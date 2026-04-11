@@ -5,6 +5,9 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SYSTEM_PROMPT =
   "You are an expert comic book grader with 30 years experience. You know the CGC grading scale 0.5 to 10.0. You know every key issue. You know Golden age  Silver Age Bronze Age Copper Age Modern Age pricing. Return JSON only no markdown no explanation.";
 
+// Fast path: Claude Vision identification + grade only. ComicVine, eBay
+// comps, census, and Ximilar enrichment are handled by /api/enrich and
+// merged into the result card when they return.
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -12,11 +15,26 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { images } = req.body || {};
+    const body = req.body || {};
+    const { images, image } = body;
     if (!Array.isArray(images) || images.length === 0) {
       res.status(400).json({ error: "images array required" });
       return;
     }
+    // Reject oversized images up front. Anything over ~1MB as a base64
+    // data URL (~750KB raw file) risks tripping Vercel's 4.5MB request
+    // body limit once JSON overhead is added. The client compresses
+    // aggressively before upload, but this is a defensive belt.
+    const MAX_IMAGE_SIZE = 1024 * 1024;
+    for (const img of images) {
+      if (typeof img === "string" && img.length > MAX_IMAGE_SIZE) {
+        res.status(413).json({
+          error: "Image too large — please retake with lower resolution",
+        });
+        return;
+      }
+    }
+    const noImage = !image;
 
     const content = [];
     for (const img of images) {
@@ -32,7 +50,7 @@ export default async function handler(req, res) {
     content.push({
       type: "text",
       text:
-        'Grade this comic book. Return ONLY this JSON shape with no markdown, no commentary: { "title": string, "publisher": string, "year": string, "grade": string, "keyIssue": string, "price": string, "priceLow": string, "priceHigh": string, "reason": string, "confidence": string }',
+        'Grade this comic book. Return ONLY this JSON shape with no markdown, no commentary: { "title": string, "publisher": string, "year": string, "grade": string, "isGraded": boolean, "numericGrade": number or null, "keyIssue": string, "price": string, "priceLow": string, "priceHigh": string, "reason": string, "confidence": string }. Set isGraded to true ONLY when a CGC, CBCS, or PGX slab label is clearly visible in the image; otherwise false. Set numericGrade to the numeric grade as a number (e.g. 9.8) when visible on a slab label, otherwise null.',
     });
 
     const message = await client.messages.create({
@@ -55,6 +73,8 @@ export default async function handler(req, res) {
       const match = text.match(/\{[\s\S]*\}/);
       parsed = match ? JSON.parse(match[0]) : { raw: text };
     }
+
+    if (noImage) parsed.noImage = true;
 
     res.status(200).json(parsed);
   } catch (err) {
