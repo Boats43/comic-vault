@@ -43,11 +43,14 @@ const parsePriceNumber = (p) => {
 const conditionIdFor = (grade) => (grade ? "2750" : "4000");
 
 const buildTitle = (item) => {
-  const parts = [];
-  if (item.title) parts.push(item.title);
-  if (item.grade) parts.push(`CGC ${item.grade}`);
-  if (item.keyIssue) parts.push("KEY");
-  const joined = parts.join(" ").trim();
+  const parts = [
+    item.title,
+    item.issue ? `#${item.issue}` : "",
+    item.isGraded === true ? `CGC ${item.numericGrade}` : item.grade,
+    item.keyIssue && !/not a|n\/a/i.test(item.keyIssue) ? "KEY" : "",
+    item.year,
+  ];
+  const joined = parts.filter(Boolean).join(" ").trim();
   // eBay title hard limit: 80 chars.
   return joined.length > 80 ? joined.slice(0, 80) : joined || "Comic Book";
 };
@@ -255,10 +258,11 @@ export default async function handler(req, res) {
     };
 
     // Step 1: upload the cover image (if provided) to eBay's picture service.
+    const coverImage = item.images?.[0] || item.image || null;
     let pictureUrl = null;
-    if (item.image) {
+    if (coverImage) {
       try {
-        pictureUrl = await uploadSiteHostedPicture(item.image, EBAY_AUTH_TOKEN, ebayHeaders);
+        pictureUrl = await uploadSiteHostedPicture(coverImage, EBAY_AUTH_TOKEN, ebayHeaders);
       } catch (imgErr) {
         // Don't hard-fail the whole listing on image upload issues — log and continue without.
         console.error("Picture upload failed:", imgErr.message);
@@ -291,7 +295,12 @@ export default async function handler(req, res) {
         `[ebay] AddFixedPriceItem failed (HTTP ${ebayRes.status}, ack=${ack}, severity=${severity}). Full response:\n` +
           redactToken(responseXml)
       );
+      // Extract the first Error-severity message, skipping Warnings.
+      const errorMatch = responseXml.match(
+        /<Errors>(?:(?!<\/Errors>)[\s\S])*?<SeverityCode>Error<\/SeverityCode>(?:(?!<\/Errors>)[\s\S])*?<ShortMessage>([\s\S]*?)<\/ShortMessage>(?:(?!<\/Errors>)[\s\S])*?<\/Errors>/
+      );
       const shortMsg =
+        errorMatch?.[1]?.trim() ||
         extractTag(responseXml, "ShortMessage") ||
         extractTag(responseXml, "LongMessage") ||
         "eBay listing failed";
