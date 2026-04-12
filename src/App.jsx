@@ -550,7 +550,7 @@ function WidgetOverlay({
   const gradeBadge =
     result?.isGraded === true && result?.numericGrade != null
       ? `CGC ${result.numericGrade}`
-      : "RAW COPY";
+      : result?.grade || "RAW COPY";
 
   const handleSave = async () => {
     if (!result || saving) return;
@@ -1111,11 +1111,11 @@ function CollectionDetail({
       ? `$${Math.round(parsedFallback).toLocaleString("en-US")}`
       : item.price || "—";
 
-  // Grade badge: CGC numeric if graded, RAW COPY otherwise.
+  // Grade badge: CGC numeric if graded, raw grade if available, else RAW COPY.
   const gradeBadgeText =
     item.isGraded === true && item.numericGrade != null
       ? `CGC ${item.numericGrade}`
-      : "RAW COPY";
+      : item.grade || "RAW COPY";
 
   const conditionBullets = parseConditionReport(item.reason);
   const confidenceText = formatConfidence(item.confidence);
