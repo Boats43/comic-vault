@@ -83,7 +83,7 @@ const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) =>
   }
 };
 
-const lookupComicVine = async ({ title, issue, year }) => {
+const lookupComicVine = async ({ title, issue, year, publisher }) => {
   if (!process.env.COMICVINE_API_KEY || !title) return null;
   try {
     // Prefer explicit issue param, fall back to parsing from title.
@@ -114,31 +114,87 @@ const lookupComicVine = async ({ title, issue, year }) => {
     // Score each issue match: prefer volume name closest to our series name,
     // then use volume id as a tiebreaker (lower id = older/original volume).
     const seriesLower = seriesName.toLowerCase().replace(/^(the|a|an)\s+/i, "").trim();
+    const comicYear = year ? parseInt(String(year).trim(), 10) : null;
+    const pubLower = publisher ? String(publisher).toLowerCase().trim() : null;
     const scoreMatch = (r) => {
       const volName = String(r?.volume?.name || "").toLowerCase().replace(/^(the|a|an)\s+/i, "").trim();
       // Exact or near-exact volume name match gets highest priority.
       const nameScore = volName === seriesLower ? 100
         : volName.includes(seriesLower) || seriesLower.includes(volName) ? 50
         : 0;
+      // Year proximity scoring: prefer volumes from the same era.
+      const startYear = r?.volume?.start_year ? parseInt(r.volume.start_year, 10) : null;
+      const yearDiff = comicYear && startYear ? Math.abs(startYear - comicYear) : 999;
+      const yearScore = yearDiff < 10 ? 2 : yearDiff < 20 ? 1 : 0;
+      // Publisher scoring: prefer matching publisher.
+      const volPublisher = String(r?.volume?.publisher?.name || "").toLowerCase().trim();
+      const publisherScore = pubLower && volPublisher && volPublisher.includes(pubLower) ? 2 : 0;
       // Lower volume id = older/more likely original series.
       const volId = parseInt(r?.volume?.id, 10) || 999999;
-      return { r, nameScore, volId };
+      return { r, nameScore, yearScore, publisherScore, volId,
+        total: nameScore + yearScore + publisherScore };
+    };
+
+    // For all issue matches (even single), fetch volume details for the
+    // unique volumes so we can score on start_year and publisher.
+    const candidates = issueMatches.length > 0 ? issueMatches : [];
+    const uniqueVolIds = [...new Set(candidates.map((r) => r?.volume?.id).filter(Boolean))];
+    const volDetails = {};
+    // Fetch up to 5 volume details sequentially (ComicVine rate-limits parallel).
+    for (const vid of uniqueVolIds.slice(0, 5)) {
+      try {
+        const vUrl =
+          `https://comicvine.gamespot.com/api/volume/4050-${vid}/?api_key=${encodeURIComponent(process.env.COMICVINE_API_KEY)}` +
+          `&format=json&field_list=id,name,start_year,publisher`;
+        const vRes = await fetch(vUrl, { headers: { "User-Agent": "ComicVault/1.0" } });
+        if (vRes.ok) {
+          const vJson = await vRes.json();
+          if (vJson?.results) volDetails[vid] = vJson.results;
+        }
+      } catch { /* skip */ }
+    }
+    console.log(`[comicvine] volDetails fetched: ${Object.keys(volDetails).length}/${uniqueVolIds.length} — ${
+      Object.entries(volDetails).map(([id, v]) => `${id}:${v.name}(${v.start_year},${v.publisher?.name || "?"})`).join(", ")}`);
+
+    // Re-score with volume detail data (start_year, publisher).
+    const scoreWithDetails = (r) => {
+      const base = scoreMatch(r);
+      const vid = r?.volume?.id;
+      const vol = volDetails[vid];
+      if (!vol) return base;
+      const startYear = vol.start_year ? parseInt(vol.start_year, 10) : null;
+      const yearDiff = comicYear && startYear ? Math.abs(startYear - comicYear) : 999;
+      const detailYearScore = yearDiff < 10 ? 2 : yearDiff < 20 ? 1 : 0;
+      const volPub = String(vol.publisher?.name || "").toLowerCase().trim();
+      const detailPubScore = pubLower && volPub && volPub.includes(pubLower) ? 2 : 0;
+      const total = base.nameScore + detailYearScore + detailPubScore;
+      return { ...base, yearScore: detailYearScore, publisherScore: detailPubScore, total };
     };
 
     let match = null;
-    if (issueMatches.length === 1) {
-      match = issueMatches[0];
-    } else if (issueMatches.length > 1) {
-      // Pick best: highest nameScore, then lowest volume id (oldest series).
-      const scored = issueMatches.map(scoreMatch);
-      scored.sort((a, b) => b.nameScore - a.nameScore || a.volId - b.volId);
+    if (candidates.length === 1) {
+      // Single match — still validate year/publisher if we have details.
+      const scored = scoreWithDetails(candidates[0]);
+      // Reject if we know both year and publisher and neither matched.
+      if (comicYear && pubLower && scored.yearScore === 0 && scored.publisherScore === 0 && volDetails[candidates[0]?.volume?.id]) {
+        match = null; // wrong era + wrong publisher — skip
+      } else {
+        match = candidates[0];
+      }
+    } else if (candidates.length > 1) {
+      // Pick best: highest combined score, then lowest volume id (oldest series).
+      const scored = candidates.map(scoreWithDetails);
+      scored.sort((a, b) => b.total - a.total || a.volId - b.volId);
+      console.log(`[comicvine] top scores: ${scored.slice(0, 3).map((s) =>
+        `${s.r.volume?.name}(name=${s.nameScore} yr=${s.yearScore} pub=${s.publisherScore} total=${s.total} vid=${s.volId})`
+      ).join(" | ")}`);
       match = scored[0].r;
     }
     // No match — don't fall through to results[0].
 
     console.log(
       `[comicvine] query="${searchQuery}" issue=${issueNumber} year=${year || "?"}` +
-      ` results=${results.length} issueMatches=${issueMatches.length}` +
+      ` results=${results.length} issueMatches=${candidates.length}` +
       ` matched=${match ? `${match.volume?.name} #${match.issue_number} (vol_id=${match.volume?.id})` : "none"}`
     );
 
@@ -272,7 +328,14 @@ const lookupPriceCharting = async ({ title, issue, year }) => {
       const cents = p["loose-price"];
       if (cents == null || isNaN(cents) || cents <= 0) continue;
       const price = cents / 100;
-      console.log(`[pricecharting] matched: "${name}" $${price}`);
+      const yearMatch2 = name.match(/\((\d{4})\)/);
+      const productYear = yearMatch2 ? parseInt(yearMatch2[1], 10) : null;
+      console.log(`[pt] matched: "${name}" year: ${productYear} comic year: ${comicYear}`);
+      // Stricter era check: skip if year gap > 15
+      if (comicYear && productYear && Math.abs(productYear - comicYear) > 15) {
+        console.log(`[pt] year mismatch — skipping`);
+        continue;
+      }
       return { price, productName: name, id: p.id, source: "pricecharting" };
     }
     console.log(`[pricecharting] no valid match in ${products.length} results`);
@@ -389,7 +452,7 @@ export default async function handler(req, res) {
         : Promise.resolve(null);
 
     const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting] = await Promise.all([
-      lookupComicVine({ title, issue: issueNum, year }),
+      lookupComicVine({ title, issue: issueNum, year, publisher }),
       compsPromise,
       lookupXimilar({ images, title, confidence }),
       fetchSold({ title, issue: issueNum, year }).catch(() => []),
