@@ -4,6 +4,10 @@ import {
   putComic,
   deleteComic,
   migrateFromLocalStorage,
+  putSnapshot,
+  getAllSnapshots,
+  getAnalysis,
+  putAnalysis,
 } from "./db.js";
 
 const LOADING_STEPS = [
@@ -1594,6 +1598,569 @@ function CollectionDetail({
   );
 }
 
+// --- Tiny SVG line chart (no dependencies) ---
+function MiniChart({ data, width = 320, height = 120 }) {
+  if (!data || data.length < 2) {
+    return (
+      <div
+        style={{
+          height,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <span className="muted small">Not enough data yet — check back after a few days</span>
+      </div>
+    );
+  }
+  const values = data.map((d) => d.totalValue);
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const range = maxV - minV || 1;
+  const pad = 8;
+  const w = width - pad * 2;
+  const h = height - pad * 2;
+  const pts = data.map((d, i) => {
+    const x = pad + (i / (data.length - 1)) * w;
+    const y = pad + h - ((d.totalValue - minV) / range) * h;
+    return `${x},${y}`;
+  });
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height }}>
+      <polyline
+        points={pts.join(" ")}
+        fill="none"
+        stroke="#d4af37"
+        strokeWidth="2.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      {data.length > 0 && (() => {
+        const last = data[data.length - 1];
+        const x = pad + w;
+        const y = pad + h - ((last.totalValue - minV) / range) * h;
+        return <circle cx={x} cy={y} r="4" fill="#d4af37" />;
+      })()}
+      {/* Y-axis labels */}
+      <text x={pad} y={pad + 4} fill="#666" fontSize="10" fontFamily="inherit">
+        {fmt(maxV)}
+      </text>
+      <text x={pad} y={height - 2} fill="#666" fontSize="10" fontFamily="inherit">
+        {fmt(minV)}
+      </text>
+    </svg>
+  );
+}
+
+const FILTER_PILLS = [
+  { key: "all", label: "All" },
+  { key: "listed", label: "Listed" },
+  { key: "unlisted", label: "Unlisted" },
+  { key: "keys", label: "Key Issues" },
+  { key: "highValue", label: "High Value" },
+  { key: "stagnant", label: "Stagnant" },
+  { key: "bundle", label: "Bundle Ready" },
+];
+
+function ManagePage({ catalogue, totalValue, analysis, snapshots, onRefreshAnalysis, analyzing, onOpenItem }) {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [selected, setSelected] = useState(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+
+  const stagnantIds = new Set((analysis?.stagnant || []).map((s) => s.id));
+  const bundleIds = new Set((analysis?.bundleGroups || []).flatMap((g) => g.ids || []));
+  const listNowIds = new Set((analysis?.listNow || []).map((s) => s.id));
+  const gradeFirstIds = new Set((analysis?.gradeFirst || []).map((s) => s.id));
+
+  const getAiTag = (item) => {
+    if (listNowIds.has(item.id)) return { emoji: "🔥", label: "HOT" };
+    if (stagnantIds.has(item.id)) return { emoji: "⏳", label: "STAGNANT" };
+    if (bundleIds.has(item.id)) return { emoji: "📦", label: "BUNDLE" };
+    if (gradeFirstIds.has(item.id)) return { emoji: "💎", label: "GRADE" };
+    return null;
+  };
+
+  const q = search.toLowerCase().trim();
+  const filtered = catalogue.filter((item) => {
+    // Text search
+    if (q) {
+      const hay = `${item.title} ${item.publisher} ${item.year} ${item.grade}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    // Filter pills
+    switch (filter) {
+      case "listed": return item.status === "listed";
+      case "unlisted": return item.status !== "listed";
+      case "keys": return item.keyIssue && item.keyIssue !== "N/A";
+      case "highValue": return marketValueOf(item) >= 100;
+      case "stagnant": return stagnantIds.has(item.id);
+      case "bundle": return bundleIds.has(item.id);
+      default: return true;
+    }
+  });
+
+  const toggleSelect = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleLongPress = (id) => {
+    setSelectMode(true);
+    setSelected(new Set([id]));
+  };
+
+  const analyzedAgo = analysis?.analyzedAt
+    ? (() => {
+        const mins = Math.round((Date.now() - analysis.analyzedAt) / 60000);
+        if (mins < 1) return "just now";
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.round(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        return `${Math.round(hrs / 24)}d ago`;
+      })()
+    : null;
+
+  const s = {
+    section: {
+      border: "1px solid rgba(212,175,55,0.3)",
+      borderRadius: 10,
+      padding: 14,
+      background: "rgba(212,175,55,0.05)",
+      marginBottom: 12,
+    },
+    sectionTitle: {
+      textTransform: "uppercase",
+      letterSpacing: 1,
+      fontSize: 11,
+      color: "#999",
+      marginBottom: 10,
+      fontWeight: 600,
+    },
+    recRow: {
+      display: "flex",
+      gap: 8,
+      alignItems: "flex-start",
+      padding: "6px 0",
+      fontSize: 14,
+    },
+    pill: (active) => ({
+      padding: "6px 14px",
+      borderRadius: 20,
+      fontSize: 13,
+      fontWeight: 600,
+      border: active ? "1px solid #d4af37" : "1px solid rgba(255,255,255,0.15)",
+      background: active ? "rgba(212,175,55,0.2)" : "transparent",
+      color: active ? "#d4af37" : "#999",
+      cursor: "pointer",
+      whiteSpace: "nowrap",
+    }),
+    listRow: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "10px 0",
+      borderBottom: "1px solid rgba(255,255,255,0.06)",
+      cursor: "pointer",
+    },
+  };
+
+  return (
+    <div style={{ paddingBottom: 8 }}>
+      {/* SEARCH BAR */}
+      <div style={{ position: "relative", marginBottom: 10 }}>
+        <input
+          type="text"
+          placeholder="Search title, publisher, year..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            width: "100%",
+            padding: "12px 14px",
+            background: "rgba(255,255,255,0.08)",
+            border: "1px solid rgba(212,175,55,0.3)",
+            borderRadius: 10,
+            color: "#fff",
+            fontSize: 15,
+            outline: "none",
+            boxSizing: "border-box",
+          }}
+        />
+      </div>
+
+      {/* FILTER PILLS */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          overflowX: "auto",
+          paddingBottom: 12,
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
+        {FILTER_PILLS.map((p) => (
+          <button
+            key={p.key}
+            onClick={() => { setFilter(p.key); setSelectMode(false); setSelected(new Set()); }}
+            style={s.pill(filter === p.key)}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* AI OVERVIEW CARD */}
+      <div style={s.section}>
+        <div style={s.sectionTitle}>AI Collection Intelligence</div>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>
+          {catalogue.length} comic{catalogue.length === 1 ? "" : "s"} · {fmt(totalValue)} est. value
+        </div>
+
+        {analysis ? (
+          <>
+            {analysis.marketSummary && (
+              <div style={{ fontSize: 14, color: "#ccc", marginBottom: 12, lineHeight: 1.5 }}>
+                {analysis.marketSummary}
+              </div>
+            )}
+
+            {analysis.trending?.length > 0 && (
+              <div style={s.recRow}>
+                <span>📈</span>
+                <span>
+                  <strong>Trending up:</strong>{" "}
+                  {analysis.trending.map((t) => t.title).join(", ")}
+                </span>
+              </div>
+            )}
+            {analysis.listNow?.length > 0 && (
+              <div style={s.recRow}>
+                <span>🔥</span>
+                <span>
+                  <strong>List now:</strong> {analysis.listNow.length} book{analysis.listNow.length === 1 ? "" : "s"} at peak value
+                </span>
+              </div>
+            )}
+            {analysis.stagnant?.length > 0 && (
+              <div style={s.recRow}>
+                <span>⏳</span>
+                <span>
+                  <strong>Stagnant:</strong> {analysis.stagnant.length} book{analysis.stagnant.length === 1 ? "" : "s"} (30+ days unlisted)
+                </span>
+              </div>
+            )}
+            {analysis.bundleGroups?.length > 0 && (
+              <div style={s.recRow}>
+                <span>📦</span>
+                <span>
+                  <strong>Bundle opportunity:</strong>{" "}
+                  {analysis.bundleGroups.map((g) => `${g.ids?.length || 0} ${g.reason || "books"}`).join(", ")}
+                </span>
+              </div>
+            )}
+            {analysis.gradeFirst?.length > 0 && (
+              <div style={s.recRow}>
+                <span>💎</span>
+                <span>
+                  <strong>Grade before selling:</strong> {analysis.gradeFirst.length} high-value raw{analysis.gradeFirst.length === 1 ? "" : "s"}
+                </span>
+              </div>
+            )}
+            {analysis.valueChange != null && analysis.valueChange !== 0 && (
+              <div style={s.recRow}>
+                <span>{analysis.valueChange > 0 ? "📈" : "📉"}</span>
+                <span>
+                  Collection value {analysis.valueChange > 0 ? "up" : "down"}{" "}
+                  {Math.abs(analysis.valueChange)}% vs 30 days ago
+                </span>
+              </div>
+            )}
+
+            {analyzedAgo && (
+              <div className="muted small" style={{ marginTop: 8, fontStyle: "italic" }}>
+                Last analyzed: {analyzedAgo}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="muted small">
+            Tap the button below to get AI recommendations for your collection.
+          </div>
+        )}
+
+        <button
+          onClick={onRefreshAnalysis}
+          disabled={analyzing || catalogue.length === 0}
+          style={{
+            width: "100%",
+            marginTop: 12,
+            padding: "14px",
+            background: analyzing
+              ? "rgba(212,175,55,0.15)"
+              : "linear-gradient(135deg, #d4af37, #b8941f)",
+            color: analyzing ? "#d4af37" : "#0a0a0a",
+            border: "none",
+            borderRadius: 10,
+            fontSize: 15,
+            fontWeight: 700,
+            cursor: analyzing ? "wait" : "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+          }}
+        >
+          {analyzing ? (
+            <>
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 14,
+                  height: 14,
+                  border: "2px solid rgba(212,175,55,0.3)",
+                  borderTopColor: "#d4af37",
+                  borderRadius: "50%",
+                  animation: "spin 0.8s linear infinite",
+                }}
+              />
+              Analyzing collection…
+            </>
+          ) : (
+            "🧠 Refresh AI Analysis"
+          )}
+        </button>
+      </div>
+
+      {/* MARKET TREND CHART */}
+      <div style={s.section}>
+        <div style={s.sectionTitle}>Collection Value Trend</div>
+        <MiniChart data={snapshots} />
+      </div>
+
+      {/* BUNDLE GROUPS */}
+      {analysis?.bundleGroups?.length > 0 && (
+        <div style={s.section}>
+          <div style={s.sectionTitle}>Bundle Opportunities</div>
+          {analysis.bundleGroups.map((g, i) => (
+            <div
+              key={i}
+              style={{
+                padding: "10px 0",
+                borderBottom:
+                  i < analysis.bundleGroups.length - 1
+                    ? "1px solid rgba(212,175,55,0.15)"
+                    : "none",
+              }}
+            >
+              <div style={{ fontSize: 14, fontWeight: 700 }}>
+                📦 {g.titles?.join(", ") || g.reason}
+              </div>
+              {g.suggestedPrice != null && (
+                <div style={{ fontSize: 13, color: "#d4af37", marginTop: 4 }}>
+                  Bundle price: ${Math.round(g.suggestedPrice).toLocaleString()}
+                </div>
+              )}
+              {g.reason && g.titles && (
+                <div className="muted small" style={{ marginTop: 2 }}>{g.reason}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* BULK SELECT BAR */}
+      {selectMode && selected.size > 0 && (
+        <div
+          style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 100,
+            background: "#1a1a1a",
+            padding: "10px 0",
+            marginBottom: 8,
+            display: "flex",
+            gap: 8,
+            borderBottom: "1px solid rgba(212,175,55,0.3)",
+          }}
+        >
+          <button
+            onClick={() => { setSelectMode(false); setSelected(new Set()); }}
+            style={{
+              padding: "8px 14px",
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.15)",
+              borderRadius: 8,
+              color: "#999",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            Cancel ({selected.size})
+          </button>
+        </div>
+      )}
+
+      {/* FILTERED COLLECTION LIST */}
+      <div>
+        {filtered.length === 0 && (
+          <div className="muted small" style={{ textAlign: "center", padding: 20 }}>
+            {q ? "No comics match your search" : "No comics in this filter"}
+          </div>
+        )}
+        {filtered.map((item) => {
+          const thumbSrc = getComicPhotos(item)[0] || null;
+          const mv = marketValueOf(item);
+          const tag = getAiTag(item);
+          const isSelected = selected.has(item.id);
+
+          const handleClick = () => {
+            if (selectMode) {
+              toggleSelect(item.id);
+            } else {
+              onOpenItem(item);
+            }
+          };
+
+          let pressTimer = null;
+          const onTouchStart = () => {
+            pressTimer = setTimeout(() => handleLongPress(item.id), 500);
+          };
+          const onTouchEnd = () => clearTimeout(pressTimer);
+
+          return (
+            <div
+              key={item.id}
+              style={{
+                ...s.listRow,
+                background: isSelected ? "rgba(212,175,55,0.1)" : "transparent",
+              }}
+              onClick={handleClick}
+              onTouchStart={onTouchStart}
+              onTouchEnd={onTouchEnd}
+              onTouchCancel={onTouchEnd}
+            >
+              {selectMode && (
+                <div
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 6,
+                    border: isSelected
+                      ? "2px solid #d4af37"
+                      : "2px solid rgba(255,255,255,0.2)",
+                    background: isSelected ? "#d4af37" : "transparent",
+                    flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#0a0a0a",
+                    fontSize: 14,
+                    fontWeight: 700,
+                  }}
+                >
+                  {isSelected ? "✓" : ""}
+                </div>
+              )}
+              {thumbSrc ? (
+                <img
+                  src={thumbSrc}
+                  alt=""
+                  loading="lazy"
+                  style={{
+                    width: 44,
+                    height: 60,
+                    objectFit: "cover",
+                    borderRadius: 6,
+                    flexShrink: 0,
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 44,
+                    height: 60,
+                    borderRadius: 6,
+                    background: "rgba(255,255,255,0.05)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 20,
+                    flexShrink: 0,
+                  }}
+                >
+                  📘
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {item.title || "Unknown"}
+                </div>
+                <div className="muted small">
+                  {item.grade || "Raw"} · {mv != null ? fmt(mv) : "—"}
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                {tag && (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: "3px 8px",
+                      borderRadius: 6,
+                      background: "rgba(212,175,55,0.15)",
+                      color: "#d4af37",
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {tag.emoji} {tag.label}
+                  </span>
+                )}
+                {item.status === "listed" && (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: "3px 8px",
+                      borderRadius: 6,
+                      background: "rgba(22,163,106,0.2)",
+                      color: "#16a34a",
+                      fontWeight: 600,
+                    }}
+                  >
+                    LISTED
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* SHIPPING PLACEHOLDER */}
+      <div style={{ ...s.section, marginTop: 12 }}>
+        <div style={s.sectionTitle}>Shipping</div>
+        <div className="muted small" style={{ textAlign: "center", padding: 8 }}>
+          Shipping labels will appear here when books are sold on eBay.
+          USPS Media Mail pre-filled with item details.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("scan"); // 'scan' | 'buyer' | 'collection'
   const [loading, setLoading] = useState(false);
@@ -1618,16 +2185,23 @@ export default function App() {
   );
   const [bulkProgress, setBulkProgress] = useState(null); // { current, total, title }
   const [bulkDone, setBulkDone] = useState(null); // number or null
+  const [analysis, setAnalysis] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [snapshots, setSnapshots] = useState([]);
   const fileRef = useRef(null);
   const buyerFileRef = useRef(null);
   const bulkRef = useRef(null);
 
-  // Load catalogue from IndexedDB on mount (and migrate legacy localStorage data).
+  // Load catalogue, snapshots, and cached analysis from IndexedDB on mount.
   useEffect(() => {
     (async () => {
       await migrateFromLocalStorage();
       const items = await getAllComics();
       setCatalogue(items);
+      const snaps = await getAllSnapshots();
+      setSnapshots(snaps);
+      const cached = await getAnalysis();
+      if (cached) setAnalysis(cached);
     })();
   }, []);
 
@@ -2060,6 +2634,38 @@ export default function App() {
     return sum + (v || 0);
   }, 0);
 
+  // Record a daily value snapshot whenever catalogue changes.
+  useEffect(() => {
+    if (catalogue.length === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const val = catalogue.reduce((s, c) => s + (marketValueOf(c) || 0), 0);
+    const snap = { date: today, totalValue: val, comicCount: catalogue.length };
+    putSnapshot(snap)
+      .then(() => getAllSnapshots())
+      .then((s) => setSnapshots(s))
+      .catch(() => {});
+  }, [catalogue]);
+
+  const refreshAnalysis = useCallback(async () => {
+    if (catalogue.length === 0) return;
+    setAnalyzing(true);
+    try {
+      const res = await fetch("/api/manage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comics: catalogue }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Analysis failed");
+      setAnalysis(data);
+      await putAnalysis(data);
+    } catch {
+      /* non-fatal */
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [catalogue]);
+
   const switchTab = (next) => {
     setTab(next);
     reset();
@@ -2280,6 +2886,21 @@ export default function App() {
         )
       )}
 
+      {tab === "manage" && (
+        <ManagePage
+          catalogue={catalogue}
+          totalValue={totalValue}
+          analysis={analysis}
+          snapshots={snapshots}
+          onRefreshAnalysis={refreshAnalysis}
+          analyzing={analyzing}
+          onOpenItem={(item) => {
+            setSelectedItem(item);
+            setTab("collection");
+          }}
+        />
+      )}
+
       <nav className="tab-bar">
         <button
           className={`tab-btn ${tab === "scan" ? "active" : ""}`}
@@ -2301,6 +2922,13 @@ export default function App() {
         >
           <div className="tab-icon">📚</div>
           <div>Collection</div>
+        </button>
+        <button
+          className={`tab-btn ${tab === "manage" ? "active" : ""}`}
+          onClick={() => switchTab("manage")}
+        >
+          <div className="tab-icon">🧠</div>
+          <div>Manage</div>
         </button>
       </nav>
 

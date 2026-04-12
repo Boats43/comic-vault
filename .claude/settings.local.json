@@ -14,7 +14,8 @@
       "Bash(curl -s -X POST http://localhost:3001/api/enrich -H \"Content-Type: application/json\" -d '{\"title\":\"Amazing Spider-Man #300\",\"grade\":\"8.0\",\"isGraded\":false,\"year\":\"1988\",\"publisher\":\"Marvel\"}')",
       "Bash(bubblewrap:*)",
       "Bash(curl -s -X POST http://localhost:3001/api/enrich -H \"Content-Type: application/json\" -d '{\"title\":\"Not a comic book\",\"year\":\"N/A\",\"publisher\":\"N/A\",\"isGraded\":false,\"grade\":\"VF\"}')",
-      "Bash(curl -s -X POST http://localhost:3001/api/enrich -H \"Content-Type: application/json\" -d '{\"title\":\"Amazing Spider-Man #300\",\"year\":\"1988\",\"publisher\":\"Marvel\",\"isGraded\":false,\"grade\":\"VF\"}')"
+      "Bash(curl -s -X POST http://localhost:3001/api/enrich -H \"Content-Type: application/json\" -d '{\"title\":\"Amazing Spider-Man #300\",\"year\":\"1988\",\"publisher\":\"Marvel\",\"isGraded\":false,\"grade\":\"VF\"}')",
+      "Bash(npx vercel:*)"
     ]
   }
 }

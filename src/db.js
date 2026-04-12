@@ -3,8 +3,10 @@
 // so we can return items newest-first without sorting the whole array.
 
 const DB_NAME = "comic-vault";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = "comics";
+const SNAPSHOTS_STORE = "valueSnapshots";
+const ANALYSIS_STORE = "analysisCache";
 const LEGACY_KEY = "cv_catalogue";
 
 let dbPromise = null;
@@ -18,6 +20,12 @@ const openDb = () => {
       if (!db.objectStoreNames.contains(STORE)) {
         const store = db.createObjectStore(STORE, { keyPath: "id" });
         store.createIndex("timestamp", "timestamp", { unique: false });
+      }
+      if (!db.objectStoreNames.contains(SNAPSHOTS_STORE)) {
+        db.createObjectStore(SNAPSHOTS_STORE, { keyPath: "date" });
+      }
+      if (!db.objectStoreNames.contains(ANALYSIS_STORE)) {
+        db.createObjectStore(ANALYSIS_STORE, { keyPath: "key" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -59,6 +67,45 @@ export const putComic = async (entry) => {
 export const deleteComic = async (id) => {
   const store = await tx("readwrite");
   await wrap(store.delete(id));
+};
+
+// --- Value snapshots (for the trend chart) ---
+
+const txStore = async (storeName, mode) => {
+  const db = await openDb();
+  const transaction = db.transaction(storeName, mode);
+  return transaction.objectStore(storeName);
+};
+
+export const putSnapshot = async (snapshot) => {
+  const store = await txStore(SNAPSHOTS_STORE, "readwrite");
+  await wrap(store.put(snapshot));
+};
+
+export const getAllSnapshots = async () => {
+  try {
+    const store = await txStore(SNAPSHOTS_STORE, "readonly");
+    const items = await wrap(store.getAll());
+    return (items || []).sort((a, b) => a.date.localeCompare(b.date));
+  } catch {
+    return [];
+  }
+};
+
+// --- Analysis cache ---
+
+export const getAnalysis = async () => {
+  try {
+    const store = await txStore(ANALYSIS_STORE, "readonly");
+    return await wrap(store.get("latest"));
+  } catch {
+    return null;
+  }
+};
+
+export const putAnalysis = async (data) => {
+  const store = await txStore(ANALYSIS_STORE, "readwrite");
+  await wrap(store.put({ key: "latest", ...data }));
 };
 
 // One-shot migration: if a legacy `cv_catalogue` array exists in localStorage,
