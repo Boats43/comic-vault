@@ -261,17 +261,32 @@ const hasIssueNumber = (listingTitle, issueNum) => {
   );
 };
 
-const buildKeywords = (title, { issue, isGraded, numericGrade, year } = {}) => {
+// Clean a comic title for eBay search: strip articles and special chars.
+const cleanTitleForSearch = (title) => {
   if (!title) return "";
-  // Strip leading articles
-  let cleanTitle = String(title).trim();
-  cleanTitle = cleanTitle.replace(/^(The|A|An)\s+/i, "");
-  // Strip special characters that break eBay search (keep hyphens)
-  cleanTitle = cleanTitle
+  let t = String(title).trim();
+  t = t.replace(/^(The|A|An)\s+/i, "");
+  t = t
     .replace(/:/g, "")
     .replace(/['"!?]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+  return t;
+};
+
+// Extract the first "significant" word from a cleaned title — skips
+// one-letter words and common prefixes so "Amazing Adventures" → "Adventures".
+const firstSignificantWord = (cleanTitle) => {
+  const words = cleanTitle.split(/\s+/);
+  for (const w of words) {
+    if (w.length >= 4) return w;
+  }
+  return words[words.length - 1] || "";
+};
+
+const buildKeywords = (title, { issue, isGraded, numericGrade, year } = {}) => {
+  if (!title) return "";
+  const cleanTitle = cleanTitleForSearch(title);
   const parts = [cleanTitle];
   if (issue) {
     const iss = String(issue).trim();
@@ -317,41 +332,87 @@ export const fetchComps = async ({
   const rawOnly = isGraded === false;
   const gradedOnly = isGraded === true;
 
-  const query = buildKeywords(title, {
-    issue,
-    isGraded,
-    numericGrade: numericTarget,
-    year,
-  });
-
   // Precompute relevance helpers once per request.
   const searchTokens = tokenizeTitle(title);
-  const issueNum = extractIssueNumber(title);
+  // Issue number: prefer explicit `issue` param, fall back to extracting from title.
+  const issueNum = issue ? String(issue).trim() : extractIssueNumber(title);
+
+  const cleanTitle = cleanTitleForSearch(title);
+  const iss = issue ? String(issue).trim() : null;
+  const yr = year ? String(year).trim() : null;
+
+  // Grade suffix appended to every attempt query.
+  const gradeSuffix =
+    isGraded === true && numericTarget != null && !isNaN(numericTarget)
+      ? ` CGC ${numericTarget}`
+      : "";
+
+  // Build ordered list of query attempts — most specific to least.
+  const attempts = [];
+  // Attempt 1: full — cleanTitle #issue year
+  if (iss && yr) {
+    attempts.push({ q: `${cleanTitle} #${iss} ${yr}`, n: 1 });
+  }
+  // Attempt 2: no year — cleanTitle #issue
+  if (iss) {
+    attempts.push({ q: `${cleanTitle} #${iss}`, n: 2 });
+  }
+  // Attempt 3: no issue — cleanTitle year
+  if (yr) {
+    attempts.push({ q: `${cleanTitle} ${yr}`, n: 3 });
+  }
+  // Attempt 4: title only — cleanTitle
+  attempts.push({ q: cleanTitle, n: 4 });
+  // Attempt 5: first significant word + issue
+  if (iss) {
+    const sig = firstSignificantWord(cleanTitle);
+    if (sig) {
+      attempts.push({ q: `${sig} #${iss}`, n: 5 });
+    }
+  }
+
+  // Deduplicate (e.g. if no year was provided, attempts 1 & 2 are identical).
+  const seen = new Set();
+  const uniqueAttempts = attempts.filter(({ q }) => {
+    const key = q.trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
   try {
-    console.log(
-      `[comps] query="${query}" isGraded=${isGraded} numericGrade=${numericTarget} year=${year} issue=${issueNum} tokens=[${searchTokens.join(",")}]`
-    );
+    let query = "";
+    let source = "";
+    let raw = null;
+    let attemptUsed = 0;
 
-    // Prefer Marketplace Insights (true sold data); fall back to Browse
-    // (active listings) when Insights is unavailable or returns nothing.
-    let source = "marketplace_insights";
-    let raw = await tryInsights({ appId, certId, query });
-    if (!raw || raw.length === 0) {
-      source = "browse_api";
-      raw = await tryBrowse({ appId, certId, query });
+    for (const attempt of uniqueAttempts) {
+      query = attempt.q + gradeSuffix;
+      // Try Insights first, then Browse.
+      source = "marketplace_insights";
+      raw = await tryInsights({ appId, certId, query });
+      if (!raw || raw.length === 0) {
+        source = "browse_api";
+        raw = await tryBrowse({ appId, certId, query });
+      }
+      const count = raw ? raw.length : 0;
+      console.log(`[comps] attempt ${attempt.n} query="${query}" results=${count}`);
+      if (count > 0) {
+        attemptUsed = attempt.n;
+        break;
+      }
     }
+
     if (!raw || raw.length === 0) {
-      return emptyComps(query, "no sales");
+      return { ...emptyComps(query, "no sales"), attemptUsed: 0 };
     }
 
     let parsed = raw.sort(
       (a, b) => new Date(b.endTime || 0) - new Date(a.endTime || 0)
     );
 
-    // Filter 0a: issue-number enforcement. If the searched title had "#N",
-    // any listing not containing that issue number is a false positive
-    // (wrong book entirely).
+    // Filter 0a: issue-number enforcement. If we know the issue number,
+    // any listing not containing it is a false positive (wrong book).
     if (issueNum) {
       const before = parsed.length;
       parsed = parsed.filter((it) => hasIssueNumber(it.title, issueNum));
@@ -442,7 +503,7 @@ export const fetchComps = async ({
     }
 
     if (parsed.length === 0) {
-      return emptyComps(query, "filtered empty");
+      return { ...emptyComps(query, "filtered empty"), attemptUsed };
     }
 
     const priceNums = parsed.map((p) => p.price);
@@ -479,11 +540,12 @@ export const fetchComps = async ({
       lastSoldDateFormatted: formatDate(lastSoldDate),
       query,
       fellBack,
+      attemptUsed,
       source,
     };
   } catch (err) {
     console.error(`[comps] error: ${err?.message || err}`);
-    return emptyComps(query, err?.message || "fetch failed");
+    return { ...emptyComps(query || cleanTitle, err?.message || "fetch failed"), attemptUsed: 0 };
   }
 };
 
