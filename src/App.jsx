@@ -101,20 +101,119 @@ const makeThumbnail = (dataUrl, maxDim = 1000, quality = 0.85) =>
     img.src = dataUrl;
   });
 
-function ScanZone({ onFile, inputRef, compact, label }) {
+// Return an array of photo data URLs for a comic, supporting both the
+// legacy single `image` field and the new `images` array. Used by
+// CollectionList, CollectionDetail, and the list-to-eBay flow so either
+// storage shape works.
+const getComicPhotos = (comic) => {
+  if (!comic) return [];
+  if (Array.isArray(comic.images) && comic.images.length > 0) {
+    return comic.images.filter(Boolean);
+  }
+  if (comic.image) return [comic.image];
+  return [];
+};
+
+// Keyword set used to flag condition-concern sentences in Claude's reason
+// field. Deliberately loose — matches "wear", "creases", "tanning", etc.
+const CONDITION_KEYWORDS =
+  /\b(wear|stress|crease|fold|tear|soil|tann|scratch|blunt|dent|missing|soiling|handling|edge|corner)/i;
+
+// Split Claude's reason into sentences and classify each as a concern
+// (condition issue ⚠️) or positive (✅) bullet for the condition report.
+const parseConditionReport = (reason) => {
+  if (!reason) return [];
+  return String(reason)
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((text) => ({ text, concern: CONDITION_KEYWORDS.test(text) }));
+};
+
+// Normalize Claude's confidence field for display. Claude returns
+// "High" / "Medium" / "85" / "85%" / "High (90%)" inconsistently.
+const formatConfidence = (confidence) => {
+  if (!confidence) return null;
+  const s = String(confidence).trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return `${s}%`;
+  return s;
+};
+
+function ScanZone({ onFile, onGalleryFiles, inputRef, compact, label }) {
+  const cameraRef = useRef(null);
+  const galleryRef = useRef(null);
+
+  const handleGalleryChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (galleryRef.current) galleryRef.current.value = "";
+    if (files.length === 0) return;
+    if (files.length === 1) {
+      // Single file — use the normal onFile path
+      onFile({ target: { files: [files[0]] } });
+    } else if (onGalleryFiles) {
+      onGalleryFiles(files);
+    } else {
+      onFile({ target: { files: [files[0]] } });
+    }
+  };
+
   return (
-    <label className={`upload-zone${compact ? " compact" : ""}`}>
-      <div className="upload-emoji">📷</div>
-      <div className="upload-text">{label}</div>
+    <div style={{ position: "relative" }}>
+      <div
+        className={`upload-zone${compact ? " compact" : ""}`}
+        onClick={() => cameraRef.current?.click()}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => e.key === "Enter" && cameraRef.current?.click()}
+      >
+        <div className="upload-emoji">📷</div>
+        <div className="upload-text">{label}</div>
+      </div>
+
+      {/* Gallery shortcut — bottom-right corner */}
+      <button
+        onClick={(e) => { e.stopPropagation(); galleryRef.current?.click(); }}
+        aria-label="Choose from gallery"
+        style={{
+          position: "absolute",
+          bottom: 12,
+          right: 12,
+          width: 36,
+          height: 36,
+          borderRadius: 8,
+          background: "rgba(212,175,55,0.15)",
+          border: "1px solid rgba(212,175,55,0.3)",
+          color: "#d4af37",
+          fontSize: 18,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          padding: 0,
+        }}
+      >
+        🖼
+      </button>
+
+      {/* Hidden file inputs */}
       <input
-        ref={inputRef}
+        ref={(el) => { cameraRef.current = el; if (inputRef) inputRef.current = el; }}
         type="file"
         accept="image/*"
         capture="environment"
         onChange={onFile}
         hidden
       />
-    </label>
+      <input
+        ref={galleryRef}
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={handleGalleryChange}
+        hidden
+      />
+    </div>
   );
 }
 
@@ -375,8 +474,446 @@ function ResultCard({ result, enriching }) {
   );
 }
 
-function BidCalculator({ marketValue }) {
+function WidgetOverlay({
+  loading,
+  step,
+  result,
+  enriching,
+  error,
+  onDismiss,
+  onSave,
+  onListEbay,
+}) {
   const [bid, setBid] = useState("");
+  const [seeded, setSeeded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [listing, setListing] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const detectedPrice = result?.detectedPrice;
+  useEffect(() => {
+    if (detectedPrice && !seeded) {
+      const cleaned = String(detectedPrice).replace(/[^0-9.]/g, "");
+      if (cleaned && parseFloat(cleaned) > 0) {
+        setBid(cleaned);
+        setSeeded(true);
+      }
+    }
+  }, [detectedPrice, seeded]);
+
+  const bidNum = parseFloat(bid);
+  const hasBid = !isNaN(bidNum) && bidNum > 0;
+  const marketValue = marketValueOf(result);
+
+  const comps = result?.comps;
+  const hasComps =
+    comps && Array.isArray(comps.recentSales) && comps.recentSales.length > 0;
+  const avgNum = hasComps ? comps.averageNum : null;
+  const lowestNum = hasComps ? comps.lowestNum : null;
+  const highestNum = hasComps
+    ? Math.max(...comps.recentSales.map((s) => s.price).filter(Boolean))
+    : null;
+
+  const max20 = marketValue != null ? marketValue * 0.8 : null;
+  const max30 = marketValue != null ? marketValue * 0.7 : null;
+
+  let rating = null;
+  if (hasBid && marketValue) {
+    if (bidNum <= max30) rating = { label: "STRONG BUY", bg: "#16a34a", color: "#fff" };
+    else if (bidNum <= max20) rating = { label: "FAIR", bg: "#d4af37", color: "#0a0a0a" };
+    else rating = { label: "OVERPRICED", bg: "#dc2626", color: "#fff" };
+  }
+
+  const recommendedNum = avgNum != null ? Math.round(avgNum * 1.15) : null;
+  const recommendedLabel =
+    recommendedNum != null
+      ? `$${recommendedNum.toLocaleString("en-US")}`
+      : result?.price || "—";
+
+  const gradeBadge =
+    result?.isGraded === true && result?.numericGrade != null
+      ? `CGC ${result.numericGrade}`
+      : "RAW COPY";
+
+  const handleSave = async () => {
+    if (!result || saving) return;
+    setSaving(true);
+    try {
+      await onSave(result, result.image);
+      setSaved(true);
+    } catch {
+      /* ignore */
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleList = async () => {
+    if (!result || listing) return;
+    setListing(true);
+    try {
+      await onListEbay(result);
+    } catch {
+      /* ignore */
+    } finally {
+      setListing(false);
+    }
+  };
+
+  const s = {
+    overlay: {
+      position: "fixed",
+      inset: 0,
+      background: "#0a0a0a",
+      zIndex: 5000,
+      display: "flex",
+      flexDirection: "column",
+      overflow: "auto",
+      WebkitOverflowScrolling: "touch",
+    },
+    header: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "12px 16px 8px",
+      flexShrink: 0,
+    },
+    headerTitle: {
+      fontSize: 16,
+      fontWeight: 700,
+      color: "#d4af37",
+    },
+    closeBtn: {
+      background: "transparent",
+      border: "none",
+      color: "#999",
+      fontSize: 22,
+      cursor: "pointer",
+      padding: "4px 8px",
+      lineHeight: 1,
+    },
+    body: {
+      flex: 1,
+      padding: "0 16px 16px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 12,
+    },
+    idRow: {
+      display: "flex",
+      gap: 12,
+      alignItems: "flex-start",
+    },
+    thumb: {
+      width: 80,
+      height: 110,
+      objectFit: "cover",
+      borderRadius: 8,
+      border: "1px solid rgba(212,175,55,0.3)",
+      flexShrink: 0,
+      background: "#1a1a1a",
+    },
+    idMeta: {
+      flex: 1,
+      minWidth: 0,
+    },
+    goldBox: {
+      border: "1px solid rgba(212,175,55,0.4)",
+      borderRadius: 10,
+      padding: 12,
+      background: "rgba(212,175,55,0.05)",
+    },
+    row: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "5px 0",
+      fontSize: 14,
+    },
+    divider: {
+      borderTop: "1px solid rgba(212,175,55,0.2)",
+      margin: "6px 0",
+    },
+    inputWrap: {
+      display: "flex",
+      alignItems: "center",
+      background: "rgba(255,255,255,0.08)",
+      borderRadius: 8,
+      padding: "0 10px",
+      flex: 1,
+    },
+    input: {
+      background: "transparent",
+      border: "none",
+      color: "#fff",
+      fontSize: 16,
+      fontWeight: 700,
+      width: "100%",
+      padding: "8px 4px",
+      outline: "none",
+    },
+    ratingBar: {
+      borderRadius: 10,
+      padding: "14px 16px",
+      textAlign: "center",
+      fontWeight: 800,
+      fontSize: 20,
+      letterSpacing: 1,
+    },
+    actionRow: {
+      display: "flex",
+      gap: 10,
+      flexShrink: 0,
+    },
+    btnOutline: {
+      flex: 1,
+      padding: "14px 8px",
+      background: "transparent",
+      color: "#d4af37",
+      border: "1px solid rgba(212,175,55,0.5)",
+      borderRadius: 10,
+      fontSize: 14,
+      fontWeight: 700,
+      cursor: "pointer",
+    },
+    btnGold: {
+      flex: 1,
+      padding: "14px 8px",
+      background: "linear-gradient(135deg, #d4af37, #b8941f)",
+      color: "#0a0a0a",
+      border: "none",
+      borderRadius: 10,
+      fontSize: 14,
+      fontWeight: 700,
+      cursor: "pointer",
+    },
+  };
+
+  return (
+    <div style={s.overlay}>
+      {/* HEADER */}
+      <div style={s.header}>
+        <span style={s.headerTitle}>Comic Vault</span>
+        <button style={s.closeBtn} onClick={onDismiss} aria-label="Close">✕</button>
+      </div>
+
+      <div style={s.body}>
+        {/* LOADING STATE */}
+        {loading && (
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 16,
+            }}
+          >
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                border: "3px solid rgba(212,175,55,0.3)",
+                borderTopColor: "#d4af37",
+                borderRadius: "50%",
+                animation: "spin 0.8s linear infinite",
+              }}
+            />
+            <div style={{ color: "#d4af37", fontSize: 16, fontWeight: 600 }}>
+              {LOADING_STEPS[step]}
+            </div>
+          </div>
+        )}
+
+        {/* ERROR STATE */}
+        {error && !loading && (
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 12,
+            }}
+          >
+            <div style={{ color: "#dc2626", fontSize: 16 }}>{error}</div>
+            <button style={s.btnOutline} onClick={onDismiss}>Close</button>
+          </div>
+        )}
+
+        {/* RESULT */}
+        {result && !loading && (
+          <>
+            {/* Section 1 — IDENTIFICATION */}
+            <div style={s.idRow}>
+              {result.image ? (
+                <img src={result.image} alt="" style={s.thumb} />
+              ) : (
+                <div style={{ ...s.thumb, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32 }}>📘</div>
+              )}
+              <div style={s.idMeta}>
+                <div style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.2 }}>
+                  {result.title || "Unknown"}
+                </div>
+                <div className="muted small" style={{ marginTop: 3 }}>
+                  {result.publisher}
+                  {result.publisher && result.year ? " · " : ""}
+                  {result.year}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <span className="grade-badge" style={{ fontSize: 11, padding: "3px 8px" }}>
+                    {gradeBadge}
+                  </span>
+                </div>
+                {result.keyIssue && result.keyIssue !== "N/A" && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 12,
+                      color: "#d4af37",
+                      fontWeight: 600,
+                    }}
+                  >
+                    ⭐ {result.keyIssue}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Section 2 — PRICE INTEL */}
+            <div style={s.goldBox}>
+              <div style={s.row}>
+                <span className="muted small">Current bid</span>
+                <div style={s.inputWrap}>
+                  <span style={{ color: "#d4af37", fontWeight: 700, fontSize: 16 }}>$</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={bid}
+                    onChange={(e) => setBid(e.target.value)}
+                    style={s.input}
+                  />
+                </div>
+              </div>
+              <div style={s.divider} />
+              {hasComps && lowestNum != null && highestNum != null && (
+                <div style={s.row}>
+                  <span className="muted small">Active range</span>
+                  <span style={{ fontWeight: 600, color: "#d4af37" }}>
+                    {fmtPrice(lowestNum)} – {fmtPrice(highestNum)}
+                  </span>
+                </div>
+              )}
+              {avgNum != null && (
+                <div style={s.row}>
+                  <span className="muted small">30-day avg</span>
+                  <span style={{ fontWeight: 600 }}>{fmtPrice(avgNum)}</span>
+                </div>
+              )}
+              {!hasComps && (result.price || result.priceLow) && (
+                <div style={s.row}>
+                  <span className="muted small">AI estimate</span>
+                  <span style={{ fontWeight: 600 }}>
+                    {result.priceLow && result.priceHigh
+                      ? `${result.priceLow} – ${result.priceHigh}`
+                      : result.price || "—"}
+                  </span>
+                </div>
+              )}
+              {enriching && !hasComps && (
+                <div style={{ ...s.row, justifyContent: "center", gap: 8 }}>
+                  <div
+                    style={{
+                      width: 12,
+                      height: 12,
+                      border: "2px solid rgba(212,175,55,0.3)",
+                      borderTopColor: "#d4af37",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                    }}
+                  />
+                  <span className="muted small">Loading market data…</span>
+                </div>
+              )}
+              <div style={s.divider} />
+              <div style={s.row}>
+                <span className="muted small">Max bid · 20%</span>
+                <span style={{ fontWeight: 700, color: "#d4af37" }}>{fmt(max20)}</span>
+              </div>
+              <div style={s.row}>
+                <span className="muted small">Max bid · 30%</span>
+                <span style={{ fontWeight: 700, color: "#d4af37" }}>{fmt(max30)}</span>
+              </div>
+            </div>
+
+            {/* Section 3 — RATING BAR */}
+            {rating ? (
+              <div
+                style={{
+                  ...s.ratingBar,
+                  background: rating.bg,
+                  color: rating.color,
+                }}
+              >
+                {rating.label === "STRONG BUY" && "⚡ "}
+                {rating.label}
+              </div>
+            ) : (
+              <div
+                style={{
+                  ...s.ratingBar,
+                  background: "rgba(255,255,255,0.08)",
+                  color: "#666",
+                }}
+              >
+                {marketValue == null ? "Loading pricing…" : "Enter bid above"}
+              </div>
+            )}
+
+            {/* Section 4 — ACTIONS */}
+            <div style={s.actionRow}>
+              <button
+                style={s.btnOutline}
+                onClick={handleSave}
+                disabled={saving || saved}
+              >
+                {saved ? "✓ Saved" : saving ? "Saving…" : "Save to Collection"}
+              </button>
+              <button
+                style={s.btnGold}
+                onClick={handleList}
+                disabled={listing}
+              >
+                {listing
+                  ? "Listing…"
+                  : `List on eBay — ${recommendedLabel}`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BidCalculator({ marketValue, detectedPrice }) {
+  const [bid, setBid] = useState("");
+  const [seeded, setSeeded] = useState(false);
+
+  // Auto-fill bid from detectedPrice once
+  useEffect(() => {
+    if (detectedPrice && !seeded) {
+      const cleaned = String(detectedPrice).replace(/[^0-9.]/g, "");
+      if (cleaned && parseFloat(cleaned) > 0) {
+        setBid(cleaned);
+        setSeeded(true);
+      }
+    }
+  }, [detectedPrice, seeded]);
+
   const bidNum = parseFloat(bid);
   const hasBid = !isNaN(bidNum) && bidNum > 0;
 
@@ -475,10 +1012,12 @@ function CollectionList({ items, totalValue, onOpen, onDelete }) {
       </div>
 
       <div className="collection-list">
-        {items.map((item) => (
+        {items.map((item) => {
+          const thumbSrc = getComicPhotos(item)[0] || null;
+          return (
           <div key={item.id} className="collection-item" onClick={() => onOpen(item)}>
-            {item.image ? (
-              <img src={item.image} alt="" loading="lazy" className="thumb" />
+            {thumbSrc ? (
+              <img src={thumbSrc} alt="" loading="lazy" className="thumb" />
             ) : (
               <div className="thumb thumb-placeholder">📘</div>
             )}
@@ -507,17 +1046,60 @@ function CollectionList({ items, totalValue, onOpen, onDelete }) {
               ✕
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
     </>
   );
 }
 
-function CollectionDetail({ item, onBack, onDelete, onList }) {
+function CollectionDetail({
+  item,
+  onBack,
+  onDelete,
+  onList,
+  onRefreshMarket,
+  onAddPhoto,
+}) {
   const [listing, setListing] = useState(false);
   const [listError, setListError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState(null);
+  const [addingPhoto, setAddingPhoto] = useState(false);
+  const [addPhotoError, setAddPhotoError] = useState(null);
+  const [expandedPhoto, setExpandedPhoto] = useState(null);
+  const addPhotoRef = useRef(null);
 
+  const photos = getComicPhotos(item);
+  const canAddMore = photos.length < 4;
   const isListed = item.status === "listed" && item.ebayUrl;
+
+  // Pricing: prefer stored comps, fall back to the flat grade fields.
+  const hasComps =
+    item.comps &&
+    Array.isArray(item.comps.recentSales) &&
+    item.comps.recentSales.length > 0;
+  const avgNum = hasComps ? item.comps.averageNum : null;
+  const recommendedNum = avgNum != null ? Math.round(avgNum * 1.15) : null;
+  const parsedFallback = parsePrice(item.price);
+  const recommendedLabel =
+    recommendedNum != null
+      ? `$${recommendedNum.toLocaleString("en-US")}`
+      : parsedFallback != null
+      ? `$${Math.round(parsedFallback).toLocaleString("en-US")}`
+      : item.price || "—";
+
+  // Grade badge: CGC numeric if graded, RAW COPY otherwise.
+  const gradeBadgeText =
+    item.isGraded === true && item.numericGrade != null
+      ? `CGC ${item.numericGrade}`
+      : "RAW COPY";
+
+  const conditionBullets = parseConditionReport(item.reason);
+  const confidenceText = formatConfidence(item.confidence);
+  const scannedText = item.timestamp
+    ? new Date(item.timestamp).toLocaleString()
+    : null;
 
   const handleList = async () => {
     setListing(true);
@@ -531,53 +1113,483 @@ function CollectionDetail({ item, onBack, onDelete, onList }) {
     }
   };
 
+  const handleRefresh = async () => {
+    if (!onRefreshMarket) return;
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      await onRefreshMarket(item);
+    } catch (err) {
+      setRefreshError(err.message || "Refresh failed");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleAddPhotoClick = () => {
+    if (!canAddMore || addingPhoto) return;
+    addPhotoRef.current?.click();
+  };
+
+  const handleAddPhotoChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (addPhotoRef.current) addPhotoRef.current.value = "";
+    if (!file || !onAddPhoto) return;
+    setAddingPhoto(true);
+    setAddPhotoError(null);
+    try {
+      await onAddPhoto(item, file);
+    } catch (err) {
+      setAddPhotoError(err.message || "Failed to add photo");
+    } finally {
+      setAddingPhoto(false);
+    }
+  };
+
   return (
     <div className="detail-view">
       <button className="back-btn" onClick={onBack}>← Back</button>
-      {item.image && <img src={item.image} alt="" loading="lazy" className="detail-image" />}
-      <ResultCard result={item} />
-      <div className="muted small" style={{ textAlign: "center" }}>
-        Scanned {new Date(item.timestamp).toLocaleString()}
-      </div>
 
-      {isListed ? (
-        <div className="listed-card">
-          <div className="listed-header">
-            <span className="listed-badge">Listed</span>
-            <span className="muted small">on eBay</span>
-          </div>
-          <a
-            href={item.ebayUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="listed-link"
-          >
-            {item.ebayUrl}
-          </a>
-        </div>
-      ) : (
-        <button
-          className="reset-btn primary"
-          onClick={handleList}
-          disabled={listing}
-        >
-          {listing ? "Listing on eBay..." : "List on eBay"}
-        </button>
-      )}
-
-      {listError && <div className="error-text small">{listError}</div>}
-
-      <button
-        className="reset-btn danger"
-        onClick={() => {
-          if (confirm(`Delete "${item.title || "this comic"}"?`)) {
-            onDelete(item.id);
-            onBack();
-          }
+      {/* 1. PHOTO STRIP */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          overflowX: "auto",
+          padding: "4px 0 12px",
+          WebkitOverflowScrolling: "touch",
         }}
       >
-        Delete from collection
-      </button>
+        {photos.map((src, i) => (
+          <img
+            key={i}
+            src={src}
+            alt=""
+            loading="lazy"
+            onClick={() => setExpandedPhoto(src)}
+            style={{
+              height: 120,
+              width: "auto",
+              flexShrink: 0,
+              borderRadius: 8,
+              objectFit: "cover",
+              cursor: "pointer",
+              border: "1px solid rgba(212,175,55,0.3)",
+            }}
+          />
+        ))}
+        {canAddMore && (
+          <button
+            onClick={handleAddPhotoClick}
+            disabled={addingPhoto}
+            style={{
+              height: 120,
+              minWidth: 100,
+              flexShrink: 0,
+              border: "2px dashed rgba(212,175,55,0.5)",
+              borderRadius: 8,
+              background: "transparent",
+              color: "#d4af37",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: addingPhoto ? "wait" : "pointer",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+              padding: 8,
+            }}
+          >
+            {addingPhoto ? (
+              <>
+                <div
+                  style={{
+                    width: 20,
+                    height: 20,
+                    border: "2px solid rgba(212,175,55,0.3)",
+                    borderTopColor: "#d4af37",
+                    borderRadius: "50%",
+                    animation: "spin 0.8s linear infinite",
+                  }}
+                />
+                <span>Analyzing…</span>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize: 24, lineHeight: 1 }}>+</span>
+                <span>Add Photo</span>
+              </>
+            )}
+          </button>
+        )}
+        <input
+          ref={addPhotoRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleAddPhotoChange}
+          hidden
+        />
+      </div>
+      {addPhotoError && (
+        <div className="error-text small" style={{ marginBottom: 10 }}>
+          {addPhotoError}
+        </div>
+      )}
+
+      {/* Fullscreen photo overlay */}
+      {expandedPhoto && (
+        <div
+          onClick={() => setExpandedPhoto(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.95)",
+            zIndex: 2000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            cursor: "pointer",
+          }}
+        >
+          <img
+            src={expandedPhoto}
+            alt=""
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              objectFit: "contain",
+            }}
+          />
+        </div>
+      )}
+
+      {/* 2. TITLE BLOCK */}
+      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
+        {item.title || "Unknown"}
+      </div>
+      <div className="muted small">
+        {item.publisher}
+        {item.publisher && item.year ? " · " : ""}
+        {item.year}
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <span className="grade-badge">{gradeBadgeText}</span>
+      </div>
+
+      {/* 3. KEY ISSUE BLOCK */}
+      {item.keyIssue && item.keyIssue !== "N/A" && (
+        <div className="key-box" style={{ marginTop: 12 }}>
+          ⭐ {item.keyIssue}
+        </div>
+      )}
+
+      {/* 4. AI CONDITION REPORT */}
+      {(conditionBullets.length > 0 || confidenceText || scannedText) && (
+        <div
+          style={{
+            marginTop: 14,
+            padding: 12,
+            border: "1px solid rgba(212,175,55,0.3)",
+            borderRadius: 8,
+            background: "rgba(212,175,55,0.05)",
+          }}
+        >
+          <div
+            className="muted small"
+            style={{
+              textTransform: "uppercase",
+              letterSpacing: 1,
+              marginBottom: 8,
+            }}
+          >
+            AI Condition Report
+          </div>
+          {conditionBullets.length > 0 && (
+            <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+              {conditionBullets.map((b, i) => (
+                <li
+                  key={i}
+                  style={{
+                    padding: "4px 0",
+                    fontSize: 14,
+                    color: b.concern ? "#f59e0b" : "#5cb85c",
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <span style={{ flexShrink: 0 }}>{b.concern ? "⚠️" : "✅"}</span>
+                  <span style={{ color: "inherit" }}>{b.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {(confidenceText || scannedText) && (
+            <div
+              className="muted small"
+              style={{
+                marginTop: conditionBullets.length > 0 ? 10 : 0,
+                paddingTop: conditionBullets.length > 0 ? 8 : 0,
+                borderTop:
+                  conditionBullets.length > 0
+                    ? "1px solid rgba(212,175,55,0.2)"
+                    : "none",
+              }}
+            >
+              {confidenceText && <div>Confidence: {confidenceText}</div>}
+              {scannedText && <div>Scanned: {scannedText}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 5. PRICING BLOCK */}
+      <div style={{ marginTop: 14 }}>
+        <div className="muted small">Recommended list price</div>
+        <div
+          className="price"
+          style={{ fontSize: 28, fontWeight: 800, color: "#d4af37" }}
+        >
+          {recommendedLabel}
+        </div>
+
+        {hasComps && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              border: "1px solid rgba(212,175,55,0.3)",
+              borderRadius: 8,
+              background: "rgba(212,175,55,0.05)",
+            }}
+          >
+            <div
+              className="muted small"
+              style={{
+                textTransform: "uppercase",
+                letterSpacing: 1,
+                marginBottom: 6,
+              }}
+            >
+              Recent eBay listings
+            </div>
+            {item.comps.recentSales.slice(0, 3).map((s, i) => {
+              const rowStyle = {
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "6px 0",
+                fontSize: 14,
+              };
+              const inner = (
+                <>
+                  <span className="muted small">
+                    {fmtSaleWhen(s.date, s.daysAgo)}
+                  </span>
+                  <span style={{ fontWeight: 600, color: "#d4af37" }}>
+                    {fmtPrice(s.price)}
+                    {s.itemWebUrl ? (
+                      <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>
+                    ) : null}
+                  </span>
+                </>
+              );
+              return s.itemWebUrl ? (
+                <a
+                  key={i}
+                  href={s.itemWebUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    ...rowStyle,
+                    textDecoration: "none",
+                    color: "inherit",
+                  }}
+                >
+                  {inner}
+                </a>
+              ) : (
+                <div key={i} style={rowStyle}>
+                  {inner}
+                </div>
+              );
+            })}
+            <div
+              style={{
+                borderTop: "1px solid rgba(212,175,55,0.25)",
+                margin: "8px 0",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                padding: "4px 0",
+                fontSize: 14,
+              }}
+            >
+              <span className="muted small">30-day average</span>
+              <span style={{ fontWeight: 600 }}>
+                {fmtPrice(item.comps.averageNum)}
+              </span>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                padding: "4px 0",
+                fontSize: 14,
+              }}
+            >
+              <span className="muted small">Recommended</span>
+              <span style={{ fontWeight: 700, color: "#d4af37" }}>
+                {recommendedLabel}
+              </span>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                padding: "4px 0",
+                fontSize: 14,
+              }}
+            >
+              <span className="muted small">Floor</span>
+              <span style={{ fontWeight: 600, color: "#e05656" }}>
+                {fmtPrice(item.comps.lowestNum)}
+              </span>
+            </div>
+            <div
+              className="muted small"
+              style={{ marginTop: 6, fontStyle: "italic" }}
+            >
+              Source:{" "}
+              {item.comps.source === "marketplace_insights"
+                ? "Marketplace Insights"
+                : "Browse API — active listings"}
+            </div>
+          </div>
+        )}
+
+        {!hasComps && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              border: "1px solid rgba(245,158,11,0.5)",
+              borderRadius: 8,
+              background: "rgba(245,158,11,0.1)",
+              color: "#f59e0b",
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+              ⚠ No stored eBay comps for this comic
+            </div>
+            <div className="small" style={{ marginBottom: 4 }}>
+              Tap refresh to fetch live market data
+            </div>
+            {(item.priceLow || item.priceHigh) && (
+              <div style={{ fontWeight: 600, marginTop: 6 }}>
+                AI range: {item.priceLow}
+                {item.priceLow && item.priceHigh ? " – " : ""}
+                {item.priceHigh}
+              </div>
+            )}
+          </div>
+        )}
+
+        <button
+          className="reset-btn"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          style={{ marginTop: 12, width: "100%" }}
+        >
+          {refreshing ? (
+            <>
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 14,
+                  height: 14,
+                  border: "2px solid rgba(212,175,55,0.3)",
+                  borderTopColor: "#d4af37",
+                  borderRadius: "50%",
+                  animation: "spin 0.8s linear infinite",
+                  marginRight: 8,
+                  verticalAlign: "middle",
+                }}
+              />
+              Refreshing…
+            </>
+          ) : (
+            "🔄 Refresh Market Data"
+          )}
+        </button>
+        {refreshError && (
+          <div className="error-text small" style={{ marginTop: 6 }}>
+            {refreshError}
+          </div>
+        )}
+      </div>
+
+      {/* 6. ACTION BUTTONS */}
+      <div style={{ marginTop: 18 }}>
+        {isListed ? (
+          <div className="listed-card">
+            <div className="listed-header">
+              <span className="listed-badge">Listed</span>
+              <span className="muted small">on eBay</span>
+            </div>
+            <a
+              href={item.ebayUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="listed-link"
+            >
+              {item.ebayUrl}
+            </a>
+          </div>
+        ) : (
+          <button
+            className="reset-btn primary"
+            onClick={handleList}
+            disabled={listing}
+            style={{ width: "100%" }}
+          >
+            {listing
+              ? "Listing on eBay..."
+              : `📋 List on eBay — ${recommendedLabel}`}
+          </button>
+        )}
+        {listError && (
+          <div className="error-text small" style={{ marginTop: 6 }}>
+            {listError}
+          </div>
+        )}
+
+        <button
+          className="reset-btn danger"
+          onClick={() => {
+            if (confirm(`Delete "${item.title || "this comic"}"?`)) {
+              onDelete(item.id);
+              onBack();
+            }
+          }}
+          style={{ marginTop: 12, width: "100%" }}
+        >
+          Delete from Collection
+        </button>
+      </div>
+
+      <div
+        className="muted small"
+        style={{ textAlign: "center", marginTop: 16, fontStyle: "italic" }}
+      >
+        {photos.length} photo{photos.length === 1 ? "" : "s"} stored
+      </div>
     </div>
   );
 }
@@ -596,8 +1608,19 @@ export default function App() {
   const [installDismissed, setInstallDismissed] = useState(
     () => localStorage.getItem("installDismissed") === "1"
   );
+  // Install banner is mobile-only. Desktop Chrome/Edge show their own
+  // install icon in the address bar, so a custom banner is just noise.
+  const [isMobile] = useState(() =>
+    /android|iphone|ipad|ipod/i.test(navigator.userAgent || "")
+  );
+  const [widgetMode, setWidgetMode] = useState(
+    () => new URLSearchParams(window.location.search).get("share-target") === "1"
+  );
+  const [bulkProgress, setBulkProgress] = useState(null); // { current, total, title }
+  const [bulkDone, setBulkDone] = useState(null); // number or null
   const fileRef = useRef(null);
   const buyerFileRef = useRef(null);
+  const bulkRef = useRef(null);
 
   // Load catalogue from IndexedDB on mount (and migrate legacy localStorage data).
   useEffect(() => {
@@ -641,6 +1664,23 @@ export default function App() {
     };
   }, []);
 
+  // Auto-dismiss the install banner 8s after it becomes visible.
+  // IMPORTANT: keyed to the banner's visibility state, NOT to mount —
+  // Chrome's `beforeinstallprompt` engagement heuristic often fires
+  // 30+ seconds after mount, so a mount-keyed timer would expire long
+  // before the banner ever appears and the banner would stay forever.
+  // This version restarts the 8s countdown when the banner first shows.
+  // Non-persistent: banner reappears next session unless the user taps ✕.
+  useEffect(() => {
+    if (installDismissed) return;
+    if (!installPrompt && !showSafariBanner) return;
+    const t = setTimeout(() => {
+      setInstallPrompt(null);
+      setShowSafariBanner(false);
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [installDismissed, installPrompt, showSafariBanner]);
+
   const addToCatalogue = useCallback(async (data, sourceDataUrl) => {
     let thumb = null;
     try {
@@ -654,6 +1694,9 @@ export default function App() {
       publisher: data.publisher || "",
       year: data.year || "",
       grade: data.grade || "",
+      isGraded: data.isGraded === true,
+      numericGrade:
+        typeof data.numericGrade === "number" ? data.numericGrade : null,
       keyIssue: data.keyIssue || "",
       price: data.price || "",
       priceLow: data.priceLow || "",
@@ -661,25 +1704,26 @@ export default function App() {
       reason: data.reason || "",
       confidence: data.confidence || "",
       timestamp: Date.now(),
-      image: thumb,
+      images: thumb ? [thumb] : [],
     };
     try {
       await putComic(entry);
     } catch (err) {
       // IndexedDB quota errors are rare but possible on very large libraries.
-      // Retry once without the image before giving up.
-      if (entry.image) {
+      // Retry once without photos before giving up.
+      if (entry.images.length > 0) {
         try {
-          await putComic({ ...entry, image: null });
-          entry.image = null;
+          await putComic({ ...entry, images: [] });
+          entry.images = [];
         } catch {
-          return;
+          return null;
         }
       } else {
-        return;
+        return null;
       }
     }
     setCatalogue((prev) => [entry, ...prev]);
+    return entry.id;
   }, []);
 
   const gradeBlob = useCallback(
@@ -705,7 +1749,7 @@ export default function App() {
         // Show the Claude result immediately.
         setResult({ ...data, image: b64 });
         setLoading(false);
-        if (save) addToCatalogue(data, b64);
+        const savedId = save ? await addToCatalogue(data, b64) : null;
 
         // Fire-and-forget enrichment pass — merges into the card when ready.
         setEnriching(true);
@@ -725,12 +1769,48 @@ export default function App() {
         })
           .then((r) => (r.ok ? r.json() : null))
           .then((enrich) => {
-            if (enrich) {
-              // Explicitly preserve the cover image from the initial grade
-              // response in case enrich ever returns its own image field.
-              setResult((prev) =>
-                prev ? { ...prev, ...enrich, image: prev.image } : prev
-              );
+            if (!enrich) return;
+            // Explicitly preserve the cover image from the initial grade
+            // response in case enrich ever returns its own image field.
+            setResult((prev) =>
+              prev ? { ...prev, ...enrich, image: prev.image } : prev
+            );
+            // Persist comps + enriched price fields into the stored
+            // catalogue entry so CollectionDetail can display them after
+            // a refresh from IndexedDB — AND update selectedItem in case
+            // the user is already viewing the detail page for this comic
+            // (otherwise the detail view would keep rendering the stale
+            // pre-enrich entry until they close and reopen it).
+            if (savedId) {
+              setCatalogue((prev) => {
+                const idx = prev.findIndex((x) => x.id === savedId);
+                if (idx < 0) return prev;
+                const updated = {
+                  ...prev[idx],
+                  comps: enrich.comps || prev[idx].comps,
+                  price: enrich.price || prev[idx].price,
+                  priceLow: enrich.priceLow || prev[idx].priceLow,
+                  priceHigh: enrich.priceHigh || prev[idx].priceHigh,
+                  keyIssue: enrich.keyIssue || prev[idx].keyIssue,
+                };
+                // Fire-and-forget persistence. Idempotent if it runs twice.
+                putComic(updated).catch(() => {});
+                const next = prev.slice();
+                next[idx] = updated;
+                return next;
+              });
+              // Sync the currently-open detail view if it's the same comic.
+              setSelectedItem((cur) => {
+                if (!cur || cur.id !== savedId) return cur;
+                return {
+                  ...cur,
+                  comps: enrich.comps || cur.comps,
+                  price: enrich.price || cur.price,
+                  priceLow: enrich.priceLow || cur.priceLow,
+                  priceHigh: enrich.priceHigh || cur.priceHigh,
+                  keyIssue: enrich.keyIssue || cur.keyIssue,
+                };
+              });
             }
           })
           .catch(() => {
@@ -753,11 +1833,78 @@ export default function App() {
     if (which === "buyer" && buyerFileRef.current) buyerFileRef.current.value = "";
   };
 
-  // Web Share Target handoff.
+  const handleBulkImport = useCallback(async (files) => {
+    setBulkDone(null);
+    setBulkProgress({ current: 1, total: files.length, title: "" });
+    let added = 0;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setBulkProgress({ current: i + 1, total: files.length, title: "" });
+      try {
+        const rawB64 = await fileToBase64(file);
+        const b64 = await makeThumbnail(rawB64, 1200, 0.85);
+        const res = await fetch("/api/grade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ images: [b64] }),
+        });
+        const data = await res.json();
+        if (!res.ok) continue; // skip failures
+        setBulkProgress({ current: i + 1, total: files.length, title: data.title || "" });
+        const savedId = await addToCatalogue(data, b64);
+        if (savedId) added++;
+        // Fire-and-forget enrichment
+        fetch("/api/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: data.title,
+            grade: data.grade,
+            isGraded: data.isGraded,
+            numericGrade: data.numericGrade,
+            year: data.year,
+            publisher: data.publisher,
+            confidence: data.confidence,
+            images: [b64],
+          }),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((enrich) => {
+            if (!enrich || !savedId) return;
+            setCatalogue((prev) => {
+              const idx = prev.findIndex((x) => x.id === savedId);
+              if (idx < 0) return prev;
+              const updated = {
+                ...prev[idx],
+                comps: enrich.comps || prev[idx].comps,
+                price: enrich.price || prev[idx].price,
+                priceLow: enrich.priceLow || prev[idx].priceLow,
+                priceHigh: enrich.priceHigh || prev[idx].priceHigh,
+                keyIssue: enrich.keyIssue || prev[idx].keyIssue,
+              };
+              putComic(updated).catch(() => {});
+              const next = prev.slice();
+              next[idx] = updated;
+              return next;
+            });
+          })
+          .catch(() => {});
+      } catch {
+        // skip failures
+      }
+    }
+    setBulkProgress(null);
+    setBulkDone(added);
+    // Auto-switch to collection tab after a short delay
+    setTimeout(() => {
+      setTab("collection");
+      setBulkDone(null);
+    }, 2000);
+  }, [addToCatalogue]);
+
+  // Web Share Target handoff — fires gradeBlob; widget mode renders the overlay.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("share-target") !== "1") return;
-    setTab("buyer");
+    if (!widgetMode) return;
     (async () => {
       try {
         const res = await fetch("/__shared-image", { cache: "no-store" });
@@ -766,8 +1913,6 @@ export default function App() {
         if (blob.size > 0) await gradeBlob(blob);
       } catch {
         /* noop */
-      } finally {
-        window.history.replaceState({}, "", "/");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -784,6 +1929,7 @@ export default function App() {
   }, []);
 
   const listOnEbay = useCallback(async (item) => {
+    const coverPhoto = getComicPhotos(item)[0] || null;
     const res = await fetch("/api/list-ebay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -797,7 +1943,7 @@ export default function App() {
         priceLow: item.priceLow,
         priceHigh: item.priceHigh,
         reason: item.reason,
-        image: item.image,
+        image: coverPhoto,
       }),
     });
     const data = await res.json();
@@ -811,6 +1957,98 @@ export default function App() {
       listedAt: Date.now(),
     };
     await putComic(updated);
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
+  }, []);
+
+  // Re-fetch eBay comps + ComicVine + census + AI verification for an
+  // existing catalogue entry, without re-running the image identification.
+  // Used by the CollectionDetail "Refresh Market Data" button.
+  const refreshMarketData = useCallback(async (item) => {
+    const res = await fetch("/api/enrich", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: item.title,
+        grade: item.grade,
+        isGraded: item.isGraded,
+        numericGrade: item.numericGrade,
+        year: item.year,
+        publisher: item.publisher,
+        confidence: item.confidence,
+      }),
+    });
+    if (!res.ok) throw new Error("Failed to refresh market data");
+    const enrich = await res.json();
+    const updated = {
+      ...item,
+      comps: enrich.comps || item.comps,
+      price: enrich.price || item.price,
+      priceLow: enrich.priceLow || item.priceLow,
+      priceHigh: enrich.priceHigh || item.priceHigh,
+      keyIssue: enrich.keyIssue || item.keyIssue,
+    };
+    await putComic(updated);
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
+  }, []);
+
+  // Append a new photo to an existing comic and re-run /api/grade with
+  // ALL photos so the identification benefits from multi-angle coverage.
+  // Updates the stored entry with fresh grade fields + new images array.
+  const addPhotoToComic = useCallback(async (item, file) => {
+    const existingPhotos = getComicPhotos(item);
+    if (existingPhotos.length >= 4) {
+      throw new Error("Maximum 4 photos reached");
+    }
+    const rawB64 = await fileToBase64(file);
+    const newThumb = await makeThumbnail(rawB64, 1200, 0.85);
+    const nextPhotos = [...existingPhotos, newThumb];
+
+    const res = await fetch("/api/grade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ images: nextPhotos }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to re-analyze");
+
+    const updated = {
+      ...item,
+      title: data.title || item.title,
+      publisher: data.publisher || item.publisher,
+      year: data.year || item.year,
+      grade: data.grade || item.grade,
+      isGraded: data.isGraded === true,
+      numericGrade:
+        typeof data.numericGrade === "number"
+          ? data.numericGrade
+          : item.numericGrade,
+      keyIssue: data.keyIssue || item.keyIssue,
+      price: data.price || item.price,
+      priceLow: data.priceLow || item.priceLow,
+      priceHigh: data.priceHigh || item.priceHigh,
+      reason: data.reason || item.reason,
+      confidence: data.confidence || item.confidence,
+      images: nextPhotos,
+      // Drop the legacy single `image` field if it's still hanging around
+      // from an older record — `images` is the source of truth now.
+      image: undefined,
+    };
+    try {
+      await putComic(updated);
+    } catch {
+      // Quota fallback: drop the oldest photo and retry.
+      const trimmed = { ...updated, images: nextPhotos.slice(-3) };
+      await putComic(trimmed);
+      setCatalogue((prev) =>
+        prev.map((x) => (x.id === item.id ? trimmed : x))
+      );
+      setSelectedItem((cur) =>
+        cur && cur.id === item.id ? trimmed : cur
+      );
+      return;
+    }
     setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
     setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
   }, []);
@@ -844,20 +2082,131 @@ export default function App() {
     setInstallDismissed(true);
   };
 
+  const dismissWidget = () => {
+    setWidgetMode(false);
+    reset();
+    window.history.replaceState({}, "", "/");
+  };
+
+  const saveFromWidget = async (data, imageDataUrl) => {
+    await addToCatalogue(data, imageDataUrl);
+  };
+
+  const listFromWidget = async (data) => {
+    const coverPhoto = data.image || null;
+    const res = await fetch("/api/list-ebay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: data.title,
+        publisher: data.publisher,
+        year: data.year,
+        grade: data.grade,
+        keyIssue: data.keyIssue,
+        price: data.price,
+        priceLow: data.priceLow,
+        priceHigh: data.priceHigh,
+        reason: data.reason,
+        image: coverPhoto,
+      }),
+    });
+    const d = await res.json();
+    if (!res.ok || !d.listingUrl) {
+      throw new Error(d.error || "Failed to create eBay listing");
+    }
+  };
+
+  if (widgetMode) {
+    return (
+      <WidgetOverlay
+        loading={loading}
+        step={step}
+        result={result}
+        enriching={enriching}
+        error={error}
+        onDismiss={dismissWidget}
+        onSave={saveFromWidget}
+        onListEbay={listFromWidget}
+      />
+    );
+  }
+
   return (
     <div className="app">
       <header className="header">Comic Vault</header>
 
       {tab === "scan" && (
         <>
-          {!loading && !result && !error && (
-            <ScanZone
-              onFile={(e) => handleFile(e, "scan")}
-              inputRef={fileRef}
-              label="Tap to scan a comic"
-            />
+          {/* Bulk import progress */}
+          {bulkProgress && (
+            <div className="loading">
+              <div className="spinner" />
+              <div className="loading-text">
+                {bulkProgress.title
+                  ? `Grading ${bulkProgress.title}… (${bulkProgress.current}/${bulkProgress.total})`
+                  : `Grading ${bulkProgress.current} of ${bulkProgress.total}…`}
+              </div>
+            </div>
           )}
-          {loading && (
+
+          {/* Bulk import done */}
+          {bulkDone != null && !bulkProgress && (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "40px 20px",
+              }}
+            >
+              <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#d4af37" }}>
+                {bulkDone} comic{bulkDone === 1 ? "" : "s"} added to collection
+              </div>
+            </div>
+          )}
+
+          {!loading && !result && !error && !bulkProgress && bulkDone == null && (
+            <>
+              <ScanZone
+                onFile={(e) => handleFile(e, "scan")}
+                onGalleryFiles={handleBulkImport}
+                inputRef={fileRef}
+                label="Tap to scan a comic"
+              />
+              <button
+                onClick={() => bulkRef.current?.click()}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  maxWidth: 420,
+                  margin: "12px auto 0",
+                  padding: "12px 16px",
+                  background: "transparent",
+                  color: "#d4af37",
+                  border: "1px solid rgba(212,175,55,0.4)",
+                  borderRadius: 10,
+                  fontSize: 15,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  textAlign: "center",
+                }}
+              >
+                📚 Bulk Import from Gallery
+              </button>
+              <input
+                ref={bulkRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (bulkRef.current) bulkRef.current.value = "";
+                  if (files.length > 0) handleBulkImport(files);
+                }}
+                hidden
+              />
+            </>
+          )}
+          {loading && !bulkProgress && (
             <div className="loading">
               <div className="spinner" />
               <div className="loading-text">{LOADING_STEPS[step]}</div>
@@ -869,7 +2218,7 @@ export default function App() {
               <button className="reset-btn" onClick={reset}>Try again</button>
             </div>
           )}
-          {result && !loading && (
+          {result && !loading && !bulkProgress && (
             <>
               <ResultCard result={result} enriching={enriching} />
               <button className="reset-btn" onClick={reset}>Scan another</button>
@@ -903,7 +2252,7 @@ export default function App() {
           {result && !loading && (
             <>
               <ResultCard result={result} enriching={enriching} />
-              <BidCalculator marketValue={marketValue} />
+              <BidCalculator marketValue={marketValue} detectedPrice={result?.detectedPrice} />
               <button className="reset-btn" onClick={reset}>Scan another</button>
             </>
           )}
@@ -918,6 +2267,8 @@ export default function App() {
             onBack={() => setSelectedItem(null)}
             onDelete={deleteFromCatalogue}
             onList={listOnEbay}
+            onRefreshMarket={refreshMarketData}
+            onAddPhoto={addPhotoToComic}
           />
         ) : (
           <CollectionList
@@ -953,13 +2304,13 @@ export default function App() {
         </button>
       </nav>
 
-      {!installDismissed && (installPrompt || showSafariBanner) && (
+      {isMobile && !installDismissed && (installPrompt || showSafariBanner) && (
         <div
           role="dialog"
           aria-label="Install Comic Vault"
           style={{
             position: "fixed",
-            bottom: 0,
+            top: 0,
             left: 0,
             right: 0,
             background: "#f0c040",
@@ -970,7 +2321,7 @@ export default function App() {
             alignItems: "center",
             justifyContent: "space-between",
             gap: 12,
-            boxShadow: "0 -2px 12px rgba(0, 0, 0, 0.4)",
+            boxShadow: "0 2px 12px rgba(0, 0, 0, 0.4)",
           }}
         >
           <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>

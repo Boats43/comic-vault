@@ -1,7 +1,20 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -E \"gitignore|^\\\\.git$\")"
+      "Bash(grep -E \"gitignore|^\\\\.git$\")",
+      "Bash(npm run:*)",
+      "Bash(vercel --prod)",
+      "Bash(vercel logs:*)",
+      "Bash(curl -s -w \"\\\\n__HTTP__:%{http_code}\\\\n\" \"https://svcs.ebay.com/services/search/FindingService/v1?OPERATION-NAME=findCompletedItems&SERVICE-VERSION=1.13.0&SECURITY-APPNAME=invalid&RESPONSE-DATA-FORMAT=JSON&REST-PAYLOAD&keywords=batman\")",
+      "Bash(npm i:*)",
+      "Bash(vercel:*)",
+      "Bash(awk -F= 'NF>1 {name=$1; val=$0; sub\\(/^[^=]*=/,\"\",val\\); gsub\\(/^\"|\"$/,\"\",val\\); print name, \"len=\"length\\(val\\)}' .env.local)",
+      "Bash(rm .env:*)",
+      "Bash(curl -s -X POST http://localhost:3001/api/comps -H \"Content-Type: application/json\" -d '{\"title\":\"Amazing Spider-Man #300\",\"isGraded\":false}')",
+      "Bash(curl -s -X POST http://localhost:3001/api/enrich -H \"Content-Type: application/json\" -d '{\"title\":\"Amazing Spider-Man #300\",\"grade\":\"8.0\",\"isGraded\":false,\"year\":\"1988\",\"publisher\":\"Marvel\"}')",
+      "Bash(bubblewrap:*)",
+      "Bash(curl -s -X POST http://localhost:3001/api/enrich -H \"Content-Type: application/json\" -d '{\"title\":\"Not a comic book\",\"year\":\"N/A\",\"publisher\":\"N/A\",\"isGraded\":false,\"grade\":\"VF\"}')",
+      "Bash(curl -s -X POST http://localhost:3001/api/enrich -H \"Content-Type: application/json\" -d '{\"title\":\"Amazing Spider-Man #300\",\"year\":\"1988\",\"publisher\":\"Marvel\",\"isGraded\":false,\"grade\":\"VF\"}')"
     ]
   }
 }
