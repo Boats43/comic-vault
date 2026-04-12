@@ -144,77 +144,25 @@ const formatConfidence = (confidence) => {
   return s;
 };
 
-function ScanZone({ onFile, onGalleryFiles, inputRef, compact, label }) {
+function ScanZone({ onFile, inputRef, compact, label }) {
   const cameraRef = useRef(null);
-  const galleryRef = useRef(null);
-
-  const handleGalleryChange = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (galleryRef.current) galleryRef.current.value = "";
-    if (files.length === 0) return;
-    if (files.length === 1) {
-      // Single file — use the normal onFile path
-      onFile({ target: { files: [files[0]] } });
-    } else if (onGalleryFiles) {
-      onGalleryFiles(files);
-    } else {
-      onFile({ target: { files: [files[0]] } });
-    }
-  };
 
   return (
-    <div style={{ position: "relative" }}>
-      <div
-        className={`upload-zone${compact ? " compact" : ""}`}
-        onClick={() => cameraRef.current?.click()}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === "Enter" && cameraRef.current?.click()}
-      >
-        <div className="upload-emoji">📷</div>
-        <div className="upload-text">{label}</div>
-      </div>
-
-      {/* Gallery shortcut — bottom-right corner */}
-      <button
-        onClick={(e) => { e.stopPropagation(); galleryRef.current?.click(); }}
-        aria-label="Choose from gallery"
-        style={{
-          position: "absolute",
-          bottom: 12,
-          right: 12,
-          width: 36,
-          height: 36,
-          borderRadius: 8,
-          background: "rgba(212,175,55,0.15)",
-          border: "1px solid rgba(212,175,55,0.3)",
-          color: "#d4af37",
-          fontSize: 18,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          padding: 0,
-        }}
-      >
-        🖼
-      </button>
-
-      {/* Hidden file inputs */}
+    <div
+      className={`upload-zone${compact ? " compact" : ""}`}
+      onClick={() => cameraRef.current?.click()}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === "Enter" && cameraRef.current?.click()}
+    >
+      <div className="upload-emoji">📷</div>
+      <div className="upload-text">{label}</div>
       <input
         ref={(el) => { cameraRef.current = el; if (inputRef) inputRef.current = el; }}
         type="file"
         accept="image/*"
         capture="environment"
         onChange={onFile}
-        hidden
-      />
-      <input
-        ref={galleryRef}
-        type="file"
-        accept="image/*"
-        multiple
-        onChange={handleGalleryChange}
         hidden
       />
     </div>
@@ -2725,7 +2673,7 @@ export default function App() {
             <>
               <ScanZone
                 onFile={(e) => handleFile(e, "scan")}
-                onGalleryFiles={handleBulkImport}
+
                 inputRef={fileRef}
                 label="Tap to scan a comic"
               />
