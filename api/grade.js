@@ -6,7 +6,7 @@ const SYSTEM_PROMPT =
   "You are an expert comic book grader with 30 years experience. You know the CGC grading scale 0.5 to 10.0. You know every key issue. You know Golden age  Silver Age Bronze Age Copper Age Modern Age pricing. Return JSON only no markdown no explanation.";
 
 // Fast path: Claude Vision identification + grade only. ComicVine, eBay
-// comps, census, and Ximilar enrichment are handled by /api/enrich and
+// comps and Ximilar enrichment are handled by /api/enrich and
 // merged into the result card when they return.
 export default async function handler(req, res) {
   if (req.method !== "POST") {

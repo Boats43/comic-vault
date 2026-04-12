@@ -1,17 +1,16 @@
 // POST /api/enrich
 //
-// Second-pass enrichment. Fires ComicVine, eBay comps, CGC census, and the
+// Second-pass enrichment. Fires ComicVine, eBay comps, and the
 // Ximilar image fallback in parallel and returns everything together. The
 // client displays the Claude /api/grade result immediately and merges this
 // payload into the card when it resolves.
 //
 // Request body: { title, grade, confidence?, images? }
-// Response: { comicVine?, comps?, census?, ximilar?, price?, priceLow?,
+// Response: { comicVine?, comps?, ximilar?, price?, priceLow?,
 //             priceHigh?, keyIssue?, identifiedBy? }
 
 import Anthropic from "@anthropic-ai/sdk";
 import { fetchComps } from "./comps.js";
-import { fetchCensus } from "./census.js";
 import { fetchSold } from "./sold.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -267,10 +266,9 @@ export default async function handler(req, res) {
           })
         : Promise.resolve(null);
 
-    const [comicVine, compsFromEbay, census, ximilar, soldResult] = await Promise.all([
+    const [comicVine, compsFromEbay, ximilar, soldResult] = await Promise.all([
       lookupComicVine({ title, issue: issueNum, year }),
       compsPromise,
-      fetchCensus({ title, grade }).catch(() => null),
       lookupXimilar({ images, title, confidence }),
       fetchSold({ title, issue: issueNum, year }).catch(() => []),
     ]);
@@ -411,8 +409,6 @@ export default async function handler(req, res) {
       `confidence: ${confidenceLevel} | ` +
       `recommended: ${recommendedPrice != null ? "$" + recommendedPrice : "AI est"}`
     );
-
-    if (census) out.census = census;
 
     if (ximilar) {
       out.ximilar = {

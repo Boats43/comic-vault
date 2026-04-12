@@ -1,23 +1,22 @@
 // POST /api/comps
 //
-// Fetches comp data from eBay via (1) Marketplace Insights API when the
-// app is approved for the limited-release scope, or (2) Browse API as a
-// fallback using the standard api_scope that every production app has.
+// Fetches comp data from eBay via (1) Finding API findCompletedItems
+// (real sold data, no OAuth needed), or (2) Browse API as a fallback
+// using the standard api_scope that every production app has.
 //
 // Env vars:
-//   EBAY_APP_ID  — OAuth client id
-//   EBAY_CERT_ID — OAuth client secret
+//   EBAY_APP_ID  — OAuth client id (also used as SECURITY-APPNAME)
+//   EBAY_CERT_ID — OAuth client secret (Browse fallback only)
 //
 // All failures fall through silently (empty comps) so the UI can show
 // its AI-estimate fallback instead of erroring out the grade flow.
 
+const FINDING_ENDPOINT =
+  "https://svcs.ebay.com/services/search/FindingService/v1";
 const OAUTH_ENDPOINT = "https://api.ebay.com/identity/v1/oauth2/token";
-const INSIGHTS_ENDPOINT =
-  "https://api.ebay.com/buy/marketplace_insights/v1_beta/item_sales/search";
 const BROWSE_ENDPOINT =
   "https://api.ebay.com/buy/browse/v1/item_summary/search";
 const CATEGORY_ID = "259104"; // Comics > Comic Books > Single Issues
-const INSIGHTS_SCOPE = "https://api.ebay.com/oauth/api_scope/buy.marketplace.insights";
 const BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope";
 
 // Log presence + first 20 chars of credentials once per cold start so we
@@ -84,7 +83,7 @@ const getOAuthToken = async (appId, certId, scope) => {
   });
 
   const text = await res.text();
-  console.log(`[comps] oauth status=${res.status}`);
+  console.log(`[comps][diag] oauth url=${OAUTH_ENDPOINT} scope=${scope} appId=${appId?.slice(0,10)}... status=${res.status} body=${text.slice(0,300)}`);
   if (!res.ok) {
     console.error(`[comps] oauth failed body=${text}`);
     throw new Error(`eBay OAuth HTTP ${res.status}`);
@@ -102,46 +101,55 @@ const getOAuthToken = async (appId, certId, scope) => {
   return json.access_token;
 };
 
-// Try the Marketplace Insights API (true sold data). Returns parsed results
-// array on success, or null on any failure so the caller can fall back.
-const tryInsights = async ({ appId, certId, query }) => {
+// Try the Finding API findCompletedItems (real sold data, no OAuth needed).
+// Returns parsed results array on success, or null on any failure so the
+// caller can fall back to Browse API.
+const tryFindCompleted = async ({ appId, query }) => {
   try {
-    const token = await getOAuthToken(appId, certId, INSIGHTS_SCOPE);
     const url =
-      `${INSIGHTS_ENDPOINT}?q=${encodeURIComponent(query)}` +
-      `&category_ids=${CATEGORY_ID}&limit=20`;
-    console.log(`[comps] insights url=${url}`);
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        Accept: "application/json",
-      },
-    });
-    console.log(`[comps] insights http status=${res.status}`);
+      `${FINDING_ENDPOINT}?` +
+      `OPERATION-NAME=findCompletedItems` +
+      `&SERVICE-VERSION=1.0.0` +
+      `&SECURITY-APPNAME=${encodeURIComponent(appId)}` +
+      `&RESPONSE-DATA-FORMAT=JSON` +
+      `&keywords=${encodeURIComponent(query)}` +
+      `&categoryId=63` +
+      `&itemFilter(0).name=SoldItemsOnly` +
+      `&itemFilter(0).value=true` +
+      `&sortOrder=EndTimeSoonest` +
+      `&paginationInput.entriesPerPage=20`;
+    console.log(`[comps] finding url=${url}`);
+    const res = await fetch(url);
+    console.log(`[comps] finding http status=${res.status}`);
     if (!res.ok) {
       const body = await res.text();
-      console.error(`[comps] insights non-OK body:\n${body}`);
+      console.error(`[comps] finding non-OK body:\n${body}`);
       return null;
     }
     const json = await res.json();
-    const itemSales = Array.isArray(json?.itemSales) ? json.itemSales : [];
-    console.log(`[comps] insights itemSales=${itemSales.length}`);
-    if (itemSales.length === 0) return null;
-    return itemSales
+    const items =
+      json?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item;
+    if (!Array.isArray(items) || items.length === 0) {
+      console.log(`[comps] finding items=0`);
+      return null;
+    }
+    console.log(`[comps] finding items=${items.length}`);
+    return items
       .map((it) => {
-        const price = it?.lastSoldPrice?.value != null ? parseFloat(it.lastSoldPrice.value) : NaN;
+        const price = parseFloat(
+          it?.sellingStatus?.[0]?.currentPrice?.[0]?.__value__
+        );
         if (isNaN(price) || price <= 0) return null;
         return {
           price,
-          endTime: it?.lastSoldDate || null,
-          title: it?.title || null,
-          url: it?.itemWebUrl || null,
+          endTime: it?.listingInfo?.[0]?.endTime || null,
+          title: it?.title?.[0] || null,
+          url: it?.viewItemURL?.[0] || null,
         };
       })
       .filter(Boolean);
   } catch (err) {
-    console.error(`[comps] insights error: ${err?.message || err}`);
+    console.error(`[comps] finding error: ${err?.message || err}`);
     return null;
   }
 };
@@ -390,9 +398,9 @@ export const fetchComps = async ({
 
     for (const attempt of uniqueAttempts) {
       query = attempt.q + (attempt.useGrade ? gradeSuffix : "");
-      // Try Insights first, then Browse.
-      source = "marketplace_insights";
-      raw = await tryInsights({ appId, certId, query });
+      // Try Finding API (sold data) first, then Browse.
+      source = "finding_api";
+      raw = await tryFindCompleted({ appId, query });
       if (!raw || raw.length === 0) {
         source = "browse_api";
         raw = await tryBrowse({ appId, certId, query });

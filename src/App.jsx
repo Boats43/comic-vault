@@ -215,18 +215,6 @@ function ResultCard({ result, enriching }) {
         </div>
       )}
       {result.grade && <div className="grade-badge">CGC {result.grade}</div>}
-      {result.census && result.census.countAtGrade != null && (
-        <div className="muted small" style={{ marginTop: 4 }}>
-          {result.census.countAtGrade.toLocaleString()} copies graded at this level
-          {result.census.totalGraded
-            ? ` · ${result.census.totalGraded.toLocaleString()} total${
-                result.census.rarityPercent != null
-                  ? ` (${result.census.rarityPercent}%)`
-                  : ""
-              }`
-            : ""}
-        </div>
-      )}
       {result.keyIssue && <div className="key-box">⭐ {result.keyIssue}</div>}
       {recommendedLabel && (
         <>
@@ -2411,7 +2399,7 @@ export default function App() {
     setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
   }, []);
 
-  // Re-fetch eBay comps + ComicVine + census + AI verification for an
+  // Re-fetch eBay comps + ComicVine + AI verification for an
   // existing catalogue entry, without re-running the image identification.
   // Used by the CollectionDetail "Refresh Market Data" button.
   const refreshMarketData = useCallback(async (item) => {
