@@ -1039,7 +1039,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete }) {
               <div className="thumb thumb-placeholder">📘</div>
             )}
             <div className="collection-meta">
-              <div className="collection-title">{item.title || "Unknown"}</div>
+              <div className="collection-title">{item.title || "Unknown"}{item.issue && !item.title?.includes('#' + item.issue) ? ` #${item.issue}` : ''}</div>
               <div className="muted small">
                 {item.publisher}
                 {item.publisher && item.year ? " · " : ""}
@@ -1378,6 +1378,11 @@ function CollectionDetail({
             >
               {recommendedLabel}
             </div>
+            {item.priceNote && (
+              <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>
+                {item.priceNote}
+              </div>
+            )}
           </div>
           {item.confidenceLevel && (
             <span style={{
@@ -1472,7 +1477,11 @@ function CollectionDetail({
               <span style={{ fontWeight: 600, color: "#e05656" }}>{fmtPrice(item.comps.lowestNum)}</span>
             </div>
             <div className="muted small" style={{ marginTop: 6, fontStyle: "italic" }}>
-              Source: {item.comps.source === "marketplace_insights" ? "Marketplace Insights" : "Browse API — active listings"}
+              {item.pricingSource === "pricecharting"
+                ? "Source: PriceCharting market data"
+                : item.pricingSource === "browse_api"
+                  ? "Source: Browse API — active listings"
+                  : "Source: AI estimate"}
               {Array.isArray(item.soldComps) && item.soldComps.length > 0 && " + eBay sold"}
             </div>
           </div>
@@ -2138,6 +2147,7 @@ export default function App() {
       isGraded: data.isGraded === true,
       numericGrade:
         typeof data.numericGrade === "number" ? data.numericGrade : null,
+      issue: data.issue || null,
       keyIssue: data.keyIssue || "",
       price: data.price || "",
       priceLow: data.priceLow || "",
@@ -2239,6 +2249,9 @@ export default function App() {
                   keyIssue: enrich.keyIssue || prev[idx].keyIssue,
                   soldComps: enrich.soldComps || prev[idx].soldComps || [],
                   confidenceLevel: enrich.confidenceLevel || prev[idx].confidenceLevel || "LOW",
+                  pricingSource: enrich.pricingSource || null,
+                  priceNote: enrich.priceNote || null,
+                  gradeMultiplier: enrich.gradeMultiplier || null,
                 };
                 // Fire-and-forget persistence. Idempotent if it runs twice.
                 putComic(updated).catch(() => {});
@@ -2258,6 +2271,9 @@ export default function App() {
                   keyIssue: enrich.keyIssue || cur.keyIssue,
                   soldComps: enrich.soldComps || cur.soldComps || [],
                   confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
+                  pricingSource: enrich.pricingSource || null,
+                  priceNote: enrich.priceNote || null,
+                  gradeMultiplier: enrich.gradeMultiplier || null,
                 };
               });
             }
@@ -2443,6 +2459,9 @@ export default function App() {
       keyIssue: enrich.keyIssue || item.keyIssue,
       soldComps: enrich.soldComps || item.soldComps || [],
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
+      pricingSource: enrich.pricingSource || null,
+      priceNote: enrich.priceNote || null,
+      gradeMultiplier: enrich.gradeMultiplier || null,
     };
     await putComic(updated);
     setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
