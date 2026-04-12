@@ -84,28 +84,65 @@ const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) =>
   }
 };
 
-const lookupComicVine = async ({ title }) => {
+const lookupComicVine = async ({ title, issue, year }) => {
   if (!process.env.COMICVINE_API_KEY || !title) return null;
   try {
-    const issueNumMatch = String(title).match(/#\s*(\d+)/);
-    const issueNumber = issueNumMatch ? issueNumMatch[1] : null;
-    const queryTitle = String(title).replace(/#\s*\d+/, "").trim();
+    // Prefer explicit issue param, fall back to parsing from title.
+    const issueFromTitle = String(title).match(/#\s*(\d+)/);
+    const issueNumber = issue ? String(issue).trim() : (issueFromTitle ? issueFromTitle[1] : null);
+    // Strip #N from title for the base series name.
+    const seriesName = String(title).replace(/#\s*\d+/, "").trim();
+    // Include issue number in query — ComicVine search ranks it much higher.
+    const searchQuery = issueNumber ? `${seriesName} ${issueNumber}` : seriesName;
+
     const url =
       `https://comicvine.gamespot.com/api/search/?api_key=${encodeURIComponent(process.env.COMICVINE_API_KEY)}` +
-      `&format=json&resources=issue&query=${encodeURIComponent(queryTitle)}` +
-      `&field_list=id,name,issue_number,description,first_appearance_characters,volume`;
+      `&format=json&resources=issue&query=${encodeURIComponent(searchQuery)}` +
+      `&field_list=id,name,issue_number,description,first_appearance_characters,volume` +
+      `&limit=20`;
     const res = await fetch(url, {
       headers: { "User-Agent": "ComicVault/1.0" },
     });
     if (!res.ok) return null;
     const json = await res.json();
     const results = Array.isArray(json?.results) ? json.results : [];
-    const match =
-      (issueNumber &&
-        results.find(
-          (r) => String(r?.issue_number ?? "").trim() === String(issueNumber)
-        )) ||
-      results[0];
+
+    // Filter to issue number matches first.
+    const issueMatches = issueNumber
+      ? results.filter((r) => String(r?.issue_number ?? "").trim() === String(issueNumber))
+      : [];
+
+    // Score each issue match: prefer volume name closest to our series name,
+    // then use volume id as a tiebreaker (lower id = older/original volume).
+    const seriesLower = seriesName.toLowerCase().replace(/^(the|a|an)\s+/i, "").trim();
+    const scoreMatch = (r) => {
+      const volName = String(r?.volume?.name || "").toLowerCase().replace(/^(the|a|an)\s+/i, "").trim();
+      // Exact or near-exact volume name match gets highest priority.
+      const nameScore = volName === seriesLower ? 100
+        : volName.includes(seriesLower) || seriesLower.includes(volName) ? 50
+        : 0;
+      // Lower volume id = older/more likely original series.
+      const volId = parseInt(r?.volume?.id, 10) || 999999;
+      return { r, nameScore, volId };
+    };
+
+    let match = null;
+    if (issueMatches.length === 1) {
+      match = issueMatches[0];
+    } else if (issueMatches.length > 1) {
+      // Pick best: highest nameScore, then lowest volume id (oldest series).
+      const scored = issueMatches.map(scoreMatch);
+      scored.sort((a, b) => b.nameScore - a.nameScore || a.volId - b.volId);
+      match = scored[0].r;
+    }
+    // No match — don't fall through to results[0].
+
+    console.log(
+      `[comicvine] query="${searchQuery}" issue=${issueNumber} year=${year || "?"}` +
+      ` results=${results.length} issueMatches=${issueMatches.length}` +
+      ` matched=${match ? `${match.volume?.name} #${match.issue_number} (vol_id=${match.volume?.id})` : "none"}`
+    );
+
     if (!match) return null;
     const firstApps = match.first_appearance_characters;
     const hasFirstApps = Array.isArray(firstApps) && firstApps.length > 0;
@@ -231,7 +268,7 @@ export default async function handler(req, res) {
         : Promise.resolve(null);
 
     const [comicVine, compsFromEbay, census, ximilar, soldResult] = await Promise.all([
-      lookupComicVine({ title }),
+      lookupComicVine({ title, issue: issueNum, year }),
       compsPromise,
       fetchCensus({ title, grade }).catch(() => null),
       lookupXimilar({ images, title, confidence }),
