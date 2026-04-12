@@ -161,6 +161,51 @@ const lookupComicVine = async ({ title, issue, year }) => {
   }
 };
 
+const PRICECHARTING_EXCLUDE =
+  /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix/i;
+
+const lookupPriceCharting = async ({ title, issue, year }) => {
+  const token = process.env.PRICECHARTING_TOKEN;
+  if (!token || !title) return null;
+  try {
+    const seriesName = String(title).replace(/#\s*\d+/, "").trim();
+    const query = issue ? `${seriesName} ${issue}` : seriesName;
+    const url =
+      `https://www.pricecharting.com/api/products` +
+      `?q=${encodeURIComponent(query)}&type=comic&t=${encodeURIComponent(token)}`;
+    console.log(`[pricecharting] query="${query}"`);
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`[pricecharting] HTTP ${res.status}`);
+      return null;
+    }
+    const json = await res.json();
+    const products = Array.isArray(json?.products) ? json.products : [];
+    if (products.length === 0) return null;
+
+    const issueStr = issue ? String(issue).trim() : null;
+    const issueRe = issueStr
+      ? new RegExp(`#${issueStr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
+      : null;
+
+    for (const p of products) {
+      const name = p["product-name"] || "";
+      if (PRICECHARTING_EXCLUDE.test(name)) continue;
+      if (issueRe && !issueRe.test(name)) continue;
+      const cents = p["loose-price"];
+      if (cents == null || isNaN(cents) || cents <= 0) continue;
+      const price = cents / 100;
+      console.log(`[pricecharting] matched: "${name}" $${price}`);
+      return { price, productName: name, id: p.id, source: "pricecharting" };
+    }
+    console.log(`[pricecharting] no valid match in ${products.length} results`);
+    return null;
+  } catch (err) {
+    console.error(`[pricecharting] error: ${err?.message || err}`);
+    return null;
+  }
+};
+
 const lookupXimilar = async ({ images, title, confidence }) => {
   if (!process.env.XIMILAR_API_TOKEN) return null;
   const rawConfidence = parseFloat(
@@ -266,11 +311,12 @@ export default async function handler(req, res) {
           })
         : Promise.resolve(null);
 
-    const [comicVine, compsFromEbay, ximilar, soldResult] = await Promise.all([
+    const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting] = await Promise.all([
       lookupComicVine({ title, issue: issueNum, year }),
       compsPromise,
       lookupXimilar({ images, title, confidence }),
       fetchSold({ title, issue: issueNum, year }).catch(() => []),
+      lookupPriceCharting({ title, issue: issueNum, year }).catch(() => null),
     ]);
 
     // AI verification pass on the comps that will be displayed. Verifies
@@ -354,10 +400,22 @@ export default async function handler(req, res) {
       out.keyIssue = req.body.keyIssue;
     }
 
-    if (rawComps && rawComps.count > 0) {
+    // Primary price source: PriceCharting (aggregated sold data).
+    // Fallback: Browse API comps (active listings).
+    if (priceCharting) {
+      const pc = priceCharting.price;
+      out.price = fmtUsd(pc);
+      out.priceLow = fmtUsd(pc * 0.75);
+      out.priceHigh = fmtUsd(pc * 1.25);
+      out.pricingSource = "pricecharting";
+    } else if (rawComps && rawComps.count > 0) {
       out.price = fmtUsd(rawComps.average * 1.15);
       out.priceLow = fmtUsd(rawComps.lowest);
       out.priceHigh = fmtUsd(rawComps.highest);
+      out.pricingSource = "browse_api";
+    }
+
+    if (rawComps && rawComps.count > 0) {
       out.comps = {
         count: rawComps.count,
         average: rawComps.averageFormatted,
