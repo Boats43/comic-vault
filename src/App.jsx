@@ -1004,7 +1004,7 @@ function BidCalculator({ marketValue, detectedPrice }) {
   );
 }
 
-function CollectionList({ items, totalValue, onOpen, onDelete }) {
+function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices }) {
   if (items.length === 0) {
     return (
       <div className="empty-state">
@@ -1027,6 +1027,11 @@ function CollectionList({ items, totalValue, onOpen, onDelete }) {
           <div className="stat-label">Est. Value</div>
         </div>
       </div>
+      {refreshingPrices > 0 && (
+        <div className="muted small" style={{ textAlign: "center", margin: "4px 0 8px" }}>
+          Updating prices... ({refreshingPrices} remaining)
+        </div>
+      )}
 
       <div className="collection-list">
         {items.map((item) => {
@@ -2063,6 +2068,7 @@ export default function App() {
   const [analysis, setAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [snapshots, setSnapshots] = useState([]);
+  const [refreshingPrices, setRefreshingPrices] = useState(0);
   const fileRef = useRef(null);
   const buyerFileRef = useRef(null);
   const bulkRef = useRef(null);
@@ -2081,6 +2087,73 @@ export default function App() {
       if (cached) setAnalysis(cached);
     })();
   }, []);
+
+  // Auto-refresh stale prices on load: items saved before enrich persistence
+  // was fixed may have null pricingSource or comps. Limit to 3 concurrent.
+  useEffect(() => {
+    if (catalogue.length === 0) return;
+    const stale = catalogue.filter(
+      (c) => !c.pricingSource || !c.comps
+    );
+    if (stale.length === 0) return;
+    let cancelled = false;
+    setRefreshingPrices(stale.length);
+    const queue = stale.slice();
+    let active = 0;
+    const MAX_CONCURRENT = 3;
+    const next = () => {
+      while (active < MAX_CONCURRENT && queue.length > 0 && !cancelled) {
+        const item = queue.shift();
+        active++;
+        fetch("/api/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: item.title,
+            issue: item.issue || item.title?.match(/#(\d+)/)?.[1] || null,
+            grade: item.grade,
+            isGraded: item.isGraded,
+            numericGrade: item.numericGrade,
+            year: item.year,
+            publisher: item.publisher,
+            confidence: item.confidence,
+          }),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((enrich) => {
+            if (cancelled || !enrich) return;
+            setCatalogue((prev) => {
+              const cur = prev.find((x) => x.id === item.id);
+              if (!cur) return prev;
+              const updated = {
+                ...cur,
+                comps: enrich.comps || cur.comps,
+                price: enrich.price || cur.price,
+                priceLow: enrich.priceLow || cur.priceLow,
+                priceHigh: enrich.priceHigh || cur.priceHigh,
+                keyIssue: enrich.keyIssue || cur.keyIssue,
+                soldComps: enrich.soldComps || cur.soldComps || [],
+                confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
+                pricingSource: enrich.pricingSource || null,
+                priceNote: enrich.priceNote || null,
+                gradeMultiplier: enrich.gradeMultiplier || null,
+              };
+              putComic(updated).catch(() => {});
+              return prev.map((x) => x.id === item.id ? updated : x);
+            });
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (cancelled) return;
+            active--;
+            setRefreshingPrices((n) => Math.max(0, n - 1));
+            next();
+          });
+      }
+    };
+    next();
+    return () => { cancelled = true; };
+  }, [catalogue.length > 0 && catalogue.some((c) => !c.pricingSource || !c.comps)]);
 
   useEffect(() => {
     if (!loading) return;
@@ -2238,11 +2311,12 @@ export default function App() {
             // (otherwise the detail view would keep rendering the stale
             // pre-enrich entry until they close and reopen it).
             if (savedId) {
-              // Build the merged entry from current catalogue state, persist
-              // to IndexedDB, THEN update React state from the persisted copy
-              // so the list and header total always reflect the DB truth.
-              const cur = catalogue.find((x) => x.id === savedId);
-              if (cur) {
+              // Use setCatalogue updater to get the CURRENT state (avoids
+              // stale closure — catalogue from gradeBlob call time won't
+              // contain the item that addToCatalogue just inserted).
+              setCatalogue((prev) => {
+                const cur = prev.find((x) => x.id === savedId);
+                if (!cur) return prev;
                 const updated = {
                   ...cur,
                   comps: enrich.comps || cur.comps,
@@ -2256,11 +2330,28 @@ export default function App() {
                   priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
                 };
-                putComic(updated).then(() => {
-                  setCatalogue((prev) => prev.map((x) => x.id === savedId ? updated : x));
-                  setSelectedItem((s) => s && s.id === savedId ? updated : s);
-                }).catch(() => {});
-              }
+                console.log('[persist] savedId:', savedId,
+                  'price:', updated.price,
+                  'comps count:', updated.comps?.count);
+                putComic(updated).catch(() => {});
+                return prev.map((x) => x.id === savedId ? updated : x);
+              });
+              setSelectedItem((s) => {
+                if (!s || s.id !== savedId) return s;
+                return {
+                  ...s,
+                  comps: enrich.comps || s.comps,
+                  price: enrich.price || s.price,
+                  priceLow: enrich.priceLow || s.priceLow,
+                  priceHigh: enrich.priceHigh || s.priceHigh,
+                  keyIssue: enrich.keyIssue || s.keyIssue,
+                  soldComps: enrich.soldComps || s.soldComps || [],
+                  confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
+                  pricingSource: enrich.pricingSource || null,
+                  priceNote: enrich.priceNote || null,
+                  gradeMultiplier: enrich.gradeMultiplier || null,
+                };
+              });
             }
           })
           .catch(() => {
@@ -2321,22 +2412,26 @@ export default function App() {
           }),
         })
           .then((r) => (r.ok ? r.json() : null))
-          .then(async (enrich) => {
+          .then((enrich) => {
             if (!enrich || !savedId) return;
-            const cur = catalogue.find((x) => x.id === savedId);
-            if (!cur) return;
-            const updated = {
-              ...cur,
-              comps: enrich.comps || cur.comps,
-              price: enrich.price || cur.price,
-              priceLow: enrich.priceLow || cur.priceLow,
-              priceHigh: enrich.priceHigh || cur.priceHigh,
-              keyIssue: enrich.keyIssue || cur.keyIssue,
-              soldComps: enrich.soldComps || cur.soldComps || [],
-              confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
-            };
-            await putComic(updated);
-            setCatalogue((prev) => prev.map((x) => x.id === savedId ? updated : x));
+            setCatalogue((prev) => {
+              const cur = prev.find((x) => x.id === savedId);
+              if (!cur) return prev;
+              const updated = {
+                ...cur,
+                comps: enrich.comps || cur.comps,
+                price: enrich.price || cur.price,
+                priceLow: enrich.priceLow || cur.priceLow,
+                priceHigh: enrich.priceHigh || cur.priceHigh,
+                keyIssue: enrich.keyIssue || cur.keyIssue,
+                soldComps: enrich.soldComps || cur.soldComps || [],
+                confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
+              };
+              console.log('[persist-bulk] savedId:', savedId,
+                'price:', updated.price);
+              putComic(updated).catch(() => {});
+              return prev.map((x) => x.id === savedId ? updated : x);
+            });
           })
           .catch(() => {});
       } catch {
@@ -2778,6 +2873,7 @@ export default function App() {
           <CollectionList
             items={catalogue}
             totalValue={totalValue}
+            refreshingPrices={refreshingPrices}
             onOpen={(item) => {
               collectionScrollPos.current = window.scrollY;
               setSelectedItem(item);
