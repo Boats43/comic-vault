@@ -215,30 +215,31 @@ body,
 .collection-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
 }
 
 .collection-item {
   display: flex;
   gap: 12px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 12px 4px;
   cursor: pointer;
   align-items: center;
-  transition: border-color 0.15s;
+  transition: background 0.15s;
 }
 
 .collection-item:hover {
-  border-color: var(--gold);
+  background: rgba(212, 175, 55, 0.05);
 }
 
 .thumb {
-  width: 56px;
-  height: 84px;
+  width: 60px;
+  height: 80px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #0a0a0a;
   flex-shrink: 0;
 }
@@ -255,7 +256,13 @@ body,
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+}
+
+.cl-row1 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .collection-title {
@@ -264,41 +271,58 @@ body,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
-.collection-row {
+.cl-row2 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cl-row3 {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
 }
 
-.grade-badge.sm {
-  font-size: 11px;
-  padding: 3px 8px;
-  margin-top: 0;
+.pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
-.key-flag {
-  font-size: 13px;
+.pill-key {
+  background: rgba(212, 175, 55, 0.2);
+  color: var(--gold);
+}
+
+.pill-listed {
+  background: rgba(22, 163, 106, 0.2);
+  color: #16a34a;
 }
 
 .collection-price {
   color: var(--gold);
   font-weight: 700;
   font-size: 14px;
-  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .delete-btn {
   background: transparent;
   border: none;
-  color: #666;
-  font-size: 18px;
+  color: #555;
+  font-size: 16px;
   cursor: pointer;
-  padding: 6px 10px;
-  border-radius: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
   flex-shrink: 0;
 }
 

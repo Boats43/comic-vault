@@ -1031,6 +1031,10 @@ function CollectionList({ items, totalValue, onOpen, onDelete }) {
       <div className="collection-list">
         {items.map((item) => {
           const thumbSrc = getComicPhotos(item)[0] || null;
+          const titleWithIssue = (item.title || "Unknown") + (item.issue && !item.title?.includes('#' + item.issue) ? ` #${item.issue}` : '');
+          const gradeTxt = item.isGraded === true && item.numericGrade != null
+            ? `CGC ${item.numericGrade}`
+            : item.grade || null;
           return (
           <div key={item.id} className="collection-item" onClick={() => onOpen(item)}>
             {thumbSrc ? (
@@ -1039,28 +1043,25 @@ function CollectionList({ items, totalValue, onOpen, onDelete }) {
               <div className="thumb thumb-placeholder">📘</div>
             )}
             <div className="collection-meta">
-              <div className="collection-title">{item.title || "Unknown"}{item.issue && !item.title?.includes('#' + item.issue) ? ` #${item.issue}` : ''}</div>
-              <div className="muted small">
-                {item.publisher}
-                {item.publisher && item.year ? " · " : ""}
-                {item.year}
-              </div>
-              <div className="collection-row">
-                {item.isGraded === true && item.numericGrade != null
-                  ? <span className="grade-badge sm cgc">CGC {item.numericGrade}</span>
-                  : item.grade
-                    ? <span className="grade-badge sm raw">{item.grade}</span>
-                    : null}
-                {item.keyIssue && <span className="key-flag">⭐</span>}
-                {item.status === "listed" && <span className="listed-badge">Listed</span>}
+              <div className="cl-row1">
+                <span className="collection-title">{titleWithIssue}</span>
                 {item.price && <span className="collection-price">{item.price}</span>}
               </div>
+              <div className="cl-row2 muted small">
+                {item.publisher}{item.publisher && item.year ? " · " : ""}{item.year}{gradeTxt ? ` · ${gradeTxt}` : ""}
+              </div>
+              {(item.keyIssue || item.status === "listed") && (
+                <div className="cl-row3">
+                  {item.keyIssue && item.keyIssue !== "N/A" && <span className="pill pill-key">KEY</span>}
+                  {item.status === "listed" && <span className="pill pill-listed">LISTED</span>}
+                </div>
+              )}
             </div>
             <button
               className="delete-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`Delete "${item.title || "this comic"}"?`)) onDelete(item.id);
+                if (confirm(`Delete "${titleWithIssue}"?`)) onDelete(item.id);
               }}
               aria-label="Delete"
             >
@@ -1289,7 +1290,7 @@ function CollectionDetail({
 
       {/* 2. TITLE BLOCK */}
       <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
-        {item.title || "Unknown"}
+        {item.title || "Unknown"}{item.issue && !String(item.title || "").includes('#' + item.issue) ? ` #${item.issue}` : ''}
       </div>
       <div className="muted small">
         {item.publisher}
