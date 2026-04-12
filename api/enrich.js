@@ -161,6 +161,28 @@ const lookupComicVine = async ({ title, issue, year }) => {
   }
 };
 
+const CGC_MULTIPLIERS = {
+  10: 12.0, 9.9: 8.0, 9.8: 5.0, 9.6: 3.0, 9.4: 2.2, 9.2: 1.8,
+  9.0: 1.5, 8.5: 1.3, 8.0: 1.15, 7.5: 1.05, 7.0: 1.0, 6.5: 0.9,
+  6.0: 0.85, 5.5: 0.8, 5.0: 0.75, 4.5: 0.7, 4.0: 0.65, 3.5: 0.6,
+  3.0: 0.55, 2.5: 0.5, 2.0: 0.45, 1.8: 0.4, 1.5: 0.35, 1.0: 0.3,
+  0.5: 0.2,
+};
+const CGC_GRADES = Object.keys(CGC_MULTIPLIERS).map(Number).sort((a, b) => a - b);
+
+const getGradeMultiplier = (grade) => {
+  const g = Number(grade);
+  if (isNaN(g)) return null;
+  if (CGC_MULTIPLIERS[g] != null) return { multiplier: CGC_MULTIPLIERS[g], grade: g };
+  let closest = CGC_GRADES[0];
+  let minDist = Math.abs(g - closest);
+  for (const k of CGC_GRADES) {
+    const d = Math.abs(g - k);
+    if (d < minDist) { closest = k; minDist = d; }
+  }
+  return { multiplier: CGC_MULTIPLIERS[closest], grade: closest };
+};
+
 const PRICECHARTING_EXCLUDE =
   /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix/i;
 
@@ -401,12 +423,29 @@ export default async function handler(req, res) {
     }
 
     // Primary price source: PriceCharting (aggregated sold data).
+    // For graded comics, apply a CGC multiplier against the raw base price.
     // Fallback: Browse API comps (active listings).
     if (priceCharting) {
-      const pc = priceCharting.price;
-      out.price = fmtUsd(pc);
-      out.priceLow = fmtUsd(pc * 0.75);
-      out.priceHigh = fmtUsd(pc * 1.25);
+      let pc = priceCharting.price;
+      const gradeInfo =
+        isGraded === true && numericGrade != null
+          ? getGradeMultiplier(numericGrade)
+          : null;
+      if (gradeInfo) {
+        const adjusted = pc * gradeInfo.multiplier;
+        out.price = fmtUsd(adjusted);
+        out.priceLow = fmtUsd(adjusted * 0.85);
+        out.priceHigh = fmtUsd(adjusted * 1.15);
+        out.gradeMultiplier = gradeInfo.multiplier;
+        out.priceNote = `CGC ${numericGrade} estimate`;
+        console.log(
+          `[enrich] pricecharting base=$${pc} × ${gradeInfo.multiplier} (CGC ${numericGrade}) = $${adjusted.toFixed(2)}`
+        );
+      } else {
+        out.price = fmtUsd(pc);
+        out.priceLow = fmtUsd(pc * 0.75);
+        out.priceHigh = fmtUsd(pc * 1.25);
+      }
       out.pricingSource = "pricecharting";
     } else if (rawComps && rawComps.count > 0) {
       out.price = fmtUsd(rawComps.average * 1.15);
