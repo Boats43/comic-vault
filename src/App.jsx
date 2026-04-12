@@ -63,14 +63,19 @@ const fmtSaleWhen = (iso, daysAgo) => {
   return "—";
 };
 
+const getDisplayPrice = (item) => {
+  if (!item) return 0;
+  const p = parseFloat(String(item.price || "0").replace(/[$,]/g, ""));
+  if (p > 0) return p;
+  if (item.comps?.averageNum)
+    return Math.round(item.comps.averageNum * 1.15);
+  return 0;
+};
+
 const marketValueOf = (r) => {
   if (!r) return null;
-  const p = parsePrice(r.price);
-  if (p != null) return p;
-  const lo = parsePrice(r.priceLow);
-  const hi = parsePrice(r.priceHigh);
-  if (lo != null && hi != null) return (lo + hi) / 2;
-  return lo ?? hi ?? null;
+  const v = getDisplayPrice(r);
+  return v || null;
 };
 
 const fileToBase64 = (file) =>
@@ -175,13 +180,10 @@ function ResultCard({ result, enriching }) {
     comps &&
     Array.isArray(comps.recentSales) &&
     comps.recentSales.length > 0;
-  const avgNum = hasComps ? comps.averageNum : null;
-  const recommendedNum =
-    avgNum != null ? Math.round(avgNum * 1.15) : null;
-  const recommendedLabel =
-    recommendedNum != null
-      ? `$${recommendedNum.toLocaleString("en-US")}`
-      : result.price;
+  const displayPrice = getDisplayPrice(result);
+  const recommendedLabel = displayPrice > 0
+    ? `$${displayPrice.toLocaleString("en-US")}`
+    : result.price || "—";
   const sourceLabel = hasComps
     ? `Source: ${comps.count} eBay sale${comps.count === 1 ? "" : "s"}`
     : "Source: AI estimate";
@@ -541,11 +543,10 @@ function WidgetOverlay({
     else rating = { label: "OVERPRICED", bg: "#dc2626", color: "#fff" };
   }
 
-  const recommendedNum = avgNum != null ? Math.round(avgNum * 1.15) : null;
-  const recommendedLabel =
-    recommendedNum != null
-      ? `$${recommendedNum.toLocaleString("en-US")}`
-      : result?.price || "—";
+  const displayPrice = getDisplayPrice(result);
+  const recommendedLabel = displayPrice > 0
+    ? `$${displayPrice.toLocaleString("en-US")}`
+    : "—";
 
   const gradeBadge =
     result?.isGraded === true && result?.numericGrade != null
@@ -1050,7 +1051,16 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
             <div className="collection-meta">
               <div className="cl-row1">
                 <span className="collection-title">{titleWithIssue}</span>
-                {item.price && <span className="collection-price">{item.price}</span>}
+                {getDisplayPrice(item) > 0 && (
+                  <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
+                    <span className="collection-price">${getDisplayPrice(item).toLocaleString("en-US")}</span>
+                    {item.pricingSource && (
+                      <span style={{ fontSize: 9, opacity: 0.5, textTransform: "uppercase", fontWeight: 600 }}>
+                        {item.pricingSource === "pricecharting" ? "PC" : "eBay"}
+                      </span>
+                    )}
+                  </span>
+                )}
               </div>
               <div className="cl-row2 muted small">
                 {item.publisher}{item.publisher && item.year ? " · " : ""}{item.year}{gradeTxt ? ` · ${gradeTxt}` : ""}
@@ -1101,20 +1111,15 @@ function CollectionDetail({
   const canAddMore = photos.length < 4;
   const isListed = item.status === "listed" && item.ebayUrl;
 
-  // Pricing: prefer stored comps, fall back to the flat grade fields.
+  // Pricing: single source of truth via getDisplayPrice.
   const hasComps =
     item.comps &&
     Array.isArray(item.comps.recentSales) &&
     item.comps.recentSales.length > 0;
-  const avgNum = hasComps ? item.comps.averageNum : null;
-  const recommendedNum = avgNum != null ? Math.round(avgNum * 1.15) : null;
-  const parsedFallback = parsePrice(item.price);
-  const recommendedLabel =
-    recommendedNum != null
-      ? `$${recommendedNum.toLocaleString("en-US")}`
-      : parsedFallback != null
-      ? `$${Math.round(parsedFallback).toLocaleString("en-US")}`
-      : item.price || "—";
+  const displayPrice = getDisplayPrice(item);
+  const recommendedLabel = displayPrice > 0
+    ? `$${displayPrice.toLocaleString("en-US")}`
+    : "—";
 
   // Grade badge: CGC numeric if graded, raw grade if available, else RAW COPY.
   const gradeBadgeText =
@@ -1482,6 +1487,16 @@ function CollectionDetail({
               <span className="muted small">Floor</span>
               <span style={{ fontWeight: 600, color: "#e05656" }}>{fmtPrice(item.comps.lowestNum)}</span>
             </div>
+            {item.comps.highestNum != null && (
+              <div className="muted small" style={{ marginTop: 4, fontSize: 12 }}>
+                Low ${item.comps.lowestNum?.toLocaleString("en-US")} → Avg ${item.comps.averageNum?.toLocaleString("en-US")} → High ${item.comps.highestNum?.toLocaleString("en-US")}
+              </div>
+            )}
+            {item.gradeMultiplier != null && (
+              <div className="muted small" style={{ marginTop: 4, fontSize: 12 }}>
+                Grade adj: ×{item.gradeMultiplier}{item.priceNote ? ` (${item.priceNote})` : ""}
+              </div>
+            )}
             <div className="muted small" style={{ marginTop: 6, fontStyle: "italic" }}>
               {item.pricingSource === "pricecharting"
                 ? "Source: PriceCharting market data"
@@ -1489,6 +1504,9 @@ function CollectionDetail({
                   ? "Source: Browse API — active listings"
                   : "Source: AI estimate"}
               {Array.isArray(item.soldComps) && item.soldComps.length > 0 && " + eBay sold"}
+            </div>
+            <div className="muted small" style={{ fontSize: 11 }}>
+              Based on {item.comps.count} listing{item.comps.count !== 1 ? "s" : ""}{item.comps.verifiedByAI ? " · AI verified" : ""}
             </div>
           </div>
         )}
@@ -2137,10 +2155,15 @@ export default function App() {
                 pricingSource: enrich.pricingSource || null,
                 priceNote: enrich.priceNote || null,
                 gradeMultiplier: enrich.gradeMultiplier || null,
+                comicVine: enrich.comicVine || cur.comicVine || null,
               };
               putComic(updated).catch(() => {});
               return prev.map((x) => x.id === item.id ? updated : x);
             });
+            // FIX 4: update detail view if open during background refresh
+            setSelectedItem((s) =>
+              s && s.id === item.id ? { ...s, ...enrich, comicVine: enrich.comicVine || s.comicVine || null } : s
+            );
           })
           .catch(() => {})
           .finally(() => {
@@ -2329,6 +2352,7 @@ export default function App() {
                   pricingSource: enrich.pricingSource || null,
                   priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
+                  comicVine: enrich.comicVine || cur.comicVine || null,
                 };
                 console.log('[persist] savedId:', savedId,
                   'price:', updated.price,
@@ -2350,6 +2374,7 @@ export default function App() {
                   pricingSource: enrich.pricingSource || null,
                   priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
+                  comicVine: enrich.comicVine || s.comicVine || null,
                 };
               });
             }
@@ -2426,6 +2451,7 @@ export default function App() {
                 keyIssue: enrich.keyIssue || cur.keyIssue,
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
+                comicVine: enrich.comicVine || cur.comicVine || null,
               };
               console.log('[persist-bulk] savedId:', savedId,
                 'price:', updated.price);
@@ -2538,6 +2564,7 @@ export default function App() {
       pricingSource: enrich.pricingSource || null,
       priceNote: enrich.priceNote || null,
       gradeMultiplier: enrich.gradeMultiplier || null,
+      comicVine: enrich.comicVine || item.comicVine || null,
     };
     await putComic(updated);
     setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
