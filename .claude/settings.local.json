@@ -17,7 +17,9 @@
       "Bash(curl -s -X POST http://localhost:3001/api/enrich -H \"Content-Type: application/json\" -d '{\"title\":\"Amazing Spider-Man #300\",\"year\":\"1988\",\"publisher\":\"Marvel\",\"isGraded\":false,\"grade\":\"VF\"}')",
       "Bash(npx vercel:*)",
       "Bash(curl -s -X POST http://localhost:3999/api/chat -H 'Content-Type: application/json' -d '{:*)",
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "Bash(curl:*)",
+      "Read(//tmp/**)"
     ]
   }
 }

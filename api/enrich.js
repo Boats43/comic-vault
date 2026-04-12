@@ -12,6 +12,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { fetchComps } from "./comps.js";
 import { fetchCensus } from "./census.js";
+import { fetchSold } from "./sold.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -223,11 +224,16 @@ export default async function handler(req, res) {
           })
         : Promise.resolve(null);
 
-    const [comicVine, compsFromEbay, census, ximilar] = await Promise.all([
+    // Extract issue number for sold lookup
+    const issueMatch = String(title).match(/#\s*(\d+)/);
+    const issueNum = issueMatch ? issueMatch[1] : null;
+
+    const [comicVine, compsFromEbay, census, ximilar, soldResult] = await Promise.all([
       lookupComicVine({ title }),
       compsPromise,
       fetchCensus({ title, grade }).catch(() => null),
       lookupXimilar({ images, title, confidence }),
+      fetchSold({ title, issue: issueNum, year }).catch(() => []),
     ]);
 
     // AI verification pass on the comps that will be displayed. Verifies
@@ -332,6 +338,37 @@ export default async function handler(req, res) {
             : 0,
       };
     }
+
+    // Sold comps from eBay completed listings
+    const soldComps = Array.isArray(soldResult) ? soldResult : [];
+    if (soldComps.length > 0) out.soldComps = soldComps;
+
+    // Confidence level
+    const verifiedCount = rawComps?.count || 0;
+    const soldCount = soldComps.length;
+    let confidenceLevel = "LOW";
+    if (soldCount >= 2 && verifiedCount >= 2) confidenceLevel = "HIGH";
+    else if (verifiedCount >= 2 || soldCount >= 1) confidenceLevel = "MEDIUM";
+    out.confidenceLevel = confidenceLevel;
+
+    // Recommended price
+    const recommendedPrice =
+      rawComps?.average != null
+        ? Math.round(rawComps.average * 1.15)
+        : null;
+
+    // [verify] log line
+    const seriesTitle = issueMatch
+      ? String(title).replace(issueMatch[0], "").trim()
+      : title;
+    console.log(
+      `[verify] ${seriesTitle} #${issueNum || "?"} | ` +
+      `grade: ${grade || "unknown"} | ` +
+      `comps: ${verifiedCount} verified / ${rawComps?.prices?.length || 0} checked | ` +
+      `sold: ${soldCount} found | ` +
+      `confidence: ${confidenceLevel} | ` +
+      `recommended: ${recommendedPrice != null ? "$" + recommendedPrice : "AI est"}`
+    );
 
     if (census) out.census = census;
 

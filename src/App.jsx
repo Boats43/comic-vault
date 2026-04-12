@@ -313,13 +313,63 @@ function ResultCard({ result, enriching }) {
             background: "rgba(212,175,55,0.05)",
           }}
         >
+          {/* LAST SOLD section */}
+          {Array.isArray(result.soldComps) && result.soldComps.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div
+                className="muted small"
+                style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}
+              >
+                Last Sold
+              </div>
+              {result.soldComps.slice(0, 3).map((s, i) => {
+                const rowStyle = {
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "6px 0",
+                  fontSize: 14,
+                };
+                const inner = (
+                  <>
+                    <span className="muted small">
+                      {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
+                    </span>
+                    <span style={{ fontWeight: 600, color: "#16a34a" }}>
+                      {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
+                      {s.url && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
+                    </span>
+                  </>
+                );
+                return s.url ? (
+                  <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>
+                    {inner}
+                  </a>
+                ) : (
+                  <div key={i} style={rowStyle}>{inner}</div>
+                );
+              })}
+              {result.soldComps.length >= 2 && (() => {
+                const avg = result.soldComps.reduce((s, c) => s + (c.price || 0), 0) / result.soldComps.length;
+                return (
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 14, borderTop: "1px solid rgba(22,163,106,0.2)", marginTop: 4 }}>
+                    <span className="muted small">Avg sold</span>
+                    <span style={{ fontWeight: 600, color: "#16a34a" }}>{fmtPrice(avg)}</span>
+                  </div>
+                );
+              })()}
+              <div style={{ borderTop: "1px solid rgba(212,175,55,0.25)", margin: "8px 0" }} />
+            </div>
+          )}
+
+          {/* ACTIVE LISTINGS section */}
           {Array.isArray(comps.recentSales) && comps.recentSales.length > 0 && (
             <div style={{ marginBottom: 10 }}>
               <div
                 className="muted small"
                 style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}
               >
-                Recent eBay listings
+                Active Listings
               </div>
               {comps.recentSales.slice(0, 3).map((s, i) => {
                 const row = (
@@ -385,13 +435,28 @@ function ResultCard({ result, enriching }) {
             style={{
               display: "flex",
               justifyContent: "space-between",
+              alignItems: "center",
               padding: "4px 0",
               fontSize: 14,
             }}
           >
             <span className="muted small">Recommended</span>
-            <span style={{ fontWeight: 700, color: "#d4af37" }}>
-              {recommendedLabel}
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontWeight: 700, color: "#d4af37" }}>
+                {recommendedLabel}
+              </span>
+              {result.confidenceLevel && (
+                <span style={{
+                  fontSize: 10,
+                  padding: "2px 7px",
+                  borderRadius: 5,
+                  fontWeight: 700,
+                  background: result.confidenceLevel === "HIGH" ? "rgba(22,163,106,0.2)" : result.confidenceLevel === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(245,158,11,0.2)",
+                  color: result.confidenceLevel === "HIGH" ? "#16a34a" : result.confidenceLevel === "MEDIUM" ? "#d4af37" : "#f59e0b",
+                }}>
+                  {result.confidenceLevel === "HIGH" ? "HIGH ✓" : result.confidenceLevel === "MEDIUM" ? "MED ~" : "AI EST"}
+                </span>
+              )}
             </span>
           </div>
           <div
@@ -417,6 +482,7 @@ function ResultCard({ result, enriching }) {
             style={{ marginTop: 8, fontStyle: "italic" }}
           >
             Source: Browse API — active listings
+            {Array.isArray(result.soldComps) && result.soldComps.length > 0 && " + eBay sold"}
           </div>
         </div>
       )}
@@ -1300,12 +1366,30 @@ function CollectionDetail({
 
       {/* 5. PRICING BLOCK */}
       <div style={{ marginTop: 14 }}>
-        <div className="muted small">Recommended list price</div>
-        <div
-          className="price"
-          style={{ fontSize: 28, fontWeight: 800, color: "#d4af37" }}
-        >
-          {recommendedLabel}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div>
+            <div className="muted small">Recommended list price</div>
+            <div
+              className="price"
+              style={{ fontSize: 28, fontWeight: 800, color: "#d4af37" }}
+            >
+              {recommendedLabel}
+            </div>
+          </div>
+          {item.confidenceLevel && (
+            <span style={{
+              fontSize: 11,
+              padding: "4px 10px",
+              borderRadius: 6,
+              fontWeight: 700,
+              background: item.confidenceLevel === "HIGH" ? "rgba(22,163,106,0.2)" : item.confidenceLevel === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(245,158,11,0.2)",
+              color: item.confidenceLevel === "HIGH" ? "#16a34a" : item.confidenceLevel === "MEDIUM" ? "#d4af37" : "#f59e0b",
+              alignSelf: "flex-end",
+              marginBottom: 4,
+            }}>
+              {item.confidenceLevel === "HIGH" ? "HIGH ✓" : item.confidenceLevel === "MEDIUM" ? "MED ~" : "AI EST"}
+            </span>
+          )}
         </div>
 
         {hasComps && (
@@ -1318,110 +1402,75 @@ function CollectionDetail({
               background: "rgba(212,175,55,0.05)",
             }}
           >
+            {/* LAST SOLD section */}
+            {Array.isArray(item.soldComps) && item.soldComps.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div className="muted small" style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+                  Last Sold
+                </div>
+                {item.soldComps.slice(0, 3).map((s, i) => {
+                  const rowStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontSize: 14 };
+                  const inner = (
+                    <>
+                      <span className="muted small">
+                        {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
+                      </span>
+                      <span style={{ fontWeight: 600, color: "#16a34a" }}>
+                        {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
+                        {s.url && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
+                      </span>
+                    </>
+                  );
+                  return s.url ? (
+                    <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>{inner}</a>
+                  ) : (
+                    <div key={i} style={rowStyle}>{inner}</div>
+                  );
+                })}
+                <div style={{ borderTop: "1px solid rgba(212,175,55,0.25)", margin: "8px 0" }} />
+              </div>
+            )}
+
+            {/* ACTIVE LISTINGS section */}
             <div
               className="muted small"
-              style={{
-                textTransform: "uppercase",
-                letterSpacing: 1,
-                marginBottom: 6,
-              }}
+              style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}
             >
-              Recent eBay listings
+              Active Listings
             </div>
             {item.comps.recentSales.slice(0, 3).map((s, i) => {
-              const rowStyle = {
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "6px 0",
-                fontSize: 14,
-              };
+              const rowStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontSize: 14 };
               const inner = (
                 <>
-                  <span className="muted small">
-                    {fmtSaleWhen(s.date, s.daysAgo)}
-                  </span>
+                  <span className="muted small">{fmtSaleWhen(s.date, s.daysAgo)}</span>
                   <span style={{ fontWeight: 600, color: "#d4af37" }}>
                     {fmtPrice(s.price)}
-                    {s.itemWebUrl ? (
-                      <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>
-                    ) : null}
+                    {s.itemWebUrl && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
                   </span>
                 </>
               );
               return s.itemWebUrl ? (
-                <a
-                  key={i}
-                  href={s.itemWebUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    ...rowStyle,
-                    textDecoration: "none",
-                    color: "inherit",
-                  }}
-                >
-                  {inner}
-                </a>
+                <a key={i} href={s.itemWebUrl} target="_blank" rel="noopener noreferrer" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>{inner}</a>
               ) : (
-                <div key={i} style={rowStyle}>
-                  {inner}
-                </div>
+                <div key={i} style={rowStyle}>{inner}</div>
               );
             })}
-            <div
-              style={{
-                borderTop: "1px solid rgba(212,175,55,0.25)",
-                margin: "8px 0",
-              }}
-            />
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "4px 0",
-                fontSize: 14,
-              }}
-            >
+            <div style={{ borderTop: "1px solid rgba(212,175,55,0.25)", margin: "8px 0" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
               <span className="muted small">30-day average</span>
-              <span style={{ fontWeight: 600 }}>
-                {fmtPrice(item.comps.averageNum)}
-              </span>
+              <span style={{ fontWeight: 600 }}>{fmtPrice(item.comps.averageNum)}</span>
             </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "4px 0",
-                fontSize: 14,
-              }}
-            >
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
               <span className="muted small">Recommended</span>
-              <span style={{ fontWeight: 700, color: "#d4af37" }}>
-                {recommendedLabel}
-              </span>
+              <span style={{ fontWeight: 700, color: "#d4af37" }}>{recommendedLabel}</span>
             </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "4px 0",
-                fontSize: 14,
-              }}
-            >
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
               <span className="muted small">Floor</span>
-              <span style={{ fontWeight: 600, color: "#e05656" }}>
-                {fmtPrice(item.comps.lowestNum)}
-              </span>
+              <span style={{ fontWeight: 600, color: "#e05656" }}>{fmtPrice(item.comps.lowestNum)}</span>
             </div>
-            <div
-              className="muted small"
-              style={{ marginTop: 6, fontStyle: "italic" }}
-            >
-              Source:{" "}
-              {item.comps.source === "marketplace_insights"
-                ? "Marketplace Insights"
-                : "Browse API — active listings"}
+            <div className="muted small" style={{ marginTop: 6, fontStyle: "italic" }}>
+              Source: {item.comps.source === "marketplace_insights" ? "Marketplace Insights" : "Browse API — active listings"}
+              {Array.isArray(item.soldComps) && item.soldComps.length > 0 && " + eBay sold"}
             </div>
           </div>
         )}
@@ -1550,42 +1599,56 @@ function CollectionDetail({
 
 function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
   const [chatInput, setChatInput] = useState("");
-  const [messages, setMessages] = useState([]);
+  const [latestResponse, setLatestResponse] = useState(null);
+  const [latestActions, setLatestActions] = useState([]);
+  const [history, setHistory] = useState([]);
   const [sending, setSending] = useState(false);
-  const [metrics, setMetrics] = useState([]);
-  const [signals, setSignals] = useState([]);
+  const [metrics, setMetrics] = useState(() => {
+    // Instant default metrics from local data — no API wait.
+    const listed = catalogue.filter((c) => c.status === "listed").length;
+    const keys = catalogue.filter((c) => c.keyIssue && c.keyIssue !== "N/A").length;
+    const stagnant = catalogue.filter((c) => c.status !== "listed" && (Date.now() - (c.timestamp || 0)) > 86400000 * 30).length;
+    return [
+      { label: "Total Value", value: fmt(totalValue), color: "green" },
+      { label: "Listed", value: `${listed} of ${catalogue.length}`, color: listed < catalogue.length / 2 ? "red" : "green" },
+      { label: "Key Issues", value: String(keys), color: keys > 0 ? "yellow" : "green" },
+      { label: "Stagnant", value: String(stagnant), color: stagnant > 0 ? "red" : "green" },
+    ];
+  });
   const [search, setSearch] = useState("");
   const [aiTags, setAiTags] = useState({});
-  const chatEndRef = useRef(null);
-  const inputRef = useRef(null);
+  const [actionStatus, setActionStatus] = useState({});
   const [booted, setBooted] = useState(false);
 
-  // Auto-boot: ask Claude for initial analysis when tab opens with comics.
+  // Auto-fire Claude analysis on tab open.
   useEffect(() => {
     if (booted || catalogue.length === 0) return;
     setBooted(true);
-    (async () => {
-      setSending(true);
-      try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: "Give me a quick status update on my collection. What should I focus on today?",
-            collection: catalogue,
-            history: [],
-          }),
-        });
-        const data = await res.json();
+    setSending(true);
+    fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: "Give me a quick summary of my collection status and top 3 actions I should take right now",
+        collection: catalogue,
+        history: [],
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
         if (data.response) {
-          setMessages([{ role: "assistant", content: data.response, actions: data.actions }]);
+          setLatestResponse(data.response);
+          setLatestActions(data.actions || []);
+          setHistory([
+            { role: "user", content: "Give me a quick summary of my collection status and top 3 actions I should take right now" },
+            { role: "assistant", content: data.response },
+          ]);
         }
         if (data.metrics?.length) setMetrics(data.metrics);
-        if (data.signals?.length) setSignals(data.signals);
         applyAiTags(data);
-      } catch { /* silent boot failure */ }
-      finally { setSending(false); }
-    })();
+      })
+      .catch(() => {})
+      .finally(() => setSending(false));
   }, [catalogue, booted]);
 
   const applyAiTags = (data) => {
@@ -1596,22 +1659,9 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
         a.comicIds.forEach((id) => { tags[id] = { emoji: "📦", label: "BUNDLE" }; });
       }
     });
-    // Parse metrics for tags
-    (data.metrics || []).forEach((m) => {
-      if (m.label?.toLowerCase().includes("stagnant") && m.filter) {
-        catalogue.forEach((c) => {
-          if (!tags[c.id] && c.status !== "listed") {
-            const days = (Date.now() - (c.timestamp || 0)) / 86400000;
-            if (days > 30) tags[c.id] = { emoji: "⏳", label: "STAGNANT" };
-          }
-        });
-      }
-      if (m.label?.toLowerCase().includes("hot") || m.label?.toLowerCase().includes("peak")) {
-        catalogue.forEach((c) => {
-          if (!tags[c.id] && c.keyIssue && c.keyIssue !== "N/A" && marketValueOf(c) >= 50) {
-            tags[c.id] = { emoji: "🔥", label: "HOT" };
-          }
-        });
+    catalogue.forEach((c) => {
+      if (!tags[c.id] && c.status !== "listed" && (Date.now() - (c.timestamp || 0)) > 86400000 * 30) {
+        tags[c.id] = { emoji: "⏳", label: "STAGNANT" };
       }
     });
     setAiTags((prev) => ({ ...prev, ...tags }));
@@ -1619,76 +1669,70 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
 
   const sendMessage = async (text) => {
     if (!text.trim() || sending) return;
-    const userMsg = { role: "user", content: text.trim() };
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
     setChatInput("");
     setSending(true);
+    const newHistory = [...history, { role: "user", content: text.trim() }];
+    setHistory(newHistory);
 
     try {
-      const history = nextMessages.slice(-10).map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text.trim(),
           collection: catalogue,
-          history: history.slice(0, -1),
+          history: newHistory.slice(-10, -1),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      const assistantMsg = {
-        role: "assistant",
-        content: data.response || "I couldn't analyze that.",
-        actions: data.actions,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
+      setLatestResponse(data.response || "I couldn't analyze that.");
+      setLatestActions(data.actions || []);
+      setHistory((prev) => [...prev, { role: "assistant", content: data.response }]);
       if (data.metrics?.length) setMetrics(data.metrics);
-      if (data.signals?.length) setSignals(data.signals);
       applyAiTags(data);
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Something went wrong. Try again." },
-      ]);
+      setLatestResponse("Something went wrong. Try again.");
+      setLatestActions([]);
     } finally {
       setSending(false);
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     }
   };
 
-  const handleAction = (action) => {
-    if (action.action === "list" && action.comicId) {
-      const comic = catalogue.find((c) => c.id === action.comicId);
-      if (comic && onListComic) onListComic(comic);
-    } else if (action.action === "view" && action.comicId) {
+  const handleAction = async (action) => {
+    if (action.action === "view" && action.comicId) {
       const comic = catalogue.find((c) => c.id === action.comicId);
       if (comic) onOpenItem(comic);
-    } else if (action.action === "bundle" && action.comicIds) {
-      // Show bundle in chat
+      return;
+    }
+    if (action.action === "list" && action.comicId) {
+      const comic = catalogue.find((c) => c.id === action.comicId);
+      if (!comic || !onListComic) return;
+      setActionStatus((prev) => ({ ...prev, [action.comicId]: "listing" }));
+      try {
+        await onListComic(comic);
+        setActionStatus((prev) => ({ ...prev, [action.comicId]: "listed" }));
+      } catch {
+        setActionStatus((prev) => ({ ...prev, [action.comicId]: "error" }));
+      }
+      return;
+    }
+    if (action.action === "bundle" && action.comicIds) {
       const titles = action.comicIds
         .map((id) => catalogue.find((c) => c.id === id)?.title)
         .filter(Boolean);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Bundle created: ${titles.join(", ")}${action.price ? ` — suggested price $${action.price}` : ""}. List them together on eBay for a faster sale.`,
-        },
-      ]);
+      setLatestResponse(
+        `Bundle ready: ${titles.join(", ")}${action.price ? ` — suggested price $${action.price}` : ""}. These sell faster as a lot.`
+      );
+      setLatestActions([]);
     }
   };
 
-  // Filter and sort collection
+  // Filter and sort
   const q = search.toLowerCase().trim();
   const filtered = catalogue
     .filter((item) => {
       if (!q) return true;
-      // Support "$100+" style queries
       const priceMatch = q.match(/^\$(\d+)\+?$/);
       if (priceMatch) return (marketValueOf(item) || 0) >= parseInt(priceMatch[1]);
       if (q === "key" || q === "keys") return item.keyIssue && item.keyIssue !== "N/A";
@@ -1701,7 +1745,6 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
       return hay.includes(q);
     })
     .sort((a, b) => {
-      // HOT first, STAGNANT last
       const tagOrder = { HOT: 0, BUNDLE: 1, STAGNANT: 3 };
       const aO = tagOrder[aiTags[a.id]?.label] ?? 2;
       const bO = tagOrder[aiTags[b.id]?.label] ?? 2;
@@ -1711,24 +1754,110 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
 
   const metricColors = { red: "#dc2626", yellow: "#d4af37", green: "#16a34a" };
 
+  const actionBtnStyle = (a) => {
+    const s = actionStatus[a.comicId];
+    if (s === "listing") return { background: "rgba(212,175,55,0.2)", color: "#d4af37", cursor: "wait" };
+    if (s === "listed") return { background: "rgba(22,163,106,0.2)", color: "#16a34a", cursor: "default" };
+    if (s === "error") return { background: "rgba(220,38,38,0.2)", color: "#dc2626", cursor: "pointer" };
+    if (a.action === "list") return { background: "linear-gradient(135deg, #d4af37, #b8941f)", color: "#0a0a0a", cursor: "pointer" };
+    return { background: "rgba(212,175,55,0.15)", color: "#d4af37", cursor: "pointer" };
+  };
+
+  const actionBtnLabel = (a) => {
+    const s = actionStatus[a.comicId];
+    if (s === "listing") return "Listing...";
+    if (s === "listed") return "Listed! View on eBay →";
+    if (s === "error") return "Failed — Retry";
+    return a.label;
+  };
+
   return (
     <div style={{ paddingBottom: 8, display: "flex", flexDirection: "column", gap: 12 }}>
 
-      {/* 1. CLAUDE CHAT BAR */}
+      {/* A. CLAUDE RESPONSE BOX (top) */}
       <div style={{
-        background: "rgba(212,175,55,0.08)",
-        border: "1px solid rgba(212,175,55,0.3)",
+        border: "1px solid rgba(212,175,55,0.4)",
         borderRadius: 12,
-        padding: 12,
+        padding: 14,
+        background: "rgba(212,175,55,0.06)",
       }}>
+        <div style={{ fontSize: 11, color: "#d4af37", fontWeight: 600, marginBottom: 8 }}>
+          🧠 Claude
+        </div>
+
+        {/* Loading state */}
+        {sending && !latestResponse && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0" }}>
+            <div style={{
+              width: 16, height: 16,
+              border: "2px solid rgba(212,175,55,0.3)",
+              borderTopColor: "#d4af37",
+              borderRadius: "50%",
+              animation: "spin 0.8s linear infinite",
+            }} />
+            <span style={{ color: "#d4af37", fontSize: 14 }}>Analyzing your collection...</span>
+          </div>
+        )}
+
+        {/* Response text */}
+        {latestResponse && (
+          <div style={{ fontSize: 14, lineHeight: 1.6, color: "#e0e0e0" }}>
+            {latestResponse}
+          </div>
+        )}
+
+        {/* Refreshing indicator after initial load */}
+        {sending && latestResponse && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+            <div style={{
+              width: 12, height: 12,
+              border: "2px solid rgba(212,175,55,0.3)",
+              borderTopColor: "#d4af37",
+              borderRadius: "50%",
+              animation: "spin 0.8s linear infinite",
+            }} />
+            <span className="muted small">Updating...</span>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        {latestActions.length > 0 && !sending && (
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            {latestActions.map((a, j) => (
+              <button
+                key={j}
+                onClick={() => handleAction(a)}
+                disabled={actionStatus[a.comicId] === "listing"}
+                style={{
+                  padding: "10px 16px",
+                  border: a.action === "list" ? "none" : "1px solid rgba(212,175,55,0.3)",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  ...actionBtnStyle(a),
+                }}
+              >
+                {actionBtnLabel(a)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!latestResponse && !sending && catalogue.length === 0 && (
+          <div className="muted small">Scan some comics first, then Claude will analyze your collection.</div>
+        )}
+      </div>
+
+      {/* B. CHAT INPUT */}
+      <div>
         <form
           onSubmit={(e) => { e.preventDefault(); sendMessage(chatInput); }}
           style={{ display: "flex", gap: 8 }}
         >
           <input
-            ref={inputRef}
             type="text"
-            placeholder="Ask Claude about your collection..."
+            placeholder="Ask Claude..."
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             disabled={sending}
@@ -1736,7 +1865,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
               flex: 1,
               padding: "12px 14px",
               background: "rgba(255,255,255,0.08)",
-              border: "1px solid rgba(212,175,55,0.2)",
+              border: "1px solid rgba(255,255,255,0.12)",
               borderRadius: 10,
               color: "#fff",
               fontSize: 15,
@@ -1761,300 +1890,134 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
             {sending ? "..." : "Ask"}
           </button>
         </form>
-
-        {/* Chat messages */}
-        {messages.length > 0 && (
-          <div style={{ marginTop: 12, maxHeight: 260, overflowY: "auto" }}>
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: "10px 12px",
-                  marginBottom: 8,
-                  borderRadius: 10,
-                  background: m.role === "user"
-                    ? "rgba(255,255,255,0.06)"
-                    : "rgba(212,175,55,0.1)",
-                  border: m.role === "assistant" ? "1px solid rgba(212,175,55,0.2)" : "none",
-                  fontSize: 14,
-                  lineHeight: 1.5,
-                }}
-              >
-                {m.role === "assistant" && (
-                  <div style={{ fontSize: 11, color: "#d4af37", fontWeight: 600, marginBottom: 4 }}>
-                    🧠 Claude
-                  </div>
-                )}
-                <div style={{ color: m.role === "user" ? "#999" : "#e0e0e0" }}>
-                  {m.content}
-                </div>
-                {m.actions?.length > 0 && (
-                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                    {m.actions.map((a, j) => (
-                      <button
-                        key={j}
-                        onClick={() => handleAction(a)}
-                        style={{
-                          padding: "8px 14px",
-                          background: a.action === "list"
-                            ? "linear-gradient(135deg, #d4af37, #b8941f)"
-                            : "rgba(212,175,55,0.15)",
-                          color: a.action === "list" ? "#0a0a0a" : "#d4af37",
-                          border: a.action === "list" ? "none" : "1px solid rgba(212,175,55,0.3)",
-                          borderRadius: 8,
-                          fontSize: 13,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {a.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-            {sending && (
-              <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{
-                  width: 14, height: 14,
-                  border: "2px solid rgba(212,175,55,0.3)",
-                  borderTopColor: "#d4af37",
-                  borderRadius: "50%",
-                  animation: "spin 0.8s linear infinite",
-                }} />
-                <span className="muted small">Claude is thinking...</span>
-              </div>
-            )}
-            <div ref={chatEndRef} />
-          </div>
-        )}
-
-        {/* Quick prompts when no messages yet */}
-        {messages.length === 0 && !sending && (
-          <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-            {["What should I sell?", "Key issues?", "Stagnant books?", "Bundle ideas?"].map((q) => (
-              <button
-                key={q}
-                onClick={() => sendMessage(q)}
-                style={{
-                  padding: "6px 12px",
-                  background: "rgba(255,255,255,0.06)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  borderRadius: 20,
-                  color: "#999",
-                  fontSize: 12,
-                  cursor: "pointer",
-                }}
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        )}
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          {["Sell?", "Keys?", "Bundle?", "Stagnant?", "Value?"].map((q) => (
+            <button
+              key={q}
+              onClick={() => sendMessage(q === "Sell?" ? "What should I sell this week?" : q === "Keys?" ? "Which books are key issues?" : q === "Bundle?" ? "Any bundle opportunities?" : q === "Stagnant?" ? "Which books are stagnant?" : "What's my most valuable book?")}
+              disabled={sending}
+              style={{
+                padding: "6px 12px",
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 20,
+                color: "#999",
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              {q}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* 4. MARKET INTELLIGENCE STRIP */}
-      {signals.length > 0 && (
-        <div style={{
-          display: "flex",
-          gap: 10,
-          overflowX: "auto",
-          paddingBottom: 4,
-          WebkitOverflowScrolling: "touch",
-        }}>
-          {signals.map((sig, i) => (
-            <div
-              key={i}
-              onClick={() => sendMessage(`Tell me more about: ${sig}`)}
-              style={{
-                flexShrink: 0,
-                padding: "8px 14px",
-                background: "rgba(212,175,55,0.08)",
-                border: "1px solid rgba(212,175,55,0.2)",
-                borderRadius: 10,
-                fontSize: 13,
-                color: "#ccc",
-                cursor: "pointer",
-                maxWidth: 260,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {sig}
+      {/* C. METRIC BOXES (2x2) */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        {metrics.slice(0, 4).map((m, i) => (
+          <div
+            key={i}
+            onClick={() => {
+              if (m.filter) setSearch(m.filter);
+              else sendMessage(`Tell me about ${m.label}`);
+            }}
+            style={{
+              padding: 14,
+              borderRadius: 10,
+              border: `1px solid ${metricColors[m.color] || "#d4af37"}40`,
+              background: `${metricColors[m.color] || "#d4af37"}10`,
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ fontSize: 20, fontWeight: 800, color: metricColors[m.color] || "#d4af37" }}>
+              {m.value}
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* 2. DYNAMIC METRIC BOXES */}
-      {metrics.length > 0 && (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 10,
-        }}>
-          {metrics.slice(0, 4).map((m, i) => (
-            <div
-              key={i}
-              onClick={() => {
-                if (m.filter) setSearch(m.filter);
-                else sendMessage(`Tell me about ${m.label}`);
-              }}
-              style={{
-                padding: 14,
-                borderRadius: 10,
-                border: `1px solid ${metricColors[m.color] || "#d4af37"}40`,
-                background: `${metricColors[m.color] || "#d4af37"}10`,
-                cursor: "pointer",
-              }}
-            >
-              <div style={{
-                fontSize: 20,
-                fontWeight: 800,
-                color: metricColors[m.color] || "#d4af37",
-              }}>
-                {m.value}
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#ccc", marginTop: 2 }}>
-                {m.label}
-              </div>
-              {m.detail && (
-                <div className="muted small" style={{ marginTop: 4 }}>{m.detail}</div>
-              )}
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#ccc", marginTop: 2 }}>
+              {m.label}
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* 3. COLLECTION GRID */}
-      <div>
-        <input
-          type="text"
-          placeholder='Search: title, "key", "$100+", "hot"...'
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "10px 14px",
-            background: "rgba(255,255,255,0.06)",
-            border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 10,
-            color: "#fff",
-            fontSize: 14,
-            outline: "none",
-            boxSizing: "border-box",
-            marginBottom: 10,
-          }}
-        />
-
-        {filtered.length === 0 && (
-          <div className="muted small" style={{ textAlign: "center", padding: 20 }}>
-            {q ? "No comics match" : "No comics in collection yet"}
+            {m.detail && <div className="muted small" style={{ marginTop: 4 }}>{m.detail}</div>}
           </div>
-        )}
+        ))}
+      </div>
 
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-          gap: 10,
-        }}>
-          {filtered.map((item) => {
-            const thumbSrc = getComicPhotos(item)[0] || null;
-            const mv = marketValueOf(item);
-            const tag = aiTags[item.id];
+      {/* D. SEARCH BAR */}
+      <input
+        type="text"
+        placeholder='Search: title, "key", "$100+", "hot"...'
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        style={{
+          width: "100%",
+          padding: "10px 14px",
+          background: "rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 10,
+          color: "#fff",
+          fontSize: 14,
+          outline: "none",
+          boxSizing: "border-box",
+        }}
+      />
 
-            return (
-              <div
-                key={item.id}
-                onClick={() => onOpenItem(item)}
-                style={{
-                  borderRadius: 10,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.03)",
-                  overflow: "hidden",
-                  cursor: "pointer",
-                }}
-              >
-                {thumbSrc ? (
-                  <img
-                    src={thumbSrc}
-                    alt=""
-                    loading="lazy"
-                    style={{
-                      width: "100%",
-                      height: 160,
-                      objectFit: "cover",
-                    }}
-                  />
-                ) : (
-                  <div style={{
-                    width: "100%",
-                    height: 160,
-                    background: "rgba(255,255,255,0.04)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 40,
-                  }}>
-                    📘
-                  </div>
-                )}
-                <div style={{ padding: "8px 10px" }}>
-                  <div style={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    marginBottom: 4,
-                  }}>
-                    {item.title || "Unknown"}
-                  </div>
-                  <div style={{
-                    fontSize: 15,
-                    fontWeight: 800,
-                    color: "#d4af37",
-                  }}>
-                    {mv != null ? fmt(mv) : "—"}
-                  </div>
-                  <div style={{
-                    display: "flex",
-                    gap: 4,
-                    marginTop: 6,
-                    flexWrap: "wrap",
-                  }}>
-                    {tag && (
-                      <span style={{
-                        fontSize: 10,
-                        padding: "2px 7px",
-                        borderRadius: 5,
-                        background: tag.label === "HOT" ? "rgba(220,38,38,0.2)" : tag.label === "STAGNANT" ? "rgba(245,158,11,0.2)" : "rgba(212,175,55,0.15)",
-                        color: tag.label === "HOT" ? "#dc2626" : tag.label === "STAGNANT" ? "#f59e0b" : "#d4af37",
-                        fontWeight: 700,
-                      }}>
-                        {tag.emoji} {tag.label}
-                      </span>
-                    )}
-                    {item.status === "listed" && (
-                      <span style={{
-                        fontSize: 10,
-                        padding: "2px 7px",
-                        borderRadius: 5,
-                        background: "rgba(22,163,106,0.2)",
-                        color: "#16a34a",
-                        fontWeight: 700,
-                      }}>
-                        LISTED
-                      </span>
-                    )}
-                  </div>
+      {/* E. COLLECTION GRID */}
+      {filtered.length === 0 && (
+        <div className="muted small" style={{ textAlign: "center", padding: 20 }}>
+          {q ? "No comics match" : "No comics in collection yet"}
+        </div>
+      )}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+        gap: 10,
+      }}>
+        {filtered.map((item) => {
+          const thumbSrc = getComicPhotos(item)[0] || null;
+          const mv = marketValueOf(item);
+          const tag = aiTags[item.id];
+          return (
+            <div
+              key={item.id}
+              onClick={() => onOpenItem(item)}
+              style={{
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(255,255,255,0.03)",
+                overflow: "hidden",
+                cursor: "pointer",
+              }}
+            >
+              {thumbSrc ? (
+                <img src={thumbSrc} alt="" loading="lazy" style={{ width: "100%", height: 160, objectFit: "cover" }} />
+              ) : (
+                <div style={{ width: "100%", height: 160, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>📘</div>
+              )}
+              <div style={{ padding: "8px 10px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 4 }}>
+                  {item.title || "Unknown"}
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "#d4af37" }}>
+                  {mv != null ? fmt(mv) : "—"}
+                </div>
+                <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+                  {tag && (
+                    <span style={{
+                      fontSize: 10, padding: "2px 7px", borderRadius: 5, fontWeight: 700,
+                      background: tag.label === "HOT" ? "rgba(220,38,38,0.2)" : tag.label === "STAGNANT" ? "rgba(245,158,11,0.2)" : "rgba(212,175,55,0.15)",
+                      color: tag.label === "HOT" ? "#dc2626" : tag.label === "STAGNANT" ? "#f59e0b" : "#d4af37",
+                    }}>
+                      {tag.emoji} {tag.label}
+                    </span>
+                  )}
+                  {item.status === "listed" && (
+                    <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "rgba(22,163,106,0.2)", color: "#16a34a", fontWeight: 700 }}>
+                      LISTED
+                    </span>
+                  )}
                 </div>
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -2090,6 +2053,8 @@ export default function App() {
   const fileRef = useRef(null);
   const buyerFileRef = useRef(null);
   const bulkRef = useRef(null);
+  const collectionScrollPos = useRef(0);
+  const manageScrollPos = useRef(0);
 
   // Load catalogue, snapshots, and cached analysis from IndexedDB on mount.
   useEffect(() => {
@@ -2265,6 +2230,8 @@ export default function App() {
                   priceLow: enrich.priceLow || prev[idx].priceLow,
                   priceHigh: enrich.priceHigh || prev[idx].priceHigh,
                   keyIssue: enrich.keyIssue || prev[idx].keyIssue,
+                  soldComps: enrich.soldComps || prev[idx].soldComps || [],
+                  confidenceLevel: enrich.confidenceLevel || prev[idx].confidenceLevel || "LOW",
                 };
                 // Fire-and-forget persistence. Idempotent if it runs twice.
                 putComic(updated).catch(() => {});
@@ -2282,6 +2249,8 @@ export default function App() {
                   priceLow: enrich.priceLow || cur.priceLow,
                   priceHigh: enrich.priceHigh || cur.priceHigh,
                   keyIssue: enrich.keyIssue || cur.keyIssue,
+                  soldComps: enrich.soldComps || cur.soldComps || [],
+                  confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 };
               });
             }
@@ -2354,6 +2323,8 @@ export default function App() {
                 priceLow: enrich.priceLow || prev[idx].priceLow,
                 priceHigh: enrich.priceHigh || prev[idx].priceHigh,
                 keyIssue: enrich.keyIssue || prev[idx].keyIssue,
+                soldComps: enrich.soldComps || prev[idx].soldComps || [],
+                confidenceLevel: enrich.confidenceLevel || prev[idx].confidenceLevel || "LOW",
               };
               putComic(updated).catch(() => {});
               const next = prev.slice();
@@ -2460,6 +2431,8 @@ export default function App() {
       priceLow: enrich.priceLow || item.priceLow,
       priceHigh: enrich.priceHigh || item.priceHigh,
       keyIssue: enrich.keyIssue || item.keyIssue,
+      soldComps: enrich.soldComps || item.soldComps || [],
+      confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
     };
     await putComic(updated);
     setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
@@ -2566,9 +2539,20 @@ export default function App() {
   }, [catalogue]);
 
   const switchTab = (next) => {
+    // Save current scroll position for restore
+    if (tab === "collection") collectionScrollPos.current = window.scrollY;
+    if (tab === "manage") manageScrollPos.current = window.scrollY;
     setTab(next);
     reset();
     setSelectedItem(null);
+    // Restore saved scroll position for the target tab
+    if (next === "manage") {
+      setTimeout(() => window.scrollTo(0, manageScrollPos.current), 50);
+    } else if (next === "collection") {
+      setTimeout(() => window.scrollTo(0, collectionScrollPos.current), 50);
+    } else {
+      window.scrollTo(0, 0);
+    }
   };
 
   const handleInstallTap = async () => {
@@ -2769,7 +2753,10 @@ export default function App() {
         selectedItem ? (
           <CollectionDetail
             item={selectedItem}
-            onBack={() => setSelectedItem(null)}
+            onBack={() => {
+              setSelectedItem(null);
+              setTimeout(() => window.scrollTo(0, collectionScrollPos.current), 50);
+            }}
             onDelete={deleteFromCatalogue}
             onList={listOnEbay}
             onRefreshMarket={refreshMarketData}
@@ -2779,7 +2766,10 @@ export default function App() {
           <CollectionList
             items={catalogue}
             totalValue={totalValue}
-            onOpen={setSelectedItem}
+            onOpen={(item) => {
+              collectionScrollPos.current = window.scrollY;
+              setSelectedItem(item);
+            }}
             onDelete={deleteFromCatalogue}
           />
         )
@@ -2790,6 +2780,7 @@ export default function App() {
           catalogue={catalogue}
           totalValue={totalValue}
           onOpenItem={(item) => {
+            manageScrollPos.current = window.scrollY;
             setSelectedItem(item);
             setTab("collection");
           }}
