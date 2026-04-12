@@ -109,7 +109,7 @@ const tryInsights = async ({ appId, certId, query }) => {
     const token = await getOAuthToken(appId, certId, INSIGHTS_SCOPE);
     const url =
       `${INSIGHTS_ENDPOINT}?q=${encodeURIComponent(query)}` +
-      `&category_ids=${CATEGORY_ID}&limit=10`;
+      `&category_ids=${CATEGORY_ID}&limit=20`;
     console.log(`[comps] insights url=${url}`);
     const res = await fetch(url, {
       headers: {
@@ -156,7 +156,7 @@ const tryBrowse = async ({ appId, certId, query }) => {
       `${BROWSE_ENDPOINT}?q=${encodeURIComponent(query)}` +
       `&category_ids=${CATEGORY_ID}` +
       `&filter=${encodeURIComponent("buyingOptions:{FIXED_PRICE}")}` +
-      `&limit=10&sort=endingSoonest`;
+      `&limit=20&sort=endingSoonest`;
     console.log(`[comps] browse url=${url}`);
     const res = await fetch(url, {
       headers: {
@@ -263,7 +263,10 @@ const hasIssueNumber = (listingTitle, issueNum) => {
 
 const buildKeywords = (title, { isGraded, numericGrade, year } = {}) => {
   if (!title) return "";
-  const parts = [String(title).trim()];
+  // Strip leading articles
+  let cleanTitle = String(title).trim();
+  cleanTitle = cleanTitle.replace(/^(The|A|An)\s+/i, "");
+  const parts = [cleanTitle];
   if (isGraded === true && numericGrade != null && !isNaN(numericGrade)) {
     parts.push("CGC", String(numericGrade));
   }

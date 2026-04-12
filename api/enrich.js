@@ -313,11 +313,14 @@ export default async function handler(req, res) {
         out.keyIssue = `1st appearance of ${comicVine.firstAppearanceCharacters.join(", ")}`;
       }
     }
+    if (!out.keyIssue && req.body?.keyIssue) {
+      out.keyIssue = req.body.keyIssue;
+    }
 
     if (rawComps && rawComps.count > 0) {
-      out.price = rawComps.averageFormatted;
-      out.priceLow = rawComps.lowestFormatted;
-      out.priceHigh = rawComps.highestFormatted;
+      out.price = fmtUsd(rawComps.average * 1.15);
+      out.priceLow = fmtUsd(rawComps.lowest);
+      out.priceHigh = fmtUsd(rawComps.highest);
       out.comps = {
         count: rawComps.count,
         average: rawComps.averageFormatted,
@@ -341,7 +344,7 @@ export default async function handler(req, res) {
 
     // Sold comps from eBay completed listings
     const soldComps = Array.isArray(soldResult) ? soldResult : [];
-    if (soldComps.length > 0) out.soldComps = soldComps;
+    out.soldComps = soldComps;
 
     // Confidence level
     const verifiedCount = rawComps?.count || 0;
