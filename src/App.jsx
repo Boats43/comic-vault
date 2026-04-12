@@ -2238,32 +2238,12 @@ export default function App() {
             // (otherwise the detail view would keep rendering the stale
             // pre-enrich entry until they close and reopen it).
             if (savedId) {
-              setCatalogue((prev) => {
-                const idx = prev.findIndex((x) => x.id === savedId);
-                if (idx < 0) return prev;
+              // Build the merged entry from current catalogue state, persist
+              // to IndexedDB, THEN update React state from the persisted copy
+              // so the list and header total always reflect the DB truth.
+              const cur = catalogue.find((x) => x.id === savedId);
+              if (cur) {
                 const updated = {
-                  ...prev[idx],
-                  comps: enrich.comps || prev[idx].comps,
-                  price: enrich.price || prev[idx].price,
-                  priceLow: enrich.priceLow || prev[idx].priceLow,
-                  priceHigh: enrich.priceHigh || prev[idx].priceHigh,
-                  keyIssue: enrich.keyIssue || prev[idx].keyIssue,
-                  soldComps: enrich.soldComps || prev[idx].soldComps || [],
-                  confidenceLevel: enrich.confidenceLevel || prev[idx].confidenceLevel || "LOW",
-                  pricingSource: enrich.pricingSource || null,
-                  priceNote: enrich.priceNote || null,
-                  gradeMultiplier: enrich.gradeMultiplier || null,
-                };
-                // Fire-and-forget persistence. Idempotent if it runs twice.
-                putComic(updated).catch(() => {});
-                const next = prev.slice();
-                next[idx] = updated;
-                return next;
-              });
-              // Sync the currently-open detail view if it's the same comic.
-              setSelectedItem((cur) => {
-                if (!cur || cur.id !== savedId) return cur;
-                return {
                   ...cur,
                   comps: enrich.comps || cur.comps,
                   price: enrich.price || cur.price,
@@ -2276,7 +2256,11 @@ export default function App() {
                   priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
                 };
-              });
+                putComic(updated).then(() => {
+                  setCatalogue((prev) => prev.map((x) => x.id === savedId ? updated : x));
+                  setSelectedItem((s) => s && s.id === savedId ? updated : s);
+                }).catch(() => {});
+              }
             }
           })
           .catch(() => {
@@ -2337,26 +2321,22 @@ export default function App() {
           }),
         })
           .then((r) => (r.ok ? r.json() : null))
-          .then((enrich) => {
+          .then(async (enrich) => {
             if (!enrich || !savedId) return;
-            setCatalogue((prev) => {
-              const idx = prev.findIndex((x) => x.id === savedId);
-              if (idx < 0) return prev;
-              const updated = {
-                ...prev[idx],
-                comps: enrich.comps || prev[idx].comps,
-                price: enrich.price || prev[idx].price,
-                priceLow: enrich.priceLow || prev[idx].priceLow,
-                priceHigh: enrich.priceHigh || prev[idx].priceHigh,
-                keyIssue: enrich.keyIssue || prev[idx].keyIssue,
-                soldComps: enrich.soldComps || prev[idx].soldComps || [],
-                confidenceLevel: enrich.confidenceLevel || prev[idx].confidenceLevel || "LOW",
-              };
-              putComic(updated).catch(() => {});
-              const next = prev.slice();
-              next[idx] = updated;
-              return next;
-            });
+            const cur = catalogue.find((x) => x.id === savedId);
+            if (!cur) return;
+            const updated = {
+              ...cur,
+              comps: enrich.comps || cur.comps,
+              price: enrich.price || cur.price,
+              priceLow: enrich.priceLow || cur.priceLow,
+              priceHigh: enrich.priceHigh || cur.priceHigh,
+              keyIssue: enrich.keyIssue || cur.keyIssue,
+              soldComps: enrich.soldComps || cur.soldComps || [],
+              confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
+            };
+            await putComic(updated);
+            setCatalogue((prev) => prev.map((x) => x.id === savedId ? updated : x));
           })
           .catch(() => {});
       } catch {
