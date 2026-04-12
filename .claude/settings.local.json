@@ -24,7 +24,9 @@
       "Bash(break)",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'query: {d[\\\\\"query\\\\\"]}'\\); print\\(f'count: {d[\\\\\"count\\\\\"]}'\\); print\\(f'avg: {d.get\\(\\\\\"averageFormatted\\\\\",\\\\\"n/a\\\\\"\\)}'\\)\")",
       "Bash(git push:*)",
-      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'query: {d[\\\\\"query\\\\\"]}  attempt: {d.get\\(\\\\\"attemptUsed\\\\\",\\\\\"?\\\\\"\\)}  count: {d[\\\\\"count\\\\\"]}  avg: {d.get\\(\\\\\"averageFormatted\\\\\",\\\\\"n/a\\\\\"\\)}'\\)\")"
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'query: {d[\\\\\"query\\\\\"]}  attempt: {d.get\\(\\\\\"attemptUsed\\\\\",\\\\\"?\\\\\"\\)}  count: {d[\\\\\"count\\\\\"]}  avg: {d.get\\(\\\\\"averageFormatted\\\\\",\\\\\"n/a\\\\\"\\)}'\\)\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'query: {d[\\\\\"query\\\\\"]}  attempt: {d.get\\(\\\\\"attemptUsed\\\\\",\\\\\"?\\\\\"\\)}  count: {d[\\\\\"count\\\\\"]}'\\)\")",
+      "Bash(pkill -f \"vercel dev\")"
     ]
   }
 }

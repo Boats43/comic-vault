@@ -195,6 +195,7 @@ export default async function handler(req, res) {
   try {
     const {
       title,
+      issue,
       grade,
       confidence,
       images,
@@ -208,10 +209,15 @@ export default async function handler(req, res) {
       return;
     }
 
+    // Prefer explicit issue param, fall back to parsing from title.
+    const issueMatch = String(title).match(/#\s*(\d+)/);
+    const issueNum = issue || (issueMatch ? issueMatch[1] : null);
+
     const compsPromise =
       process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? fetchComps({
             title,
+            issue: issueNum,
             grade,
             isGraded,
             numericGrade,
@@ -223,10 +229,6 @@ export default async function handler(req, res) {
             return null;
           })
         : Promise.resolve(null);
-
-    // Extract issue number for sold lookup
-    const issueMatch = String(title).match(/#\s*(\d+)/);
-    const issueNum = issueMatch ? issueMatch[1] : null;
 
     const [comicVine, compsFromEbay, census, ximilar, soldResult] = await Promise.all([
       lookupComicVine({ title }),

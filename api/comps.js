@@ -267,6 +267,7 @@ const cleanTitleForSearch = (title) => {
   let t = String(title).trim();
   t = t.replace(/^(The|A|An)\s+/i, "");
   t = t
+    .replace(/\(.*?\)/g, "")
     .replace(/:/g, "")
     .replace(/['"!?]/g, "")
     .replace(/\s+/g, " ")
@@ -340,6 +341,7 @@ export const fetchComps = async ({
   const cleanTitle = cleanTitleForSearch(title);
   const iss = issue ? String(issue).trim() : null;
   const yr = year ? String(year).trim() : null;
+  console.log('[comps] title=', title, 'issue=', issue, 'cleanTitle=', cleanTitle);
 
   // Grade suffix appended to every attempt query.
   const gradeSuffix =
@@ -349,25 +351,25 @@ export const fetchComps = async ({
 
   // Build ordered list of query attempts — most specific to least.
   const attempts = [];
-  // Attempt 1: full — cleanTitle #issue year
+  // Attempt 1: full — cleanTitle #issue year (+ grade suffix)
   if (iss && yr) {
-    attempts.push({ q: `${cleanTitle} #${iss} ${yr}`, n: 1 });
+    attempts.push({ q: `${cleanTitle} #${iss} ${yr}`, n: 1, useGrade: true });
   }
-  // Attempt 2: no year — cleanTitle #issue
+  // Attempt 2: no year — cleanTitle #issue (+ grade suffix)
   if (iss) {
-    attempts.push({ q: `${cleanTitle} #${iss}`, n: 2 });
+    attempts.push({ q: `${cleanTitle} #${iss}`, n: 2, useGrade: true });
   }
-  // Attempt 3: no issue — cleanTitle year
+  // Attempt 3: no issue — cleanTitle year (+ grade suffix)
   if (yr) {
-    attempts.push({ q: `${cleanTitle} ${yr}`, n: 3 });
+    attempts.push({ q: `${cleanTitle} ${yr}`, n: 3, useGrade: true });
   }
-  // Attempt 4: title only — cleanTitle
-  attempts.push({ q: cleanTitle, n: 4 });
-  // Attempt 5: first significant word + issue
+  // Attempt 4: title only — cleanTitle (no grade suffix)
+  attempts.push({ q: cleanTitle, n: 4, useGrade: false });
+  // Attempt 5: first significant word + issue (no grade suffix)
   if (iss) {
     const sig = firstSignificantWord(cleanTitle);
     if (sig) {
-      attempts.push({ q: `${sig} #${iss}`, n: 5 });
+      attempts.push({ q: `${sig} #${iss}`, n: 5, useGrade: false });
     }
   }
 
@@ -387,7 +389,7 @@ export const fetchComps = async ({
     let attemptUsed = 0;
 
     for (const attempt of uniqueAttempts) {
-      query = attempt.q + gradeSuffix;
+      query = attempt.q + (attempt.useGrade ? gradeSuffix : "");
       // Try Insights first, then Browse.
       source = "marketplace_insights";
       raw = await tryInsights({ appId, certId, query });

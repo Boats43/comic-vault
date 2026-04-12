@@ -203,7 +203,7 @@ function ResultCard({ result, enriching }) {
           }}
         />
       )}
-      <div className="title">{result.title}</div>
+      <div className="title">{result.title}{result.issue && !result.title?.includes(`#${result.issue}`) ? ` #${result.issue}` : ''}</div>
       <div className="muted small">
         {result.publisher}
         {result.publisher && result.year ? " · " : ""}
@@ -2184,10 +2184,13 @@ export default function App() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed to grade");
+        // Extract issue number: prefer explicit field, fall back to parsing title.
+        const issueNum = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
+        console.log('[grade] title:', data.title, 'issue:', issueNum);
         // Show the Claude result immediately.
-        setResult({ ...data, image: b64 });
+        setResult({ ...data, issue: issueNum, image: b64 });
         setLoading(false);
-        const savedId = save ? await addToCatalogue(data, b64) : null;
+        const savedId = save ? await addToCatalogue({ ...data, issue: issueNum }, b64) : null;
 
         // Fire-and-forget enrichment pass — merges into the card when ready.
         setEnriching(true);
@@ -2196,6 +2199,7 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             title: data.title,
+            issue: issueNum,
             grade: data.grade,
             isGraded: data.isGraded,
             numericGrade: data.numericGrade,
@@ -2292,8 +2296,9 @@ export default function App() {
         });
         const data = await res.json();
         if (!res.ok) continue; // skip failures
+        const bulkIssue = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
         setBulkProgress({ current: i + 1, total: files.length, title: data.title || "" });
-        const savedId = await addToCatalogue(data, b64);
+        const savedId = await addToCatalogue({ ...data, issue: bulkIssue }, b64);
         if (savedId) added++;
         // Fire-and-forget enrichment
         fetch("/api/enrich", {
@@ -2301,6 +2306,7 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             title: data.title,
+            issue: bulkIssue,
             grade: data.grade,
             isGraded: data.isGraded,
             numericGrade: data.numericGrade,
@@ -2414,6 +2420,7 @@ export default function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: item.title,
+        issue: item.issue || item.title?.match(/#(\d+)/)?.[1] || null,
         grade: item.grade,
         isGraded: item.isGraded,
         numericGrade: item.numericGrade,
@@ -2459,9 +2466,11 @@ export default function App() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to re-analyze");
 
+    const photoIssue = data.issue || data.title?.match(/#(\d+)/)?.[1] || item.issue || null;
     const updated = {
       ...item,
       title: data.title || item.title,
+      issue: photoIssue,
       publisher: data.publisher || item.publisher,
       year: data.year || item.year,
       grade: data.grade || item.grade,
