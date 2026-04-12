@@ -168,6 +168,17 @@ const CGC_MULTIPLIERS = {
   3.0: 0.55, 2.5: 0.5, 2.0: 0.45, 1.8: 0.4, 1.5: 0.35, 1.0: 0.3,
   0.5: 0.2,
 };
+
+const RAW_MULTIPLIERS = {
+  "NM": 1.0, "NM/M": 1.0,
+  "VF/NM": 0.85, "VF": 0.75,
+  "VF/F": 0.70, "FN/VF": 0.65,
+  "FN": 0.55, "VG/FN": 0.50,
+  "VG": 0.45, "VG/G": 0.40,
+  "GD/VG": 0.35, "GD": 0.30,
+  "FR/GD": 0.25, "FR": 0.20,
+  "PR": 0.15,
+};
 const CGC_GRADES = Object.keys(CGC_MULTIPLIERS).map(Number).sort((a, b) => a - b);
 
 const getGradeMultiplier = (grade) => {
@@ -181,6 +192,37 @@ const getGradeMultiplier = (grade) => {
     if (d < minDist) { closest = k; minDist = d; }
   }
   return { multiplier: CGC_MULTIPLIERS[closest], grade: closest };
+};
+
+// Parse a raw grade string like "VG 4.0" or "FR 1.0" into a multiplier.
+// Step 1: extract numeric → find nearest CGC_MULTIPLIERS entry.
+// Step 2: extract text abbreviation → look up RAW_MULTIPLIERS.
+// Step 3: default 0.75.
+const getRawGradeMultiplier = (gradeStr) => {
+  if (!gradeStr) return { multiplier: 0.75, label: "RAW" };
+  const s = String(gradeStr).trim();
+
+  // Step 1: numeric portion
+  const numMatch = s.match(/([\d.]+)/);
+  if (numMatch) {
+    const g = parseFloat(numMatch[1]);
+    if (!isNaN(g) && g >= 0.5 && g <= 10) {
+      const info = getGradeMultiplier(g);
+      if (info) return { multiplier: info.multiplier, label: s };
+    }
+  }
+
+  // Step 2: text abbreviation
+  const textMatch = s.match(/^([A-Z][A-Z/]*)/i);
+  if (textMatch) {
+    const abbrev = textMatch[1].toUpperCase().replace(/\s+/g, "");
+    if (RAW_MULTIPLIERS[abbrev] != null) {
+      return { multiplier: RAW_MULTIPLIERS[abbrev], label: s };
+    }
+  }
+
+  // Step 3: default
+  return { multiplier: 0.75, label: s || "RAW" };
 };
 
 const PRICECHARTING_EXCLUDE =
@@ -210,10 +252,23 @@ const lookupPriceCharting = async ({ title, issue, year }) => {
       ? new RegExp(`#${issueStr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
       : null;
 
+    const comicYear = year ? parseInt(String(year).trim(), 10) : null;
+
     for (const p of products) {
       const name = p["product-name"] || "";
       if (PRICECHARTING_EXCLUDE.test(name)) continue;
       if (issueRe && !issueRe.test(name)) continue;
+
+      // Year validation: reject products from the wrong era.
+      if (comicYear) {
+        const yearMatch = name.match(/\((\d{4})\)/);
+        const productYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
+        if (productYear && Math.abs(productYear - comicYear) > 10) {
+          console.log(`[pricecharting] skipping "${name}" — year ${productYear} vs ${comicYear}`);
+          continue;
+        }
+      }
+
       const cents = p["loose-price"];
       if (cents == null || isNaN(cents) || cents <= 0) continue;
       const price = cents / 100;
@@ -414,37 +469,53 @@ export default async function handler(req, res) {
 
     if (comicVine) {
       out.comicVine = comicVine;
-      if (comicVine.firstAppearanceCharacters.length > 0) {
-        out.keyIssue = `1st appearance of ${comicVine.firstAppearanceCharacters.join(", ")}`;
-      }
     }
-    if (!out.keyIssue && req.body?.keyIssue) {
+
+    // Key issue: prefer ComicVine first appearances, fall back to Claude data.
+    const cvChars = comicVine?.firstAppearanceCharacters;
+    if (Array.isArray(cvChars) && cvChars.length > 0) {
+      out.keyIssue = `1st appearance of ${cvChars.join(", ")}`;
+    } else if (
+      req.body?.keyIssue &&
+      req.body.keyIssue !== "N/A" &&
+      String(req.body.keyIssue).length > 3
+    ) {
       out.keyIssue = req.body.keyIssue;
+    } else {
+      out.keyIssue = null;
     }
 
     // Primary price source: PriceCharting (aggregated sold data).
     // For graded comics, apply a CGC multiplier against the raw base price.
+    // For raw comics, apply a raw grade multiplier against the base price.
     // Fallback: Browse API comps (active listings).
     if (priceCharting) {
       let pc = priceCharting.price;
-      const gradeInfo =
-        isGraded === true && numericGrade != null
-          ? getGradeMultiplier(numericGrade)
-          : null;
-      if (gradeInfo) {
-        const adjusted = pc * gradeInfo.multiplier;
-        out.price = fmtUsd(adjusted);
-        out.priceLow = fmtUsd(adjusted * 0.85);
-        out.priceHigh = fmtUsd(adjusted * 1.15);
-        out.gradeMultiplier = gradeInfo.multiplier;
-        out.priceNote = `CGC ${numericGrade} estimate`;
-        console.log(
-          `[enrich] pricecharting base=$${pc} × ${gradeInfo.multiplier} (CGC ${numericGrade}) = $${adjusted.toFixed(2)}`
-        );
+      if (isGraded === true && numericGrade != null) {
+        const gradeInfo = getGradeMultiplier(numericGrade);
+        if (gradeInfo) {
+          const adjusted = pc * gradeInfo.multiplier;
+          out.price = fmtUsd(adjusted);
+          out.priceLow = fmtUsd(adjusted * 0.85);
+          out.priceHigh = fmtUsd(adjusted * 1.15);
+          out.gradeMultiplier = gradeInfo.multiplier;
+          out.priceNote = `CGC ${numericGrade} estimate`;
+          console.log(
+            `[enrich] pricecharting base=$${pc} × ${gradeInfo.multiplier} (CGC ${numericGrade}) = $${adjusted.toFixed(2)}`
+          );
+        }
       } else {
-        out.price = fmtUsd(pc);
-        out.priceLow = fmtUsd(pc * 0.75);
-        out.priceHigh = fmtUsd(pc * 1.25);
+        // Raw comic: apply grade multiplier from grade string.
+        const rawInfo = getRawGradeMultiplier(grade);
+        const adjusted = pc * rawInfo.multiplier;
+        out.price = fmtUsd(adjusted);
+        out.priceLow = fmtUsd(adjusted * 0.75);
+        out.priceHigh = fmtUsd(adjusted * 1.25);
+        out.gradeMultiplier = rawInfo.multiplier;
+        out.priceNote = `${rawInfo.label} estimate`;
+        console.log(
+          `[enrich] pricecharting base=$${pc} × ${rawInfo.multiplier} (${rawInfo.label}) = $${adjusted.toFixed(2)}`
+        );
       }
       out.pricingSource = "pricecharting";
     } else if (rawComps && rawComps.count > 0) {

@@ -214,7 +214,11 @@ function ResultCard({ result, enriching }) {
           No cover photo — rescan for image
         </div>
       )}
-      {result.grade && <div className="grade-badge">CGC {result.grade}</div>}
+      {result.isGraded === true && result.numericGrade != null
+        ? <div className="grade-badge cgc">CGC {result.numericGrade}</div>
+        : result.grade
+          ? <div className="grade-badge raw">{result.grade}</div>
+          : null}
       {result.keyIssue && <div className="key-box">⭐ {result.keyIssue}</div>}
       {recommendedLabel && (
         <>
@@ -222,6 +226,11 @@ function ResultCard({ result, enriching }) {
             Recommended list price
           </div>
           <div className="price">{recommendedLabel}</div>
+          {result.priceNote && (
+            <div style={{ color: "#aaa", fontSize: 12 }}>
+              {result.priceNote}
+            </div>
+          )}
           {hasComps && (
             <div className="muted small">
               Based on {comps.count} eBay sale{comps.count === 1 ? "" : "s"} in last 30 days
@@ -469,7 +478,9 @@ function ResultCard({ result, enriching }) {
             className="muted small"
             style={{ marginTop: 8, fontStyle: "italic" }}
           >
-            Source: Browse API — active listings
+            {result.pricingSource === "pricecharting"
+              ? "Source: PriceCharting market data"
+              : "Source: Browse API — active listings"}
             {Array.isArray(result.soldComps) && result.soldComps.length > 0 && " + eBay sold"}
           </div>
         </div>
@@ -1035,7 +1046,11 @@ function CollectionList({ items, totalValue, onOpen, onDelete }) {
                 {item.year}
               </div>
               <div className="collection-row">
-                {item.grade && <span className="grade-badge sm">CGC {item.grade}</span>}
+                {item.isGraded === true && item.numericGrade != null
+                  ? <span className="grade-badge sm cgc">CGC {item.numericGrade}</span>
+                  : item.grade
+                    ? <span className="grade-badge sm raw">{item.grade}</span>
+                    : null}
                 {item.keyIssue && <span className="key-flag">⭐</span>}
                 {item.status === "listed" && <span className="listed-badge">Listed</span>}
                 {item.price && <span className="collection-price">{item.price}</span>}
