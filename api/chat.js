@@ -1,0 +1,125 @@
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  try {
+    const { message, collection, history } = req.body || {};
+    if (!message) {
+      res.status(400).json({ error: "message required" });
+      return;
+    }
+
+    // Build collection summary for Claude context (strip images).
+    const comics = (collection || []).map((c) => ({
+      id: c.id,
+      title: c.title,
+      publisher: c.publisher,
+      year: c.year,
+      grade: c.grade,
+      isGraded: c.isGraded,
+      numericGrade: c.numericGrade,
+      keyIssue: c.keyIssue,
+      price: c.price,
+      priceLow: c.priceLow,
+      priceHigh: c.priceHigh,
+      status: c.status || "unlisted",
+      listedAt: c.listedAt || null,
+      timestamp: c.timestamp,
+      comps: c.comps
+        ? {
+            averageNum: c.comps.averageNum,
+            lowestNum: c.comps.lowestNum,
+            count: c.comps.count,
+          }
+        : null,
+    }));
+
+    const totalValue = comics.reduce((s, c) => {
+      const p = c.comps?.averageNum || parseFloat(String(c.price).replace(/[^0-9.]/g, "")) || 0;
+      return s + p;
+    }, 0);
+
+    const systemPrompt = `You are the collection manager AI for Comic Vault. You have complete knowledge of this collector's inventory.
+
+COLLECTION (${comics.length} comics, ~$${Math.round(totalValue).toLocaleString()} estimated value):
+${JSON.stringify(comics)}
+
+RULES:
+- Keep responses under 3 sentences. Be direct and actionable.
+- When recommending an action, include it in the "actions" array of your JSON response.
+- Always respond with ONLY valid JSON, no markdown, no explanation outside the JSON.
+- Response shape: { "response": "your message text", "actions": [...], "metrics": [...], "signals": [...] }
+
+ACTIONS array (optional buttons the user can tap):
+- { "label": "List Now — $X", "action": "list", "comicId": "xxx" }
+- { "label": "Create Bundle — $X", "action": "bundle", "comicIds": ["xxx","yyy"], "price": number }
+- { "label": "View Details", "action": "view", "comicId": "xxx" }
+
+METRICS array (exactly 4 boxes for the dashboard, ordered by priority):
+Each: { "label": string, "value": string, "color": "red"|"yellow"|"green", "detail": string, "filter": string }
+- color: red = action needed now, yellow = watch this, green = good position
+- filter: a search string that filters the collection grid when tapped
+Pick the 4 most relevant from: Total Value, Hot Right Now, Stagnant Alert, Bundle Ready, Grade Signal, Market Alert, Listed Count, Key Issues
+
+SIGNALS array (3-5 short market intelligence strings for the scrolling strip):
+Each: string like "📈 Variant covers +12% this week" or "🔥 ASM #300 — high demand"
+
+Always include metrics and signals in EVERY response.`;
+
+    // Build message history (keep last 5 exchanges for continuity).
+    const messages = [];
+    if (Array.isArray(history)) {
+      for (const h of history.slice(-10)) {
+        messages.push({
+          role: h.role === "assistant" ? "assistant" : "user",
+          content: h.content,
+        });
+      }
+    }
+    messages.push({ role: "user", content: message });
+
+    const result = await client.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 800,
+      system: systemPrompt,
+      messages,
+    });
+
+    const text = result.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]);
+        } catch {
+          parsed = { response: text, actions: [], metrics: [], signals: [] };
+        }
+      } else {
+        parsed = { response: text, actions: [], metrics: [], signals: [] };
+      }
+    }
+
+    // Ensure arrays exist.
+    parsed.actions = parsed.actions || [];
+    parsed.metrics = parsed.metrics || [];
+    parsed.signals = parsed.signals || [];
+
+    res.status(200).json(parsed);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "Server error" });
+  }
+}

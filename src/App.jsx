@@ -1598,563 +1598,514 @@ function CollectionDetail({
   );
 }
 
-// --- Tiny SVG line chart (no dependencies) ---
-function MiniChart({ data, width = 320, height = 120 }) {
-  if (!data || data.length < 2) {
-    return (
-      <div
-        style={{
-          height,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <span className="muted small">Not enough data yet — check back after a few days</span>
-      </div>
-    );
-  }
-  const values = data.map((d) => d.totalValue);
-  const minV = Math.min(...values);
-  const maxV = Math.max(...values);
-  const range = maxV - minV || 1;
-  const pad = 8;
-  const w = width - pad * 2;
-  const h = height - pad * 2;
-  const pts = data.map((d, i) => {
-    const x = pad + (i / (data.length - 1)) * w;
-    const y = pad + h - ((d.totalValue - minV) / range) * h;
-    return `${x},${y}`;
-  });
+// --- Manage Tab: Claude Command Center ---
 
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height }}>
-      <polyline
-        points={pts.join(" ")}
-        fill="none"
-        stroke="#d4af37"
-        strokeWidth="2.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      {data.length > 0 && (() => {
-        const last = data[data.length - 1];
-        const x = pad + w;
-        const y = pad + h - ((last.totalValue - minV) / range) * h;
-        return <circle cx={x} cy={y} r="4" fill="#d4af37" />;
-      })()}
-      {/* Y-axis labels */}
-      <text x={pad} y={pad + 4} fill="#666" fontSize="10" fontFamily="inherit">
-        {fmt(maxV)}
-      </text>
-      <text x={pad} y={height - 2} fill="#666" fontSize="10" fontFamily="inherit">
-        {fmt(minV)}
-      </text>
-    </svg>
-  );
-}
-
-const FILTER_PILLS = [
-  { key: "all", label: "All" },
-  { key: "listed", label: "Listed" },
-  { key: "unlisted", label: "Unlisted" },
-  { key: "keys", label: "Key Issues" },
-  { key: "highValue", label: "High Value" },
-  { key: "stagnant", label: "Stagnant" },
-  { key: "bundle", label: "Bundle Ready" },
-];
-
-function ManagePage({ catalogue, totalValue, analysis, snapshots, onRefreshAnalysis, analyzing, onOpenItem }) {
+function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
+  const [chatInput, setChatInput] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [metrics, setMetrics] = useState([]);
+  const [signals, setSignals] = useState([]);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [selected, setSelected] = useState(new Set());
-  const [selectMode, setSelectMode] = useState(false);
+  const [aiTags, setAiTags] = useState({});
+  const chatEndRef = useRef(null);
+  const inputRef = useRef(null);
+  const [booted, setBooted] = useState(false);
 
-  const stagnantIds = new Set((analysis?.stagnant || []).map((s) => s.id));
-  const bundleIds = new Set((analysis?.bundleGroups || []).flatMap((g) => g.ids || []));
-  const listNowIds = new Set((analysis?.listNow || []).map((s) => s.id));
-  const gradeFirstIds = new Set((analysis?.gradeFirst || []).map((s) => s.id));
+  // Auto-boot: ask Claude for initial analysis when tab opens with comics.
+  useEffect(() => {
+    if (booted || catalogue.length === 0) return;
+    setBooted(true);
+    (async () => {
+      setSending(true);
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: "Give me a quick status update on my collection. What should I focus on today?",
+            collection: catalogue,
+            history: [],
+          }),
+        });
+        const data = await res.json();
+        if (data.response) {
+          setMessages([{ role: "assistant", content: data.response, actions: data.actions }]);
+        }
+        if (data.metrics?.length) setMetrics(data.metrics);
+        if (data.signals?.length) setSignals(data.signals);
+        applyAiTags(data);
+      } catch { /* silent boot failure */ }
+      finally { setSending(false); }
+    })();
+  }, [catalogue, booted]);
 
-  const getAiTag = (item) => {
-    if (listNowIds.has(item.id)) return { emoji: "🔥", label: "HOT" };
-    if (stagnantIds.has(item.id)) return { emoji: "⏳", label: "STAGNANT" };
-    if (bundleIds.has(item.id)) return { emoji: "📦", label: "BUNDLE" };
-    if (gradeFirstIds.has(item.id)) return { emoji: "💎", label: "GRADE" };
-    return null;
-  };
-
-  const q = search.toLowerCase().trim();
-  const filtered = catalogue.filter((item) => {
-    // Text search
-    if (q) {
-      const hay = `${item.title} ${item.publisher} ${item.year} ${item.grade}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    // Filter pills
-    switch (filter) {
-      case "listed": return item.status === "listed";
-      case "unlisted": return item.status !== "listed";
-      case "keys": return item.keyIssue && item.keyIssue !== "N/A";
-      case "highValue": return marketValueOf(item) >= 100;
-      case "stagnant": return stagnantIds.has(item.id);
-      case "bundle": return bundleIds.has(item.id);
-      default: return true;
-    }
-  });
-
-  const toggleSelect = (id) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+  const applyAiTags = (data) => {
+    const tags = {};
+    (data.actions || []).forEach((a) => {
+      if (a.action === "list" && a.comicId) tags[a.comicId] = { emoji: "🔥", label: "HOT" };
+      if (a.action === "bundle" && a.comicIds) {
+        a.comicIds.forEach((id) => { tags[id] = { emoji: "📦", label: "BUNDLE" }; });
+      }
     });
+    // Parse metrics for tags
+    (data.metrics || []).forEach((m) => {
+      if (m.label?.toLowerCase().includes("stagnant") && m.filter) {
+        catalogue.forEach((c) => {
+          if (!tags[c.id] && c.status !== "listed") {
+            const days = (Date.now() - (c.timestamp || 0)) / 86400000;
+            if (days > 30) tags[c.id] = { emoji: "⏳", label: "STAGNANT" };
+          }
+        });
+      }
+      if (m.label?.toLowerCase().includes("hot") || m.label?.toLowerCase().includes("peak")) {
+        catalogue.forEach((c) => {
+          if (!tags[c.id] && c.keyIssue && c.keyIssue !== "N/A" && marketValueOf(c) >= 50) {
+            tags[c.id] = { emoji: "🔥", label: "HOT" };
+          }
+        });
+      }
+    });
+    setAiTags((prev) => ({ ...prev, ...tags }));
   };
 
-  const handleLongPress = (id) => {
-    setSelectMode(true);
-    setSelected(new Set([id]));
+  const sendMessage = async (text) => {
+    if (!text.trim() || sending) return;
+    const userMsg = { role: "user", content: text.trim() };
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
+    setChatInput("");
+    setSending(true);
+
+    try {
+      const history = nextMessages.slice(-10).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text.trim(),
+          collection: catalogue,
+          history: history.slice(0, -1),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      const assistantMsg = {
+        role: "assistant",
+        content: data.response || "I couldn't analyze that.",
+        actions: data.actions,
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+      if (data.metrics?.length) setMetrics(data.metrics);
+      if (data.signals?.length) setSignals(data.signals);
+      applyAiTags(data);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Something went wrong. Try again." },
+      ]);
+    } finally {
+      setSending(false);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+    }
   };
 
-  const analyzedAgo = analysis?.analyzedAt
-    ? (() => {
-        const mins = Math.round((Date.now() - analysis.analyzedAt) / 60000);
-        if (mins < 1) return "just now";
-        if (mins < 60) return `${mins}m ago`;
-        const hrs = Math.round(mins / 60);
-        if (hrs < 24) return `${hrs}h ago`;
-        return `${Math.round(hrs / 24)}d ago`;
-      })()
-    : null;
-
-  const s = {
-    section: {
-      border: "1px solid rgba(212,175,55,0.3)",
-      borderRadius: 10,
-      padding: 14,
-      background: "rgba(212,175,55,0.05)",
-      marginBottom: 12,
-    },
-    sectionTitle: {
-      textTransform: "uppercase",
-      letterSpacing: 1,
-      fontSize: 11,
-      color: "#999",
-      marginBottom: 10,
-      fontWeight: 600,
-    },
-    recRow: {
-      display: "flex",
-      gap: 8,
-      alignItems: "flex-start",
-      padding: "6px 0",
-      fontSize: 14,
-    },
-    pill: (active) => ({
-      padding: "6px 14px",
-      borderRadius: 20,
-      fontSize: 13,
-      fontWeight: 600,
-      border: active ? "1px solid #d4af37" : "1px solid rgba(255,255,255,0.15)",
-      background: active ? "rgba(212,175,55,0.2)" : "transparent",
-      color: active ? "#d4af37" : "#999",
-      cursor: "pointer",
-      whiteSpace: "nowrap",
-    }),
-    listRow: {
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      padding: "10px 0",
-      borderBottom: "1px solid rgba(255,255,255,0.06)",
-      cursor: "pointer",
-    },
+  const handleAction = (action) => {
+    if (action.action === "list" && action.comicId) {
+      const comic = catalogue.find((c) => c.id === action.comicId);
+      if (comic && onListComic) onListComic(comic);
+    } else if (action.action === "view" && action.comicId) {
+      const comic = catalogue.find((c) => c.id === action.comicId);
+      if (comic) onOpenItem(comic);
+    } else if (action.action === "bundle" && action.comicIds) {
+      // Show bundle in chat
+      const titles = action.comicIds
+        .map((id) => catalogue.find((c) => c.id === id)?.title)
+        .filter(Boolean);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `Bundle created: ${titles.join(", ")}${action.price ? ` — suggested price $${action.price}` : ""}. List them together on eBay for a faster sale.`,
+        },
+      ]);
+    }
   };
+
+  // Filter and sort collection
+  const q = search.toLowerCase().trim();
+  const filtered = catalogue
+    .filter((item) => {
+      if (!q) return true;
+      // Support "$100+" style queries
+      const priceMatch = q.match(/^\$(\d+)\+?$/);
+      if (priceMatch) return (marketValueOf(item) || 0) >= parseInt(priceMatch[1]);
+      if (q === "key" || q === "keys") return item.keyIssue && item.keyIssue !== "N/A";
+      if (q === "listed") return item.status === "listed";
+      if (q === "unlisted") return item.status !== "listed";
+      if (q === "hot") return aiTags[item.id]?.label === "HOT";
+      if (q === "stagnant") return aiTags[item.id]?.label === "STAGNANT";
+      if (q === "bundle") return aiTags[item.id]?.label === "BUNDLE";
+      const hay = `${item.title} ${item.publisher} ${item.year} ${item.grade} ${item.keyIssue}`.toLowerCase();
+      return hay.includes(q);
+    })
+    .sort((a, b) => {
+      // HOT first, STAGNANT last
+      const tagOrder = { HOT: 0, BUNDLE: 1, STAGNANT: 3 };
+      const aO = tagOrder[aiTags[a.id]?.label] ?? 2;
+      const bO = tagOrder[aiTags[b.id]?.label] ?? 2;
+      if (aO !== bO) return aO - bO;
+      return (marketValueOf(b) || 0) - (marketValueOf(a) || 0);
+    });
+
+  const metricColors = { red: "#dc2626", yellow: "#d4af37", green: "#16a34a" };
 
   return (
-    <div style={{ paddingBottom: 8 }}>
-      {/* SEARCH BAR */}
-      <div style={{ position: "relative", marginBottom: 10 }}>
-        <input
-          type="text"
-          placeholder="Search title, publisher, year..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "12px 14px",
-            background: "rgba(255,255,255,0.08)",
-            border: "1px solid rgba(212,175,55,0.3)",
-            borderRadius: 10,
-            color: "#fff",
-            fontSize: 15,
-            outline: "none",
-            boxSizing: "border-box",
-          }}
-        />
-      </div>
+    <div style={{ paddingBottom: 8, display: "flex", flexDirection: "column", gap: 12 }}>
 
-      {/* FILTER PILLS */}
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          overflowX: "auto",
-          paddingBottom: 12,
-          WebkitOverflowScrolling: "touch",
-        }}
-      >
-        {FILTER_PILLS.map((p) => (
-          <button
-            key={p.key}
-            onClick={() => { setFilter(p.key); setSelectMode(false); setSelected(new Set()); }}
-            style={s.pill(filter === p.key)}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
-
-      {/* AI OVERVIEW CARD */}
-      <div style={s.section}>
-        <div style={s.sectionTitle}>AI Collection Intelligence</div>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>
-          {catalogue.length} comic{catalogue.length === 1 ? "" : "s"} · {fmt(totalValue)} est. value
-        </div>
-
-        {analysis ? (
-          <>
-            {analysis.marketSummary && (
-              <div style={{ fontSize: 14, color: "#ccc", marginBottom: 12, lineHeight: 1.5 }}>
-                {analysis.marketSummary}
-              </div>
-            )}
-
-            {analysis.trending?.length > 0 && (
-              <div style={s.recRow}>
-                <span>📈</span>
-                <span>
-                  <strong>Trending up:</strong>{" "}
-                  {analysis.trending.map((t) => t.title).join(", ")}
-                </span>
-              </div>
-            )}
-            {analysis.listNow?.length > 0 && (
-              <div style={s.recRow}>
-                <span>🔥</span>
-                <span>
-                  <strong>List now:</strong> {analysis.listNow.length} book{analysis.listNow.length === 1 ? "" : "s"} at peak value
-                </span>
-              </div>
-            )}
-            {analysis.stagnant?.length > 0 && (
-              <div style={s.recRow}>
-                <span>⏳</span>
-                <span>
-                  <strong>Stagnant:</strong> {analysis.stagnant.length} book{analysis.stagnant.length === 1 ? "" : "s"} (30+ days unlisted)
-                </span>
-              </div>
-            )}
-            {analysis.bundleGroups?.length > 0 && (
-              <div style={s.recRow}>
-                <span>📦</span>
-                <span>
-                  <strong>Bundle opportunity:</strong>{" "}
-                  {analysis.bundleGroups.map((g) => `${g.ids?.length || 0} ${g.reason || "books"}`).join(", ")}
-                </span>
-              </div>
-            )}
-            {analysis.gradeFirst?.length > 0 && (
-              <div style={s.recRow}>
-                <span>💎</span>
-                <span>
-                  <strong>Grade before selling:</strong> {analysis.gradeFirst.length} high-value raw{analysis.gradeFirst.length === 1 ? "" : "s"}
-                </span>
-              </div>
-            )}
-            {analysis.valueChange != null && analysis.valueChange !== 0 && (
-              <div style={s.recRow}>
-                <span>{analysis.valueChange > 0 ? "📈" : "📉"}</span>
-                <span>
-                  Collection value {analysis.valueChange > 0 ? "up" : "down"}{" "}
-                  {Math.abs(analysis.valueChange)}% vs 30 days ago
-                </span>
-              </div>
-            )}
-
-            {analyzedAgo && (
-              <div className="muted small" style={{ marginTop: 8, fontStyle: "italic" }}>
-                Last analyzed: {analyzedAgo}
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="muted small">
-            Tap the button below to get AI recommendations for your collection.
-          </div>
-        )}
-
-        <button
-          onClick={onRefreshAnalysis}
-          disabled={analyzing || catalogue.length === 0}
-          style={{
-            width: "100%",
-            marginTop: 12,
-            padding: "14px",
-            background: analyzing
-              ? "rgba(212,175,55,0.15)"
-              : "linear-gradient(135deg, #d4af37, #b8941f)",
-            color: analyzing ? "#d4af37" : "#0a0a0a",
-            border: "none",
-            borderRadius: 10,
-            fontSize: 15,
-            fontWeight: 700,
-            cursor: analyzing ? "wait" : "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 10,
-          }}
+      {/* 1. CLAUDE CHAT BAR */}
+      <div style={{
+        background: "rgba(212,175,55,0.08)",
+        border: "1px solid rgba(212,175,55,0.3)",
+        borderRadius: 12,
+        padding: 12,
+      }}>
+        <form
+          onSubmit={(e) => { e.preventDefault(); sendMessage(chatInput); }}
+          style={{ display: "flex", gap: 8 }}
         >
-          {analyzing ? (
-            <>
-              <span
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Ask Claude about your collection..."
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            disabled={sending}
+            style={{
+              flex: 1,
+              padding: "12px 14px",
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(212,175,55,0.2)",
+              borderRadius: 10,
+              color: "#fff",
+              fontSize: 15,
+              outline: "none",
+            }}
+          />
+          <button
+            type="submit"
+            disabled={sending || !chatInput.trim()}
+            style={{
+              padding: "12px 18px",
+              background: sending ? "rgba(212,175,55,0.2)" : "linear-gradient(135deg, #d4af37, #b8941f)",
+              color: sending ? "#d4af37" : "#0a0a0a",
+              border: "none",
+              borderRadius: 10,
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: sending ? "wait" : "pointer",
+              flexShrink: 0,
+            }}
+          >
+            {sending ? "..." : "Ask"}
+          </button>
+        </form>
+
+        {/* Chat messages */}
+        {messages.length > 0 && (
+          <div style={{ marginTop: 12, maxHeight: 260, overflowY: "auto" }}>
+            {messages.map((m, i) => (
+              <div
+                key={i}
                 style={{
-                  display: "inline-block",
-                  width: 14,
-                  height: 14,
+                  padding: "10px 12px",
+                  marginBottom: 8,
+                  borderRadius: 10,
+                  background: m.role === "user"
+                    ? "rgba(255,255,255,0.06)"
+                    : "rgba(212,175,55,0.1)",
+                  border: m.role === "assistant" ? "1px solid rgba(212,175,55,0.2)" : "none",
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                }}
+              >
+                {m.role === "assistant" && (
+                  <div style={{ fontSize: 11, color: "#d4af37", fontWeight: 600, marginBottom: 4 }}>
+                    🧠 Claude
+                  </div>
+                )}
+                <div style={{ color: m.role === "user" ? "#999" : "#e0e0e0" }}>
+                  {m.content}
+                </div>
+                {m.actions?.length > 0 && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    {m.actions.map((a, j) => (
+                      <button
+                        key={j}
+                        onClick={() => handleAction(a)}
+                        style={{
+                          padding: "8px 14px",
+                          background: a.action === "list"
+                            ? "linear-gradient(135deg, #d4af37, #b8941f)"
+                            : "rgba(212,175,55,0.15)",
+                          color: a.action === "list" ? "#0a0a0a" : "#d4af37",
+                          border: a.action === "list" ? "none" : "1px solid rgba(212,175,55,0.3)",
+                          borderRadius: 8,
+                          fontSize: 13,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {sending && (
+              <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{
+                  width: 14, height: 14,
                   border: "2px solid rgba(212,175,55,0.3)",
                   borderTopColor: "#d4af37",
                   borderRadius: "50%",
                   animation: "spin 0.8s linear infinite",
+                }} />
+                <span className="muted small">Claude is thinking...</span>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+        )}
+
+        {/* Quick prompts when no messages yet */}
+        {messages.length === 0 && !sending && (
+          <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+            {["What should I sell?", "Key issues?", "Stagnant books?", "Bundle ideas?"].map((q) => (
+              <button
+                key={q}
+                onClick={() => sendMessage(q)}
+                style={{
+                  padding: "6px 12px",
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 20,
+                  color: "#999",
+                  fontSize: 12,
+                  cursor: "pointer",
                 }}
-              />
-              Analyzing collection…
-            </>
-          ) : (
-            "🧠 Refresh AI Analysis"
-          )}
-        </button>
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* MARKET TREND CHART */}
-      <div style={s.section}>
-        <div style={s.sectionTitle}>Collection Value Trend</div>
-        <MiniChart data={snapshots} />
-      </div>
-
-      {/* BUNDLE GROUPS */}
-      {analysis?.bundleGroups?.length > 0 && (
-        <div style={s.section}>
-          <div style={s.sectionTitle}>Bundle Opportunities</div>
-          {analysis.bundleGroups.map((g, i) => (
+      {/* 4. MARKET INTELLIGENCE STRIP */}
+      {signals.length > 0 && (
+        <div style={{
+          display: "flex",
+          gap: 10,
+          overflowX: "auto",
+          paddingBottom: 4,
+          WebkitOverflowScrolling: "touch",
+        }}>
+          {signals.map((sig, i) => (
             <div
               key={i}
+              onClick={() => sendMessage(`Tell me more about: ${sig}`)}
               style={{
-                padding: "10px 0",
-                borderBottom:
-                  i < analysis.bundleGroups.length - 1
-                    ? "1px solid rgba(212,175,55,0.15)"
-                    : "none",
+                flexShrink: 0,
+                padding: "8px 14px",
+                background: "rgba(212,175,55,0.08)",
+                border: "1px solid rgba(212,175,55,0.2)",
+                borderRadius: 10,
+                fontSize: 13,
+                color: "#ccc",
+                cursor: "pointer",
+                maxWidth: 260,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
               }}
             >
-              <div style={{ fontSize: 14, fontWeight: 700 }}>
-                📦 {g.titles?.join(", ") || g.reason}
+              {sig}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 2. DYNAMIC METRIC BOXES */}
+      {metrics.length > 0 && (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 10,
+        }}>
+          {metrics.slice(0, 4).map((m, i) => (
+            <div
+              key={i}
+              onClick={() => {
+                if (m.filter) setSearch(m.filter);
+                else sendMessage(`Tell me about ${m.label}`);
+              }}
+              style={{
+                padding: 14,
+                borderRadius: 10,
+                border: `1px solid ${metricColors[m.color] || "#d4af37"}40`,
+                background: `${metricColors[m.color] || "#d4af37"}10`,
+                cursor: "pointer",
+              }}
+            >
+              <div style={{
+                fontSize: 20,
+                fontWeight: 800,
+                color: metricColors[m.color] || "#d4af37",
+              }}>
+                {m.value}
               </div>
-              {g.suggestedPrice != null && (
-                <div style={{ fontSize: 13, color: "#d4af37", marginTop: 4 }}>
-                  Bundle price: ${Math.round(g.suggestedPrice).toLocaleString()}
-                </div>
-              )}
-              {g.reason && g.titles && (
-                <div className="muted small" style={{ marginTop: 2 }}>{g.reason}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#ccc", marginTop: 2 }}>
+                {m.label}
+              </div>
+              {m.detail && (
+                <div className="muted small" style={{ marginTop: 4 }}>{m.detail}</div>
               )}
             </div>
           ))}
         </div>
       )}
 
-      {/* BULK SELECT BAR */}
-      {selectMode && selected.size > 0 && (
-        <div
-          style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 100,
-            background: "#1a1a1a",
-            padding: "10px 0",
-            marginBottom: 8,
-            display: "flex",
-            gap: 8,
-            borderBottom: "1px solid rgba(212,175,55,0.3)",
-          }}
-        >
-          <button
-            onClick={() => { setSelectMode(false); setSelected(new Set()); }}
-            style={{
-              padding: "8px 14px",
-              background: "transparent",
-              border: "1px solid rgba(255,255,255,0.15)",
-              borderRadius: 8,
-              color: "#999",
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            Cancel ({selected.size})
-          </button>
-        </div>
-      )}
-
-      {/* FILTERED COLLECTION LIST */}
+      {/* 3. COLLECTION GRID */}
       <div>
+        <input
+          type="text"
+          placeholder='Search: title, "key", "$100+", "hot"...'
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            width: "100%",
+            padding: "10px 14px",
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 10,
+            color: "#fff",
+            fontSize: 14,
+            outline: "none",
+            boxSizing: "border-box",
+            marginBottom: 10,
+          }}
+        />
+
         {filtered.length === 0 && (
           <div className="muted small" style={{ textAlign: "center", padding: 20 }}>
-            {q ? "No comics match your search" : "No comics in this filter"}
+            {q ? "No comics match" : "No comics in collection yet"}
           </div>
         )}
-        {filtered.map((item) => {
-          const thumbSrc = getComicPhotos(item)[0] || null;
-          const mv = marketValueOf(item);
-          const tag = getAiTag(item);
-          const isSelected = selected.has(item.id);
 
-          const handleClick = () => {
-            if (selectMode) {
-              toggleSelect(item.id);
-            } else {
-              onOpenItem(item);
-            }
-          };
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+          gap: 10,
+        }}>
+          {filtered.map((item) => {
+            const thumbSrc = getComicPhotos(item)[0] || null;
+            const mv = marketValueOf(item);
+            const tag = aiTags[item.id];
 
-          let pressTimer = null;
-          const onTouchStart = () => {
-            pressTimer = setTimeout(() => handleLongPress(item.id), 500);
-          };
-          const onTouchEnd = () => clearTimeout(pressTimer);
-
-          return (
-            <div
-              key={item.id}
-              style={{
-                ...s.listRow,
-                background: isSelected ? "rgba(212,175,55,0.1)" : "transparent",
-              }}
-              onClick={handleClick}
-              onTouchStart={onTouchStart}
-              onTouchEnd={onTouchEnd}
-              onTouchCancel={onTouchEnd}
-            >
-              {selectMode && (
-                <div
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 6,
-                    border: isSelected
-                      ? "2px solid #d4af37"
-                      : "2px solid rgba(255,255,255,0.2)",
-                    background: isSelected ? "#d4af37" : "transparent",
-                    flexShrink: 0,
+            return (
+              <div
+                key={item.id}
+                onClick={() => onOpenItem(item)}
+                style={{
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.03)",
+                  overflow: "hidden",
+                  cursor: "pointer",
+                }}
+              >
+                {thumbSrc ? (
+                  <img
+                    src={thumbSrc}
+                    alt=""
+                    loading="lazy"
+                    style={{
+                      width: "100%",
+                      height: 160,
+                      objectFit: "cover",
+                    }}
+                  />
+                ) : (
+                  <div style={{
+                    width: "100%",
+                    height: 160,
+                    background: "rgba(255,255,255,0.04)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: "#0a0a0a",
-                    fontSize: 14,
-                    fontWeight: 700,
-                  }}
-                >
-                  {isSelected ? "✓" : ""}
-                </div>
-              )}
-              {thumbSrc ? (
-                <img
-                  src={thumbSrc}
-                  alt=""
-                  loading="lazy"
-                  style={{
-                    width: 44,
-                    height: 60,
-                    objectFit: "cover",
-                    borderRadius: 6,
-                    flexShrink: 0,
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    width: 44,
-                    height: 60,
-                    borderRadius: 6,
-                    background: "rgba(255,255,255,0.05)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 20,
-                    flexShrink: 0,
-                  }}
-                >
-                  📘
-                </div>
-              )}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 14,
+                    fontSize: 40,
+                  }}>
+                    📘
+                  </div>
+                )}
+                <div style={{ padding: "8px 10px" }}>
+                  <div style={{
+                    fontSize: 13,
                     fontWeight: 700,
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
-                  }}
-                >
-                  {item.title || "Unknown"}
-                </div>
-                <div className="muted small">
-                  {item.grade || "Raw"} · {mv != null ? fmt(mv) : "—"}
+                    marginBottom: 4,
+                  }}>
+                    {item.title || "Unknown"}
+                  </div>
+                  <div style={{
+                    fontSize: 15,
+                    fontWeight: 800,
+                    color: "#d4af37",
+                  }}>
+                    {mv != null ? fmt(mv) : "—"}
+                  </div>
+                  <div style={{
+                    display: "flex",
+                    gap: 4,
+                    marginTop: 6,
+                    flexWrap: "wrap",
+                  }}>
+                    {tag && (
+                      <span style={{
+                        fontSize: 10,
+                        padding: "2px 7px",
+                        borderRadius: 5,
+                        background: tag.label === "HOT" ? "rgba(220,38,38,0.2)" : tag.label === "STAGNANT" ? "rgba(245,158,11,0.2)" : "rgba(212,175,55,0.15)",
+                        color: tag.label === "HOT" ? "#dc2626" : tag.label === "STAGNANT" ? "#f59e0b" : "#d4af37",
+                        fontWeight: 700,
+                      }}>
+                        {tag.emoji} {tag.label}
+                      </span>
+                    )}
+                    {item.status === "listed" && (
+                      <span style={{
+                        fontSize: 10,
+                        padding: "2px 7px",
+                        borderRadius: 5,
+                        background: "rgba(22,163,106,0.2)",
+                        color: "#16a34a",
+                        fontWeight: 700,
+                      }}>
+                        LISTED
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                {tag && (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      padding: "3px 8px",
-                      borderRadius: 6,
-                      background: "rgba(212,175,55,0.15)",
-                      color: "#d4af37",
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {tag.emoji} {tag.label}
-                  </span>
-                )}
-                {item.status === "listed" && (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      padding: "3px 8px",
-                      borderRadius: 6,
-                      background: "rgba(22,163,106,0.2)",
-                      color: "#16a34a",
-                      fontWeight: 600,
-                    }}
-                  >
-                    LISTED
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* SHIPPING PLACEHOLDER */}
-      <div style={{ ...s.section, marginTop: 12 }}>
-        <div style={s.sectionTitle}>Shipping</div>
-        <div className="muted small" style={{ textAlign: "center", padding: 8 }}>
-          Shipping labels will appear here when books are sold on eBay.
-          USPS Media Mail pre-filled with item details.
+            );
+          })}
         </div>
       </div>
     </div>
@@ -2890,14 +2841,11 @@ export default function App() {
         <ManagePage
           catalogue={catalogue}
           totalValue={totalValue}
-          analysis={analysis}
-          snapshots={snapshots}
-          onRefreshAnalysis={refreshAnalysis}
-          analyzing={analyzing}
           onOpenItem={(item) => {
             setSelectedItem(item);
             setTab("collection");
           }}
+          onListComic={listOnEbay}
         />
       )}
 
