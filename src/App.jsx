@@ -209,7 +209,7 @@ function ResultCard({ result, enriching }) {
         {result.publisher && result.year ? " · " : ""}
         {result.year}
       </div>
-      {result.noImage && (
+      {!result.image && (
         <div className="muted small" style={{ fontStyle: "italic" }}>
           No cover photo — rescan for image
         </div>
