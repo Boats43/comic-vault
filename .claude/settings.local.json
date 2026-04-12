@@ -19,7 +19,10 @@
       "Bash(curl -s -X POST http://localhost:3999/api/chat -H 'Content-Type: application/json' -d '{:*)",
       "Bash(node -e ':*)",
       "Bash(curl:*)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(python -m json.tool)",
+      "Bash(break)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'query: {d[\\\\\"query\\\\\"]}'\\); print\\(f'count: {d[\\\\\"count\\\\\"]}'\\); print\\(f'avg: {d.get\\(\\\\\"averageFormatted\\\\\",\\\\\"n/a\\\\\"\\)}'\\)\")"
     ]
   }
 }

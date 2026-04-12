@@ -261,12 +261,22 @@ const hasIssueNumber = (listingTitle, issueNum) => {
   );
 };
 
-const buildKeywords = (title, { isGraded, numericGrade, year } = {}) => {
+const buildKeywords = (title, { issue, isGraded, numericGrade, year } = {}) => {
   if (!title) return "";
   // Strip leading articles
   let cleanTitle = String(title).trim();
   cleanTitle = cleanTitle.replace(/^(The|A|An)\s+/i, "");
+  // Strip special characters that break eBay search (keep hyphens)
+  cleanTitle = cleanTitle
+    .replace(/:/g, "")
+    .replace(/['"!?]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
   const parts = [cleanTitle];
+  if (issue) {
+    const iss = String(issue).trim();
+    if (iss) parts.push(`#${iss}`);
+  }
   if (isGraded === true && numericGrade != null && !isNaN(numericGrade)) {
     parts.push("CGC", String(numericGrade));
   }
@@ -282,6 +292,7 @@ const buildKeywords = (title, { isGraded, numericGrade, year } = {}) => {
 // the grade flow can fall through to the AI estimate path.
 export const fetchComps = async ({
   title,
+  issue,
   grade,
   isGraded,
   numericGrade,
@@ -307,6 +318,7 @@ export const fetchComps = async ({
   const gradedOnly = isGraded === true;
 
   const query = buildKeywords(title, {
+    issue,
     isGraded,
     numericGrade: numericTarget,
     year,
@@ -484,13 +496,14 @@ export default async function handler(req, res) {
   const { EBAY_APP_ID, EBAY_CERT_ID } = process.env;
 
   try {
-    const { title, grade, isGraded, numericGrade, year } = req.body || {};
+    const { title, issue, grade, isGraded, numericGrade, year } = req.body || {};
     if (!title) {
       res.status(400).json({ error: "title required" });
       return;
     }
     const comps = await fetchComps({
       title,
+      issue,
       grade,
       isGraded,
       numericGrade,
