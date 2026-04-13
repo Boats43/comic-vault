@@ -436,16 +436,18 @@ const lookupEbayVisual = async ({ imageBase64, claudeIssue }) => {
     const items = Array.isArray(json?.itemSummaries) ? json.itemSummaries : [];
     if (items.length === 0) return null;
 
-    // Extract issue numbers from titles
+    // Extract issue numbers from titles (1-3 digits only, skip years)
+    console.log('[visual] titles:', items.map((r) => r.title));
     const issueNumbers = [];
     for (const item of items) {
       const title = item.title || "";
-      const m = title.match(/#(\d+)/);
-      if (m) issueNumbers.push(m[1]);
+      const m = title.match(/#(\d{1,3})(?!\d)/);
+      if (m && parseInt(m[1], 10) <= 999) issueNumbers.push(m[1]);
     }
+    console.log('[visual] extracted issues:', issueNumbers);
     if (issueNumbers.length === 0) return null;
 
-    // Find most common issue number
+    // Find most common issue number (majority wins)
     const freq = {};
     for (const n of issueNumbers) {
       freq[n] = (freq[n] || 0) + 1;
@@ -455,6 +457,7 @@ const lookupEbayVisual = async ({ imageBase64, claudeIssue }) => {
     for (const [num, count] of Object.entries(freq)) {
       if (count > maxCount) { mostCommon = num; maxCount = count; }
     }
+    console.log('[visual] winner:', mostCommon, `(${maxCount}/${issueNumbers.length})`);
 
     const claudeStr = claudeIssue ? String(claudeIssue).trim() : null;
     if (mostCommon && claudeStr && mostCommon !== claudeStr) {
