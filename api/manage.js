@@ -37,7 +37,7 @@ export default async function handler(req, res) {
     });
 
     const stripped = comics.map((c) => ({
-      id: c.id, title: c.title, publisher: c.publisher, year: c.year,
+      id: c.id, title: c.title, issue: c.issue || null, publisher: c.publisher, year: c.year,
       grade: c.grade, isGraded: c.isGraded, numericGrade: c.numericGrade,
       keyIssue: c.keyIssue, price: c.price,
       status: c.status || "unlisted", timestamp: c.timestamp,

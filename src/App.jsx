@@ -2307,12 +2307,35 @@ export default function App() {
   }, []);
 
   // Auto-refresh stale prices on load: items saved before enrich persistence
-  // was fixed may have null pricingSource or comps. Limit to 3 concurrent.
+  // was fixed may have null pricingSource or comps. Also sync duplicate copies
+  // where prices differ. Limit to 3 concurrent.
   useEffect(() => {
     if (catalogue.length === 0) return;
-    const stale = catalogue.filter(
+    const missingSource = catalogue.filter(
       (c) => !c.pricingSource || !c.comps
     );
+    const missingIds = new Set(missingSource.map((c) => c.id));
+
+    // Find duplicate groups with inconsistent prices.
+    const groups = {};
+    catalogue.forEach((c) => {
+      const key = [c.title?.toLowerCase(), c.issue, c.year].join("|");
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(c);
+    });
+    const dupStale = [];
+    Object.values(groups).forEach((group) => {
+      if (group.length < 2) return;
+      const prices = group.map((c) =>
+        parseFloat(String(c.price || "0").replace(/[$,]/g, ""))
+      );
+      if (!prices.every((p) => p === prices[0])) {
+        const oldest = group.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))[0];
+        if (!missingIds.has(oldest.id)) dupStale.push(oldest);
+      }
+    });
+
+    const stale = [...missingSource, ...dupStale];
     if (stale.length === 0) return;
     let cancelled = false;
     setRefreshingPrices(stale.length);
@@ -2359,7 +2382,18 @@ export default function App() {
                 comicVine: enrich.comicVine || cur.comicVine || null,
               };
               putComic(updated).catch(() => {});
-              return prev.map((x) => x.id === item.id ? updated : x);
+              return prev.map((x) => {
+                if (x.id === item.id) return updated;
+                // Sync duplicate copies with same title + issue + year.
+                if (x.title?.toLowerCase() === item.title?.toLowerCase()
+                  && x.issue === item.issue
+                  && x.year === item.year) {
+                  const synced = { ...x, price: enrich.price || x.price, priceLow: enrich.priceLow || x.priceLow, priceHigh: enrich.priceHigh || x.priceHigh, comps: enrich.comps || x.comps, pricingSource: enrich.pricingSource || x.pricingSource, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || x.gradeMultiplier };
+                  putComic(synced).catch(() => {});
+                  return synced;
+                }
+                return x;
+              });
             });
             // FIX 4: update detail view if open during background refresh
             setSelectedItem((s) =>
