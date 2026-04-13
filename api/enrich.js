@@ -763,6 +763,35 @@ export default async function handler(req, res) {
       out.priceNote = (out.priceNote || '') + ' · floor enforced';
     }
 
+    // Variant multiplier: adjust price for known variant types.
+    const variant = req.body.variant ? String(req.body.variant).trim() : null;
+    if (variant && out.price) {
+      const variantMultipliers = {
+        'gold': 3.0,
+        '2nd print': 1.5,
+        'second print': 1.5,
+        'newsstand': 1.3,
+        'price variant': 2.0,
+        'whitman': 2.0,
+        '35 cent': 3.0,
+        '30 cent': 3.0,
+      };
+      const vLower = variant.toLowerCase();
+      let vMult = null;
+      for (const [key, mult] of Object.entries(variantMultipliers)) {
+        if (vLower.includes(key)) { vMult = mult; break; }
+      }
+      if (vMult) {
+        const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
+        out.price = fmtUsd(curPrice * vMult);
+        out.priceLow = fmtUsd(curPrice * vMult * 0.75);
+        out.priceHigh = fmtUsd(curPrice * vMult * 1.25);
+        out.variantNote = variant;
+        out.variantMultiplier = vMult;
+        console.log('[variant]', variant, '×', vMult);
+      }
+    }
+
     if (rawComps && rawComps.count > 0) {
       out.comps = {
         count: rawComps.count,

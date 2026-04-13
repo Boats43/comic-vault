@@ -240,6 +240,11 @@ function ResultCard({ result, enriching }) {
           ? <div className="grade-badge raw">{result.grade}</div>
           : null}
       {showKeyIssue(result.keyIssue) && <div className="key-box">⭐ {result.keyIssue}</div>}
+      {result.variant && (
+        <div style={{ color: "#FFD700", fontSize: 13, marginTop: 4, fontWeight: "bold" }}>
+          ⚡ {result.variant}
+        </div>
+      )}
       {result.restoration && (
         <div style={{ background: "#ff000022", border: "1px solid #ff4444", borderRadius: 6, padding: "8px 12px", marginTop: 8, color: "#ff6666" }}>
           ⚠️ RESTORED: {result.restoration}
@@ -1729,6 +1734,11 @@ function CollectionDetail({
           ⭐ {item.keyIssue}
         </div>
       )}
+      {item.variant && (
+        <div style={{ color: "#FFD700", fontSize: 13, marginTop: 4, fontWeight: "bold" }}>
+          ⚡ {item.variant}
+        </div>
+      )}
 
       {/* 3b. RESTORATION WARNING */}
       {item.restoration && (
@@ -1914,6 +1924,11 @@ function CollectionDetail({
             {item.gradeMultiplier != null && (
               <div className="muted small" style={{ marginTop: 4, fontSize: 12 }}>
                 Grade adj: ×{item.gradeMultiplier}{item.priceNote && /estimate|CGC/i.test(item.priceNote) ? ` (${item.priceNote})` : ""}
+              </div>
+            )}
+            {item.variantMultiplier != null && (
+              <div style={{ color: "#aaa", fontSize: 11, marginTop: 4 }}>
+                Variant adj: ×{item.variantMultiplier}
               </div>
             )}
             <div className="muted small" style={{ marginTop: 6, fontStyle: "italic" }}>
@@ -2613,6 +2628,7 @@ export default function App() {
             year: item.year,
             publisher: item.publisher,
             confidence: item.confidence,
+            variant: item.variant || null,
           }),
         })
           .then((r) => (r.ok ? r.json() : null))
@@ -2638,6 +2654,8 @@ export default function App() {
                 certNumber: enrich.certNumber || cur.certNumber || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
+                variant: enrich.variantNote || cur.variant || null,
+                variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
               };
               putComic(updated).catch(() => {});
               return prev.map((x) => {
@@ -2746,6 +2764,8 @@ export default function App() {
       confidence: data.confidence || "",
       restoration: data.restoration || null,
       defectPenalty: data.defectPenalty || null,
+      variant: data.variant || null,
+      variantMultiplier: data.variantMultiplier || null,
       certNumber: data.certNumber || null,
       cgcVerified: data.cgcVerified || false,
       cgcLabel: data.cgcLabel || null,
@@ -2843,6 +2863,7 @@ export default function App() {
             confidence: data.confidence,
             defectPenalty: data.defectPenalty || null,
             certNumber: data.certNumber || null,
+            variant: data.variant || null,
             images: [b64],
           }),
         })
@@ -2883,6 +2904,8 @@ export default function App() {
                   certNumber: enrich.certNumber || cur.certNumber || null,
                   cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                   cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
+                  variant: enrich.variantNote || cur.variant || null,
+                  variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                 };
                 console.log('[persist] savedId:', savedId,
                   'price:', updated.price,
@@ -2909,6 +2932,8 @@ export default function App() {
                   certNumber: enrich.certNumber || s.certNumber || null,
                   cgcVerified: enrich.cgcVerified || s.cgcVerified || false,
                   cgcLabel: enrich.cgcLabel || s.cgcLabel || null,
+                  variant: enrich.variantNote || s.variant || null,
+                  variantMultiplier: enrich.variantMultiplier || s.variantMultiplier || null,
                 };
               });
             }
@@ -2968,6 +2993,7 @@ export default function App() {
             publisher: data.publisher,
             confidence: data.confidence,
             defectPenalty: data.defectPenalty || null,
+            variant: data.variant || null,
             images: [b64],
           }),
         })
@@ -2990,6 +3016,8 @@ export default function App() {
                 certNumber: enrich.certNumber || cur.certNumber || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
+                variant: enrich.variantNote || cur.variant || null,
+                variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
               };
               console.log('[persist-bulk] savedId:', savedId,
                 'price:', updated.price);
@@ -3137,6 +3165,7 @@ export default function App() {
         year: item.year,
         publisher: item.publisher,
         confidence: item.confidence,
+        variant: item.variant || null,
       }),
     });
     if (!res.ok) throw new Error("Failed to refresh market data");
@@ -3158,6 +3187,8 @@ export default function App() {
       certNumber: enrich.certNumber || item.certNumber || null,
       cgcVerified: enrich.cgcVerified || item.cgcVerified || false,
       cgcLabel: enrich.cgcLabel || item.cgcLabel || null,
+      variant: enrich.variantNote || item.variant || null,
+      variantMultiplier: enrich.variantMultiplier || item.variantMultiplier || null,
     };
     await putComic(updated);
     setCatalogue((prev) => prev.map((x) => {
@@ -3476,7 +3507,7 @@ export default function App() {
                             isGraded: data.isGraded, numericGrade: data.numericGrade,
                             year: data.year, publisher: data.publisher,
                             confidence: data.confidence, defectPenalty: data.defectPenalty || null,
-                            certNumber: data.certNumber || null, images: [b64],
+                            certNumber: data.certNumber || null, variant: data.variant || null, images: [b64],
                           }),
                         })
                           .then((r) => r.ok ? r.json() : null)
@@ -3485,7 +3516,7 @@ export default function App() {
                             setCatalogue((prev) => {
                               const cur = prev.find((x) => x.id === savedId);
                               if (!cur) return prev;
-                              const updated = { ...cur, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null };
+                              const updated = { ...cur, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });
