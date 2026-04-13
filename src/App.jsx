@@ -1066,7 +1066,19 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
           const titleWithIssue = (item.title || "Unknown") + (item.issue && !item.title?.includes('#' + item.issue) ? ` #${item.issue}` : '');
           const gradeTxt = item.isGraded === true && item.numericGrade != null
             ? `CGC ${item.numericGrade}`
-            : item.grade || null;
+            : (() => {
+                if (!item.grade) return null;
+                const g = String(item.grade).trim();
+                const hasLetters = /[A-Z]/i.test(g);
+                const hasNumber = /\d/.test(g);
+                if (hasLetters && hasNumber) return g;
+                if (hasLetters && !hasNumber) {
+                  const RAW_NUMS = { "NM/M": "9.8", "NM": "9.4", "VF/NM": "8.5", "VF": "7.5", "VF/F": "7.0", "FN/VF": "6.5", "FN": "6.0", "VG/FN": "5.0", "VG": "4.0", "VG/G": "3.5", "GD/VG": "3.0", "GD": "2.0", "GD-": "1.8", "FR/GD": "1.5", "FR": "1.0", "PR": "0.5" };
+                  const abbrev = g.toUpperCase().replace(/\s+/g, "");
+                  return RAW_NUMS[abbrev] ? `${g} ${RAW_NUMS[abbrev]}` : g;
+                }
+                return g;
+              })();
           return (
           <div key={item.id} className="collection-item" onClick={() => onOpen(item)}>
             {thumbSrc ? (
@@ -2128,6 +2140,7 @@ export default function App() {
   const [snapshots, setSnapshots] = useState([]);
   const [refreshingPrices, setRefreshingPrices] = useState(0);
   const [duplicateWarning, setDuplicateWarning] = useState(null);
+  const [pendingDuplicate, setPendingDuplicate] = useState(null);
   const fileRef = useRef(null);
   const buyerFileRef = useRef(null);
   const bulkRef = useRef(null);
@@ -2353,22 +2366,24 @@ export default function App() {
         const issueNum = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
         console.log('[grade] title:', data.title, 'issue:', issueNum);
 
-        // FIX 3: Duplicate detection
-        const isDuplicate = catalogue.some(c =>
+        // Duplicate detection: skip auto-save if already in collection.
+        const isDuplicate = save && catalogue.some(c =>
           c.title?.toLowerCase() === data.title?.toLowerCase() &&
           c.issue === issueNum &&
           c.year === data.year
         );
         if (isDuplicate) {
           setDuplicateWarning({ title: data.title, issue: issueNum, year: data.year });
+          setPendingDuplicate({ data: { ...data, issue: issueNum }, b64 });
         } else {
           setDuplicateWarning(null);
+          setPendingDuplicate(null);
         }
 
         // Show the Claude result immediately.
         setResult({ ...data, issue: issueNum, image: b64 });
         setLoading(false);
-        const savedId = save ? await addToCatalogue({ ...data, issue: issueNum }, b64) : null;
+        const savedId = (save && !isDuplicate) ? await addToCatalogue({ ...data, issue: issueNum }, b64) : null;
 
         // Fire-and-forget enrichment pass — merges into the card when ready.
         setEnriching(true);
@@ -2563,6 +2578,8 @@ export default function App() {
   const reset = () => {
     setResult(null);
     setError(null);
+    setDuplicateWarning(null);
+    setPendingDuplicate(null);
   };
 
   const deleteFromCatalogue = useCallback(async (id) => {
@@ -2915,9 +2932,44 @@ export default function App() {
           )}
           {result && !loading && !bulkProgress && (
             <>
-              {duplicateWarning && (
-                <div style={{ background: "#ff990022", border: "1px solid #ff9900", borderRadius: 6, padding: "8px 12px", marginBottom: 8, color: "#ffaa33", fontSize: 13 }}>
-                  ⚠️ Already in collection. Saved as new copy.
+              {duplicateWarning && pendingDuplicate && (
+                <div style={{ background: "#ff990022", border: "1px solid #ff9900", borderRadius: 6, padding: "8px 12px", marginBottom: 8, color: "#ffaa33", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>⚠️ Already in collection. Tap Save to add another copy.</span>
+                  <button
+                    style={{ background: "#ff9900", color: "#000", border: "none", borderRadius: 4, padding: "4px 10px", fontWeight: 700, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap", marginLeft: 8 }}
+                    onClick={async () => {
+                      const { data, b64 } = pendingDuplicate;
+                      const savedId = await addToCatalogue(data, b64);
+                      setPendingDuplicate(null);
+                      setDuplicateWarning(null);
+                      if (savedId) {
+                        // Fire enrichment for the newly saved copy
+                        fetch("/api/enrich", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            title: data.title, issue: data.issue, grade: data.grade,
+                            isGraded: data.isGraded, numericGrade: data.numericGrade,
+                            year: data.year, publisher: data.publisher,
+                            confidence: data.confidence, defectPenalty: data.defectPenalty || null,
+                            images: [b64],
+                          }),
+                        })
+                          .then((r) => r.ok ? r.json() : null)
+                          .then((enrich) => {
+                            if (!enrich) return;
+                            setCatalogue((prev) => {
+                              const cur = prev.find((x) => x.id === savedId);
+                              if (!cur) return prev;
+                              const updated = { ...cur, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null };
+                              putComic(updated).catch(() => {});
+                              return prev.map((x) => x.id === savedId ? updated : x);
+                            });
+                          })
+                          .catch(() => {});
+                      }
+                    }}
+                  >Save Another Copy</button>
                 </div>
               )}
               <ResultCard result={result} enriching={enriching} />
