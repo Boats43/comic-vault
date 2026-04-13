@@ -164,7 +164,9 @@ const showKeyIssue = (k) => {
     .some((x) => s.includes(x))) return false;
   return ["1st", "first", "origin", "death",
     "intro", "appearance", "cameo", "key",
-    "classic", "vs ", "battle", "debut"]
+    "classic", "vs ", "battle", "debut",
+    "kirby", "ditko", "first issue", "last issue",
+    "final issue", "historic", "landmark", "#1"]
     .some((x) => s.includes(x));
 };
 
@@ -2841,7 +2843,27 @@ export default function App() {
       comicVine: enrich.comicVine || item.comicVine || null,
     };
     await putComic(updated);
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
+    setCatalogue((prev) => prev.map((x) => {
+      if (x.id === item.id) return updated;
+      // Sync duplicate copies with same title + issue + year.
+      if (x.title?.toLowerCase() === item.title?.toLowerCase()
+        && x.issue === item.issue
+        && x.year === item.year) {
+        const synced = {
+          ...x,
+          price: enrich.price || x.price,
+          priceLow: enrich.priceLow || x.priceLow,
+          priceHigh: enrich.priceHigh || x.priceHigh,
+          comps: enrich.comps || x.comps,
+          pricingSource: enrich.pricingSource || x.pricingSource,
+          priceNote: enrich.priceNote || null,
+          gradeMultiplier: enrich.gradeMultiplier || x.gradeMultiplier,
+        };
+        putComic(synced).catch(() => {});
+        return synced;
+      }
+      return x;
+    }));
     setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
   }, []);
 
