@@ -1040,12 +1040,14 @@ function BidCalculator({ marketValue, detectedPrice }) {
   );
 }
 
-function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices }) {
+function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices, snapshots }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [sortBy, setSortBy] = useState("value");
   const [eraFilter, setEraFilter] = useState("all");
   const [localSearch, setLocalSearch] = useState("");
+  const [importStatus, setImportStatus] = useState(null);
+  const importRef = useRef(null);
 
   const toggleSelect = (id) => {
     setSelected((prev) => {
@@ -1063,12 +1065,90 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
     setSelectMode(false);
   };
 
+  const exportJSON = () => {
+    const data = items.map(({ images, ...rest }) => rest);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `comic-vault-export-${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportCSV = () => {
+    const cols = ["title","issue","publisher","year","grade","isGraded","numericGrade","keyIssue","price","pricingSource","status","ebayUrl","purchasePrice","timestamp"];
+    const escape = (v) => {
+      const s = String(v ?? "");
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = [cols.join(",")];
+    for (const item of items) {
+      rows.push(cols.map((c) => escape(item[c])).join(","));
+    }
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `comic-vault-export-${date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (importRef.current) importRef.current.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) { setImportStatus("Invalid file: expected JSON array"); return; }
+      const existing = new Set(items.map((c) => `${c.title}|${c.issue}|${c.year}`));
+      let imported = 0, skipped = 0;
+      for (let i = 0; i < parsed.length; i++) {
+        const c = parsed[i];
+        if (!c || !c.title) { skipped++; continue; }
+        const key = `${c.title}|${c.issue}|${c.year}`;
+        if (existing.has(key)) { skipped++; continue; }
+        existing.add(key);
+        const entry = {
+          ...c,
+          id: c.id || `cv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          timestamp: c.timestamp || Date.now(),
+          images: c.images || [],
+        };
+        await putComic(entry);
+        imported++;
+        if (i % 10 === 0) setImportStatus(`Importing ${i + 1} of ${parsed.length}...`);
+      }
+      setImportStatus(`Imported ${imported}, skipped ${skipped} duplicate${skipped !== 1 ? "s" : ""}`);
+      if (imported > 0) window.location.reload();
+    } catch (err) {
+      setImportStatus(`Import failed: ${err.message}`);
+    }
+  };
+
+  // Value trend sparkline from snapshots
+  const trendData = (snapshots || []).slice(-30);
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const weekAgoSnap = trendData.find((s) => s.date >= weekAgo) || trendData[0];
+  const latestSnap = trendData[trendData.length - 1];
+  const weekDelta = latestSnap && weekAgoSnap ? latestSnap.totalValue - weekAgoSnap.totalValue : null;
+
   if (items.length === 0) {
     return (
       <div className="empty-state">
         <div className="upload-emoji">📚</div>
         <div className="muted">No comics in your collection yet.</div>
         <div className="muted small">Scanned comics will appear here.</div>
+        <input ref={importRef} type="file" accept=".json" onChange={handleImport} hidden />
+        <button
+          onClick={() => importRef.current?.click()}
+          style={{ marginTop: 12, fontSize: 12, padding: "6px 14px", borderRadius: 6, border: "1px solid rgba(212,175,55,0.4)", background: "transparent", color: "#d4af37", cursor: "pointer", fontWeight: 600 }}
+        >Import Collection</button>
+        {importStatus && <div className="muted small" style={{ marginTop: 8 }}>{importStatus}</div>}
       </div>
     );
   }
@@ -1085,6 +1165,37 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
           <div className="stat-label">Est. Value</div>
         </div>
       </div>
+      {/* Value trend sparkline */}
+      {trendData.length >= 2 && (() => {
+        const vals = trendData.map((s) => s.totalValue);
+        const minV = Math.min(...vals);
+        const maxV = Math.max(...vals);
+        const range = maxV - minV || 1;
+        const w = 300;
+        const h = 60;
+        const pad = 4;
+        const points = vals.map((v, i) => {
+          const x = pad + (i / (vals.length - 1)) * (w - pad * 2);
+          const y = h - pad - ((v - minV) / range) * (h - pad * 2);
+          return `${x},${y}`;
+        });
+        return (
+          <div style={{ margin: "8px 0" }}>
+            {weekDelta != null && (
+              <div style={{ fontSize: 12, fontWeight: 600, textAlign: "center", marginBottom: 4, color: weekDelta >= 0 ? "#16a34a" : "#e05656" }}>
+                {weekDelta >= 0 ? "\u2191" : "\u2193"} {fmt(Math.abs(weekDelta))} since last week
+              </div>
+            )}
+            <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 60 }}>
+              <polyline points={points.join(" ")} fill="none" stroke="#FFD700" strokeWidth="2" strokeLinejoin="round" />
+              {points.map((p, i) => (
+                <circle key={i} cx={p.split(",")[0]} cy={p.split(",")[1]} r="2.5" fill="#FFD700" />
+              ))}
+            </svg>
+          </div>
+        );
+      })()}
+
       {refreshingPrices > 0 && (
         <div className="muted small" style={{ textAlign: "center", margin: "4px 0 8px" }}>
           Updating prices... ({refreshingPrices} remaining)
@@ -1092,6 +1203,8 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
       )}
 
       {/* Select mode header */}
+      <input ref={importRef} type="file" accept=".json" onChange={handleImport} hidden />
+      {importStatus && <div className="muted small" style={{ textAlign: "center", margin: "4px 0" }}>{importStatus}</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, padding: "4px 0", marginBottom: 4 }}>
         {selectMode ? (
           <>
@@ -1113,10 +1226,24 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
             >Cancel</button>
           </>
         ) : (
-          <button
-            style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
-            onClick={() => setSelectMode(true)}
-          >Select</button>
+          <>
+            <button
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
+              onClick={exportJSON}
+            >Export</button>
+            <button
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
+              onClick={exportCSV}
+            >CSV</button>
+            <button
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
+              onClick={() => importRef.current?.click()}
+            >Import</button>
+            <button
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
+              onClick={() => setSelectMode(true)}
+            >Select</button>
+          </>
         )}
       </div>
 
@@ -1267,10 +1394,19 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
               <div className="cl-row2 muted small">
                 {item.publisher}{item.publisher && item.year ? " · " : ""}{item.year}{gradeTxt ? ` · ${gradeTxt}` : ""}
               </div>
-              {(showKeyIssue(item.keyIssue) || item.status === "listed") && (
+              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.purchasePrice > 0) && (
                 <div className="cl-row3">
                   {showKeyIssue(item.keyIssue) && <span className="pill pill-key">KEY</span>}
                   {item.status === "listed" && <span className="pill pill-listed">LISTED</span>}
+                  {item.purchasePrice > 0 && getDisplayPrice(item) > 0 && (() => {
+                    const roi = ((getDisplayPrice(item) - item.purchasePrice) / item.purchasePrice) * 100;
+                    const pos = roi >= 0;
+                    return (
+                      <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, fontWeight: 700, background: pos ? "rgba(22,163,106,0.2)" : "rgba(224,86,86,0.2)", color: pos ? "#16a34a" : "#e05656" }}>
+                        {pos ? "+" : ""}{Math.round(roi)}%
+                      </span>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -1304,6 +1440,7 @@ function CollectionDetail({
   onList,
   onRefreshMarket,
   onAddPhoto,
+  onUpdateField,
   currentIndex,
   totalItems,
   onPrev,
@@ -1316,6 +1453,7 @@ function CollectionDetail({
   const [addingPhoto, setAddingPhoto] = useState(false);
   const [addPhotoError, setAddPhotoError] = useState(null);
   const [expandedPhoto, setExpandedPhoto] = useState(null);
+  const [ppInput, setPpInput] = useState(item.purchasePrice != null ? String(item.purchasePrice) : "");
   const addPhotoRef = useRef(null);
 
   useEffect(() => {
@@ -1546,6 +1684,43 @@ function CollectionDetail({
       </div>
       <div style={{ marginTop: 8 }}>
         <span className="grade-badge">{gradeBadgeText}</span>
+      </div>
+
+      {/* 2b. PURCHASE PRICE + ROI */}
+      <div style={{ marginTop: 10 }}>
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="What did you pay? (optional)"
+          value={ppInput}
+          onChange={(e) => setPpInput(e.target.value)}
+          onBlur={() => {
+            const val = parseFloat(ppInput.replace(/[$,]/g, ""));
+            const newVal = !isNaN(val) && val > 0 ? val : null;
+            if (newVal !== item.purchasePrice) {
+              onUpdateField?.(item, "purchasePrice", newVal);
+            }
+          }}
+          style={{
+            width: "100%", padding: "8px 12px", boxSizing: "border-box",
+            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
+            borderRadius: 6, color: "#fff", fontSize: 14, outline: "none",
+          }}
+        />
+        {item.purchasePrice > 0 && displayPrice > 0 && (() => {
+          const gain = displayPrice - item.purchasePrice;
+          const pct = (gain / item.purchasePrice) * 100;
+          const pos = gain >= 0;
+          return (
+            <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 14 }}>
+              <span className="muted">Paid: <strong>${item.purchasePrice.toLocaleString("en-US")}</strong></span>
+              <span className="muted">Current: <strong>${displayPrice.toLocaleString("en-US")}</strong></span>
+              <span style={{ fontWeight: 700, color: pos ? "#16a34a" : "#e05656" }}>
+                ROI: {pos ? "+" : ""}{fmt(gain)} ({pos ? "+" : ""}{Math.round(pct)}%)
+              </span>
+            </div>
+          );
+        })()}
       </div>
 
       {/* 3. KEY ISSUE BLOCK */}
@@ -1897,17 +2072,25 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
   const [latestActions, setLatestActions] = useState([]);
   const [history, setHistory] = useState([]);
   const [sending, setSending] = useState(false);
+  const totalCostBasis = catalogue.reduce((s, c) => s + (c.purchasePrice || 0), 0);
+  const totalGain = totalValue - totalCostBasis;
+  const totalGainPct = totalCostBasis > 0 ? (totalGain / totalCostBasis) * 100 : null;
   const [metrics, setMetrics] = useState(() => {
     // Instant default metrics from local data — no API wait.
     const listed = catalogue.filter((c) => c.status === "listed").length;
     const keys = catalogue.filter((c) => showKeyIssue(c.keyIssue)).length;
     const stagnant = catalogue.filter((c) => c.status !== "listed" && (Date.now() - (c.timestamp || 0)) > 86400000 * 30).length;
-    return [
+    const m = [
       { label: "Total Value", value: fmt(totalValue), color: "green" },
       { label: "Listed", value: `${listed} of ${catalogue.length}`, color: listed < catalogue.length / 2 ? "red" : "green" },
       { label: "Key Issues", value: String(keys), color: keys > 0 ? "yellow" : "green" },
       { label: "Stagnant", value: String(stagnant), color: stagnant > 0 ? "red" : "green" },
     ];
+    if (totalCostBasis > 0) {
+      m.push({ label: "Cost Basis", value: fmt(totalCostBasis), color: "yellow" });
+      m.push({ label: "Gain/Loss", value: `${totalGain >= 0 ? "+" : ""}${fmt(totalGain)}${totalGainPct != null ? ` (${totalGain >= 0 ? "+" : ""}${Math.round(totalGainPct)}%)` : ""}`, color: totalGain >= 0 ? "green" : "red" });
+    }
+    return m;
   });
   const [search, setSearch] = useState("");
   const [aiTags, setAiTags] = useState({});
@@ -2566,6 +2749,7 @@ export default function App() {
       certNumber: data.certNumber || null,
       cgcVerified: data.cgcVerified || false,
       cgcLabel: data.cgcLabel || null,
+      purchasePrice: data.purchasePrice != null ? parseFloat(data.purchasePrice) || null : null,
       timestamp: Date.now(),
       images: thumb ? [thumb] : [],
     };
@@ -2924,6 +3108,14 @@ export default function App() {
       ebayItemId: data.listingId || null,
       listedAt: Date.now(),
     };
+    await putComic(updated);
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
+  }, []);
+
+  // Update a single field on a catalogue entry and persist to IndexedDB.
+  const updateComicField = useCallback(async (item, field, value) => {
+    const updated = { ...item, [field]: value };
     await putComic(updated);
     setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
     setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
@@ -3356,6 +3548,7 @@ export default function App() {
             onList={listOnEbay}
             onRefreshMarket={refreshMarketData}
             onAddPhoto={addPhotoToComic}
+            onUpdateField={updateComicField}
             currentIndex={catalogue.indexOf(selectedItem)}
             totalItems={catalogue.length}
             onPrev={() => {
@@ -3372,6 +3565,7 @@ export default function App() {
             items={catalogue}
             totalValue={totalValue}
             refreshingPrices={refreshingPrices}
+            snapshots={snapshots}
             onOpen={(item) => {
               collectionScrollPos.current = window.scrollY;
               setSelectedItem(item);
