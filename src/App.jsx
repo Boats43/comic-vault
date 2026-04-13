@@ -141,12 +141,31 @@ const parseConditionReport = (reason) => {
 
 // Normalize Claude's confidence field for display. Claude returns
 // "High" / "Medium" / "85" / "85%" / "High (90%)" inconsistently.
-const formatConfidence = (confidence) => {
-  if (!confidence) return null;
-  const s = String(confidence).trim();
-  if (!s) return null;
-  if (/^\d+$/.test(s)) return `${s}%`;
-  return s;
+const formatConfidence = (c) => {
+  if (!c) return "low";
+  const s = String(c).toLowerCase().trim();
+  if (s === "high" || s === "excellent") return "high";
+  if (s === "medium" || s === "mid" || s === "moderate") return "medium";
+  const num = parseFloat(s);
+  if (!isNaN(num)) {
+    const n = num > 10 ? num / 100 : num > 1 ? num / 10 : num;
+    if (n >= 0.8) return "high";
+    if (n >= 0.6) return "medium";
+    return "low";
+  }
+  return "low";
+};
+
+const showKeyIssue = (k) => {
+  if (!k) return false;
+  const s = k.toLowerCase().trim();
+  if (["no", "n/a", "none", "false", "not a key",
+    "non-key", "non key", "not key"]
+    .some((x) => s.includes(x))) return false;
+  return ["1st", "first", "origin", "death",
+    "intro", "appearance", "cameo", "key",
+    "classic", "vs ", "battle", "debut"]
+    .some((x) => s.includes(x));
 };
 
 function ScanZone({ onFile, inputRef, compact, label }) {
@@ -221,7 +240,7 @@ function ResultCard({ result, enriching }) {
         : result.grade
           ? <div className="grade-badge raw">{result.grade}</div>
           : null}
-      {result.keyIssue && <div className="key-box">⭐ {result.keyIssue}</div>}
+      {showKeyIssue(result.keyIssue) && <div className="key-box">⭐ {result.keyIssue}</div>}
       {result.restoration && (
         <div style={{ background: "#ff000022", border: "1px solid #ff4444", borderRadius: 6, padding: "8px 12px", marginTop: 8, color: "#ff6666" }}>
           ⚠️ RESTORED: {result.restoration}
@@ -791,7 +810,7 @@ function WidgetOverlay({
                     {gradeBadge}
                   </span>
                 </div>
-                {result.keyIssue && result.keyIssue !== "N/A" && (
+                {showKeyIssue(result.keyIssue) && (
                   <div
                     style={{
                       marginTop: 6,
@@ -1071,9 +1090,9 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
               <div className="cl-row2 muted small">
                 {item.publisher}{item.publisher && item.year ? " · " : ""}{item.year}{gradeTxt ? ` · ${gradeTxt}` : ""}
               </div>
-              {(item.keyIssue || item.status === "listed") && (
+              {(showKeyIssue(item.keyIssue) || item.status === "listed") && (
                 <div className="cl-row3">
-                  {item.keyIssue && item.keyIssue !== "N/A" && <span className="pill pill-key">KEY</span>}
+                  {showKeyIssue(item.keyIssue) && <span className="pill pill-key">KEY</span>}
                   {item.status === "listed" && <span className="pill pill-listed">LISTED</span>}
                 </div>
               )}
@@ -1318,7 +1337,7 @@ function CollectionDetail({
       </div>
 
       {/* 3. KEY ISSUE BLOCK */}
-      {item.keyIssue && item.keyIssue !== "N/A" && (
+      {showKeyIssue(item.keyIssue) && (
         <div className="key-box" style={{ marginTop: 12 }}>
           ⭐ {item.keyIssue}
         </div>
@@ -1654,7 +1673,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
   const [metrics, setMetrics] = useState(() => {
     // Instant default metrics from local data — no API wait.
     const listed = catalogue.filter((c) => c.status === "listed").length;
-    const keys = catalogue.filter((c) => c.keyIssue && c.keyIssue !== "N/A").length;
+    const keys = catalogue.filter((c) => showKeyIssue(c.keyIssue)).length;
     const stagnant = catalogue.filter((c) => c.status !== "listed" && (Date.now() - (c.timestamp || 0)) > 86400000 * 30).length;
     return [
       { label: "Total Value", value: fmt(totalValue), color: "green" },
@@ -1783,7 +1802,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
       if (!q) return true;
       const priceMatch = q.match(/^\$(\d+)\+?$/);
       if (priceMatch) return (marketValueOf(item) || 0) >= parseInt(priceMatch[1]);
-      if (q === "key" || q === "keys") return item.keyIssue && item.keyIssue !== "N/A";
+      if (q === "key" || q === "keys") return showKeyIssue(item.keyIssue);
       if (q === "listed") return item.status === "listed";
       if (q === "unlisted") return item.status !== "listed";
       if (q === "hot") return aiTags[item.id]?.label === "HOT";
