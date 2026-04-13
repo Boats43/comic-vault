@@ -613,6 +613,20 @@ export default async function handler(req, res) {
             '< comps*0.3', compsAvg * 0.3, '→ fallback');
         }
       }
+
+      // Defect penalty: reduce price if Claude detected a significant defect.
+      if (req.body.defectPenalty) {
+        const pen = parseFloat(req.body.defectPenalty);
+        if (pen > 0 && pen < 1) {
+          const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
+          out.price = fmtUsd(curPrice * pen);
+          out.priceLow = fmtUsd(parseFloat(String(out.priceLow || '0').replace(/[$,]/g, '')) * pen);
+          out.priceHigh = fmtUsd(parseFloat(String(out.priceHigh || '0').replace(/[$,]/g, '')) * pen);
+          out.defectPenalty = pen;
+          out.priceNote = (out.priceNote || '') + ' · defect adj';
+          console.log(`[enrich] defect penalty ×${pen} applied`);
+        }
+      }
     } else if (rawComps && rawComps.count > 0) {
       out.price = fmtUsd(rawComps.average * 1.15);
       out.priceLow = fmtUsd(rawComps.lowest);

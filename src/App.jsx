@@ -2168,6 +2168,7 @@ export default function App() {
                 pricingSource: enrich.pricingSource || null,
                 priceNote: enrich.priceNote || null,
                 gradeMultiplier: enrich.gradeMultiplier || null,
+                defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
                 comicVine: enrich.comicVine || cur.comicVine || null,
               };
               putComic(updated).catch(() => {});
@@ -2265,6 +2266,7 @@ export default function App() {
       reason: data.reason || "",
       confidence: data.confidence || "",
       restoration: data.restoration || null,
+      defectPenalty: data.defectPenalty || null,
       timestamp: Date.now(),
       images: thumb ? [thumb] : [],
     };
@@ -2354,6 +2356,7 @@ export default function App() {
             year: data.year,
             publisher: data.publisher,
             confidence: data.confidence,
+            defectPenalty: data.defectPenalty || null,
             images: [b64],
           }),
         })
@@ -2412,6 +2415,7 @@ export default function App() {
                   pricingSource: enrich.pricingSource || null,
                   priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
+                  defectPenalty: enrich.defectPenalty || s.defectPenalty || null,
                   comicVine: enrich.comicVine || s.comicVine || null,
                 };
               });
@@ -2471,6 +2475,7 @@ export default function App() {
             year: data.year,
             publisher: data.publisher,
             confidence: data.confidence,
+            defectPenalty: data.defectPenalty || null,
             images: [b64],
           }),
         })
@@ -2602,6 +2607,7 @@ export default function App() {
       pricingSource: enrich.pricingSource || null,
       priceNote: enrich.priceNote || null,
       gradeMultiplier: enrich.gradeMultiplier || null,
+      defectPenalty: enrich.defectPenalty || item.defectPenalty || null,
       comicVine: enrich.comicVine || item.comicVine || null,
     };
     await putComic(updated);

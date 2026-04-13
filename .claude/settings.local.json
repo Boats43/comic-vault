@@ -29,7 +29,10 @@
       "Bash(pkill -f \"vercel dev\")",
       "Bash(pkill -f vite)",
       "Bash(lsof -ti:3001)",
-      "Bash(xargs kill:*)"
+      "Bash(xargs kill:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('price:', d.get\\('price'\\), 'pricingSource:', d.get\\('pricingSource'\\), 'comps avg:', d.get\\('comps',{}\\).get\\('average'\\)\\)\")"
     ]
   }
 }
