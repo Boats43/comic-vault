@@ -1038,6 +1038,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
   const [selected, setSelected] = useState(new Set());
   const [sortBy, setSortBy] = useState("value");
   const [eraFilter, setEraFilter] = useState("all");
+  const [localSearch, setLocalSearch] = useState("");
 
   const toggleSelect = (id) => {
     setSelected((prev) => {
@@ -1112,6 +1113,27 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
         )}
       </div>
 
+      {/* Search bar */}
+      <div style={{ position: "relative", marginBottom: 6 }}>
+        <input
+          type="text"
+          placeholder='Search title, "key", "$100+", publisher...'
+          value={localSearch}
+          onChange={(e) => setLocalSearch(e.target.value)}
+          style={{
+            width: "100%", padding: "10px 32px 10px 12px", boxSizing: "border-box",
+            background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)",
+            borderRadius: 8, color: "#fff", fontSize: 14, outline: "none",
+          }}
+        />
+        {localSearch && (
+          <button
+            onClick={() => setLocalSearch("")}
+            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", color: "#aaa", fontSize: 16, cursor: "pointer", padding: "2px 4px" }}
+          >✕</button>
+        )}
+      </div>
+
       {/* Sort bar */}
       <div style={{ display: "flex", gap: 4, padding: "4px 0", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
         {[["value", "Value ↓"], ["title", "Title"], ["year", "Year"], ["grade", "Grade"], ["recent", "Recent"]].map(([key, label]) => (
@@ -1129,13 +1151,25 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
           <button
             key={key}
             onClick={() => setEraFilter(eraFilter === key ? "all" : key)}
-            style={{ fontSize: 11, padding: "3px 8px", borderRadius: 12, border: eraFilter === key ? "1px solid #d4af37" : "1px solid rgba(255,255,255,0.12)", background: eraFilter === key ? "rgba(212,175,55,0.15)" : "transparent", color: eraFilter === key ? "#d4af37" : "#aaa", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }}
+            style={{ fontSize: 11, padding: "3px 8px", borderRadius: 12, border: eraFilter === key && key !== "all" ? "none" : "1px solid rgba(255,255,255,0.12)", background: eraFilter === key && key !== "all" ? "#FFD700" : eraFilter === key ? "rgba(212,175,55,0.15)" : "transparent", color: eraFilter === key && key !== "all" ? "#000" : eraFilter === key ? "#d4af37" : "#aaa", cursor: "pointer", fontWeight: eraFilter === key ? 700 : 600, whiteSpace: "nowrap" }}
           >{label}</button>
         ))}
       </div>
 
-      <div className="collection-list">
-        {items
+      {(() => {
+        const sq = localSearch.toLowerCase().trim();
+        const searchFilter = (item) => {
+          if (!sq) return true;
+          const priceMatch = sq.match(/^\$(\d+)\+?$/);
+          if (priceMatch) return (getDisplayPrice(item) || 0) >= parseInt(priceMatch[1]);
+          if (sq === "key" || sq === "keys") return showKeyIssue(item.keyIssue);
+          if (sq === "listed") return item.status === "listed";
+          if (sq === "unlisted") return item.status !== "listed";
+          const hay = `${item.title} ${item.publisher} ${item.year} ${item.grade} ${item.keyIssue}`.toLowerCase();
+          return hay.includes(sq);
+        };
+        const filteredItems = items
+          .filter(searchFilter)
           .filter((item) => {
             if (eraFilter === "all") return true;
             const yr = parseInt(item.year, 10);
@@ -1154,8 +1188,17 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
             if (sortBy === "grade") return (b.numericGrade || 0) - (a.numericGrade || 0);
             if (sortBy === "recent") return (b.timestamp || 0) - (a.timestamp || 0);
             return 0;
-          })
-          .map((item) => {
+          });
+        const isFiltered = eraFilter !== "all" || sq;
+        return (
+          <>
+            {isFiltered && (
+              <div className="muted small" style={{ textAlign: "center", marginBottom: 6 }}>
+                Showing {filteredItems.length} of {items.length} comics
+              </div>
+            )}
+            <div className="collection-list">
+              {filteredItems.map((item) => {
           const thumbSrc = getComicPhotos(item)[0] || null;
           const titleWithIssue = (item.title || "Unknown") + (item.issue && !item.title?.includes('#' + item.issue) ? ` #${item.issue}` : '');
           const gradeTxt = item.isGraded === true && item.numericGrade != null
@@ -1238,8 +1281,11 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
             )}
           </div>
           );
-        })}
-      </div>
+              })}
+            </div>
+          </>
+        );
+      })()}
     </>
   );
 }
