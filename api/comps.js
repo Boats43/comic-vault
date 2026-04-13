@@ -321,6 +321,7 @@ export const fetchComps = async ({
   isGraded,
   numericGrade,
   year,
+  variant,
   appId,
   certId,
 }) => {
@@ -357,15 +358,29 @@ export const fetchComps = async ({
       ? ` CGC ${numericTarget}`
       : "";
 
+  // Extract a short variant keyword for search queries.
+  const variantKeyword = (() => {
+    if (!variant) return "";
+    const v = String(variant).toLowerCase();
+    if (v.includes("gold")) return " gold";
+    if (v.includes("2nd print") || v.includes("second print")) return " 2nd print";
+    if (v.includes("newsstand")) return " newsstand";
+    if (v.includes("whitman")) return " whitman";
+    if (v.includes("30 cent")) return " 30 cent";
+    if (v.includes("35 cent")) return " 35 cent";
+    if (v.includes("price variant")) return " price variant";
+    return "";
+  })();
+
   // Build ordered list of query attempts — most specific to least.
   const attempts = [];
-  // Attempt 1: full — cleanTitle #issue year (+ grade suffix)
+  // Attempt 1: full — cleanTitle #issue variant year (+ grade suffix)
   if (iss && yr) {
-    attempts.push({ q: `${cleanTitle} #${iss} ${yr}`, n: 1, useGrade: true });
+    attempts.push({ q: `${cleanTitle} #${iss}${variantKeyword} ${yr}`, n: 1, useGrade: true });
   }
-  // Attempt 2: no year — cleanTitle #issue (+ grade suffix)
+  // Attempt 2: no year — cleanTitle #issue variant (+ grade suffix)
   if (iss) {
-    attempts.push({ q: `${cleanTitle} #${iss}`, n: 2, useGrade: true });
+    attempts.push({ q: `${cleanTitle} #${iss}${variantKeyword}`, n: 2, useGrade: true });
   }
   // Attempt 3: no issue — cleanTitle year (+ grade suffix)
   if (yr) {
