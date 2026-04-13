@@ -663,6 +663,7 @@ export default async function handler(req, res) {
 
     // Primary price source: PriceCharting (aggregated sold data).
     // For graded comics, apply a CGC multiplier against the raw base price.
+    let sanityFired = false;
     // For raw comics, apply a raw grade multiplier against the base price.
     // Fallback: Browse API comps (active listings).
     if (priceCharting) {
@@ -708,6 +709,7 @@ export default async function handler(req, res) {
 
         // PC way too high vs market (compare final price to grade-adjusted avg)
         if (pcNum > adjAvg * 3) {
+          sanityFired = true;
           out.price = fmtUsd(adjAvg * 1.15);
           out.priceLow = fmtUsd(adjAvg * 0.75);
           out.priceHigh = fmtUsd(adjAvg * 1.5);
@@ -718,7 +720,8 @@ export default async function handler(req, res) {
         }
 
         // PC way too low vs market floor (compare final price to grade-adjusted avg)
-        if (pcNum < adjAvg * 0.5 && pcNum < adjAvg - 10) {
+        if (!sanityFired && pcNum < adjAvg * 0.5 && pcNum < adjAvg - 10) {
+          sanityFired = true;
           out.price = fmtUsd(adjAvg);
           out.priceLow = fmtUsd(adjAvg * 0.75);
           out.priceHigh = fmtUsd(adjAvg * 1.5);
@@ -781,7 +784,9 @@ export default async function handler(req, res) {
     const gradeAdj = out.gradeMultiplier || 1.0;
     const floorNum = rawFloor * gradeAdj;
 
+    let floorFired = false;
     if (floorNum > 0 && finalNum < floorNum) {
+      floorFired = true;
       console.log('[floor] price', finalNum,
         '< adjFloor', floorNum, `(raw ${rawFloor} × ${gradeAdj})`, '— enforcing');
       out.price = fmtUsd(floorNum);
@@ -789,6 +794,19 @@ export default async function handler(req, res) {
       out.priceHigh = fmtUsd(floorNum * 1.25);
       out.priceNote = (out.priceNote || '') + ' · floor enforced';
     }
+
+    console.log('[price-trace]',
+      'pcBase:', priceCharting?.price,
+      'multiplier:', out.gradeMultiplier,
+      'afterMult:', parseFloat(String(out.price || '0').replace(/[$,]/g, '')),
+      'compsAvg:', compsFromEbay?.average,
+      'sanityFired:', sanityFired,
+      'rawFloor:', rawFloor,
+      'adjFloor:', floorNum,
+      'floorFired:', floorFired,
+      'finalPrice:', out.price,
+      'source:', out.pricingSource
+    );
 
     // Variant multiplier: adjust price for known variant types.
     const variant = req.body.variant ? String(req.body.variant).trim() : null;
