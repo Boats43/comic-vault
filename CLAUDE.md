@@ -52,6 +52,8 @@ Nine keys required (all set in Vercel):
 - No premium multiplier: corner box, masterpieces, design variant, cover A/B/C/D.
 - Variant short keywords only in comps query attempts 1-2.
 - Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
+- Sanity check compares grade-adjusted PC price to grade-adjusted comps average (not raw avg).
+- Sanity thresholds: 0.5x (too low) and 3x (too high) against adjAvg.
 
 ## Last Session
 Session 4/13/2026 — 12 commits: Visual issue validation, variant detection, export/import, ROI tracking, trend chart, 5 bug fixes, listing title format.
