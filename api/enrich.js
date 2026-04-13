@@ -505,11 +505,27 @@ export default async function handler(req, res) {
     const issueMatch = String(title).match(/#\s*(\d+)/);
     const issueNum = issue || (issueMatch ? issueMatch[1] : null);
 
+    // Step 1: visual issue correction — runs before comps so the
+    // corrected issue number flows into all downstream lookups.
+    let visualBase64 = null;
+    if (Array.isArray(images) && images.length > 0) {
+      const firstImg = String(images[0] || "");
+      const m = firstImg.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/);
+      visualBase64 = m ? m[2] : firstImg.replace(/^data:[^;]+;base64,/, "");
+    }
+    const visualResult = visualBase64
+      ? await lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null)
+      : null;
+    const correctedIssue = (visualResult?.issueSource === "ebay_visual" && visualResult.issue)
+      ? visualResult.issue
+      : issueNum;
+
+    // Step 2: run everything else with the corrected issue number.
     const compsPromise =
       process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? fetchComps({
             title,
-            issue: issueNum,
+            issue: correctedIssue,
             grade,
             isGraded,
             numericGrade,
@@ -522,22 +538,13 @@ export default async function handler(req, res) {
           })
         : Promise.resolve(null);
 
-    // Extract base64 for eBay visual search (strip data URI prefix)
-    let visualBase64 = null;
-    if (Array.isArray(images) && images.length > 0) {
-      const firstImg = String(images[0] || "");
-      const m = firstImg.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/);
-      visualBase64 = m ? m[2] : firstImg.replace(/^data:[^;]+;base64,/, "");
-    }
-
-    const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting, cgcResult, visualResult] = await Promise.all([
-      lookupComicVine({ title, issue: issueNum, year, publisher }),
+    const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting, cgcResult] = await Promise.all([
+      lookupComicVine({ title, issue: correctedIssue, year, publisher }),
       compsPromise,
       lookupXimilar({ images, title, confidence }),
-      fetchSold({ title, issue: issueNum, year }).catch(() => []),
-      lookupPriceCharting({ title, issue: issueNum, year }).catch(() => null),
+      fetchSold({ title, issue: correctedIssue, year }).catch(() => []),
+      lookupPriceCharting({ title, issue: correctedIssue, year }).catch(() => null),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
-      lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null),
     ]);
 
     // AI verification pass on the comps that will be displayed. Verifies
@@ -801,7 +808,7 @@ export default async function handler(req, res) {
       ? String(title).replace(issueMatch[0], "").trim()
       : title;
     console.log(
-      `[verify] ${seriesTitle} #${issueNum || "?"} | ` +
+      `[verify] ${seriesTitle} #${correctedIssue || "?"} | ` +
       `grade: ${grade || "unknown"} | ` +
       `comps: ${verifiedCount} verified / ${rawComps?.prices?.length || 0} checked | ` +
       `sold: ${soldCount} found | ` +
