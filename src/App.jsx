@@ -1032,6 +1032,25 @@ function BidCalculator({ marketValue, detectedPrice }) {
 }
 
 function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices }) {
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+
+  const toggleSelect = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selectAll = () => setSelected(new Set(items.map((i) => i.id)));
+  const cancelSelect = () => { setSelectMode(false); setSelected(new Set()); };
+  const deleteSelected = () => {
+    if (!confirm(`Delete ${selected.size} comic${selected.size === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    for (const id of selected) onDelete(id);
+    setSelected(new Set());
+    setSelectMode(false);
+  };
+
   if (items.length === 0) {
     return (
       <div className="empty-state">
@@ -1060,6 +1079,35 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
         </div>
       )}
 
+      {/* Select mode header */}
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, padding: "4px 0", marginBottom: 4 }}>
+        {selectMode ? (
+          <>
+            <span className="muted small" style={{ marginRight: "auto" }}>
+              {selected.size} selected
+            </span>
+            <button
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(212,175,55,0.4)", background: "transparent", color: "#d4af37", cursor: "pointer", fontWeight: 600 }}
+              onClick={selectAll}
+            >Select All</button>
+            <button
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid #e05656", background: selected.size > 0 ? "#e05656" : "transparent", color: selected.size > 0 ? "#fff" : "#e05656", cursor: selected.size > 0 ? "pointer" : "default", fontWeight: 700, opacity: selected.size > 0 ? 1 : 0.4 }}
+              onClick={deleteSelected}
+              disabled={selected.size === 0}
+            >Delete Selected</button>
+            <button
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.2)", background: "transparent", color: "#aaa", cursor: "pointer" }}
+              onClick={cancelSelect}
+            >Cancel</button>
+          </>
+        ) : (
+          <button
+            style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
+            onClick={() => setSelectMode(true)}
+          >Select</button>
+        )}
+      </div>
+
       <div className="collection-list">
         {items.map((item) => {
           const thumbSrc = getComicPhotos(item)[0] || null;
@@ -1079,8 +1127,28 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
                 }
                 return g;
               })();
+          const isSelected = selected.has(item.id);
           return (
-          <div key={item.id} className="collection-item" onClick={() => onOpen(item)}>
+          <div
+            key={item.id}
+            className="collection-item"
+            style={isSelected ? { background: "rgba(212,175,55,0.1)" } : undefined}
+            onClick={() => selectMode ? toggleSelect(item.id) : onOpen(item)}
+          >
+            {selectMode && (
+              <div
+                style={{ display: "flex", alignItems: "center", paddingRight: 8, cursor: "pointer" }}
+                onClick={(e) => { e.stopPropagation(); toggleSelect(item.id); }}
+              >
+                <div style={{
+                  width: 20, height: 20, borderRadius: 4,
+                  border: isSelected ? "2px solid #d4af37" : "2px solid rgba(255,255,255,0.25)",
+                  background: isSelected ? "#d4af37" : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 13, color: "#000", fontWeight: 700,
+                }}>{isSelected ? "✓" : ""}</div>
+              </div>
+            )}
             {thumbSrc ? (
               <img src={thumbSrc} alt="" loading="lazy" className="thumb" />
             ) : (
@@ -1110,16 +1178,18 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
                 </div>
               )}
             </div>
-            <button
-              className="delete-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirm(`Delete "${titleWithIssue}"?`)) onDelete(item.id);
-              }}
-              aria-label="Delete"
-            >
-              ✕
-            </button>
+            {!selectMode && (
+              <button
+                className="delete-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (confirm(`Delete "${titleWithIssue}"?`)) onDelete(item.id);
+                }}
+                aria-label="Delete"
+              >
+                ✕
+              </button>
+            )}
           </div>
           );
         })}
