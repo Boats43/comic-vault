@@ -46,9 +46,14 @@ const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) =>
     const prompt =
       `I identified this comic: ${comicLabel}${publisherPart}.\n\n` +
       `These are eBay listings returned as price comps:\n${numbered}\n\n` +
-      `For each listing reply with MATCH or NO_MATCH. Only MATCH if the ` +
+      `For each listing reply with MATCH or NO_MATCH. MATCH if the ` +
       `listing is clearly the same comic — same title, same issue number, ` +
-      `same era. Reply with only a JSON array like:\n[true, false, true, false]\n` +
+      `same era. If the title is a close match (same character, same series ` +
+      `name, same issue number) accept it even if the listing title has ` +
+      `extra words like "variant", "cover B", "ratio variant", "2nd print", ` +
+      `"newsstand", or "facsimile". Only reject if it is clearly a different ` +
+      `character or different issue number. ` +
+      `Reply with only a JSON array like:\n[true, false, true, false]\n` +
       `in the same order as the listings.`;
 
     const message = await anthropic.messages.create({
@@ -320,7 +325,7 @@ const lookupPriceCharting = async ({ title, issue, year }) => {
       if (comicYear) {
         const yearMatch = name.match(/\((\d{4})\)/);
         const productYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
-        if (productYear && Math.abs(productYear - comicYear) > 10) {
+        if (productYear && Math.abs(productYear - comicYear) > 5) {
           console.log(`[pricecharting] skipping "${name}" — year ${productYear} vs ${comicYear}`);
           continue;
         }
@@ -332,8 +337,8 @@ const lookupPriceCharting = async ({ title, issue, year }) => {
       const yearMatch2 = name.match(/\((\d{4})\)/);
       const productYear = yearMatch2 ? parseInt(yearMatch2[1], 10) : null;
       console.log(`[pt] matched: "${name}" year: ${productYear} comic year: ${comicYear}`);
-      // Stricter era check: skip if year gap > 15
-      if (comicYear && productYear && Math.abs(productYear - comicYear) > 15) {
+      // Stricter era check: skip if year gap > 5
+      if (comicYear && productYear && Math.abs(productYear - comicYear) > 5) {
         console.log(`[pt] year mismatch — skipping`);
         continue;
       }
@@ -819,12 +824,13 @@ export default async function handler(req, res) {
     const soldComps = Array.isArray(soldResult) ? soldResult : [];
     out.soldComps = soldComps;
 
-    // Confidence level
+    // Confidence level — PC data guarantees at least MEDIUM.
     const verifiedCount = rawComps?.count || 0;
     const soldCount = soldComps.length;
+    const hasPCData = out.pricingSource === "pricecharting";
     let confidenceLevel = "LOW";
     if (soldCount >= 2 && verifiedCount >= 2) confidenceLevel = "HIGH";
-    else if (verifiedCount >= 2 || soldCount >= 1) confidenceLevel = "MEDIUM";
+    else if (verifiedCount >= 2 || soldCount >= 1 || hasPCData) confidenceLevel = "MEDIUM";
     out.confidenceLevel = confidenceLevel;
 
     // Recommended price
