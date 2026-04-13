@@ -36,9 +36,9 @@ Nine keys required (all set in Vercel):
 
 ## Open Items
 - GoCollect API: approval pending — check email
-- GPA: check gpanalysis.com subscription for API
+- GPA: check gpanalysis.com for API access
 - eBay Marketplace Insights: DEAD for indie devs
-- FF #348 gold: rescan to verify variant comps
+- Visual search: disabled for modern (1985+), active for Silver/Bronze Age only
 
 ## Rules
 - **Never change pricing math** (grade multipliers, sanity checks, floor guard, price calculations in `api/enrich.js`) without explicit instruction.
@@ -47,3 +47,11 @@ Nine keys required (all set in Vercel):
 - PriceCharting year threshold: 5 years max gap between comic year and product year.
 - AI verify: accept variant/cover B listings as matches if same character + issue number.
 - Variant multipliers: gold ×3, 2nd print ×1.5, newsstand ×1.3, price variant ×2.0.
+- Visual search only overrides with 3+ matches.
+- PriceCharting skipped when issue=null.
+- No premium multiplier: corner box, masterpieces, design variant, cover A/B/C/D.
+- Variant short keywords only in comps query attempts 1-2.
+- Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
+
+## Last Session
+Session 4/13/2026 — 12 commits: Visual issue validation, variant detection, export/import, ROI tracking, trend chart, 5 bug fixes, listing title format.
