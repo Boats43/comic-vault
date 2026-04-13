@@ -449,18 +449,19 @@ function ResultCard({ result, enriching }) {
               <span style={{ fontWeight: 700, color: "#d4af37" }}>
                 {recommendedLabel}
               </span>
-              {result.confidenceLevel && (
-                <span style={{
-                  fontSize: 10,
-                  padding: "2px 7px",
-                  borderRadius: 5,
-                  fontWeight: 700,
-                  background: result.confidenceLevel === "HIGH" ? "rgba(22,163,106,0.2)" : result.confidenceLevel === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(245,158,11,0.2)",
-                  color: result.confidenceLevel === "HIGH" ? "#16a34a" : result.confidenceLevel === "MEDIUM" ? "#d4af37" : "#f59e0b",
-                }}>
-                  {result.confidenceLevel === "HIGH" ? "HIGH ✓" : result.confidenceLevel === "MEDIUM" ? "MED ~" : "AI EST"}
-                </span>
-              )}
+              {(() => {
+                const cc = comps?.count || 0;
+                const sc = Array.isArray(result.soldComps) ? result.soldComps.length : 0;
+                const level = cc >= 2 ? (sc >= 2 ? "HIGH" : "MEDIUM") : "LOW";
+                const bg = level === "HIGH" ? "rgba(22,163,106,0.2)" : level === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(245,158,11,0.2)";
+                const fg = level === "HIGH" ? "#16a34a" : level === "MEDIUM" ? "#d4af37" : "#f59e0b";
+                const label = level === "HIGH" ? "HIGH ✓" : level === "MEDIUM" ? "MED ~" : "AI EST";
+                return (
+                  <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, fontWeight: 700, background: bg, color: fg }}>
+                    {label}
+                  </span>
+                );
+              })()}
             </span>
           </div>
           <div
@@ -1407,20 +1408,19 @@ function CollectionDetail({
               </div>
             )}
           </div>
-          {item.confidenceLevel && (
-            <span style={{
-              fontSize: 11,
-              padding: "4px 10px",
-              borderRadius: 6,
-              fontWeight: 700,
-              background: item.confidenceLevel === "HIGH" ? "rgba(22,163,106,0.2)" : item.confidenceLevel === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(245,158,11,0.2)",
-              color: item.confidenceLevel === "HIGH" ? "#16a34a" : item.confidenceLevel === "MEDIUM" ? "#d4af37" : "#f59e0b",
-              alignSelf: "flex-end",
-              marginBottom: 4,
-            }}>
-              {item.confidenceLevel === "HIGH" ? "HIGH ✓" : item.confidenceLevel === "MEDIUM" ? "MED ~" : "AI EST"}
-            </span>
-          )}
+          {(() => {
+            const cc = item.comps?.count || 0;
+            const sc = Array.isArray(item.soldComps) ? item.soldComps.length : 0;
+            const level = cc >= 2 ? (sc >= 2 ? "HIGH" : "MEDIUM") : "LOW";
+            const bg = level === "HIGH" ? "rgba(22,163,106,0.2)" : level === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(245,158,11,0.2)";
+            const fg = level === "HIGH" ? "#16a34a" : level === "MEDIUM" ? "#d4af37" : "#f59e0b";
+            const label = level === "HIGH" ? "HIGH ✓" : level === "MEDIUM" ? "MED ~" : "AI EST";
+            return (
+              <span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, fontWeight: 700, background: bg, color: fg, alignSelf: "flex-end", marginBottom: 4 }}>
+                {label}
+              </span>
+            );
+          })()}
         </div>
 
         {hasComps && (
@@ -1501,12 +1501,12 @@ function CollectionDetail({
             </div>
             {item.comps.highestNum != null && (
               <div className="muted small" style={{ marginTop: 4, fontSize: 12 }}>
-                Low ${item.comps.lowestNum?.toLocaleString("en-US")} → Avg ${item.comps.averageNum?.toLocaleString("en-US")} → High ${item.comps.highestNum?.toLocaleString("en-US")}
+                Low ${item.comps.lowestNum?.toLocaleString("en-US")} → Avg ${(Math.round((item.comps.averageNum || 0) * 100) / 100).toLocaleString("en-US")} → High ${item.comps.highestNum?.toLocaleString("en-US")}
               </div>
             )}
             {item.gradeMultiplier != null && (
               <div className="muted small" style={{ marginTop: 4, fontSize: 12 }}>
-                Grade adj: ×{item.gradeMultiplier}{item.priceNote ? ` (${item.priceNote})` : ""}
+                Grade adj: ×{item.gradeMultiplier}{item.priceNote && /estimate|CGC/i.test(item.priceNote) ? ` (${item.priceNote})` : ""}
               </div>
             )}
             <div className="muted small" style={{ marginTop: 6, fontStyle: "italic" }}>
