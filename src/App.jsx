@@ -203,9 +203,6 @@ function ResultCard({ result, enriching }) {
   const recommendedLabel = displayPrice > 0
     ? `$${displayPrice.toLocaleString("en-US")}`
     : result.price || "—";
-  const sourceLabel = hasComps
-    ? `Source: ${comps.count} eBay sale${comps.count === 1 ? "" : "s"}`
-    : "Source: AI estimate";
 
   return (
     <div className="result-card">
@@ -259,12 +256,16 @@ function ResultCard({ result, enriching }) {
           )}
           {hasComps && (
             <div className="muted small">
-              Based on {comps.count} eBay sale{comps.count === 1 ? "" : "s"} in last 30 days
+              {comps.source === "browse_api"
+                ? `Based on ${comps.count} active eBay listing${comps.count === 1 ? "" : "s"}`
+                : `Based on ${comps.count} eBay sale${comps.count === 1 ? "" : "s"} in last 30 days`}
             </div>
           )}
-          <div className="muted small" style={{ marginTop: 4, fontStyle: "italic" }}>
-            {sourceLabel}
-          </div>
+          {result.priceNote && /defect adj/i.test(result.priceNote) && (
+            <div style={{ color: "#f59e0b", fontSize: 12, marginTop: 4 }}>
+              Adjusted for cover defects
+            </div>
+          )}
         </>
       )}
 
@@ -1537,8 +1538,16 @@ function CollectionDetail({
               {Array.isArray(item.soldComps) && item.soldComps.length > 0 && " + eBay sold"}
             </div>
             <div className="muted small" style={{ fontSize: 11 }}>
-              Based on {item.comps.count} listing{item.comps.count !== 1 ? "s" : ""}{item.comps.verifiedByAI ? " · AI verified" : ""}
+              {item.comps.source === "browse_api"
+                ? `Based on ${item.comps.count} active eBay listing${item.comps.count !== 1 ? "s" : ""}`
+                : `Based on ${item.comps.count} eBay sale${item.comps.count !== 1 ? "s" : ""} in last 30 days`}
+              {item.comps.verifiedByAI ? " · AI verified" : ""}
             </div>
+            {item.priceNote && /defect adj/i.test(item.priceNote) && (
+              <div style={{ color: "#f59e0b", fontSize: 12, marginTop: 4 }}>
+                Adjusted for cover defects
+              </div>
+            )}
           </div>
         )}
 
