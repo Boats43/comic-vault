@@ -2727,9 +2727,49 @@ export default function App() {
   };
 
   const deleteFromCatalogue = useCallback(async (id) => {
+    const item = catalogue.find((x) => x.id === id);
+
+    // If listed on eBay with a known ItemID, offer to delist first.
+    if (item && item.status === "listed" && item.ebayItemId) {
+      const choice = prompt(
+        `"${item.title}" is listed on eBay.\n\n` +
+        `Type 1 to Remove from eBay + Collection\n` +
+        `Type 2 to Remove from Collection Only\n` +
+        `Type anything else to Cancel`
+      );
+      if (choice === "1") {
+        try {
+          const res = await fetch("/api/delist-ebay", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ebayItemId: item.ebayItemId }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            const proceed = confirm(
+              `eBay removal failed: ${data.error || "unknown error"}\n` +
+              `Remove manually at ebay.com/myebay.\n\n` +
+              `Still remove from collection?`
+            );
+            if (!proceed) return;
+          }
+        } catch {
+          const proceed = confirm(
+            `Could not reach eBay API.\n` +
+            `Remove manually at ebay.com/myebay.\n\n` +
+            `Still remove from collection?`
+          );
+          if (!proceed) return;
+        }
+      } else if (choice !== "2") {
+        return; // cancelled
+      }
+    }
+
     await deleteComic(id);
     setCatalogue((prev) => prev.filter((x) => x.id !== id));
-  }, []);
+    setSelectedItem((cur) => (cur && cur.id === id ? null : cur));
+  }, [catalogue]);
 
   const listOnEbay = useCallback(async (item) => {
     const coverPhoto = getComicPhotos(item)[0] || null;
@@ -2757,6 +2797,7 @@ export default function App() {
       ...item,
       status: "listed",
       ebayUrl: data.listingUrl,
+      ebayItemId: data.listingId || null,
       listedAt: Date.now(),
     };
     await putComic(updated);
