@@ -222,6 +222,11 @@ function ResultCard({ result, enriching }) {
           ? <div className="grade-badge raw">{result.grade}</div>
           : null}
       {result.keyIssue && <div className="key-box">⭐ {result.keyIssue}</div>}
+      {result.restoration && (
+        <div style={{ background: "#ff000022", border: "1px solid #ff4444", borderRadius: 6, padding: "8px 12px", marginTop: 8, color: "#ff6666" }}>
+          ⚠️ RESTORED: {result.restoration}
+        </div>
+      )}
       {recommendedLabel && (
         <>
           <div className="muted small" style={{ marginTop: 12 }}>
@@ -1318,6 +1323,13 @@ function CollectionDetail({
         </div>
       )}
 
+      {/* 3b. RESTORATION WARNING */}
+      {item.restoration && (
+        <div style={{ background: "#ff000022", border: "1px solid #ff4444", borderRadius: 6, padding: "8px 12px", marginTop: 8, color: "#ff6666" }}>
+          ⚠️ RESTORED: {item.restoration}
+        </div>
+      )}
+
       {/* 4. AI CONDITION REPORT */}
       {(conditionBullets.length > 0 || confidenceText || scannedText) && (
         <div
@@ -2087,6 +2099,7 @@ export default function App() {
   const [analyzing, setAnalyzing] = useState(false);
   const [snapshots, setSnapshots] = useState([]);
   const [refreshingPrices, setRefreshingPrices] = useState(0);
+  const [duplicateWarning, setDuplicateWarning] = useState(null);
   const fileRef = useRef(null);
   const buyerFileRef = useRef(null);
   const bulkRef = useRef(null);
@@ -2251,6 +2264,7 @@ export default function App() {
       priceHigh: data.priceHigh || "",
       reason: data.reason || "",
       confidence: data.confidence || "",
+      restoration: data.restoration || null,
       timestamp: Date.now(),
       images: thumb ? [thumb] : [],
     };
@@ -2294,9 +2308,33 @@ export default function App() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed to grade");
+
+        // FIX 2: Non-comic rejection
+        if (!data.title ||
+            data.title.toLowerCase().includes('not a comic') ||
+            data.title.toLowerCase().includes('unknown') ||
+            (!data.publisher && !data.year && !data.issue)) {
+          setError("No comic detected. Try again.");
+          setLoading(false);
+          return;
+        }
+
         // Extract issue number: prefer explicit field, fall back to parsing title.
         const issueNum = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
         console.log('[grade] title:', data.title, 'issue:', issueNum);
+
+        // FIX 3: Duplicate detection
+        const isDuplicate = catalogue.some(c =>
+          c.title?.toLowerCase() === data.title?.toLowerCase() &&
+          c.issue === issueNum &&
+          c.year === data.year
+        );
+        if (isDuplicate) {
+          setDuplicateWarning({ title: data.title, issue: issueNum, year: data.year });
+        } else {
+          setDuplicateWarning(null);
+        }
+
         // Show the Claude result immediately.
         setResult({ ...data, issue: issueNum, image: b64 });
         setLoading(false);
@@ -2388,7 +2426,7 @@ export default function App() {
         setLoading(false);
       }
     },
-    [addToCatalogue]
+    [addToCatalogue, catalogue]
   );
 
   const handleFile = async (e, which) => {
@@ -2843,6 +2881,11 @@ export default function App() {
           )}
           {result && !loading && !bulkProgress && (
             <>
+              {duplicateWarning && (
+                <div style={{ background: "#ff990022", border: "1px solid #ff9900", borderRadius: 6, padding: "8px 12px", marginBottom: 8, color: "#ffaa33", fontSize: 13 }}>
+                  ⚠️ Already in collection. Saved as new copy.
+                </div>
+              )}
               <ResultCard result={result} enriching={enriching} />
               <button className="reset-btn" onClick={reset}>Scan another</button>
             </>

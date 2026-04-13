@@ -581,6 +581,38 @@ export default async function handler(req, res) {
         );
       }
       out.pricingSource = "pricecharting";
+
+      // Sanity check: compare PC price against eBay comps average.
+      const compsAvg = compsFromEbay?.average;
+      if (compsAvg && compsAvg > 5) {
+        const pcNum = parseFloat(
+          String(out.price || '0').replace(/[$,]/g, '')
+        );
+
+        // PC way too high vs market
+        if (pcNum > compsAvg * 3) {
+          const fallback = Math.round(compsAvg * 1.15);
+          out.price = fmtUsd(fallback);
+          out.priceLow = fmtUsd(compsAvg * 0.75);
+          out.priceHigh = fmtUsd(compsAvg * 1.5);
+          out.pricingSource = "browse_api";
+          out.priceNote = "PC outlier — eBay avg used";
+          console.log('[sanity] PC', pcNum,
+            '> comps*3', compsAvg * 3, '→ fallback');
+        }
+
+        // PC way too low vs market floor
+        if (pcNum < compsAvg * 0.3 && pcNum < compsAvg - 10) {
+          const fallback = Math.round(compsAvg * 1.0);
+          out.price = fmtUsd(fallback);
+          out.priceLow = fmtUsd(compsAvg * 0.75);
+          out.priceHigh = fmtUsd(compsAvg * 1.5);
+          out.pricingSource = "browse_api";
+          out.priceNote = "PC too low — eBay avg used";
+          console.log('[sanity] PC', pcNum,
+            '< comps*0.3', compsAvg * 0.3, '→ fallback');
+        }
+      }
     } else if (rawComps && rawComps.count > 0) {
       out.price = fmtUsd(rawComps.average * 1.15);
       out.priceLow = fmtUsd(rawComps.lowest);
