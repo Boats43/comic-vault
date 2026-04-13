@@ -35,11 +35,15 @@ Nine keys required (all set in Vercel):
 `ANTHROPIC_API_KEY`, `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DEV_ID`, `EBAY_AUTH_TOKEN`, `EBAY_SANDBOX`, `COMICVINE_API_KEY`, `XIMILAR_API_TOKEN`, `PRICECHARTING_TOKEN`
 
 ## Open Items
-- eBay Marketplace Insights: DEAD — denied to independent developers as of March 2026
-- GPA (gpanalysis.com): investigate API access for CGC-specific sold price data
-- GoCollect API: primary sold data target (pending)
+- GoCollect API: approval pending — check email
+- GPA: check gpanalysis.com subscription for API
+- eBay Marketplace Insights: DEAD for indie devs
+- FF #348 gold: rescan to verify variant comps
 
 ## Rules
 - **Never change pricing math** (grade multipliers, sanity checks, floor guard, price calculations in `api/enrich.js`) without explicit instruction.
 - **Never commit without running `npm run build` first** and confirming zero errors.
 - Always preserve the pricing stack order: PriceCharting -> grade multiplier -> sanity check -> defect penalty -> floor guard -> browse_api fallback.
+- PriceCharting year threshold: 5 years max gap between comic year and product year.
+- AI verify: accept variant/cover B listings as matches if same character + issue number.
+- Variant multipliers: gold ×3, 2nd print ×1.5, newsstand ×1.3, price variant ×2.0.
