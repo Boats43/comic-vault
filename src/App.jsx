@@ -2355,6 +2355,18 @@ export default function App() {
 
   // Load catalogue, snapshots, and cached analysis from IndexedDB on mount.
   useEffect(() => {
+    // Warm up grade + enrich endpoints silently
+    fetch('/api/grade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warmup: true })
+    }).catch(() => {});
+    fetch('/api/enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warmup: true })
+    }).catch(() => {});
+
     (async () => {
       await migrateFromLocalStorage();
       const items = await getAllComics();

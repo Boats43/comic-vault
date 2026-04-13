@@ -14,6 +14,11 @@ export default async function handler(req, res) {
     return;
   }
 
+  if (req.body?.warmup === true) {
+    res.status(200).json({ warmed: true });
+    return;
+  }
+
   try {
     const body = req.body || {};
     const { images, image } = body;

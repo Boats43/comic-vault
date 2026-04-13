@@ -10,7 +10,7 @@
 //             priceHigh?, keyIssue?, identifiedBy? }
 
 import Anthropic from "@anthropic-ai/sdk";
-import { fetchComps } from "./comps.js";
+import { fetchComps, getOAuthToken } from "./comps.js";
 import { fetchSold } from "./sold.js";
 import { lookupCGC } from "./cgc-lookup.js";
 
@@ -408,9 +408,75 @@ const lookupXimilar = async ({ images, title, confidence }) => {
   }
 };
 
+const BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope";
+
+const lookupEbayVisual = async ({ imageBase64, claudeIssue }) => {
+  const appId = process.env.EBAY_APP_ID;
+  const certId = process.env.EBAY_CERT_ID;
+  if (!appId || !certId || !imageBase64) return null;
+  try {
+    const token = await getOAuthToken(appId, certId, BROWSE_SCOPE);
+    const url =
+      "https://api.ebay.com/buy/browse/v1/item_summary/search_by_image" +
+      "?category_ids=63&limit=5";
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+      },
+      body: JSON.stringify({ image: imageBase64 }),
+    });
+    if (!res.ok) {
+      console.error(`[visual] eBay image search HTTP ${res.status}`);
+      return null;
+    }
+    const json = await res.json();
+    const items = Array.isArray(json?.itemSummaries) ? json.itemSummaries : [];
+    if (items.length === 0) return null;
+
+    // Extract issue numbers from titles
+    const issueNumbers = [];
+    for (const item of items) {
+      const title = item.title || "";
+      const m = title.match(/#(\d+)/);
+      if (m) issueNumbers.push(m[1]);
+    }
+    if (issueNumbers.length === 0) return null;
+
+    // Find most common issue number
+    const freq = {};
+    for (const n of issueNumbers) {
+      freq[n] = (freq[n] || 0) + 1;
+    }
+    let mostCommon = null;
+    let maxCount = 0;
+    for (const [num, count] of Object.entries(freq)) {
+      if (count > maxCount) { mostCommon = num; maxCount = count; }
+    }
+
+    const claudeStr = claudeIssue ? String(claudeIssue).trim() : null;
+    if (mostCommon && claudeStr && mostCommon !== claudeStr) {
+      console.log(`[visual] Claude=#${claudeStr} eBay=#${mostCommon} → using #${mostCommon}`);
+      return { issue: mostCommon, issueSource: "ebay_visual", claudeIssue: claudeStr };
+    }
+    console.log(`[visual] Claude=#${claudeStr} matches eBay=#${mostCommon || "none"} — keeping Claude`);
+    return { issue: claudeStr, issueSource: "claude_vision" };
+  } catch (err) {
+    console.error(`[visual] eBay image search error: ${err?.message || err}`);
+    return null;
+  }
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  if (req.body?.warmup === true) {
+    res.status(200).json({ warmed: true });
     return;
   }
 
@@ -453,13 +519,22 @@ export default async function handler(req, res) {
           })
         : Promise.resolve(null);
 
-    const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting, cgcResult] = await Promise.all([
+    // Extract base64 for eBay visual search (strip data URI prefix)
+    let visualBase64 = null;
+    if (Array.isArray(images) && images.length > 0) {
+      const firstImg = String(images[0] || "");
+      const m = firstImg.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/);
+      visualBase64 = m ? m[2] : firstImg.replace(/^data:[^;]+;base64,/, "");
+    }
+
+    const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting, cgcResult, visualResult] = await Promise.all([
       lookupComicVine({ title, issue: issueNum, year, publisher }),
       compsPromise,
       lookupXimilar({ images, title, confidence }),
       fetchSold({ title, issue: issueNum, year }).catch(() => []),
       lookupPriceCharting({ title, issue: issueNum, year }).catch(() => null),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
+      lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null),
     ]);
 
     // AI verification pass on the comps that will be displayed. Verifies
@@ -744,6 +819,15 @@ export default async function handler(req, res) {
           ? `${ximilar.name} #${ximilar.issueNumber}`
           : ximilar.name;
         out.identifiedBy = "ximilar";
+      }
+    }
+
+    // eBay visual issue cross-validation
+    if (visualResult) {
+      out.issueSource = visualResult.issueSource;
+      if (visualResult.issueSource === "ebay_visual") {
+        out.issue = visualResult.issue;
+        out.claudeIssue = visualResult.claudeIssue;
       }
     }
 

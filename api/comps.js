@@ -60,7 +60,7 @@ const emptyComps = (query, reason) => ({
 // we refresh when the cache is within 60s of expiry.
 const tokenCache = {};
 
-const getOAuthToken = async (appId, certId, scope) => {
+export const getOAuthToken = async (appId, certId, scope) => {
   const now = Date.now();
   const cached = tokenCache[scope];
   if (cached && now < cached.expiresAt - 60_000) {

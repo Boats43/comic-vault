@@ -34,6 +34,11 @@ npx vercel --prod
 Nine keys required (all set in Vercel):
 `ANTHROPIC_API_KEY`, `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DEV_ID`, `EBAY_AUTH_TOKEN`, `EBAY_SANDBOX`, `COMICVINE_API_KEY`, `XIMILAR_API_TOKEN`, `PRICECHARTING_TOKEN`
 
+## Open Items
+- eBay Marketplace Insights: DEAD — denied to independent developers as of March 2026
+- GPA (gpanalysis.com): investigate API access for CGC-specific sold price data
+- GoCollect API: primary sold data target (pending)
+
 ## Rules
 - **Never change pricing math** (grade multipliers, sanity checks, floor guard, price calculations in `api/enrich.js`) without explicit instruction.
 - **Never commit without running `npm run build` first** and confirming zero errors.
