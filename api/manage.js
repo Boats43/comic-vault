@@ -37,7 +37,7 @@ export default async function handler(req, res) {
     });
 
     const stripped = comics.map((c) => ({
-      id: c.id, title: c.title, issue: c.issue || null, publisher: c.publisher, year: c.year,
+      id: c.id, title: c.issue ? `${c.title} #${c.issue}` : c.title, issue: c.issue || null, publisher: c.publisher, year: c.year,
       grade: c.grade, isGraded: c.isGraded, numericGrade: c.numericGrade,
       keyIssue: c.keyIssue, price: c.price,
       status: c.status || "unlisted", timestamp: c.timestamp,
@@ -68,7 +68,7 @@ export default async function handler(req, res) {
       model: "claude-haiku-4-5",
       max_tokens: 2048,
       system:
-        "You are an expert comic book dealer and collection manager with 30 years experience in the comic market. You know CGC grading, key issues, market trends, bundling strategy, and eBay selling tactics. Analyze collections and give actionable selling advice. Return JSON only, no markdown, no explanation.",
+        "You are an expert comic book dealer and collection manager with 30 years experience in the comic market. You know CGC grading, key issues, market trends, bundling strategy, and eBay selling tactics. Analyze collections and give actionable selling advice. Each comic is identified by its EXACT issue number. Amazing Adventures #4 is issue 4, NOT issue 1. Always use the exact issue field provided. Never infer or guess issue numbers. Return JSON only, no markdown, no explanation.",
       messages: [
         {
           role: "user",

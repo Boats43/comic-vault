@@ -2434,7 +2434,7 @@ export default function App() {
                 if (x.title?.toLowerCase() === item.title?.toLowerCase()
                   && x.issue === item.issue
                   && x.year === item.year) {
-                  const synced = { ...x, price: enrich.price || x.price, priceLow: enrich.priceLow || x.priceLow, priceHigh: enrich.priceHigh || x.priceHigh, comps: enrich.comps || x.comps, pricingSource: enrich.pricingSource || x.pricingSource, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || x.gradeMultiplier };
+                  const synced = { ...x, price: enrich.price ?? x.price, priceLow: enrich.priceLow ?? x.priceLow, priceHigh: enrich.priceHigh ?? x.priceHigh, comps: enrich.comps ?? x.comps, pricingSource: enrich.pricingSource ?? x.pricingSource, priceNote: enrich.priceNote ?? null, gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier };
                   putComic(synced).catch(() => {});
                   return synced;
                 }
@@ -2931,13 +2931,13 @@ export default function App() {
         && x.year === item.year) {
         const synced = {
           ...x,
-          price: enrich.price || x.price,
-          priceLow: enrich.priceLow || x.priceLow,
-          priceHigh: enrich.priceHigh || x.priceHigh,
-          comps: enrich.comps || x.comps,
-          pricingSource: enrich.pricingSource || x.pricingSource,
-          priceNote: enrich.priceNote || null,
-          gradeMultiplier: enrich.gradeMultiplier || x.gradeMultiplier,
+          price: enrich.price ?? x.price,
+          priceLow: enrich.priceLow ?? x.priceLow,
+          priceHigh: enrich.priceHigh ?? x.priceHigh,
+          comps: enrich.comps ?? x.comps,
+          pricingSource: enrich.pricingSource ?? x.pricingSource,
+          priceNote: enrich.priceNote ?? null,
+          gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier,
         };
         putComic(synced).catch(() => {});
         return synced;

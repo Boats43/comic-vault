@@ -589,28 +589,30 @@ export default async function handler(req, res) {
           String(out.price || '0').replace(/[$,]/g, '')
         );
 
+        // Grade-adjusted eBay fallback base for sanity overrides.
+        const mult = out.gradeMultiplier || 1;
+        const adjAvg = compsAvg * mult;
+
         // PC way too high vs market
         if (pcNum > compsAvg * 3) {
-          const fallback = Math.round(compsAvg * 1.15);
-          out.price = fmtUsd(fallback);
-          out.priceLow = fmtUsd(compsAvg * 0.75);
-          out.priceHigh = fmtUsd(compsAvg * 1.5);
+          out.price = fmtUsd(adjAvg * 1.15);
+          out.priceLow = fmtUsd(adjAvg * 0.75);
+          out.priceHigh = fmtUsd(adjAvg * 1.5);
           out.pricingSource = "browse_api";
           out.priceNote = "PC outlier — eBay avg used";
           console.log('[sanity] PC', pcNum,
-            '> comps*3', compsAvg * 3, '→ fallback');
+            '> comps*3', compsAvg * 3, '→ fallback adj', adjAvg.toFixed(2));
         }
 
         // PC way too low vs market floor
         if (pcNum < compsAvg * 0.3 && pcNum < compsAvg - 10) {
-          const fallback = Math.round(compsAvg * 1.0);
-          out.price = fmtUsd(fallback);
-          out.priceLow = fmtUsd(compsAvg * 0.75);
-          out.priceHigh = fmtUsd(compsAvg * 1.5);
+          out.price = fmtUsd(adjAvg);
+          out.priceLow = fmtUsd(adjAvg * 0.75);
+          out.priceHigh = fmtUsd(adjAvg * 1.5);
           out.pricingSource = "browse_api";
           out.priceNote = "PC too low — eBay avg used";
           console.log('[sanity] PC', pcNum,
-            '< comps*0.3', compsAvg * 0.3, '→ fallback');
+            '< comps*0.3', compsAvg * 0.3, '→ fallback adj', adjAvg.toFixed(2));
         }
       }
 
@@ -634,9 +636,27 @@ export default async function handler(req, res) {
         }
       }
     } else if (rawComps && rawComps.count > 0) {
-      out.price = fmtUsd(rawComps.average * 1.15);
-      out.priceLow = fmtUsd(rawComps.lowest);
-      out.priceHigh = fmtUsd(rawComps.highest);
+      // Apply grade multiplier to eBay avg too.
+      const browseBase = rawComps.average || 0;
+
+      let browsePrice = browseBase;
+      if (isGraded === true && numericGrade != null) {
+        const gInfo = getGradeMultiplier(numericGrade);
+        if (gInfo) {
+          browsePrice = browseBase * gInfo.multiplier;
+          out.gradeMultiplier = gInfo.multiplier;
+          out.priceNote = `CGC ${numericGrade} estimate`;
+        }
+      } else if (grade) {
+        const rawInfo = getRawGradeMultiplier(grade);
+        browsePrice = browseBase * rawInfo.multiplier;
+        out.gradeMultiplier = rawInfo.multiplier;
+        out.priceNote = `${rawInfo.label} estimate`;
+      }
+
+      out.price = fmtUsd(browsePrice);
+      out.priceLow = fmtUsd(browsePrice * 0.75);
+      out.priceHigh = fmtUsd(browsePrice * 1.25);
       out.pricingSource = "browse_api";
     }
 
