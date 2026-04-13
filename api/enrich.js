@@ -667,7 +667,7 @@ export default async function handler(req, res) {
     const finalNum = parseFloat(
       String(out.price || '0').replace(/[$,]/g, '')
     );
-    const floorNum = compsFromEbay?.lowestNum || 0;
+    const floorNum = rawComps?.lowestNum || compsFromEbay?.lowestNum || 0;
 
     if (floorNum > 0 && finalNum < floorNum) {
       console.log('[floor] price', finalNum,
