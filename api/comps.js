@@ -263,10 +263,12 @@ const hasSufficientTitleOverlap = (listingTitle, searchTokens) => {
 // (word-bounded so "1710" and "2171" don't match "171").
 const hasIssueNumber = (listingTitle, issueNum) => {
   if (!issueNum) return true;
+  const t = String(listingTitle || "");
+  // Reject lot listings (multiple issues bundled together)
+  if (/\blot\b/i.test(t) || /\d+\s*,\s*\d+/.test(t)) return false;
+  // Exact issue match: require # prefix, word boundary after
   const escaped = String(issueNum).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`#\\s*${escaped}\\b|\\b${escaped}\\b`, "i").test(
-    String(listingTitle || "")
-  );
+  return new RegExp(`#\\s*${escaped}\\b`, "i").test(t);
 };
 
 // Clean a comic title for eBay search: strip articles and special chars.
