@@ -291,6 +291,10 @@ const PRICECHARTING_EXCLUDE =
   /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix/i;
 
 const lookupPriceCharting = async ({ title, issue, year }) => {
+  if (!issue) {
+    console.log("[pt] no issue number — skipping");
+    return null;
+  }
   const token = process.env.PRICECHARTING_TOKEN;
   if (!token || !title) return null;
   try {
@@ -470,6 +474,10 @@ const lookupEbayVisual = async ({ imageBase64, claudeIssue, year }) => {
     console.log('[visual] winner:', mostCommon, `(${maxCount}/${issueNumbers.length})`);
 
     const claudeStr = claudeIssue ? String(claudeIssue).trim() : null;
+    if (maxCount < 3) {
+      console.log('[visual] only', maxCount, 'matches — keeping Claude issue:', claudeStr);
+      return null;
+    }
     if (mostCommon && claudeStr && mostCommon !== claudeStr) {
       console.log(`[visual] Claude=#${claudeStr} eBay=#${mostCommon} → using #${mostCommon}`);
       return { issue: mostCommon, issueSource: "ebay_visual", claudeIssue: claudeStr };
@@ -506,8 +514,10 @@ export default async function handler(req, res) {
       publisher,
       certNumber,
     } = req.body || {};
-    if (!title) {
-      res.status(400).json({ error: "title required" });
+    const titleLower = (title || "").toLowerCase();
+    if (!title || titleLower.includes("not a comic") || titleLower === "unknown") {
+      console.log("[enrich] rejected non-comic:", title);
+      res.status(400).json({ error: "Not a comic book" });
       return;
     }
 
@@ -777,29 +787,39 @@ export default async function handler(req, res) {
     // Variant multiplier: adjust price for known variant types.
     const variant = req.body.variant ? String(req.body.variant).trim() : null;
     if (variant && out.price) {
-      const variantMultipliers = {
-        'gold': 3.0,
-        '2nd print': 1.5,
-        'second print': 1.5,
-        'newsstand': 1.3,
-        'price variant': 2.0,
-        'whitman': 2.0,
-        '35 cent': 3.0,
-        '30 cent': 3.0,
-      };
+      const NO_PREMIUM = [
+        'corner box', 'masterpieces', 'design variant', 'headshot',
+        'trading card', 'cover a', 'cover b', 'cover c', 'cover d',
+      ];
       const vLower = variant.toLowerCase();
-      let vMult = null;
-      for (const [key, mult] of Object.entries(variantMultipliers)) {
-        if (vLower.includes(key)) { vMult = mult; break; }
-      }
-      if (vMult) {
-        const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
-        out.price = fmtUsd(curPrice * vMult);
-        out.priceLow = fmtUsd(curPrice * vMult * 0.75);
-        out.priceHigh = fmtUsd(curPrice * vMult * 1.25);
+      const isNoPremium = NO_PREMIUM.some((v) => vLower.includes(v));
+      if (isNoPremium) {
         out.variantNote = variant;
-        out.variantMultiplier = vMult;
-        console.log('[variant]', variant, '×', vMult);
+        console.log('[variant] no premium — skipping mult');
+      } else {
+        const variantMultipliers = {
+          'gold': 3.0,
+          '2nd print': 1.5,
+          'second print': 1.5,
+          'newsstand': 1.3,
+          'price variant': 2.0,
+          'whitman': 2.0,
+          '35 cent': 3.0,
+          '30 cent': 3.0,
+        };
+        let vMult = null;
+        for (const [key, mult] of Object.entries(variantMultipliers)) {
+          if (vLower.includes(key)) { vMult = mult; break; }
+        }
+        if (vMult) {
+          const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
+          out.price = fmtUsd(curPrice * vMult);
+          out.priceLow = fmtUsd(curPrice * vMult * 0.75);
+          out.priceHigh = fmtUsd(curPrice * vMult * 1.25);
+          out.variantNote = variant;
+          out.variantMultiplier = vMult;
+          console.log('[variant]', variant, '×', vMult);
+        }
       }
     }
 

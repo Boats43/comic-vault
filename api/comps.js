@@ -359,18 +359,23 @@ export const fetchComps = async ({
       : "";
 
   // Extract a short variant keyword for search queries.
-  const variantKeyword = (() => {
-    if (!variant) return "";
-    const v = String(variant).toLowerCase();
-    if (v.includes("gold")) return " gold";
-    if (v.includes("2nd print") || v.includes("second print")) return " 2nd print";
-    if (v.includes("newsstand")) return " newsstand";
-    if (v.includes("whitman")) return " whitman";
-    if (v.includes("30 cent")) return " 30 cent";
-    if (v.includes("35 cent")) return " 35 cent";
-    if (v.includes("price variant")) return " price variant";
-    return "";
-  })();
+  const VARIANT_SHORT = {
+    'gold': 'gold',
+    '2nd print': '2nd print',
+    'second print': '2nd print',
+    'newsstand': 'newsstand',
+    'whitman': 'whitman',
+    'virgin': 'virgin',
+    '1:25': '1:25',
+    '1:50': '1:50',
+    '1:100': '1:100',
+    '35 cent': '35 cent',
+    '30 cent': '30 cent',
+  };
+  const shortVariant = variant
+    ? Object.entries(VARIANT_SHORT).find(([k]) => String(variant).toLowerCase().includes(k))?.[1] || null
+    : null;
+  const variantKeyword = shortVariant ? ` ${shortVariant}` : "";
 
   // Build ordered list of query attempts — most specific to least.
   const attempts = [];
