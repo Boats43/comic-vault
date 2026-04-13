@@ -474,7 +474,8 @@ function ResultCard({ result, enriching }) {
               {(() => {
                 const cc = comps?.count || 0;
                 const sc = Array.isArray(result.soldComps) ? result.soldComps.length : 0;
-                const level = cc >= 2 ? (sc >= 2 ? "HIGH" : "MEDIUM") : "LOW";
+                const hasPriceData = result?.pricingSource === "pricecharting";
+                const level = sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW";
                 const bg = level === "HIGH" ? "rgba(22,163,106,0.2)" : level === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(245,158,11,0.2)";
                 const fg = level === "HIGH" ? "#16a34a" : level === "MEDIUM" ? "#d4af37" : "#f59e0b";
                 const label = level === "HIGH" ? "HIGH ✓" : level === "MEDIUM" ? "MED ~" : "AI EST";
@@ -1635,7 +1636,8 @@ function CollectionDetail({
           {(() => {
             const cc = item.comps?.count || 0;
             const sc = Array.isArray(item.soldComps) ? item.soldComps.length : 0;
-            const level = cc >= 2 ? (sc >= 2 ? "HIGH" : "MEDIUM") : "LOW";
+            const hasPriceData = item?.pricingSource === "pricecharting";
+            const level = sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW";
             const bg = level === "HIGH" ? "rgba(22,163,106,0.2)" : level === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(245,158,11,0.2)";
             const fg = level === "HIGH" ? "#16a34a" : level === "MEDIUM" ? "#d4af37" : "#f59e0b";
             const label = level === "HIGH" ? "HIGH ✓" : level === "MEDIUM" ? "MED ~" : "AI EST";
@@ -2909,14 +2911,14 @@ export default function App() {
     const enrich = await res.json();
     const updated = {
       ...item,
-      comps: enrich.comps || item.comps,
-      price: enrich.price || item.price,
-      priceLow: enrich.priceLow || item.priceLow,
-      priceHigh: enrich.priceHigh || item.priceHigh,
+      comps: enrich.comps ?? item.comps,
+      price: enrich.price ?? item.price,
+      priceLow: enrich.priceLow ?? item.priceLow,
+      priceHigh: enrich.priceHigh ?? item.priceHigh,
       keyIssue: enrich.keyIssue || item.keyIssue,
       soldComps: enrich.soldComps || item.soldComps || [],
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
-      pricingSource: enrich.pricingSource || null,
+      pricingSource: enrich.pricingSource ?? null,
       priceNote: enrich.priceNote || null,
       gradeMultiplier: enrich.gradeMultiplier || null,
       defectPenalty: enrich.defectPenalty || item.defectPenalty || null,

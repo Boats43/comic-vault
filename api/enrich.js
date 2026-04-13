@@ -660,6 +660,21 @@ export default async function handler(req, res) {
       out.pricingSource = "browse_api";
     }
 
+    // Floor guard: never price below the lowest eBay comp.
+    const finalNum = parseFloat(
+      String(out.price || '0').replace(/[$,]/g, '')
+    );
+    const floorNum = compsFromEbay?.lowestNum || 0;
+
+    if (floorNum > 0 && finalNum < floorNum) {
+      console.log('[floor] price', finalNum,
+        '< floor', floorNum, '— enforcing');
+      out.price = fmtUsd(floorNum);
+      out.priceLow = fmtUsd(floorNum * 0.85);
+      out.priceHigh = fmtUsd(floorNum * 1.25);
+      out.priceNote = (out.priceNote || '') + ' · floor enforced';
+    }
+
     if (rawComps && rawComps.count > 0) {
       out.comps = {
         count: rawComps.count,
