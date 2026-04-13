@@ -702,26 +702,26 @@ export default async function handler(req, res) {
         const mult = out.gradeMultiplier || 1;
         const adjAvg = compsAvg * mult;
 
-        // PC way too high vs market
-        if (pcNum > compsAvg * 3) {
+        // PC way too high vs market (compare final price to grade-adjusted avg)
+        if (pcNum > adjAvg * 3) {
           out.price = fmtUsd(adjAvg * 1.15);
           out.priceLow = fmtUsd(adjAvg * 0.75);
           out.priceHigh = fmtUsd(adjAvg * 1.5);
           out.pricingSource = "browse_api";
           out.priceNote = "PC outlier — eBay avg used";
           console.log('[sanity] PC', pcNum,
-            '> comps*3', compsAvg * 3, '→ fallback adj', adjAvg.toFixed(2));
+            '> adjAvg*3', adjAvg * 3, '→ fallback adj', adjAvg.toFixed(2));
         }
 
-        // PC way too low vs market floor
-        if (pcNum < compsAvg * 0.3 && pcNum < compsAvg - 10) {
+        // PC way too low vs market floor (compare final price to grade-adjusted avg)
+        if (pcNum < adjAvg * 0.5 && pcNum < adjAvg - 10) {
           out.price = fmtUsd(adjAvg);
           out.priceLow = fmtUsd(adjAvg * 0.75);
           out.priceHigh = fmtUsd(adjAvg * 1.5);
           out.pricingSource = "browse_api";
           out.priceNote = "PC too low — eBay avg used";
           console.log('[sanity] PC', pcNum,
-            '< comps*0.3', compsAvg * 0.3, '→ fallback adj', adjAvg.toFixed(2));
+            '< adjAvg*0.5', adjAvg * 0.5, '→ fallback adj', adjAvg.toFixed(2));
         }
       }
 
