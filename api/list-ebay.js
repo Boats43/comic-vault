@@ -42,13 +42,28 @@ const parsePriceNumber = (p) => {
 // Safest for a graded book is 2750 (Graded). Raw/ungraded → 4000.
 const conditionIdFor = (grade) => (grade ? "2750" : "4000");
 
+// Match the frontend showKeyIssue() check.
+const showKeyIssue = (k) => {
+  if (!k) return false;
+  const s = k.toLowerCase().trim();
+  if (["no", "n/a", "none", "false", "not a key",
+    "non-key", "non key", "not key"]
+    .some((x) => s.includes(x))) return false;
+  return s.length > 2;
+};
+
 const buildTitle = (item) => {
+  const gradeStr =
+    item.isGraded === true && item.numericGrade != null
+      ? `CGC ${item.numericGrade}`
+      : item.grade || "";
   const parts = [
     item.title,
     item.issue ? `#${item.issue}` : "",
-    item.isGraded === true ? `CGC ${item.numericGrade}` : item.grade,
-    item.keyIssue && !/not a|n\/a/i.test(item.keyIssue) ? "KEY" : "",
+    gradeStr,
+    item.publisher,
     item.year,
+    showKeyIssue(item.keyIssue) ? "KEY" : "",
   ];
   const joined = parts.filter(Boolean).join(" ").trim();
   // eBay title hard limit: 80 chars.
@@ -60,7 +75,13 @@ const buildDescription = (item) => {
   if (item.title) lines.push(`<h2>${xmlEscape(item.title)}</h2>`);
   const meta = [item.publisher, item.year].filter(Boolean).join(" · ");
   if (meta) lines.push(`<p><strong>${xmlEscape(meta)}</strong></p>`);
-  if (item.grade) lines.push(`<p>Grade: <strong>CGC ${xmlEscape(item.grade)}</strong></p>`);
+  if (item.grade) {
+    const gradeLabel =
+      item.isGraded === true && item.numericGrade != null
+        ? `CGC ${xmlEscape(item.grade)}`
+        : xmlEscape(item.grade);
+    lines.push(`<p>Grade: <strong>${gradeLabel}</strong></p>`);
+  }
   if (item.keyIssue) lines.push(`<p>Key Issue: ${xmlEscape(item.keyIssue)}</p>`);
   if (item.reason) lines.push(`<p>${xmlEscape(item.reason)}</p>`);
   if (item.comicVine?.description) {
