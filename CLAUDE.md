@@ -54,6 +54,8 @@ Nine keys required (all set in Vercel):
 - Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
 - Sanity check compares grade-adjusted PC price to grade-adjusted comps average (not raw avg).
 - Sanity thresholds: 0.5x (too low) and 3x (too high) against adjAvg.
+- Floor guard field: `rawComps.lowest` (not `lowestNum`) — comps.js returns `lowest`.
+- Floor guard is grade-adjusted: `rawFloor * gradeMultiplier`.
 
 ## Last Session
-Session 4/13/2026 — 12 commits: Visual issue validation, variant detection, export/import, ROI tracking, trend chart, 5 bug fixes, listing title format.
+Session 4/13/2026 — 18 commits: Visual issue validation, variant detection, export/import, ROI tracking, trend chart, listing title format, hasIssueNumber exact match, floor guard field fix, sanity check apples-to-apples, price-trace logging.
