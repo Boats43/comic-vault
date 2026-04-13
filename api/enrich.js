@@ -12,6 +12,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { fetchComps } from "./comps.js";
 import { fetchSold } from "./sold.js";
+import { lookupCGC } from "./cgc-lookup.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -424,6 +425,7 @@ export default async function handler(req, res) {
       numericGrade,
       year,
       publisher,
+      certNumber,
     } = req.body || {};
     if (!title) {
       res.status(400).json({ error: "title required" });
@@ -451,12 +453,13 @@ export default async function handler(req, res) {
           })
         : Promise.resolve(null);
 
-    const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting] = await Promise.all([
+    const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting, cgcResult] = await Promise.all([
       lookupComicVine({ title, issue: issueNum, year, publisher }),
       compsPromise,
       lookupXimilar({ images, title, confidence }),
       fetchSold({ title, issue: issueNum, year }).catch(() => []),
       lookupPriceCharting({ title, issue: issueNum, year }).catch(() => null),
+      certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
     ]);
 
     // AI verification pass on the comps that will be displayed. Verifies
@@ -742,6 +745,16 @@ export default async function handler(req, res) {
           : ximilar.name;
         out.identifiedBy = "ximilar";
       }
+    }
+
+    // CGC cert verification override — authoritative data.
+    if (cgcResult) {
+      if (cgcResult.title) out.title = cgcResult.title;
+      if (cgcResult.issue) out.issue = cgcResult.issue;
+      if (cgcResult.grade != null) out.grade = cgcResult.grade;
+      out.cgcVerified = true;
+      out.cgcLabel = cgcResult.labelType || null;
+      out.certNumber = cgcResult.certNumber;
     }
 
     res.status(200).json(out);
