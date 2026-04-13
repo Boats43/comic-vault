@@ -773,15 +773,17 @@ export default async function handler(req, res) {
       out.pricingSource = "browse_api";
     }
 
-    // Floor guard: never price below the lowest eBay comp.
+    // Floor guard: never price below the grade-adjusted lowest eBay comp.
     const finalNum = parseFloat(
       String(out.price || '0').replace(/[$,]/g, '')
     );
-    const floorNum = rawComps?.lowestNum || compsFromEbay?.lowestNum || 0;
+    const rawFloor = rawComps?.lowestNum || compsFromEbay?.lowestNum || 0;
+    const gradeAdj = out.gradeMultiplier || 1.0;
+    const floorNum = rawFloor * gradeAdj;
 
     if (floorNum > 0 && finalNum < floorNum) {
       console.log('[floor] price', finalNum,
-        '< floor', floorNum, '— enforcing');
+        '< adjFloor', floorNum, `(raw ${rawFloor} × ${gradeAdj})`, '— enforcing');
       out.price = fmtUsd(floorNum);
       out.priceLow = fmtUsd(floorNum * 0.85);
       out.priceHigh = fmtUsd(floorNum * 1.25);
