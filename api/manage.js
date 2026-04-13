@@ -15,30 +15,54 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Strip images to stay under body limits — Claude only needs metadata.
+    // Build a compact summary + top books instead of sending full catalogue.
+    const getPrice = (c) => {
+      const p = parseFloat(String(c.price || "0").replace(/[^0-9.]/g, ""));
+      return p > 0 ? p : (c.comps?.averageNum || 0);
+    };
+
+    const now = Date.now();
+    const totalValue = comics.reduce((s, c) => s + getPrice(c), 0);
+    const cgcCount = comics.filter((c) => c.isGraded === true).length;
+    const publishers = {};
+    const eras = { silver: 0, bronze: 0, modern: 0, other: 0 };
+    comics.forEach((c) => {
+      const pub = c.publisher || "Unknown";
+      publishers[pub] = (publishers[pub] || 0) + 1;
+      const yr = parseInt(c.year, 10);
+      if (yr >= 1956 && yr <= 1969) eras.silver++;
+      else if (yr >= 1970 && yr <= 1985) eras.bronze++;
+      else if (yr >= 1986) eras.modern++;
+      else eras.other++;
+    });
+
     const stripped = comics.map((c) => ({
-      id: c.id,
-      title: c.title,
-      publisher: c.publisher,
-      year: c.year,
-      grade: c.grade,
-      isGraded: c.isGraded,
-      numericGrade: c.numericGrade,
-      keyIssue: c.keyIssue,
-      price: c.price,
-      priceLow: c.priceLow,
-      priceHigh: c.priceHigh,
-      status: c.status || "unlisted",
-      listedAt: c.listedAt || null,
-      timestamp: c.timestamp,
-      comps: c.comps
-        ? {
-            averageNum: c.comps.averageNum,
-            lowestNum: c.comps.lowestNum,
-            count: c.comps.count,
-          }
-        : null,
+      id: c.id, title: c.title, publisher: c.publisher, year: c.year,
+      grade: c.grade, isGraded: c.isGraded, numericGrade: c.numericGrade,
+      keyIssue: c.keyIssue, price: c.price,
+      status: c.status || "unlisted", timestamp: c.timestamp,
+      value: getPrice(c),
     }));
+
+    const topBooks = stripped.slice().sort((a, b) => b.value - a.value).slice(0, 10);
+    const keyIssues = stripped.filter((c) => c.keyIssue && c.keyIssue !== "N/A" && c.keyIssue.length > 3);
+    const unlisted = stripped.filter((c) => c.status !== "listed");
+    const stagnant = stripped.filter((c) => c.status !== "listed" && (now - (c.timestamp || 0)) > 86400000 * 30);
+    const rawHighValue = stripped.filter((c) => !c.isGraded && c.value >= 50);
+
+    const summary = {
+      totalBooks: comics.length,
+      totalValue: Math.round(totalValue),
+      avgValue: Math.round(totalValue / (comics.length || 1)),
+      gradeDistribution: { CGC: cgcCount, raw: comics.length - cgcCount },
+      publishers,
+      eras,
+      topValueBooks: topBooks,
+      keyIssues: keyIssues.slice(0, 10),
+      unlisted: unlisted.length,
+      stagnant: stagnant.slice(0, 10),
+      rawHighValue: rawHighValue.slice(0, 10),
+    };
 
     const message = await client.messages.create({
       model: "claude-haiku-4-5",
@@ -70,8 +94,8 @@ Rules:
 - totalValue: estimated total collection value in dollars
 - valueChange: estimated percent change vs 30 days ago (positive = up, negative = down)
 
-Collection (${stripped.length} books):
-${JSON.stringify(stripped)}`,
+Collection Summary:
+${JSON.stringify(summary)}`,
         },
       ],
     });

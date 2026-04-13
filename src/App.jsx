@@ -1034,6 +1034,8 @@ function BidCalculator({ marketValue, detectedPrice }) {
 function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
+  const [sortBy, setSortBy] = useState("value");
+  const [eraFilter, setEraFilter] = useState("all");
 
   const toggleSelect = (id) => {
     setSelected((prev) => {
@@ -1108,8 +1110,50 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices 
         )}
       </div>
 
+      {/* Sort bar */}
+      <div style={{ display: "flex", gap: 4, padding: "4px 0", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        {[["value", "Value ↓"], ["title", "Title"], ["year", "Year"], ["grade", "Grade"], ["recent", "Recent"]].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setSortBy(key)}
+            style={{ fontSize: 11, padding: "3px 8px", borderRadius: 4, border: sortBy === key ? "1px solid #d4af37" : "1px solid rgba(255,255,255,0.12)", background: sortBy === key ? "rgba(212,175,55,0.15)" : "transparent", color: sortBy === key ? "#d4af37" : "#aaa", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }}
+          >{label}</button>
+        ))}
+      </div>
+
+      {/* Era filter pills */}
+      <div style={{ display: "flex", gap: 4, padding: "4px 0 8px", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        {[["all", "All"], ["silver", "Silver Age"], ["bronze", "Bronze"], ["modern", "Modern"], ["keys", "Keys"], ["listed", "Listed"], ["unlisted", "Unlisted"]].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setEraFilter(eraFilter === key ? "all" : key)}
+            style={{ fontSize: 11, padding: "3px 8px", borderRadius: 12, border: eraFilter === key ? "1px solid #d4af37" : "1px solid rgba(255,255,255,0.12)", background: eraFilter === key ? "rgba(212,175,55,0.15)" : "transparent", color: eraFilter === key ? "#d4af37" : "#aaa", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }}
+          >{label}</button>
+        ))}
+      </div>
+
       <div className="collection-list">
-        {items.map((item) => {
+        {items
+          .filter((item) => {
+            if (eraFilter === "all") return true;
+            const yr = parseInt(item.year, 10);
+            if (eraFilter === "silver") return yr >= 1956 && yr <= 1969;
+            if (eraFilter === "bronze") return yr >= 1970 && yr <= 1985;
+            if (eraFilter === "modern") return yr >= 1986;
+            if (eraFilter === "keys") return showKeyIssue(item.keyIssue);
+            if (eraFilter === "listed") return item.status === "listed";
+            if (eraFilter === "unlisted") return item.status !== "listed";
+            return true;
+          })
+          .sort((a, b) => {
+            if (sortBy === "value") return (getDisplayPrice(b) || 0) - (getDisplayPrice(a) || 0);
+            if (sortBy === "title") return (a.title || "").localeCompare(b.title || "");
+            if (sortBy === "year") return (parseInt(a.year, 10) || 0) - (parseInt(b.year, 10) || 0);
+            if (sortBy === "grade") return (b.numericGrade || 0) - (a.numericGrade || 0);
+            if (sortBy === "recent") return (b.timestamp || 0) - (a.timestamp || 0);
+            return 0;
+          })
+          .map((item) => {
           const thumbSrc = getComicPhotos(item)[0] || null;
           const titleWithIssue = (item.title || "Unknown") + (item.issue && !item.title?.includes('#' + item.issue) ? ` #${item.issue}` : '');
           const gradeTxt = item.isGraded === true && item.numericGrade != null
@@ -1205,6 +1249,10 @@ function CollectionDetail({
   onList,
   onRefreshMarket,
   onAddPhoto,
+  currentIndex,
+  totalItems,
+  onPrev,
+  onNext,
 }) {
   const [listing, setListing] = useState(false);
   const [listError, setListError] = useState(null);
@@ -1214,6 +1262,15 @@ function CollectionDetail({
   const [addPhotoError, setAddPhotoError] = useState(null);
   const [expandedPhoto, setExpandedPhoto] = useState(null);
   const addPhotoRef = useRef(null);
+
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === "ArrowLeft" && onPrev) onPrev();
+      if (e.key === "ArrowRight" && onNext) onNext();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onPrev, onNext]);
 
   const photos = getComicPhotos(item);
   const canAddMore = photos.length < 4;
@@ -1288,7 +1345,24 @@ function CollectionDetail({
 
   return (
     <div className="detail-view">
-      <button className="back-btn" onClick={onBack}>← Back</button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <button className="back-btn" onClick={onBack} style={{ margin: 0 }}>← Back</button>
+        {totalItems > 1 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={onPrev}
+              disabled={currentIndex <= 0}
+              style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 4, color: currentIndex <= 0 ? "#555" : "#d4af37", cursor: currentIndex <= 0 ? "default" : "pointer", padding: "4px 10px", fontSize: 14, fontWeight: 700 }}
+            >←</button>
+            <span className="muted small">{currentIndex + 1} of {totalItems}</span>
+            <button
+              onClick={onNext}
+              disabled={currentIndex >= totalItems - 1}
+              style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 4, color: currentIndex >= totalItems - 1 ? "#555" : "#d4af37", cursor: currentIndex >= totalItems - 1 ? "default" : "pointer", padding: "4px 10px", fontSize: 14, fontWeight: 700 }}
+            >→</button>
+          </div>
+        )}
+      </div>
 
       {/* 1. PHOTO STRIP */}
       <div
@@ -3094,6 +3168,16 @@ export default function App() {
             onList={listOnEbay}
             onRefreshMarket={refreshMarketData}
             onAddPhoto={addPhotoToComic}
+            currentIndex={catalogue.indexOf(selectedItem)}
+            totalItems={catalogue.length}
+            onPrev={() => {
+              const idx = catalogue.indexOf(selectedItem);
+              if (idx > 0) { setSelectedItem(catalogue[idx - 1]); window.scrollTo(0, 0); }
+            }}
+            onNext={() => {
+              const idx = catalogue.indexOf(selectedItem);
+              if (idx < catalogue.length - 1) { setSelectedItem(catalogue[idx + 1]); window.scrollTo(0, 0); }
+            }}
           />
         ) : (
           <CollectionList
