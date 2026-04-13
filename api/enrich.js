@@ -634,6 +634,10 @@ export default async function handler(req, res) {
         console.log(
           `[enrich] AI verify: kept ${verifiedCount}/${verifyCount} (removed ${removed})`
         );
+        if (removed > 0) {
+          const rejectedTitles = titlesToVerify.filter((_, i) => !keepFlags[i]).slice(0, 3);
+          console.log('[verify] removed titles:', rejectedTitles);
+        }
       }
     }
 
