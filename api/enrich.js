@@ -415,7 +415,12 @@ const lookupXimilar = async ({ images, title, confidence }) => {
 
 const BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope";
 
-const lookupEbayVisual = async ({ imageBase64, claudeIssue }) => {
+const lookupEbayVisual = async ({ imageBase64, claudeIssue, year }) => {
+  // Modern books (1985+): Claude Vision reads issue numbers accurately.
+  if (year && parseInt(year, 10) >= 1985) {
+    console.log('[visual] modern book — trusting Claude Vision');
+    return null;
+  }
   const appId = process.env.EBAY_APP_ID;
   const certId = process.env.EBAY_CERT_ID;
   if (!appId || !certId || !imageBase64) return null;
@@ -519,7 +524,7 @@ export default async function handler(req, res) {
       visualBase64 = m ? m[2] : firstImg.replace(/^data:[^;]+;base64,/, "");
     }
     const visualResult = visualBase64
-      ? await lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null)
+      ? await lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum, year }).catch(() => null)
       : null;
     const correctedIssue = (visualResult?.issueSource === "ebay_visual" && visualResult.issue)
       ? visualResult.issue
