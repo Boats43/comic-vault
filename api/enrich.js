@@ -780,7 +780,7 @@ export default async function handler(req, res) {
     const finalNum = parseFloat(
       String(out.price || '0').replace(/[$,]/g, '')
     );
-    const rawFloor = rawComps?.lowestNum || compsFromEbay?.lowestNum || 0;
+    const rawFloor = rawComps?.lowest || compsFromEbay?.lowest || 0;
     const gradeAdj = out.gradeMultiplier || 1.0;
     const floorNum = rawFloor * gradeAdj;
 
@@ -800,9 +800,8 @@ export default async function handler(req, res) {
       'multiplier:', out.gradeMultiplier,
       'afterMult:', parseFloat(String(out.price || '0').replace(/[$,]/g, '')),
       'compsAvg:', compsFromEbay?.average,
-      'sanityFired:', sanityFired,
-      'rawFloor:', rawFloor,
-      'adjFloor:', floorNum,
+      'rawFloor:', rawComps?.lowest || 0,
+      'adjFloor:', (rawComps?.lowest || 0) * (out.gradeMultiplier || 1.0),
       'floorFired:', floorFired,
       'finalPrice:', out.price,
       'source:', out.pricingSource
