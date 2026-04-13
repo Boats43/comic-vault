@@ -614,6 +614,12 @@ export default async function handler(req, res) {
         }
       }
 
+      // If sanity check switched to browse_api but comps are actually empty,
+      // the priceNote is misleading — clear it.
+      if (out.pricingSource === "browse_api" && !(compsFromEbay?.average > 0)) {
+        out.priceNote = null;
+      }
+
       // Defect penalty: reduce price if Claude detected a significant defect.
       if (req.body.defectPenalty) {
         const pen = parseFloat(req.body.defectPenalty);
