@@ -101,40 +101,78 @@ export const getOAuthToken = async (appId, certId, scope) => {
   return json.access_token;
 };
 
+// In-memory cache for Finding Service results (per-instance, 5 min TTL).
+const findingCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000;
+
 // Try the Finding API findCompletedItems (real sold data, no OAuth needed).
 // Returns parsed results array on success, or null on any failure so the
 // caller can fall back to Browse API.
+// Adds: 500ms pre-call spacing, 5-min in-memory cache, and one retry with
+// 2s backoff when eBay returns 500 + errorId 10001 (rate-limit).
 const tryFindCompleted = async ({ appId, query }) => {
-  try {
-    const url =
-      `${FINDING_ENDPOINT}?` +
-      `OPERATION-NAME=findCompletedItems` +
-      `&SERVICE-VERSION=1.0.0` +
-      `&SECURITY-APPNAME=${encodeURIComponent(appId)}` +
-      `&RESPONSE-DATA-FORMAT=JSON` +
-      `&keywords=${encodeURIComponent(query)}` +
-      `&categoryId=63` +
-      `&itemFilter(0).name=SoldItemsOnly` +
-      `&itemFilter(0).value=true` +
-      `&sortOrder=EndTimeSoonest` +
-      `&paginationInput.entriesPerPage=20`;
-    console.log(`[comps] finding url=${url}`);
-    const res = await fetch(url);
-    console.log(`[comps] finding http status=${res.status}`);
-    if (!res.ok) {
-      const body = await res.text();
-      console.error(`[comps] finding non-OK body:\n${body}`);
-      return null;
+  const cacheKey = String(query || '').trim().toLowerCase();
+  if (cacheKey && findingCache.has(cacheKey)) {
+    const cached = findingCache.get(cacheKey);
+    if (Date.now() - cached.ts < CACHE_TTL) {
+      console.log(`[comps] finding cache hit for "${cacheKey}"`);
+      return cached.data;
     }
+    findingCache.delete(cacheKey);
+  }
+
+  const url =
+    `${FINDING_ENDPOINT}?` +
+    `OPERATION-NAME=findCompletedItems` +
+    `&SERVICE-VERSION=1.0.0` +
+    `&SECURITY-APPNAME=${encodeURIComponent(appId)}` +
+    `&RESPONSE-DATA-FORMAT=JSON` +
+    `&keywords=${encodeURIComponent(query)}` +
+    `&categoryId=63` +
+    `&itemFilter(0).name=SoldItemsOnly` +
+    `&itemFilter(0).value=true` +
+    `&sortOrder=EndTimeSoonest` +
+    `&paginationInput.entriesPerPage=20`;
+
+  const doFetch = async () => {
+    await new Promise((r) => setTimeout(r, 500));
+    const res = await fetch(url);
+    const body = res.ok ? null : await res.text();
+    return { res, body };
+  };
+
+  try {
+    console.log(`[comps] finding url=${url}`);
+    let { res, body } = await doFetch();
+    console.log(`[comps] finding http status=${res.status}`);
+
+    if (!res.ok) {
+      const isRateLimit = res.status === 500 && /"errorId"\s*:\s*\[?\s*"?10001"?/i.test(body || '');
+      if (isRateLimit) {
+        console.warn(`[comps] finding 500 errorId 10001 — backoff 2s then retry once`);
+        await new Promise((r) => setTimeout(r, 2000));
+        ({ res, body } = await doFetch());
+        console.log(`[comps] finding retry http status=${res.status}`);
+        if (!res.ok) {
+          console.warn(`[comps] finding retry failed — skipping, using Browse`);
+          return null;
+        }
+      } else {
+        console.error(`[comps] finding non-OK body:\n${body}`);
+        return null;
+      }
+    }
+
     const json = await res.json();
     const items =
       json?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item;
     if (!Array.isArray(items) || items.length === 0) {
       console.log(`[comps] finding items=0`);
+      if (cacheKey) findingCache.set(cacheKey, { ts: Date.now(), data: null });
       return null;
     }
     console.log(`[comps] finding items=${items.length}`);
-    return items
+    const parsed = items
       .map((it) => {
         const price = parseFloat(
           it?.sellingStatus?.[0]?.currentPrice?.[0]?.__value__
@@ -148,6 +186,8 @@ const tryFindCompleted = async ({ appId, query }) => {
         };
       })
       .filter(Boolean);
+    if (cacheKey) findingCache.set(cacheKey, { ts: Date.now(), data: parsed });
+    return parsed;
   } catch (err) {
     console.error(`[comps] finding error: ${err?.message || err}`);
     return null;
