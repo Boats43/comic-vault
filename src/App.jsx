@@ -1045,9 +1045,11 @@ function BidCalculator({ marketValue, detectedPrice }) {
   );
 }
 
-function FloatingSearchBar({ value, onChange }) {
+function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
   const [listening, setListening] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [aiResponse, setAiResponse] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
   const recognitionRef = useRef(null);
   const silenceTimer = useRef(null);
   const inputRef = useRef(null);
@@ -1055,6 +1057,43 @@ function FloatingSearchBar({ value, onChange }) {
   const animFrameRef = useRef(null);
   const analyserRef = useRef(null);
   const streamRef = useRef(null);
+
+  const isAiQuery = (text) => {
+    const t = text.trim().toLowerCase();
+    if (t.startsWith("ask ")) return true;
+    if (/^(what|which|who|how|why|show me|find|tell|suggest|recommend|should|is there|are there|do i|any )/i.test(t)) return true;
+    return false;
+  };
+
+  const submitAiQuery = useCallback(async (text) => {
+    const query = text.replace(/^ask\s+/i, "").trim();
+    if (!query || !items) return;
+    setAiLoading(true);
+    setAiResponse(null);
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: query, collection: items, history: [] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setAiResponse(data.response || "No response.");
+      if (onAskClaude) onAskClaude(data);
+    } catch {
+      setAiResponse("Something went wrong. Try again.");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [items, onAskClaude]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && value.trim()) {
+      if (isAiQuery(value)) {
+        submitAiQuery(value);
+      }
+    }
+  };
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
@@ -1111,7 +1150,10 @@ function FloatingSearchBar({ value, onChange }) {
       onChange(transcript);
       if (silenceTimer.current) clearTimeout(silenceTimer.current);
       if (e.results[e.results.length - 1].isFinal) {
-        silenceTimer.current = setTimeout(() => stopListening(), 1500);
+        silenceTimer.current = setTimeout(() => {
+          stopListening();
+          if (isAiQuery(transcript)) submitAiQuery(transcript);
+        }, 1500);
       }
     };
     rec.onerror = () => stopListening();
@@ -1119,7 +1161,6 @@ function FloatingSearchBar({ value, onChange }) {
     rec.start();
     setListening(true);
 
-    // Start waveform visualiser
     navigator.mediaDevices?.getUserMedia({ audio: true }).then((stream) => {
       streamRef.current = stream;
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1130,11 +1171,12 @@ function FloatingSearchBar({ value, onChange }) {
       analyserRef.current = analyser;
       drawWaveform();
     }).catch(() => {});
-  }, [onChange, stopListening, drawWaveform]);
+  }, [onChange, stopListening, drawWaveform, submitAiQuery]);
 
   useEffect(() => () => stopListening(), [stopListening]);
 
   const hasSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const showingAi = isAiQuery(value);
 
   return (
     <div style={{
@@ -1143,10 +1185,37 @@ function FloatingSearchBar({ value, onChange }) {
       padding: "0 12px", zIndex: 20,
       pointerEvents: "none",
     }}>
+      {/* Claude AI response bubble */}
+      {(aiResponse || aiLoading) && (
+        <div style={{
+          background: "rgba(18,18,18,0.95)", backdropFilter: "blur(12px)",
+          border: "1px solid rgba(212,175,55,0.3)", borderRadius: 16,
+          padding: "12px 14px", marginBottom: 8,
+          pointerEvents: "auto", maxHeight: 200, overflowY: "auto",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: "#d4af37", fontWeight: 600 }}>Claude</span>
+            <button
+              onClick={() => { setAiResponse(null); onChange(""); }}
+              style={{ background: "transparent", border: "none", color: "#666", fontSize: 14, cursor: "pointer", padding: "0 4px", lineHeight: 1 }}
+            >✕</button>
+          </div>
+          {aiLoading ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 14, height: 14, border: "2px solid rgba(212,175,55,0.3)", borderTopColor: "#d4af37", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+              <span style={{ color: "#d4af37", fontSize: 13 }}>Thinking...</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, lineHeight: 1.6, color: "#e0e0e0" }}>{aiResponse}</div>
+          )}
+        </div>
+      )}
+
+      {/* Search bar */}
       <div style={{
         display: "flex", alignItems: "center", gap: 8,
         background: "rgba(18,18,18,0.95)", backdropFilter: "blur(12px)",
-        border: "1px solid rgba(212,175,55,0.35)", borderRadius: 28,
+        border: `1px solid ${showingAi ? "rgba(212,175,55,0.6)" : "rgba(212,175,55,0.35)"}`, borderRadius: 28,
         padding: "6px 6px 6px 16px", boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
         pointerEvents: "auto",
       }}>
@@ -1155,9 +1224,10 @@ function FloatingSearchBar({ value, onChange }) {
             <input
               ref={inputRef}
               type="text"
-              placeholder='Search title, "key", "$100+"...'
+              placeholder='Search or ask Claude...'
               value={value}
-              onChange={(e) => onChange(e.target.value)}
+              onChange={(e) => { onChange(e.target.value); if (!isAiQuery(e.target.value)) setAiResponse(null); }}
+              onKeyDown={handleKeyDown}
               autoFocus
               style={{
                 flex: 1, background: "transparent", border: "none", outline: "none",
@@ -1169,7 +1239,7 @@ function FloatingSearchBar({ value, onChange }) {
             )}
             {value && (
               <button
-                onClick={() => onChange("")}
+                onClick={() => { onChange(""); setAiResponse(null); }}
                 style={{ background: "transparent", border: "none", color: "#aaa", fontSize: 18, cursor: "pointer", padding: "4px 6px", lineHeight: 1 }}
               >✕</button>
             )}
@@ -1184,6 +1254,17 @@ function FloatingSearchBar({ value, onChange }) {
                 }}
                 aria-label={listening ? "Stop voice" : "Voice search"}
               >{listening ? "⏹" : "🎤"}</button>
+            )}
+            {showingAi && !aiLoading && (
+              <button
+                onClick={() => submitAiQuery(value)}
+                style={{
+                  width: 36, height: 36, borderRadius: "50%", border: "none", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                  background: "#d4af37", color: "#000", fontSize: 16, fontWeight: 700,
+                }}
+                aria-label="Ask Claude"
+              >→</button>
             )}
             <button
               onClick={() => { setExpanded(false); stopListening(); }}
@@ -1200,7 +1281,7 @@ function FloatingSearchBar({ value, onChange }) {
             }}
           >
             <span style={{ fontSize: 16 }}>🔍</span>
-            <span>{value || 'Search collection...'}</span>
+            <span>{value || 'Search or ask Claude...'}</span>
           </button>
         )}
       </div>
@@ -1437,7 +1518,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
         ))}
       </div>
 
-      <FloatingSearchBar value={localSearch} onChange={setLocalSearch} />
+      <FloatingSearchBar value={localSearch} onChange={setLocalSearch} items={items} />
 
       {(() => {
         const sq = localSearch.toLowerCase().trim();
@@ -3577,9 +3658,16 @@ export default function App() {
 
           {!loading && !result && !error && !bulkProgress && bulkDone == null && (
             <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "8px 0 4px" }}>
+                <div style={{
+                  width: 8, height: 8, borderRadius: "50%", background: "#16a34a",
+                  boxShadow: "0 0 6px #16a34a, 0 0 12px rgba(22,163,106,0.4)",
+                  animation: "pulse-dot 2s ease-in-out infinite",
+                }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#16a34a" }}>Scanner ready</span>
+              </div>
               <ScanZone
                 onFile={(e) => handleFile(e, "scan")}
-
                 inputRef={fileRef}
                 label="Tap to scan a comic"
               />
