@@ -49,6 +49,7 @@ Nine keys required (all set in Vercel):
 - PriceCharting year threshold: 5 years max gap between comic year and product year.
 - AI verify: accept variant/cover B listings as matches if same character + issue number.
 - Variant multipliers: gold ×3, 2nd print ×1.5, newsstand ×1.3, price variant ×2.0.
+- Key issue multiplier: ×1.5 applied after variant mult when `out.keyIssue` is set.
 - Visual search only overrides with 3+ matches.
 - PriceCharting skipped when issue=null.
 - No premium multiplier: corner box, masterpieces, design variant, cover A/B/C/D.
@@ -60,10 +61,14 @@ Nine keys required (all set in Vercel):
 - Floor guard is grade-adjusted: `rawFloor * gradeMultiplier`.
 - Buyer sessions stored in localStorage key `cv_buyer_sessions` (last 100 entries).
 - Budget persisted in localStorage key `cv_buyer_budget`.
+- Buyer settings persisted in localStorage key `cv_buyer_settings` (whatnotFee, supplies, labor, minProfit).
+- Net profit formula: `marketValue - marketValue*(whatnotFee/100) - supplies - labor - bid`.
+- BUY/PASS auto-suggested: BUY when netProfit ≥ minProfit and within budget; PASS otherwise.
+- Net profit color: green ≥ minProfit, yellow > 0 but < minProfit, red ≤ 0.
 - FloatingSearchBar has two modes: 🔍 search (local filter) and 🧠 claude (AI query) — never mix.
-- Share Target switches to Buyer tab and calls `gradeBlob(blob, { save: false })`.
+- Share Target switches to Buyer tab, strips `?share-target=1` from URL, clears widgetMode, and calls `gradeBlob(blob, { save: false })` — no widget overlay.
 - Collection list paddingBottom is dynamic: 220px when Claude card visible, 100px otherwise.
 - `api/chat.js` receives optional `buyerSessions` with Whatnot buying history for Claude context.
 
 ## Last Session
-Session 4/13/2026 (cont.) — floating search bar with voice input, Claude inline collection queries (separate from filter), budget-aware BidCalculator with BUY/PASS session logging, Whatnot deep link ("Back to stream →"), share target auto-routes to Buyer tab, scan ready dot, dynamic list padding for Claude card, buyer session history sent to api/chat.js for Claude context.
+Session 4/14/2026 — key issue ×1.5 multiplier in enrich pipeline, share target now persists into Buyer tab (URL cleaned, widget overlay bypassed), BidCalculator redesigned as Net Profit UI: title+grade header, ⚙ settings gear (whatnotFee 10%, supplies $0.75, labor $2.00, minProfit $5.00 — stored in `cv_buyer_settings`), huge NET PROFIT hero with green/yellow/red color states, single large BUY/PASS button (auto-suggest from net vs minProfit + budget), collapsible "See details ›" breakdown row-by-row.
