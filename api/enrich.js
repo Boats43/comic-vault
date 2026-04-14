@@ -846,6 +846,18 @@ export default async function handler(req, res) {
       }
     }
 
+    // Key issue multiplier: ×1.5 on top of base/variant price.
+    if (out.keyIssue && out.price) {
+      const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
+      if (curPrice > 0) {
+        out.price = fmtUsd(curPrice * 1.5);
+        out.priceLow = fmtUsd(curPrice * 1.5 * 0.75);
+        out.priceHigh = fmtUsd(curPrice * 1.5 * 1.25);
+        out.keyMultiplier = 1.5;
+        console.log('[key]', out.keyIssue, '× 1.5');
+      }
+    }
+
     if (rawComps && rawComps.count > 0) {
       out.comps = {
         count: rawComps.count,

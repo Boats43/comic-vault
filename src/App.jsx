@@ -980,11 +980,27 @@ const getSessionSummary = () => {
   return { recentSessions: sessions, buyRate: buys.length / sessions.length, avgDiscount, totalSpent, bestDeal };
 };
 
-function BidCalculator({ marketValue, detectedPrice, resultTitle, onLogSession }) {
+const DEFAULT_BUYER_SETTINGS = { whatnotFee: 10, supplies: 0.75, labor: 2.0, minProfit: 5.0 };
+
+const loadBuyerSettings = () => {
+  try {
+    const raw = localStorage.getItem("cv_buyer_settings");
+    if (!raw) return { ...DEFAULT_BUYER_SETTINGS };
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_BUYER_SETTINGS, ...parsed };
+  } catch {
+    return { ...DEFAULT_BUYER_SETTINGS };
+  }
+};
+
+function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, onLogSession }) {
   const [bid, setBid] = useState("");
   const [budget, setBudget] = useState(() => localStorage.getItem("cv_buyer_budget") || "");
   const [seeded, setSeeded] = useState(false);
   const [logged, setLogged] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState(loadBuyerSettings);
 
   useEffect(() => {
     if (detectedPrice && !seeded) {
@@ -1000,38 +1016,108 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, onLogSession }
     if (budget) localStorage.setItem("cv_buyer_budget", budget);
   }, [budget]);
 
+  useEffect(() => {
+    localStorage.setItem("cv_buyer_settings", JSON.stringify(settings));
+  }, [settings]);
+
   const bidNum = parseFloat(bid);
   const budgetNum = parseFloat(budget);
   const hasBid = !isNaN(bidNum) && bidNum > 0;
   const hasBudget = !isNaN(budgetNum) && budgetNum > 0;
+  const hasMV = marketValue != null && marketValue > 0;
 
-  const maxSafe = marketValue != null ? Math.round(marketValue * 0.8) : null;
+  const feePct = parseFloat(settings.whatnotFee) || 0;
+  const supplies = parseFloat(settings.supplies) || 0;
+  const labor = parseFloat(settings.labor) || 0;
+  const minProfit = parseFloat(settings.minProfit) || 0;
 
-  let rating = null;
-  if (hasBid && marketValue) {
-    if (bidNum <= marketValue * 0.7) rating = { label: "STRONG BUY", cls: "rating-strong" };
-    else if (bidNum <= marketValue * 0.8) rating = { label: "FAIR", cls: "rating-fair" };
-    else rating = { label: "OVERPRICED", cls: "rating-bad" };
-  }
+  const whatnotFeeAmt = hasMV ? marketValue * (feePct / 100) : 0;
+  const netProfit = hasMV && hasBid
+    ? marketValue - whatnotFeeAmt - supplies - labor - bidNum
+    : null;
 
   const overBudget = hasBid && hasBudget && bidNum > budgetNum;
-  const withinBudget = hasBid && hasBudget && bidNum <= budgetNum;
 
-  const pctBelow =
-    hasBid && marketValue
-      ? Math.round(((marketValue - bidNum) / marketValue) * 100)
-      : null;
+  let verdictColor = "#aaa";
+  if (netProfit != null) {
+    if (netProfit >= minProfit) verdictColor = "#16a34a";
+    else if (netProfit > 0) verdictColor = "#d4af37";
+    else verdictColor = "#e05656";
+  }
+  const shouldBuy = netProfit != null && netProfit >= minProfit && !overBudget;
 
   const logDecision = (decision) => {
     if (logged) return;
-    const entry = { title: resultTitle || "Unknown", marketValue: marketValue || 0, bidPrice: bidNum || 0, budget: budgetNum || 0, decision };
+    const entry = {
+      title: resultTitle || "Unknown",
+      marketValue: marketValue || 0,
+      bidPrice: bidNum || 0,
+      budget: budgetNum || 0,
+      netProfit: netProfit != null ? Math.round(netProfit * 100) / 100 : 0,
+      decision,
+    };
     saveSession(entry);
     setLogged(true);
     if (onLogSession) onLogSession(entry);
   };
 
+  const updateSetting = (k, v) => setSettings((s) => ({ ...s, [k]: v }));
+
   return (
     <div className="calc-card">
+      {/* Header: title + grade + settings gear */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {resultTitle && (
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#ddd", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {resultTitle}
+            </div>
+          )}
+          {resultGrade && (
+            <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{resultGrade}</div>
+          )}
+        </div>
+        <button
+          onClick={() => setShowSettings((s) => !s)}
+          style={{
+            background: "transparent", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8,
+            padding: "4px 8px", fontSize: 14, color: "#aaa", cursor: "pointer", lineHeight: 1,
+          }}
+          aria-label="Settings"
+        >⚙</button>
+      </div>
+
+      {/* Settings panel */}
+      {showSettings && (
+        <div style={{
+          border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10,
+          padding: 12, marginBottom: 12, background: "rgba(255,255,255,0.03)",
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#d4af37", marginBottom: 8 }}>Buyer settings</div>
+          {[
+            { k: "whatnotFee", label: "Whatnot fee %", step: "0.5" },
+            { k: "supplies", label: "Supplies $", step: "0.25" },
+            { k: "labor", label: "Labor $", step: "0.5" },
+            { k: "minProfit", label: "Min profit $", step: "0.5" },
+          ].map(({ k, label, step }) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, color: "#aaa" }}>{label}</span>
+              <input
+                type="number" inputMode="decimal" step={step}
+                value={settings[k]}
+                onChange={(e) => updateSetting(k, e.target.value)}
+                style={{
+                  width: 80, padding: "4px 8px", borderRadius: 6,
+                  border: "1px solid rgba(255,255,255,0.15)", background: "#1a1a1a",
+                  color: "#fff", fontSize: 13, textAlign: "right",
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Inputs: budget + bid */}
       <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
         <div style={{ flex: 1 }}>
           <label className="calc-label">Budget</label>
@@ -1049,76 +1135,73 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, onLogSession }
         </div>
       </div>
 
-      <div className="calc-row">
-        <span className="muted small">Market Value</span>
-        <span className="calc-mv">{fmt(marketValue)}</span>
-      </div>
-
-      {/* Budget verdict */}
-      {hasBid && hasBudget && marketValue != null && (
-        <div style={{
-          border: `1px solid ${overBudget ? "rgba(224,86,86,0.4)" : "rgba(22,163,106,0.4)"}`,
-          borderRadius: 10, padding: "10px 14px", margin: "8px 0",
-          background: overBudget ? "rgba(224,86,86,0.08)" : "rgba(22,163,106,0.08)",
-        }}>
-          {overBudget ? (
-            <>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#e05656" }}>
-                Over budget by ${Math.round(bidNum - budgetNum)}
-              </div>
-              <div style={{ fontSize: 13, color: "#e05656", marginTop: 4 }}>Pass on this one</div>
-            </>
-          ) : (
-            <>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#16a34a" }}>
-                Within budget
-              </div>
-              {rating && (
-                <div style={{ fontSize: 15, fontWeight: 800, color: rating.cls === "rating-strong" ? "#16a34a" : rating.cls === "rating-fair" ? "#d4af37" : "#e05656", marginTop: 4 }}>
-                  {rating.label === "STRONG BUY" && "⚡ "}{rating.label}
-                </div>
-              )}
-              {maxSafe != null && (
-                <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>
-                  Max safe bid: ${maxSafe}
-                </div>
-              )}
-            </>
+      {/* NET PROFIT hero */}
+      {hasMV && hasBid ? (
+        <div style={{ textAlign: "center", padding: "14px 0 8px" }}>
+          <div style={{ fontSize: 11, letterSpacing: 1.5, color: "#888", fontWeight: 700 }}>NET PROFIT</div>
+          <div style={{ fontSize: 52, fontWeight: 900, color: verdictColor, lineHeight: 1.05, marginTop: 4 }}>
+            {netProfit >= 0 ? "$" : "-$"}{Math.abs(Math.round(netProfit))}
+          </div>
+          {overBudget && (
+            <div style={{ fontSize: 12, color: "#e05656", marginTop: 4 }}>
+              Over budget by ${Math.round(bidNum - budgetNum)}
+            </div>
           )}
         </div>
-      )}
-
-      {/* Percentage context */}
-      {pctBelow != null && !overBudget && (
-        <div className="muted small" style={{ textAlign: "center", marginTop: 4 }}>
-          {pctBelow > 0 ? `${pctBelow}% below market` : `${Math.abs(pctBelow)}% above market`}
+      ) : (
+        <div style={{ textAlign: "center", padding: "14px 0 8px", color: "#666", fontSize: 13 }}>
+          {!hasMV ? "Scan a comic to see net profit" : "Enter a bid"}
         </div>
       )}
 
-      {/* BUY / PASS buttons — log session */}
-      {hasBid && marketValue != null && (
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <button
-            onClick={() => logDecision("BUY")}
-            disabled={logged}
-            style={{
-              flex: 1, padding: "10px 0", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 14, cursor: logged ? "default" : "pointer",
-              background: logged ? "rgba(255,255,255,0.06)" : "#16a34a", color: logged ? "#666" : "#fff",
-            }}
-          >{logged ? "Logged" : "BUY"}</button>
-          <button
-            onClick={() => logDecision("PASS")}
-            disabled={logged}
-            style={{
-              flex: 1, padding: "10px 0", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", fontWeight: 700, fontSize: 14, cursor: logged ? "default" : "pointer",
-              background: "transparent", color: logged ? "#666" : "#aaa",
-            }}
-          >{logged ? "Logged" : "PASS"}</button>
-        </div>
+      {/* BUY / PASS */}
+      {hasMV && hasBid && (
+        <button
+          onClick={() => logDecision(shouldBuy ? "BUY" : "PASS")}
+          disabled={logged}
+          style={{
+            width: "100%", padding: "16px 0", borderRadius: 10, border: "none",
+            fontWeight: 900, fontSize: 20, letterSpacing: 2, cursor: logged ? "default" : "pointer",
+            background: logged ? "rgba(255,255,255,0.06)" : (shouldBuy ? "#16a34a" : "#e05656"),
+            color: logged ? "#666" : "#fff", marginTop: 6,
+          }}
+        >{logged ? "LOGGED" : (shouldBuy ? "BUY" : "PASS")}</button>
       )}
 
-      {marketValue == null && (
-        <div className="muted small">Scan a comic above to get a market value.</div>
+      {/* See details */}
+      {hasMV && hasBid && (
+        <>
+          <button
+            onClick={() => setShowDetails((s) => !s)}
+            style={{
+              width: "100%", padding: "8px 0", marginTop: 8, background: "transparent",
+              border: "none", color: "#888", fontSize: 12, cursor: "pointer",
+            }}
+          >See details {showDetails ? "▾" : "›"}</button>
+          {showDetails && (
+            <div style={{ fontSize: 12, color: "#aaa", padding: "0 4px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                <span>Market value</span><span style={{ color: "#ddd" }}>{fmt(marketValue)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                <span>Whatnot fee ({feePct}%)</span><span>-${whatnotFeeAmt.toFixed(2)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                <span>Supplies</span><span>-${supplies.toFixed(2)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                <span>Labor</span><span>-${labor.toFixed(2)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                <span>Your bid</span><span>-${bidNum.toFixed(2)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0 0", borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 4, fontWeight: 700 }}>
+                <span style={{ color: "#ddd" }}>Net profit</span>
+                <span style={{ color: verdictColor }}>${netProfit.toFixed(2)}</span>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -3390,10 +3473,13 @@ export default function App() {
     }, 2000);
   }, [addToCatalogue]);
 
-  // Web Share Target handoff — fires gradeBlob in buyer mode (save:false).
+  // Web Share Target handoff — persist into Buyer tab (save:false).
+  // Strip ?share-target=1 immediately so reloads don't re-trigger the flow.
   useEffect(() => {
     if (!widgetMode) return;
     setTab("buyer");
+    window.history.replaceState({}, "", "/");
+    setWidgetMode(false);
     (async () => {
       try {
         const res = await fetch("/__shared-image", { cache: "no-store" });
@@ -3930,7 +4016,7 @@ export default function App() {
                 }}
               >Back to stream →</button>
               <ResultCard result={result} enriching={enriching} />
-              <BidCalculator marketValue={marketValue} detectedPrice={result?.detectedPrice} resultTitle={result?.title} />
+              <BidCalculator marketValue={marketValue} detectedPrice={result?.detectedPrice} resultTitle={result?.title} resultGrade={result?.grade} />
               <button className="reset-btn" onClick={reset}>Scan another</button>
             </>
           )}
