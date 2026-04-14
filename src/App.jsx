@@ -1124,11 +1124,13 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, onLogSession }
   );
 }
 
-function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
+function FloatingSearchBar({ value, onChange, items, onAskClaude, onClaudeCardChange }) {
   const [listening, setListening] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [aiResponse, setAiResponse] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiInput, setAiInput] = useState(""); // separate state for Claude queries
+  const [mode, setMode] = useState("search"); // "search" or "claude"
   const recognitionRef = useRef(null);
   const silenceTimer = useRef(null);
   const inputRef = useRef(null);
@@ -1166,13 +1168,36 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
     }
   }, [items, onAskClaude]);
 
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter" && value.trim()) {
-      if (isAiQuery(value)) {
-        submitAiQuery(value);
+  const displayValue = mode === "claude" ? aiInput : value;
+  const handleInputChange = (text) => {
+    if (mode === "claude") {
+      setAiInput(text);
+    } else {
+      // Auto-detect AI query and switch modes
+      if (isAiQuery(text)) {
+        setMode("claude");
+        setAiInput(text);
+        onChange(""); // clear filter
+      } else {
+        onChange(text);
       }
     }
   };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && mode === "claude" && aiInput.trim()) {
+      submitAiQuery(aiInput);
+    }
+  };
+
+  const clearAll = () => {
+    onChange("");
+    setAiInput("");
+    setAiResponse(null);
+    setMode("search");
+  };
+
+  const claudeCardVisible = !!(aiResponse || aiLoading);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
@@ -1226,7 +1251,13 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
 
     rec.onresult = (e) => {
       const transcript = Array.from(e.results).map((r) => r[0].transcript).join("");
-      onChange(transcript);
+      if (isAiQuery(transcript)) {
+        setMode("claude");
+        setAiInput(transcript);
+        onChange("");
+      } else {
+        onChange(transcript);
+      }
       if (silenceTimer.current) clearTimeout(silenceTimer.current);
       if (e.results[e.results.length - 1].isFinal) {
         silenceTimer.current = setTimeout(() => {
@@ -1255,7 +1286,10 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
   useEffect(() => () => stopListening(), [stopListening]);
 
   const hasSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-  const showingAi = isAiQuery(value);
+
+  useEffect(() => {
+    if (onClaudeCardChange) onClaudeCardChange(claudeCardVisible);
+  }, [claudeCardVisible, onClaudeCardChange]);
 
   return (
     <div style={{
@@ -1265,7 +1299,7 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
       pointerEvents: "none",
     }}>
       {/* Claude AI response bubble */}
-      {(aiResponse || aiLoading) && (
+      {claudeCardVisible && (
         <div style={{
           background: "rgba(18,18,18,0.95)", backdropFilter: "blur(12px)",
           border: "1px solid rgba(212,175,55,0.3)", borderRadius: 16,
@@ -1275,7 +1309,7 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
             <span style={{ fontSize: 11, color: "#d4af37", fontWeight: 600 }}>Claude</span>
             <button
-              onClick={() => { setAiResponse(null); onChange(""); }}
+              onClick={clearAll}
               style={{ background: "transparent", border: "none", color: "#666", fontSize: 14, cursor: "pointer", padding: "0 4px", lineHeight: 1 }}
             >✕</button>
           </div>
@@ -1294,18 +1328,28 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
       <div style={{
         display: "flex", alignItems: "center", gap: 8,
         background: "rgba(18,18,18,0.95)", backdropFilter: "blur(12px)",
-        border: `1px solid ${showingAi ? "rgba(212,175,55,0.6)" : "rgba(212,175,55,0.35)"}`, borderRadius: 28,
+        border: `1px solid ${mode === "claude" ? "rgba(212,175,55,0.6)" : "rgba(212,175,55,0.35)"}`, borderRadius: 28,
         padding: "6px 6px 6px 16px", boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
         pointerEvents: "auto",
       }}>
         {expanded ? (
           <>
+            {/* Mode toggle */}
+            <button
+              onClick={() => { setMode(mode === "claude" ? "search" : "claude"); }}
+              style={{
+                background: "transparent", border: "none", cursor: "pointer",
+                fontSize: 16, flexShrink: 0, padding: "2px 4px",
+                color: mode === "claude" ? "#d4af37" : "#888",
+              }}
+              aria-label={mode === "claude" ? "Switch to search" : "Switch to Claude"}
+            >{mode === "claude" ? "🧠" : "🔍"}</button>
             <input
               ref={inputRef}
               type="text"
-              placeholder='Search or ask Claude...'
-              value={value}
-              onChange={(e) => { onChange(e.target.value); if (!isAiQuery(e.target.value)) setAiResponse(null); }}
+              placeholder={mode === "claude" ? 'Ask Claude about your collection...' : 'Filter by title, "key", "$100+"...'}
+              value={displayValue}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
               autoFocus
               style={{
@@ -1316,9 +1360,9 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
             {listening && (
               <canvas ref={canvasRef} width={60} height={28} style={{ flexShrink: 0, opacity: 0.9 }} />
             )}
-            {value && (
+            {displayValue && (
               <button
-                onClick={() => { onChange(""); setAiResponse(null); }}
+                onClick={clearAll}
                 style={{ background: "transparent", border: "none", color: "#aaa", fontSize: 18, cursor: "pointer", padding: "4px 6px", lineHeight: 1 }}
               >✕</button>
             )}
@@ -1334,9 +1378,9 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
                 aria-label={listening ? "Stop voice" : "Voice search"}
               >{listening ? "⏹" : "🎤"}</button>
             )}
-            {showingAi && !aiLoading && (
+            {mode === "claude" && aiInput.trim() && !aiLoading && (
               <button
-                onClick={() => submitAiQuery(value)}
+                onClick={() => submitAiQuery(aiInput)}
                 style={{
                   width: 36, height: 36, borderRadius: "50%", border: "none", cursor: "pointer",
                   display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
@@ -1375,6 +1419,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
   const [eraFilter, setEraFilter] = useState("all");
   const [localSearch, setLocalSearch] = useState("");
   const [importStatus, setImportStatus] = useState(null);
+  const [claudeCardVisible, setClaudeCardVisible] = useState(false);
   const importRef = useRef(null);
 
   const toggleSelect = (id) => {
@@ -1597,7 +1642,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
         ))}
       </div>
 
-      <FloatingSearchBar value={localSearch} onChange={setLocalSearch} items={items} />
+      <FloatingSearchBar value={localSearch} onChange={setLocalSearch} items={items} onClaudeCardChange={setClaudeCardVisible} />
 
       {(() => {
         const sq = localSearch.toLowerCase().trim();
@@ -1640,7 +1685,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                 Showing {filteredItems.length} of {items.length} comics
               </div>
             )}
-            <div className="collection-list" style={{ paddingBottom: 70 }}>
+            <div className="collection-list" style={{ paddingBottom: claudeCardVisible ? 220 : 100 }}>
               {filteredItems.map((item) => {
           const thumbSrc = getComicPhotos(item)[0] || null;
           const titleWithIssue = (item.title || "Unknown") + (item.issue && !item.title?.includes('#' + item.issue) ? ` #${item.issue}` : '');
@@ -3345,15 +3390,16 @@ export default function App() {
     }, 2000);
   }, [addToCatalogue]);
 
-  // Web Share Target handoff — fires gradeBlob; widget mode renders the overlay.
+  // Web Share Target handoff — fires gradeBlob in buyer mode (save:false).
   useEffect(() => {
     if (!widgetMode) return;
+    setTab("buyer");
     (async () => {
       try {
         const res = await fetch("/__shared-image", { cache: "no-store" });
         if (!res.ok) return;
         const blob = await res.blob();
-        if (blob.size > 0) await gradeBlob(blob);
+        if (blob.size > 0) await gradeBlob(blob, { save: false });
       } catch {
         /* noop */
       }
