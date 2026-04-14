@@ -2575,7 +2575,14 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
             { role: "assistant", content: data.response },
           ]);
         }
-        if (data.metrics?.length) setMetrics(data.metrics);
+        if (data.metrics?.length) {
+        // Total Value must come from local getDisplayPrice sum — never from Claude.
+        const filtered = data.metrics.filter((m) => m.label !== "Total Value");
+        setMetrics((prev) => {
+          const tv = prev.find((m) => m.label === "Total Value");
+          return tv ? [tv, ...filtered] : filtered;
+        });
+      }
         applyAiTags(data);
       })
       .catch(() => {})
@@ -2621,7 +2628,14 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
       setLatestResponse(data.response || "I couldn't analyze that.");
       setLatestActions(data.actions || []);
       setHistory((prev) => [...prev, { role: "assistant", content: data.response }]);
-      if (data.metrics?.length) setMetrics(data.metrics);
+      if (data.metrics?.length) {
+        // Total Value must come from local getDisplayPrice sum — never from Claude.
+        const filtered = data.metrics.filter((m) => m.label !== "Total Value");
+        setMetrics((prev) => {
+          const tv = prev.find((m) => m.label === "Total Value");
+          return tv ? [tv, ...filtered] : filtered;
+        });
+      }
       applyAiTags(data);
     } catch {
       setLatestResponse("Something went wrong. Try again.");
