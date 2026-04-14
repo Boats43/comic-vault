@@ -1771,7 +1771,13 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
             <div className="collection-list" style={{ paddingBottom: claudeCardVisible ? 220 : 100 }}>
               {filteredItems.map((item) => {
           const thumbSrc = getComicPhotos(item)[0] || null;
-          const titleWithIssue = (item.title || "Unknown") + (item.issue && !item.title?.includes('#' + item.issue) ? ` #${item.issue}` : '');
+          const extractIssueFromReport = (txt) => {
+            if (!txt) return null;
+            const m = String(txt).match(/#\s*(\d+)/);
+            return m ? m[1] : null;
+          };
+          const displayIssue = item.issue || extractIssueFromReport(item.conditionReport || item.notes || '');
+          const titleWithIssue = (item.title || "Unknown") + (displayIssue && !String(item.title || "").includes('#' + displayIssue) ? ` #${displayIssue}` : '');
           const gradeTxt = item.isGraded === true && item.numericGrade != null
             ? `CGC ${item.numericGrade}`
             : (() => {

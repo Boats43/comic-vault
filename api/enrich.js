@@ -814,7 +814,16 @@ export default async function handler(req, res) {
       String(out.price || '0').replace(/[$,]/g, '')
     );
     const rawFloor = rawComps?.lowest || compsFromEbay?.lowest || 0;
-    const gradeAdj = out.gradeMultiplier || 1.0;
+    let gradeAdj = out.gradeMultiplier;
+    if (gradeAdj == null) {
+      if (isGraded === true && numericGrade != null) {
+        const gInfo = getGradeMultiplier(numericGrade);
+        if (gInfo) gradeAdj = gInfo.multiplier;
+      } else if (grade) {
+        gradeAdj = getRawGradeMultiplier(grade).multiplier;
+      }
+    }
+    gradeAdj = gradeAdj || 1.0;
     const floorNum = rawFloor * gradeAdj;
 
     let floorFired = false;
