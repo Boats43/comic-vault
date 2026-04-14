@@ -1498,7 +1498,7 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude, onClaudeCardCh
 function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices, snapshots }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
-  const [sortBy, setSortBy] = useState("value");
+  const [sortBy, setSortBy] = useState("recent");
   const [eraFilter, setEraFilter] = useState("all");
   const [localSearch, setLocalSearch] = useState("");
   const [importStatus, setImportStatus] = useState(null);
