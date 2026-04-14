@@ -753,7 +753,7 @@ export default async function handler(req, res) {
         }
 
         // PC way too low vs market floor (compare final price to grade-adjusted avg)
-        if (!sanityFired && pcNum < adjAvg * 0.5 && pcNum < adjAvg - 10) {
+        if (!sanityFired && pcNum < adjAvg * 0.5) {
           sanityFired = true;
           out.price = fmtUsd(adjAvg);
           out.priceLow = fmtUsd(adjAvg * 0.75);
