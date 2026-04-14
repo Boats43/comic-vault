@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message, collection, history } = req.body || {};
+    const { message, collection, history, buyerSessions } = req.body || {};
     if (!message) {
       res.status(400).json({ error: "message required" });
       return;
@@ -45,10 +45,22 @@ export default async function handler(req, res) {
       return s + p;
     }, 0);
 
+    // Buyer session summary (Whatnot history)
+    let buyerContext = "";
+    if (buyerSessions && typeof buyerSessions === "object" && buyerSessions.recentSessions?.length > 0) {
+      const bs = buyerSessions;
+      buyerContext = `\n\nWHATNOT BUYING HISTORY (last ${bs.recentSessions.length} sessions):
+Buy rate: ${Math.round((bs.buyRate || 0) * 100)}% | Avg discount: ${Math.round((bs.avgDiscount || 0) * 100)}% below market | Total spent: $${Math.round(bs.totalSpent || 0)}
+${bs.bestDeal ? `Best deal: ${bs.bestDeal.title} — bought at $${bs.bestDeal.bidPrice} (market $${bs.bestDeal.marketValue}, ${Math.round(bs.bestDeal.discount * 100)}% discount)` : ""}
+Recent decisions: ${JSON.stringify(bs.recentSessions.slice(-10).map((s) => ({ title: s.title, decision: s.decision, bid: s.bidPrice, market: s.marketValue })))}
+
+You also have access to the user's Whatnot buying history. Use it to give advice on their buying patterns, best deals, and areas to improve.`;
+    }
+
     const systemPrompt = `You are the collection manager AI for Comic Vault. You have complete knowledge of this collector's inventory.
 
 COLLECTION (${comics.length} comics, ~$${Math.round(totalValue).toLocaleString()} estimated value):
-${JSON.stringify(comics)}
+${JSON.stringify(comics)}${buyerContext}
 
 RULES:
 - Keep responses under 3 sentences. Be direct and actionable.

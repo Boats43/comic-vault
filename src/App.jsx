@@ -957,11 +957,35 @@ function WidgetOverlay({
   );
 }
 
-function BidCalculator({ marketValue, detectedPrice }) {
-  const [bid, setBid] = useState("");
-  const [seeded, setSeeded] = useState(false);
+// Session logger — ephemeral buyer history in localStorage
+const SESSIONS_KEY = "cv_buyer_sessions";
+const getSessions = () => { try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]"); } catch { return []; } };
+const saveSession = (entry) => {
+  const sessions = getSessions();
+  sessions.push({ ...entry, ts: Date.now() });
+  if (sessions.length > 100) sessions.splice(0, sessions.length - 100);
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+};
+const getSessionSummary = () => {
+  const sessions = getSessions().slice(-20);
+  if (sessions.length === 0) return null;
+  const buys = sessions.filter((s) => s.decision === "BUY");
+  const totalSpent = buys.reduce((s, b) => s + (b.bidPrice || 0), 0);
+  const discounts = buys.filter((b) => b.marketValue > 0).map((b) => (b.marketValue - b.bidPrice) / b.marketValue);
+  const avgDiscount = discounts.length > 0 ? discounts.reduce((s, d) => s + d, 0) / discounts.length : 0;
+  const bestDeal = buys.reduce((best, b) => {
+    const disc = b.marketValue > 0 ? (b.marketValue - b.bidPrice) / b.marketValue : 0;
+    return disc > (best?.discount || 0) ? { title: b.title, discount: disc, bidPrice: b.bidPrice, marketValue: b.marketValue } : best;
+  }, null);
+  return { recentSessions: sessions, buyRate: buys.length / sessions.length, avgDiscount, totalSpent, bestDeal };
+};
 
-  // Auto-fill bid from detectedPrice once
+function BidCalculator({ marketValue, detectedPrice, resultTitle, onLogSession }) {
+  const [bid, setBid] = useState("");
+  const [budget, setBudget] = useState(() => localStorage.getItem("cv_buyer_budget") || "");
+  const [seeded, setSeeded] = useState(false);
+  const [logged, setLogged] = useState(false);
+
   useEffect(() => {
     if (detectedPrice && !seeded) {
       const cleaned = String(detectedPrice).replace(/[^0-9.]/g, "");
@@ -972,69 +996,124 @@ function BidCalculator({ marketValue, detectedPrice }) {
     }
   }, [detectedPrice, seeded]);
 
-  const bidNum = parseFloat(bid);
-  const hasBid = !isNaN(bidNum) && bidNum > 0;
+  useEffect(() => {
+    if (budget) localStorage.setItem("cv_buyer_budget", budget);
+  }, [budget]);
 
-  const max20 = marketValue != null ? marketValue * 0.8 : null;
-  const max30 = marketValue != null ? marketValue * 0.7 : null;
+  const bidNum = parseFloat(bid);
+  const budgetNum = parseFloat(budget);
+  const hasBid = !isNaN(bidNum) && bidNum > 0;
+  const hasBudget = !isNaN(budgetNum) && budgetNum > 0;
+
+  const maxSafe = marketValue != null ? Math.round(marketValue * 0.8) : null;
 
   let rating = null;
   if (hasBid && marketValue) {
-    if (bidNum <= max30) rating = { label: "STRONG BUY", cls: "rating-strong" };
-    else if (bidNum <= max20) rating = { label: "FAIR", cls: "rating-fair" };
+    if (bidNum <= marketValue * 0.7) rating = { label: "STRONG BUY", cls: "rating-strong" };
+    else if (bidNum <= marketValue * 0.8) rating = { label: "FAIR", cls: "rating-fair" };
     else rating = { label: "OVERPRICED", cls: "rating-bad" };
   }
+
+  const overBudget = hasBid && hasBudget && bidNum > budgetNum;
+  const withinBudget = hasBid && hasBudget && bidNum <= budgetNum;
 
   const pctBelow =
     hasBid && marketValue
       ? Math.round(((marketValue - bidNum) / marketValue) * 100)
       : null;
 
+  const logDecision = (decision) => {
+    if (logged) return;
+    const entry = { title: resultTitle || "Unknown", marketValue: marketValue || 0, bidPrice: bidNum || 0, budget: budgetNum || 0, decision };
+    saveSession(entry);
+    setLogged(true);
+    if (onLogSession) onLogSession(entry);
+  };
+
   return (
     <div className="calc-card">
+      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+        <div style={{ flex: 1 }}>
+          <label className="calc-label">Budget</label>
+          <div className="calc-input-wrap">
+            <span className="calc-dollar">$</span>
+            <input type="number" inputMode="decimal" placeholder="50" value={budget} onChange={(e) => setBudget(e.target.value)} className="calc-input" />
+          </div>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="calc-label">Bid / Ask</label>
+          <div className="calc-input-wrap">
+            <span className="calc-dollar">$</span>
+            <input type="number" inputMode="decimal" placeholder="0" value={bid} onChange={(e) => setBid(e.target.value)} className="calc-input" />
+          </div>
+        </div>
+      </div>
+
       <div className="calc-row">
         <span className="muted small">Market Value</span>
         <span className="calc-mv">{fmt(marketValue)}</span>
       </div>
 
-      <label className="calc-label">Current starting bid</label>
-      <div className="calc-input-wrap">
-        <span className="calc-dollar">$</span>
-        <input
-          type="number"
-          inputMode="decimal"
-          placeholder="0"
-          value={bid}
-          onChange={(e) => setBid(e.target.value)}
-          className="calc-input"
-        />
-      </div>
-
-      {marketValue != null && (
-        <>
-          <div className="calc-row">
-            <span className="muted small">Max bid · 20% margin</span>
-            <span className="calc-max">{fmt(max20)}</span>
-          </div>
-          <div className="calc-row">
-            <span className="muted small">Max bid · 30% margin</span>
-            <span className="calc-max">{fmt(max30)}</span>
-          </div>
-        </>
+      {/* Budget verdict */}
+      {hasBid && hasBudget && marketValue != null && (
+        <div style={{
+          border: `1px solid ${overBudget ? "rgba(224,86,86,0.4)" : "rgba(22,163,106,0.4)"}`,
+          borderRadius: 10, padding: "10px 14px", margin: "8px 0",
+          background: overBudget ? "rgba(224,86,86,0.08)" : "rgba(22,163,106,0.08)",
+        }}>
+          {overBudget ? (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#e05656" }}>
+                Over budget by ${Math.round(bidNum - budgetNum)}
+              </div>
+              <div style={{ fontSize: 13, color: "#e05656", marginTop: 4 }}>Pass on this one</div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#16a34a" }}>
+                Within budget
+              </div>
+              {rating && (
+                <div style={{ fontSize: 15, fontWeight: 800, color: rating.cls === "rating-strong" ? "#16a34a" : rating.cls === "rating-fair" ? "#d4af37" : "#e05656", marginTop: 4 }}>
+                  {rating.label === "STRONG BUY" && "⚡ "}{rating.label}
+                </div>
+              )}
+              {maxSafe != null && (
+                <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>
+                  Max safe bid: ${maxSafe}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
 
-      {rating && (
-        <div className={`deal-rating ${rating.cls}`}>
-          {rating.label === "STRONG BUY" && "⚡ "}
-          {rating.label}
-          {pctBelow != null && pctBelow > 0 && (
-            <div className="deal-sub">Current ask is {pctBelow}% below market</div>
-          )}
-          {pctBelow != null && pctBelow <= 0 && (
-            <div className="deal-sub">
-              Current ask is {Math.abs(pctBelow)}% above market
-            </div>
-          )}
+      {/* Percentage context */}
+      {pctBelow != null && !overBudget && (
+        <div className="muted small" style={{ textAlign: "center", marginTop: 4 }}>
+          {pctBelow > 0 ? `${pctBelow}% below market` : `${Math.abs(pctBelow)}% above market`}
+        </div>
+      )}
+
+      {/* BUY / PASS buttons — log session */}
+      {hasBid && marketValue != null && (
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button
+            onClick={() => logDecision("BUY")}
+            disabled={logged}
+            style={{
+              flex: 1, padding: "10px 0", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 14, cursor: logged ? "default" : "pointer",
+              background: logged ? "rgba(255,255,255,0.06)" : "#16a34a", color: logged ? "#666" : "#fff",
+            }}
+          >{logged ? "Logged" : "BUY"}</button>
+          <button
+            onClick={() => logDecision("PASS")}
+            disabled={logged}
+            style={{
+              flex: 1, padding: "10px 0", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", fontWeight: 700, fontSize: 14, cursor: logged ? "default" : "pointer",
+              background: "transparent", color: logged ? "#666" : "#aaa",
+            }}
+          >{logged ? "Logged" : "PASS"}</button>
         </div>
       )}
 
@@ -1074,7 +1153,7 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude }) {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: query, collection: items, history: [] }),
+        body: JSON.stringify({ message: query, collection: items, history: [], buyerSessions: getSessionSummary() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -2349,6 +2428,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
         message: "Give me a quick summary of my collection status and top 3 actions I should take right now",
         collection: catalogue,
         history: [],
+        buyerSessions: getSessionSummary(),
       }),
     })
       .then((r) => r.json())
@@ -2399,6 +2479,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
           message: text.trim(),
           collection: catalogue,
           history: newHistory.slice(-10, -1),
+          buyerSessions: getSessionSummary(),
         }),
       });
       const data = await res.json();
@@ -3790,8 +3871,20 @@ export default function App() {
           )}
           {result && !loading && (
             <>
+              <button
+                onClick={() => {
+                  window.location.href = "whatnot://";
+                  setTimeout(() => { window.location.href = "https://whatnot.com"; }, 1500);
+                }}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  width: "100%", padding: "10px 0", marginBottom: 8,
+                  background: "transparent", border: "1px solid rgba(212,175,55,0.4)",
+                  borderRadius: 8, color: "#d4af37", fontSize: 14, fontWeight: 600, cursor: "pointer",
+                }}
+              >Back to stream →</button>
               <ResultCard result={result} enriching={enriching} />
-              <BidCalculator marketValue={marketValue} detectedPrice={result?.detectedPrice} />
+              <BidCalculator marketValue={marketValue} detectedPrice={result?.detectedPrice} resultTitle={result?.title} />
               <button className="reset-btn" onClick={reset}>Scan another</button>
             </>
           )}
