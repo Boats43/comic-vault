@@ -850,8 +850,10 @@ export default async function handler(req, res) {
     );
 
     // Variant multiplier: adjust price for known variant types.
+    // Only apply when PriceCharting is the pricing source — browse_api/ebay_avg
+    // already reflect market for this specific variant.
     const variant = req.body.variant ? String(req.body.variant).trim() : null;
-    if (variant && out.price) {
+    if (variant && out.price && out.pricingSource === 'pricecharting') {
       const NO_PREMIUM = [
         'corner box', 'masterpieces', 'design variant', 'headshot',
         'trading card', 'cover a', 'cover b', 'cover c', 'cover d',
@@ -889,9 +891,11 @@ export default async function handler(req, res) {
     }
 
     // Key issue multiplier: ×1.5 on top of base/variant price.
+    // Only apply when PriceCharting is the pricing source — browse_api/ebay_avg
+    // already reflect market premium for the key.
     const isKey = !!out.keyIssue;
-    console.log('[key] keyIssue value:', out.keyIssue, 'isKey:', isKey, 'bodyKey:', req.body?.keyIssue);
-    if (isKey && out.price) {
+    console.log('[key] keyIssue value:', out.keyIssue, 'isKey:', isKey, 'bodyKey:', req.body?.keyIssue, 'source:', out.pricingSource);
+    if (isKey && out.price && out.pricingSource === 'pricecharting') {
       const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
       if (curPrice > 0) {
         out.price = fmtUsd(curPrice * 1.5);
