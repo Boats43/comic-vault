@@ -41,8 +41,8 @@ export default async function handler(req, res) {
     }));
 
     const totalValue = comics.reduce((s, c) => {
-      const p = c.comps?.averageNum || parseFloat(String(c.price).replace(/[^0-9.]/g, "")) || 0;
-      return s + p;
+      const p = parseFloat(String(c.price||"0").replace(/[$,]/g,""));
+      return s + (p || 0);
     }, 0);
 
     // Buyer session summary (Whatnot history)

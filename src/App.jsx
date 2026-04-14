@@ -2597,6 +2597,15 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
         a.comicIds.forEach((id) => { tags[id] = { emoji: "📦", label: "BUNDLE" }; });
       }
     });
+    catalogue.forEach((item) => {
+      const marketVal = item.comps?.averageNum;
+      const displayVal = getDisplayPrice(item);
+      if (marketVal && displayVal < marketVal * 0.85) {
+        if (!aiTags[item.id] && !tags[item.id]) {
+          tags[item.id] = { emoji: "🔥", label: "HOT", reason: "Priced below market" };
+        }
+      }
+    });
     catalogue.forEach((c) => {
       if (!tags[c.id] && c.status !== "listed" && (Date.now() - (c.timestamp || 0)) > 86400000 * 30) {
         tags[c.id] = { emoji: "⏳", label: "STAGNANT" };
@@ -2714,6 +2723,12 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
     if (s === "listing") return "Listing...";
     if (s === "listed") return "Listed! View on eBay →";
     if (s === "error") return "Failed — Retry";
+    if (a.action === "list" && a.comicId) {
+      const listItem = catalogue.find((c) => c.id === a.comicId);
+      const realPrice = listItem ? getDisplayPrice(listItem) : null;
+      const label = realPrice ? "List Now — $" + realPrice : a.label;
+      return label;
+    }
     return a.label;
   };
 
