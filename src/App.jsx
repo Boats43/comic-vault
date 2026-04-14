@@ -1045,6 +1045,169 @@ function BidCalculator({ marketValue, detectedPrice }) {
   );
 }
 
+function FloatingSearchBar({ value, onChange }) {
+  const [listening, setListening] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const recognitionRef = useRef(null);
+  const silenceTimer = useRef(null);
+  const inputRef = useRef(null);
+  const canvasRef = useRef(null);
+  const animFrameRef = useRef(null);
+  const analyserRef = useRef(null);
+  const streamRef = useRef(null);
+
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (_) {}
+    }
+    if (silenceTimer.current) clearTimeout(silenceTimer.current);
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    setListening(false);
+  }, []);
+
+  const drawWaveform = useCallback(() => {
+    const canvas = canvasRef.current;
+    const analyser = analyserRef.current;
+    if (!canvas || !analyser) return;
+    const ctx = canvas.getContext("2d");
+    const bufLen = analyser.frequencyBinCount;
+    const data = new Uint8Array(bufLen);
+    const draw = () => {
+      animFrameRef.current = requestAnimationFrame(draw);
+      analyser.getByteTimeDomainData(data);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#d4af37";
+      ctx.beginPath();
+      const sliceW = canvas.width / bufLen;
+      let x = 0;
+      for (let i = 0; i < bufLen; i++) {
+        const v = data[i] / 128.0;
+        const y = (v * canvas.height) / 2;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        x += sliceW;
+      }
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+    };
+    draw();
+  }, []);
+
+  const startListening = useCallback(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    const rec = new SpeechRecognition();
+    rec.continuous = false;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+    recognitionRef.current = rec;
+
+    rec.onresult = (e) => {
+      const transcript = Array.from(e.results).map((r) => r[0].transcript).join("");
+      onChange(transcript);
+      if (silenceTimer.current) clearTimeout(silenceTimer.current);
+      if (e.results[e.results.length - 1].isFinal) {
+        silenceTimer.current = setTimeout(() => stopListening(), 1500);
+      }
+    };
+    rec.onerror = () => stopListening();
+    rec.onend = () => stopListening();
+    rec.start();
+    setListening(true);
+
+    // Start waveform visualiser
+    navigator.mediaDevices?.getUserMedia({ audio: true }).then((stream) => {
+      streamRef.current = stream;
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      drawWaveform();
+    }).catch(() => {});
+  }, [onChange, stopListening, drawWaveform]);
+
+  useEffect(() => () => stopListening(), [stopListening]);
+
+  const hasSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  return (
+    <div style={{
+      position: "fixed", bottom: 70, left: 0, right: 0,
+      maxWidth: 480, margin: "0 auto",
+      padding: "0 12px", zIndex: 20,
+      pointerEvents: "none",
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8,
+        background: "rgba(18,18,18,0.95)", backdropFilter: "blur(12px)",
+        border: "1px solid rgba(212,175,55,0.35)", borderRadius: 28,
+        padding: "6px 6px 6px 16px", boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+        pointerEvents: "auto",
+      }}>
+        {expanded ? (
+          <>
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder='Search title, "key", "$100+"...'
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              autoFocus
+              style={{
+                flex: 1, background: "transparent", border: "none", outline: "none",
+                color: "#fff", fontSize: 15, padding: "6px 0",
+              }}
+            />
+            {listening && (
+              <canvas ref={canvasRef} width={60} height={28} style={{ flexShrink: 0, opacity: 0.9 }} />
+            )}
+            {value && (
+              <button
+                onClick={() => onChange("")}
+                style={{ background: "transparent", border: "none", color: "#aaa", fontSize: 18, cursor: "pointer", padding: "4px 6px", lineHeight: 1 }}
+              >✕</button>
+            )}
+            {hasSpeech && (
+              <button
+                onClick={listening ? stopListening : startListening}
+                style={{
+                  width: 36, height: 36, borderRadius: "50%", border: "none", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                  background: listening ? "#d4af37" : "rgba(255,255,255,0.1)",
+                  color: listening ? "#000" : "#d4af37", fontSize: 18, transition: "all 0.2s",
+                }}
+                aria-label={listening ? "Stop voice" : "Voice search"}
+              >{listening ? "⏹" : "🎤"}</button>
+            )}
+            <button
+              onClick={() => { setExpanded(false); stopListening(); }}
+              style={{ background: "transparent", border: "none", color: "#888", fontSize: 14, cursor: "pointer", padding: "4px 8px", fontWeight: 600 }}
+            >Done</button>
+          </>
+        ) : (
+          <button
+            onClick={() => { setExpanded(true); setTimeout(() => inputRef.current?.focus(), 100); }}
+            style={{
+              flex: 1, display: "flex", alignItems: "center", gap: 8,
+              background: "transparent", border: "none", cursor: "pointer",
+              color: "#888", fontSize: 15, padding: "6px 0", textAlign: "left",
+            }}
+          >
+            <span style={{ fontSize: 16 }}>🔍</span>
+            <span>{value || 'Search collection...'}</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices, snapshots }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
@@ -1252,27 +1415,6 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
         )}
       </div>
 
-      {/* Search bar */}
-      <div style={{ position: "relative", marginBottom: 6 }}>
-        <input
-          type="text"
-          placeholder='Search title, "key", "$100+", publisher...'
-          value={localSearch}
-          onChange={(e) => setLocalSearch(e.target.value)}
-          style={{
-            width: "100%", padding: "10px 32px 10px 12px", boxSizing: "border-box",
-            background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)",
-            borderRadius: 8, color: "#fff", fontSize: 14, outline: "none",
-          }}
-        />
-        {localSearch && (
-          <button
-            onClick={() => setLocalSearch("")}
-            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", color: "#aaa", fontSize: 16, cursor: "pointer", padding: "2px 4px" }}
-          >✕</button>
-        )}
-      </div>
-
       {/* Sort bar */}
       <div style={{ display: "flex", gap: 4, padding: "4px 0", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
         {[["value", "Value ↓"], ["title", "Title"], ["year", "Year"], ["grade", "Grade"], ["recent", "Recent"]].map(([key, label]) => (
@@ -1294,6 +1436,8 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
           >{label}</button>
         ))}
       </div>
+
+      <FloatingSearchBar value={localSearch} onChange={setLocalSearch} />
 
       {(() => {
         const sq = localSearch.toLowerCase().trim();
@@ -1336,7 +1480,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                 Showing {filteredItems.length} of {items.length} comics
               </div>
             )}
-            <div className="collection-list">
+            <div className="collection-list" style={{ paddingBottom: 70 }}>
               {filteredItems.map((item) => {
           const thumbSrc = getComicPhotos(item)[0] || null;
           const titleWithIssue = (item.title || "Unknown") + (item.issue && !item.title?.includes('#' + item.issue) ? ` #${item.issue}` : '');
