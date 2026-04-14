@@ -3063,6 +3063,7 @@ export default function App() {
             publisher: item.publisher,
             confidence: item.confidence,
             variant: item.variant || null,
+            keyIssue: item.keyIssue || null,
           }),
         })
           .then((r) => (r.ok ? r.json() : null))
@@ -3298,6 +3299,7 @@ export default function App() {
             defectPenalty: data.defectPenalty || null,
             certNumber: data.certNumber || null,
             variant: data.variant || null,
+            keyIssue: data.keyIssue || null,
             images: [b64],
           }),
         })
@@ -3428,6 +3430,7 @@ export default function App() {
             confidence: data.confidence,
             defectPenalty: data.defectPenalty || null,
             variant: data.variant || null,
+            keyIssue: data.keyIssue || null,
             images: [b64],
           }),
         })
@@ -3604,6 +3607,7 @@ export default function App() {
         publisher: item.publisher,
         confidence: item.confidence,
         variant: item.variant || null,
+        keyIssue: item.keyIssue || null,
       }),
     });
     if (!res.ok) throw new Error("Failed to refresh market data");
@@ -3952,7 +3956,8 @@ export default function App() {
                             isGraded: data.isGraded, numericGrade: data.numericGrade,
                             year: data.year, publisher: data.publisher,
                             confidence: data.confidence, defectPenalty: data.defectPenalty || null,
-                            certNumber: data.certNumber || null, variant: data.variant || null, images: [b64],
+                            certNumber: data.certNumber || null, variant: data.variant || null,
+                            keyIssue: data.keyIssue || null, images: [b64],
                           }),
                         })
                           .then((r) => r.ok ? r.json() : null)
