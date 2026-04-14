@@ -16,9 +16,10 @@ npx vercel --prod
 ```
 
 ## Key Files
-- `src/App.jsx` — entire frontend (ResultCard, CollectionDetail, grading flow, catalogue)
+- `src/App.jsx` — entire frontend (ResultCard, CollectionDetail, grading flow, catalogue, FloatingSearchBar, BidCalculator)
 - `api/enrich.js` — second-pass enrichment (PriceCharting, eBay comps, ComicVine, Ximilar, CGC lookup)
 - `api/grade.js` — Claude Vision comic identification and grading
+- `api/chat.js` — Claude collection chat (inline queries, Whatnot session context)
 - `api/comps.js` — eBay Browse API comp fetching
 - `api/sold.js` — eBay completed/sold listings
 - `api/cgc-lookup.js` — CGC cert number verification
@@ -39,6 +40,7 @@ Nine keys required (all set in Vercel):
 - GPA: check gpanalysis.com for API access
 - eBay Marketplace Insights: DEAD for indie devs
 - Visual search: disabled for modern (1985+), active for Silver/Bronze Age only
+- Android native app: PiP overlay for Whatnot live buying
 
 ## Rules
 - **Never change pricing math** (grade multipliers, sanity checks, floor guard, price calculations in `api/enrich.js`) without explicit instruction.
@@ -56,6 +58,12 @@ Nine keys required (all set in Vercel):
 - Sanity thresholds: 0.5x (too low) and 3x (too high) against adjAvg.
 - Floor guard field: `rawComps.lowest` (not `lowestNum`) — comps.js returns `lowest`.
 - Floor guard is grade-adjusted: `rawFloor * gradeMultiplier`.
+- Buyer sessions stored in localStorage key `cv_buyer_sessions` (last 100 entries).
+- Budget persisted in localStorage key `cv_buyer_budget`.
+- FloatingSearchBar has two modes: 🔍 search (local filter) and 🧠 claude (AI query) — never mix.
+- Share Target switches to Buyer tab and calls `gradeBlob(blob, { save: false })`.
+- Collection list paddingBottom is dynamic: 220px when Claude card visible, 100px otherwise.
+- `api/chat.js` receives optional `buyerSessions` with Whatnot buying history for Claude context.
 
 ## Last Session
-Session 4/13/2026 — 18 commits: Visual issue validation, variant detection, export/import, ROI tracking, trend chart, listing title format, hasIssueNumber exact match, floor guard field fix, sanity check apples-to-apples, price-trace logging.
+Session 4/13/2026 (cont.) — floating search bar with voice input, Claude inline collection queries (separate from filter), budget-aware BidCalculator with BUY/PASS session logging, Whatnot deep link ("Back to stream →"), share target auto-routes to Buyer tab, scan ready dot, dynamic list padding for Claude card, buyer session history sent to api/chat.js for Claude context.
