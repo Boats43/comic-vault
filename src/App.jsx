@@ -3728,15 +3728,14 @@ export default function App() {
   const marketValue = marketValueOf(result);
 
   const totalValue = catalogue.reduce((sum, item) => {
-    const v = marketValueOf(item);
-    return sum + (v || 0);
+    return sum + (getDisplayPrice(item) || 0);
   }, 0);
 
   // Record a daily value snapshot whenever catalogue changes.
   useEffect(() => {
     if (catalogue.length === 0) return;
     const today = new Date().toISOString().slice(0, 10);
-    const val = catalogue.reduce((s, c) => s + (marketValueOf(c) || 0), 0);
+    const val = catalogue.reduce((s, c) => s + (getDisplayPrice(c) || 0), 0);
     const snap = { date: today, totalValue: val, comicCount: catalogue.length };
     putSnapshot(snap)
       .then(() => getAllSnapshots())
