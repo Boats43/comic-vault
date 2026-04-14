@@ -103,7 +103,7 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
     const url =
       `https://comicvine.gamespot.com/api/search/?api_key=${encodeURIComponent(process.env.COMICVINE_API_KEY)}` +
       `&format=json&resources=issue&query=${encodeURIComponent(searchQuery)}` +
-      `&field_list=id,name,issue_number,description,first_appearance_characters,volume` +
+      `&field_list=id,name,issue_number,cover_date,description,deck,first_appearance_characters,character_credits,story_arc_credits,volume` +
       `&limit=20`;
     const res = await fetch(url, {
       headers: { "User-Agent": "ComicVault/1.0" },
@@ -207,15 +207,45 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
     if (!match) return null;
     const firstApps = match.first_appearance_characters;
     const hasFirstApps = Array.isArray(firstApps) && firstApps.length > 0;
+
+    // Parse description + deck for key-issue signals when structured
+    // first_appearance_characters is empty (common for origin issues,
+    // deaths, #1 issues, classic-artist-significance keys).
+    const descText = `${match.deck || ""} ${match.description || ""}`
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    let derivedKey = null;
+    if (!hasFirstApps && descText) {
+      const d = descText.toLowerCase();
+      const faMatch = descText.match(/first appearance of ([^.!?;\n]{3,80})/i);
+      const originMatch = descText.match(/origin of ([^.!?;\n]{3,80})/i);
+      const deathMatch = descText.match(/death of ([^.!?;\n]{3,80})/i);
+      if (faMatch) {
+        derivedKey = `1st appearance of ${faMatch[1].trim().replace(/[,.]$/, "")}`;
+      } else if (originMatch) {
+        derivedKey = `Origin of ${originMatch[1].trim().replace(/[,.]$/, "")}`;
+      } else if (deathMatch) {
+        derivedKey = `Death of ${deathMatch[1].trim().replace(/[,.]$/, "")}`;
+      } else if (/\bfirst appearance\b/.test(d)) {
+        derivedKey = "1st appearance";
+      } else if (/\borigin\b/.test(d) && /\bissue\b/.test(d)) {
+        derivedKey = "Origin issue";
+      }
+      if (derivedKey) console.log("[comicvine] key derived from description:", derivedKey);
+    }
+
     return {
       id: match.id,
       name: match.name,
       issueNumber: match.issue_number,
       volume: match.volume?.name,
       description: match.description,
+      deck: match.deck,
       firstAppearanceCharacters: hasFirstApps
         ? firstApps.map((c) => c?.name).filter(Boolean)
         : [],
+      derivedKeyIssue: derivedKey,
     };
   } catch (err) {
     console.error(`[enrich] comicvine error: ${err?.message || err}`);
@@ -647,10 +677,13 @@ export default async function handler(req, res) {
       out.comicVine = comicVine;
     }
 
-    // Key issue: prefer ComicVine first appearances, fall back to Claude data.
+    // Key issue: prefer ComicVine structured data, then description-derived,
+    // then Claude's keyIssue from /api/grade.
     const cvChars = comicVine?.firstAppearanceCharacters;
     if (Array.isArray(cvChars) && cvChars.length > 0) {
       out.keyIssue = `1st appearance of ${cvChars.join(", ")}`;
+    } else if (comicVine?.derivedKeyIssue) {
+      out.keyIssue = comicVine.derivedKeyIssue;
     } else if (
       req.body?.keyIssue &&
       req.body.keyIssue !== "N/A" &&
