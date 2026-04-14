@@ -809,6 +809,11 @@ export default async function handler(req, res) {
       out.pricingSource = "browse_api";
     }
 
+    // Snapshot pricing source BEFORE floor guard / variant / key blocks.
+    // Variant and key multipliers should only apply when the base price
+    // came from PriceCharting (not from browse_api or sanity fallback).
+    const isFromPC = !!(priceCharting?.price) && !sanityFired && out.pricingSource === 'pricecharting';
+
     // Floor guard: never price below the grade-adjusted lowest eBay comp.
     const finalNum = parseFloat(
       String(out.price || '0').replace(/[$,]/g, '')
@@ -853,7 +858,7 @@ export default async function handler(req, res) {
     // Only apply when PriceCharting is the pricing source — browse_api/ebay_avg
     // already reflect market for this specific variant.
     const variant = req.body.variant ? String(req.body.variant).trim() : null;
-    if (variant && out.price && out.pricingSource === 'pricecharting') {
+    if (variant && out.price && isFromPC) {
       const NO_PREMIUM = [
         'corner box', 'masterpieces', 'design variant', 'headshot',
         'trading card', 'cover a', 'cover b', 'cover c', 'cover d',
@@ -894,8 +899,8 @@ export default async function handler(req, res) {
     // Only apply when PriceCharting is the pricing source — browse_api/ebay_avg
     // already reflect market premium for the key.
     const isKey = !!out.keyIssue;
-    console.log('[key] keyIssue value:', out.keyIssue, 'isKey:', isKey, 'bodyKey:', req.body?.keyIssue, 'source:', out.pricingSource);
-    if (isKey && out.price && out.pricingSource === 'pricecharting') {
+    console.log('[key] keyIssue value:', out.keyIssue, 'isKey:', isKey, 'bodyKey:', req.body?.keyIssue, 'source:', out.pricingSource, 'isFromPC:', isFromPC);
+    if (isKey && out.price && isFromPC) {
       const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
       if (curPrice > 0) {
         out.price = fmtUsd(curPrice * 1.5);
