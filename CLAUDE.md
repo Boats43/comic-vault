@@ -57,6 +57,10 @@ Nine keys required (all set in Vercel):
 - Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
 - Sanity check compares grade-adjusted PC price to grade-adjusted comps average (not raw avg).
 - Sanity thresholds: 0.5x (too low) and 3x (too high) against adjAvg.
+- Sanity low-side condition: `pcNum < adjAvg × 0.5` only (removed legacy `adjAvg - 10` guard that blocked firing on low-value books).
+- Variant mult: PC source only — gated by `isFromPC` flag.
+- Key mult: PC source only — gated by `isFromPC` flag.
+- `isFromPC = !!priceCharting?.price && !sanityFired && out.pricingSource === 'pricecharting'` — snapshotted after PC/sanity branch, before floor/variant/key blocks.
 - Floor guard field: `rawComps.lowest` (not `lowestNum`) — comps.js returns `lowest`.
 - Floor guard is grade-adjusted: `rawFloor * gradeMultiplier`.
 - Buyer sessions stored in localStorage key `cv_buyer_sessions` (last 100 entries).
@@ -71,4 +75,4 @@ Nine keys required (all set in Vercel):
 - `api/chat.js` receives optional `buyerSessions` with Whatnot buying history for Claude context.
 
 ## Last Session
-Session 4/14/2026 — key issue ×1.5 multiplier in enrich pipeline, share target now persists into Buyer tab (URL cleaned, widget overlay bypassed), BidCalculator redesigned as Net Profit UI: title+grade header, ⚙ settings gear (whatnotFee 10%, supplies $0.75, labor $2.00, minProfit $5.00 — stored in `cv_buyer_settings`), huge NET PROFIT hero with green/yellow/red color states, single large BUY/PASS button (auto-suggest from net vs minProfit + budget), collapsible "See details ›" breakdown row-by-row.
+Session 4/14/2026 — pricing calibration: (1) floor guard now derives `gradeAdj` from grade string when `out.gradeMultiplier` is unset; (2) collection tile falls back to `#N` parsed from conditionReport/notes via `extractIssueFromReport` when `item.issue` is missing; (3) variant and key multipliers now gated by `isFromPC` snapshot (`priceCharting.price` exists AND `!sanityFired` AND `out.pricingSource === 'pricecharting'`) — computed right after PC/sanity branch to prevent firing on browse_api or sanity-fallback prices; (4) sanity low-side now fires on `pcNum < adjAvg × 0.5` alone — removed legacy `adjAvg - 10` guard that blocked low-value books (e.g., Shazam #2 FN 6.0: $4.09 vs adjAvg $12.61 now correctly falls back).
