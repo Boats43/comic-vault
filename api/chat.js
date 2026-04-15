@@ -16,7 +16,10 @@ export default async function handler(req, res) {
     }
 
     // Build collection summary for Claude context (strip images).
-    const allComics = (collection || []).map((c) => ({
+    const list = Array.isArray(collection)
+      ? collection
+      : (collection?.books || []);
+    const allComics = list.map((c) => ({
       id: c.id,
       title: c.title,
       publisher: c.publisher,
