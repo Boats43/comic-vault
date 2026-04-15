@@ -3520,8 +3520,16 @@ export default function App() {
     setWidgetMode(false);
     (async () => {
       try {
-        const res = await fetch("/__shared-image", { cache: "no-store" });
-        if (!res.ok) return;
+        const tryFetchSharedImage = async (retries = 3) => {
+          for (let i = 0; i < retries; i++) {
+            const res = await fetch("/__shared-image", { cache: "no-store" });
+            if (res.ok) return res;
+            await new Promise((r) => setTimeout(r, 500));
+          }
+          return null;
+        };
+        const res = await tryFetchSharedImage();
+        if (!res) return;
         const blob = await res.blob();
         if (blob.size > 0) await gradeBlob(blob, { save: false });
       } catch {

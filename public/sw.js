@@ -6,12 +6,16 @@
 const SHARE_CACHE = "comic-vault-share-v1";
 const SHARED_IMAGE_URL = "/__shared-image";
 
-self.addEventListener("install", () => {
-  self.skipWaiting();
+self.addEventListener("install", (event) => {
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    Promise.all([
+      self.clients.claim(),
+    ])
+  );
 });
 
 self.addEventListener("fetch", (event) => {
