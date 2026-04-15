@@ -70,6 +70,128 @@ const buildTitle = (item) => {
   return joined.length > 80 ? joined.slice(0, 80) : joined || "Comic Book";
 };
 
+const eraFromYear = (y) => {
+  const n = parseInt(y, 10);
+  if (!n || isNaN(n)) return "";
+  if (n < 1956) return "Golden Age";
+  if (n <= 1970) return "Silver Age";
+  if (n <= 1984) return "Bronze Age";
+  if (n <= 1991) return "Copper Age";
+  return "Modern Age";
+};
+
+const buildBundleTitle = (items) => {
+  const issues = items
+    .map((it) => it.issue)
+    .filter(Boolean)
+    .map((v) => `#${v}`);
+  const titles = [...new Set(items.map((it) => it.title).filter(Boolean))];
+  const series = titles.length === 1 ? titles[0] : "Comic";
+  const years = items.map((it) => parseInt(it.year, 10)).filter((n) => n && !isNaN(n));
+  const minYear = years.length ? Math.min(...years) : null;
+  const publishers = [...new Set(items.map((it) => it.publisher).filter(Boolean))];
+  const pub = publishers.length === 1 ? publishers[0] : "";
+  const era = minYear ? eraFromYear(minYear) : "";
+  const parts = [
+    series,
+    issues.join(" "),
+    "Lot",
+    minYear || "",
+    pub,
+    era,
+  ];
+  const joined = parts.filter(Boolean).join(" ").trim();
+  return joined.length > 80 ? joined.slice(0, 80).trim() : joined || "Comic Book Lot";
+};
+
+const buildBundleDescription = (items) => {
+  const lines = [];
+  const titles = [...new Set(items.map((it) => it.title).filter(Boolean))];
+  const header =
+    titles.length === 1
+      ? `${titles[0]} — ${items.length}-Book Lot`
+      : `${items.length}-Book Comic Lot`;
+  lines.push(`<h2>${xmlEscape(header)}</h2>`);
+  lines.push(`<p><strong>Contents (${items.length} books):</strong></p>`);
+  lines.push("<ul>");
+  for (const it of items) {
+    const gradeStr =
+      it.isGraded === true && it.numericGrade != null
+        ? `CGC ${it.numericGrade}`
+        : it.grade || "Raw";
+    const issuePart = it.issue ? ` #${it.issue}` : "";
+    const yearPart = it.year ? ` (${it.year})` : "";
+    const keyPart = showKeyIssue(it.keyIssue) ? ` — KEY: ${xmlEscape(it.keyIssue)}` : "";
+    const notePart = it.reason ? ` — ${xmlEscape(String(it.reason).slice(0, 160))}` : "";
+    lines.push(
+      `<li><strong>${xmlEscape(it.title || "Comic")}${issuePart}</strong>${yearPart} — ${xmlEscape(gradeStr)}${keyPart}${notePart}</li>`
+    );
+  }
+  lines.push("</ul>");
+  lines.push("<p>Bundle priced at 18% off combined market value.</p>");
+  lines.push("<p>Ships via USPS Media Mail. 30-day returns accepted.</p>");
+  return lines.join("\n");
+};
+
+const buildBundleXml = (items, authToken, pictureUrls) => {
+  const title = buildBundleTitle(items);
+  const description = buildBundleDescription(items);
+  const sum = items.reduce((acc, it) => {
+    const p = parsePriceNumber(it.price) ?? parsePriceNumber(it.priceHigh) ?? parsePriceNumber(it.priceLow) ?? 0;
+    return acc + p;
+  }, 0);
+  const price = Math.round(sum * 0.82 * 100) / 100;
+  if (price <= 0) throw new Error("No valid bundle price — cannot list");
+  const conditionId = items.every((it) => it.isGraded === true) ? "2750" : "4000";
+  const pictureBlock = (pictureUrls && pictureUrls.length)
+    ? `    <PictureDetails>\n${pictureUrls
+        .map((u) => `      <PictureURL>${xmlEscape(u)}</PictureURL>`)
+        .join("\n")}\n    </PictureDetails>\n`
+    : "";
+  return `<?xml version="1.0" encoding="utf-8"?>
+<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${xmlEscape(authToken)}</eBayAuthToken>
+  </RequesterCredentials>
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <WarningLevel>High</WarningLevel>
+  <Item>
+    <Title>${xmlEscape(title)}</Title>
+    <Description><![CDATA[${description}]]></Description>
+    <PrimaryCategory>
+      <CategoryID>${CATEGORY_ID}</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="USD">${price.toFixed(2)}</StartPrice>
+    <ConditionID>${conditionId}</ConditionID>
+    <Location>Phoenix, AZ</Location>
+    <Country>US</Country>
+    <PostalCode>85033</PostalCode>
+    <Currency>USD</Currency>
+    <ListingDuration>GTC</ListingDuration>
+    <ListingType>FixedPriceItem</ListingType>
+    <Quantity>1</Quantity>
+    <Site>US</Site>
+    <DispatchTimeMax>3</DispatchTimeMax>
+${pictureBlock}    <ShipToLocations>US</ShipToLocations>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>USPSMedia</ShippingService>
+        <ShippingServiceCost>6.99</ShippingServiceCost>
+        <FreeShipping>false</FreeShipping>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+      <RefundOption>MoneyBack</RefundOption>
+      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+      <ShippingCostPaidByOption>Seller</ShippingCostPaidByOption>
+    </ReturnPolicy>
+  </Item>
+</AddFixedPriceItemRequest>`;
+};
+
 const buildDescription = (item) => {
   const lines = [];
   if (item.title) lines.push(`<h2>${xmlEscape(item.title)}</h2>`);
@@ -265,10 +387,6 @@ export default async function handler(req, res) {
 
   try {
     const item = req.body || {};
-    if (!item.title) {
-      res.status(400).json({ error: "title required" });
-      return;
-    }
 
     const ebayHeaders = {
       "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT_LEVEL,
@@ -277,6 +395,68 @@ export default async function handler(req, res) {
       "X-EBAY-API-CERT-NAME": EBAY_CERT_ID,
       "X-EBAY-API-SITEID": SITE_ID,
     };
+
+    // Bundle branch: combined lot listing for multiple comics.
+    if (item.bundle === true) {
+      const items = Array.isArray(item.items) ? item.items : [];
+      if (items.length < 2) {
+        res.status(400).json({ error: "Bundle requires at least 2 items" });
+        return;
+      }
+      const bundleImages = items
+        .map((it) => (Array.isArray(it.images) && it.images[0]) || it.image || null)
+        .filter(Boolean)
+        .slice(0, 12);
+      const pictureUrls = [];
+      for (const img of bundleImages) {
+        try {
+          const url = await uploadSiteHostedPicture(img, EBAY_AUTH_TOKEN, ebayHeaders);
+          if (url) pictureUrls.push(url);
+        } catch (imgErr) {
+          console.error("[ebay] bundle picture upload failed:", imgErr.message);
+        }
+      }
+      const xml = buildBundleXml(items, EBAY_AUTH_TOKEN, pictureUrls);
+      console.log("[ebay] AddFixedPriceItem (bundle) request XML:\n" + redactToken(xml));
+      const ebayRes = await fetch(EBAY_ENDPOINT, {
+        method: "POST",
+        headers: {
+          ...ebayHeaders,
+          "Content-Type": "text/xml",
+          "X-EBAY-API-CALL-NAME": "AddFixedPriceItem",
+        },
+        body: xml,
+      });
+      const responseXml = await ebayRes.text();
+      const ack = extractTag(responseXml, "Ack");
+      const itemId = extractTag(responseXml, "ItemID");
+      if (!itemId) {
+        console.error(
+          `[ebay] bundle listing failed (HTTP ${ebayRes.status}, ack=${ack}). Full response:\n` +
+            redactToken(responseXml)
+        );
+        const shortMsg =
+          extractTag(responseXml, "ShortMessage") ||
+          extractTag(responseXml, "LongMessage") ||
+          "eBay bundle listing failed";
+        res.status(502).json({ error: shortMsg, ack });
+        return;
+      }
+      res.status(200).json({
+        ok: true,
+        bundle: true,
+        listingId: itemId,
+        listingUrl: `https://www.ebay.com/itm/${itemId}`,
+        pictureCount: pictureUrls.length,
+        ack: ack || "Success",
+      });
+      return;
+    }
+
+    if (!item.title) {
+      res.status(400).json({ error: "title required" });
+      return;
+    }
 
     // Step 1: upload the cover image (if provided) to eBay's picture service.
     const coverImage = item.images?.[0] || item.image || null;

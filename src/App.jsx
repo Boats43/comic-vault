@@ -2515,7 +2515,46 @@ function CollectionDetail({
 
 // --- Manage Tab: Claude Command Center ---
 
-function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
+function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleList }) {
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bundling, setBundling] = useState(false);
+  const [bundleMsg, setBundleMsg] = useState(null);
+
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelection = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const submitBundle = async () => {
+    if (bundling || !onBundleList) return;
+    const items = catalogue.filter((c) => selectedIds.has(c.id));
+    if (items.length < 2) {
+      setBundleMsg({ type: "err", text: "Select at least 2 comics" });
+      return;
+    }
+    setBundling(true);
+    setBundleMsg({ type: "info", text: `Creating bundle listing for ${items.length} comics…` });
+    try {
+      const r = await onBundleList(items);
+      setBundleMsg({ type: "ok", text: `Bundle listed! ${r.count} comics → eBay #${r.ebayItemId}` });
+      exitSelection();
+      setTimeout(() => setBundleMsg(null), 4000);
+    } catch (err) {
+      setBundleMsg({ type: "err", text: err?.message || "Bundle listing failed" });
+    } finally {
+      setBundling(false);
+    }
+  };
+
   const [chatInput, setChatInput] = useState("");
   const [latestResponse, setLatestResponse] = useState(null);
   const [latestActions, setLatestActions] = useState([]);
@@ -2669,13 +2708,21 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
       return;
     }
     if (action.action === "bundle" && action.comicIds) {
-      const titles = action.comicIds
+      const validIds = action.comicIds.filter((id) => catalogue.some((c) => c.id === id));
+      if (validIds.length < 2) {
+        setLatestResponse("Not enough comics for a bundle.");
+        return;
+      }
+      setSelectionMode(true);
+      setSelectedIds(new Set(validIds));
+      const titles = validIds
         .map((id) => catalogue.find((c) => c.id === id)?.title)
         .filter(Boolean);
       setLatestResponse(
-        `Bundle ready: ${titles.join(", ")}${action.price ? ` — suggested price $${action.price}` : ""}. These sell faster as a lot.`
+        `Bundle pre-selected: ${titles.join(", ")}. Review checkboxes and tap "List Bundle" to create the combined eBay listing.`
       );
       setLatestActions([]);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
@@ -2728,8 +2775,12 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
     return a.label;
   };
 
+  const bundleItems = catalogue.filter((c) => selectedIds.has(c.id));
+  const bundleSum = bundleItems.reduce((acc, it) => acc + (getDisplayPrice(it) || 0), 0);
+  const bundlePrice = bundleSum * 0.82;
+
   return (
-    <div style={{ paddingBottom: 8, display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{ paddingBottom: selectionMode ? 120 : 8, display: "flex", flexDirection: "column", gap: 12 }}>
 
       {/* A. CLAUDE RESPONSE BOX (top) */}
       <div style={{
@@ -2847,7 +2898,25 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
             {sending ? "..." : "Ask"}
           </button>
         </form>
-        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            onClick={() => {
+              if (selectionMode) exitSelection();
+              else setSelectionMode(true);
+            }}
+            style={{
+              padding: "6px 12px",
+              background: selectionMode ? "rgba(220,38,38,0.2)" : "rgba(212,175,55,0.15)",
+              border: `1px solid ${selectionMode ? "rgba(220,38,38,0.4)" : "rgba(212,175,55,0.35)"}`,
+              borderRadius: 20,
+              color: selectionMode ? "#dc2626" : "#d4af37",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            {selectionMode ? "✕ Cancel Bundle" : "📦 Create Bundle"}
+          </button>
           {["Sell?", "Keys?", "Bundle?", "Stagnant?", "Value?"].map((q) => (
             <button
               key={q}
@@ -2931,18 +3000,48 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
           const thumbSrc = getComicPhotos(item)[0] || null;
           const mv = marketValueOf(item);
           const tag = aiTags[item.id];
+          const isSelected = selectionMode && selectedIds.has(item.id);
           return (
             <div
               key={item.id}
-              onClick={() => onOpenItem(item)}
+              onClick={() => {
+                if (selectionMode) toggleSelected(item.id);
+                else onOpenItem(item);
+              }}
               style={{
+                position: "relative",
                 borderRadius: 10,
-                border: "1px solid rgba(255,255,255,0.08)",
-                background: "rgba(255,255,255,0.03)",
+                border: isSelected
+                  ? "2px solid #d4af37"
+                  : "1px solid rgba(255,255,255,0.08)",
+                background: isSelected
+                  ? "rgba(212,175,55,0.1)"
+                  : "rgba(255,255,255,0.03)",
                 overflow: "hidden",
                 cursor: "pointer",
               }}
             >
+              {selectionMode && (
+                <div style={{
+                  position: "absolute",
+                  top: 6,
+                  left: 6,
+                  width: 24,
+                  height: 24,
+                  borderRadius: 6,
+                  background: isSelected ? "#d4af37" : "rgba(0,0,0,0.6)",
+                  border: "1px solid rgba(212,175,55,0.6)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#0a0a0a",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  zIndex: 2,
+                }}>
+                  {isSelected ? "✓" : ""}
+                </div>
+              )}
               {thumbSrc ? (
                 <img src={thumbSrc} alt="" loading="lazy" style={{ width: "100%", height: 160, objectFit: "cover" }} />
               ) : (
@@ -2984,6 +3083,92 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
           );
         })}
       </div>
+
+      {bundleMsg && (
+        <div style={{
+          position: "fixed",
+          left: 12,
+          right: 12,
+          bottom: selectionMode ? 90 : 70,
+          padding: "10px 14px",
+          borderRadius: 10,
+          fontSize: 13,
+          fontWeight: 600,
+          textAlign: "center",
+          zIndex: 50,
+          background: bundleMsg.type === "err"
+            ? "rgba(220,38,38,0.2)"
+            : bundleMsg.type === "ok"
+              ? "rgba(22,163,106,0.2)"
+              : "rgba(212,175,55,0.2)",
+          border: `1px solid ${bundleMsg.type === "err" ? "#dc2626" : bundleMsg.type === "ok" ? "#16a34a" : "#d4af37"}`,
+          color: bundleMsg.type === "err" ? "#dc2626" : bundleMsg.type === "ok" ? "#16a34a" : "#d4af37",
+        }}>
+          {bundleMsg.text}
+        </div>
+      )}
+
+      {selectionMode && (
+        <div style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: 56,
+          padding: "10px 12px",
+          background: "rgba(15,15,15,0.96)",
+          borderTop: "1px solid rgba(212,175,55,0.4)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          zIndex: 40,
+          backdropFilter: "blur(8px)",
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#d4af37" }}>
+              {selectedIds.size} selected
+            </div>
+            <div style={{ fontSize: 11, color: "#999" }}>
+              {bundleItems.length >= 2
+                ? `$${bundleSum.toFixed(2)} → $${bundlePrice.toFixed(2)} (18% off)`
+                : "Select 2+ comics to bundle"}
+            </div>
+          </div>
+          <button
+            onClick={exitSelection}
+            disabled={bundling}
+            style={{
+              padding: "10px 14px",
+              border: "1px solid rgba(255,255,255,0.15)",
+              borderRadius: 8,
+              background: "transparent",
+              color: "#ccc",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: bundling ? "wait" : "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submitBundle}
+            disabled={bundling || selectedIds.size < 2}
+            style={{
+              padding: "10px 16px",
+              border: "none",
+              borderRadius: 8,
+              background: selectedIds.size >= 2 && !bundling
+                ? "linear-gradient(135deg, #d4af37, #b8941f)"
+                : "rgba(212,175,55,0.2)",
+              color: selectedIds.size >= 2 && !bundling ? "#0a0a0a" : "#d4af37",
+              fontSize: 13,
+              fontWeight: 800,
+              cursor: bundling ? "wait" : selectedIds.size >= 2 ? "pointer" : "not-allowed",
+            }}
+          >
+            {bundling ? "Listing…" : "📦 List Bundle"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -3779,6 +3964,57 @@ export default function App() {
     setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
   }, []);
 
+  const listBundleOnEbay = useCallback(async (items) => {
+    if (!Array.isArray(items) || items.length < 2) {
+      throw new Error("Select at least 2 comics to bundle");
+    }
+    const payloadItems = items.map((it) => ({
+      id: it.id,
+      title: it.title,
+      issue: it.issue,
+      publisher: it.publisher,
+      year: it.year,
+      grade: it.grade,
+      isGraded: it.isGraded,
+      numericGrade: it.numericGrade,
+      keyIssue: it.keyIssue,
+      price: it.price,
+      priceLow: it.priceLow,
+      priceHigh: it.priceHigh,
+      reason: it.reason,
+      images: [getComicPhotos(it)[0]].filter(Boolean),
+    }));
+    const res = await fetch("/api/list-ebay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bundle: true, items: payloadItems }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.listingUrl) {
+      throw new Error(data.error || "Failed to create bundle listing");
+    }
+    const ebayItemId = data.listingId || null;
+    const ebayUrl = data.listingUrl;
+    const ids = new Set(items.map((i) => i.id));
+    const listedAt = Date.now();
+    setCatalogue((prev) =>
+      prev.map((x) => {
+        if (!ids.has(x.id)) return x;
+        const updated = {
+          ...x,
+          status: "listed",
+          ebayUrl,
+          ebayItemId,
+          listedAt,
+          bundleId: ebayItemId,
+        };
+        putComic(updated).catch(() => {});
+        return updated;
+      })
+    );
+    return { ebayItemId, ebayUrl, count: items.length };
+  }, []);
+
   // Update a single field on a catalogue entry and persist to IndexedDB.
   const updateComicField = useCallback(async (item, field, value) => {
     const updated = { ...item, [field]: value };
@@ -4291,6 +4527,7 @@ export default function App() {
             setTab("collection");
           }}
           onListComic={listOnEbay}
+          onBundleList={listBundleOnEbay}
         />
       )}
 
