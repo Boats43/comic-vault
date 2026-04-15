@@ -740,8 +740,10 @@ export default async function handler(req, res) {
         const mult = out.gradeMultiplier || 1;
         const adjAvg = compsAvg * mult;
 
-        // PC way too high vs market (compare final price to grade-adjusted avg)
-        if (pcNum > adjAvg * 3) {
+        // PC way too high vs market (compare final price to grade-adjusted avg).
+        // Modern books (1985+) use a tighter 2x threshold; older books keep 3x.
+        const sanityHighMult = (parseInt(year) >= 1985) ? 2 : 3;
+        if (pcNum > adjAvg * sanityHighMult) {
           sanityFired = true;
           out.price = fmtUsd(adjAvg * 1.15);
           out.priceLow = fmtUsd(adjAvg * 0.75);
@@ -749,7 +751,7 @@ export default async function handler(req, res) {
           out.pricingSource = "browse_api";
           out.priceNote = "PC outlier — eBay avg used";
           console.log('[sanity] PC', pcNum,
-            '> adjAvg*3', adjAvg * 3, '→ fallback adj', adjAvg.toFixed(2));
+            '> adjAvg*' + sanityHighMult, adjAvg * sanityHighMult, '→ fallback adj', adjAvg.toFixed(2));
         }
 
         // PC way too low vs market floor (compare final price to grade-adjusted avg)
@@ -862,6 +864,7 @@ export default async function handler(req, res) {
       const NO_PREMIUM = [
         'corner box', 'masterpieces', 'design variant', 'headshot',
         'trading card', 'cover a', 'cover b', 'cover c', 'cover d',
+        'marvel legacy', 'legacy',
       ];
       const vLower = variant.toLowerCase();
       const isNoPremium = NO_PREMIUM.some((v) => vLower.includes(v));

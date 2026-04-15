@@ -1611,6 +1611,9 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
 
   return (
     <>
+      <div style={{ fontSize: 20, fontWeight: 800, color: "#d4af37", textAlign: "center", padding: "8px 0 4px", letterSpacing: 0.5 }}>
+        Comic Vault
+      </div>
       <div className="stats-row">
         <div className="stat">
           <div className="stat-value">{items.length}</div>
@@ -1824,14 +1827,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
               <div className="cl-row1">
                 <span className="collection-title">{titleWithIssue}</span>
                 {getDisplayPrice(item) > 0 && (
-                  <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
-                    <span className="collection-price">${getDisplayPrice(item).toLocaleString("en-US")}</span>
-                    {item.pricingSource && (
-                      <span style={{ fontSize: 9, opacity: 0.5, textTransform: "uppercase", fontWeight: 600 }}>
-                        {item.pricingSource === "pricecharting" ? "PC" : "eBay"}
-                      </span>
-                    )}
-                  </span>
+                  <span className="collection-price">${getDisplayPrice(item).toLocaleString("en-US")}</span>
                 )}
               </div>
               <div className="cl-row2 muted small">
@@ -2953,9 +2949,17 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
                 <div style={{ width: "100%", height: 160, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>📘</div>
               )}
               <div style={{ padding: "8px 10px" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 2 }}>
                   {item.title || "Unknown"}
                 </div>
+                {(() => {
+                  const gt = item.isGraded === true && item.numericGrade != null
+                    ? `CGC ${item.numericGrade}`
+                    : (item.grade || null);
+                  return gt ? (
+                    <div style={{ fontSize: 11, color: "#999", marginBottom: 4 }}>{gt}</div>
+                  ) : null;
+                })()}
                 <div style={{ fontSize: 15, fontWeight: 800, color: "#d4af37" }}>
                   {mv != null ? fmt(mv) : "—"}
                 </div>
@@ -2984,6 +2988,155 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic }) {
   );
 }
 
+function WatchMode({ onStop }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const lastTitleRef = useRef("");
+  const busyRef = useRef(false);
+  const [result, setResult] = useState(null);
+  const [status, setStatus] = useState("Starting camera...");
+  const [settings] = useState(loadBuyerSettings);
+
+  useEffect(() => {
+    let stream = null;
+    let intervalId = null;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        setStatus("Watching...");
+
+        const captureAndGrade = async () => {
+          if (busyRef.current) return;
+          const v = videoRef.current;
+          const c = canvasRef.current;
+          if (!v || !c || !v.videoWidth) return;
+          busyRef.current = true;
+          try {
+            c.width = v.videoWidth;
+            c.height = v.videoHeight;
+            const ctx = c.getContext("2d");
+            ctx.drawImage(v, 0, 0, c.width, c.height);
+            const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.85));
+            if (!blob) return;
+            const b64 = await fileToBase64(blob);
+            const res = await fetch("/api/grade", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ images: [b64] }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.title) return;
+            const low = data.title.toLowerCase();
+            if (low.includes("not a comic") || low.includes("unknown")) return;
+            const issueNum = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
+            const key = `${data.title}|${issueNum}`;
+            if (key === lastTitleRef.current) return;
+            lastTitleRef.current = key;
+            setResult({ ...data, issue: issueNum, image: b64, _enriching: true });
+
+            fetch("/api/enrich", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                title: data.title,
+                issue: issueNum,
+                grade: data.grade,
+                isGraded: data.isGraded,
+                numericGrade: data.numericGrade,
+                year: data.year,
+                publisher: data.publisher,
+                variant: data.variant || null,
+                keyIssue: data.keyIssue || null,
+                images: [b64],
+              }),
+            })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((enrich) => {
+                if (!enrich || cancelled) return;
+                setResult((prev) => prev ? { ...prev, ...enrich, image: prev.image, _enriching: false } : prev);
+              })
+              .catch(() => {});
+          } catch {
+            /* skip frame */
+          } finally {
+            busyRef.current = false;
+          }
+        };
+
+        intervalId = setInterval(captureAndGrade, 3000);
+        captureAndGrade();
+      } catch (err) {
+        setStatus("Camera error: " + (err.message || "permission denied"));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  const mv = marketValueOf(result);
+  const fee = Number(settings.whatnotFee) || 0;
+  const supplies = Number(settings.supplies) || 0;
+  const labor = Number(settings.labor) || 0;
+  const netAtZero = mv != null ? mv - mv * (fee / 100) - supplies - labor : null;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#d4af37" }}>👁 Watch Mode</div>
+        <button
+          onClick={onStop}
+          style={{ padding: "6px 14px", background: "transparent", border: "1px solid #e05656", borderRadius: 8, color: "#e05656", fontWeight: 700, cursor: "pointer" }}
+        >Stop</button>
+      </div>
+      <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#000", aspectRatio: "4/3" }}>
+        <video ref={videoRef} playsInline muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <canvas ref={canvasRef} style={{ display: "none" }} />
+        <div style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.6)", color: "#d4af37", padding: "4px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
+          {status}
+        </div>
+      </div>
+      {result && (
+        <div style={{ border: "1px solid rgba(212,175,55,0.4)", borderRadius: 12, padding: 14, background: "rgba(212,175,55,0.06)" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+            {result.title}{result.issue ? ` #${result.issue}` : ""}
+          </div>
+          <div style={{ fontSize: 11, color: "#999", marginBottom: 8 }}>
+            {result.publisher}{result.year ? ` · ${result.year}` : ""}{result.grade ? ` · ${result.grade}` : ""}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase" }}>Market</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#d4af37" }}>
+                {mv != null ? fmt(mv) : (result._enriching ? "..." : "—")}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase" }}>Net @ $0 bid</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: netAtZero != null && netAtZero > 0 ? "#16a34a" : "#e05656" }}>
+                {netAtZero != null ? fmt(netAtZero) : (result._enriching ? "..." : "—")}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("scan"); // 'scan' | 'buyer' | 'collection'
   const [loading, setLoading] = useState(false);
@@ -3006,6 +3159,7 @@ export default function App() {
   const [widgetMode, setWidgetMode] = useState(
     () => new URLSearchParams(window.location.search).get("share-target") === "1"
   );
+  const [watchMode, setWatchMode] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(null); // { current, total, title }
   const [bulkDone, setBulkDone] = useState(null); // number or null
   const [analysis, setAnalysis] = useState(null);
@@ -4028,13 +4182,28 @@ export default function App() {
 
       {tab === "buyer" && (
         <>
+          {watchMode ? (
+            <WatchMode onStop={() => setWatchMode(false)} />
+          ) : (
+          <>
           {!loading && !result && !error && (
-            <ScanZone
-              onFile={(e) => handleFile(e, "buyer")}
-              inputRef={buyerFileRef}
-              compact
-              label="Scan the book on stream"
-            />
+            <>
+              <ScanZone
+                onFile={(e) => handleFile(e, "buyer")}
+                inputRef={buyerFileRef}
+                compact
+                label="Scan the book on stream"
+              />
+              <button
+                onClick={() => setWatchMode(true)}
+                style={{
+                  width: "100%", padding: "12px 0", marginTop: 8,
+                  background: "transparent", border: "1px solid rgba(212,175,55,0.4)",
+                  borderRadius: 10, color: "#d4af37", fontWeight: 700, fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >👁 Watch Mode</button>
+            </>
           )}
           {loading && (
             <div className="loading">
@@ -4068,6 +4237,8 @@ export default function App() {
             </>
           )}
           {!result && !loading && !error && <BidCalculator marketValue={null} />}
+          </>
+          )}
         </>
       )}
 
