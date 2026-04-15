@@ -2172,6 +2172,12 @@ function CollectionDetail({
           placeholder="What did you pay? (optional)"
           value={ppInput}
           onChange={(e) => setPpInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.target.blur();
+            }
+          }}
           onBlur={() => {
             const val = parseFloat(ppInput.replace(/[$,]/g, ""));
             const newVal = !isNaN(val) && val > 0 ? val : null;
@@ -4076,11 +4082,14 @@ export default function App() {
   }, []);
 
   // Update a single field on a catalogue entry and persist to IndexedDB.
-  const updateComicField = useCallback(async (item, field, value) => {
+  const updateComicField = useCallback((item, field, value) => {
     const updated = { ...item, [field]: value };
-    await putComic(updated);
+    // Optimistic UI: update React state immediately so ROI and any other
+    // derived views render instantly, then flush to IndexedDB in the
+    // background. Users never see the putComic latency.
     setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
     setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
+    putComic(updated).catch((err) => console.error("[db] write failed:", err));
   }, []);
 
   // Re-fetch eBay comps + ComicVine + AI verification for an
