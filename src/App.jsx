@@ -548,6 +548,11 @@ function WidgetOverlay({
   const [saving, setSaving] = useState(false);
   const [listing, setListing] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [listPrice, setListPrice] = useState(() => getDisplayPrice(result));
+
+  useEffect(() => {
+    setListPrice(getDisplayPrice(result));
+  }, [result?.title, result?.issue, result?.grade]);
 
   const detectedPrice = result?.detectedPrice;
   useEffect(() => {
@@ -610,7 +615,11 @@ function WidgetOverlay({
     if (!result || listing) return;
     setListing(true);
     try {
-      await onListEbay(result);
+      const overridePrice = parseFloat(listPrice);
+      const payload = overridePrice > 0
+        ? { ...result, price: `$${overridePrice.toFixed(2)}` }
+        : result;
+      await onListEbay(payload);
     } catch {
       /* ignore */
     } finally {
@@ -931,7 +940,28 @@ function WidgetOverlay({
               </div>
             )}
 
-            {/* Section 4 — ACTIONS */}
+            {/* Section 4 — LIST PRICE OVERRIDE */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ color: "#aaa", fontSize: 13 }}>List price</span>
+              <input
+                type="number"
+                value={listPrice}
+                onChange={(e) => setListPrice(e.target.value)}
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  borderRadius: 8,
+                  color: "#fff",
+                  fontSize: 18,
+                  fontWeight: 700,
+                  padding: "6px 10px",
+                  width: 100,
+                  textAlign: "right",
+                }}
+              />
+            </div>
+
+            {/* Section 5 — ACTIONS */}
             <div style={s.actionRow}>
               <button
                 style={s.btnOutline}
@@ -943,11 +973,11 @@ function WidgetOverlay({
               <button
                 style={s.btnGold}
                 onClick={handleList}
-                disabled={listing}
+                disabled={listing || !(parseFloat(listPrice) > 0)}
               >
                 {listing
                   ? "Listing…"
-                  : `List on eBay — ${recommendedLabel}`}
+                  : `List on eBay — $${listPrice || "0"}`}
               </button>
             </div>
           </>
@@ -1893,7 +1923,12 @@ function CollectionDetail({
   const [addPhotoError, setAddPhotoError] = useState(null);
   const [expandedPhoto, setExpandedPhoto] = useState(null);
   const [ppInput, setPpInput] = useState(item.purchasePrice != null ? String(item.purchasePrice) : "");
+  const [listPrice, setListPrice] = useState(() => getDisplayPrice(item));
   const addPhotoRef = useRef(null);
+
+  useEffect(() => {
+    setListPrice(getDisplayPrice(item));
+  }, [item?.id]);
 
   useEffect(() => {
     const handleKey = (e) => {
@@ -1934,7 +1969,11 @@ function CollectionDetail({
     setListing(true);
     setListError(null);
     try {
-      await onList(item);
+      const overridePrice = parseFloat(listPrice);
+      const itemToList = overridePrice > 0
+        ? { ...item, price: `$${overridePrice.toFixed(2)}` }
+        : item;
+      await onList(itemToList);
     } catch (err) {
       setListError(err.message || "Failed to list");
     } finally {
@@ -2472,16 +2511,37 @@ function CollectionDetail({
             </a>
           </div>
         ) : (
-          <button
-            className="reset-btn primary"
-            onClick={handleList}
-            disabled={listing}
-            style={{ width: "100%" }}
-          >
-            {listing
-              ? "Listing on eBay..."
-              : `📋 List on eBay — ${recommendedLabel}`}
-          </button>
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <span style={{ color: "#aaa", fontSize: 13 }}>List price</span>
+              <input
+                type="number"
+                value={listPrice}
+                onChange={(e) => setListPrice(e.target.value)}
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  borderRadius: 8,
+                  color: "#fff",
+                  fontSize: 18,
+                  fontWeight: 700,
+                  padding: "6px 10px",
+                  width: 100,
+                  textAlign: "right",
+                }}
+              />
+            </div>
+            <button
+              className="reset-btn primary"
+              onClick={handleList}
+              disabled={listing || !(parseFloat(listPrice) > 0)}
+              style={{ width: "100%" }}
+            >
+              {listing
+                ? "Listing on eBay..."
+                : `📋 List on eBay — $${listPrice || "0"}`}
+            </button>
+          </>
         )}
         {listError && (
           <div className="error-text small" style={{ marginTop: 6 }}>
