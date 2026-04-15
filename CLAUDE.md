@@ -74,6 +74,18 @@ Nine keys required (all set in Vercel):
 - Collection list paddingBottom is dynamic: 220px when Claude card visible, 100px otherwise.
 - `api/chat.js` receives optional `buyerSessions` with Whatnot buying history for Claude context.
 
+## Verified Pricing Fixes — 4/15/2026 (commit 8d70e12)
+All five pricing fixes confirmed intact:
+- **NO_PREMIUM**: corner box, masterpieces, design variant, headshot, trading card, cover a/b/c/d, marvel legacy, legacy
+- **Key mult ×1.5**: isFromPC gated, PC source only
+- **Sanity low**: `pcNum < adjAvg × 0.5` (no -10 guard)
+- **Sanity high**: `adjAvg × 2` modern (1985+) / `× 3` Silver Age
+- **Floor guard**: `rawComps.lowest × gradeAdj`
+- **Share target**: SW cache + Vercel fallback route + 3× retry in App.jsx
+
+## Features
+- **Bundle listing**: Manage tab → "📦 Create Bundle" chip → tap tiles to multi-select → floating bar shows `$sum → $bundlePrice (18% off)` → "List Bundle" posts to `/api/list-ebay` with `{ bundle: true, items: [...] }` → single eBay listing (all items marked `status:"listed"` with shared `ebayItemId`/`bundleId`). ERA auto-detected from earliest book year (Golden <1956, Silver ≤1970, Bronze ≤1984, Copper ≤1991, Modern 1992+). Claude BUNDLE actions pre-select recommended comicIds into selection mode.
+
 ## Last Session
 Session 4/14/2026 — Manage tab audit fixes: (1) List Now button label now uses real `getDisplayPrice(catalogue item)` instead of Claude's text price — `actionBtnLabel` in Manage view resolves `a.comicId` against catalogue and builds `"List Now — $" + realPrice`, falls back to `a.label` if no match (commit f684813); (2) HOT badge fires deterministically in `applyAiTags` — after Claude's HOT/BUNDLE action tags, any catalogue item with `comps.averageNum` and `displayVal < marketVal × 0.85` gets tagged HOT with reason "Priced below market" (guarded by `!aiTags[id] && !tags[id]` to avoid overwrite); (3) `api/chat.js` `totalValue` now uses enriched `c.price` only (`parseFloat(String(c.price||"0").replace(/[$,]/g,""))`) — no longer falls back to `comps.averageNum`, matches UI's `getDisplayPrice` formula; (4) collection header EST VALUE matches Manage tab Total Value (same source); (5) Total Value metric locked — `sendMessage` filters out Claude's `Total Value` entry from `data.metrics` and re-prepends the locally-computed one so chat API responses never overwrite it.
 
