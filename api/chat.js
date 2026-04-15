@@ -16,7 +16,7 @@ export default async function handler(req, res) {
     }
 
     // Build collection summary for Claude context (strip images).
-    const comics = (collection || []).map((c) => ({
+    const allComics = (collection || []).map((c) => ({
       id: c.id,
       title: c.title,
       publisher: c.publisher,
@@ -40,10 +40,25 @@ export default async function handler(req, res) {
         : null,
     }));
 
-    const totalValue = comics.reduce((s, c) => {
+    // Total value from the full collection, never just the subset sent to Claude.
+    const totalValue = allComics.reduce((s, c) => {
       const p = parseFloat(String(c.price||"0").replace(/[$,]/g,""));
       return s + (p || 0);
     }, 0);
+
+    // Limit to top 20 by display price (price or comps.averageNum×1.15) to
+    // keep the prompt under the model's effective token budget for 58+
+    // comics. Matches frontend getDisplayPrice logic.
+    const displayPriceOf = (c) => {
+      const p = parseFloat(String(c.price || "0").replace(/[$,]/g, ""));
+      if (p > 0) return p;
+      if (c.comps?.averageNum) return Math.round(c.comps.averageNum * 1.15);
+      return 0;
+    };
+    const comics = [...allComics]
+      .sort((a, b) => displayPriceOf(b) - displayPriceOf(a))
+      .slice(0, 20);
+    const truncated = allComics.length - comics.length;
 
     // Buyer session summary (Whatnot history)
     let buyerContext = "";
@@ -57,9 +72,12 @@ Recent decisions: ${JSON.stringify(bs.recentSessions.slice(-10).map((s) => ({ ti
 You also have access to the user's Whatnot buying history. Use it to give advice on their buying patterns, best deals, and areas to improve.`;
     }
 
+    const truncNote = truncated > 0
+      ? ` (showing top ${comics.length} by value; ${truncated} more in full collection)`
+      : "";
     const systemPrompt = `You are the collection manager AI for Comic Vault. You have complete knowledge of this collector's inventory.
 
-COLLECTION (${comics.length} comics, ~$${Math.round(totalValue).toLocaleString()} estimated value):
+COLLECTION (${allComics.length} comics total${truncNote}, ~$${Math.round(totalValue).toLocaleString()} estimated value):
 ${JSON.stringify(comics)}${buyerContext}
 
 RULES:
@@ -96,12 +114,29 @@ Always include metrics and signals in EVERY response.`;
     }
     messages.push({ role: "user", content: message });
 
-    const result = await client.messages.create({
+    // 8s timeout guard — if Claude doesn't respond in time, return a safe
+    // fallback so the Manage card never shows "Something went wrong".
+    const TIMEOUT_MS = 8000;
+    const apiPromise = client.messages.create({
       model: "claude-haiku-4-5",
       max_tokens: 800,
       system: systemPrompt,
       messages,
     });
+    const timeoutPromise = new Promise((resolve) =>
+      setTimeout(() => resolve({ __timedOut: true }), TIMEOUT_MS)
+    );
+    const result = await Promise.race([apiPromise, timeoutPromise]);
+    if (result && result.__timedOut) {
+      console.warn(`[chat] Claude timeout after ${TIMEOUT_MS}ms — returning fallback`);
+      res.status(200).json({
+        response: "Taking longer than usual — try a narrower question like \"What should I sell?\" or \"Any bundle ideas?\"",
+        actions: [],
+        metrics: [],
+        signals: [],
+      });
+      return;
+    }
 
     const text = result.content
       .filter((b) => b.type === "text")
