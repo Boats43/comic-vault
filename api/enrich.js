@@ -671,6 +671,24 @@ export default async function handler(req, res) {
       }
     }
 
+    // Blended average: weight sold comps (60%) + active comps (40%).
+    const soldPrices = (Array.isArray(soldResult) ? soldResult : [])
+      .map(s => typeof s.price === 'number' ? s.price : parseFloat(String(s.price || '0').replace(/[$,]/g, '')))
+      .filter(p => p > 0);
+    const soldAvg = soldPrices.length > 0
+      ? soldPrices.reduce((a, b) => a + b, 0) / soldPrices.length
+      : null;
+    const activeAvg = rawComps?.average || null;
+    let blendedAvg = null;
+    if (soldAvg && activeAvg) {
+      blendedAvg = (soldAvg * 0.6) + (activeAvg * 0.4);
+      console.log('[blend] sold:', soldAvg, 'active:', activeAvg, 'blended:', blendedAvg.toFixed(2));
+    } else if (soldAvg) {
+      blendedAvg = soldAvg * 1.1;
+    } else if (activeAvg) {
+      blendedAvg = activeAvg;
+    }
+
     const out = {};
 
     if (comicVine) {
@@ -729,8 +747,8 @@ export default async function handler(req, res) {
       }
       out.pricingSource = "pricecharting";
 
-      // Sanity check: compare PC price against eBay comps average.
-      const compsAvg = compsFromEbay?.average;
+      // Sanity check: compare PC price against blended/eBay comps average.
+      const compsAvg = blendedAvg || compsFromEbay?.average;
       if (compsAvg && compsAvg > 5) {
         const pcNum = parseFloat(
           String(out.price || '0').replace(/[$,]/g, '')
@@ -898,19 +916,33 @@ export default async function handler(req, res) {
       }
     }
 
-    // Key issue multiplier: ×1.5 on top of base/variant price.
+    // Key issue multiplier: tiered — major keys ×1.5, minor keys ×1.2.
     // Only apply when PriceCharting is the pricing source — browse_api/ebay_avg
     // already reflect market premium for the key.
-    const isKey = !!out.keyIssue;
-    console.log('[key] keyIssue value:', out.keyIssue, 'isKey:', isKey, 'bodyKey:', req.body?.keyIssue, 'source:', out.pricingSource, 'isFromPC:', isFromPC);
-    if (isKey && out.price && isFromPC) {
+    const keyStr = String(out.keyIssue || '').toLowerCase();
+    const isMajorKey = keyStr.includes('1st appearance') ||
+      keyStr.includes('first appearance') ||
+      keyStr.includes('origin') ||
+      keyStr.includes('death') ||
+      keyStr.includes('first issue');
+    const isMinorKey = !isMajorKey && (
+      keyStr.includes('2nd appearance') ||
+      keyStr.includes('second appearance') ||
+      keyStr.includes('first cover') ||
+      keyStr.includes('cameo') ||
+      keyStr.includes('iconic') ||
+      keyStr.includes('classic')
+    );
+    const keyMult = isMajorKey ? 1.5 : isMinorKey ? 1.2 : 1.0;
+    console.log('[key] keyIssue:', out.keyIssue, 'major:', isMajorKey, 'minor:', isMinorKey, 'mult:', keyMult, 'isFromPC:', isFromPC);
+    if (keyMult > 1.0 && out.price && isFromPC) {
       const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
       if (curPrice > 0) {
-        out.price = fmtUsd(curPrice * 1.5);
-        out.priceLow = fmtUsd(curPrice * 1.5 * 0.75);
-        out.priceHigh = fmtUsd(curPrice * 1.5 * 1.25);
-        out.keyMultiplier = 1.5;
-        console.log('[key]', out.keyIssue, '× 1.5 →', out.price);
+        out.price = fmtUsd(curPrice * keyMult);
+        out.priceLow = fmtUsd(curPrice * keyMult * 0.75);
+        out.priceHigh = fmtUsd(curPrice * keyMult * 1.25);
+        out.keyMultiplier = keyMult;
+        console.log('[key]', isMajorKey ? 'major' : 'minor', '×' + keyMult, '→', out.price);
       }
     }
 

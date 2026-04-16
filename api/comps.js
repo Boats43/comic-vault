@@ -521,6 +521,18 @@ export const fetchComps = async ({
       }
     }
 
+    // Filter 1b: variant contamination — when NOT searching for a
+    // specific variant, drop listings with variant/foil/ratio/incentive
+    // keywords to prevent inflated copies from skewing the average.
+    if (!variant) {
+      const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b/i;
+      const before = parsed.length;
+      parsed = parsed.filter((it) => !VARIANT_CONTAM_RE.test(String(it.title || "")));
+      if (parsed.length < before) {
+        console.log(`[comps] variant filter removed ${before - parsed.length}`);
+      }
+    }
+
     // Filter 2: raw-vs-graded title separation.
     if (rawOnly) {
       const before = parsed.length;
