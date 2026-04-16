@@ -53,6 +53,7 @@ Nine keys required (all set in Vercel):
 - Visual search only overrides with 3+ matches.
 - PriceCharting skipped when issue=null.
 - No premium multiplier: corner box, masterpieces, design variant, cover A/B/C/D.
+- eBay listing title includes variant (newsstand, gold, 2nd print, etc.) between issue and grade — filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot).
 - Variant short keywords only in comps query attempts 1-2.
 - Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
 - Sanity check compares grade-adjusted PC price to grade-adjusted comps average (not raw avg).
@@ -114,6 +115,13 @@ All pricing fixes confirmed intact:
 (3) **Text hint input** (`4182221`): text input below camera preview shares `watchContext` state with voice — last one wins. Clear button (✕) resets both.
 (4) **Android browser fallback** (`a38069f`): SpeechRecognition constructor check + try/catch on `.start()` + onerror handler all show "Type context above instead" instead of crashing. Three failure points covered.
 (5) **Self-correcting pipeline** (`6784aed`): `api/grade.js` rebuilt with multi-pass watch pipeline. Pass 1 Sonnet fast ID with watch-optimized prompt ("read directly from cover"). High confidence → return immediately. Pass 2 Sonnet self-correction with pass 1 context. Pass 3 Opus escalation if still low confidence. Shared helpers: `buildImageContent`, `callModel`, `parseResponse`. Response headers `x-watch-passes` and `x-watch-timing`. Standard (non-watch) path unchanged — single Opus call.
+
+## Session 4/15/2026 — UX polish + variant pipeline fix
+(1) **Back button returns to correct tab** (`839f5e9`): `prevTabRef` tracks which tab opened CollectionDetail. Back from Manage → returns to Manage tab with scroll restored. Android back gesture intercepted via `popstate` listener — closes detail view instead of exiting app.
+(2) **Swipe navigation** (`0b20db7`): touch swipe left/right on CollectionDetail navigates between comics. 50px threshold to avoid accidental triggers. First-use hint "← swipe to navigate →" fades after 2s, persisted in `cv_swipe_hint_seen` localStorage.
+(3) **Stats bar** (`9d096a3`): one-line bar below title in CollectionDetail — grade pill + price + last sold + asking range (low–high from comps).
+(4) **Photo angle prompts** (`927d54e`): photo strip shows labeled placeholder buttons for missing angles (Front/Back/Spine/Pages). 1 photo → 3 placeholders, 4+ → none. Each tappable to open camera.
+(5) **Variant in eBay listing title** (`1cdf988`): `buildTitle` in `list-ebay.js` now includes `item.variant` between issue and grade. Filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot) — these add no search value. Same filter applied to `buildBundleTitle`. Pipeline trace confirmed variant flows: grade.js → App.jsx → enrich.js → comps.js (attempts 1-2 only) → list-ebay.js (was missing, now fixed).
 
 ## Last Session
 Session 4/14/2026 — Manage tab audit fixes: (1) List Now button label now uses real `getDisplayPrice(catalogue item)` instead of Claude's text price — `actionBtnLabel` in Manage view resolves `a.comicId` against catalogue and builds `"List Now — $" + realPrice`, falls back to `a.label` if no match (commit f684813); (2) HOT badge fires deterministically in `applyAiTags` — after Claude's HOT/BUNDLE action tags, any catalogue item with `comps.averageNum` and `displayVal < marketVal × 0.85` gets tagged HOT with reason "Priced below market" (guarded by `!aiTags[id] && !tags[id]` to avoid overwrite); (3) `api/chat.js` `totalValue` now uses enriched `c.price` only (`parseFloat(String(c.price||"0").replace(/[$,]/g,""))`) — no longer falls back to `comps.averageNum`, matches UI's `getDisplayPrice` formula; (4) collection header EST VALUE matches Manage tab Total Value (same source); (5) Total Value metric locked — `sendMessage` filters out Claude's `Total Value` entry from `data.metrics` and re-prepends the locally-computed one so chat API responses never overwrite it.
