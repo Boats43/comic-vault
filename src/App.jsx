@@ -1924,7 +1924,9 @@ function CollectionDetail({
   const [expandedPhoto, setExpandedPhoto] = useState(null);
   const [ppInput, setPpInput] = useState(item.purchasePrice != null ? String(item.purchasePrice) : "");
   const [listPrice, setListPrice] = useState(() => getDisplayPrice(item));
+  const [swipeHint, setSwipeHint] = useState(() => !localStorage.getItem("cv_swipe_hint_seen"));
   const addPhotoRef = useRef(null);
+  const touchStartX = useRef(null);
 
   useEffect(() => {
     setListPrice(getDisplayPrice(item));
@@ -1938,6 +1940,15 @@ function CollectionDetail({
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [onPrev, onNext]);
+
+  useEffect(() => {
+    if (!swipeHint) return;
+    const t = setTimeout(() => {
+      setSwipeHint(false);
+      localStorage.setItem("cv_swipe_hint_seen", "1");
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [swipeHint]);
 
   const photos = getComicPhotos(item);
   const canAddMore = photos.length < 4;
@@ -2015,7 +2026,23 @@ function CollectionDetail({
   };
 
   return (
-    <div className="detail-view">
+    <div
+      className="detail-view"
+      onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
+      onTouchEnd={e => {
+        if (touchStartX.current === null) return;
+        const diff = touchStartX.current - e.changedTouches[0].clientX;
+        touchStartX.current = null;
+        if (Math.abs(diff) < 50) return;
+        if (diff > 0) { onNext && onNext(); }
+        else { onPrev && onPrev(); }
+      }}
+    >
+      {swipeHint && totalItems > 1 && (
+        <div style={{ textAlign: "center", fontSize: 11, color: "rgba(212,175,55,0.6)", marginBottom: 4, transition: "opacity 0.5s", animation: "fadeOut 2s forwards" }}>
+          ← swipe to navigate →
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <button className="back-btn" onClick={onBack} style={{ margin: 0 }}>← Back</button>
         {totalItems > 1 && (
