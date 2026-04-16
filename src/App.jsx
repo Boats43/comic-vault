@@ -3945,8 +3945,10 @@ export default function App() {
     setBulkDone(null);
     setBulkProgress({ current: 1, total: files.length, title: "" });
     let added = 0;
+    const errors = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      console.log('[bulk] processing file:', file.name);
       setBulkProgress({ current: i + 1, total: files.length, title: "" });
       try {
         const rawB64 = await fileToBase64(file);
@@ -3957,11 +3959,23 @@ export default function App() {
           body: JSON.stringify({ images: [b64] }),
         });
         const data = await res.json();
-        if (!res.ok) continue; // skip failures
+        if (!res.ok) {
+          const msg = data.error || `HTTP ${res.status}`;
+          console.warn('[bulk] grade error for', file.name, msg);
+          errors.push(`${file.name}: ${msg}`);
+          continue;
+        }
+        console.log('[bulk] grade result:', JSON.stringify(data));
         const bulkIssue = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
         setBulkProgress({ current: i + 1, total: files.length, title: data.title || "" });
         const savedId = await addToCatalogue({ ...data, issue: bulkIssue }, b64);
-        if (savedId) added++;
+        if (savedId) {
+          added++;
+          console.log('[bulk] added to catalogue:', data.title, bulkIssue);
+        } else {
+          console.warn('[bulk] addToCatalogue returned null for', file.name);
+          errors.push(`${file.name}: failed to save`);
+        }
         // Fire-and-forget enrichment
         fetch("/api/enrich", {
           method: "POST",
@@ -4010,11 +4024,16 @@ export default function App() {
             });
           })
           .catch(() => {});
-      } catch {
-        // skip failures
+      } catch (err) {
+        console.warn('[bulk] unexpected error for', file.name, err);
+        errors.push(`${file.name}: ${err.message || 'unexpected error'}`);
       }
     }
     setBulkProgress(null);
+    if (errors.length > 0) {
+      console.warn('[bulk] errors:', errors);
+      setError(`Bulk import: ${added} added, ${errors.length} failed.\n${errors.join('\n')}`);
+    }
     setBulkDone(added);
     // Auto-switch to collection tab after a short delay
     setTimeout(() => {
