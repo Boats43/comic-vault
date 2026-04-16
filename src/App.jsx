@@ -3491,6 +3491,7 @@ export default function App() {
   const bulkRef = useRef(null);
   const collectionScrollPos = useRef(0);
   const manageScrollPos = useRef(0);
+  const prevTabRef = useRef("collection");
 
   // Load catalogue, snapshots, and cached analysis from IndexedDB on mount.
   useEffect(() => {
@@ -3982,6 +3983,17 @@ export default function App() {
       setBulkDone(null);
     }, 2000);
   }, [addToCatalogue]);
+
+  // Android back gesture intercept — return to list instead of exiting app.
+  useEffect(() => {
+    window.history.pushState(null, "", window.location.href);
+    const onPopState = () => {
+      window.history.pushState(null, "", window.location.href);
+      if (selectedItem) setSelectedItem(null);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [selectedItem]);
 
   // Web Share Target handoff — persist into Buyer tab (save:false).
   // Strip ?share-target=1 immediately so reloads don't re-trigger the flow.
@@ -4619,8 +4631,15 @@ export default function App() {
           <CollectionDetail
             item={selectedItem}
             onBack={() => {
+              const prev = prevTabRef.current;
               setSelectedItem(null);
-              setTimeout(() => window.scrollTo(0, collectionScrollPos.current), 50);
+              if (prev === "manage") {
+                setTab("manage");
+                setTimeout(() => window.scrollTo(0, manageScrollPos.current), 50);
+              } else {
+                setTimeout(() => window.scrollTo(0, collectionScrollPos.current), 50);
+              }
+              prevTabRef.current = "collection";
             }}
             onDelete={deleteFromCatalogue}
             onList={listOnEbay}
@@ -4646,6 +4665,7 @@ export default function App() {
             snapshots={snapshots}
             onOpen={(item) => {
               collectionScrollPos.current = window.scrollY;
+              prevTabRef.current = "collection";
               setSelectedItem(item);
             }}
             onDelete={deleteFromCatalogue}
@@ -4659,6 +4679,7 @@ export default function App() {
           totalValue={totalValue}
           onOpenItem={(item) => {
             manageScrollPos.current = window.scrollY;
+            prevTabRef.current = "manage";
             setSelectedItem(item);
             setTab("collection");
           }}
