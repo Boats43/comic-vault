@@ -849,7 +849,12 @@ export default async function handler(req, res) {
       }
     }
     gradeAdj = gradeAdj || 1.0;
-    const floorNum = rawFloor * gradeAdj;
+    let floorNum = rawFloor * gradeAdj;
+    const compsAvgForCap = blendedAvg || compsFromEbay?.average || 0;
+    if (floorNum > compsAvgForCap && compsAvgForCap > 0) {
+      floorNum = compsAvgForCap;
+      console.log('[floor] capped at comps avg', compsAvgForCap.toFixed(2));
+    }
 
     let floorFired = false;
     if (floorNum > 0 && finalNum < floorNum) {
