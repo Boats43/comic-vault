@@ -49,17 +49,19 @@ Nine keys required (all set in Vercel):
 - PriceCharting year threshold: 5 years max gap between comic year and product year.
 - AI verify: accept variant/cover B listings as matches if same character + issue number.
 - Variant multipliers: gold ×3, 2nd print ×1.5, newsstand ×1.3, price variant ×2.0.
-- Key issue multiplier: ×1.5 applied after variant mult when `out.keyIssue` is set.
+- Key issue multiplier: tiered (major ×1.5, minor ×1.2) applied after variant mult when `out.keyIssue` is set AND blendedAvg is non-null.
 - Visual search only overrides with 3+ matches.
 - PriceCharting skipped when issue=null.
 - No premium multiplier: corner box, masterpieces, design variant, cover A/B/C/D.
 - Variant short keywords only in comps query attempts 1-2.
 - Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
 - Sanity check compares grade-adjusted PC price to grade-adjusted comps average (not raw avg).
-- Sanity thresholds: 0.5x (too low) and 3x (too high) against adjAvg.
+- Sanity thresholds: 0.5x (too low) and 2x modern/3x Silver (too high) against adjAvg.
+- Sanity check uses `blendedAvg || compsFromEbay?.average` — blended comps (60% sold + 40% active) preferred over raw Browse average.
 - Sanity low-side condition: `pcNum < adjAvg × 0.5` only (removed legacy `adjAvg - 10` guard that blocked firing on low-value books).
 - Variant mult: PC source only — gated by `isFromPC` flag.
-- Key mult: PC source only — gated by `isFromPC` flag.
+- Key mult: PC source only — gated by `isFromPC && blendedAvg` (requires comps to validate).
+- Key mult tiered: major (1st appearance, first appearance, origin, death, first issue) ×1.5; minor (2nd, second app, first cover, cameo, iconic, classic) ×1.2; other ×1.0.
 - `isFromPC = !!priceCharting?.price && !sanityFired && out.pricingSource === 'pricecharting'` — snapshotted after PC/sanity branch, before floor/variant/key blocks.
 - Floor guard field: `rawComps.lowest` (not `lowestNum`) — comps.js returns `lowest`.
 - Floor guard is grade-adjusted: `rawFloor * gradeMultiplier`.
@@ -74,13 +76,14 @@ Nine keys required (all set in Vercel):
 - Collection list paddingBottom is dynamic: 220px when Claude card visible, 100px otherwise.
 - `api/chat.js` receives optional `buyerSessions` with Whatnot buying history for Claude context.
 
-## Verified Pricing Fixes — 4/15/2026 (commit 8d70e12)
-All five pricing fixes confirmed intact:
+## Verified Pricing Fixes — 4/15/2026 (commit 8d70e12 → 47705c7)
+All pricing fixes confirmed intact:
 - **NO_PREMIUM**: corner box, masterpieces, design variant, headshot, trading card, cover a/b/c/d, marvel legacy, legacy
-- **Key mult ×1.5**: isFromPC gated, PC source only
-- **Sanity low**: `pcNum < adjAvg × 0.5` (no -10 guard)
-- **Sanity high**: `adjAvg × 2` modern (1985+) / `× 3` Silver Age
+- **Key mult tiered**: major ×1.5 / minor ×1.2 — gated by `isFromPC && blendedAvg` (no comps = no key mult)
+- **Blended comps**: `soldAvg * 0.6 + activeAvg * 0.4` (sold-only ×1.1, active-only as-is)
+- **Sanity check**: uses blendedAvg, thresholds 0.5x low / 2x modern / 3x Silver high
 - **Floor guard**: `rawComps.lowest × gradeAdj`
+- **Variant filter**: comps.js drops variant/virgin/foil/ratio/incentive listings when not searching for variant
 - **Share target**: SW cache + Vercel fallback route + 3× retry in App.jsx
 
 ## Features
@@ -95,6 +98,13 @@ All five pricing fixes confirmed intact:
 (2) Bundle listing feature shipped (`8d70e12`): `api/list-ebay.js` bundle branch (18% off sum, era-derived title, per-item HTML description, up to 12 cover photos); Manage tab "📦 Create Bundle" chip → checkbox tiles → floating bottom bar → single eBay listing, all items marked `status:"listed"` with shared `ebayItemId`/`bundleId`. Claude BUNDLE action pre-selects recommended comicIds.
 (3) `api/chat.js` hardening (`d218b95` + `951a13c`): top-20 by displayPrice sent to Claude (totalValue still from full collection); 8s `Promise.race` timeout returns friendly fallback instead of 500; accepts both flat-array and nested `{ books:[...] }` collection shapes.
 (4) Production test against `/api/chat` with 5-comic sample: 4.5s response, 2 actions (List + Bundle), 4 metrics, 3 signals — healthy.
+
+## Session 4/15/2026 — pricing calibration: blended comps, tiered keys, variant filter
+(1) **Blended comps** (`9b9de52`): `enrich.js` computes `blendedAvg` from sold comps (60%) + active comps (40%) after Promise.all. Sold-only uses ×1.1 bump. Sanity check now uses `blendedAvg || compsFromEbay?.average` for better market signal.
+(2) **Tiered key multiplier** (`9b9de52`): replaces flat ×1.5 with major (1st appearance, origin, death, first issue) ×1.5 / minor (2nd, second app, first cover, cameo, iconic, classic) ×1.2 / other ×1.0.
+(3) **Key mult requires comps** (`47705c7`): key multiplier gated by `blendedAvg` — without comps to validate, no multiplier applied. House of Secrets #92 FN- 5.5 now prices at $644 (PC × grade) instead of $966 (inflated by key mult with no market validation).
+(4) **Variant contamination filter** (`9b9de52`): `comps.js` adds Filter 1b — drops listings with variant/virgin/foil/ratio/incentive keywords when NOT searching for a variant. Thor #338 comps avg dropped from $52.75 to $35.90 after filter.
+(5) **Minor key detection broadened** (`47705c7`): `keyStr.includes('2nd')` and `keyStr.includes('second app')` added to isMinorKey for Thor #337 "2nd app Beta Ray Bill" and similar.
 
 ## Last Session
 Session 4/14/2026 — Manage tab audit fixes: (1) List Now button label now uses real `getDisplayPrice(catalogue item)` instead of Claude's text price — `actionBtnLabel` in Manage view resolves `a.comicId` against catalogue and builds `"List Now — $" + realPrice`, falls back to `a.label` if no match (commit f684813); (2) HOT badge fires deterministically in `applyAiTags` — after Claude's HOT/BUNDLE action tags, any catalogue item with `comps.averageNum` and `displayVal < marketVal × 0.85` gets tagged HOT with reason "Priced below market" (guarded by `!aiTags[id] && !tags[id]` to avoid overwrite); (3) `api/chat.js` `totalValue` now uses enriched `c.price` only (`parseFloat(String(c.price||"0").replace(/[$,]/g,""))`) — no longer falls back to `comps.averageNum`, matches UI's `getDisplayPrice` formula; (4) collection header EST VALUE matches Manage tab Total Value (same source); (5) Total Value metric locked — `sendMessage` filters out Claude's `Total Value` entry from `data.metrics` and re-prepends the locally-computed one so chat API responses never overwrite it.
