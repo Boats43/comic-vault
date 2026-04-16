@@ -928,6 +928,8 @@ export default async function handler(req, res) {
     const isMinorKey = !isMajorKey && (
       keyStr.includes('2nd appearance') ||
       keyStr.includes('second appearance') ||
+      keyStr.includes('2nd') ||
+      keyStr.includes('second app') ||
       keyStr.includes('first cover') ||
       keyStr.includes('cameo') ||
       keyStr.includes('iconic') ||
@@ -935,7 +937,7 @@ export default async function handler(req, res) {
     );
     const keyMult = isMajorKey ? 1.5 : isMinorKey ? 1.2 : 1.0;
     console.log('[key] keyIssue:', out.keyIssue, 'major:', isMajorKey, 'minor:', isMinorKey, 'mult:', keyMult, 'isFromPC:', isFromPC);
-    if (keyMult > 1.0 && out.price && isFromPC) {
+    if (keyMult > 1.0 && out.price && isFromPC && blendedAvg) {
       const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
       if (curPrice > 0) {
         out.price = fmtUsd(curPrice * keyMult);
