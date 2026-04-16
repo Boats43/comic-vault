@@ -59,7 +59,7 @@ export default async function handler(req, res) {
     });
 
     const message = await client.messages.create({
-      model: "claude-opus-4-6",
+      model: body.source === 'watch' ? "claude-sonnet-4-20250514" : "claude-opus-4-6",
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content }],
