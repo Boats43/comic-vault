@@ -2090,51 +2090,46 @@ function CollectionDetail({
             }}
           />
         ))}
-        {canAddMore && (
-          <button
-            onClick={handleAddPhotoClick}
-            disabled={addingPhoto}
-            style={{
-              height: 120,
-              minWidth: 100,
-              flexShrink: 0,
-              border: "2px dashed rgba(212,175,55,0.5)",
-              borderRadius: 8,
-              background: "transparent",
-              color: "#d4af37",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: addingPhoto ? "wait" : "pointer",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-              padding: 8,
-            }}
-          >
-            {addingPhoto ? (
-              <>
-                <div
-                  style={{
-                    width: 20,
-                    height: 20,
-                    border: "2px solid rgba(212,175,55,0.3)",
-                    borderTopColor: "#d4af37",
-                    borderRadius: "50%",
-                    animation: "spin 0.8s linear infinite",
-                  }}
-                />
-                <span>Analyzing…</span>
-              </>
-            ) : (
-              <>
-                <span style={{ fontSize: 24, lineHeight: 1 }}>+</span>
-                <span>Add Photo</span>
-              </>
-            )}
-          </button>
-        )}
+        {(() => {
+          const PHOTO_LABELS = ['Front', 'Back', 'Spine', 'Pages'];
+          const missing = PHOTO_LABELS.slice(Math.min(photos.length, 4));
+          if (missing.length === 0) return null;
+          return missing.map((label) => (
+            <button
+              key={label}
+              onClick={handleAddPhotoClick}
+              disabled={addingPhoto}
+              style={{
+                height: 120,
+                minWidth: 80,
+                width: 80,
+                flexShrink: 0,
+                border: "2px dashed rgba(212,175,55,0.5)",
+                borderRadius: 8,
+                background: "rgba(255,255,255,0.03)",
+                color: "#d4af37",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: addingPhoto ? "wait" : "pointer",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 4,
+                padding: 6,
+              }}
+            >
+              {addingPhoto ? (
+                <div style={{ width: 20, height: 20, border: "2px solid rgba(212,175,55,0.3)", borderTopColor: "#d4af37", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+              ) : (
+                <>
+                  <span style={{ fontSize: 20, lineHeight: 1, opacity: 0.6 }}>{"\uD83D\uDCF7"}</span>
+                  <span>{label}</span>
+                </>
+              )}
+            </button>
+          ));
+        })()}
         <input
           ref={addPhotoRef}
           type="file"
