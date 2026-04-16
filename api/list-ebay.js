@@ -52,6 +52,19 @@ const showKeyIssue = (k) => {
   return s.length > 2;
 };
 
+const NO_TITLE_VARIANTS = [
+  'corner box', 'masterpieces', 'design variant',
+  'cover a', 'cover b', 'cover c', 'cover d', 'headshot',
+];
+
+const variantForTitle = (variant) => {
+  if (!variant) return null;
+  const v = String(variant).trim();
+  if (!v) return null;
+  if (NO_TITLE_VARIANTS.some(nv => v.toLowerCase().includes(nv))) return null;
+  return v;
+};
+
 const buildTitle = (item) => {
   const gradeStr =
     item.isGraded === true && item.numericGrade != null
@@ -59,13 +72,14 @@ const buildTitle = (item) => {
       : item.grade || "";
   const parts = [
     item.title,
-    item.issue ? `#${item.issue}` : "",
+    item.issue ? `#${item.issue}` : null,
+    variantForTitle(item.variant),
     gradeStr,
     item.publisher,
     item.year,
-    showKeyIssue(item.keyIssue) ? "KEY" : "",
-  ];
-  const joined = parts.filter(Boolean).join(" ").trim();
+    showKeyIssue(item.keyIssue) ? "KEY" : null,
+  ].filter(Boolean);
+  const joined = parts.join(" ").trim();
   // eBay title hard limit: 80 chars.
   return joined.length > 80 ? joined.slice(0, 80) : joined || "Comic Book";
 };
@@ -87,6 +101,8 @@ const buildBundleTitle = (items) => {
     .map((v) => `#${v}`);
   const titles = [...new Set(items.map((it) => it.title).filter(Boolean))];
   const series = titles.length === 1 ? titles[0] : "Comic";
+  const variants = [...new Set(items.map((it) => variantForTitle(it.variant)).filter(Boolean))];
+  const variantStr = variants.length === 1 ? variants[0] : "";
   const years = items.map((it) => parseInt(it.year, 10)).filter((n) => n && !isNaN(n));
   const minYear = years.length ? Math.min(...years) : null;
   const publishers = [...new Set(items.map((it) => it.publisher).filter(Boolean))];
@@ -95,12 +111,13 @@ const buildBundleTitle = (items) => {
   const parts = [
     series,
     issues.join(" "),
+    variantStr,
     "Lot",
     minYear || "",
     pub,
     era,
-  ];
-  const joined = parts.filter(Boolean).join(" ").trim();
+  ].filter(Boolean);
+  const joined = parts.join(" ").trim();
   return joined.length > 80 ? joined.slice(0, 80).trim() : joined || "Comic Book Lot";
 };
 
