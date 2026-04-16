@@ -3244,9 +3244,16 @@ function WatchMode({ onStop }) {
   const canvasRef = useRef(null);
   const lastTitleRef = useRef("");
   const busyRef = useRef(false);
+  const recognitionRef = useRef(null);
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState("Starting camera...");
   const [settings] = useState(loadBuyerSettings);
+  const [watchContext, setWatchContext] = useState("");
+  const [listening, setListening] = useState(false);
+  const [voiceNote, setVoiceNote] = useState(null);
+  const [bid, setBid] = useState("");
+  const watchContextRef = useRef("");
+  useEffect(() => { watchContextRef.current = watchContext; }, [watchContext]);
 
   useEffect(() => {
     let stream = null;
@@ -3283,7 +3290,7 @@ function WatchMode({ onStop }) {
             const res = await fetch("/api/grade", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ images: [b64], source: 'watch' }),
+              body: JSON.stringify({ images: [b64], source: 'watch', voiceContext: watchContextRef.current || undefined }),
             });
             const data = await res.json();
             if (!res.ok || !data.title) return;
@@ -3338,11 +3345,48 @@ function WatchMode({ onStop }) {
     };
   }, []);
 
+  const toggleVoice = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) { setVoiceNote("Speech not supported"); return; }
+    if (listening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setListening(false);
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = (e) => {
+      const transcript = Array.from(e.results).map(r => r[0].transcript).join(" ").trim();
+      if (transcript) {
+        setWatchContext(transcript);
+        const bidMatch = transcript.match(/\$?\b(\d+(?:\.\d{1,2})?)\b/);
+        if (bidMatch) {
+          const autoBid = parseFloat(bidMatch[1]);
+          if (autoBid > 0 && autoBid < 10000) {
+            setBid(String(autoBid));
+            setVoiceNote("\uD83C\uDFA4 Bid: $" + autoBid);
+          }
+        }
+      }
+    };
+    recognition.onerror = () => { setListening(false); };
+    recognition.onend = () => { setListening(false); };
+    recognitionRef.current = recognition;
+    recognition.start();
+    setListening(true);
+    setVoiceNote(null);
+  };
+
   const mv = marketValueOf(result);
   const fee = Number(settings.whatnotFee) || 0;
   const supplies = Number(settings.supplies) || 0;
   const labor = Number(settings.labor) || 0;
+  const bidNum = parseFloat(bid);
+  const hasBid = !isNaN(bidNum) && bidNum > 0;
   const netAtZero = mv != null ? mv - mv * (fee / 100) - supplies - labor : null;
+  const netAtBid = mv != null && hasBid ? mv - mv * (fee / 100) - supplies - labor - bidNum : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -3360,6 +3404,22 @@ function WatchMode({ onStop }) {
           {status}
         </div>
       </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2 }}>
+        <input
+          placeholder="Context: title, grade, notes..."
+          value={watchContext}
+          onChange={e => setWatchContext(e.target.value)}
+          style={{ flex: 1, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, color: "#fff", fontSize: 13, padding: "6px 10px" }}
+        />
+        {watchContext && (
+          <button onClick={() => { setWatchContext(""); setVoiceNote(null); }} style={{ background: "transparent", border: "none", color: "#999", fontSize: 16, cursor: "pointer", padding: "4px" }}>✕</button>
+        )}
+        <button
+          onClick={toggleVoice}
+          style={{ padding: "6px 10px", background: listening ? "rgba(224,86,86,0.3)" : "rgba(212,175,55,0.15)", border: `1px solid ${listening ? "#e05656" : "rgba(212,175,55,0.4)"}`, borderRadius: 8, color: listening ? "#e05656" : "#d4af37", fontSize: 16, cursor: "pointer" }}
+        >{listening ? "⏹" : "\uD83C\uDFA4"}</button>
+      </div>
+      {voiceNote && <div style={{ fontSize: 11, color: "#d4af37", marginTop: 2 }}>{voiceNote}</div>}
       {result && (
         <div style={{ border: "1px solid rgba(212,175,55,0.4)", borderRadius: 12, padding: 14, background: "rgba(212,175,55,0.06)" }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
@@ -3372,13 +3432,15 @@ function WatchMode({ onStop }) {
             <div>
               <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase" }}>Market</div>
               <div style={{ fontSize: 20, fontWeight: 800, color: "#d4af37" }}>
-                {mv != null ? fmt(mv) : (result._enriching ? "..." : "—")}
+                {mv != null ? fmt(mv) : (result._enriching ? "..." : "\u2014")}
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase" }}>Net @ $0 bid</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: netAtZero != null && netAtZero > 0 ? "#16a34a" : "#e05656" }}>
-                {netAtZero != null ? fmt(netAtZero) : (result._enriching ? "..." : "—")}
+              <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase" }}>{hasBid ? `Net @ $${bid}` : "Net @ $0 bid"}</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: (hasBid ? netAtBid : netAtZero) != null && (hasBid ? netAtBid : netAtZero) > 0 ? "#16a34a" : "#e05656" }}>
+                {hasBid
+                  ? (netAtBid != null ? fmt(netAtBid) : "\u2014")
+                  : (netAtZero != null ? fmt(netAtZero) : (result._enriching ? "..." : "\u2014"))}
               </div>
             </div>
           </div>
