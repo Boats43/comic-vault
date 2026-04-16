@@ -2187,9 +2187,26 @@ function CollectionDetail({
         {item.publisher && item.year ? " · " : ""}
         {item.year}
       </div>
-      <div style={{ marginTop: 8 }}>
-        <span className="grade-badge">{gradeBadgeText}</span>
-      </div>
+      {/* 2a. STATS BAR */}
+      {(() => {
+        const lastSoldPrice = item.soldComps?.[0]?.price || item.comps?.recentSales?.[0]?.price || null;
+        const lastSoldLabel = lastSoldPrice ? '$' + Math.round(lastSoldPrice) : null;
+        const activeLoNum = item.comps?.lowestNum;
+        const activeHiNum = item.comps?.highestNum;
+        const activeAvgNum = item.comps?.averageNum;
+        const activeLow = activeLoNum ? '$' + Math.round(activeLoNum) : null;
+        const activeHigh = activeHiNum ? '$' + Math.round(activeHiNum) : null;
+        const activeRange = activeLow && activeHigh ? activeLow + '\u2013' + activeHigh : (activeAvgNum ? '$' + Math.round(activeAvgNum) : null);
+        const dp = getDisplayPrice(item);
+        return (
+          <div style={{ fontSize: 12, color: '#888', marginTop: 4, marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+            <span style={{ background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: 12, color: '#d4af37', fontWeight: 600 }}>{item.grade || 'RAW'}</span>
+            {dp > 0 && <span>${dp.toLocaleString('en-US')}</span>}
+            {lastSoldLabel && <span>· Last sold {lastSoldLabel}</span>}
+            {activeRange && <span>· Asking {activeRange}</span>}
+          </div>
+        );
+      })()}
 
       {/* 2b. PURCHASE PRICE + ROI */}
       <div style={{ marginTop: 10 }}>
