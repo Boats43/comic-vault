@@ -3347,7 +3347,7 @@ function WatchMode({ onStop }) {
 
   const toggleVoice = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) { setVoiceNote("Speech not supported"); return; }
+    if (!SpeechRecognition) { setVoiceNote("Type context above instead"); return; }
     if (listening && recognitionRef.current) {
       recognitionRef.current.stop();
       setListening(false);
@@ -3371,12 +3371,17 @@ function WatchMode({ onStop }) {
         }
       }
     };
-    recognition.onerror = () => { setListening(false); };
+    recognition.onerror = () => { setListening(false); setVoiceNote("Type context above instead"); };
     recognition.onend = () => { setListening(false); };
     recognitionRef.current = recognition;
-    recognition.start();
-    setListening(true);
-    setVoiceNote(null);
+    try {
+      recognition.start();
+      setListening(true);
+      setVoiceNote(null);
+    } catch {
+      setListening(false);
+      setVoiceNote("Type context above instead");
+    }
   };
 
   const mv = marketValueOf(result);
