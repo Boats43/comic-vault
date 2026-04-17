@@ -4011,7 +4011,43 @@ export default function App() {
           continue;
         }
         console.log('[bulk] grade result:', JSON.stringify(data));
+
+        // Non-comic rejection (mirrors gradeBlob :3844-3852)
+        const titleLower = (data.title || '').toLowerCase();
+        if (!data.title ||
+            titleLower === 'unknown' ||
+            titleLower.includes('not a comic') ||
+            (!data.publisher && !data.year && !data.issue)) {
+          console.warn('[bulk] not a comic, skipping:', file.name);
+          errors.push(`${file.name}: not a comic`);
+          continue;
+        }
+
+        // Publisher-as-title detection
+        const PUBLISHER_NAMES = ['marvel comics', 'dc comics', 'image comics',
+          'dark horse', 'idw publishing', 'dw publishing', 'boom studios',
+          'dynamite', 'valiant', 'archie comics'];
+        if (PUBLISHER_NAMES.some(p => titleLower.includes(p)) &&
+            data.publisher && titleLower.includes(data.publisher.toLowerCase())) {
+          console.warn('[bulk] title may be publisher name:', data.title, file.name);
+          errors.push(`${file.name}: title "${data.title}" looks like publisher — review manually`);
+          continue;
+        }
+
         const bulkIssue = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
+
+        // Duplicate detection (mirrors gradeBlob :3859-3863)
+        const isDuplicate = catalogue.some(c =>
+          c.title?.toLowerCase() === titleLower &&
+          c.issue === bulkIssue &&
+          c.year === data.year
+        );
+        if (isDuplicate) {
+          console.log('[bulk] duplicate, skipping:', data.title, '#' + bulkIssue);
+          errors.push(`${file.name}: duplicate (${data.title} #${bulkIssue})`);
+          continue;
+        }
+
         setBulkProgress({ current: i + 1, total: files.length, title: data.title || "" });
         const savedId = await addToCatalogue({ ...data, issue: bulkIssue }, b64);
         if (savedId) {
@@ -4055,6 +4091,10 @@ export default function App() {
                 keyIssue: enrich.keyIssue || cur.keyIssue,
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
+                pricingSource: enrich.pricingSource || null,
+                priceNote: enrich.priceNote || null,
+                gradeMultiplier: enrich.gradeMultiplier || null,
+                defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
                 comicVine: enrich.comicVine || cur.comicVine || null,
                 certNumber: enrich.certNumber || cur.certNumber || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
@@ -4085,7 +4125,7 @@ export default function App() {
       setTab("collection");
       setBulkDone(null);
     }, 2000);
-  }, [addToCatalogue]);
+  }, [addToCatalogue, catalogue]);
 
   // Android back gesture intercept — return to list instead of exiting app.
   useEffect(() => {
