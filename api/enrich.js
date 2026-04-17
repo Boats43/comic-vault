@@ -581,6 +581,7 @@ export default async function handler(req, res) {
             numericGrade,
             year,
             variant: req.body.variant || null,
+            publisher: publisher || null,
             appId: process.env.EBAY_APP_ID,
             certId: process.env.EBAY_CERT_ID,
           }).catch((err) => {
@@ -671,8 +672,22 @@ export default async function handler(req, res) {
       }
     }
 
+    // Filter sold comps by issue number before blending — sold results
+    // have no title verification, so wrong-issue listings can corrupt the avg.
+    let filteredSold = Array.isArray(soldResult) ? soldResult : [];
+    if (filteredSold.length > 0 && correctedIssue) {
+      const issueRe = new RegExp(
+        '#\\s*' + String(correctedIssue).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i'
+      );
+      const before = filteredSold.length;
+      filteredSold = filteredSold.filter(s => issueRe.test(s.title || ''));
+      if (filteredSold.length < before) {
+        console.log('[sold-filter] kept', filteredSold.length, 'of', before, 'sold comps');
+      }
+    }
+
     // Blended average: weight sold comps (60%) + active comps (40%).
-    const soldPrices = (Array.isArray(soldResult) ? soldResult : [])
+    const soldPrices = filteredSold
       .map(s => typeof s.price === 'number' ? s.price : parseFloat(String(s.price || '0').replace(/[$,]/g, '')))
       .filter(p => p > 0);
     const soldAvg = soldPrices.length > 0
@@ -975,13 +990,12 @@ export default async function handler(req, res) {
       };
     }
 
-    // Sold comps from eBay completed listings
-    const soldComps = Array.isArray(soldResult) ? soldResult : [];
-    out.soldComps = soldComps;
+    // Sold comps from eBay completed listings (filtered by issue#)
+    out.soldComps = filteredSold;
 
     // Confidence level — PC data guarantees at least MEDIUM.
     const verifiedCount = rawComps?.count || 0;
-    const soldCount = soldComps.length;
+    const soldCount = filteredSold.length;
     const hasPCData = out.pricingSource === "pricecharting";
     let confidenceLevel = "LOW";
     if (soldCount >= 2 && verifiedCount >= 2) confidenceLevel = "HIGH";

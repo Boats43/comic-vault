@@ -3576,6 +3576,7 @@ export default function App() {
   const collectionScrollPos = useRef(0);
   const manageScrollPos = useRef(0);
   const prevTabRef = useRef("collection");
+  const lastAutoRefreshRef = useRef(0);
 
   // Load catalogue, snapshots, and cached analysis from IndexedDB on mount.
   useEffect(() => {
@@ -3602,11 +3603,16 @@ export default function App() {
     })();
   }, []);
 
-  // Auto-refresh stale prices on load: items saved before enrich persistence
-  // was fixed may have null pricingSource or comps. Also sync duplicate copies
-  // where prices differ. Limit to 3 concurrent.
+  // Auto-refresh stale prices: items saved before enrich persistence was fixed
+  // may have null pricingSource or comps. Also sync duplicate copies where
+  // prices differ. Only fires when on collection tab with no detail open,
+  // and at least 60s since last refresh to prevent rapid re-firing.
   useEffect(() => {
     if (catalogue.length === 0) return;
+    if (tab !== "collection") return;
+    if (selectedItem) return;
+    if (Date.now() - lastAutoRefreshRef.current < 60000) return;
+    lastAutoRefreshRef.current = Date.now();
     const missingSource = catalogue.filter(
       (c) => !c.pricingSource || !c.comps
     );
@@ -3714,7 +3720,7 @@ export default function App() {
     };
     next();
     return () => { cancelled = true; };
-  }, [catalogue.length > 0 && catalogue.some((c) => !c.pricingSource || !c.comps)]);
+  }, [catalogue.length > 0 && catalogue.some((c) => !c.pricingSource || !c.comps), tab, selectedItem]);
 
   useEffect(() => {
     if (!loading) return;

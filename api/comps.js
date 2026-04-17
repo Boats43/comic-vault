@@ -364,6 +364,7 @@ export const fetchComps = async ({
   numericGrade,
   year,
   variant,
+  publisher,
   appId,
   certId,
 }) => {
@@ -419,8 +420,27 @@ export const fetchComps = async ({
     : null;
   const variantKeyword = shortVariant ? ` ${shortVariant}` : "";
 
+  // Build publisher keyword for most-specific attempt.
+  // Atlas/Timely are pre-Marvel — eBay sellers use both terms interchangeably.
+  const pubClean = publisher ? String(publisher).trim() : null;
+  let pubKeyword = "";
+  if (pubClean) {
+    const pubLower = pubClean.toLowerCase();
+    if (pubLower.includes("atlas") || pubLower.includes("timely")) {
+      pubKeyword = " Atlas Marvel";
+    } else if (pubLower.includes("marvel")) {
+      pubKeyword = " Marvel";
+    } else if (pubLower.length <= 20) {
+      pubKeyword = ` ${pubClean}`;
+    }
+  }
+
   // Build ordered list of query attempts — most specific to least.
   const attempts = [];
+  // Attempt 0: most specific — cleanTitle #issue year publisher (+ grade suffix)
+  if (iss && yr && pubKeyword) {
+    attempts.push({ q: `${cleanTitle} #${iss}${variantKeyword} ${yr}${pubKeyword}`, n: 0, useGrade: true });
+  }
   // Attempt 1: full — cleanTitle #issue variant year (+ grade suffix)
   if (iss && yr) {
     attempts.push({ q: `${cleanTitle} #${iss}${variantKeyword} ${yr}`, n: 1, useGrade: true });
