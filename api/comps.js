@@ -253,6 +253,33 @@ const SLAB_RE = /\bCGC\b|\bCBCS\b|\bPGX\b|graded|slab|\b9\.8\b|\b9\.6\b|\b9\.4\b
 // For graded searches, require the title to mention CGC or CBCS.
 const GRADED_RE = /\bCGC\b|\bCBCS\b/i;
 
+// Parse a numeric grade from a listing title. Recognizes CGC X.X slab grades
+// and raw letter grades (NM, VF+, GD-, etc). Returns null when no grade is
+// detectable — caller should keep those listings (can't prove mismatch).
+const parseListingGrade = (title) => {
+  const t = String(title || '');
+  const cgc = t.match(/CGC\s*([\d.]+)/i);
+  if (cgc) return parseFloat(cgc[1]);
+  const gradeMap = [
+    ['nm/mt', 9.8], ['nm+', 9.6], ['nm-', 9.2],
+    ['nm', 9.4], ['vf/nm', 9.0], ['vf+', 8.5],
+    ['vf-', 7.5], ['vf', 8.0], ['fn/vf', 7.0],
+    ['fn+', 6.5], ['fn-', 5.5], ['fn', 6.0],
+    ['vg/fn', 5.0], ['vg+', 4.5], ['vg-', 3.5],
+    ['vg', 4.0], ['gd/vg', 3.0], ['gd+', 2.5],
+    ['gd-', 1.8], ['gd', 2.0], ['fr/gd', 1.5],
+    ['fr', 1.0], ['pr', 0.5]
+  ];
+  for (const [abbr, val] of gradeMap) {
+    const re = new RegExp(
+      '(?:^|[\\s#(])' +
+      abbr.replace('/', '\\/') +
+      '(?:[\\s)$]|\\d)', 'i');
+    if (re.test(t)) return val;
+  }
+  return null;
+};
+
 // Remove price outliers: anything above 3x median or below 25% of median.
 // Kills signed/variant copies from contaminating the average on searches
 // that otherwise look clean. Requires at least 3 items to be meaningful.
@@ -555,7 +582,7 @@ export const fetchComps = async ({
     // specific variant, drop listings with variant/foil/ratio/incentive
     // keywords to prevent inflated copies from skewing the average.
     if (!variant) {
-      const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b/i;
+      const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1/i;
       const before = parsed.length;
       parsed = parsed.filter((it) => !VARIANT_CONTAM_RE.test(String(it.title || "")));
       if (parsed.length < before) {
@@ -609,11 +636,17 @@ export const fetchComps = async ({
       !isNaN(numericTarget)
     ) {
       const filtered = parsed.filter((it) => {
-        const m = String(it.title || "").match(/CGC\s*([\d.]+)/i);
-        if (!m) return true;
-        const g = parseFloat(m[1]);
-        if (isNaN(g)) return true;
-        return Math.abs(g - numericTarget) <= 1.0;
+        const listingGrade = parseListingGrade(it.title);
+        if (listingGrade === null) return true;
+        const diff = Math.abs(listingGrade - numericTarget);
+        if (diff > 1.5) {
+          console.log('[grade-filter] rejected:',
+            String(it.title || '').slice(0, 50),
+            'grade:', listingGrade,
+            'vs our:', numericTarget);
+          return false;
+        }
+        return true;
       });
       if (filtered.length > 0) {
         parsed = filtered;
@@ -632,6 +665,28 @@ export const fetchComps = async ({
         console.log(
           `[comps] price sanity removed ${before - parsed.length}`
         );
+      }
+    }
+
+    // Filter 5: dedup near-identical listings (same price + near-identical
+    // title prefix). Catches eBay returning the same item twice in one batch.
+    {
+      const before = parsed.length;
+      const seenListings = new Set();
+      parsed = parsed.filter((item) => {
+        const key =
+          String(item.price || '0') + '|' +
+          String(item.title || '').toLowerCase().slice(0, 35);
+        if (seenListings.has(key)) {
+          console.log('[dedup] removed duplicate:',
+            String(item.title || '').slice(0, 40));
+          return false;
+        }
+        seenListings.add(key);
+        return true;
+      });
+      if (parsed.length < before) {
+        console.log(`[comps] dedup removed ${before - parsed.length}`);
       }
     }
 
