@@ -60,6 +60,7 @@ Nine keys required (all set in Vercel):
 - Sanity thresholds: 0.5x (too low) and 2x modern/3x Silver (too high) against adjAvg.
 - Sanity check uses `blendedAvg || compsFromEbay?.average` — blended comps (60% sold + 40% active) preferred over raw Browse average.
 - Sanity low-side condition: `pcNum < adjAvg × 0.5` only (removed legacy `adjAvg - 10` guard that blocked firing on low-value books).
+- **browse_api prices: NO grade multiplier.** eBay listings already reflect market grade. Grade mult only applies to PriceCharting base prices (NM-equivalent). Sanity fallback uses raw `compsAvg`, not `adjAvg`. Browse primary fallback uses `browseBase` directly. `gradeMultiplier` is still recorded on `out` for floor guard but not applied to browse_api prices.
 - Variant mult: PC source only — gated by `isFromPC` flag.
 - Key mult: PC source only — gated by `isFromPC && blendedAvg` (requires comps to validate).
 - Key mult tiered: major (1st appearance, first appearance, origin, death, first issue) ×1.5; minor (2nd, second app, first cover, cameo, iconic, classic) ×1.2; other ×1.0.
