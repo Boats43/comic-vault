@@ -936,15 +936,33 @@ export default async function handler(req, res) {
         out.variantNote = variant;
         console.log('[variant] no premium — skipping mult');
       } else {
+        // Ordered by descending multiplier so the higher-premium match wins
+        // when a variant string contains multiple keywords (e.g.
+        // "canadian price variant" must hit `canadian price` before
+        // `price variant`).
         const variantMultipliers = {
+          'triple cover': 10.0,
+          'double cover': 8.0,
+          '35¢': 6.0,
+          '35 cent': 6.0,
+          '30¢': 4.0,
+          '30 cent': 4.0,
+          'inverted': 4.0,
           'gold': 3.0,
+          'printing error': 3.0,
+          'miscut': 3.0,
+          'mark jewelers': 2.5,
+          'canadian price': 2.0,
+          'price variant': 2.0,
+          'type 1a': 2.0,
+          'type 1b': 2.0,
+          'canadian': 1.8,
+          'whitman': 1.8,
           '2nd print': 1.5,
           'second print': 1.5,
+          'pence': 1.5,
+          'dc universe logo': 1.5,
           'newsstand': 1.3,
-          'price variant': 2.0,
-          'whitman': 2.0,
-          '35 cent': 3.0,
-          '30 cent': 3.0,
         };
         let vMult = null;
         for (const [key, mult] of Object.entries(variantMultipliers)) {
