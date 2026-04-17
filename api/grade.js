@@ -57,7 +57,7 @@ const callModel = async (model, imageContent, promptText) => {
 // Self-correcting watch pipeline: Sonnet fast → Sonnet self-correct → Opus escalation.
 const watchPipeline = async (imageContent, voiceContext) => {
   const SONNET = "claude-sonnet-4-20250514";
-  const OPUS = "claude-opus-4-6";
+  const OPUS = "claude-opus-4-7";
 
   let prompt = WATCH_PROMPT;
   if (voiceContext) {
@@ -159,7 +159,7 @@ export default async function handler(req, res) {
       userPrompt += "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
     }
 
-    const { parsed } = await callModel("claude-opus-4-6", imageContent, userPrompt);
+    const { parsed } = await callModel("claude-opus-4-7", imageContent, userPrompt);
     if (noImage) parsed.noImage = true;
 
     res.status(200).json(parsed);
