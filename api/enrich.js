@@ -52,8 +52,11 @@ const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) =>
       `same era. If the title is a close match (same character, same series ` +
       `name, same issue number) accept it even if the listing title has ` +
       `extra words like "variant", "cover B", "ratio variant", "2nd print", ` +
-      `"newsstand", or "facsimile". Only reject if it is clearly a different ` +
-      `character or different issue number. ` +
+      `"newsstand", or "facsimile". ` +
+      `Year in listing title may differ from our year by 1-2 years due to ` +
+      `cover dates vs publication dates — this is NOT a reason to reject. ` +
+      `Only reject if it is clearly a different issue number or a different ` +
+      `character/series. ` +
       `Reply with only a JSON array like:\n[true, false, true, false]\n` +
       `in the same order as the listings.`;
 
