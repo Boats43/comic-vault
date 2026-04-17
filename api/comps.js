@@ -241,10 +241,10 @@ const tryBrowse = async ({ appId, certId, query }) => {
   }
 };
 
-// Reprints, facsimiles, and anniversary variants pollute Browse API results
-// for any high-demand key (e.g. ASM #300 constantly surfaces "True Believers"
-// reprints). Drop these regardless of graded/raw.
-const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition/i;
+// Reprints, facsimiles, anniversary variants, and nth printings pollute Browse
+// API results for any high-demand key (e.g. ASM #300 constantly surfaces
+// "True Believers" reprints, and "2nd ptg" listings skew first-print comps).
+const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition|2nd\s*p(?:rint|tg)|3rd\s*p(?:rint|tg)|4th\s*p(?:rint|tg)|5th\s*p(?:rint|tg)|second\s*print|third\s*print|fourth\s*print|\bptg\b/i;
 
 // For raw (ungraded) searches, exclude any listing that mentions a grading
 // slab or a common graded tier in the title.
@@ -535,8 +535,11 @@ export const fetchComps = async ({
       }
     }
 
-    // Filter 1: reprints / facsimiles / anniversary variants.
-    {
+    // Filter 1: reprints / facsimiles / anniversary variants / nth printings.
+    // Exception: when our book IS a print variant (e.g., "2nd print"),
+    // keep those comps so we price against the correct edition.
+    const isNthPrint = (variant || '').toLowerCase().match(/\d+(?:st|nd|rd|th)\s*p(?:rint|tg)/);
+    if (!isNthPrint) {
       const before = parsed.length;
       parsed = parsed.filter((it) => !REPRINT_RE.test(String(it.title || "")));
       if (parsed.length < before) {
@@ -544,6 +547,8 @@ export const fetchComps = async ({
           `[comps] reprint filter removed ${before - parsed.length}`
         );
       }
+    } else {
+      console.log(`[comps] reprint filter skipped — book is ${variant}`);
     }
 
     // Filter 1b: variant contamination — when NOT searching for a
