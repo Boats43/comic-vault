@@ -54,7 +54,7 @@ Nine keys required (all set in Vercel):
 - PriceCharting skipped when issue=null.
 - No premium multiplier: corner box, masterpieces, design variant, cover A/B/C/D.
 - eBay listing title includes variant (newsstand, gold, 2nd print, etc.) between issue and grade — filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot).
-- Variant short keywords only in comps query attempts 1-2.
+- Variant short keywords only in comps query attempts 1-2. Attempt 0 uses FULL variant string (e.g., "Paco Medina Thing variant") for most specific eBay search.
 - Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
 - Sanity check compares grade-adjusted PC price to grade-adjusted comps average (not raw avg).
 - Sanity thresholds: 0.5x (too low) and 2x modern/3x Silver (too high) against adjAvg.
@@ -66,8 +66,9 @@ Nine keys required (all set in Vercel):
 - Key mult tiered: major (1st appearance, first appearance, origin, death, first issue) ×1.5; minor (2nd, second app, first cover, cameo, iconic, classic) ×1.2; other ×1.0.
 - `isFromPC = !!priceCharting?.price && !sanityFired && out.pricingSource === 'pricecharting'` — snapshotted after PC/sanity branch, before floor/variant/key blocks.
 - Floor guard field: `rawComps.lowest` (not `lowestNum`) — comps.js returns `lowest`.
-- Floor guard is grade-adjusted: `rawFloor * gradeMultiplier`.
-- eBay comps search: attempt 0 = title + issue + year + publisher (most specific); falls through to title + issue + year, then title + issue, etc.
+- Floor guard: raw `rawFloor` (no grade multiplier). eBay comps already reflect market grade. Capped at `compsAvg`.
+- eBay comps search: attempt 0 = title + issue + full variant + year + publisher (most specific, capped 100 chars); falls through to attempt 1 (short variant + year), then attempt 2 (no year), etc.
+- Variant comp preference (Filter 1c): when variant set, prefer comps whose titles match variant-specific words (min 2 matches to filter, otherwise keep all).
 - Atlas/pre-Marvel publishers: append "Atlas Marvel" to eBay query (sellers use both terms interchangeably).
 - Auto-refresh stale prices: collection tab only, no book detail open (`selectedItem === null`), 60s cooldown via `lastAutoRefreshRef`.
 - Sold comps: filtered by `#issue\b` regex before blending into `soldAvg` — prevents wrong-issue sold data from corrupting the 60% sold weight.
