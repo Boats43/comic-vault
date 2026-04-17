@@ -435,11 +435,16 @@ export const fetchComps = async ({
     }
   }
 
+  // Full variant string for most-specific attempt (not just the short keyword).
+  const fullVariant = variant ? String(variant).trim() : "";
+
   // Build ordered list of query attempts — most specific to least.
   const attempts = [];
-  // Attempt 0: most specific — cleanTitle #issue year publisher (+ grade suffix)
-  if (iss && yr && pubKeyword) {
-    attempts.push({ q: `${cleanTitle} #${iss}${variantKeyword} ${yr}${pubKeyword}`, n: 0, useGrade: true });
+  // Attempt 0: most specific — cleanTitle #issue fullVariant year publisher (+ grade suffix)
+  if (iss && yr) {
+    const a0Parts = [cleanTitle, `#${iss}`, fullVariant, yr, pubKeyword.trim()].filter(Boolean);
+    const a0 = a0Parts.join(' ').trim().slice(0, 100);
+    attempts.push({ q: a0, n: 0, useGrade: true });
   }
   // Attempt 1: full — cleanTitle #issue variant year (+ grade suffix)
   if (iss && yr) {
