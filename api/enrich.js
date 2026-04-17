@@ -246,6 +246,7 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
       volume: match.volume?.name,
       description: match.description,
       deck: match.deck,
+      coverDate: match.cover_date || null,
       firstAppearanceCharacters: hasFirstApps
         ? firstApps.map((c) => c?.name).filter(Boolean)
         : [],
@@ -380,7 +381,7 @@ const lookupPriceCharting = async ({ title, issue, year }) => {
         console.log(`[pt] year mismatch — skipping`);
         continue;
       }
-      return { price, productName: name, id: p.id, source: "pricecharting" };
+      return { price, productName: name, id: p.id, year: productYear, source: "pricecharting" };
     }
     console.log(`[pricecharting] no valid match in ${products.length} results`);
     return null;
@@ -574,7 +575,27 @@ export default async function handler(req, res) {
       ? visualResult.issue
       : issueNum;
 
-    // Step 2: run everything else with the corrected issue number.
+    // Step 2a: run year-independent lookups first so we can derive the
+    // confirmed publication year before firing the comps/sold/goCollect
+    // queries that use year as a query parameter.
+    const [comicVine, ximilar, priceCharting, cgcResult] = await Promise.all([
+      lookupComicVine({ title, issue: correctedIssue, year, publisher }),
+      lookupXimilar({ images, title, confidence }),
+      lookupPriceCharting({ title, issue: correctedIssue, year }).catch(() => null),
+      certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
+    ]);
+
+    // Derive the confirmed year: prefer PriceCharting match year, fall back
+    // to ComicVine cover_date, then the saved year on the item.
+    const confirmedYear =
+      priceCharting?.year ||
+      (comicVine?.coverDate ? String(comicVine.coverDate).slice(0, 4) : null) ||
+      year;
+    if (confirmedYear && String(confirmedYear) !== String(year || "")) {
+      console.log('[enrich] year corrected:', year, '→', confirmedYear);
+    }
+
+    // Step 2b: year-dependent lookups using confirmedYear.
     const compsPromise =
       process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? fetchComps({
@@ -583,7 +604,7 @@ export default async function handler(req, res) {
             grade,
             isGraded,
             numericGrade,
-            year,
+            year: confirmedYear,
             variant: req.body.variant || null,
             publisher: publisher || null,
             appId: process.env.EBAY_APP_ID,
@@ -594,14 +615,10 @@ export default async function handler(req, res) {
           })
         : Promise.resolve(null);
 
-    const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting, cgcResult, goCollectResult] = await Promise.all([
-      lookupComicVine({ title, issue: correctedIssue, year, publisher }),
+    const [compsFromEbay, soldResult, goCollectResult] = await Promise.all([
       compsPromise,
-      lookupXimilar({ images, title, confidence }),
-      fetchSold({ title, issue: correctedIssue, year }).catch(() => []),
-      lookupPriceCharting({ title, issue: correctedIssue, year }).catch(() => null),
-      certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
-      lookupGoCollect({ title, issue: correctedIssue, year, publisher }).catch(() => null),
+      fetchSold({ title, issue: correctedIssue, year: confirmedYear }).catch(() => []),
+      lookupGoCollect({ title, issue: correctedIssue, year: confirmedYear, publisher }).catch(() => null),
     ]);
 
     // AI verification pass on the comps that will be displayed. Verifies
@@ -627,7 +644,7 @@ export default async function handler(req, res) {
       const keepFlags = await verifyCompsTitles({
         title: seriesTitle,
         issue: issueNum,
-        year,
+        year: confirmedYear,
         publisher,
         listings: titlesToVerify,
       });
