@@ -73,6 +73,23 @@ export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
     const fmv92 = fmv[9.2] || null;
     const fmv90 = fmv[9.0] || null;
 
+    // Census / population count — total graded copies if exposed by the
+    // payload. Shape varies: sometimes a flat number, sometimes per-grade.
+    let census = null;
+    if (typeof match.census === 'number') census = match.census;
+    else if (typeof match.population === 'number') census = match.population;
+    else if (match.census && typeof match.census === 'object') {
+      census = Object.values(match.census).reduce(
+        (a, b) => a + (Number(b) || 0),
+        0
+      );
+    } else if (match.population && typeof match.population === 'object') {
+      census = Object.values(match.population).reduce(
+        (a, b) => a + (Number(b) || 0),
+        0
+      );
+    }
+
     // Submit recommendation: compare raw value to CGC 9.8 FMV.
     // If CGC 9.8 is >2x the estimated raw value, recommend submitting.
     // CGC submission costs ~$30-65 depending on tier + shipping.
@@ -100,6 +117,7 @@ export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
       fmv94,
       fmv92,
       fmv90,
+      census,
       submitRecommended,
       submitGap,
       source: "gocollect",

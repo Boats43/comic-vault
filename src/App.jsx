@@ -2550,43 +2550,184 @@ function CollectionDetail({
           </div>
         )}
 
-        {/* GoCollect CGC FMV panel */}
+        {/* GoCollect CGC submission analysis */}
         {(item.goCollect || item.userFmv98) && (() => {
           const gc = item.goCollect || {};
           const fmv98 = item.userFmv98 || gc.fmv98;
           const fmv96 = gc.fmv96;
           const fmv94 = gc.fmv94;
+          const fmv92 = gc.fmv92;
+
+          const gradingCost = 35; // CGC economy tier
+          const pressCost = 20;   // press + clean
+          const totalCost = gradingCost + pressCost;
+          const rawPrice = getDisplayPrice(item) || 0;
+
+          const scenariosRaw = [
+            { grade: "9.8", fmv: fmv98 },
+            { grade: "9.6", fmv: fmv96 },
+            { grade: "9.4", fmv: fmv94 },
+            { grade: "9.2", fmv: fmv92 },
+          ].filter((s) => s.fmv > 0);
+
+          const scenarios = scenariosRaw.map((s) => {
+            const net = s.fmv - totalCost - rawPrice;
+            return { ...s, net, profitable: net > 0 };
+          });
+
+          // Verdict: find the lowest grade where net is still profitable
+          // (stopping at the first unprofitable tier on the way down).
+          const descending = scenarios
+            .slice()
+            .sort((a, b) => parseFloat(b.grade) - parseFloat(a.grade));
+          let lowestProfitable = null;
+          for (const s of descending) {
+            if (s.profitable) lowestProfitable = s.grade;
+            else break;
+          }
+          const lowestTested = descending[descending.length - 1]?.grade;
+
+          let verdict;
+          if (!lowestProfitable) {
+            verdict = { icon: "❌", text: "SELL RAW — not worth grading", color: "#dc2626" };
+          } else if (lowestProfitable === "9.8") {
+            verdict = { icon: "⚠️", text: "RISKY — must grade 9.8", color: "#f59e0b" };
+          } else if (lowestProfitable === lowestTested) {
+            verdict = { icon: "✅", text: "SUBMIT — low risk", color: "#4caf50" };
+          } else {
+            verdict = {
+              icon: "✅",
+              text: `SUBMIT — profitable at ${lowestProfitable}+`,
+              color: "#4caf50",
+            };
+          }
+
+          // Press recommendation from Claude's condition notes.
+          const reasonLower = String(item.reason || "").toLowerCase();
+          const needsPress = /spine tick|stress|minor wear|handling/.test(reasonLower);
+
+          const census = gc.census;
+          const lowCensus = typeof census === "number" && census > 0 && census < 50;
+
+          const showAnalysis = !item.isGraded && scenarios.length > 0;
+
           return (
-            <div style={{ marginTop: 12, padding: 12, border: "1px solid rgba(138,43,226,0.3)", borderRadius: 8, background: "rgba(138,43,226,0.06)" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#8a2be2", marginBottom: 8 }}>CGC Fair Market Value</div>
-              {fmv98 && (
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 }}>
-                  <span style={{ color: "#aaa" }}>CGC 9.8</span>
-                  <span style={{ fontWeight: 700, color: "#8a2be2" }}>${Number(fmv98).toLocaleString("en-US")}{item.userFmv98 ? " (manual)" : ""}</span>
-                </div>
+            <div
+              style={{
+                marginTop: 12,
+                padding: 12,
+                border: "1px solid rgba(138,43,226,0.3)",
+                borderRadius: 8,
+                background: "rgba(138,43,226,0.06)",
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#8a2be2", marginBottom: 8 }}>
+                {showAnalysis ? "📊 CGC Submission Analysis" : "CGC Fair Market Value"}
+              </div>
+
+              {showAnalysis && (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", padding: "2px 0" }}>
+                    <span>Raw value</span>
+                    <span style={{ fontWeight: 700, color: "#ccc" }}>${rawPrice.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", padding: "2px 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: 6, marginBottom: 6 }}>
+                    <span>Grading + press</span>
+                    <span style={{ fontWeight: 700, color: "#ccc" }}>~${totalCost}</span>
+                  </div>
+
+                  {scenarios.map((s) => (
+                    <div
+                      key={s.grade}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "3px 0",
+                        fontSize: 13,
+                      }}
+                    >
+                      <span style={{ color: "#aaa" }}>
+                        If grades <strong style={{ color: "#ccc" }}>{s.grade}</strong>
+                      </span>
+                      <span style={{ fontWeight: 600 }}>
+                        <span style={{ color: "#8a2be2" }}>${Number(s.fmv).toFixed(0)}</span>
+                        <span style={{ color: "#888", margin: "0 6px" }}>→</span>
+                        <span style={{ color: s.profitable ? "#4caf50" : "#dc2626", fontWeight: 700 }}>
+                          {s.net >= 0 ? "+" : "−"}${Math.abs(s.net).toFixed(0)}
+                        </span>
+                        <span style={{ marginLeft: 6 }}>{s.profitable ? "✅" : "❌"}</span>
+                      </span>
+                    </div>
+                  ))}
+
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      background: `${verdict.color}20`,
+                      border: `1px solid ${verdict.color}60`,
+                      color: verdict.color,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      textAlign: "center",
+                    }}
+                  >
+                    {verdict.icon} {verdict.text}
+                  </div>
+
+                  <div style={{ marginTop: 8, fontSize: 11, color: "#aaa" }}>
+                    {needsPress
+                      ? "🔧 Press recommended before submit"
+                      : "✅ Clean copy — press optional"}
+                  </div>
+
+                  {typeof census === "number" && census > 0 && (
+                    <div style={{ marginTop: 4, fontSize: 11, color: "#aaa" }}>
+                      Census: {census.toLocaleString("en-US")} graded
+                      {lowCensus && (
+                        <span style={{ color: "#f59e0b", marginLeft: 6 }}>🔥 Low pop — scarcity premium</span>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
-              {fmv96 && (
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 }}>
-                  <span style={{ color: "#aaa" }}>CGC 9.6</span>
-                  <span style={{ fontWeight: 600 }}>${Number(fmv96).toLocaleString("en-US")}</span>
-                </div>
+
+              {!showAnalysis && (
+                <>
+                  {fmv98 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 }}>
+                      <span style={{ color: "#aaa" }}>CGC 9.8</span>
+                      <span style={{ fontWeight: 700, color: "#8a2be2" }}>
+                        ${Number(fmv98).toLocaleString("en-US")}
+                        {item.userFmv98 ? " (manual)" : ""}
+                      </span>
+                    </div>
+                  )}
+                  {fmv96 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 }}>
+                      <span style={{ color: "#aaa" }}>CGC 9.6</span>
+                      <span style={{ fontWeight: 600 }}>${Number(fmv96).toLocaleString("en-US")}</span>
+                    </div>
+                  )}
+                  {fmv94 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 }}>
+                      <span style={{ color: "#aaa" }}>CGC 9.4</span>
+                      <span style={{ fontWeight: 600 }}>${Number(fmv94).toLocaleString("en-US")}</span>
+                    </div>
+                  )}
+                  {typeof census === "number" && census > 0 && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: "#aaa" }}>
+                      Census: {census.toLocaleString("en-US")} graded
+                      {lowCensus && (
+                        <span style={{ color: "#f59e0b", marginLeft: 6 }}>🔥 Low pop</span>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
-              {fmv94 && (
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 }}>
-                  <span style={{ color: "#aaa" }}>CGC 9.4</span>
-                  <span style={{ fontWeight: 600 }}>${Number(fmv94).toLocaleString("en-US")}</span>
-                </div>
-              )}
-              {gc.submitRecommended && (
-                <div style={{ color: "#4caf50", fontSize: 12, marginTop: 6, fontWeight: 600 }}>
-                  ⭐ Submit to CGC — {gc.submitGap}x return potential
-                </div>
-              )}
-              {gc.fmv98 && !gc.submitRecommended && (
-                <div style={{ color: "#888", fontSize: 11, marginTop: 4 }}>
-                  Raw value similar to graded — sell raw or hold
-                </div>
-              )}
+
               <div style={{ marginTop: 8 }}>
                 <input
                   type="text"
@@ -2598,11 +2739,26 @@ function CollectionDetail({
                     if (v > 0) onUpdateField?.(item, "userFmv98", v);
                     else if (!e.target.value) onUpdateField?.(item, "userFmv98", null);
                   }}
-                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(138,43,226,0.3)", background: "rgba(0,0,0,0.2)", color: "#ccc", fontSize: 12, boxSizing: "border-box" }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.target.blur();
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(138,43,226,0.3)",
+                    background: "rgba(0,0,0,0.2)",
+                    color: "#ccc",
+                    fontSize: 12,
+                    boxSizing: "border-box",
+                  }}
                 />
               </div>
-              {gc.source && <div className="muted small" style={{ marginTop: 4, fontSize: 10 }}>Source: GoCollect</div>}
+              {gc.source && (
+                <div className="muted small" style={{ marginTop: 4, fontSize: 10 }}>
+                  Source: GoCollect
+                </div>
+              )}
             </div>
           );
         })()}
