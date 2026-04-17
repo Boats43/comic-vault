@@ -95,7 +95,7 @@ All pricing fixes confirmed intact:
 - **Sanity check**: uses blendedAvg, thresholds 0.5x low / 2x modern / 3x Silver high
 - **Floor guard**: `rawComps.lowest × gradeAdj`
 - **Variant filter**: comps.js drops variant/virgin/foil/ratio/incentive listings when not searching for variant
-- **Share target**: SW cache + Vercel fallback route + 3× retry in App.jsx
+- **Share target**: SW cache + Vercel fallback route + 6× retry in App.jsx
 
 ## Features
 - **Bundle listing**: Manage tab → "📦 Create Bundle" chip → tap tiles to multi-select → floating bar shows `$sum → $bundlePrice (18% off)` → "List Bundle" posts to `/api/list-ebay` with `{ bundle: true, items: [...] }` → single eBay listing (all items marked `status:"listed"` with shared `ebayItemId`/`bundleId`). ERA auto-detected from earliest book year (Golden <1956, Silver ≤1970, Bronze ≤1984, Copper ≤1991, Modern 1992+). Claude BUNDLE actions pre-select recommended comicIds into selection mode.
