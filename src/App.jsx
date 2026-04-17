@@ -1533,7 +1533,18 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
   const [localSearch, setLocalSearch] = useState("");
   const [importStatus, setImportStatus] = useState(null);
   const [claudeCardVisible, setClaudeCardVisible] = useState(false);
+  const [backupBanner, setBackupBanner] = useState(false);
   const importRef = useRef(null);
+
+  // Track collection changes for backup reminder
+  useEffect(() => {
+    if (items.length === 0) return;
+    const lastBackup = localStorage.getItem("cv_last_backup_date");
+    const lastCount = parseInt(localStorage.getItem("cv_last_backup_count") || "0", 10);
+    if (!lastBackup || items.length !== lastCount) {
+      setBackupBanner(true);
+    }
+  }, [items.length]);
 
   const toggleSelect = (id) => {
     setSelected((prev) => {
@@ -1583,6 +1594,24 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
     URL.revokeObjectURL(url);
   };
 
+  const backupToDrive = () => {
+    const data = items.map(({ images, ...rest }) => rest);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `comic-vault-backup-${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    localStorage.setItem("cv_last_backup_date", date);
+    localStorage.setItem("cv_last_backup_count", String(items.length));
+    setBackupBanner(false);
+    setTimeout(() => {
+      window.open("https://drive.google.com/drive/my-drive", "_blank");
+    }, 500);
+  };
+
   const handleImport = async (e) => {
     const file = e.target.files?.[0];
     if (importRef.current) importRef.current.value = "";
@@ -1629,11 +1658,12 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
         <div className="upload-emoji">📚</div>
         <div className="muted">No comics in your collection yet.</div>
         <div className="muted small">Scanned comics will appear here.</div>
-        <input ref={importRef} type="file" accept=".json" onChange={handleImport} hidden />
+        <input ref={importRef} type="file" accept=".json" onClick={(e) => { e.target.value = null; }} onChange={handleImport} hidden />
         <button
           onClick={() => importRef.current?.click()}
           style={{ marginTop: 12, fontSize: 12, padding: "6px 14px", borderRadius: 6, border: "1px solid rgba(212,175,55,0.4)", background: "transparent", color: "#d4af37", cursor: "pointer", fontWeight: 600 }}
         >Import Collection</button>
+        <div className="muted small" style={{ marginTop: 6, fontSize: 10, opacity: 0.6 }}>Tip: Find your backup in Downloads folder</div>
         {importStatus && <div className="muted small" style={{ marginTop: 8 }}>{importStatus}</div>}
       </div>
     );
@@ -1691,8 +1721,19 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
         </div>
       )}
 
+      {/* Backup banner */}
+      {backupBanner && (
+        <div
+          onClick={backupToDrive}
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "8px 12px", margin: "4px 0", borderRadius: 8, background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.3)", cursor: "pointer" }}
+        >
+          <span style={{ fontSize: 13, color: "#d4af37", fontWeight: 600 }}>Collection updated — tap to backup to Drive</span>
+          <button onClick={(e) => { e.stopPropagation(); setBackupBanner(false); }} style={{ background: "transparent", border: "none", color: "#888", fontSize: 16, cursor: "pointer", padding: "0 4px", lineHeight: 1 }}>&times;</button>
+        </div>
+      )}
+
       {/* Select mode header */}
-      <input ref={importRef} type="file" accept=".json" onChange={handleImport} hidden />
+      <input ref={importRef} type="file" accept=".json" onClick={(e) => { e.target.value = null; }} onChange={handleImport} hidden />
       {importStatus && <div className="muted small" style={{ textAlign: "center", margin: "4px 0" }}>{importStatus}</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, padding: "4px 0", marginBottom: 4 }}>
         {selectMode ? (
@@ -1716,6 +1757,10 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
           </>
         ) : (
           <>
+            <button
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(212,175,55,0.25)", background: "rgba(212,175,55,0.08)", color: "#d4af37", cursor: "pointer", fontWeight: 600 }}
+              onClick={backupToDrive}
+            >Backup to Drive</button>
             <button
               style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
               onClick={exportJSON}
