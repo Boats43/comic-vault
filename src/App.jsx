@@ -2761,6 +2761,9 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bundling, setBundling] = useState(false);
   const [bundleMsg, setBundleMsg] = useState(null);
+  const [postAllOpen, setPostAllOpen] = useState(false);
+  const [postAllRunning, setPostAllRunning] = useState(false);
+  const [postAllResults, setPostAllResults] = useState([]); // [{ id, title, issue, priceNum, state, msg }]
 
   const toggleSelected = (id) => {
     setSelectedIds((prev) => {
@@ -2773,6 +2776,87 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   const exitSelection = () => {
     setSelectionMode(false);
     setSelectedIds(new Set());
+  };
+
+  // Books eligible for "Post All HOT": tagged HOT, not already listed, and
+  // have a resolved display price. Computed from current aiTags and catalogue.
+  const getHotUnlisted = (aiTagsSnapshot) =>
+    catalogue.filter(
+      (c) =>
+        aiTagsSnapshot?.[c.id]?.label === "HOT" &&
+        c.status !== "listed" &&
+        getDisplayPrice(c) > 0
+    );
+
+  const runPostAll = async (ids) => {
+    const items = ids
+      .map((id) => catalogue.find((c) => c.id === id))
+      .filter(Boolean);
+    if (items.length === 0) return;
+    setPostAllRunning(true);
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      setPostAllResults((prev) =>
+        prev.map((r) => (r.id === it.id ? { ...r, state: "posting", msg: null } : r))
+      );
+      try {
+        await onListComic(it);
+        setPostAllResults((prev) =>
+          prev.map((r) => (r.id === it.id ? { ...r, state: "success" } : r))
+        );
+      } catch (err) {
+        setPostAllResults((prev) =>
+          prev.map((r) =>
+            r.id === it.id
+              ? { ...r, state: "error", msg: err?.message || "failed" }
+              : r
+          )
+        );
+      }
+      if (i < items.length - 1) {
+        await new Promise((res) => setTimeout(res, 1500));
+      }
+    }
+    setPostAllRunning(false);
+  };
+
+  const openPostAll = (hotUnlisted) => {
+    if (!hotUnlisted.length) return;
+    setPostAllResults(
+      hotUnlisted.map((c) => ({
+        id: c.id,
+        title: c.title,
+        issue: c.issue,
+        priceNum: getDisplayPrice(c),
+        state: "pending",
+        msg: null,
+      }))
+    );
+    setPostAllOpen(true);
+  };
+
+  const confirmPostAll = () => {
+    const pendingIds = postAllResults
+      .filter((r) => r.state === "pending")
+      .map((r) => r.id);
+    runPostAll(pendingIds);
+  };
+
+  const retryFailed = () => {
+    const failedIds = postAllResults
+      .filter((r) => r.state === "error")
+      .map((r) => r.id);
+    if (failedIds.length === 0) return;
+    setPostAllResults((prev) =>
+      prev.map((r) => (r.state === "error" ? { ...r, state: "pending", msg: null } : r))
+    );
+    runPostAll(failedIds);
+  };
+
+  const closePostAll = () => {
+    if (postAllRunning) return;
+    setPostAllOpen(false);
+    setPostAllResults([]);
   };
 
   const submitBundle = async () => {
@@ -3158,6 +3242,29 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
           >
             {selectionMode ? "✕ Cancel Bundle" : "📦 Create Bundle"}
           </button>
+          {(() => {
+            const hotUnlisted = getHotUnlisted(aiTags);
+            if (hotUnlisted.length === 0) return null;
+            return (
+              <button
+                onClick={() => openPostAll(hotUnlisted)}
+                disabled={selectionMode || postAllRunning}
+                style={{
+                  padding: "6px 12px",
+                  background: "rgba(220,38,38,0.2)",
+                  border: "1px solid rgba(220,38,38,0.4)",
+                  borderRadius: 20,
+                  color: "#dc2626",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  opacity: selectionMode || postAllRunning ? 0.5 : 1,
+                }}
+              >
+                📋 Post All HOT ({hotUnlisted.length})
+              </button>
+            );
+          })()}
           {["Sell?", "Keys?", "Bundle?", "Stagnant?", "Value?"].map((q) => (
             <button
               key={q}
@@ -3410,6 +3517,128 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
           </button>
         </div>
       )}
+
+      {postAllOpen && (() => {
+        const total = postAllResults.length;
+        const successCount = postAllResults.filter((r) => r.state === "success").length;
+        const errorCount = postAllResults.filter((r) => r.state === "error").length;
+        const doneCount = successCount + errorCount;
+        const estTotal = postAllResults.reduce((s, r) => s + (r.priceNum || 0), 0);
+        const started = postAllRunning || doneCount > 0;
+        const allDone = !postAllRunning && doneCount === total && total > 0;
+        return (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.7)",
+              zIndex: 1000,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+            onClick={(e) => { if (e.target === e.currentTarget) closePostAll(); }}
+          >
+            <div
+              style={{
+                background: "#0a0a0a",
+                border: "1px solid rgba(220,38,38,0.35)",
+                borderRadius: 12,
+                padding: 16,
+                maxWidth: 440,
+                width: "100%",
+                maxHeight: "85vh",
+                overflowY: "auto",
+                color: "#ccc",
+              }}
+            >
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#dc2626", marginBottom: 10 }}>
+                {!started && `Post ${total} books to eBay?`}
+                {postAllRunning && `📋 Posting… ${doneCount} of ${total}`}
+                {allDone && `✅ Posted ${successCount} of ${total}${errorCount > 0 ? ` — ${errorCount} failed` : ""}`}
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                {postAllResults.map((r) => {
+                  const icon =
+                    r.state === "pending" ? "⏳" :
+                    r.state === "posting" ? "📤" :
+                    r.state === "success" ? "✅" : "❌";
+                  const color =
+                    r.state === "success" ? "#4caf50" :
+                    r.state === "error" ? "#dc2626" :
+                    r.state === "posting" ? "#d4af37" : "#888";
+                  return (
+                    <div
+                      key={r.id}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 12,
+                        color,
+                        borderBottom: "1px solid rgba(255,255,255,0.05)",
+                        paddingBottom: 4,
+                      }}
+                    >
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginRight: 8 }}>
+                        {icon} {r.title}{r.issue ? ` #${r.issue}` : ""}
+                      </span>
+                      <span style={{ fontWeight: 700 }}>
+                        ${Number(r.priceNum || 0).toFixed(2)}
+                        {r.msg ? ` — ${r.msg}` : ""}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {!started && (
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#d4af37", marginBottom: 12 }}>
+                  Est. total value: ${estTotal.toFixed(2)}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                {!started && (
+                  <>
+                    <button
+                      onClick={closePostAll}
+                      style={{ padding: "8px 14px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, color: "#ccc", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={confirmPostAll}
+                      style={{ padding: "8px 14px", background: "rgba(220,38,38,0.25)", border: "1px solid rgba(220,38,38,0.5)", borderRadius: 8, color: "#dc2626", fontSize: 13, fontWeight: 800, cursor: "pointer" }}
+                    >
+                      Post All
+                    </button>
+                  </>
+                )}
+                {allDone && (
+                  <>
+                    {errorCount > 0 && (
+                      <button
+                        onClick={retryFailed}
+                        style={{ padding: "8px 14px", background: "rgba(245,158,11,0.2)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 8, color: "#f59e0b", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                      >
+                        Retry {errorCount} failed
+                      </button>
+                    )}
+                    <button
+                      onClick={closePostAll}
+                      style={{ padding: "8px 14px", background: "rgba(212,175,55,0.15)", border: "1px solid rgba(212,175,55,0.35)", borderRadius: 8, color: "#d4af37", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Close
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
