@@ -626,12 +626,11 @@ export const fetchComps = async ({
       }
     }
 
-    // Filter 3: ±1.0 grade proximity for graded searches (or any caller that
-    // passed a legacy `grade` without isGraded=false).
+    // Filter 3: ±1.5 grade proximity. Applies to both raw and graded searches —
+    // a VF listing should not price a VG book regardless of slab status.
     let fellBack = false;
     if (
       parsed.length > 0 &&
-      !rawOnly &&
       numericTarget != null &&
       !isNaN(numericTarget)
     ) {
