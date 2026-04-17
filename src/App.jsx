@@ -1909,9 +1909,26 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                   <span className="collection-price">${getDisplayPrice(item).toLocaleString("en-US")}</span>
                 )}
               </div>
+              {item.variant && !['cover a','corner box','masterpieces'].some(v => item.variant.toLowerCase().includes(v)) && (
+                <div style={{ fontSize: 11, color: '#d4af37', marginTop: 1 }}>⚡ {item.variant}</div>
+              )}
               <div className="cl-row2 muted small">
                 {item.publisher}{item.publisher && item.year ? " · " : ""}{item.year}{gradeTxt ? ` · ${gradeTxt}` : ""}
               </div>
+              {(() => {
+                const soldLow = item.soldComps?.[0]?.price;
+                const askLow = item.comps?.lowestNum;
+                const askHigh = item.comps?.highestNum;
+                if (!soldLow && !askLow) return null;
+                return (
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                    {soldLow ? `Last sold $${Math.round(soldLow)}` : ''}
+                    {soldLow && askLow ? ' · ' : ''}
+                    {askLow ? `Asking $${Math.round(askLow)}` : ''}
+                    {askHigh && askHigh !== askLow ? `–$${Math.round(askHigh)}` : ''}
+                  </div>
+                );
+              })()}
               {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.purchasePrice > 0) && (
                 <div className="cl-row3">
                   {showKeyIssue(item.keyIssue) && <span className="pill pill-key">KEY</span>}
