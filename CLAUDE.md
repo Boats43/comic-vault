@@ -17,12 +17,13 @@ npx vercel --prod
 
 ## Key Files
 - `src/App.jsx` — entire frontend (ResultCard, CollectionDetail, grading flow, catalogue, FloatingSearchBar, BidCalculator)
-- `api/enrich.js` — second-pass enrichment (PriceCharting, eBay comps, ComicVine, Ximilar, CGC lookup)
+- `api/enrich.js` — second-pass enrichment (PriceCharting, eBay comps, ComicVine, Ximilar, CGC lookup, GoCollect)
 - `api/grade.js` — Claude Vision comic identification and grading
 - `api/chat.js` — Claude collection chat (inline queries, Whatnot session context)
 - `api/comps.js` — eBay Browse API comp fetching
 - `api/sold.js` — eBay completed/sold listings
 - `api/cgc-lookup.js` — CGC cert number verification
+- `api/gocollect.js` — GoCollect CGC FMV lookup (requires GOCOLLECT_API_KEY, returns null without it)
 - `api/manage.js` — collection analysis via Claude
 - `api/list-ebay.js` — eBay listing creation
 - `api/delist-ebay.js` — eBay listing removal
@@ -32,11 +33,12 @@ npx vercel --prod
 - **Live**: comic-vault-rouge.vercel.app
 
 ## Environment Variables
-Nine keys required (all set in Vercel):
+Nine keys required (all set in Vercel), one optional:
 `ANTHROPIC_API_KEY`, `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DEV_ID`, `EBAY_AUTH_TOKEN`, `EBAY_SANDBOX`, `COMICVINE_API_KEY`, `XIMILAR_API_TOKEN`, `PRICECHARTING_TOKEN`
+Optional: `GOCOLLECT_API_KEY` (CGC FMV — pending approval ticket #019483)
 
 ## Open Items
-- GoCollect API: approval pending — check email
+- GoCollect API: approval pending (ticket #019483) — `api/gocollect.js` deployed, returns null without key. Add `GOCOLLECT_API_KEY` to Vercel env when approved.
 - GPA: check gpanalysis.com for API access
 - eBay Marketplace Insights: DEAD for indie devs
 - Visual search: disabled for modern (1985+), active for Silver/Bronze Age only
@@ -73,6 +75,7 @@ Nine keys required (all set in Vercel):
 - Auto-refresh stale prices: collection tab only, no book detail open (`selectedItem === null`), 60s cooldown via `lastAutoRefreshRef`.
 - Sold comps: filtered by `#issue\b` regex before blending into `soldAvg` — prevents wrong-issue sold data from corrupting the 60% sold weight.
 - Bulk import: non-comic rejection, duplicate detection, publisher-as-title guard, full enrich field parity with single scan.
+- GoCollect CGC FMV: runs in enrich Promise.all, returns null without API key. Shows purple panel in CollectionDetail with FMV at 9.8/9.6/9.4. Submit recommendation: `fmv98 > rawEquiv + $50 && gap >= 2x`. Manual override via `item.userFmv98` persisted to IndexedDB.
 - Buyer sessions stored in localStorage key `cv_buyer_sessions` (last 100 entries).
 - Budget persisted in localStorage key `cv_buyer_budget`.
 - Buyer settings persisted in localStorage key `cv_buyer_settings` (whatnotFee, supplies, labor, minProfit).
