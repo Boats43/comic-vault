@@ -504,9 +504,9 @@ function ResultCard({ result, enriching }) {
               fontSize: 14,
             }}
           >
-            <span className="muted small">Floor{result.gradeMultiplier && comps.lowestNum ? " (grade adj)" : ""}</span>
+            <span className="muted small">Floor</span>
             <span style={{ fontWeight: 600, color: "#e05656" }}>
-              {fmtPrice(result.gradeMultiplier && comps.lowestNum ? comps.lowestNum * result.gradeMultiplier : comps.lowestNum)}
+              {fmtPrice(comps.lowestNum)}
             </span>
           </div>
           {comps.fellBack && (
@@ -2487,8 +2487,8 @@ function CollectionDetail({
               <span style={{ fontWeight: 700, color: "#d4af37" }}>{recommendedLabel}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
-              <span className="muted small">Floor{item.gradeMultiplier && item.comps.lowestNum ? " (grade adj)" : ""}</span>
-              <span style={{ fontWeight: 600, color: "#e05656" }}>{fmtPrice(item.gradeMultiplier && item.comps.lowestNum ? item.comps.lowestNum * item.gradeMultiplier : item.comps.lowestNum)}</span>
+              <span className="muted small">Floor</span>
+              <span style={{ fontWeight: 600, color: "#e05656" }}>{fmtPrice(item.comps.lowestNum)}</span>
             </div>
             {item.comps.highestNum != null && (
               <div className="muted small" style={{ marginTop: 4, fontSize: 12 }}>
