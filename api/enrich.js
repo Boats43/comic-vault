@@ -778,25 +778,27 @@ export default async function handler(req, res) {
         const sanityHighMult = (parseInt(year) >= 1985) ? 2 : 3;
         if (pcNum > adjAvg * sanityHighMult) {
           sanityFired = true;
-          out.price = fmtUsd(adjAvg * 1.15);
-          out.priceLow = fmtUsd(adjAvg * 0.75);
-          out.priceHigh = fmtUsd(adjAvg * 1.5);
+          // Use raw compsAvg — eBay listings already reflect market grade.
+          out.price = fmtUsd(compsAvg * 1.15);
+          out.priceLow = fmtUsd(compsAvg * 0.75);
+          out.priceHigh = fmtUsd(compsAvg * 1.5);
           out.pricingSource = "browse_api";
           out.priceNote = "PC outlier — eBay avg used";
           console.log('[sanity] PC', pcNum,
-            '> adjAvg*' + sanityHighMult, adjAvg * sanityHighMult, '→ fallback adj', adjAvg.toFixed(2));
+            '> adjAvg*' + sanityHighMult, adjAvg * sanityHighMult, '→ fallback compsAvg', compsAvg.toFixed(2));
         }
 
         // PC way too low vs market floor (compare final price to grade-adjusted avg)
         if (!sanityFired && pcNum < adjAvg * 0.5) {
           sanityFired = true;
-          out.price = fmtUsd(adjAvg);
-          out.priceLow = fmtUsd(adjAvg * 0.75);
-          out.priceHigh = fmtUsd(adjAvg * 1.5);
+          // Use raw compsAvg — eBay listings already reflect market grade.
+          out.price = fmtUsd(compsAvg);
+          out.priceLow = fmtUsd(compsAvg * 0.75);
+          out.priceHigh = fmtUsd(compsAvg * 1.5);
           out.pricingSource = "browse_api";
           out.priceNote = "PC too low — eBay avg used";
           console.log('[sanity] PC', pcNum,
-            '< adjAvg*0.5', adjAvg * 0.5, '→ fallback adj', adjAvg.toFixed(2));
+            '< adjAvg*0.5', adjAvg * 0.5, '→ fallback compsAvg', compsAvg.toFixed(2));
         }
       }
 
@@ -820,20 +822,20 @@ export default async function handler(req, res) {
         }
       }
     } else if (rawComps && rawComps.count > 0) {
-      // Apply grade multiplier to eBay avg too.
+      // eBay listings already reflect market grade — do not multiply again.
       const browseBase = rawComps.average || 0;
-
       let browsePrice = browseBase;
+
+      // Still record gradeMultiplier for downstream (floor guard, etc.)
+      // but do NOT apply it to the browse price.
       if (isGraded === true && numericGrade != null) {
         const gInfo = getGradeMultiplier(numericGrade);
         if (gInfo) {
-          browsePrice = browseBase * gInfo.multiplier;
           out.gradeMultiplier = gInfo.multiplier;
           out.priceNote = `CGC ${numericGrade} estimate`;
         }
       } else if (grade) {
         const rawInfo = getRawGradeMultiplier(grade);
-        browsePrice = browseBase * rawInfo.multiplier;
         out.gradeMultiplier = rawInfo.multiplier;
         out.priceNote = `${rawInfo.label} estimate`;
       }
