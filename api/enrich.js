@@ -13,6 +13,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { fetchComps, getOAuthToken } from "./comps.js";
 import { fetchSold } from "./sold.js";
 import { lookupCGC } from "./cgc-lookup.js";
+import { lookupGoCollect } from "./gocollect.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -590,13 +591,14 @@ export default async function handler(req, res) {
           })
         : Promise.resolve(null);
 
-    const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting, cgcResult] = await Promise.all([
+    const [comicVine, compsFromEbay, ximilar, soldResult, priceCharting, cgcResult, goCollectResult] = await Promise.all([
       lookupComicVine({ title, issue: correctedIssue, year, publisher }),
       compsPromise,
       lookupXimilar({ images, title, confidence }),
       fetchSold({ title, issue: correctedIssue, year }).catch(() => []),
       lookupPriceCharting({ title, issue: correctedIssue, year }).catch(() => null),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
+      lookupGoCollect({ title, issue: correctedIssue, year, publisher }).catch(() => null),
     ]);
 
     // AI verification pass on the comps that will be displayed. Verifies
@@ -1048,6 +1050,11 @@ export default async function handler(req, res) {
       out.cgcVerified = true;
       out.cgcLabel = cgcResult.labelType || null;
       out.certNumber = cgcResult.certNumber;
+    }
+
+    // GoCollect CGC FMV data (null when API key not set)
+    if (goCollectResult) {
+      out.goCollect = goCollectResult;
     }
 
     res.status(200).json(out);

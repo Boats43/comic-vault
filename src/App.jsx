@@ -2544,6 +2544,63 @@ function CollectionDetail({
           </div>
         )}
 
+        {/* GoCollect CGC FMV panel */}
+        {(item.goCollect || item.userFmv98) && (() => {
+          const gc = item.goCollect || {};
+          const fmv98 = item.userFmv98 || gc.fmv98;
+          const fmv96 = gc.fmv96;
+          const fmv94 = gc.fmv94;
+          return (
+            <div style={{ marginTop: 12, padding: 12, border: "1px solid rgba(138,43,226,0.3)", borderRadius: 8, background: "rgba(138,43,226,0.06)" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#8a2be2", marginBottom: 8 }}>CGC Fair Market Value</div>
+              {fmv98 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 }}>
+                  <span style={{ color: "#aaa" }}>CGC 9.8</span>
+                  <span style={{ fontWeight: 700, color: "#8a2be2" }}>${Number(fmv98).toLocaleString("en-US")}{item.userFmv98 ? " (manual)" : ""}</span>
+                </div>
+              )}
+              {fmv96 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 }}>
+                  <span style={{ color: "#aaa" }}>CGC 9.6</span>
+                  <span style={{ fontWeight: 600 }}>${Number(fmv96).toLocaleString("en-US")}</span>
+                </div>
+              )}
+              {fmv94 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 }}>
+                  <span style={{ color: "#aaa" }}>CGC 9.4</span>
+                  <span style={{ fontWeight: 600 }}>${Number(fmv94).toLocaleString("en-US")}</span>
+                </div>
+              )}
+              {gc.submitRecommended && (
+                <div style={{ color: "#4caf50", fontSize: 12, marginTop: 6, fontWeight: 600 }}>
+                  ⭐ Submit to CGC — {gc.submitGap}x return potential
+                </div>
+              )}
+              {gc.fmv98 && !gc.submitRecommended && (
+                <div style={{ color: "#888", fontSize: 11, marginTop: 4 }}>
+                  Raw value similar to graded — sell raw or hold
+                </div>
+              )}
+              <div style={{ marginTop: 8 }}>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Override FMV 9.8"
+                  defaultValue={item.userFmv98 || ""}
+                  onBlur={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (v > 0) onUpdateField?.(item, "userFmv98", v);
+                    else if (!e.target.value) onUpdateField?.(item, "userFmv98", null);
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(138,43,226,0.3)", background: "rgba(0,0,0,0.2)", color: "#ccc", fontSize: 12, boxSizing: "border-box" }}
+                />
+              </div>
+              {gc.source && <div className="muted small" style={{ marginTop: 4, fontSize: 10 }}>Source: GoCollect</div>}
+            </div>
+          );
+        })()}
+
         {!hasComps && (
           <div
             style={{
@@ -3715,6 +3772,7 @@ export default function App() {
                 certNumber: enrich.certNumber || cur.certNumber || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
+                goCollect: enrich.goCollect || cur.goCollect || null,
                 variant: enrich.variantNote || cur.variant || null,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
               };
@@ -3734,7 +3792,7 @@ export default function App() {
             });
             // FIX 4: update detail view if open during background refresh
             setSelectedItem((s) =>
-              s && s.id === item.id ? { ...s, ...enrich, comicVine: enrich.comicVine || s.comicVine || null, certNumber: enrich.certNumber || s.certNumber || null, cgcVerified: enrich.cgcVerified || s.cgcVerified || false, cgcLabel: enrich.cgcLabel || s.cgcLabel || null } : s
+              s && s.id === item.id ? { ...s, ...enrich, comicVine: enrich.comicVine || s.comicVine || null, certNumber: enrich.certNumber || s.certNumber || null, cgcVerified: enrich.cgcVerified || s.cgcVerified || false, cgcLabel: enrich.cgcLabel || s.cgcLabel || null, goCollect: enrich.goCollect || s.goCollect || null } : s
             );
           })
           .catch(() => {})
@@ -3994,6 +4052,7 @@ export default function App() {
                   certNumber: enrich.certNumber || s.certNumber || null,
                   cgcVerified: enrich.cgcVerified || s.cgcVerified || false,
                   cgcLabel: enrich.cgcLabel || s.cgcLabel || null,
+                  goCollect: enrich.goCollect || s.goCollect || null,
                   variant: enrich.variantNote || s.variant || null,
                   variantMultiplier: enrich.variantMultiplier || s.variantMultiplier || null,
                 };
@@ -4133,6 +4192,7 @@ export default function App() {
                 certNumber: enrich.certNumber || cur.certNumber || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
+                goCollect: enrich.goCollect || cur.goCollect || null,
                 variant: enrich.variantNote || cur.variant || null,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
               };
@@ -4387,6 +4447,7 @@ export default function App() {
       certNumber: enrich.certNumber || item.certNumber || null,
       cgcVerified: enrich.cgcVerified || item.cgcVerified || false,
       cgcLabel: enrich.cgcLabel || item.cgcLabel || null,
+      goCollect: enrich.goCollect || item.goCollect || null,
       variant: enrich.variantNote || item.variant || null,
       variantMultiplier: enrich.variantMultiplier || item.variantMultiplier || null,
     };
