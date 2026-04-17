@@ -1529,7 +1529,7 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude, onClaudeCardCh
   );
 }
 
-function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices, snapshots }) {
+function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices, snapshots, bulkEnrichProgress }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [sortBy, setSortBy] = useState("recent");
@@ -1722,6 +1722,12 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
       {refreshingPrices > 0 && (
         <div className="muted small" style={{ textAlign: "center", margin: "4px 0 8px" }}>
           Updating prices... ({refreshingPrices} remaining)
+        </div>
+      )}
+
+      {bulkEnrichProgress && bulkEnrichProgress.current < bulkEnrichProgress.total && (
+        <div className="muted small" style={{ textAlign: "center", margin: "4px 0 8px", color: "#4caf50" }}>
+          Fetching market data… {bulkEnrichProgress.current} of {bulkEnrichProgress.total}
         </div>
       )}
 
@@ -3649,6 +3655,7 @@ export default function App() {
   const [watchMode, setWatchMode] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(null); // { current, total, title }
   const [bulkDone, setBulkDone] = useState(null); // number or null
+  const [bulkEnrichProgress, setBulkEnrichProgress] = useState(null); // { current, total }
   const [analysis, setAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [snapshots, setSnapshots] = useState([]);
@@ -3698,8 +3705,12 @@ export default function App() {
     if (selectedItem) return;
     if (Date.now() - lastAutoRefreshRef.current < 60000) return;
     lastAutoRefreshRef.current = Date.now();
+    // Skip books imported in the last 5 minutes — bulk import enrich is still
+    // in flight and would race with auto-refresh, overwriting fresh data.
+    const isRecentlyImported = (c) =>
+      Date.now() - (c.timestamp || 0) < 300000;
     const missingSource = catalogue.filter(
-      (c) => !c.pricingSource || !c.comps
+      (c) => !isRecentlyImported(c) && (!c.pricingSource || !c.comps)
     );
     const missingIds = new Set(missingSource.map((c) => c.id));
 
@@ -3718,7 +3729,7 @@ export default function App() {
       );
       if (!prices.every((p) => p === prices[0])) {
         const oldest = group.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))[0];
-        if (!missingIds.has(oldest.id)) dupStale.push(oldest);
+        if (!missingIds.has(oldest.id) && !isRecentlyImported(oldest)) dupStale.push(oldest);
       }
     });
 
@@ -4082,8 +4093,19 @@ export default function App() {
   const handleBulkImport = useCallback(async (files) => {
     setBulkDone(null);
     setBulkProgress({ current: 1, total: files.length, title: "" });
+    setBulkEnrichProgress(null);
     let added = 0;
     const errors = [];
+    let enrichTotal = 0;
+    let enrichDone = 0;
+    const bumpEnrichFired = () => {
+      enrichTotal++;
+      setBulkEnrichProgress({ current: enrichDone, total: enrichTotal });
+    };
+    const bumpEnrichSettled = () => {
+      enrichDone++;
+      setBulkEnrichProgress({ current: enrichDone, total: enrichTotal });
+    };
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       console.log('[bulk] processing file:', file.name);
@@ -4116,15 +4138,22 @@ export default function App() {
           continue;
         }
 
-        // Publisher-as-title detection
-        const PUBLISHER_NAMES = ['marvel comics', 'dc comics', 'image comics',
-          'dark horse', 'idw publishing', 'dw publishing', 'boom studios',
-          'dynamite', 'valiant', 'archie comics'];
+        // Publisher-as-title detection — WARN, don't block. Book still gets
+        // added; user can review and edit the title manually in the catalogue.
+        const PUBLISHER_NAMES = [
+          'marvel comics', 'dc comics', 'image comics', 'dark horse comics',
+          'idw publishing', 'boom studios', 'dynamite entertainment', 'valiant',
+          'archie comics', 'oni press', 'vault comics', 'mad cave',
+          'aftershock', 'awaken comics',
+          'marvel', 'dc', 'image', 'dark horse', 'idw'
+        ];
         if (PUBLISHER_NAMES.some(p => titleLower.includes(p)) &&
             data.publisher && titleLower.includes(data.publisher.toLowerCase())) {
           console.warn('[bulk] title may be publisher name:', data.title, file.name);
-          errors.push(`${file.name}: title "${data.title}" looks like publisher — review manually`);
-          continue;
+          data.titleWarning = true;
+          data.titleWarningMsg = 'Title may be publisher name — verify';
+          errors.push(`${file.name}: title "${data.title}" may be publisher name — added, review manually`);
+          // book still gets added
         }
 
         const bulkIssue = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
@@ -4150,7 +4179,8 @@ export default function App() {
           console.warn('[bulk] addToCatalogue returned null for', file.name);
           errors.push(`${file.name}: failed to save`);
         }
-        // Fire-and-forget enrichment
+        // Fire-and-forget enrichment — tracked via bulkEnrichProgress.
+        bumpEnrichFired();
         fetch("/api/enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -4202,13 +4232,20 @@ export default function App() {
               return prev.map((x) => x.id === savedId ? updated : x);
             });
           })
-          .catch(() => {});
+          .catch(() => {})
+          .finally(bumpEnrichSettled);
       } catch (err) {
         console.warn('[bulk] unexpected error for', file.name, err);
         errors.push(`${file.name}: ${err.message || 'unexpected error'}`);
       }
     }
     setBulkProgress(null);
+    // Poll enrich completion; clear progress when all settle (max 45s wait).
+    const pollStart = Date.now();
+    while (enrichDone < enrichTotal && Date.now() - pollStart < 45000) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    setBulkEnrichProgress(null);
     if (errors.length > 0) {
       console.warn('[bulk] errors:', errors);
       setError(`Bulk import: ${added} added, ${errors.length} failed.\n${errors.join('\n')}`);
@@ -4676,6 +4713,14 @@ export default function App() {
             </div>
           )}
 
+          {/* Bulk enrich progress (shown on Scan tab after grading finishes,
+              until the tab switches to collection). */}
+          {!bulkProgress && bulkEnrichProgress && bulkEnrichProgress.current < bulkEnrichProgress.total && (
+            <div className="muted small" style={{ textAlign: "center", margin: "8px 0", color: "#4caf50" }}>
+              Fetching market data… {bulkEnrichProgress.current} of {bulkEnrichProgress.total}
+            </div>
+          )}
+
           {/* Bulk import done */}
           {bulkDone != null && !bulkProgress && (
             <div
@@ -4900,6 +4945,7 @@ export default function App() {
             items={catalogue}
             totalValue={totalValue}
             refreshingPrices={refreshingPrices}
+            bulkEnrichProgress={bulkEnrichProgress}
             snapshots={snapshots}
             onOpen={(item) => {
               collectionScrollPos.current = window.scrollY;
