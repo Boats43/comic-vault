@@ -1,7 +1,7 @@
 {
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/:path*" },
-    { "source": "/share-target", "destination": "/" }
+    { "source": "/share-target", "destination": "/?share-target=1" }
   ],
   "functions": {
     "api/grade.js": { "maxDuration": 60 },

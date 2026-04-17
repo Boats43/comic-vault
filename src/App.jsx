@@ -4016,8 +4016,10 @@ function WatchMode({ onStop }) {
 }
 
 export default function App() {
-  const [tab, setTab] = useState("scan"); // 'scan' | 'buyer' | 'collection'
-  const [loading, setLoading] = useState(false);
+  const isShareTarget = typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("share-target") === "1";
+  const [tab, setTab] = useState(isShareTarget ? "buyer" : "scan"); // 'scan' | 'buyer' | 'collection'
+  const [loading, setLoading] = useState(isShareTarget);
   const [step, setStep] = useState(0);
   const [result, setResult] = useState(null);
   const [enriching, setEnriching] = useState(false);
@@ -4034,9 +4036,7 @@ export default function App() {
   const [isMobile] = useState(() =>
     /android|iphone|ipad|ipod/i.test(navigator.userAgent || "")
   );
-  const [widgetMode, setWidgetMode] = useState(
-    () => new URLSearchParams(window.location.search).get("share-target") === "1"
-  );
+  const [widgetMode, setWidgetMode] = useState(() => isShareTarget);
   const [watchMode, setWatchMode] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(null); // { current, total, title }
   const [bulkDone, setBulkDone] = useState(null); // number or null
@@ -4654,7 +4654,7 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, [selectedItem]);
 
-  // Web Share Target handoff — persist into Buyer tab (save:false).
+  // Web Share Target handoff — grade in Buyer tab without saving.
   // Strip ?share-target=1 immediately so reloads don't re-trigger the flow.
   useEffect(() => {
     if (!widgetMode) return;
@@ -4662,21 +4662,35 @@ export default function App() {
     window.history.replaceState({}, "", "/");
     setWidgetMode(false);
     (async () => {
-      try {
-        const tryFetchSharedImage = async (retries = 3) => {
-          for (let i = 0; i < retries; i++) {
+      const tryFetchSharedImage = async (retries = 6) => {
+        for (let i = 0; i < retries; i++) {
+          try {
             const res = await fetch("/__shared-image", { cache: "no-store" });
             if (res.ok) return res;
-            await new Promise((r) => setTimeout(r, 500));
+          } catch {
+            /* retry */
           }
-          return null;
-        };
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        return null;
+      };
+      try {
         const res = await tryFetchSharedImage();
-        if (!res) return;
+        if (!res) {
+          setLoading(false);
+          setError("Couldn't load shared image. Try sharing again.");
+          return;
+        }
         const blob = await res.blob();
-        if (blob.size > 0) await gradeBlob(blob, { save: false });
-      } catch {
-        /* noop */
+        if (blob.size > 0) {
+          await gradeBlob(blob, { save: false });
+        } else {
+          setLoading(false);
+          setError("Shared image was empty. Try again.");
+        }
+      } catch (err) {
+        setLoading(false);
+        setError(err?.message || "Share failed.");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5064,21 +5078,6 @@ export default function App() {
       throw new Error(d.error || "Failed to create eBay listing");
     }
   };
-
-  if (widgetMode) {
-    return (
-      <WidgetOverlay
-        loading={loading}
-        step={step}
-        result={result}
-        enriching={enriching}
-        error={error}
-        onDismiss={dismissWidget}
-        onSave={saveFromWidget}
-        onListEbay={listFromWidget}
-      />
-    );
-  }
 
   return (
     <div className="app">
