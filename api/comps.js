@@ -565,14 +565,23 @@ export const fetchComps = async ({
     // Filter 1: reprints / facsimiles / anniversary variants / nth printings.
     // Exception: when our book IS a print variant (e.g., "2nd print"),
     // keep those comps so we price against the correct edition.
+    // Fallback: if the filter removes ALL comps, keep the pre-filter set
+    // and flag reprintFallback so the caller can annotate the price note.
     const isNthPrint = (variant || '').toLowerCase().match(/\d+(?:st|nd|rd|th)\s*p(?:rint|tg)/);
+    let reprintFallback = false;
     if (!isNthPrint) {
-      const before = parsed.length;
-      parsed = parsed.filter((it) => !REPRINT_RE.test(String(it.title || "")));
-      if (parsed.length < before) {
-        console.log(
-          `[comps] reprint filter removed ${before - parsed.length}`
-        );
+      const beforeReprint = parsed;
+      const afterReprint = parsed.filter((it) => !REPRINT_RE.test(String(it.title || "")));
+      if (afterReprint.length === 0 && beforeReprint.length > 0) {
+        console.log('[comps] reprint fallback: all comps were reprints, keeping all');
+        reprintFallback = true;
+      } else {
+        parsed = afterReprint;
+        if (parsed.length < beforeReprint.length) {
+          console.log(
+            `[comps] reprint filter removed ${beforeReprint.length - parsed.length}`
+          );
+        }
       }
     } else {
       console.log(`[comps] reprint filter skipped — book is ${variant}`);
@@ -581,12 +590,20 @@ export const fetchComps = async ({
     // Filter 1b: variant contamination — when NOT searching for a
     // specific variant, drop listings with variant/foil/ratio/incentive
     // keywords to prevent inflated copies from skewing the average.
+    // Fallback: if the filter removes ALL comps, keep the pre-filter set.
+    let variantFallback = false;
     if (!variant) {
       const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1/i;
-      const before = parsed.length;
-      parsed = parsed.filter((it) => !VARIANT_CONTAM_RE.test(String(it.title || "")));
-      if (parsed.length < before) {
-        console.log(`[comps] variant filter removed ${before - parsed.length}`);
+      const beforeVariant = parsed;
+      const afterVariant = parsed.filter((it) => !VARIANT_CONTAM_RE.test(String(it.title || "")));
+      if (afterVariant.length === 0 && beforeVariant.length > 0) {
+        console.log('[comps] variant fallback: all comps were variants, keeping all');
+        variantFallback = true;
+      } else {
+        parsed = afterVariant;
+        if (parsed.length < beforeVariant.length) {
+          console.log(`[comps] variant filter removed ${beforeVariant.length - parsed.length}`);
+        }
       }
     }
 
@@ -728,6 +745,8 @@ export const fetchComps = async ({
       lastSoldDateFormatted: formatDate(lastSoldDate),
       query,
       fellBack,
+      reprintFallback,
+      variantFallback,
       attemptUsed,
       source,
     };

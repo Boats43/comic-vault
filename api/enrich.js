@@ -830,6 +830,16 @@ export default async function handler(req, res) {
         out.priceNote = null;
       }
 
+      // Annotate when the comps set contained only reprints or only variants
+      // and we kept them as a fallback — signals that the avg is imperfect.
+      if (out.pricingSource === "browse_api") {
+        if (rawComps?.reprintFallback) {
+          out.priceNote = "eBay avg (mixed prints)";
+        } else if (rawComps?.variantFallback) {
+          out.priceNote = "eBay avg (mixed variants)";
+        }
+      }
+
       // Defect penalty: reduce price if Claude detected a significant defect.
       if (req.body.defectPenalty) {
         const pen = parseFloat(req.body.defectPenalty);
