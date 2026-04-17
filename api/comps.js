@@ -624,6 +624,7 @@ export const fetchComps = async ({
       return {
         price: p.price,
         priceFormatted: formatUsd(p.price),
+        title: p.title || null,
         date: p.endTime,
         daysAgo,
         itemWebUrl: p.url || null,

@@ -851,23 +851,15 @@ export default async function handler(req, res) {
     // came from PriceCharting (not from browse_api or sanity fallback).
     const isFromPC = !!(priceCharting?.price) && !sanityFired && out.pricingSource === 'pricecharting';
 
-    // Floor guard: never price below the grade-adjusted lowest eBay comp.
+    // Floor guard: never price below the lowest eBay comp.
+    // eBay comps already reflect market grade — no grade multiplier on floor.
+    // Floor is capped at compsAvg to prevent exceeding market.
     const finalNum = parseFloat(
       String(out.price || '0').replace(/[$,]/g, '')
     );
     const rawFloor = rawComps?.lowest || compsFromEbay?.lowest || 0;
-    let gradeAdj = out.gradeMultiplier;
-    if (gradeAdj == null) {
-      if (isGraded === true && numericGrade != null) {
-        const gInfo = getGradeMultiplier(numericGrade);
-        if (gInfo) gradeAdj = gInfo.multiplier;
-      } else if (grade) {
-        gradeAdj = getRawGradeMultiplier(grade).multiplier;
-      }
-    }
-    gradeAdj = gradeAdj || 1.0;
-    let floorNum = rawFloor * gradeAdj;
     const compsAvgForCap = blendedAvg || compsFromEbay?.average || 0;
+    let floorNum = rawFloor;
     if (floorNum > compsAvgForCap && compsAvgForCap > 0) {
       floorNum = compsAvgForCap;
       console.log('[floor] capped at comps avg', compsAvgForCap.toFixed(2));
@@ -877,7 +869,7 @@ export default async function handler(req, res) {
     if (floorNum > 0 && finalNum < floorNum) {
       floorFired = true;
       console.log('[floor] price', finalNum,
-        '< adjFloor', floorNum, `(raw ${rawFloor} × ${gradeAdj})`, '— enforcing');
+        '< floor', floorNum, `(raw ${rawFloor}, cap ${compsAvgForCap})`, '— enforcing');
       out.price = fmtUsd(floorNum);
       out.priceLow = fmtUsd(floorNum * 0.85);
       out.priceHigh = fmtUsd(floorNum * 1.25);
@@ -890,7 +882,7 @@ export default async function handler(req, res) {
       'afterMult:', parseFloat(String(out.price || '0').replace(/[$,]/g, '')),
       'compsAvg:', compsFromEbay?.average,
       'rawFloor:', rawComps?.lowest || 0,
-      'adjFloor:', (rawComps?.lowest || 0) * (out.gradeMultiplier || 1.0),
+      'floor:', floorNum,
       'floorFired:', floorFired,
       'finalPrice:', out.price,
       'source:', out.pricingSource

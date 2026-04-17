@@ -404,22 +404,26 @@ function ResultCard({ result, enriching }) {
               </div>
               {comps.recentSales.slice(0, 3).map((s, i) => {
                 const row = (
-                  <>
-                    <span className="muted small">
-                      {fmtSaleWhen(s.date, s.daysAgo)}
-                    </span>
-                    <span style={{ fontWeight: 600, color: "#d4af37" }}>
-                      {fmtPrice(s.price)}
-                      {s.itemWebUrl ? (
-                        <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>
-                      ) : null}
-                    </span>
-                  </>
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span className="muted small">
+                        {fmtSaleWhen(s.date, s.daysAgo)}
+                      </span>
+                      <span style={{ fontWeight: 600, color: "#d4af37" }}>
+                        {fmtPrice(s.price)}
+                        {s.itemWebUrl ? (
+                          <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>
+                        ) : null}
+                      </span>
+                    </div>
+                    {s.title && (
+                      <div style={{ fontSize: 11, color: "#666", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
+                        {s.title.length > 55 ? s.title.slice(0, 55) + "…" : s.title}
+                      </div>
+                    )}
+                  </div>
                 );
                 const rowStyle = {
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
                   padding: "6px 0",
                   fontSize: 14,
                 };
@@ -2450,15 +2454,22 @@ function CollectionDetail({
               Active Listings
             </div>
             {item.comps.recentSales.slice(0, 3).map((s, i) => {
-              const rowStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontSize: 14 };
+              const rowStyle = { padding: "6px 0", fontSize: 14 };
               const inner = (
-                <>
-                  <span className="muted small">{fmtSaleWhen(s.date, s.daysAgo)}</span>
-                  <span style={{ fontWeight: 600, color: "#d4af37" }}>
-                    {fmtPrice(s.price)}
-                    {s.itemWebUrl && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
-                  </span>
-                </>
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span className="muted small">{fmtSaleWhen(s.date, s.daysAgo)}</span>
+                    <span style={{ fontWeight: 600, color: "#d4af37" }}>
+                      {fmtPrice(s.price)}
+                      {s.itemWebUrl && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
+                    </span>
+                  </div>
+                  {s.title && (
+                    <div style={{ fontSize: 11, color: "#666", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
+                      {s.title.length > 55 ? s.title.slice(0, 55) + "…" : s.title}
+                    </div>
+                  )}
+                </div>
               );
               return s.itemWebUrl ? (
                 <a key={i} href={s.itemWebUrl} target="_blank" rel="noopener noreferrer" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>{inner}</a>
