@@ -553,6 +553,25 @@ export const fetchComps = async ({
       }
     }
 
+    // Filter 1c: variant preference — when searching for a specific variant,
+    // prefer comps whose titles mention variant keywords. Requires 2+ matches;
+    // if fewer exist, keep all comps to avoid empty results.
+    if (variant && parsed.length > 0) {
+      const varWords = String(variant).toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['variant', 'cover', 'print', 'edition'].includes(w));
+      if (varWords.length > 0) {
+        const variantMatches = parsed.filter(it => {
+          const t = String(it.title || '').toLowerCase();
+          return varWords.some(w => t.includes(w));
+        });
+        if (variantMatches.length >= 2) {
+          console.log(`[comps] variant preference: ${variantMatches.length}/${parsed.length} match "${variant}" words [${varWords.join(',')}]`);
+          parsed = variantMatches;
+        } else {
+          console.log(`[comps] variant preference: only ${variantMatches.length} match — keeping all ${parsed.length}`);
+        }
+      }
+    }
+
     // Filter 2: raw-vs-graded title separation.
     if (rawOnly) {
       const before = parsed.length;
