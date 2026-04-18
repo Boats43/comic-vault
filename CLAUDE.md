@@ -58,10 +58,11 @@ Optional: `GOCOLLECT_API_KEY` (CGC FMV — pending approval ticket #019483)
 - eBay listing title includes variant (newsstand, gold, 2nd print, etc.) between issue and grade — filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot).
 - Variant short keywords only in comps query attempts 1-2. Attempt 0 uses FULL variant string (e.g., "Paco Medina Thing variant") for most specific eBay search.
 - Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
-- Sanity check compares grade-adjusted PC price to grade-adjusted comps average (not raw avg).
-- Sanity thresholds: 0.5x (too low) and 2x modern/3x Silver (too high) against adjAvg.
-- Sanity check uses `blendedAvg || compsFromEbay?.average` — blended comps (60% sold + 40% active) preferred over raw Browse average.
-- Sanity low-side condition: `pcNum < adjAvg × 0.5` only (removed legacy `adjAvg - 10` guard that blocked firing on low-value books).
+- Sanity comparison base: `sanityCompsAvg = isMixedFallback ? compsAvg : compsAvg × gradeMultiplier`. Mixed fallback (reprint/variant/aiVerify) uses raw compsAvg — median already reflects market.
+- Sanity thresholds high: `lowCompsCount<3 || isMixedFallback` → 1.25x; Golden <1970 → 3x; Silver/Bronze <1985 → 1.75x; Modern ≥1985 → 1.5x. Low: 0.5x always.
+- Sanity check input preference: `fallbackMedian || blendedAvg || compsFromEbay?.average`. On any fallback flag (reprint/variant/aiVerify) uses median of `rawComps.prices` instead of mean.
+- aiVerifyFallback fires when AI verify rejects every checked listing but raw comps existed — switches sanity to median of raw prices + 1.25x threshold.
+- Sanity low-side condition: `pcNum < sanityCompsAvg × 0.5` only.
 - **browse_api prices: NO grade multiplier.** eBay listings already reflect market grade. Grade mult only applies to PriceCharting base prices (NM-equivalent). Sanity fallback uses raw `compsAvg`, not `adjAvg`. Browse primary fallback uses `browseBase` directly. `gradeMultiplier` is still recorded on `out` for floor guard but not applied to browse_api prices.
 - Variant mult: PC source only — gated by `isFromPC` flag.
 - Key mult: PC source only — gated by `isFromPC && blendedAvg` (requires comps to validate).
@@ -70,6 +71,12 @@ Optional: `GOCOLLECT_API_KEY` (CGC FMV — pending approval ticket #019483)
 - Floor guard field: `rawComps.lowest` (not `lowestNum`) — comps.js returns `lowest`.
 - Floor guard: raw `rawFloor` (no grade multiplier). eBay comps already reflect market grade. Capped at `compsAvg`.
 - eBay comps search: attempt 0 = title + issue + full variant + year + publisher (most specific, capped 100 chars); falls through to attempt 1 (short variant + year), then attempt 2 (no year), etc.
+- Comps attempt loop runs filters INSIDE the loop; only breaks on `parsed.length > 0` (post-filter survivors), not `raw.length > 0`. Too-specific attempts that match only junk fall through to broader queries instead of starving them.
+- `cleanTitleForSearch` replaces apostrophes/quotes/!? with a SPACE (not empty). "D'Orc" → "D Orc" so eBay tokenizes to match actual listings; empty replacement collapsed to unmatchable "DOrc".
+- Browse API call: `limit=100`, `sort=bestMatch`, `buyingOptions:{FIXED_PRICE|AUCTION}`. Raises raw pool 5x and includes auction data.
+- SLAB_RE (raw filter) requires explicit slab indicator — `/\b(cgc|cbcs|pgx|slab|graded|universal)\s*<tier>?\s*\d+(\.\d+)?/i`. Bare "9.4" in a raw seller's self-grade no longer triggers the filter.
+- VARIANT_CONTAM_RE has NO bare `\bvariant\b` — "Cover A Variant" listings are commonly 1st-print Cover A. Drops only on concrete markers: virgin, foil, ratio, 1:N, incentive, newsstand, whitman, canadian.
+- `out.confirmedYear` + `out.yearCorrected` surfaced from `/api/enrich`. App.jsx enrich callbacks (initial scan, auto-refresh, manual refresh, bulk import) heal `item.year` when `yearCorrected === true`.
 - Variant comp preference (Filter 1c): when variant set, prefer comps whose titles match variant-specific words (min 2 matches to filter, otherwise keep all).
 - Atlas/pre-Marvel publishers: append "Atlas Marvel" to eBay query (sellers use both terms interchangeably).
 - Auto-refresh stale prices: collection tab only, no book detail open (`selectedItem === null`), 60s cooldown via `lastAutoRefreshRef`.
@@ -134,7 +141,20 @@ All pricing fixes confirmed intact:
 (5) **Variant in eBay listing title** (`1cdf988`): `buildTitle` in `list-ebay.js` now includes `item.variant` between issue and grade. Filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot) — these add no search value. Same filter applied to `buildBundleTitle`. Pipeline trace confirmed variant flows: grade.js → App.jsx → enrich.js → comps.js (attempts 1-2 only) → list-ebay.js (was missing, now fixed).
 
 ## Last Session
-Session 4/17/2026 — comps hardening, prompt fixes, import race, bulk HOT listing:
+Session 4/17/2026 (late) — median fallbacks, sanity re-tier, comp pool expansion, year heal:
+(1) **Median on mixed-print fallback** (`ff5758a`): `api/enrich.js` adds `median()` helper. When `reprintFallback` or `variantFallback` is set, sanity `compsAvg` becomes `median(rawComps.prices)` instead of the mean — filters 1st/4th print price mixes where the mean is meaningless. Tightens sanityHighMult to 1.25x on any mixed fallback.
+(2) **AI verify fallback** (`80f35fb`): when `verifyCompsTitles` rejects every checked listing but `rawComps.prices` still has entries, set `rawComps.aiVerifyFallback = true` so sanity treats it the same as reprint/variant fallback. Surfaces `out.aiVerifyFallback` on the response.
+(3) **Apostrophe handling** (`eac6188`): `cleanTitleForSearch` in `api/comps.js` replaces `/['"!?]/g` with a SPACE instead of empty string. "D'Orc" → "D Orc" (two tokens) rather than "DOrc" (one unmatchable token). Fixes eBay coverage for apostrophe titles.
+(4) **Sanity raw compsAvg on fallback** (`eac6188`): `sanityCompsAvg = isMixedFallback ? compsAvg : compsAvg × mult`. Prior adjAvg-based comparison inflated the guardrail by the grade multiplier and masked PC outliers when a fallback flag was active.
+(5) **Attempt loop continues on empty post-filter** (`eac6188`): `fetchComps` in `api/comps.js` now inlines the full filter chain inside the attempt loop and only breaks on `parsed.length > 0`. Previously broke on `raw.length > 0`, so a too-specific query that matched 5 junk listings starved the broader fallback queries.
+(6) **confirmedYear surfaced + client heal** (`eac6188`): `api/enrich.js` writes `out.confirmedYear` and `out.yearCorrected`. App.jsx enrich callbacks (scan, auto-refresh, refreshMarketData, bulk import) update `item.year` when yearCorrected === true. Catalogue entries stored with a wrong year get healed on next refresh.
+(7) **Tighter sanity thresholds** (`084a8ca`): added `lowCompsCount = (rawComps?.count || 0) < 3` guard → 1.25x. Retiered modern: Golden <1970 → 3x, Silver/Bronze <1985 → 1.75x, Modern ≥1985 → 1.5x. Replaces the prior 3x (pre-1985) / 2x (modern) scheme.
+(8) **Comp pool expansion** (`5bcfe91`): `api/comps.js:tryBrowse` now uses `limit=100` (was 20), `sort=bestMatch` (was endingSoonest), and `buyingOptions:{FIXED_PRICE|AUCTION}` (was FIXED_PRICE only). 5× raw pool, relevance-ranked, auction bids included.
+(9) **SLAB_RE tightened** (`5bcfe91`): raw-search slab filter requires an explicit slab indicator (cgc|cbcs|pgx|slab|graded|universal) before the numeric grade. Bare "9.4" in a raw seller's self-grade no longer drops the listing.
+(10) **Variant regex loosened** (`5bcfe91`): dropped bare `\bvariant\b` from VARIANT_CONTAM_RE. Sellers commonly append "variant" to 1st-print Cover A titles generically. Kept concrete markers (virgin/foil/ratio/1:N/incentive/newsstand/whitman/canadian).
+End-to-end verification on D'Orc #1 (Image 2026 NM 9.4, stored year 2025): 2 comps → 5 comps, price $275.49 → $63.49 with priceNote "PC too low — eBay avg used" and `yearCorrected: true` / `confirmedYear: 2026`.
+
+Session 4/17/2026 (early) — comps hardening, prompt fixes, import race, bulk HOT listing:
 (1) **Comps grade proximity — raw letter grades** (`5279383`): new `parseListingGrade(title)` in `comps.js` recognizes CGC numeric slabs AND raw letter grades (NM/MT, NM+, NM-, NM, VF/NM, VF+, VF-, VF, FN/VF, FN+, FN-, FN, VG/FN, VG+, VG-, VG, GD/VG, GD+, GD-, GD, FR/GD, FR, PR). Filter tolerance widened from ±1.0 to ±1.5. Rejections logged with listing grade + our target.
 (2) **Comps listing dedup** (`5279383`): Filter 5 — after all other filters, dedup on `price|title[0:35].lower()` to catch eBay returning the same row twice in one batch. Query-level dedup (line 472) was already in place — this adds row-level.
 (3) **Newsstand in VARIANT_CONTAM_RE** (`5279383`): regex extended with `newsstand | whitman | price variant | type 1`. Previously only `variant/virgin/foil/ratio/1:N/incentive` — newsstand copies were leaking into non-variant searches and inflating blended avg.
