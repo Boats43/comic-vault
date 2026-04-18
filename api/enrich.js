@@ -833,18 +833,24 @@ export default async function handler(req, res) {
           String(out.price || '0').replace(/[$,]/g, '')
         );
 
-        // Grade-adjusted eBay fallback base for sanity overrides.
+        // Sanity comparison base:
+        //  - On mixed-print / variant / AI-verify fallback, the median is
+        //    already a raw at-market number — do NOT multiply by grade
+        //    multiplier (CLAUDE.md: "Sanity fallback uses raw compsAvg,
+        //    not adjAvg"). Inflating by mult suppresses the guardrail.
+        //  - Otherwise apply grade multiplier so we compare grade-adjusted
+        //    PC price to grade-adjusted market average.
         const mult = out.gradeMultiplier || 1;
-        const adjAvg = compsAvg * mult;
+        const sanityCompsAvg = isMixedFallback ? compsAvg : compsAvg * mult;
 
-        // PC way too high vs market (compare final price to grade-adjusted avg).
+        // PC way too high vs market.
         // Mixed-print / AI-verify fallback: 1.25x (can't trust the median
         // that closely). Silver/Bronze (<1985): 3x. Modern: 2x.
         const bookYear = parseInt(year) || 0;
         const sanityHighMult =
           isMixedFallback ? 1.25 :
           bookYear < 1985 ? 3 : 2;
-        if (pcNum > adjAvg * sanityHighMult) {
+        if (pcNum > sanityCompsAvg * sanityHighMult) {
           sanityFired = true;
           // Use raw compsAvg — eBay listings already reflect market grade.
           out.price = fmtUsd(compsAvg * 1.15);
@@ -853,11 +859,12 @@ export default async function handler(req, res) {
           out.pricingSource = "browse_api";
           out.priceNote = "PC outlier — eBay avg used";
           console.log('[sanity] PC', pcNum,
-            '> adjAvg*' + sanityHighMult, adjAvg * sanityHighMult, '→ fallback compsAvg', compsAvg.toFixed(2));
+            '> sanityCompsAvg*' + sanityHighMult, (sanityCompsAvg * sanityHighMult).toFixed(2),
+            '→ fallback compsAvg', compsAvg.toFixed(2));
         }
 
-        // PC way too low vs market floor (compare final price to grade-adjusted avg)
-        if (!sanityFired && pcNum < adjAvg * 0.5) {
+        // PC way too low vs market floor.
+        if (!sanityFired && pcNum < sanityCompsAvg * 0.5) {
           sanityFired = true;
           // Use raw compsAvg — eBay listings already reflect market grade.
           out.price = fmtUsd(compsAvg);
@@ -866,7 +873,8 @@ export default async function handler(req, res) {
           out.pricingSource = "browse_api";
           out.priceNote = "PC too low — eBay avg used";
           console.log('[sanity] PC', pcNum,
-            '< adjAvg*0.5', adjAvg * 0.5, '→ fallback compsAvg', compsAvg.toFixed(2));
+            '< sanityCompsAvg*0.5', (sanityCompsAvg * 0.5).toFixed(2),
+            '→ fallback compsAvg', compsAvg.toFixed(2));
         }
       }
 
@@ -1096,6 +1104,15 @@ export default async function handler(req, res) {
     if (soldCount >= 2 && verifiedCount >= 2) confidenceLevel = "HIGH";
     else if (verifiedCount >= 2 || soldCount >= 1 || hasPCData) confidenceLevel = "MEDIUM";
     out.confidenceLevel = confidenceLevel;
+
+    // Surface confirmedYear so the client can heal an incorrectly-stored
+    // year on the catalogue item (e.g. Claude vision read 2025 but PC /
+    // ComicVine agree on 2026). Only flag yearCorrected when the new
+    // value actually differs from what the client sent in.
+    if (confirmedYear) {
+      out.confirmedYear = String(confirmedYear);
+      out.yearCorrected = String(confirmedYear) !== String(year || "");
+    }
 
     // Recommended price
     const recommendedPrice =

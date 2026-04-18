@@ -346,7 +346,9 @@ const cleanTitleForSearch = (title) => {
   t = t
     .replace(/\(.*?\)/g, "")
     .replace(/:/g, "")
-    .replace(/['"!?]/g, "")
+    // Replace apostrophes/quotes/!/? with a SPACE (not empty) so "D'Orc"
+    // tokenizes on eBay as "D Orc" rather than collapsing to "DOrc".
+    .replace(/['"!?]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   return t;
@@ -507,207 +509,203 @@ export const fetchComps = async ({
   try {
     let query = "";
     let source = "";
-    let raw = null;
     let attemptUsed = 0;
+    let parsed = [];
+    let reprintFallback = false;
+    let variantFallback = false;
+    let fellBack = false;
 
-    for (const attempt of uniqueAttempts) {
+    // Full filter chain on a single raw result set. Called inside the
+    // attempt loop so we can move on to the next (broader) query when
+    // filters wipe everything — prevents a too-specific query from
+    // matching junk listings that survive into raw but all die in
+    // filters, starving the broader fallback queries.
+    const applyFilterChain = (raw) => {
+      let p = raw.slice().sort(
+        (a, b) => new Date(b.endTime || 0) - new Date(a.endTime || 0)
+      );
+      let _reprintFallback = false;
+      let _variantFallback = false;
+      let _fellBack = false;
+
+      // Filter 0a: issue-number enforcement.
+      if (issueNum) {
+        const before = p.length;
+        p = p.filter((it) => hasIssueNumber(it.title, issueNum));
+        if (p.length < before) {
+          console.log(`[comps] issue# filter removed ${before - p.length}`);
+        }
+      }
+
+      // Filter 0b: title similarity.
+      if (searchTokens.length > 0) {
+        const before = p.length;
+        p = p.filter((it) => hasSufficientTitleOverlap(it.title, searchTokens));
+        if (p.length < before) {
+          console.log(`[comps] title similarity filter removed ${before - p.length}`);
+        }
+      }
+
+      // Filter 1: reprints / facsimiles / anniversary variants / nth printings.
+      const isNthPrint = (variant || '').toLowerCase().match(/\d+(?:st|nd|rd|th)\s*p(?:rint|tg)/);
+      if (!isNthPrint) {
+        const beforeReprint = p;
+        const afterReprint = p.filter((it) => !REPRINT_RE.test(String(it.title || "")));
+        if (afterReprint.length === 0 && beforeReprint.length > 0) {
+          console.log('[comps] reprint fallback: all comps were reprints, keeping all');
+          _reprintFallback = true;
+        } else {
+          p = afterReprint;
+          if (p.length < beforeReprint.length) {
+            console.log(`[comps] reprint filter removed ${beforeReprint.length - p.length}`);
+          }
+        }
+      } else {
+        console.log(`[comps] reprint filter skipped — book is ${variant}`);
+      }
+
+      // Filter 1b: variant contamination.
+      if (!variant) {
+        const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1/i;
+        const beforeVariant = p;
+        const afterVariant = p.filter((it) => !VARIANT_CONTAM_RE.test(String(it.title || "")));
+        if (afterVariant.length === 0 && beforeVariant.length > 0) {
+          console.log('[comps] variant fallback: all comps were variants, keeping all');
+          _variantFallback = true;
+        } else {
+          p = afterVariant;
+          if (p.length < beforeVariant.length) {
+            console.log(`[comps] variant filter removed ${beforeVariant.length - p.length}`);
+          }
+        }
+      }
+
+      // Filter 1c: variant preference.
+      if (variant && p.length > 0) {
+        const varWords = String(variant).toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['variant', 'cover', 'print', 'edition'].includes(w));
+        if (varWords.length > 0) {
+          const variantMatches = p.filter(it => {
+            const t = String(it.title || '').toLowerCase();
+            return varWords.some(w => t.includes(w));
+          });
+          if (variantMatches.length >= 2) {
+            console.log(`[comps] variant preference: ${variantMatches.length}/${p.length} match "${variant}" words [${varWords.join(',')}]`);
+            p = variantMatches;
+          } else {
+            console.log(`[comps] variant preference: only ${variantMatches.length} match — keeping all ${p.length}`);
+          }
+        }
+      }
+
+      // Filter 2: raw-vs-graded title separation.
+      if (rawOnly) {
+        const before = p.length;
+        p = p.filter((it) => !SLAB_RE.test(String(it.title || "")));
+        if (p.length < before) {
+          console.log(`[comps] slab filter removed ${before - p.length}`);
+        }
+      } else if (gradedOnly) {
+        const before = p.length;
+        p = p.filter((it) => GRADED_RE.test(String(it.title || "")));
+        if (p.length < before) {
+          console.log(`[comps] non-graded filter removed ${before - p.length}`);
+        }
+      }
+
+      // Filter 3: ±1.5 grade proximity.
+      if (p.length > 0 && numericTarget != null && !isNaN(numericTarget)) {
+        const filtered = p.filter((it) => {
+          const listingGrade = parseListingGrade(it.title);
+          if (listingGrade === null) return true;
+          const diff = Math.abs(listingGrade - numericTarget);
+          if (diff > 1.5) {
+            console.log('[grade-filter] rejected:',
+              String(it.title || '').slice(0, 50),
+              'grade:', listingGrade,
+              'vs our:', numericTarget);
+            return false;
+          }
+          return true;
+        });
+        if (filtered.length > 0) {
+          p = filtered;
+        } else {
+          _fellBack = true;
+        }
+      }
+
+      // Filter 4: median-based price sanity.
+      {
+        const before = p.length;
+        p = applyPriceSanity(p);
+        if (p.length < before) {
+          console.log(`[comps] price sanity removed ${before - p.length}`);
+        }
+      }
+
+      // Filter 5: dedup near-identical listings.
+      {
+        const before = p.length;
+        const seenListings = new Set();
+        p = p.filter((item) => {
+          const key =
+            String(item.price || '0') + '|' +
+            String(item.title || '').toLowerCase().slice(0, 35);
+          if (seenListings.has(key)) {
+            console.log('[dedup] removed duplicate:',
+              String(item.title || '').slice(0, 40));
+            return false;
+          }
+          seenListings.add(key);
+          return true;
+        });
+        if (p.length < before) {
+          console.log(`[comps] dedup removed ${before - p.length}`);
+        }
+      }
+
+      return {
+        parsed: p,
+        reprintFallback: _reprintFallback,
+        variantFallback: _variantFallback,
+        fellBack: _fellBack,
+      };
+    };
+
+    // Iterate attempts most-specific → least. Break on the FIRST attempt
+    // whose filtered survivors are non-empty — not just on non-empty raw
+    // results, because a too-specific query can match junk that all gets
+    // filtered out, and we want to fall through to the broader queries.
+    for (let i = 0; i < uniqueAttempts.length; i++) {
+      const attempt = uniqueAttempts[i];
       query = attempt.q + (attempt.useGrade ? gradeSuffix : "");
-      // Try Finding API (sold data) first, then Browse.
       source = "finding_api";
-      raw = await tryFindCompleted({ appId, query });
+      let raw = await tryFindCompleted({ appId, query });
       if (!raw || raw.length === 0) {
         source = "browse_api";
         raw = await tryBrowse({ appId, certId, query });
       }
-      const count = raw ? raw.length : 0;
-      console.log(`[comps] attempt ${attempt.n} query="${query}" results=${count}`);
-      if (count > 0) {
+      const rawCount = raw ? raw.length : 0;
+      console.log(`[comps] attempt ${attempt.n} query="${query}" raw=${rawCount}`);
+      if (rawCount === 0) continue;
+
+      const filtered = applyFilterChain(raw);
+      console.log(`[comps] attempt ${attempt.n} post-filter=${filtered.parsed.length}`);
+      if (filtered.parsed.length > 0) {
+        parsed = filtered.parsed;
+        reprintFallback = filtered.reprintFallback;
+        variantFallback = filtered.variantFallback;
+        fellBack = filtered.fellBack;
         attemptUsed = attempt.n;
         break;
       }
-    }
-
-    if (!raw || raw.length === 0) {
-      return { ...emptyComps(query, "no sales"), attemptUsed: 0 };
-    }
-
-    let parsed = raw.sort(
-      (a, b) => new Date(b.endTime || 0) - new Date(a.endTime || 0)
-    );
-
-    // Filter 0a: issue-number enforcement. If we know the issue number,
-    // any listing not containing it is a false positive (wrong book).
-    if (issueNum) {
-      const before = parsed.length;
-      parsed = parsed.filter((it) => hasIssueNumber(it.title, issueNum));
-      if (parsed.length < before) {
-        console.log(
-          `[comps] issue# filter removed ${before - parsed.length}`
-        );
-      }
-    }
-
-    // Filter 0b: title similarity. Require at least 2 of the search title's
-    // 4+ character tokens to appear in the listing title. Kills "Avengers
-    // #171" matches when you were searching "Comic Reader #171".
-    if (searchTokens.length > 0) {
-      const before = parsed.length;
-      parsed = parsed.filter((it) =>
-        hasSufficientTitleOverlap(it.title, searchTokens)
-      );
-      if (parsed.length < before) {
-        console.log(
-          `[comps] title similarity filter removed ${before - parsed.length}`
-        );
-      }
-    }
-
-    // Filter 1: reprints / facsimiles / anniversary variants / nth printings.
-    // Exception: when our book IS a print variant (e.g., "2nd print"),
-    // keep those comps so we price against the correct edition.
-    // Fallback: if the filter removes ALL comps, keep the pre-filter set
-    // and flag reprintFallback so the caller can annotate the price note.
-    const isNthPrint = (variant || '').toLowerCase().match(/\d+(?:st|nd|rd|th)\s*p(?:rint|tg)/);
-    let reprintFallback = false;
-    if (!isNthPrint) {
-      const beforeReprint = parsed;
-      const afterReprint = parsed.filter((it) => !REPRINT_RE.test(String(it.title || "")));
-      if (afterReprint.length === 0 && beforeReprint.length > 0) {
-        console.log('[comps] reprint fallback: all comps were reprints, keeping all');
-        reprintFallback = true;
-      } else {
-        parsed = afterReprint;
-        if (parsed.length < beforeReprint.length) {
-          console.log(
-            `[comps] reprint filter removed ${beforeReprint.length - parsed.length}`
-          );
-        }
-      }
-    } else {
-      console.log(`[comps] reprint filter skipped — book is ${variant}`);
-    }
-
-    // Filter 1b: variant contamination — when NOT searching for a
-    // specific variant, drop listings with variant/foil/ratio/incentive
-    // keywords to prevent inflated copies from skewing the average.
-    // Fallback: if the filter removes ALL comps, keep the pre-filter set.
-    let variantFallback = false;
-    if (!variant) {
-      const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1/i;
-      const beforeVariant = parsed;
-      const afterVariant = parsed.filter((it) => !VARIANT_CONTAM_RE.test(String(it.title || "")));
-      if (afterVariant.length === 0 && beforeVariant.length > 0) {
-        console.log('[comps] variant fallback: all comps were variants, keeping all');
-        variantFallback = true;
-      } else {
-        parsed = afterVariant;
-        if (parsed.length < beforeVariant.length) {
-          console.log(`[comps] variant filter removed ${beforeVariant.length - parsed.length}`);
-        }
-      }
-    }
-
-    // Filter 1c: variant preference — when searching for a specific variant,
-    // prefer comps whose titles mention variant keywords. Requires 2+ matches;
-    // if fewer exist, keep all comps to avoid empty results.
-    if (variant && parsed.length > 0) {
-      const varWords = String(variant).toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['variant', 'cover', 'print', 'edition'].includes(w));
-      if (varWords.length > 0) {
-        const variantMatches = parsed.filter(it => {
-          const t = String(it.title || '').toLowerCase();
-          return varWords.some(w => t.includes(w));
-        });
-        if (variantMatches.length >= 2) {
-          console.log(`[comps] variant preference: ${variantMatches.length}/${parsed.length} match "${variant}" words [${varWords.join(',')}]`);
-          parsed = variantMatches;
-        } else {
-          console.log(`[comps] variant preference: only ${variantMatches.length} match — keeping all ${parsed.length}`);
-        }
-      }
-    }
-
-    // Filter 2: raw-vs-graded title separation.
-    if (rawOnly) {
-      const before = parsed.length;
-      parsed = parsed.filter((it) => !SLAB_RE.test(String(it.title || "")));
-      if (parsed.length < before) {
-        console.log(`[comps] slab filter removed ${before - parsed.length}`);
-      }
-    } else if (gradedOnly) {
-      const before = parsed.length;
-      parsed = parsed.filter((it) => GRADED_RE.test(String(it.title || "")));
-      if (parsed.length < before) {
-        console.log(
-          `[comps] non-graded filter removed ${before - parsed.length}`
-        );
-      }
-    }
-
-    // Filter 3: ±1.5 grade proximity. Applies to both raw and graded searches —
-    // a VF listing should not price a VG book regardless of slab status.
-    let fellBack = false;
-    if (
-      parsed.length > 0 &&
-      numericTarget != null &&
-      !isNaN(numericTarget)
-    ) {
-      const filtered = parsed.filter((it) => {
-        const listingGrade = parseListingGrade(it.title);
-        if (listingGrade === null) return true;
-        const diff = Math.abs(listingGrade - numericTarget);
-        if (diff > 1.5) {
-          console.log('[grade-filter] rejected:',
-            String(it.title || '').slice(0, 50),
-            'grade:', listingGrade,
-            'vs our:', numericTarget);
-          return false;
-        }
-        return true;
-      });
-      if (filtered.length > 0) {
-        parsed = filtered;
-      } else {
-        fellBack = true;
-      }
-    }
-
-    // Filter 4: median-based price sanity. Drop anything > 3x median or
-    // < 25% of median to kill signed/variant outliers (e.g. Stan Lee
-    // signed copies skewing a raw ASM #300 search).
-    {
-      const before = parsed.length;
-      parsed = applyPriceSanity(parsed);
-      if (parsed.length < before) {
-        console.log(
-          `[comps] price sanity removed ${before - parsed.length}`
-        );
-      }
-    }
-
-    // Filter 5: dedup near-identical listings (same price + near-identical
-    // title prefix). Catches eBay returning the same item twice in one batch.
-    {
-      const before = parsed.length;
-      const seenListings = new Set();
-      parsed = parsed.filter((item) => {
-        const key =
-          String(item.price || '0') + '|' +
-          String(item.title || '').toLowerCase().slice(0, 35);
-        if (seenListings.has(key)) {
-          console.log('[dedup] removed duplicate:',
-            String(item.title || '').slice(0, 40));
-          return false;
-        }
-        seenListings.add(key);
-        return true;
-      });
-      if (parsed.length < before) {
-        console.log(`[comps] dedup removed ${before - parsed.length}`);
+      if (i < uniqueAttempts.length - 1) {
+        console.log(`[comps] attempt ${attempt.n} post-filter empty, trying next`);
       }
     }
 
     if (parsed.length === 0) {
-      return { ...emptyComps(query, "filtered empty"), attemptUsed };
+      return { ...emptyComps(query, "no sales after filters"), attemptUsed: 0 };
     }
 
     const priceNums = parsed.map((p) => p.price);

@@ -3697,6 +3697,9 @@ export default function App() {
             setCatalogue((prev) => {
               const cur = prev.find((x) => x.id === item.id);
               if (!cur) return prev;
+              if (enrich.yearCorrected && enrich.confirmedYear) {
+                console.log('[refresh] year healed:', cur.year, '→', enrich.confirmedYear);
+              }
               const updated = {
                 ...cur,
                 comps: enrich.comps || cur.comps,
@@ -3717,6 +3720,7 @@ export default function App() {
                 goCollect: enrich.goCollect || cur.goCollect || null,
                 variant: enrich.variantNote || cur.variant || null,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year,
               };
               putComic(updated).catch(() => {});
               return prev.map((x) => {
@@ -3950,6 +3954,9 @@ export default function App() {
               setCatalogue((prev) => {
                 const cur = prev.find((x) => x.id === savedId);
                 if (!cur) return prev;
+                if (enrich.yearCorrected && enrich.confirmedYear) {
+                  console.log('[scan] year healed:', cur.year, '→', enrich.confirmedYear);
+                }
                 const updated = {
                   ...cur,
                   comps: enrich.comps || cur.comps,
@@ -3968,6 +3975,7 @@ export default function App() {
                   cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
                   variant: enrich.variantNote || cur.variant || null,
                   variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                  year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year,
                 };
                 console.log('[persist] savedId:', savedId,
                   'price:', updated.price,
@@ -4136,6 +4144,9 @@ export default function App() {
             setCatalogue((prev) => {
               const cur = prev.find((x) => x.id === savedId);
               if (!cur) return prev;
+              if (enrich.yearCorrected && enrich.confirmedYear) {
+                console.log('[bulk] year healed:', cur.year, '→', enrich.confirmedYear);
+              }
               const updated = {
                 ...cur,
                 comps: enrich.comps || cur.comps,
@@ -4156,6 +4167,7 @@ export default function App() {
                 goCollect: enrich.goCollect || cur.goCollect || null,
                 variant: enrich.variantNote || cur.variant || null,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year,
               };
               console.log('[persist-bulk] savedId:', savedId,
                 'price:', updated.price);
@@ -4412,6 +4424,9 @@ export default function App() {
     });
     if (!res.ok) throw new Error("Failed to refresh market data");
     const enrich = await res.json();
+    if (enrich.yearCorrected && enrich.confirmedYear) {
+      console.log('[refresh] year healed:', item.year, '→', enrich.confirmedYear);
+    }
     const updated = {
       ...item,
       comps: enrich.comps ?? item.comps,
@@ -4432,6 +4447,7 @@ export default function App() {
       goCollect: enrich.goCollect || item.goCollect || null,
       variant: enrich.variantNote || item.variant || null,
       variantMultiplier: enrich.variantMultiplier || item.variantMultiplier || null,
+      year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : item.year,
     };
     await putComic(updated);
     setCatalogue((prev) => prev.map((x) => {
