@@ -253,10 +253,12 @@ const tryBrowse = async ({ appId, certId, query }) => {
 const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition|2nd\s*p(?:rint|tg)|3rd\s*p(?:rint|tg)|4th\s*p(?:rint|tg)|5th\s*p(?:rint|tg)|second\s*print|third\s*print|fourth\s*print|\bptg\b/i;
 
 // For raw (ungraded) searches, exclude any listing that mentions a grading
-// slab. Require an explicit slab indicator (CGC/CBCS/PGX/slab/graded/
-// universal) followed by an optional letter tier and a numeric grade —
-// bare "9.4" in a raw seller's self-grade no longer triggers the filter.
-const SLAB_RE = /\b(?:cgc|cbcs|pgx|slab|graded|universal)\s*(?:mt|nm\/mt|nm\+|nm-|nm|vf\/nm|vf\+|vf-|vf|fn\/vf|fn\+|fn-|fn|vg\/fn|vg\+|vg-|vg|gd\/vg|gd\+|gd-|gd|fr\/gd|fr|pr)?\s*\d+(?:\.\d+)?/i;
+// slab. Require an explicit slab indicator followed by an optional letter
+// tier and a numeric grade. Bare "9.4" in a raw seller's self-grade no
+// longer triggers the filter. Covers CGC, CBCS, PGX, PSA (Pro Sports
+// Authenticator also grades comics), EGS, HGA, generic "slab/graded/
+// universal", CGC Signature Series, "verified" / "qualified" tier tags.
+const SLAB_RE = /\b(?:cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|signature\s+series|verified|qualified)\s*(?:mt|nm\/mt|nm\+|nm-|nm|vf\/nm|vf\+|vf-|vf|fn\/vf|fn\+|fn-|fn|vg\/fn|vg\+|vg-|vg|gd\/vg|gd\+|gd-|gd|fr\/gd|fr|pr)?\s*\d+(?:\.\d+)?/i;
 
 // For graded searches, require the title to mention CGC or CBCS.
 const GRADED_RE = /\bCGC\b|\bCBCS\b/i;
@@ -604,6 +606,52 @@ export const fetchComps = async ({
             p = variantMatches;
           } else {
             console.log(`[comps] variant preference: only ${variantMatches.length} match — keeping all ${p.length}`);
+          }
+        }
+      }
+
+      // Filter 1d: cover-letter matching. Cover A, B, C, D are separate
+      // books with separate prices — never compare across cover letters.
+      //  - Our book has no variant OR is Cover A OR is just "1st print":
+      //    drop any listing with Cover B/C/D/E+ in the title.
+      //  - Our book has a specific cover letter (B/C/...): keep ONLY
+      //    listings matching that letter; fall back to all if zero match
+      //    (prefer weak comp over no comp).
+      {
+        const ourVariant = String(variant || '').toLowerCase();
+        const ourCoverMatch = ourVariant.match(/\b(?:cover|cvr)\s*([a-z])\b/);
+        const ourCoverLetter = ourCoverMatch ? ourCoverMatch[1].toLowerCase() : null;
+        const isCoverAorStandard =
+          !ourVariant ||
+          ourCoverLetter === 'a' ||
+          ourVariant.includes('1st print') ||
+          ourVariant.includes('first print');
+
+        if (isCoverAorStandard) {
+          const OTHER_COVER_RE = /\bcover\s*[b-z]\b|\bcvr\s*[b-z]\b/i;
+          const before = p.length;
+          p = p.filter((item) => {
+            if (OTHER_COVER_RE.test(String(item.title || ''))) {
+              console.log('[other-cover] rejected:',
+                String(item.title || '').slice(0, 50));
+              return false;
+            }
+            return true;
+          });
+          if (p.length < before) {
+            console.log(`[comps] other-cover filter removed ${before - p.length}`);
+          }
+        } else if (ourCoverLetter) {
+          const OUR_COVER_RE = new RegExp(
+            `\\b(?:cover|cvr)\\s*${ourCoverLetter}\\b`, 'i'
+          );
+          const before = p.length;
+          const matched = p.filter((item) => OUR_COVER_RE.test(String(item.title || '')));
+          if (matched.length > 0) {
+            p = matched;
+            console.log(`[comps] our-cover filter kept ${matched.length}/${before} with cover ${ourCoverLetter}`);
+          } else {
+            console.log(`[comps] our-cover filter: no listings match cover ${ourCoverLetter} — keeping all`);
           }
         }
       }
