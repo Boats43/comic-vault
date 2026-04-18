@@ -200,11 +200,17 @@ const tryFindCompleted = async ({ appId, query }) => {
 const tryBrowse = async ({ appId, certId, query }) => {
   try {
     const token = await getOAuthToken(appId, certId, BROWSE_SCOPE);
+    // Pool expansion:
+    //  - limit=100 (5x the prior 20) so we see a representative slice of
+    //    large markets like modern Image/DC/Marvel #1s.
+    //  - buyingOptions includes AUCTION so real market bids count.
+    //  - sort=bestMatch returns relevance-ranked results instead of
+    //    stale end-of-listing relists that bias the top 20 toward junk.
     const url =
       `${BROWSE_ENDPOINT}?q=${encodeURIComponent(query)}` +
       `&category_ids=${CATEGORY_ID}` +
-      `&filter=${encodeURIComponent("buyingOptions:{FIXED_PRICE}")}` +
-      `&limit=20&sort=endingSoonest`;
+      `&filter=${encodeURIComponent("buyingOptions:{FIXED_PRICE|AUCTION}")}` +
+      `&limit=100&sort=bestMatch`;
     console.log(`[comps] browse url=${url}`);
     const res = await fetch(url, {
       headers: {
@@ -247,8 +253,10 @@ const tryBrowse = async ({ appId, certId, query }) => {
 const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition|2nd\s*p(?:rint|tg)|3rd\s*p(?:rint|tg)|4th\s*p(?:rint|tg)|5th\s*p(?:rint|tg)|second\s*print|third\s*print|fourth\s*print|\bptg\b/i;
 
 // For raw (ungraded) searches, exclude any listing that mentions a grading
-// slab or a common graded tier in the title.
-const SLAB_RE = /\bCGC\b|\bCBCS\b|\bPGX\b|graded|slab|\b9\.8\b|\b9\.6\b|\b9\.4\b/i;
+// slab. Require an explicit slab indicator (CGC/CBCS/PGX/slab/graded/
+// universal) followed by an optional letter tier and a numeric grade —
+// bare "9.4" in a raw seller's self-grade no longer triggers the filter.
+const SLAB_RE = /\b(?:cgc|cbcs|pgx|slab|graded|universal)\s*(?:mt|nm\/mt|nm\+|nm-|nm|vf\/nm|vf\+|vf-|vf|fn\/vf|fn\+|fn-|fn|vg\/fn|vg\+|vg-|vg|gd\/vg|gd\+|gd-|gd|fr\/gd|fr|pr)?\s*\d+(?:\.\d+)?/i;
 
 // For graded searches, require the title to mention CGC or CBCS.
 const GRADED_RE = /\bCGC\b|\bCBCS\b/i;
@@ -564,9 +572,12 @@ export const fetchComps = async ({
         console.log(`[comps] reprint filter skipped — book is ${variant}`);
       }
 
-      // Filter 1b: variant contamination.
+      // Filter 1b: variant contamination. Specific variant types only —
+      // bare "\bvariant\b" used to match "Cover A Variant" listings where
+      // sellers append "variant" as a generic tag on 1st-print Cover A
+      // copies. We now only drop on concrete variant markers.
       if (!variant) {
-        const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1/i;
+        const VARIANT_CONTAM_RE = /\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bcanadian\b/i;
         const beforeVariant = p;
         const afterVariant = p.filter((it) => !VARIANT_CONTAM_RE.test(String(it.title || "")));
         if (afterVariant.length === 0 && beforeVariant.length > 0) {
