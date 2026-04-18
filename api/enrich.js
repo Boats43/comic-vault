@@ -844,12 +844,20 @@ export default async function handler(req, res) {
         const sanityCompsAvg = isMixedFallback ? compsAvg : compsAvg * mult;
 
         // PC way too high vs market.
-        // Mixed-print / AI-verify fallback: 1.25x (can't trust the median
-        // that closely). Silver/Bronze (<1985): 3x. Modern: 2x.
+        //  - Low comp count (<3 verified): 1.25x — can't trust PC with
+        //    only 1-2 comps to validate against.
+        //  - Mixed-print / variant / AI-verify fallback: 1.25x.
+        //  - Golden (<1970): 3x (volatile, thin markets).
+        //  - Silver/Bronze (<1985): 1.75x.
+        //  - Modern (1985+): 1.5x — tight, deep eBay markets.
         const bookYear = parseInt(year) || 0;
+        const lowCompsCount = (rawComps?.count || 0) < 3;
         const sanityHighMult =
+          lowCompsCount ? 1.25 :
           isMixedFallback ? 1.25 :
-          bookYear < 1985 ? 3 : 2;
+          bookYear < 1970 ? 3 :
+          bookYear < 1985 ? 1.75 :
+          1.5;
         if (pcNum > sanityCompsAvg * sanityHighMult) {
           sanityFired = true;
           // Use raw compsAvg — eBay listings already reflect market grade.
