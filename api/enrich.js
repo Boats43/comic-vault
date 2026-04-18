@@ -904,6 +904,10 @@ export default async function handler(req, res) {
       if (rawComps?.reprintFallback) out.reprintFallback = true;
       if (rawComps?.variantFallback) out.variantFallback = true;
       if (rawComps?.aiVerifyFallback) out.aiVerifyFallback = true;
+      if (rawComps?.artistFallback) {
+        out.artistFallback = true;
+        out.compBasis = rawComps.compBasis || 'generic-variant-fallback';
+      }
 
       // Defect penalty: reduce price if Claude detected a significant defect.
       if (req.body.defectPenalty) {
@@ -941,6 +945,15 @@ export default async function handler(req, res) {
       out.priceLow = fmtUsd(browsePrice * 0.75);
       out.priceHigh = fmtUsd(browsePrice * 1.25);
       out.pricingSource = "browse_api";
+    }
+
+    // Surface artistFallback / compBasis for browse_api-only books too
+    // (the priceCharting branch already sets these, but not the
+    // browse-only branch). Safe to set unconditionally — no-op when the
+    // flag is already true.
+    if (rawComps?.artistFallback && !out.artistFallback) {
+      out.artistFallback = true;
+      out.compBasis = rawComps.compBasis || 'generic-variant-fallback';
     }
 
     // Snapshot pricing source BEFORE floor guard / variant / key blocks.

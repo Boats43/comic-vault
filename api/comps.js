@@ -534,6 +534,46 @@ export const fetchComps = async ({
     console.log('[comps] Dell Four Color aliases added:', fcAliases);
   }
 
+  // Artist-specific variant priority: when the variant names a known
+  // cover artist (Skan virgin, Rapoza virgin, Momoko, etc.), try the
+  // EXACT artist+variant comp before falling through to generic-virgin /
+  // variantKeyword queries. Other artist-virgin copies trade at very
+  // different prices than ours, so mixing them poisons the average.
+  // Falls through gracefully when nothing matches — caller flags
+  // artistFallback so the UI can warn the user.
+  const ARTIST_PATTERNS = [
+    /skan/i, /rapoza/i, /quash/i, /momoko/i, /ross/i, /adams/i,
+    /kirkham/i, /bean/i, /andolfo/i, /browne/i, /forstner/i,
+    /howard/i, /corona/i, /stegman/i, /ottley/i,
+  ];
+  let artistName = null;
+  if (variant) {
+    for (const pattern of ARTIST_PATTERNS) {
+      const m = String(variant).match(pattern);
+      if (m) {
+        artistName = m[0];
+        const isVirgin = /virgin/i.test(variant);
+        const artistParts = [
+          cleanTitle,
+          iss ? `#${iss}` : null,
+          artistName,
+          isVirgin ? 'virgin' : null,
+          yr,
+          pubKeyword.trim(),
+        ].filter(Boolean);
+        const artistQuery = artistParts.join(' ').trim().slice(0, 100);
+        attempts.unshift({
+          q: artistQuery,
+          n: -1,
+          label: 'artist-specific',
+          useGrade: true,
+        });
+        console.log('[comps] artist-specific attempt:', artistQuery);
+        break;
+      }
+    }
+  }
+
   // Deduplicate (e.g. if no year was provided, attempts 1 & 2 are identical).
   const seen = new Set();
   const uniqueAttempts = attempts.filter(({ q }) => {
@@ -547,6 +587,7 @@ export const fetchComps = async ({
     let query = "";
     let source = "";
     let attemptUsed = 0;
+    let attemptLabel = null;
     let parsed = [];
     let reprintFallback = false;
     let variantFallback = false;
@@ -783,6 +824,7 @@ export const fetchComps = async ({
         variantFallback = filtered.variantFallback;
         fellBack = filtered.fellBack;
         attemptUsed = attempt.n;
+        attemptLabel = attempt.label || null;
         break;
       }
       if (i < uniqueAttempts.length - 1) {
@@ -815,6 +857,14 @@ export const fetchComps = async ({
       };
     });
 
+    // Artist fallback: we queued an artist-specific attempt but the
+    // winning query doesn't actually contain the artist name — i.e. we
+    // fell through to a generic virgin/variant comp set.
+    const winningQuery = String(query || '').toLowerCase();
+    const artistFallback =
+      !!artistName &&
+      !winningQuery.includes(String(artistName).toLowerCase());
+
     return {
       count: parsed.length,
       prices: parsed,
@@ -831,7 +881,10 @@ export const fetchComps = async ({
       fellBack,
       reprintFallback,
       variantFallback,
+      artistFallback,
+      compBasis: artistFallback ? 'generic-variant-fallback' : null,
       attemptUsed,
+      attemptLabel,
       source,
     };
   } catch (err) {
