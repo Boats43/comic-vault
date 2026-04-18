@@ -683,6 +683,15 @@ export default async function handler(req, res) {
           ? Math.max(...verifiedPrices)
           : null;
 
+        // When AI verify rejects every checked listing but raw comps
+        // existed, flag aiVerifyFallback so the sanity check can price
+        // against the median of the raw prices instead of letting PC win
+        // unchecked. Same treatment as reprintFallback / variantFallback.
+        const aiVerifyFallback =
+          verifiedCount === 0 &&
+          Array.isArray(rawComps.prices) &&
+          rawComps.prices.length > 0;
+
         rawComps = {
           ...rawComps,
           recentSales: verifiedSales,
@@ -695,6 +704,7 @@ export default async function handler(req, res) {
           highestFormatted: fmtUsd(verifiedHigh),
           verifiedByAI: true,
           verificationRemoved: removed,
+          aiVerifyFallback,
         };
         console.log(
           `[enrich] AI verify: kept ${verifiedCount}/${verifyCount} (removed ${removed})`
@@ -702,6 +712,10 @@ export default async function handler(req, res) {
         if (removed > 0) {
           const rejectedTitles = titlesToVerify.filter((_, i) => !keepFlags[i]).slice(0, 3);
           console.log('[verify] removed titles:', rejectedTitles);
+        }
+        if (aiVerifyFallback) {
+          console.log('[verify] fallback — 0 verified of', verifyCount,
+            ', will use median of', rawComps.prices.length, 'raw comps');
         }
       }
     }
@@ -797,9 +811,14 @@ export default async function handler(req, res) {
       out.pricingSource = "pricecharting";
 
       // Sanity check: compare PC price against blended/eBay comps average.
-      // When comps fell back to mixed reprints/variants, the mean is
-      // meaningless — use the median of raw comp prices instead.
-      const isMixedFallback = !!(rawComps?.reprintFallback || rawComps?.variantFallback);
+      // When comps fell back to mixed reprints/variants, OR when AI verify
+      // rejected every checked listing, the mean is meaningless — use
+      // the median of raw comp prices instead.
+      const isMixedFallback = !!(
+        rawComps?.reprintFallback ||
+        rawComps?.variantFallback ||
+        rawComps?.aiVerifyFallback
+      );
       const fallbackMedian = isMixedFallback && Array.isArray(rawComps?.prices)
         ? median(rawComps.prices.map((p) => p.price).filter((p) => p > 0))
         : null;
@@ -819,11 +838,11 @@ export default async function handler(req, res) {
         const adjAvg = compsAvg * mult;
 
         // PC way too high vs market (compare final price to grade-adjusted avg).
-        // Mixed-print fallback: 1.25x (can't trust the median that closely).
-        // Silver/Bronze (<1985): 3x. Modern: 2x.
+        // Mixed-print / AI-verify fallback: 1.25x (can't trust the median
+        // that closely). Silver/Bronze (<1985): 3x. Modern: 2x.
         const bookYear = parseInt(year) || 0;
         const sanityHighMult =
-          rawComps?.reprintFallback ? 1.25 :
+          isMixedFallback ? 1.25 :
           bookYear < 1985 ? 3 : 2;
         if (pcNum > adjAvg * sanityHighMult) {
           sanityFired = true;
@@ -857,17 +876,20 @@ export default async function handler(req, res) {
         out.priceNote = null;
       }
 
-      // Annotate when the comps set contained only reprints or only variants
-      // and we kept them as a fallback — signals that the avg is imperfect.
+      // Annotate when the comps set contained only reprints, only variants,
+      // or was wiped by AI verify — signals that the avg is imperfect.
       if (out.pricingSource === "browse_api") {
         if (rawComps?.reprintFallback) {
           out.priceNote = "eBay avg (mixed prints)";
         } else if (rawComps?.variantFallback) {
           out.priceNote = "eBay avg (mixed variants)";
+        } else if (rawComps?.aiVerifyFallback) {
+          out.priceNote = "eBay median (no verified comps)";
         }
       }
       if (rawComps?.reprintFallback) out.reprintFallback = true;
       if (rawComps?.variantFallback) out.variantFallback = true;
+      if (rawComps?.aiVerifyFallback) out.aiVerifyFallback = true;
 
       // Defect penalty: reduce price if Claude detected a significant defect.
       if (req.body.defectPenalty) {
