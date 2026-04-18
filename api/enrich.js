@@ -833,15 +833,13 @@ export default async function handler(req, res) {
           String(out.price || '0').replace(/[$,]/g, '')
         );
 
-        // Sanity comparison base:
-        //  - On mixed-print / variant / AI-verify fallback, the median is
-        //    already a raw at-market number — do NOT multiply by grade
-        //    multiplier (CLAUDE.md: "Sanity fallback uses raw compsAvg,
-        //    not adjAvg"). Inflating by mult suppresses the guardrail.
-        //  - Otherwise apply grade multiplier so we compare grade-adjusted
-        //    PC price to grade-adjusted market average.
-        const mult = out.gradeMultiplier || 1;
-        const sanityCompsAvg = isMixedFallback ? compsAvg : compsAvg * mult;
+        // Sanity comparison base: raw compsAvg in EVERY case. eBay listings
+        // already reflect market grade (sellers grade in the title), so
+        // multiplying by out.gradeMultiplier double-counts the grade
+        // adjustment — both pcNum (grade-adjusted PC base) and compsAvg
+        // (at-grade market) are already at the target grade.
+        // CLAUDE.md: "Sanity fallback uses raw compsAvg, not adjAvg."
+        const sanityCompsAvg = compsAvg;
 
         // PC way too high vs market.
         //  - Low comp count (<3 verified): 1.25x — can't trust PC with

@@ -58,7 +58,7 @@ Optional: `GOCOLLECT_API_KEY` (CGC FMV — pending approval ticket #019483)
 - eBay listing title includes variant (newsstand, gold, 2nd print, etc.) between issue and grade — filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot).
 - Variant short keywords only in comps query attempts 1-2. Attempt 0 uses FULL variant string (e.g., "Paco Medina Thing variant") for most specific eBay search.
 - Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
-- Sanity comparison base: `sanityCompsAvg = isMixedFallback ? compsAvg : compsAvg × gradeMultiplier`. Mixed fallback (reprint/variant/aiVerify) uses raw compsAvg — median already reflects market.
+- Sanity comparison base: `sanityCompsAvg = compsAvg` — ALWAYS raw. eBay listings already reflect market grade (sellers grade in title), so multiplying by gradeMultiplier would double-count. Both sides of the comparison (pcNum = PC base × mult, compsAvg = at-grade market) are already at-grade.
 - Sanity thresholds high: `lowCompsCount<3 || isMixedFallback` → 1.25x; Golden <1970 → 3x; Silver/Bronze <1985 → 1.75x; Modern ≥1985 → 1.5x. Low: 0.5x always.
 - Sanity check input preference: `fallbackMedian || blendedAvg || compsFromEbay?.average`. On any fallback flag (reprint/variant/aiVerify) uses median of `rawComps.prices` instead of mean.
 - aiVerifyFallback fires when AI verify rejects every checked listing but raw comps existed — switches sanity to median of raw prices + 1.25x threshold.
