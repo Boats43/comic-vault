@@ -25,6 +25,18 @@ const fmtUsd = (n) =>
     ? null
     : `$${n.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
 
+// Median of a numeric array. Used for mixed-print/variant comp fallbacks
+// where the mean is meaningless (e.g. 1st prints @ $200 mixed with 4th
+// prints @ $3 averages to $100). Median filters outlier prints better.
+const median = (arr) => {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
 // Fast, text-only AI verification pass. Asks Claude whether each eBay
 // listing title actually matches the identified comic. Returns an array
 // of booleans in the same order as `listings`, or null on any failure so
@@ -785,7 +797,18 @@ export default async function handler(req, res) {
       out.pricingSource = "pricecharting";
 
       // Sanity check: compare PC price against blended/eBay comps average.
-      const compsAvg = blendedAvg || compsFromEbay?.average;
+      // When comps fell back to mixed reprints/variants, the mean is
+      // meaningless — use the median of raw comp prices instead.
+      const isMixedFallback = !!(rawComps?.reprintFallback || rawComps?.variantFallback);
+      const fallbackMedian = isMixedFallback && Array.isArray(rawComps?.prices)
+        ? median(rawComps.prices.map((p) => p.price).filter((p) => p > 0))
+        : null;
+      if (fallbackMedian) {
+        console.log('[sanity] mixed fallback — using median',
+          fallbackMedian.toFixed(2), 'instead of mean',
+          (blendedAvg || compsFromEbay?.average || 0).toFixed(2));
+      }
+      const compsAvg = fallbackMedian || blendedAvg || compsFromEbay?.average;
       if (compsAvg && compsAvg > 5) {
         const pcNum = parseFloat(
           String(out.price || '0').replace(/[$,]/g, '')
@@ -796,8 +819,12 @@ export default async function handler(req, res) {
         const adjAvg = compsAvg * mult;
 
         // PC way too high vs market (compare final price to grade-adjusted avg).
-        // Modern books (1985+) use a tighter 2x threshold; older books keep 3x.
-        const sanityHighMult = (parseInt(year) >= 1985) ? 2 : 3;
+        // Mixed-print fallback: 1.25x (can't trust the median that closely).
+        // Silver/Bronze (<1985): 3x. Modern: 2x.
+        const bookYear = parseInt(year) || 0;
+        const sanityHighMult =
+          rawComps?.reprintFallback ? 1.25 :
+          bookYear < 1985 ? 3 : 2;
         if (pcNum > adjAvg * sanityHighMult) {
           sanityFired = true;
           // Use raw compsAvg — eBay listings already reflect market grade.
@@ -839,6 +866,8 @@ export default async function handler(req, res) {
           out.priceNote = "eBay avg (mixed variants)";
         }
       }
+      if (rawComps?.reprintFallback) out.reprintFallback = true;
+      if (rawComps?.variantFallback) out.variantFallback = true;
 
       // Defect penalty: reduce price if Claude detected a significant defect.
       if (req.body.defectPenalty) {
