@@ -507,6 +507,33 @@ export const fetchComps = async ({
     }
   }
 
+  // Dell Four Color alias: Dell's "Four Color" anthology ran issues 1-1354
+  // (1939-1962), each issue a different character. Sellers list these
+  // three ways — (a) "Chilly Willy #1017" (already covered above), (b)
+  // "Four Color #1017 Chilly Willy", (c) "Dell Four Color 1017". Add
+  // explicit aliases for (b) and (c) so comps pick up both listing styles.
+  // Guard on publisher="Dell" + issue > 100 to avoid polluting unrelated
+  // Dell titles.
+  const isDellFourColor =
+    pubClean &&
+    /dell/i.test(pubClean) &&
+    iss &&
+    parseInt(iss, 10) > 100;
+  if (isDellFourColor) {
+    // Let alias-style listings (which may omit the character name) survive
+    // the title-similarity filter by seeding "four"/"color" tokens.
+    if (!searchTokens.includes('four')) searchTokens.push('four');
+    if (!searchTokens.includes('color')) searchTokens.push('color');
+    const fcAliases = [];
+    if (yr) fcAliases.push(`Four Color #${iss} ${cleanTitle} ${yr}`);
+    fcAliases.push(`Four Color #${iss} ${cleanTitle}`);
+    fcAliases.push(`Dell Four Color ${iss}`);
+    for (const q of fcAliases) {
+      attempts.push({ q: q.trim().slice(0, 100), n: attempts.length, useGrade: true });
+    }
+    console.log('[comps] Dell Four Color aliases added:', fcAliases);
+  }
+
   // Deduplicate (e.g. if no year was provided, attempts 1 & 2 are identical).
   const seen = new Set();
   const uniqueAttempts = attempts.filter(({ q }) => {
