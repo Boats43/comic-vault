@@ -37,7 +37,8 @@
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('cgcVerified:', d.get\\('cgcVerified'\\), 'label:', d.get\\('cgcLabel'\\), 'certNumber:', d.get\\('certNumber'\\), 'title:', d.get\\('title'\\)\\); print\\('price:', d.get\\('price'\\)\\)\")",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('price:', d.get\\('price'\\)\\); print\\('variant:', d.get\\('variantNote'\\)\\); print\\('multiplier:', d.get\\('variantMultiplier'\\)\\)\")",
       "Bash(git commit *)",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "WebFetch(domain:www.mycomicshop.com)"
     ]
   }
 }

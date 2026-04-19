@@ -318,29 +318,53 @@ const extractIssueNumber = (title) => {
   return m ? m[1] : null;
 };
 
-// Tokenize a title into lowercase words of 4+ characters, dropping the
-// issue-number hash fragment since issue# is matched separately.
-const tokenizeTitle = (title) =>
-  String(title || "")
-    .toLowerCase()
-    .replace(/#\s*\d+/g, "")
-    .match(/[a-z]{4,}/g) || [];
+// Stop-words excluded from title-similarity tokens. These all appear so
+// commonly across comic listings (publisher names, format words, common
+// English particles) that matching on them produces noise. They stay in
+// the eBay search query — only the similarity-match step ignores them.
+// Without this filter "Tip Top Comics" tokenizes to ["comics"] only,
+// which matches every comic listing on eBay.
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'of', 'and', 'or',
+  'in', 'on', 'at', 'to', 'for', 'with',
+  'comic', 'comics', 'comicbook', 'issue', 'volume', 'vol',
+  'marvel', 'dc', 'image', 'dark', 'horse', 'idw',
+]);
+const MIN_TOKEN_LEN = 2;
 
-// Require at least 2 of the search tokens to appear in the listing title
-// (case-insensitive substring). Falls back to "all tokens must match"
-// when the search title has fewer than 2 scorable tokens.
+// Tokenize a title for similarity matching. Lowercases, strips the issue#
+// hash, splits on non-alphanumerics, drops stop-words and pure-digit
+// tokens (years, raw numbers carry no series-name signal).
+const tokenizeTitle = (title) => {
+  const words = String(title || "")
+    .toLowerCase()
+    .replace(/#\s*\d+/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((w) =>
+      w.length >= MIN_TOKEN_LEN &&
+      !STOP_WORDS.has(w) &&
+      !/^\d+$/.test(w)
+    );
+  return words;
+};
+
+// Require ≥50% of our non-stop-word tokens to appear in the listing's
+// non-stop-word tokens. "Tip Top Comics" → ["tip","top"] (comics is
+// stop-word), Dell listing "Tip Top #219 Dell" → ["tip","top","dell"]
+// → 2/2 overlap → match. Fantastic Four → ["fantastic","four"] →
+// 0/2 overlap with ["tip","top"] → reject. When our tokens are all
+// stop-words (e.g. "Dark Horse Comics") we have no signal — return true
+// and let other filters (issue#, slab, etc.) handle it.
 const hasSufficientTitleOverlap = (listingTitle, searchTokens) => {
   if (!searchTokens || searchTokens.length === 0) return true;
-  const listing = String(listingTitle || "").toLowerCase();
-  const threshold = Math.min(2, searchTokens.length);
-  let hits = 0;
+  const listingSet = new Set(tokenizeTitle(listingTitle));
+  if (listingSet.size === 0) return false;
+  let matches = 0;
   for (const t of searchTokens) {
-    if (listing.includes(t)) {
-      hits++;
-      if (hits >= threshold) return true;
-    }
+    if (listingSet.has(t)) matches++;
   }
-  return false;
+  return matches / searchTokens.length >= 0.5;
 };
 
 // Listing must contain the issue number as "#N" or as a standalone N
