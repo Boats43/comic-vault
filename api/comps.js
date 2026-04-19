@@ -430,6 +430,95 @@ const buildKeywords = (title, { issue, isGraded, numericGrade, year } = {}) => {
   return parts.filter(Boolean).join(" ").trim();
 };
 
+// computeMatchConfidence — DISPLAY-only signal that scores how well our
+// final comp set matches the book we're pricing. NEVER influences the
+// pricing math chain (gradeMult / sanity / floor / variant / key); the
+// score is surfaced via out.matchConfidence so the UI can warn the user
+// when comps are loose substitutes rather than exact matches.
+//
+// Per-comp checklist (compMax floats based on which fields the caller
+// supplied — variant/creator add max only when present):
+//   title presence (substring or ≥50% token overlap) +20
+//   issue#                                            +20
+//   year                                              +15
+//   variant first-15-chars                            +20 (only if variant)
+//   creator                                           +15 (only if creator)
+//   print match (1st-print vs reprint alignment)      +10
+//
+// Final score = round(avg(perCompScore/perCompMax) * 100). Tier:
+//   ≥85 HIGH, ≥65 MEDIUM, else LOW.
+export const computeMatchConfidence = (comps, opts = {}) => {
+  if (!Array.isArray(comps) || comps.length === 0) {
+    return { score: 0, tier: 'LOW' };
+  }
+  const { title, issue, year, variant, creator } = opts;
+  const titleLower = String(title || '').toLowerCase().trim();
+  const issueStr = issue != null ? String(issue).trim() : '';
+  const variantLower = variant ? String(variant).toLowerCase() : '';
+  const creatorLower = creator ? String(creator).toLowerCase().trim() : '';
+  const escIssue = issueStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const issueRe = escIssue ? new RegExp(`#?${escIssue}\\b`) : null;
+  const yearRe = year ? new RegExp(`\\b${String(year)}\\b`) : null;
+  const our1stPrint = !variantLower.includes('print');
+  const reprintRe = /\b(?:2nd|3rd|4th|second|third|fourth)\s*print/i;
+  const ourTitleTokens = titleLower
+    ? titleLower.split(/\s+/).filter((w) => w.length >= 3)
+    : [];
+
+  let totalNorm = 0;
+  for (const comp of comps) {
+    const t = String(comp.title || '').toLowerCase();
+    let s = 0;
+    let max = 0;
+
+    // Title
+    max += 20;
+    if (titleLower && t.includes(titleLower)) {
+      s += 20;
+    } else if (ourTitleTokens.length > 0) {
+      const matched = ourTitleTokens.filter((w) => t.includes(w)).length;
+      if (matched / ourTitleTokens.length >= 0.5) s += 14; // partial credit
+    }
+
+    // Issue#
+    if (issueRe) {
+      max += 20;
+      if (issueRe.test(t)) s += 20;
+    }
+
+    // Year
+    if (yearRe) {
+      max += 15;
+      if (yearRe.test(t)) s += 15;
+    }
+
+    // Variant (first 15 chars to avoid over-strict full-string match)
+    if (variantLower) {
+      max += 20;
+      if (t.includes(variantLower.slice(0, 15))) s += 20;
+    }
+
+    // Creator
+    if (creatorLower && creatorLower.length >= 3) {
+      max += 15;
+      if (t.includes(creatorLower)) s += 15;
+    }
+
+    // Print alignment
+    max += 10;
+    const isReprint = reprintRe.test(t);
+    if (our1stPrint && !isReprint) s += 10;
+    else if (!our1stPrint && isReprint) s += 10;
+
+    totalNorm += max > 0 ? s / max : 0;
+  }
+
+  const avg = totalNorm / comps.length;
+  const score = Math.round(avg * 100);
+  const tier = avg >= 0.85 ? 'HIGH' : avg >= 0.65 ? 'MEDIUM' : 'LOW';
+  return { score, tier };
+};
+
 // Core fetcher — exported so api/grade.js can reuse it without an HTTP hop.
 // Always resolves (never throws): failures return an empty comps object so
 // the grade flow can fall through to the AI estimate path.

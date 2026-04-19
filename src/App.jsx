@@ -1961,13 +1961,23 @@ function CollectionDetail({
             )}
           </div>
           {(() => {
+            // Prefer per-comp matchConfidence tier from /api/enrich when present
+            // (scores how well each comp matches our title/issue/year/variant/
+            // creator). Falls back to the legacy count-based heuristic.
+            const mcTier = item.matchConfidence?.tier;
+            const mcScore = item.matchConfidence?.score;
             const cc = item.comps?.count || 0;
             const sc = Array.isArray(item.soldComps) ? item.soldComps.length : 0;
             const hasPriceData = item?.pricingSource === "pricecharting";
-            const level = sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW";
-            const bg = level === "HIGH" ? "rgba(22,163,106,0.2)" : level === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(245,158,11,0.2)";
-            const fg = level === "HIGH" ? "#16a34a" : level === "MEDIUM" ? "#d4af37" : "#f59e0b";
-            const label = level === "HIGH" ? "HIGH ✓" : level === "MEDIUM" ? "MED ~" : "AI EST";
+            const level = mcTier
+              || (sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW");
+            const bg = level === "HIGH" ? "rgba(22,163,106,0.2)" : level === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(220,38,38,0.2)";
+            const fg = level === "HIGH" ? "#16a34a" : level === "MEDIUM" ? "#d4af37" : "#dc2626";
+            const label = level === "HIGH"
+              ? `✓ Verified${mcScore != null ? ` ${mcScore}` : ""}`
+              : level === "MEDIUM"
+                ? `~ Similar${mcScore != null ? ` ${mcScore}` : ""}`
+                : `⚠ Estimate${mcScore != null ? ` ${mcScore}` : ""}`;
             return (
               <span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, fontWeight: 700, background: bg, color: fg, alignSelf: "flex-end", marginBottom: 4 }}>
                 {label}
@@ -1975,6 +1985,24 @@ function CollectionDetail({
             );
           })()}
         </div>
+
+        {item.matchConfidence?.tier === "LOW" && (
+          <div style={{
+            marginTop: 10,
+            padding: "10px 12px",
+            border: "1px solid rgba(220,38,38,0.4)",
+            borderRadius: 8,
+            background: "rgba(220,38,38,0.08)",
+            color: "#fca5a5",
+            fontSize: 13,
+            lineHeight: 1.4,
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 2, color: "#dc2626" }}>
+              ⚠ {item.matchConfidence.displayMessage || "Exact match not found — AI estimate"}
+            </div>
+            These are SIMILAR listings, not exact matches. Verify before listing.
+          </div>
+        )}
 
         {hasComps && (
           <div
@@ -3694,6 +3722,15 @@ export default function App() {
           .then((r) => (r.ok ? r.json() : null))
           .then((enrich) => {
             if (cancelled || !enrich) return;
+            // Gate: when matchConfidence is LOW, auto-refresh must NOT
+            // overwrite price/comps fields — comps are loose substitutes,
+            // not exact matches. Non-price metadata (matchConfidence, year
+            // heal, comicVine, cgcVerified, goCollect) still flows so the
+            // UI can render the warning and require a manual refresh.
+            const lowMatch = enrich.matchConfidence?.tier === "LOW";
+            if (lowMatch) {
+              console.log('[refresh] LOW match confidence — skipping price update for', item.title);
+            }
             setCatalogue((prev) => {
               const cur = prev.find((x) => x.id === item.id);
               if (!cur) return prev;
@@ -3702,16 +3739,17 @@ export default function App() {
               }
               const updated = {
                 ...cur,
-                comps: enrich.comps || cur.comps,
-                price: enrich.price || cur.price,
-                priceLow: enrich.priceLow || cur.priceLow,
-                priceHigh: enrich.priceHigh || cur.priceHigh,
+                comps: lowMatch ? cur.comps : (enrich.comps || cur.comps),
+                price: lowMatch ? cur.price : (enrich.price || cur.price),
+                priceLow: lowMatch ? cur.priceLow : (enrich.priceLow || cur.priceLow),
+                priceHigh: lowMatch ? cur.priceHigh : (enrich.priceHigh || cur.priceHigh),
                 keyIssue: enrich.keyIssue || cur.keyIssue,
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
-                pricingSource: enrich.pricingSource || null,
-                priceNote: enrich.priceNote || null,
-                gradeMultiplier: enrich.gradeMultiplier || null,
+                matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
+                pricingSource: lowMatch ? cur.pricingSource : (enrich.pricingSource || null),
+                priceNote: lowMatch ? cur.priceNote : (enrich.priceNote || null),
+                gradeMultiplier: lowMatch ? cur.gradeMultiplier : (enrich.gradeMultiplier || null),
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
                 comicVine: enrich.comicVine || cur.comicVine || null,
                 certNumber: enrich.certNumber || cur.certNumber || null,
@@ -3966,6 +4004,7 @@ export default function App() {
                   keyIssue: enrich.keyIssue || cur.keyIssue,
                   soldComps: enrich.soldComps || cur.soldComps || [],
                   confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
+                  matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                   pricingSource: enrich.pricingSource || null,
                   priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
@@ -4156,6 +4195,7 @@ export default function App() {
                 keyIssue: enrich.keyIssue || cur.keyIssue,
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
+                matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 pricingSource: enrich.pricingSource || null,
                 priceNote: enrich.priceNote || null,
                 gradeMultiplier: enrich.gradeMultiplier || null,
@@ -4436,6 +4476,7 @@ export default function App() {
       keyIssue: enrich.keyIssue || item.keyIssue,
       soldComps: enrich.soldComps || item.soldComps || [],
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
+      matchConfidence: enrich.matchConfidence || item.matchConfidence || null,
       pricingSource: enrich.pricingSource ?? null,
       priceNote: enrich.priceNote || null,
       gradeMultiplier: enrich.gradeMultiplier || null,

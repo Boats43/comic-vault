@@ -10,7 +10,7 @@
 //             priceHigh?, keyIssue?, identifiedBy? }
 
 import Anthropic from "@anthropic-ai/sdk";
-import { fetchComps, getOAuthToken } from "./comps.js";
+import { fetchComps, getOAuthToken, computeMatchConfidence } from "./comps.js";
 import { fetchSold } from "./sold.js";
 import { lookupCGC } from "./cgc-lookup.js";
 import { lookupGoCollect } from "./gocollect.js";
@@ -1153,6 +1153,35 @@ export default async function handler(req, res) {
             ? rawComps.verificationRemoved
             : 0,
       };
+    }
+
+    // matchConfidence — DISPLAY-only signal scoring how exact our final
+    // (post-AI-verify) comp set matches the book. Does NOT influence the
+    // pricing math chain. Sourced from the same prices array the UI shows.
+    // Falls back to {0, LOW} when comps is empty so the client can render
+    // an "AI estimate" badge without special-casing nulls.
+    {
+      const compTitlesForScore =
+        Array.isArray(rawComps?.recentSales) && rawComps.recentSales.length > 0
+          ? rawComps.recentSales
+          : Array.isArray(rawComps?.prices)
+          ? rawComps.prices
+          : [];
+      const mc = computeMatchConfidence(compTitlesForScore, {
+        title: req.body.title || title,
+        issue: correctedIssue,
+        year: confirmedYear,
+        variant: req.body.variant || null,
+        creator: req.body.creator || null,
+      });
+      const displayMessage =
+        mc.tier === 'HIGH'
+          ? 'Verified exact match'
+          : mc.tier === 'MEDIUM'
+          ? 'Similar matches found'
+          : 'Exact match not found — AI estimate';
+      out.matchConfidence = { ...mc, displayMessage };
+      console.log(`[match-conf] score=${mc.score} tier=${mc.tier} comps=${compTitlesForScore.length}`);
     }
 
     // Sold comps from eBay completed listings (filtered by issue#)
