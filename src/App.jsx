@@ -3918,7 +3918,7 @@ export default function App() {
   }, []);
 
   const gradeBlob = useCallback(
-    async (blob, { save = false } = {}) => {
+    async (blob, { save = false, buyerMode = false } = {}) => {
       setError(null);
       setResult(null);
       setEnriching(false);
@@ -3930,10 +3930,18 @@ export default function App() {
         // JPEG quality 0.85. Reuses the same canvas helper the catalogue
         // thumbnail path uses.
         const b64 = await makeThumbnail(rawB64, 1200, 0.85);
+        // Buyer mode: route grade through the watch-mode Sonnet pipeline
+        // (pass-1 fast ID, pass-2 self-correct, pass-3 Opus escalate only
+        // if still low confidence). ~5x faster on the common case where
+        // the book is clearly identifiable. Scan tab stays on the full
+        // Opus standard path for condition-report accuracy.
+        const gradeBody = buyerMode
+          ? { images: [b64], source: 'watch' }
+          : { images: [b64] };
         const res = await fetch("/api/grade", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ images: [b64] }),
+          body: JSON.stringify(gradeBody),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed to grade");
@@ -3972,25 +3980,31 @@ export default function App() {
         const savedId = (save && !isDuplicate) ? await addToCatalogue({ ...data, issue: issueNum }, b64) : null;
 
         // Fire-and-forget enrichment pass — merges into the card when ready.
+        // Buyer mode skips `images` to bypass Ximilar visual search (saves
+        // ~500-800ms on the enrich critical path). Price + comps still fire
+        // (PriceCharting, ComicVine, eBay browse/sold, GoCollect) — we just
+        // trust the grade-pass identification in live-buying context.
         setEnriching(true);
+        const enrichBody = {
+          title: data.title,
+          issue: issueNum,
+          grade: data.grade,
+          isGraded: data.isGraded,
+          numericGrade: data.numericGrade,
+          year: data.year,
+          publisher: data.publisher,
+          confidence: data.confidence,
+          defectPenalty: data.defectPenalty || null,
+          certNumber: data.certNumber || null,
+          variant: data.variant || null,
+          keyIssue: data.keyIssue || null,
+          creator: data.creator || null,
+        };
+        if (!buyerMode) enrichBody.images = [b64];
         fetch("/api/enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: data.title,
-            issue: issueNum,
-            grade: data.grade,
-            isGraded: data.isGraded,
-            numericGrade: data.numericGrade,
-            year: data.year,
-            publisher: data.publisher,
-            confidence: data.confidence,
-            defectPenalty: data.defectPenalty || null,
-            certNumber: data.certNumber || null,
-            variant: data.variant || null,
-            keyIssue: data.keyIssue || null,
-            images: [b64],
-          }),
+          body: JSON.stringify(enrichBody),
         })
           .then((r) => (r.ok ? r.json() : null))
           .then((enrich) => {
@@ -4084,7 +4098,7 @@ export default function App() {
   const handleFile = async (e, which) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    await gradeBlob(file, { save: which === "scan" });
+    await gradeBlob(file, { save: which === "scan", buyerMode: which === "buyer" });
     if (which === "scan" && fileRef.current) fileRef.current.value = "";
     if (which === "buyer" && buyerFileRef.current) buyerFileRef.current.value = "";
   };
@@ -4302,7 +4316,7 @@ export default function App() {
         }
         const blob = await res.blob();
         if (blob.size > 0) {
-          await gradeBlob(blob, { save: false });
+          await gradeBlob(blob, { save: false, buyerMode: true });
         } else {
           setLoading(false);
           setError("Shared image was empty. Try again.");

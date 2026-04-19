@@ -549,6 +549,18 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Phase timing instrumentation — Buyer mode speed measurement.
+    // All offsets are ms relative to handler entry. Logged to Vercel
+    // function logs and mirrored onto out.timings for client inspection.
+    const startTime = Date.now();
+    const t = {};
+    const mark = (label) => {
+      const ms = Date.now() - startTime;
+      t[label] = ms;
+      console.log(`[timing] ${label}: ${ms}ms`);
+    };
+    mark('handler_entry');
+
     const {
       title,
       issue,
@@ -594,12 +606,14 @@ export default async function handler(req, res) {
     // Step 2a: run year-independent lookups first so we can derive the
     // confirmed publication year before firing the comps/sold/goCollect
     // queries that use year as a query parameter.
+    mark('phase1_start');
     const [comicVine, ximilar, priceCharting, cgcResult] = await Promise.all([
       lookupComicVine({ title, issue: correctedIssue, year, publisher }),
       lookupXimilar({ images, title, confidence }),
       lookupPriceCharting({ title, issue: correctedIssue, year }).catch(() => null),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
     ]);
+    mark('phase1_complete');
 
     // Derive the confirmed year — trust but verify. PC and CV can return
     // the wrong volume (e.g. ComicVine matched Marvel Super-Heroes vol 2
@@ -654,6 +668,7 @@ export default async function handler(req, res) {
     }
 
     // Step 2b: year-dependent lookups using confirmedYear.
+    mark('phase2_start');
     const compsPromise =
       process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? fetchComps({
@@ -679,6 +694,7 @@ export default async function handler(req, res) {
       fetchSold({ title, issue: correctedIssue, year: confirmedYear }).catch(() => []),
       lookupGoCollect({ title, issue: correctedIssue, year: confirmedYear, publisher }).catch(() => null),
     ]);
+    mark('comps_fetched');
 
     // AI verification pass on the comps that will be displayed. Verifies
     // each listing title from rawComps.prices (which carries titles in the
@@ -700,6 +716,7 @@ export default async function handler(req, res) {
       const seriesTitle = issueMatch
         ? String(title).replace(issueMatch[0], "").trim()
         : title;
+      mark('ai_verify_start');
       const keepFlags = await verifyCompsTitles({
         title: seriesTitle,
         issue: issueNum,
@@ -707,6 +724,7 @@ export default async function handler(req, res) {
         publisher,
         listings: titlesToVerify,
       });
+      mark('ai_verify_complete');
       if (Array.isArray(keepFlags)) {
         const verifiedSales = rawComps.recentSales.filter(
           (_, i) => keepFlags[i]
@@ -1299,6 +1317,16 @@ export default async function handler(req, res) {
     if (goCollectResult) {
       out.goCollect = goCollectResult;
     }
+
+    mark('final_response');
+    out.timings = {
+      total_ms: Date.now() - startTime,
+      phase1_ms: (t.phase1_complete != null && t.phase1_start != null) ? t.phase1_complete - t.phase1_start : null,
+      comps_ms: (t.comps_fetched != null && t.phase2_start != null) ? t.comps_fetched - t.phase2_start : null,
+      verify_ms: (t.ai_verify_complete != null && t.ai_verify_start != null) ? t.ai_verify_complete - t.ai_verify_start : null,
+      marks: t,
+    };
+    console.log('[timing] summary:', JSON.stringify(out.timings));
 
     res.status(200).json(out);
   } catch (err) {
