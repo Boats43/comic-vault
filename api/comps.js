@@ -263,6 +263,13 @@ const SLAB_RE = /\b(?:cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|signature\s
 // For graded searches, require the title to mention CGC or CBCS.
 const GRADED_RE = /\bCGC\b|\bCBCS\b/i;
 
+// TPB / collected-edition format markers. When our title contains one of
+// these, we know we're pricing a TPB / hardcover / omnibus / compendium —
+// floppy single-issue listings must be filtered out (they vastly outnumber
+// rare collected editions on eBay and poison the avg).
+const TPB_MARKER_RE =
+  /\b(?:tpb|trade\s*paperback|hardcover|hc|omnibus|compendium|deluxe(?:\s*edition)?|absolute(?:\s*edition)?|treasury(?:\s*edition)?|collected\s*edition|graphic\s*novel|gn)\b/i;
+
 // Parse a numeric grade from a listing title. Recognizes CGC X.X slab grades
 // and raw letter grades (NM, VF+, GD-, etc). Returns null when no grade is
 // detectable — caller should keep those listings (can't prove mismatch).
@@ -574,6 +581,27 @@ export const fetchComps = async ({
     }
   }
 
+  // ARROW 1: TPB-aware attempt. When our title contains a TPB/collected-
+  // edition marker, prepend an attempt that DROPS `#issue` (TPBs aren't
+  // sold by issue number) so eBay's relevance ranker stops biasing to
+  // floppies. Marker is appended only if cleanTitle doesn't already
+  // contain it (avoids "Collected Edition Collected Edition" duplication).
+  const tpbMatch = String(title || '').match(TPB_MARKER_RE);
+  const isTPB = !!tpbMatch;
+  const tpbMarker = isTPB ? tpbMatch[0] : null;
+  if (isTPB) {
+    const titleHasMarker = TPB_MARKER_RE.test(cleanTitle);
+    const tpbParts = [
+      cleanTitle,
+      titleHasMarker ? null : tpbMarker,
+      yr,
+      pubKeyword.trim(),
+    ].filter(Boolean);
+    const tpbQ = tpbParts.join(' ').trim().slice(0, 100);
+    attempts.unshift({ q: tpbQ, n: -2, label: 'tpb-aware', useGrade: true });
+    console.log('[comps] tpb-aware attempt:', tpbQ, '(marker:', tpbMarker, ')');
+  }
+
   // Deduplicate (e.g. if no year was provided, attempts 1 & 2 are identical).
   const seen = new Set();
   const uniqueAttempts = attempts.filter(({ q }) => {
@@ -606,10 +634,19 @@ export const fetchComps = async ({
       let _variantFallback = false;
       let _fellBack = false;
 
-      // Filter 0a: issue-number enforcement.
+      // Filter 0a: issue-number enforcement. RELAXED for TPBs — TPB
+      // listings typically lack a `#1` token (sellers write "TPB Vol 1"
+      // or omit issue numbers since a TPB is a single-volume product).
+      // When isTPB, accept listings that have EITHER the issue number
+      // OR a TPB-format marker; otherwise the standard #issue check.
       if (issueNum) {
         const before = p.length;
-        p = p.filter((it) => hasIssueNumber(it.title, issueNum));
+        p = p.filter((it) => {
+          const t = String(it.title || '');
+          if (hasIssueNumber(t, issueNum)) return true;
+          if (isTPB && TPB_MARKER_RE.test(t)) return true;
+          return false;
+        });
         if (p.length < before) {
           console.log(`[comps] issue# filter removed ${before - p.length}`);
         }
@@ -781,6 +818,24 @@ export const fetchComps = async ({
           if (p.length < before) {
             console.log(`[comps] half-issue filter removed ${before - p.length}`);
           }
+        }
+      }
+
+      // Filter 1g: TPB / collected-edition format match. ARROW 2 of the
+      // TPB fix. When our title contains a TPB marker (tpb, hardcover,
+      // omnibus, compendium, collected edition, etc.), require comp
+      // listing titles to also contain a TPB marker — otherwise floppy
+      // single issues poison the avg (e.g. Batman vs Predator Collected
+      // Edition was getting $8.97 floppy avg vs ~$30 real TPB market).
+      // Graceful fallback to keeping all if zero TPB-format matches.
+      if (isTPB && p.length > 0) {
+        const before = p.length;
+        const tpbFiltered = p.filter((item) => TPB_MARKER_RE.test(String(item.title || '')));
+        if (tpbFiltered.length > 0) {
+          console.log(`[tpb-format] kept ${tpbFiltered.length} of ${before} (marker required)`);
+          p = tpbFiltered;
+        } else {
+          console.log(`[tpb-format] 0 TPB matches — keeping all ${before} (graceful fallback)`);
         }
       }
 
