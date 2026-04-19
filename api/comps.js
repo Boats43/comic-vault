@@ -752,6 +752,38 @@ export const fetchComps = async ({
         }
       }
 
+      // Filter 1f: half-issue / ashcan / promo filter. Books like Fathom
+      // #1 (1998 Wizard World Chicago Exclusive) were getting Fathom #1/2
+      // (2001 Wizard promo) as comps — different books that pass the
+      // issue-number filter because "#1/2" contains "#1" before the slash.
+      // Skip when our book IS a half-issue / fraction (Spawn #½, Fathom
+      // #1/2, etc.). Tightened from spec: `#` prefix REQUIRED on the
+      // `#N/M` and `#N.M` alternations — otherwise grades like "9.4" or
+      // date strings like "9/2026" would match and wipe legitimate comps.
+      {
+        const issueStr = String(issue || '');
+        const isOurBookHalfIssue =
+          issueStr.includes('/') ||
+          issueStr.includes('.') ||
+          issueStr.includes('½');
+        if (!isOurBookHalfIssue) {
+          const HALF_ISSUE_RE =
+            /#\s*\d+\s*\/\s*\d+\b|#\s*\d+\.\d+\b|\b½\b|\bhalf[-\s]*issue\b|\b1\/2\s*issue\b|\bashcan\b|\bpromo(?:tional)?\b/i;
+          const before = p.length;
+          p = p.filter((item) => {
+            const t = String(item.title || '');
+            if (HALF_ISSUE_RE.test(t)) {
+              console.log('[half-issue] rejected:', t.slice(0, 50));
+              return false;
+            }
+            return true;
+          });
+          if (p.length < before) {
+            console.log(`[comps] half-issue filter removed ${before - p.length}`);
+          }
+        }
+      }
+
       // Filter 2: raw-vs-graded title separation.
       if (rawOnly) {
         const before = p.length;
