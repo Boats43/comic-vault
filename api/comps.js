@@ -441,6 +441,7 @@ export const fetchComps = async ({
   numericGrade,
   year,
   variant,
+  creator,
   publisher,
   appId,
   certId,
@@ -713,9 +714,12 @@ export const fetchComps = async ({
       // Filter 1b: variant contamination. Specific variant types only —
       // bare "\bvariant\b" used to match "Cover A Variant" listings where
       // sellers append "variant" as a generic tag on 1st-print Cover A
-      // copies. We now only drop on concrete variant markers.
+      // copies. We now only drop on concrete variant markers. Added
+      // `exclusive` and `sketch` — strong indicators of a non-standard
+      // cover that was poisoning Cover-A averages on modern books like
+      // D'Orc #1 (Mel Milton exclusive, Akira Homage exclusive).
       if (!variant) {
-        const VARIANT_CONTAM_RE = /\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bcanadian\b/i;
+        const VARIANT_CONTAM_RE = /\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bcanadian\b|\bexclusive\b|\bsketch\b/i;
         const beforeVariant = p;
         const afterVariant = p.filter((it) => !VARIANT_CONTAM_RE.test(String(it.title || "")));
         if (afterVariant.length === 0 && beforeVariant.length > 0) {
@@ -725,6 +729,27 @@ export const fetchComps = async ({
           p = afterVariant;
           if (p.length < beforeVariant.length) {
             console.log(`[comps] variant filter removed ${beforeVariant.length - p.length}`);
+          }
+        }
+      }
+
+      // Filter 1b-creator: when no variant is set but grade.js reported a
+      // main cover artist (creator field), prefer comps whose titles
+      // mention that creator. Standard Cover A listings often tag the
+      // artist (e.g. "Brett Bean Cover A"); this drops mis-matched comps
+      // that happen to be a different artist's exclusive. Graceful
+      // fallback to keep all if <2 listings match.
+      if (!variant && creator && p.length > 0) {
+        const creatorLower = String(creator).toLowerCase().trim();
+        if (creatorLower.length >= 3) {
+          const creatorMatches = p.filter((it) =>
+            String(it.title || '').toLowerCase().includes(creatorLower)
+          );
+          if (creatorMatches.length >= 2) {
+            console.log(`[creator-match] kept ${creatorMatches.length} of ${p.length} matching creator "${creator}"`);
+            p = creatorMatches;
+          } else {
+            console.log(`[creator-match] only ${creatorMatches.length} match creator "${creator}" — keeping all ${p.length}`);
           }
         }
       }

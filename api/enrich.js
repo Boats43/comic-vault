@@ -660,6 +660,7 @@ export default async function handler(req, res) {
             numericGrade,
             year: confirmedYear,
             variant: req.body.variant || null,
+            creator: req.body.creator || null,
             publisher: publisher || null,
             appId: process.env.EBAY_APP_ID,
             certId: process.env.EBAY_CERT_ID,
