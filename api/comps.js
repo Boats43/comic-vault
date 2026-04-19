@@ -265,7 +265,7 @@ const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition
 // longer triggers the filter. Covers CGC, CBCS, PGX, PSA (Pro Sports
 // Authenticator also grades comics), EGS, HGA, generic "slab/graded/
 // universal", CGC Signature Series, "verified" / "qualified" tier tags.
-const SLAB_RE = /\b(?:cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|signature\s+series|verified|qualified)\s*(?:mt|nm\/mt|nm\+|nm-|nm|vf\/nm|vf\+|vf-|vf|fn\/vf|fn\+|fn-|fn|vg\/fn|vg\+|vg-|vg|gd\/vg|gd\+|gd-|gd|fr\/gd|fr|pr)?\s*\d+(?:\.\d+)?/i;
+const SLAB_RE = /\b(?:cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|signature\s+series|verified|qualified)\s*(?:ss|signature\s+series|mt|nm\/mt|nm\+|nm-|nm|vf\/nm|vf\+|vf-|vf|fn\/vf|fn\+|fn-|fn|vg\/fn|vg\+|vg-|vg|gd\/vg|gd\+|gd-|gd|fr\/gd|fr|pr)?\s*\d+(?:\.\d+)?/i;
 
 // For graded searches, require the title to mention CGC or CBCS.
 const GRADED_RE = /\bCGC\b|\bCBCS\b/i;
@@ -719,7 +719,7 @@ export const fetchComps = async ({
       // cover that was poisoning Cover-A averages on modern books like
       // D'Orc #1 (Mel Milton exclusive, Akira Homage exclusive).
       if (!variant) {
-        const VARIANT_CONTAM_RE = /\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bcanadian\b|\bexclusive\b|\bsketch\b/i;
+        const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1|\bexclusive\b|\bsketch\b|\bexcl\.?\b/i;
         const beforeVariant = p;
         const afterVariant = p.filter((it) => !VARIANT_CONTAM_RE.test(String(it.title || "")));
         if (afterVariant.length === 0 && beforeVariant.length > 0) {
