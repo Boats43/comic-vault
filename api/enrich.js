@@ -10,7 +10,7 @@
 //             priceHigh?, keyIssue?, identifiedBy? }
 
 import Anthropic from "@anthropic-ai/sdk";
-import { fetchComps, getOAuthToken, computeMatchConfidence } from "./comps.js";
+import { fetchComps, getOAuthToken, computeMatchConfidence, cleanPublisher } from "./comps.js";
 import { fetchSold } from "./sold.js";
 import { lookupCGC } from "./cgc-lookup.js";
 import { lookupGoCollect } from "./gocollect.js";
@@ -558,9 +558,13 @@ export default async function handler(req, res) {
       isGraded,
       numericGrade,
       year,
-      publisher,
+      publisher: rawPublisher,
       certNumber,
     } = req.body || {};
+    // Strip brackets/quotes/slashes before anything downstream sees the
+    // publisher — parens in "Hollywood Comics (Walt Disney)" break eBay's
+    // query parser and cause ComicVine's substring scoring to miss.
+    const publisher = cleanPublisher(rawPublisher) || null;
     const titleLower = (title || "").toLowerCase();
     if (!title || titleLower.includes("not a comic") || titleLower === "unknown") {
       console.log("[enrich] rejected non-comic:", title);
@@ -1174,14 +1178,43 @@ export default async function handler(req, res) {
         variant: req.body.variant || null,
         creator: req.body.creator || null,
       });
-      const displayMessage =
+      const fallbackMessage =
         mc.tier === 'HIGH'
           ? 'Verified exact match'
           : mc.tier === 'MEDIUM'
           ? 'Similar matches found'
           : 'Exact match not found — AI estimate';
-      out.matchConfidence = { ...mc, displayMessage };
-      console.log(`[match-conf] score=${mc.score} tier=${mc.tier} comps=${compTitlesForScore.length}`);
+      const finalMc = {
+        ...mc,
+        displayMessage: mc.displayMessage || fallbackMessage,
+      };
+
+      // Vision-confidence cap. matchConfidence scores how well the comps
+      // match the IDENTIFIED book — it can't detect a misidentification
+      // (wrong book → matching comps still scores HIGH). Cap the tier and
+      // score by Claude Vision's own confidence so a LOW-confidence ID
+      // can never surface as "✓ Verified".
+      const visionConfidence = String(confidence || 'medium').toLowerCase();
+      out.visionConfidence = visionConfidence;
+
+      if (visionConfidence === 'low') {
+        if (finalMc.tier === 'HIGH') {
+          const originalScore = finalMc.score;
+          finalMc.tier = 'MEDIUM';
+          finalMc.score = Math.min(finalMc.score, 75);
+          finalMc.displayMessage = 'Vision confidence low — verify identification';
+          finalMc.visionCapped = true;
+          finalMc.originalScore = originalScore;
+        } else if (finalMc.tier === 'MEDIUM') {
+          finalMc.displayMessage = 'Vision confidence low — verify identification';
+          finalMc.visionCapped = true;
+        }
+      } else if (visionConfidence === 'medium' && finalMc.tier === 'HIGH') {
+        finalMc.visionModerate = true;
+      }
+
+      out.matchConfidence = finalMc;
+      console.log(`[match-conf] score=${finalMc.score} tier=${finalMc.tier} comps=${compTitlesForScore.length} vision=${visionConfidence}${finalMc.visionCapped ? ' CAPPED' : ''}`);
     }
 
     // Sold comps from eBay completed listings (filtered by issue#)

@@ -1545,6 +1545,8 @@ function CollectionDetail({
   const [swipeHint, setSwipeHint] = useState(() => !localStorage.getItem("cv_swipe_hint_seen"));
   const addPhotoRef = useRef(null);
   const touchStartX = useRef(null);
+  const touchStartY = useRef(null);
+  const touchStartT = useRef(null);
 
   useEffect(() => {
     setListPrice(getDisplayPrice(item));
@@ -1646,13 +1648,23 @@ function CollectionDetail({
   return (
     <div
       className="detail-view"
-      onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
+      onTouchStart={e => {
+        touchStartX.current = e.touches[0].clientX;
+        touchStartY.current = e.touches[0].clientY;
+        touchStartT.current = Date.now();
+      }}
       onTouchEnd={e => {
         if (touchStartX.current === null) return;
-        const diff = touchStartX.current - e.changedTouches[0].clientX;
+        const dx = touchStartX.current - e.changedTouches[0].clientX;
+        const dy = touchStartY.current - e.changedTouches[0].clientY;
+        const dt = Date.now() - (touchStartT.current || 0);
         touchStartX.current = null;
-        if (Math.abs(diff) < 50) return;
-        if (diff > 0) { onNext && onNext(); }
+        touchStartY.current = null;
+        touchStartT.current = null;
+        if (dt > 500) return;
+        if (Math.abs(dx) < 50) return;
+        if (Math.abs(dx) <= Math.abs(dy)) return;
+        if (dx > 0) { onNext && onNext(); }
         else { onPrev && onPrev(); }
       }}
     >
@@ -1986,7 +1998,7 @@ function CollectionDetail({
           })()}
         </div>
 
-        {item.matchConfidence?.tier === "LOW" && (
+        {(item.matchConfidence?.tier === "LOW" || item.matchConfidence?.visionCapped) && (
           <div style={{
             marginTop: 10,
             padding: "10px 12px",
@@ -2000,7 +2012,16 @@ function CollectionDetail({
             <div style={{ fontWeight: 700, marginBottom: 2, color: "#dc2626" }}>
               ⚠ {item.matchConfidence.displayMessage || "Exact match not found — AI estimate"}
             </div>
-            These are SIMILAR listings, not exact matches. Verify before listing.
+            {item.matchConfidence?.visionCapped ? (
+              <>
+                AI identification uncertain — confirm book identity before listing.
+                {item.matchConfidence.originalScore != null && (
+                  <> Match score reduced from {item.matchConfidence.originalScore} to {item.matchConfidence.score} due to low Vision confidence.</>
+                )}
+              </>
+            ) : (
+              <>These are SIMILAR listings, not exact matches. Verify before listing.</>
+            )}
           </div>
         )}
 

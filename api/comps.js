@@ -270,6 +270,11 @@ const SLAB_RE = /\b(?:cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|signature\s
 // For graded searches, require the title to mention CGC or CBCS.
 const GRADED_RE = /\bCGC\b|\bCBCS\b/i;
 
+// Variant contamination. Hard-reject markers when our book is NOT a variant.
+// Also re-used as a guard inside the creator-match filter so creator
+// preference never selects a variant listing (even in variant-fallback mode).
+const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1|\bexclusive\b|\bsketch\b|\bexcl\.?\b/i;
+
 // TPB / collected-edition format markers. When our title contains one of
 // these, we know we're pricing a TPB / hardcover / omnibus / compendium —
 // floppy single-issue listings must be filtered out (they vastly outnumber
@@ -402,6 +407,18 @@ const cleanTitleForSearch = (title) => {
   return t;
 };
 
+// Normalize a publisher string for search queries. Brackets/quotes/slashes/
+// ampersands/question marks break eBay's query parser or truncate the match,
+// so they're replaced with spaces and collapsed. Preserves all word tokens —
+// "Hollywood Comics (Walt Disney)" → "Hollywood Comics Walt Disney".
+export const cleanPublisher = (p) => {
+  if (!p) return "";
+  return String(p)
+    .replace(/[()[\]{}"'\/\\&?]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
 // Extract the first "significant" word from a cleaned title — skips
 // one-letter words and common prefixes so "Amazing Adventures" → "Adventures".
 const firstSignificantWord = (cleanTitle) => {
@@ -449,7 +466,11 @@ const buildKeywords = (title, { issue, isGraded, numericGrade, year } = {}) => {
 //   ≥85 HIGH, ≥65 MEDIUM, else LOW.
 export const computeMatchConfidence = (comps, opts = {}) => {
   if (!Array.isArray(comps) || comps.length === 0) {
-    return { score: 0, tier: 'LOW' };
+    return {
+      score: 0,
+      tier: 'LOW',
+      displayMessage: 'No eBay comps found — AI estimate only',
+    };
   }
   const { title, issue, year, variant, creator } = opts;
   const titleLower = String(title || '').toLowerCase().trim();
@@ -514,9 +535,28 @@ export const computeMatchConfidence = (comps, opts = {}) => {
   }
 
   const avg = totalNorm / comps.length;
-  const score = Math.round(avg * 100);
+  const rawScore = Math.round(avg * 100);
+
+  // Thin-data caps: 1 comp can't earn HIGH/MEDIUM confidence; 2 comps cap at MEDIUM.
+  // Prevents "100 ✓ Verified" badges when there's nothing to verify against.
+  if (comps.length === 1) {
+    return {
+      score: Math.min(rawScore, 60),
+      tier: 'LOW',
+      displayMessage: 'Only 1 comp found — limited data',
+    };
+  }
+  if (comps.length === 2) {
+    const capped = Math.min(rawScore, 75);
+    return {
+      score: capped,
+      tier: capped >= 65 ? 'MEDIUM' : 'LOW',
+      displayMessage: 'Limited comps — verify before listing',
+    };
+  }
+
   const tier = avg >= 0.85 ? 'HIGH' : avg >= 0.65 ? 'MEDIUM' : 'LOW';
-  return { score, tier };
+  return { score: rawScore, tier };
 };
 
 // Core fetcher — exported so api/grade.js can reuse it without an HTTP hop.
@@ -589,7 +629,9 @@ export const fetchComps = async ({
 
   // Build publisher keyword for most-specific attempt.
   // Atlas/Timely are pre-Marvel — eBay sellers use both terms interchangeably.
-  const pubClean = publisher ? String(publisher).trim() : null;
+  // Strip brackets/special chars so "Hollywood Comics (Walt Disney)" preserves
+  // both imprint and parent words in the eBay query.
+  const pubClean = publisher ? cleanPublisher(publisher) : null;
   let pubKeyword = "";
   if (pubClean) {
     const pubLower = pubClean.toLowerCase();
@@ -597,7 +639,7 @@ export const fetchComps = async ({
       pubKeyword = " Atlas Marvel";
     } else if (pubLower.includes("marvel")) {
       pubKeyword = " Marvel";
-    } else if (pubLower.length <= 20) {
+    } else if (pubLower.length <= 35) {
       pubKeyword = ` ${pubClean}`;
     }
   }
@@ -808,15 +850,10 @@ export const fetchComps = async ({
         console.log(`[comps] reprint filter skipped — book is ${variant}`);
       }
 
-      // Filter 1b: variant contamination. Specific variant types only —
-      // bare "\bvariant\b" used to match "Cover A Variant" listings where
-      // sellers append "variant" as a generic tag on 1st-print Cover A
-      // copies. We now only drop on concrete variant markers. Added
-      // `exclusive` and `sketch` — strong indicators of a non-standard
-      // cover that was poisoning Cover-A averages on modern books like
-      // D'Orc #1 (Mel Milton exclusive, Akira Homage exclusive).
+      // Filter 1b: variant contamination. Hard reject when our book is NOT
+      // a variant. VARIANT_CONTAM_RE hoisted to module scope so the
+      // creator-match filter below can re-apply it as a hard guard.
       if (!variant) {
-        const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1|\bexclusive\b|\bsketch\b|\bexcl\.?\b/i;
         const beforeVariant = p;
         const afterVariant = p.filter((it) => !VARIANT_CONTAM_RE.test(String(it.title || "")));
         if (afterVariant.length === 0 && beforeVariant.length > 0) {
@@ -826,27 +863,6 @@ export const fetchComps = async ({
           p = afterVariant;
           if (p.length < beforeVariant.length) {
             console.log(`[comps] variant filter removed ${beforeVariant.length - p.length}`);
-          }
-        }
-      }
-
-      // Filter 1b-creator: when no variant is set but grade.js reported a
-      // main cover artist (creator field), prefer comps whose titles
-      // mention that creator. Standard Cover A listings often tag the
-      // artist (e.g. "Brett Bean Cover A"); this drops mis-matched comps
-      // that happen to be a different artist's exclusive. Graceful
-      // fallback to keep all if <2 listings match.
-      if (!variant && creator && p.length > 0) {
-        const creatorLower = String(creator).toLowerCase().trim();
-        if (creatorLower.length >= 3) {
-          const creatorMatches = p.filter((it) =>
-            String(it.title || '').toLowerCase().includes(creatorLower)
-          );
-          if (creatorMatches.length >= 2) {
-            console.log(`[creator-match] kept ${creatorMatches.length} of ${p.length} matching creator "${creator}"`);
-            p = creatorMatches;
-          } else {
-            console.log(`[creator-match] only ${creatorMatches.length} match creator "${creator}" — keeping all ${p.length}`);
           }
         }
       }
@@ -1050,6 +1066,32 @@ export const fetchComps = async ({
           p = filtered;
         } else {
           _fellBack = true;
+        }
+      }
+
+      // Filter 3b (creator-aware soft preference, moved from 1b-creator):
+      // When no variant is set but grade.js reported a main cover artist,
+      // prefer comps whose titles mention that creator. Runs AFTER all
+      // hard filters (variant/cover/lot/half-issue/TPB/slab/grade) so we
+      // only pick among listings that already passed those rejects.
+      // Re-applies VARIANT_CONTAM_RE as a hard guard so creator preference
+      // never selects a variant — even when variant fallback kept the
+      // pool (e.g. Usagi Yojimbo #1 Cover A where Eastman-branded RI-C
+      // Variant was slipping through because Eastman matched the creator).
+      if (!variant && creator && p.length > 0) {
+        const creatorLower = String(creator).toLowerCase().trim();
+        if (creatorLower.length >= 3) {
+          const creatorMatches = p.filter((it) => {
+            const t = String(it.title || '').toLowerCase();
+            if (VARIANT_CONTAM_RE.test(t)) return false;
+            return t.includes(creatorLower);
+          });
+          if (creatorMatches.length >= 2) {
+            console.log(`[creator-match] kept ${creatorMatches.length} of ${p.length} matching creator "${creator}"`);
+            p = creatorMatches;
+          } else {
+            console.log(`[creator-match] only ${creatorMatches.length} match creator "${creator}" — keeping all ${p.length}`);
+          }
         }
       }
 
