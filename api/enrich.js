@@ -597,12 +597,54 @@ export default async function handler(req, res) {
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
     ]);
 
-    // Derive the confirmed year: prefer PriceCharting match year, fall back
-    // to ComicVine cover_date, then the saved year on the item.
-    const confirmedYear =
-      priceCharting?.year ||
-      (comicVine?.coverDate ? String(comicVine.coverDate).slice(0, 4) : null) ||
-      year;
+    // Derive the confirmed year — trust but verify. PC and CV can return
+    // the wrong volume (e.g. ComicVine matched Marvel Super-Heroes vol 2
+    // (1980) when user passed 1966 for the King-Size Special). Reject any
+    // override that disagrees with the user year by more than ±2y, and
+    // never override on era-specific keys (King-Size, Annual, Giant-Size).
+    const userYear = year ? parseInt(String(year).trim(), 10) : null;
+    const pcYear = priceCharting?.year ? parseInt(priceCharting.year, 10) : null;
+    const cvYear = comicVine?.coverDate
+      ? parseInt(String(comicVine.coverDate).slice(0, 4), 10)
+      : null;
+    const pcGap = pcYear && userYear ? Math.abs(userYear - pcYear) : 999;
+    const cvGap = cvYear && userYear ? Math.abs(userYear - cvYear) : 999;
+    const keyIssueStr = req.body?.keyIssue ? String(req.body.keyIssue) : "";
+    const isEraSpecific =
+      /silver age|bronze age|king[-\s]?size|giant[-\s]?size|annual|spectacular|first issue/i.test(
+        keyIssueStr
+      );
+
+    let confirmedYear;
+    let yearOverrideRejected = false;
+    if (isEraSpecific && userYear) {
+      confirmedYear = String(userYear);
+      console.log(
+        '[enrich] era-specific key — trusting user year:',
+        userYear,
+        'keyIssue:', keyIssueStr,
+        'pc:', pcYear, 'cv:', cvYear
+      );
+    } else if (pcYear && cvYear && Math.abs(pcYear - cvYear) <= 2) {
+      // PC and CV agree (within ±2y) — trust them even if user year differs.
+      confirmedYear = String(Math.round((pcYear + cvYear) / 2));
+    } else if (pcYear && (!userYear || pcGap <= 2)) {
+      confirmedYear = String(pcYear);
+    } else if (cvYear && (!userYear || cvGap <= 2)) {
+      confirmedYear = String(cvYear);
+    } else if (userYear) {
+      confirmedYear = String(userYear);
+      yearOverrideRejected = true;
+      console.log(
+        '[enrich] year override REJECTED:',
+        'user:', userYear,
+        'pc:', pcYear,
+        'cv:', cvYear,
+        'keeping user year'
+      );
+    } else {
+      confirmedYear = pcYear ? String(pcYear) : (cvYear ? String(cvYear) : year);
+    }
     if (confirmedYear && String(confirmedYear) !== String(year || "")) {
       console.log('[enrich] year corrected:', year, '→', confirmedYear);
     }
@@ -1131,6 +1173,9 @@ export default async function handler(req, res) {
     if (confirmedYear) {
       out.confirmedYear = String(confirmedYear);
       out.yearCorrected = String(confirmedYear) !== String(year || "");
+    }
+    if (yearOverrideRejected) {
+      out.yearOverrideRejected = true;
     }
 
     // Recommended price
