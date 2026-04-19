@@ -798,18 +798,42 @@ export const fetchComps = async ({
       // when our book itself is a lot/set listing. The "\d+ book/issue/
       // comic" alternation REQUIRES a "lot|set" qualifier — without it,
       // "1 Issue Comic Book" (common single-issue title fragment) would
-      // falsely match.
+      // falsely match. The naked `#N-M` issue-range alternation was
+      // moved to `isValidIssueRange()` below — the bare regex was
+      // killing valid singles like "Konga #2 - FN- (5.5) - Charlton
+      // 1961 - 10 Cents" (matched "1961-10") and "Marvel Super Heroes
+      // #1 - 1966" (matched "1-1966").
       {
         const ourVariantStr = String(variant || '').toLowerCase();
         const isOurBookALot = /\b(?:lot|set|bundle)\b/.test(ourVariantStr);
         if (!isOurBookALot) {
           const LOT_RE =
-            /\b(?:lot|bundle|complete\s*set|full\s*run|comic\s*library|comic\s*collection)\b|#?\d+\s*[-–—]\s*#?\d+|\b\d+\s*(?:book|issue|comic)s?\s*(?:lot|set)\b|\bset\s*of\s*\d+\b/i;
+            /\b(?:lot|bundle|complete\s*set|full\s*run|comic\s*library|comic\s*collection)\b|\bset\s*of\s*\d+\b|\b\d+\s*(?:book|issue|comic)s?\s*(?:lot|set)\b/i;
+          const isValidIssueRange = (title) => {
+            const re = /#?(\d+(?:\.\d+)?)\s*[-–—]\s*#?(\d+(?:\.\d+)?)/g;
+            for (const m of title.matchAll(re)) {
+              const firstStr = m[1];
+              const secondStr = m[2];
+              const first = parseFloat(firstStr);
+              const second = parseFloat(secondStr);
+              if (second >= 1800 && second <= 2050) continue; // year
+              if (second <= 10 && secondStr.includes('.')) continue; // grade
+              if (first >= second) continue; // not ascending
+              if (
+                Number.isInteger(first) &&
+                Number.isInteger(second) &&
+                second < 1000
+              ) {
+                return true;
+              }
+            }
+            return false;
+          };
           const before = p.length;
           p = p.filter((item) => {
             const t = String(item.title || '');
-            if (LOT_RE.test(t)) {
-              console.log('[lot-filter] rejected:', t.slice(0, 50));
+            if (LOT_RE.test(t) || isValidIssueRange(t)) {
+              console.log('[lot-filter] rejected:', t.slice(0, 55));
               return false;
             }
             return true;
