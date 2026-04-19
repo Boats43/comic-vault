@@ -724,6 +724,34 @@ export const fetchComps = async ({
         }
       }
 
+      // Filter 1e: lot / set / bundle / multi-book filter. Multi-book
+      // listings inflate single-book averages (e.g. Dark Horse Comics #1
+      // showed $33.72 comp that was actually "#1-5" 5-book lot). Skip
+      // when our book itself is a lot/set listing. The "\d+ book/issue/
+      // comic" alternation REQUIRES a "lot|set" qualifier — without it,
+      // "1 Issue Comic Book" (common single-issue title fragment) would
+      // falsely match.
+      {
+        const ourVariantStr = String(variant || '').toLowerCase();
+        const isOurBookALot = /\b(?:lot|set|bundle)\b/.test(ourVariantStr);
+        if (!isOurBookALot) {
+          const LOT_RE =
+            /\b(?:lot|bundle|complete\s*set|full\s*run|comic\s*library|comic\s*collection)\b|#?\d+\s*[-–—]\s*#?\d+|\b\d+\s*(?:book|issue|comic)s?\s*(?:lot|set)\b|\bset\s*of\s*\d+\b/i;
+          const before = p.length;
+          p = p.filter((item) => {
+            const t = String(item.title || '');
+            if (LOT_RE.test(t)) {
+              console.log('[lot-filter] rejected:', t.slice(0, 50));
+              return false;
+            }
+            return true;
+          });
+          if (p.length < before) {
+            console.log(`[comps] lot filter removed ${before - p.length}`);
+          }
+        }
+      }
+
       // Filter 2: raw-vs-graded title separation.
       if (rawOnly) {
         const before = p.length;
