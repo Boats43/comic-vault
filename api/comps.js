@@ -105,6 +105,13 @@ export const getOAuthToken = async (appId, certId, scope) => {
 const findingCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000;
 
+// eBay Finding API has been returning 500 errorId 10001 100% of the
+// time as of late April 2026 — wasting 2.5s per attempt (1s call + 2s
+// backoff + 1s retry that also fails). Bypass it entirely and go
+// straight to Browse. Set EBAY_USE_FINDING=true in env to re-enable
+// (e.g. if eBay restores the endpoint or for diagnostic comparison).
+const USE_FINDING = process.env.EBAY_USE_FINDING === 'true';
+
 // Try the Finding API findCompletedItems (real sold data, no OAuth needed).
 // Returns parsed results array on success, or null on any failure so the
 // caller can fall back to Browse API.
@@ -945,8 +952,11 @@ export const fetchComps = async ({
     for (let i = 0; i < uniqueAttempts.length; i++) {
       const attempt = uniqueAttempts[i];
       query = attempt.q + (attempt.useGrade ? gradeSuffix : "");
-      source = "finding_api";
-      let raw = await tryFindCompleted({ appId, query });
+      let raw = null;
+      if (USE_FINDING) {
+        source = "finding_api";
+        raw = await tryFindCompleted({ appId, query });
+      }
       if (!raw || raw.length === 0) {
         source = "browse_api";
         raw = await tryBrowse({ appId, certId, query });
