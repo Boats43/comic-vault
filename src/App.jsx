@@ -1526,6 +1526,7 @@ function CollectionDetail({
   onDelete,
   onList,
   onRefreshMarket,
+  onAbortEnrich,
   onAddPhoto,
   onUpdateField,
   currentIndex,
@@ -1551,6 +1552,16 @@ function CollectionDetail({
   useEffect(() => {
     setListPrice(getDisplayPrice(item));
   }, [item?.id]);
+
+  // Abort any in-flight card enrich when the item changes or the detail
+  // view unmounts. Prevents a pending /api/enrich response from a PRIOR
+  // item (e.g. user tapped Refresh on A, swiped to B) from landing and
+  // stomping catalogue state.
+  useEffect(() => {
+    return () => {
+      if (onAbortEnrich) onAbortEnrich();
+    };
+  }, [item?.id, onAbortEnrich]);
 
   useEffect(() => {
     const handleKey = (e) => {
@@ -3649,6 +3660,16 @@ export default function App() {
   const manageScrollPos = useRef(0);
   const prevTabRef = useRef("collection");
   const lastAutoRefreshRef = useRef(0);
+  // Card-level enrich collision guard. Each manual-refresh /api/enrich call
+  // (refreshMarketData) tags itself with an enrichId and registers its
+  // AbortController here. Navigating to a different item or unmounting the
+  // detail view aborts the in-flight call and stale responses (enrichId
+  // mismatch) are dropped before they can overwrite the catalogue.
+  const activeCardEnrichIdRef = useRef(null);
+  const cardEnrichAbortRef = useRef(null);
+  // Auto-refresh queue abort registry. Effect cleanup aborts every
+  // in-flight fetch so responses can't land after the user opens a card.
+  const autoRefreshAbortersRef = useRef(new Set());
 
   // Load catalogue, snapshots, and cached analysis from IndexedDB on mount.
   useEffect(() => {
@@ -3724,6 +3745,8 @@ export default function App() {
       while (active < MAX_CONCURRENT && queue.length > 0 && !cancelled) {
         const item = queue.shift();
         active++;
+        const controller = new AbortController();
+        autoRefreshAbortersRef.current.add(controller);
         fetch("/api/enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3739,6 +3762,7 @@ export default function App() {
             variant: item.variant || null,
             keyIssue: item.keyIssue || null,
           }),
+          signal: controller.signal,
         })
           .then((r) => (r.ok ? r.json() : null))
           .then((enrich) => {
@@ -3800,8 +3824,13 @@ export default function App() {
               s && s.id === item.id ? { ...s, ...enrich, comicVine: enrich.comicVine || s.comicVine || null, certNumber: enrich.certNumber || s.certNumber || null, cgcVerified: enrich.cgcVerified || s.cgcVerified || false, cgcLabel: enrich.cgcLabel || s.cgcLabel || null, goCollect: enrich.goCollect || s.goCollect || null } : s
             );
           })
-          .catch(() => {})
+          .catch((err) => {
+            if (err?.name === "AbortError") {
+              console.log("[auto-refresh] aborted for", item.title);
+            }
+          })
           .finally(() => {
+            autoRefreshAbortersRef.current.delete(controller);
             if (cancelled) return;
             active--;
             setRefreshingPrices((n) => Math.max(0, n - 1));
@@ -3810,7 +3839,13 @@ export default function App() {
       }
     };
     next();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // Abort every in-flight auto-refresh fetch so responses can't land
+      // after the user opens a detail card or switches tabs.
+      for (const c of autoRefreshAbortersRef.current) c.abort();
+      autoRefreshAbortersRef.current.clear();
+    };
   }, [catalogue.length > 0 && catalogue.some((c) => !c.pricingSource || !c.comps), tab, selectedItem]);
 
   useEffect(() => {
@@ -4480,25 +4515,56 @@ export default function App() {
   // Re-fetch eBay comps + ComicVine + AI verification for an
   // existing catalogue entry, without re-running the image identification.
   // Used by the CollectionDetail "Refresh Market Data" button.
+  //
+  // Collision guard: each call abort()s the previous in-flight refresh and
+  // tags itself with a unique enrichId. On response, compares enrichId to
+  // activeCardEnrichIdRef — if mismatched, the user moved on (swiped cards,
+  // closed detail, started another refresh) and this response is discarded
+  // before it can overwrite the catalogue with stale data for a prior item.
   const refreshMarketData = useCallback(async (item) => {
-    const res = await fetch("/api/enrich", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: item.title,
-        issue: item.issue || item.title?.match(/#(\d+)/)?.[1] || null,
-        grade: item.grade,
-        isGraded: item.isGraded,
-        numericGrade: item.numericGrade,
-        year: item.year,
-        publisher: item.publisher,
-        confidence: item.confidence,
-        variant: item.variant || null,
-        keyIssue: item.keyIssue || null,
-      }),
-    });
+    cardEnrichAbortRef.current?.abort();
+    const controller = new AbortController();
+    cardEnrichAbortRef.current = controller;
+    const enrichId = `${item.id}-${Date.now()}`;
+    activeCardEnrichIdRef.current = enrichId;
+    console.log(`[enrich] refresh start id=${enrichId} title=${item.title}`);
+
+    let res;
+    try {
+      res = await fetch("/api/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: item.title,
+          issue: item.issue || item.title?.match(/#(\d+)/)?.[1] || null,
+          grade: item.grade,
+          isGraded: item.isGraded,
+          numericGrade: item.numericGrade,
+          year: item.year,
+          publisher: item.publisher,
+          confidence: item.confidence,
+          variant: item.variant || null,
+          keyIssue: item.keyIssue || null,
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err.name === "AbortError") {
+        console.log(`[enrich] refresh aborted id=${enrichId}`);
+        return;
+      }
+      throw err;
+    }
     if (!res.ok) throw new Error("Failed to refresh market data");
+    if (activeCardEnrichIdRef.current !== enrichId) {
+      console.log(`[enrich] stale ignored id=${enrichId}`);
+      return;
+    }
     const enrich = await res.json();
+    if (activeCardEnrichIdRef.current !== enrichId) {
+      console.log(`[enrich] stale ignored post-parse id=${enrichId}`);
+      return;
+    }
     if (enrich.yearCorrected && enrich.confirmedYear) {
       console.log('[refresh] year healed:', item.year, '→', enrich.confirmedYear);
     }
@@ -4915,6 +4981,14 @@ export default function App() {
             onDelete={deleteFromCatalogue}
             onList={listOnEbay}
             onRefreshMarket={refreshMarketData}
+            onAbortEnrich={() => {
+              if (cardEnrichAbortRef.current) {
+                console.log("[enrich] card unmount/change — aborting in-flight");
+                cardEnrichAbortRef.current.abort();
+                cardEnrichAbortRef.current = null;
+                activeCardEnrichIdRef.current = null;
+              }
+            }}
             onAddPhoto={addPhotoToComic}
             onUpdateField={updateComicField}
             currentIndex={catalogue.indexOf(selectedItem)}
