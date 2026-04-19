@@ -417,8 +417,8 @@ function ResultCard({ result, enriching }) {
                       </span>
                     </div>
                     {s.title && (
-                      <div style={{ fontSize: 11, color: "#666", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
-                        {s.title.length > 55 ? s.title.slice(0, 55) + "…" : s.title}
+                      <div style={{ fontSize: 13, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                        {s.title}
                       </div>
                     )}
                   </div>
@@ -2034,8 +2034,8 @@ function CollectionDetail({
                     </span>
                   </div>
                   {s.title && (
-                    <div style={{ fontSize: 11, color: "#666", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
-                      {s.title.length > 55 ? s.title.slice(0, 55) + "…" : s.title}
+                    <div style={{ fontSize: 13, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                      {s.title}
                     </div>
                   )}
                 </div>

@@ -581,9 +581,17 @@ export const fetchComps = async ({
   // Falls through gracefully when nothing matches — caller flags
   // artistFallback so the UI can warn the user.
   const ARTIST_PATTERNS = [
+    // Multi-word patterns first (first-match-wins via break) so they
+    // capture the longer, more specific name before single-word fallbacks.
+    /tyler kirkham/i, /jim lee/i, /inhyuk lee/i, /skottie young/i,
+    /frank cho/i, /frank miller/i, /windsor.?smith/i, /dell'?otto/i,
+    // Single-word patterns
     /skan/i, /rapoza/i, /quash/i, /momoko/i, /ross/i, /adams/i,
     /kirkham/i, /bean/i, /andolfo/i, /browne/i, /forstner/i,
     /howard/i, /corona/i, /stegman/i, /ottley/i,
+    /jimenez/i, /mcfarlane/i, /campbell/i, /artgerm/i, /nakayama/i,
+    /hughes/i, /byrne/i, /perez/i, /kirby/i, /ditko/i, /mele/i,
+    /albuquerque/i, /hama/i,
   ];
   let artistName = null;
   if (variant) {
