@@ -156,16 +156,19 @@ All pricing fixes confirmed intact:
 (5) **Variant in eBay listing title** (`1cdf988`): `buildTitle` in `list-ebay.js` now includes `item.variant` between issue and grade. Filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot) — these add no search value. Same filter applied to `buildBundleTitle`. Pipeline trace confirmed variant flows: grade.js → App.jsx → enrich.js → comps.js (attempts 1-2 only) → list-ebay.js (was missing, now fixed).
 
 ## Last Session
-Session 4/22/2026 — Tier 0 liability firewall + Phase 5a (pop data) shipped. 7 production deploys. Mega-keys floor system completed at 29 entries with three-tier badge UI (verified/estimated/manual) plus distinct exceedsMap handling. Display layer hardened so unsafe engine numbers never anchor user listing decisions. Verify-fallback leak that was producing $147K Action #1 from Superman #1 comps is closed. PriceCharting CGC pop extractor + UI panel live with locked POP_GRADE_INDEX from PC source. Status: Tier 0 COMPLETE, Phase 5a COMPLETE. Next options: Phase 5b (scarcity-aware pricing hooks), K1 (rules-version stamping), issue# accuracy work, or Scan UX polish. 61 unit tests passing.
+Session 4/22/2026 — Tier 0 liability firewall + Phase 5a (pop data) + Tier 1 variant allowlist (35¢ + 30¢) shipped. **10 production deploys, 126 unit tests passing.** Mega-keys floor system at 29 entries with three-tier badge UI (verified/estimated/manual) plus distinct exceedsMap handling. Display layer hardened so unsafe engine numbers never anchor user listing decisions. Verify-fallback leak ($147K Action #1 from Superman #1 comps) closed at both sanity-block and floor-block surfaces. PriceCharting CGC pop extractor + UI panel live with locked POP_GRADE_INDEX from PC source. Marvel test-market price-variant allowlist covers 109 series / 366 issues across 35¢ (1977) and 30¢ (1976) windows — eliminates Howard the Duck #28 / Hulk #181 false-positive class. Status: Tier 0 COMPLETE, Phase 5a COMPLETE, Tier 1 (35¢/30¢) COMPLETE. Pattern-based variant architecture (`TEST_MARKET_KEYS` + `TEST_MARKET_VARIANTS`) ready for Whitman / Mark Jewelers / Type 1A-1B follow-ups.
 
-**Deploys (7, in order):**
+**Deploys (10, in order):**
 1. `34f1cc9` — Tier 0 accuracy fixes (E2 mega-keys floor + F3 reprint regex + F2 era-consistency comp filter)
 2. `cf6bf6c` — Tier 0 hotfix (persist mega-key flags through 5 client merge paths)
 3. `99ee51e` — Phase 5a.1 (PriceCharting CGC pop extractor backend + `[pc-pop-calibrate]` logging)
 4. `5c9864a` — Tier 0 polish (split exceedsMap from manualReview + Manual Appraisal price suppression with toggle)
 5. `5960239` — Tier 0 polish (suppress asking/last-sold lines, replace with Floor band when applicable)
-6. `01d81b6` — Tier 0 hotfix (verify-fallback leak — skip sanity for mega-keys + when 100% AI-rejected)
+6. `01d81b6` — Tier 0 hotfix Ship #1 (verify-fallback sanity leak — skip sanity for mega-keys + when 100% AI-rejected)
 7. `ff6c852` — Phase 5a.3 (POP_GRADE_INDEX locked from PC source + CollectionDetail pop UI panel + 5 merge paths)
+8. `d3ccf26` — Tier 0 hotfix Ship #8 ([floor] block bypass for mega-keys + compsExhausted — same leak surface as Ship #1, downstream block)
+9. `8393a91` — Ship #9 — 35¢ Marvel test-market variant allowlist (52 series / 184 issues, June-Oct 1977 window) + `normalizeTitle` hyphen extension + 3 retroactive mega-keys map key updates
+10. `00f0afe` — Ship #10 — 30¢ Marvel test-market variant allowlist (57 series / 182 issues, April-Aug 1976 window) + retroactive Kull correction (Conqueror → Destroyer typo fix in 35¢ bucket) + Doctor Strange / Dr. Strange dual-key in both buckets + refactored gate via `TEST_MARKET_KEYS` map for future variant-type extensions
 
 **Mega-keys floor system (`api/mega-keys.js`, 29 entries):**
 - 10 Golden Age (Action #1, Superman #1, Detective #27/#38, Batman #1, Marvel Comics #1, Cap America #1, All Star #8, Sensation #1, Flash Comics #1)
@@ -196,6 +199,49 @@ Session 4/22/2026 — Tier 0 liability firewall + Phase 5a (pop data) shipped. 7
 - 5 merge paths plumb the `pop` field: auto-refresh→catalogue, scan→catalogue, scan→selectedItem, bulk-import→catalogue, refreshMarketData. Pattern: `pop: enrich.pop || cur.pop || null`.
 - `/api/pricecharting-pop` standalone POST endpoint (`{ productId, grade }`) for manual calibration hits.
 - No pricing math changes anywhere in Phase 5a — display only. Phase 5b (scarcity-aware pricing hooks like thin-pop floor premium, dense-pop confidence boost) remains gated behind explicit greenlight.
+
+**Ship #8 — [floor] block bypass (`d3ccf26`):**
+- Bug: after Ship #1 fixed the sanity-block leak for mega-keys, the eBay-comps floor guard at `api/enrich.js:1077-1100` was still overriding clean PC × mult with `compsFromEbay.lowest` (pre-verify, contaminated). Repro: Action #1 went from $59K (correct PC × CGC 9.0 mult after sanity skip) to $145,000 (wrong-book Superman comp lowest). Sensation #1 went from $27.50 to $1,250.
+- Fix: same skip surface as Ship #1 — wrapped the floor block in `if (isMegaKeyForFloor) {} else if (compsExhausted) {} else { ... }`. Hoisted `floorNum`/`floorFired` declarations so the downstream `[price-trace]` log still has them in scope. Logs `[floor] skipped — mega-key uses floor map` or `[floor] skipped — all comps rejected by AI verify`.
+- Closes the leak symmetrically across BOTH downstream blocks. Mega-key floor map at `api/mega-keys.js` is now the sole authority for mega-key pricing once PC × mult lands.
+
+**Ship #9 — 35¢ Marvel test-market variant allowlist (`8393a91`):**
+- Bug class: Vision prompt at `api/grade.js:12` instructs Claude to label any 35¢ price-box book as `"35 cent variant"`. The variant multiplier table in `api/enrich.js` then applied ×6 to ANY book with that variant string — even Howard the Duck #28 (1978, well after the test-market window closed in Oct 1977 and 35¢ became the standard cover price industry-wide).
+- Fix: new `TEST_MARKET_VARIANTS['35¢']` const with 52 series / 184 issues from the canonical [RecalledComics list](https://recalledcomics.com/Marvel35CentVariants.php) (cross-checked vs gocollect.com + sellmycomicbooks.com). Gate inside the variant-mult loop checks `isTestMarketVariant(title, issue, '35¢')` — books not in the allowlist `continue` past the 35¢ key (mult skipped, falls through to next key, default 1.0×). Logs `[variant] 35¢ test-market match` or `[variant] 35¢ allowlist miss — skipping mult`.
+- `normalizeTitle` extended to strip hyphens to spaces (Marvel Team-Up / Marvel Team Up unify). 3 retroactive mega-keys map key updates required: `x-men|1` → `x men|1`, `giant-size x-men|1` → `giant size x men|1`, `amazing spider-man|300` → `amazing spider man|300`. End-to-end behavior identical because `getMegaKeyEntry` runs the same `normalizeTitle` on lookup.
+- Defensive aliases for titles where Vision returns short OR long form: `'sgt fury'` + `'sgt fury and his howling commandos'`, `'john carter'` + `'john carter warlord of mars'`, `'kid colt'` + `'kid colt outlaw'`. Both keys point to same array.
+- New test file `tests/variant-allowlist.test.js` with 32 cases: ALLOW (Iron Fist #14, Star Wars #1/#4, ASM #171, X-Men #107, etc.), DENY (Howard the Duck #28, ASM #300, Spawn #8, off-by-one bounds, unknowns), EDGE (empty title, null issue, non-numeric issue, uppercase normalization). 61/61 mega-keys tests still pass after `normalizeTitle` extension (2 assertions updated to reflect new hyphen behavior).
+
+**Ship #10 — 30¢ Marvel test-market variant allowlist + retroactive corrections (`00f0afe`):**
+- Same pattern as Ship #9 for the 1976 30¢ window. Populated `TEST_MARKET_VARIANTS['30¢']` with 57 series / 182 issues from [RecalledComics 30¢ list](https://recalledcomics.com/Marvel30CentVariants.php). April-August 1976 test-market window in 6 small US cities. Excludes Ka-Zar #16 and Inhumans #5 (entire run was 30¢, no variant exists).
+- Variant mult for 30¢ is ×4 (per existing `variantMultipliers` table — already there, just narrowing scope). Gate refactored from hard-coded `if (key === '35¢' || ...)` to `if (key in TEST_MARKET_KEYS)` lookup map: `TEST_MARKET_KEYS = { '35 cent': '35¢', '35¢': '35¢', '30 cent': '30¢', '30¢': '30¢' }`. Pattern extends trivially to Whitman / Mark Jewelers / Type 1A-1B by adding entries to both `TEST_MARKET_KEYS` and a new bucket in `TEST_MARKET_VARIANTS`.
+- Retroactive Ship #9 correction: `'kull the conqueror'` key in 35¢ bucket renamed to `'kull the destroyer'`. Actual 1977 cover title was "Kull the Destroyer" (Marvel renamed in 1973 and stayed there until 1982); RecalledComics' display label "Kull the Conqueror" was a typo. Vision reads literal cover text — old key would have produced false negatives.
+- Doctor Strange dual-key in BOTH buckets: `'doctor strange'` + `'dr strange'` → same issue array per bucket. Vision returns inconsistently.
+- Test file extended with 33 new cases (Kull correction, Doctor Strange dual-key, 30¢ ALLOW/DENY/EDGE). Notable cross-era assertions: ASM #155 in 35¢ bucket → false (was 30¢ era); ASM #169 in 30¢ bucket → false (was 35¢ era); Iron Fist #14 in 30¢ bucket → false (35¢ only). 65/65 variant-allowlist + 61/61 mega-keys = 126 tests passing.
+- Combined 35¢ + 30¢ coverage: **109 series / 366 issues** of true Marvel test-market variants. Books outside both windows now correctly fall through to baseline.
+
+## Next session candidates (queued)
+
+**Tier 1 (continued, well-bounded):**
+- B4 — Artist-credit variant disambiguation
+- Whitman variants (pattern ready via `TEST_MARKET_KEYS` + new bucket)
+- Mark Jewelers insert variants (same pattern)
+- K1 — Duplicate detection (needs fresh head)
+
+**Tier 2 (larger scope):**
+- FR-Q9 — Issue# cross-check via ComicVine before commit (3-4 hours, soft-flag variant)
+- FR-Q11 — Cover hash verify
+- FR-Q12 — Imprint awareness
+- Phase 5b — Scarcity-aware pricing hooks (gated; thin-pop floor premium, dense-pop confidence boost) — needs explicit greenlight before any pricing math touched
+- Scan UX rail (3-4 hours)
+- K2 — Merge pattern refactor (5 merge paths → centralized helper)
+
+**Open external threads:**
+- GoCollect API key #019483 — pending approval
+- eBay Marketplace Insights API — DEAD for indie devs
+- Phone audit cadence — strong momentum (5 fixes in 4/19 session, 10 deploys 4/22)
+
+**Process note — parallel QA protocol validated:** three Claude instances coordinating (pattern observer / directive synthesizer / executor with codebase access) shipped 10 clean deploys today. Methodology proven effective for high-velocity Tier 0 + Tier 1 work.
 
 ## Session 4/19/2026 (phone audit — 5 critical fixes)
 Navigation gesture guards, empty/low comp scoring, publisher parens cleanup, variant filter order, vision + match tier sync.
