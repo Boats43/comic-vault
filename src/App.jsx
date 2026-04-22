@@ -1457,7 +1457,11 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
             <div className="collection-meta">
               <div className="cl-row1">
                 <span className="collection-title">{titleWithIssue}</span>
-                {getDisplayPrice(item) > 0 && (
+                {(item.manualReviewRequired || item.gradeExceedsMap) ? (
+                  <span className="collection-price" style={{ color: "#d17105" }}>
+                    Appraise
+                  </span>
+                ) : getDisplayPrice(item) > 0 && (
                   <span className="collection-price">${getDisplayPrice(item).toLocaleString("en-US")}</span>
                 )}
               </div>
@@ -1481,7 +1485,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                   </div>
                 );
               })()}
-              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired) && (
+              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired || item.gradeExceedsMap) && (
                 <div className="cl-row3">
                   {showKeyIssue(item.keyIssue) && <span className="pill pill-key">KEY</span>}
                   {item.manualReviewRequired && (
@@ -1492,7 +1496,15 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                       🔑 MANUAL REVIEW
                     </span>
                   )}
-                  {item.megaKeyFloorApplied && !item.manualReviewRequired && (
+                  {item.gradeExceedsMap && !item.manualReviewRequired && (
+                    <span
+                      className="pill pill-exceeds-map"
+                      title={item.gradeExceedsMapReason || "Grade exceeds floor map coverage"}
+                    >
+                      🔑 GRADE EXCEEDS MAP
+                    </span>
+                  )}
+                  {item.megaKeyFloorApplied && !item.manualReviewRequired && !item.gradeExceedsMap && (
                     <span
                       className={`pill ${item.megaKeyFloorVerified ? 'pill-mega-verified' : 'pill-mega-estimated'}`}
                       title={item.megaKeyFloorNote || ""}
@@ -1560,6 +1572,7 @@ function CollectionDetail({
   const [ppInput, setPpInput] = useState(item.purchasePrice != null ? String(item.purchasePrice) : "");
   const [listPrice, setListPrice] = useState(() => getDisplayPrice(item));
   const [swipeHint, setSwipeHint] = useState(() => !localStorage.getItem("cv_swipe_hint_seen"));
+  const [showEngineRec, setShowEngineRec] = useState(false);
   const addPhotoRef = useRef(null);
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
@@ -1567,6 +1580,7 @@ function CollectionDetail({
 
   useEffect(() => {
     setListPrice(getDisplayPrice(item));
+    setShowEngineRec(false);
   }, [item?.id]);
 
   // Abort any in-flight card enrich when the item changes or the detail
@@ -1853,7 +1867,9 @@ function CollectionDetail({
         return (
           <div style={{ fontSize: 12, color: '#888', marginTop: 4, marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <span style={{ background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: 12, color: '#d4af37', fontWeight: 600 }}>{item.grade || 'RAW'}</span>
-            {dp > 0 && <span>${dp.toLocaleString('en-US')}</span>}
+            {(item.manualReviewRequired || item.gradeExceedsMap)
+              ? <span style={{ color: '#d17105', fontWeight: 600 }}>Appraise</span>
+              : dp > 0 && <span>${dp.toLocaleString('en-US')}</span>}
             {lastSoldLabel && <span>· Last sold {lastSoldLabel}</span>}
             {activeRange && <span>· Asking {activeRange}</span>}
           </div>
@@ -1987,16 +2003,55 @@ function CollectionDetail({
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div>
             <div className="muted small">Recommended list price</div>
-            <div
-              className="price"
-              style={{ fontSize: 28, fontWeight: 800, color: "#d4af37" }}
-            >
-              {recommendedLabel}
-            </div>
-            {item.priceNote && (
-              <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>
-                {item.priceNote}
-              </div>
+            {(item.manualReviewRequired || item.gradeExceedsMap) ? (
+              <>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#d17105", lineHeight: 1.15 }}>
+                  Manual Appraisal Required
+                </div>
+                <button
+                  onClick={() => setShowEngineRec((v) => !v)}
+                  style={{
+                    marginTop: 6,
+                    fontSize: 11,
+                    padding: "3px 8px",
+                    background: "transparent",
+                    border: "1px solid #555",
+                    borderRadius: 4,
+                    color: "#aaa",
+                    cursor: "pointer",
+                  }}
+                >
+                  {showEngineRec ? "Hide engine estimate ▲" : "Show engine estimate ▼"}
+                </button>
+                {showEngineRec && (
+                  <div style={{
+                    marginTop: 6,
+                    fontSize: 12,
+                    color: "#aaa",
+                    lineHeight: 1.4,
+                  }}>
+                    <div>Engine estimate: <span style={{ color: "#d4af37" }}>{recommendedLabel}</span></div>
+                    <div style={{ marginTop: 2, color: "#d17105" }}>
+                      ⚠ Engine cannot price this book accurately.{" "}
+                      {item.manualReviewReason || item.gradeExceedsMapReason || "Verify via Heritage/GoCollect before listing."}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div
+                  className="price"
+                  style={{ fontSize: 28, fontWeight: 800, color: "#d4af37" }}
+                >
+                  {recommendedLabel}
+                </div>
+                {item.priceNote && (
+                  <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>
+                    {item.priceNote}
+                  </div>
+                )}
+              </>
             )}
           </div>
           {(() => {
@@ -2011,6 +2066,17 @@ function CollectionDetail({
                   style={pillStyle}
                 >
                   🔑 MANUAL REVIEW
+                </span>
+              );
+            }
+            if (item.gradeExceedsMap) {
+              return (
+                <span
+                  className="pill pill-exceeds-map"
+                  title={item.gradeExceedsMapReason || ""}
+                  style={pillStyle}
+                >
+                  🔑 GRADE EXCEEDS MAP
                 </span>
               );
             }
@@ -2048,7 +2114,7 @@ function CollectionDetail({
           })()}
         </div>
 
-        {(item.matchConfidence?.tier === "LOW" || item.matchConfidence?.visionCapped) && !item.megaKeyFloorApplied && !item.manualReviewRequired && (
+        {(item.matchConfidence?.tier === "LOW" || item.matchConfidence?.visionCapped) && !item.megaKeyFloorApplied && !item.manualReviewRequired && !item.gradeExceedsMap && (
           <div style={{
             marginTop: 10,
             padding: "10px 12px",
@@ -2101,7 +2167,30 @@ function CollectionDetail({
           </div>
         )}
 
-        {item.megaKeyFloorApplied && !item.manualReviewRequired && (
+        {item.gradeExceedsMap && !item.manualReviewRequired && (
+          <div style={{
+            marginTop: 10,
+            padding: "12px 14px",
+            border: "1px solid #d17105",
+            borderRadius: 8,
+            background: "rgba(209,113,5,0.08)",
+            color: "#fde68a",
+            fontSize: 13,
+            lineHeight: 1.45,
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 4, color: "#d17105" }}>
+              🔑 Grade exceeds floor map coverage
+            </div>
+            {item.gradeExceedsMapReason ||
+              "This grade is above the highest bucket in our floor map for this book."}
+            <div style={{ marginTop: 4, opacity: 0.85 }}>
+              The engine-computed price is not trustworthy for this grade.
+              Verify via Heritage Auctions or GoCollect before listing.
+            </div>
+          </div>
+        )}
+
+        {item.megaKeyFloorApplied && !item.manualReviewRequired && !item.gradeExceedsMap && (
           <div style={{
             marginTop: 10,
             padding: "12px 14px",
@@ -2489,7 +2578,7 @@ function CollectionDetail({
           );
         })()}
 
-        {!hasComps && !item.megaKeyFloorApplied && !item.manualReviewRequired && (
+        {!hasComps && !item.megaKeyFloorApplied && !item.manualReviewRequired && !item.gradeExceedsMap && (
           <div
             style={{
               marginTop: 12,
@@ -2598,11 +2687,20 @@ function CollectionDetail({
               // ANY mega-key floor (verified or estimated) requires user
               // acknowledgment before listing — mega-keys are volatile and
               // $100K+ decisions warrant explicit one-tap confirmation.
+              // gradeExceedsMap and manualReviewRequired both gate here
+              // because the displayed price cannot be trusted for listing.
               // manualConfirmed resets on price change (see merge paths).
               const needsAck =
-                (item.manualReviewRequired || item.megaKeyFloorApplied) &&
+                (item.manualReviewRequired ||
+                  item.gradeExceedsMap ||
+                  item.megaKeyFloorApplied) &&
                 !item.manualConfirmed;
               if (needsAck) {
+                const gateLabel = item.gradeExceedsMap
+                  ? "Grade exceeds map — manual appraisal needed before listing."
+                  : item.manualReviewRequired
+                    ? "Manual appraisal required — mega-key pricing dispersion."
+                    : "Confirm price manually first — mega-key detected.";
                 return (
                   <>
                     <div style={{
@@ -2614,7 +2712,7 @@ function CollectionDetail({
                       fontSize: 12,
                       color: "#fca5a5",
                     }}>
-                      Confirm price manually first — mega-key detected.
+                      {gateLabel}
                     </div>
                     <button
                       className="reset-btn"
@@ -3983,6 +4081,8 @@ export default function App() {
                 preFloorSource: enrich.preFloorSource || null,
                 manualReviewRequired: enrich.manualReviewRequired === true,
                 manualReviewReason: enrich.manualReviewReason || null,
+                gradeExceedsMap: enrich.gradeExceedsMap === true,
+                gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                 compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedAR ? false : (cur.manualConfirmed || false),
@@ -4290,6 +4390,8 @@ export default function App() {
                   preFloorSource: enrich.preFloorSource || null,
                   manualReviewRequired: enrich.manualReviewRequired === true,
                   manualReviewReason: enrich.manualReviewReason || null,
+                  gradeExceedsMap: enrich.gradeExceedsMap === true,
+                  gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                   compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
@@ -4334,6 +4436,8 @@ export default function App() {
                   preFloorSource: enrich.preFloorSource || null,
                   manualReviewRequired: enrich.manualReviewRequired === true,
                   manualReviewReason: enrich.manualReviewReason || null,
+                  gradeExceedsMap: enrich.gradeExceedsMap === true,
+                  gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                   compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChangedSel ? false : (s.manualConfirmed || false),
@@ -4511,6 +4615,8 @@ export default function App() {
                 preFloorSource: enrich.preFloorSource || null,
                 manualReviewRequired: enrich.manualReviewRequired === true,
                 manualReviewReason: enrich.manualReviewReason || null,
+                gradeExceedsMap: enrich.gradeExceedsMap === true,
+                gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                 compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedBulk ? false : (cur.manualConfirmed || false),
@@ -4838,6 +4944,8 @@ export default function App() {
       preFloorSource: enrich.preFloorSource || null,
       manualReviewRequired: enrich.manualReviewRequired === true,
       manualReviewReason: enrich.manualReviewReason || null,
+      gradeExceedsMap: enrich.gradeExceedsMap === true,
+      gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
       compEraFilterBypassed: enrich.compEraFilterBypassed === true,
       megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
       manualConfirmed: priceChangedRM ? false : (item.manualConfirmed || false),

@@ -322,6 +322,11 @@ body,
   color: white;
 }
 
+.pill-exceeds-map {
+  background: #d17105;
+  color: white;
+}
+
 .collection-price {
   color: var(--gold);
   font-weight: 700;

@@ -1192,9 +1192,16 @@ export default async function handler(req, res) {
             title, correctedIssue, grade, numericGrade
           );
           if (floorResult.exceedsMap) {
-            out.manualReviewRequired = true;
-            out.manualReviewReason =
-              'Grade exceeds floor map coverage for this book';
+            // Distinct from type=MANUAL: the map simply doesn't cover
+            // this grade. Book could be floored if the map were
+            // extended. UI surfaces an amber GRADE EXCEEDS MAP badge
+            // and suppresses the engine-computed price (same safety
+            // gate as MANUAL) so users don't anchor on an unfloored
+            // PC/comp number that's typically orders of magnitude
+            // below market.
+            out.gradeExceedsMap = true;
+            out.gradeExceedsMapReason =
+              'Grade exceeds floor map coverage — manual review required';
             out.priceNote = (out.priceNote || '') + ' · grade exceeds floor map';
             console.log('[mega-key-floor] EXCEEDS MAP:',
               `${title} #${correctedIssue} grade=${grade}`, '— manual review');
