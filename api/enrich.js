@@ -35,20 +35,25 @@ const fmtUsd = (n) =>
 // Marvel test-market price-variant allowlists. Vision labels any 35¢ /
 // 30¢ price box on a cover as a "test market" variant, but those price
 // points are also the standard cover price for a wide era of Marvel
-// books (35¢ became standard August 1977; 30¢ was standard from May 1976
-// to July 1977 outside the test window). Without this gate the variant
-// multiplier (×6 for 35¢) fires on books like Howard the Duck #28 (1978,
-// out of window) that just happen to show 35¢ as their normal price.
+// books (35¢ became standard August 1977; 30¢ was standard from
+// September 1976 onward outside the test window). Without this gate
+// the variant multiplier (×6 for 35¢, ×4 for 30¢) fires on books like
+// Howard the Duck #28 (1978, out of window) that just happen to show
+// 35¢ as their normal price.
 //
 // Title keys go through `normalizeTitle` (lowercase, strip punctuation,
 // hyphens → spaces). Aliases included where Vision returns the short
-// form some scans and the full form on others.
+// form some scans and the full form on others (sgt fury, john carter,
+// kid colt, doctor strange / dr strange).
 //
 // 35¢ source: https://recalledcomics.com/Marvel35CentVariants.php
 //   (cross-checked vs gocollect.com and sellmycomicbooks.com — 184
 //   issues across 52 series, June–October 1977 test-market window).
 //
-// 30¢ slot reserved for follow-up; same gate structure when populated.
+// 30¢ source: https://recalledcomics.com/Marvel30CentVariants.php
+//   (cross-checked vs gocollect.com — 182 issues across 57 series,
+//   April–August 1976 test-market window). Excludes Ka-Zar #16 and
+//   Inhumans #5 — those were printed entirely at 30¢, no variant.
 const TEST_MARKET_VARIANTS = {
   '35¢': {
     '2001 a space odyssey': [7, 8, 9, 10],
@@ -61,6 +66,8 @@ const TEST_MARKET_VARIANTS = {
     'conan the barbarian': [75, 76, 77, 78, 79],
     'daredevil': [146, 147, 148],
     'defenders': [48, 49, 50, 51, 52],
+    // Ship #10: dual-key for Doctor Strange / Dr. Strange (Vision varies).
+    'doctor strange': [23, 24, 25],
     'dr strange': [23, 24, 25],
     'eternals': [12, 13, 14, 15, 16],
     'fantastic four': [183, 184, 185, 186, 187],
@@ -78,7 +85,11 @@ const TEST_MARKET_VARIANTS = {
     'john carter warlord of mars': [1, 2, 3, 4, 5],
     'kid colt': [218, 219, 220],
     'kid colt outlaw': [218, 219, 220],
-    'kull the conqueror': [21, 22, 23],
+    // Ship #10: actual cover title 1977 was "Kull the Destroyer"
+    // (RecalledComics' display label "Kull the Conqueror" was a
+    // typo — the title flipped to Destroyer in 1973 and stayed
+    // there until 1982). Vision reads literal cover text.
+    'kull the destroyer': [21, 22, 23],
     'logans run': [6, 7],
     'marvel premiere': [36, 37, 38],
     'marvel presents': [11, 12],
@@ -108,9 +119,78 @@ const TEST_MARKET_VARIANTS = {
     'x men': [105, 106, 107],
   },
   '30¢': {
-    // Reserved for 1976 Marvel 30¢ test-market follow-up. Same gate
-    // structure when populated.
+    'adventures on the planet of the apes': [5, 6, 7],
+    'amazing adventures': [36, 37],
+    'amazing spider man': [155, 156, 157, 158, 159],
+    'astonishing tales': [35, 36],
+    'avengers': [146, 147, 148, 149, 150],
+    'black goliath': [2, 3, 4],
+    'captain america': [196, 197, 198, 199, 200],
+    'captain marvel': [44, 45],
+    'chamber of chills': [22, 23],
+    'champions': [5, 6, 7],
+    'conan the barbarian': [61, 62, 63, 64, 65],
+    'daredevil': [132, 133, 134, 135, 136],
+    'defenders': [34, 35, 36, 37, 38],
+    'doctor strange': [13, 14, 15, 16, 17],
+    'dr strange': [13, 14, 15, 16, 17],
+    'eternals': [1, 2],
+    'fantastic four': [169, 170, 171, 172, 173],
+    'ghost rider': [17, 18, 19],
+    'howard the duck': [3, 4],
+    'incredible hulk': [198, 199, 200, 201, 202],
+    'invaders': [6, 7],
+    'iron fist': [4, 5, 6],
+    'iron man': [85, 86, 87, 88, 89],
+    'jungle action': [21, 22],
+    'kid colt': [205, 206, 207, 208, 209],
+    'kid colt outlaw': [205, 206, 207, 208, 209],
+    'kull the destroyer': [16],
+    'marvel adventure': [3, 4, 5],
+    'marvel chillers': [4, 5, 6],
+    'marvel double feature': [15, 16, 17],
+    'marvel feature': [4, 5],
+    'marvel premiere': [29, 30, 31],
+    'marvel presents': [4, 5, 6],
+    'marvel spotlight': [27, 28, 29],
+    'marvel super heroes': [57, 58],
+    'marvel tales': [66, 67, 68, 69, 70],
+    'marvel team up': [44, 45, 46, 47, 48],
+    'marvel triple action': [29, 30],
+    'marvel two in one': [15, 16, 17, 18],
+    'marvels greatest comics': [63, 64],
+    'master of kung fu': [39, 40, 41, 42, 43],
+    'mighty marvel western': [45],
+    'omega the unknown': [2, 3],
+    'power man': [30, 31, 32, 33, 34],
+    'rawhide kid': [133, 134],
+    'ringo kid': [27, 28],
+    'sgt fury': [133, 134],
+    'sgt fury and his howling commandos': [133, 134],
+    'skull the slayer': [5, 6],
+    'son of satan': [3, 4, 5],
+    'strange tales': [185, 186],
+    'super villain team up': [5, 6, 7],
+    'thor': [246, 247, 248, 249, 250],
+    'tomb of darkness': [20, 21],
+    'tomb of dracula': [43, 44, 45, 46, 47],
+    'two gun kid': [129, 130, 131],
+    'warlock': [12, 13, 14],
+    'weird wonder tales': [15, 16, 17],
+    'werewolf by night': [38, 39],
+    'x men': [98, 99, 100],
   },
+};
+
+// Maps variant-string keys (as appear in Vision-returned variant
+// strings) to their TEST_MARKET_VARIANTS bucket key. Extends cleanly
+// to future variant types (Whitman, Mark Jewelers, Type 1A/1B) by
+// adding new entries here + a new bucket above.
+const TEST_MARKET_KEYS = {
+  '35 cent': '35¢',
+  '35¢': '35¢',
+  '30 cent': '30¢',
+  '30¢': '30¢',
 };
 
 // Resolve whether a (title, issue, variantKey) combo falls within a
@@ -1274,22 +1354,25 @@ export default async function handler(req, res) {
         let vMult = null;
         for (const [key, mult] of Object.entries(variantMultipliers)) {
           if (vLower.includes(key)) {
-            // Test-market price-variant gate (Ship #9). Vision labels
-            // any 35¢ / 30¢ price box as a test-market variant, but
-            // those are also standard prices outside the 1976-1977
-            // window. Only honor the multiplier when (title, issue)
-            // is in the canonical allowlist; otherwise fall through
-            // and try the next variant key.
-            if (key === '35¢' || key === '35 cent') {
-              if (!isTestMarketVariant(title, correctedIssue, '35¢')) {
+            // Test-market price-variant gate (Ship #9 + #10). Vision
+            // labels any 35¢ / 30¢ price box as a test-market variant,
+            // but those are also standard cover prices outside the
+            // 1976-1977 windows. Only honor the multiplier when
+            // (title, issue) is in the canonical allowlist; otherwise
+            // fall through and try the next variant key. Pattern
+            // extends trivially to Whitman, Mark Jewelers, etc. by
+            // adding entries to TEST_MARKET_KEYS + TEST_MARKET_VARIANTS.
+            if (key in TEST_MARKET_KEYS) {
+              const variantType = TEST_MARKET_KEYS[key];
+              if (!isTestMarketVariant(title, correctedIssue, variantType)) {
                 console.log(
-                  '[variant] 35¢ allowlist miss — skipping mult',
+                  `[variant] ${variantType} allowlist miss — skipping mult`,
                   `title="${normalizeTitle(title)}" issue=${correctedIssue}`
                 );
                 continue;
               }
               console.log(
-                '[variant] 35¢ test-market match',
+                `[variant] ${variantType} test-market match`,
                 `title="${normalizeTitle(title)}" issue=${correctedIssue}`
               );
             }
