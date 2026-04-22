@@ -1077,26 +1077,44 @@ export default async function handler(req, res) {
     // Floor guard: never price below the lowest eBay comp.
     // eBay comps already reflect market grade — no grade multiplier on floor.
     // Floor is capped at compsAvg to prevent exceeding market.
-    const finalNum = parseFloat(
-      String(out.price || '0').replace(/[$,]/g, '')
-    );
-    const rawFloor = rawComps?.lowest || compsFromEbay?.lowest || 0;
-    const compsAvgForCap = blendedAvg || compsFromEbay?.average || 0;
-    let floorNum = rawFloor;
-    if (floorNum > compsAvgForCap && compsAvgForCap > 0) {
-      floorNum = compsAvgForCap;
-      console.log('[floor] capped at comps avg', compsAvgForCap.toFixed(2));
-    }
-
+    //
+    // Same skip conditions as the sanity block above (Ship #1 Surface B):
+    //   1. Mega-keys: floor map at api/mega-keys.js is the source of
+    //      truth. The eBay-comps floor here would override clean PC × mult
+    //      with `compsFromEbay.lowest` — for Golden/Silver mega-keys this
+    //      is dominated by reprints/facsimiles/wrong-book entries (the
+    //      $145K Action #1 from Superman #1 comps class of bug).
+    //   2. compsExhausted: AI verify rejected 100% of comps. `rawComps.lowest`
+    //      is null but `compsFromEbay.lowest` still holds the pre-verify
+    //      contaminated lowest — same untrusted data the sanity block skips.
+    let floorNum = 0;
     let floorFired = false;
-    if (floorNum > 0 && finalNum < floorNum) {
-      floorFired = true;
-      console.log('[floor] price', finalNum,
-        '< floor', floorNum, `(raw ${rawFloor}, cap ${compsAvgForCap})`, '— enforcing');
-      out.price = fmtUsd(floorNum);
-      out.priceLow = fmtUsd(floorNum * 0.85);
-      out.priceHigh = fmtUsd(floorNum * 1.25);
-      out.priceNote = (out.priceNote || '') + ' · floor enforced';
+    const isMegaKeyForFloor = !!getMegaKeyEntry(title, correctedIssue);
+    if (isMegaKeyForFloor) {
+      console.log('[floor] skipped — mega-key uses floor map');
+    } else if (compsExhausted) {
+      console.log('[floor] skipped — all comps rejected by AI verify');
+    } else {
+      const finalNum = parseFloat(
+        String(out.price || '0').replace(/[$,]/g, '')
+      );
+      const rawFloor = rawComps?.lowest || compsFromEbay?.lowest || 0;
+      const compsAvgForCap = blendedAvg || compsFromEbay?.average || 0;
+      floorNum = rawFloor;
+      if (floorNum > compsAvgForCap && compsAvgForCap > 0) {
+        floorNum = compsAvgForCap;
+        console.log('[floor] capped at comps avg', compsAvgForCap.toFixed(2));
+      }
+
+      if (floorNum > 0 && finalNum < floorNum) {
+        floorFired = true;
+        console.log('[floor] price', finalNum,
+          '< floor', floorNum, `(raw ${rawFloor}, cap ${compsAvgForCap})`, '— enforcing');
+        out.price = fmtUsd(floorNum);
+        out.priceLow = fmtUsd(floorNum * 0.85);
+        out.priceHigh = fmtUsd(floorNum * 1.25);
+        out.priceNote = (out.priceNote || '') + ' · floor enforced';
+      }
     }
 
     console.log('[price-trace]',
