@@ -317,7 +317,7 @@ export const MEGA_KEYS_FLOOR = {
       9.4: 700_000, 9.6: 1_500_000,
     },
   },
-  "x-men|1": {
+  "x men|1": {
     type: "MEGA",
     verified: false,
     source: "training_estimate_60pct",
@@ -429,7 +429,7 @@ export const MEGA_KEYS_FLOOR = {
       9.6: 75_000, 9.8: 200_000,
     },
   },
-  "giant-size x-men|1": {
+  "giant size x men|1": {
     type: "MEGA",
     verified: true,
     source:
@@ -464,7 +464,7 @@ export const MEGA_KEYS_FLOOR = {
       9.4: 15_000, 9.6: 35_000, 9.8: 100_000,
     },
   },
-  "amazing spider-man|300": {
+  "amazing spider man|300": {
     type: "MEGA",
     verified: false,
     source: "training_estimate_60pct",
@@ -483,13 +483,19 @@ export const MEGA_KEYS_FLOOR = {
 };
 
 // Normalize a title for map lookup. Lowercases, strips apostrophes/quotes/
-// basic punctuation, collapses whitespace. Preserves articles ("the", "a")
-// — map keys should reflect true title prefix as stored in catalogue.
+// basic punctuation, normalizes hyphens to spaces, collapses whitespace.
+// Preserves articles ("the", "a") — map keys should reflect true title
+// prefix as stored in catalogue.
+//
+// Hyphen normalization (added Ship #9 for 35¢ allowlist) handles Marvel
+// title variants like "Marvel Team-Up" / "Marvel Team Up" / "Super-Villain
+// Team-Up" with one canonical key per series.
 export const normalizeTitle = (title) => {
   if (!title) return "";
   return String(title)
     .toLowerCase()
     .replace(/['"!?.,]/g, "")
+    .replace(/-/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 };

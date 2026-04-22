@@ -50,8 +50,8 @@ assertEq(verifiedCount, 8, '8 verified:true entries');
 console.log('\nTitle normalization:');
 assertEq(normalizeTitle('Detective Comics'), 'detective comics', 'lowercase');
 assertEq(normalizeTitle("D'Orc"), 'dorc', 'strip apostrophe');
-assertEq(normalizeTitle('  X-Men  '), 'x-men', 'trim whitespace');
-assertEq(normalizeTitle('Amazing  Spider-Man'), 'amazing spider-man', 'collapse spaces');
+assertEq(normalizeTitle('  X-Men  '), 'x men', 'trim whitespace + hyphen → space (Ship #9)');
+assertEq(normalizeTitle('Amazing  Spider-Man'), 'amazing spider man', 'collapse spaces + hyphen → space (Ship #9)');
 
 console.log('\nGrade normalization:');
 assertEq(normalizeGrade(null, 9.8), 9.8, 'numericGrade 9.8 → 9.8');

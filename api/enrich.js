@@ -19,6 +19,7 @@ import {
   MEGA_KEYS_SCHEMA_VERSION,
   getMegaKeyEntry,
   getMegaKeyFloor,
+  normalizeTitle,
 } from "./mega-keys.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -30,6 +31,103 @@ const fmtUsd = (n) =>
   n == null || isNaN(n)
     ? null
     : `$${n.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
+
+// Marvel test-market price-variant allowlists. Vision labels any 35¢ /
+// 30¢ price box on a cover as a "test market" variant, but those price
+// points are also the standard cover price for a wide era of Marvel
+// books (35¢ became standard August 1977; 30¢ was standard from May 1976
+// to July 1977 outside the test window). Without this gate the variant
+// multiplier (×6 for 35¢) fires on books like Howard the Duck #28 (1978,
+// out of window) that just happen to show 35¢ as their normal price.
+//
+// Title keys go through `normalizeTitle` (lowercase, strip punctuation,
+// hyphens → spaces). Aliases included where Vision returns the short
+// form some scans and the full form on others.
+//
+// 35¢ source: https://recalledcomics.com/Marvel35CentVariants.php
+//   (cross-checked vs gocollect.com and sellmycomicbooks.com — 184
+//   issues across 52 series, June–October 1977 test-market window).
+//
+// 30¢ slot reserved for follow-up; same gate structure when populated.
+const TEST_MARKET_VARIANTS = {
+  '35¢': {
+    '2001 a space odyssey': [7, 8, 9, 10],
+    'amazing spider man': [169, 170, 171, 172, 173],
+    'avengers': [160, 161, 162, 163, 164],
+    'black panther': [4, 5],
+    'captain america': [210, 211, 212, 213, 214],
+    'captain marvel': [51, 52],
+    'champions': [14, 15],
+    'conan the barbarian': [75, 76, 77, 78, 79],
+    'daredevil': [146, 147, 148],
+    'defenders': [48, 49, 50, 51, 52],
+    'dr strange': [23, 24, 25],
+    'eternals': [12, 13, 14, 15, 16],
+    'fantastic four': [183, 184, 185, 186, 187],
+    'flintstones': [1],
+    'ghost rider': [24, 25, 26],
+    'godzilla': [1, 2, 3],
+    'howard the duck': [13, 14, 15, 16, 17],
+    'human fly': [1, 2],
+    'incredible hulk': [212, 213, 214, 215, 216],
+    'inhumans': [11, 12],
+    'invaders': [17, 18, 19, 20, 21],
+    'iron fist': [13, 14, 15],
+    'iron man': [99, 100, 101, 102, 103],
+    'john carter': [1, 2, 3, 4, 5],
+    'john carter warlord of mars': [1, 2, 3, 4, 5],
+    'kid colt': [218, 219, 220],
+    'kid colt outlaw': [218, 219, 220],
+    'kull the conqueror': [21, 22, 23],
+    'logans run': [6, 7],
+    'marvel premiere': [36, 37, 38],
+    'marvel presents': [11, 12],
+    'marvel super action': [2, 3],
+    'marvel super heroes': [65, 66],
+    'marvel tales': [80, 81, 82, 83, 84],
+    'marvel team up': [58, 59, 60, 61, 62],
+    'marvel triple action': [36, 37],
+    'marvel two in one': [28, 29, 30, 31, 32],
+    'marvels greatest comics': [71, 72, 73],
+    'master of kung fu': [53, 54, 55, 56, 57],
+    'ms marvel': [6, 7, 8, 9, 10],
+    'nova': [10, 11, 12, 13, 14],
+    'omega the unknown': [9, 10],
+    'power man': [44, 45, 46, 47],
+    'rawhide kid': [140, 141],
+    'red sonja': [4, 5],
+    'scooby doo': [1],
+    'sgt fury': [141, 142],
+    'sgt fury and his howling commandos': [141, 142],
+    'spectacular spider man': [7, 8, 9, 10, 11],
+    'star wars': [1, 2, 3, 4],
+    'super villain team up': [12, 13, 14],
+    'tarzan': [1, 2, 3, 4, 5],
+    'thor': [260, 261, 262, 263, 264],
+    'tomb of dracula': [57, 58, 59, 60],
+    'x men': [105, 106, 107],
+  },
+  '30¢': {
+    // Reserved for 1976 Marvel 30¢ test-market follow-up. Same gate
+    // structure when populated.
+  },
+};
+
+// Resolve whether a (title, issue, variantKey) combo falls within a
+// known test-market window. Returns true ONLY for (title, issue) pairs
+// listed in TEST_MARKET_VARIANTS[variantKey]. Used to gate the variant
+// multiplier — books outside the allowlist fall through to 1.0× even
+// when Vision labeled the cover with a test-market price string.
+const isTestMarketVariant = (title, issue, variantKey) => {
+  const bucket = TEST_MARKET_VARIANTS[variantKey];
+  if (!bucket) return false;
+  const titleKey = normalizeTitle(title);
+  if (!titleKey) return false;
+  const issueNum = parseInt(String(issue || '').trim(), 10);
+  if (isNaN(issueNum)) return false;
+  const allowed = bucket[titleKey];
+  return Array.isArray(allowed) && allowed.includes(issueNum);
+};
 
 // Median of a numeric array. Used for mixed-print/variant comp fallbacks
 // where the mean is meaningless (e.g. 1st prints @ $200 mixed with 4th
@@ -1175,7 +1273,29 @@ export default async function handler(req, res) {
         };
         let vMult = null;
         for (const [key, mult] of Object.entries(variantMultipliers)) {
-          if (vLower.includes(key)) { vMult = mult; break; }
+          if (vLower.includes(key)) {
+            // Test-market price-variant gate (Ship #9). Vision labels
+            // any 35¢ / 30¢ price box as a test-market variant, but
+            // those are also standard prices outside the 1976-1977
+            // window. Only honor the multiplier when (title, issue)
+            // is in the canonical allowlist; otherwise fall through
+            // and try the next variant key.
+            if (key === '35¢' || key === '35 cent') {
+              if (!isTestMarketVariant(title, correctedIssue, '35¢')) {
+                console.log(
+                  '[variant] 35¢ allowlist miss — skipping mult',
+                  `title="${normalizeTitle(title)}" issue=${correctedIssue}`
+                );
+                continue;
+              }
+              console.log(
+                '[variant] 35¢ test-market match',
+                `title="${normalizeTitle(title)}" issue=${correctedIssue}`
+              );
+            }
+            vMult = mult;
+            break;
+          }
         }
         if (vMult) {
           const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
