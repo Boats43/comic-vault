@@ -63,6 +63,14 @@ const fmtSaleWhen = (iso, daysAgo) => {
   return "—";
 };
 
+// Mirror of api/pricecharting-pop.js POP_GRADE_INDEX. Hardcoded
+// client-side so the histogram can label its 14 bars without
+// shipping the array on every enrich response. Verified from PC's
+// render_pop_chart() in /js/market_ab.js (April 2026).
+const POP_GRADE_INDEX = [
+  1, 2, 3, 4, 5, 6, 7, 8, 9.0, 9.2, 9.4, 9.6, 9.8, 10,
+];
+
 const getDisplayPrice = (item) => {
   if (!item) return 0;
   const p = parseFloat(String(item.price || "0").replace(/[$,]/g, ""));
@@ -2029,6 +2037,67 @@ function CollectionDetail({
               {scannedText && <div>Scanned: {scannedText}</div>}
             </div>
           )}
+        </div>
+      )}
+
+      {/* 4b. PC-TRACKED CGC POP (Phase 5a.3) */}
+      {item.pop && Array.isArray(item.pop.cgc) && item.pop.cgc.length === POP_GRADE_INDEX.length && (
+        <div className="pop-panel">
+          <div className="pop-header">PC-TRACKED CGC POP</div>
+          {item.pop.total === 0 ? (
+            <div style={{ opacity: 0.7, fontSize: 12 }}>
+              No copies tracked yet — thin census signal.
+            </div>
+          ) : (
+            <>
+              <div className="pop-stats">
+                <span>Tracked copies:</span>
+                <span>{item.pop.total.toLocaleString("en-US")}</span>
+                {item.pop.atGrade != null && item.pop.userBucket != null && (
+                  <>
+                    <span>At your grade ({item.pop.userBucket}):</span>
+                    <span>
+                      {item.pop.atGrade.toLocaleString("en-US")}
+                      {item.pop.scarcityRatio != null && ` (${(item.pop.scarcityRatio * 100).toFixed(1)}%)`}
+                    </span>
+                  </>
+                )}
+                {item.pop.aboveGrade != null && (
+                  <>
+                    <span>Graded higher:</span>
+                    <span>{item.pop.aboveGrade.toLocaleString("en-US")}</span>
+                  </>
+                )}
+                {item.pop.belowGrade != null && (
+                  <>
+                    <span>Graded lower:</span>
+                    <span>{item.pop.belowGrade.toLocaleString("en-US")}</span>
+                  </>
+                )}
+              </div>
+              <div className="pop-histogram">
+                {item.pop.cgc.map((count, idx) => {
+                  const grade = POP_GRADE_INDEX[idx];
+                  const maxCount = Math.max(...item.pop.cgc, 1);
+                  const heightPercent = (Number(count) / maxCount) * 100;
+                  const isUserGrade = item.pop.userBucket === grade;
+                  return (
+                    <div key={idx} className="pop-bar-container">
+                      <div
+                        className={`pop-bar ${isUserGrade ? 'user-grade' : ''}`}
+                        style={{ height: `${heightPercent}%` }}
+                        title={`Grade ${grade}: ${Number(count).toLocaleString("en-US")} copies`}
+                      />
+                      <div className="pop-label">{grade}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          <div className="pop-footer">
+            * PriceCharting tracks copies seen in market activity. Full CGC census may be higher for vintage books.
+          </div>
         </div>
       )}
 
@@ -4118,6 +4187,7 @@ export default function App() {
                 gradeExceedsMap: enrich.gradeExceedsMap === true,
                 gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                 compsExhausted: enrich.compsExhausted === true,
+                pop: enrich.pop || cur.pop || null,
                 compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedAR ? false : (cur.manualConfirmed || false),
@@ -4428,6 +4498,7 @@ export default function App() {
                   gradeExceedsMap: enrich.gradeExceedsMap === true,
                   gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                   compsExhausted: enrich.compsExhausted === true,
+                  pop: enrich.pop || cur.pop || null,
                   compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
@@ -4475,6 +4546,7 @@ export default function App() {
                   gradeExceedsMap: enrich.gradeExceedsMap === true,
                   gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                   compsExhausted: enrich.compsExhausted === true,
+                  pop: enrich.pop || s.pop || null,
                   compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChangedSel ? false : (s.manualConfirmed || false),
@@ -4655,6 +4727,7 @@ export default function App() {
                 gradeExceedsMap: enrich.gradeExceedsMap === true,
                 gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                 compsExhausted: enrich.compsExhausted === true,
+                pop: enrich.pop || cur.pop || null,
                 compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedBulk ? false : (cur.manualConfirmed || false),
@@ -4985,6 +5058,7 @@ export default function App() {
       gradeExceedsMap: enrich.gradeExceedsMap === true,
       gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
       compsExhausted: enrich.compsExhausted === true,
+      pop: enrich.pop || item.pop || null,
       compEraFilterBypassed: enrich.compEraFilterBypassed === true,
       megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
       manualConfirmed: priceChangedRM ? false : (item.manualConfirmed || false),

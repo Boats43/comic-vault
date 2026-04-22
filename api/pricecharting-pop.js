@@ -13,18 +13,37 @@
 // pricing math changes. POP_GRADE_INDEX is a working hypothesis
 // pending empirical calibration in Phase 5a.2.
 
-// 14-bucket CGC grade index — PLACEHOLDER pending calibration.
-// ASM #300 sample array [12,57,142,419,776,1499,2881,5431,3509,
-// 3929,4869,4243,1588,0] sums to 33,355 which matches the real
-// public ASM #300 CGC pop — so the TOTAL is trustworthy. The
-// per-grade mapping below is the best-guess peak-around-9.0 scheme;
-// actual bucket boundaries will be locked after Phase 5a.2 cross-
-// references raw arrays against CGC's official census on 5 test
-// books (ASM #300, AF #15, Hulk #181, NYX #3, Detective #27).
+// 14-bucket CGC grade index — VERIFIED from PC's render_pop_chart()
+// in /js/market_ab.js line 5544 (April 2026). The xAxis categories
+// for is_comic products are exactly:
+//   ['1','2','3','4','5','6','7','8','9.0','9.2','9.4','9.6','9.8','10']
+//
+// PC bucketing semantics:
+// - Grades 1-8: whole-number bins. CGC 8.5 → bucket "8", CGC 1.8 → "1".
+// - Grades 9.0+: exact buckets (9.0, 9.2, 9.4, 9.6, 9.8, 10).
+// - CGC 9.9 has no bucket — closest is 9.8.
+//
+// User grade → bucket mapping (see normalizeGradeToPopBucket):
+// - CGC 8.5 → bucket 8 (index 7)
+// - CGC 9.4 → bucket 9.4 (index 10)
+// - CGC 9.9 → bucket 9.8 (index 12)
+// - CGC 10.0 → bucket 10 (index 13)
 const POP_GRADE_INDEX = [
-  0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0,
-  5.0, 6.0, 7.0, 8.0, 9.0, 9.4,
+  1, 2, 3, 4, 5, 6, 7, 8, 9.0, 9.2, 9.4, 9.6, 9.8, 10,
 ];
+
+// Normalize a CGC numeric grade to the matching pop bucket.
+// Sub-9.0 grades fall to the floor whole number (PC bins them).
+// 9.0+ grades match the half-grade tracked by PC.
+const normalizeGradeToPopBucket = (grade) => {
+  if (grade >= 10) return 10;
+  if (grade >= 9.8) return 9.8;
+  if (grade >= 9.6) return 9.6;
+  if (grade >= 9.4) return 9.4;
+  if (grade >= 9.2) return 9.2;
+  if (grade >= 9.0) return 9.0;
+  return Math.floor(grade);
+};
 
 // In-memory cache per warm Lambda. Product pop data changes monthly
 // per the PC blog footer, so 24h TTL is conservative.
@@ -98,8 +117,10 @@ export const fetchPricechartingPop = async (productId, userGrade = null) => {
 };
 
 // Derives atGrade / aboveGrade / belowGrade / scarcityRatio for a
-// given user grade. Separated from the fetch so a cached pop can
-// service different grades without re-parsing HTML.
+// given user grade. Bucket the user grade first via PC's bucketing
+// scheme so CGC 8.5 lands in bucket "8" (not an unmatched 8.5).
+// Separated from the fetch so a cached pop can service different
+// grades without re-parsing HTML.
 const attachGradeContext = (pop, userGrade) => {
   if (!pop) return null;
   const out = {
@@ -108,25 +129,29 @@ const attachGradeContext = (pop, userGrade) => {
     aboveGrade: null,
     belowGrade: null,
     scarcityRatio: null,
+    userBucket: null,
   };
   if (!pop.total || !userGrade) return out;
   const g = parseFloat(String(userGrade).replace(/[^\d.]/g, ""));
   if (isNaN(g)) return out;
 
+  const userBucket = normalizeGradeToPopBucket(g);
+
   let at = 0;
   let above = 0;
   let below = 0;
   for (const [gradeStr, count] of Object.entries(pop.byGrade)) {
-    const grade = parseFloat(gradeStr);
+    const bucket = parseFloat(gradeStr);
     const c = Number(count) || 0;
-    if (isNaN(grade)) continue;
-    if (grade === g) at += c;
-    else if (grade > g) above += c;
+    if (isNaN(bucket)) continue;
+    if (bucket === userBucket) at += c;
+    else if (bucket > userBucket) above += c;
     else below += c;
   }
   out.atGrade = at;
   out.aboveGrade = above;
   out.belowGrade = below;
+  out.userBucket = userBucket;
   out.scarcityRatio = pop.total > 0 ? at / pop.total : 0;
   return out;
 };

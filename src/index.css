@@ -327,6 +327,86 @@ body,
   color: white;
 }
 
+/* PC-tracked CGC pop panel (Phase 5a.3) */
+.pop-panel {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.pop-header {
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  opacity: 0.7;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pop-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  margin-bottom: 12px;
+}
+
+.pop-stats > span:nth-child(odd) {
+  opacity: 0.7;
+}
+
+.pop-stats > span:nth-child(even) {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pop-histogram {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 60px;
+  margin: 8px 0;
+}
+
+.pop-bar-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  min-width: 0;
+}
+
+.pop-bar {
+  width: 100%;
+  background: rgba(100, 150, 255, 0.4);
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  transition: background 0.2s;
+}
+
+.pop-bar.user-grade {
+  background: rgba(255, 180, 50, 0.85);
+}
+
+.pop-label {
+  font-size: 9px;
+  opacity: 0.5;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.pop-footer {
+  font-size: 10px;
+  opacity: 0.5;
+  font-style: italic;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
 .collection-price {
   color: var(--gold);
   font-weight: 700;
