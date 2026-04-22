@@ -156,7 +156,49 @@ All pricing fixes confirmed intact:
 (5) **Variant in eBay listing title** (`1cdf988`): `buildTitle` in `list-ebay.js` now includes `item.variant` between issue and grade. Filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot) — these add no search value. Same filter applied to `buildBundleTitle`. Pipeline trace confirmed variant flows: grade.js → App.jsx → enrich.js → comps.js (attempts 1-2 only) → list-ebay.js (was missing, now fixed).
 
 ## Last Session
-Session 4/19/2026 (phone audit — 5 critical fixes) — navigation gesture guards, empty/low comp scoring, publisher parens cleanup, variant filter order, vision + match tier sync.
+Session 4/22/2026 — Tier 0 liability firewall + Phase 5a (pop data) shipped. 7 production deploys. Mega-keys floor system completed at 29 entries with three-tier badge UI (verified/estimated/manual) plus distinct exceedsMap handling. Display layer hardened so unsafe engine numbers never anchor user listing decisions. Verify-fallback leak that was producing $147K Action #1 from Superman #1 comps is closed. PriceCharting CGC pop extractor + UI panel live with locked POP_GRADE_INDEX from PC source. Status: Tier 0 COMPLETE, Phase 5a COMPLETE. Next options: Phase 5b (scarcity-aware pricing hooks), K1 (rules-version stamping), issue# accuracy work, or Scan UX polish. 61 unit tests passing.
+
+**Deploys (7, in order):**
+1. `34f1cc9` — Tier 0 accuracy fixes (E2 mega-keys floor + F3 reprint regex + F2 era-consistency comp filter)
+2. `cf6bf6c` — Tier 0 hotfix (persist mega-key flags through 5 client merge paths)
+3. `99ee51e` — Phase 5a.1 (PriceCharting CGC pop extractor backend + `[pc-pop-calibrate]` logging)
+4. `5c9864a` — Tier 0 polish (split exceedsMap from manualReview + Manual Appraisal price suppression with toggle)
+5. `5960239` — Tier 0 polish (suppress asking/last-sold lines, replace with Floor band when applicable)
+6. `01d81b6` — Tier 0 hotfix (verify-fallback leak — skip sanity for mega-keys + when 100% AI-rejected)
+7. `ff6c852` — Phase 5a.3 (POP_GRADE_INDEX locked from PC source + CollectionDetail pop UI panel + 5 merge paths)
+
+**Mega-keys floor system (`api/mega-keys.js`, 29 entries):**
+- 10 Golden Age (Action #1, Superman #1, Detective #27/#38, Batman #1, Marvel Comics #1, Cap America #1, All Star #8, Sensation #1, Flash Comics #1)
+- 15 Silver Age (Showcase #4, B&B #28, AF #15, FF #1/#5/#48, ToS #39, JiM #83, Hulk #1, X-Men #1, Strange Tales #110, ToA #35, Avengers #1/#4, Daredevil #1)
+- 2 Bronze (Hulk #181, Giant-Size X-Men #1)
+- 2 Modern (TMNT #1 Mirage, ASM #300)
+- Two entry types: `MEGA` (has `grades` bucket map → floor applied when below) and `MANUAL` (Action #1, Superman #1; null `grades`, dispersion too wide for single-floor model)
+- `verified: true/false` flag drives green VERIFIED vs yellow ESTIMATED badge
+
+**Three-tier badge system + display layer (`src/App.jsx` + `src/index.css`):**
+- 🔑 VERIFIED / 🔑 ESTIMATED FLOOR (green / yellow) — `megaKeyFloorApplied`, hero shows floored price, asking line replaced by `Floor band $low–$high`, listing requires one-tap acknowledge
+- 🔑 MANUAL REVIEW (red, `pill-manual-review`) — `manualReviewRequired`, reserved for `type === 'MANUAL'`. Hero replaced with "Manual Appraisal Required". Engine estimate hidden behind "Show engine estimate ▼" toggle in CollectionDetail (`showEngineRec` state, resets per-item). Asking + last-sold lines hidden. Inline list-row price replaced with amber "Appraise". Listing button hard-blocked.
+- 🔑 GRADE EXCEEDS MAP (amber, `pill-exceeds-map`) — `gradeExceedsMap`, distinct from MANUAL. Fires when book is `type === 'MEGA'` but user grade exceeds the highest bucket in its floor map (e.g. Sensation #1 CGC 9.4 against a map ceiling of 9.2). Same display + listing gate as MANUAL — different copy ("Grade exceeds floor map coverage") so the user knows the map could be extended rather than the book being inherently un-floorable.
+- Acknowledge gate (`needsAck` in CollectionDetail listing flow) checks `manualReviewRequired || gradeExceedsMap || megaKeyFloorApplied`. Gate copy is flag-specific. `manualConfirmed` resets on price change across all 5 merge paths.
+
+**Verify-fallback leak fix (`api/enrich.js`):**
+- Bug: when AI verify rejected 100% of comps (e.g. Action Comics #1 query returning Superman #1 facsimiles), `aiVerifyFallback = true` set sanity to `median(rawComps.prices)` of the rejected listings. Median of wrong-book Superman comps ≈ $147,250. Sanity fired "PC too low" branch ($59K < $73,625), overwrote price with $147,250.
+- Surface A: tightened `aiVerifyFallback` to require `(verifyCount - verifiedCount) / verifyCount < 1.0` — false when 100% rejected. New `compsExhausted` flag set instead, surfaced on `out.compsExhausted`, plumbed through 5 merge paths.
+- Surface B: wrapped sanity block in `if (!isMegaKeyBook && !compsExhausted)`. Mega-keys (MEGA + MANUAL) skip comp-based sanity entirely — floor map is the source of truth, eBay comps for Golden/Silver mega-keys are dominated by reprints/facsimiles/wrong-book entries. Logs `[sanity] skipped — mega-key uses floor map` or `[sanity] skipped — all comps rejected by AI verify`.
+- Closes the "$109 / $147K class of bug" upstream of the floor block.
+
+**Phase 5a (PriceCharting CGC pop):**
+- New module `api/pricecharting-pop.js` — fetches `https://www.pricecharting.com/game/<id>` (302-redirects to slug URL), regex-extracts `VGPC.pop_data = {"cgc":[...]}` from the embedded JS, returns structured `{cgc, total, byGrade, atGrade, aboveGrade, belowGrade, scarcityRatio, userBucket, source}`. 24h in-memory cache per warm Lambda. Fails closed: any error (network, regex, parse, schema mismatch) returns null, engine unchanged.
+- Runs 4th-parallel in `api/enrich.js` Promise.all alongside comps/sold/GoCollect — zero added wall-clock latency. Surfaced as `out.pop` on response.
+- `POP_GRADE_INDEX = [1, 2, 3, 4, 5, 6, 7, 8, 9.0, 9.2, 9.4, 9.6, 9.8, 10]` — locked from PC's own `render_pop_chart()` in `/js/market_ab.js` line 5544. PC bins grades 1–8 into whole-number buckets, breaks out half-grades only at 9.0+. `normalizeGradeToPopBucket()` maps user CGC grade to the matching bucket (CGC 8.5 → bucket 8, CGC 9.4 → exact bucket 9.4, CGC 9.9 → bucket 9.8, CGC 10.0 → bucket 10). Mirrored client-side as a small constant near the App.jsx top.
+- CollectionDetail panel ("PC-TRACKED CGC POP") between AI condition report and pricing block. Renders only when `item.pop && cgc.length === 14` (schema defense). Shows tracked-copies total, at-grade count + scarcity %, graded higher / lower, 14-bar inline-flex histogram with user grade highlighted in amber. Footer: "* PriceCharting tracks copies seen in market activity. Full CGC census may be higher for vintage books." Honest about source — Action #1 PC pop = 44 vs real CGC census ~150.
+- Hidden when `item.pop == null` (indie books, no PC product, scrape fail). When `total === 0`, renders "No copies tracked yet — thin census signal" instead of empty histogram.
+- 5 merge paths plumb the `pop` field: auto-refresh→catalogue, scan→catalogue, scan→selectedItem, bulk-import→catalogue, refreshMarketData. Pattern: `pop: enrich.pop || cur.pop || null`.
+- `/api/pricecharting-pop` standalone POST endpoint (`{ productId, grade }`) for manual calibration hits.
+- No pricing math changes anywhere in Phase 5a — display only. Phase 5b (scarcity-aware pricing hooks like thin-pop floor premium, dense-pop confidence boost) remains gated behind explicit greenlight.
+
+## Session 4/19/2026 (phone audit — 5 critical fixes)
+Navigation gesture guards, empty/low comp scoring, publisher parens cleanup, variant filter order, vision + match tier sync.
 
 Source: 30+ scan phone audit session surfaced 4 identification errors + navigation instability + confidence-scoring logic bugs. Every book's confidence signal now honest.
 
