@@ -14,6 +14,7 @@ import { fetchComps, getOAuthToken, computeMatchConfidence, cleanPublisher } fro
 import { fetchSold } from "./sold.js";
 import { lookupCGC } from "./cgc-lookup.js";
 import { lookupGoCollect } from "./gocollect.js";
+import { fetchPricechartingPop } from "./pricecharting-pop.js";
 import {
   MEGA_KEYS_SCHEMA_VERSION,
   getMegaKeyEntry,
@@ -694,10 +695,13 @@ export default async function handler(req, res) {
           })
         : Promise.resolve(null);
 
-    const [compsFromEbay, soldResult, goCollectResult] = await Promise.all([
+    const [compsFromEbay, soldResult, goCollectResult, pcPop] = await Promise.all([
       compsPromise,
       fetchSold({ title, issue: correctedIssue, year: confirmedYear }).catch(() => []),
       lookupGoCollect({ title, issue: correctedIssue, year: confirmedYear, publisher }).catch(() => null),
+      priceCharting?.id
+        ? fetchPricechartingPop(priceCharting.id, req.body?.grade).catch(() => null)
+        : Promise.resolve(null),
     ]);
     mark('comps_fetched');
 
@@ -1380,6 +1384,13 @@ export default async function handler(req, res) {
     // GoCollect CGC FMV data (null when API key not set)
     if (goCollectResult) {
       out.goCollect = goCollectResult;
+    }
+
+    // PriceCharting CGC pop data (Phase 5a.1 — backend only, no UI
+    // and no pricing math changes. Null when PC has no product match
+    // or the pop_data HTML scrape fails.)
+    if (pcPop) {
+      out.pop = pcPop;
     }
 
     mark('final_response');
