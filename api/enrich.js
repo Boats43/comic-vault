@@ -14,6 +14,11 @@ import { fetchComps, getOAuthToken, computeMatchConfidence, cleanPublisher } fro
 import { fetchSold } from "./sold.js";
 import { lookupCGC } from "./cgc-lookup.js";
 import { lookupGoCollect } from "./gocollect.js";
+import {
+  MEGA_KEYS_SCHEMA_VERSION,
+  getMegaKeyEntry,
+  getMegaKeyFloor,
+} from "./mega-keys.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1021,6 +1026,11 @@ export default async function handler(req, res) {
       out.compBasis = rawComps.compBasis || 'generic-variant-fallback';
     }
 
+    // Era-filter bypass flag — set in both pricing branches (PC + browse).
+    // Surfaces to UI via out.compEraFilterBypassed so user can be warned
+    // that era filter wiped the pool and was skipped as graceful fallback.
+    if (rawComps?.eraFilterBypassed) out.compEraFilterBypassed = true;
+
     // Snapshot pricing source BEFORE floor guard / variant / key blocks.
     // Variant and key multipliers should only apply when the base price
     // came from PriceCharting (not from browse_api or sanity fallback).
@@ -1152,6 +1162,60 @@ export default async function handler(req, res) {
         out.priceHigh = fmtUsd(curPrice * keyMult * 1.25);
         out.keyMultiplier = keyMult;
         console.log('[key]', isMajorKey ? 'major' : 'minor', '×' + keyMult, '→', out.price);
+      }
+    }
+
+    // ═══ MEGA-KEY FLOOR — post-pricing guard (E2) ═══
+    // Consulted AFTER all variant/key multipliers. One-way: only raises
+    // price, never lowers. Two branches:
+    //   MANUAL → flag for manual review; price untouched; listing blocked.
+    //   MEGA   → apply floor when current price < floor bucket for grade.
+    //   exceedsMap → grade above map coverage; flag for manual review.
+    // Schema version stamped on response for K2 rules-version tracking.
+    out.megaKeysSchemaVersion = MEGA_KEYS_SCHEMA_VERSION;
+    {
+      const megaKeyEntry = getMegaKeyEntry(title, correctedIssue);
+      if (megaKeyEntry) {
+        if (megaKeyEntry.type === 'MANUAL') {
+          out.manualReviewRequired = true;
+          out.manualReviewReason = megaKeyEntry.volatilityNote ||
+            'Mega-key with price dispersion too wide for automated floor';
+          out.priceNote = (out.priceNote || '') + ' · manual review required';
+          console.log('[mega-key-floor] MANUAL REVIEW:',
+            `${title} #${correctedIssue}`, '— no floor applied');
+        } else {
+          const floorResult = getMegaKeyFloor(
+            title, correctedIssue, grade, numericGrade
+          );
+          if (floorResult.exceedsMap) {
+            out.manualReviewRequired = true;
+            out.manualReviewReason =
+              'Grade exceeds floor map coverage for this book';
+            out.priceNote = (out.priceNote || '') + ' · grade exceeds floor map';
+            console.log('[mega-key-floor] EXCEEDS MAP:',
+              `${title} #${correctedIssue} grade=${grade}`, '— manual review');
+          } else if (floorResult.floor) {
+            const currentPriceNum = parseFloat(
+              String(out.price || '0').replace(/[$,]/g, '')
+            );
+            if (currentPriceNum < floorResult.floor) {
+              out.preFloorPrice = out.price;
+              out.preFloorSource = out.pricingSource || 'fallback';
+              out.price = fmtUsd(floorResult.floor);
+              out.priceLow = fmtUsd(floorResult.floor);
+              out.priceHigh = fmtUsd(floorResult.priceHigh);
+              out.megaKeyFloorApplied = true;
+              out.megaKeyFloorVerified = megaKeyEntry.verified;
+              out.megaKeyFloorSource = megaKeyEntry.source;
+              out.megaKeyFloorNote = megaKeyEntry.volatilityNote;
+              out.priceNote = (out.priceNote || '') + ' · mega-key floor';
+              console.log('[mega-key-floor] enforced:',
+                `${title} #${correctedIssue} grade=${grade} bucket=${floorResult.bucket}`,
+                `${out.preFloorPrice} → $${floorResult.floor}`,
+                megaKeyEntry.verified ? 'VERIFIED' : 'ESTIMATED');
+            }
+          }
+        }
       }
     }
 

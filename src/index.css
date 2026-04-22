@@ -307,6 +307,21 @@ body,
   color: #16a34a;
 }
 
+.pill-mega-verified {
+  background: #2ea043;
+  color: white;
+}
+
+.pill-mega-estimated {
+  background: #d29922;
+  color: black;
+}
+
+.pill-manual-review {
+  background: #da3633;
+  color: white;
+}
+
 .collection-price {
   color: var(--gold);
   font-weight: 700;

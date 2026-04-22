@@ -1481,9 +1481,25 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                   </div>
                 );
               })()}
-              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.purchasePrice > 0) && (
+              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired) && (
                 <div className="cl-row3">
                   {showKeyIssue(item.keyIssue) && <span className="pill pill-key">KEY</span>}
+                  {item.manualReviewRequired && (
+                    <span
+                      className="pill pill-manual-review"
+                      title={item.manualReviewReason || "Manual review required"}
+                    >
+                      🔑 MANUAL REVIEW
+                    </span>
+                  )}
+                  {item.megaKeyFloorApplied && !item.manualReviewRequired && (
+                    <span
+                      className={`pill ${item.megaKeyFloorVerified ? 'pill-mega-verified' : 'pill-mega-estimated'}`}
+                      title={item.megaKeyFloorNote || ""}
+                    >
+                      🔑 {item.megaKeyFloorVerified ? "VERIFIED" : "ESTIMATED"}
+                    </span>
+                  )}
                   {item.status === "listed" && <span className="pill pill-listed">LISTED</span>}
                   {item.purchasePrice > 0 && getDisplayPrice(item) > 0 && (() => {
                     const roi = ((getDisplayPrice(item) - item.purchasePrice) / item.purchasePrice) * 100;
@@ -2036,6 +2052,87 @@ function CollectionDetail({
           </div>
         )}
 
+        {item.manualReviewRequired && (
+          <div style={{
+            marginTop: 10,
+            padding: "12px 14px",
+            border: "1px solid #da3633",
+            borderRadius: 8,
+            background: "rgba(218,54,51,0.08)",
+            color: "#fca5a5",
+            fontSize: 13,
+            lineHeight: 1.45,
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 4, color: "#da3633" }}>
+              🔑 Mega-key detected — manual review required
+            </div>
+            {item.manualReviewReason || "Price dispersion too wide for automated floor."}
+            <div style={{ marginTop: 4, opacity: 0.8 }}>
+              Verify manually via Heritage Auctions or GoCollect before listing.
+            </div>
+            {item.preFloorPrice && (
+              <div style={{ marginTop: 6, fontSize: 11, opacity: 0.7 }}>
+                Engine rec shown for transparency: {item.preFloorPrice} (source: {item.preFloorSource || "—"})
+              </div>
+            )}
+          </div>
+        )}
+
+        {item.megaKeyFloorApplied && !item.manualReviewRequired && (
+          <div style={{
+            marginTop: 10,
+            padding: "12px 14px",
+            border: `1px solid ${item.megaKeyFloorVerified ? "#2ea043" : "#d29922"}`,
+            borderRadius: 8,
+            background: item.megaKeyFloorVerified
+              ? "rgba(46,160,67,0.08)"
+              : "rgba(210,153,34,0.08)",
+            color: item.megaKeyFloorVerified ? "#86efac" : "#fde68a",
+            fontSize: 13,
+            lineHeight: 1.45,
+          }}>
+            <div style={{
+              fontWeight: 700,
+              marginBottom: 4,
+              color: item.megaKeyFloorVerified ? "#2ea043" : "#d29922"
+            }}>
+              🔑 Mega-key floor {item.megaKeyFloorVerified ? "enforced" : "applied (estimated)"}
+            </div>
+            <div>Engine floor: <strong>{item.price}</strong></div>
+            {item.preFloorPrice && (
+              <div style={{ marginTop: 2, opacity: 0.85 }}>
+                Pre-floor rec: {item.preFloorPrice}
+                {item.preFloorSource && <> (source: {item.preFloorSource})</>}
+              </div>
+            )}
+            <div style={{ marginTop: 6, fontSize: 12 }}>
+              {item.megaKeyFloorVerified
+                ? "Verified against Heritage/GoCollect sold archive."
+                : "⚠ Estimated floor — verify against Heritage/GoCollect before listing."}
+            </div>
+            {item.megaKeyFloorNote && (
+              <div style={{ marginTop: 6, fontSize: 11, opacity: 0.8, fontStyle: "italic" }}>
+                {item.megaKeyFloorNote}
+              </div>
+            )}
+          </div>
+        )}
+
+        {item.compEraFilterBypassed && (
+          <div style={{
+            marginTop: 10,
+            padding: "10px 12px",
+            border: "1px solid rgba(210,153,34,0.4)",
+            borderRadius: 8,
+            background: "rgba(210,153,34,0.08)",
+            color: "#fde68a",
+            fontSize: 12,
+            lineHeight: 1.4,
+          }}>
+            ⚠ Era filter bypassed — every comp failed year consistency check and was kept as fallback. Verify listings manually.
+          </div>
+        )}
+
         {hasComps && (
           <div
             style={{
@@ -2474,16 +2571,48 @@ function CollectionDetail({
                 }}
               />
             </div>
-            <button
-              className="reset-btn primary"
-              onClick={handleList}
-              disabled={listing || !(parseFloat(listPrice) > 0)}
-              style={{ width: "100%" }}
-            >
-              {listing
-                ? "Listing on eBay..."
-                : `📋 List on eBay — $${listPrice || "0"}`}
-            </button>
+            {(() => {
+              const needsAck =
+                (item.manualReviewRequired ||
+                  (item.megaKeyFloorApplied && !item.megaKeyFloorVerified)) &&
+                !item.manualConfirmed;
+              if (needsAck) {
+                return (
+                  <>
+                    <div style={{
+                      padding: "8px 10px",
+                      marginBottom: 8,
+                      background: "rgba(218,54,51,0.1)",
+                      border: "1px solid #da3633",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: "#fca5a5",
+                    }}>
+                      Confirm price manually first — mega-key detected.
+                    </div>
+                    <button
+                      className="reset-btn"
+                      onClick={() => onUpdateField(item, 'manualConfirmed', true)}
+                      style={{ width: "100%", background: "#da3633", color: "white" }}
+                    >
+                      Acknowledge and Enable Listing
+                    </button>
+                  </>
+                );
+              }
+              return (
+                <button
+                  className="reset-btn primary"
+                  onClick={handleList}
+                  disabled={listing || !(parseFloat(listPrice) > 0)}
+                  style={{ width: "100%" }}
+                >
+                  {listing
+                    ? "Listing on eBay..."
+                    : `📋 List on eBay — $${listPrice || "0"}`}
+                </button>
+              );
+            })()}
           </>
         )}
         {listError && (
@@ -3710,8 +3839,17 @@ export default function App() {
     // in flight and would race with auto-refresh, overwriting fresh data.
     const isRecentlyImported = (c) =>
       Date.now() - (c.timestamp || 0) < 300000;
+    // Skip mega-key books with estimated floors or manual-review flags —
+    // thin comps could overwrite the protected floor. Verified floors still
+    // refresh normally (they're trusted and can be updated).
+    const isUnverifiedMegaKey = (c) =>
+      c.manualReviewRequired ||
+      (c.megaKeyFloorApplied && !c.megaKeyFloorVerified);
     const missingSource = catalogue.filter(
-      (c) => !isRecentlyImported(c) && (!c.pricingSource || !c.comps)
+      (c) =>
+        !isRecentlyImported(c) &&
+        !isUnverifiedMegaKey(c) &&
+        (!c.pricingSource || !c.comps)
     );
     const missingIds = new Set(missingSource.map((c) => c.id));
 
@@ -3730,7 +3868,11 @@ export default function App() {
       );
       if (!prices.every((p) => p === prices[0])) {
         const oldest = group.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))[0];
-        if (!missingIds.has(oldest.id) && !isRecentlyImported(oldest)) dupStale.push(oldest);
+        if (
+          !missingIds.has(oldest.id) &&
+          !isRecentlyImported(oldest) &&
+          !isUnverifiedMegaKey(oldest)
+        ) dupStale.push(oldest);
       }
     });
 

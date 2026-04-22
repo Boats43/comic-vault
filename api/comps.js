@@ -257,7 +257,11 @@ const tryBrowse = async ({ appId, certId, query }) => {
 // Reprints, facsimiles, anniversary variants, and nth printings pollute Browse
 // API results for any high-demand key (e.g. ASM #300 constantly surfaces
 // "True Believers" reprints, and "2nd ptg" listings skew first-print comps).
-const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition|2nd\s*p(?:rint|tg)|3rd\s*p(?:rint|tg)|4th\s*p(?:rint|tg)|5th\s*p(?:rint|tg)|second\s*print|third\s*print|fourth\s*print|\bptg\b/i;
+// F3 extension (commit Tier-0): added Millennium Edition, DC Classics Library,
+// Marvel Milestones, Masterworks, reproduction, replica edition, premiere
+// edition, archive edition — all observed poisoning B&B #28 / TMNT #1 /
+// similar Silver-Age-and-older reprint-contamination vectors.
+const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition|2nd\s*p(?:rint|tg)|3rd\s*p(?:rint|tg)|4th\s*p(?:rint|tg)|5th\s*p(?:rint|tg)|second\s*print|third\s*print|fourth\s*print|\bptg\b|millennium edition|dc classics library|marvel milestones|masterworks|reproduction|replica edition|premiere edition|archive edition/i;
 
 // For raw (ungraded) searches, exclude any listing that mentions a grading
 // slab. Require an explicit slab indicator followed by an optional letter
@@ -791,6 +795,7 @@ export const fetchComps = async ({
     let reprintFallback = false;
     let variantFallback = false;
     let fellBack = false;
+    let eraFilterBypassed = false;
 
     // Full filter chain on a single raw result set. Called inside the
     // attempt loop so we can move on to the next (broader) query when
@@ -804,6 +809,7 @@ export const fetchComps = async ({
       let _reprintFallback = false;
       let _variantFallback = false;
       let _fellBack = false;
+      let _eraFilterBypassed = false;
 
       // Filter 0a: issue-number enforcement. RELAXED for TPBs — TPB
       // listings typically lack a `#1` token (sellers write "TPB Vol 1"
@@ -829,6 +835,54 @@ export const fetchComps = async ({
         p = p.filter((it) => hasSufficientTitleOverlap(it.title, searchTokens));
         if (p.length < before) {
           console.log(`[comps] title similarity filter removed ${before - p.length}`);
+        }
+      }
+
+      // Filter 0c: era consistency (F2). Reject listings whose year
+      // differs from our confirmedYear (passed in as `year`) by more than
+      // the era's tolerance. Catches clean reprint listings that don't
+      // match REPRINT_RE (e.g. DC Classics Library issues retaining the
+      // original's #issue number without explicit "reprint" token).
+      // Tolerance:
+      //   <1970 (Golden/early Silver): ±5y — volatile cover dating
+      //   1970-1985 (Bronze):          ±3y — tight
+      //   ≥1985 (Modern):              ±3y — deep comp pools, collision risk
+      // Graceful wipe-out fallback: if filter removes every listing, keep
+      // all and flag eraFilterBypassed so UI can warn user.
+      if (year) {
+        const yearNum = parseInt(String(year), 10);
+        if (!isNaN(yearNum)) {
+          const tolerance =
+            yearNum < 1970 ? 5 :
+            yearNum < 1985 ? 3 :
+            3;
+          const extractYear = (t) => {
+            const m = String(t || '').match(/\b(19|20)\d{2}\b/);
+            return m ? parseInt(m[0], 10) : null;
+          };
+          const beforeEra = p.length;
+          const eraFiltered = p.filter((it) => {
+            const ly = extractYear(it.title);
+            if (ly == null) return true;
+            const diff = Math.abs(ly - yearNum);
+            if (diff > tolerance) {
+              console.log('[era-filter] rejected:',
+                String(it.title || '').slice(0, 55),
+                `(year ${ly} vs ${yearNum}, tol ±${tolerance})`);
+              return false;
+            }
+            return true;
+          });
+          if (eraFiltered.length === 0 && beforeEra > 0) {
+            console.log('[era-filter] bypassed — all', beforeEra,
+              'comps failed, keeping all');
+            _eraFilterBypassed = true;
+          } else {
+            p = eraFiltered;
+            if (p.length < beforeEra) {
+              console.log(`[comps] era filter removed ${beforeEra - p.length}`);
+            }
+          }
         }
       }
 
@@ -1130,6 +1184,7 @@ export const fetchComps = async ({
         reprintFallback: _reprintFallback,
         variantFallback: _variantFallback,
         fellBack: _fellBack,
+        eraFilterBypassed: _eraFilterBypassed,
       };
     };
 
@@ -1160,6 +1215,7 @@ export const fetchComps = async ({
         reprintFallback = filtered.reprintFallback;
         variantFallback = filtered.variantFallback;
         fellBack = filtered.fellBack;
+        eraFilterBypassed = filtered.eraFilterBypassed;
         attemptUsed = attempt.n;
         attemptLabel = attempt.label || null;
         break;
@@ -1218,6 +1274,7 @@ export const fetchComps = async ({
       fellBack,
       reprintFallback,
       variantFallback,
+      eraFilterBypassed,
       artistFallback,
       compBasis: artistFallback ? 'generic-variant-fallback' : null,
       attemptUsed,
