@@ -1472,6 +1472,24 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                 {item.publisher}{item.publisher && item.year ? " · " : ""}{item.year}{gradeTxt ? ` · ${gradeTxt}` : ""}
               </div>
               {(() => {
+                // When engine cannot price the book, hide both range and
+                // last-sold rather than leak the unguarded comp pool — same
+                // logic that already suppresses the hero/inline price.
+                if (item.manualReviewRequired || item.gradeExceedsMap) return null;
+
+                // Mega-key floor enforced: show the floor band, not the
+                // contaminated comp pool that the floor exists to override.
+                if (item.megaKeyFloorApplied) {
+                  const lo = item.priceLow ? String(item.priceLow).replace(/\.00$/, '') : null;
+                  const hi = item.priceHigh ? String(item.priceHigh).replace(/\.00$/, '') : null;
+                  if (!lo) return null;
+                  return (
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                      {(!hi || lo === hi) ? `Floor ${lo}` : `Floor band ${lo}–${hi}`}
+                    </div>
+                  );
+                }
+
                 const soldLow = item.soldComps?.[0]?.price;
                 const askLow = item.comps?.lowestNum;
                 const askHigh = item.comps?.highestNum;
@@ -1867,11 +1885,27 @@ function CollectionDetail({
         return (
           <div style={{ fontSize: 12, color: '#888', marginTop: 4, marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <span style={{ background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: 12, color: '#d4af37', fontWeight: 600 }}>{item.grade || 'RAW'}</span>
-            {(item.manualReviewRequired || item.gradeExceedsMap)
-              ? <span style={{ color: '#d17105', fontWeight: 600 }}>Appraise</span>
-              : dp > 0 && <span>${dp.toLocaleString('en-US')}</span>}
-            {lastSoldLabel && <span>· Last sold {lastSoldLabel}</span>}
-            {activeRange && <span>· Asking {activeRange}</span>}
+            {(item.manualReviewRequired || item.gradeExceedsMap) ? (
+              <span style={{ color: '#d17105', fontWeight: 600 }}>Appraise</span>
+            ) : item.megaKeyFloorApplied ? (
+              <>
+                {dp > 0 && <span>${dp.toLocaleString('en-US')}</span>}
+                {(() => {
+                  const lo = item.priceLow ? String(item.priceLow).replace(/\.00$/, '') : null;
+                  const hi = item.priceHigh ? String(item.priceHigh).replace(/\.00$/, '') : null;
+                  if (!lo) return null;
+                  return (
+                    <span>· {(!hi || lo === hi) ? `Floor ${lo}` : `Floor band ${lo}–${hi}`}</span>
+                  );
+                })()}
+              </>
+            ) : (
+              <>
+                {dp > 0 && <span>${dp.toLocaleString('en-US')}</span>}
+                {lastSoldLabel && <span>· Last sold {lastSoldLabel}</span>}
+                {activeRange && <span>· Asking {activeRange}</span>}
+              </>
+            )}
           </div>
         );
       })()}
