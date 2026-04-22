@@ -2000,9 +2000,32 @@ function CollectionDetail({
             )}
           </div>
           {(() => {
-            // Prefer per-comp matchConfidence tier from /api/enrich when present
-            // (scores how well each comp matches our title/issue/year/variant/
-            // creator). Falls back to the legacy count-based heuristic.
+            // Mega-key pill takes precedence over matchConfidence — floor
+            // status is the authoritative signal when applicable.
+            const pillStyle = { fontSize: 11, padding: "4px 10px", borderRadius: 6, fontWeight: 700, alignSelf: "flex-end", marginBottom: 4 };
+            if (item.manualReviewRequired) {
+              return (
+                <span
+                  className="pill pill-manual-review"
+                  title={item.manualReviewReason || ""}
+                  style={pillStyle}
+                >
+                  🔑 MANUAL REVIEW
+                </span>
+              );
+            }
+            if (item.megaKeyFloorApplied) {
+              return (
+                <span
+                  className={`pill ${item.megaKeyFloorVerified ? "pill-mega-verified" : "pill-mega-estimated"}`}
+                  title={item.megaKeyFloorNote || ""}
+                  style={pillStyle}
+                >
+                  🔑 {item.megaKeyFloorVerified ? "VERIFIED FLOOR" : "ESTIMATED FLOOR"}
+                </span>
+              );
+            }
+            // Default: matchConfidence tier (for non-mega-key books).
             const mcTier = item.matchConfidence?.tier;
             const mcScore = item.matchConfidence?.score;
             const cc = item.comps?.count || 0;
@@ -2018,14 +2041,14 @@ function CollectionDetail({
                 ? `~ Similar${mcScore != null ? ` ${mcScore}` : ""}`
                 : `⚠ Estimate${mcScore != null ? ` ${mcScore}` : ""}`;
             return (
-              <span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, fontWeight: 700, background: bg, color: fg, alignSelf: "flex-end", marginBottom: 4 }}>
+              <span style={{ ...pillStyle, background: bg, color: fg }}>
                 {label}
               </span>
             );
           })()}
         </div>
 
-        {(item.matchConfidence?.tier === "LOW" || item.matchConfidence?.visionCapped) && (
+        {(item.matchConfidence?.tier === "LOW" || item.matchConfidence?.visionCapped) && !item.megaKeyFloorApplied && !item.manualReviewRequired && (
           <div style={{
             marginTop: 10,
             padding: "10px 12px",
@@ -2466,7 +2489,7 @@ function CollectionDetail({
           );
         })()}
 
-        {!hasComps && (
+        {!hasComps && !item.megaKeyFloorApplied && !item.manualReviewRequired && (
           <div
             style={{
               marginTop: 12,
@@ -2572,9 +2595,12 @@ function CollectionDetail({
               />
             </div>
             {(() => {
+              // ANY mega-key floor (verified or estimated) requires user
+              // acknowledgment before listing — mega-keys are volatile and
+              // $100K+ decisions warrant explicit one-tap confirmation.
+              // manualConfirmed resets on price change (see merge paths).
               const needsAck =
-                (item.manualReviewRequired ||
-                  (item.megaKeyFloorApplied && !item.megaKeyFloorVerified)) &&
+                (item.manualReviewRequired || item.megaKeyFloorApplied) &&
                 !item.manualConfirmed;
               if (needsAck) {
                 return (
@@ -3924,10 +3950,12 @@ export default function App() {
               if (enrich.yearCorrected && enrich.confirmedYear) {
                 console.log('[refresh] year healed:', cur.year, '→', enrich.confirmedYear);
               }
+              const newPriceAR = lowMatch ? cur.price : (enrich.price || cur.price);
+              const priceChangedAR = newPriceAR !== cur.price;
               const updated = {
                 ...cur,
                 comps: lowMatch ? cur.comps : (enrich.comps || cur.comps),
-                price: lowMatch ? cur.price : (enrich.price || cur.price),
+                price: newPriceAR,
                 priceLow: lowMatch ? cur.priceLow : (enrich.priceLow || cur.priceLow),
                 priceHigh: lowMatch ? cur.priceHigh : (enrich.priceHigh || cur.priceHigh),
                 keyIssue: enrich.keyIssue || cur.keyIssue,
@@ -3946,6 +3974,18 @@ export default function App() {
                 variant: enrich.variantNote || cur.variant || null,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                 year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year,
+                // Mega-key floor flags — flow even under lowMatch (they're identity, not price)
+                megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
+                megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
+                megaKeyFloorSource: enrich.megaKeyFloorSource || null,
+                megaKeyFloorNote: enrich.megaKeyFloorNote || null,
+                preFloorPrice: enrich.preFloorPrice || null,
+                preFloorSource: enrich.preFloorSource || null,
+                manualReviewRequired: enrich.manualReviewRequired === true,
+                manualReviewReason: enrich.manualReviewReason || null,
+                compEraFilterBypassed: enrich.compEraFilterBypassed === true,
+                megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
+                manualConfirmed: priceChangedAR ? false : (cur.manualConfirmed || false),
               };
               putComic(updated).catch(() => {});
               return prev.map((x) => {
@@ -3961,10 +4001,23 @@ export default function App() {
                 return x;
               });
             });
-            // FIX 4: update detail view if open during background refresh
-            setSelectedItem((s) =>
-              s && s.id === item.id ? { ...s, ...enrich, comicVine: enrich.comicVine || s.comicVine || null, certNumber: enrich.certNumber || s.certNumber || null, cgcVerified: enrich.cgcVerified || s.cgcVerified || false, cgcLabel: enrich.cgcLabel || s.cgcLabel || null, goCollect: enrich.goCollect || s.goCollect || null } : s
-            );
+            // FIX 4: update detail view if open during background refresh.
+            // Blind spread includes mega-key flags; manualConfirmed is reset
+            // when price changed so user must re-acknowledge on new floor.
+            setSelectedItem((s) => {
+              if (!s || s.id !== item.id) return s;
+              const newP = lowMatch ? s.price : (enrich.price || s.price);
+              const pc = newP !== s.price;
+              return {
+                ...s, ...enrich,
+                comicVine: enrich.comicVine || s.comicVine || null,
+                certNumber: enrich.certNumber || s.certNumber || null,
+                cgcVerified: enrich.cgcVerified || s.cgcVerified || false,
+                cgcLabel: enrich.cgcLabel || s.cgcLabel || null,
+                goCollect: enrich.goCollect || s.goCollect || null,
+                manualConfirmed: pc ? false : (s.manualConfirmed || false),
+              };
+            });
           })
           .catch((err) => {
             if (err?.name === "AbortError") {
@@ -4207,6 +4260,7 @@ export default function App() {
                 if (enrich.yearCorrected && enrich.confirmedYear) {
                   console.log('[scan] year healed:', cur.year, '→', enrich.confirmedYear);
                 }
+                const priceChanged = enrich.price && enrich.price !== cur.price;
                 const updated = {
                   ...cur,
                   comps: enrich.comps || cur.comps,
@@ -4227,15 +4281,29 @@ export default function App() {
                   variant: enrich.variantNote || cur.variant || null,
                   variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                   year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year,
+                  // Mega-key floor flags (Tier 0 hotfix — persist from enrich)
+                  megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
+                  megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
+                  megaKeyFloorSource: enrich.megaKeyFloorSource || null,
+                  megaKeyFloorNote: enrich.megaKeyFloorNote || null,
+                  preFloorPrice: enrich.preFloorPrice || null,
+                  preFloorSource: enrich.preFloorSource || null,
+                  manualReviewRequired: enrich.manualReviewRequired === true,
+                  manualReviewReason: enrich.manualReviewReason || null,
+                  compEraFilterBypassed: enrich.compEraFilterBypassed === true,
+                  megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
+                  manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
                 };
                 console.log('[persist] savedId:', savedId,
                   'price:', updated.price,
-                  'comps count:', updated.comps?.count);
+                  'comps count:', updated.comps?.count,
+                  'megaKey:', updated.megaKeyFloorApplied);
                 putComic(updated).catch(() => {});
                 return prev.map((x) => x.id === savedId ? updated : x);
               });
               setSelectedItem((s) => {
                 if (!s || s.id !== savedId) return s;
+                const priceChangedSel = enrich.price && enrich.price !== s.price;
                 return {
                   ...s,
                   comps: enrich.comps || s.comps,
@@ -4245,6 +4313,7 @@ export default function App() {
                   keyIssue: enrich.keyIssue || s.keyIssue,
                   soldComps: enrich.soldComps || s.soldComps || [],
                   confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
+                  matchConfidence: enrich.matchConfidence || s.matchConfidence || null,
                   pricingSource: enrich.pricingSource || null,
                   priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
@@ -4256,6 +4325,18 @@ export default function App() {
                   goCollect: enrich.goCollect || s.goCollect || null,
                   variant: enrich.variantNote || s.variant || null,
                   variantMultiplier: enrich.variantMultiplier || s.variantMultiplier || null,
+                  // Mega-key floor flags
+                  megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
+                  megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
+                  megaKeyFloorSource: enrich.megaKeyFloorSource || null,
+                  megaKeyFloorNote: enrich.megaKeyFloorNote || null,
+                  preFloorPrice: enrich.preFloorPrice || null,
+                  preFloorSource: enrich.preFloorSource || null,
+                  manualReviewRequired: enrich.manualReviewRequired === true,
+                  manualReviewReason: enrich.manualReviewReason || null,
+                  compEraFilterBypassed: enrich.compEraFilterBypassed === true,
+                  megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
+                  manualConfirmed: priceChangedSel ? false : (s.manualConfirmed || false),
                 };
               });
             }
@@ -4398,6 +4479,7 @@ export default function App() {
               if (enrich.yearCorrected && enrich.confirmedYear) {
                 console.log('[bulk] year healed:', cur.year, '→', enrich.confirmedYear);
               }
+              const priceChangedBulk = enrich.price && enrich.price !== cur.price;
               const updated = {
                 ...cur,
                 comps: enrich.comps || cur.comps,
@@ -4420,9 +4502,22 @@ export default function App() {
                 variant: enrich.variantNote || cur.variant || null,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                 year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year,
+                // Mega-key floor flags
+                megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
+                megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
+                megaKeyFloorSource: enrich.megaKeyFloorSource || null,
+                megaKeyFloorNote: enrich.megaKeyFloorNote || null,
+                preFloorPrice: enrich.preFloorPrice || null,
+                preFloorSource: enrich.preFloorSource || null,
+                manualReviewRequired: enrich.manualReviewRequired === true,
+                manualReviewReason: enrich.manualReviewReason || null,
+                compEraFilterBypassed: enrich.compEraFilterBypassed === true,
+                megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
+                manualConfirmed: priceChangedBulk ? false : (cur.manualConfirmed || false),
               };
               console.log('[persist-bulk] savedId:', savedId,
-                'price:', updated.price);
+                'price:', updated.price,
+                'megaKey:', updated.megaKeyFloorApplied);
               putComic(updated).catch(() => {});
               return prev.map((x) => x.id === savedId ? updated : x);
             });
@@ -4710,10 +4805,12 @@ export default function App() {
     if (enrich.yearCorrected && enrich.confirmedYear) {
       console.log('[refresh] year healed:', item.year, '→', enrich.confirmedYear);
     }
+    const newPriceRM = enrich.price ?? item.price;
+    const priceChangedRM = newPriceRM !== item.price;
     const updated = {
       ...item,
       comps: enrich.comps ?? item.comps,
-      price: enrich.price ?? item.price,
+      price: newPriceRM,
       priceLow: enrich.priceLow ?? item.priceLow,
       priceHigh: enrich.priceHigh ?? item.priceHigh,
       keyIssue: enrich.keyIssue || item.keyIssue,
@@ -4732,6 +4829,18 @@ export default function App() {
       variant: enrich.variantNote || item.variant || null,
       variantMultiplier: enrich.variantMultiplier || item.variantMultiplier || null,
       year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : item.year,
+      // Mega-key floor flags
+      megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
+      megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
+      megaKeyFloorSource: enrich.megaKeyFloorSource || null,
+      megaKeyFloorNote: enrich.megaKeyFloorNote || null,
+      preFloorPrice: enrich.preFloorPrice || null,
+      preFloorSource: enrich.preFloorSource || null,
+      manualReviewRequired: enrich.manualReviewRequired === true,
+      manualReviewReason: enrich.manualReviewReason || null,
+      compEraFilterBypassed: enrich.compEraFilterBypassed === true,
+      megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
+      manualConfirmed: priceChangedRM ? false : (item.manualConfirmed || false),
     };
     await putComic(updated);
     setCatalogue((prev) => prev.map((x) => {
