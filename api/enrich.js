@@ -710,6 +710,10 @@ export default async function handler(req, res) {
     // same order as recentSales) and filters recentSales by the returned
     // boolean array. Silent fallback: any failure leaves comps unchanged.
     let rawComps = compsFromEbay;
+    // Tracks the "AI verify nuked everything" case so the sanity
+    // check downstream can skip rather than read compsFromEbay.average
+    // (which still holds the contaminated pre-verify mean).
+    let compsExhausted = false;
     if (
       rawComps &&
       Array.isArray(rawComps.recentSales) &&
@@ -757,14 +761,21 @@ export default async function handler(req, res) {
           ? Math.max(...verifiedPrices)
           : null;
 
-        // When AI verify rejects every checked listing but raw comps
-        // existed, flag aiVerifyFallback so the sanity check can price
-        // against the median of the raw prices instead of letting PC win
-        // unchecked. Same treatment as reprintFallback / variantFallback.
+        // When AI verify partially rejects (>0% but <100%), flag
+        // aiVerifyFallback so the sanity check can price against the
+        // median of the raw prices. When AI verify rejects 100% of
+        // comps, do NOT fall back — those rejected listings are
+        // exactly the ones we don't trust (e.g. wrong-book Superman
+        // facsimiles surfacing in an Action Comics #1 query). Their
+        // median produces high-confidence wrong answers (the $109 /
+        // $147,250 class of bug). When 100% rejected, compsExhausted
+        // gates the entire sanity block off below.
         const aiVerifyFallback =
           verifiedCount === 0 &&
           Array.isArray(rawComps.prices) &&
-          rawComps.prices.length > 0;
+          rawComps.prices.length > 0 &&
+          verifyCount > 0 &&
+          (verifyCount - verifiedCount) / verifyCount < 1.0;
 
         rawComps = {
           ...rawComps,
@@ -790,6 +801,10 @@ export default async function handler(req, res) {
         if (aiVerifyFallback) {
           console.log('[verify] fallback — 0 verified of', verifyCount,
             ', will use median of', rawComps.prices.length, 'raw comps');
+        }
+        if (verifiedCount === 0 && verifyCount > 0) {
+          compsExhausted = true;
+          console.log('[verify] all comps rejected — no comp-based sanity applied');
         }
       }
     }
@@ -885,6 +900,24 @@ export default async function handler(req, res) {
       out.pricingSource = "pricecharting";
 
       // Sanity check: compare PC price against blended/eBay comps average.
+      // Two skip conditions, both close upstream-of-floor leaks:
+      //   1. Mega-keys (MEGA or MANUAL): the floor map is the source
+      //      of truth for these books. eBay comps for Golden/Silver
+      //      mega-keys are dominated by reprints, facsimiles, and
+      //      wrong-book entries (the real books trade at Heritage).
+      //      The floor block downstream handles the price decision.
+      //   2. compsExhausted: AI verify rejected 100% of comps. Their
+      //      median (and `compsFromEbay.average`, which still holds
+      //      the pre-verify contaminated mean) is exactly what we
+      //      don't trust — using either lets wrong-book prices win.
+      //
+      // When skipped, PC × grade multiplier remains as `out.price`.
+      const isMegaKeyBook = !!getMegaKeyEntry(title, correctedIssue);
+      if (isMegaKeyBook) {
+        console.log('[sanity] skipped — mega-key uses floor map');
+      } else if (compsExhausted) {
+        console.log('[sanity] skipped — all comps rejected by AI verify');
+      } else {
       // When comps fell back to mixed reprints/variants, OR when AI verify
       // rejected every checked listing, the mean is meaningless — use
       // the median of raw comp prices instead.
@@ -956,6 +989,7 @@ export default async function handler(req, res) {
             '< sanityCompsAvg*0.5', (sanityCompsAvg * 0.5).toFixed(2),
             '→ fallback compsAvg', compsAvg.toFixed(2));
         }
+      }
       }
 
       // If sanity check switched to browse_api but comps are actually empty,
@@ -1398,6 +1432,12 @@ export default async function handler(req, res) {
     // or the pop_data HTML scrape fails.)
     if (pcPop) {
       out.pop = pcPop;
+    }
+
+    // AI verify exhausted all comps — surface so client/UI can
+    // indicate "no comp validation" without inventing a number.
+    if (compsExhausted) {
+      out.compsExhausted = true;
     }
 
     mark('final_response');
