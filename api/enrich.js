@@ -454,54 +454,94 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
   }
 };
 
-const CGC_MULTIPLIERS = {
-  10: 12.0, 9.9: 8.0, 9.8: 5.0, 9.6: 3.0, 9.4: 2.2, 9.2: 1.8,
-  9.0: 1.5, 8.5: 1.3, 8.0: 1.15, 7.5: 1.05, 7.0: 1.0, 6.5: 0.9,
-  6.0: 0.85, 5.5: 0.8, 5.0: 0.75, 4.5: 0.7, 4.0: 0.65, 3.5: 0.6,
-  3.0: 0.55, 2.5: 0.5, 2.0: 0.45, 1.8: 0.4, 1.5: 0.35, 1.0: 0.3,
-  0.5: 0.2,
+// Ship #11 — era-aware CGC/RAW multipliers. Pre-1985 (Golden/Silver/Bronze)
+// keeps scarcity-premium multipliers unchanged. 1985+ (Crisis-era direct
+// market → modern) uses damped multipliers to match abundant high-grade
+// supply. getEra(year) routes to the right table; null/0/missing year
+// defaults to vintage (safe — prefers over- to under-valuing unknown books).
+export const CGC_MULTIPLIERS = {
+  vintage: {
+    10: 12.0, 9.9: 8.0, 9.8: 5.0, 9.6: 3.0, 9.4: 2.2, 9.2: 1.8,
+    9.0: 1.5, 8.5: 1.3, 8.0: 1.15, 7.5: 1.05, 7.0: 1.0, 6.5: 0.9,
+    6.0: 0.85, 5.5: 0.8, 5.0: 0.75, 4.5: 0.7, 4.0: 0.65, 3.5: 0.6,
+    3.0: 0.55, 2.5: 0.5, 2.0: 0.45, 1.8: 0.4, 1.5: 0.35, 1.0: 0.3,
+    0.5: 0.2,
+  },
+  modern: {
+    10: 3.0, 9.9: 2.6, 9.8: 2.2, 9.6: 1.6, 9.4: 1.35, 9.2: 1.2,
+    9.0: 1.1, 8.5: 1.05, 8.0: 1.0, 7.5: 0.95, 7.0: 0.9, 6.5: 0.85,
+    6.0: 0.8, 5.5: 0.7, 5.0: 0.65, 4.5: 0.6, 4.0: 0.55, 3.5: 0.5,
+    3.0: 0.45, 2.5: 0.4, 2.0: 0.38, 1.8: 0.35, 1.5: 0.32, 1.0: 0.28,
+    0.5: 0.25,
+  },
 };
 
-const RAW_MULTIPLIERS = {
-  "NM": 1.0, "NM/M": 1.0,
-  "VF/NM": 0.85, "VF": 0.75,
-  "VF/F": 0.70, "FN/VF": 0.65,
-  "FN": 0.55, "VG/FN": 0.50,
-  "VG": 0.45, "VG/G": 0.40,
-  "GD/VG": 0.35, "GD": 0.30,
-  "FR/GD": 0.25, "FR": 0.20,
-  "PR": 0.15,
+// Modern raw: graduated damp on upper curve (NM → VG/G), flat tail below.
+// Sub-GD books trade on condition-survival, not era dynamics, so damping
+// at that tier is noise — modern == vintage from GD/VG downward.
+export const RAW_MULTIPLIERS = {
+  vintage: {
+    "NM": 1.0, "NM/M": 1.0,
+    "VF/NM": 0.85, "VF": 0.75,
+    "VF/F": 0.70, "FN/VF": 0.65,
+    "FN": 0.55, "VG/FN": 0.50,
+    "VG": 0.45, "VG/G": 0.40,
+    "GD/VG": 0.35, "GD": 0.30,
+    "FR/GD": 0.25, "FR": 0.20,
+    "PR": 0.15,
+  },
+  modern: {
+    "NM": 0.90, "NM/M": 0.90,
+    "VF/NM": 0.78, "VF": 0.70,
+    "VF/F": 0.65, "FN/VF": 0.60,
+    "FN": 0.50, "VG/FN": 0.45,
+    "VG": 0.40, "VG/G": 0.36,
+    "GD/VG": 0.35, "GD": 0.30,
+    "FR/GD": 0.25, "FR": 0.20,
+    "PR": 0.15,
+  },
 };
-const CGC_GRADES = Object.keys(CGC_MULTIPLIERS).map(Number).sort((a, b) => a - b);
 
-const getGradeMultiplier = (grade) => {
+const CGC_GRADES = Object.keys(CGC_MULTIPLIERS.vintage)
+  .map(Number).sort((a, b) => a - b);
+
+export const getEra = (year) => {
+  const y = parseInt(year, 10);
+  if (!y || y <= 0) return 'vintage';
+  return y >= 1985 ? 'modern' : 'vintage';
+};
+
+export const getGradeMultiplier = (grade, year = null) => {
   const g = Number(grade);
   if (isNaN(g)) return null;
-  if (CGC_MULTIPLIERS[g] != null) return { multiplier: CGC_MULTIPLIERS[g], grade: g };
+  const era = getEra(year);
+  const table = CGC_MULTIPLIERS[era];
+  if (table[g] != null) return { multiplier: table[g], grade: g, era };
   let closest = CGC_GRADES[0];
   let minDist = Math.abs(g - closest);
   for (const k of CGC_GRADES) {
     const d = Math.abs(g - k);
     if (d < minDist) { closest = k; minDist = d; }
   }
-  return { multiplier: CGC_MULTIPLIERS[closest], grade: closest };
+  return { multiplier: table[closest], grade: closest, era };
 };
 
 // Parse a raw grade string like "VG 4.0" or "FR 1.0" into a multiplier.
 // Step 1: extract numeric → find nearest CGC_MULTIPLIERS entry.
 // Step 2: extract text abbreviation → look up RAW_MULTIPLIERS.
 // Step 3: default 0.75.
-const getRawGradeMultiplier = (gradeStr) => {
-  if (!gradeStr) return { multiplier: 0.75, label: "RAW" };
+export const getRawGradeMultiplier = (gradeStr, year = null) => {
+  if (!gradeStr) return { multiplier: 0.75, label: "RAW", era: getEra(year) };
   const s = String(gradeStr).trim();
+  const era = getEra(year);
 
   // Step 1: numeric portion
   const numMatch = s.match(/([\d.]+)/);
   if (numMatch) {
     const g = parseFloat(numMatch[1]);
     if (!isNaN(g) && g >= 0.5 && g <= 10) {
-      const info = getGradeMultiplier(g);
-      if (info) return { multiplier: info.multiplier, label: s };
+      const info = getGradeMultiplier(g, year);
+      if (info) return { multiplier: info.multiplier, label: s, era };
     }
   }
 
@@ -509,13 +549,14 @@ const getRawGradeMultiplier = (gradeStr) => {
   const textMatch = s.match(/^([A-Z][A-Z/]*)/i);
   if (textMatch) {
     const abbrev = textMatch[1].toUpperCase().replace(/\s+/g, "");
-    if (RAW_MULTIPLIERS[abbrev] != null) {
-      return { multiplier: RAW_MULTIPLIERS[abbrev], label: s };
+    const table = RAW_MULTIPLIERS[era];
+    if (table[abbrev] != null) {
+      return { multiplier: table[abbrev], label: s, era };
     }
   }
 
   // Step 3: default
-  return { multiplier: 0.75, label: s || "RAW" };
+  return { multiplier: 0.75, label: s || "RAW", era };
 };
 
 const PRICECHARTING_EXCLUDE =
@@ -1049,8 +1090,11 @@ export default async function handler(req, res) {
     // Fallback: Browse API comps (active listings).
     if (priceCharting) {
       let pc = priceCharting.price;
+      // Era-aware multipliers use confirmedYear (healed via PC/CV crosscheck)
+      // when available; falls back to user year; then vintage default.
+      const eraYear = confirmedYear || year;
       if (isGraded === true && numericGrade != null) {
-        const gradeInfo = getGradeMultiplier(numericGrade);
+        const gradeInfo = getGradeMultiplier(numericGrade, eraYear);
         if (gradeInfo) {
           const adjusted = pc * gradeInfo.multiplier;
           out.price = fmtUsd(adjusted);
@@ -1059,12 +1103,12 @@ export default async function handler(req, res) {
           out.gradeMultiplier = gradeInfo.multiplier;
           out.priceNote = `CGC ${numericGrade} estimate`;
           console.log(
-            `[enrich] pricecharting base=$${pc} × ${gradeInfo.multiplier} (CGC ${numericGrade}) = $${adjusted.toFixed(2)}`
+            `[enrich] pricecharting base=$${pc} × ${gradeInfo.multiplier} (CGC ${numericGrade}, era=${gradeInfo.era}) = $${adjusted.toFixed(2)}`
           );
         }
       } else {
         // Raw comic: apply grade multiplier from grade string.
-        const rawInfo = getRawGradeMultiplier(grade);
+        const rawInfo = getRawGradeMultiplier(grade, eraYear);
         const adjusted = pc * rawInfo.multiplier;
         out.price = fmtUsd(adjusted);
         out.priceLow = fmtUsd(adjusted * 0.75);
@@ -1072,7 +1116,7 @@ export default async function handler(req, res) {
         out.gradeMultiplier = rawInfo.multiplier;
         out.priceNote = `${rawInfo.label} estimate`;
         console.log(
-          `[enrich] pricecharting base=$${pc} × ${rawInfo.multiplier} (${rawInfo.label}) = $${adjusted.toFixed(2)}`
+          `[enrich] pricecharting base=$${pc} × ${rawInfo.multiplier} (${rawInfo.label}, era=${rawInfo.era}) = $${adjusted.toFixed(2)}`
         );
       }
       out.pricingSource = "pricecharting";
@@ -1215,14 +1259,15 @@ export default async function handler(req, res) {
 
       // Still record gradeMultiplier for downstream (floor guard, etc.)
       // but do NOT apply it to the browse price.
+      const eraYear = confirmedYear || year;
       if (isGraded === true && numericGrade != null) {
-        const gInfo = getGradeMultiplier(numericGrade);
+        const gInfo = getGradeMultiplier(numericGrade, eraYear);
         if (gInfo) {
           out.gradeMultiplier = gInfo.multiplier;
           out.priceNote = `CGC ${numericGrade} estimate`;
         }
       } else if (grade) {
-        const rawInfo = getRawGradeMultiplier(grade);
+        const rawInfo = getRawGradeMultiplier(grade, eraYear);
         out.gradeMultiplier = rawInfo.multiplier;
         out.priceNote = `${rawInfo.label} estimate`;
       }
