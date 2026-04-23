@@ -1599,6 +1599,7 @@ function CollectionDetail({
   const [listPrice, setListPrice] = useState(() => getDisplayPrice(item));
   const [swipeHint, setSwipeHint] = useState(() => !localStorage.getItem("cv_swipe_hint_seen"));
   const [showEngineRec, setShowEngineRec] = useState(false);
+  const [expandedKeyIdx, setExpandedKeyIdx] = useState(null);
   const addPhotoRef = useRef(null);
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
@@ -1965,6 +1966,50 @@ function CollectionDetail({
       {showKeyIssue(item.keyIssue) && (
         <div className="key-box" style={{ marginTop: 12 }}>
           ⭐ {item.keyIssue}
+        </div>
+      )}
+
+      {/* 3a. Ship #12a — DETECTED IN COMPS (multi-key attribution) */}
+      {Array.isArray(item.keyFromComps) && item.keyFromComps.length > 0 && (
+        <div style={{
+          marginTop: 8,
+          padding: "8px 14px",
+          background: "rgba(240, 192, 64, 0.06)",
+          border: "1px solid rgba(240, 192, 64, 0.18)",
+          borderRadius: 12,
+        }}>
+          <div style={{ color: "#888", fontSize: 11, marginBottom: 4, letterSpacing: 0.5 }}>
+            DETECTED IN COMPS
+          </div>
+          {item.keyFromComps.map((entry, idx) => (
+            <div key={idx} style={{ marginBottom: 3 }}>
+              <button
+                onClick={() => setExpandedKeyIdx(expandedKeyIdx === idx ? null : idx)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--gold)",
+                  padding: 0,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  fontSize: 13,
+                  width: "100%",
+                }}
+              >
+                • {entry.phrase}{" "}
+                <span style={{ color: "#888", fontSize: 11 }}>
+                  ({entry.hits} source{entry.hits === 1 ? "" : "s"}) {expandedKeyIdx === idx ? "▲" : "▼"}
+                </span>
+              </button>
+              {expandedKeyIdx === idx && Array.isArray(entry.sources) && (
+                <div style={{ paddingLeft: 12, marginTop: 4, fontSize: 11, color: "#aaa" }}>
+                  {entry.sources.map((src, i) => (
+                    <div key={i} style={{ marginBottom: 2 }}>— {src}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
       {item.variant && (
@@ -4160,6 +4205,9 @@ export default function App() {
                 priceLow: lowMatch ? cur.priceLow : (enrich.priceLow || cur.priceLow),
                 priceHigh: lowMatch ? cur.priceHigh : (enrich.priceHigh || cur.priceHigh),
                 keyIssue: enrich.keyIssue || cur.keyIssue,
+                keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
+                keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
+                keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
@@ -4473,6 +4521,9 @@ export default function App() {
                   priceLow: enrich.priceLow || cur.priceLow,
                   priceHigh: enrich.priceHigh || cur.priceHigh,
                   keyIssue: enrich.keyIssue || cur.keyIssue,
+                  keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
+                  keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
+                  keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
                   soldComps: enrich.soldComps || cur.soldComps || [],
                   confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
@@ -4520,6 +4571,9 @@ export default function App() {
                   priceLow: enrich.priceLow || s.priceLow,
                   priceHigh: enrich.priceHigh || s.priceHigh,
                   keyIssue: enrich.keyIssue || s.keyIssue,
+                  keyIssueSource: enrich.keyIssueSource || s.keyIssueSource || null,
+                  keyFromComps: enrich.keyFromComps || s.keyFromComps || [],
+                  keyFromCompsSingleton: enrich.keyFromCompsSingleton || s.keyFromCompsSingleton || [],
                   soldComps: enrich.soldComps || s.soldComps || [],
                   confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || s.matchConfidence || null,
@@ -4700,6 +4754,9 @@ export default function App() {
                 priceLow: enrich.priceLow || cur.priceLow,
                 priceHigh: enrich.priceHigh || cur.priceHigh,
                 keyIssue: enrich.keyIssue || cur.keyIssue,
+                keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
+                keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
+                keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
@@ -5031,6 +5088,9 @@ export default function App() {
       priceLow: enrich.priceLow ?? item.priceLow,
       priceHigh: enrich.priceHigh ?? item.priceHigh,
       keyIssue: enrich.keyIssue || item.keyIssue,
+      keyIssueSource: enrich.keyIssueSource || item.keyIssueSource || null,
+      keyFromComps: enrich.keyFromComps || item.keyFromComps || [],
+      keyFromCompsSingleton: enrich.keyFromCompsSingleton || item.keyFromCompsSingleton || [],
       soldComps: enrich.soldComps || item.soldComps || [],
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
       matchConfidence: enrich.matchConfidence || item.matchConfidence || null,

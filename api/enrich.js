@@ -559,6 +559,123 @@ export const getRawGradeMultiplier = (gradeStr, year = null) => {
   return { multiplier: 0.75, label: s || "RAW", era };
 };
 
+// Ship #12a — FR-D7 multi-key attribution extraction from comp titles.
+// Sellers encode key context in eBay listing titles ("1st app of X", "Death
+// of Dracula", "Intro of Y"). Engine previously pulled titles for pricing
+// but ignored the key signals. Pattern-match post-AI-verify comp pool,
+// surface consensus detections (hits >= 2) on out.keyFromComps, singletons
+// on out.keyFromCompsSingleton for observability. DISPLAY ONLY — no write
+// to out.keyIssue, no pricing math impact. Promotion logic reserved for
+// Ship #12b with separate greenlight.
+export const COMP_KEY_PATTERNS = [
+  {
+    kind: 'first-appearance',
+    weight: 'major',
+    re: /\b(?:1st|first)\s+(?:ever\s+)?app(?:earance)?\b(?:\s+of\s+[^-–|#,;]{2,50})?/i,
+  },
+  {
+    kind: 'origin',
+    weight: 'major',
+    re: /\borigin\s+of\s+[^-–|#,;]{2,50}/i,
+  },
+  {
+    kind: 'death',
+    weight: 'minor',
+    re: /\b(?:1st\s+)?(?:death|dies)\s+of\s+[^-–|#,;]{2,50}/i,
+  },
+  {
+    kind: 'intro',
+    weight: 'major',
+    re: /\b(?:intro(?:duction|duces|duced|ducing)?|introducing)\b(?:\s+(?:of\s+)?[^-–|#,;]{2,50})?/i,
+  },
+  {
+    kind: 'first-told',
+    weight: 'minor',
+    re: /\b(?:1st|first)\s+told\s+[^-–|#,;]{2,50}/i,
+  },
+  {
+    kind: 'cameo',
+    weight: 'minor',
+    re: /\bcameo(?:\s+(?:of|by)\s+[^-–|#,;]{2,50})?/i,
+  },
+  {
+    kind: 'second-appearance',
+    weight: 'minor',
+    re: /\b(?:2nd|second)\s+app(?:earance)?\b/i,
+  },
+  {
+    kind: 'first-cover',
+    weight: 'minor',
+    re: /\b(?:1st|first)\s+cover(?:\s+app(?:earance)?)?\b/i,
+  },
+];
+
+// Trim noise from a captured phrase — grading-company suffixes, trailing
+// grades, trailing years, trailing issue numbers. The raw match may trail
+// into "CGC 9.4 Marvel 1974" territory; we want just the signal phrase.
+const COMP_PHRASE_NOISE = [
+  /\s+(?:cgc|cbcs|pgx|psa|egs|hga)\b.*$/i,
+  /\s+#\s*\d+.*$/,
+  /\s+\d{4}\s*$/,
+  /\s+\d+(?:\.\d+)?\s*$/,
+  /\s+(?:vf|nm|fn|vg|gd|fr|pr|mint)\b.*$/i,
+];
+
+const cleanCompPhrase = (p) => {
+  if (!p) return '';
+  let out = String(p).trim();
+  for (const re of COMP_PHRASE_NOISE) out = out.replace(re, '');
+  return out.replace(/\s{2,}/g, ' ').trim();
+};
+
+// Title-case for display. Lowercase common connectors (of, the, &, and)
+// unless they're the first token. Preserves punctuation ("Mr.", "Ma & Pa").
+export const titleCaseKeyPhrase = (s) => {
+  if (!s) return s;
+  const lowers = new Set(['of', 'the', 'a', 'an', 'and', '&', 'in', 'on',
+    'at', 'to', 'for', 'by', 'vs', 'vs.']);
+  return String(s).toLowerCase().split(/\s+/).map((w, i) => {
+    if (!w) return w;
+    if (i > 0 && lowers.has(w)) return w;
+    if (!/[a-z]/i.test(w)) return w; // pure symbols/numbers
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }).join(' ');
+};
+
+// Scan an array of comp titles and return consensus + singleton detections.
+// { consensus: [{kind, phrase, hits, weight, sources[]}], singletons: [...] }
+// consensus = hits >= 2. singletons = hits === 1 (observability).
+// Sorted by hits desc. sources capped at 3 per entry.
+export const extractKeyFromComps = (titles) => {
+  if (!Array.isArray(titles) || titles.length === 0) {
+    return { consensus: [], singletons: [] };
+  }
+  const map = new Map();
+  for (const rawTitle of titles) {
+    if (!rawTitle || typeof rawTitle !== 'string') continue;
+    for (const { kind, weight, re } of COMP_KEY_PATTERNS) {
+      const m = rawTitle.match(re);
+      if (!m) continue;
+      const cleaned = cleanCompPhrase(m[0]);
+      if (!cleaned || cleaned.length < 3) continue;
+      const phrase = titleCaseKeyPhrase(cleaned);
+      const key = `${kind}:${phrase.toLowerCase()}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.hits += 1;
+        if (existing.sources.length < 3) existing.sources.push(rawTitle);
+      } else {
+        map.set(key, { kind, phrase, hits: 1, weight, sources: [rawTitle] });
+      }
+    }
+  }
+  const all = Array.from(map.values()).sort((a, b) => b.hits - a.hits);
+  return {
+    consensus: all.filter((e) => e.hits >= 2),
+    singletons: all.filter((e) => e.hits === 1),
+  };
+};
+
 const PRICECHARTING_EXCLUDE =
   /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix/i;
 
@@ -1067,20 +1184,43 @@ export default async function handler(req, res) {
     }
 
     // Key issue: prefer ComicVine structured data, then description-derived,
-    // then Claude's keyIssue from /api/grade.
+    // then Claude's keyIssue from /api/grade. keyIssueSource surfaces which
+    // branch won so the UI can render an attribution hint.
     const cvChars = comicVine?.firstAppearanceCharacters;
     if (Array.isArray(cvChars) && cvChars.length > 0) {
       out.keyIssue = `1st appearance of ${cvChars.join(", ")}`;
+      out.keyIssueSource = 'comicvine';
     } else if (comicVine?.derivedKeyIssue) {
       out.keyIssue = comicVine.derivedKeyIssue;
+      out.keyIssueSource = 'comicvine-derived';
     } else if (
       req.body?.keyIssue &&
       req.body.keyIssue !== "N/A" &&
       String(req.body.keyIssue).length > 3
     ) {
       out.keyIssue = req.body.keyIssue;
+      out.keyIssueSource = 'claude';
     } else {
       out.keyIssue = null;
+      out.keyIssueSource = null;
+    }
+
+    // Ship #12a — extract key-attribution signals from comp titles.
+    // Runs over the post-AI-verify pool so reprint/facsimile noise is
+    // already filtered. Display-only — does NOT mutate out.keyIssue.
+    // Consensus (hits >= 2) surfaces on out.keyFromComps; singletons
+    // (hits === 1) on out.keyFromCompsSingleton for observability.
+    {
+      const compTitles = Array.isArray(rawComps?.prices)
+        ? rawComps.prices.map((p) => p?.title).filter(Boolean)
+        : [];
+      const { consensus, singletons } = extractKeyFromComps(compTitles);
+      out.keyFromComps = consensus;
+      out.keyFromCompsSingleton = singletons;
+      if (consensus.length > 0) {
+        console.log('[key-from-comps] consensus:',
+          consensus.map((e) => `${e.kind}/${e.phrase}×${e.hits}`).join(', '));
+      }
     }
 
     // Primary price source: PriceCharting (aggregated sold data).
