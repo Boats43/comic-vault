@@ -156,9 +156,11 @@ All pricing fixes confirmed intact:
 (5) **Variant in eBay listing title** (`1cdf988`): `buildTitle` in `list-ebay.js` now includes `item.variant` between issue and grade. Filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot) — these add no search value. Same filter applied to `buildBundleTitle`. Pipeline trace confirmed variant flows: grade.js → App.jsx → enrich.js → comps.js (attempts 1-2 only) → list-ebay.js (was missing, now fixed).
 
 ## Last Session
-Session 4/22/2026 — Tier 0 liability firewall + Phase 5a (pop data) + Tier 1 variant allowlist (35¢ + 30¢) shipped. **10 production deploys, 126 unit tests passing.** Mega-keys floor system at 29 entries with three-tier badge UI (verified/estimated/manual) plus distinct exceedsMap handling. Display layer hardened so unsafe engine numbers never anchor user listing decisions. Verify-fallback leak ($147K Action #1 from Superman #1 comps) closed at both sanity-block and floor-block surfaces. PriceCharting CGC pop extractor + UI panel live with locked POP_GRADE_INDEX from PC source. Marvel test-market price-variant allowlist covers 109 series / 366 issues across 35¢ (1977) and 30¢ (1976) windows — eliminates Howard the Duck #28 / Hulk #181 false-positive class. Status: Tier 0 COMPLETE, Phase 5a COMPLETE, Tier 1 (35¢/30¢) COMPLETE. Pattern-based variant architecture (`TEST_MARKET_KEYS` + `TEST_MARKET_VARIANTS`) ready for Whitman / Mark Jewelers / Type 1A-1B follow-ups.
+Session 4/22/2026 — Tier 0 liability firewall + Phase 5a (pop data) + Tier 1 variant allowlist (35¢ + 30¢) + A3 era-aware multiplier fix + FR-D7 multi-key comp extraction shipped. **12 production deploys, 288 unit tests passing** (61 mega-keys + 65 variant-allowlist + 109 era-multipliers + 53 comp-key-extraction). Mega-keys floor system at 29 entries with three-tier badge UI (verified/estimated/manual) plus distinct exceedsMap handling. Display layer hardened so unsafe engine numbers never anchor user listing decisions. Verify-fallback leak ($147K Action #1 from Superman #1 comps) closed at both sanity-block and floor-block surfaces. PriceCharting CGC pop extractor + UI panel live with locked POP_GRADE_INDEX from PC source. Marvel test-market price-variant allowlist covers 109 series / 366 issues across 35¢ (1977) and 30¢ (1976) windows — eliminates Howard the Duck #28 / Hulk #181 false-positive class. CGC_MULTIPLIERS and RAW_MULTIPLIERS now era-split (vintage unchanged / modern damped) — modern CGC 9.4 2.2→1.35, 9.8 5.0→2.2, VF+ 8.5 1.3→1.05. Comp titles pattern-matched for 8 key signals (1st app / origin / death / intro / 1st told / cameo / 2nd app / 1st cover) with hits≥2 consensus threshold, surfaced under ⭐ keyIssue in UI. Status: Tier 0 COMPLETE, Phase 5a COMPLETE, Tier 1 (35¢/30¢) COMPLETE, A3 bug class CLOSED, FR-D7 (display-only 12a) COMPLETE. Pattern-based variant architecture (`TEST_MARKET_KEYS` + `TEST_MARKET_VARIANTS`) ready for Whitman / Mark Jewelers / Type 1A-1B follow-ups.
 
-**Deploys (10, in order):**
+**Strategic vision — layered platform:** *Layer 1 Foundation* (MAJOR PROGRESS — Tier 0, Phase 5a, Tier 1 variants, era-aware, FR-D7; remaining: COMP-POOL-QUALITY, LISTING-VERIFICATION-GATE, REPRINT-VARIANT-DISAMBIG, FR-LIST-PRICE-WARNING, FR-LOW-GRADE-FLOOR, AI-CROSS-LAYER-DISCONNECT, BAKED-IN-PREMIUM, VARIANT-TYPE-DISCRIMINATION). *Layer 2 Data Leverage* (STARTED via FR-D7; remaining: FR-5a.4 value ladder, FR-5a.5 leverage sweep, FR-5a.6 temporal data, FR-5a.7 velocity data, FR-5a.8 zero-at-grade display). *Layer 3 Decision Engine* (NOT STARTED — 5-path comparator, sentiment engine, probability modeling, synthesis layer). *Layer 4 Portfolio OS* (UNLOCKS AT 250+ SCANS — pattern recognition, bulk allocation, portfolio dashboard, autonomous scheduler). Positioning: "Bloomberg terminal for comic assets." Endgame: AI-managed portfolio OS.
+
+**Deploys (12, in order):**
 1. `34f1cc9` — Tier 0 accuracy fixes (E2 mega-keys floor + F3 reprint regex + F2 era-consistency comp filter)
 2. `cf6bf6c` — Tier 0 hotfix (persist mega-key flags through 5 client merge paths)
 3. `99ee51e` — Phase 5a.1 (PriceCharting CGC pop extractor backend + `[pc-pop-calibrate]` logging)
@@ -169,6 +171,8 @@ Session 4/22/2026 — Tier 0 liability firewall + Phase 5a (pop data) + Tier 1 v
 8. `d3ccf26` — Tier 0 hotfix Ship #8 ([floor] block bypass for mega-keys + compsExhausted — same leak surface as Ship #1, downstream block)
 9. `8393a91` — Ship #9 — 35¢ Marvel test-market variant allowlist (52 series / 184 issues, June-Oct 1977 window) + `normalizeTitle` hyphen extension + 3 retroactive mega-keys map key updates
 10. `00f0afe` — Ship #10 — 30¢ Marvel test-market variant allowlist (57 series / 182 issues, April-Aug 1976 window) + retroactive Kull correction (Conqueror → Destroyer typo fix in 35¢ bucket) + Doctor Strange / Dr. Strange dual-key in both buckets + refactored gate via `TEST_MARKET_KEYS` map for future variant-type extensions
+11. `c35f705` — Ship #11 — A3 era-aware grade multiplier recalibration. CGC_MULTIPLIERS + RAW_MULTIPLIERS split into {vintage, modern}. Vintage tables preserved exactly. Modern CGC damped aggressively (9.4: 2.2→1.35, 9.8: 5.0→2.2, VF+ 8.5: 1.3→1.05, 10: 12.0→3.0). Modern raw graduated damp upper curve (NM 1.00→0.90 through VG 0.45→0.40) + flat tail below VG/G (sub-GD trades on condition, not era). Year cutoff 1985 (Crisis). Null-year → vintage default. `confirmedYear || year` used at call sites. Only affects `pricingSource === 'pricecharting'` path — browse_api untouched (already at-grade). Mega-keys untouched (floor overrides downstream). 109 test assertions added, full vintage regression pinned.
+12. `bdb0f1e` — Ship #12a — FR-D7 multi-key attribution extraction from comp titles (display only). `COMP_KEY_PATTERNS` with 8 regex kinds scans post-AI-verify `rawComps.prices`, consensus threshold hits≥2, surfaces on `out.keyFromComps` + `out.keyFromCompsSingleton` (observability) + `out.keyIssueSource` (existing keyIssue attribution). Title-cased phrase display ("1ST TOLD DEATH OF MA & PA KENT" → "1st Told Death of Ma & Pa Kent"). Collapsible "DETECTED IN COMPS" UI block under ⭐ keyIssue in CollectionDetail with tap-to-expand sources (max 3 per entry). 5 client merge paths plumbed: `keyFromComps`, `keyFromCompsSingleton`, `keyIssueSource`. Superman #161 double-trigger (first-told + death), Frankenstein Monster #9 (death), Shazam! #2 (intro) all covered. Superman #201 narrative event deferred to future ship. Zero pricing math impact. Ship #12b (promotion to keyIssue) gated behind future explicit greenlight.
 
 **Mega-keys floor system (`api/mega-keys.js`, 29 entries):**
 - 10 Golden Age (Action #1, Superman #1, Detective #27/#38, Batman #1, Marvel Comics #1, Cap America #1, All Star #8, Sensation #1, Flash Comics #1)
@@ -220,28 +224,88 @@ Session 4/22/2026 — Tier 0 liability firewall + Phase 5a (pop data) + Tier 1 v
 - Test file extended with 33 new cases (Kull correction, Doctor Strange dual-key, 30¢ ALLOW/DENY/EDGE). Notable cross-era assertions: ASM #155 in 35¢ bucket → false (was 30¢ era); ASM #169 in 30¢ bucket → false (was 35¢ era); Iron Fist #14 in 30¢ bucket → false (35¢ only). 65/65 variant-allowlist + 61/61 mega-keys = 126 tests passing.
 - Combined 35¢ + 30¢ coverage: **109 series / 366 issues** of true Marvel test-market variants. Books outside both windows now correctly fall through to baseline.
 
+**Ship #11 — A3 era-aware grade multiplier recalibration (`c35f705`):**
+- Bug class: `CGC_MULTIPLIERS` and `RAW_MULTIPLIERS` in `api/enrich.js` were era-agnostic. A 1938 Action Comics CGC 9.4 and a 2018 modern variant CGC 9.4 both got ×2.2. Correct for vintage (scarcity premiums real). Wrong for modern (direct-market supply abundance means CGC 9.4 modern trades at ~1.35× raw, not 2.2×). Confirmed misses: Wolverine/Hulk #1 (2002) NM 9.4, US of Cap #1 (2021) CGC 9.4, Daredevil #600 (2018) NM 9.4, Dark Horse #1 (1992) VF+ 8.5.
+- Fix: both tables refactored to `{ vintage, modern }`. Vintage preserved exactly (every value pinned in regression tests). Modern CGC damped: 10: 12.0→3.0, 9.9: 8.0→2.6, 9.8: 5.0→2.2, 9.6: 3.0→1.6, 9.4: 2.2→1.35, 9.2: 1.8→1.2, 9.0: 1.5→1.1, 8.5: 1.3→1.05, 8.0: 1.15→1.0, 7.5: 1.05→0.95, 7.0: 1.0→0.9, 6.5: 0.9→0.85, 6.0: 0.85→0.8, 5.5: 0.8→0.7, 5.0: 0.75→0.65, 4.5: 0.7→0.6, 4.0: 0.65→0.55, 3.5: 0.6→0.5, 3.0: 0.55→0.45, 2.5: 0.5→0.4, 2.0: 0.45→0.38, 1.8: 0.4→0.35, 1.5: 0.35→0.32, 1.0: 0.3→0.28, 0.5: 0.2→0.25.
+- Modern RAW: graduated damping upper curve (NM 1.00→0.90, NM/M 1.00→0.90, VF/NM 0.85→0.78, VF 0.75→0.70, VF/F 0.70→0.65, FN/VF 0.65→0.60, FN 0.55→0.50, VG/FN 0.50→0.45, VG 0.45→0.40, VG/G 0.40→0.36) + flat tail below VG/G (GD/VG 0.35, GD 0.30, FR/GD 0.25, FR 0.20, PR 0.15 — identical to vintage; sub-GD trades on condition-survival not era dynamics).
+- `getEra(year)` helper: `parseInt(year) >= 1985 ? 'modern' : 'vintage'`. Null / undefined / 0 / empty-string → vintage (safe default — prefers over- to under-valuing unknown books). String-year inputs handled via parseInt.
+- `getGradeMultiplier(grade, year = null)` and `getRawGradeMultiplier(gradeStr, year = null)` — optional year param, defaults to vintage. Response now includes `era` field for observability. Call sites at lines 1090-1119 (PC branch) and 1259-1272 (browse_api branch) use `const eraYear = confirmedYear || year` — healed year from PC/CV crosscheck wins when available.
+- Log line augmented: `[enrich] pricecharting base=$X × Y (CGC Z, era=vintage|modern) = $N`. Every multiplier decision traceable to its era routing.
+- Behavior preservation:
+  - Browse_api path UNCHANGED in behavior — still doesn't apply multiplier, just records era-aware value for `out.gradeMultiplier` (used by floor guard downstream).
+  - Mega-keys UNAFFECTED — mega-key floor at `api/mega-keys.js` overrides downstream regardless.
+  - Variant / key multipliers UNAFFECTED — separate gating, apply on top of already era-aware base.
+  - 35¢ / 30¢ test-market variants UNAFFECTED — those books are 1976-1977 (vintage), variant mult still applies ×4 / ×6 on top of vintage base.
+- Tables + helpers `export const` for test import (first time `api/enrich.js` has named exports besides default handler — harmless to Vercel runtime, enables regression pinning).
+- Test coverage: `tests/era-multipliers.test.js` — 109 assertions. Schema sanity (both era buckets, matching keys); `getEra()` boundaries (1938/1974/1984/1985/1986/1992/2021/null/undefined/0/empty-string/string-year); CGC vintage unchanged (all 25 grades verified exactly against pre-ship values); CGC modern damped (Dark Horse #1 VF+ 8.5, Wolverine/Hulk #1 CGC 9.4, US of Cap #1 CGC 9.4, ASM #300 CGC 9.8, 10/9.6/9.2 spot-checks); CGC null/edge year → vintage default; RAW vintage unchanged (all 15 tiers); RAW modern damped upper curve; RAW modern flat tail (GD/VG and below === vintage, asserted via both function call and table equality); numeric grade strings route via CGC table with correct era; era tag present on every response.
+- Production validation confirmed: Avengers #20 (2025) NM 9.4 → $3.19 (modern ×1.35 applied, was would-be ~$5-6 with old ×2.2). Daredevil #1 (1964) CGC 9.8 → $600K floor unchanged (vintage, mega-key). Amazing Adventures #4 (1961) VG 4.0 → $70.85 unchanged (vintage raw ×0.65).
+
+**Ship #12a — FR-D7 multi-key attribution from comp titles (`bdb0f1e`):**
+- Bug class: competing sellers encode key context in eBay listing titles ("1ST TOLD DEATH OF MA & PA KENT", "Death of Dracula", "Intro of Mr. Tawky Tawny & Mr. Mind"). Engine pulled titles for comp pricing but ignored the structured key signals. Confirmed misses across Superman #161, Frankenstein Monster #9, Shazam! #2, Superman #201.
+- Approach: leverage-only. Pure text parsing on existing `rawComps.prices` post-AI-verify (so reprint/facsimile/wrong-book noise is already filtered). Zero new endpoints.
+- `COMP_KEY_PATTERNS` module-level constant in `api/enrich.js` — 8 regex kinds with `weight: 'major' | 'minor'`:
+  - `first-appearance` (major): `/\b(?:1st|first)\s+(?:ever\s+)?app(?:earance)?\b(?:\s+of\s+[^-–|#,;]{2,50})?/i`
+  - `origin` (major): `/\borigin\s+of\s+[^-–|#,;]{2,50}/i`
+  - `death` (minor): `/\b(?:1st\s+)?(?:death|dies)\s+of\s+[^-–|#,;]{2,50}/i`
+  - `intro` (major): `/\b(?:intro(?:duction|duces|duced|ducing)?|introducing)\b(?:\s+(?:of\s+)?[^-–|#,;]{2,50})?/i`
+  - `first-told` (minor): `/\b(?:1st|first)\s+told\s+[^-–|#,;]{2,50}/i`
+  - `cameo` (minor): `/\bcameo(?:\s+(?:of|by)\s+[^-–|#,;]{2,50})?/i`
+  - `second-appearance` (minor): `/\b(?:2nd|second)\s+app(?:earance)?\b/i`
+  - `first-cover` (minor): `/\b(?:1st|first)\s+cover(?:\s+app(?:earance)?)?\b/i`
+- `cleanCompPhrase(s)` helper strips trailing noise: CGC / CBCS / PGX / PSA / EGS / HGA suffix; trailing `#N`; trailing year (4 digits); trailing decimal/whole grade; trailing raw grade letters (vf/nm/fn/vg/gd/fr/pr/mint). Multiple consecutive spaces collapsed. Raw match "Death of Dracula CGC 9.4 Marvel 1974" → "Death of Dracula".
+- `titleCaseKeyPhrase(s)` — exported. Lowercases connectors `{of, the, a, an, and, &, in, on, at, to, for, by, vs, vs.}` mid-phrase; capitalizes first char of every non-lowercased word; preserves punctuation ("Mr.", "Ma & Pa"). "1ST TOLD DEATH OF MA & PA KENT" → "1st Told Death of Ma & Pa Kent".
+- `extractKeyFromComps(titles)` — exported. Scans array of comp titles against all patterns. Dedup key = `${kind}:${titleCasedPhrase.toLowerCase()}` so "DEATH OF DRACULA", "Death of Dracula", "death of dracula" all merge into one entry. Returns `{ consensus: [...], singletons: [...] }`. `consensus = hits >= 2`, `singletons = hits === 1`. Sorted by hits desc. Sources array capped at 3 per entry. Guard on non-array / null / undefined / mixed-type input returns `{ consensus: [], singletons: [] }` silently.
+- Handler integration at line 1205: runs AFTER keyIssue resolution (so existing `out.keyIssue` flow is untouched) but references `rawComps.prices` (post-AI-verify pool). Logs `[key-from-comps] consensus: kind/phrase×hits, ...` when at least one consensus detection fires.
+- `keyIssueSource` field added alongside existing keyIssue resolution chain: `'comicvine'` (structured firstAppearanceCharacters) | `'comicvine-derived'` (description regex) | `'claude'` (grade.js `req.body.keyIssue`) | `null`. Observability only — UI not yet using it.
+- Response additions (all additive, backward compatible):
+  - `out.keyFromComps` — consensus list, each `{ kind, phrase, hits, weight, sources[] }`
+  - `out.keyFromCompsSingleton` — hits=1 list (same shape) for observability
+  - `out.keyIssueSource` — string | null
+- Client merge paths: 5 sites in `src/App.jsx` (auto-refresh→catalogue, bulk-import→catalogue, bulk-import→selectedItem, scan→catalogue, refreshMarketData→item) extended to propagate `keyFromComps`, `keyFromCompsSingleton`, `keyIssueSource` alongside existing `keyIssue`. Pattern: `enrich.X || cur.X || defaultValue`. Default for arrays is `[]`, default for string is `null`. Necessary for IndexedDB persistence — scoped earlier estimate of "zero merge paths" was wrong because `keyIssue` uses explicit field mapping (not `...enrich` spread).
+- UI block in `CollectionDetail` (~line 1972): collapsible "DETECTED IN COMPS" panel under the ⭐ keyIssue box. Renders only when `Array.isArray(item.keyFromComps) && item.keyFromComps.length > 0`. Each entry is a button: `• {phrase} ({N} source{s}) ▼`. Tap toggles expansion (via `expandedKeyIdx` state in CollectionDetail). Expanded state shows up to 3 source titles indented. Style matches existing key-box aesthetic (gold accent at 6% opacity background, 18% border). Bundle delta +0.41 KB gzip.
+- Superman #161 double-trigger behavior: the pattern "1ST TOLD DEATH OF MA & PA KENT" in a single title hits BOTH `first-told` and `death` patterns independently because `death` has an optional `(?:1st\s+)?` prefix. Two consensus entries result when the same title appears in 2+ comps. This is correct — each kind is a separate signal.
+- Pricing math: ZERO impact. `out.keyIssue` resolution chain unchanged (still CV / CV-derived / Claude / null). Key multiplier at line 1443+ still reads `out.keyIssue`, never `keyFromComps`. Promotion to keyIssue (Ship #12b) is gated behind future explicit greenlight after observing signal quality in production.
+- Narrative events out of scope per session decision (e.g. "Clark Kent Abandons Superman" on Superman #201): weaker pricing correlation, lower signal-to-noise ratio, deferred to potential future FR-D7.5 ship. Explicit negative test assertion locks this scope decision into the test file.
+- Test coverage: `tests/comp-key-extraction.test.js` — 53 assertions. Pattern catalog registration (all 8 kinds); `titleCaseKeyPhrase` behavior; guards (empty / null / undefined / mixed-type input); each of the 8 pattern kinds individually tested with positive fixture; consensus threshold (1 hit → singleton, 2 hits → consensus); case-insensitive dedup; different-phrase-same-kind separate entries; negative cases ("1st print", "Death Metal" without "of", bare title); sources array cap at 3; noise stripping in captured phrase; weight field preservation; sort order (hits desc); all 4 confirmed production misses pinned as fixtures (Superman #161 double-trigger, Frankenstein Monster #9 death, Shazam! #2 intro, Superman #201 asserted NOT matched).
+
+**Cumulative session impact (4/22/2026, 12 deploys):**
+- Bug classes eliminated: mega-key undervaluation, wrong-book comp leaks (sanity + floor), contaminated floor bypass, 35¢/30¢ false positives, A3 modern grade inflation, Kull "Destroyer vs Conqueror" typo, single-field keyIssue attribution blindness.
+- Architectural additions: `TEST_MARKET_VARIANTS` extensible variant-type structure, era-aware multiplier tables (vintage/modern split), comp key extraction (leverage-first pattern), response field additions (`keyFromComps`, `keyFromCompsSingleton`, `keyIssueSource`, `era`, `pop`, `compsExhausted`, `preFloorPrice`, `gradeExceedsMap`, `manualReviewRequired`, `megaKeyFloorApplied`/`Verified`/`Source`/`Note`, `yearOverrideRejected`).
+- Pattern library state (from 20-book scan analysis): Pattern A (Bronze non-mega keys) 5 confirmations, Pattern B (Silver/Bronze non-mega) 7, Pattern C (Mega-keys floor) 4, Pattern D (Indie/obscure) 2, Pattern E (Modern non-key raw) 2, Pattern K (Low-grade floor) 1, Pattern L (Publisher-debut) 1.
+- Parallel QA protocol validated: three Claude instances collaborating effectively (pattern observer with fresh context / directive synthesizer in main chat / executor with codebase access) + human decision-maker. Proven across 12 clean deploys in a single session.
+
 ## Next session candidates (queued)
 
-**Tier 1 (continued, well-bounded):**
+**Tier 1 (next session, pick by energy):**
+- COMP-POOL-QUALITY — filter signed/grade/variant pollution (3-4 hr)
+- FR-LIST-PRICE-WARNING — user over-reach detection (2-3 hr)
+- FR-LOW-GRADE-FLOOR — bottom-census anchoring (1-2 hr)
+- FR-5a.4 — CGC-style value ladder display (2-3 hr)
 - B4 — Artist-credit variant disambiguation
 - Whitman variants (pattern ready via `TEST_MARKET_KEYS` + new bucket)
 - Mark Jewelers insert variants (same pattern)
-- K1 — Duplicate detection (needs fresh head)
 
 **Tier 2 (larger scope):**
 - FR-Q9 — Issue# cross-check via ComicVine before commit (3-4 hours, soft-flag variant)
+- FR-5a.5 — Leverage extraction sweep (4-6 hr)
+- Ship #12b — keyFromComps promotion to `keyIssue` (requires phone observation of 12a signal quality first; pricing math change — explicit greenlight required)
 - FR-Q11 — Cover hash verify
 - FR-Q12 — Imprint awareness
-- Phase 5b — Scarcity-aware pricing hooks (gated; thin-pop floor premium, dense-pop confidence boost) — needs explicit greenlight before any pricing math touched
-- Scan UX rail (3-4 hours)
 - K2 — Merge pattern refactor (5 merge paths → centralized helper)
 
-**Open external threads:**
-- GoCollect API key #019483 — pending approval
-- eBay Marketplace Insights API — DEAD for indie devs
-- Phone audit cadence — strong momentum (5 fixes in 4/19 session, 10 deploys 4/22)
+**Deferred (fresh head required):**
+- Phase 5b — Scarcity-aware pricing hooks (gated; thin-pop floor premium, dense-pop confidence boost) — explicit greenlight before any pricing math
+- K1 — Duplicate detection
+- Scan UX rail (dedicated session)
 
-**Process note — parallel QA protocol validated:** three Claude instances coordinating (pattern observer / directive synthesizer / executor with codebase access) shipped 10 clean deploys today. Methodology proven effective for high-velocity Tier 0 + Tier 1 work.
+**Open external threads:**
+- GoCollect API key #019483 — pending approval (since 4/15)
+- eBay Marketplace Insights API — DEAD for indie devs
+- Phone audit cadence — strong momentum (5 fixes in 4/19 session, 12 deploys in 4/22 session)
+
+**Ship #12a phone validation pending:** scan Shazam! #2 / Frankenstein Monster #9 / Superman #161 if in collection. Look for "DETECTED IN COMPS" block under ⭐ keyIssue in CollectionDetail. Only shows when ≥2 comp titles mention same key. Collapsible with source expansion. Zero pricing changes expected. Expected log signatures: `[key-from-comps] consensus: {kind}/{phrase}×{hits}` and `[enrich] pricecharting base=$X × Y (grade, era=vintage|modern) = $Z`.
+
+**Process note — parallel QA protocol validated:** three Claude instances coordinating (pattern observer with fresh context / directive synthesizer in main chat / executor with codebase access) + human decision-maker shipped 12 clean deploys today. Methodology proven effective for high-velocity Tier 0 + Tier 1 + A3 + FR-D7 work.
 
 ## Session 4/19/2026 (phone audit — 5 critical fixes)
 Navigation gesture guards, empty/low comp scoring, publisher parens cleanup, variant filter order, vision + match tier sync.
