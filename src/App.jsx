@@ -2076,7 +2076,7 @@ function CollectionDetail({
       )}
 
       {/* 4. AI CONDITION REPORT */}
-      {(conditionBullets.length > 0 || confidenceText || scannedText) && (
+      {(conditionBullets.length > 0 || confidenceText || scannedText || item.cgcPenaltyFlags) && (
         <div
           style={{
             marginTop: 14,
@@ -2116,22 +2116,113 @@ function CollectionDetail({
               ))}
             </ul>
           )}
-          {(confidenceText || scannedText) && (
-            <div
-              className="muted small"
-              style={{
-                marginTop: conditionBullets.length > 0 ? 10 : 0,
-                paddingTop: conditionBullets.length > 0 ? 8 : 0,
-                borderTop:
-                  conditionBullets.length > 0
-                    ? "1px solid rgba(212,175,55,0.2)"
-                    : "none",
-              }}
-            >
-              {confidenceText && <div>Confidence: {confidenceText}</div>}
-              {scannedText && <div>Scanned: {scannedText}</div>}
-            </div>
-          )}
+          {item.cgcPenaltyFlags && (() => {
+            const f = item.cgcPenaltyFlags;
+            const advisoryStyle = (color) => ({
+              padding: "4px 0",
+              fontSize: 14,
+              color,
+              display: "flex",
+              gap: 8,
+              alignItems: "flex-start",
+            });
+            const positive = "#d4af37";   // gold (pedigree premium)
+            const warn = "#f59e0b";       // amber (store stamp)
+            const severe = "#ef4444";     // red (staple, chips)
+            const info = "#06b6d4";       // cyan (polybag, pressable)
+            const lis = [];
+            if (f.pedigreeStamp?.detected && f.pedigreeStamp.canonical) {
+              lis.push(
+                <li key="ped" style={advisoryStyle(positive)}>
+                  <span style={{ flexShrink: 0 }}>🏆</span>
+                  <span>Pedigree: {f.pedigreeStamp.canonical} — adds collector premium</span>
+                </li>
+              );
+            } else if (f.pedigreeStamp?.detected && f.pedigreeStamp.pedigreeName && f.pedigreeStamp.recognized === false) {
+              lis.push(
+                <li key="ped-unrec" style={advisoryStyle(warn)}>
+                  <span style={{ flexShrink: 0 }}>⚠️</span>
+                  <span>Pedigree claimed: "{f.pedigreeStamp.pedigreeName}" — unrecognized, verify manually</span>
+                </li>
+              );
+            }
+            if (f.storeStamp?.detected) {
+              lis.push(
+                <li key="stamp" style={advisoryStyle(warn)}>
+                  <span style={{ flexShrink: 0 }}>⚠️</span>
+                  <span>Store stamp detected — CGC may dock ~1.3 grades</span>
+                </li>
+              );
+            }
+            if (f.staplePopping?.detected) {
+              lis.push(
+                <li key="staple" style={advisoryStyle(severe)}>
+                  <span style={{ flexShrink: 0 }}>🚨</span>
+                  <span>
+                    Staple popping{f.staplePopping.severity ? ` (${f.staplePopping.severity})` : ""} —
+                    structural damage, grade typically capped (not pressable)
+                  </span>
+                </li>
+              );
+            }
+            if (f.polybagIndents?.detected) {
+              lis.push(
+                <li key="polybag" style={advisoryStyle(info)}>
+                  <span style={{ flexShrink: 0 }}>✨</span>
+                  <span>Polybag indents — pressing recommended</span>
+                </li>
+              );
+            }
+            if (f.cornerChips?.detected) {
+              lis.push(
+                <li key="chips" style={advisoryStyle(severe)}>
+                  <span style={{ flexShrink: 0 }}>🚨</span>
+                  <span>
+                    Corner chips
+                    {f.cornerChips.count ? ` (${f.cornerChips.count} corner${f.cornerChips.count === 1 ? "" : "s"})` : ""} —
+                    CGC may dock up to 4 grades
+                  </span>
+                </li>
+              );
+            }
+            if (lis.length === 0) return null;
+            return (
+              <ul style={{
+                margin: 0,
+                padding: 0,
+                listStyle: "none",
+                marginTop: conditionBullets.length > 0 ? 6 : 0,
+                paddingTop: conditionBullets.length > 0 ? 6 : 0,
+                borderTop: conditionBullets.length > 0 ? "1px solid rgba(212,175,55,0.15)" : "none",
+              }}>
+                {lis}
+              </ul>
+            );
+          })()}
+          {(confidenceText || scannedText) && (() => {
+            const hasAnyAdvisory =
+              conditionBullets.length > 0 ||
+              (item.cgcPenaltyFlags && (
+                item.cgcPenaltyFlags.pedigreeStamp?.detected ||
+                item.cgcPenaltyFlags.storeStamp?.detected ||
+                item.cgcPenaltyFlags.staplePopping?.detected ||
+                item.cgcPenaltyFlags.polybagIndents?.detected ||
+                item.cgcPenaltyFlags.cornerChips?.detected
+              ));
+            return (
+              <div
+                className="muted small"
+                style={{
+                  marginTop: hasAnyAdvisory ? 10 : 0,
+                  paddingTop: hasAnyAdvisory ? 8 : 0,
+                  borderTop: hasAnyAdvisory ? "1px solid rgba(212,175,55,0.2)" : "none",
+                }}
+              >
+                {confidenceText && <div>Confidence: {confidenceText}</div>}
+                {scannedText && <div>Scanned: {scannedText}</div>}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -4336,6 +4427,8 @@ export default function App() {
                 // Ship #17 observability
                 lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
                 lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
+                // Ship #18 — preserve Vision-set penalty flags
+                cgcPenaltyFlags: enrich.cgcPenaltyFlags || cur.cgcPenaltyFlags || null,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedAR ? false : (cur.manualConfirmed || false),
               };
@@ -4470,6 +4563,7 @@ export default function App() {
       confidence: data.confidence || "",
       restoration: data.restoration || null,
       defectPenalty: data.defectPenalty || null,
+      cgcPenaltyFlags: data.cgcPenaltyFlags || null,
       variant: data.variant || null,
       variantMultiplier: data.variantMultiplier || null,
       certNumber: data.certNumber || null,
@@ -4661,6 +4755,8 @@ export default function App() {
                   // Ship #17 observability
                   lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
                   lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
+                  // Ship #18 — preserve Vision-set penalty flags
+                  cgcPenaltyFlags: enrich.cgcPenaltyFlags || cur.cgcPenaltyFlags || null,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
                 };
@@ -4723,6 +4819,8 @@ export default function App() {
                   // Ship #17 observability
                   lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
                   lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
+                  // Ship #18 — preserve Vision-set penalty flags
+                  cgcPenaltyFlags: enrich.cgcPenaltyFlags || s.cgcPenaltyFlags || null,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChangedSel ? false : (s.manualConfirmed || false),
                 };
@@ -4918,6 +5016,8 @@ export default function App() {
                 // Ship #17 observability
                 lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
                 lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
+                // Ship #18 — preserve Vision-set penalty flags
+                cgcPenaltyFlags: enrich.cgcPenaltyFlags || cur.cgcPenaltyFlags || null,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedBulk ? false : (cur.manualConfirmed || false),
               };
@@ -5263,6 +5363,8 @@ export default function App() {
       // Ship #17 observability
       lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
       lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
+      // Ship #18 — preserve Vision-set penalty flags
+      cgcPenaltyFlags: enrich.cgcPenaltyFlags || item.cgcPenaltyFlags || null,
       megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
       manualConfirmed: priceChangedRM ? false : (item.manualConfirmed || false),
     };
@@ -5330,6 +5432,7 @@ export default function App() {
       priceHigh: data.priceHigh || item.priceHigh,
       reason: data.reason || item.reason,
       confidence: data.confidence || item.confidence,
+      cgcPenaltyFlags: data.cgcPenaltyFlags || item.cgcPenaltyFlags || null,
       images: nextPhotos,
       // Drop the legacy single `image` field if it's still hanging around
       // from an older record — `images` is the source of truth now.
