@@ -4333,6 +4333,9 @@ export default function App() {
                 sequelRejected: enrich.sequelRejected || 0,
                 signedRejected: enrich.signedRejected || 0,
                 multiIssueRejected: enrich.multiIssueRejected || 0,
+                // Ship #17 observability
+                lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
+                lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedAR ? false : (cur.manualConfirmed || false),
               };
@@ -4655,6 +4658,9 @@ export default function App() {
                   sequelRejected: enrich.sequelRejected || 0,
                   signedRejected: enrich.signedRejected || 0,
                   multiIssueRejected: enrich.multiIssueRejected || 0,
+                  // Ship #17 observability
+                  lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
+                  lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
                 };
@@ -4714,6 +4720,9 @@ export default function App() {
                   sequelRejected: enrich.sequelRejected || 0,
                   signedRejected: enrich.signedRejected || 0,
                   multiIssueRejected: enrich.multiIssueRejected || 0,
+                  // Ship #17 observability
+                  lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
+                  lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChangedSel ? false : (s.manualConfirmed || false),
                 };
@@ -4906,6 +4915,9 @@ export default function App() {
                 sequelRejected: enrich.sequelRejected || 0,
                 signedRejected: enrich.signedRejected || 0,
                 multiIssueRejected: enrich.multiIssueRejected || 0,
+                // Ship #17 observability
+                lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
+                lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedBulk ? false : (cur.manualConfirmed || false),
               };
@@ -5248,6 +5260,9 @@ export default function App() {
       sequelRejected: enrich.sequelRejected || 0,
       signedRejected: enrich.signedRejected || 0,
       multiIssueRejected: enrich.multiIssueRejected || 0,
+      // Ship #17 observability
+      lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
+      lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
       megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
       manualConfirmed: priceChangedRM ? false : (item.manualConfirmed || false),
     };

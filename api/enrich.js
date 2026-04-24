@@ -326,6 +326,47 @@ export const computeSanityFallback = (pcNum, compsAvg, opts = {}) => {
   return null;
 };
 
+// Ship #17 — bottom-of-census low-grade floor as a pure, testable helper.
+// When PriceCharting pop data confirms the user's grade is at the bottom
+// of CGC census (no copies graded lower) AND pricing fell back to
+// browse_api (sanity LOW lifted to compsAvg, or no-PC fallback used
+// rawComps.average directly), re-anchor `out.price` to rawComps.lowest.
+// The census says the user IS the market floor, so the bottom of the
+// at-grade comp pool is a more honest anchor than the average.
+//
+// Conservative scope (Ship #17 Q1):
+//   - Only fires when pricingSource === 'browse_api'.
+//     PC × grade-mult outputs are calibrated and preserved — the
+//     bottom-of-census signal alone does not override calibrated
+//     grade-aware pricing.
+//
+// Skip conditions (matches Ship #13.1 / Ship #14 helpers):
+//   isMegaKey       → mega-key floor is authoritative (one-way raise
+//                     downstream re-corrects anyway, but skip to avoid
+//                     pointless price thrash and observability noise)
+//   compsExhausted  → AI verify rejected 100% of comps; rawComps.lowest
+//                     is null and compsFromEbay.lowest is contaminated
+//   pop missing / pop.total === 0  → no signal
+//   pop.belowGrade !== 0           → not bottom (covers null/undefined too)
+//   rawComps missing / lowest <= 0 → no anchor available
+//   currentPrice <= rawComps.lowest → already at/below floor
+//
+// Returns { anchor, shouldAnchor: true } when the re-anchor should
+// apply, or null when it should not. Pure — no side effects.
+export const computeLowGradeFloor = (currentPrice, rawComps, pop, opts = {}) => {
+  const { isMegaKey, compsExhausted, pricingSource } = opts;
+  if (isMegaKey || compsExhausted) return null;
+  if (pricingSource !== 'browse_api') return null;
+  if (!pop || !(Number(pop.total) > 0)) return null;
+  if (pop.belowGrade !== 0) return null;
+  if (!rawComps) return null;
+  const lowest = Number(rawComps.lowest);
+  if (!(lowest > 0)) return null;
+  if (typeof currentPrice !== 'number' || !(currentPrice > 0)) return null;
+  if (currentPrice <= lowest) return null;
+  return { anchor: lowest, shouldAnchor: true };
+};
+
 // Fast, text-only AI verification pass. Asks Claude whether each eBay
 // listing title actually matches the identified comic. Returns an array
 // of booleans in the same order as `listings`, or null on any failure so
@@ -1762,6 +1803,35 @@ export default async function handler(req, res) {
       }
     }
 
+    // Ship #17 — bottom-of-census low-grade floor.
+    // Conservative re-anchor: when pricing fell back to browse_api
+    // (sanity LOW lifted to compsAvg, or no-PC path used rawComps.average)
+    // AND PC pop data confirms user grade is the bottom of CGC census,
+    // override compsAvg-derived price with rawComps.lowest. PC × grade-mult
+    // outputs are NOT touched — calibrated grade-aware pricing wins.
+    // Runs AFTER thin-pool anchor (both lower price; either order works
+    // since the more-conservative result wins). Runs BEFORE mega-key
+    // floor so mega-key one-way raise re-corrects when applicable.
+    {
+      const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
+      const lgResult = computeLowGradeFloor(curPrice, rawComps, pcPop, {
+        isMegaKey: isMegaKeyForFloor,
+        compsExhausted,
+        pricingSource: out.pricingSource,
+      });
+      if (lgResult) {
+        console.log(
+          `[low-grade-floor] anchored cur=$${curPrice.toFixed(2)} → comp.lowest=$${lgResult.anchor.toFixed(2)} (pop.belowGrade=0)`
+        );
+        out.price = fmtUsd(lgResult.anchor);
+        out.priceLow = fmtUsd(lgResult.anchor * 0.85);
+        out.priceHigh = fmtUsd(lgResult.anchor * 1.15);
+        out.lowGradeFloorApplied = true;
+        out.lowGradeFloorAnchor = lgResult.anchor;
+        out.priceNote = (out.priceNote || '') + ' · low-grade floor';
+      }
+    }
+
     // ═══ MEGA-KEY FLOOR — post-pricing guard (E2) ═══
     // Consulted AFTER all variant/key multipliers. One-way: only raises
     // price, never lowers. Two branches:
@@ -1839,7 +1909,8 @@ export default async function handler(req, res) {
       'sanityFired:', sanityFired || false,
       'finalPrice:', out.price,
       'source:', out.pricingSource,
-      'thinPoolAnchored:', out.thinPoolAnchored === true
+      'thinPoolAnchored:', out.thinPoolAnchored === true,
+      'lowGradeFloorApplied:', out.lowGradeFloorApplied === true
     );
 
     if (rawComps && rawComps.count > 0) {
