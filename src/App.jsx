@@ -9,6 +9,7 @@ import {
   getAnalysis,
   putAnalysis,
 } from "./db.js";
+import { computeListPriceWarning } from "../api/list-price-warning.js";
 
 const LOADING_STEPS = [
   "Reading cover...",
@@ -1600,6 +1601,7 @@ function CollectionDetail({
   const [swipeHint, setSwipeHint] = useState(() => !localStorage.getItem("cv_swipe_hint_seen"));
   const [showEngineRec, setShowEngineRec] = useState(false);
   const [expandedKeyIdx, setExpandedKeyIdx] = useState(null);
+  const [listPriceWarningDismissed, setListPriceWarningDismissed] = useState(false);
   const addPhotoRef = useRef(null);
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
@@ -1608,6 +1610,7 @@ function CollectionDetail({
   useEffect(() => {
     setListPrice(getDisplayPrice(item));
     setShowEngineRec(false);
+    setListPriceWarningDismissed(false);
   }, [item?.id]);
 
   // Abort any in-flight card enrich when the item changes or the detail
@@ -2831,6 +2834,44 @@ function CollectionDetail({
                 }}
               />
             </div>
+            {(() => {
+              if (listPriceWarningDismissed) return null;
+              const w = computeListPriceWarning(listPrice, item);
+              if (!w) return null;
+              return (
+                <div style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  padding: "8px 10px",
+                  marginBottom: 8,
+                  background: "rgba(218,165,32,0.10)",
+                  border: "1px solid #d4af37",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: "#fde68a",
+                  lineHeight: 1.4,
+                }}>
+                  <div style={{ flex: 1 }}>
+                    ⚠ ${w.listPrice.toFixed(2)} is {w.worst.pctOver}% above {w.worst.label} (${w.worst.anchor.toFixed(2)}). Books priced above market typically stall.
+                  </div>
+                  <button
+                    onClick={() => setListPriceWarningDismissed(true)}
+                    style={{
+                      background: "transparent",
+                      border: "1px solid rgba(212,175,55,0.4)",
+                      color: "#fde68a",
+                      borderRadius: 4,
+                      padding: "2px 8px",
+                      fontSize: 11,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              );
+            })()}
             {(() => {
               // ANY mega-key floor (verified or estimated) requires user
               // acknowledgment before listing — mega-keys are volatile and
