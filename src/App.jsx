@@ -9,7 +9,7 @@ import {
   getAnalysis,
   putAnalysis,
 } from "./db.js";
-import { computeListPriceWarning } from "../api/list-price-warning.js";
+import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 
 const LOADING_STEPS = [
   "Reading cover...",

@@ -28,6 +28,11 @@
 //   or null when no trigger or input unsafe.
 //
 // Pure — no side effects, deterministic given inputs.
+//
+// Location note: lives under src/lib/ rather than api/ because every
+// .js file in api/ becomes its own Vercel serverless function endpoint
+// (Hobby plan limit: 12). This is a UI-only helper with no HTTP handler,
+// so api/ would waste a function slot. Tests still import directly.
 
 const TRIGGERS = [
   { kind: 'engine', label: 'engine recommendation', mult: 1.25, source: (it) =>

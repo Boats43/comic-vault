@@ -7,7 +7,7 @@
 // Invoke: node tests/list-price-warning.test.js
 // Exit: 0 all-pass, 1 any failure.
 
-import { computeListPriceWarning } from '../api/list-price-warning.js';
+import { computeListPriceWarning } from '../src/lib/listPriceWarning.js';
 
 let passed = 0;
 let failed = 0;
