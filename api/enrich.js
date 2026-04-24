@@ -227,6 +227,36 @@ const median = (arr) => {
     : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
+// Ship #13.1 — thin-comp-pool anchor as a pure, testable helper.
+// Safety cap applied AFTER all pricing math (variant/key mult, sanity,
+// floor) to prevent the engine from recommending more than 5% above the
+// highest actual comp when the pool is too thin (<3 comps) to validate
+// a higher number. Ship #13 gated this on isFromPC, but that misses the
+// exact case it was designed for — PC outlier sanity-flipped into a
+// browse_api price that still overshoots the lone comp (Biker Mice #1).
+//
+// Returns { anchorCap, shouldAnchor: true } when the cap should apply,
+// or null when anchor is not warranted. Pure — no side effects.
+//
+// Skip conditions:
+//   isMegaKey        → floor map at api/mega-keys.js is authoritative
+//   compsExhausted   → no trusted comps to anchor against
+//   rawComps missing / count=0 / count>=3 → no thin-pool situation
+//   highest missing / ≤0                  → no upper bound to cap against
+//   currentPrice missing / ≤0             → nothing to cap
+//   currentPrice ≤ anchorCap              → already within cap (no-op)
+export const computeThinPoolAnchor = (currentPrice, rawComps, opts = {}) => {
+  const { isMegaKey, compsExhausted } = opts;
+  if (isMegaKey || compsExhausted) return null;
+  if (!rawComps || typeof rawComps.count !== 'number') return null;
+  if (rawComps.count <= 0 || rawComps.count >= 3) return null;
+  if (typeof rawComps.highest !== 'number' || rawComps.highest <= 0) return null;
+  if (typeof currentPrice !== 'number' || !(currentPrice > 0)) return null;
+  const anchorCap = rawComps.highest * 1.05;
+  if (currentPrice <= anchorCap) return null;
+  return { anchorCap, shouldAnchor: true };
+};
+
 // Fast, text-only AI verification pass. Asks Claude whether each eBay
 // listing title actually matches the identified comic. Returns an array
 // of booleans in the same order as `listings`, or null on any failure so
@@ -1486,17 +1516,13 @@ export default async function handler(req, res) {
       }
     }
 
-    console.log('[price-trace]',
-      'pcBase:', priceCharting?.price,
-      'multiplier:', out.gradeMultiplier,
-      'afterMult:', parseFloat(String(out.price || '0').replace(/[$,]/g, '')),
-      'compsAvg:', compsFromEbay?.average,
-      'rawFloor:', rawComps?.lowest || 0,
-      'floor:', floorNum,
-      'floorFired:', floorFired,
-      'finalPrice:', out.price,
-      'source:', out.pricingSource
-    );
+    // Ship #13.1: snapshot price RIGHT HERE (post-floor, pre-
+    // variant/key/anchor/mega-key) so `[price-trace]` below can show
+    // afterMult = "what PC × gradeMult + sanity + floor produced" while
+    // `finalPrice` shows the actual returned value after every downstream
+    // adjustment. Without this snapshot the log would lose the pre-
+    // multiplier baseline as soon as variant mult rewrote out.price.
+    const priceAfterFloor = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
 
     // Variant multiplier: adjust price for known variant types.
     // Only apply when PriceCharting is the pricing source — browse_api/ebay_avg
@@ -1651,34 +1677,28 @@ export default async function handler(req, res) {
       }
     }
 
-    // Ship #13 Bug 6: thin-comp-pool anchor. When rawComps.count < 3 (and
-    // > 0) and PC is the pricing source, cap engine output at
-    // rawComps.highest × 1.05 so the engine never recommends more than
-    // 5% above the highest actual market data point. Prevents Biker
-    // Mice #1 / modern-indie-first-issue class of bug where Ship #11
-    // modern CGC mult × PC base overshoots the only comp available.
-    // Runs AFTER variant/key multipliers so the cap binds against the
-    // final engine output. Skipped for mega-keys (floor map authoritative)
-    // and compsExhausted (no trusted comps to anchor against).
-    if (
-      isFromPC &&
-      !isMegaKeyForFloor &&
-      !compsExhausted &&
-      rawComps &&
-      rawComps.count > 0 &&
-      rawComps.count < 3 &&
-      typeof rawComps.highest === 'number' &&
-      rawComps.highest > 0
-    ) {
-      const anchorCap = rawComps.highest * 1.05;
+    // Ship #13.1 — thin-comp-pool anchor (scope-corrected from Ship #13).
+    // Universal safety cap: when rawComps.count < 3 (and > 0), cap engine
+    // output at rawComps.highest × 1.05 regardless of pricing source.
+    // Ship #13 gated this on isFromPC, which flipped false exactly when
+    // sanity fired and pushed output into the exact "PC outlier, thin
+    // pool" region the anchor was designed to protect (Biker Mice #1
+    // hotfix case). Runs AFTER variant/key mults, sanity, floor — so the
+    // cap binds against the final engine output. Mega-key floor runs
+    // AFTER anchor and one-way-raises, preserving mega-key authority.
+    {
       const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
-      if (curPrice > anchorCap) {
+      const anchorResult = computeThinPoolAnchor(curPrice, rawComps, {
+        isMegaKey: isMegaKeyForFloor,
+        compsExhausted,
+      });
+      if (anchorResult) {
         console.log(
-          `[thin-pool] anchor applied cap=$${anchorCap.toFixed(2)} was=$${curPrice.toFixed(2)} comps=${rawComps.count}`
+          `[thin-pool] anchor applied cap=$${anchorResult.anchorCap.toFixed(2)} was=$${curPrice.toFixed(2)} comps=${rawComps.count}`
         );
-        out.price = fmtUsd(anchorCap);
-        out.priceLow = fmtUsd(anchorCap * 0.85);
-        out.priceHigh = fmtUsd(anchorCap * 1.15);
+        out.price = fmtUsd(anchorResult.anchorCap);
+        out.priceLow = fmtUsd(anchorResult.anchorCap * 0.85);
+        out.priceHigh = fmtUsd(anchorResult.anchorCap * 1.15);
         out.thinPoolAnchored = true;
         out.priceNote = (out.priceNote || '') + ' · thin-pool anchor';
       }
@@ -1744,6 +1764,24 @@ export default async function handler(req, res) {
         }
       }
     }
+
+    // Ship #13.1: relocated to run AFTER all pricing adjustments
+    // (variant mult, key mult, thin-pool anchor, mega-key floor) so
+    // `finalPrice` reflects the actual returned value. `afterMult` stays
+    // the post-floor/pre-multiplier snapshot (priceAfterFloor) so the
+    // trace still shows the compute chain's intermediate state.
+    console.log('[price-trace]',
+      'pcBase:', priceCharting?.price,
+      'multiplier:', out.gradeMultiplier,
+      'afterMult:', priceAfterFloor,
+      'compsAvg:', compsFromEbay?.average,
+      'rawFloor:', rawComps?.lowest || 0,
+      'floor:', floorNum,
+      'floorFired:', floorFired,
+      'finalPrice:', out.price,
+      'source:', out.pricingSource,
+      'thinPoolAnchored:', out.thinPoolAnchored === true
+    );
 
     if (rawComps && rawComps.count > 0) {
       out.comps = {

@@ -18,6 +18,7 @@ import {
   SIGNED_RE,
   VARIANT_CONTAM_RE,
 } from '../api/comps.js';
+import { computeThinPoolAnchor } from '../api/enrich.js';
 
 let passed = 0;
 let failed = 0;
@@ -372,7 +373,166 @@ assertTrue(
   dd600Ratio > 0.80,
   'Bug 4 miss: Daredevil #600 pool ratio >80% → 0.5 damping');
 
-// BUG 6 thin pool: verified via integration layer in era-multipliers test file
+// ─── Ship #13.1 — computeThinPoolAnchor ────────────────────────────
+// Ship #13 Bug 6 gated on isFromPC which falsely excluded the exact
+// scenario it was designed for (PC outlier sanity-flipped to browse_api
+// output on thin-pool books). Ship #13.1 extracts the anchor logic into
+// a pure helper and removes the isFromPC gate. These assertions pin
+// the helper's behavior across every code path.
+console.log('\n── Ship #13.1 — computeThinPoolAnchor ──');
+
+// Biker Mice from Mars #1 — confirmed production miss. Count 1,
+// highest $7.16, engine output $8.23 (PC × mult sanity-fallbacked).
+// Expected cap: $7.16 × 1.05 = $7.518.
+const biker = computeThinPoolAnchor(
+  8.23,
+  { count: 1, highest: 7.16 },
+  {}
+);
+assertTrue(biker && biker.shouldAnchor === true,
+  'Biker Mice #1: anchor fires (count=1, 8.23 > 7.52)');
+assertEq(biker.anchorCap.toFixed(3), '7.518',
+  'Biker Mice #1: cap = $7.518');
+
+// Below cap — no anchor.
+assertEq(
+  computeThinPoolAnchor(7.00, { count: 1, highest: 7.16 }, {}),
+  null,
+  '$7.00 < cap $7.52 → null (no anchor needed)'
+);
+
+// Exactly at cap — no anchor (must be strictly greater).
+assertEq(
+  computeThinPoolAnchor(7.518, { count: 1, highest: 7.16 }, {}),
+  null,
+  'exactly at cap → null (no-op)'
+);
+
+// 2 comps also in thin-pool range.
+const twoComps = computeThinPoolAnchor(
+  15.00,
+  { count: 2, highest: 10.00 },
+  {}
+);
+assertTrue(twoComps && twoComps.shouldAnchor === true,
+  '2 comps, 15 > 10.50: anchor fires');
+assertEq(twoComps.anchorCap, 10.5, '2 comps: cap = $10.50');
+
+// 3 comps — outside thin-pool range, no anchor.
+assertEq(
+  computeThinPoolAnchor(15.00, { count: 3, highest: 10.00 }, {}),
+  null,
+  '3 comps → null (not thin pool)'
+);
+
+// 10 comps — outside thin-pool range.
+assertEq(
+  computeThinPoolAnchor(15.00, { count: 10, highest: 10.00 }, {}),
+  null,
+  '10 comps → null (full pool)'
+);
+
+// Zero comps — null.
+assertEq(
+  computeThinPoolAnchor(15.00, { count: 0, highest: 0 }, {}),
+  null,
+  'count=0 → null'
+);
+
+// Mega-key skip — even with thin pool.
+assertEq(
+  computeThinPoolAnchor(
+    50000,
+    { count: 1, highest: 100 },
+    { isMegaKey: true }
+  ),
+  null,
+  'mega-key skip (Action #1 thin pool, floor map authoritative)'
+);
+
+// compsExhausted skip — no trusted comps to anchor against.
+assertEq(
+  computeThinPoolAnchor(
+    1000,
+    { count: 1, highest: 10 },
+    { compsExhausted: true }
+  ),
+  null,
+  'compsExhausted skip (100% AI verify rejection)'
+);
+
+// Missing rawComps defensive.
+assertEq(
+  computeThinPoolAnchor(10, null, {}),
+  null,
+  'null rawComps → null'
+);
+assertEq(
+  computeThinPoolAnchor(10, undefined, {}),
+  null,
+  'undefined rawComps → null'
+);
+assertEq(
+  computeThinPoolAnchor(10, {}, {}),
+  null,
+  'empty rawComps object → null (no count field)'
+);
+
+// Invalid highest values.
+assertEq(
+  computeThinPoolAnchor(10, { count: 1, highest: 0 }, {}),
+  null,
+  'highest=0 → null'
+);
+assertEq(
+  computeThinPoolAnchor(10, { count: 1, highest: -5 }, {}),
+  null,
+  'highest negative → null'
+);
+assertEq(
+  computeThinPoolAnchor(10, { count: 1, highest: null }, {}),
+  null,
+  'highest null → null'
+);
+
+// Invalid currentPrice.
+assertEq(
+  computeThinPoolAnchor(0, { count: 1, highest: 10 }, {}),
+  null,
+  'currentPrice=0 → null'
+);
+assertEq(
+  computeThinPoolAnchor(-5, { count: 1, highest: 10 }, {}),
+  null,
+  'currentPrice negative → null'
+);
+assertEq(
+  computeThinPoolAnchor(null, { count: 1, highest: 10 }, {}),
+  null,
+  'currentPrice null → null'
+);
+
+// Ship #13.1 scope gap verification — browse_api path case.
+// Regardless of "source" (no isFromPC gate on the helper), anchor
+// decision is purely about count + highest + price.
+const browseApiPath = computeThinPoolAnchor(
+  8.23,
+  { count: 1, highest: 7.16, average: 7.16 },
+  {}
+);
+assertTrue(
+  browseApiPath && browseApiPath.shouldAnchor === true,
+  'browse_api path + thin pool: anchor fires (the Ship #13 gap fix)'
+);
+
+// Negative regression: pure browse_api book where price = average ≤ highest.
+// Avg ≤ highest mathematically, so price never > highest×1.05 in this path
+// unless sanity/mults were applied. Without mults, never binds.
+assertEq(
+  computeThinPoolAnchor(7.16, { count: 1, highest: 7.16 }, {}),
+  null,
+  'pure browse_api (price = avg = highest): no bind'
+);
 
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== RESULTS ===`);
