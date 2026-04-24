@@ -277,7 +277,19 @@ const GRADED_RE = /\bCGC\b|\bCBCS\b/i;
 // Variant contamination. Hard-reject markers when our book is NOT a variant.
 // Also re-used as a guard inside the creator-match filter so creator
 // preference never selects a variant listing (even in variant-fallback mode).
-const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1|\bexclusive\b|\bsketch\b|\bexcl\.?\b/i;
+// Ship #13 Bug 4: exported so enrich.js can compute variant composition
+// ratio for the homogeneous-pool damping check.
+export const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1|\bexclusive\b|\bsketch\b|\bexcl\.?\b/i;
+
+// Ship #13 Bug 3: signed / autographed / signature-series / yellow-label /
+// green-label / remarked listings command a premium over standard copies.
+// Reject when our book is NOT a signed variant (gated at call site).
+// Skips bare `SS` per Q3 decision — too many false positives (SS-Squadron,
+// Steel & Soul, character names). Multi-word "signature series" catches
+// the real CGC SS cases. Blue label intentionally omitted — blue = Universal
+// (standard, not signed). Yellow = CGC Signature Series, Green = Qualified
+// (signed but not witnessed) — both signed.
+export const SIGNED_RE = /\b(?:signed|signature\s+series|autographed?|yellow\s*label|green\s*label|remarked?)\b/i;
 
 // TPB / collected-edition format markers. When our title contains one of
 // these, we know we're pricing a TPB / hardcover / omnibus / compendium —
@@ -383,16 +395,70 @@ const hasSufficientTitleOverlap = (listingTitle, searchTokens) => {
   return matches / searchTokens.length >= 0.5;
 };
 
-// Listing must contain the issue number as "#N" or as a standalone N
-// (word-bounded so "1710" and "2171" don't match "171").
-const hasIssueNumber = (listingTitle, issueNum) => {
+// Listing must contain the issue number as "#N" with a word boundary after
+// (so "#1710" and "#21" don't match "#1"). Also rejects lot listings with
+// commas-between-digits, "lot" keyword, or multiple distinct #N patterns
+// (multi-issue compound listings like "#1 + #4 variant set").
+export const hasIssueNumber = (listingTitle, issueNum) => {
   if (!issueNum) return true;
   const t = String(listingTitle || "");
   // Reject lot listings (multiple issues bundled together)
   if (/\blot\b/i.test(t) || /\d+\s*,\s*\d+/.test(t)) return false;
   // Exact issue match: require # prefix, word boundary after
   const escaped = String(issueNum).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`#\\s*${escaped}\\b`, "i").test(t);
+  if (!new RegExp(`#\\s*${escaped}\\b`, "i").test(t)) return false;
+  // Ship #13 Bug 1: multi-issue compound detection. When more than one
+  // distinct #N pattern appears in the title, the listing is a bundle
+  // whose price can't be attributed to our issue — reject. Catches
+  // "Absolute Batman #4 + #1 variant" and "#1 and #4 set" which the
+  // basic lot filter missed (no comma between digits, no "lot" word).
+  return !hasMultipleDistinctIssues(t);
+};
+
+// Ship #13 Bug 1: helper to count distinct #N patterns in a title.
+// Returns true when ≥2 different issue numbers are present. Used inside
+// hasIssueNumber above but also exported for direct regression testing.
+export const hasMultipleDistinctIssues = (listingTitle) => {
+  const distinct = new Set();
+  for (const m of String(listingTitle || "").matchAll(/#\s*(\d+)\b/gi)) {
+    distinct.add(m[1]);
+    if (distinct.size > 1) return true;
+  }
+  return false;
+};
+
+// Ship #13 Bug 2: detect series-extension markers in a title — Roman
+// numerals II-X, Vol/Volume N, Re-/Pre- prefix words, Part N, Book N.
+// Returns an array of normalized marker strings like
+// ['roman-ii', 'vol-2', 're-evolution']. Empty array = no markers.
+// Used to reject "Last Ronin II Re-Evolution #4" from "Last Ronin #4"
+// search (same issue number, different series via sequel markers).
+export const detectSeriesMarkers = (title) => {
+  const t = String(title || '');
+  const markers = [];
+  // Roman numerals II-X, collected via matchAll so a leading "X-Men" /
+  // "V-Wars" / "X-Factor" in the title doesn't eat the match slot before
+  // we reach a real sequel marker. `(?<![\w-])` and `(?![\w-])` exclude
+  // hyphenated adjacency (so X-Men / V-Wars' X / V are ignored) while
+  // still accepting standalone V / X when the title actually uses them
+  // as sequel markers. `VI{0,3}` covers V/VI/VII/VIII in one atom.
+  for (const m of t.matchAll(/(?<![\w-])(III|II|IV|VI{0,3}|IX|X)(?![\w-])/g)) {
+    markers.push(`roman-${m[1].toLowerCase()}`);
+  }
+  // Vol / Volume N
+  const volMatch = t.match(/\bVol(?:\.|ume)?\s*(\d+)\b/i);
+  if (volMatch) markers.push(`vol-${volMatch[1]}`);
+  // Re- / Pre- prefix followed by a capitalized word. Requires cap letter
+  // so "re-read" / "pre-order" (seller flavor text) don't match.
+  const reMatch = t.match(/\b(Re|Pre)[-\s]([A-Z][a-z]+)\b/);
+  if (reMatch) markers.push(`${reMatch[1].toLowerCase()}-${reMatch[2].toLowerCase()}`);
+  // Part N
+  const partMatch = t.match(/\bPart\s+(\d+)\b/i);
+  if (partMatch) markers.push(`part-${partMatch[1]}`);
+  // Book N
+  const bookMatch = t.match(/\bBook\s+(\d+)\b/i);
+  if (bookMatch) markers.push(`book-${bookMatch[1]}`);
+  return markers;
 };
 
 // Clean a comic title for eBay search: strip articles and special chars.
@@ -796,6 +862,9 @@ export const fetchComps = async ({
     let variantFallback = false;
     let fellBack = false;
     let eraFilterBypassed = false;
+    let multiIssueRejected = 0;
+    let sequelRejected = 0;
+    let signedRejected = 0;
 
     // Full filter chain on a single raw result set. Called inside the
     // attempt loop so we can move on to the next (broader) query when
@@ -810,19 +879,32 @@ export const fetchComps = async ({
       let _variantFallback = false;
       let _fellBack = false;
       let _eraFilterBypassed = false;
+      let _multiIssueRejected = 0;
+      let _sequelRejected = 0;
+      let _signedRejected = 0;
 
       // Filter 0a: issue-number enforcement. RELAXED for TPBs — TPB
       // listings typically lack a `#1` token (sellers write "TPB Vol 1"
       // or omit issue numbers since a TPB is a single-volume product).
       // When isTPB, accept listings that have EITHER the issue number
       // OR a TPB-format marker; otherwise the standard #issue check.
+      // Ship #13 Bug 1: multi-issue compound rejection embedded in
+      // hasIssueNumber. Count separately for observability.
       if (issueNum) {
         const before = p.length;
         p = p.filter((it) => {
           const t = String(it.title || '');
-          if (hasIssueNumber(t, issueNum)) return true;
+          // TPB bypass — accept TPB format listings without strict #N
           if (isTPB && TPB_MARKER_RE.test(t)) return true;
-          return false;
+          // Bug 1: multi-issue detection. Counted separately before the
+          // standard #N check so the observability counter reflects
+          // actual compound rejections.
+          if (hasMultipleDistinctIssues(t)) {
+            _multiIssueRejected++;
+            console.log('[issue-filter] multi-issue rejected:', t.slice(0, 55));
+            return false;
+          }
+          return hasIssueNumber(t, issueNum);
         });
         if (p.length < before) {
           console.log(`[comps] issue# filter removed ${before - p.length}`);
@@ -835,6 +917,41 @@ export const fetchComps = async ({
         p = p.filter((it) => hasSufficientTitleOverlap(it.title, searchTokens));
         if (p.length < before) {
           console.log(`[comps] title similarity filter removed ${before - p.length}`);
+        }
+      }
+
+      // Ship #13 Bug 2: sequel / volume / extension asymmetry filter.
+      // Token overlap alone (filter 0b) can't tell "Last Ronin II
+      // Re-Evolution #4" from "Last Ronin #4" — both share "last" + "ronin".
+      // Detect Roman numerals II-X, Vol N, Re-/Pre- prefix, Part N, Book N
+      // in each listing and reject when listing has a marker our title does
+      // NOT. Graceful wipe-out fallback: keep all if filter removes every
+      // listing (e.g. user scanned a Vol 2 book but didn't type "Vol 2").
+      {
+        const ourMarkers = detectSeriesMarkers(title);
+        const beforeSeq = p.length;
+        let localSequelRejected = 0;
+        const sequelFiltered = p.filter((it) => {
+          const theirMarkers = detectSeriesMarkers(it.title);
+          for (const m of theirMarkers) {
+            if (!ourMarkers.includes(m)) {
+              localSequelRejected++;
+              console.log('[sequel-filter] series asymmetry detected:',
+                String(it.title || '').slice(0, 55), `(marker: ${m})`);
+              return false;
+            }
+          }
+          return true;
+        });
+        if (sequelFiltered.length === 0 && beforeSeq > 0) {
+          console.log('[sequel-filter] bypassed — all', beforeSeq,
+            'comps had sequel markers, keeping all');
+        } else {
+          p = sequelFiltered;
+          _sequelRejected = localSequelRejected;
+          if (localSequelRejected > 0) {
+            console.log(`[comps] sequel filter removed ${localSequelRejected}`);
+          }
         }
       }
 
@@ -1101,6 +1218,32 @@ export const fetchComps = async ({
         }
       }
 
+      // Ship #13 Bug 3 (Filter 2b): signed / autographed / signature-series
+      // exclusion. Signed books command a premium over standard copies —
+      // pollutes both raw pools ("2X signed" seller listings) and graded
+      // pools (CGC SS yellow-label slabs). Gate: skip when our book is
+      // itself a signed variant (detected via variant string).
+      {
+        const ourVariantStr = String(variant || '').toLowerCase();
+        const isOurBookSigned =
+          /\b(?:signed|signature|autograph(?:ed)?|\bauto\b|remarked?|yellow\s*label|green\s*label)\b/.test(ourVariantStr);
+        if (!isOurBookSigned) {
+          const before = p.length;
+          p = p.filter((it) => {
+            if (SIGNED_RE.test(String(it.title || ''))) {
+              _signedRejected++;
+              console.log('[signed-filter] SS listing rejected:',
+                String(it.title || '').slice(0, 55));
+              return false;
+            }
+            return true;
+          });
+          if (p.length < before) {
+            console.log(`[comps] signed filter removed ${before - p.length}`);
+          }
+        }
+      }
+
       // Filter 3: ±1.5 grade proximity.
       if (p.length > 0 && numericTarget != null && !isNaN(numericTarget)) {
         const filtered = p.filter((it) => {
@@ -1185,6 +1328,9 @@ export const fetchComps = async ({
         variantFallback: _variantFallback,
         fellBack: _fellBack,
         eraFilterBypassed: _eraFilterBypassed,
+        multiIssueRejected: _multiIssueRejected,
+        sequelRejected: _sequelRejected,
+        signedRejected: _signedRejected,
       };
     };
 
@@ -1216,6 +1362,9 @@ export const fetchComps = async ({
         variantFallback = filtered.variantFallback;
         fellBack = filtered.fellBack;
         eraFilterBypassed = filtered.eraFilterBypassed;
+        multiIssueRejected = filtered.multiIssueRejected;
+        sequelRejected = filtered.sequelRejected;
+        signedRejected = filtered.signedRejected;
         attemptUsed = attempt.n;
         attemptLabel = attempt.label || null;
         break;
@@ -1277,6 +1426,9 @@ export const fetchComps = async ({
       eraFilterBypassed,
       artistFallback,
       compBasis: artistFallback ? 'generic-variant-fallback' : null,
+      multiIssueRejected,
+      sequelRejected,
+      signedRejected,
       attemptUsed,
       attemptLabel,
       source,

@@ -4237,6 +4237,12 @@ export default function App() {
                 compsExhausted: enrich.compsExhausted === true,
                 pop: enrich.pop || cur.pop || null,
                 compEraFilterBypassed: enrich.compEraFilterBypassed === true,
+                // Ship #13 observability
+                thinPoolAnchored: enrich.thinPoolAnchored === true,
+                variantComposition: enrich.variantComposition || null,
+                sequelRejected: enrich.sequelRejected || 0,
+                signedRejected: enrich.signedRejected || 0,
+                multiIssueRejected: enrich.multiIssueRejected || 0,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedAR ? false : (cur.manualConfirmed || false),
               };
@@ -4551,6 +4557,12 @@ export default function App() {
                   compsExhausted: enrich.compsExhausted === true,
                   pop: enrich.pop || cur.pop || null,
                   compEraFilterBypassed: enrich.compEraFilterBypassed === true,
+                  // Ship #13 observability
+                  thinPoolAnchored: enrich.thinPoolAnchored === true,
+                  variantComposition: enrich.variantComposition || null,
+                  sequelRejected: enrich.sequelRejected || 0,
+                  signedRejected: enrich.signedRejected || 0,
+                  multiIssueRejected: enrich.multiIssueRejected || 0,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
                 };
@@ -4602,6 +4614,12 @@ export default function App() {
                   compsExhausted: enrich.compsExhausted === true,
                   pop: enrich.pop || s.pop || null,
                   compEraFilterBypassed: enrich.compEraFilterBypassed === true,
+                  // Ship #13 observability
+                  thinPoolAnchored: enrich.thinPoolAnchored === true,
+                  variantComposition: enrich.variantComposition || null,
+                  sequelRejected: enrich.sequelRejected || 0,
+                  signedRejected: enrich.signedRejected || 0,
+                  multiIssueRejected: enrich.multiIssueRejected || 0,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChangedSel ? false : (s.manualConfirmed || false),
                 };
@@ -4786,6 +4804,12 @@ export default function App() {
                 compsExhausted: enrich.compsExhausted === true,
                 pop: enrich.pop || cur.pop || null,
                 compEraFilterBypassed: enrich.compEraFilterBypassed === true,
+                // Ship #13 observability
+                thinPoolAnchored: enrich.thinPoolAnchored === true,
+                variantComposition: enrich.variantComposition || null,
+                sequelRejected: enrich.sequelRejected || 0,
+                signedRejected: enrich.signedRejected || 0,
+                multiIssueRejected: enrich.multiIssueRejected || 0,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedBulk ? false : (cur.manualConfirmed || false),
               };
@@ -5120,6 +5144,12 @@ export default function App() {
       compsExhausted: enrich.compsExhausted === true,
       pop: enrich.pop || item.pop || null,
       compEraFilterBypassed: enrich.compEraFilterBypassed === true,
+      // Ship #13 observability
+      thinPoolAnchored: enrich.thinPoolAnchored === true,
+      variantComposition: enrich.variantComposition || null,
+      sequelRejected: enrich.sequelRejected || 0,
+      signedRejected: enrich.signedRejected || 0,
+      multiIssueRejected: enrich.multiIssueRejected || 0,
       megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
       manualConfirmed: priceChangedRM ? false : (item.manualConfirmed || false),
     };

@@ -10,7 +10,13 @@
 //             priceHigh?, keyIssue?, identifiedBy? }
 
 import Anthropic from "@anthropic-ai/sdk";
-import { fetchComps, getOAuthToken, computeMatchConfidence, cleanPublisher } from "./comps.js";
+import {
+  fetchComps,
+  getOAuthToken,
+  computeMatchConfidence,
+  cleanPublisher,
+  VARIANT_CONTAM_RE,
+} from "./comps.js";
 import { fetchSold } from "./sold.js";
 import { lookupCGC } from "./cgc-lookup.js";
 import { lookupGoCollect } from "./gocollect.js";
@@ -1566,12 +1572,48 @@ export default async function handler(req, res) {
           }
         }
         if (vMult) {
+          // Ship #13 Bug 4: composition-aware damping. When the comp
+          // pool is dominated by variant listings (>80% match
+          // VARIANT_CONTAM_RE), the variant premium is already baked
+          // into the floor/avg — applying the full vMult on top
+          // double-counts. Tiered damping keeps the mult accurate for
+          // mixed pools while taming homogeneous-variant pools.
+          const originalMult = vMult;
+          let variantComposition = null;
+          if (rawComps && Array.isArray(rawComps.prices) && rawComps.prices.length > 0) {
+            const variantHits = rawComps.prices.filter((p) =>
+              VARIANT_CONTAM_RE.test(String(p?.title || ''))
+            ).length;
+            const ratio = variantHits / rawComps.prices.length;
+            let damping = 1.0;
+            if (ratio > 0.80) damping = 0.5;
+            else if (ratio > 0.50) damping = 0.75;
+            // else: ≤50% → full mult (no damping)
+            if (damping < 1.0) {
+              vMult = vMult * damping;
+              console.log(
+                `[variant-composition] ratio=${ratio.toFixed(2)} damping=${damping} mult ${originalMult}→${vMult}`
+              );
+            } else {
+              console.log(
+                `[variant-composition] ratio=${ratio.toFixed(2)} damping=1.0 (no change)`
+              );
+            }
+            variantComposition = {
+              ratio: Number(ratio.toFixed(2)),
+              dampedMult: vMult,
+              originalMult,
+              compCount: rawComps.prices.length,
+            };
+          }
+
           const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
           out.price = fmtUsd(curPrice * vMult);
           out.priceLow = fmtUsd(curPrice * vMult * 0.75);
           out.priceHigh = fmtUsd(curPrice * vMult * 1.25);
           out.variantNote = variant;
           out.variantMultiplier = vMult;
+          if (variantComposition) out.variantComposition = variantComposition;
           console.log('[variant]', variant, '×', vMult);
         }
       }
@@ -1606,6 +1648,39 @@ export default async function handler(req, res) {
         out.priceHigh = fmtUsd(curPrice * keyMult * 1.25);
         out.keyMultiplier = keyMult;
         console.log('[key]', isMajorKey ? 'major' : 'minor', '×' + keyMult, '→', out.price);
+      }
+    }
+
+    // Ship #13 Bug 6: thin-comp-pool anchor. When rawComps.count < 3 (and
+    // > 0) and PC is the pricing source, cap engine output at
+    // rawComps.highest × 1.05 so the engine never recommends more than
+    // 5% above the highest actual market data point. Prevents Biker
+    // Mice #1 / modern-indie-first-issue class of bug where Ship #11
+    // modern CGC mult × PC base overshoots the only comp available.
+    // Runs AFTER variant/key multipliers so the cap binds against the
+    // final engine output. Skipped for mega-keys (floor map authoritative)
+    // and compsExhausted (no trusted comps to anchor against).
+    if (
+      isFromPC &&
+      !isMegaKeyForFloor &&
+      !compsExhausted &&
+      rawComps &&
+      rawComps.count > 0 &&
+      rawComps.count < 3 &&
+      typeof rawComps.highest === 'number' &&
+      rawComps.highest > 0
+    ) {
+      const anchorCap = rawComps.highest * 1.05;
+      const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
+      if (curPrice > anchorCap) {
+        console.log(
+          `[thin-pool] anchor applied cap=$${anchorCap.toFixed(2)} was=$${curPrice.toFixed(2)} comps=${rawComps.count}`
+        );
+        out.price = fmtUsd(anchorCap);
+        out.priceLow = fmtUsd(anchorCap * 0.85);
+        out.priceHigh = fmtUsd(anchorCap * 1.15);
+        out.thinPoolAnchored = true;
+        out.priceNote = (out.priceNote || '') + ' · thin-pool anchor';
       }
     }
 
@@ -1844,6 +1919,18 @@ export default async function handler(req, res) {
     // indicate "no comp validation" without inventing a number.
     if (compsExhausted) {
       out.compsExhausted = true;
+    }
+
+    // Ship #13 observability flags: surface filter-rejection counts so the
+    // UI (and post-deploy telemetry) can report pool-hygiene activity.
+    if (rawComps?.multiIssueRejected > 0) {
+      out.multiIssueRejected = rawComps.multiIssueRejected;
+    }
+    if (rawComps?.sequelRejected > 0) {
+      out.sequelRejected = rawComps.sequelRejected;
+    }
+    if (rawComps?.signedRejected > 0) {
+      out.signedRejected = rawComps.signedRejected;
     }
 
     mark('final_response');

@@ -12,6 +12,7 @@ import {
   getGradeMultiplier,
   getRawGradeMultiplier,
 } from '../api/enrich.js';
+import { hasIssueNumber } from '../api/comps.js';
 
 let passed = 0;
 let failed = 0;
@@ -171,6 +172,20 @@ const preShipVintageRaw = {
 for (const [t, mult] of Object.entries(preShipVintageRaw)) {
   assertEq(RAW_MULTIPLIERS.vintage[t], mult, `vintage RAW ${t} === ${mult} (pre-ship)`);
 }
+
+// Ship #13 Bug 5 — issue-number word-boundary regression pins. The
+// existing `\b`-anchored regex in hasIssueNumber already rejects #11
+// against a #1 search; these pins prevent future regression of the
+// Sensation #1 / Comics #11 filter-leak class of bug.
+console.log('\nShip #13 Bug 5 — issue# word-boundary regression pins:');
+assertEq(hasIssueNumber('Sensation Comics #11 CGC 8.0', '1'), false,
+  'Sensation #11 must NOT match #1 search');
+assertEq(hasIssueNumber('Book #10 CGC 9.0', '1'), false,
+  '#10 must NOT match #1 search');
+assertEq(hasIssueNumber('Title #100 CGC 9.8', '1'), false,
+  '#100 must NOT match #1 search');
+assertEq(hasIssueNumber('Sensation Comics #1 CGC 9.0', '1'), true,
+  'Sensation #1 still matches #1 search (positive control)');
 
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== RESULTS ===`);
