@@ -27,6 +27,7 @@ import {
   getMegaKeyFloor,
   normalizeTitle,
 } from "./mega-keys.js";
+import { extractCreatorsFromComps } from "../src/lib/premiumCreators.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1309,21 +1310,33 @@ export default async function handler(req, res) {
       out.keyIssueSource = null;
     }
 
-    // Ship #12a — extract key-attribution signals from comp titles.
-    // Runs over the post-AI-verify pool so reprint/facsimile noise is
-    // already filtered. Display-only — does NOT mutate out.keyIssue.
-    // Consensus (hits >= 2) surfaces on out.keyFromComps; singletons
-    // (hits === 1) on out.keyFromCompsSingleton for observability.
+    // Ship #12a + Ship #16 — comp-title attribution scans.
+    // Both run over the post-AI-verify pool so reprint/facsimile noise is
+    // already filtered. Display-only — neither mutates out.keyIssue or
+    // pricing math. Consensus (hits >= 2) surfaces on out.keyFromComps /
+    // out.creatorFromComps; singletons (hits === 1) surface on the
+    // *FromCompsSingleton parallels for observability.
     {
       const compTitles = Array.isArray(rawComps?.prices)
         ? rawComps.prices.map((p) => p?.title).filter(Boolean)
         : [];
-      const { consensus, singletons } = extractKeyFromComps(compTitles);
-      out.keyFromComps = consensus;
-      out.keyFromCompsSingleton = singletons;
-      if (consensus.length > 0) {
+
+      // Ship #12a — multi-key attribution.
+      const keyResult = extractKeyFromComps(compTitles);
+      out.keyFromComps = keyResult.consensus;
+      out.keyFromCompsSingleton = keyResult.singletons;
+      if (keyResult.consensus.length > 0) {
         console.log('[key-from-comps] consensus:',
-          consensus.map((e) => `${e.kind}/${e.phrase}×${e.hits}`).join(', '));
+          keyResult.consensus.map((e) => `${e.kind}/${e.phrase}×${e.hits}`).join(', '));
+      }
+
+      // Ship #16 — premium creator credits.
+      const creatorResult = extractCreatorsFromComps(compTitles);
+      out.creatorFromComps = creatorResult.consensus;
+      out.creatorFromCompsSingleton = creatorResult.singletons;
+      if (creatorResult.consensus.length > 0) {
+        console.log('[creator-from-comps] consensus:',
+          creatorResult.consensus.map((e) => `${e.tier}/${e.canonical}×${e.hits}`).join(', '));
       }
     }
 

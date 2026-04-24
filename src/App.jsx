@@ -1972,8 +1972,9 @@ function CollectionDetail({
         </div>
       )}
 
-      {/* 3a. Ship #12a — DETECTED IN COMPS (multi-key attribution) */}
-      {Array.isArray(item.keyFromComps) && item.keyFromComps.length > 0 && (
+      {/* 3a. Ship #12a + Ship #16 — DETECTED IN COMPS (keys + creators) */}
+      {((Array.isArray(item.keyFromComps) && item.keyFromComps.length > 0) ||
+        (Array.isArray(item.creatorFromComps) && item.creatorFromComps.length > 0)) && (
         <div style={{
           marginTop: 8,
           padding: "8px 14px",
@@ -1984,35 +1985,81 @@ function CollectionDetail({
           <div style={{ color: "#888", fontSize: 11, marginBottom: 4, letterSpacing: 0.5 }}>
             DETECTED IN COMPS
           </div>
-          {item.keyFromComps.map((entry, idx) => (
-            <div key={idx} style={{ marginBottom: 3 }}>
-              <button
-                onClick={() => setExpandedKeyIdx(expandedKeyIdx === idx ? null : idx)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--gold)",
-                  padding: 0,
-                  cursor: "pointer",
-                  textAlign: "left",
-                  fontSize: 13,
-                  width: "100%",
-                }}
-              >
-                • {entry.phrase}{" "}
-                <span style={{ color: "#888", fontSize: 11 }}>
-                  ({entry.hits} source{entry.hits === 1 ? "" : "s"}) {expandedKeyIdx === idx ? "▲" : "▼"}
-                </span>
-              </button>
-              {expandedKeyIdx === idx && Array.isArray(entry.sources) && (
-                <div style={{ paddingLeft: 12, marginTop: 4, fontSize: 11, color: "#aaa" }}>
-                  {entry.sources.map((src, i) => (
-                    <div key={i} style={{ marginBottom: 2 }}>— {src}</div>
-                  ))}
-                </div>
+          {Array.isArray(item.keyFromComps) && item.keyFromComps.map((entry, idx) => {
+            const id = `key-${idx}`;
+            return (
+              <div key={id} style={{ marginBottom: 3 }}>
+                <button
+                  onClick={() => setExpandedKeyIdx(expandedKeyIdx === id ? null : id)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--gold)",
+                    padding: 0,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    fontSize: 13,
+                    width: "100%",
+                  }}
+                >
+                  • {entry.phrase}{" "}
+                  <span style={{ color: "#888", fontSize: 11 }}>
+                    ({entry.hits} source{entry.hits === 1 ? "" : "s"}) {expandedKeyIdx === id ? "▲" : "▼"}
+                  </span>
+                </button>
+                {expandedKeyIdx === id && Array.isArray(entry.sources) && (
+                  <div style={{ paddingLeft: 12, marginTop: 4, fontSize: 11, color: "#aaa" }}>
+                    {entry.sources.map((src, i) => (
+                      <div key={i} style={{ marginBottom: 2 }}>— {src}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {Array.isArray(item.creatorFromComps) && item.creatorFromComps.length > 0 && (
+            <>
+              {Array.isArray(item.keyFromComps) && item.keyFromComps.length > 0 && (
+                <div style={{ borderTop: "1px solid rgba(240,192,64,0.18)", margin: "6px 0" }} />
               )}
-            </div>
-          ))}
+              <div style={{ color: "#888", fontSize: 11, marginBottom: 4, letterSpacing: 0.5 }}>
+                CREATORS
+              </div>
+              {item.creatorFromComps.map((entry, idx) => {
+                const id = `creator-${idx}`;
+                const meta = [entry.role, entry.tier].filter(Boolean).join(", ");
+                return (
+                  <div key={id} style={{ marginBottom: 3 }}>
+                    <button
+                      onClick={() => setExpandedKeyIdx(expandedKeyIdx === id ? null : id)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--gold)",
+                        padding: 0,
+                        cursor: "pointer",
+                        textAlign: "left",
+                        fontSize: 13,
+                        width: "100%",
+                      }}
+                    >
+                      • {entry.canonical}{" "}
+                      <span style={{ color: "#888", fontSize: 11 }}>
+                        ({meta}, {entry.hits} source{entry.hits === 1 ? "" : "s"}) {expandedKeyIdx === id ? "▲" : "▼"}
+                      </span>
+                    </button>
+                    {expandedKeyIdx === id && Array.isArray(entry.sources) && (
+                      <div style={{ paddingLeft: 12, marginTop: 4, fontSize: 11, color: "#aaa" }}>
+                        {entry.sources.map((src, i) => (
+                          <div key={i} style={{ marginBottom: 2 }}>— {src}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
       {item.variant && (
@@ -4249,6 +4296,8 @@ export default function App() {
                 keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
                 keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
                 keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
+                creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
+                creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
@@ -4571,6 +4620,8 @@ export default function App() {
                   keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
                   keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
                   keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
+                  creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
+                  creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                   soldComps: enrich.soldComps || cur.soldComps || [],
                   confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
@@ -4627,6 +4678,8 @@ export default function App() {
                   keyIssueSource: enrich.keyIssueSource || s.keyIssueSource || null,
                   keyFromComps: enrich.keyFromComps || s.keyFromComps || [],
                   keyFromCompsSingleton: enrich.keyFromCompsSingleton || s.keyFromCompsSingleton || [],
+                  creatorFromComps: enrich.creatorFromComps || s.creatorFromComps || [],
+                  creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || s.creatorFromCompsSingleton || [],
                   soldComps: enrich.soldComps || s.soldComps || [],
                   confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || s.matchConfidence || null,
@@ -4816,6 +4869,8 @@ export default function App() {
                 keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
                 keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
                 keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
+                creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
+                creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
@@ -5156,6 +5211,8 @@ export default function App() {
       keyIssueSource: enrich.keyIssueSource || item.keyIssueSource || null,
       keyFromComps: enrich.keyFromComps || item.keyFromComps || [],
       keyFromCompsSingleton: enrich.keyFromCompsSingleton || item.keyFromCompsSingleton || [],
+      creatorFromComps: enrich.creatorFromComps || item.creatorFromComps || [],
+      creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || item.creatorFromCompsSingleton || [],
       soldComps: enrich.soldComps || item.soldComps || [],
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
       matchConfidence: enrich.matchConfidence || item.matchConfidence || null,
