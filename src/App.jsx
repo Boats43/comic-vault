@@ -3022,6 +3022,12 @@ function CollectionDetail({
                   item.gradeExceedsMap ||
                   item.megaKeyFloorApplied) &&
                 !item.manualConfirmed;
+              // Ship #19 — edition warning ack, stacks sequentially after
+              // mega-key ack. Red banner with signals list; must click
+              // "Acknowledge" to enable listing. editionConfirmed persists
+              // until Vision rescan changes the signals array.
+              const needsEditionAck =
+                item.editionWarning?.detected === true && !item.editionConfirmed;
               if (needsAck) {
                 const gateLabel = item.gradeExceedsMap
                   ? "Grade exceeds map — manual appraisal needed before listing."
@@ -3047,6 +3053,35 @@ function CollectionDetail({
                       style={{ width: "100%", background: "#da3633", color: "white" }}
                     >
                       Acknowledge and Enable Listing
+                    </button>
+                  </>
+                );
+              }
+              if (needsEditionAck) {
+                const signals = Array.isArray(item.editionWarning?.signals)
+                  ? item.editionWarning.signals.join(", ")
+                  : "";
+                return (
+                  <>
+                    <div style={{
+                      padding: "8px 10px",
+                      marginBottom: 8,
+                      background: "rgba(218,54,51,0.1)",
+                      border: "1px solid #da3633",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: "#fca5a5",
+                    }}>
+                      🚨 EDITION WARNING — Vision detected reprint or later-print
+                      signals{signals ? ` (${signals})` : ""}. Current price may
+                      reflect 1st-print comps. Verify edition before listing.
+                    </div>
+                    <button
+                      className="reset-btn"
+                      onClick={() => onUpdateField(item, 'editionConfirmed', true)}
+                      style={{ width: "100%", background: "#da3633", color: "white" }}
+                    >
+                      Acknowledge edition warning and Enable Listing
                     </button>
                   </>
                 );
@@ -4429,6 +4464,9 @@ export default function App() {
                 lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
                 // Ship #18 — preserve Vision-set penalty flags
                 cgcPenaltyFlags: enrich.cgcPenaltyFlags || cur.cgcPenaltyFlags || null,
+                // Ship #19 — preserve Vision-set editionWarning + ack state
+                editionWarning: enrich.editionWarning || cur.editionWarning || null,
+                editionConfirmed: cur.editionConfirmed || false,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedAR ? false : (cur.manualConfirmed || false),
               };
@@ -4564,6 +4602,8 @@ export default function App() {
       restoration: data.restoration || null,
       defectPenalty: data.defectPenalty || null,
       cgcPenaltyFlags: data.cgcPenaltyFlags || null,
+      editionWarning: data.editionWarning || null,
+      editionConfirmed: false,
       variant: data.variant || null,
       variantMultiplier: data.variantMultiplier || null,
       certNumber: data.certNumber || null,
@@ -4757,6 +4797,9 @@ export default function App() {
                   lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
                   // Ship #18 — preserve Vision-set penalty flags
                   cgcPenaltyFlags: enrich.cgcPenaltyFlags || cur.cgcPenaltyFlags || null,
+                  // Ship #19 — preserve Vision-set editionWarning + ack state
+                  editionWarning: enrich.editionWarning || cur.editionWarning || null,
+                  editionConfirmed: cur.editionConfirmed || false,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
                 };
@@ -4821,6 +4864,9 @@ export default function App() {
                   lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
                   // Ship #18 — preserve Vision-set penalty flags
                   cgcPenaltyFlags: enrich.cgcPenaltyFlags || s.cgcPenaltyFlags || null,
+                  // Ship #19 — preserve Vision-set editionWarning + ack state
+                  editionWarning: enrich.editionWarning || s.editionWarning || null,
+                  editionConfirmed: s.editionConfirmed || false,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChangedSel ? false : (s.manualConfirmed || false),
                 };
@@ -5018,6 +5064,9 @@ export default function App() {
                 lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
                 // Ship #18 — preserve Vision-set penalty flags
                 cgcPenaltyFlags: enrich.cgcPenaltyFlags || cur.cgcPenaltyFlags || null,
+                // Ship #19 — preserve Vision-set editionWarning + ack state
+                editionWarning: enrich.editionWarning || cur.editionWarning || null,
+                editionConfirmed: cur.editionConfirmed || false,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedBulk ? false : (cur.manualConfirmed || false),
               };
@@ -5365,6 +5414,9 @@ export default function App() {
       lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
       // Ship #18 — preserve Vision-set penalty flags
       cgcPenaltyFlags: enrich.cgcPenaltyFlags || item.cgcPenaltyFlags || null,
+      // Ship #19 — preserve Vision-set editionWarning + ack state
+      editionWarning: enrich.editionWarning || item.editionWarning || null,
+      editionConfirmed: item.editionConfirmed || false,
       megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
       manualConfirmed: priceChangedRM ? false : (item.manualConfirmed || false),
     };
@@ -5433,6 +5485,15 @@ export default function App() {
       reason: data.reason || item.reason,
       confidence: data.confidence || item.confidence,
       cgcPenaltyFlags: data.cgcPenaltyFlags || item.cgcPenaltyFlags || null,
+      // Ship #19 — manual rescan: update editionWarning from new Vision
+      // result. Reset editionConfirmed when the signals actually change
+      // (different reason → possibly different edition judgment).
+      editionWarning: data.editionWarning || item.editionWarning || null,
+      editionConfirmed:
+        JSON.stringify(data.editionWarning?.signals || []) ===
+        JSON.stringify(item.editionWarning?.signals || [])
+          ? (item.editionConfirmed || false)
+          : false,
       images: nextPhotos,
       // Drop the legacy single `image` field if it's still hanging around
       // from an older record — `images` is the source of truth now.

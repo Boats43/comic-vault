@@ -25,6 +25,59 @@ const parseResponse = (text) => {
   }
 };
 
+// Ship #19 MVP — AI-CROSS-LAYER-DISCONNECT edition warning detection.
+//
+// Scans Vision's free-form `reason` text for reprint / later-print /
+// facsimile signals. When detected, surfaces an `editionWarning` flag
+// and the UI gates the List-on-eBay button until the user acknowledges.
+//
+// This closes the data-flow gap behind the Star Wars #1 live-listing bug:
+// Vision's Condition Report explicitly said "35 cent REPRINT edition"
+// and "NOT the rare 35 cent first print variant", but the pricing
+// engine never read the text — so 1st-print comps anchored the price
+// at $297 for a book that trades at $20-50.
+//
+// MVP SCOPE: detection + gate only. Pricing math untouched. Phase 2
+// (Ship #19b) will add comp pool filtering + recalibration.
+//
+// Patterns use word boundaries so "reprinted" does NOT match
+// "reprint" (different word form). Case-insensitive by default;
+// the "NOT the" pattern is case-sensitive because Vision uses
+// all-caps NOT for emphasis — that's a higher-confidence signal.
+const EDITION_WARNING_PATTERNS = [
+  { kind: 'reprint',          re: /\breprint(?:\s+edition)?\b/i },
+  { kind: 'facsimile',        re: /\bfacsimile\b/i },
+  { kind: 'later-printing',   re: /\blater\s+print(?:ing)?\b/i },
+  { kind: 'not-first-print',  re: /\bnot\s+(?:the\s+)?(?:(?:rare|original)\s+(?:\S+\s+){0,4})?(?:first|1st)\s+(?:\S+\s+){0,2}(?:print|edition|printing)\b/i },
+  { kind: 'not-original',     re: /\bNOT\s+the\s+(?:original|rare|first|1st)\b/ },
+  { kind: 'less-valuable',    re: /\bsignificantly\s+less\s+valuable\b/i },
+  { kind: 'second-print',     re: /\b(?:2nd|second)\s+print(?:ing)?\b/i },
+  { kind: 'third-print',      re: /\b(?:3rd|third)\s+print(?:ing)?\b/i },
+];
+
+// Pure helper — scan Vision's reason text. Returns:
+//   { detected: true, signals: ['kind', ...], source: 'vision-condition-report' }
+// when ≥1 pattern fires, or null otherwise. Signals deduped and
+// stable-ordered (pattern array order). Safe on null/empty/non-string.
+export const detectEditionWarning = (reason) => {
+  if (!reason || typeof reason !== 'string') return null;
+  const signals = [];
+  const seen = new Set();
+  for (const { kind, re } of EDITION_WARNING_PATTERNS) {
+    if (seen.has(kind)) continue;
+    if (re.test(reason)) {
+      signals.push(kind);
+      seen.add(kind);
+    }
+  }
+  if (signals.length === 0) return null;
+  return {
+    detected: true,
+    signals,
+    source: 'vision-condition-report',
+  };
+};
+
 // Ship #18 — post-parse pedigree cross-validation.
 // Vision claims a pedigreeName; the registry normalizes alias→canonical
 // (e.g. "Edgar Church" → "Mile High Collection") and flags recognized.
@@ -138,6 +191,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
   const pass3 = await callModel(OPUS, imageContent, opusPrompt);
   const r3 = pass3.parsed;
   enrichPedigree(r3);
+  r3.editionWarning = detectEditionWarning(r3.reason);
   r3._watchPasses = 3;
   console.log(`[watch] pass1: ${pass1.ms}ms pass2: ${pass2.ms}ms pass3: ${pass3.ms}ms total: ${pass1.ms + pass2.ms + pass3.ms}ms — Opus escalation`);
   return { result: r3, passes: 3, timings: { pass1: pass1.ms, pass2: pass2.ms, pass3: pass3.ms } };
@@ -195,6 +249,7 @@ export default async function handler(req, res) {
     const { parsed } = await callModel("claude-opus-4-7", imageContent, userPrompt);
     if (noImage) parsed.noImage = true;
     enrichPedigree(parsed);
+    parsed.editionWarning = detectEditionWarning(parsed.reason);
 
     res.status(200).json(parsed);
   } catch (err) {
