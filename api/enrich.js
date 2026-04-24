@@ -257,6 +257,74 @@ export const computeThinPoolAnchor = (currentPrice, rawComps, opts = {}) => {
   return { anchorCap, shouldAnchor: true };
 };
 
+// Ship #14 — price-engine sanity fallback as a pure, testable helper.
+// Compares the PC × grade-mult output (pcNum) against the comp-derived
+// market signal (compsAvg) and returns a fallback when PC diverges too
+// far in either direction. Era-aware thresholds:
+//
+//   High-side (PC > market):
+//     lowCompsCount (<3)      → 1.25×
+//     isMixedFallback         → 1.25×
+//     Golden <1970            → 3.0×
+//     Silver/Bronze 1970–1984 → 1.75×
+//     Modern 1985+            → 1.5×
+//
+//   Low-side (PC < market):
+//     Silver + Bronze 1956–1984 → 0.6× (Ship #14 Fix 4.3)
+//     True Golden <1956, Modern 1985+, unknown year → 0.5×
+//
+// The 1956 boundary uses the comic-community Silver Age start (Showcase
+// #4, Oct 1956). The engine's high-side bucketing uses <1970 / <1985 for
+// calibration reasons — low-side needs the wider Silver window to catch
+// FF #61 (1967) class of keys where PC base lags recent run-ups.
+//
+// Floor gate (Ship #14 Fix 4.1): `compsAvg > 1` — was `> 5`, which
+// blocked modern mid-grade books at $3–5 from ever getting comp-checked
+// (Deadpool/Wolverine #2, ASM Extra! #1 overpricing class). `> 1`
+// preserves null-safety without masking real modern comps.
+//
+// Returns { shouldFire: 'high' | 'low', fallbackPrice, fallbackPriceLow,
+// fallbackPriceHigh, threshold, thresholdMult, priceNote } on fire, or
+// null when PC is within the acceptable band. Pure — no side effects.
+export const computeSanityFallback = (pcNum, compsAvg, opts = {}) => {
+  const { bookYear, lowCompsCount, isMixedFallback } = opts;
+  if (!(compsAvg > 1)) return null;
+  if (!(pcNum > 0)) return null;
+
+  const year = parseInt(bookYear, 10) || 0;
+  const highMult =
+    lowCompsCount ? 1.25 :
+    isMixedFallback ? 1.25 :
+    year < 1970 ? 3 :
+    year < 1985 ? 1.75 :
+    1.5;
+  const lowMult = (year >= 1956 && year < 1985) ? 0.6 : 0.5;
+
+  if (pcNum > compsAvg * highMult) {
+    return {
+      shouldFire: 'high',
+      fallbackPrice: compsAvg * 1.15,
+      fallbackPriceLow: compsAvg * 0.75,
+      fallbackPriceHigh: compsAvg * 1.5,
+      threshold: compsAvg * highMult,
+      thresholdMult: highMult,
+      priceNote: 'PC outlier — eBay avg used',
+    };
+  }
+  if (pcNum < compsAvg * lowMult) {
+    return {
+      shouldFire: 'low',
+      fallbackPrice: compsAvg,
+      fallbackPriceLow: compsAvg * 0.75,
+      fallbackPriceHigh: compsAvg * 1.5,
+      threshold: compsAvg * lowMult,
+      thresholdMult: lowMult,
+      priceNote: 'PC too low — eBay avg used',
+    };
+  }
+  return null;
+};
+
 // Fast, text-only AI verification pass. Asks Claude whether each eBay
 // listing title actually matches the identified comic. Returns an array
 // of booleans in the same order as `listings`, or null on any failure so
@@ -1332,61 +1400,38 @@ export default async function handler(req, res) {
           fallbackMedian.toFixed(2), 'instead of mean',
           (blendedAvg || compsFromEbay?.average || 0).toFixed(2));
       }
+      // Ship #14 — delegate threshold logic to computeSanityFallback.
+      // Pure helper, era-aware. See helper docs for threshold table.
+      // Sanity comparison base: raw compsAvg in EVERY case. eBay listings
+      // already reflect market grade (sellers grade in the title), so
+      // multiplying by out.gradeMultiplier double-counts the grade
+      // adjustment — both pcNum (grade-adjusted PC base) and compsAvg
+      // (at-grade market) are already at the target grade.
+      // CLAUDE.md: "Sanity fallback uses raw compsAvg, not adjAvg."
       const compsAvg = fallbackMedian || blendedAvg || compsFromEbay?.average;
-      if (compsAvg && compsAvg > 5) {
-        const pcNum = parseFloat(
-          String(out.price || '0').replace(/[$,]/g, '')
-        );
-
-        // Sanity comparison base: raw compsAvg in EVERY case. eBay listings
-        // already reflect market grade (sellers grade in the title), so
-        // multiplying by out.gradeMultiplier double-counts the grade
-        // adjustment — both pcNum (grade-adjusted PC base) and compsAvg
-        // (at-grade market) are already at the target grade.
-        // CLAUDE.md: "Sanity fallback uses raw compsAvg, not adjAvg."
-        const sanityCompsAvg = compsAvg;
-
-        // PC way too high vs market.
-        //  - Low comp count (<3 verified): 1.25x — can't trust PC with
-        //    only 1-2 comps to validate against.
-        //  - Mixed-print / variant / AI-verify fallback: 1.25x.
-        //  - Golden (<1970): 3x (volatile, thin markets).
-        //  - Silver/Bronze (<1985): 1.75x.
-        //  - Modern (1985+): 1.5x — tight, deep eBay markets.
-        const bookYear = parseInt(year) || 0;
-        const lowCompsCount = (rawComps?.count || 0) < 3;
-        const sanityHighMult =
-          lowCompsCount ? 1.25 :
-          isMixedFallback ? 1.25 :
-          bookYear < 1970 ? 3 :
-          bookYear < 1985 ? 1.75 :
-          1.5;
-        if (pcNum > sanityCompsAvg * sanityHighMult) {
-          sanityFired = true;
-          // Use raw compsAvg — eBay listings already reflect market grade.
-          out.price = fmtUsd(compsAvg * 1.15);
-          out.priceLow = fmtUsd(compsAvg * 0.75);
-          out.priceHigh = fmtUsd(compsAvg * 1.5);
-          out.pricingSource = "browse_api";
-          out.priceNote = "PC outlier — eBay avg used";
-          console.log('[sanity] PC', pcNum,
-            '> sanityCompsAvg*' + sanityHighMult, (sanityCompsAvg * sanityHighMult).toFixed(2),
-            '→ fallback compsAvg', compsAvg.toFixed(2));
-        }
-
-        // PC way too low vs market floor.
-        if (!sanityFired && pcNum < sanityCompsAvg * 0.5) {
-          sanityFired = true;
-          // Use raw compsAvg — eBay listings already reflect market grade.
-          out.price = fmtUsd(compsAvg);
-          out.priceLow = fmtUsd(compsAvg * 0.75);
-          out.priceHigh = fmtUsd(compsAvg * 1.5);
-          out.pricingSource = "browse_api";
-          out.priceNote = "PC too low — eBay avg used";
-          console.log('[sanity] PC', pcNum,
-            '< sanityCompsAvg*0.5', (sanityCompsAvg * 0.5).toFixed(2),
-            '→ fallback compsAvg', compsAvg.toFixed(2));
-        }
+      const pcNum = parseFloat(
+        String(out.price || '0').replace(/[$,]/g, '')
+      );
+      const bookYear = parseInt(year) || 0;
+      const lowCompsCount = (rawComps?.count || 0) < 3;
+      const sanityResult = computeSanityFallback(pcNum, compsAvg, {
+        bookYear,
+        lowCompsCount,
+        isMixedFallback,
+      });
+      if (sanityResult) {
+        sanityFired = sanityResult.shouldFire;
+        out.price = fmtUsd(sanityResult.fallbackPrice);
+        out.priceLow = fmtUsd(sanityResult.fallbackPriceLow);
+        out.priceHigh = fmtUsd(sanityResult.fallbackPriceHigh);
+        out.pricingSource = "browse_api";
+        out.priceNote = sanityResult.priceNote;
+        console.log('[sanity]', sanityResult.shouldFire,
+          '— pcNum', pcNum,
+          sanityResult.shouldFire === 'high' ? '>' : '<',
+          'threshold', sanityResult.threshold.toFixed(2),
+          `(×${sanityResult.thresholdMult})`,
+          '→ fallback compsAvg', compsAvg.toFixed(2));
       }
       }
 
@@ -1778,6 +1823,7 @@ export default async function handler(req, res) {
       'rawFloor:', rawComps?.lowest || 0,
       'floor:', floorNum,
       'floorFired:', floorFired,
+      'sanityFired:', sanityFired || false,
       'finalPrice:', out.price,
       'source:', out.pricingSource,
       'thinPoolAnchored:', out.thinPoolAnchored === true
