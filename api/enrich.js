@@ -1464,7 +1464,7 @@ export default async function handler(req, res) {
       //      don't trust — using either lets wrong-book prices win.
       //
       // When skipped, PC × grade multiplier remains as `out.price`.
-      const isMegaKeyBook = !!getMegaKeyEntry(title, correctedIssue);
+      const isMegaKeyBook = !!getMegaKeyEntry(title, correctedIssue, publisher, confirmedYear || year);
       if (isMegaKeyBook) {
         console.log('[sanity] skipped — mega-key uses floor map');
       } else if (compsExhausted) {
@@ -1619,7 +1619,7 @@ export default async function handler(req, res) {
     //      contaminated lowest — same untrusted data the sanity block skips.
     let floorNum = 0;
     let floorFired = false;
-    const isMegaKeyForFloor = !!getMegaKeyEntry(title, correctedIssue);
+    const isMegaKeyForFloor = !!getMegaKeyEntry(title, correctedIssue, publisher, confirmedYear || year);
     if (isMegaKeyForFloor) {
       console.log('[floor] skipped — mega-key uses floor map');
     } else if (compsExhausted) {
@@ -1873,7 +1873,7 @@ export default async function handler(req, res) {
     // Schema version stamped on response for K2 rules-version tracking.
     out.megaKeysSchemaVersion = MEGA_KEYS_SCHEMA_VERSION;
     {
-      const megaKeyEntry = getMegaKeyEntry(title, correctedIssue);
+      const megaKeyEntry = getMegaKeyEntry(title, correctedIssue, publisher, confirmedYear || year);
       if (megaKeyEntry) {
         if (megaKeyEntry.type === 'MANUAL') {
           out.manualReviewRequired = true;
@@ -1884,7 +1884,7 @@ export default async function handler(req, res) {
             `${title} #${correctedIssue}`, '— no floor applied');
         } else {
           const floorResult = getMegaKeyFloor(
-            title, correctedIssue, grade, numericGrade
+            title, correctedIssue, publisher, confirmedYear || year, grade, numericGrade
           );
           if (floorResult.exceedsMap) {
             // Distinct from type=MANUAL: the map simply doesn't cover

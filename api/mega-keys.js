@@ -18,18 +18,71 @@
 // $1.7M is still correct-order-of-magnitude; the floor's only job is to
 // prevent the $109 class of bug.
 //
+// Identity matching (Ship #20a.7, schema 2.0.0):
+//   getMegaKeyEntry / isMegaKey / getMegaKeyFloor now require `publisher`
+//   and `year` arguments. Every entry stores canonical `publisher` (a
+//   PUBLISHER_ALIASES key) and original `year`. yearTolerance defaults to
+//   1 (Dec/Jan cover-date drift); pre-1962 entries override to 2 (less
+//   reliable cover-vs-publication dating in the Golden / early-Silver era).
+//   When a user book has neither publisher nor year, the match fails
+//   closed. Prevents the TMNT #1 IDW 2016 Funko / Daredevil #1 Marvel 1998
+//   / X-Men #1 Marvel 1991 class of false-positive floor firings.
+//
 // See docs in CLAUDE.md session notes for calibration source + CSV review.
 
-export const MEGA_KEYS_SCHEMA_VERSION = "1.0.0";
+export const MEGA_KEYS_SCHEMA_VERSION = "2.0.0";
 
 const VERIFY_NOTE =
   "Training-data estimate pending Heritage/GoCollect cross-check. " +
   "Run ha.com/comics/<title-slug> search.";
 
+// Publisher aliases — collapses imprint / lineage variations into a single
+// canonical bucket for matching. Vision-detected publisher strings are
+// normalized through this table before comparison against entry.publisher.
+//
+// Marvel-lineage (Timely 1939 → Atlas 1951 → Marvel 1961+) collapses to
+// 'marvel'. DC-lineage (National Allied / National Periodical / Detective
+// Comics, Inc. → DC Comics) collapses to 'dc'. Era distinction is already
+// captured by the entry's `year` field, so a single bucket per lineage is
+// sufficient at the matching layer.
+const PUBLISHER_ALIASES = {
+  dc: "dc",
+  "dc comics": "dc",
+  national: "dc",
+  "national periodical publications": "dc",
+  "national allied publications": "dc",
+  "detective comics inc": "dc",
+  marvel: "marvel",
+  "marvel comics": "marvel",
+  // Cover-printed legal names — Vision reads these literally off Bronze /
+  // Copper / Modern Marvel covers. Without these aliases we ship known-
+  // broken behavior on Hulk #181 / GSX #1 / ASM #300 etc.
+  "marvel comics group": "marvel", // 1972-1986 cover label
+  "marvel entertainment group": "marvel", // 1986-1996
+  "marvel worldwide": "marvel", // modern legal name (occasional)
+  timely: "marvel",
+  "timely comics": "marvel",
+  "timely publications": "marvel",
+  atlas: "marvel",
+  "atlas comics": "marvel",
+  "atlas marvel": "marvel",
+  mirage: "mirage",
+  "mirage studios": "mirage",
+  idw: "idw",
+  "idw publishing": "idw",
+  image: "image",
+  "image comics": "image",
+  archie: "archie",
+  "archie comics": "archie",
+};
+
 export const MEGA_KEYS_FLOOR = {
   // ─── GOLDEN AGE ─────────────────────────────────────────────────────
   "action comics|1": {
     type: "MANUAL",
+    publisher: "dc",
+    year: 1938,
+    yearTolerance: 2,
     verified: false,
     source: null,
     lastVerified: null,
@@ -43,6 +96,9 @@ export const MEGA_KEYS_FLOOR = {
   },
   "superman|1": {
     type: "MANUAL",
+    publisher: "dc",
+    year: 1939,
+    yearTolerance: 2,
     verified: false,
     source: null,
     lastVerified: null,
@@ -55,6 +111,9 @@ export const MEGA_KEYS_FLOOR = {
   },
   "detective comics|27": {
     type: "MEGA",
+    publisher: "dc",
+    year: 1939,
+    yearTolerance: 2,
     verified: true,
     source:
       "Heritage Auctions archive (2020-2024 sold); 6.0 ref: $1.74M Jan-2022; " +
@@ -74,6 +133,9 @@ export const MEGA_KEYS_FLOOR = {
   },
   "detective comics|38": {
     type: "MEGA",
+    publisher: "dc",
+    year: 1940,
+    yearTolerance: 2,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -88,6 +150,9 @@ export const MEGA_KEYS_FLOOR = {
   },
   "batman|1": {
     type: "MEGA",
+    publisher: "dc",
+    year: 1940,
+    yearTolerance: 2,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -103,6 +168,9 @@ export const MEGA_KEYS_FLOOR = {
   },
   "marvel comics|1": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1939,
+    yearTolerance: 2,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -118,6 +186,9 @@ export const MEGA_KEYS_FLOOR = {
   },
   "captain america comics|1": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1941,
+    yearTolerance: 2,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -132,6 +203,9 @@ export const MEGA_KEYS_FLOOR = {
   },
   "all star comics|8": {
     type: "MEGA",
+    publisher: "dc",
+    year: 1941,
+    yearTolerance: 2,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -146,6 +220,9 @@ export const MEGA_KEYS_FLOOR = {
   },
   "sensation comics|1": {
     type: "MEGA",
+    publisher: "dc",
+    year: 1942,
+    yearTolerance: 2,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -160,6 +237,9 @@ export const MEGA_KEYS_FLOOR = {
   },
   "flash comics|1": {
     type: "MEGA",
+    publisher: "dc",
+    year: 1940,
+    yearTolerance: 2,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -175,6 +255,9 @@ export const MEGA_KEYS_FLOOR = {
   // ─── SILVER AGE ─────────────────────────────────────────────────────
   "showcase|4": {
     type: "MEGA",
+    publisher: "dc",
+    year: 1956,
+    yearTolerance: 2,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -189,6 +272,9 @@ export const MEGA_KEYS_FLOOR = {
   },
   "brave and the bold|28": {
     type: "MEGA",
+    publisher: "dc",
+    year: 1960,
+    yearTolerance: 2,
     verified: true,
     source:
       "Heritage Auctions archive; HA 2021 9.4 ref: $342K. F2 filter pairs " +
@@ -207,6 +293,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "amazing fantasy|15": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1962,
     verified: true,
     source:
       "Heritage Auctions + GoCollect FMV; 9.4 ref: $1.1M HA 2021 (multiple " +
@@ -228,6 +316,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "fantastic four|1": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1961,
     verified: true,
     source:
       "Heritage Auctions; 9.2 ref: $715K HA 2022. Scaled conservatively " +
@@ -245,6 +335,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "fantastic four|5": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1962,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -259,6 +351,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "fantastic four|48": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1966,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -273,6 +367,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "tales of suspense|39": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1963,
     verified: true,
     source:
       "Heritage Auctions; 9.2 ref: $375K HA 2021. 1st Iron Man. SEPARATE " +
@@ -290,6 +386,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "journey into mystery|83": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1962,
     verified: true,
     source: "Heritage Auctions archive; 1st Thor.",
     lastVerified: null,
@@ -304,6 +402,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "incredible hulk|1": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1962,
     verified: false,
     source: "training_estimate_60pct; HA 2021 9.2 ref: $490K",
     lastVerified: null,
@@ -319,14 +419,17 @@ export const MEGA_KEYS_FLOOR = {
   },
   "x men|1": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1963,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
     verificationDue: true,
     verificationNote: VERIFY_NOTE,
     volatilityNote:
-      "1st X-Men team (1963). SEPARATE from Giant-Size X-Men #1 (1975). " +
-      "9.2 estimate conservative — X-Men film cycle swings.",
+      "1st X-Men team (1963). SEPARATE from Giant-Size X-Men #1 (1975) " +
+      "and from later X-Men #1 relaunches (1991 Jim Lee, 2019 HoX, 2024 " +
+      "Krakoa). Publisher+year gating prevents relaunch false-positives.",
     grades: {
       0.5: 2_000, 1.0: 3_000, 2.0: 6_000, 4.0: 15_000,
       6.0: 35_000, 8.0: 125_000, 9.0: 300_000, 9.2: 500_000,
@@ -335,6 +438,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "strange tales|110": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1963,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -349,6 +454,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "tales to astonish|35": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1962,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -365,12 +472,16 @@ export const MEGA_KEYS_FLOOR = {
   },
   "avengers|1": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1963,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
     verificationDue: true,
     verificationNote: VERIFY_NOTE,
-    volatilityNote: "1st Avengers team. MCU cycles.",
+    volatilityNote:
+      "1st Avengers team (1963). MCU cycles. SEPARATE from later Avengers " +
+      "#1 relaunches — publisher+year gating prevents false positives.",
     grades: {
       0.5: 600, 1.0: 900, 2.0: 2_000, 4.0: 5_000,
       6.0: 15_000, 8.0: 50_000, 9.0: 100_000, 9.2: 150_000,
@@ -379,6 +490,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "avengers|4": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1964,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -393,12 +506,17 @@ export const MEGA_KEYS_FLOOR = {
   },
   "daredevil|1": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1964,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
     verificationDue: true,
     verificationNote: VERIFY_NOTE,
-    volatilityNote: "1st Daredevil. Netflix/MCU revival cycles.",
+    volatilityNote:
+      "1st Daredevil (1964). Netflix/MCU revival cycles. SEPARATE from " +
+      "Daredevil #1 Marvel 1998 (Marvel Knights relaunch) and later " +
+      "relaunches — publisher+year gating prevents false positives.",
     grades: {
       0.5: 250, 1.0: 400, 2.0: 800, 4.0: 2_000,
       6.0: 5_000, 8.0: 15_000, 9.0: 30_000, 9.2: 50_000,
@@ -409,6 +527,8 @@ export const MEGA_KEYS_FLOOR = {
   // ─── BRONZE AGE ─────────────────────────────────────────────────────
   "incredible hulk|181": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1974,
     verified: true,
     source:
       "Heritage Auctions + GoCollect FMV cross-check. " +
@@ -417,9 +537,9 @@ export const MEGA_KEYS_FLOOR = {
     verificationDue: true,
     verificationNote: VERIFY_NOTE,
     volatilityNote:
-      "1st Wolverine. X-Men film cycles swing ±20%. MJ-WP pages command " +
-      "substantial premium over OW-WP at 9.4+. 9.8 values bifurcate by " +
-      "page quality.",
+      "1st Wolverine (1974). X-Men film cycles swing ±20%. MJ-WP pages " +
+      "command substantial premium over OW-WP at 9.4+. 9.8 values bifurcate " +
+      "by page quality. SEPARATE from 1998 Wolverine anniversary reprint.",
     grades: {
       0.5: 1_000, 1.0: 1_500, 1.5: 2_000, 2.0: 3_000,
       2.5: 3_500, 3.0: 4_000, 3.5: 4_500, 4.0: 5_000,
@@ -431,6 +551,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "giant size x men|1": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1975,
     verified: true,
     source:
       "Heritage Auctions archive. SEPARATE entry from X-Men #1 (1963) per " +
@@ -450,6 +572,8 @@ export const MEGA_KEYS_FLOOR = {
   // ─── MODERN ─────────────────────────────────────────────────────────
   "teenage mutant ninja turtles|1": {
     type: "MEGA",
+    publisher: "mirage",
+    year: 1984,
     verified: false,
     source: "training_estimate_60pct; Mirage 1st print only",
     lastVerified: null,
@@ -457,7 +581,9 @@ export const MEGA_KEYS_FLOOR = {
     verificationNote: VERIFY_NOTE,
     volatilityNote:
       "Mirage 1st print (1984) only. Pairs with F3 reprint filter to " +
-      "block 2nd/3rd/4th/5th printings which trade at <$200.",
+      "block 2nd/3rd/4th/5th printings which trade at <$200. Publisher+ " +
+      "year gating (Ship #20a.7) blocks IDW 2011/2016 / Image 1996 / " +
+      "Archie 1988 false-positive matches.",
     grades: {
       0.5: 150, 1.0: 250, 2.0: 800, 4.0: 1_800,
       6.0: 3_000, 8.0: 6_000, 9.0: 9_000, 9.2: 11_000,
@@ -466,6 +592,8 @@ export const MEGA_KEYS_FLOOR = {
   },
   "amazing spider man|300": {
     type: "MEGA",
+    publisher: "marvel",
+    year: 1988,
     verified: false,
     source: "training_estimate_60pct",
     lastVerified: null,
@@ -500,6 +628,23 @@ export const normalizeTitle = (title) => {
     .trim();
 };
 
+// Normalize a publisher string for map lookup. Lowercases, strips
+// punctuation, collapses whitespace, then routes through PUBLISHER_ALIASES
+// to collapse imprint variations into canonical buckets. Returns null for
+// empty/missing input. Unknown publishers pass through unchanged so a
+// future publisher-specific entry without an alias mapping can still match
+// when caller passes the canonical string directly.
+export const normalizePublisher = (pub) => {
+  if (!pub) return null;
+  const p = String(pub)
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!p) return null;
+  return PUBLISHER_ALIASES[p] || p;
+};
+
 // Normalize grade to a CGC-numeric bucket. Prefers explicit numericGrade;
 // falls back to parsing the grade string. Returns null when grade is
 // unparseable or out-of-range.
@@ -525,23 +670,73 @@ export const normalizeGrade = (grade, numericGrade) => {
   return bucket;
 };
 
-// Check if a book is a mega-key (MEGA or MANUAL).
-export const isMegaKey = (title, issue) => {
+// Internal — given a registry entry that already matched on title+issue,
+// apply publisher and year identity gates. Returns true when the user's
+// book is consistent with the entry, false (with log) when it's a known
+// false-positive class (different publisher / different year / no
+// disambiguation data).
+//
+// Fail-closed rule: when entry has both publisher and year set but the
+// user's book has neither, reject. Without disambiguation data we cannot
+// distinguish the original mega-key from facsimiles, relaunches, or
+// publisher reissues.
+const passesIdentityGates = (entry, key, publisher, year) => {
+  const userPub = normalizePublisher(publisher);
+  const userYearRaw =
+    year === null || year === undefined || year === "" ? NaN : parseInt(year);
+  const userYear = isNaN(userYearRaw) ? null : userYearRaw;
+  const entryPub = entry.publisher || null;
+  const entryYear = entry.year || null;
+  const tol = entry.yearTolerance ?? 1;
+
+  if (entryPub && entryYear && !userPub && !userYear) {
+    console.log(
+      "[mega-key-match] rejected — no publisher or year on user book:",
+      key
+    );
+    return false;
+  }
+  if (entryPub && userPub && userPub !== entryPub) {
+    console.log(
+      "[mega-key-match] rejected — publisher mismatch:",
+      `${key} entry=${entryPub} user=${userPub}`
+    );
+    return false;
+  }
+  if (entryYear && userYear && Math.abs(userYear - entryYear) > tol) {
+    console.log(
+      "[mega-key-match] rejected — year out of tolerance:",
+      `${key} entry=${entryYear} user=${userYear} tol=${tol}`
+    );
+    return false;
+  }
+  return true;
+};
+
+// Check if a book is a mega-key (MEGA or MANUAL) after identity gating.
+export const isMegaKey = (title, issue, publisher, year) => {
   if (!title || issue == null) return false;
   const key = `${normalizeTitle(title)}|${String(issue).trim()}`;
-  return Object.prototype.hasOwnProperty.call(MEGA_KEYS_FLOOR, key);
+  const entry = MEGA_KEYS_FLOOR[key];
+  if (!entry) return false;
+  return passesIdentityGates(entry, key, publisher, year);
 };
 
-// Return the full map entry (or null) for a title+issue. Callers use the
-// returned entry's `type` field to branch MEGA vs MANUAL.
-export const getMegaKeyEntry = (title, issue) => {
+// Return the full map entry (or null) for a title+issue+publisher+year.
+// Callers use the returned entry's `type` field to branch MEGA vs MANUAL.
+// Identity gates (publisher + year) prevent false-positive matches like
+// TMNT #1 IDW 2016 against the Mirage 1984 entry.
+export const getMegaKeyEntry = (title, issue, publisher, year) => {
   if (!title || issue == null) return null;
   const key = `${normalizeTitle(title)}|${String(issue).trim()}`;
-  return MEGA_KEYS_FLOOR[key] || null;
+  const entry = MEGA_KEYS_FLOOR[key];
+  if (!entry) return null;
+  if (!passesIdentityGates(entry, key, publisher, year)) return null;
+  return entry;
 };
 
-// Return the floor value + priceHigh + exceedsMap flag for a title+issue+
-// grade combination.
+// Return the floor value + priceHigh + exceedsMap flag for a
+// title+issue+publisher+year+grade combination.
 //
 // Returned shape:
 //   { floor: number|null, priceHigh: number|null,
@@ -556,9 +751,16 @@ export const getMegaKeyEntry = (title, issue) => {
 // - `exceedsMap` — true when the book's grade is ABOVE the highest bucket
 //                 covered by the map. Caller should trigger manual review.
 // - `bucket`    — the rounded-down CGC bucket (for debugging/logging).
-export const getMegaKeyFloor = (title, issue, grade, numericGrade) => {
+export const getMegaKeyFloor = (
+  title,
+  issue,
+  publisher,
+  year,
+  grade,
+  numericGrade
+) => {
   const empty = { floor: null, priceHigh: null, exceedsMap: false, bucket: null };
-  const entry = getMegaKeyEntry(title, issue);
+  const entry = getMegaKeyEntry(title, issue, publisher, year);
   if (!entry || entry.type !== "MEGA") return empty;
   const bucket = normalizeGrade(grade, numericGrade);
   if (bucket == null) return empty;
