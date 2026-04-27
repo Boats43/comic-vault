@@ -361,6 +361,15 @@ function ResultCard({ result, enriching }) {
                 style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}
               >
                 Last Sold
+                {(() => {
+                  const newest = result.soldComps[0]?.daysAgo;
+                  const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
+                  return (
+                    <span style={{ marginLeft: 6, opacity: 0.7, textTransform: "none", letterSpacing: 0 }}>
+                      📊 {result.soldComps.length} sold{recencyStr ? ` · ${recencyStr}` : ""}
+                    </span>
+                  );
+                })()}
               </div>
               {result.soldComps.slice(0, 3).map((s, i) => {
                 const rowStyle = {
@@ -370,10 +379,21 @@ function ResultCard({ result, enriching }) {
                   padding: "6px 0",
                   fontSize: 14,
                 };
+                const mpStyle = (mp) => ({
+                  marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
+                  background: mp === "heritage" ? "rgba(212,175,55,0.15)" : "rgba(22,163,106,0.15)",
+                  color: mp === "heritage" ? "#d4af37" : "#16a34a",
+                  textTransform: "uppercase", letterSpacing: 0.5,
+                });
                 const inner = (
                   <>
                     <span className="muted small">
                       {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
+                      {s.marketplace && (
+                        <span style={mpStyle(s.marketplace)}>
+                          {s.marketplace === "heritage" ? "HRT" : "eBay"}
+                        </span>
+                      )}
                     </span>
                     <span style={{ fontWeight: 600, color: "#16a34a" }}>
                       {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
@@ -2549,13 +2569,33 @@ function CollectionDetail({
               <div style={{ marginBottom: 10 }}>
                 <div className="muted small" style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
                   Last Sold
+                  {(() => {
+                    const newest = item.soldComps[0]?.daysAgo;
+                    const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
+                    return (
+                      <span style={{ marginLeft: 6, opacity: 0.7, textTransform: "none", letterSpacing: 0 }}>
+                        📊 {item.soldComps.length} sold{recencyStr ? ` · ${recencyStr}` : ""}
+                      </span>
+                    );
+                  })()}
                 </div>
                 {item.soldComps.slice(0, 3).map((s, i) => {
                   const rowStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontSize: 14 };
+                  const mpStyle = (mp) => ({
+                    marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
+                    background: mp === "heritage" ? "rgba(212,175,55,0.15)" : "rgba(22,163,106,0.15)",
+                    color: mp === "heritage" ? "#d4af37" : "#16a34a",
+                    textTransform: "uppercase", letterSpacing: 0.5,
+                  });
                   const inner = (
                     <>
                       <span className="muted small">
                         {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
+                        {s.marketplace && (
+                          <span style={mpStyle(s.marketplace)}>
+                            {s.marketplace === "heritage" ? "HRT" : "eBay"}
+                          </span>
+                        )}
                       </span>
                       <span style={{ fontWeight: 600, color: "#16a34a" }}>
                         {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
@@ -4425,6 +4465,7 @@ export default function App() {
                 creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
                 creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                 soldComps: enrich.soldComps || cur.soldComps || [],
+                salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 pricingSource: lowMatch ? cur.pricingSource : (enrich.pricingSource || null),
@@ -4760,6 +4801,7 @@ export default function App() {
                   creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
                   creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                   soldComps: enrich.soldComps || cur.soldComps || [],
+                  salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                   confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                   pricingSource: enrich.pricingSource || null,
@@ -4826,6 +4868,7 @@ export default function App() {
                   creatorFromComps: enrich.creatorFromComps || s.creatorFromComps || [],
                   creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || s.creatorFromCompsSingleton || [],
                   soldComps: enrich.soldComps || s.soldComps || [],
+                  salesByGrade: enrich.salesByGrade || s.salesByGrade || null,
                   confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || s.matchConfidence || null,
                   pricingSource: enrich.pricingSource || null,
@@ -5025,6 +5068,7 @@ export default function App() {
                 creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
                 creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                 soldComps: enrich.soldComps || cur.soldComps || [],
+                salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 pricingSource: enrich.pricingSource || null,
@@ -5375,6 +5419,7 @@ export default function App() {
       creatorFromComps: enrich.creatorFromComps || item.creatorFromComps || [],
       creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || item.creatorFromCompsSingleton || [],
       soldComps: enrich.soldComps || item.soldComps || [],
+      salesByGrade: enrich.salesByGrade || item.salesByGrade || null,
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
       matchConfidence: enrich.matchConfidence || item.matchConfidence || null,
       pricingSource: enrich.pricingSource ?? null,
@@ -5722,7 +5767,7 @@ export default function App() {
                             setCatalogue((prev) => {
                               const cur = prev.find((x) => x.id === savedId);
                               if (!cur) return prev;
-                              const updated = { ...cur, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });

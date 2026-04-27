@@ -20,7 +20,10 @@ import {
 import { fetchSold } from "./sold.js";
 import { lookupCGC } from "./cgc-lookup.js";
 import { lookupGoCollect } from "./gocollect.js";
-import { fetchPricechartingPop } from "./pricecharting-pop.js";
+import {
+  fetchPricechartingPop,
+  fetchPricechartingSales,
+} from "./pricecharting-pop.js";
 import {
   MEGA_KEYS_SCHEMA_VERSION,
   getMegaKeyEntry,
@@ -1177,14 +1180,38 @@ export default async function handler(req, res) {
           })
         : Promise.resolve(null);
 
-    const [compsFromEbay, soldResult, goCollectResult, pcPop] = await Promise.all([
+    // Ship #20a — fetchPricechartingSales userGrade is the numeric CGC
+    // grade for graded books, the literal 'raw' for ungraded. Falls back
+    // to req.body?.grade when numericGrade absent so a string-typed grade
+    // still routes through pickUserGradeKey on the extractor side.
+    const userGradeForSales =
+      isGraded === true && numericGrade != null
+        ? numericGrade
+        : "raw";
+
+    const [
+      compsFromEbay,
+      soldResult,
+      goCollectResult,
+      pcPop,
+      pcSalesResult,
+    ] = await Promise.all([
       compsPromise,
+      // fetchSold (api/sold.js) currently dormant: eBay Marketplace
+      // Insights API requires a gated scope unavailable to indie devs.
+      // Returns [] gracefully. Kept in the pipeline so a future scope
+      // approval lights it up without re-wiring. Ship #20a sources sold
+      // data from PriceCharting instead (pcSalesResult below).
       fetchSold({ title, issue: correctedIssue, year: confirmedYear }).catch(() => []),
       lookupGoCollect({ title, issue: correctedIssue, year: confirmedYear, publisher }).catch(() => null),
       priceCharting?.id
         ? fetchPricechartingPop(priceCharting.id, req.body?.grade).catch(() => null)
         : Promise.resolve(null),
+      priceCharting?.id
+        ? fetchPricechartingSales(priceCharting.id, userGradeForSales).catch(() => null)
+        : Promise.resolve(null),
     ]);
+    const pcSales = pcSalesResult || { soldComps: [], salesByGrade: {} };
     mark('comps_fetched');
 
     // AI verification pass on the comps that will be displayed. Verifies
@@ -1291,9 +1318,14 @@ export default async function handler(req, res) {
       }
     }
 
-    // Filter sold comps by issue number before blending — sold results
-    // have no title verification, so wrong-issue listings can corrupt the avg.
-    let filteredSold = Array.isArray(soldResult) ? soldResult : [];
+    // Ship #20a — sold comp source. Prefer PriceCharting sales-history
+    // (real eBay + Heritage completed sales) when populated; fall back to
+    // soldResult (eBay Insights, currently dormant). Defensive issue-regex
+    // filter applies to whichever source — PC matched the wrong product
+    // occasionally returns sales for a sibling issue.
+    let filteredSold = pcSales.soldComps.length > 0
+      ? pcSales.soldComps
+      : (Array.isArray(soldResult) ? soldResult : []);
     if (filteredSold.length > 0 && correctedIssue) {
       const issueRe = new RegExp(
         '#\\s*' + String(correctedIssue).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i'
@@ -1993,8 +2025,16 @@ export default async function handler(req, res) {
       console.log(`[match-conf] score=${finalMc.score} tier=${finalMc.tier} comps=${compTitlesForScore.length} vision=${visionConfidence}${finalMc.visionCapped ? ' CAPPED' : ''}`);
     }
 
-    // Sold comps from eBay completed listings (filtered by issue#)
+    // Sold comps — Ship #20a: now populated from PriceCharting sales-history
+    // scrape (api/pricecharting-pop.js fetchPricechartingSales). Each entry
+    // carries marketplace: 'ebay' | 'heritage' for source attribution.
+    // Falls back to fetchSold (eBay Insights, dormant) when PC sales empty.
+    // salesByGrade keeps every grade tab's rows for future Ship #20b weighting
+    // and FR-5a.4 value-ladder display.
     out.soldComps = filteredSold;
+    if (pcSales.salesByGrade && Object.keys(pcSales.salesByGrade).length > 0) {
+      out.salesByGrade = pcSales.salesByGrade;
+    }
 
     // Confidence level — PC data guarantees at least MEDIUM.
     const verifiedCount = rawComps?.count || 0;
