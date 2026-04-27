@@ -10,6 +10,8 @@
 import {
   buildTabGradeMap,
   extractTabRows,
+  extractPriceLadder,
+  extractSalesVelocity,
 } from '../api/pricecharting-pop.js';
 
 let passed = 0;
@@ -383,6 +385,165 @@ const malRows = extractTabRows(MALFORMED_FIXTURE, 'completed-auctions-used');
 assertEq(malRows.length, 1, 'malformed rows skipped, only good row survives');
 assertEq(malRows[0].title, 'good row', 'good row title decoded correctly');
 assertEq(malRows[0].price, 99, 'good row price parsed');
+
+// ─── Ship #20a.5 — extractPriceLadder (7) ──────────────────────────
+console.log('\n=== SHIP #20a.5 — PRICE LADDER ===\n');
+
+const LADDER_FIXTURE = `
+<div id="full-prices">
+  <a name="full-prices"></a>
+  <h2>Full Price Guide: Amazing Spider-Man #300 (1988)</h2>
+  <table>
+    <tr><td>Ungraded</td><td class="price js-price">$298.75</td></tr>
+    <tr><td>2.0</td><td class="price js-price">$162.00</td></tr>
+    <tr><td>3.0</td><td class="price js-price">$0.00</td></tr>
+    <tr><td>4.0</td><td class="price js-price">$275.00</td></tr>
+    <tr><td>9.4</td><td class="price js-price">$681.00</td></tr>
+    <tr><td>9.8</td><td class="price js-price">$2,757.74</td></tr>
+    <tr><td>10</td><td class="price js-price">$3,585.00</td></tr>
+  </table>
+</div>
+`;
+const ladder = extractPriceLadder(LADDER_FIXTURE);
+assertEq(ladder['raw'], 298.75, '"Ungraded" → "raw" key, $298.75');
+assertEq(ladder['9.4'], 681, '"9.4" → "9.4" key, $681');
+assertEq(ladder['9.8'], 2757.74, 'comma price $2,757.74 → 2757.74');
+assertEq(ladder['10.0'], 3585, '"10" → "10.0" key (formatGradeKey normalization)');
+assertTrue(!('3.0' in ladder), '$0.00 row omitted (not free book — missing data)');
+assertEq(extractPriceLadder(''), {}, 'empty HTML → {}');
+assertEq(
+  extractPriceLadder('<html>no full-prices div</html>'),
+  {},
+  'missing <div id="full-prices"> → {}',
+);
+
+// ─── Ship #20a.5 — extractSalesVelocity (10) ───────────────────────
+console.log('\n=== SHIP #20a.5 — SALES VELOCITY ===\n');
+
+const VELOCITY_FIXTURE = `
+<select id="completed-auctions-condition">
+  <option value="completed-auctions-used">Ungraded (30)</option>
+  <option value="completed-auctions-cib">4.0 (5)</option>
+  <option value="completed-auctions-new">6.0 (10)</option>
+  <option value="completed-auctions-graded">8.0 (20)</option>
+  <option value="completed-auctions-grade-seventeen">9.4 (30)</option>
+  <option value="completed-auctions-manual-only">9.8 (30)</option>
+</select>
+<table id="price_data">
+  <tbody>
+    <tr class="sales_volume">
+      <td class="js-show-tab" data-show-tab="completed-auctions-used">
+        <span class="tablet-portrait-hidden">volume:&nbsp;</span>
+        <a href="#">1 sale per day</a>
+      </td>
+      <td class="js-show-tab" data-show-tab="completed-auctions-cib">
+        <a href="#">5 sales per year</a>
+      </td>
+      <td class="js-show-tab" data-show-tab="completed-auctions-new">
+        <a href="#">1 sale per week</a>
+      </td>
+    </tr>
+    <tr class="additional_data">
+      <td class="js-show-tab" data-show-tab="completed-auctions-graded">
+        <a href="#">3 sales per month</a>
+      </td>
+      <td class="js-show-tab" data-show-tab="completed-auctions-grade-seventeen">
+        <a href="#">3 sales per week</a>
+      </td>
+      <td class="js-show-tab" data-show-tab="completed-auctions-manual-only">
+        <a href="#">less than 1 per year</a>
+      </td>
+      <td class="js-show-tab" data-show-tab="completed-auctions-orphan-tab">
+        <a href="#">1 sale per day</a>
+      </td>
+    </tr>
+  </tbody>
+</table>
+`;
+const velTabMap = buildTabGradeMap(VELOCITY_FIXTURE);
+const velocity = extractSalesVelocity(VELOCITY_FIXTURE, velTabMap);
+
+assertEq(velocity['raw'].perDay, 1, '"1 sale per day" → perDay 1.0');
+assertEq(velocity['raw'].label, '1 sale per day', 'label preserved verbatim');
+assertEq(
+  Math.round(velocity['4.0'].perDay * 10000) / 10000,
+  Math.round((5 / 365) * 10000) / 10000,
+  '"5 sales per year" → perDay = 5/365',
+);
+assertEq(
+  Math.round(velocity['6.0'].perDay * 10000) / 10000,
+  Math.round((1 / 7) * 10000) / 10000,
+  '"1 sale per week" → perDay = 1/7',
+);
+assertEq(
+  Math.round(velocity['8.0'].perDay * 10000) / 10000,
+  Math.round((3 / 30) * 10000) / 10000,
+  '"3 sales per month" → perDay = 3/30 = 0.1',
+);
+assertEq(
+  velocity['9.8'].perDay,
+  null,
+  '"less than 1 per year" → perDay null (uncertain)',
+);
+assertEq(
+  velocity['9.8'].label,
+  'less than 1 per year',
+  '"less than" label preserved (Q1 — signal kept)',
+);
+
+// Tab class not in tabMap (orphan-tab) — entry omitted.
+// Fixture has 6 valid mappings (raw, 4.0, 6.0, 8.0, 9.4, 9.8) + 1 orphan.
+assertTrue(
+  !('orphan-tab' in velocity) &&
+    Object.keys(velocity).length === 6,
+  'orphan tab class omitted from velocity (6 valid + 1 orphan dropped)',
+);
+
+// Multi-row aggregation — 9.4 (sales_volume row sibling) AND 8.0 (additional_data row).
+assertTrue(
+  velocity['9.4'] && velocity['8.0'],
+  'multi-row aggregation: both sales_volume + additional_data contribute',
+);
+
+// Missing tabMap → {}.
+assertEq(
+  extractSalesVelocity(VELOCITY_FIXTURE, {}),
+  {},
+  'empty tabMap → {} (no entries can resolve)',
+);
+
+// Unparseable text — e.g. "n/a" or empty <a>.
+const UNPARSEABLE_FIXTURE = `
+<select id="completed-auctions-condition">
+  <option value="completed-auctions-used">Ungraded (1)</option>
+</select>
+<table id="price_data">
+  <tr class="sales_volume">
+    <td class="js-show-tab" data-show-tab="completed-auctions-used">
+      <a href="#">n/a</a>
+    </td>
+  </tr>
+</table>
+`;
+const unparseable = extractSalesVelocity(UNPARSEABLE_FIXTURE);
+assertEq(
+  unparseable['raw'],
+  { label: 'n/a', perDay: null },
+  'unparseable text → label preserved, perDay null',
+);
+
+// ─── Integration (1) ───────────────────────────────────────────────
+console.log('\n=== Integration ===\n');
+
+// Combined fixture with both ladder + velocity in one HTML string.
+const COMBINED_FIXTURE = LADDER_FIXTURE + VELOCITY_FIXTURE;
+const combinedLadder = extractPriceLadder(COMBINED_FIXTURE);
+const combinedVel = extractSalesVelocity(COMBINED_FIXTURE);
+assertTrue(
+  Object.keys(combinedLadder).length >= 5 &&
+    Object.keys(combinedVel).length >= 5,
+  'combined HTML returns both ladder + velocity populated independently',
+);
 
 // ─── Final ─────────────────────────────────────────────────────────
 console.log(`\n=== RESULTS ===`);

@@ -2035,6 +2035,15 @@ export default async function handler(req, res) {
     if (pcSales.salesByGrade && Object.keys(pcSales.salesByGrade).length > 0) {
       out.salesByGrade = pcSales.salesByGrade;
     }
+    // Ship #20a.5 — per-grade price guide + per-grade sales velocity from
+    // the same PC HTML. Pure data capture; downstream Ship #20b consumes
+    // these for sold-first weighting and grade-aware pricing math.
+    if (pcSales.priceLadder && Object.keys(pcSales.priceLadder).length > 0) {
+      out.priceLadder = pcSales.priceLadder;
+    }
+    if (pcSales.salesVelocity && Object.keys(pcSales.salesVelocity).length > 0) {
+      out.salesVelocity = pcSales.salesVelocity;
+    }
 
     // Confidence level — PC data guarantees at least MEDIUM.
     const verifiedCount = rawComps?.count || 0;

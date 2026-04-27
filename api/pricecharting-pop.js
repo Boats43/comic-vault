@@ -1,12 +1,17 @@
-// PriceCharting product-page extractors (Phase 5a.1 + Ship #20a).
+// PriceCharting product-page extractors (Phase 5a.1 + Ship #20a + #20a.5).
 //
-// Hosts TWO extractors over a single shared HTML fetch:
-//   1. fetchPricechartingPop  — CGC pop_data (Phase 5a.1, since 2026-04-22)
+// Hosts FOUR extractors over a single shared HTML fetch:
+//   1. fetchPricechartingPop   — CGC pop_data (Phase 5a.1, since 2026-04-22)
 //   2. fetchPricechartingSales — completed-sales rows (Ship #20a, 2026-04-26)
+//   3. extractPriceLadder      — per-grade prices (Ship #20a.5, 2026-04-27)
+//   4. extractSalesVelocity    — per-grade volume (Ship #20a.5, 2026-04-27)
 //
-// Both parse the SAME HTML PriceCharting serves at /game/{productId}.
+// All parse the SAME HTML PriceCharting serves at /game/{productId}.
 // fetchPCProductHtml caches the raw HTML for 24h per warm Lambda so a
-// single page fetch services both extractors with no extra requests.
+// single page fetch services every extractor with no extra requests.
+// Ladder + velocity are bundled into fetchPricechartingSales' return
+// shape (additive, doesn't break existing soldComps / salesByGrade
+// consumers).
 //
 // Fails CLOSED throughout: any error (network, regex miss, parse, schema
 // mismatch) returns null / []. Engine behavior is unchanged when the
@@ -306,13 +311,154 @@ export const extractTabRows = (html, tabClass) => {
   return rows;
 };
 
-// Stable key shape for salesByGrade map. Integer grades keep an explicit
-// ".0" suffix ("9.0" not "9") so consumers can rely on a uniform shape
-// across half-grades. 'raw' passes through verbatim.
+// Stable key shape for salesByGrade / priceLadder / salesVelocity maps.
+// Integer grades keep an explicit ".0" suffix ("9.0" not "9") so consumers
+// can rely on a uniform shape across half-grades. 'raw' passes through
+// verbatim. NB: this is the canonical normalization — every map keyed by
+// grade in this module routes through it.
 const formatGradeKey = (grade) => {
   if (grade === "raw") return "raw";
   if (typeof grade !== "number" || isNaN(grade)) return null;
   return Number.isInteger(grade) ? `${grade}.0` : String(grade);
+};
+
+// ───────────────────────── price ladder (Ship #20a.5) ────────────────────────
+//
+// Per-grade price guide lives in <div id="full-prices"> as a simple table:
+//   <tr>
+//     <td>Ungraded</td>
+//     <td class="price js-price">$298.75</td>
+//   </tr>
+//   <tr>
+//     <td>9.4</td>
+//     <td class="price js-price">$681.00</td>
+//   </tr>
+//   <tr>
+//     <td>10</td>
+//     <td class="price js-price">$3,585.00</td>
+//   </tr>
+//
+// 14 grades for major-market books; sparse markets return fewer. Each row
+// is independent — missing grades simply don't appear (no placeholder).
+// Output shape: { "raw": 298.75, "2.0": 162, ..., "9.8": 2757.74, "10.0": 3585 }
+//
+// Q2 confirmed: $0.00 rows omitted. PC shows $0.00 when no recorded sales
+// exist for that grade — treating it as a zero-value price corrupts
+// downstream pricing math (Ship #20b will read this).
+
+const FULL_PRICES_BLOCK_RE =
+  /<div id="full-prices">([\s\S]*?)<\/div>/i;
+// Each row: <tr><td>{label}</td><td class="...price...js-price..." …>${price}</td>
+const LADDER_ROW_RE =
+  /<tr>\s*<td>\s*([^<]+?)\s*<\/td>\s*<td[^>]*class="[^"]*\bprice\b[^"]*\bjs-price\b[^"]*"[^>]*>\s*\$([\d,]+(?:\.\d+)?)/gi;
+
+export const extractPriceLadder = (html) => {
+  if (!html) return {};
+  const block = html.match(FULL_PRICES_BLOCK_RE);
+  if (!block) return {};
+  const ladder = {};
+  for (const m of block[1].matchAll(LADDER_ROW_RE)) {
+    const labelRaw = (m[1] || "").trim();
+    const price = parseFloat((m[2] || "").replace(/,/g, ""));
+    if (!(price > 0)) continue;
+    let key = null;
+    if (/^ungraded$/i.test(labelRaw)) {
+      key = "raw";
+    } else {
+      const num = parseFloat(labelRaw);
+      if (isNaN(num)) continue;
+      key = formatGradeKey(num);
+    }
+    if (key) ladder[key] = price;
+  }
+  return ladder;
+};
+
+// ───────────────────────── sales velocity (Ship #20a.5) ──────────────────────
+//
+// Per-grade liquidity lives in <td class="js-show-tab" data-show-tab="...">
+// cells inside <table id="price_data">. Two physical rows feed it (the
+// summary `<tr class="sales_volume">` plus a continuation `<tr class="
+// additional_data">` with desktop-only graded columns). Cell pattern:
+//
+//   <td class="js-show-tab" data-show-tab="completed-auctions-used">
+//     <span class="tablet-portrait-hidden">volume:&nbsp;</span>
+//     <a href="#">1 sale per day</a>
+//   </td>
+//
+// data-show-tab matches the same tab-class identifiers buildTabGradeMap
+// already maps, so we reuse that mapping to convert tab → grade key.
+//
+// Q1 confirmed: unparseable / "less than 1 per *" preserved with
+// perDay: null so consumers (UI badge, decision engine) keep the signal.
+//
+// Output shape:
+//   {
+//     "raw":  { label: "1 sale per day",   perDay: 1.0    },
+//     "9.4":  { label: "3 sales per week", perDay: 0.4286 },
+//     "9.8":  { label: "less than 1 per year", perDay: null },
+//   }
+
+const VELOCITY_CELL_RE =
+  /<td[^>]*class="[^"]*\bjs-show-tab\b[^"]*"[^>]*data-show-tab="(completed-auctions-[a-z-]+)"[^>]*>([\s\S]*?)<\/td>/gi;
+const VELOCITY_LINK_RE = /<a[^>]*>\s*([^<]+?)\s*<\/a>/i;
+const LESS_THAN_RE = /\bless\s+than\s+/i;
+const VOLUME_PARSE_RE =
+  /(\d+(?:\.\d+)?)\s+sales?\s+per\s+(day|week|month|year)\b/i;
+
+const parseVolumeText = (text) => {
+  const t = String(text || "").trim();
+  if (!t) return null;
+  if (LESS_THAN_RE.test(t)) {
+    return { label: t, perDay: null };
+  }
+  const m = t.match(VOLUME_PARSE_RE);
+  if (!m) return { label: t, perDay: null };
+  const n = parseFloat(m[1]);
+  if (isNaN(n) || n <= 0) return { label: t, perDay: null };
+  const unit = m[2].toLowerCase();
+  let perDay;
+  switch (unit) {
+    case "day":
+      perDay = n;
+      break;
+    case "week":
+      perDay = n / 7;
+      break;
+    case "month":
+      perDay = n / 30;
+      break;
+    case "year":
+      perDay = n / 365;
+      break;
+    default:
+      return { label: t, perDay: null };
+  }
+  return { label: t, perDay };
+};
+
+export const extractSalesVelocity = (html, tabMap = null) => {
+  if (!html) return {};
+  // Resolve tab→grade map if not provided. Most callers pass the map
+  // they already built (single regex pass), but the unit tests exercise
+  // this function in isolation.
+  const map = tabMap || buildTabGradeMap(html);
+  if (!map || Object.keys(map).length === 0) return {};
+  const velocity = {};
+  for (const m of html.matchAll(VELOCITY_CELL_RE)) {
+    const tabClass = m[1];
+    const cellInner = m[2] || "";
+    const grade = map[tabClass];
+    if (grade === undefined) continue;
+    const key = formatGradeKey(grade);
+    if (!key) continue;
+    const linkMatch = cellInner.match(VELOCITY_LINK_RE);
+    if (!linkMatch) continue;
+    const v = parseVolumeText(linkMatch[1]);
+    if (!v) continue;
+    velocity[key] = v;
+  }
+  return velocity;
 };
 
 // Choose which salesByGrade bucket maps to the user's grade.
@@ -330,14 +476,21 @@ const pickUserGradeKey = (userGrade) => {
   return isNaN(n) ? null : formatGradeKey(n);
 };
 
+const EMPTY_SALES_RESULT = Object.freeze({
+  soldComps: [],
+  salesByGrade: {},
+  priceLadder: {},
+  salesVelocity: {},
+});
+
 export const fetchPricechartingSales = async (
   productId,
   userGrade = null
 ) => {
-  if (!productId) return { soldComps: [], salesByGrade: {} };
+  if (!productId) return { ...EMPTY_SALES_RESULT };
   try {
     const html = await fetchPCProductHtml(productId);
-    if (!html) return { soldComps: [], salesByGrade: {} };
+    if (!html) return { ...EMPTY_SALES_RESULT };
 
     const tabMap = buildTabGradeMap(html);
     const salesByGrade = {};
@@ -367,13 +520,18 @@ export const fetchPricechartingSales = async (
       soldComps = salesByGrade[lookupKey] || [];
     }
 
+    // Ship #20a.5 — additive ladder + velocity from the same HTML.
+    // tabMap reused (single buildTabGradeMap call serves both extractors).
+    const priceLadder = extractPriceLadder(html);
+    const salesVelocity = extractSalesVelocity(html, tabMap);
+
     console.log(
-      `[pc-sales] id=${productId} grades=${Object.keys(salesByGrade).length} userGrade=${lookupKey} soldComps=${soldComps.length}`
+      `[pc-sales] id=${productId} grades=${Object.keys(salesByGrade).length} userGrade=${lookupKey} soldComps=${soldComps.length} ladder=${Object.keys(priceLadder).length} velocity=${Object.keys(salesVelocity).length}`
     );
-    return { soldComps, salesByGrade };
+    return { soldComps, salesByGrade, priceLadder, salesVelocity };
   } catch (err) {
     console.error(`[pc-sales] error id=${productId}: ${err?.message || err}`);
-    return { soldComps: [], salesByGrade: {} };
+    return { ...EMPTY_SALES_RESULT };
   }
 };
 

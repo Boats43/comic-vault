@@ -4466,6 +4466,8 @@ export default function App() {
                 creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
+                priceLadder: enrich.priceLadder || cur.priceLadder || null,
+                salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 pricingSource: lowMatch ? cur.pricingSource : (enrich.pricingSource || null),
@@ -4802,6 +4804,8 @@ export default function App() {
                   creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                   soldComps: enrich.soldComps || cur.soldComps || [],
                   salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
+                  priceLadder: enrich.priceLadder || cur.priceLadder || null,
+                  salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                   confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                   pricingSource: enrich.pricingSource || null,
@@ -4869,6 +4873,8 @@ export default function App() {
                   creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || s.creatorFromCompsSingleton || [],
                   soldComps: enrich.soldComps || s.soldComps || [],
                   salesByGrade: enrich.salesByGrade || s.salesByGrade || null,
+                  priceLadder: enrich.priceLadder || s.priceLadder || null,
+                  salesVelocity: enrich.salesVelocity || s.salesVelocity || null,
                   confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || s.matchConfidence || null,
                   pricingSource: enrich.pricingSource || null,
@@ -5069,6 +5075,8 @@ export default function App() {
                 creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
+                priceLadder: enrich.priceLadder || cur.priceLadder || null,
+                salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 pricingSource: enrich.pricingSource || null,
@@ -5420,6 +5428,8 @@ export default function App() {
       creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || item.creatorFromCompsSingleton || [],
       soldComps: enrich.soldComps || item.soldComps || [],
       salesByGrade: enrich.salesByGrade || item.salesByGrade || null,
+      priceLadder: enrich.priceLadder || item.priceLadder || null,
+      salesVelocity: enrich.salesVelocity || item.salesVelocity || null,
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
       matchConfidence: enrich.matchConfidence || item.matchConfidence || null,
       pricingSource: enrich.pricingSource ?? null,
@@ -5767,7 +5777,7 @@ export default function App() {
                             setCatalogue((prev) => {
                               const cur = prev.find((x) => x.id === savedId);
                               if (!cur) return prev;
-                              const updated = { ...cur, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });
