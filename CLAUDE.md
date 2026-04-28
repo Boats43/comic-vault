@@ -7,12 +7,14 @@ Comic Vault — a progressive web app for grading, pricing, and managing comic b
 - **Frontend**: React + Vite (single-page app in `src/App.jsx`)
 - **Backend**: Vercel serverless functions (`api/` directory)
 - **Storage**: IndexedDB (client-side), no server database
-- **Deploy**: Vercel
+- **Deploy**: Vercel (auto-deploys from `main` branch)
 
 ## Build & Deploy
 ```bash
-npm run build
-npx vercel --prod
+npm run build           # always run before commit; zero errors required
+git push origin main    # production deploy (auto, primary protocol)
+git revert <hash> && git push   # single-step rollback
+npx vercel --prod       # uncommitted-tree fallback only
 ```
 
 ## Key Files
@@ -21,12 +23,19 @@ npx vercel --prod
 - `api/grade.js` — Claude Vision comic identification and grading
 - `api/chat.js` — Claude collection chat (inline queries, Whatnot session context)
 - `api/comps.js` — eBay Browse API comp fetching
-- `api/sold.js` — eBay completed/sold listings
+- `api/sold.js` — eBay completed/sold listings (legacy, dormant — Ship #20a routes via PC scrape)
 - `api/cgc-lookup.js` — CGC cert number verification
 - `api/gocollect.js` — GoCollect CGC FMV lookup (requires GOCOLLECT_API_KEY, returns null without it)
 - `api/manage.js` — collection analysis via Claude
 - `api/list-ebay.js` — eBay listing creation
 - `api/delist-ebay.js` — eBay listing removal
+- `api/mega-keys.js` — mega-key floor map (29 entries, publisher+year strict)
+- `api/pricecharting-pop.js` — PC pop + sales-history + price ladder + velocity scrape
+- `src/lib/compHygiene.js` — shared regex + helpers (REPRINT_RE, SLAB_RE, VARIANT_CONTAM_RE, SIGNED_RE, ARTIST_PATTERNS, etc.)
+- `src/lib/soldVerification.js` — `verifySoldComps(rawRows, ctx)` filter chain
+- `src/lib/listPriceWarning.js` — UI helper (over-reach detection)
+- `src/lib/premiumCreators.js` — 80-creator tiered registry
+- `src/lib/pedigreeRegistry.js` — 22-pedigree canonical lookup
 
 ## Repo & Live
 - **Repo**: Boats43/comic-vault
@@ -37,517 +46,351 @@ Nine keys required (all set in Vercel), one optional:
 `ANTHROPIC_API_KEY`, `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DEV_ID`, `EBAY_AUTH_TOKEN`, `EBAY_SANDBOX`, `COMICVINE_API_KEY`, `XIMILAR_API_TOKEN`, `PRICECHARTING_TOKEN`
 Optional: `GOCOLLECT_API_KEY` (CGC FMV — pending approval ticket #019483)
 
-## Open Items
-- GoCollect API: approval pending (ticket #019483) — `api/gocollect.js` deployed, returns null without key. Add `GOCOLLECT_API_KEY` to Vercel env when approved.
-- GPA: check gpanalysis.com for API access
-- eBay Marketplace Insights: DEAD for indie devs
-- Visual search: disabled for modern (1985+), active for Silver/Bronze Age only
-- Android native app: PiP overlay for Whatnot live buying
-
 ## Rules
-- **Never change pricing math** (grade multipliers, sanity checks, floor guard, price calculations in `api/enrich.js`) without explicit instruction.
-- **Never commit without running `npm run build` first** and confirming zero errors.
-- Always preserve the pricing stack order: PriceCharting -> grade multiplier -> sanity check -> defect penalty -> floor guard -> browse_api fallback.
-- PriceCharting year threshold: 5 years max gap between comic year and product year.
-- AI verify: accept variant/cover B listings as matches if same character + issue number.
-- Variant multipliers (descending, first substring match wins): triple cover ×10, double cover ×8, 35¢/35 cent ×6, 30¢/30 cent ×4, inverted ×4, gold ×3, printing error ×3, miscut ×3, mark jewelers ×2.5, canadian price ×2, price variant ×2, type 1a/1b ×2, canadian ×1.8, whitman ×1.8, 2nd/second print ×1.5, pence ×1.5, dc universe logo ×1.5, newsstand ×1.3.
-- Key issue multiplier: tiered (major ×1.5, minor ×1.2) applied after variant mult when `out.keyIssue` is set AND blendedAvg is non-null.
-- Visual search only overrides with 3+ matches.
-- PriceCharting skipped when issue=null.
-- No premium multiplier: corner box, masterpieces, design variant, cover A/B/C/D.
-- eBay listing title includes variant (newsstand, gold, 2nd print, etc.) between issue and grade — filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot).
-- Variant short keywords only in comps query attempts 1-2. Attempt 0 uses FULL variant string (e.g., "Paco Medina Thing variant") for most specific eBay search.
-- Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
-- Sanity comparison base: `sanityCompsAvg = compsAvg` — ALWAYS raw. eBay listings already reflect market grade (sellers grade in title), so multiplying by gradeMultiplier would double-count. Both sides of the comparison (pcNum = PC base × mult, compsAvg = at-grade market) are already at-grade.
-- Sanity thresholds high: `lowCompsCount<3 || isMixedFallback` → 1.25x; Golden <1970 → 3x; Silver/Bronze <1985 → 1.75x; Modern ≥1985 → 1.5x. Low: 0.5x always.
-- Sanity check input preference: `fallbackMedian || blendedAvg || compsFromEbay?.average`. On any fallback flag (reprint/variant/aiVerify) uses median of `rawComps.prices` instead of mean.
-- aiVerifyFallback fires when AI verify rejects every checked listing but raw comps existed — switches sanity to median of raw prices + 1.25x threshold.
-- Sanity low-side condition: `pcNum < sanityCompsAvg × 0.5` only.
-- **browse_api prices: NO grade multiplier.** eBay listings already reflect market grade. Grade mult only applies to PriceCharting base prices (NM-equivalent). Sanity fallback uses raw `compsAvg`, not `adjAvg`. Browse primary fallback uses `browseBase` directly. `gradeMultiplier` is still recorded on `out` for floor guard but not applied to browse_api prices.
-- Variant mult: PC source only — gated by `isFromPC` flag.
-- Key mult: PC source only — gated by `isFromPC && blendedAvg` (requires comps to validate).
-- Key mult tiered: major (1st appearance, first appearance, origin, death, first issue) ×1.5; minor (2nd, second app, first cover, cameo, iconic, classic) ×1.2; other ×1.0.
-- `isFromPC = !!priceCharting?.price && !sanityFired && out.pricingSource === 'pricecharting'` — snapshotted after PC/sanity branch, before floor/variant/key blocks.
-- Floor guard field: `rawComps.lowest` (not `lowestNum`) — comps.js returns `lowest`.
-- Floor guard: raw `rawFloor` (no grade multiplier). eBay comps already reflect market grade. Capped at `compsAvg`.
-- eBay comps search: attempt 0 = title + issue + full variant + year + publisher (most specific, capped 100 chars); falls through to attempt 1 (short variant + year), then attempt 2 (no year), etc.
-- Comps attempt loop runs filters INSIDE the loop; only breaks on `parsed.length > 0` (post-filter survivors), not `raw.length > 0`. Too-specific attempts that match only junk fall through to broader queries instead of starving them.
-- `cleanTitleForSearch` replaces apostrophes/quotes/!? with a SPACE (not empty). "D'Orc" → "D Orc" so eBay tokenizes to match actual listings; empty replacement collapsed to unmatchable "DOrc".
-- Browse API call: `limit=100`, `sort=bestMatch`, `buyingOptions:{FIXED_PRICE|AUCTION}`. Raises raw pool 5x and includes auction data.
-- SLAB_RE (raw filter) requires explicit slab indicator — `/\b(cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|signature\s+series|verified|qualified)\s*(?:ss|signature\s+series|<tier>)?\s*\d+(\.\d+)?/i`. PSA (grades comics too) + EGS/HGA/CGC Signature Series covered. The `(?:ss|signature\s+series|...)` middle group catches "CGC SS 9.8" / "CBCS SS 7.0" — without it the SS abbreviation between cert org and grade broke the match (CGC SS 9.8 was leaking into raw comp pools). Bare "9.4" in a raw seller's self-grade does NOT trigger.
-- Cover-letter matching (Filter 1d in comps.js): Cover A, B, C, D are separate books with separate prices. When our variant is empty / "Cover A" / "1st print": drop listings with Cover B/C/D/... in title. When our variant is "Cover B/C/...": keep ONLY listings with that specific letter (fall back to all if zero match).
-- VARIANT_CONTAM_RE policy REVERSED (`2c17f2b`) — now INCLUDES `\bvariant\b`. Full pattern: `\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1|\bexclusive\b|\bsketch\b|\bexcl\.?\b`. Rationale: "Cover A Variant"-tagged listings ARE usually true variants in modern catalogues (artist exclusives, store variants, ratio incentives). Filter 1b-creator + creator-aware grading prevents over-filtering of legit Cover A listings. ALSO ADDED: `\bexclusive\b`, `\bsketch\b`, `\bexcl\.?\b` (catches Pat Ventura "Excl Variant"-style abbreviations; word-boundary prevents "excellent" match), `\btype\s+1` (Type 1A/1B Marvel distribution variants), `\bprice\s+variant\b`. REMOVED: `\bcanadian\b` — Canadian price-variant listings will now PASS through (policy decision; flag if unintended).
-- Lot/set filter (Filter 1e in `api/comps.js`, between cover-letter and slab): drops multi-book lot listings from single-book comps. LOT_RE alternations: `\b(lot|bundle|complete set|full run|comic library|comic collection)\b` | `#?\d+\s*[-–—]\s*#?\d+` (issue range like `#1-5`) | `\b\d+\s*(book|issue|comic)s?\s*(lot|set)\b` (qualifier REQUIRED — bare "1 Issue Comic Book" must not match) | `\bset of \d+\b`. Skipped when our book's `variant` contains `lot|set|bundle` (user explicitly cataloguing a lot).
-- Creator field (`api/grade.js` + `api/enrich.js` + `api/comps.js`, commit `6074f24`): `JSON_SHAPE` now includes `"creator": string or null` — Vision extracts the main cover artist from cover credits / signature on modern books (1990+), null otherwise. NEVER guesses from style. `enrich.js` passes `creator: req.body.creator || null` into `fetchComps`. New Filter 1b-creator (between Filter 1b variant-contam and Filter 1c variant-preference): when `!variant && creator && p.length > 0` and `creator.length >= 3`, prefer comps whose lowercased title contains the lowercased creator name. Graceful fallback to keep all if <2 match. Solves the "D'Orc #1 Cover A by Brett Bean" case where exclusive variants by other artists (Mel Milton, Akira Homage, Pat Ventura) were poisoning the Cover A average.
-- Title-similarity tokenizer overhaul (`api/comps.js`, commit `b6df77e`): `MIN_TOKEN_LEN = 2` (was 4). New `STOP_WORDS` set: `the, a, an, of, and, or, in, on, at, to, for, with, comic, comics, comicbook, issue, volume, vol, marvel, dc, image, dark, horse, idw`. `tokenizeTitle` now also drops pure-digit tokens (`/^\d+$/`). `hasSufficientTitleOverlap` rewritten to tokenize the listing title too and require ≥50% overlap of our search tokens with listing tokens (returns true when our tokens are all stop-words — e.g. "Dark Horse Comics" — to let other filters take over). Fixes short-word series (Tip Top, Mad, X-Men, G.I. Joe, Sgt. Rock, Tor, ROM) that previously tokenized to just `["comics"]` (or empty) and matched every comic listing on eBay. Stop-words STAY in the eBay search query — only the similarity-match step ignores them.
-- Lot/set range refinement (`api/comps.js`, commit `b6e06be`): the bare `#?\d+\s*[-–—]\s*#?\d+` alternation was killing valid singles like "Konga #2 - FN- (5.5) - Charlton 1961 - 10 Cents" (matched `1961-10`) and "Marvel Super Heroes #1 - 1966" (matched `1-1966`). Replaced with `isValidIssueRange()` helper inside Filter 1e: matches each `#?N - #?M` pair, then for each pair skips if (a) M is a year `1800-2050`, (b) M is a decimal grade `<=10` containing `.`, (c) first >= second (descending = not a range), or (d) either bound is non-integer or M >= 1000. Only returns true for ascending whole-number issue ranges like `#1-5` / `#100-150`. The base LOT_RE regex no longer carries the range alternation.
-- Finding API skipped by default (`api/comps.js`, commit `06c3ebb`): module-level constant `USE_FINDING = process.env.EBAY_USE_FINDING === 'true'` — defaults to FALSE. eBay's Finding API was returning 500 errorId 10001 100% of the time as of late April 2026, wasting ~2.5s per attempt (1s call + 2s backoff + 1s retry that also failed). Bypassed entirely; every comp call goes straight to Browse. `tryFindCompleted` itself is left intact for future re-enable. Wall-clock enrich dropped from ~5.0s to ~1.87s (-62.5%) on warm Lambda. Set `EBAY_USE_FINDING=true` in Vercel env to re-enable for diagnostic comparison if eBay restores the endpoint.
-- TPB / collected-edition pipeline (`api/comps.js`): three coordinated changes for TPB pricing. (a) `TPB_MARKER_RE = /\b(tpb|trade paperback|hardcover|hc|omnibus|compendium|deluxe(\s edition)?|absolute(\s edition)?|treasury(\s edition)?|collected edition|graphic novel|gn)\b/i` — module-level constant. (b) ARROW 1: when title matches TPB_MARKER_RE (`isTPB === true`), `attempts.unshift` a `tpb-aware`-labeled query with NO `#issue` (`<cleanTitle> [marker if not in title] <year> <publisher>`) — strips eBay's floppy-bias (single-issue floppies vastly outnumber rare collected editions in eBay's relevance ranking). (c) ARROW 2: Filter 1g requires comp listing titles to contain a TPB_MARKER_RE marker when `isTPB`; graceful fallback to keep all if zero matches. (d) Filter 0a relaxation: when `isTPB`, accept listings that contain EITHER `#issueNum` OR a TPB_MARKER_RE marker — TPB sellers typically write "TPB Vol 1" or omit issue numbers entirely (a TPB is one product, not a serial), so the standard `#1` requirement was nuking real TPB listings before Filter 1g could see them.
-- `out.confirmedYear` + `out.yearCorrected` surfaced from `/api/enrich`. App.jsx enrich callbacks (initial scan, auto-refresh, manual refresh, bulk import) heal `item.year` when `yearCorrected === true`.
-- Year override guard (`api/enrich.js`): `confirmedYear` derivation is trust-but-verify, not blind chain. Order: (a) era-specific keyIssue regex (`silver age|bronze age|king-size|giant-size|annual|spectacular|first issue`) → trust user year; (b) PC and CV agree within ±2y → use average; (c) PC within ±2y of user → PC wins; (d) CV within ±2y of user → CV wins; (e) PC/CV both >2y from user → keep user year, set `out.yearOverrideRejected = true`, log `[enrich] year override REJECTED`. Prevents wrong-volume CV matches (e.g. Marvel Super-Heroes vol 2 1980 hijacking 1966 King-Size Special) from poisoning the comps query.
-- Variant comp preference (Filter 1c): when variant set, prefer comps whose titles match variant-specific words (min 2 matches to filter, otherwise keep all).
-- Atlas/pre-Marvel publishers: append "Atlas Marvel" to eBay query (sellers use both terms interchangeably).
-- Dell Four Color alias (`api/comps.js`): when `publisher` contains "Dell" AND `issue > 100`, append three alias attempts — `Four Color #N <title> <year>`, `Four Color #N <title>`, `Dell Four Color N`. Also seeds `four`/`color` into `searchTokens` so alias-only listings (without character name) pass the title-overlap filter. Dell's Four Color anthology ran issues 1-1354 (1939-1962), one character per issue, and sellers list three ways.
-- Artist-specific variant priority (`api/comps.js`): when `variant` matches ARTIST_PATTERNS, `attempts.unshift` an `artist-specific` query: `<title> #<issue> <artist> [virgin] <year> <publisher>`. If the winning query lacks the artist name, returns `artistFallback: true` + `compBasis: 'generic-variant-fallback'`. Surfaced via `out.artistFallback` / `out.compBasis` from `/api/enrich` in both the pricecharting and browse_api branches. ARTIST_PATTERNS = 36 entries (commit `e139caa`): multi-word patterns FIRST so first-match-wins via `break` captures the longer name before single-word fallbacks — `tyler kirkham`, `jim lee`, `inhyuk lee`, `skottie young`, `frank cho`, `frank miller`, `windsor.?smith`, `dell'?otto`; then single-word — skan, rapoza, quash, momoko, ross, adams, kirkham, bean, andolfo, browne, forstner, howard, corona, stegman, ottley, jimenez, mcfarlane, campbell, artgerm, nakayama, hughes, byrne, perez, kirby, ditko, mele, albuquerque, hama.
-- Auto-refresh stale prices: collection tab only, no book detail open (`selectedItem === null`), 60s cooldown via `lastAutoRefreshRef`.
-- Sold comps: filtered by `#issue\b` regex before blending into `soldAvg` — prevents wrong-issue sold data from corrupting the 60% sold weight.
-- Bulk import: non-comic rejection, duplicate detection, publisher-as-title guard, full enrich field parity with single scan.
-- GoCollect CGC FMV: runs in enrich Promise.all, returns null without API key. Shows purple panel in CollectionDetail with FMV at 9.8/9.6/9.4. Submit recommendation: `fmv98 > rawEquiv + $50 && gap >= 2x`. Manual override via `item.userFmv98` persisted to IndexedDB.
-- Buyer sessions stored in localStorage key `cv_buyer_sessions` (last 100 entries).
-- Budget persisted in localStorage key `cv_buyer_budget`.
-- Buyer settings persisted in localStorage key `cv_buyer_settings` (whatnotFee, supplies, labor, minProfit).
-- Net profit formula: `marketValue - marketValue*(whatnotFee/100) - supplies - labor - bid`.
-- BUY/PASS auto-suggested: BUY when netProfit ≥ minProfit and within budget; PASS otherwise.
-- Net profit color: green ≥ minProfit, yellow > 0 but < minProfit, red ≤ 0.
-- FloatingSearchBar has two modes: 🔍 search (local filter) and 🧠 claude (AI query) — never mix.
-- Share Target switches to Buyer tab, strips `?share-target=1` from URL, clears widgetMode, and calls `gradeBlob(blob, { save: false })` — no widget overlay.
-- Collection list paddingBottom is dynamic: 220px when Claude card visible, 100px otherwise.
-- `api/chat.js` receives optional `buyerSessions` with Whatnot buying history for Claude context.
-- **Navigation gesture guards** (`src/App.jsx` CollectionDetail): swipe navigation requires touch duration ≤500ms AND horizontal movement >50px AND `|dx| > |dy|` (horizontal dominant over vertical). Otherwise treats as scroll. `touchStartX`/`touchStartY`/`touchStartT` refs. Prevents long-press-drag false-positive swipes during vertical scrolling.
-- **Comp confidence tier by count** (`api/comps.js computeMatchConfidence`): 0 comps → score 0, tier LOW, `displayMessage: "No eBay comps found — AI estimate only"`. 1 comp → max score 60, tier LOW, "Only 1 comp found — limited data". 2 comps → max score 75, tier MEDIUM (only if ≥65 else LOW), "Limited comps — verify before listing". 3+ comps → full scoring range. `enrich.js` now prefers `mc.displayMessage` when returned, falls back to tier-based default otherwise.
-- **Publisher string cleanup** (`api/comps.js cleanPublisher` exported, `api/enrich.js:13,561-565`): strips `()` `[]` `{}` `"` `'` `/` `\` `&` `?` → space, collapses whitespace. Applied at handler entry so ComicVine scoring, fetchComps, GoCollect all see the clean version. `"Hollywood Comics (Walt Disney)"` → `"Hollywood Comics Walt Disney"`. fetchComps 20-char pubKeyword cap raised to 35 to accommodate parent+imprint combinations.
-- **Filter order — hard first, soft last** (`api/comps.js`): full order is title-similarity (Filter 0c) → reprint (1) → VARIANT_CONTAM_RE (1b, hard reject) → variant preference (1c) → cover-letter (1d) → lot (1e) → half-issue (1f) → TPB format (1g) → slab (2) → grade proximity (3) → **creator match (3b, SOFT preference)** → price sanity (4) → dedup (5). Creator match MOVED from position 1b-creator (ran before many hard filters) to 3b (after all hard rejects). Re-applies `VARIANT_CONTAM_RE` as a hard guard inside creator match — so even in variant-fallback mode (pool kept because all comps were variants), creator preference cannot select a variant listing. `VARIANT_CONTAM_RE` hoisted to module scope. Fixes Usagi Yojimbo #1 Cover A where "RI-C Variant Eastman" was slipping through on creator match.
-- **Vision confidence + match tier sync** (`api/enrich.js:1181-1213`): reads req.body.confidence (grade.js Vision "high"/"medium"/"low"). matchConfidence measures "do comps match identified book?" but can't detect misidentification — Vision confidence caps it. Vision LOW + Match HIGH → tier → MEDIUM, score → min(score, 75), `visionCapped: true`, `originalScore` preserved, `displayMessage: "Vision confidence low — verify identification"`. Vision LOW + Match MEDIUM → keeps MEDIUM, adds same visionCapped flag/message. Vision LOW + Match LOW → unchanged. Vision MEDIUM + Match HIGH → `visionModerate: true` flag only (no tier change). Vision HIGH → untouched. `out.visionConfidence` always surfaced. `src/App.jsx:2001-2027` warning panel triggers on `tier === 'LOW'` OR `visionCapped === true`; visionCapped shows enhanced copy: "AI identification uncertain — confirm book identity before listing. Match score reduced from X to Y due to low Vision confidence."
 
-## Verified Pricing Fixes — 4/15/2026 (commit 8d70e12 → 47705c7)
-All pricing fixes confirmed intact:
-- **NO_PREMIUM**: corner box, masterpieces, design variant, headshot, trading card, cover a/b/c/d, marvel legacy, legacy
-- **Key mult tiered**: major ×1.5 / minor ×1.2 — gated by `isFromPC && blendedAvg` (no comps = no key mult)
-- **Blended comps**: `soldAvg * 0.6 + activeAvg * 0.4` (sold-only ×1.1, active-only as-is)
-- **Sanity check**: uses blendedAvg, thresholds 0.5x low / 2x modern / 3x Silver high
-- **Floor guard**: `rawComps.lowest × gradeAdj`
-- **Variant filter**: comps.js drops variant/virgin/foil/ratio/incentive listings when not searching for variant
-- **Share target**: SW cache + Vercel fallback route + 6× retry in App.jsx
+### Architecture (top priority)
+- **Vercel function cap is 12** (Hobby plan). Every `.js` file in `api/` becomes its own serverless function endpoint, regardless of whether it has a default-exported HTTP handler. Current count: 12/12 — adding a new file in `api/` will fail deploy.
+  - Pure UI helpers belong in `src/lib/` (no HTTP handler). `App.jsx` imports relatively.
+  - Pure server helpers used by `api/enrich.js` go INLINE in that file (`computeSanityFallback`, `computeThinPoolAnchor`, `computeLowGradeFloor`) OR in `src/lib/` and imported via `../src/lib/X.js` — Vercel bundles transitively.
+  - Filename convention: kebab → camel for helpers (`listPriceWarning.js`, matches `src/db.js`).
+- **Pricing-math greenlight protocol:** never modify pricing math (grade multipliers, sanity checks, floor guards, key/variant multipliers, comp-pool composition logic in `api/enrich.js` or `api/comps.js`) without explicit user instruction. Layer A trust hardening (display gates, ID checks, advisories) does NOT require greenlight; Layer B accuracy changes do. When uncertain whether a change crosses into pricing math, ask first.
+- **Auto-deploy on push to main.** Production deploys trigger automatically. Verify locally before push: `npm run build` clean, tests passing.
+- **Investigation-first protocol:** when a bug is reported or surfaced, investigate root cause before implementing. Don't bypass safety checks (`--no-verify`, etc.) as a shortcut.
+- **Diff-before-commit on all changes.** Show the user the diff for review before committing high-impact admin changes.
+- **Phone validation immediately after deploy.** Tests verify code correctness, not feature correctness. Production behavior must be observed on real scans before next ship.
+- **Conservative direction preferred when uncertain.** Bias toward under-pricing rather than over-pricing on weak signals; under-confident rather than over-confident on identification.
+
+### Pricing stack (do not reorder without greenlight)
+- Stack: PriceCharting → grade multiplier → sanity check → defect penalty → floor guard → browse_api fallback.
+- PriceCharting year threshold: 5 years max gap between comic year and product year.
+- PriceCharting skipped when `issue=null`.
+- Visual search only overrides with 3+ matches.
+- Non-comic titles ("not a comic", "unknown") rejected at enrich entry.
+- AI verify: accept variant/cover B listings if same character + issue number. Year tolerance ±1-2y (cover-date vs publication-date drift).
+
+### Era cutoffs
+- `getEra(year)`: `parseInt(year) >= 1985 ? 'modern' : 'vintage'`. Null/undefined/0/empty-string → vintage (safe default).
+- Sanity thresholds use a SECOND boundary: comic-community Silver Age start = 1956 (Showcase #4). Boundary asymmetry is documented in `computeSanityFallback` docstring.
+- Bundle ERA bands (display only): Golden <1956, Silver ≤1970, Bronze ≤1984, Copper ≤1991, Modern 1992+.
+
+### Grade multipliers (era-aware)
+- `CGC_MULTIPLIERS` and `RAW_MULTIPLIERS` split into `{ vintage, modern }`. Vintage tables preserved exactly (calibrated). Modern damped: CGC 9.4 2.2→1.35, 9.8 5.0→2.2, VF+ 8.5 1.3→1.05, 10 12.0→3.0.
+- Modern RAW: graduated upper-curve damp (NM 1.00→0.90 through VG 0.45→0.40), flat tail below VG/G (sub-GD trades on condition, not era).
+- Multiplier table is calibrated. Never modify without explicit instruction.
+- `getGradeMultiplier(grade, year)` and `getRawGradeMultiplier(gradeStr, year)` — use `confirmedYear || year`.
+
+### Sanity check (`computeSanityFallback`)
+- **Sanity comparison base:** `sanityCompsAvg = compsAvg` — ALWAYS raw. eBay listings already reflect market grade; multiplying by gradeMultiplier double-counts.
+- **High thresholds:** `lowCompsCount<3 || isMixedFallback` → 1.25x; Golden <1970 → 3x; Silver/Bronze <1985 → 1.75x; Modern ≥1985 → 1.5x.
+- **Low threshold:** Silver+Bronze (1956–1984) → 0.6×; all other eras → 0.5×. Asymmetry documented in helper.
+- **Gate:** `compsAvg > 1` (was `> 5`, dropped Ship #14 to catch sub-$5 modern comps).
+- **Input preference:** `fallbackMedian || blendedAvg || compsFromEbay?.average`. On any fallback flag (reprint/variant/aiVerify), uses median of `rawComps.prices` instead of mean.
+- **Skip when:** mega-key book OR `compsExhausted` (AI verify rejected 100%).
+- `aiVerifyFallback` fires when AI verify rejects every checked listing but raw comps existed. Tightened: requires `(verifyCount - verifiedCount) / verifyCount < 1.0`. New `compsExhausted` flag for the 100% case.
+
+### Floor guard
+- Field: `rawComps.lowest` (not `lowestNum`).
+- Raw `rawFloor` (no grade multiplier — eBay comps already reflect market grade). Capped at `compsAvg`.
+- Skip when: mega-key book OR `compsExhausted`.
+
+### Browse_api path
+- **No grade multiplier.** eBay listings already reflect market grade. `gradeMultiplier` still recorded on `out` for floor guard but not applied to browse_api prices.
+- Variant mult and key mult: PC source ONLY — gated by `isFromPC` flag.
+- `isFromPC = !!priceCharting?.price && !sanityFired && out.pricingSource === 'pricecharting'` — snapshotted after PC/sanity branch, before floor/variant/key blocks.
+
+### Variant multipliers (descending, first substring match wins)
+triple cover ×10, double cover ×8, 35¢/35 cent ×6, 30¢/30 cent ×4, inverted ×4, gold ×3, printing error ×3, miscut ×3, mark jewelers ×2.5, canadian price ×2, price variant ×2, type 1a/1b ×2, canadian ×1.8, whitman ×1.8, 2nd/second print ×1.5, pence ×1.5, dc universe logo ×1.5, newsstand ×1.3.
+- Test-market variants gated by allowlist: `TEST_MARKET_KEYS` map (`'35 cent'` → `'35¢'`, etc.) + `TEST_MARKET_VARIANTS` bucket per key. 35¢ window June-Oct 1977 (52 series / 184 issues). 30¢ window Apr-Aug 1976 (57 series / 182 issues). Pattern extends to Whitman / Mark Jewelers / Type 1A-1B by adding bucket.
+- Composition damping (Bug 4): `variantRatio = variantHits / rawComps.prices.length`. Ladder: >0.80 → ×0.5 damping, >0.50 → ×0.75 damping, ≤0.50 → full mult.
+- **NO_PREMIUM list:** corner box, masterpieces, design variant, headshot, trading card, cover a/b/c/d, marvel legacy, legacy.
+
+### Key multipliers (PC source only, requires comps)
+- Tiered: major (1st appearance, first appearance, origin, death, first issue) ×1.5; minor (2nd, second app, first cover, cameo, iconic, classic) ×1.2; other ×1.0.
+- Gated by `isFromPC && blendedAvg` — without comps to validate, no multiplier applied.
+
+### Comp filter chain order (`api/comps.js`, hard first / soft last)
+title-similarity (Filter 0c) → reprint (1) → VARIANT_CONTAM_RE (1b, hard) → variant preference (1c) → cover-letter (1d) → lot (1e) → half-issue (1f) → TPB format (1g) → slab (2) → signed (2b) → grade proximity (3) → **creator match (3b, SOFT)** → price sanity (4) → dedup (5).
+Filters run INSIDE the attempt loop; loop only breaks on `parsed.length > 0` (post-filter survivors), not `raw.length > 0`. Too-specific attempts that match only junk fall through to broader queries.
+
+### Filter regex catalogs
+- **SLAB_RE:** `/\b(cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|signature\s+series|verified|qualified)\s*(?:ss|signature\s+series|<tier>)?\s*\d+(\.\d+)?/i`. Middle SS group catches "CGC SS 9.8" / "CBCS SS 7.0". Bare "9.4" in raw seller's self-grade does NOT trigger.
+- **SIGNED_RE:** `/\b(?:signed|signature\s+series|autographed?|yellow\s*label|green\s*label|remarked?)\b/i`. Bare `SS` omitted (false-positive risk: SS-Squadron). Blue label omitted (= Universal).
+- **VARIANT_CONTAM_RE:** `\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1|\bexclusive\b|\bsketch\b|\bexcl\.?\b`. Includes bare `\bvariant\b` (artist exclusives, store variants). Hoisted to module scope. Re-applied inside creator match.
+- **REPRINT_RE:** detects reprint/facsimile/later printing. Pre-filter set kept when filter would remove all; raises `reprintFallback` flag.
+- **TPB_MARKER_RE:** `/\b(tpb|trade paperback|hardcover|hc|omnibus|compendium|deluxe(\s edition)?|absolute(\s edition)?|treasury(\s edition)?|collected edition|graphic novel|gn)\b/i`.
+- **LOT_RE:** `\b(lot|bundle|complete set|full run|comic library|comic collection)\b | \b\d+\s*(book|issue|comic)s?\s*(lot|set)\b | \bset of \d+\b`. Qualifier REQUIRED on book/issue/comic alternation. Issue-range detection separated to `isValidIssueRange()` — skips year-like (1800-2050), decimal grades, descending pairs.
+- **EDITION_WARNING_PATTERNS** (`api/grade.js`, Ship #19): 8 regex patterns scanning Vision `reason` text for reprint/facsimile/later-printing/"not the first print" signals. Sets `editionWarning.detected` for UI gate. Does NOT modify pricing.
+
+### Cover-letter matching (Filter 1d)
+Cover A, B, C, D are separate books with separate prices. When variant is empty / "Cover A" / "1st print": drop listings with Cover B/C/D+ in title. When variant is "Cover B/C/...": keep ONLY that letter (fall back to all if zero match).
+
+### TPB pipeline
+1. ARROW 1: when title matches TPB_MARKER_RE, `attempts.unshift` `tpb-aware` query with NO `#issue` (strips eBay floppy-bias).
+2. ARROW 2 (Filter 1g): require comp titles contain TPB marker when `isTPB`. Graceful fallback if zero matches.
+3. Filter 0a relaxation: `isTPB` accepts EITHER `#issueNum` OR TPB marker.
+
+### Multi-issue detection
+`hasMultipleDistinctIssues` — counts distinct `#N` patterns, rejects ≥2. Catches "Absolute Batman #4 + #1 variant" compounds. Called from inside `hasIssueNumber` AND separately in Filter 0a.
+
+### Sequel/volume asymmetry
+`detectSeriesMarkers(title)` returns markers: `roman-ii` through `roman-x`, `vol-N`, `re-word`/`pre-word` (capitalized only), `part-N`, `book-N`, `annual-N`, `special-N`, `king-size-N`, `giant-size-N`. `?` placeholder when format word appears without number. Asymmetry filter (between 0b and 0c) rejects when listing has marker our title lacks.
+
+### Title-similarity tokenizer
+- `MIN_TOKEN_LEN = 2`. STOP_WORDS: the, a, an, of, and, or, in, on, at, to, for, with, comic, comics, comicbook, issue, volume, vol, marvel, dc, image, dark, horse, idw. Pure-digit tokens dropped.
+- `hasSufficientTitleOverlap` requires ≥50% overlap of OUR tokens vs LISTING tokens. Returns true when all our tokens are stop-words ("Dark Horse Comics") so other filters take over.
+- Stop-words STAY in eBay query — only similarity-match ignores them.
+- `cleanTitleForSearch` replaces `/['"!?]/g` with SPACE. "D'Orc" → "D Orc".
+
+### Search query construction
+- Attempt 0: `title #issue full-variant year publisher` (most specific, capped 100 chars).
+- Falls through to attempt 1 (short variant + year), attempt 2 (no year), etc.
+- Atlas/pre-Marvel publishers: append "Atlas Marvel" (sellers use both terms).
+- Dell + issue >100: append three Four Color alias attempts (`Four Color #N <title> <year>`, `Four Color #N <title>`, `Dell Four Color N`). Seeds `four`/`color` into searchTokens.
+- ARTIST_PATTERNS match against `variant` → `attempts.unshift` `artist-specific` query: `<title> #<issue> <artist> [virgin] <year> <publisher>`. 36+ entries; multi-word patterns FIRST so first-match-wins captures longest. Recent additions: jeehyung lee, alex ross, kaare andrews, fabok.
+- Variant short keywords only in attempts 1-2. Attempt 0 uses FULL variant string.
+
+### Browse API call
+`limit=100`, `sort=bestMatch`, `buyingOptions:{FIXED_PRICE|AUCTION}`. Raises raw pool 5x, includes auction data.
+
+### Finding API
+Skipped by default. `USE_FINDING = process.env.EBAY_USE_FINDING === 'true'`. eBay's Finding API was returning 500 errorId 10001 100% of the time as of late April 2026. Wall-clock enrich 5.0s → 1.87s. `tryFindCompleted` left intact for future re-enable.
+
+### Sold comps (Ship #20a + #20a.6)
+- Source: PriceCharting sales-history scrape (eBay Marketplace Insights gated, eBay Finding bypassed). Same HTML as pop extractor — zero new requests, 24h cache.
+- `verifySoldComps(rawRows, ctx)` filter chain: titleMismatch → issueMismatch → annualMismatch → printingMismatch → variantMismatch → slabMismatch → signed → lot → gradeMismatch → stale → outlier.
+- Surfaces `out.soldComps` (verified) + `out.soldCompsRaw` + `out.soldCompDiagnostics` (`{ rawCount, verifiedCount, rejectedCount, reasons: {...}, rejectedSamples: [top 3] }`).
+- `blendedAvg = soldAvg × 0.6 + activeAvg × 0.4`. Sold-only ×1.1 bump.
+- Last Sold UI chip: "📊 V of R sold verified · Xd ago" when `rawCount > verifiedCount`; "📊 N sold" when no gap.
+
+### Year override guard (`api/enrich.js`)
+`confirmedYear` derivation, trust-but-verify:
+- (a) era-specific keyIssue regex (silver age|bronze age|king-size|giant-size|annual|spectacular|first issue) → trust user year.
+- (b) PC and CV agree within ±2y → average.
+- (c) PC within ±2y of user → PC wins.
+- (d) CV within ±2y of user → CV wins.
+- (e) PC/CV both >2y from user → keep user, set `out.yearOverrideRejected = true`.
+
+`out.confirmedYear` + `out.yearCorrected` surfaced. App.jsx enrich callbacks heal `item.year` when `yearCorrected === true`.
+
+### Mega-keys (`api/mega-keys.js`, 29 entries)
+- 10 Golden / 15 Silver / 2 Bronze / 2 Modern.
+- Two types: MEGA (has `grades` bucket map) and MANUAL (Action #1, Superman #1; null grades, manual review only).
+- Strict canonical match: `getMegaKeyEntry(title, issue, publisher, year)`. Pre-1962 entries `yearTolerance: 2`; post-1962 `yearTolerance: 1`. `normalizePublisher` collapses Timely/Atlas → marvel.
+- Three-tier badge: VERIFIED (green) / ESTIMATED (yellow) / MANUAL REVIEW (red, `pill-manual-review`) / GRADE EXCEEDS MAP (amber).
+- Listing button hard-blocked on MANUAL + GRADE EXCEEDS MAP.
+
+### CGC penalty-aware Vision (Ship #18, STANDARD_PROMPT only)
+Detects: store stamps, staple popping, polybag indents, corner chips, pedigree stamps. `out.cgcPenaltyFlags` nested object plumbed through 8 merge paths × 1 line. `pedigreeRegistry.js` 22 canonical pedigrees + aliases, strict match (no fuzzy). `lookupPedigree` and `enrichPedigree` helpers.
+
+### Watch Mode pipeline
+- Pass 1 — Sonnet fast ID (watch-optimized prompt: "read directly from cover, do not infer"). Confidence=high + title not unknown → return (1 pass).
+- Pass 2 — Sonnet self-correction (sends pass 1 result as context). Not low → return (2 passes).
+- Pass 3 — Opus escalation (full STANDARD_PROMPT). Same Vision flags as standard scan apply (CGC penalty + pedigree).
+- Headers: `x-watch-passes` (1/2/3), `x-watch-timing` (JSON ms per pass).
+- Standard scan: single Opus call.
+- Cost optimization: `body.source === 'watch'` routes to Sonnet. Standard requests stay on Opus 4.7.
+
+### Voice + text context (Watch Mode)
+Web Speech API continuous mode + text input share `watchContext` state — last one wins. `voiceContext` POST → grade.js appends `"\nSeller said: {context}. Use this context to improve accuracy."` to user prompt. Auto-bid: regex extracts first `$N` from transcript. Android fallback: SpeechRecognition constructor check + try/catch on `.start()` + onerror handler all show "Type context above instead".
+
+### Match confidence
+- 0 comps → score 0, tier LOW, `displayMessage: "No eBay comps found — AI estimate only"`.
+- 1 comp → max 60, LOW, "Only 1 comp found — limited data".
+- 2 comps → max 75, MEDIUM (only if rawScore≥65 else LOW), "Limited comps — verify before listing".
+- 3+ comps → full scoring.
+- Vision confidence caps match confidence: Vision LOW + Match HIGH → tier MEDIUM, score min(score, 75), `visionCapped: true`. Vision LOW + Match MEDIUM → keeps MEDIUM + flag. Vision MEDIUM + Match HIGH → `visionModerate: true` flag only.
+
+### List-price warning (`src/lib/listPriceWarning.js`)
+Pure UI banner. Three triggers, worst pctOver surfaced:
+- A: `listPrice > engineRec × 1.25` (25% over).
+- B: `listPrice > comps.highest × 1.20` (20% over).
+- C: `listPrice > comps.average × 1.50` (50% over).
+
+Skip flags: `megaKeyFloorApplied`, `manualReviewRequired`, `gradeExceedsMap`. Session-only dismiss (per-book, no localStorage).
+
+### Low-grade floor anchor (Ship #17, `computeLowGradeFloor`)
+When `pop.belowGrade === 0` (user grade is bottom of CGC census) AND `pricingSource === 'browse_api'` → re-anchor `out.price` to `rawComps.lowest`. Skip flags: `isMegaKey`, `compsExhausted`. Position: AFTER thin-pool anchor, BEFORE mega-key floor.
+
+### Thin-pool anchor (Ship #13.1, `computeThinPoolAnchor`)
+When `rawComps.count < 3`, cap `out.price` at `rawComps.highest × 1.05`. No `isFromPC` gate. Skip flags: `isMegaKey`, `compsExhausted`. Surfaces `out.thinPoolAnchored`. priceNote suffix `· thin-pool anchor`.
+
+### Multi-key extraction from comps (Ship #12a)
+8 `COMP_KEY_PATTERNS`: first-appearance, origin, death, intro, first-told, cameo, second-appearance, first-cover. `extractKeyFromComps(titles)` returns `{ consensus: hits>=2, singletons: hits===1 }`. `cleanCompPhrase` strips trailing CGC suffix/year/grade. `titleCaseKeyPhrase` preserves punctuation. Sources cap 3 per entry.
+**Display only** — `out.keyIssue` resolution chain unchanged. Promotion to keyIssue (Ship #12b) gated behind future explicit greenlight.
+
+### Premium creator credits (Ship #16, `src/lib/premiumCreators.js`)
+80 tiered creators (legend 20 / premium 25 / modern-premium 20 / current 15). `extractCreatorsFromComps(titles)` returns `{ consensus, singletons }`. Alias policy: 39 unambiguous last-names allowed (Wrightson, Aparo, Kirby, Ditko, McFarlane, Mignola, Capullo, Dell'Otto, Artgerm, ...); full-name required for ambiguous (Neal Adams vs Arthur Adams, Jim Lee vs Stan Lee, Frank Miller vs Mike Miller). Optional `role: 'writer'|'artist'|'cover'`.
+**Display only.** Ship #16b (creator-aware multiplier) gated behind explicit greenlight.
+
+### App.jsx merge paths
+5 client merge paths plumb enrich response fields through IndexedDB: auto-refresh→catalogue, scan→catalogue, scan→selectedItem, bulk-import→catalogue, refreshMarketData. Pattern: `enrich.X || cur.X || defaultValue`.
+
+### Auto-refresh
+Collection tab only (`tab === 'collection'`), no book detail open (`selectedItem === null`), 60s cooldown via `lastAutoRefreshRef`. Skips items imported in last 5 minutes (`Date.now() - (c.timestamp || 0) < 300000`).
+
+### Bulk import
+Non-comic rejection, duplicate detection (title+issue+year case-insensitive), publisher-as-title WARN (not block) via `data.titleWarning = true`, full enrich field parity. Progress indicator via `bulkEnrichProgress` state.
+
+### Buyer / Whatnot
+- Buyer sessions: localStorage `cv_buyer_sessions` (last 100).
+- Budget: localStorage `cv_buyer_budget`.
+- Settings: localStorage `cv_buyer_settings` (whatnotFee, supplies, labor, minProfit).
+- Net profit: `marketValue - marketValue×(whatnotFee/100) - supplies - labor - bid`.
+- BUY/PASS auto-suggested: BUY when netProfit ≥ minProfit and within budget.
+- Net profit color: green ≥ minProfit, yellow > 0 but < minProfit, red ≤ 0.
+
+### eBay listing
+Title includes variant (newsstand, gold, 2nd print, etc.) between issue and grade. Filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot).
+
+### GoCollect CGC FMV
+Runs in enrich Promise.all, returns null without API key. Purple panel in CollectionDetail with FMV at 9.8/9.6/9.4. Submit recommendation: `fmv98 > rawEquiv + $50 && gap >= 2x`. Manual override `item.userFmv98` persisted. CGC submission profit scenarios for raw books — gradingCost $35 + pressCost $20 = $55 against `getDisplayPrice`.
+
+### Misc
+- Publisher cleanup: `cleanPublisher(p)` strips `()` `[]` `{}` `"` `'` `/` `\` `&` `?` → space. Applied at handler entry.
+- FloatingSearchBar: two modes — 🔍 search (local filter) vs 🧠 claude (AI query). Never mix.
+- Share Target: switches to Buyer tab, strips `?share-target=1`, calls `gradeBlob(blob, { save: false })` — no widget overlay.
+- Collection list paddingBottom: 220px when Claude card visible, 100px otherwise.
+- Navigation gestures (CollectionDetail): swipe requires duration ≤500ms AND `|dx| >= 50` AND `|dx| > |dy|`.
 
 ## Features
-- **Bundle listing**: Manage tab → "📦 Create Bundle" chip → tap tiles to multi-select → floating bar shows `$sum → $bundlePrice (18% off)` → "List Bundle" posts to `/api/list-ebay` with `{ bundle: true, items: [...] }` → single eBay listing (all items marked `status:"listed"` with shared `ebayItemId`/`bundleId`). ERA auto-detected from earliest book year (Golden <1956, Silver ≤1970, Bronze ≤1984, Copper ≤1991, Modern 1992+). Claude BUNDLE actions pre-select recommended comicIds into selection mode.
-- **Watch Mode**: Buyer tab → "👁 Watch Mode" → rear camera captures JPEG frames every 3s → `/api/grade` (self-correcting pipeline) → dedup by `title|issue` key → `/api/enrich` on new comic → shows Market + Net @ bid. Voice context (Web Speech API, continuous mode) and text hint input share `watchContext` state → appended as `"Seller said: {context}"` in grade prompt. Auto-bid parses `$N` from speech transcript. Android browser fallback: "Type context above instead" on SpeechRecognition failure.
-- **Watch Mode self-correcting pipeline** (`api/grade.js`): Pass 1 — Sonnet fast ID (watch-optimized prompt: "read directly from cover, do not infer"). If confidence=high and title not unknown → return (1 pass). Pass 2 — Sonnet self-correction: sends same frame + pass 1 result as context, asks to review/correct issue number, grade, variant. If confidence not low → return (2 passes). Pass 3 — Opus escalation: full standard prompt for final answer (3 passes). Response headers: `x-watch-passes` (1/2/3), `x-watch-timing` (JSON ms per pass). Standard (non-watch) requests use single Opus call unchanged.
+- **Bundle listing**: Manage tab → "📦 Create Bundle" chip → multi-select tiles → floating bar shows `$sum → $bundlePrice (18% off)` → "List Bundle" posts to `/api/list-ebay` with `{ bundle: true, items: [...] }` → single eBay listing (all items `status:"listed"` with shared `ebayItemId`/`bundleId`). ERA from earliest book year. Claude BUNDLE actions pre-select.
+- **Watch Mode**: Buyer tab → 👁 Watch Mode → rear camera captures JPEG every 3s → `/api/grade` self-correcting pipeline (Pass 1 Sonnet fast → Pass 2 Sonnet self-correct → Pass 3 Opus) → dedup by `title|issue` → `/api/enrich` on new comic → shows Market + Net @ bid. Voice + text context shared via `watchContext` state. Auto-bid from speech transcript.
+- **Post All HOT**: Manage tab `📋 Post All HOT (X)` button. Filters `aiTags[id]?.label === 'HOT' && status !== 'listed' && getDisplayPrice > 0`. Sequential post via `onListComic` with 1500ms between rows.
+- **Editable list price**: numeric `listPrice` input above List on eBay button. `handleList` passes `{ ...item, price: "$X.XX" }` so override drives eBay StartPrice + persists to catalogue.
+- **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 
-## Session 4/15/2026 — optimistic UI, editable list price, bundle listing
-(1) **Optimistic UI for catalogue field updates** (`bd4f319`): `updateComicField` now calls `setCatalogue` + `setSelectedItem` first so ROI / derived views render instantly, then fires `putComic(updated).catch(...)` in the background without `await`. Applies to every `onUpdateField` caller. Fixes perceived lag on "What did you pay?" blur — root cause was `putComic` rewriting the full record (including base64 `images` blob, 100-500 KB) on every field change. Added Enter-key → blur → commit on the purchasePrice input.
-(2) **Editable list price before eBay listing** (`fec065a`): CollectionDetail and WidgetOverlay expose a numeric `listPrice` input above the List on eBay button. Button label live-reflects the value; `handleList` passes `{ ...item, price: "$X.XX" }` so the override drives eBay StartPrice AND persists to the catalogue record. Resets on item change via `useEffect([item?.id])`. ResultCard is display-only — no listing button there, so not included.
+## Current State
+**Overwritten each session — never appended.**
 
-## Session 4/15/2026 — chat hardened, bundle live, audit complete
-(1) Full pricing audit verified all 5 fixes intact on `8d70e12`: NO_PREMIUM list, key mult ×1.5 PC-only, sanity low `<0.5×`, sanity high `2×` modern / `3×` Silver, floor `rawComps.lowest × gradeAdj`, share target SW+vercel+retry.
-(2) Bundle listing feature shipped (`8d70e12`): `api/list-ebay.js` bundle branch (18% off sum, era-derived title, per-item HTML description, up to 12 cover photos); Manage tab "📦 Create Bundle" chip → checkbox tiles → floating bottom bar → single eBay listing, all items marked `status:"listed"` with shared `ebayItemId`/`bundleId`. Claude BUNDLE action pre-selects recommended comicIds.
-(3) `api/chat.js` hardening (`d218b95` + `951a13c`): top-20 by displayPrice sent to Claude (totalValue still from full collection); 8s `Promise.race` timeout returns friendly fallback instead of 500; accepts both flat-array and nested `{ books:[...] }` collection shapes.
-(4) Production test against `/api/chat` with 5-comic sample: 4.5s response, 2 actions (List + Bundle), 4 metrics, 3 signals — healthy.
+- Last commit: `d971267` — Ship #20a.6 — sold comp verification + hygiene extraction
+- Test count: 1002 passing across 13 suites
+- Vercel function count: 12/12
+- Layer 1 status: ~75% (sold-verification foundation locked)
+- Layer 2 status: ~30%
+- Layer 3 status: 0% (gated)
+- Layer 4 status: 0% (scan-gated at 250+; currently ~84)
 
-## Session 4/15/2026 — pricing calibration: blended comps, tiered keys, variant filter
-(1) **Blended comps** (`9b9de52`): `enrich.js` computes `blendedAvg` from sold comps (60%) + active comps (40%) after Promise.all. Sold-only uses ×1.1 bump. Sanity check now uses `blendedAvg || compsFromEbay?.average` for better market signal.
-(2) **Tiered key multiplier** (`9b9de52`): replaces flat ×1.5 with major (1st appearance, origin, death, first issue) ×1.5 / minor (2nd, second app, first cover, cameo, iconic, classic) ×1.2 / other ×1.0.
-(3) **Key mult requires comps** (`47705c7`): key multiplier gated by `blendedAvg` — without comps to validate, no multiplier applied. House of Secrets #92 FN- 5.5 now prices at $644 (PC × grade) instead of $966 (inflated by key mult with no market validation).
-(4) **Variant contamination filter** (`9b9de52`): `comps.js` adds Filter 1b — drops listings with variant/virgin/foil/ratio/incentive keywords when NOT searching for a variant. Thor #338 comps avg dropped from $52.75 to $35.90 after filter.
-(5) **Minor key detection broadened** (`47705c7`): `keyStr.includes('2nd')` and `keyStr.includes('second app')` added to isMinorKey for Thor #337 "2nd app Beta Ray Bill" and similar.
+- Active session focus: Layer A trust hardening
+- Last validated ship: #20a.6 (phone-validated 2026-04-27)
+- Pending validation: Layer B pricing accuracy ships (#18, #19, #20a, #20a.5, #20a.7)
 
-## Session 4/15/2026 — Watch Mode: voice, text context, Sonnet routing
-(1) **Sonnet model routing** (`fb40e45`): `api/grade.js` routes `body.source === 'watch'` to `claude-sonnet-4-20250514`, all other requests stay on `claude-opus-4-6`. WatchMode sends `source: 'watch'` in POST body. ~5x cost reduction per frame.
-(2) **Voice context** (`4182221`): WatchMode mic button toggles Web Speech API continuous recognition. Transcript stored in `watchContext` state, sent as `voiceContext` in grade POST. `grade.js` appends `"\nSeller said: {context}. Use this context to improve accuracy."` to user prompt. Auto-bid: regex extracts first `$N` from transcript → sets bid → shows voice note.
-(3) **Text hint input** (`4182221`): text input below camera preview shares `watchContext` state with voice — last one wins. Clear button (✕) resets both.
-(4) **Android browser fallback** (`a38069f`): SpeechRecognition constructor check + try/catch on `.start()` + onerror handler all show "Type context above instead" instead of crashing. Three failure points covered.
-(5) **Self-correcting pipeline** (`6784aed`): `api/grade.js` rebuilt with multi-pass watch pipeline. Pass 1 Sonnet fast ID with watch-optimized prompt ("read directly from cover"). High confidence → return immediately. Pass 2 Sonnet self-correction with pass 1 context. Pass 3 Opus escalation if still low confidence. Shared helpers: `buildImageContent`, `callModel`, `parseResponse`. Response headers `x-watch-passes` and `x-watch-timing`. Standard (non-watch) path unchanged — single Opus call.
+## Recent Ships
+**Last 5 only — overwritten when 6th lands.**
 
-## Session 4/15/2026 — UX polish + variant pipeline fix
-(1) **Back button returns to correct tab** (`839f5e9`): `prevTabRef` tracks which tab opened CollectionDetail. Back from Manage → returns to Manage tab with scroll restored. Android back gesture intercepted via `popstate` listener — closes detail view instead of exiting app.
-(2) **Swipe navigation** (`0b20db7`): touch swipe left/right on CollectionDetail navigates between comics. 50px threshold to avoid accidental triggers. First-use hint "← swipe to navigate →" fades after 2s, persisted in `cv_swipe_hint_seen` localStorage.
-(3) **Stats bar** (`9d096a3`): one-line bar below title in CollectionDetail — grade pill + price + last sold + asking range (low–high from comps).
-(4) **Photo angle prompts** (`927d54e`): photo strip shows labeled placeholder buttons for missing angles (Front/Back/Spine/Pages). 1 photo → 3 placeholders, 4+ → none. Each tappable to open camera.
-(5) **Variant in eBay listing title** (`1cdf988`): `buildTitle` in `list-ebay.js` now includes `item.variant` between issue and grade. Filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot) — these add no search value. Same filter applied to `buildBundleTitle`. Pipeline trace confirmed variant flows: grade.js → App.jsx → enrich.js → comps.js (attempts 1-2 only) → list-ebay.js (was missing, now fixed).
+- `d971267` — Ship #20a.6 — sold comp verification + hygiene extraction. Pure-fn `verifySoldComps` filter chain (10 reject reasons + diagnostics). `compHygiene.js` extracted from `api/comps.js` (-271 lines). 911 → 1002 tests. Pricing-math change (greenlit).
+- `4114bcb` — Ship #20a.7 — mega-key strict canonical guard. `getMegaKeyEntry(title, issue, publisher, year)`. Schema 1.0.0 → 2.0.0. Closes TMNT #1 IDW 2016 → $15K floor false-positive. 778 → 911 tests.
+- `0e3679f` — Ship #20a.5 — PriceCharting price ladder + sales velocity extraction. `out.priceLadder` (14 grades) + `out.salesVelocity` (perDay numeric). 759 → 778 tests. Data capture only.
+- `7d20c93` — Ship #20a — restore sold data via PC sales-history scrape. `fetchPricechartingSales(productId, userGrade)`. soldComps + salesByGrade. 728 → 759 tests. Closes dead pipeline (eBay APIs gated/bypassed).
+- `357a14e` — Ship #19 MVP — AI-CROSS-LAYER-DISCONNECT (edition warning gate). 8 EDITION_WARNING_PATTERNS scan Vision `reason` text. UI gate stacks AFTER mega-key ack. 688 → 728 tests. NO pricing math (deferred to Ship #19b).
 
-## Last Session
-Session 4/24/2026 — Session 3 landmark 4-ship day. **5 production deploys, 622 unit tests passing** (99 comp-filter-hygiene + 53 comp-key-extraction + 65 creator-from-comps + 113 era-multipliers + 51 list-price-warning + 45 low-grade-floor + 61 mega-keys + 70 sanity-thresholds + 65 variant-allowlist — up from 391 baseline, +231 / +59% growth). Ship #14 closed two pricing-accuracy bug classes simultaneously (modern overpricing + Silver Age key underpricing) by recalibrating sanity thresholds; Ship #15 introduced a non-blocking yellow user-safety banner for list-price over-reach (3 evidence cases); Ship #16 extended Ship #12a's comp-title attribution pattern to detect 80 premium creator credits (4 evidence cases); Ship #17 added bottom-of-census price re-anchoring leveraging existing PC pop data with a conservative `pricingSource === 'browse_api'` gate. Vercel function cap maintained at 12/12 across all 4 ships — surfaced an architectural learning during Ship #15 that pure UI helpers belong in `src/lib/` (not `api/`) since each `api/*.js` file becomes a serverless function. Layer 1 Foundation now ~85% complete; Layer 2 Data Leverage ~25% complete via Ship #12a (display-only key extraction) + Ship #16 (display-only creator extraction).
+## Active Priority Queue
 
-**Strategic vision — layered platform** (updated): *Layer 1 Foundation* ~85% COMPLETE — Tier 0, Phase 5a, Tier 1 variants (35¢/30¢), A3 era-aware, FR-D7 (12a), comp-pool hygiene + thin-pool anchor (Ship #13/#13.1), sanity recalibration (Ship #14), list-price warning (Ship #15), creator credits (Ship #16), low-grade floor anchor (Ship #17) all shipped. Remaining: LISTING-VERIFICATION-GATE, REPRINT-VARIANT-DISAMBIG, AI-CROSS-LAYER-DISCONNECT, BAKED-IN-PREMIUM (partial via Ship #13 Bug 4), CGC-PENALTY-AWARE-VISION. *Layer 2 Data Leverage* ~25% IN PROGRESS — FR-D7 + FR-CREATOR-CREDITS shipped (display-only). Remaining: FR-5a.4 value ladder, FR-5a.5 leverage sweep, FR-5a.6 temporal data, FR-5a.7 velocity data, FR-5a.8 zero-at-grade display. *Layer 3 Decision Engine* and *Layer 4 Portfolio OS* unchanged (not started / unlocks at 250+ scans respectively).
+### Layer A — TRUST HARDENING (Tier 0)
+Pure UI/data gates, no pricing math.
 
-**Deploys (5 commits across 4 ships, 19 cumulative):**
-15. `92b0614` — Ship #14 — price-engine sanity recalibration. Two coordinated fixes for Sanity helper. Fix 4.1: drop `compsAvg > 5` gate to `> 1` — closes Bug 1 (modern overpricing where DP/Wolverine #2 ($9.81 vs $3.54 avg) and ASM Extra! #1 ($11 vs $4.83 avg) had sanity blocked entirely because their compsAvg was below the historical $5 floor). Fix 4.3: Silver+Bronze (1956–1984) low-side threshold raised from 0.5× → 0.6× — closes Bug 2 (FF #61 1967 GD 6.0 stuck at $17.86 instead of $33.99 because ratio 0.53 just missed the old 0.5× threshold). Boundary chosen at 1956 (comic-community Silver Age start, Showcase #4) rather than engine's `<1970` Golden boundary because FF #61 falls in the engine's Golden bucket and would otherwise miss the fix. True Golden (pre-1956) low-side preserved at 0.5×. Modern high-side and low-side unchanged (already calibrated). `computeSanityFallback(pcNum, compsAvg, { bookYear, lowCompsCount, isMixedFallback })` extracted as pure helper following Ship #13.1 pattern; handler call site shrank 87 → 32 lines. `[price-trace]` log gained `sanityFired: 'high' | 'low' | false` field. 70 new assertions in `tests/sanity-thresholds.test.js`. Test total: 391 → 461.
-16. `37ae32b` — Ship #15 (initial) — list-price warning (FR-LIST-PRICE-WARNING). Pure-UI yellow banner displayed in CollectionDetail when user's list-price exceeds market thresholds. Three triggers, worst pctOver surfaced: A `listPrice > engineRec × 1.25` (25% over), B `listPrice > comps.highest × 1.20` (20% over), C `listPrice > comps.average × 1.50` (50% over). Skip flags: `megaKeyFloorApplied`, `manualReviewRequired`, `gradeExceedsMap` (engine-deliberate-high cases). Engine source: raw `item.price` (no getDisplayPrice fallback — when item.price empty, trigger A simply doesn't fire and B/C still cover via comp data). Session-only dismiss (per-book, resets on item.id change / app reload, no localStorage). Initial commit placed helper at `api/list-price-warning.js`.
-17. `9092600` — Ship #15 (relocation hotfix) — initial deploy failed: Vercel Hobby plan caps serverless functions at 12, every `.js` file in `api/` becomes its own function endpoint, and `api/list-price-warning.js` pushed count from 12 → 13. Architectural learning: pure UI helpers belong in `src/lib/` (not `api/`) because they have no HTTP handler — `computeSanityFallback` and `computeThinPoolAnchor` are NOT separate functions, they live inside `api/enrich.js` (one file, one function endpoint). Renamed `api/list-price-warning.js` → `src/lib/listPriceWarning.js` (kebab → camel filename to match `src/db.js` convention). Updated 2 import paths (App.jsx + tests). Helper internals unchanged. `api/` back to 12. Added "Location note" comment block in helper documenting the rationale for future ships. Test total: 461 → 512 (+51 from list-price-warning tests, captured under Ship #15 even though split across 2 commits).
-18. `49e04ad` — Ship #16 — premium creator credits (FR-CREATOR-CREDITS). Extends Ship #12a multi-key extraction pattern to detect 80 tiered creators in comp listing titles. New `src/lib/premiumCreators.js` with `PREMIUM_CREATORS` static list (legend 20 / premium 25 / modern-premium 20 / current 15). Precompiled `SEARCH_INDEX` of word-boundary regexes at module load (one-time cost, fast per-call match). `extractCreatorsFromComps(titles)` returns `{ consensus: hits>=2, singletons: hits===1 }` with within-title dedup (same canonical via multiple aliases counts once per title) + cross-title accumulation. Sources capped at 3 per entry, sort by hits desc. Alias policy (Q4) — 39 unambiguous last-names allowed (Wrightson, Aparo, Kirby, Ditko, Frazetta, Steranko, Colan, Eisner, Toth, Infantino, McFarlane, Liefeld, Silvestri, Byrne, Perez, Sienkiewicz, Bolland, Bolton, Bisley, Suydam, Larsen, Portacio, Mignola, Madureira, Janson, Gaiman, Broome, Cassaday, Quitely, Bachalo, Capullo, McNiven, Coipel, Dell'Otto, Charest, Mahnke, Cheung, Jimenez, Hitch, Finch, Ribic, Maleev, Immonen, Asrar, Momoko, Skan, Mayhew, Parrillo, Nakayama, Artgerm); full-name required for ambiguous (Neal Adams vs Arthur Adams, Jim Lee vs Stan Lee vs Inhyuk Lee, Frank Miller vs Mike Miller, John Romita Sr/Jr, Joe/Andy/Adam Kubert, John/Sal Buscema, Wally/Mike/Bob Wood, John/Marie Severin, Russ Heath, Mike Zeck, Alan Davis, Alan Moore, Grant Morrison, Gardner Fox, Adam Hughes, J. Scott Campbell, Alex Ross, Frank Cho, Skottie Young, Inhyuk Lee, Tula Lotay). Optional `role: 'writer' | 'artist' | 'cover'` field surfaced when set so writers (Broome, Moore, Morrison) and cover-only creators (Artgerm) display distinctly. `api/enrich.js` IIFE shares `compTitles` between Ship #12a and Ship #16 (single iteration). Response fields `out.creatorFromComps` + `out.creatorFromCompsSingleton`. UI extends "DETECTED IN COMPS" container to render when EITHER `keyFromComps` OR `creatorFromComps` non-empty; `expandedKeyIdx` switched from numeric `0/1/2` to namespaced string `'key-N'` / `'creator-N'` so single state handles both sections; new CREATORS subheader with subtle gold border-divider when both sections render. Creator entry copy: `• Bernie Wrightson (artist, legend, 3 sources) ▼`. 5 client merge paths plumb both new fields. 65 new assertions in `tests/creator-from-comps.test.js`. Test total: 512 → 577. Helper at `src/lib/` per Ship #15 architectural learning — `api/enrich.js` imports via `../src/lib/premiumCreators.js` (Vercel bundles transitively, no new function added).
-19. `a35b2e6` — Ship #17 — bottom-of-census low-grade floor anchor (FR-LOW-GRADE-FLOOR). When PriceCharting pop data confirms the user's grade is the bottom of CGC census (`pop.belowGrade === 0`) AND pricing fell back to `browse_api` (sanity LOW lifted to compsAvg, or no-PC path used rawComps.average directly), re-anchor `out.price` to `rawComps.lowest`. The census says the user IS the market floor, so the bottom of the at-grade comp pool is a more honest anchor than the average. Bug target: JLA #62 (1968) GD 2.0 — sanity LOW lifted to compsAvg ≈ $30, pop says belowGrade=0 across 65 tracked, comp.lowest = $8 → re-anchored. Conservative gate (Q1): only fires when `pricingSource === 'browse_api'` — PC × grade-mult outputs preserved (calibration trust). `computeLowGradeFloor(currentPrice, rawComps, pop, { isMegaKey, compsExhausted, pricingSource })` extracted as pure helper inline in `api/enrich.js`. Skip flags match existing pattern: `isMegaKey` (mega-key floor authoritative downstream), `compsExhausted` (rawComps.lowest null + compsFromEbay.lowest contaminated). Position in pipeline: AFTER thin-pool anchor (Ship #13.1), BEFORE mega-key floor (so one-way raise re-corrects when applicable). Surfaces `out.lowGradeFloorApplied` (boolean) + `out.lowGradeFloorAnchor` (number) on response. priceNote suffix `· low-grade floor`. `[price-trace]` gains `lowGradeFloorApplied: bool` field. 5 client merge paths plumb both fields parallel to existing `thinPoolAnchored`. 45 new assertions in `tests/low-grade-floor.test.js` (over-delivered vs ~22 target). Test total: 577 → 622.
+1. **Ship #20a.6.4** — Refuse-to-price when identity unknown. Donald Duck Whitman #978 priced $50 with no ID — could be 10× wrong on real Golden Age keys.
+2. **Ship #20a.6.1** — Sold title display + rejected diagnostics. Active rows show titles, sold rows don't. Can't audit verification.
+3. **Ship #20a.6.3** — Vision output sanitization. "Cannot determine from visible cover" rendered as literal value.
+4. **Ship #20a.6.5** — Format detection (BLB/magazine/storybook). Whitman BLBs treated as regular comics.
+5. **Ship #20a.6.2** — Cover image / stock image risk. Chip 'n' Dale #6 — text verified, image was different book.
+6. **Ship #20a.7.5** — Confidence scoring rebuild. HIGH confidence on 4/15 verified is wrong.
 
-**Ship #14 — sanity recalibration details:**
-- **Bug 1 (modern overpricing)**: line 1336 gate `compsAvg > 5` blocked sanity check entirely for modern books trading at $3–5. PC × grade-mult stood unchallenged. Fix: gate to `> 1` (preserves null safety, runs sanity for sub-$5 modern comps).
-- **Bug 2 (Silver Age key underpricing)**: low-side threshold flat 0.5× across all eras. FF #61 ratio 0.53 just missed. Fix: era-aware low-side — Silver+Bronze 1956-1984 → 0.6×, all other eras → 0.5×. Comic-community Silver Age start (Showcase #4 Oct 1956) used as boundary because FF #61 (1967) falls in engine's `<1970` Golden bucket and strict `≥1970` would have missed it.
-- **Asymmetry note**: high-side keeps engine's `<1970/<1985` calibrated boundaries. Low-side uses comic-community 1956 boundary. Documented in helper docstring.
-- Q4 deferred: key-aware low-side overlay (Ship #14.1 if Fix 4.3 insufficient based on production observation).
+### Layer B — PRICING ACCURACY (gated behind Layer A)
+**PRICING-MATH CHANGES — explicit greenlight required per ship.**
 
-**Ship #15 — list-price warning details:**
-- Evidence cases all fire correctly: Avengers #221 ($20 list, $9.50 engine, $15 high, $7.50 avg) → A+B+C, worst=avg (167%); Superman #201 ($17.90 list, $14.50 engine, $11 high, $9 avg) → B+C only (engine ratio 1.234 just under 1.25 — proves the threshold correctly rejects borderline cases), worst=avg (99%); Tales of Teen Titans #43 ($19.11 list, $10 engine, $10 high, $7.50 avg) → A+B+C, worst=avg (155%).
-- Banner copy: `⚠ $X is N% above {label} (${anchor}). Books priced above market typically stall.` with Dismiss button.
-- `thinPoolAnchored` and `compsExhausted` are NOT skip flags — user over-reach on thin pool / exhausted-comp books is still warning-worthy.
+7. **Ship #20b** — Verified-sold-first pricing + market bands.
+8. **Ship #20a.10** — Modern exact-variant matching.
+9. **Ship #20a.13** — Active grade filtering.
+10. **Ship #20a.12** — Stale sold weighting (recency bands).
+11. **Ship #20a.11** — Newsstand + 35¢ correction.
+12. **Ship #20a.14** — Magazine/comic format collision.
 
-**Ship #16 — creator credits details:**
-- Evidence cases all detected: House of Secrets #106 → Bernie Wrightson legend×3 (alias-only matching); Flash #156 → Carmine Infantino legend×2 + John Broome (writer) singleton; Batman C-25 Treasury → Neal Adams legend×2 (full-name required, Arthur Adams ambiguity guard); Ghosts #21 → Nick Cardy legend×2 + Jim Aparo singleton.
-- Architecture note: backend `api/enrich.js` importing from `../src/lib/premiumCreators.js` works because Vercel bundles transitively-imported files into the function bundle. `src/` subdirectories are NOT auto-routed as functions. Pattern is reusable for future server-imported helpers.
-- Tier system enables future Ship #16b (creator-aware multiplier) — explicit greenlight required for pricing-math change.
+### Layer C — UI / SEMANTIC CLARITY
+13. **Ship #20a.9** — Floor label clarification.
+14. **Ship #20a.9 hotfix** — List-price warning false-positives.
 
-**Ship #17 — low-grade floor anchor details:**
-- Conservative gate (`pricingSource === 'browse_api'`) means PC × grade-mult calibrated outputs are NEVER touched. Only sanity-flipped or no-PC fallback paths go through Ship #17. Justification: PC's grade-aware data is empirically calibrated; bottom-of-census signal alone shouldn't override it.
-- Layer ordering verified: thin-pool anchor (Ship #13.1) caps at `highest × 1.05` — both Ship #13.1 and Ship #17 lower price; either order works since the more-conservative result wins. Ship #17 placed AFTER thin-pool but BEFORE mega-key floor.
-- Pop data already fetched in parallel `Promise.all` since Phase 5a (Ship #5a.1). Ship #17 leverages existing infra — zero new network calls, zero new endpoints.
-- Q2 deferred: lowest-outlier guard (median-of-bottom-3 instead of single lowest). v1 trusts post-AI-verify post-filter rawComps.lowest. Ship #17.1 if outlier issue surfaces.
-
-**Architectural learning — Vercel function cap (Ship #15 hotfix):**
-- Every `.js` file in `api/` becomes its own serverless function endpoint, regardless of whether it has a default-exported HTTP handler.
-- Hobby plan limit: 12. Repo had exactly 12 before Ship #15: cgc-lookup, chat, comps, delist-ebay, enrich, gocollect, grade, list-ebay, manage, mega-keys, pricecharting-pop, sold.
-- Pure UI helpers (no HTTP handler) belong in `src/lib/`. `App.jsx` imports relatively.
-- Pure server helpers (used by `api/enrich.js`) belong INLINE inside that file (like `computeSanityFallback`, `computeThinPoolAnchor`, `computeLowGradeFloor`) OR in `src/lib/` and imported via `../src/lib/X.js` — Vercel bundles transitively.
-- File rename in Ship #15 hotfix: `api/list-price-warning.js` → `src/lib/listPriceWarning.js` (kebab to camel matches `src/db.js` convention).
-- Documented as "Location note" comment block in `src/lib/listPriceWarning.js` and `src/lib/premiumCreators.js` so future ships don't repeat the issue.
-
-**Test coverage growth:**
-- Session 1 baseline: 288 tests
-- Session 2 end (Ships #13 + #13.1): 391 tests (+103)
-- Session 3 end (Ships #14 + #15 + #16 + #17): 622 tests (+231)
-- Per-suite: comp-filter-hygiene 99 / comp-key-extraction 53 / creator-from-comps 65 / era-multipliers 113 / list-price-warning 51 / low-grade-floor 45 / mega-keys 61 / sanity-thresholds 70 / variant-allowlist 65
-- 9 distinct test suites; zero regressions across all 4 Session 3 ships; over-delivered on every Session 3 ship's per-test target
-
-**Validation status:**
-- Ship #14 phone validation NOT YET DONE (deferred when user pivoted directly into Ship #15 investigation)
-- Ship #15 phone validation NOT YET DONE
-- Ship #16 phone validation NOT YET DONE
-- Ship #17 phone validation NOT YET DONE
-- Combined 4-ship validation pass possible in single phone scan session covering: DP/Wolverine #2 + ASM Extra! #1 + FF #61 (Ship #14 bugs); FF #52 + Avengers #20 + Biker Mice #1 + mega-keys (Ship #14 regressions); Avengers #221 + Superman #201 + Tales TT #43 (Ship #15 triggers); House of Secrets #106 + Batman C-25 + Ghosts #21 + Flash #156 (Ship #16 fires); JLA #62 (Ship #17 fire) + same regression set as Ship #14 for cross-ship verification.
-
-**Pattern library state (Session 1 → Session 3):**
-- Patterns A–L unchanged from Session 2 — Session 3 ships were all pattern-extension or new-feature work, not new pattern discovery
-- Pattern L (publisher-debut issues) gained Ship #17 confirmation potential via JLA #62 class
-
-**Process note — same parallel QA protocol from Session 2:** three Claude instances coordinating (pattern observer / directive synthesizer / executor with codebase access) + human decision-maker shipped 4 clean Session 3 ships including 1 hotfix. Methodology now proven across 19 production deploys (Sessions 2 + 3).
-
-**Next session candidates (ordered by surfaced evidence):**
-1. **Tier 1 quick wins**:
-   - Ship #18 — FR-5a.8 zero-at-grade display (1 hr, Layer 2 continuation)
-   - Ship #19 — CGC-PENALTY-AWARE-VISION (2-3 hr)
-2. **Tier 2 coordinated arc (Star Wars #1 class)**:
-   - Ship #20 — AI-CROSS-LAYER-DISCONNECT (6-8 hr)
-   - Ship #21 — LISTING-VERIFICATION-GATE (2-3 hr)
-   - Ship #22 — REPRINT-VARIANT-DISAMBIG (3-4 hr)
-3. **Tier 3 Layer 2 continuation**:
-   - Ship #25 — FR-5a.4 CGC value ladder display
-   - Ship #26 — FR-5a.5 leverage extraction sweep
-4. **Phone validation pass** for all 4 Session 3 ships before further accuracy work — production behavior currently uncoupled from test suite passing
-
-**Deferred (unchanged from Session 2 queue, narrowed scope):**
-- COMP-POOL-QUALITY (Tier 1) — partially addressed by Ship #13 Bug 3 (signed) + Bug 4 (variant composition); remaining narrowed
-- BAKED-IN-PREMIUM — partially addressed by Ship #13 Bug 4
-- Ship #12b — keyFromComps promotion to keyIssue (requires phone observation of 12a signal quality)
-- Ship #16b — creator-aware multiplier (pricing-math change, explicit greenlight required)
-- Ship #14.1 — key-aware sanity low-side overlay (gated on Ship #14 production observation)
-- Ship #17.1 — median-of-bottom-3 lowest-outlier guard (gated on Ship #17 production observation)
-- Phase 5b — scarcity-aware pricing hooks (gated; thin-pop floor premium, dense-pop confidence boost)
-- VARIANT-TYPE-DISCRIMINATION — extends `TEST_MARKET_KEYS` pattern to Whitman / Mark Jewelers / Type 1A-1B
+### Layer D — DEFERRED
+- Bundle routing
+- Decision engine paths (Layer 3, gated)
+- Layer 4 portfolio OS (scan-gated at 250+, currently ~84)
+- Phase 5b — scarcity-aware pricing hooks (gated; thin-pop floor premium, dense-pop confidence boost) — explicit greenlight before any pricing math
+- Ship #12b — keyFromComps promotion to keyIssue (pricing-math change)
+- Ship #16b — creator-aware multiplier (pricing-math change)
+- VARIANT-TYPE-DISCRIMINATION — Whitman / Mark Jewelers / Type 1A-1B (extends `TEST_MARKET_KEYS`)
 - FR-Q9 / FR-Q11 / FR-Q12 / K1 / K2
 
-**Open external threads:**
-- GoCollect API key #019483 — pending since 4/15 (10 days)
-- eBay Marketplace Insights API — DEAD for indie devs
-- Phone audit cadence — strong (Sessions 1 + 2 + 3 cumulative: 21 ships across 19 deploys)
+## Recalibration
 
-## Session 4/23/2026
-Session 4/23/2026 — Ship #13 comp-pool hygiene cluster (6 bugs) + Ship #13.1 thin-pool anchor hotfix. **2 production deploys, 391 unit tests passing** (99 comp-filter-hygiene + 113 era-multipliers + 61 mega-keys + 65 variant-allowlist + 53 comp-key-extraction — up from 288 baseline). Ship #13 closed the largest remaining accuracy cluster surfaced by 41-book phone validation: multi-issue compound listings (Bug 1 — `hasMultipleDistinctIssues`), sequel/volume series mismatches (Bug 2 — `detectSeriesMarkers` catches II-X / Vol N / Re-*/Pre-* / Part N / Book N markers), signed/autographed pool pollution (Bug 3 — `SIGNED_RE` excludes signed/signature series/yellow label/green label/remarked, skips bare SS per ambiguity), composition-aware variant multiplier damping (Bug 4 — homogeneous-variant pools >80% get ×0.5, >50% get ×0.75 damping), #11 word-boundary regression pins (Bug 5 — verified pre-fixed, pinned against regression), and thin-pool overpricing anchor (Bug 6 — cap engine output at `comps.highest × 1.05` when `count < 3`). 5 observability flags plumbed through 5 App.jsx merge paths (`thinPoolAnchored`, `variantComposition`, `sequelRejected`, `signedRejected`, `multiIssueRejected`). Ship #13.1 closed scope gap discovered during Biker Mice from Mars #1 phone validation — Bug 6 originally gated on `isFromPC` which flipped false when sanity fired (PC outlier → browse_api fallback), so the exact case the anchor was designed for bypassed it. Extracted `computeThinPoolAnchor` pure helper, removed `isFromPC` gate, preserved `isMegaKeyForFloor` + `compsExhausted` skip conditions. `[price-trace]` log relocated post-mega-key-floor with `priceAfterFloor` snapshot preserving the `afterMult:` pre-mult baseline while `finalPrice:` now shows truly-final output + new `thinPoolAnchored` boolean field. Biker Mice #1 validated in production: $8.23 → $7.52 (anchor cap at $7.16 × 1.05 = $7.518, floor from the single active comp).
+**GPT external review insights — keep for ongoing reference.**
 
-**Strategic vision — layered platform** (updated): *Layer 1 Foundation* SUBSTANTIALLY COMPLETE — Tier 0, Phase 5a, Tier 1 variants (35¢/30¢), A3 era-aware, FR-D7 (12a), comp-pool hygiene + thin-pool anchor all shipped. Remaining: LISTING-VERIFICATION-GATE, REPRINT-VARIANT-DISAMBIG, FR-LIST-PRICE-WARNING, FR-LOW-GRADE-FLOOR, AI-CROSS-LAYER-DISCONNECT, BAKED-IN-PREMIUM (partial via Ship #13 Bug 4). *Layer 2 Data Leverage* IN PROGRESS — FR-D7 shipped (12a display-only). Remaining: FR-5a.4 value ladder, FR-5a.5 leverage sweep, FR-5a.6 temporal data, FR-5a.7 velocity data, FR-5a.8 zero-at-grade display. *Layer 3 Decision Engine* and *Layer 4 Portfolio OS* unchanged (not started / unlocks at 250+ scans respectively).
+### Layer status corrections
+- Layer 1 Foundation: ~75% (overclaimed at 90% prior; honest reassessment after 4/27 phone validation surfaced 25 distinct fixes).
+- Layer 2 Data Leverage: ~30%.
+- Layer 3 Decision Engine: 0% (gated — unlocks after Layer 2 substantially complete).
+- Layer 4 Portfolio OS: 0% (scan-gated at 250+ books; currently ~84).
 
-**Deploys (2 this session, 14 cumulative):**
-13. `886d6ea` — Ship #13 — comp-pool hygiene (6 bugs fixed). New exports from `api/comps.js`: `VARIANT_CONTAM_RE`, `SIGNED_RE`, `hasIssueNumber`, `hasMultipleDistinctIssues`, `detectSeriesMarkers`. New filter chain layers in `applyFilterChain`: Bug 1 multi-issue check (inside Filter 0a), Bug 2 sequel-asymmetry filter (between 0b title-similarity and 0c era), Bug 3 signed filter (Filter 2b, after slab, before grade proximity). Filter chain return object extended with `multiIssueRejected` / `sequelRejected` / `signedRejected` counters. `api/enrich.js` variant multiplier block gains composition-aware damping: computes `variantRatio = variantHits / rawComps.prices.length` where variantHits = count matching VARIANT_CONTAM_RE; applies `vMult × 0.5` when ratio > 0.80, `vMult × 0.75` when ratio > 0.50. Surfaces `out.variantComposition = { ratio, dampedMult, originalMult, compCount }` for post-deploy calibration. Bug 6 thin-pool anchor block added before mega-key floor block. 5 client merge paths in `src/App.jsx` (auto-refresh, scan→catalogue, scan→selectedItem, bulk-import, refreshMarketData) plumbed for the new observability flags using existing pattern. 77 new assertions in `tests/comp-filter-hygiene.test.js` (Bug 1-4 coverage + regression tests for confirmed production misses: Absolute Batman #6, Last Ronin II, US of Cap #1 signed, Daredevil #600 all-variant pool). 4 new assertions in `tests/era-multipliers.test.js` (Bug 5 word-boundary regression pins: #11 / #10 / #100 vs #1 search). Test total: 288 → 369.
-14. `69ab9cf` — Ship #13.1 — thin-pool anchor gap fix. Extracted `computeThinPoolAnchor(currentPrice, rawComps, { isMegaKey, compsExhausted })` as exported pure helper in `api/enrich.js` (placed right after `median`, line 228). Handler call site replaced 23-line inline block with 15-line helper call. Removed `isFromPC &&` from anchor gate (the scope bug). `[price-trace]` log relocated from after-floor-guard (line 1519) to after-mega-key-floor (line ~1771); `priceAfterFloor = parseFloat(out.price)` snapshot captured at the old log point (line 1525) so `afterMult:` field continues to show post-floor pre-multiplier state; `finalPrice:` now reads live `out.price` post-anchor post-mega-key-floor (truly final); new `thinPoolAnchored:` boolean field added to trace line. 22 new `computeThinPoolAnchor` assertions in `tests/comp-filter-hygiene.test.js` — Biker Mice #1 case pinned exactly (count=1, price=$8.23, highest=$7.16 → cap=$7.518), plus defensive null/undefined/zero/negative coverage for every argument, plus mega-key and compsExhausted skip pins, plus browse_api gap-fix verification. Test total: 369 → 391.
+### Architecture-before-features priority shift
+1. Trust hardening (Layer A) before pricing math (Layer B).
+2. Pricing math before features.
+3. Features compound on broken logic if shipped first.
 
-**Ship #13 bug inventory (all 6 closed):**
-- **Bug 1 — ISSUE-NUMBER-COMP-MISMATCH v1 (multi-issue compound)**: `hasIssueNumber` previously missed compound listings like "Absolute Batman #4 + #1 variant" because the lot regex required `lot|bundle` keywords or `#N-M` dash ranges (comma-separated handled, + and & were not). Added `hasMultipleDistinctIssues` helper that counts distinct `#N` patterns and rejects when ≥2. Called from inside `hasIssueNumber` (defense-in-depth) AND separately in Filter 0a (observability counter). Logs `[issue-filter] multi-issue rejected: <title>`.
-- **Bug 2 — ISSUE-NUMBER-COMP-MISMATCH v2 (sequel/volume asymmetry)**: Title-similarity filter (Filter 0b) used ≥50% token overlap, which passed "Last Ronin II Re-Evolution #4" for a "Last Ronin #4" search (`last` + `ronin` = 2/3 = 67% overlap). New `detectSeriesMarkers(title)` returns normalized markers array: `roman-ii` through `roman-x` (II/III/IV/VI{0,3}/IX/X via `matchAll` with `(?<![\w-])` + `(?![\w-])` boundaries so X-Men/V-Wars don't false-positive on their X/V), `vol-N`, `re-word`/`pre-word` (requires capitalized word so "re-read"/"pre-order" don't match), `part-N`, `book-N`. Filter inserted between 0b and 0c: reject when listing has marker our title lacks. Graceful wipe-out fallback preserves thin pools. Logs `[sequel-filter] series asymmetry detected: <title> (marker: <m>)`.
-- **Bug 3 — COMP-POOL-QUALITY (signed/autographed)**: No prior filter for signed listings. SLAB_RE required a trailing numeric grade, so raw "US of Cap #1 2X signed Ed McGuinness" / "ASM #300 signed by Todd" passed through. New `SIGNED_RE = /\b(?:signed|signature\s+series|autographed?|yellow\s*label|green\s*label|remarked?)\b/i`. Bare `SS` intentionally omitted per Q3 decision (false-positive risk: SS-Squadron, Steel & Soul). Blue label intentionally omitted (= Universal / standard, not signed). Filter 2b runs after slab filter, gated on `isOurBookSigned` (skip when user's variant contains signed|signature|autograph|auto|remarked|yellow/green label). Logs `[signed-filter] SS listing rejected: <title>`.
-- **Bug 4 — BAKED-IN-PREMIUM (homogeneous variant pools)**: When our book is a variant and the entire comp pool is variant-priced (variant floor already reflects premium), the variant multiplier was double-counting the premium. Floor guard → takes variant-priced `rawComps.lowest` → variant mult ×2 to ×10 on top = doubled premium. Composition check computes `variantRatio = variantHits / rawComps.prices.length` in `api/enrich.js` variant-mult block. Damping ladder: >0.80 → ×0.5 damping, >0.50 → ×0.75 damping, ≤0.50 → full mult. Requires `VARIANT_CONTAM_RE` export from `api/comps.js` (previously module-scoped). Logs `[variant-composition] ratio=X damping=Y mult A→B`. Surfaces `out.variantComposition = { ratio, dampedMult, originalMult, compCount }` always (even when damping=1.0) for post-deploy calibration.
-- **Bug 5 — #11 WORD-BOUNDARY (already firewalled)**: `hasIssueNumber` regex was already `\b`-anchored — "#11" has no boundary between the two `1` digits, so `/#\s*1\b/i` correctly fails to match. Verified with 4 regression pins in `tests/era-multipliers.test.js`: Sensation Comics #11, Book #10, Title #100 all fail #1 search; Sensation Comics #1 passes (positive control). Bug closed as "pre-fixed", pinned against regression.
-- **Bug 6 — THIN-COMP-POOL OVERPRICING (engine recommends above lone comp)**: When `rawComps.count < 3`, the only comp was $7.16 (Biker Mice #1), PC × modern CGC 9.4 mult produced $8.23 (engine recommends 15% above only data point). No prior anchor logic. Ship #13 added safety cap at `rawComps.highest × 1.05` after variant/key mults, before mega-key floor. Ship #13.1 corrected scope — see below.
+### Timeline
+- Total remaining: 130-200 hours.
+- Calendar: 12-24 months.
 
-**Ship #13.1 — thin-pool anchor scope correction:**
-- Bug 6 anchor in Ship #13 gated on `isFromPC`, defined as `!!(priceCharting?.price) && !sanityFired && out.pricingSource === 'pricecharting'`. When sanity fires (PC outlier detected, threshold exceeded for low-comp-count books), `pricingSource` flips to `browse_api` AND `sanityFired` becomes true → `isFromPC` becomes false → anchor skipped. This is the exact branch where the anchor is most needed (sanity produced `compsAvg × 1.15` which is 15% above single-comp market). Biker Mice #1 validated the gap: expected $7.52, actual $8.23.
-- Fix: extracted anchor logic into `computeThinPoolAnchor(currentPrice, rawComps, { isMegaKey, compsExhausted })` pure helper. No `isFromPC` gate. Kept `isMegaKey` skip (mega-key floor map is authoritative; Action #1 / Detective #27 thin pool dominated by wrong-book comps anyway) and `compsExhausted` skip (AI verify rejected 100% — no trusted data). Returns `{ anchorCap: rawComps.highest × 1.05, shouldAnchor: true }` or `null`.
-- `[price-trace]` observability integrity restored: log relocated to after mega-key floor block. Pre-anchor `priceAfterFloor` snapshot captured at old log point so `afterMult:` field stays as "post-floor pre-multiplier baseline" (Biker Mice: $8.23). `finalPrice:` now reads live `out.price` → shows true post-anchor post-mega-key output (Biker Mice: $7.52). New `thinPoolAnchored:` boolean field for quick grep in logs.
-- Regression math verified for pure browse_api path (no PC): `out.price = rawComps.average`, and `average ≤ highest` always, so `price ≤ highest < highest × 1.05` → anchor threshold never binds → no behavior change. The anchor only fires in the specific "sanity produced above-comp output" scenario.
+### Category framing
+- Current: "Asset decision system for collectibles."
+- Aspirational: "Bloomberg terminal for comic assets."
+- Don't overclaim present state.
 
-**Production validation (Biker Mice from Mars #1 (2024) NM 9.4):**
-- Before Ship #13.1: `out.price = "$8.23"`, no `thinPoolAnchored` flag
-- After Ship #13.1: `out.price = "$7.52"`, `out.thinPoolAnchored = true`, price note includes `· thin-pool anchor`
-- Log sequence: `[sanity] PC ... > threshold → fallback compsAvg 7.16` → `[thin-pool] anchor applied cap=$7.52 was=$8.23 comps=1` → `[price-trace] ... finalPrice:$7.52 source:browse_api thinPoolAnchored:true`
+### Field intelligence (2026-04-27 phone validation)
+- 25 distinct fixes surfaced from 7 real scans.
+- Reorganized into Layers A / B / C / D in Active Priority Queue above.
+- Detail in `docs/session-history.md`.
 
-**Regression verified unaffected (Session 2):**
-- Mega-keys (Action #1, Detective #27, Daredevil #1, Giant-Size X-Men #1) — helper's `isMegaKey` skip path, floor map authoritative
-- Vintage non-mega with ≥3 comps (Adventure Comics #425) — count gate, anchor skipped
-- Modern non-key with full pool (Avengers #20) — count gate, anchor skipped
-- 35¢/30¢ allowlist books (Iron Fist #14, ASM #171) — variant mult unchanged when pool composition <20% variant (ratio threshold)
-- TPB pipeline (Batman vs Predator Collected Edition) — sequel filter symmetric on Vol N markers
-- Ship #11 era multipliers (Dark Horse #1 VF+ 8.5 modern) — anchor runs POST-multiplier, preserves grade-aware base
-- Ship #12a `keyFromComps` — extraction unchanged; Bug 1/2/3 tighten the comp pool upstream before keyFromComps reads it, which improves attribution quality rather than breaking it
+## Pattern Library
+**Descriptive names, not letters.** Listed in approximate order of discovery.
 
-**Pattern library state (41+ scans Session 1 → Session 2 validation):**
-- Pattern L (publisher-debut issues) gained new confirmation via Biker Mice from Mars #1 NM 9.4 (indie modern, thin comp pool, PC outlier sanity-flipped)
-- Patterns A-K unchanged from Session 1 inventory
+- **Sinful Suzie class** — wrong-title comp contamination (different series under same nominal title).
+- **Thor #4 class** — printing version mismatch (1st vs 2nd print same cover).
+- **Howard Duck Magazine class** — format collision (magazine vs comic same character).
+- **Marvel Age #58 class** — shared issue # different title.
+- **Annual #2 class** — marker asymmetry (Annual #1 vs Annual #2 same series).
+- **Loot Crate class** — convention/variant in active pool not flagged as variant.
+- **Chip n Dale class** — text verified but cover image was different book.
+- **Whitman #978 class** — non-comic format priced as regular comic.
+- **Action Force class** — thin pence/UK market false HIGH match.
+- **Spooky #118 class** — grade mismatch in active pool.
+- **D'Orc #1 class** — apostrophe title eBay tokenization (`cleanTitleForSearch` SPACE replacement).
+- **Star Wars #1 class** — reprint vs first-print (Vision sees, engine ignores) — Ship #19 territory.
+- **Biker Mice #1 class** — thin pool sanity-flipped above lone comp — Ship #13.1 territory.
+- **Action #1 / Superman #1 / Detective #27 class** — manual-review mega-keys.
+- **JLA #62 class** — bottom-of-CGC-census low-grade floor — Ship #17 territory.
+- **FF #61 class** — Silver Age key low-side threshold underpricing — Ship #14 territory.
+- **House of Secrets #106 class** — alias-only creator detection — Ship #16 territory.
+- **TMNT #1 IDW 2016 class** — mega-key publisher+year disambiguation — Ship #20a.7 territory.
+- **Donald Duck Whitman #978 class** — refuse-to-price gate — Ship #20a.6.4 territory.
 
-**Next session candidates (ordered by evidence surfaced in Session 1 phone audit):**
-1. FR-LIST-PRICE-WARNING — 3 user over-reach cases confirmed; display-only, low risk
-2. FR-CREATOR-CREDITS — 4 misses; extend Ship #12a comp-key extraction pattern to creator attribution
-3. FR-5a.4 — CGC-style value ladder display; Layer 2 continuation
-4. Ship #13 Bugs 1-4 target-book validation — scan Absolute Batman / TMNT Last Ronin / US of Cap / Daredevil #600 variants to confirm filter hits in production
+## Open Blockers
 
-**Deferred (unchanged from Session 1 queue):**
-- COMP-POOL-QUALITY (Tier 1) — now PARTIALLY ADDRESSED by Ship #13 Bug 3 (signed) and Bug 4 (variant composition); remaining scope narrowed
-- LISTING-VERIFICATION-GATE — Star Wars #1 class
-- REPRINT-VARIANT-DISAMBIG
-- FR-LOW-GRADE-FLOOR
-- AI-CROSS-LAYER-DISCONNECT
-- BAKED-IN-PREMIUM — now PARTIALLY ADDRESSED by Ship #13 Bug 4
-- Ship #12b — keyFromComps promotion to keyIssue (requires more phone observation of 12a signal quality)
-- Phase 5b — scarcity-aware pricing hooks
-- FR-Q9 / FR-Q11 / FR-Q12 / K1 / K2
+### External
+- **GoCollect API key #019483** — pending since 2026-04-15.
+- **eBay Marketplace Insights API** — gated for indie devs (DEAD).
+- **eBay Finding API** — rate-limited 100% as of late April 2026, bypassed.
 
-**Open external threads:**
-- GoCollect API key #019483 — pending since 4/15
-- eBay Marketplace Insights API — DEAD for indie devs
-- Phone audit momentum — strong (17 fixes across Sessions 1 + 2)
+### Workaround active
+- PriceCharting sales-history scrape (Ship #20a foundation data layer).
 
-## Session 4/22/2026
-Session 4/22/2026 — Tier 0 liability firewall + Phase 5a (pop data) + Tier 1 variant allowlist (35¢ + 30¢) + A3 era-aware multiplier fix + FR-D7 multi-key comp extraction shipped. **12 production deploys, 288 unit tests passing** (61 mega-keys + 65 variant-allowlist + 109 era-multipliers + 53 comp-key-extraction). Mega-keys floor system at 29 entries with three-tier badge UI (verified/estimated/manual) plus distinct exceedsMap handling. Display layer hardened so unsafe engine numbers never anchor user listing decisions. Verify-fallback leak ($147K Action #1 from Superman #1 comps) closed at both sanity-block and floor-block surfaces. PriceCharting CGC pop extractor + UI panel live with locked POP_GRADE_INDEX from PC source. Marvel test-market price-variant allowlist covers 109 series / 366 issues across 35¢ (1977) and 30¢ (1976) windows — eliminates Howard the Duck #28 / Hulk #181 false-positive class. CGC_MULTIPLIERS and RAW_MULTIPLIERS now era-split (vintage unchanged / modern damped) — modern CGC 9.4 2.2→1.35, 9.8 5.0→2.2, VF+ 8.5 1.3→1.05. Comp titles pattern-matched for 8 key signals (1st app / origin / death / intro / 1st told / cameo / 2nd app / 1st cover) with hits≥2 consensus threshold, surfaced under ⭐ keyIssue in UI. Status: Tier 0 COMPLETE, Phase 5a COMPLETE, Tier 1 (35¢/30¢) COMPLETE, A3 bug class CLOSED, FR-D7 (display-only 12a) COMPLETE. Pattern-based variant architecture (`TEST_MARKET_KEYS` + `TEST_MARKET_VARIANTS`) ready for Whitman / Mark Jewelers / Type 1A-1B follow-ups.
+## Handoff Pointers
 
-**Strategic vision — layered platform:** *Layer 1 Foundation* (MAJOR PROGRESS — Tier 0, Phase 5a, Tier 1 variants, era-aware, FR-D7; remaining: COMP-POOL-QUALITY, LISTING-VERIFICATION-GATE, REPRINT-VARIANT-DISAMBIG, FR-LIST-PRICE-WARNING, FR-LOW-GRADE-FLOOR, AI-CROSS-LAYER-DISCONNECT, BAKED-IN-PREMIUM, VARIANT-TYPE-DISCRIMINATION). *Layer 2 Data Leverage* (STARTED via FR-D7; remaining: FR-5a.4 value ladder, FR-5a.5 leverage sweep, FR-5a.6 temporal data, FR-5a.7 velocity data, FR-5a.8 zero-at-grade display). *Layer 3 Decision Engine* (NOT STARTED — 5-path comparator, sentiment engine, probability modeling, synthesis layer). *Layer 4 Portfolio OS* (UNLOCKS AT 250+ SCANS — pattern recognition, bulk allocation, portfolio dashboard, autonomous scheduler). Positioning: "Bloomberg terminal for comic assets." Endgame: AI-managed portfolio OS.
-
-**Deploys (12, in order):**
-1. `34f1cc9` — Tier 0 accuracy fixes (E2 mega-keys floor + F3 reprint regex + F2 era-consistency comp filter)
-2. `cf6bf6c` — Tier 0 hotfix (persist mega-key flags through 5 client merge paths)
-3. `99ee51e` — Phase 5a.1 (PriceCharting CGC pop extractor backend + `[pc-pop-calibrate]` logging)
-4. `5c9864a` — Tier 0 polish (split exceedsMap from manualReview + Manual Appraisal price suppression with toggle)
-5. `5960239` — Tier 0 polish (suppress asking/last-sold lines, replace with Floor band when applicable)
-6. `01d81b6` — Tier 0 hotfix Ship #1 (verify-fallback sanity leak — skip sanity for mega-keys + when 100% AI-rejected)
-7. `ff6c852` — Phase 5a.3 (POP_GRADE_INDEX locked from PC source + CollectionDetail pop UI panel + 5 merge paths)
-8. `d3ccf26` — Tier 0 hotfix Ship #8 ([floor] block bypass for mega-keys + compsExhausted — same leak surface as Ship #1, downstream block)
-9. `8393a91` — Ship #9 — 35¢ Marvel test-market variant allowlist (52 series / 184 issues, June-Oct 1977 window) + `normalizeTitle` hyphen extension + 3 retroactive mega-keys map key updates
-10. `00f0afe` — Ship #10 — 30¢ Marvel test-market variant allowlist (57 series / 182 issues, April-Aug 1976 window) + retroactive Kull correction (Conqueror → Destroyer typo fix in 35¢ bucket) + Doctor Strange / Dr. Strange dual-key in both buckets + refactored gate via `TEST_MARKET_KEYS` map for future variant-type extensions
-11. `c35f705` — Ship #11 — A3 era-aware grade multiplier recalibration. CGC_MULTIPLIERS + RAW_MULTIPLIERS split into {vintage, modern}. Vintage tables preserved exactly. Modern CGC damped aggressively (9.4: 2.2→1.35, 9.8: 5.0→2.2, VF+ 8.5: 1.3→1.05, 10: 12.0→3.0). Modern raw graduated damp upper curve (NM 1.00→0.90 through VG 0.45→0.40) + flat tail below VG/G (sub-GD trades on condition, not era). Year cutoff 1985 (Crisis). Null-year → vintage default. `confirmedYear || year` used at call sites. Only affects `pricingSource === 'pricecharting'` path — browse_api untouched (already at-grade). Mega-keys untouched (floor overrides downstream). 109 test assertions added, full vintage regression pinned.
-12. `bdb0f1e` — Ship #12a — FR-D7 multi-key attribution extraction from comp titles (display only). `COMP_KEY_PATTERNS` with 8 regex kinds scans post-AI-verify `rawComps.prices`, consensus threshold hits≥2, surfaces on `out.keyFromComps` + `out.keyFromCompsSingleton` (observability) + `out.keyIssueSource` (existing keyIssue attribution). Title-cased phrase display ("1ST TOLD DEATH OF MA & PA KENT" → "1st Told Death of Ma & Pa Kent"). Collapsible "DETECTED IN COMPS" UI block under ⭐ keyIssue in CollectionDetail with tap-to-expand sources (max 3 per entry). 5 client merge paths plumbed: `keyFromComps`, `keyFromCompsSingleton`, `keyIssueSource`. Superman #161 double-trigger (first-told + death), Frankenstein Monster #9 (death), Shazam! #2 (intro) all covered. Superman #201 narrative event deferred to future ship. Zero pricing math impact. Ship #12b (promotion to keyIssue) gated behind future explicit greenlight.
-
-**Mega-keys floor system (`api/mega-keys.js`, 29 entries):**
-- 10 Golden Age (Action #1, Superman #1, Detective #27/#38, Batman #1, Marvel Comics #1, Cap America #1, All Star #8, Sensation #1, Flash Comics #1)
-- 15 Silver Age (Showcase #4, B&B #28, AF #15, FF #1/#5/#48, ToS #39, JiM #83, Hulk #1, X-Men #1, Strange Tales #110, ToA #35, Avengers #1/#4, Daredevil #1)
-- 2 Bronze (Hulk #181, Giant-Size X-Men #1)
-- 2 Modern (TMNT #1 Mirage, ASM #300)
-- Two entry types: `MEGA` (has `grades` bucket map → floor applied when below) and `MANUAL` (Action #1, Superman #1; null `grades`, dispersion too wide for single-floor model)
-- `verified: true/false` flag drives green VERIFIED vs yellow ESTIMATED badge
-
-**Three-tier badge system + display layer (`src/App.jsx` + `src/index.css`):**
-- 🔑 VERIFIED / 🔑 ESTIMATED FLOOR (green / yellow) — `megaKeyFloorApplied`, hero shows floored price, asking line replaced by `Floor band $low–$high`, listing requires one-tap acknowledge
-- 🔑 MANUAL REVIEW (red, `pill-manual-review`) — `manualReviewRequired`, reserved for `type === 'MANUAL'`. Hero replaced with "Manual Appraisal Required". Engine estimate hidden behind "Show engine estimate ▼" toggle in CollectionDetail (`showEngineRec` state, resets per-item). Asking + last-sold lines hidden. Inline list-row price replaced with amber "Appraise". Listing button hard-blocked.
-- 🔑 GRADE EXCEEDS MAP (amber, `pill-exceeds-map`) — `gradeExceedsMap`, distinct from MANUAL. Fires when book is `type === 'MEGA'` but user grade exceeds the highest bucket in its floor map (e.g. Sensation #1 CGC 9.4 against a map ceiling of 9.2). Same display + listing gate as MANUAL — different copy ("Grade exceeds floor map coverage") so the user knows the map could be extended rather than the book being inherently un-floorable.
-- Acknowledge gate (`needsAck` in CollectionDetail listing flow) checks `manualReviewRequired || gradeExceedsMap || megaKeyFloorApplied`. Gate copy is flag-specific. `manualConfirmed` resets on price change across all 5 merge paths.
-
-**Verify-fallback leak fix (`api/enrich.js`):**
-- Bug: when AI verify rejected 100% of comps (e.g. Action Comics #1 query returning Superman #1 facsimiles), `aiVerifyFallback = true` set sanity to `median(rawComps.prices)` of the rejected listings. Median of wrong-book Superman comps ≈ $147,250. Sanity fired "PC too low" branch ($59K < $73,625), overwrote price with $147,250.
-- Surface A: tightened `aiVerifyFallback` to require `(verifyCount - verifiedCount) / verifyCount < 1.0` — false when 100% rejected. New `compsExhausted` flag set instead, surfaced on `out.compsExhausted`, plumbed through 5 merge paths.
-- Surface B: wrapped sanity block in `if (!isMegaKeyBook && !compsExhausted)`. Mega-keys (MEGA + MANUAL) skip comp-based sanity entirely — floor map is the source of truth, eBay comps for Golden/Silver mega-keys are dominated by reprints/facsimiles/wrong-book entries. Logs `[sanity] skipped — mega-key uses floor map` or `[sanity] skipped — all comps rejected by AI verify`.
-- Closes the "$109 / $147K class of bug" upstream of the floor block.
-
-**Phase 5a (PriceCharting CGC pop):**
-- New module `api/pricecharting-pop.js` — fetches `https://www.pricecharting.com/game/<id>` (302-redirects to slug URL), regex-extracts `VGPC.pop_data = {"cgc":[...]}` from the embedded JS, returns structured `{cgc, total, byGrade, atGrade, aboveGrade, belowGrade, scarcityRatio, userBucket, source}`. 24h in-memory cache per warm Lambda. Fails closed: any error (network, regex, parse, schema mismatch) returns null, engine unchanged.
-- Runs 4th-parallel in `api/enrich.js` Promise.all alongside comps/sold/GoCollect — zero added wall-clock latency. Surfaced as `out.pop` on response.
-- `POP_GRADE_INDEX = [1, 2, 3, 4, 5, 6, 7, 8, 9.0, 9.2, 9.4, 9.6, 9.8, 10]` — locked from PC's own `render_pop_chart()` in `/js/market_ab.js` line 5544. PC bins grades 1–8 into whole-number buckets, breaks out half-grades only at 9.0+. `normalizeGradeToPopBucket()` maps user CGC grade to the matching bucket (CGC 8.5 → bucket 8, CGC 9.4 → exact bucket 9.4, CGC 9.9 → bucket 9.8, CGC 10.0 → bucket 10). Mirrored client-side as a small constant near the App.jsx top.
-- CollectionDetail panel ("PC-TRACKED CGC POP") between AI condition report and pricing block. Renders only when `item.pop && cgc.length === 14` (schema defense). Shows tracked-copies total, at-grade count + scarcity %, graded higher / lower, 14-bar inline-flex histogram with user grade highlighted in amber. Footer: "* PriceCharting tracks copies seen in market activity. Full CGC census may be higher for vintage books." Honest about source — Action #1 PC pop = 44 vs real CGC census ~150.
-- Hidden when `item.pop == null` (indie books, no PC product, scrape fail). When `total === 0`, renders "No copies tracked yet — thin census signal" instead of empty histogram.
-- 5 merge paths plumb the `pop` field: auto-refresh→catalogue, scan→catalogue, scan→selectedItem, bulk-import→catalogue, refreshMarketData. Pattern: `pop: enrich.pop || cur.pop || null`.
-- `/api/pricecharting-pop` standalone POST endpoint (`{ productId, grade }`) for manual calibration hits.
-- No pricing math changes anywhere in Phase 5a — display only. Phase 5b (scarcity-aware pricing hooks like thin-pop floor premium, dense-pop confidence boost) remains gated behind explicit greenlight.
-
-**Ship #8 — [floor] block bypass (`d3ccf26`):**
-- Bug: after Ship #1 fixed the sanity-block leak for mega-keys, the eBay-comps floor guard at `api/enrich.js:1077-1100` was still overriding clean PC × mult with `compsFromEbay.lowest` (pre-verify, contaminated). Repro: Action #1 went from $59K (correct PC × CGC 9.0 mult after sanity skip) to $145,000 (wrong-book Superman comp lowest). Sensation #1 went from $27.50 to $1,250.
-- Fix: same skip surface as Ship #1 — wrapped the floor block in `if (isMegaKeyForFloor) {} else if (compsExhausted) {} else { ... }`. Hoisted `floorNum`/`floorFired` declarations so the downstream `[price-trace]` log still has them in scope. Logs `[floor] skipped — mega-key uses floor map` or `[floor] skipped — all comps rejected by AI verify`.
-- Closes the leak symmetrically across BOTH downstream blocks. Mega-key floor map at `api/mega-keys.js` is now the sole authority for mega-key pricing once PC × mult lands.
-
-**Ship #9 — 35¢ Marvel test-market variant allowlist (`8393a91`):**
-- Bug class: Vision prompt at `api/grade.js:12` instructs Claude to label any 35¢ price-box book as `"35 cent variant"`. The variant multiplier table in `api/enrich.js` then applied ×6 to ANY book with that variant string — even Howard the Duck #28 (1978, well after the test-market window closed in Oct 1977 and 35¢ became the standard cover price industry-wide).
-- Fix: new `TEST_MARKET_VARIANTS['35¢']` const with 52 series / 184 issues from the canonical [RecalledComics list](https://recalledcomics.com/Marvel35CentVariants.php) (cross-checked vs gocollect.com + sellmycomicbooks.com). Gate inside the variant-mult loop checks `isTestMarketVariant(title, issue, '35¢')` — books not in the allowlist `continue` past the 35¢ key (mult skipped, falls through to next key, default 1.0×). Logs `[variant] 35¢ test-market match` or `[variant] 35¢ allowlist miss — skipping mult`.
-- `normalizeTitle` extended to strip hyphens to spaces (Marvel Team-Up / Marvel Team Up unify). 3 retroactive mega-keys map key updates required: `x-men|1` → `x men|1`, `giant-size x-men|1` → `giant size x men|1`, `amazing spider-man|300` → `amazing spider man|300`. End-to-end behavior identical because `getMegaKeyEntry` runs the same `normalizeTitle` on lookup.
-- Defensive aliases for titles where Vision returns short OR long form: `'sgt fury'` + `'sgt fury and his howling commandos'`, `'john carter'` + `'john carter warlord of mars'`, `'kid colt'` + `'kid colt outlaw'`. Both keys point to same array.
-- New test file `tests/variant-allowlist.test.js` with 32 cases: ALLOW (Iron Fist #14, Star Wars #1/#4, ASM #171, X-Men #107, etc.), DENY (Howard the Duck #28, ASM #300, Spawn #8, off-by-one bounds, unknowns), EDGE (empty title, null issue, non-numeric issue, uppercase normalization). 61/61 mega-keys tests still pass after `normalizeTitle` extension (2 assertions updated to reflect new hyphen behavior).
-
-**Ship #10 — 30¢ Marvel test-market variant allowlist + retroactive corrections (`00f0afe`):**
-- Same pattern as Ship #9 for the 1976 30¢ window. Populated `TEST_MARKET_VARIANTS['30¢']` with 57 series / 182 issues from [RecalledComics 30¢ list](https://recalledcomics.com/Marvel30CentVariants.php). April-August 1976 test-market window in 6 small US cities. Excludes Ka-Zar #16 and Inhumans #5 (entire run was 30¢, no variant exists).
-- Variant mult for 30¢ is ×4 (per existing `variantMultipliers` table — already there, just narrowing scope). Gate refactored from hard-coded `if (key === '35¢' || ...)` to `if (key in TEST_MARKET_KEYS)` lookup map: `TEST_MARKET_KEYS = { '35 cent': '35¢', '35¢': '35¢', '30 cent': '30¢', '30¢': '30¢' }`. Pattern extends trivially to Whitman / Mark Jewelers / Type 1A-1B by adding entries to both `TEST_MARKET_KEYS` and a new bucket in `TEST_MARKET_VARIANTS`.
-- Retroactive Ship #9 correction: `'kull the conqueror'` key in 35¢ bucket renamed to `'kull the destroyer'`. Actual 1977 cover title was "Kull the Destroyer" (Marvel renamed in 1973 and stayed there until 1982); RecalledComics' display label "Kull the Conqueror" was a typo. Vision reads literal cover text — old key would have produced false negatives.
-- Doctor Strange dual-key in BOTH buckets: `'doctor strange'` + `'dr strange'` → same issue array per bucket. Vision returns inconsistently.
-- Test file extended with 33 new cases (Kull correction, Doctor Strange dual-key, 30¢ ALLOW/DENY/EDGE). Notable cross-era assertions: ASM #155 in 35¢ bucket → false (was 30¢ era); ASM #169 in 30¢ bucket → false (was 35¢ era); Iron Fist #14 in 30¢ bucket → false (35¢ only). 65/65 variant-allowlist + 61/61 mega-keys = 126 tests passing.
-- Combined 35¢ + 30¢ coverage: **109 series / 366 issues** of true Marvel test-market variants. Books outside both windows now correctly fall through to baseline.
-
-**Ship #11 — A3 era-aware grade multiplier recalibration (`c35f705`):**
-- Bug class: `CGC_MULTIPLIERS` and `RAW_MULTIPLIERS` in `api/enrich.js` were era-agnostic. A 1938 Action Comics CGC 9.4 and a 2018 modern variant CGC 9.4 both got ×2.2. Correct for vintage (scarcity premiums real). Wrong for modern (direct-market supply abundance means CGC 9.4 modern trades at ~1.35× raw, not 2.2×). Confirmed misses: Wolverine/Hulk #1 (2002) NM 9.4, US of Cap #1 (2021) CGC 9.4, Daredevil #600 (2018) NM 9.4, Dark Horse #1 (1992) VF+ 8.5.
-- Fix: both tables refactored to `{ vintage, modern }`. Vintage preserved exactly (every value pinned in regression tests). Modern CGC damped: 10: 12.0→3.0, 9.9: 8.0→2.6, 9.8: 5.0→2.2, 9.6: 3.0→1.6, 9.4: 2.2→1.35, 9.2: 1.8→1.2, 9.0: 1.5→1.1, 8.5: 1.3→1.05, 8.0: 1.15→1.0, 7.5: 1.05→0.95, 7.0: 1.0→0.9, 6.5: 0.9→0.85, 6.0: 0.85→0.8, 5.5: 0.8→0.7, 5.0: 0.75→0.65, 4.5: 0.7→0.6, 4.0: 0.65→0.55, 3.5: 0.6→0.5, 3.0: 0.55→0.45, 2.5: 0.5→0.4, 2.0: 0.45→0.38, 1.8: 0.4→0.35, 1.5: 0.35→0.32, 1.0: 0.3→0.28, 0.5: 0.2→0.25.
-- Modern RAW: graduated damping upper curve (NM 1.00→0.90, NM/M 1.00→0.90, VF/NM 0.85→0.78, VF 0.75→0.70, VF/F 0.70→0.65, FN/VF 0.65→0.60, FN 0.55→0.50, VG/FN 0.50→0.45, VG 0.45→0.40, VG/G 0.40→0.36) + flat tail below VG/G (GD/VG 0.35, GD 0.30, FR/GD 0.25, FR 0.20, PR 0.15 — identical to vintage; sub-GD trades on condition-survival not era dynamics).
-- `getEra(year)` helper: `parseInt(year) >= 1985 ? 'modern' : 'vintage'`. Null / undefined / 0 / empty-string → vintage (safe default — prefers over- to under-valuing unknown books). String-year inputs handled via parseInt.
-- `getGradeMultiplier(grade, year = null)` and `getRawGradeMultiplier(gradeStr, year = null)` — optional year param, defaults to vintage. Response now includes `era` field for observability. Call sites at lines 1090-1119 (PC branch) and 1259-1272 (browse_api branch) use `const eraYear = confirmedYear || year` — healed year from PC/CV crosscheck wins when available.
-- Log line augmented: `[enrich] pricecharting base=$X × Y (CGC Z, era=vintage|modern) = $N`. Every multiplier decision traceable to its era routing.
-- Behavior preservation:
-  - Browse_api path UNCHANGED in behavior — still doesn't apply multiplier, just records era-aware value for `out.gradeMultiplier` (used by floor guard downstream).
-  - Mega-keys UNAFFECTED — mega-key floor at `api/mega-keys.js` overrides downstream regardless.
-  - Variant / key multipliers UNAFFECTED — separate gating, apply on top of already era-aware base.
-  - 35¢ / 30¢ test-market variants UNAFFECTED — those books are 1976-1977 (vintage), variant mult still applies ×4 / ×6 on top of vintage base.
-- Tables + helpers `export const` for test import (first time `api/enrich.js` has named exports besides default handler — harmless to Vercel runtime, enables regression pinning).
-- Test coverage: `tests/era-multipliers.test.js` — 109 assertions. Schema sanity (both era buckets, matching keys); `getEra()` boundaries (1938/1974/1984/1985/1986/1992/2021/null/undefined/0/empty-string/string-year); CGC vintage unchanged (all 25 grades verified exactly against pre-ship values); CGC modern damped (Dark Horse #1 VF+ 8.5, Wolverine/Hulk #1 CGC 9.4, US of Cap #1 CGC 9.4, ASM #300 CGC 9.8, 10/9.6/9.2 spot-checks); CGC null/edge year → vintage default; RAW vintage unchanged (all 15 tiers); RAW modern damped upper curve; RAW modern flat tail (GD/VG and below === vintage, asserted via both function call and table equality); numeric grade strings route via CGC table with correct era; era tag present on every response.
-- Production validation confirmed: Avengers #20 (2025) NM 9.4 → $3.19 (modern ×1.35 applied, was would-be ~$5-6 with old ×2.2). Daredevil #1 (1964) CGC 9.8 → $600K floor unchanged (vintage, mega-key). Amazing Adventures #4 (1961) VG 4.0 → $70.85 unchanged (vintage raw ×0.65).
-
-**Ship #12a — FR-D7 multi-key attribution from comp titles (`bdb0f1e`):**
-- Bug class: competing sellers encode key context in eBay listing titles ("1ST TOLD DEATH OF MA & PA KENT", "Death of Dracula", "Intro of Mr. Tawky Tawny & Mr. Mind"). Engine pulled titles for comp pricing but ignored the structured key signals. Confirmed misses across Superman #161, Frankenstein Monster #9, Shazam! #2, Superman #201.
-- Approach: leverage-only. Pure text parsing on existing `rawComps.prices` post-AI-verify (so reprint/facsimile/wrong-book noise is already filtered). Zero new endpoints.
-- `COMP_KEY_PATTERNS` module-level constant in `api/enrich.js` — 8 regex kinds with `weight: 'major' | 'minor'`:
-  - `first-appearance` (major): `/\b(?:1st|first)\s+(?:ever\s+)?app(?:earance)?\b(?:\s+of\s+[^-–|#,;]{2,50})?/i`
-  - `origin` (major): `/\borigin\s+of\s+[^-–|#,;]{2,50}/i`
-  - `death` (minor): `/\b(?:1st\s+)?(?:death|dies)\s+of\s+[^-–|#,;]{2,50}/i`
-  - `intro` (major): `/\b(?:intro(?:duction|duces|duced|ducing)?|introducing)\b(?:\s+(?:of\s+)?[^-–|#,;]{2,50})?/i`
-  - `first-told` (minor): `/\b(?:1st|first)\s+told\s+[^-–|#,;]{2,50}/i`
-  - `cameo` (minor): `/\bcameo(?:\s+(?:of|by)\s+[^-–|#,;]{2,50})?/i`
-  - `second-appearance` (minor): `/\b(?:2nd|second)\s+app(?:earance)?\b/i`
-  - `first-cover` (minor): `/\b(?:1st|first)\s+cover(?:\s+app(?:earance)?)?\b/i`
-- `cleanCompPhrase(s)` helper strips trailing noise: CGC / CBCS / PGX / PSA / EGS / HGA suffix; trailing `#N`; trailing year (4 digits); trailing decimal/whole grade; trailing raw grade letters (vf/nm/fn/vg/gd/fr/pr/mint). Multiple consecutive spaces collapsed. Raw match "Death of Dracula CGC 9.4 Marvel 1974" → "Death of Dracula".
-- `titleCaseKeyPhrase(s)` — exported. Lowercases connectors `{of, the, a, an, and, &, in, on, at, to, for, by, vs, vs.}` mid-phrase; capitalizes first char of every non-lowercased word; preserves punctuation ("Mr.", "Ma & Pa"). "1ST TOLD DEATH OF MA & PA KENT" → "1st Told Death of Ma & Pa Kent".
-- `extractKeyFromComps(titles)` — exported. Scans array of comp titles against all patterns. Dedup key = `${kind}:${titleCasedPhrase.toLowerCase()}` so "DEATH OF DRACULA", "Death of Dracula", "death of dracula" all merge into one entry. Returns `{ consensus: [...], singletons: [...] }`. `consensus = hits >= 2`, `singletons = hits === 1`. Sorted by hits desc. Sources array capped at 3 per entry. Guard on non-array / null / undefined / mixed-type input returns `{ consensus: [], singletons: [] }` silently.
-- Handler integration at line 1205: runs AFTER keyIssue resolution (so existing `out.keyIssue` flow is untouched) but references `rawComps.prices` (post-AI-verify pool). Logs `[key-from-comps] consensus: kind/phrase×hits, ...` when at least one consensus detection fires.
-- `keyIssueSource` field added alongside existing keyIssue resolution chain: `'comicvine'` (structured firstAppearanceCharacters) | `'comicvine-derived'` (description regex) | `'claude'` (grade.js `req.body.keyIssue`) | `null`. Observability only — UI not yet using it.
-- Response additions (all additive, backward compatible):
-  - `out.keyFromComps` — consensus list, each `{ kind, phrase, hits, weight, sources[] }`
-  - `out.keyFromCompsSingleton` — hits=1 list (same shape) for observability
-  - `out.keyIssueSource` — string | null
-- Client merge paths: 5 sites in `src/App.jsx` (auto-refresh→catalogue, bulk-import→catalogue, bulk-import→selectedItem, scan→catalogue, refreshMarketData→item) extended to propagate `keyFromComps`, `keyFromCompsSingleton`, `keyIssueSource` alongside existing `keyIssue`. Pattern: `enrich.X || cur.X || defaultValue`. Default for arrays is `[]`, default for string is `null`. Necessary for IndexedDB persistence — scoped earlier estimate of "zero merge paths" was wrong because `keyIssue` uses explicit field mapping (not `...enrich` spread).
-- UI block in `CollectionDetail` (~line 1972): collapsible "DETECTED IN COMPS" panel under the ⭐ keyIssue box. Renders only when `Array.isArray(item.keyFromComps) && item.keyFromComps.length > 0`. Each entry is a button: `• {phrase} ({N} source{s}) ▼`. Tap toggles expansion (via `expandedKeyIdx` state in CollectionDetail). Expanded state shows up to 3 source titles indented. Style matches existing key-box aesthetic (gold accent at 6% opacity background, 18% border). Bundle delta +0.41 KB gzip.
-- Superman #161 double-trigger behavior: the pattern "1ST TOLD DEATH OF MA & PA KENT" in a single title hits BOTH `first-told` and `death` patterns independently because `death` has an optional `(?:1st\s+)?` prefix. Two consensus entries result when the same title appears in 2+ comps. This is correct — each kind is a separate signal.
-- Pricing math: ZERO impact. `out.keyIssue` resolution chain unchanged (still CV / CV-derived / Claude / null). Key multiplier at line 1443+ still reads `out.keyIssue`, never `keyFromComps`. Promotion to keyIssue (Ship #12b) is gated behind future explicit greenlight after observing signal quality in production.
-- Narrative events out of scope per session decision (e.g. "Clark Kent Abandons Superman" on Superman #201): weaker pricing correlation, lower signal-to-noise ratio, deferred to potential future FR-D7.5 ship. Explicit negative test assertion locks this scope decision into the test file.
-- Test coverage: `tests/comp-key-extraction.test.js` — 53 assertions. Pattern catalog registration (all 8 kinds); `titleCaseKeyPhrase` behavior; guards (empty / null / undefined / mixed-type input); each of the 8 pattern kinds individually tested with positive fixture; consensus threshold (1 hit → singleton, 2 hits → consensus); case-insensitive dedup; different-phrase-same-kind separate entries; negative cases ("1st print", "Death Metal" without "of", bare title); sources array cap at 3; noise stripping in captured phrase; weight field preservation; sort order (hits desc); all 4 confirmed production misses pinned as fixtures (Superman #161 double-trigger, Frankenstein Monster #9 death, Shazam! #2 intro, Superman #201 asserted NOT matched).
-
-**Cumulative session impact (4/22/2026, 12 deploys):**
-- Bug classes eliminated: mega-key undervaluation, wrong-book comp leaks (sanity + floor), contaminated floor bypass, 35¢/30¢ false positives, A3 modern grade inflation, Kull "Destroyer vs Conqueror" typo, single-field keyIssue attribution blindness.
-- Architectural additions: `TEST_MARKET_VARIANTS` extensible variant-type structure, era-aware multiplier tables (vintage/modern split), comp key extraction (leverage-first pattern), response field additions (`keyFromComps`, `keyFromCompsSingleton`, `keyIssueSource`, `era`, `pop`, `compsExhausted`, `preFloorPrice`, `gradeExceedsMap`, `manualReviewRequired`, `megaKeyFloorApplied`/`Verified`/`Source`/`Note`, `yearOverrideRejected`).
-- Pattern library state (from 20-book scan analysis): Pattern A (Bronze non-mega keys) 5 confirmations, Pattern B (Silver/Bronze non-mega) 7, Pattern C (Mega-keys floor) 4, Pattern D (Indie/obscure) 2, Pattern E (Modern non-key raw) 2, Pattern K (Low-grade floor) 1, Pattern L (Publisher-debut) 1.
-- Parallel QA protocol validated: three Claude instances collaborating effectively (pattern observer with fresh context / directive synthesizer in main chat / executor with codebase access) + human decision-maker. Proven across 12 clean deploys in a single session.
-
-## Next session candidates (queued)
-
-**Tier 1 (next session, pick by energy):**
-- COMP-POOL-QUALITY — filter signed/grade/variant pollution (3-4 hr)
-- FR-LIST-PRICE-WARNING — user over-reach detection (2-3 hr)
-- FR-LOW-GRADE-FLOOR — bottom-census anchoring (1-2 hr)
-- FR-5a.4 — CGC-style value ladder display (2-3 hr)
-- B4 — Artist-credit variant disambiguation
-- Whitman variants (pattern ready via `TEST_MARKET_KEYS` + new bucket)
-- Mark Jewelers insert variants (same pattern)
-
-**Tier 2 (larger scope):**
-- FR-Q9 — Issue# cross-check via ComicVine before commit (3-4 hours, soft-flag variant)
-- FR-5a.5 — Leverage extraction sweep (4-6 hr)
-- Ship #12b — keyFromComps promotion to `keyIssue` (requires phone observation of 12a signal quality first; pricing math change — explicit greenlight required)
-- FR-Q11 — Cover hash verify
-- FR-Q12 — Imprint awareness
-- K2 — Merge pattern refactor (5 merge paths → centralized helper)
-
-**Deferred (fresh head required):**
-- Phase 5b — Scarcity-aware pricing hooks (gated; thin-pop floor premium, dense-pop confidence boost) — explicit greenlight before any pricing math
-- K1 — Duplicate detection
-- Scan UX rail (dedicated session)
-
-**Open external threads:**
-- GoCollect API key #019483 — pending approval (since 4/15)
-- eBay Marketplace Insights API — DEAD for indie devs
-- Phone audit cadence — strong momentum (5 fixes in 4/19 session, 12 deploys in 4/22 session)
-
-**Ship #12a phone validation pending:** scan Shazam! #2 / Frankenstein Monster #9 / Superman #161 if in collection. Look for "DETECTED IN COMPS" block under ⭐ keyIssue in CollectionDetail. Only shows when ≥2 comp titles mention same key. Collapsible with source expansion. Zero pricing changes expected. Expected log signatures: `[key-from-comps] consensus: {kind}/{phrase}×{hits}` and `[enrich] pricecharting base=$X × Y (grade, era=vintage|modern) = $Z`.
-
-**Process note — parallel QA protocol validated:** three Claude instances coordinating (pattern observer with fresh context / directive synthesizer in main chat / executor with codebase access) + human decision-maker shipped 12 clean deploys today. Methodology proven effective for high-velocity Tier 0 + Tier 1 + A3 + FR-D7 work.
-
-## Session 4/19/2026 (phone audit — 5 critical fixes)
-Navigation gesture guards, empty/low comp scoring, publisher parens cleanup, variant filter order, vision + match tier sync.
-
-Source: 30+ scan phone audit session surfaced 4 identification errors + navigation instability + confidence-scoring logic bugs. Every book's confidence signal now honest.
-
-(1) **FIX 1 — Navigation gesture guards** (`src/App.jsx:1547-1668` CollectionDetail): added `touchStartY`/`touchStartT` refs alongside existing `touchStartX`. onTouchEnd now checks (a) duration ≤500ms (long-press ignored), (b) `|dx| >= 50`, (c) `|dx| > |dy|` (horizontal dominant). Vertical scrolls and long-press-drags no longer trigger card navigation. Arrow-key handler unchanged.
-
-(2) **FIX 2 — Empty/low comp scoring** (`api/comps.js:450-539 computeMatchConfidence` + `api/enrich.js:1181-1191`): 0 comps returns `{score:0, tier:'LOW', displayMessage:'No eBay comps found — AI estimate only'}`. 1 comp caps score at 60, tier LOW, message "Only 1 comp found — limited data". 2 comps caps score at 75, tier MEDIUM (only if rawScore≥65, else LOW), message "Limited comps — verify before listing". 3+ comps keep full scoring. enrich.js now prefers returned `mc.displayMessage` and only falls back to tier-based default when absent. UI badge already rendered `mcScore` + `displayMessage` — no client changes needed for the badge. Repro: Dinosaurs #1 was returning `matchConfidence: 100 ✓ Verified` with `comps count: 0` — now returns 0 LOW with correct message.
-
-(3) **FIX 3 — Publisher parens cleanup** (`api/comps.js:407-416 cleanPublisher` exported + `api/enrich.js:13,561-565`): new `cleanPublisher(p)` helper strips `()` `[]` `{}` `"` `'` `/` `\` `&` `?` → space, collapses whitespace. Applied at enrich handler entry (`const publisher = cleanPublisher(rawPublisher) || null`) so ComicVine scoring (which uses `.includes(pubLower)`), fetchComps, and GoCollect all see the clean version. fetchComps `pubKeyword` length cap raised 20 → 35 to accommodate parent+imprint combinations like "Hollywood Comics Walt Disney" (28 chars). Repro: Dinosaurs #1 with `publisher:"Hollywood Comics (Walt Disney)"` was returning 0 comps on eBay Browse — parens broke the query parser. After fix: both "Hollywood Comics" and "Walt Disney" tokens reach eBay.
-
-(4) **FIX 4 — Variant filter order (hard first, soft last)** (`api/comps.js`): creator-match filter (previously Filter 1b-creator at line 870) MOVED to position 3b, running AFTER all hard filters. New chain order: title-similarity → reprint (1) → VARIANT_CONTAM_RE (1b, hard) → variant preference (1c) → cover-letter (1d) → lot (1e) → half-issue (1f) → TPB format (1g) → slab (2) → grade proximity (3) → **creator match (3b, SOFT preference)** → price sanity (4) → dedup (5). `VARIANT_CONTAM_RE` hoisted to module scope (line 273-277) and re-applied inside creator match as a hard guard — even when variant-fallback keeps a variant-only pool (all comps were variants), creator match filters them out before picking. Repro: Usagi Yojimbo #1 Cover A with creator="Stan Sakai" or "Eastman" was selecting "RI-C Variant Eastman" because the old creator match ran before variant filter, OR variant filter fell back in variant-only pool and then creator match picked variants. After fix: creator match only ever runs on non-variant listings.
-
-(5) **FIX 5 — Vision + match tier sync** (`api/enrich.js:1181-1213` + `src/App.jsx:2001-2027`): matchConfidence measures "do comps match identified book?" — can't detect misidentification where Vision returned the wrong book with a matching comp pool. Now reads req.body.confidence (grade.js Vision "high"/"medium"/"low") and caps matchConfidence. Vision LOW + Match HIGH → tier → MEDIUM, score → min(score, 75), `visionCapped: true`, `originalScore` preserved, `displayMessage: "Vision confidence low — verify identification"`. Vision LOW + Match MEDIUM → stays MEDIUM but gets visionCapped flag + same message. Vision LOW + Match LOW → unchanged (already LOW). Vision MEDIUM + Match HIGH → `visionModerate: true` flag only (badge unchanged). Vision HIGH → untouched. `out.visionConfidence` always surfaced. UI warning panel widened to trigger on `tier === 'LOW'` OR `visionCapped === true`; visionCapped branch shows enhanced copy "AI identification uncertain — confirm book identity before listing. Match score reduced from X to Y due to low Vision confidence." Log line includes `vision=low CAPPED` marker. Repro cases: Sentry #1 (Vision medium, Match 98 HIGH), Miles Morales #1 (Vision LOW, Match 77 MEDIUM — now flagged), Doctor Solar #14 misread as #10 (would have been caught by vision-capped warning had Vision returned LOW).
-
-Build clean (194ms, dist/assets/index 115.58 KB / 30.22 KB gzip).
-
-## Session 4/19/2026 — ARTIST_PATTERNS expansion + Active Listings full-title visibility:
-(1) **`e139caa` — ARTIST_PATTERNS 15 → 36**: `api/comps.js` artist-specific virgin/variant matcher expanded with 21 new patterns. **Multi-word patterns listed first** so first-match-wins via `break` in the loop captures the longer name before generic single-word fallbacks would shorten it (e.g. `/tyler kirkham/i` matches before `/kirkham/i`; `/jim lee/i` and `/inhyuk lee/i` would otherwise be capped at first-token match): `tyler kirkham`, `jim lee`, `inhyuk lee`, `skottie young`, `frank cho`, `frank miller`, `windsor.?smith` (matches `windsor smith`/`windsor-smith`/`windsorsmith`), `dell'?otto` (matches `Dell'Otto`/`Dellotto`). New single-word: `jimenez`, `mcfarlane`, `campbell`, `artgerm`, `nakayama`, `hughes`, `byrne`, `perez`, `kirby`, `ditko`, `mele`, `albuquerque`, `hama`. Existing 15 (skan, rapoza, quash, momoko, ross, adams, kirkham, bean, andolfo, browne, forstner, howard, corona, stegman, ottley) preserved.
-(2) **`e139caa` — Active Listings full title visibility**: `src/App.jsx` Active Listings title rendering in BOTH `CollectionDetail` (~line 2037) and `ResultCard` (~line 420). Removed `whiteSpace: nowrap` + `overflow: hidden` + `textOverflow: ellipsis` + 55-char `s.title.slice(0,55) + "…"` truncation. Replaced with `{ fontSize: 13, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }` — wraps to multiple lines, full eBay listing title visible. Date+price flex row above stays unchanged. Font bumped 11px → 13px and color lightened #666 → #999 for readability against dark theme.
-(3) Build clean (314ms, dist/assets/index ~113.86 KB / 29.76 KB gzip). Deployed `comic-vault-98j95l8b2-boats43s-projects.vercel.app`.
-
-Session 4/18/2026 (creator + slabs) — creator field, SLAB_RE+SS, variant policy reversal, Excl filter:
-(1) **`6074f24` — creator-as-default-matcher + non-standard filter**: `api/grade.js` `JSON_SHAPE` adds `"creator": string or null` with prompt instructions to extract main cover artist from cover credits/signature, modern books only, never guessing from style. `api/enrich.js` passes `creator: req.body.creator || null` through to `fetchComps`. `api/comps.js` extends VARIANT_CONTAM_RE with `\bexclusive\b` and `\bsketch\b` (catches D'Orc Mel Milton/Akira Homage exclusives). New Filter 1b-creator (after 1b variant-contam, before 1c variant-preference): when `!variant && creator`, prefer comps whose title contains the creator name; graceful fallback if <2 match. D'Orc #1 with `creator: "Brett Bean"` narrowed from 5 mixed-artist comps to 5 all-Brett-Bean comps.
-(2) **`2c17f2b` — SLAB_RE catches CGC SS, VARIANT_CONTAM catches Excl abbreviation**: SLAB_RE middle group adds `ss|signature\s+series` so `CGC SS 9.8` / `CBCS SS 7.0` slab listings are now correctly filtered from raw comp pools. Previously the bare "SS" between cert org and grade broke the regex (3 CGC SS 9.8 slabs were leaking into D'Orc raw comps; one CBCS SS 7.0 signed Romita @ $975 was inflating ASM #121 avg). VARIANT_CONTAM_RE policy REVERSED — now INCLUDES bare `\bvariant\b` plus `\bprice\s+variant\b`, `\btype\s+1`, `\bexcl\.?\b` (catches "Excl Variant" abbreviation; word-boundary prevents "excellent" match). REMOVED: `\bcanadian\b` — Canadian price-variant listings now PASS through (policy decision; flag if unintended).
-(3) **Combined impact**: D'Orc #1 NM 9.4 with creator → $107 → $131 (raw-only Brett Bean Cover A pool, 3 comps, range $99.99-$169.99). ASM #121 FN 6.0 → $448.80 → $255.00 (CBCS SS 7.0 $975 outlier removed; floor-enforced from rawComps.lowest). HEADS-UP: across the catalogue, expect books with slabbed comps in their pool to recompute LOWER after refresh — this is MORE ACCURATE raw pricing, not a regression.
-
-Session 4/18/2026 (perf+filters) — Finding API bypass + tokenizer overhaul + lot range fix:
-(1) **`06c3ebb` — Finding API bypass**: module-level `USE_FINDING = process.env.EBAY_USE_FINDING === 'true'` defaults to FALSE. eBay Finding API was returning 500 errorId 10001 100% of the time, costing 2.5s per attempt. Wall-clock enrich: 5.02s → 1.87s avg (-62.5%) on `Amazing Spider-Man #121 1973 FN 6.0`. Pricing identical (same browse_api fallback as before). `tryFindCompleted` left intact for future re-enable.
-(2) **`b6df77e` — tokenizer overhaul**: `tokenizeTitle` MIN_TOKEN_LEN 4→2; new STOP_WORDS set (the/a/an/of/and/or/in/on/at/to/for/with/comic/comics/comicbook/issue/volume/vol/marvel/dc/image/dark/horse/idw); pure-digit tokens dropped (`/^\d+$/`). `hasSufficientTitleOverlap` rewritten — tokenizes the listing too, requires ≥50% overlap of our tokens. Returns true when all our tokens are stop-words ("Dark Horse Comics") so other filters handle it. Fixes Tip Top Comics #219: $8.05 (Fantastic Four contamination) → $31.88 (5 real Tip Top comps incl 4 listings without the word "Comics" that were previously filtered). Stop-words stay in the eBay search query, only similarity-match ignores them.
-(3) **`b6e06be` — lot range refinement**: bare `#?\d+\s*[-–—]\s*#?\d+` alternation removed from LOT_RE; replaced with `isValidIssueRange()` that skips year-like numbers (1800-2050), decimal grades (≤10 with `.`), descending pairs, non-integer pairs, and pairs where M ≥ 1000. Only flags ascending whole-number issue ranges (`#1-5`, `#100-150`). Fixes Konga #2 ("1961 - 10 Cents" no longer matches), Marvel Super-Heroes #1 ("1 - 1966" no longer matches). Dark Horse Comics `#1-5` lot still correctly rejected.
-
-Session 4/18/2026 (TPB) — TPB-aware comps pipeline:
-(1) **TPB-aware comps** (`73c8810`): three coordinated sub-fixes to make TPB / collected-edition pricing accurate. Repro: Batman vs Predator "The Collected Edition" was returning $10.31 from 5 single-issue floppy comps (real TPB market ~$25-45). After fix: $26.99 from 4 real Collected Edition TPB listings (avg $29.24 range $24.95–$35). Sub-fixes:
-  (a) **TPB_MARKER_RE** module-level constant: `tpb|trade paperback|hardcover|hc|omnibus|compendium|deluxe(\s edition)?|absolute(\s edition)?|treasury(\s edition)?|collected edition|graphic novel|gn`.
-  (b) **ARROW 1 — TPB-aware attempt query**: when title matches TPB_MARKER_RE, `attempts.unshift` an attempt labeled `tpb-aware` with NO `#issue` token. Marker is appended only if cleanTitle doesn't already contain it (avoids "Collected Edition Collected Edition" duplication). Strips eBay's bias toward floppies (single-issue floppies vastly outnumber rare collected editions in relevance ranking).
-  (c) **ARROW 2 — Filter 1g (TPB format match)**: between Filter 1f and Filter 2. When `isTPB`, requires comp titles to contain a TPB marker. Graceful fallback to keep all if zero matches.
-  (d) **Filter 0a relaxation**: when `isTPB`, accept listings with EITHER `#issueNum` OR a TPB marker. Without this fix the TPB-aware attempt died on Filter 0a — TPB sellers write "TPB Vol 1" or omit issue numbers entirely, so the standard `#1` requirement was nuking real TPB listings before Filter 1g could see them.
-(2) **Regression check** — Walking Dead Compendium $22.99 → $19.53 (5 Compendium listings, broader pool now includes Graphic Novel format); Dark Knight Returns TPB $29.31 → $17.09 (5 TPB listings). Both price drops are MORE accurate, not regressions: TPB-aware attempt drops `#1` and captures lower-grade copies that were previously excluded. Real DKR raw TPB market on eBay is $15–22, so $17 reflects truth better than $29.
-
-Session 4/18/2026 (latest) — lot/set/bundle comp filter:
-(1) **Lot filter** (`3420902`): new Filter 1e in `api/comps.js` between cover-letter (1d) and slab (Filter 2). Multi-book lot listings inflated single-book comp averages — repro: Dark Horse Comics #1 (1992) had a $33.72 comp that was actually `#1-5` 5-book lot. LOT_RE: `/\b(?:lot|bundle|complete\s*set|full\s*run|comic\s*library|comic\s*collection)\b|#?\d+\s*[-–—]\s*#?\d+|\b\d+\s*(?:book|issue|comic)s?\s*(?:lot|set)\b|\bset\s*of\s*\d+\b/i`. Spec deviation from user request: `(lot|set)` qualifier on the `\d+\s*(book|issue|comic)s?` alternation made REQUIRED (not optional) — without it, "1 Issue Comic Book" (extremely common single-issue title fragment) matches and would wipe the comp pool. Skips entirely when `variant` contains `lot|set|bundle` (user knowingly cataloguing a lot). Each rejection logs `[lot-filter] rejected: <title prefix>`. After fix Dark Horse Comics #1 1992 VF+ 8.5 returns 4 single-issue comps avg $6.60 (range $3.78–$12), price $5.54 from PriceCharting (sanity passed).
-
-Session 4/18/2026 (late) — year override guard:
-(1) **Year override guard** (`523ce2b`): `api/enrich.js` `confirmedYear` derivation rebuilt from blind `pc?.year || cv?.coverDate?.slice(0,4) || year` chain to trust-but-verify. Branches in order: (a) era-specific keyIssue regex (`silver age|bronze age|king-size|giant-size|annual|spectacular|first issue`) → trust user year + log `[enrich] era-specific key — trusting user year`; (b) PC and CV agree within ±2y → average them; (c) PC year within ±2y of user → PC wins; (d) CV year within ±2y of user → CV wins; (e) both PC and CV diverge from user by >2y → keep user year, set `out.yearOverrideRejected = true`, log `[enrich] year override REJECTED: user=X pc=Y cv=Z`. Original log line `[enrich] year corrected: A → B` retained when the chosen value differs from user input. Repro: Marvel Super-Heroes #1 1966 FN 6.0 with `keyIssue: "King-Size Special #1"` — before fix ComicVine matched vol 2 (id 1035124, coverDate 1980-12-01), `confirmedYear` flipped to 1980, comps query went out as `… #1 1980 Marvel`, AI verify dropped 4/5 leaving one 1980 Spring Special at $9.99 → final $11.49. After fix era-specific branch fires on "King-Size", confirmedYear stays 1966, comps query is `… #1 1966 Marvel`, 5 Silver Age listings survive (avg $22, range $10–$46), final $25.30 / confidence MEDIUM. `out.yearOverrideRejected` only set on branch (e) — branch (a) returns user year via the era-specific path without the rejected flag.
-
-Session 4/18/2026 — Dell Four Color alias + artist-specific variant matching:
-(1) **Dell Four Color alias** (`b25e9c4`): `api/comps.js` now detects `publisher` containing "Dell" + `issue > 100` and appends three alias attempts before dedupe — `Four Color #<iss> <title> <year>`, `Four Color #<iss> <title>`, `Dell Four Color <iss>`. Also seeds `four`/`color` into `searchTokens` so alias listings that omit the character name survive the title-overlap filter. Dell's Four Color anthology ran issues 1-1354 (1939-1962) as a one-character-per-issue series; eBay sellers list all three ways. Character-only query (attempt 0) already existed — this adds the two alias forms.
-(2) **Artist-specific variant priority** (`42947dd`): `api/comps.js` ARTIST_PATTERNS list (skan, rapoza, quash, momoko, ross, adams, kirkham, bean, andolfo, browne, forstner, howard, corona, stegman, ottley) tested against `variant`. On match, `attempts.unshift` an `artist-specific`-labeled query: `<cleanTitle> #<iss> <artist> [virgin] <year> <publisher>` capped at 100 chars. Loop tracks `attemptLabel` on the winning attempt. `artistFallback = !!artistName && !winningQuery.includes(artistName)` — set when we fell through to a generic virgin/variant query. Returns `artistFallback` + `compBasis: 'generic-variant-fallback'` on the comps object. `api/enrich.js` surfaces both on `out.artistFallback` / `out.compBasis` in both the pricecharting branch and (separately) for browse_api-only books. Fixes Skan/Rapoza/Momoko/etc virgin variants being compared against generic-virgin comp pools from unrelated artists.
-
-Session 4/17/2026 (late) — median fallbacks, sanity re-tier, comp pool expansion, year heal:
-(1) **Median on mixed-print fallback** (`ff5758a`): `api/enrich.js` adds `median()` helper. When `reprintFallback` or `variantFallback` is set, sanity `compsAvg` becomes `median(rawComps.prices)` instead of the mean — filters 1st/4th print price mixes where the mean is meaningless. Tightens sanityHighMult to 1.25x on any mixed fallback.
-(2) **AI verify fallback** (`80f35fb`): when `verifyCompsTitles` rejects every checked listing but `rawComps.prices` still has entries, set `rawComps.aiVerifyFallback = true` so sanity treats it the same as reprint/variant fallback. Surfaces `out.aiVerifyFallback` on the response.
-(3) **Apostrophe handling** (`eac6188`): `cleanTitleForSearch` in `api/comps.js` replaces `/['"!?]/g` with a SPACE instead of empty string. "D'Orc" → "D Orc" (two tokens) rather than "DOrc" (one unmatchable token). Fixes eBay coverage for apostrophe titles.
-(4) **Sanity raw compsAvg on fallback** (`eac6188`): `sanityCompsAvg = isMixedFallback ? compsAvg : compsAvg × mult`. Prior adjAvg-based comparison inflated the guardrail by the grade multiplier and masked PC outliers when a fallback flag was active.
-(5) **Attempt loop continues on empty post-filter** (`eac6188`): `fetchComps` in `api/comps.js` now inlines the full filter chain inside the attempt loop and only breaks on `parsed.length > 0`. Previously broke on `raw.length > 0`, so a too-specific query that matched 5 junk listings starved the broader fallback queries.
-(6) **confirmedYear surfaced + client heal** (`eac6188`): `api/enrich.js` writes `out.confirmedYear` and `out.yearCorrected`. App.jsx enrich callbacks (scan, auto-refresh, refreshMarketData, bulk import) update `item.year` when yearCorrected === true. Catalogue entries stored with a wrong year get healed on next refresh.
-(7) **Tighter sanity thresholds** (`084a8ca`): added `lowCompsCount = (rawComps?.count || 0) < 3` guard → 1.25x. Retiered modern: Golden <1970 → 3x, Silver/Bronze <1985 → 1.75x, Modern ≥1985 → 1.5x. Replaces the prior 3x (pre-1985) / 2x (modern) scheme.
-(8) **Comp pool expansion** (`5bcfe91`): `api/comps.js:tryBrowse` now uses `limit=100` (was 20), `sort=bestMatch` (was endingSoonest), and `buyingOptions:{FIXED_PRICE|AUCTION}` (was FIXED_PRICE only). 5× raw pool, relevance-ranked, auction bids included.
-(9) **SLAB_RE tightened** (`5bcfe91`): raw-search slab filter requires an explicit slab indicator (cgc|cbcs|pgx|slab|graded|universal) before the numeric grade. Bare "9.4" in a raw seller's self-grade no longer drops the listing.
-(10) **Variant regex loosened** (`5bcfe91`): dropped bare `\bvariant\b` from VARIANT_CONTAM_RE. Sellers commonly append "variant" to 1st-print Cover A titles generically. Kept concrete markers (virgin/foil/ratio/1:N/incentive/newsstand/whitman/canadian).
-(11) **Sanity double-grade fix** (`cbcc590`): `sanityCompsAvg` is now always raw `compsAvg` — removed the `isMixedFallback ? compsAvg : compsAvg × gradeMultiplier` conditional. Both sides of the comparison are already at-grade (pcNum = PC × mult, compsAvg = at-grade market), so multiplying compsAvg by mult inside the comparison double-counted the grade adjustment. D'Orc #1 PC $193 passed the old guardrail at $111 × 2.2 × 1.5 = $367 but fires correctly at $111 × 1.5 = $167.
-(12) **PSA + cover variant filter** (`ae78d5d`): SLAB_RE expanded to match `psa | egs | hga | signature\s+series | verified | qualified` in addition to CGC/CBCS/PGX — PSA 9.8 slabs were leaking into raw comps. New Filter 1d enforces cover-letter matching: Cover A / no variant / "1st print" drops Cover B/C/D+ listings; specific Cover B/C/... variants keep only that letter with graceful fall-back to all if zero match.
-End-to-end verification on D'Orc #1 (Image 2026 NM 9.4 Cover A, stored year 2025): 2 comps → 5 comps → 2 Cover-A-only, price $275.49 → $91.23 with priceNote "PC too low — eBay avg used" and `yearCorrected: true` / `confirmedYear: 2026`. Key mult no longer stacks on browse_api source; no PSA / Cover B / Cover C listings in the comp pool.
-
-Session 4/17/2026 (early) — comps hardening, prompt fixes, import race, bulk HOT listing:
-(1) **Comps grade proximity — raw letter grades** (`5279383`): new `parseListingGrade(title)` in `comps.js` recognizes CGC numeric slabs AND raw letter grades (NM/MT, NM+, NM-, NM, VF/NM, VF+, VF-, VF, FN/VF, FN+, FN-, FN, VG/FN, VG+, VG-, VG, GD/VG, GD+, GD-, GD, FR/GD, FR, PR). Filter tolerance widened from ±1.0 to ±1.5. Rejections logged with listing grade + our target.
-(2) **Comps listing dedup** (`5279383`): Filter 5 — after all other filters, dedup on `price|title[0:35].lower()` to catch eBay returning the same row twice in one batch. Query-level dedup (line 472) was already in place — this adds row-level.
-(3) **Newsstand in VARIANT_CONTAM_RE** (`5279383`): regex extended with `newsstand | whitman | price variant | type 1`. Previously only `variant/virgin/foil/ratio/1:N/incentive` — newsstand copies were leaking into non-variant searches and inflating blended avg.
-(4) **Grade filter applies to raw searches** (`694f3ed`): removed `!rawOnly` gate from Filter 3 in `comps.js`. VF+ listing will no longer show up in VG 4.0 raw comp pull.
-(5) **Year accuracy prompt** (`add3412`): `STANDARD_PROMPT` in `api/grade.js` now includes explicit year instruction — "read from cover price box, indicia, or copyright notice", explicit 2025/2026 examples, "never default to 2024 for recent books", context-clue fallback (art style, cover price, characters). Addresses model defaulting to training-data year on modern books like D'Orc #1 (2026).
-(6) **Publisher-as-title WARN not BLOCK** (`add3412`): `handleBulkImport` no longer skips books where the detected title looks like a publisher. Book is added with `data.titleWarning = true` and `data.titleWarningMsg` for later review. PUBLISHER_NAMES expanded: `oni press`, `vault comics`, `mad cave`, `aftershock`, `awaken comics`, plus bare names (`marvel`, `dc`, `image`, `dark horse`, `idw`).
-(7) **Auto-refresh recency guard** (`add3412`): auto-refresh in `App.jsx` now also skips catalogue items imported in the last 5 minutes via `Date.now() - (c.timestamp || 0) < 300000`. Prevents the fire-and-forget bulk-import enrich from racing with the catalogue-level auto-refresh and overwriting fresh market data. Guard applied in both `missingSource` and `dupStale` branches.
-(8) **Bulk enrich progress indicator** (`add3412`): new `bulkEnrichProgress` state tracks `{ current, total }` via `.finally` on each enrich promise. "Fetching market data… X of Y" banner rendered both on Scan tab (post-grading) and Collection tab (post-tab-switch). `handleBulkImport` awaits enriches (max 45s poll) before clearing the indicator.
-(9) **Post All HOT bulk listing** (`f76f252`): new `📋 Post All HOT (X)` button in Manage tab next to `Create Bundle`. Filters catalogue for `aiTags[id]?.label === 'HOT' && status !== 'listed' && getDisplayPrice > 0`. Confirmation modal shows per-item price + est total. Runs sequentially via existing `onListComic` with 1500 ms between rows. Per-row state (pending/posting/success/error) updates live. Retry button for failed rows; success rows get normal `listOnEbay` writeback (`status:"listed"`, `ebayItemId`, `listedAt`).
-(10) **AI verify year tolerance** (`8ab5fa3`): haiku prompt in `verifyCompsTitles` (enrich.js) now tells the model that year in a listing title may differ from our year by 1-2 years (cover date vs publication date) and is NOT a reason to reject. Only reject on clearly different issue number or clearly different character/series. Fixes D'Orc #1 2026 being rejected because our saved year was 2024.
-(11) **Confirmed-year comps query** (`18dff47`): `lookupPriceCharting` now returns `year: productYear`, `lookupComicVine` now returns `coverDate`. `enrich.js` handler split into two phases — phase 1 (parallel): ComicVine + Ximilar + PriceCharting + CGC; derive `confirmedYear = priceCharting?.year || comicVine?.coverDate?.slice(0,4) || savedYear`; phase 2 (parallel): fetchComps + fetchSold + lookupGoCollect using `confirmedYear`. `verifyCompsTitles` also receives `confirmedYear`. Logs `[enrich] year corrected: 2024 → 2026` when they differ. Sanity `parseInt(year)` left untouched per the pricing-math rule.
-(12) **Reprint / variant filter fallback** (`e279e88`): Filter 1 (reprint) and Filter 1b (variant contamination) in `comps.js` now keep the pre-filter set when the filter would remove every listing, and raise `reprintFallback` / `variantFallback` on the returned comps. `enrich.js` reads those flags when `pricingSource === "browse_api"` and sets `priceNote` to `"eBay avg (mixed prints)"` or `"eBay avg (mixed variants)"` — overrides the generic "PC outlier" / "PC too low" messages. Prevents silent fallback to unchecked PC price when all returned listings are reprints (e.g., D'Orc #1 where 14/20 were 2nd/3rd/4th prints and the other 6 were variants).
-(13) **CGC submission profit scenarios** (`0b6b0b7`): GoCollect panel in `CollectionDetail` (raw books only) now models the full submit decision. `gradingCost $35 + pressCost $20 = $55` against `getDisplayPrice` as raw baseline. Per-grade scenario line (9.8/9.6/9.4/9.2) shows `fmv → net` with pass/fail icon. Verdict logic based on the lowest profitable grade: all profitable → `SUBMIT — low risk`; mid cut-off → `SUBMIT — profitable at {grade}+`; only 9.8 → `RISKY — must grade 9.8`; none → `SELL RAW — not worth grading`. Press recommendation from `item.reason` text (spine tick/stress/minor wear/handling). Census displayed with `🔥 Low pop — scarcity premium` under 50. `api/gocollect.js` now extracts `census` from flat number, per-grade object, or `population` key. Graded copies keep the original FMV-only panel. Manual `userFmv98` override preserved.
-(14) **Rare variant multipliers + prompt guidance** (`3794975`): `grade.js` STANDARD_PROMPT appends rare-variant identification section — 35¢/30¢ Marvel test market, Mark Jewelers insert, Whitman diamond logo, Canadian price, pence, double/triple cover, printing error (miscut/inverted/color error/missing ink), Type 1A/1B distribution. `enrich.js` variantMultipliers table expanded from 8 keys to 22 and reordered by descending multiplier so higher-premium keywords win substring matches. Adds triple cover ×10, double cover ×8, inverted ×4, printing error ×3, miscut ×3, mark jewelers ×2.5, canadian price ×2, type 1a/1b ×2, canadian ×1.8, pence ×1.5, dc universe logo ×1.5. Raises 35¢/35 cent ×3→×6 and 30¢/30 cent ×3→×4. Lowers whitman ×2→×1.8. Unchanged: gold ×3, 2nd/second print ×1.5, price variant ×2, newsstand ×1.3. NO_PREMIUM list verified clean (no newsstand/canadian/pence). Gate unchanged — still PC-source only (`isFromPC && blendedAvg`); browse_api pricing skips the mult.
-
-Session 4/16/2026 — pricing chain hardening + bulk import fixes:
-(1) **Opus 4.7 upgrade**: `api/grade.js` standard scan and Watch Mode pass 3 now use `claude-opus-4-7`. Sonnet references unchanged.
-(2) **Import/backup**: file picker resets value on click for Android re-import; "Backup to Drive" button downloads JSON then opens Google Drive; stale-backup banner when collection count changes (`cv_last_backup_date`, `cv_last_backup_count` in localStorage).
-(3) **Bulk import hardening**: non-comic rejection (mirrors single scan), duplicate detection (title+issue+year case-insensitive), publisher-as-title guard (known publisher names list), 4 missing enrich fields added to bulk merge (`pricingSource`, `priceNote`, `gradeMultiplier`, `defectPenalty`).
-(4) **Publisher in eBay search** (`comps.js`): new attempt 0 = `title #issue variant year publisher` (most specific). Atlas/Timely → "Atlas Marvel". `publisher` param added to `fetchComps` signature, threaded from `enrich.js`.
-(5) **Auto-refresh guard** (`App.jsx`): only fires when `tab === 'collection'` AND `selectedItem === null` AND 60s since last refresh via `lastAutoRefreshRef`. No longer hammers `/api/enrich` on book load or tab switch.
-(6) **Sold comps validation** (`enrich.js`): `filteredSold` filtered by `#issue\b` regex before blending. Replaces raw `soldResult` in `soldAvg`, `out.soldComps`, and confidence `soldCount`. Prevents wrong-issue sold data from corrupting 60% blend weight.
-
-Session 4/14/2026 — Manage tab audit fixes + pricing calibration (see git log for details).
+- Detailed history: `docs/session-history.md`
+- Behavioral specs: `tests/` directory (1002 tests, 13 suites)
+- Pricing math: `api/enrich.js`
+- Sold verification: `src/lib/soldVerification.js`
+- Comp hygiene: `src/lib/compHygiene.js`
+- Pedigree registry: `src/lib/pedigreeRegistry.js`
+- Premium creators: `src/lib/premiumCreators.js`
+- List-price warning: `src/lib/listPriceWarning.js`
+- Vision integration: `api/grade.js`
+- PriceCharting scrape: `api/pricecharting-pop.js`
+- Mega-keys floor: `api/mega-keys.js`
