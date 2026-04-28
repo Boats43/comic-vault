@@ -11,6 +11,47 @@
 // All failures fall through silently (empty comps) so the UI can show
 // its AI-estimate fallback instead of erroring out the grade flow.
 
+// Comp hygiene primitives extracted Ship #20a.6 to src/lib/compHygiene.js
+// for reuse by sold-comp verification (src/lib/soldVerification.js).
+// Behavior preserved exactly. api/enrich.js + tests continue to import
+// VARIANT_CONTAM_RE / SIGNED_RE / cleanPublisher / hasIssueNumber /
+// hasMultipleDistinctIssues / detectSeriesMarkers from this module via
+// the re-exports below.
+import {
+  REPRINT_RE,
+  SLAB_RE,
+  GRADED_RE,
+  VARIANT_CONTAM_RE,
+  SIGNED_RE,
+  TPB_MARKER_RE,
+  OTHER_COVER_RE,
+  LOT_RE,
+  HALF_ISSUE_RE,
+  ARTIST_PATTERNS,
+  STOP_WORDS,
+  MIN_TOKEN_LEN,
+  tokenizeTitle,
+  hasSufficientTitleOverlap,
+  parseListingGrade,
+  applyPriceSanity,
+  extractIssueNumber,
+  hasIssueNumber,
+  hasMultipleDistinctIssues,
+  detectSeriesMarkers,
+  isValidIssueRange,
+  extractArtist,
+  cleanPublisher,
+} from "../src/lib/compHygiene.js";
+
+export {
+  VARIANT_CONTAM_RE,
+  SIGNED_RE,
+  cleanPublisher,
+  hasIssueNumber,
+  hasMultipleDistinctIssues,
+  detectSeriesMarkers,
+};
+
 const FINDING_ENDPOINT =
   "https://svcs.ebay.com/services/search/FindingService/v1";
 const OAUTH_ENDPOINT = "https://api.ebay.com/identity/v1/oauth2/token";
@@ -254,212 +295,15 @@ const tryBrowse = async ({ appId, certId, query }) => {
   }
 };
 
-// Reprints, facsimiles, anniversary variants, and nth printings pollute Browse
-// API results for any high-demand key (e.g. ASM #300 constantly surfaces
-// "True Believers" reprints, and "2nd ptg" listings skew first-print comps).
-// F3 extension (commit Tier-0): added Millennium Edition, DC Classics Library,
-// Marvel Milestones, Masterworks, reproduction, replica edition, premiere
-// edition, archive edition — all observed poisoning B&B #28 / TMNT #1 /
-// similar Silver-Age-and-older reprint-contamination vectors.
-const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition|2nd\s*p(?:rint|tg)|3rd\s*p(?:rint|tg)|4th\s*p(?:rint|tg)|5th\s*p(?:rint|tg)|second\s*print|third\s*print|fourth\s*print|\bptg\b|millennium edition|dc classics library|marvel milestones|masterworks|reproduction|replica edition|premiere edition|archive edition/i;
+// REPRINT_RE / SLAB_RE / GRADED_RE / VARIANT_CONTAM_RE / SIGNED_RE moved
+// to src/lib/compHygiene.js (Ship #20a.6). Imported + re-exported above.
 
-// For raw (ungraded) searches, exclude any listing that mentions a grading
-// slab. Require an explicit slab indicator followed by an optional letter
-// tier and a numeric grade. Bare "9.4" in a raw seller's self-grade no
-// longer triggers the filter. Covers CGC, CBCS, PGX, PSA (Pro Sports
-// Authenticator also grades comics), EGS, HGA, generic "slab/graded/
-// universal", CGC Signature Series, "verified" / "qualified" tier tags.
-const SLAB_RE = /\b(?:cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|signature\s+series|verified|qualified)\s*(?:ss|signature\s+series|mt|nm\/mt|nm\+|nm-|nm|vf\/nm|vf\+|vf-|vf|fn\/vf|fn\+|fn-|fn|vg\/fn|vg\+|vg-|vg|gd\/vg|gd\+|gd-|gd|fr\/gd|fr|pr)?\s*\d+(?:\.\d+)?/i;
-
-// For graded searches, require the title to mention CGC or CBCS.
-const GRADED_RE = /\bCGC\b|\bCBCS\b/i;
-
-// Variant contamination. Hard-reject markers when our book is NOT a variant.
-// Also re-used as a guard inside the creator-match filter so creator
-// preference never selects a variant listing (even in variant-fallback mode).
-// Ship #13 Bug 4: exported so enrich.js can compute variant composition
-// ratio for the homogeneous-pool damping check.
-export const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1|\bexclusive\b|\bsketch\b|\bexcl\.?\b/i;
-
-// Ship #13 Bug 3: signed / autographed / signature-series / yellow-label /
-// green-label / remarked listings command a premium over standard copies.
-// Reject when our book is NOT a signed variant (gated at call site).
-// Skips bare `SS` per Q3 decision — too many false positives (SS-Squadron,
-// Steel & Soul, character names). Multi-word "signature series" catches
-// the real CGC SS cases. Blue label intentionally omitted — blue = Universal
-// (standard, not signed). Yellow = CGC Signature Series, Green = Qualified
-// (signed but not witnessed) — both signed.
-export const SIGNED_RE = /\b(?:signed|signature\s+series|autographed?|yellow\s*label|green\s*label|remarked?)\b/i;
-
-// TPB / collected-edition format markers. When our title contains one of
-// these, we know we're pricing a TPB / hardcover / omnibus / compendium —
-// floppy single-issue listings must be filtered out (they vastly outnumber
-// rare collected editions on eBay and poison the avg).
-const TPB_MARKER_RE =
-  /\b(?:tpb|trade\s*paperback|hardcover|hc|omnibus|compendium|deluxe(?:\s*edition)?|absolute(?:\s*edition)?|treasury(?:\s*edition)?|collected\s*edition|graphic\s*novel|gn)\b/i;
-
-// Parse a numeric grade from a listing title. Recognizes CGC X.X slab grades
-// and raw letter grades (NM, VF+, GD-, etc). Returns null when no grade is
-// detectable — caller should keep those listings (can't prove mismatch).
-const parseListingGrade = (title) => {
-  const t = String(title || '');
-  const cgc = t.match(/CGC\s*([\d.]+)/i);
-  if (cgc) return parseFloat(cgc[1]);
-  const gradeMap = [
-    ['nm/mt', 9.8], ['nm+', 9.6], ['nm-', 9.2],
-    ['nm', 9.4], ['vf/nm', 9.0], ['vf+', 8.5],
-    ['vf-', 7.5], ['vf', 8.0], ['fn/vf', 7.0],
-    ['fn+', 6.5], ['fn-', 5.5], ['fn', 6.0],
-    ['vg/fn', 5.0], ['vg+', 4.5], ['vg-', 3.5],
-    ['vg', 4.0], ['gd/vg', 3.0], ['gd+', 2.5],
-    ['gd-', 1.8], ['gd', 2.0], ['fr/gd', 1.5],
-    ['fr', 1.0], ['pr', 0.5]
-  ];
-  for (const [abbr, val] of gradeMap) {
-    const re = new RegExp(
-      '(?:^|[\\s#(])' +
-      abbr.replace('/', '\\/') +
-      '(?:[\\s)$]|\\d)', 'i');
-    if (re.test(t)) return val;
-  }
-  return null;
-};
-
-// Remove price outliers: anything above 3x median or below 25% of median.
-// Kills signed/variant copies from contaminating the average on searches
-// that otherwise look clean. Requires at least 3 items to be meaningful.
-const applyPriceSanity = (items) => {
-  if (!Array.isArray(items) || items.length < 3) return items;
-  const sorted = items.map((p) => p.price).slice().sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median =
-    sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-  if (!median || median <= 0) return items;
-  const lo = median * 0.25;
-  const hi = median * 3;
-  return items.filter((p) => p.price >= lo && p.price <= hi);
-};
-
-// Extract issue number from a title like "Comic Reader #171" → "171".
-const extractIssueNumber = (title) => {
-  const m = String(title || "").match(/#\s*(\d+)/);
-  return m ? m[1] : null;
-};
-
-// Stop-words excluded from title-similarity tokens. These all appear so
-// commonly across comic listings (publisher names, format words, common
-// English particles) that matching on them produces noise. They stay in
-// the eBay search query — only the similarity-match step ignores them.
-// Without this filter "Tip Top Comics" tokenizes to ["comics"] only,
-// which matches every comic listing on eBay.
-const STOP_WORDS = new Set([
-  'the', 'a', 'an', 'of', 'and', 'or',
-  'in', 'on', 'at', 'to', 'for', 'with',
-  'comic', 'comics', 'comicbook', 'issue', 'volume', 'vol',
-  'marvel', 'dc', 'image', 'dark', 'horse', 'idw',
-]);
-const MIN_TOKEN_LEN = 2;
-
-// Tokenize a title for similarity matching. Lowercases, strips the issue#
-// hash, splits on non-alphanumerics, drops stop-words and pure-digit
-// tokens (years, raw numbers carry no series-name signal).
-const tokenizeTitle = (title) => {
-  const words = String(title || "")
-    .toLowerCase()
-    .replace(/#\s*\d+/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(/\s+/)
-    .filter((w) =>
-      w.length >= MIN_TOKEN_LEN &&
-      !STOP_WORDS.has(w) &&
-      !/^\d+$/.test(w)
-    );
-  return words;
-};
-
-// Require ≥50% of our non-stop-word tokens to appear in the listing's
-// non-stop-word tokens. "Tip Top Comics" → ["tip","top"] (comics is
-// stop-word), Dell listing "Tip Top #219 Dell" → ["tip","top","dell"]
-// → 2/2 overlap → match. Fantastic Four → ["fantastic","four"] →
-// 0/2 overlap with ["tip","top"] → reject. When our tokens are all
-// stop-words (e.g. "Dark Horse Comics") we have no signal — return true
-// and let other filters (issue#, slab, etc.) handle it.
-const hasSufficientTitleOverlap = (listingTitle, searchTokens) => {
-  if (!searchTokens || searchTokens.length === 0) return true;
-  const listingSet = new Set(tokenizeTitle(listingTitle));
-  if (listingSet.size === 0) return false;
-  let matches = 0;
-  for (const t of searchTokens) {
-    if (listingSet.has(t)) matches++;
-  }
-  return matches / searchTokens.length >= 0.5;
-};
-
-// Listing must contain the issue number as "#N" with a word boundary after
-// (so "#1710" and "#21" don't match "#1"). Also rejects lot listings with
-// commas-between-digits, "lot" keyword, or multiple distinct #N patterns
-// (multi-issue compound listings like "#1 + #4 variant set").
-export const hasIssueNumber = (listingTitle, issueNum) => {
-  if (!issueNum) return true;
-  const t = String(listingTitle || "");
-  // Reject lot listings (multiple issues bundled together)
-  if (/\blot\b/i.test(t) || /\d+\s*,\s*\d+/.test(t)) return false;
-  // Exact issue match: require # prefix, word boundary after
-  const escaped = String(issueNum).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (!new RegExp(`#\\s*${escaped}\\b`, "i").test(t)) return false;
-  // Ship #13 Bug 1: multi-issue compound detection. When more than one
-  // distinct #N pattern appears in the title, the listing is a bundle
-  // whose price can't be attributed to our issue — reject. Catches
-  // "Absolute Batman #4 + #1 variant" and "#1 and #4 set" which the
-  // basic lot filter missed (no comma between digits, no "lot" word).
-  return !hasMultipleDistinctIssues(t);
-};
-
-// Ship #13 Bug 1: helper to count distinct #N patterns in a title.
-// Returns true when ≥2 different issue numbers are present. Used inside
-// hasIssueNumber above but also exported for direct regression testing.
-export const hasMultipleDistinctIssues = (listingTitle) => {
-  const distinct = new Set();
-  for (const m of String(listingTitle || "").matchAll(/#\s*(\d+)\b/gi)) {
-    distinct.add(m[1]);
-    if (distinct.size > 1) return true;
-  }
-  return false;
-};
-
-// Ship #13 Bug 2: detect series-extension markers in a title — Roman
-// numerals II-X, Vol/Volume N, Re-/Pre- prefix words, Part N, Book N.
-// Returns an array of normalized marker strings like
-// ['roman-ii', 'vol-2', 're-evolution']. Empty array = no markers.
-// Used to reject "Last Ronin II Re-Evolution #4" from "Last Ronin #4"
-// search (same issue number, different series via sequel markers).
-export const detectSeriesMarkers = (title) => {
-  const t = String(title || '');
-  const markers = [];
-  // Roman numerals II-X, collected via matchAll so a leading "X-Men" /
-  // "V-Wars" / "X-Factor" in the title doesn't eat the match slot before
-  // we reach a real sequel marker. `(?<![\w-])` and `(?![\w-])` exclude
-  // hyphenated adjacency (so X-Men / V-Wars' X / V are ignored) while
-  // still accepting standalone V / X when the title actually uses them
-  // as sequel markers. `VI{0,3}` covers V/VI/VII/VIII in one atom.
-  for (const m of t.matchAll(/(?<![\w-])(III|II|IV|VI{0,3}|IX|X)(?![\w-])/g)) {
-    markers.push(`roman-${m[1].toLowerCase()}`);
-  }
-  // Vol / Volume N
-  const volMatch = t.match(/\bVol(?:\.|ume)?\s*(\d+)\b/i);
-  if (volMatch) markers.push(`vol-${volMatch[1]}`);
-  // Re- / Pre- prefix followed by a capitalized word. Requires cap letter
-  // so "re-read" / "pre-order" (seller flavor text) don't match.
-  const reMatch = t.match(/\b(Re|Pre)[-\s]([A-Z][a-z]+)\b/);
-  if (reMatch) markers.push(`${reMatch[1].toLowerCase()}-${reMatch[2].toLowerCase()}`);
-  // Part N
-  const partMatch = t.match(/\bPart\s+(\d+)\b/i);
-  if (partMatch) markers.push(`part-${partMatch[1]}`);
-  // Book N
-  const bookMatch = t.match(/\bBook\s+(\d+)\b/i);
-  if (bookMatch) markers.push(`book-${bookMatch[1]}`);
-  return markers;
-};
+// TPB_MARKER_RE / parseListingGrade / applyPriceSanity / extractIssueNumber
+// / STOP_WORDS / MIN_TOKEN_LEN / tokenizeTitle / hasSufficientTitleOverlap
+// / hasIssueNumber / hasMultipleDistinctIssues / detectSeriesMarkers moved
+// to src/lib/compHygiene.js (Ship #20a.6). Imported + (where needed)
+// re-exported above. Active-comp callers in this file pick them up via
+// module-scope binding.
 
 // Clean a comic title for eBay search: strip articles and special chars.
 const cleanTitleForSearch = (title) => {
@@ -477,17 +321,8 @@ const cleanTitleForSearch = (title) => {
   return t;
 };
 
-// Normalize a publisher string for search queries. Brackets/quotes/slashes/
-// ampersands/question marks break eBay's query parser or truncate the match,
-// so they're replaced with spaces and collapsed. Preserves all word tokens —
-// "Hollywood Comics (Walt Disney)" → "Hollywood Comics Walt Disney".
-export const cleanPublisher = (p) => {
-  if (!p) return "";
-  return String(p)
-    .replace(/[()[\]{}"'\/\\&?]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-};
+// cleanPublisher moved to src/lib/compHygiene.js (Ship #20a.6).
+// Imported + re-exported above.
 
 // Extract the first "significant" word from a cleaned title — skips
 // one-letter words and common prefixes so "Amazing Adventures" → "Adventures".
@@ -780,20 +615,8 @@ export const fetchComps = async ({
   // variantKeyword queries. Other artist-virgin copies trade at very
   // different prices than ours, so mixing them poisons the average.
   // Falls through gracefully when nothing matches — caller flags
-  // artistFallback so the UI can warn the user.
-  const ARTIST_PATTERNS = [
-    // Multi-word patterns first (first-match-wins via break) so they
-    // capture the longer, more specific name before single-word fallbacks.
-    /tyler kirkham/i, /jim lee/i, /inhyuk lee/i, /skottie young/i,
-    /frank cho/i, /frank miller/i, /windsor.?smith/i, /dell'?otto/i,
-    // Single-word patterns
-    /skan/i, /rapoza/i, /quash/i, /momoko/i, /ross/i, /adams/i,
-    /kirkham/i, /bean/i, /andolfo/i, /browne/i, /forstner/i,
-    /howard/i, /corona/i, /stegman/i, /ottley/i,
-    /jimenez/i, /mcfarlane/i, /campbell/i, /artgerm/i, /nakayama/i,
-    /hughes/i, /byrne/i, /perez/i, /kirby/i, /ditko/i, /mele/i,
-    /albuquerque/i, /hama/i,
-  ];
+  // artistFallback so the UI can warn the user. ARTIST_PATTERNS list
+  // moved to src/lib/compHygiene.js (Ship #20a.6).
   let artistName = null;
   if (variant) {
     for (const pattern of ARTIST_PATTERNS) {
@@ -1073,7 +896,7 @@ export const fetchComps = async ({
           ourVariant.includes('first print');
 
         if (isCoverAorStandard) {
-          const OTHER_COVER_RE = /\bcover\s*[b-z]\b|\bcvr\s*[b-z]\b/i;
+          // OTHER_COVER_RE imported from src/lib/compHygiene.js (Ship #20a.6).
           const before = p.length;
           p = p.filter((item) => {
             if (OTHER_COVER_RE.test(String(item.title || ''))) {
@@ -1116,28 +939,8 @@ export const fetchComps = async ({
         const ourVariantStr = String(variant || '').toLowerCase();
         const isOurBookALot = /\b(?:lot|set|bundle)\b/.test(ourVariantStr);
         if (!isOurBookALot) {
-          const LOT_RE =
-            /\b(?:lot|bundle|complete\s*set|full\s*run|comic\s*library|comic\s*collection)\b|\bset\s*of\s*\d+\b|\b\d+\s*(?:book|issue|comic)s?\s*(?:lot|set)\b/i;
-          const isValidIssueRange = (title) => {
-            const re = /#?(\d+(?:\.\d+)?)\s*[-–—]\s*#?(\d+(?:\.\d+)?)/g;
-            for (const m of title.matchAll(re)) {
-              const firstStr = m[1];
-              const secondStr = m[2];
-              const first = parseFloat(firstStr);
-              const second = parseFloat(secondStr);
-              if (second >= 1800 && second <= 2050) continue; // year
-              if (second <= 10 && secondStr.includes('.')) continue; // grade
-              if (first >= second) continue; // not ascending
-              if (
-                Number.isInteger(first) &&
-                Number.isInteger(second) &&
-                second < 1000
-              ) {
-                return true;
-              }
-            }
-            return false;
-          };
+          // LOT_RE + isValidIssueRange imported from src/lib/compHygiene.js
+          // (Ship #20a.6). Behavior preserved exactly.
           const before = p.length;
           p = p.filter((item) => {
             const t = String(item.title || '');
@@ -1168,8 +971,7 @@ export const fetchComps = async ({
           issueStr.includes('.') ||
           issueStr.includes('½');
         if (!isOurBookHalfIssue) {
-          const HALF_ISSUE_RE =
-            /#\s*\d+\s*\/\s*\d+\b|#\s*\d+\.\d+\b|\b½\b|\bhalf[-\s]*issue\b|\b1\/2\s*issue\b|\bashcan\b|\bpromo(?:tional)?\b/i;
+          // HALF_ISSUE_RE imported from src/lib/compHygiene.js (Ship #20a.6).
           const before = p.length;
           p = p.filter((item) => {
             const t = String(item.title || '');

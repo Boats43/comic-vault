@@ -364,9 +364,15 @@ function ResultCard({ result, enriching }) {
                 {(() => {
                   const newest = result.soldComps[0]?.daysAgo;
                   const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
+                  // Ship #20a.6 — when raw count > verified, show "V of R verified".
+                  const diag = result.soldCompDiagnostics;
+                  const showVerifiedRatio = diag && diag.rawCount > diag.verifiedCount && diag.verifiedCount > 0;
+                  const verifiedStr = showVerifiedRatio
+                    ? `${diag.verifiedCount} of ${diag.rawCount} sold verified`
+                    : `${result.soldComps.length} sold`;
                   return (
                     <span style={{ marginLeft: 6, opacity: 0.7, textTransform: "none", letterSpacing: 0 }}>
-                      📊 {result.soldComps.length} sold{recencyStr ? ` · ${recencyStr}` : ""}
+                      📊 {verifiedStr}{recencyStr ? ` · ${recencyStr}` : ""}
                     </span>
                   );
                 })()}
@@ -2572,9 +2578,15 @@ function CollectionDetail({
                   {(() => {
                     const newest = item.soldComps[0]?.daysAgo;
                     const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
+                    // Ship #20a.6 — when raw count > verified, show "V of R verified".
+                    const diag = item.soldCompDiagnostics;
+                    const showVerifiedRatio = diag && diag.rawCount > diag.verifiedCount && diag.verifiedCount > 0;
+                    const verifiedStr = showVerifiedRatio
+                      ? `${diag.verifiedCount} of ${diag.rawCount} sold verified`
+                      : `${item.soldComps.length} sold`;
                     return (
                       <span style={{ marginLeft: 6, opacity: 0.7, textTransform: "none", letterSpacing: 0 }}>
-                        📊 {item.soldComps.length} sold{recencyStr ? ` · ${recencyStr}` : ""}
+                        📊 {verifiedStr}{recencyStr ? ` · ${recencyStr}` : ""}
                       </span>
                     );
                   })()}
@@ -4465,6 +4477,8 @@ export default function App() {
                 creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
                 creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                 soldComps: enrich.soldComps || cur.soldComps || [],
+                soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
+                soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
@@ -4803,6 +4817,8 @@ export default function App() {
                   creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
                   creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                   soldComps: enrich.soldComps || cur.soldComps || [],
+                  soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
+                  soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
                   salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                   priceLadder: enrich.priceLadder || cur.priceLadder || null,
                   salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
@@ -4872,6 +4888,8 @@ export default function App() {
                   creatorFromComps: enrich.creatorFromComps || s.creatorFromComps || [],
                   creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || s.creatorFromCompsSingleton || [],
                   soldComps: enrich.soldComps || s.soldComps || [],
+                  soldCompsRaw: enrich.soldCompsRaw || s.soldCompsRaw || [],
+                  soldCompDiagnostics: enrich.soldCompDiagnostics || s.soldCompDiagnostics || null,
                   salesByGrade: enrich.salesByGrade || s.salesByGrade || null,
                   priceLadder: enrich.priceLadder || s.priceLadder || null,
                   salesVelocity: enrich.salesVelocity || s.salesVelocity || null,
@@ -5074,6 +5092,8 @@ export default function App() {
                 creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
                 creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || cur.creatorFromCompsSingleton || [],
                 soldComps: enrich.soldComps || cur.soldComps || [],
+                soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
+                soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
@@ -5427,6 +5447,8 @@ export default function App() {
       creatorFromComps: enrich.creatorFromComps || item.creatorFromComps || [],
       creatorFromCompsSingleton: enrich.creatorFromCompsSingleton || item.creatorFromCompsSingleton || [],
       soldComps: enrich.soldComps || item.soldComps || [],
+      soldCompsRaw: enrich.soldCompsRaw || item.soldCompsRaw || [],
+      soldCompDiagnostics: enrich.soldCompDiagnostics || item.soldCompDiagnostics || null,
       salesByGrade: enrich.salesByGrade || item.salesByGrade || null,
       priceLadder: enrich.priceLadder || item.priceLadder || null,
       salesVelocity: enrich.salesVelocity || item.salesVelocity || null,

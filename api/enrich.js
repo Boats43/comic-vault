@@ -17,6 +17,13 @@ import {
   cleanPublisher,
   VARIANT_CONTAM_RE,
 } from "./comps.js";
+// Ship #20a.6 — sold comp verification (pure regex, no I/O). Replaces the
+// single #issue regex filter with full hygiene chain. See
+// src/lib/soldVerification.js for filter list + diagnostics shape.
+import {
+  verifySoldComps,
+  capRawSoldRows,
+} from "../src/lib/soldVerification.js";
 import { fetchSold } from "./sold.js";
 import { lookupCGC } from "./cgc-lookup.js";
 import { lookupGoCollect } from "./gocollect.js";
@@ -1320,21 +1327,43 @@ export default async function handler(req, res) {
 
     // Ship #20a — sold comp source. Prefer PriceCharting sales-history
     // (real eBay + Heritage completed sales) when populated; fall back to
-    // soldResult (eBay Insights, currently dormant). Defensive issue-regex
-    // filter applies to whichever source — PC matched the wrong product
-    // occasionally returns sales for a sibling issue.
-    let filteredSold = pcSales.soldComps.length > 0
+    // soldResult (eBay Insights, currently dormant).
+    //
+    // Ship #20a.6 — verification chain replaces the single #issue regex.
+    // verifySoldComps returns { verified, diagnostics }. The verified pool
+    // is what feeds soldAvg / blendedAvg / sanity / thin-pool anchor /
+    // key-mult gate / confidence below. Raw rows are surfaced (capped at
+    // 20) on out.soldCompsRaw for UI debug + diagnostics shape on
+    // out.soldCompDiagnostics for the "V of R verified" chip.
+    const rawSoldRows = pcSales.soldComps.length > 0
       ? pcSales.soldComps
       : (Array.isArray(soldResult) ? soldResult : []);
-    if (filteredSold.length > 0 && correctedIssue) {
-      const issueRe = new RegExp(
-        '#\\s*' + String(correctedIssue).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i'
+    const userGradeKeyForSold =
+      isGraded === true && numericGrade != null
+        ? (Number.isInteger(numericGrade)
+            ? `${numericGrade}.0`
+            : String(numericGrade))
+        : 'raw';
+    const soldVerifyResult = verifySoldComps(rawSoldRows, {
+      title,
+      issue: correctedIssue,
+      variant: req.body?.variant || null,
+      publisher,
+      bookYear: confirmedYear || year,
+      userGradeKey: userGradeKeyForSold,
+    });
+    const filteredSold = soldVerifyResult.verified;
+    if (rawSoldRows.length > 0) {
+      const d = soldVerifyResult.diagnostics;
+      console.log(
+        `[sold-verify] kept ${d.verifiedCount}/${d.rawCount} ` +
+        `(rejected ${d.rejectedCount}: ` +
+        Object.entries(d.reasons)
+          .filter(([, v]) => v > 0)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(', ') +
+        ')'
       );
-      const before = filteredSold.length;
-      filteredSold = filteredSold.filter(s => issueRe.test(s.title || ''));
-      if (filteredSold.length < before) {
-        console.log('[sold-filter] kept', filteredSold.length, 'of', before, 'sold comps');
-      }
     }
 
     // Blended average: weight sold comps (60%) + active comps (40%).
@@ -2031,7 +2060,14 @@ export default async function handler(req, res) {
     // Falls back to fetchSold (eBay Insights, dormant) when PC sales empty.
     // salesByGrade keeps every grade tab's rows for future Ship #20b weighting
     // and FR-5a.4 value-ladder display.
+    //
+    // Ship #20a.6 — out.soldComps now holds VERIFIED rows only (used by
+    // pricing math). out.soldCompsRaw exposes the raw pool (capped at 20)
+    // for UI debug. out.soldCompDiagnostics gives reason counts + top 3
+    // rejected samples so post-deploy phone QA can see what was filtered.
     out.soldComps = filteredSold;
+    out.soldCompsRaw = capRawSoldRows(rawSoldRows);
+    out.soldCompDiagnostics = soldVerifyResult.diagnostics;
     if (pcSales.salesByGrade && Object.keys(pcSales.salesByGrade).length > 0) {
       out.salesByGrade = pcSales.salesByGrade;
     }
