@@ -74,6 +74,12 @@ const POP_GRADE_INDEX = [
 
 const getDisplayPrice = (item) => {
   if (!item) return 0;
+  // Ship #20a.6.4 — refuse-to-price gate. When identity is uncertain,
+  // suppress both Vision's stored price AND the cached comps fallback.
+  // The displayed value is the listing-decision number; gated books
+  // must not produce one. Default-true on missing field protects
+  // existing catalog entries (no field → not gated).
+  if (item.identityConfident === false) return 0;
   const p = parseFloat(String(item.price || "0").replace(/[$,]/g, ""));
   if (p > 0) return p;
   if (item.comps?.averageNum)
@@ -214,6 +220,20 @@ function ResultCard({ result, enriching }) {
   const recommendedLabel = displayPrice > 0
     ? `$${displayPrice.toLocaleString("en-US")}`
     : result.price || "—";
+  // Ship #20a.6.4 — refuse-to-price state. When server returns
+  // identityConfident:false, the price area is replaced with a red
+  // "Identification Required" panel. Only the title (when it itself
+  // is non-uncertainty) and the cover image are still shown so the
+  // user can see what they captured.
+  const identityGated = result.identityConfident === false;
+  // Numeric-issue check: when identity is gated, suppress the "#N"
+  // suffix unless issue is purely numeric (uncertainty strings like
+  // "Cannot determine from visible cover" must not render).
+  const issueRendersAsNumber =
+    result.issue != null && /^\d+(\.\d+)?$/.test(String(result.issue).trim());
+  const showIssueSuffix =
+    issueRendersAsNumber &&
+    !result.title?.includes(`#${result.issue}`);
 
   return (
     <div className="result-card">
@@ -232,11 +252,11 @@ function ResultCard({ result, enriching }) {
           }}
         />
       )}
-      <div className="title">{result.title}{result.issue && !result.title?.includes(`#${result.issue}`) ? ` #${result.issue}` : ''}</div>
+      <div className="title">{result.title}{showIssueSuffix ? ` #${result.issue}` : ''}</div>
       <div className="muted small">
         {result.publisher}
-        {result.publisher && result.year ? " · " : ""}
-        {result.year}
+        {result.publisher && result.year && /^\d{4}$/.test(String(result.year).trim()) ? " · " : ""}
+        {/^\d{4}$/.test(String(result.year || "").trim()) ? result.year : ""}
       </div>
       {!result.image && (
         <div className="muted small" style={{ fontStyle: "italic" }}>
@@ -259,7 +279,45 @@ function ResultCard({ result, enriching }) {
           ⚠️ RESTORED: {result.restoration}
         </div>
       )}
-      {recommendedLabel && (
+      {identityGated && (
+        <div
+          style={{
+            marginTop: 14,
+            padding: 14,
+            border: "1px solid rgba(239,68,68,0.6)",
+            borderRadius: 8,
+            background: "rgba(239,68,68,0.10)",
+            color: "#fca5a5",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 15 }}>
+            🔍 Identification Required
+          </div>
+          <div className="small" style={{ marginBottom: 8, color: "#fecaca" }}>
+            Cannot price safely — verified title, issue, year, and publisher all required.
+          </div>
+          {Array.isArray(result.identityMissingFields) && result.identityMissingFields.length > 0 && (
+            <div className="small" style={{ marginBottom: 8 }}>
+              <span style={{ opacity: 0.7 }}>Missing: </span>
+              <span style={{ fontWeight: 600 }}>
+                {result.identityMissingFields.join(", ")}
+              </span>
+            </div>
+          )}
+          {Array.isArray(result.identityReasons) && result.identityReasons.length > 0 && (
+            <ul style={{ margin: "6px 0 8px 0", paddingLeft: 18, fontSize: 12, color: "#fecaca" }}>
+              {result.identityReasons.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          )}
+          <div className="small" style={{ opacity: 0.85 }}>
+            Capture the indicia (inside front cover) or back cover to surface issue # and year, then re-scan.
+          </div>
+        </div>
+      )}
+
+      {!identityGated && recommendedLabel && (
         <>
           <div className="muted small" style={{ marginTop: 12 }}>
             Recommended list price
@@ -285,7 +343,7 @@ function ResultCard({ result, enriching }) {
         </>
       )}
 
-      {!hasComps && enriching && (
+      {!identityGated && !hasComps && enriching && (
         <div
           style={{
             marginTop: 14,
@@ -312,7 +370,7 @@ function ResultCard({ result, enriching }) {
         </div>
       )}
 
-      {!hasComps && !enriching && (
+      {!identityGated && !hasComps && !enriching && (
         <div
           style={{
             marginTop: 14,
@@ -2318,7 +2376,31 @@ function CollectionDetail({
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div>
             <div className="muted small">Recommended list price</div>
-            {(item.manualReviewRequired || item.gradeExceedsMap) ? (
+            {item.identityConfident === false ? (
+              <>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#ef4444", lineHeight: 1.15 }}>
+                  Identification Required
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12, color: "#fecaca", lineHeight: 1.4 }}>
+                  Cannot price safely without verified title, issue, year, and publisher.
+                </div>
+                {Array.isArray(item.identityMissingFields) && item.identityMissingFields.length > 0 && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#fca5a5" }}>
+                    Missing: <span style={{ fontWeight: 700 }}>{item.identityMissingFields.join(", ")}</span>
+                  </div>
+                )}
+                {Array.isArray(item.identityReasons) && item.identityReasons.length > 0 && (
+                  <ul style={{ margin: "6px 0 0 0", paddingLeft: 18, fontSize: 11, color: "#fecaca" }}>
+                    {item.identityReasons.map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                )}
+                <div style={{ marginTop: 8, fontSize: 11, color: "#aaa" }}>
+                  Edit fields below or re-scan with indicia / back cover photo.
+                </div>
+              </>
+            ) : (item.manualReviewRequired || item.gradeExceedsMap) ? (
               <>
                 <div style={{ fontSize: 22, fontWeight: 800, color: "#d17105", lineHeight: 1.15 }}>
                   Manual Appraisal Required
@@ -2370,9 +2452,28 @@ function CollectionDetail({
             )}
           </div>
           {(() => {
-            // Mega-key pill takes precedence over matchConfidence — floor
-            // status is the authoritative signal when applicable.
+            // Pill precedence (highest to lowest):
+            //   identityConfident:false → 🔍 ID REQUIRED (red, Ship #20a.6.4)
+            //   manualReviewRequired    → 🔑 MANUAL REVIEW
+            //   gradeExceedsMap         → 🔑 GRADE EXCEEDS MAP
+            //   megaKeyFloorApplied     → 🔑 VERIFIED/ESTIMATED FLOOR
             const pillStyle = { fontSize: 11, padding: "4px 10px", borderRadius: 6, fontWeight: 700, alignSelf: "flex-end", marginBottom: 4 };
+            if (item.identityConfident === false) {
+              return (
+                <span
+                  className="pill"
+                  title="Identification required to price safely"
+                  style={{
+                    ...pillStyle,
+                    background: "rgba(239,68,68,0.15)",
+                    color: "#fca5a5",
+                    border: "1px solid rgba(239,68,68,0.6)",
+                  }}
+                >
+                  🔍 ID REQUIRED
+                </span>
+              );
+            }
             if (item.manualReviewRequired) {
               return (
                 <span
@@ -3063,6 +3164,26 @@ function CollectionDetail({
               );
             })()}
             {(() => {
+              // Ship #20a.6.4 — identity gate is HARD-BLOCK, not ack-able.
+              // User can't acknowledge "we don't know what this book is";
+              // they have to fix the data first (edit fields or re-scan).
+              // Takes precedence over mega-key ack and edition warning ack.
+              if (item.identityConfident === false) {
+                return (
+                  <div style={{
+                    padding: "10px 12px",
+                    marginBottom: 8,
+                    background: "rgba(239,68,68,0.10)",
+                    border: "1px solid rgba(239,68,68,0.6)",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: "#fca5a5",
+                  }}>
+                    🔍 Listing blocked — identification required.{" "}
+                    Edit title, issue, year, or publisher to proceed (or re-scan).
+                  </div>
+                );
+              }
               // ANY mega-key floor (verified or estimated) requires user
               // acknowledgment before listing — mega-keys are volatile and
               // $100K+ decisions warrant explicit one-tap confirmation.
@@ -4462,14 +4583,22 @@ export default function App() {
               if (enrich.yearCorrected && enrich.confirmedYear) {
                 console.log('[refresh] year healed:', cur.year, '→', enrich.confirmedYear);
               }
-              const newPriceAR = lowMatch ? cur.price : (enrich.price || cur.price);
+              // Ship #20a.6.4 — idGated forces null on price triplet so
+              // Vision's stored guess can't survive the merge default of
+              // "enrich.price || cur.price". Default-true on missing
+              // identityConfident protects existing catalog entries.
+              const idGated = enrich.identityConfident === false;
+              const newPriceAR = idGated ? null : (lowMatch ? cur.price : (enrich.price || cur.price));
               const priceChangedAR = newPriceAR !== cur.price;
               const updated = {
                 ...cur,
                 comps: lowMatch ? cur.comps : (enrich.comps || cur.comps),
                 price: newPriceAR,
-                priceLow: lowMatch ? cur.priceLow : (enrich.priceLow || cur.priceLow),
-                priceHigh: lowMatch ? cur.priceHigh : (enrich.priceHigh || cur.priceHigh),
+                priceLow: idGated ? null : (lowMatch ? cur.priceLow : (enrich.priceLow || cur.priceLow)),
+                priceHigh: idGated ? null : (lowMatch ? cur.priceHigh : (enrich.priceHigh || cur.priceHigh)),
+                identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
+                identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
+                identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
                 keyIssue: enrich.keyIssue || cur.keyIssue,
                 keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
                 keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
@@ -4534,7 +4663,10 @@ export default function App() {
                 if (x.title?.toLowerCase() === item.title?.toLowerCase()
                   && x.issue === item.issue
                   && x.year === item.year) {
-                  const synced = { ...x, price: enrich.price ?? x.price, priceLow: enrich.priceLow ?? x.priceLow, priceHigh: enrich.priceHigh ?? x.priceHigh, comps: enrich.comps ?? x.comps, pricingSource: enrich.pricingSource ?? x.pricingSource, priceNote: enrich.priceNote ?? null, gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier };
+                  // Ship #20a.6.4 — duplicate sync respects idGated.
+                  const synced = idGated
+                    ? { ...x, price: null, priceLow: null, priceHigh: null, comps: enrich.comps ?? x.comps, pricingSource: enrich.pricingSource ?? x.pricingSource, priceNote: enrich.priceNote ?? null, gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier, identityConfident: false, identityMissingFields: enrich.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? null }
+                    : { ...x, price: enrich.price ?? x.price, priceLow: enrich.priceLow ?? x.priceLow, priceHigh: enrich.priceHigh ?? x.priceHigh, comps: enrich.comps ?? x.comps, pricingSource: enrich.pricingSource ?? x.pricingSource, priceNote: enrich.priceNote ?? null, gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier, identityConfident: enrich.identityConfident ?? x.identityConfident ?? true };
                   putComic(synced).catch(() => {});
                   return synced;
                 }
@@ -4804,12 +4936,17 @@ export default function App() {
                   console.log('[scan] year healed:', cur.year, '→', enrich.confirmedYear);
                 }
                 const priceChanged = enrich.price && enrich.price !== cur.price;
+                // Ship #20a.6.4 — see auto-refresh path for full rationale.
+                const idGated = enrich.identityConfident === false;
                 const updated = {
                   ...cur,
                   comps: enrich.comps || cur.comps,
-                  price: enrich.price || cur.price,
-                  priceLow: enrich.priceLow || cur.priceLow,
-                  priceHigh: enrich.priceHigh || cur.priceHigh,
+                  price: idGated ? null : (enrich.price || cur.price),
+                  priceLow: idGated ? null : (enrich.priceLow || cur.priceLow),
+                  priceHigh: idGated ? null : (enrich.priceHigh || cur.priceHigh),
+                  identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
+                  identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
+                  identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
                   keyIssue: enrich.keyIssue || cur.keyIssue,
                   keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
                   keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
@@ -4875,12 +5012,17 @@ export default function App() {
               setSelectedItem((s) => {
                 if (!s || s.id !== savedId) return s;
                 const priceChangedSel = enrich.price && enrich.price !== s.price;
+                // Ship #20a.6.4 — see auto-refresh path for full rationale.
+                const idGatedSel = enrich.identityConfident === false;
                 return {
                   ...s,
                   comps: enrich.comps || s.comps,
-                  price: enrich.price || s.price,
-                  priceLow: enrich.priceLow || s.priceLow,
-                  priceHigh: enrich.priceHigh || s.priceHigh,
+                  price: idGatedSel ? null : (enrich.price || s.price),
+                  priceLow: idGatedSel ? null : (enrich.priceLow || s.priceLow),
+                  priceHigh: idGatedSel ? null : (enrich.priceHigh || s.priceHigh),
+                  identityConfident: enrich.identityConfident ?? s.identityConfident ?? true,
+                  identityMissingFields: enrich.identityMissingFields ?? s.identityMissingFields ?? null,
+                  identityReasons: enrich.identityReasons ?? s.identityReasons ?? null,
                   keyIssue: enrich.keyIssue || s.keyIssue,
                   keyIssueSource: enrich.keyIssueSource || s.keyIssueSource || null,
                   keyFromComps: enrich.keyFromComps || s.keyFromComps || [],
@@ -5079,12 +5221,17 @@ export default function App() {
                 console.log('[bulk] year healed:', cur.year, '→', enrich.confirmedYear);
               }
               const priceChangedBulk = enrich.price && enrich.price !== cur.price;
+              // Ship #20a.6.4 — see auto-refresh path for full rationale.
+              const idGatedBulk = enrich.identityConfident === false;
               const updated = {
                 ...cur,
                 comps: enrich.comps || cur.comps,
-                price: enrich.price || cur.price,
-                priceLow: enrich.priceLow || cur.priceLow,
-                priceHigh: enrich.priceHigh || cur.priceHigh,
+                price: idGatedBulk ? null : (enrich.price || cur.price),
+                priceLow: idGatedBulk ? null : (enrich.priceLow || cur.priceLow),
+                priceHigh: idGatedBulk ? null : (enrich.priceHigh || cur.priceHigh),
+                identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
+                identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
+                identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
                 keyIssue: enrich.keyIssue || cur.keyIssue,
                 keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
                 keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
@@ -5432,14 +5579,19 @@ export default function App() {
     if (enrich.yearCorrected && enrich.confirmedYear) {
       console.log('[refresh] year healed:', item.year, '→', enrich.confirmedYear);
     }
-    const newPriceRM = enrich.price ?? item.price;
+    // Ship #20a.6.4 — see auto-refresh path for full rationale.
+    const idGatedRM = enrich.identityConfident === false;
+    const newPriceRM = idGatedRM ? null : (enrich.price ?? item.price);
     const priceChangedRM = newPriceRM !== item.price;
     const updated = {
       ...item,
       comps: enrich.comps ?? item.comps,
       price: newPriceRM,
-      priceLow: enrich.priceLow ?? item.priceLow,
-      priceHigh: enrich.priceHigh ?? item.priceHigh,
+      priceLow: idGatedRM ? null : (enrich.priceLow ?? item.priceLow),
+      priceHigh: idGatedRM ? null : (enrich.priceHigh ?? item.priceHigh),
+      identityConfident: enrich.identityConfident ?? item.identityConfident ?? true,
+      identityMissingFields: enrich.identityMissingFields ?? item.identityMissingFields ?? null,
+      identityReasons: enrich.identityReasons ?? item.identityReasons ?? null,
       keyIssue: enrich.keyIssue || item.keyIssue,
       keyIssueSource: enrich.keyIssueSource || item.keyIssueSource || null,
       keyFromComps: enrich.keyFromComps || item.keyFromComps || [],
@@ -5504,16 +5656,32 @@ export default function App() {
       if (x.title?.toLowerCase() === item.title?.toLowerCase()
         && x.issue === item.issue
         && x.year === item.year) {
-        const synced = {
-          ...x,
-          price: enrich.price ?? x.price,
-          priceLow: enrich.priceLow ?? x.priceLow,
-          priceHigh: enrich.priceHigh ?? x.priceHigh,
-          comps: enrich.comps ?? x.comps,
-          pricingSource: enrich.pricingSource ?? x.pricingSource,
-          priceNote: enrich.priceNote ?? null,
-          gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier,
-        };
+        // Ship #20a.6.4 — duplicate sync respects idGated.
+        const synced = idGatedRM
+          ? {
+              ...x,
+              price: null,
+              priceLow: null,
+              priceHigh: null,
+              comps: enrich.comps ?? x.comps,
+              pricingSource: enrich.pricingSource ?? x.pricingSource,
+              priceNote: enrich.priceNote ?? null,
+              gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier,
+              identityConfident: false,
+              identityMissingFields: enrich.identityMissingFields ?? null,
+              identityReasons: enrich.identityReasons ?? null,
+            }
+          : {
+              ...x,
+              price: enrich.price ?? x.price,
+              priceLow: enrich.priceLow ?? x.priceLow,
+              priceHigh: enrich.priceHigh ?? x.priceHigh,
+              comps: enrich.comps ?? x.comps,
+              pricingSource: enrich.pricingSource ?? x.pricingSource,
+              priceNote: enrich.priceNote ?? null,
+              gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier,
+              identityConfident: enrich.identityConfident ?? x.identityConfident ?? true,
+            };
         putComic(synced).catch(() => {});
         return synced;
       }

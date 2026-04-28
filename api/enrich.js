@@ -38,6 +38,14 @@ import {
   normalizeTitle,
 } from "./mega-keys.js";
 import { extractCreatorsFromComps } from "../src/lib/premiumCreators.js";
+// Ship #20a.6.4 — refuse-to-price gate. Sanitizes Vision identity fields
+// and refuses to produce a price when title/issue/year/publisher can't
+// be cleanly extracted (or Vision self-reports low confidence). See
+// src/lib/identityGate.js for sanitizer + assessor.
+import {
+  sanitizeIdentityFields,
+  assessIdentityConfidence,
+} from "../src/lib/identityGate.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1442,11 +1450,58 @@ export default async function handler(req, res) {
       }
     }
 
+    // Ship #20a.6.4 — identity gate. Runs AFTER phase 1 (so PC/CV year-heal
+    // chain has applied → confirmedYear; visual issue correction → correctedIssue;
+    // publisher cleanup → publisher) and BEFORE the pricing block. When
+    // identity-critical fields can't be cleanly extracted, refuses to price
+    // entirely. Vision's price/priceLow/priceHigh are NOT used as a fallback —
+    // out.price is set to null explicitly so the client merge ("enrich.price ||
+    // cur.price") replaces, not preserves, Vision's guess.
+    //
+    // Surfaced 2026-04-27 phone validation: Donald Duck Whitman #978 priced
+    // $50 with Vision returning "Cannot determine from visible cover" as
+    // literal issue value. Real Golden Age key in same shape would be 10× wrong.
+    const sanitizedIdentity = sanitizeIdentityFields({
+      title,
+      issue: correctedIssue,
+      year: confirmedYear,
+      publisher,
+      visionConfidence: confidence,
+    });
+    const idCheck = assessIdentityConfidence(sanitizedIdentity);
+    out.identityConfident = idCheck.confident;
+    if (!idCheck.confident) {
+      out.identityMissingFields = idCheck.missingFields;
+      out.identityReasons = idCheck.reasons;
+      out.price = null;
+      out.priceLow = null;
+      out.priceHigh = null;
+      out.pricingSource = 'identity-required';
+      console.log(
+        '[identity-gate] REFUSED to price —',
+        'missing:', idCheck.missingFields.join(',') || '(none)',
+        '· reasons:', idCheck.reasons.join('; ')
+      );
+    }
+
+    // Hoisted out of the pricing block so the [price-trace] log below has
+    // these in scope when the gate fires (pricing block is skipped entirely).
+    let sanityFired = false;
+    let floorNum = 0;
+    let floorFired = false;
+    let priceAfterFloor = 0;
+    let isMegaKeyForFloor = false;
+
     // Primary price source: PriceCharting (aggregated sold data).
     // For graded comics, apply a CGC multiplier against the raw base price.
-    let sanityFired = false;
     // For raw comics, apply a raw grade multiplier against the base price.
     // Fallback: Browse API comps (active listings).
+    //
+    // Ship #20a.6.4: entire pricing flow gated by identity confidence. When
+    // gate fires, this whole block is skipped. Comps/sold/pop reference data
+    // (already populated above) still surfaces on the response so the user
+    // can see what eBay/PC found, but no price recommendation is produced.
+    if (idCheck.confident) {
     if (priceCharting) {
       let pc = priceCharting.price;
       // Era-aware multipliers use confirmedYear (healed via PC/CV crosscheck)
@@ -1646,9 +1701,7 @@ export default async function handler(req, res) {
     //   2. compsExhausted: AI verify rejected 100% of comps. `rawComps.lowest`
     //      is null but `compsFromEbay.lowest` still holds the pre-verify
     //      contaminated lowest — same untrusted data the sanity block skips.
-    let floorNum = 0;
-    let floorFired = false;
-    const isMegaKeyForFloor = !!getMegaKeyEntry(title, correctedIssue, publisher, confirmedYear || year);
+    isMegaKeyForFloor = !!getMegaKeyEntry(title, correctedIssue, publisher, confirmedYear || year);
     if (isMegaKeyForFloor) {
       console.log('[floor] skipped — mega-key uses floor map');
     } else if (compsExhausted) {
@@ -1682,7 +1735,7 @@ export default async function handler(req, res) {
     // `finalPrice` shows the actual returned value after every downstream
     // adjustment. Without this snapshot the log would lose the pre-
     // multiplier baseline as soon as variant mult rewrote out.price.
-    const priceAfterFloor = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
+    priceAfterFloor = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
 
     // Variant multiplier: adjust price for known variant types.
     // Only apply when PriceCharting is the pricing source — browse_api/ebay_avg
@@ -1953,6 +2006,8 @@ export default async function handler(req, res) {
         }
       }
     }
+
+    } // end if (idCheck.confident) — Ship #20a.6.4 identity-gate wrap
 
     // Ship #13.1: relocated to run AFTER all pricing adjustments
     // (variant mult, key mult, thin-pool anchor, mega-key floor) so
