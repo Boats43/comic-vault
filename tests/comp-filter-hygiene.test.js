@@ -18,7 +18,7 @@ import {
   SIGNED_RE,
   VARIANT_CONTAM_RE,
 } from '../api/comps.js';
-import { COVERLESS_RE, SLAB_RE } from '../src/lib/compHygiene.js';
+import { COVERLESS_RE, SLAB_RE, REPRINT_RE } from '../src/lib/compHygiene.js';
 import { computeThinPoolAnchor } from '../api/enrich.js';
 
 let passed = 0;
@@ -610,6 +610,94 @@ assertTrue(
 assertTrue(
   SLAB_RE.test('Hulk #181 CGC SS 9.8'),
   'CGC SS 9.8 → match'
+);
+
+// ─── Ship #20a.6.12 — REPRINT_RE subscription box patterns ─────────
+console.log('\n── Ship #20a.6.12 — REPRINT_RE subscription box patterns ──');
+
+assertTrue(
+  REPRINT_RE.test('Brave and the Bold #28 LOOT CRATE EDITION'),
+  'loot crate → match'
+);
+assertTrue(
+  REPRINT_RE.test('Brave and the Bold #28 Loot-Crate exclusive'),
+  'loot-crate (hyphen) → match'
+);
+assertTrue(
+  REPRINT_RE.test('Batman #1 Funko Pop Edition'),
+  'funko → match'
+);
+assertTrue(
+  REPRINT_RE.test('Batman #1 FUNKO exclusive'),
+  'FUNKO caps → match'
+);
+assertTrue(
+  REPRINT_RE.test('Amazing Fantasy #15 Previews Exclusive'),
+  'previews exclusive → match'
+);
+assertTrue(
+  REPRINT_RE.test('Amazing Fantasy #15 PREVIEWS EXCLUSIVE reprint'),
+  'previews exclusive reprint → match'
+);
+assertTrue(
+  REPRINT_RE.test('Action Comics #1 Convention Exclusive'),
+  'convention exclusive → match'
+);
+assertTrue(
+  REPRINT_RE.test('Action Comics #1 Con Exclusive'),
+  'con exclusive → match'
+);
+assertTrue(
+  REPRINT_RE.test('Superman #1 Comic Block Edition'),
+  'comic block → match'
+);
+assertTrue(
+  REPRINT_RE.test('X-Men #1 Nerd Block'),
+  'nerd block → match'
+);
+assertTrue(
+  REPRINT_RE.test('Spider-Man #1 Geek Fuel exclusive'),
+  'geek fuel → match'
+);
+assertTrue(
+  REPRINT_RE.test('Flash #1 Box Set edition'),
+  'box set → match'
+);
+assertTrue(
+  REPRINT_RE.test('Avengers #1 Collector Box'),
+  "collector box → match"
+);
+assertTrue(
+  REPRINT_RE.test("Hulk #1 Collectors Box"),
+  "collectors box → match"
+);
+assertTrue(
+  REPRINT_RE.test('Thor #1 Subscription Box'),
+  'subscription box → match'
+);
+assertTrue(
+  REPRINT_RE.test('Captain America #1 Promotional Edition'),
+  'promotional edition → match'
+);
+
+// Existing reprint patterns still work
+assertTrue(
+  REPRINT_RE.test('Amazing Fantasy #15 Facsimile'),
+  'facsimile → match (existing pattern)'
+);
+assertTrue(
+  REPRINT_RE.test('X-Men #1 second printing'),
+  'second printing → match (existing pattern)'
+);
+
+// Edge case: "new sealed" alone should NOT match
+assertFalse(
+  REPRINT_RE.test('Batman #1 new sealed'),
+  '"new sealed" alone → no match (not a reprint signal)'
+);
+assertFalse(
+  REPRINT_RE.test('Amazing Spider-Man #300 NEW SEALED'),
+  '"NEW SEALED" alone → no match'
 );
 
 // ─── Ship #20a.6.11 — Thin-pool anchor at count=1 (skip) ───────────

@@ -294,6 +294,110 @@ assertEq(typeof shape.worst.label, 'string', 'shape: worst.label is string');
 assertEq(typeof shape.worst.anchor, 'number', 'shape: worst.anchor is number');
 assertEq(typeof shape.worst.pctOver, 'number', 'shape: worst.pctOver is number');
 
+// ─── Ship #20a.6.12 — Sold-first avg logic ─────────────────────────
+console.log('\nShip #20a.6.12 — Sold-first avg logic:');
+
+// Scenario 1: Book with soldComps.length >= 2 → uses sold avg
+const withSold = {
+  price: '$0',
+  soldComps: [{ price: 100 }, { price: 200 }],  // sold avg = 150
+  comps: { averageNum: 50, highestNum: 0 },     // active avg = 50, no high trigger
+};
+const soldResult = computeListPriceWarning(250, withSold);
+// avg trigger: 250 > 150 × 1.50 (225)? YES → fires
+// If it used active avg: 250 > 50 × 1.50 (75)? YES but different pctOver
+assertFires(soldResult, ['avg'], 'soldComps.length >= 2 → uses sold avg (fires)');
+assertEq(
+  soldResult.worst.anchor,
+  150,
+  'sold avg anchor = 150 (not 50)'
+);
+assertEq(
+  soldResult.worst.pctOver,
+  67,
+  'pctOver = (250/150 - 1) × 100 = 67% (not 400% from active)'
+);
+
+// Scenario 2: Book with soldComps.length < 2 → falls back to active avg
+const oneSold = {
+  price: '$0',
+  soldComps: [{ price: 100 }],  // only 1 sold, not enough
+  comps: { averageNum: 50, highestNum: 0 },  // no high trigger
+};
+const oneSoldResult = computeListPriceWarning(100, oneSold);
+// avg trigger: 100 > 50 × 1.50 (75)? YES → fires with active avg
+assertFires(oneSoldResult, ['avg'], 'soldComps.length < 2 → falls back to active avg (fires)');
+assertEq(
+  oneSoldResult.worst.anchor,
+  50,
+  'active avg anchor = 50 (fallback)'
+);
+
+// Scenario 3: Book with no soldComps → uses active avg
+const noSold = {
+  price: '$0',
+  soldComps: null,
+  comps: { averageNum: 50, highestNum: 0 },
+};
+const noSoldResult = computeListPriceWarning(100, noSold);
+assertFires(noSoldResult, ['avg'], 'no soldComps → uses active avg (fires)');
+assertEq(noSoldResult.worst.anchor, 50, 'active avg anchor = 50');
+
+// Scenario 4: soldComps empty array → uses active avg
+const emptySold = {
+  price: '$0',
+  soldComps: [],
+  comps: { averageNum: 50, highestNum: 0 },
+};
+const emptySoldResult = computeListPriceWarning(100, emptySold);
+assertFires(emptySoldResult, ['avg'], 'soldComps = [] → uses active avg (fires)');
+assertEq(emptySoldResult.worst.anchor, 50, 'active avg anchor = 50');
+
+// Scenario 5: B&B #28 real-world case — soldAvg $1,087, listPrice $933 → NO warning
+const braveBold28 = {
+  price: '$0',
+  soldComps: [
+    { price: 1275 },
+    { price: 900 },
+  ],  // sold avg = 1087.5
+  comps: { averageNum: 40.40, highestNum: 0 },  // contaminated active avg, no high
+};
+const bb28Result = computeListPriceWarning(933, braveBold28);
+// avg trigger: 933 > 1087.5 × 1.50 (1631.25)? NO → null
+assertNull(bb28Result, 'B&B #28: soldAvg $1,087.50 > listPrice $933 → NO warning fires');
+
+// Scenario 6: B&B #28 contamination proof — if it used active avg, warning would fire
+const bb28ActiveCheck = computeListPriceWarning(933, {
+  price: '$0',
+  soldComps: [],  // force active fallback
+  comps: { averageNum: 40.40, highestNum: 0 },
+});
+// avg trigger: 933 > 40.40 × 1.50 (60.60)? YES → fires
+assertFires(
+  bb28ActiveCheck,
+  ['avg'],
+  'B&B #28 if using contaminated active avg $40.40 → warning fires (proof sold-first prevents false positive)'
+);
+
+// Scenario 7: soldComps with zero/null prices → should skip those in avg
+const soldWithZeros = {
+  price: '$0',
+  soldComps: [
+    { price: 100 },
+    { price: 0 },    // should contribute 0 (not skip)
+    { price: 200 },
+  ],  // sum=300, count=3, avg=100
+  comps: { averageNum: 50, highestNum: 0 },
+};
+const soldZerosResult = computeListPriceWarning(200, soldWithZeros);
+// avg trigger: 200 > 100 × 1.50 (150)? YES → fires
+assertFires(soldZerosResult, ['avg'], 'soldComps with zero prices → includes in avg (fires)');
+assertEq(
+  soldZerosResult.worst.anchor,
+  100,
+  'sold avg = (100 + 0 + 200) / 3 = 100'
+);
+
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== RESULTS ===`);
 console.log(`Passed: ${passed}`);

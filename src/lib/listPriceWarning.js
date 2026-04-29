@@ -39,8 +39,17 @@ const TRIGGERS = [
       parseFloat(String(it?.price || '0').replace(/[$,]/g, '')) || 0 },
   { kind: 'high', label: 'market high', mult: 1.20, source: (it) =>
       Number(it?.comps?.highestNum) || 0 },
-  { kind: 'avg', label: '30-day average', mult: 1.50, source: (it) =>
-      Number(it?.comps?.averageNum) || 0 },
+  // Ship #20a.6.12 — sold-first avg. Verified sold comps (real money exchanged)
+  // are better anchor than active listings (often contaminated by reprints/
+  // promotional editions). Falls back to active avg when no sold data.
+  { kind: 'avg', label: '30-day average', mult: 1.50, source: (it) => {
+      const soldAvg = Array.isArray(it?.soldComps) && it.soldComps.length >= 2
+        ? it.soldComps.reduce((sum, s) => sum + (s.price || 0), 0) / it.soldComps.length
+        : 0;
+      const activeAvg = Number(it?.comps?.averageNum) || 0;
+      return soldAvg > 0 ? soldAvg : activeAvg;
+    }
+  },
 ];
 
 export const computeListPriceWarning = (listPrice, item) => {

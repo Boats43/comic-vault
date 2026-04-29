@@ -20,7 +20,11 @@
 // Milestones / DC Classics Library / etc. F3 extension entries from Tier-0:
 // Millennium Edition, Masterworks, reproduction, replica edition, premiere
 // edition, archive edition.
-export const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition|2nd\s*p(?:rint|tg)|3rd\s*p(?:rint|tg)|4th\s*p(?:rint|tg)|5th\s*p(?:rint|tg)|second\s*print|third\s*print|fourth\s*print|\bptg\b|millennium edition|dc classics library|marvel milestones|masterworks|reproduction|replica edition|premiere edition|archive edition/i;
+// Ship #20a.6.12 — subscription box / promotional edition extensions (12
+// patterns): loot crate, funko, previews exclusive, comic block, nerd block,
+// geek fuel, box set, collector's box, subscription box, promotional edition,
+// convention exclusive, con exclusive. Closes B&B #28 Loot Crate class.
+export const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition|2nd\s*p(?:rint|tg)|3rd\s*p(?:rint|tg)|4th\s*p(?:rint|tg)|5th\s*p(?:rint|tg)|second\s*print|third\s*print|fourth\s*print|\bptg\b|millennium edition|dc classics library|marvel milestones|masterworks|reproduction|replica edition|premiere edition|archive edition|loot.?crate|\bfunko\b|previews\s+exclusive|comic\s+block|nerd\s+block|geek\s+fuel|box\s+set|collector'?s?\s+box|subscription\s+box|promotional\s+edition|convention\s+exclusive|con\s+exclusive/i;
 
 // Slab/grading-organization detection. Requires explicit slab indicator
 // (CGC/CBCS/PGX/PSA/EGS/HGA/etc) followed by an optional letter tier and
