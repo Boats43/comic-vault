@@ -301,6 +301,63 @@ assertEq(
   'Whitespace trimmed correctly'
 );
 
+// ─── Ship #20a.6.16 Win #2 — PC re-query logic ──────────────────────────
+console.log('\nShip #20a.6.16 — PC re-query logic:');
+
+// Re-query should fire when consensus differs AND main token check fails
+// (simulated via helper logic extracted from ship)
+const shouldRequery = (consensusTitle, visionTitle, pcProduct) => {
+  if (!consensusTitle || consensusTitle === visionTitle) return false;
+  if (!pcProduct) return true; // No PC result → re-query
+
+  const COMMON_TOKENS = new Set([
+    'marvel', 'dc', 'image', 'idw', 'comics', 'comic',
+    'book', 'the', 'a', 'an', 'of', 'and', 'in', 'for',
+    'dark', 'horse', 'boom', 'archie', 'dynamite',
+  ]);
+  const tokenize = (s) =>
+    String(s || '').toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(t => t.length > 1 && !COMMON_TOKENS.has(t));
+
+  const visionTokens = tokenize(visionTitle);
+  const mainToken = visionTokens[0];
+  if (!mainToken) return false;
+  const productTokens = tokenize(pcProduct);
+  return !productTokens.includes(mainToken);
+};
+
+// Consensus differs, main token fails → re-query FIRES
+assertTrue(
+  shouldRequery('The Crow Lazarus', 'Crow Lazarus', 'Lazarus: Fallen #1 (2025)'),
+  'Consensus ≠ Vision AND main token fails → re-query FIRES'
+);
+
+// Consensus same as Vision → re-query SKIPPED
+assertFalse(
+  shouldRequery('Amazing Fantasy', 'Amazing Fantasy', 'Amazing Fantasy #15'),
+  'Consensus = Vision → re-query SKIPPED'
+);
+
+// Consensus differs but main token passes → re-query SKIPPED
+assertFalse(
+  shouldRequery('The Crow Lazarus', 'Crow Lazarus', 'The Crow Lazarus #1 (2024)'),
+  'Consensus ≠ Vision BUT main token passes → re-query SKIPPED'
+);
+
+// No consensus → re-query SKIPPED
+assertFalse(
+  shouldRequery(null, 'Batman', 'Batman #1'),
+  'No consensus → re-query SKIPPED'
+);
+
+// No PC product initially → re-query FIRES
+assertTrue(
+  shouldRequery('The Crow Lazarus', 'Crow Lazarus', null),
+  'Consensus ≠ Vision AND no initial PC product → re-query FIRES'
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────
 console.log(`\n=== RESULTS ===`);
 console.log(`Passed: ${passed}`);
