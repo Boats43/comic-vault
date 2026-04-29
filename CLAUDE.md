@@ -259,20 +259,41 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - **Editable list price**: numeric `listPrice` input above List on eBay button. `handleList` passes `{ ...item, price: "$X.XX" }` so override drives eBay StartPrice + persists to catalogue.
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 
-## Current State
-**Overwritten each session — never appended.**
+## Current State (as of 2026-04-29)
 
-- Last commit: `d971267` — Ship #20a.6 — sold comp verification + hygiene extraction
-- Test count: 1002 passing across 13 suites
-- Vercel function count: 12/12
-- Layer 1 status: ~75% (sold-verification foundation locked)
-- Layer 2 status: ~30%
-- Layer 3 status: 0% (gated)
-- Layer 4 status: 0% (scan-gated at 250+; currently ~84)
+Latest commit: f831277 — Ship #20a.6.13 trading card sold filter + thin-pool floor guard
+Session ships (newest first):
+  f831277 — #20a.6.13 trading card filter + floor guard
+  00dcb65 — #20a.6.12 reprint contamination + sold-first warning
+  2a15c7e — #20a.6.11 publisher alias + Sensation grade map + coverless filter + thin-pool count=1
+  11eeb83 — Phase 1 image search ungate + sold title display
+  e83b9f8 — #20a.6.4 refuse-to-price identity gate
+  d971267 — #20a.6 sold comp verification (pricing-math greenlit)
 
-- Active session focus: Layer A trust hardening
-- Last validated ship: #20a.6 (phone-validated 2026-04-27)
-- Pending validation: Layer B pricing accuracy ships (#18, #19, #20a, #20a.5, #20a.7)
+Test count: 1301 passing across 15 suites
+Vercel functions: 12/12
+Layer 1: ~85% (recalibrated — 9 fixes confirmed in production)
+Layer 2: ~30%
+Layer 3-4: 0%
+
+Deploy: git push origin main = auto-deploy (confirmed)
+Rollback: git revert [hash] && git push origin main
+
+Active session focus: F-EW1, F-LGF1, F-LGF2, F-GRD1 investigation (4 open failures → Ship #20b territory)
+
+OPEN FAILURE LOG:
+  F-007: Heritage FR mixed with FN comps → Ship #20b
+  F-EW1: Edition warning false-fire on reprint series #1
+  F-LGF1: Low-grade floor under-anchoring → Ship #20b
+  F-LGF2: Stacked multipliers (newsstand × grade) → Ship #20b
+  F-GRD1: Grade adj not applied to recommendation → Ship #20b
+
+DEFERRED:
+  F-002C: Pedigree premium (Crowley) — pricing math, P2
+  Ship #20a.6.7b: Cross-reference matrix — after Phase 1 validated
+  Ship #20a.6.7c: Variant token pricing — needs market data
+  Ship #20a.11: Newsstand multiplier standalone — folded into #20b
+  Ship #20b: Verified-sold-first + market bands — investigation complete, build pending greenlight
 
 ## Recent Ships
 **Last 5 only — overwritten when 6th lands.**
