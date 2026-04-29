@@ -93,6 +93,31 @@ const marketValueOf = (r) => {
   return v || null;
 };
 
+// Ship #20a.6.1 — human-readable label for sold-comp rejection reasons.
+// Reasons in soldVerification.js:
+//   titleMismatch, issueMismatch, annualMismatch, printingMismatch,
+//   variantMismatch, slabMismatch, signed, lot, gradeMismatch, stale, outlier
+// Sample reasons may carry a qualifier (e.g. "lot:half-issue", "outlier×3");
+// the base key before ':' or '×' drives the lookup.
+const SOLD_REASON_LABELS = {
+  titleMismatch: "title didn't match",
+  issueMismatch: "issue # didn't match",
+  annualMismatch: "annual/special format mismatch",
+  printingMismatch: "wrong print (1st vs reprint)",
+  variantMismatch: "variant mismatch",
+  slabMismatch: "slab vs raw mismatch",
+  signed: "signed/SS variant",
+  lot: "lot/multi-issue",
+  gradeMismatch: "wrong grade tier",
+  stale: "stale (>540 days)",
+  outlier: "outlier price",
+};
+const humanizeSoldReason = (reason) => {
+  if (!reason) return "rejected";
+  const base = String(reason).split(/[:×]/)[0];
+  return SOLD_REASON_LABELS[base] || base;
+};
+
 const fileToBase64 = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -211,6 +236,11 @@ function ScanZone({ onFile, inputRef, compact, label }) {
 }
 
 function ResultCard({ result, enriching }) {
+  // Ship #20a.6.1 — collapsible drawer for soldCompDiagnostics rejected
+  // samples. Toggled by clicking the V/R chip. Per-card state — different
+  // cards stay independently expanded.
+  const [soldDrawerOpen, setSoldDrawerOpen] = useState(false);
+
   const comps = result.comps;
   const hasComps =
     comps &&
@@ -423,47 +453,64 @@ function ResultCard({ result, enriching }) {
                   const newest = result.soldComps[0]?.daysAgo;
                   const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
                   // Ship #20a.6 — when raw count > verified, show "V of R verified".
+                  // Ship #20a.6.1 — chip is clickable; expands rejected-samples drawer.
                   const diag = result.soldCompDiagnostics;
+                  const hasRejected = diag && Array.isArray(diag.rejectedSamples) && diag.rejectedSamples.length > 0;
                   const showVerifiedRatio = diag && diag.rawCount > diag.verifiedCount && diag.verifiedCount > 0;
                   const verifiedStr = showVerifiedRatio
                     ? `${diag.verifiedCount} of ${diag.rawCount} sold verified`
                     : `${result.soldComps.length} sold`;
+                  const onClick = hasRejected
+                    ? (e) => { e.preventDefault(); e.stopPropagation(); setSoldDrawerOpen((v) => !v); }
+                    : undefined;
                   return (
-                    <span style={{ marginLeft: 6, opacity: 0.7, textTransform: "none", letterSpacing: 0 }}>
-                      📊 {verifiedStr}{recencyStr ? ` · ${recencyStr}` : ""}
+                    <span
+                      onClick={onClick}
+                      style={{
+                        marginLeft: 6,
+                        opacity: 0.7,
+                        textTransform: "none",
+                        letterSpacing: 0,
+                        cursor: hasRejected ? "pointer" : "default",
+                        userSelect: "none",
+                      }}
+                      title={hasRejected ? (soldDrawerOpen ? "Hide rejected" : "Show rejected") : undefined}
+                    >
+                      📊 {verifiedStr}{recencyStr ? ` · ${recencyStr}` : ""}{hasRejected ? (soldDrawerOpen ? " ▾" : " ▸") : ""}
                     </span>
                   );
                 })()}
               </div>
               {result.soldComps.slice(0, 3).map((s, i) => {
-                const rowStyle = {
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "6px 0",
-                  fontSize: 14,
-                };
                 const mpStyle = (mp) => ({
                   marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
                   background: mp === "heritage" ? "rgba(212,175,55,0.15)" : "rgba(22,163,106,0.15)",
                   color: mp === "heritage" ? "#d4af37" : "#16a34a",
                   textTransform: "uppercase", letterSpacing: 0.5,
                 });
+                const rowStyle = { padding: "6px 0", fontSize: 14 };
                 const inner = (
-                  <>
-                    <span className="muted small">
-                      {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
-                      {s.marketplace && (
-                        <span style={mpStyle(s.marketplace)}>
-                          {s.marketplace === "heritage" ? "HRT" : "eBay"}
-                        </span>
-                      )}
-                    </span>
-                    <span style={{ fontWeight: 600, color: "#16a34a" }}>
-                      {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
-                      {s.url && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
-                    </span>
-                  </>
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span className="muted small">
+                        {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
+                        {s.marketplace && (
+                          <span style={mpStyle(s.marketplace)}>
+                            {s.marketplace === "heritage" ? "HRT" : "eBay"}
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ fontWeight: 600, color: "#16a34a" }}>
+                        {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
+                        {s.url && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
+                      </span>
+                    </div>
+                    {s.title && (
+                      <div style={{ fontSize: 13, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                        {s.title}
+                      </div>
+                    )}
+                  </div>
                 );
                 return s.url ? (
                   <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>
@@ -473,6 +520,36 @@ function ResultCard({ result, enriching }) {
                   <div key={i} style={rowStyle}>{inner}</div>
                 );
               })}
+              {soldDrawerOpen && Array.isArray(result.soldCompDiagnostics?.rejectedSamples) && result.soldCompDiagnostics.rejectedSamples.length > 0 && (
+                <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(224,86,86,0.06)", border: "1px solid rgba(224,86,86,0.2)" }}>
+                  <div className="muted small" style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e05656" }}>
+                    Rejected ({result.soldCompDiagnostics.rejectedCount} total — top {result.soldCompDiagnostics.rejectedSamples.length})
+                  </div>
+                  {result.soldCompDiagnostics.rejectedSamples.map((rej, i) => (
+                    <div key={i} style={{ padding: "4px 0", fontSize: 12, borderTop: i > 0 ? "1px solid rgba(224,86,86,0.15)" : "none" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                        <span style={{
+                          fontSize: 10, padding: "1px 6px", borderRadius: 3,
+                          background: "rgba(224,86,86,0.15)", color: "#e05656",
+                          whiteSpace: "nowrap", letterSpacing: 0.3,
+                        }}>
+                          {humanizeSoldReason(rej.reason)}
+                        </span>
+                        {rej.price != null && (
+                          <span style={{ color: "#888", fontSize: 11 }}>
+                            {fmtPrice(rej.price)}
+                          </span>
+                        )}
+                      </div>
+                      {rej.title && (
+                        <div style={{ fontSize: 11, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                          {rej.title}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               {result.soldComps.length >= 2 && (() => {
                 const avg = result.soldComps.reduce((s, c) => s + (c.price || 0), 0) / result.soldComps.length;
                 return (
@@ -1686,6 +1763,8 @@ function CollectionDetail({
   const [showEngineRec, setShowEngineRec] = useState(false);
   const [expandedKeyIdx, setExpandedKeyIdx] = useState(null);
   const [listPriceWarningDismissed, setListPriceWarningDismissed] = useState(false);
+  // Ship #20a.6.1 — collapsible drawer for soldCompDiagnostics rejected samples.
+  const [soldDrawerOpen, setSoldDrawerOpen] = useState(false);
   const addPhotoRef = useRef(null);
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
@@ -2680,41 +2759,64 @@ function CollectionDetail({
                     const newest = item.soldComps[0]?.daysAgo;
                     const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
                     // Ship #20a.6 — when raw count > verified, show "V of R verified".
+                    // Ship #20a.6.1 — chip is clickable; expands rejected-samples drawer.
                     const diag = item.soldCompDiagnostics;
+                    const hasRejected = diag && Array.isArray(diag.rejectedSamples) && diag.rejectedSamples.length > 0;
                     const showVerifiedRatio = diag && diag.rawCount > diag.verifiedCount && diag.verifiedCount > 0;
                     const verifiedStr = showVerifiedRatio
                       ? `${diag.verifiedCount} of ${diag.rawCount} sold verified`
                       : `${item.soldComps.length} sold`;
+                    const onClick = hasRejected
+                      ? (e) => { e.preventDefault(); e.stopPropagation(); setSoldDrawerOpen((v) => !v); }
+                      : undefined;
                     return (
-                      <span style={{ marginLeft: 6, opacity: 0.7, textTransform: "none", letterSpacing: 0 }}>
-                        📊 {verifiedStr}{recencyStr ? ` · ${recencyStr}` : ""}
+                      <span
+                        onClick={onClick}
+                        style={{
+                          marginLeft: 6,
+                          opacity: 0.7,
+                          textTransform: "none",
+                          letterSpacing: 0,
+                          cursor: hasRejected ? "pointer" : "default",
+                          userSelect: "none",
+                        }}
+                        title={hasRejected ? (soldDrawerOpen ? "Hide rejected" : "Show rejected") : undefined}
+                      >
+                        📊 {verifiedStr}{recencyStr ? ` · ${recencyStr}` : ""}{hasRejected ? (soldDrawerOpen ? " ▾" : " ▸") : ""}
                       </span>
                     );
                   })()}
                 </div>
                 {item.soldComps.slice(0, 3).map((s, i) => {
-                  const rowStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontSize: 14 };
                   const mpStyle = (mp) => ({
                     marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
                     background: mp === "heritage" ? "rgba(212,175,55,0.15)" : "rgba(22,163,106,0.15)",
                     color: mp === "heritage" ? "#d4af37" : "#16a34a",
                     textTransform: "uppercase", letterSpacing: 0.5,
                   });
+                  const rowStyle = { padding: "6px 0", fontSize: 14 };
                   const inner = (
-                    <>
-                      <span className="muted small">
-                        {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
-                        {s.marketplace && (
-                          <span style={mpStyle(s.marketplace)}>
-                            {s.marketplace === "heritage" ? "HRT" : "eBay"}
-                          </span>
-                        )}
-                      </span>
-                      <span style={{ fontWeight: 600, color: "#16a34a" }}>
-                        {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
-                        {s.url && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
-                      </span>
-                    </>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span className="muted small">
+                          {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
+                          {s.marketplace && (
+                            <span style={mpStyle(s.marketplace)}>
+                              {s.marketplace === "heritage" ? "HRT" : "eBay"}
+                            </span>
+                          )}
+                        </span>
+                        <span style={{ fontWeight: 600, color: "#16a34a" }}>
+                          {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
+                          {s.url && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
+                        </span>
+                      </div>
+                      {s.title && (
+                        <div style={{ fontSize: 13, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                          {s.title}
+                        </div>
+                      )}
+                    </div>
                   );
                   return s.url ? (
                     <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>{inner}</a>
@@ -2722,6 +2824,36 @@ function CollectionDetail({
                     <div key={i} style={rowStyle}>{inner}</div>
                   );
                 })}
+                {soldDrawerOpen && Array.isArray(item.soldCompDiagnostics?.rejectedSamples) && item.soldCompDiagnostics.rejectedSamples.length > 0 && (
+                  <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(224,86,86,0.06)", border: "1px solid rgba(224,86,86,0.2)" }}>
+                    <div className="muted small" style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e05656" }}>
+                      Rejected ({item.soldCompDiagnostics.rejectedCount} total — top {item.soldCompDiagnostics.rejectedSamples.length})
+                    </div>
+                    {item.soldCompDiagnostics.rejectedSamples.map((rej, i) => (
+                      <div key={i} style={{ padding: "4px 0", fontSize: 12, borderTop: i > 0 ? "1px solid rgba(224,86,86,0.15)" : "none" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                          <span style={{
+                            fontSize: 10, padding: "1px 6px", borderRadius: 3,
+                            background: "rgba(224,86,86,0.15)", color: "#e05656",
+                            whiteSpace: "nowrap", letterSpacing: 0.3,
+                          }}>
+                            {humanizeSoldReason(rej.reason)}
+                          </span>
+                          {rej.price != null && (
+                            <span style={{ color: "#888", fontSize: 11 }}>
+                              {fmtPrice(rej.price)}
+                            </span>
+                          )}
+                        </div>
+                        {rej.title && (
+                          <div style={{ fontSize: 11, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                            {rej.title}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div style={{ borderTop: "1px solid rgba(212,175,55,0.25)", margin: "8px 0" }} />
               </div>
             )}
@@ -4608,6 +4740,7 @@ export default function App() {
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
                 soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
+                imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
@@ -4956,6 +5089,7 @@ export default function App() {
                   soldComps: enrich.soldComps || cur.soldComps || [],
                   soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
                   soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
+                  imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                   salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                   priceLadder: enrich.priceLadder || cur.priceLadder || null,
                   salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
@@ -5032,6 +5166,7 @@ export default function App() {
                   soldComps: enrich.soldComps || s.soldComps || [],
                   soldCompsRaw: enrich.soldCompsRaw || s.soldCompsRaw || [],
                   soldCompDiagnostics: enrich.soldCompDiagnostics || s.soldCompDiagnostics || null,
+                  imageSearchResults: enrich.imageSearchResults || s.imageSearchResults || null,
                   salesByGrade: enrich.salesByGrade || s.salesByGrade || null,
                   priceLadder: enrich.priceLadder || s.priceLadder || null,
                   salesVelocity: enrich.salesVelocity || s.salesVelocity || null,
@@ -5241,6 +5376,7 @@ export default function App() {
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
                 soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
+                imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
@@ -5601,6 +5737,7 @@ export default function App() {
       soldComps: enrich.soldComps || item.soldComps || [],
       soldCompsRaw: enrich.soldCompsRaw || item.soldCompsRaw || [],
       soldCompDiagnostics: enrich.soldCompDiagnostics || item.soldCompDiagnostics || null,
+      imageSearchResults: enrich.imageSearchResults || item.imageSearchResults || null,
       salesByGrade: enrich.salesByGrade || item.salesByGrade || null,
       priceLadder: enrich.priceLadder || item.priceLadder || null,
       salesVelocity: enrich.salesVelocity || item.salesVelocity || null,
@@ -5967,7 +6104,7 @@ export default function App() {
                             setCatalogue((prev) => {
                               const cur = prev.find((x) => x.id === savedId);
                               if (!cur) return prev;
-                              const updated = { ...cur, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });

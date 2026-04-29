@@ -46,6 +46,7 @@ import {
   sanitizeIdentityFields,
   assessIdentityConfidence,
 } from "../src/lib/identityGate.js";
+import { extractIdentityFromImageSearch } from "../src/lib/imageSearchIdentity.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -972,12 +973,16 @@ const lookupXimilar = async ({ images, title, confidence }) => {
 
 const BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope";
 
-const lookupEbayVisual = async ({ imageBase64, claudeIssue, year }) => {
-  // Modern books (1985+): Claude Vision reads issue numbers accurately.
-  if (year && parseInt(year, 10) >= 1985) {
-    console.log('[visual] modern book — trusting Claude Vision');
-    return null;
-  }
+const lookupEbayVisual = async ({ imageBase64, claudeIssue }) => {
+  // Ship #20a.6.7a — modern gate lifted (was: skip year>=1985), limit
+  // raised 5→20 for richer consensus, structured items[] surfaced for
+  // downstream cross-reference + UI inspection. Issue-consensus voting
+  // unchanged: ≥3 matching #N to override Claude. Items always returned
+  // (with parsed title / issue / year / variantTokens) so callers can
+  // see ALL parsed rows even when consensus didn't fire.
+  //
+  // Token parsing lives in src/lib/imageSearchIdentity.js (pure helper,
+  // bundled transitively per Ship #15 — no new function endpoint).
   const appId = process.env.EBAY_APP_ID;
   const certId = process.env.EBAY_CERT_ID;
   if (!appId || !certId || !imageBase64) return null;
@@ -985,7 +990,7 @@ const lookupEbayVisual = async ({ imageBase64, claudeIssue, year }) => {
     const token = await getOAuthToken(appId, certId, BROWSE_SCOPE);
     const url =
       "https://api.ebay.com/buy/browse/v1/item_summary/search_by_image" +
-      "?category_ids=63&limit=5";
+      "?category_ids=63&limit=20";
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -1003,40 +1008,44 @@ const lookupEbayVisual = async ({ imageBase64, claudeIssue, year }) => {
     const items = Array.isArray(json?.itemSummaries) ? json.itemSummaries : [];
     if (items.length === 0) return null;
 
-    // Extract issue numbers from titles (1-3 digits only, skip years)
-    console.log('[visual] titles:', items.map((r) => r.title));
-    const issueNumbers = [];
-    for (const item of items) {
-      const title = item.title || "";
-      const m = title.match(/#(\d{1,3})(?!\d)/);
-      if (m && parseInt(m[1], 10) <= 999) issueNumbers.push(m[1]);
-    }
-    console.log('[visual] extracted issues:', issueNumbers);
-    if (issueNumbers.length === 0) return null;
+    // Build structured identity rows once. Same parsed issue values feed
+    // both the consensus voter below AND the surfaced items[] payload.
+    const parsedRows = extractIdentityFromImageSearch(items);
 
-    // Find most common issue number (majority wins)
-    const freq = {};
-    for (const n of issueNumbers) {
-      freq[n] = (freq[n] || 0) + 1;
-    }
-    let mostCommon = null;
-    let maxCount = 0;
-    for (const [num, count] of Object.entries(freq)) {
-      if (count > maxCount) { mostCommon = num; maxCount = count; }
-    }
-    console.log('[visual] winner:', mostCommon, `(${maxCount}/${issueNumbers.length})`);
+    console.log('[visual] titles:', items.map((r) => r.title));
+    const issueNumbers = parsedRows.map((r) => r.issue).filter(Boolean);
+    console.log('[visual] extracted issues:', issueNumbers);
 
     const claudeStr = claudeIssue ? String(claudeIssue).trim() : null;
-    if (maxCount < 3) {
-      console.log('[visual] only', maxCount, 'matches — keeping Claude issue:', claudeStr);
-      return null;
+    const result = { items: parsedRows };
+
+    if (issueNumbers.length > 0) {
+      const freq = {};
+      for (const n of issueNumbers) freq[n] = (freq[n] || 0) + 1;
+      let mostCommon = null;
+      let maxCount = 0;
+      for (const [num, count] of Object.entries(freq)) {
+        if (count > maxCount) { mostCommon = num; maxCount = count; }
+      }
+      console.log('[visual] winner:', mostCommon, `(${maxCount}/${issueNumbers.length})`);
+
+      if (maxCount >= 3) {
+        if (mostCommon && claudeStr && mostCommon !== claudeStr) {
+          console.log(`[visual] Claude=#${claudeStr} eBay=#${mostCommon} → using #${mostCommon}`);
+          result.issue = mostCommon;
+          result.issueSource = "ebay_visual";
+          result.claudeIssue = claudeStr;
+        } else {
+          console.log(`[visual] Claude=#${claudeStr} matches eBay=#${mostCommon || "none"} — keeping Claude`);
+          result.issue = claudeStr;
+          result.issueSource = "claude_vision";
+        }
+      } else {
+        console.log('[visual] only', maxCount, 'matches — keeping Claude issue:', claudeStr);
+      }
     }
-    if (mostCommon && claudeStr && mostCommon !== claudeStr) {
-      console.log(`[visual] Claude=#${claudeStr} eBay=#${mostCommon} → using #${mostCommon}`);
-      return { issue: mostCommon, issueSource: "ebay_visual", claudeIssue: claudeStr };
-    }
-    console.log(`[visual] Claude=#${claudeStr} matches eBay=#${mostCommon || "none"} — keeping Claude`);
-    return { issue: claudeStr, issueSource: "claude_vision" };
+
+    return result;
   } catch (err) {
     console.error(`[visual] eBay image search error: ${err?.message || err}`);
     return null;
@@ -1103,7 +1112,7 @@ export default async function handler(req, res) {
       visualBase64 = m ? m[2] : firstImg.replace(/^data:[^;]+;base64,/, "");
     }
     const visualResult = visualBase64
-      ? await lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum, year }).catch(() => null)
+      ? await lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null)
       : null;
     const correctedIssue = (visualResult?.issueSource === "ebay_visual" && visualResult.issue)
       ? visualResult.issue
@@ -2192,12 +2201,20 @@ export default async function handler(req, res) {
       }
     }
 
-    // eBay visual issue cross-validation
+    // eBay visual issue cross-validation + Ship #20a.6.7a image-search
+    // identity rows. Items[] is always present when search_by_image
+    // returned anything; issueSource is only set when the consensus
+    // voter fired (≥3 matching #N).
     if (visualResult) {
-      out.issueSource = visualResult.issueSource;
-      if (visualResult.issueSource === "ebay_visual") {
-        out.issue = visualResult.issue;
-        out.claudeIssue = visualResult.claudeIssue;
+      if (Array.isArray(visualResult.items) && visualResult.items.length > 0) {
+        out.imageSearchResults = visualResult.items;
+      }
+      if (visualResult.issueSource) {
+        out.issueSource = visualResult.issueSource;
+        if (visualResult.issueSource === "ebay_visual") {
+          out.issue = visualResult.issue;
+          out.claudeIssue = visualResult.claudeIssue;
+        }
       }
     }
 

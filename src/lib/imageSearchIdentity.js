@@ -1,0 +1,219 @@
+// Ship #20a.6.7a — pure parser for eBay image-search itemSummaries.
+//
+// Input: array of `{ title }` rows from the eBay Browse API
+// /buy/browse/v1/item_summary/search_by_image response.
+//
+// Output: structured identity rows
+//   { rawTitle, title, issue, year, variantTokens }
+//
+// Variant token catalog is static (leverage-first per the Ship #20a.6.7
+// investigation). Categories: convention, ratio, retailer, authentication,
+// finish. Tokens are deduped, lowercased, and emitted in stable order
+// (convention → ratio → retailer → auth → finish) so consumers can rely
+// on positional intent.
+//
+// Phase 1 scope: descriptive metadata only. The variant tokens are NOT
+// fed into the pricing-multiplier table (api/enrich.js variantMultipliers).
+// Phase 2 (Ship #20a.6.7b) layers cross-reference confidence on top.
+// Phase 3 (Ship #20a.6.7c) requires explicit pricing-math greenlight before
+// routing tokens into the multiplier chain.
+//
+// Per Ship #15 architectural rule: pure helper has no HTTP handler; lives
+// in src/lib/, imported by api/enrich.js. Vercel bundles transitively.
+// Function count stays at 12/12.
+
+// ─────────────────────────── token catalogs ───────────────────────────
+//
+// Each entry is `{ re, token }`. `re` is matched against the listing title;
+// when it fires the canonical `token` is added. Categories appended in
+// order so the output array stays stable across runs.
+
+const CONVENTION_PATTERNS = [
+  { re: /\bmegacon\b/i,            token: 'megacon' },
+  { re: /\bnycc\b/i,               token: 'nycc' },
+  { re: /\bc2e2\b/i,               token: 'c2e2' },
+  { re: /\bsdcc\b/i,               token: 'sdcc' },
+  { re: /\bfan[\s-]?expo\b/i,      token: 'fanexpo' },
+  { re: /\bemerald\s+city\b/i,     token: 'emerald city' },
+  { re: /\beccc\b/i,               token: 'eccc' },
+  { re: /\bwondercon\b/i,          token: 'wondercon' },
+];
+
+// Ratio variants (1:N). Sorted descending so /\b1:1000\b/ tries before
+// /\b1:100\b/ — word boundaries already prevent false matches but keeping
+// the order avoids relying on regex ordering quirks.
+const RATIO_PATTERNS = [
+  { re: /\b1:1000\b/, token: '1:1000' },
+  { re: /\b1:500\b/,  token: '1:500'  },
+  { re: /\b1:250\b/,  token: '1:250'  },
+  { re: /\b1:200\b/,  token: '1:200'  },
+  { re: /\b1:150\b/,  token: '1:150'  },
+  { re: /\b1:100\b/,  token: '1:100'  },
+  { re: /\b1:75\b/,   token: '1:75'   },
+  { re: /\b1:50\b/,   token: '1:50'   },
+  { re: /\b1:40\b/,   token: '1:40'   },
+  { re: /\b1:25\b/,   token: '1:25'   },
+  { re: /\b1:20\b/,   token: '1:20'   },
+  { re: /\b1:15\b/,   token: '1:15'   },
+  { re: /\b1:10\b/,   token: '1:10'   },
+];
+
+const RETAILER_PATTERNS = [
+  { re: /\bsilverbax\b/i,                  token: 'silverbax' },
+  { re: /\bcomic\s*tom\b/i,                token: 'comictom' },
+  { re: /\bscorpion\s+comics?\b/i,         token: 'scorpion' },
+  { re: /\bfrankie'?s\b/i,                 token: 'frankies' },
+  { re: /\bunknown\s+comics?\b/i,          token: 'unknown comics' },
+  { re: /\bwalmart\b/i,                    token: 'walmart' },
+  { re: /\btarget\s+exclusive\b/i,         token: 'target' },
+  { re: /\bhot\s+topic\b/i,                token: 'hot topic' },
+];
+
+// Authentication / signature markers. NB: bare `\bss\b` carries a known
+// false-positive risk on series names like SS-Squadron. In practice eBay
+// listing titles use SS overwhelmingly to mean "signature series" (CGC SS).
+// Phase 1 surfaces this as descriptive metadata only — no pricing impact —
+// so the false-positive surface is acceptable. Phase 2/3 cross-reference
+// can ignore the SS token when other authentication signals are absent.
+const AUTH_PATTERNS = [
+  { re: /\bsignature\s+series\b/i,         token: 'signature series' },
+  { re: /\bautographed?\b/i,               token: 'autographed' },
+  { re: /\bcoa\b/i,                        token: 'coa' },
+  { re: /\bsigned\b/i,                     token: 'signed' },
+  { re: /\bcertified\b/i,                  token: 'certified' },
+  { re: /\bremarked?\b/i,                  token: 'remark' },
+  { re: /\bss\b/i,                         token: 'ss' },
+];
+
+// Cover / print finish.
+const FINISH_PATTERNS = [
+  { re: /\bgold\s+foil\b/i,                token: 'gold foil' },
+  { re: /\bsilver\s+foil\b/i,              token: 'silver foil' },
+  { re: /\bholofoil\b/i,                   token: 'holofoil' },
+  { re: /\bholo(?:gram|graphic)?\b/i,      token: 'holographic' },
+  { re: /\bglow[-\s]?in[-\s]?(?:the[-\s]?)?dark\b/i, token: 'glow-in-dark' },
+  { re: /\bembossed\b/i,                   token: 'embossed' },
+  { re: /\bmetallic\b/i,                   token: 'metallic' },
+  { re: /\bvirgin\b/i,                     token: 'virgin' },
+  { re: /\bsketch\b/i,                     token: 'sketch' },
+  { re: /\bfoil\b/i,                       token: 'foil' },
+];
+
+const CATEGORY_BLOCKS = [
+  { kind: 'convention',     patterns: CONVENTION_PATTERNS },
+  { kind: 'ratio',          patterns: RATIO_PATTERNS      },
+  { kind: 'retailer',       patterns: RETAILER_PATTERNS   },
+  { kind: 'authentication', patterns: AUTH_PATTERNS       },
+  { kind: 'finish',         patterns: FINISH_PATTERNS     },
+];
+
+// ───────────────────────── exported helpers ─────────────────────────
+
+// Extract variant tokens from a single title. Returns deduped, lowercase
+// strings in stable category order. Empty array when no patterns fire.
+//
+// Multi-word finish tokens (e.g. "gold foil") match before bare "foil"
+// because FINISH_PATTERNS lists them first; the dedup Set then prevents
+// "foil" being added on its own when "gold foil" already fired.
+export const extractVariantTokens = (title) => {
+  const t = String(title || '');
+  if (!t) return [];
+  const seen = new Set();
+  const tokens = [];
+  for (const { patterns } of CATEGORY_BLOCKS) {
+    for (const { re, token } of patterns) {
+      if (seen.has(token)) continue;
+      if (re.test(t)) {
+        seen.add(token);
+        tokens.push(token);
+      }
+    }
+  }
+  // Suppress bare 'foil' when 'gold foil' / 'silver foil' / 'holofoil'
+  // already fired — same physical attribute, the more specific token wins.
+  if (tokens.includes('foil') && (tokens.includes('gold foil') || tokens.includes('silver foil') || tokens.includes('holofoil'))) {
+    return tokens.filter((t) => t !== 'foil');
+  }
+  return tokens;
+};
+
+// Extract issue # from a title. Re-uses the existing /#(\d{1,3})(?!\d)/
+// pattern from api/enrich.js lookupEbayVisual so behavior is identical
+// — issue # in 1-999 only, no trailing digits.
+const ISSUE_RE = /#\s*(\d{1,3})(?!\d)/;
+export const extractIssueFromTitle = (title) => {
+  const m = String(title || '').match(ISSUE_RE);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  if (n > 999) return null;
+  return m[1];
+};
+
+// Extract a 4-digit year from a title. Range: 1900-2099. Prefers a
+// parenthesized year `(1985)` (the canonical eBay form) over a bare
+// year, which can appear inside variant strings or grade contexts.
+const PAREN_YEAR_RE = /\((19\d{2}|20\d{2})\)/;
+const BARE_YEAR_RE  = /\b(19\d{2}|20\d{2})\b/;
+export const extractYearFromTitle = (title) => {
+  const t = String(title || '');
+  const p = t.match(PAREN_YEAR_RE);
+  if (p) return p[1];
+  const b = t.match(BARE_YEAR_RE);
+  return b ? b[1] : null;
+};
+
+// Best-effort series name extraction. Strips slab markers, paren blocks
+// (year + extras), #issue, prices, ratio markers, all variant tokens, and
+// noise words. Whatever remains is the candidate series name. Returns
+// null when the strip leaves nothing meaningful (length < 2).
+//
+// Imperfect by design — modern variant titles are noisy. Phase 2 cross-
+// reference uses tokenized comparison against Vision/PC/CV titles, so
+// exact equality is not required. Returning null on uncertainty is safer
+// than guessing.
+const SLAB_STRIP_RE = /\b(?:cgc|cbcs|pgx|psa|egs|hga)\s*(?:ss|signature\s+series|mt|nm[+/-]?(?:mt)?|vf[+/-]?(?:nm)?|fn[+/-]?(?:vf)?|vg[+/-]?(?:fn)?|gd[+/-]?(?:vg)?|fr|pr)?\s*\d+(?:\.\d+)?/i;
+const NOISE_WORDS_RE = /\b(?:exclusive|excl|variant|edition|cover\s+[a-z]\b|cvr\s+[a-z]\b|comics?|comic\s+book|near\s+mint|nm|vf|fn|ltd\s*\d*|limited|first\s+print|1st\s+print|2nd\s+print|3rd\s+print)\b/gi;
+const PRICE_BLOCK_RE = /\$\d+(?:\.\d{1,2})?/g;
+const RATIO_STRIP_RE = /\b1:\d+\b/g;
+const HASH_ISSUE_RE = /#\s*\d{1,3}\b/g;
+const PAREN_BLOCK_RE = /\([^)]*\)/g;
+
+export const extractSeriesTitle = (rawTitle) => {
+  if (!rawTitle) return null;
+  let s = String(rawTitle);
+  s = s.replace(SLAB_STRIP_RE, ' ');
+  s = s.replace(PAREN_BLOCK_RE, ' ');     // strips (year), (variant), (signed), …
+  s = s.replace(HASH_ISSUE_RE, ' ');
+  s = s.replace(PRICE_BLOCK_RE, ' ');
+  s = s.replace(RATIO_STRIP_RE, ' ');
+  // Strip every variant token's regex match — flatten CATEGORY_BLOCKS.
+  for (const { patterns } of CATEGORY_BLOCKS) {
+    for (const { re } of patterns) {
+      const flagSet = new Set([...re.flags, 'g']);
+      s = s.replace(new RegExp(re.source, [...flagSet].join('')), ' ');
+    }
+  }
+  s = s.replace(NOISE_WORDS_RE, ' ');
+  s = s.replace(/[#:&|/\\\[\]]/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  if (!s || s.length < 2) return null;
+  return s;
+};
+
+// Main entry — parse a list of eBay itemSummaries items into structured
+// identity rows. Each row carries rawTitle / title / issue / year /
+// variantTokens. Items without a string title are kept with all-null
+// fields so callers can correlate index-aligned with the original items.
+export const extractIdentityFromImageSearch = (items) => {
+  if (!Array.isArray(items)) return [];
+  return items.map((it) => {
+    const rawTitle = (it && typeof it.title === 'string') ? it.title : null;
+    return {
+      rawTitle,
+      title: extractSeriesTitle(rawTitle),
+      issue: extractIssueFromTitle(rawTitle),
+      year: extractYearFromTitle(rawTitle),
+      variantTokens: extractVariantTokens(rawTitle),
+    };
+  });
+};
