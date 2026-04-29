@@ -342,6 +342,31 @@ assertTrue(getMegaKeyEntry('Daredevil', '1', 'Marvel', 'not-a-year'), 'DD #1 Mar
 // Both fields invalid → fail-closed.
 assertEq(getMegaKeyEntry('Daredevil', '1', '', 'not-a-year'), null, 'DD #1 empty pub + unparseable year → reject');
 
+// ─── Ship #20a.6.11: Publisher alias F-001 regression ──────────────
+console.log('\nShip #20a.6.11 — Publisher alias "D C Comics" → "dc":');
+const action1DcSpaced = getMegaKeyEntry('Action Comics', '1', 'D C Comics', 1938);
+assertEq(action1DcSpaced?.type, 'MANUAL', 'Action #1 "D C Comics" (space-separated) matches');
+assertTrue(isMegaKey('Action Comics', '1', 'D C Comics', 1938), 'isMegaKey(Action #1 "D C Comics") true');
+const det27DcSpaced = getMegaKeyEntry('Detective Comics', '27', 'd c comics', 1939);
+assertTrue(det27DcSpaced, 'Det #27 "d c comics" (lowercased) matches');
+assertEq(det27DcSpaced?.type, 'MEGA', 'Det #27 "d c comics" is MEGA');
+
+// ─── Ship #20a.6.11: Sensation Comics #1 grade map extension ───────
+console.log('\nShip #20a.6.11 — Sensation #1 extended to 9.8 (Crowley 9.4 case):');
+const sensation94 = getMegaKeyFloor('Sensation Comics', '1', 'DC', 1942, 'CGC 9.4', 9.4);
+assertEq(sensation94.floor, 1_200_000, 'Sensation #1 @ 9.4 = $1.2M');
+assertEq(sensation94.exceedsMap, false, 'Sensation #1 @ 9.4 does NOT exceed map (extended)');
+const sensation96 = getMegaKeyFloor('Sensation Comics', '1', 'DC', 1942, 'CGC 9.6', 9.6);
+assertEq(sensation96.floor, 1_800_000, 'Sensation #1 @ 9.6 = $1.8M');
+assertEq(sensation96.exceedsMap, false, 'Sensation #1 @ 9.6 within map');
+const sensation98 = getMegaKeyFloor('Sensation Comics', '1', 'DC', 1942, 'CGC 9.8', 9.8);
+assertEq(sensation98.floor, 3_000_000, 'Sensation #1 @ 9.8 = $3M');
+assertEq(sensation98.exceedsMap, false, 'Sensation #1 @ 9.8 within map');
+// Highest is now 9.8, so 9.9 should exceed
+const sensation99 = getMegaKeyFloor('Sensation Comics', '1', 'DC', 1942, 'CGC 9.9', 9.9);
+assertEq(sensation99.exceedsMap, true, 'Sensation #1 @ 9.9 exceedsMap (above 9.8)');
+assertEq(sensation99.floor, null, 'Sensation #1 @ 9.9 floor=null');
+
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

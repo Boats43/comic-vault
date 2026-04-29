@@ -18,6 +18,7 @@ import {
   SIGNED_RE,
   VARIANT_CONTAM_RE,
 } from '../api/comps.js';
+import { COVERLESS_RE, SLAB_RE } from '../src/lib/compHygiene.js';
 import { computeThinPoolAnchor } from '../api/enrich.js';
 
 let passed = 0;
@@ -381,31 +382,30 @@ assertTrue(
 // the helper's behavior across every code path.
 console.log('\n── Ship #13.1 — computeThinPoolAnchor ──');
 
-// Biker Mice from Mars #1 — confirmed production miss. Count 1,
-// highest $7.16, engine output $8.23 (PC × mult sanity-fallbacked).
-// Expected cap: $7.16 × 1.05 = $7.518.
+// Ship #20a.6.11 — count=1 now skipped (was the Biker Mice #1 case).
+// Rationale: 1 comp too unreliable to anchor (Sensation #1 Crowley 9.4
+// case where 1 wrong-book comp set $1,250 floor). Anchor fires only at
+// count=2 now.
 const biker = computeThinPoolAnchor(
   8.23,
   { count: 1, highest: 7.16 },
   {}
 );
-assertTrue(biker && biker.shouldAnchor === true,
-  'Biker Mice #1: anchor fires (count=1, 8.23 > 7.52)');
-assertEq(biker.anchorCap.toFixed(3), '7.518',
-  'Biker Mice #1: cap = $7.518');
+assertEq(biker, null,
+  'Biker Mice #1 (count=1): anchor NOW SKIPPED (Ship #20a.6.11)');
 
-// Below cap — no anchor.
+// Below cap at count=1 — also skipped (count threshold before price check).
 assertEq(
   computeThinPoolAnchor(7.00, { count: 1, highest: 7.16 }, {}),
   null,
-  '$7.00 < cap $7.52 → null (no anchor needed)'
+  'count=1 below cap → null (count threshold)'
 );
 
-// Exactly at cap — no anchor (must be strictly greater).
+// Exactly at cap at count=1 — also skipped.
 assertEq(
   computeThinPoolAnchor(7.518, { count: 1, highest: 7.16 }, {}),
   null,
-  'exactly at cap → null (no-op)'
+  'count=1 at cap → null (count threshold)'
 );
 
 // 2 comps also in thin-pool range.
@@ -513,16 +513,29 @@ assertEq(
 );
 
 // Ship #13.1 scope gap verification — browse_api path case.
-// Regardless of "source" (no isFromPC gate on the helper), anchor
-// decision is purely about count + highest + price.
+// Ship #20a.6.11 update: count=1 now skipped, so browse_api path with
+// count=1 no longer fires anchor. The gap fix from Ship #13.1 (removing
+// isFromPC gate) still applies, but only for count=2.
 const browseApiPath = computeThinPoolAnchor(
   8.23,
   { count: 1, highest: 7.16, average: 7.16 },
   {}
 );
+assertEq(
+  browseApiPath,
+  null,
+  'browse_api path count=1: NOW SKIPPED (Ship #20a.6.11)'
+);
+
+// Verify count=2 browse_api case still fires (Ship #13.1 gap fix preserved).
+const browseApiCount2 = computeThinPoolAnchor(
+  15.0,
+  { count: 2, highest: 10.0, average: 10.0 },
+  {}
+);
 assertTrue(
-  browseApiPath && browseApiPath.shouldAnchor === true,
-  'browse_api path + thin pool: anchor fires (the Ship #13 gap fix)'
+  browseApiCount2 && browseApiCount2.shouldAnchor === true,
+  'browse_api path count=2: anchor fires (Ship #13.1 gap fix preserved)'
 );
 
 // Negative regression: pure browse_api book where price = average ≤ highest.
@@ -531,7 +544,97 @@ assertTrue(
 assertEq(
   computeThinPoolAnchor(7.16, { count: 1, highest: 7.16 }, {}),
   null,
-  'pure browse_api (price = avg = highest): no bind'
+  'pure browse_api count=1 (price = avg = highest): no bind'
+);
+
+// ─── Ship #20a.6.11 — COVERLESS_RE filter ──────────────────────────
+console.log('\n── Ship #20a.6.11 — COVERLESS_RE hard reject ──');
+
+assertTrue(
+  COVERLESS_RE.test('Sensation Comics #1 CGC-NG COVERLESS'),
+  'CGC-NG COVERLESS → match'
+);
+assertTrue(
+  COVERLESS_RE.test('Batman #1 coverless'),
+  'coverless (lowercase) → match'
+);
+assertTrue(
+  COVERLESS_RE.test('Amazing Fantasy #15 no cover'),
+  'no cover → match'
+);
+assertTrue(
+  COVERLESS_RE.test('Detective Comics #27 cover missing'),
+  'cover missing → match'
+);
+assertTrue(
+  COVERLESS_RE.test('Action Comics #1 incomplete'),
+  'incomplete → match'
+);
+assertTrue(
+  COVERLESS_RE.test('Flash Comics #1 damaged cover'),
+  'damaged cover → match'
+);
+assertFalse(
+  COVERLESS_RE.test('Amazing Spider-Man #300 CGC 9.8'),
+  'normal listing → no match'
+);
+assertFalse(
+  COVERLESS_RE.test('Batman #1 DC 1940 CGC 3.0'),
+  'standard slab → no match'
+);
+
+// ─── Ship #20a.6.11 — SLAB_RE extended for CGC-NG ──────────────────
+console.log('\n── Ship #20a.6.11 — SLAB_RE catches CGC-NG ──');
+
+assertTrue(
+  SLAB_RE.test('Sensation Comics #11 CGC-NG'),
+  'CGC-NG (hyphen) → match'
+);
+assertTrue(
+  SLAB_RE.test('Batman #1 CGC NG'),
+  'CGC NG (space) → match'
+);
+assertTrue(
+  SLAB_RE.test('Detective #27 CBCS-NG'),
+  'CBCS-NG → match'
+);
+assertTrue(
+  SLAB_RE.test('Flash #1 CGC no grade'),
+  'CGC no grade → match'
+);
+// Standard slabs still match
+assertTrue(
+  SLAB_RE.test('Amazing Fantasy #15 CGC 9.6'),
+  'standard CGC 9.6 → match'
+);
+assertTrue(
+  SLAB_RE.test('Hulk #181 CGC SS 9.8'),
+  'CGC SS 9.8 → match'
+);
+
+// ─── Ship #20a.6.11 — Thin-pool anchor at count=1 (skip) ───────────
+console.log('\n── Ship #20a.6.11 — Thin-pool anchor skips count=1 ──');
+
+assertEq(
+  computeThinPoolAnchor(100, { count: 1, highest: 50 }, {}),
+  null,
+  'count=1: anchor returns null (too unreliable)'
+);
+assertEq(
+  computeThinPoolAnchor(100, { count: 0, highest: 50 }, {}),
+  null,
+  'count=0: anchor returns null (was already skipped)'
+);
+// Count=2 should fire
+const count2Result = computeThinPoolAnchor(100, { count: 2, highest: 50 }, {});
+assertTrue(
+  count2Result && count2Result.shouldAnchor === true,
+  'count=2: anchor fires (thin pool)'
+);
+assertEq(
+  count2Result?.anchorCap,
+  52.5,
+  'count=2: anchorCap = 50 × 1.05 = 52.5'
 );
 
 // ─── Summary ────────────────────────────────────────────────────────

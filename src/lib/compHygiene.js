@@ -26,7 +26,8 @@ export const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary 
 // (CGC/CBCS/PGX/PSA/EGS/HGA/etc) followed by an optional letter tier and
 // numeric grade. Bare "9.4" in a raw seller's self-grade does NOT match.
 // Middle (?:ss|signature\s+series|...) catches "CGC SS 9.8" / "CBCS SS 7.0".
-export const SLAB_RE = /\b(?:cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|signature\s+series|verified|qualified)\s*(?:ss|signature\s+series|mt|nm\/mt|nm\+|nm-|nm|vf\/nm|vf\+|vf-|vf|fn\/vf|fn\+|fn-|fn|vg\/fn|vg\+|vg-|vg|gd\/vg|gd\+|gd-|gd|fr\/gd|fr|pr)?\s*\d+(?:\.\d+)?/i;
+// Ship #20a.6.11 — extended to catch CGC-NG / CBCS-NG / no-grade slabs.
+export const SLAB_RE = /\b(?:cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|signature\s+series|verified|qualified)\s*(?:ss|signature\s+series|mt|nm\/mt|nm\+|nm-|nm|vf\/nm|vf\+|vf-|vf|fn\/vf|fn\+|fn-|fn|vg\/fn|vg\+|vg-|vg|gd\/vg|gd\+|gd-|gd|fr\/gd|fr|pr)?\s*(?:\d+(?:\.\d+)?|(?:-\s*)?(?:ng|no\s*grade))/i;
 
 // Graded-only requirement — title MUST mention CGC or CBCS.
 export const GRADED_RE = /\bCGC\b|\bCBCS\b/i;
@@ -62,6 +63,13 @@ export const LOT_RE =
 // or date strings like "9/2026" would falsely match.
 export const HALF_ISSUE_RE =
   /#\s*\d+\s*\/\s*\d+\b|#\s*\d+\.\d+\b|\b½\b|\bhalf[-\s]*issue\b|\b1\/2\s*issue\b|\bashcan\b|\bpromo(?:tional)?\b/i;
+
+// Coverless / incomplete / no-cover markers. Ship #20a.6.11 — Sensation #1
+// Crowley 9.4 case where "Sensation Comics #11 CGC-NG COVERLESS" passed all
+// filters and poisoned the floor. Hard-reject unless our book is also
+// coverless (which it never is in the standard grading flow).
+export const COVERLESS_RE =
+  /\b(?:coverless|no\s*cover|cover\s*missing|incomplete|damaged\s*cover)\b/i;
 
 // Cover artist patterns — used both for active-comp creator filter
 // (api/comps.js Filter 3b) and sold-row variant-artist matching

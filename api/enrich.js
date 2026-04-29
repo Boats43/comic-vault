@@ -261,15 +261,19 @@ const median = (arr) => {
 // Skip conditions:
 //   isMegaKey        → floor map at api/mega-keys.js is authoritative
 //   compsExhausted   → no trusted comps to anchor against
-//   rawComps missing / count=0 / count>=3 → no thin-pool situation
+//   rawComps missing / count≤1 / count≥3 → no thin-pool situation
 //   highest missing / ≤0                  → no upper bound to cap against
 //   currentPrice missing / ≤0             → nothing to cap
 //   currentPrice ≤ anchorCap              → already within cap (no-op)
+//
+// Ship #20a.6.11: threshold raised to count≤1 (was count≤0). Single-comp
+// pools are too unreliable to anchor (Sensation #1 Crowley 9.4 case where
+// 1 wrong-book comp set a $1,250 floor). Anchor now fires only at count=2.
 export const computeThinPoolAnchor = (currentPrice, rawComps, opts = {}) => {
   const { isMegaKey, compsExhausted } = opts;
   if (isMegaKey || compsExhausted) return null;
   if (!rawComps || typeof rawComps.count !== 'number') return null;
-  if (rawComps.count <= 0 || rawComps.count >= 3) return null;
+  if (rawComps.count <= 1 || rawComps.count >= 3) return null;
   if (typeof rawComps.highest !== 'number' || rawComps.highest <= 0) return null;
   if (typeof currentPrice !== 'number' || !(currentPrice > 0)) return null;
   const anchorCap = rawComps.highest * 1.05;

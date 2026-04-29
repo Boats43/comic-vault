@@ -27,6 +27,7 @@ import {
   OTHER_COVER_RE,
   LOT_RE,
   HALF_ISSUE_RE,
+  COVERLESS_RE,
   ARTIST_PATTERNS,
   STOP_WORDS,
   MIN_TOKEN_LEN,
@@ -1043,6 +1044,26 @@ export const fetchComps = async ({
           if (p.length < before) {
             console.log(`[comps] signed filter removed ${before - p.length}`);
           }
+        }
+      }
+
+      // Ship #20a.6.11 Filter 2c: coverless / incomplete / no-cover filter.
+      // Books with missing covers poison comps (Sensation #1 Crowley 9.4 case
+      // where "Sensation Comics #11 CGC-NG COVERLESS" set floor at $1,250).
+      // Hard-reject unless our book is also coverless (which never happens in
+      // the standard grading flow). No observability counter — these are rare.
+      {
+        const before = p.length;
+        p = p.filter((it) => {
+          if (COVERLESS_RE.test(String(it.title || ''))) {
+            console.log('[coverless-filter] rejected:',
+              String(it.title || '').slice(0, 55));
+            return false;
+          }
+          return true;
+        });
+        if (p.length < before) {
+          console.log(`[comps] coverless filter removed ${before - p.length}`);
         }
       }
 

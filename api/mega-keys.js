@@ -48,6 +48,7 @@ const VERIFY_NOTE =
 const PUBLISHER_ALIASES = {
   dc: "dc",
   "dc comics": "dc",
+  "d c comics": "dc", // Ship #20a.6.11 — space-separated form Vision returns
   national: "dc",
   "national periodical publications": "dc",
   "national allied publications": "dc",
@@ -230,9 +231,10 @@ export const MEGA_KEYS_FLOOR = {
     verificationNote: VERIFY_NOTE,
     volatilityNote:
       "Wonder Woman movie/theatrical cycles move this book ±30%. " +
-      "Conservative floor.",
+      "Conservative floor. Ship #20a.6.11 extended to 9.8 (Crowley 9.4 case).",
     grades: {
       2.0: 15_000, 6.0: 100_000, 8.0: 400_000, 9.2: 800_000,
+      9.4: 1_200_000, 9.6: 1_800_000, 9.8: 3_000_000,
     },
   },
   "flash comics|1": {
