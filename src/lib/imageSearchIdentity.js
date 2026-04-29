@@ -99,10 +99,43 @@ const FINISH_PATTERNS = [
   { re: /\bfoil\b/i,                       token: 'foil' },
 ];
 
+// Ship #20a.6.18 — Exclusive markers (convention exclusives, store exclusives,
+// secret drops). Captures the descriptor but not the quantity/limitation
+// (that's handled by LIMITATION_PATTERNS below). Sorted from most-specific
+// to least-specific so multi-word patterns match before bare "exclusive".
+const EXCLUSIVE_PATTERNS = [
+  { re: /\bconvention\s+exclusive\b/i,     token: 'convention exclusive' },
+  { re: /\bcon\s+exclusive\b/i,            token: 'con exclusive' },
+  { re: /\bstore\s+exclusive\b/i,          token: 'store exclusive' },
+  { re: /\bshop\s+exclusive\b/i,           token: 'shop exclusive' },
+  { re: /\bweb\s+exclusive\b/i,            token: 'web exclusive' },
+  { re: /\bonline\s+exclusive\b/i,         token: 'online exclusive' },
+  { re: /\bsecret\s+drop\b/i,              token: 'secret drop' },
+  { re: /\bexclusive\b/i,                  token: 'exclusive' },
+  { re: /\bexcl\.?\b/i,                    token: 'exclusive' },
+];
+
+// Ship #20a.6.18 — Limitation markers. Captures print-run limitation strings
+// ("LTD 150", "limited to 200", "#47/150"). The captured token is the
+// CANONICAL form (lowercased, normalized). eBay sellers use many variations:
+// "LTD 150", "Ltd. 150", "Limited to 150", "Limited 150", "#/150", etc.
+// Pattern order: most-specific (numbered copies) → abbreviated (LTD N) →
+// spelled-out (limited to N / limited N).
+const LIMITATION_PATTERNS = [
+  { re: /\b#\s*\d+\s*\/\s*(\d+)\b/i,               token: 'numbered' },  // "#47/150"
+  { re: /\b#\s*\d+\s+of\s+(\d+)\b/i,               token: 'numbered' },  // "#47 of 150"
+  { re: /\bltd\.?\s*(\d+)\b/i,                     token: 'limited' },   // "LTD 150"
+  { re: /\blimited\s+to\s+(\d+)\b/i,               token: 'limited' },   // "limited to 150"
+  { re: /\blimited\s+(\d+)\b/i,                    token: 'limited' },   // "limited 150"
+  { re: /\b(\d+)\s+copies?\b/i,                    token: 'limited' },   // "150 copies"
+];
+
 const CATEGORY_BLOCKS = [
   { kind: 'convention',     patterns: CONVENTION_PATTERNS },
   { kind: 'ratio',          patterns: RATIO_PATTERNS      },
   { kind: 'retailer',       patterns: RETAILER_PATTERNS   },
+  { kind: 'exclusive',      patterns: EXCLUSIVE_PATTERNS  },
+  { kind: 'limitation',     patterns: LIMITATION_PATTERNS },
   { kind: 'authentication', patterns: AUTH_PATTERNS       },
   { kind: 'finish',         patterns: FINISH_PATTERNS     },
 ];

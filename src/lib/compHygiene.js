@@ -96,22 +96,29 @@ export const TRADING_CARD_RE =
 // pattern matches), fabok (single-word). Active-comp callers will pick
 // these up when scanning cover-credit variant strings; the same array
 // drives sold-comp variant-artist mismatch detection.
+//
+// Ship #20a.6.18 added 9 patterns: mico suayan (Crow Dead Time class),
+// puppeteer lee, derrick chew, jonboy meyers, kael ngu, natali sanders,
+// kendrick lim, lucio parrillo (multi-word); ejikure (single-word).
 export const ARTIST_PATTERNS = [
   // Multi-word patterns — longest-first wins via break in callers, so
   // multi-word entries MUST come before single-word fallbacks (e.g.
   // /alex ross/ before /ross/, /jeehyung lee/ before /lee/).
   // Original 8 multi-word + Ship #20a.6 added /jeehyung lee/, /alex ross/,
   // /kaare andrews/. Ship #20a.6.7c added /alan quah/.
+  // Ship #20a.6.18 added 8 multi-word below.
   /tyler kirkham/i, /jim lee/i, /inhyuk lee/i, /skottie young/i,
   /frank cho/i, /frank miller/i, /windsor.?smith/i, /dell'?otto/i,
   /jeehyung lee/i, /alex ross/i, /kaare andrews/i, /alan quah/i,
-  // Single-word — original 28 + Ship #20a.6 /fabok/.
+  /mico suayan/i, /puppeteer lee/i, /derrick chew/i, /jonboy meyers/i,
+  /kael ngu/i, /natali sanders/i, /kendrick lim/i, /lucio parrillo/i,
+  // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/.
   /skan/i, /rapoza/i, /quash/i, /momoko/i, /ross/i, /adams/i,
   /kirkham/i, /bean/i, /andolfo/i, /browne/i, /forstner/i,
   /howard/i, /corona/i, /stegman/i, /ottley/i,
   /jimenez/i, /mcfarlane/i, /campbell/i, /artgerm/i, /nakayama/i,
   /hughes/i, /byrne/i, /perez/i, /kirby/i, /ditko/i, /mele/i,
-  /albuquerque/i, /hama/i, /fabok/i,
+  /albuquerque/i, /hama/i, /fabok/i, /ejikure/i,
 ];
 
 // ───────────────────────── TOKEN-BASED HELPERS ─────────────────────────

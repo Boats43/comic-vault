@@ -47,6 +47,10 @@ import {
   assessIdentityConfidence,
 } from "../src/lib/identityGate.js";
 import { extractIdentityFromImageSearch } from "../src/lib/imageSearchIdentity.js";
+// Ship #20a.6.18 — variant identity engine (modern variant consensus from
+// eBay image search). Overrides Vision variant field when ≥2 eBay listings
+// agree on specific tokens (convention, artist, exclusive, limitation).
+import { extractConfirmedVariant } from "../src/lib/variantIdentity.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1341,6 +1345,29 @@ export default async function handler(req, res) {
       console.log('[enrich] year corrected:', year, '→', confirmedYear);
     }
 
+    // Ship #20a.6.18 — Variant identity check (additive, gated). Only runs
+    // on modern books (year >= 2000) with variant detected AND Vision
+    // confidence not HIGH AND eBay image search returned results. Extracts
+    // consensus variant from eBay listing titles (convention, artist,
+    // exclusive markers, limitation). Overrides Vision variant for comp
+    // query when ≥2 listings agree. Falls back gracefully: no consensus →
+    // keeps Vision variant. Old books (pre-2000) skip entirely.
+    let confirmedVariant = req.body.variant || null;
+    let variantIdentitySource = 'vision';
+    const variantCheck = extractConfirmedVariant(
+      visualResult?.items,
+      req.body.variant,
+      confirmedYear,
+      confidence
+    );
+    if (variantCheck) {
+      confirmedVariant = variantCheck.confirmedVariant;
+      variantIdentitySource = 'ebay_image_consensus';
+      out.variantIdentitySource = variantIdentitySource;
+      out.variantConsensus = variantCheck.consensus;
+      out.variantOverriddenVision = variantCheck.overriddenVision;
+    }
+
     // Step 2b: year-dependent lookups using confirmedYear.
     mark('phase2_start');
     const compsPromise =
@@ -1352,7 +1379,7 @@ export default async function handler(req, res) {
             isGraded,
             numericGrade,
             year: confirmedYear,
-            variant: req.body.variant || null,
+            variant: confirmedVariant,  // Ship #20a.6.18: uses confirmed variant (eBay consensus when gate fires, Vision otherwise)
             creator: req.body.creator || null,
             publisher: publisher || null,
             imageSearchTitle,
@@ -2236,7 +2263,7 @@ export default async function handler(req, res) {
         title: req.body.title || title,
         issue: correctedIssue,
         year: confirmedYear,
-        variant: req.body.variant || null,
+        variant: confirmedVariant,  // Ship #20a.6.18: uses confirmed variant
         creator: req.body.creator || null,
       });
       const fallbackMessage =
