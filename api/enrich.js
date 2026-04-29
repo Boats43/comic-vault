@@ -1196,23 +1196,39 @@ export default async function handler(req, res) {
     ]);
     mark('phase1_complete');
 
+    // Ship #20a.6.7c — Instrumentation: log image search titles for Option B
+    // design if Option A proves insufficient. Format: array of {title, tokens}
+    // so we can analyze consensus behavior on the next exclusive-variant failure.
+    if (visualResult?.items?.length) {
+      console.log(
+        '[image-search-titles]',
+        JSON.stringify(
+          visualResult.items.map(i => ({
+            title: i?.rawTitle || i?.title,
+            tokens: i?.variantTokens
+          }))
+        )
+      );
+    }
+
     // Extract corrected issue from image search consensus (issue correction).
     const correctedIssue = (visualResult?.issueSource === "ebay_visual" && visualResult.issue)
       ? visualResult.issue
       : issueNum;
 
     // Ship #20a.6.7b.2 — Image search consensus title extraction. Extract
-    // consensus title (≥3 matching titles) from visual result when Vision
-    // confidence is not HIGH.
+    // consensus title (≥2 matching titles) from visual result when Vision
+    // confidence is not HIGH. Ship #20a.6.7c lowered threshold from ≥3 to ≥2
+    // to catch thin exclusive variants (Alan Quah Fanexpo class).
     const getImageSearchConsensusTitle = (visualResult) => {
       if (!visualResult?.items?.length) return null;
       const titles = visualResult.items.map(i => i.title).filter(Boolean);
-      if (titles.length < 3) return null;
+      if (titles.length < 2) return null;
       const freq = {};
       titles.forEach(t => { freq[t] = (freq[t] || 0) + 1; });
       const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
       const top = sorted[0];
-      return top && top[1] >= 3 ? top[0] : null;
+      return top && top[1] >= 2 ? top[0] : null;
     };
 
     const visionConfidenceLower = String(confidence || 'medium').toLowerCase();

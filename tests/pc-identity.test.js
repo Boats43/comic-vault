@@ -35,15 +35,16 @@ const wouldAcceptProduct = (queryTitle, productName) => {
 
 const stripSubtitle = (t) => String(t || '').replace(/:.*$/, '').trim();
 
+// Ship #20a.6.7c — lowered consensus threshold from ≥3 to ≥2
 const getImageSearchConsensusTitle = (items) => {
-  if (!items || !Array.isArray(items) || items.length < 3) return null;
+  if (!items || !Array.isArray(items) || items.length < 2) return null;
   const titles = items.map(i => i?.title).filter(Boolean);
-  if (titles.length < 3) return null;
+  if (titles.length < 2) return null;
   const freq = {};
   titles.forEach(t => { freq[t] = (freq[t] || 0) + 1; });
   const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
   const top = sorted[0];
-  return top && top[1] >= 3 ? top[0] : null;
+  return top && top[1] >= 2 ? top[0] : null;
 };
 
 let passed = 0;
@@ -176,9 +177,9 @@ assertFalse(
 );
 
 // ─── Ship #20a.6.7b.2 — Image search consensus ──────────────────────────
-console.log('\nShip #20a.6.7b.2 — Image search consensus title:');
+console.log('\nShip #20a.6.7b.2 — Image search consensus title (Ship #20a.6.7c lowered to ≥2):');
 
-// Consensus fires when ≥3 titles match
+// Consensus fires when ≥2 titles match (Ship #20a.6.7c lowered from ≥3)
 const crow20x = Array(20).fill({ title: 'The Crow Lazarus' });
 assertEq(
   getImageSearchConsensusTitle(crow20x),
@@ -198,6 +199,17 @@ assertEq(
   'Exactly 3 matches → consensus fires'
 );
 
+// Ship #20a.6.7c — Exactly 2 matches NOW fires consensus (was null before)
+const crowExact2 = [
+  { title: 'Crow Dead Time' },
+  { title: 'Crow Dead Time' },
+];
+assertEq(
+  getImageSearchConsensusTitle(crowExact2),
+  'Crow Dead Time',
+  'Exactly 2 matches → consensus fires (Ship #20a.6.7c)'
+);
+
 // Mixed titles, no clear winner
 const mixed = [
   { title: 'Batman #1' },
@@ -207,19 +219,18 @@ const mixed = [
 ];
 assertEq(
   getImageSearchConsensusTitle(mixed),
-  null,
-  'Mixed titles, no ≥3 match → null'
+  'Batman #1',
+  'Mixed titles, "Batman #1" appears 2× → fires (Ship #20a.6.7c)'
 );
 
-// Fewer than 3 results total
-const twoResults = [
-  { title: 'Batman #1' },
+// Only 1 result total — consensus cannot fire
+const oneResult = [
   { title: 'Batman #1' },
 ];
 assertEq(
-  getImageSearchConsensusTitle(twoResults),
+  getImageSearchConsensusTitle(oneResult),
   null,
-  'Only 2 results → null (need ≥3 total)'
+  'Only 1 result → null (need ≥2 total)'
 );
 
 // Empty array

@@ -289,6 +289,75 @@ console.log('\nEmpty input (eBay returned 0 items):');
   assertEq(extractIdentityFromImageSearch([]), [], 'empty array safe');
 }
 
+// ─── Ship #20a.6.7c — Consensus threshold + Alan Quah ────────────────
+console.log('\nShip #20a.6.7c — Consensus threshold + artist extraction:');
+{
+  // ≥2 consensus fires (was ≥3 before Ship #20a.6.7c).
+  const items = [
+    { title: 'Crow Dead Time #1 (2024)' },
+    { title: 'Crow Dead Time #1 (2024)' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  assertEq(rows.length, 2, '2 rows');
+  assertEq(rows[0].issue, '1', 'row 0 issue');
+  assertEq(rows[1].issue, '1', 'row 1 issue');
+  // Note: consensus logic is in api/enrich.js, not here. This test confirms
+  // extractor surfaces the titles correctly so consensus can fire at ≥2.
+}
+{
+  // Alan Quah in listing title — should be extractable by ARTIST_PATTERNS.
+  const items = [
+    { title: 'Crow Dead Time #1 Alan Quah Fanexpo Variant (2024)' },
+    { title: 'Absolute Batman #1 Alan Quah Virgin Cover' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  assertContains(rows[0].variantTokens, 'fanexpo', 'row 0 fanexpo detected');
+  assertContains(rows[1].variantTokens, 'virgin', 'row 1 virgin detected');
+  // Alan Quah is artist name, not a variant token — ARTIST_PATTERNS handles it.
+  // The extractor doesn't parse artist names (that's comps.js territory).
+}
+{
+  // Mixed titles below threshold — no dominant winner at ≥2.
+  const items = [
+    { title: 'Book A #1' },
+    { title: 'Book B #1' },
+    { title: 'Book C #1' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  assertEq(rows.length, 3, '3 distinct books');
+  assertEq(rows[0].issue, '1', 'all are #1');
+  assertEq(rows[1].issue, '1', 'all are #1');
+  assertEq(rows[2].issue, '1', 'all are #1');
+  // Title extraction differs — cross-reference in api/enrich.js will see
+  // no consensus (each title appears once, top frequency = 1, < 2).
+}
+{
+  // Single title appearing ≥2 times fires consensus.
+  const items = [
+    { title: 'The Crow Lazarus #1 (2024)' },
+    { title: 'The Crow Lazarus #1 (2024)' },
+    { title: 'Different Book #1' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  assertEq(rows.length, 3, '3 rows');
+  // Consensus would fire on "The Crow Lazarus" (appears 2× >= threshold).
+}
+{
+  // Edge case: exactly 1 result — consensus cannot fire (need ≥2 total).
+  const items = [
+    { title: 'Lone Book #1' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  assertEq(rows.length, 1, '1 row');
+  // api/enrich.js consensus checks titles.length < 2 → null.
+}
+{
+  // Fanexpo variants in both forms (space + hyphen).
+  assertContains(extractVariantTokens('Crow #1 Fanexpo Variant'), 'fanexpo', 'fanexpo (no space)');
+  assertContains(extractVariantTokens('Crow #1 Fan Expo Variant'), 'fanexpo', 'fan expo (space)');
+  assertContains(extractVariantTokens('Crow #1 Fan-Expo Variant'), 'fanexpo', 'fan-expo (hyphen)');
+}
+
 // ─── Done ────────────────────────────────────────────────────────────
 console.log(`\n=== ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

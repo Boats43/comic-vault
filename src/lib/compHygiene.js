@@ -101,10 +101,10 @@ export const ARTIST_PATTERNS = [
   // multi-word entries MUST come before single-word fallbacks (e.g.
   // /alex ross/ before /ross/, /jeehyung lee/ before /lee/).
   // Original 8 multi-word + Ship #20a.6 added /jeehyung lee/, /alex ross/,
-  // /kaare andrews/.
+  // /kaare andrews/. Ship #20a.6.7c added /alan quah/.
   /tyler kirkham/i, /jim lee/i, /inhyuk lee/i, /skottie young/i,
   /frank cho/i, /frank miller/i, /windsor.?smith/i, /dell'?otto/i,
-  /jeehyung lee/i, /alex ross/i, /kaare andrews/i,
+  /jeehyung lee/i, /alex ross/i, /kaare andrews/i, /alan quah/i,
   // Single-word — original 28 + Ship #20a.6 /fabok/.
   /skan/i, /rapoza/i, /quash/i, /momoko/i, /ross/i, /adams/i,
   /kirkham/i, /bean/i, /andolfo/i, /browne/i, /forstner/i,
