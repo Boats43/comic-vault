@@ -478,6 +478,7 @@ export const fetchComps = async ({
   variant,
   creator,
   publisher,
+  imageSearchTitle,
   appId,
   certId,
 }) => {
@@ -555,6 +556,16 @@ export const fetchComps = async ({
 
   // Build ordered list of query attempts — most specific to least.
   const attempts = [];
+
+  // Ship #20a.6.7b.3 — Image search title as first attempt. When eBay visual
+  // search returned results, the top rawTitle becomes attempt -1 (most specific).
+  // This catches exact seller listings that Vision might have misread.
+  if (imageSearchTitle) {
+    const imgQuery = String(imageSearchTitle).trim().slice(0, 100);
+    attempts.push({ q: imgQuery, n: -1, label: 'image-search', useGrade: false });
+    console.log(`[comps] image-search attempt: "${imgQuery}"`);
+  }
+
   // Attempt 0: most specific — cleanTitle #issue fullVariant year publisher (+ grade suffix)
   if (iss && yr) {
     const a0Parts = [cleanTitle, `#${iss}`, fullVariant, yr, pubKeyword.trim()].filter(Boolean);

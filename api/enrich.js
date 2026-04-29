@@ -895,6 +895,24 @@ const lookupPriceCharting = async ({ title, issue, year }) => {
 
     const comicYear = year ? parseInt(String(year).trim(), 10) : null;
 
+    // Ship #20a.6.7b.1 — PC token overlap check. Prevents wrong-product
+    // acceptance when PC returns products with similar but wrong titles
+    // (e.g. "Crow Lazarus" matching "Lazarus: Fallen"). Requires at least
+    // the first main token from our query to appear in the product name.
+    const COMMON_TOKENS = new Set([
+      'marvel', 'dc', 'image', 'idw', 'comics', 'comic',
+      'book', 'the', 'a', 'an', 'of', 'and', 'in', 'for',
+      'dark', 'horse', 'boom', 'archie', 'dynamite',
+    ]);
+    const tokenize = (s) =>
+      String(s || '').toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(t => t.length > 1 && !COMMON_TOKENS.has(t));
+
+    const queryTokens = tokenize(seriesName);
+    const mainToken = queryTokens[0];
+
     for (const p of products) {
       const name = p["product-name"] || "";
       if (PRICECHARTING_EXCLUDE.test(name)) continue;
@@ -906,6 +924,16 @@ const lookupPriceCharting = async ({ title, issue, year }) => {
         const productYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
         if (productYear && Math.abs(productYear - comicYear) > 5) {
           console.log(`[pricecharting] skipping "${name}" — year ${productYear} vs ${comicYear}`);
+          continue;
+        }
+      }
+
+      // Ship #20a.6.7b.1 — Token overlap validation. Skip when the main
+      // query token (first substantive word) is absent from the product name.
+      if (mainToken) {
+        const productTokens = tokenize(name);
+        if (!productTokens.includes(mainToken)) {
+          console.log(`[pricecharting] skipping "${name}" — main token "${mainToken}" absent`);
           continue;
         }
       }
@@ -1139,14 +1167,57 @@ export default async function handler(req, res) {
       ? visualResult.issue
       : issueNum;
 
+    // Ship #20a.6.15 + #20a.6.7b.2 — Subtitle strip + image search consensus
+    // title extraction. Colons in comic titles often mark subtitle boundaries
+    // ("The Crow: Lazarus", "Batman: Year One"). PC and CV substring scoring
+    // can match wrong volumes when the subtitle is a common word. Strip text
+    // after colon for PC/CV queries; preserve full title for eBay comps (sellers
+    // use full titles). Image search consensus title (≥3 matching titles in the
+    // visual result set) overrides Vision title when Vision confidence is not HIGH.
+    const stripSubtitle = (t) => String(t || '').replace(/:.*$/, '').trim();
+    const hasSubtitle = title && String(title).includes(':');
+
+    const getImageSearchConsensusTitle = (visualResult) => {
+      if (!visualResult?.items?.length) return null;
+      const titles = visualResult.items.map(i => i.title).filter(Boolean);
+      if (titles.length < 3) return null;
+      const freq = {};
+      titles.forEach(t => { freq[t] = (freq[t] || 0) + 1; });
+      const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+      const top = sorted[0];
+      return top && top[1] >= 3 ? top[0] : null;
+    };
+
+    const visionConfidenceLower = String(confidence || 'medium').toLowerCase();
+    const imageConsensusTitle =
+      (visionConfidenceLower !== 'high' && visualResult)
+        ? getImageSearchConsensusTitle(visualResult)
+        : null;
+
+    // Final PC query title: consensus override > subtitle-stripped > full title
+    const subtitleStripped = hasSubtitle ? stripSubtitle(title) : title;
+    const pcQueryTitle = imageConsensusTitle || subtitleStripped;
+    if (imageConsensusTitle) {
+      console.log(`[pc-query] using image consensus title: "${imageConsensusTitle}" (Vision was: "${title}")`);
+    } else if (hasSubtitle && subtitleStripped !== title) {
+      console.log(`[pc-query] subtitle stripped: "${title}" → "${subtitleStripped}"`);
+    }
+
+    // CV query: use subtitle-stripped title (no consensus override for CV)
+    const cvQueryTitle = subtitleStripped;
+
+    // Ship #20a.6.7b.3 — Image search title for comp query. Top rawTitle from
+    // visual result becomes first comp attempt when available.
+    const imageSearchTitle = visualResult?.items?.[0]?.rawTitle || null;
+
     // Step 2a: run year-independent lookups first so we can derive the
     // confirmed publication year before firing the comps/sold/goCollect
     // queries that use year as a query parameter.
     mark('phase1_start');
     const [comicVine, ximilar, priceCharting, cgcResult] = await Promise.all([
-      lookupComicVine({ title, issue: correctedIssue, year, publisher }),
+      lookupComicVine({ title: cvQueryTitle, issue: correctedIssue, year, publisher }),
       lookupXimilar({ images, title, confidence }),
-      lookupPriceCharting({ title, issue: correctedIssue, year }).catch(() => null),
+      lookupPriceCharting({ title: pcQueryTitle, issue: correctedIssue, year }).catch(() => null),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
     ]);
     mark('phase1_complete');
@@ -1217,6 +1288,7 @@ export default async function handler(req, res) {
             variant: req.body.variant || null,
             creator: req.body.creator || null,
             publisher: publisher || null,
+            imageSearchTitle,
             appId: process.env.EBAY_APP_ID,
             certId: process.env.EBAY_CERT_ID,
           }).catch((err) => {
