@@ -75,6 +75,14 @@ export const HALF_ISSUE_RE =
 export const COVERLESS_RE =
   /\b(?:coverless|no\s*cover|cover\s*missing|incomplete|damaged\s*cover)\b/i;
 
+// Trading card / non-comic format markers. Ship #20a.6.13 — Avengers #20
+// (2025) sold pool contaminated by "Marvel Fleer Ultra Avengers 2022 Base
+// Card #20 Elektra" trading card sales. PriceCharting API includes
+// `&type=comic` parameter but still returns trading card products for some
+// queries. Downstream filter required. Closes Avengers #20 trading-card class.
+export const TRADING_CARD_RE =
+  /\b(?:fleer|upper\s*deck|topps|panini|skybox|base\s*card|trading\s*card|insert\s*card|parallel|chase\s*card)\b/i;
+
 // Cover artist patterns — used both for active-comp creator filter
 // (api/comps.js Filter 3b) and sold-row variant-artist matching
 // (Ship #20a.6 soldVerification). Multi-word patterns FIRST so first-

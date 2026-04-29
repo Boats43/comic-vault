@@ -269,6 +269,12 @@ const median = (arr) => {
 // Ship #20a.6.11: threshold raised to count≤1 (was count≤0). Single-comp
 // pools are too unreliable to anchor (Sensation #1 Crowley 9.4 case where
 // 1 wrong-book comp set a $1,250 floor). Anchor now fires only at count=2.
+//
+// Ship #20a.6.13: floor guard added. Thin-pool anchor runs AFTER floor guard
+// in the pricing pipeline (line 1906 vs 1704), but has no floor awareness —
+// can override floor and lower price below it. Avengers #20 (2025) case: floor
+// enforced $3.19, anchor capped at $2.68, recommended ended up below floor.
+// Conservative guard: suppress anchor when anchorCap < rawComps.lowest.
 export const computeThinPoolAnchor = (currentPrice, rawComps, opts = {}) => {
   const { isMegaKey, compsExhausted } = opts;
   if (isMegaKey || compsExhausted) return null;
@@ -277,6 +283,17 @@ export const computeThinPoolAnchor = (currentPrice, rawComps, opts = {}) => {
   if (typeof rawComps.highest !== 'number' || rawComps.highest <= 0) return null;
   if (typeof currentPrice !== 'number' || !(currentPrice > 0)) return null;
   const anchorCap = rawComps.highest * 1.05;
+
+  // Never anchor below floor. Floor guard runs before anchor (line 1704) but
+  // anchor has no floor awareness. If anchorCap would lower price below
+  // rawComps.lowest, suppress the anchor entirely.
+  const floor = typeof rawComps.lowest === 'number' && rawComps.lowest > 0
+    ? rawComps.lowest : 0;
+  if (floor > 0 && anchorCap < floor) {
+    console.log(`[thin-pool] anchorCap $${anchorCap.toFixed(2)} < floor $${floor.toFixed(2)} — anchor suppressed`);
+    return null;
+  }
+
   if (currentPrice <= anchorCap) return null;
   return { anchorCap, shouldAnchor: true };
 };

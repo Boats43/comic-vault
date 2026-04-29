@@ -26,6 +26,7 @@ import {
   SIGNED_RE,
   LOT_RE,
   HALF_ISSUE_RE,
+  TRADING_CARD_RE,
   isValidIssueRange,
   hasIssueNumber,
   detectSeriesMarkers,
@@ -221,6 +222,7 @@ export const verifySoldComps = (rawRows, ctx) => {
     slabMismatch: 0,
     signed: 0,
     lot: 0,
+    format: 0,
     gradeMismatch: 0,
     stale: 0,
     outlier: 0,
@@ -314,6 +316,19 @@ export const verifySoldComps = (rawRows, ctx) => {
       return true;
     });
   }
+
+  // 3b. Trading card / non-comic format. Ship #20a.6.13 — Avengers #20 case
+  //     where PriceCharting returned a trading card product instead of the
+  //     comic product. PC sales-history table scraped trading card sales into
+  //     sold pool, contaminating sold avg ($1.74 vs $3.19 active avg).
+  working = working.filter((r) => {
+    if (TRADING_CARD_RE.test(String(r.title || ''))) {
+      reasons.format++;
+      pushSample(r, 'format:trading-card');
+      return false;
+    }
+    return true;
+  });
 
   // 4. Format asymmetry — annual/special/king-size/giant-size/sequel/vol/
   //    Re-/Pre-/Part/Book mismatch.

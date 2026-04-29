@@ -509,6 +509,60 @@ console.log('\nHalf-issue / ashcan / promo rejection:');
   assertEq(r.verified.length, 1, '1 standard row kept; half-issue/ashcan/promo rejected');
 }
 
+// ─── Ship #20a.6.13 — Trading card filter ──────────────────────────
+console.log('\nShip #20a.6.13 — Trading card filter:');
+{
+  // Avengers #20 (2025) real-world case — PC returned trading card product
+  const rows = [
+    { price: 1.99, title: 'Marvel Fleer Ultra Avengers 2022 Base Card #20 Elektra', daysAgo: 10, grade: 'raw' },
+    { price: 2.00, title: '2022 Marvel Fleer Ultra Avengers Elektra Card #20', daysAgo: 15, grade: 'raw' },
+    { price: 1.99, title: '2022 Upper Deck Marvel Fleer Ultra Avengers Elektra #20 (Near Mint) #20', daysAgo: 20, grade: 'raw' },
+    { price: 3.19, title: 'Avengers #20 2025 raw', daysAgo: 5, grade: 'raw' }, // actual comic
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Avengers', issue: '20', variant: null, bookYear: 2025, userGradeKey: 'raw',
+  });
+  assertEq(r.verified.length, 1, 'trading cards rejected, comic kept');
+  assertEq(r.verified[0].price, 3.19, 'verified row is the comic ($3.19)');
+  assertEq(r.diagnostics.rejectedCount, 3, '3 trading card rows rejected');
+  assertEq(r.diagnostics.reasons.format, 3, 'format reason = 3');
+  assertTrue(
+    r.diagnostics.rejectedSamples.some((s) => s.reason === 'format:trading-card'),
+    'rejectedSamples includes format:trading-card'
+  );
+}
+
+{
+  // Individual pattern tests
+  const rows = [
+    { price: 5, title: 'Topps Amazing Fantasy trading card #15', daysAgo: 10, grade: 'raw' },
+    { price: 6, title: 'Panini Amazing Fantasy base card #15 2023', daysAgo: 10, grade: 'raw' },
+    { price: 7, title: 'Skybox Marvel Amazing Fantasy insert card #15', daysAgo: 10, grade: 'raw' },
+    { price: 8, title: 'Amazing Fantasy #15 chase card parallel', daysAgo: 10, grade: 'raw' },
+    { price: 10, title: 'Amazing Fantasy #15 1962 raw', daysAgo: 10, grade: 'raw' }, // clean comic
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Amazing Fantasy', issue: '15', variant: null, bookYear: 1962, userGradeKey: 'raw',
+  });
+  assertEq(r.verified.length, 1, 'trading card patterns rejected, clean comic kept');
+  assertEq(r.verified[0].price, 10, 'clean comic verified');
+  assertEq(r.diagnostics.reasons.format, 4, '4 trading card rows rejected');
+}
+
+{
+  // No false positives on clean titles
+  const rows = [
+    { price: 50, title: 'X-Men #1 1991 NM', daysAgo: 10, grade: 'raw' },
+    { price: 45, title: 'X-Men #1 Jim Lee cover 1991', daysAgo: 10, grade: 'raw' },
+    { price: 40, title: 'X-Men #1 1991 VF condition', daysAgo: 10, grade: 'raw' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'X-Men', issue: '1', variant: null, bookYear: 1991, userGradeKey: 'raw',
+  });
+  assertEq(r.verified.length, 3, 'no false positives on clean comic titles');
+  assertEq(r.diagnostics.reasons.format, 0, 'format reason = 0');
+}
+
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

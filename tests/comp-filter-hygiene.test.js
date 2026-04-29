@@ -725,6 +725,50 @@ assertEq(
   'count=2: anchorCap = 50 × 1.05 = 52.5'
 );
 
+// ─── Ship #20a.6.13 — Thin-pool floor guard ────────────────────────
+console.log('\n── Ship #20a.6.13 — Thin-pool floor guard ──');
+
+// Avengers #20 (2025) real-world case — anchor would lower below floor
+// count=2, highest=$2.55, lowest=$3.19, currentPrice=$3.19 (post-floor)
+// anchorCap = $2.55 × 1.05 = $2.68 < floor $3.19 → anchor suppressed
+assertEq(
+  computeThinPoolAnchor(3.19, { count: 2, highest: 2.55, lowest: 3.19 }, {}),
+  null,
+  'Avengers #20 case: anchorCap $2.68 < floor $3.19 → anchor suppressed'
+);
+
+// Anchor fires when anchorCap > floor
+const aboveFloorResult = computeThinPoolAnchor(100, { count: 2, highest: 60, lowest: 50 }, {});
+assertTrue(
+  aboveFloorResult && aboveFloorResult.shouldAnchor === true,
+  'anchorCap $63 > floor $50 → anchor fires'
+);
+assertEq(
+  aboveFloorResult?.anchorCap,
+  63,
+  'anchorCap = 60 × 1.05 = 63 (above floor $50)'
+);
+
+// Boundary: anchorCap = floor → anchor suppressed (not strictly greater)
+assertEq(
+  computeThinPoolAnchor(100, { count: 2, highest: 47.619, lowest: 50 }, {}),
+  null,
+  'anchorCap = floor → anchor suppressed (boundary condition)'
+);
+
+// Floor = 0 or missing → anchor fires normally (no floor to check)
+const noFloorResult = computeThinPoolAnchor(100, { count: 2, highest: 50, lowest: 0 }, {});
+assertTrue(
+  noFloorResult && noFloorResult.shouldAnchor === true,
+  'floor = 0 → anchor fires (no floor constraint)'
+);
+
+const missingFloorResult = computeThinPoolAnchor(100, { count: 2, highest: 50 }, {});
+assertTrue(
+  missingFloorResult && missingFloorResult.shouldAnchor === true,
+  'floor missing → anchor fires (no floor constraint)'
+);
+
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== RESULTS ===`);
 console.log(`Passed: ${passed}`);
