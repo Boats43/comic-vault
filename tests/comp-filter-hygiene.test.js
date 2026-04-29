@@ -753,6 +753,29 @@ assertFalse(
   'no separator → no match'
 );
 
+// ─── Ship #20a.6.20 — Trading card filter (active parity) ──────────
+console.log('\n── Ship #20a.6.20 — Trading card active filter ──');
+
+import { TRADING_CARD_RE } from '../src/lib/compHygiene.js';
+
+// Trading card detection
+assertTrue(
+  TRADING_CARD_RE.test('Avengers #20 Fleer Ultra trading card'),
+  'trading card → match (active filter should reject)'
+);
+assertTrue(
+  TRADING_CARD_RE.test('X-Men 1991 Upper Deck Marvel card set'),
+  'card set → match'
+);
+assertFalse(
+  TRADING_CARD_RE.test('Avengers #20 Marvel Comics NM'),
+  'clean comic → no match'
+);
+assertFalse(
+  TRADING_CARD_RE.test('X-Men #1 1991 raw'),
+  'normal comic → no match'
+);
+
 // ─── Ship #20a.6.11 — Thin-pool anchor at count=1 (skip) ───────────
 console.log('\n── Ship #20a.6.11 — Thin-pool anchor skips count=1 ──');
 

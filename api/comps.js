@@ -28,6 +28,7 @@ import {
   LOT_RE,
   HALF_ISSUE_RE,
   COVERLESS_RE,
+  TRADING_CARD_RE,
   ARTIST_PATTERNS,
   STOP_WORDS,
   MIN_TOKEN_LEN,
@@ -1016,6 +1017,17 @@ export const fetchComps = async ({
           p = tpbFiltered;
         } else {
           console.log(`[tpb-format] 0 TPB matches — keeping all ${before} (graceful fallback)`);
+        }
+      }
+
+      // Filter 1h: Trading card / non-comic format. Ship #20a.6.20 parity
+      // with sold Filter 3b. Avengers #20 class — reject card products from
+      // active pool (Fleer Ultra, Upper Deck, etc.).
+      {
+        const before = p.length;
+        p = p.filter((item) => !TRADING_CARD_RE.test(String(item.title || '')));
+        if (p.length < before) {
+          console.log(`[comps] trading-card filter removed ${before - p.length}`);
         }
       }
 

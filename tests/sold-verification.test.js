@@ -563,6 +563,74 @@ console.log('\nShip #20a.6.13 — Trading card filter:');
   assertEq(r.diagnostics.reasons.format, 0, 'format reason = 0');
 }
 
+// ─── Ship #20a.6.20 — Filter parity (sold/active alignment) ─────────
+console.log('\n── Ship #20a.6.20 — Filter parity gaps ──');
+
+// FIX 1: Cross-series separator
+{
+  const rows = [
+    { price: 561, title: 'Brave and Bold #28 + Titans 34', daysAgo: 10, grade: 'raw' },
+    { price: 650, title: 'Brave and Bold #28 1st JLA VG', daysAgo: 10, grade: 'raw' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Brave and the Bold', issue: '28', variant: null, bookYear: 1960, userGradeKey: 'raw',
+  });
+  assertEq(r.verified.length, 1, 'cross-series separator → rejected');
+  assertEq(r.diagnostics.reasons.lot, 1, 'lot reason incremented');
+  assertEq(r.diagnostics.rejectedSamples[0].reason, 'cross-series', 'sample tagged cross-series');
+}
+
+// FIX 2: Vintage year check (±5y Silver Age)
+{
+  const rows = [
+    { price: 561, title: 'Brave and Bold #28 1st JLA', daysAgo: 10, grade: 'raw', year: 1963 },
+    { price: 200, title: 'Brave and Bold #28 VG', daysAgo: 10, grade: 'raw', year: 1970 },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Brave and the Bold', issue: '28', variant: null, bookYear: 1960, userGradeKey: 'raw',
+  });
+  assertEq(r.verified.length, 1, 'year 1970 (>±5y from 1960) → rejected');
+  assertEq(r.diagnostics.reasons.yearMismatch, 1, 'yearMismatch reason incremented');
+}
+
+{
+  // Year check skips when row.year missing
+  const rows = [
+    { price: 561, title: 'Brave and Bold #28 1st JLA', daysAgo: 10, grade: 'raw' }, // no year
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Brave and the Bold', issue: '28', variant: null, bookYear: 1960, userGradeKey: 'raw',
+  });
+  assertEq(r.verified.length, 1, 'no year in row → accepted (no reject on missing data)');
+  assertEq(r.diagnostics.reasons.yearMismatch, 0, 'yearMismatch = 0');
+}
+
+// FIX 3A: TPB format
+{
+  const rows = [
+    { price: 30, title: 'Brave and Bold #28 TPB collection', daysAgo: 10, grade: 'raw' },
+    { price: 561, title: 'Brave and Bold #28 raw VG', daysAgo: 10, grade: 'raw' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Brave and the Bold', issue: '28', variant: null, bookYear: 1960, userGradeKey: 'raw',
+  });
+  assertEq(r.verified.length, 1, 'TPB in sold pool → rejected');
+  assertEq(r.diagnostics.reasons.format, 1, 'format reason incremented');
+}
+
+// FIX 3B: Coverless
+{
+  const rows = [
+    { price: 100, title: 'Brave and Bold #28 coverless reading copy', daysAgo: 10, grade: 'raw' },
+    { price: 561, title: 'Brave and Bold #28 VG complete', daysAgo: 10, grade: 'raw' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Brave and the Bold', issue: '28', variant: null, bookYear: 1960, userGradeKey: 'raw',
+  });
+  assertEq(r.verified.length, 1, 'coverless in sold pool → rejected');
+  assertEq(r.diagnostics.reasons.format, 1, 'format reason incremented (coverless)');
+}
+
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

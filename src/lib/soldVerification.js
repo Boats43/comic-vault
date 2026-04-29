@@ -27,8 +27,11 @@ import {
   LOT_RE,
   HALF_ISSUE_RE,
   TRADING_CARD_RE,
+  TPB_MARKER_RE,
+  COVERLESS_RE,
   isValidIssueRange,
   hasIssueNumber,
+  hasCrossSeriesSeparator,
   detectSeriesMarkers,
   hasSufficientTitleOverlap,
   tokenizeTitle,
@@ -223,6 +226,7 @@ export const verifySoldComps = (rawRows, ctx) => {
     signed: 0,
     lot: 0,
     format: 0,
+    yearMismatch: 0,
     gradeMismatch: 0,
     stale: 0,
     outlier: 0,
@@ -287,14 +291,15 @@ export const verifySoldComps = (rawRows, ctx) => {
     });
   }
 
-  // 2. Lot / set / bundle / valid issue range. Skip when our book is itself
-  //    a lot.
+  // 2. Lot / set / bundle / valid issue range / cross-series separator.
+  //    Skip when our book is itself a lot. Ship #20a.6.20 — added
+  //    hasCrossSeriesSeparator (parity with active Filter 1e).
   if (!ourIsLot) {
     working = working.filter((r) => {
       const t = String(r.title || '');
-      if (LOT_RE.test(t) || isValidIssueRange(t)) {
+      if (LOT_RE.test(t) || isValidIssueRange(t) || hasCrossSeriesSeparator(t)) {
         reasons.lot++;
-        pushSample(r, 'lot');
+        pushSample(r, hasCrossSeriesSeparator(t) ? 'cross-series' : 'lot');
         return false;
       }
       return true;
@@ -325,6 +330,28 @@ export const verifySoldComps = (rawRows, ctx) => {
     if (TRADING_CARD_RE.test(String(r.title || ''))) {
       reasons.format++;
       pushSample(r, 'format:trading-card');
+      return false;
+    }
+    return true;
+  });
+
+  // 3c. TPB / collected edition format. Ship #20a.6.20 parity with active
+  //     Filter 1g. Reject TPB sales from floppy pools.
+  working = working.filter((r) => {
+    if (TPB_MARKER_RE.test(String(r.title || ''))) {
+      reasons.format++;
+      pushSample(r, 'format:tpb');
+      return false;
+    }
+    return true;
+  });
+
+  // 3d. Coverless / incomplete. Ship #20a.6.20 parity with active Filter 2c.
+  //     Sensation #1 Crowley 9.4 case — coverless sales poison floor.
+  working = working.filter((r) => {
+    if (COVERLESS_RE.test(String(r.title || ''))) {
+      reasons.format++;
+      pushSample(r, 'format:coverless');
       return false;
     }
     return true;
@@ -415,6 +442,37 @@ export const verifySoldComps = (rawRows, ctx) => {
     }
     return true;
   });
+
+  // 11.5. Era year tolerance (Ship #20a.6.20 parity with active Filter 0c).
+  //       Vintage books: reject sold rows from wrong era (±5y Golden/Silver,
+  //       ±3y Bronze, ±2y Modern). Skips when r.year missing (PC rows often
+  //       lack year; don't reject on missing data).
+  if (bookYear) {
+    working = working.filter((r) => {
+      // Extract year from row if present (PC rows may have year in metadata
+      // or parseable from title). Skip check if no year available.
+      const rowYear = r.year || null;
+      if (!rowYear) return true; // no data = no reject
+
+      const ourYear = parseInt(bookYear, 10);
+      const theirYear = parseInt(rowYear, 10);
+      if (isNaN(ourYear) || isNaN(theirYear)) return true;
+
+      // Era-based tolerance (mirrors active Filter 0c)
+      const tolerance =
+        ourYear < 1956 ? 5  // Golden Age
+        : ourYear < 1970 ? 5  // Silver Age
+        : ourYear < 1985 ? 3  // Bronze Age
+        : 2;                 // Modern
+
+      if (Math.abs(theirYear - ourYear) > tolerance) {
+        reasons.yearMismatch++;
+        pushSample(r, 'yearMismatch');
+        return false;
+      }
+      return true;
+    });
+  }
 
   // 12. Stale recency for modern books. Vintage rows tagged via
   //     recencyBand but kept (sold pool naturally thin).
