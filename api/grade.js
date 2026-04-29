@@ -45,7 +45,11 @@ const parseResponse = (text) => {
 // the "NOT the" pattern is case-sensitive because Vision uses
 // all-caps NOT for emphasis — that's a higher-confidence signal.
 const EDITION_WARNING_PATTERNS = [
-  { kind: 'reprint',          re: /\breprint(?:\s+edition)?\b/i },
+  // Ship #20a.6.14 — negative lookahead excludes "reprint series" (first printing
+  // of issue #1 of a series that reprints old content). Tales to Astonish Sub-Mariner
+  // #1 (1979) false-positive: Vision says "issue #1 of the reprint series" but the
+  // issue itself IS a first printing. Pattern now: "reprint" NOT followed by "series".
+  { kind: 'reprint',          re: /\breprint(?!\s+series)(?:\s+edition)?\b/i },
   { kind: 'facsimile',        re: /\bfacsimile\b/i },
   { kind: 'later-printing',   re: /\blater\s+print(?:ing)?\b/i },
   { kind: 'not-first-print',  re: /\bnot\s+(?:the\s+)?(?:(?:rare|original)\s+(?:\S+\s+){0,4})?(?:first|1st)\s+(?:\S+\s+){0,2}(?:print|edition|printing)\b/i },

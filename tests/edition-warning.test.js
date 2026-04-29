@@ -219,6 +219,50 @@ assertEq(shape.detected, true, 'detected=true on fire');
 assertEq(Array.isArray(shape.signals), true, 'signals is array');
 assertEq(shape.source, 'vision-condition-report', 'source set correctly');
 
+// ─── Ship #20a.6.14 — Reprint series negative lookahead ─────────────
+console.log('\nShip #20a.6.14 — Reprint series (NO FIRE):');
+// Tales to Astonish Sub-Mariner #1 (1979) — issue #1 of reprint series
+// is a first printing, even though the series reprints old content.
+assertNull(
+  detectEditionWarning('This is issue #1 of the reprint series Tales to Astonish'),
+  '"reprint series" → no fire (first printing of reprint series)'
+);
+assertNull(
+  detectEditionWarning('First issue of reprint series — reprints Sub-Mariner stories'),
+  '"First issue of reprint series" → no fire'
+);
+assertNull(
+  detectEditionWarning('Bronze Age reprint series first issue'),
+  '"Bronze Age reprint series" → no fire'
+);
+assertNull(
+  detectEditionWarning('issue #1 of the reprint series'),
+  '"issue #1 of the reprint series" → no fire'
+);
+
+console.log('\nShip #20a.6.14 — Standalone reprint (STILL FIRES):');
+// Standalone "reprint" (not "reprint series") still fires correctly.
+assertFiresAny(
+  detectEditionWarning('This is a reprint from 1974'),
+  'reprint',
+  '"reprint from 1974" → fires (not "reprint series")'
+);
+assertFiresAny(
+  detectEditionWarning('This is a reprint edition published in 2010'),
+  'reprint',
+  '"reprint edition" → fires (existing behavior preserved)'
+);
+assertFiresAny(
+  detectEditionWarning('reprint — not original'),
+  'reprint',
+  '"reprint — not original" → fires (standalone)'
+);
+assertFiresAny(
+  detectEditionWarning('Identified as a reprint based on cover indicators'),
+  'reprint',
+  '"Identified as a reprint" → fires (standalone)'
+);
+
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== RESULTS ===`);
 console.log(`Passed: ${passed}`);
