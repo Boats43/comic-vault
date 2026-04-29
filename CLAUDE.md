@@ -261,39 +261,48 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 
 ## Current State (as of 2026-04-29)
 
-Latest commit: f831277 — Ship #20a.6.13 trading card sold filter + thin-pool floor guard
-Session ships (newest first):
-  f831277 — #20a.6.13 trading card filter + floor guard
-  00dcb65 — #20a.6.12 reprint contamination + sold-first warning
-  2a15c7e — #20a.6.11 publisher alias + Sensation grade map + coverless filter + thin-pool count=1
-  11eeb83 — Phase 1 image search ungate + sold title display
-  e83b9f8 — #20a.6.4 refuse-to-price identity gate
-  d971267 — #20a.6 sold comp verification (pricing-math greenlit)
+Latest commit: 3e99d57 — Ship #20a.6.17 True Believers + Marvel Tales PC exclusion
 
-Test count: 1301 passing across 15 suites
+Session ships (newest first):
+  3e99d57 — #20a.6.17 True Believers/Marvel Tales PC exclusion
+  b354099 — #20a.6.16 CV parallel + image search Phase 1 perf
+  6f5b0df — #20a.6.7b image search wired into PC+CV+comp query
+  cfe7e90 — #20a.6.14 edition warning false-fire fix
+  f831277 — #20a.6.13 trading card filter + thin-pool floor guard
+  00dcb65 — #20a.6.12 reprint contamination + sold-first warning
+
+Test count: 1349 passing across 16 suites
 Vercel functions: 12/12
-Layer 1: ~85% (recalibrated — 9 fixes confirmed in production)
-Layer 2: ~30%
+Layer 1: ~88% (11 ships confirmed in production today)
+Layer 2: ~35%
 Layer 3-4: 0%
+
+Performance: Scan time 7.5s → 2.5s (66% improvement)
+  phase1_complete: 769ms (was ~2800ms)
+  total_ms: 2550ms (was ~7500ms)
 
 Deploy: git push origin main = auto-deploy (confirmed)
 Rollback: git revert [hash] && git push origin main
 
-Active session focus: F-EW1, F-LGF1, F-LGF2, F-GRD1 investigation (4 open failures → Ship #20b territory)
-
 OPEN FAILURE LOG:
-  F-007: Heritage FR mixed with FN comps → Ship #20b
-  F-EW1: Edition warning false-fire on reprint series #1
+  F-007: Heritage FR grade mixed with FN comps → Ship #20b
   F-LGF1: Low-grade floor under-anchoring → Ship #20b
   F-LGF2: Stacked multipliers (newsstand × grade) → Ship #20b
   F-GRD1: Grade adj not applied to recommendation → Ship #20b
 
+NEXT SESSION PRIORITIES:
+  1. Part 5 consistency gate investigation
+     (sold pool must match active pool must match title)
+     Prerequisite for Ship #20b
+  2. Ship #20b — verified-sold-first pricing architecture
+     (12-20 hr, 4 sub-ships, MAJOR greenlight required)
+  3. Win #3 — background AI verify (~2s more savings)
+  4. Ship #20a.6.7c — full cross-reference matrix (future)
+
 DEFERRED:
-  F-002C: Pedigree premium (Crowley) — pricing math, P2
-  Ship #20a.6.7b: Cross-reference matrix — after Phase 1 validated
   Ship #20a.6.7c: Variant token pricing — needs market data
-  Ship #20a.11: Newsstand multiplier standalone — folded into #20b
-  Ship #20b: Verified-sold-first + market bands — investigation complete, build pending greenlight
+  Pedigree premium (F-002C) — pricing math, P2
+  Ship #20c: Confidence UI display
 
 ## Recent Ships
 **Last 5 only — overwritten when 6th lands.**
