@@ -136,6 +136,45 @@ assertFalse(
   '"Lazarus" vs "Batman" → REJECTED (marvel/comics filtered)'
 );
 
+// ─── Ship #20a.6.17 — PRICECHARTING_EXCLUDE pattern ─────────────────────
+console.log('\nShip #20a.6.17 — PRICECHARTING_EXCLUDE (True Believers + Marvel Tales):');
+
+// Ship #20a.6.17 — True Believers and Marvel Tales are Marvel reprint series
+// that should be excluded from PC product matches. The PRICECHARTING_EXCLUDE
+// pattern filters these at the PC acceptance loop (api/enrich.js line 925).
+const PRICECHARTING_EXCLUDE =
+  /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix|true believers|marvel tales/i;
+
+const isExcluded = (productName) => PRICECHARTING_EXCLUDE.test(productName);
+
+// True Believers — Marvel 99¢ reprint one-shots
+assertTrue(
+  isExcluded('True Believers: Fantastic Four - Super-Skrull #1 (2018)'),
+  '"True Believers: FF - Super-Skrull #1" → EXCLUDED'
+);
+
+assertTrue(
+  isExcluded('True Believers: Amazing Fantasy #15 (2018)'),
+  '"True Believers: Amazing Fantasy #15" → EXCLUDED'
+);
+
+// Marvel Tales — reprint anthology series
+assertTrue(
+  isExcluded('Marvel Tales #1 (1964)'),
+  '"Marvel Tales #1 (1964)" → EXCLUDED'
+);
+
+// Originals — should NOT be excluded (regression check)
+assertFalse(
+  isExcluded('Fantastic Four #1 (1961)'),
+  '"Fantastic Four #1 (1961)" → NOT excluded (original)'
+);
+
+assertFalse(
+  isExcluded('Amazing Fantasy #15 (1962)'),
+  '"Amazing Fantasy #15 (1962)" → NOT excluded (original)'
+);
+
 // ─── Ship #20a.6.7b.2 — Image search consensus ──────────────────────────
 console.log('\nShip #20a.6.7b.2 — Image search consensus title:');
 

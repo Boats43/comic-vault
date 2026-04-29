@@ -870,7 +870,7 @@ export const extractKeyFromComps = (titles) => {
 };
 
 const PRICECHARTING_EXCLUDE =
-  /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix/i;
+  /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix|true believers|marvel tales/i;
 
 const lookupPriceCharting = async ({ title, issue, year }) => {
   if (!issue) {
