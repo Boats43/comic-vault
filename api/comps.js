@@ -38,6 +38,7 @@ import {
   extractIssueNumber,
   hasIssueNumber,
   hasMultipleDistinctIssues,
+  hasCrossSeriesSeparator,
   detectSeriesMarkers,
   isValidIssueRange,
   extractArtist,
@@ -951,12 +952,13 @@ export const fetchComps = async ({
         const ourVariantStr = String(variant || '').toLowerCase();
         const isOurBookALot = /\b(?:lot|set|bundle)\b/.test(ourVariantStr);
         if (!isOurBookALot) {
-          // LOT_RE + isValidIssueRange imported from src/lib/compHygiene.js
-          // (Ship #20a.6). Behavior preserved exactly.
+          // LOT_RE + isValidIssueRange + hasCrossSeriesSeparator imported
+          // from src/lib/compHygiene.js (Ship #20a.6). Separator check added
+          // Ship #20a.6.19 — catches "Brave and Bold #28 + Titans 34" class.
           const before = p.length;
           p = p.filter((item) => {
             const t = String(item.title || '');
-            if (LOT_RE.test(t) || isValidIssueRange(t)) {
+            if (LOT_RE.test(t) || isValidIssueRange(t) || hasCrossSeriesSeparator(t)) {
               console.log('[lot-filter] rejected:', t.slice(0, 55));
               return false;
             }

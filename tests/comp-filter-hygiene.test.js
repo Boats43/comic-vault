@@ -18,7 +18,7 @@ import {
   SIGNED_RE,
   VARIANT_CONTAM_RE,
 } from '../api/comps.js';
-import { COVERLESS_RE, SLAB_RE, REPRINT_RE } from '../src/lib/compHygiene.js';
+import { COVERLESS_RE, SLAB_RE, REPRINT_RE, hasCrossSeriesSeparator } from '../src/lib/compHygiene.js';
 import { computeThinPoolAnchor } from '../api/enrich.js';
 
 let passed = 0;
@@ -698,6 +698,59 @@ assertFalse(
 assertFalse(
   REPRINT_RE.test('Amazing Spider-Man #300 NEW SEALED'),
   '"NEW SEALED" alone → no match'
+);
+
+// ─── Ship #20a.6.19 — SEALED / COA / cross-series separator ────────
+console.log('\n── Ship #20a.6.19 — Filter gap fixes ──');
+
+// SEALED at start (Loot Crate reprint class)
+assertTrue(
+  REPRINT_RE.test('SEALED The Brave and the Bold #28 Justice League'),
+  'SEALED at start → match (reprint signal)'
+);
+assertTrue(
+  REPRINT_RE.test('sealed Brave and Bold #28 Loot Crate'),
+  'sealed at start (lowercase) → match'
+);
+assertFalse(
+  REPRINT_RE.test('Brave and Bold #28 still sealed in bag'),
+  'sealed mid-title → no match (not reprint signal)'
+);
+
+// COA (Certificate of Authenticity)
+assertTrue(
+  SIGNED_RE.test('Brave and Bold #28 with COA'),
+  'COA → match (signed filter)'
+);
+assertTrue(
+  SIGNED_RE.test('Batman #1 CGC 9.8 coa included'),
+  'coa lowercase → match'
+);
+assertFalse(
+  SIGNED_RE.test('Batman #1 NM raw ungraded'),
+  'no COA → no match'
+);
+
+// Cross-series separator (Titans 34 class)
+assertTrue(
+  hasCrossSeriesSeparator('Brave and Bold #28 + Titans 34'),
+  'cross-series + separator → match'
+);
+assertTrue(
+  hasCrossSeriesSeparator('Justice League #1 & Flash 123'),
+  'cross-series & separator → match'
+);
+assertFalse(
+  hasCrossSeriesSeparator('Brave and Bold #28 1st Justice League'),
+  'single issue → no match'
+);
+assertFalse(
+  hasCrossSeriesSeparator('Batman 1966 + Robin era'),
+  'no issue number → no match'
+);
+assertFalse(
+  hasCrossSeriesSeparator('Issue #28'),
+  'no separator → no match'
 );
 
 // ─── Ship #20a.6.11 — Thin-pool anchor at count=1 (skip) ───────────

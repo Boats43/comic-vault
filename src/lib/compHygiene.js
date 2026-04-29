@@ -24,7 +24,7 @@
 // patterns): loot crate, funko, previews exclusive, comic block, nerd block,
 // geek fuel, box set, collector's box, subscription box, promotional edition,
 // convention exclusive, con exclusive. Closes B&B #28 Loot Crate class.
-export const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition|2nd\s*p(?:rint|tg)|3rd\s*p(?:rint|tg)|4th\s*p(?:rint|tg)|5th\s*p(?:rint|tg)|second\s*print|third\s*print|fourth\s*print|\bptg\b|millennium edition|dc classics library|marvel milestones|masterworks|reproduction|replica edition|premiere edition|archive edition|loot.?crate|\bfunko\b|previews\s+exclusive|comic\s+block|nerd\s+block|geek\s+fuel|box\s+set|collector'?s?\s+box|subscription\s+box|promotional\s+edition|convention\s+exclusive|con\s+exclusive/i;
+export const REPRINT_RE = /true believers|reprint|facsimile|replica|anniversary edition|2nd\s*p(?:rint|tg)|3rd\s*p(?:rint|tg)|4th\s*p(?:rint|tg)|5th\s*p(?:rint|tg)|second\s*print|third\s*print|fourth\s*print|\bptg\b|millennium edition|dc classics library|marvel milestones|masterworks|reproduction|replica edition|premiere edition|archive edition|loot.?crate|\bfunko\b|previews\s+exclusive|comic\s+block|nerd\s+block|geek\s+fuel|box\s+set|collector'?s?\s+box|subscription\s+box|promotional\s+edition|convention\s+exclusive|con\s+exclusive|^sealed\b/i;
 
 // Slab/grading-organization detection. Requires explicit slab indicator
 // (CGC/CBCS/PGX/PSA/EGS/HGA/etc) followed by an optional letter tier and
@@ -44,8 +44,8 @@ export const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:
 // Signed / SS / yellow-label / green-label / remarked / autographed.
 // Skips bare "SS" (false-positive risk: SS-Squadron, Steel & Soul).
 // Multi-word "signature series" catches CGC SS slabs. Blue label omitted
-// (= Universal/standard, not signed).
-export const SIGNED_RE = /\b(?:signed|signature\s+series|autographed?|yellow\s*label|green\s*label|remarked?)\b/i;
+// (= Universal/standard, not signed). COA = Certificate of Authenticity.
+export const SIGNED_RE = /\b(?:signed|signature\s+series|autographed?|yellow\s*label|green\s*label|remarked?|COA)\b/i;
 
 // TPB / collected-edition format markers.
 export const TPB_MARKER_RE =
@@ -244,6 +244,19 @@ export const hasMultipleDistinctIssues = (listingTitle) => {
     if (distinct.size > 1) return true;
   }
   return false;
+};
+
+// Helper: detect cross-series separator patterns. Returns true when listing
+// contains both an issue number (#N) AND a separator (+/&) followed by likely
+// second book (series name + bare issue number). Catches "Brave and Bold #28
+// + Titans 34" class where bare issue number lacks "#" prefix. Ship #20a.6.19.
+export const hasCrossSeriesSeparator = (title) => {
+  const t = String(title || '');
+  // Requires: issue number present (#N pattern)
+  if (!/#\s*\d+/.test(t)) return false;
+  // Separator pattern: + or & followed by likely series name (word starting
+  // with capital) and bare issue number (1-4 digits)
+  return /[+&]\s+[A-Z][a-z]+\s+\d{1,4}\b/i.test(t);
 };
 
 // Issue range validator — returns true for ascending whole-number ranges

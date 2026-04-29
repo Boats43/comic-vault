@@ -1742,6 +1742,7 @@ function CollectionDetail({
   onDelete,
   onList,
   onRefreshMarket,
+  onReIdentify,
   onAbortEnrich,
   onAddPhoto,
   onUpdateField,
@@ -1754,6 +1755,8 @@ function CollectionDetail({
   const [listError, setListError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(null);
+  const [reIdentifying, setReIdentifying] = useState(false);
+  const [reIdentifyError, setReIdentifyError] = useState(null);
   const [addingPhoto, setAddingPhoto] = useState(false);
   const [addPhotoError, setAddPhotoError] = useState(null);
   const [expandedPhoto, setExpandedPhoto] = useState(null);
@@ -1856,6 +1859,23 @@ function CollectionDetail({
       setRefreshError(err.message || "Refresh failed");
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleReIdentify = async () => {
+    if (!onReIdentify) return;
+    const confirmed = window.confirm(
+      "Re-scanning will update title, variant, grade, and pricing from the stored image. Continue?"
+    );
+    if (!confirmed) return;
+    setReIdentifying(true);
+    setReIdentifyError(null);
+    try {
+      await onReIdentify(item);
+    } catch (err) {
+      setReIdentifyError(err.message || "Re-identify failed");
+    } finally {
+      setReIdentifying(false);
     }
   };
 
@@ -3216,6 +3236,44 @@ function CollectionDetail({
           <div className="error-text small" style={{ marginTop: 6 }}>
             {refreshError}
           </div>
+        )}
+
+        {/* Ship #20a.6.19 — Re-identify button */}
+        {item.images?.[0] && onReIdentify && (
+          <>
+            <button
+              className="btn-secondary"
+              onClick={handleReIdentify}
+              disabled={reIdentifying || refreshing}
+              style={{ marginTop: 8, width: "100%" }}
+            >
+              {reIdentifying ? (
+                <>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 14,
+                      height: 14,
+                      border: "2px solid rgba(212,175,55,0.3)",
+                      borderTopColor: "#d4af37",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                      marginRight: 8,
+                      verticalAlign: "middle",
+                    }}
+                  />
+                  Re-scanning…
+                </>
+              ) : (
+                "🔍 Re-identify Book"
+              )}
+            </button>
+            {reIdentifyError && (
+              <div className="error-text small" style={{ marginTop: 6 }}>
+                {reIdentifyError}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -4694,6 +4752,7 @@ export default function App() {
             confidence: item.confidence,
             variant: item.variant || null,
             keyIssue: item.keyIssue || null,
+            images: item.images?.[0] ? [item.images[0]] : [],  // Ship #20a.6.19: pass stored image for variant identity
           }),
           signal: controller.signal,
         })
@@ -5692,6 +5751,7 @@ export default function App() {
           confidence: item.confidence,
           variant: item.variant || null,
           keyIssue: item.keyIssue || null,
+          images: item.images?.[0] ? [item.images[0]] : [],  // Ship #20a.6.19: pass stored image for variant identity
         }),
         signal: controller.signal,
       });
@@ -5825,6 +5885,84 @@ export default function App() {
       return x;
     }));
     setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
+  }, []);
+
+  // Ship #20a.6.19 — Re-identify book (re-grade + re-enrich with stored image).
+  // Differs from refreshMarketData: refreshes Vision identity (title/variant/
+  // grade) not just pricing. Used when stored image exists but identity is
+  // wrong (e.g. Crow Lethe vs Crow Dead Time).
+  const reIdentifyBook = useCallback(async (item) => {
+    if (!item.images?.[0]) {
+      throw new Error("No stored image available for re-identification");
+    }
+    const b64 = item.images[0];
+
+    // Step 1: Re-grade with stored image
+    const gradeRes = await fetch("/api/grade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ images: [b64] }),
+    });
+    if (!gradeRes.ok) throw new Error("Failed to re-grade book");
+    const gradeData = await gradeRes.json();
+    if (!gradeData.title) throw new Error("Vision returned no title");
+
+    // Step 2: Re-enrich with new identity + stored image
+    const issueNum = gradeData.issue || gradeData.title?.match(/#(\d+)/)?.[1] || null;
+    const enrichRes = await fetch("/api/enrich", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: gradeData.title,
+        issue: issueNum,
+        grade: gradeData.grade,
+        isGraded: gradeData.isGraded,
+        numericGrade: gradeData.numericGrade,
+        year: gradeData.year,
+        publisher: gradeData.publisher,
+        confidence: gradeData.confidence,
+        variant: gradeData.variant || null,
+        keyIssue: gradeData.keyIssue || null,
+        certNumber: gradeData.certNumber || null,
+        defectPenalty: gradeData.defectPenalty || null,
+        images: [b64],
+      }),
+    });
+    if (!enrichRes.ok) throw new Error("Failed to enrich book");
+    const enrichData = await enrichRes.json();
+
+    // Step 3: Update catalogue with new identity + enriched data
+    const updated = {
+      ...item,
+      title: gradeData.title,
+      issue: issueNum,
+      grade: gradeData.grade,
+      isGraded: gradeData.isGraded,
+      numericGrade: gradeData.numericGrade,
+      year: enrichData.confirmedYear || gradeData.year,
+      publisher: gradeData.publisher,
+      confidence: gradeData.confidence,
+      variant: gradeData.variant || null,
+      keyIssue: enrichData.keyIssue || gradeData.keyIssue || null,
+      price: enrichData.price || null,
+      priceLow: enrichData.priceLow || null,
+      priceHigh: enrichData.priceHigh || null,
+      comps: enrichData.comps || null,
+      reason: gradeData.reason || null,
+      restoration: gradeData.restoration || null,
+      defectPenalty: gradeData.defectPenalty || null,
+      cgcPenaltyFlags: gradeData.cgcPenaltyFlags || null,
+      editionWarning: gradeData.editionWarning || null,
+      certNumber: gradeData.certNumber || null,
+      cgcVerified: gradeData.cgcVerified || false,
+      cgcLabel: gradeData.cgcLabel || null,
+    };
+
+    await putComic(updated);
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
+    setSelectedItem(updated);
+
+    return updated;
   }, []);
 
   // Append a new photo to an existing comic and re-run /api/grade with
@@ -6202,6 +6340,7 @@ export default function App() {
             onDelete={deleteFromCatalogue}
             onList={listOnEbay}
             onRefreshMarket={refreshMarketData}
+            onReIdentify={reIdentifyBook}
             onAbortEnrich={() => {
               if (cardEnrichAbortRef.current) {
                 console.log("[enrich] card unmount/change — aborting in-flight");
