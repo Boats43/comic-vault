@@ -5804,7 +5804,7 @@ export default function App() {
     const idGatedRM = enrich.identityConfident === false;
     const newPriceRM = idGatedRM ? null : (enrich.price ?? item.price);
     const priceChangedRM = newPriceRM !== item.price;
-    const updated = {
+    let updated = {
       ...item,
       comps: enrich.comps ?? item.comps,
       price: newPriceRM,
