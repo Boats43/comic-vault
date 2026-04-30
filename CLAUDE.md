@@ -261,20 +261,12 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 
 ## Current State (as of 2026-04-29)
 
-Latest commit: 3e99d57 — Ship #20a.6.17 True Believers + Marvel Tales PC exclusion
+Latest commit: 24bd280 — Ship #20a.6.22 error visibility + graceful degradation + autofix engine
 
-Session ships (newest first):
-  3e99d57 — #20a.6.17 True Believers/Marvel Tales PC exclusion
-  b354099 — #20a.6.16 CV parallel + image search Phase 1 perf
-  6f5b0df — #20a.6.7b image search wired into PC+CV+comp query
-  cfe7e90 — #20a.6.14 edition warning false-fire fix
-  f831277 — #20a.6.13 trading card filter + thin-pool floor guard
-  00dcb65 — #20a.6.12 reprint contamination + sold-first warning
-
-Test count: 1349 passing across 16 suites
+Test count: 1,442 passing across 18 suites
 Vercel functions: 12/12
-Layer 1: ~88% (11 ships confirmed in production today)
-Layer 2: ~35%
+Layer 1: ~93% (autofix engine + graceful degradation shipped)
+Layer 2: ~40%
 Layer 3-4: 0%
 
 Performance: Scan time 7.5s → 2.5s (66% improvement)
@@ -284,79 +276,100 @@ Performance: Scan time 7.5s → 2.5s (66% improvement)
 Deploy: git push origin main = auto-deploy (confirmed)
 Rollback: git revert [hash] && git push origin main
 
-OPEN FAILURE LOG:
-  F-007: Heritage FR grade mixed with FN comps → Ship #20b
-  F-LGF1: Low-grade floor under-anchoring → Ship #20b
-  F-LGF2: Stacked multipliers (newsstand × grade) → Ship #20b
-  F-GRD1: Grade adj not applied to recommendation → Ship #20b
+THREE SHIPS TO COMPLETE THE PRODUCT:
 
-NEXT SESSION PRIORITIES:
-  1. Part 5 consistency gate investigation
-     (sold pool must match active pool must match title)
-     Prerequisite for Ship #20b
-  2. Ship #20b — verified-sold-first pricing architecture
-     (12-20 hr, 4 sub-ships, MAJOR greenlight required)
-  3. Win #3 — background AI verify (~2s more savings)
-  4. Ship #20a.6.7c — full cross-reference matrix (future)
+**Ship #20b — VERIFIED SOLD PRICING** (6-8 hours)
+  Sold comps = primary anchor
+  Price bands: Quick / Market / Stretch
+  Closes: F-007, F-LGF1, F-LGF2, F-GRD1
+  Requires: MAJOR pricing greenlight
+  
+**Ship #21 — DECISION ENGINE** (4-6 hours)
+  Keep/Sell/Press/CGC/Hold recommendations per book
+  ROI calculator with market timing
+  Layer 3 unlock
+  
+**Ship #22 — ONE-TAP LISTING** (3-4 hours)
+  eBay auto-listing with correct category + description
+  Batch listing workflow
+  Closes listing UX gap
 
-DEFERRED:
-  Ship #20a.6.7c: Variant token pricing — needs market data
-  Pedigree premium (F-002C) — pricing math, P2
-  Ship #20c: Confidence UI display
+Micro-fixes deferred — autofix engine handles edge cases
 
 ## Recent Ships
 **Last 5 only — overwritten when 6th lands.**
 
+- `24bd280` — Ship #20a.6.22 — error visibility + graceful degradation + autofix engine. Read server error body (not generic "Failed to enrich"). Graceful fallback to Vision-only when enrich fails. 8-fix autofix engine (sold-anchor, wrong-issue, series-mismatch, magazine, grade-mult, modern-contam, newsstand-penalty, single-comp). 1,416 → 1,442 tests. Zero regressions.
 - `d971267` — Ship #20a.6 — sold comp verification + hygiene extraction. Pure-fn `verifySoldComps` filter chain (10 reject reasons + diagnostics). `compHygiene.js` extracted from `api/comps.js` (-271 lines). 911 → 1002 tests. Pricing-math change (greenlit).
 - `4114bcb` — Ship #20a.7 — mega-key strict canonical guard. `getMegaKeyEntry(title, issue, publisher, year)`. Schema 1.0.0 → 2.0.0. Closes TMNT #1 IDW 2016 → $15K floor false-positive. 778 → 911 tests.
 - `0e3679f` — Ship #20a.5 — PriceCharting price ladder + sales velocity extraction. `out.priceLadder` (14 grades) + `out.salesVelocity` (perDay numeric). 759 → 778 tests. Data capture only.
 - `7d20c93` — Ship #20a — restore sold data via PC sales-history scrape. `fetchPricechartingSales(productId, userGrade)`. soldComps + salesByGrade. 728 → 759 tests. Closes dead pipeline (eBay APIs gated/bypassed).
-- `357a14e` — Ship #19 MVP — AI-CROSS-LAYER-DISCONNECT (edition warning gate). 8 EDITION_WARNING_PATTERNS scan Vision `reason` text. UI gate stacks AFTER mega-key ack. 688 → 728 tests. NO pricing math (deferred to Ship #19b).
 
 ## Active Priority Queue
 
-### Layer A — TRUST HARDENING (Tier 0)
-Pure UI/data gates, no pricing math.
+**Streamlined roadmap — 3 ships to complete the product.**
 
-1. **Ship #20a.6.4** — Refuse-to-price when identity unknown. Donald Duck Whitman #978 priced $50 with no ID — could be 10× wrong on real Golden Age keys.
-2. **Ship #20a.6.1** — Sold title display + rejected diagnostics. Active rows show titles, sold rows don't. Can't audit verification.
-3. **Ship #20a.6.3** — Vision output sanitization. "Cannot determine from visible cover" rendered as literal value.
-4. **Ship #20a.6.5** — Format detection (BLB/magazine/storybook). Whitman BLBs treated as regular comics.
-5. **Ship #20a.6.2** — Cover image / stock image risk. Chip 'n' Dale #6 — text verified, image was different book.
-6. **Ship #20a.7.5** — Confidence scoring rebuild. HIGH confidence on 4/15 verified is wrong.
+### 1. Ship #20b — VERIFIED SOLD PRICING (NEXT)
+**Est: 6-8 hours | Pricing greenlight REQUIRED**
 
-### Layer B — PRICING ACCURACY (gated behind Layer A)
-**PRICING-MATH CHANGES — explicit greenlight required per ship.**
+Sold comps become primary anchor. Active comps validate but don't drive.
+- Price bands: Quick (10th %ile sold) / Market (median sold) / Stretch (90th %ile sold)
+- Sold verification must match active verification (cross-pool consistency)
+- Grade-aware anchoring (sold grade → user grade multiplier)
+- Recency weighting (30d/90d/180d bands)
+- Closes open failures: F-007, F-LGF1, F-LGF2, F-GRD1
 
-7. **Ship #20b** — Verified-sold-first pricing + market bands.
-8. **Ship #20a.10** — Modern exact-variant matching.
-9. **Ship #20a.13** — Active grade filtering.
-10. **Ship #20a.12** — Stale sold weighting (recency bands).
-11. **Ship #20a.11** — Newsstand + 35¢ correction.
-12. **Ship #20a.14** — Magazine/comic format collision.
+Sub-ships:
+- #20b.1 — Cross-pool consistency gate (sold titles must match active)
+- #20b.2 — Sold-first pricing architecture + price bands
+- #20b.3 — Grade-aware sold anchoring
+- #20b.4 — Recency weighting + stale suppression
 
-### Layer C — UI / SEMANTIC CLARITY
-13. **Ship #20a.9** — Floor label clarification.
-14. **Ship #20a.9 hotfix** — List-price warning false-positives.
+### 2. Ship #21 — DECISION ENGINE
+**Est: 4-6 hours | Unlocks Layer 3**
 
-### Layer D — DEFERRED
-- Bundle routing
-- Decision engine paths (Layer 3, gated)
-- Layer 4 portfolio OS (scan-gated at 250+, currently ~84)
-- Phase 5b — scarcity-aware pricing hooks (gated; thin-pop floor premium, dense-pop confidence boost) — explicit greenlight before any pricing math
-- Ship #12b — keyFromComps promotion to keyIssue (pricing-math change)
-- Ship #16b — creator-aware multiplier (pricing-math change)
-- VARIANT-TYPE-DISCRIMINATION — Whitman / Mark Jewelers / Type 1A-1B (extends `TEST_MARKET_KEYS`)
-- FR-Q9 / FR-Q11 / FR-Q12 / K1 / K2
+Per-book Keep/Sell/Press/CGC/Hold recommendations with ROI math.
+- Market timing signals (velocity, trend, seasonality)
+- CGC submission net profit (grade scenarios × FMV - costs)
+- Press recommendation (defect flags × FMV gap)
+- Hold recommendation (appreciation potential)
+- Sell urgency (price decay risk, market saturation)
+
+### 3. Ship #22 — ONE-TAP LISTING
+**Est: 3-4 hours**
+
+eBay auto-listing with correct category + AI-generated description.
+- One tap → listed (title, price, category, description, photos)
+- Batch listing workflow (select multiple → post all)
+- Auto-category (vision signals → eBay category ID)
+- Template descriptions (era-aware, key-aware)
+
+### DEFERRED — Autofix engine handles micro-fixes
+Edge cases now caught by Ship #20a.6.22 autofix:
+- Wrong-issue comps → flagged
+- Series mismatch → flagged
+- Magazine format → flagged
+- Grade multiplier errors → auto-corrected
+- Modern contamination → auto-filtered
+- Newsstand penalty → auto-removed (pre-1985)
+- Single-comp warnings → auto-suppressed
+
+Remaining micro-fixes (low priority):
+- Bundle routing automation
+- Layer 4 portfolio OS (scan-gated at 250+)
+- Phase 5b scarcity-aware pricing
+- Variant-type discrimination (Whitman/Mark Jewelers/Type 1A-1B)
+- Creator-aware multiplier (Ship #16b)
+- KeyFromComps promotion (Ship #12b)
 
 ## Recalibration
 
 **GPT external review insights — keep for ongoing reference.**
 
-### Layer status corrections
-- Layer 1 Foundation: ~75% (overclaimed at 90% prior; honest reassessment after 4/27 phone validation surfaced 25 distinct fixes).
-- Layer 2 Data Leverage: ~30%.
-- Layer 3 Decision Engine: 0% (gated — unlocks after Layer 2 substantially complete).
+### Layer status (updated 2026-04-29)
+- Layer 1 Foundation: ~93% (error visibility + graceful degradation + autofix engine shipped).
+- Layer 2 Data Leverage: ~40% (sold verification complete, pricing architecture next).
+- Layer 3 Decision Engine: 0% (unlocks after Ship #21).
 - Layer 4 Portfolio OS: 0% (scan-gated at 250+ books; currently ~84).
 
 ### Architecture-before-features priority shift
@@ -365,8 +378,9 @@ Pure UI/data gates, no pricing math.
 3. Features compound on broken logic if shipped first.
 
 ### Timeline
-- Total remaining: 130-200 hours.
-- Calendar: 12-24 months.
+- Three ships to complete: 13-18 hours total.
+- Est completion: 2-3 weeks (at current pace).
+- Original estimate was 130-200 hours — streamlined via autofix engine.
 
 ### Category framing
 - Current: "Asset decision system for collectibles."
