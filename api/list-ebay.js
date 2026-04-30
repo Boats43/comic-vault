@@ -66,6 +66,13 @@ const variantForTitle = (variant) => {
 };
 
 const buildTitle = (item) => {
+  // T1-2: Use Claude's suggested title if HIGH confidence
+  if (item.claudeCheck?.confidence === 'HIGH' &&
+      item.claudeCheck?.suggestedListingTitle) {
+    return item.claudeCheck.suggestedListingTitle.substring(0, 80);
+  }
+
+  // Fallback to existing logic
   const gradeStr =
     item.isGraded === true && item.numericGrade != null
       ? `CGC ${item.numericGrade}`
@@ -92,6 +99,28 @@ const eraFromYear = (y) => {
   if (n <= 1984) return "Bronze Age";
   if (n <= 1991) return "Copper Age";
   return "Modern Age";
+};
+
+// T1-1: Era for Item Specifics (eBay-friendly labels)
+const getEra = (y) => {
+  const n = parseInt(y, 10);
+  if (!n || isNaN(n)) return "Modern Age";
+  if (n < 1938) return "Victorian/Platinum Age";
+  if (n < 1956) return "Golden Age";
+  if (n < 1970) return "Silver Age";
+  if (n < 1985) return "Bronze Age";
+  if (n < 1991) return "Copper Age";
+  if (n < 2000) return "Modern Age (1991-1999)";
+  return "Modern Age";
+};
+
+// T1-1: Extract character for Item Specifics
+const extractCharacter = (item) => {
+  return (
+    item.firstAppearanceCharacters?.[0] ||
+    item.comicVine?.characterCredits?.[0]?.name ||
+    null
+  );
 };
 
 const buildBundleTitle = (items) => {
@@ -211,9 +240,20 @@ ${pictureBlock}    <ShipToLocations>US</ShipToLocations>
 
 const buildDescription = (item) => {
   const lines = [];
+
+  // T3-3: Flags disclosure (if any)
+  if (item.claudeCheck?.flags && item.claudeCheck.flags.length > 0) {
+    lines.push("<p><strong>NOTES</strong></p>");
+    item.claudeCheck.flags.forEach(flag => {
+      lines.push(`<p>• ${xmlEscape(flag)}</p>`);
+    });
+    lines.push("<br>");
+  }
+
   if (item.title) lines.push(`<h2>${xmlEscape(item.title)}</h2>`);
   const meta = [item.publisher, item.year].filter(Boolean).join(" · ");
   if (meta) lines.push(`<p><strong>${xmlEscape(meta)}</strong></p>`);
+
   if (item.grade) {
     const gradeLabel =
       item.isGraded === true && item.numericGrade != null
@@ -221,18 +261,86 @@ const buildDescription = (item) => {
         : xmlEscape(item.grade);
     lines.push(`<p>Grade: <strong>${gradeLabel}</strong></p>`);
   }
+
   if (item.keyIssue) lines.push(`<p>Key Issue: ${xmlEscape(item.keyIssue)}</p>`);
   if (item.reason) lines.push(`<p>${xmlEscape(item.reason)}</p>`);
+
+  // T2-2: Story (expanded from 500 to 1000 chars)
   if (item.comicVine?.description) {
-    // ComicVine descriptions are pre-sanitized HTML from their API.
-    lines.push(`<div>${item.comicVine.description}</div>`);
+    const storyText = String(item.comicVine.description).substring(0, 1000);
+    lines.push(`<p><strong>STORY</strong></p>`);
+    lines.push(`<div>${storyText}</div>`);
   }
-  if (Array.isArray(item.comicVine?.firstAppearanceCharacters) && item.comicVine.firstAppearanceCharacters.length > 0) {
+
+  // T2-2: Creators section
+  if (item.comicVine?.personCredits && item.comicVine.personCredits.length > 0) {
+    const creatorList = item.comicVine.personCredits
+      .map(p => `${xmlEscape(p.name)}${p.role ? ` (${xmlEscape(p.role)})` : ''}`)
+      .join(', ');
+    lines.push(`<p><strong>CREATORS</strong></p>`);
+    lines.push(`<p>${creatorList}</p>`);
+  }
+
+  // T2-2: Characters section
+  if (item.comicVine?.characterCredits && item.comicVine.characterCredits.length > 0) {
+    const characterList = item.comicVine.characterCredits
+      .slice(0, 5)
+      .map(c => xmlEscape(c.name))
+      .join(', ');
+    lines.push(`<p><strong>CHARACTERS</strong></p>`);
+    lines.push(`<p>${characterList}</p>`);
+  }
+
+  // Legacy first appearance field (keep if no characterCredits)
+  if (Array.isArray(item.comicVine?.firstAppearanceCharacters) &&
+      item.comicVine.firstAppearanceCharacters.length > 0 &&
+      (!item.comicVine?.characterCredits || item.comicVine.characterCredits.length === 0)) {
     lines.push(
       `<p><strong>First appearance:</strong> ${xmlEscape(item.comicVine.firstAppearanceCharacters.join(", "))}</p>`
     );
   }
-  lines.push("<p>Ships via USPS Media Mail. 30-day returns accepted.</p>");
+
+  // T1-3: Market proof section
+  if (item.priceBands) {
+    lines.push(`<p><strong>MARKET DATA</strong></p>`);
+    const pb = item.priceBands;
+    if (pb.quick && pb.stretch && pb.market) {
+      lines.push(
+        `<p>Recent verified sales: $${pb.quick.toFixed(2)}–$${pb.stretch.toFixed(2)} ` +
+        `(${pb.count || 0} comps)</p>`
+      );
+      lines.push(
+        `<p>Market value: $${pb.market.toFixed(2)} ` +
+        `(${xmlEscape(pb.source || 'estimated')})</p>`
+      );
+    }
+    if (item.pop?.total > 0) {
+      lines.push(`<p>CGC census: ${item.pop.total} copies graded</p>`);
+    }
+  }
+
+  // T2-2: Demand section
+  if (item.demandSignals) {
+    const ds = item.demandSignals;
+    const demandEmoji = ds.demandLevel === 'HIGH' ? '🔥' : ds.demandLevel === 'LOW' ? '📉' : '➡️';
+    const trendIcon = ds.trend === 'RISING' ? '↑' : ds.trend === 'DECLINING' ? '↓' : '→';
+    lines.push(`<p><strong>DEMAND</strong></p>`);
+    lines.push(
+      `<p>${demandEmoji} ${xmlEscape(ds.demandLevel || 'NORMAL')} demand · ` +
+      `${trendIcon} ${xmlEscape(ds.trend || 'FLAT')} price trend · ` +
+      `${xmlEscape(ds.liquidity || 'NORMAL')} mover</p>`
+    );
+  }
+
+  // T1-4: Enhanced pack details footer
+  lines.push("<p><strong>SHIPPING</strong></p>");
+  lines.push(
+    "<p>Packed in Gemini mailer with cardboard backing and top loader for protection. " +
+    "Ships within 3 business days via USPS Media Mail. Combined shipping available.</p>"
+  );
+  lines.push("<p><strong>RETURNS</strong></p>");
+  lines.push("<p>30-day returns accepted. Professional grading available.</p>");
+
   return lines.join("\n");
 };
 
@@ -328,7 +436,7 @@ const uploadSiteHostedPicture = async (base64Image, authToken, headers) => {
   return fullUrl;
 };
 
-const buildXml = (item, authToken, pictureUrl) => {
+const buildXml = (item, authToken, pictureUrls) => {
   const title = buildTitle(item);
   const description = buildDescription(item);
   const price = parsePriceNumber(item.price) ?? parsePriceNumber(item.priceHigh) ?? parsePriceNumber(item.priceLow);
@@ -336,12 +444,74 @@ const buildXml = (item, authToken, pictureUrl) => {
     throw new Error("No valid price on item — cannot list");
   }
   const conditionId = conditionIdFor(item.grade);
-  const pictureBlock = pictureUrl
+
+  // T2-1: Multi-image support
+  const pictureBlock = (pictureUrls && pictureUrls.length > 0)
     ? `    <PictureDetails>
-      <PictureURL>${xmlEscape(pictureUrl)}</PictureURL>
+${pictureUrls.map(url => `      <PictureURL>${xmlEscape(url)}</PictureURL>`).join('\n')}
     </PictureDetails>
 `
     : "";
+
+  // T2-3: Dynamic category
+  const categoryId = item.isTPB ? '267' :
+                     item.isMagazine ? '180' :
+                     CATEGORY_ID;
+
+  // T2-4: Free shipping for $50+
+  const isFreeShipping = price >= 50;
+  const shippingCost = isFreeShipping ? '0.00' : '4.99';
+  const freeShippingFlag = isFreeShipping ? 'true' : 'false';
+
+  // T3-2: Best Offer thresholds
+  const autoAcceptPrice = (price * 0.95).toFixed(2);
+  const minBestOfferPrice = (price * 0.75).toFixed(2);
+
+  // T1-1: Item Specifics
+  const character = extractCharacter(item);
+  const itemSpecifics = `    <ItemSpecifics>
+      <NameValueList>
+        <Name>Publisher</Name>
+        <Value>${xmlEscape(item.publisher || 'Unknown')}</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Series Title</Name>
+        <Value>${xmlEscape(item.title || 'Unknown')}</Value>
+      </NameValueList>
+${item.issue ? `      <NameValueList>
+        <Name>Issue Number</Name>
+        <Value>${xmlEscape(item.issue)}</Value>
+      </NameValueList>
+` : ''}      <NameValueList>
+        <Name>Era</Name>
+        <Value>${xmlEscape(getEra(item.year))}</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Grade Certification</Name>
+        <Value>${xmlEscape(item.slabNumber ? (item.slabCompany || 'CGC') : 'Raw/Ungraded')}</Value>
+      </NameValueList>
+${item.numericGrade ? `      <NameValueList>
+        <Name>Numeric Grade</Name>
+        <Value>${xmlEscape(item.numericGrade)}</Value>
+      </NameValueList>
+` : ''}      <NameValueList>
+        <Name>Format</Name>
+        <Value>${xmlEscape(item.isTPB ? 'Trade Paperback' : item.isMagazine ? 'Magazine' : 'Single Issue')}</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Language</Name>
+        <Value>English</Value>
+      </NameValueList>
+${character ? `      <NameValueList>
+        <Name>Character</Name>
+        <Value>${xmlEscape(character)}</Value>
+      </NameValueList>
+` : ''}${item.variant ? `      <NameValueList>
+        <Name>Variant</Name>
+        <Value>${xmlEscape(item.variant)}</Value>
+      </NameValueList>
+` : ''}    </ItemSpecifics>
+`;
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -354,7 +524,7 @@ const buildXml = (item, authToken, pictureUrl) => {
     <Title>${xmlEscape(title)}</Title>
     <Description><![CDATA[${description}]]></Description>
     <PrimaryCategory>
-      <CategoryID>${CATEGORY_ID}</CategoryID>
+      <CategoryID>${categoryId}</CategoryID>
     </PrimaryCategory>
     <StartPrice currencyID="USD">${price.toFixed(2)}</StartPrice>
     <ConditionID>${conditionId}</ConditionID>
@@ -373,8 +543,8 @@ ${pictureBlock}    <ShipToLocations>US</ShipToLocations>
       <ShippingServiceOptions>
         <ShippingServicePriority>1</ShippingServicePriority>
         <ShippingService>USPSMedia</ShippingService>
-        <ShippingServiceCost>4.99</ShippingServiceCost>
-        <FreeShipping>false</FreeShipping>
+        <ShippingServiceCost>${shippingCost}</ShippingServiceCost>
+        <FreeShipping>${freeShippingFlag}</FreeShipping>
       </ShippingServiceOptions>
     </ShippingDetails>
     <ReturnPolicy>
@@ -383,6 +553,13 @@ ${pictureBlock}    <ShipToLocations>US</ShipToLocations>
       <ReturnsWithinOption>Days_30</ReturnsWithinOption>
       <ShippingCostPaidByOption>Seller</ShippingCostPaidByOption>
     </ReturnPolicy>
+${itemSpecifics}    <BestOfferDetails>
+      <BestOfferEnabled>true</BestOfferEnabled>
+    </BestOfferDetails>
+    <ListingDetails>
+      <BestOfferAutoAcceptPrice>${autoAcceptPrice}</BestOfferAutoAcceptPrice>
+      <MinimumBestOfferPrice>${minBestOfferPrice}</MinimumBestOfferPrice>
+    </ListingDetails>
   </Item>
 </AddFixedPriceItemRequest>`;
 };
@@ -475,20 +652,40 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Step 1: upload the cover image (if provided) to eBay's picture service.
-    const coverImage = item.images?.[0] || item.image || null;
-    let pictureUrl = null;
-    if (coverImage) {
+    // T3-1: Confidence gate — block LOW confidence listings
+    if (item.claudeCheck?.confidence === 'LOW' ||
+        item.matchConfidence?.tier === 'LOW') {
+      res.status(400).json({
+        error: 'LOW_CONFIDENCE',
+        message: 'Identity confidence too low to list. Use Re-identify to improve accuracy first.',
+        flags: item.claudeCheck?.flags || []
+      });
+      return;
+    }
+
+    // T2-1: Multi-image upload for singles (up to 12 images)
+    // Gate: only upload all images when confidence is not LOW
+    const shouldUploadMultiple =
+      item.matchConfidence?.tier !== 'LOW' &&
+      item.claudeCheck?.confidence !== 'LOW';
+
+    const imagesToUpload = shouldUploadMultiple
+      ? (item.images || []).filter(Boolean).slice(0, 12)
+      : [(item.images?.[0] || item.image || null)].filter(Boolean);
+
+    const pictureUrls = [];
+    for (const img of imagesToUpload) {
       try {
-        pictureUrl = await uploadSiteHostedPicture(coverImage, EBAY_AUTH_TOKEN, ebayHeaders);
+        const url = await uploadSiteHostedPicture(img, EBAY_AUTH_TOKEN, ebayHeaders);
+        if (url) pictureUrls.push(url);
       } catch (imgErr) {
         // Don't hard-fail the whole listing on image upload issues — log and continue without.
         console.error("Picture upload failed:", imgErr.message);
       }
     }
 
-    // Step 2: create the listing, including the hosted picture URL if we have one.
-    const xml = buildXml(item, EBAY_AUTH_TOKEN, pictureUrl);
+    // Step 2: create the listing, including the hosted picture URLs.
+    const xml = buildXml(item, EBAY_AUTH_TOKEN, pictureUrls);
     console.log("[ebay] AddFixedPriceItem request XML:\n" + redactToken(xml));
 
     const ebayRes = await fetch(EBAY_ENDPOINT, {
@@ -542,7 +739,7 @@ export default async function handler(req, res) {
       ok: true,
       listingId: itemId,
       listingUrl: `https://www.ebay.com/itm/${itemId}`,
-      pictureUrl,
+      pictureCount: pictureUrls.length,
       ack: ack || "Success",
     });
   } catch (err) {
