@@ -10,6 +10,7 @@ import {
   putAnalysis,
 } from "./db.js";
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
+import { runAutoFix } from "./lib/autoFix.js";
 
 const LOADING_STEPS = [
   "Reading cover...",
@@ -2104,6 +2105,27 @@ function CollectionDetail({
           </div>
         );
       })()}
+
+      {/* Ship #20a.6.22 — Graceful degradation: enrichFailed warning */}
+      {item.enrichFailed && (
+        <div
+          style={{
+            background: "rgba(255,193,7,0.15)",
+            border: "1px solid rgba(255,193,7,0.3)",
+            borderRadius: 6,
+            padding: 8,
+            marginTop: 8,
+            marginBottom: 8,
+            fontSize: 12,
+            color: "#ffc107",
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>⚠ AI estimate only — market data unavailable</div>
+          <div style={{ opacity: 0.9, fontSize: 11 }}>
+            {item.enrichError || "Unable to fetch pricing data. Refresh to retry."}
+          </div>
+        </div>
+      )}
 
       {/* 2b. PURCHASE PRICE + ROI */}
       <div style={{ marginTop: 10 }}>
@@ -5762,7 +5784,10 @@ export default function App() {
       }
       throw err;
     }
-    if (!res.ok) throw new Error("Failed to refresh market data");
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || "Failed to refresh market data");
+    }
     if (activeCardEnrichIdRef.current !== enrichId) {
       console.log(`[enrich] stale ignored id=${enrichId}`);
       return;
@@ -5846,6 +5871,14 @@ export default function App() {
       megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
       manualConfirmed: priceChangedRM ? false : (item.manualConfirmed || false),
     };
+
+    // Ship #20a.6.22 — Apply autofix engine
+    const { updated: autofixed, fixes } = runAutoFix(updated);
+    if (fixes.length > 0) {
+      console.log('[autofix] refreshMarketData:', fixes);
+      updated = autofixed;
+    }
+
     await putComic(updated);
     setCatalogue((prev) => prev.map((x) => {
       if (x.id === item.id) return updated;
@@ -5909,29 +5942,43 @@ export default function App() {
 
     // Step 2: Re-enrich with new identity + stored image
     const issueNum = gradeData.issue || gradeData.title?.match(/#(\d+)/)?.[1] || null;
-    const enrichRes = await fetch("/api/enrich", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: gradeData.title,
-        issue: issueNum,
-        grade: gradeData.grade,
-        isGraded: gradeData.isGraded,
-        numericGrade: gradeData.numericGrade,
-        year: gradeData.year,
-        publisher: gradeData.publisher,
-        confidence: gradeData.confidence,
-        variant: gradeData.variant || null,
-        keyIssue: gradeData.keyIssue || null,
-        certNumber: gradeData.certNumber || null,
-        defectPenalty: gradeData.defectPenalty || null,
-        images: [b64],
-      }),
-    });
-    if (!enrichRes.ok) throw new Error("Failed to enrich book");
-    const enrichData = await enrichRes.json();
+    let enrichData = null;
+    let enrichFailed = false;
+    let enrichError = null;
 
-    // Step 3: Update catalogue with new identity + enriched data
+    try {
+      const enrichRes = await fetch("/api/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: gradeData.title,
+          issue: issueNum,
+          grade: gradeData.grade,
+          isGraded: gradeData.isGraded,
+          numericGrade: gradeData.numericGrade,
+          year: gradeData.year,
+          publisher: gradeData.publisher,
+          confidence: gradeData.confidence,
+          variant: gradeData.variant || null,
+          keyIssue: gradeData.keyIssue || null,
+          certNumber: gradeData.certNumber || null,
+          defectPenalty: gradeData.defectPenalty || null,
+          images: [b64],
+        }),
+      });
+      if (!enrichRes.ok) {
+        const errBody = await enrichRes.json().catch(() => ({}));
+        throw new Error(errBody.error || "Failed to enrich book");
+      }
+      enrichData = await enrichRes.json();
+    } catch (err) {
+      // Graceful degradation: enrich failed but we have Vision data
+      enrichFailed = true;
+      enrichError = err.message;
+      console.warn('[reIdentify] enrich failed, falling back to Vision-only:', err.message);
+    }
+
+    // Step 3: Update catalogue with new identity + enriched data (or Vision-only if enrich failed)
     const updated = {
       ...item,
       title: gradeData.title,
@@ -5939,15 +5986,15 @@ export default function App() {
       grade: gradeData.grade,
       isGraded: gradeData.isGraded,
       numericGrade: gradeData.numericGrade,
-      year: enrichData.confirmedYear || gradeData.year,
+      year: enrichData?.confirmedYear || gradeData.year,
       publisher: gradeData.publisher,
       confidence: gradeData.confidence,
       variant: gradeData.variant || null,
-      keyIssue: enrichData.keyIssue || gradeData.keyIssue || null,
-      price: enrichData.price || null,
-      priceLow: enrichData.priceLow || null,
-      priceHigh: enrichData.priceHigh || null,
-      comps: enrichData.comps || null,
+      keyIssue: enrichData?.keyIssue || gradeData.keyIssue || null,
+      price: enrichData?.price || null,
+      priceLow: enrichData?.priceLow || null,
+      priceHigh: enrichData?.priceHigh || null,
+      comps: enrichData?.comps || null,
       reason: gradeData.reason || null,
       restoration: gradeData.restoration || null,
       defectPenalty: gradeData.defectPenalty || null,
@@ -5956,13 +6003,25 @@ export default function App() {
       certNumber: gradeData.certNumber || null,
       cgcVerified: gradeData.cgcVerified || false,
       cgcLabel: gradeData.cgcLabel || null,
+      enrichFailed,
+      enrichError,
     };
 
-    await putComic(updated);
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
-    setSelectedItem(updated);
+    // Ship #20a.6.22 — Apply autofix engine (skip if enrich failed)
+    let finalUpdated = updated;
+    if (!enrichFailed) {
+      const { updated: autofixed, fixes } = runAutoFix(updated);
+      if (fixes.length > 0) {
+        console.log('[autofix] reIdentifyBook:', fixes);
+        finalUpdated = autofixed;
+      }
+    }
 
-    return updated;
+    await putComic(finalUpdated);
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? finalUpdated : x)));
+    setSelectedItem(finalUpdated);
+
+    return finalUpdated;
   }, []);
 
   // Append a new photo to an existing comic and re-run /api/grade with
