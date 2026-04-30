@@ -1160,8 +1160,10 @@ export default async function handler(req, res) {
     }
 
     // Prefer explicit issue param, fall back to parsing from title.
+    // Ship #20a.6.22 hotfix: treat "Unknown" as null (Vision failure case).
     const issueMatch = String(title).match(/#\s*(\d+)/);
-    const issueNum = issue || (issueMatch ? issueMatch[1] : null);
+    const issueRaw = issue && !/unknown/i.test(String(issue)) ? issue : null;
+    const issueNum = issueRaw || (issueMatch ? issueMatch[1] : null);
 
     // Ship #20a.6.16 Win #2 — Move eBay image search INTO Phase 1 to run in
     // parallel with PC/CV/Ximilar/CGC. Saves ~800-1200ms by overlapping image

@@ -1582,7 +1582,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
             return m ? m[1] : null;
           };
           const displayIssue = item.issue || extractIssueFromReport(item.conditionReport || item.notes || '');
-          const titleWithIssue = (item.title || "Unknown") + (displayIssue && !String(item.title || "").includes('#' + displayIssue) ? ` #${displayIssue}` : '');
+          const titleWithIssue = (item.title || "Unknown") + (displayIssue && !/unknown/i.test(String(displayIssue)) && !String(item.title || "").includes('#' + displayIssue) ? ` #${displayIssue}` : '');
           const gradeTxt = item.isGraded === true && item.numericGrade != null
             ? `CGC ${item.numericGrade}`
             : (() => {
@@ -2060,7 +2060,7 @@ function CollectionDetail({
 
       {/* 2. TITLE BLOCK */}
       <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
-        {item.title || "Unknown"}{item.issue && !String(item.title || "").includes('#' + item.issue) ? ` #${item.issue}` : ''}
+        {item.title || "Unknown"}{item.issue && !/unknown/i.test(String(item.issue)) && !String(item.title || "").includes('#' + item.issue) ? ` #${item.issue}` : ''}
       </div>
       <div className="muted small">
         {item.publisher}
