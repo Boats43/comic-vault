@@ -38,6 +38,7 @@ import {
   normalizeTitle,
 } from "./mega-keys.js";
 import { extractCreatorsFromComps } from "../src/lib/premiumCreators.js";
+import { alignIdentity, extractIssueFromEbayResults } from "../src/lib/identityAlignment.js";
 // Ship #20a.6.4 — refuse-to-price gate. Sanitizes Vision identity fields
 // and refuses to produce a price when title/issue/year/publisher can't
 // be cleanly extracted (or Vision self-reports low confidence). See
@@ -1202,6 +1203,29 @@ export default async function handler(req, res) {
     ]);
     mark('phase1_complete');
 
+    // Ship #20a.6.7c — Identity Alignment: cross-reference Vision, eBay image
+    // search, PriceCharting, and ComicVine to determine most accurate title.
+    // eBay image search has highest trust (matched actual cover image).
+    const alignment = alignIdentity({
+      visionTitle: title,
+      visionIssue: issueNum,
+      visionYear: year,
+      visionConfidence: confidence,
+      ebayImageResults: visualResult?.items,
+      pcProductName: priceChartingInitial?.productName,
+      cvVolumeName: comicVine?.volume,
+    });
+
+    if (alignment.overrodeVision) {
+      console.log(
+        `[identity] eBay overrides Vision: "${alignment.visionWas}" → "${alignment.confirmedTitle}"`
+      );
+    } else if (alignment.confirmedSource === 'vision+text') {
+      console.log(`[identity] Vision confirmed by text sources (${alignment.confidence})`);
+    } else {
+      console.log(`[identity] Vision only, confidence=${alignment.confidence}${alignment.needsReview ? ' (needs review)' : ''}`);
+    }
+
     // Ship #20a.6.7c — Instrumentation: log image search titles for Option B
     // design if Option A proves insufficient. Format: array of {title, tokens}
     // so we can analyze consensus behavior on the next exclusive-variant failure.
@@ -1218,9 +1242,14 @@ export default async function handler(req, res) {
     }
 
     // Extract corrected issue from image search consensus (issue correction).
-    const correctedIssue = (visualResult?.issueSource === "ebay_visual" && visualResult.issue)
-      ? visualResult.issue
-      : issueNum;
+    // Ship #20a.6.7c: Also extract issue when identity alignment overrides Vision.
+    let correctedIssue = issueNum;
+    if (visualResult?.issueSource === "ebay_visual" && visualResult.issue) {
+      correctedIssue = visualResult.issue;
+    } else if (alignment.overrodeVision) {
+      const ebayIssue = extractIssueFromEbayResults(visualResult?.items);
+      if (ebayIssue) correctedIssue = ebayIssue;
+    }
 
     // Ship #20a.6.7b.2 — Image search consensus title extraction. Extract
     // consensus title (≥2 matching titles) from visual result when Vision
@@ -2404,6 +2433,22 @@ export default async function handler(req, res) {
           out.issue = visualResult.issue;
           out.claudeIssue = visualResult.claudeIssue;
         }
+      }
+    }
+
+    // Ship #20a.6.7c — Identity alignment cross-reference result
+    if (alignment) {
+      out.identityAlignment = {
+        confirmedTitle: alignment.confirmedTitle,
+        confirmedSource: alignment.confirmedSource,
+        overrodeVision: alignment.overrodeVision,
+        confidence: alignment.confidence,
+      };
+      if (alignment.overrodeVision) {
+        out.identityAlignment.visionWas = alignment.visionWas;
+      }
+      if (alignment.needsReview) {
+        out.identityAlignment.needsReview = true;
       }
     }
 
