@@ -50,6 +50,10 @@ import {
 import { extractIdentityFromImageSearch } from "../src/lib/imageSearchIdentity.js";
 // Ship #20b — price bands engine (verified sold-first pricing).
 import { computePriceBands, enforceFloor } from "../src/lib/priceBands.js";
+// Ship #21 — demand signals from sales data.
+import { computeDemandSignals } from "../src/lib/demandSignals.js";
+// Ship #21 — Claude Haiku quality check.
+import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
@@ -496,7 +500,7 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
     const url =
       `https://comicvine.gamespot.com/api/search/?api_key=${encodeURIComponent(process.env.COMICVINE_API_KEY)}` +
       `&format=json&resources=issue&query=${encodeURIComponent(searchQuery)}` +
-      `&field_list=id,name,issue_number,cover_date,description,deck,first_appearance_characters,character_credits,story_arc_credits,volume` +
+      `&field_list=id,name,issue_number,cover_date,description,deck,first_appearance_characters,character_credits,person_credits,story_arc_credits,aliases,volume` +
       `&limit=20`;
     const res = await fetch(url, {
       headers: { "User-Agent": "ComicVault/1.0" },
@@ -635,16 +639,36 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
       if (derivedKey) console.log("[comicvine] key derived from description:", derivedKey);
     }
 
+    // Ship #21 — Expand ComicVine data for complete card
+    const vid = match.volume?.id;
+    const volDetail = volDetails[vid];
+
     return {
       id: match.id,
       name: match.name,
       issueNumber: match.issue_number,
       volume: match.volume?.name,
+      volumeId: vid,
+      publisher: volDetail?.publisher?.name || match.volume?.publisher?.name || null,
+      startYear: volDetail?.start_year || null,
       description: match.description,
       deck: match.deck,
       coverDate: match.cover_date || null,
+      aliases: Array.isArray(match.aliases) ? match.aliases : [],
       firstAppearanceCharacters: hasFirstApps
         ? firstApps.map((c) => c?.name).filter(Boolean)
+        : [],
+      characterCredits: Array.isArray(match.character_credits)
+        ? match.character_credits.map((c) => c?.name).filter(Boolean).slice(0, 5)
+        : [],
+      personCredits: Array.isArray(match.person_credits)
+        ? match.person_credits.map((p) => ({
+            name: p?.name,
+            role: p?.role
+          })).filter(p => p.name)
+        : [],
+      storyArcCredits: Array.isArray(match.story_arc_credits)
+        ? match.story_arc_credits.map((s) => s?.name).filter(Boolean)
         : [],
       derivedKeyIssue: derivedKey,
     };
@@ -1688,6 +1712,13 @@ export default async function handler(req, res) {
       };
     }
 
+    // Ship #21 — Demand signals (velocity, trend, liquidity)
+    const demandSignals = computeDemandSignals({
+      soldComps: filteredSold,
+      activeComps: rawComps
+    });
+    out.demandSignals = demandSignals;
+
     // Key issue: prefer ComicVine structured data, then description-derived,
     // then Claude's keyIssue from /api/grade. keyIssueSource surfaces which
     // branch won so the UI can render an attribution hint.
@@ -2574,6 +2605,34 @@ export default async function handler(req, res) {
     }
     if (rawComps?.signedRejected > 0) {
       out.signedRejected = rawComps.signedRejected;
+    }
+
+    // Ship #21 — Claude Haiku quality check (verify all data alignment)
+    const claudeCheckData = {
+      title,
+      issue: correctedIssue,
+      year: confirmedYear || year,
+      publisher,
+      variant: req.body?.variant || null,
+      grade,
+      numericGrade,
+      conditionSummary: req.body?.reason || null,
+      keyIssue: out.keyIssue,
+      storyDescription: comicVine?.description || null,
+      creators: comicVine?.personCredits || [],
+      priceBands: out.priceBands,
+      soldComps: filteredSold,
+      activeComps: rawComps,
+      pop: out.pop,
+      demandSignals: out.demandSignals
+    };
+
+    const claudeCheck = await runClaudeCheck(claudeCheckData);
+    if (claudeCheck) {
+      out.claudeCheck = claudeCheck;
+      out.verified = claudeCheck.verified;
+      out.recommendation = claudeCheck.recommendation;
+      out.suggestedListingTitle = claudeCheck.suggestedListingTitle;
     }
 
     mark('final_response');

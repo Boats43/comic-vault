@@ -2058,6 +2058,63 @@ function CollectionDetail({
         </div>
       )}
 
+      {/* Ship #21 — VERIFIED BADGE */}
+      {(() => {
+        const check = item.claudeCheck;
+        if (!check) return null;
+
+        const verified = check.verified;
+        const hasFlags = check.flags && check.flags.length > 0;
+        const lowConfidence = item.identityConfident === false;
+
+        const badge = lowConfidence ? {
+          icon: '❓',
+          label: 'UNCONFIRMED',
+          color: '#888',
+          bg: 'rgba(136,136,136,0.1)',
+          border: 'rgba(136,136,136,0.3)'
+        } : hasFlags ? {
+          icon: '⚠️',
+          label: 'NEEDS REVIEW',
+          color: '#fbbf24',
+          bg: 'rgba(251,191,36,0.1)',
+          border: 'rgba(251,191,36,0.3)'
+        } : verified ? {
+          icon: '✅',
+          label: 'VERIFIED',
+          color: '#22c55e',
+          bg: 'rgba(34,197,94,0.1)',
+          border: 'rgba(34,197,94,0.3)'
+        } : {
+          icon: '⚠️',
+          label: 'NEEDS REVIEW',
+          color: '#fbbf24',
+          bg: 'rgba(251,191,36,0.1)',
+          border: 'rgba(251,191,36,0.3)'
+        };
+
+        return (
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '4px 10px',
+            background: badge.bg,
+            border: `1px solid ${badge.border}`,
+            borderRadius: 6,
+            fontSize: 11,
+            fontWeight: 700,
+            color: badge.color,
+            marginBottom: 8,
+            letterSpacing: 0.5
+          }}>
+            <span>{badge.icon}</span>
+            <span>{badge.label}</span>
+            {hasFlags && <span style={{ fontSize: 9 }}>({check.flags.length})</span>}
+          </div>
+        );
+      })()}
+
       {/* 2. TITLE BLOCK */}
       <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
         {item.title || "Unknown"}{item.issue && !/unknown/i.test(String(item.issue)) && !String(item.title || "").includes('#' + item.issue) ? ` #${item.issue}` : ''}
@@ -2174,6 +2231,84 @@ function CollectionDetail({
       {showKeyIssue(item.keyIssue) && (
         <div className="key-box" style={{ marginTop: 12 }}>
           ⭐ {item.keyIssue}
+        </div>
+      )}
+
+      {/* Ship #21 — STORY & CREATORS from ComicVine */}
+      {item.comicVine && (item.comicVine.description || item.comicVine.personCredits?.length > 0 || item.comicVine.characterCredits?.length > 0) && (
+        <div style={{
+          marginTop: 12,
+          padding: "10px 12px",
+          background: "rgba(59,130,246,0.06)",
+          border: "1px solid rgba(59,130,246,0.15)",
+          borderRadius: 8,
+        }}>
+          {/* Story */}
+          {item.comicVine.description && (
+            <div style={{ marginBottom: item.comicVine.personCredits?.length > 0 || item.comicVine.characterCredits?.length > 0 ? 8 : 0 }}>
+              <div style={{ color: "#888", fontSize: 10, marginBottom: 4, letterSpacing: 0.5, fontWeight: 600 }}>STORY</div>
+              <div style={{ fontSize: 12, lineHeight: 1.4, color: "#ccc" }}>
+                {item.comicVine.description.replace(/<[^>]+>/g, '').substring(0, 200)}
+                {item.comicVine.description.length > 200 && '...'}
+              </div>
+            </div>
+          )}
+          {/* Creators */}
+          {item.comicVine.personCredits && item.comicVine.personCredits.length > 0 && (
+            <div style={{ marginBottom: item.comicVine.characterCredits?.length > 0 ? 8 : 0 }}>
+              <div style={{ color: "#888", fontSize: 10, marginBottom: 4, letterSpacing: 0.5, fontWeight: 600 }}>CREATORS</div>
+              <div style={{ fontSize: 12, color: "#ccc" }}>
+                {item.comicVine.personCredits.slice(0, 3).map((c, i) => (
+                  <span key={i}>
+                    {c.name}{c.role ? ` (${c.role})` : ''}
+                    {i < Math.min(2, item.comicVine.personCredits.length - 1) && ', '}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Characters */}
+          {item.comicVine.characterCredits && item.comicVine.characterCredits.length > 0 && (
+            <div>
+              <div style={{ color: "#888", fontSize: 10, marginBottom: 4, letterSpacing: 0.5, fontWeight: 600 }}>CHARACTERS</div>
+              <div style={{ fontSize: 12, color: "#ccc" }}>
+                {item.comicVine.characterCredits.slice(0, 5).join(', ')}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Ship #21 — DEMAND SIGNALS */}
+      {item.demandSignals && (
+        <div style={{
+          marginTop: 8,
+          padding: "8px 12px",
+          background: "rgba(168,85,247,0.06)",
+          border: "1px solid rgba(168,85,247,0.15)",
+          borderRadius: 8,
+          display: "flex",
+          gap: 12,
+          fontSize: 11,
+        }}>
+          <div>
+            <span style={{ color: "#888" }}>DEMAND:</span>{' '}
+            <span style={{ fontWeight: 600, color: item.demandSignals.demandLevel === 'HIGH' ? '#22c55e' : item.demandSignals.demandLevel === 'NORMAL' ? '#3b82f6' : '#888' }}>
+              {item.demandSignals.demandLevel === 'HIGH' ? '🔥 HIGH' : item.demandSignals.demandLevel === 'NORMAL' ? '➡️ NORMAL' : '📉 LOW'}
+            </span>
+          </div>
+          <div>
+            <span style={{ color: "#888" }}>TREND:</span>{' '}
+            <span style={{ fontWeight: 600 }}>
+              {item.demandSignals.trend === 'RISING' ? '↑ Rising' : item.demandSignals.trend === 'DECLINING' ? '↓ Declining' : '→ Flat'}
+            </span>
+          </div>
+          <div>
+            <span style={{ color: "#888" }}>SPEED:</span>{' '}
+            <span style={{ fontWeight: 600 }}>
+              {item.demandSignals.liquidity === 'FAST' ? 'Fast' : item.demandSignals.liquidity === 'NORMAL' ? 'Normal' : 'Slow'}
+            </span>
+          </div>
         </div>
       )}
 
@@ -3405,6 +3540,102 @@ function CollectionDetail({
                 </div>
               </div>
             )}
+
+            {/* Ship #21 — Decision Path UI */}
+            {item.claudeCheck && item.claudeCheck.recommendation && (
+              <div style={{
+                marginBottom: 12,
+                padding: "12px",
+                background: "rgba(59,130,246,0.08)",
+                border: "1px solid rgba(59,130,246,0.25)",
+                borderRadius: 8,
+              }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6, color: "#60a5fa" }}>
+                  RECOMMENDATION
+                </div>
+                <div style={{ fontSize: 12, color: "#ccc", marginBottom: 8 }}>
+                  {item.claudeCheck.recommendationReason || 'Based on current market data'}
+                </div>
+                {(() => {
+                  const rec = item.claudeCheck.recommendation;
+                  const marketPrice = item.priceBands?.market ? parseFloat(String(item.priceBands.market).replace(/[$,]/g, '')) : null;
+
+                  if (rec === 'SELL_RAW') {
+                    return (
+                      <div style={{ fontSize: 13 }}>
+                        <div style={{ fontWeight: 600, color: "#22c55e", marginBottom: 4 }}>
+                          ✓ Sell Raw
+                        </div>
+                        {marketPrice && (
+                          <div style={{ fontSize: 12, color: "#888" }}>
+                            Market value: ${marketPrice.toFixed(2)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  } else if (rec === 'PRESS') {
+                    const currentGrade = item.numericGrade || 6.0;
+                    const afterPressGrade = currentGrade + 0.5;
+                    const currentValue = marketPrice || 50;
+                    const afterPressValue = currentValue * 1.3; // rough estimate
+                    const pressCost = 25;
+                    const netGain = afterPressValue - currentValue - pressCost;
+
+                    return (
+                      <div style={{ fontSize: 12 }}>
+                        <div style={{ fontWeight: 600, color: "#f59e0b", marginBottom: 6 }}>
+                          ⚡ Press Recommended
+                        </div>
+                        <div style={{ color: "#888", lineHeight: 1.6 }}>
+                          Current: {item.grade} → ${currentValue.toFixed(2)}<br/>
+                          After press: ~{afterPressGrade.toFixed(1)} → ${afterPressValue.toFixed(2)}<br/>
+                          Press cost: ~${pressCost}<br/>
+                          <span style={{ fontWeight: 600, color: netGain > 0 ? '#22c55e' : '#ef4444' }}>
+                            Net gain: ${netGain.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  } else if (rec === 'CGC') {
+                    const currentValue = marketPrice || 50;
+                    const cgcGrade = item.numericGrade || (item.grade?.match(/(\d+\.?\d*)/)?.[1] ? parseFloat(item.grade.match(/(\d+\.?\d*)/)[1]) : 7.0);
+                    const cgcValue = item.goCollect?.fmv98 || currentValue * 2; // rough estimate
+                    const submissionCost = 55; // grading + press
+                    const netGain = cgcValue - currentValue - submissionCost;
+
+                    return (
+                      <div style={{ fontSize: 12 }}>
+                        <div style={{ fontWeight: 600, color: "#8b5cf6", marginBottom: 6 }}>
+                          🏆 CGC Submission
+                        </div>
+                        <div style={{ color: "#888", lineHeight: 1.6 }}>
+                          Current raw: ${currentValue.toFixed(2)}<br/>
+                          CGC at {cgcGrade.toFixed(1)}: ${cgcValue.toFixed(2)}<br/>
+                          Submission cost: ~${submissionCost}<br/>
+                          <span style={{ fontWeight: 600, color: netGain > 0 ? '#22c55e' : '#ef4444' }}>
+                            Net gain: ${netGain.toFixed(2)}
+                          </span><br/>
+                          <span style={{ fontSize: 10 }}>Timeline: 60-90 days</span>
+                        </div>
+                      </div>
+                    );
+                  } else if (rec === 'HOLD') {
+                    return (
+                      <div style={{ fontSize: 12 }}>
+                        <div style={{ fontWeight: 600, color: "#6366f1", marginBottom: 4 }}>
+                          📊 Hold
+                        </div>
+                        <div style={{ color: "#888" }}>
+                          {item.claudeCheck.recommendationReason || 'Market conditions suggest holding'}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+            )}
+
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               <span style={{ color: "#aaa", fontSize: 13 }}>List price</span>
               <input
