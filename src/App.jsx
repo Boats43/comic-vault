@@ -3318,6 +3318,93 @@ function CollectionDetail({
           </div>
         ) : (
           <>
+            {/* Ship #20b — Price Bands */}
+            {item.priceBands && (
+              <div style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 12,
+              }}>
+                <div style={{ color: "#888", fontSize: 11, marginBottom: 8, letterSpacing: 0.5 }}>
+                  PRICE BANDS
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {/* Quick Sale */}
+                  <button
+                    onClick={() => {
+                      const price = parseFloat(String(item.priceBands.quick || '0').replace(/[$,]/g, ''));
+                      setListPrice(price);
+                    }}
+                    style={{
+                      background: "rgba(34,197,94,0.1)",
+                      border: "1px solid rgba(34,197,94,0.3)",
+                      borderRadius: 6,
+                      padding: "8px 12px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      cursor: "pointer",
+                      color: "#fff",
+                    }}
+                  >
+                    <span style={{ fontSize: 13, color: "#22c55e" }}>Quick Sale</span>
+                    <span style={{ fontSize: 16, fontWeight: 700 }}>{item.priceBands.quick}</span>
+                  </button>
+                  {/* Market */}
+                  <button
+                    onClick={() => {
+                      const price = parseFloat(String(item.priceBands.market || '0').replace(/[$,]/g, ''));
+                      setListPrice(price);
+                    }}
+                    style={{
+                      background: "rgba(59,130,246,0.1)",
+                      border: "1px solid rgba(59,130,246,0.3)",
+                      borderRadius: 6,
+                      padding: "8px 12px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      cursor: "pointer",
+                      color: "#fff",
+                    }}
+                  >
+                    <span style={{ fontSize: 13, color: "#3b82f6" }}>Market</span>
+                    <span style={{ fontSize: 16, fontWeight: 700 }}>{item.priceBands.market}</span>
+                  </button>
+                  {/* Stretch */}
+                  <button
+                    onClick={() => {
+                      const price = parseFloat(String(item.priceBands.stretch || '0').replace(/[$,]/g, ''));
+                      setListPrice(price);
+                    }}
+                    style={{
+                      background: "rgba(168,85,247,0.1)",
+                      border: "1px solid rgba(168,85,247,0.3)",
+                      borderRadius: 6,
+                      padding: "8px 12px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      cursor: "pointer",
+                      color: "#fff",
+                    }}
+                  >
+                    <span style={{ fontSize: 13, color: "#a855f7" }}>Stretch</span>
+                    <span style={{ fontSize: 16, fontWeight: 700 }}>{item.priceBands.stretch}</span>
+                  </button>
+                </div>
+                {/* Source info */}
+                <div style={{ marginTop: 8, fontSize: 11, color: "#888" }}>
+                  {item.priceBands.count > 0 && `Based on ${item.priceBands.count} ${
+                    item.priceBands.source === 'verified_sold' ? 'sold' :
+                    item.priceBands.source === 'verified_active' ? 'active' : 'estimated'
+                  } comp${item.priceBands.count === 1 ? '' : 's'}`}
+                  {item.priceBands.recencyDays != null && ` · Most recent: ${item.priceBands.recencyDays}d ago`}
+                </div>
+              </div>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               <span style={{ color: "#aaa", fontSize: 13 }}>List price</span>
               <input

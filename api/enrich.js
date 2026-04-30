@@ -48,6 +48,8 @@ import {
   assessIdentityConfidence,
 } from "../src/lib/identityGate.js";
 import { extractIdentityFromImageSearch } from "../src/lib/imageSearchIdentity.js";
+// Ship #20b — price bands engine (verified sold-first pricing).
+import { computePriceBands, enforceFloor } from "../src/lib/priceBands.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
@@ -1620,6 +1622,47 @@ export default async function handler(req, res) {
       blendedAvg = activeAvg;
     }
 
+    // Ship #20b — Price bands (verified sold-first pricing).
+    // Calculate Quick/Market/Stretch bands from verified sold comps (primary),
+    // verified active comps (fallback), or PC base (last resort).
+    // Apply era-aware grade multiplier to all bands.
+    const eraYear = confirmedYear || year;
+    let gradeMultiplier = 1;
+    let gradeLabel = '';
+
+    if (isGraded === true && numericGrade != null) {
+      const gradeInfo = getGradeMultiplier(numericGrade, eraYear);
+      if (gradeInfo) {
+        gradeMultiplier = gradeInfo.multiplier;
+        gradeLabel = `CGC ${numericGrade}`;
+      }
+    } else if (grade) {
+      const rawInfo = getRawGradeMultiplier(grade, eraYear);
+      gradeMultiplier = rawInfo.multiplier;
+      gradeLabel = rawInfo.label;
+    }
+
+    const pcBase = priceCharting?.price || null;
+    const priceBandsRaw = computePriceBands({
+      soldComps: filteredSold,
+      activeComps: rawComps,
+      pcBase,
+      gradeMultiplier,
+      title,
+      issue: correctedIssue,
+      variant: req.body?.variant || null
+    });
+
+    if (priceBandsRaw) {
+      console.log(
+        `[price-bands] source=${priceBandsRaw.source} ` +
+        `quick=$${priceBandsRaw.quick} market=$${priceBandsRaw.market} stretch=$${priceBandsRaw.stretch} ` +
+        `count=${priceBandsRaw.count}` +
+        (priceBandsRaw.recencyDays != null ? ` recency=${priceBandsRaw.recencyDays}d` : '') +
+        ` gradeMult=${gradeMultiplier}`
+      );
+    }
+
     const out = {};
 
     if (comicVine) {
@@ -1631,6 +1674,18 @@ export default async function handler(req, res) {
       out.variantIdentitySource = variantIdentitySource;
       out.variantConsensus = variantConsensus;
       out.variantOverriddenVision = variantOverriddenVision;
+    }
+
+    // Ship #20b — Price bands (Quick/Market/Stretch) from verified sold/active comps
+    if (priceBandsRaw) {
+      out.priceBands = {
+        quick: fmtUsd(priceBandsRaw.quick),
+        market: fmtUsd(priceBandsRaw.market),
+        stretch: fmtUsd(priceBandsRaw.stretch),
+        source: priceBandsRaw.source,
+        count: priceBandsRaw.count,
+        recencyDays: priceBandsRaw.recencyDays
+      };
     }
 
     // Key issue: prefer ComicVine structured data, then description-derived,
@@ -1727,17 +1782,38 @@ export default async function handler(req, res) {
     let priceAfterFloor = 0;
     let isMegaKeyForFloor = false;
 
-    // Primary price source: PriceCharting (aggregated sold data).
-    // For graded comics, apply a CGC multiplier against the raw base price.
-    // For raw comics, apply a raw grade multiplier against the base price.
-    // Fallback: Browse API comps (active listings).
+    // Ship #20b — Primary price source: Price Bands (verified sold-first pricing).
+    // STEP 1: Verified sold comps (min 2) → Quick/Market/Stretch bands
+    // STEP 2: Verified active comps (min 2) → Quick/Market/Stretch bands
+    // STEP 3: PC base (last resort) → synthetic bands
+    // Fallback: Legacy PC/browse API logic (when price bands unavailable).
     //
     // Ship #20a.6.4: entire pricing flow gated by identity confidence. When
     // gate fires, this whole block is skipped. Comps/sold/pop reference data
     // (already populated above) still surfaces on the response so the user
     // can see what eBay/PC found, but no price recommendation is produced.
     if (idCheck.confident) {
-    if (priceCharting) {
+    // Ship #20b — Use price bands as primary pricing source
+    if (priceBandsRaw) {
+      out.price = fmtUsd(priceBandsRaw.market);
+      out.priceLow = fmtUsd(priceBandsRaw.quick);
+      out.priceHigh = fmtUsd(priceBandsRaw.stretch);
+      out.gradeMultiplier = gradeMultiplier;
+      out.pricingSource = priceBandsRaw.source === 'verified_sold'
+        ? 'verified_sold'
+        : priceBandsRaw.source === 'verified_active'
+        ? 'verified_active'
+        : 'pc_estimate';
+      out.priceNote = gradeLabel
+        ? `${gradeLabel} · ${priceBandsRaw.count} verified comps`
+        : `${priceBandsRaw.count} verified comps`;
+
+      console.log(
+        `[price-bands-pricing] market=${priceBandsRaw.market.toFixed(2)} ` +
+        `source=${out.pricingSource} count=${priceBandsRaw.count} ` +
+        `gradeMult=${gradeMultiplier}`
+      );
+    } else if (priceCharting) {
       let pc = priceCharting.price;
       // Era-aware multipliers use confirmedYear (healed via PC/CV crosscheck)
       // when available; falls back to user year; then vintage default.
