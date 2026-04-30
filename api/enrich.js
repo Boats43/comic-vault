@@ -1385,6 +1385,8 @@ export default async function handler(req, res) {
     // keeps Vision variant. Old books (pre-2000) skip entirely.
     let confirmedVariant = req.body.variant || null;
     let variantIdentitySource = 'vision';
+    let variantConsensus = null;
+    let variantOverriddenVision = false;
     const variantCheck = extractConfirmedVariant(
       visualResult?.items,
       req.body.variant,
@@ -1394,9 +1396,8 @@ export default async function handler(req, res) {
     if (variantCheck) {
       confirmedVariant = variantCheck.confirmedVariant;
       variantIdentitySource = 'ebay_image_consensus';
-      out.variantIdentitySource = variantIdentitySource;
-      out.variantConsensus = variantCheck.consensus;
-      out.variantOverriddenVision = variantCheck.overriddenVision;
+      variantConsensus = variantCheck.consensus;
+      variantOverriddenVision = variantCheck.overriddenVision;
     }
 
     // Step 2b: year-dependent lookups using confirmedYear.
@@ -1623,6 +1624,13 @@ export default async function handler(req, res) {
 
     if (comicVine) {
       out.comicVine = comicVine;
+    }
+
+    // Ship #20a.6.18 — Variant identity fields (moved after out initialization)
+    if (variantIdentitySource === 'ebay_image_consensus') {
+      out.variantIdentitySource = variantIdentitySource;
+      out.variantConsensus = variantConsensus;
+      out.variantOverriddenVision = variantOverriddenVision;
     }
 
     // Key issue: prefer ComicVine structured data, then description-derived,
