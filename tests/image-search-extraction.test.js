@@ -467,6 +467,42 @@ console.log('\nShip #EBAY-FIRST — extractConsensus:');
   assertEq(consensus.variant, 'virgin', 'variant consensus virgin');
 }
 
+{
+  // Ship #EBAY-FIRST FIX — variant noise stripping test
+  // Real-world case: The Crow Dead Time #1 with 20 different variant suffixes
+  // All should collapse to same base title after stripping variant noise
+  const items = [
+    { title: 'The Crow: Dead Time #1 Alan Quah FanExpo Chicago Virgin Variant Ltd 300 W/COA' },
+    { title: 'CROW DEAD TIME #1 ALAN QUAH FANEXPO CHICAGO EXCLUSIVE SPOT FOIL LTD 75' },
+    { title: 'CROW DEAD TIME #1 SIGNED ALAN QUAH FANEXPO CHICAGO SPOT FOIL VIRGIN LTD 75 W/COA' },
+    { title: 'Crow Dead Time #1 Alan Quah FanExpo Virgin Cover (2024)' },
+    { title: 'The Crow Dead Time #1 Alan Quah Fanexpo Exclusive Virgin Ltd 300' },
+    { title: 'CROW DEAD TIME 1 ALAN QUAH FANEXPO VIRGIN FOIL LIMITED 300 COA' },
+    { title: 'Crow Dead Time #1 FanExpo Chicago Alan Quah Virgin Variant' },
+    { title: 'The Crow: Dead Time #1 Alan Quah Virgin Variant FanExpo Ltd 300' },
+    { title: 'CROW DEAD TIME #1 FANEXPO ALAN QUAH VIRGIN EXCLUSIVE LTD' },
+    { title: 'Crow Dead Time #1 (2024) Alan Quah FanExpo Virgin' },
+    { title: 'The Crow Dead Time #1 Alan Quah Virgin Ltd 300 FanExpo' },
+    { title: 'CROW: DEAD TIME #1 ALAN QUAH FANEXPO VIRGIN VARIANT' },
+    { title: 'Crow Dead Time #1 FanExpo Virgin Alan Quah Ltd 300' },
+    { title: 'The Crow Dead Time #1 Virgin Variant Alan Quah FanExpo' },
+    { title: 'CROW DEAD TIME #1 VIRGIN ALAN QUAH FANEXPO LTD 300' },
+    { title: 'Crow: Dead Time #1 Alan Quah FanExpo Virgin Limited 300' },
+    { title: 'THE CROW DEAD TIME #1 FANEXPO VIRGIN ALAN QUAH' },
+    { title: 'Crow Dead Time #1 (2024) FanExpo Alan Quah Virgin' },
+    { title: 'The Crow: Dead Time 1 Alan Quah Virgin FanExpo Ltd' },
+    { title: 'CROW DEAD TIME #1 ALAN QUAH VIRGIN FANEXPO EXCLUSIVE' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  const consensus = extractConsensus(rows);
+
+  assertTrue(consensus !== null, 'variant noise: consensus not null');
+  assertTrue(consensus.title && (consensus.title.toLowerCase().includes('crow') && consensus.title.toLowerCase().includes('dead')), `variant noise: title contains Crow Dead (got "${consensus.title}")`);
+  assertEq(consensus.issue, '1', 'variant noise: issue #1');
+  assertTrue(consensus.confidence >= 0.65, `variant noise: confidence ≥0.65 (got ${consensus.confidence})`);
+  console.log(`  ✓ variant noise stripped: 20 diverse titles → consensus "${consensus.title}" #${consensus.issue} (${consensus.confidence} confidence)`);
+}
+
 // ─── Done ────────────────────────────────────────────────────────────
 console.log(`\n=== ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

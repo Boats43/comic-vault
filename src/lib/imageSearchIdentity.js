@@ -281,6 +281,26 @@ export const extractConsensus = (parsedRows) => {
 
   const total = parsedRows.length;
 
+  // Ship #EBAY-FIRST FIX — strip variant noise before consensus.
+  // Problem: 20 correct results but all have different variant suffixes
+  // (Alan Quah, FanExpo, Virgin, Foil, Ltd 300, etc.) so consensus fails.
+  // Solution: strip variant keywords BEFORE comparing titles.
+  const stripVariantNoise = (title) => {
+    if (!title) return title;
+    return String(title)
+      .replace(/\b(virgin|virgins?|foil|exclusive|exclusives?|signed|autographed?|ltd|limited|coa|w\/coa|with\s+coa)\b/gi, '')
+      .replace(/\b(fanexpo|fan[\s-]?expo|megacon|nycc|sdcc|c2e2|eccc|wondercon|emerald\s+city)\b/gi, '')
+      .replace(/\b(alan\s+quah|inhyuk\s+lee|jeehyung\s+lee|raymond\s+gay|peach\s+momoko|artgerm|stanley\s+lau)\b/gi, '')
+      .replace(/\b(david\s+nakayama|alex\s+ross|jim\s+lee|todd\s+mcfarlane|frank\s+miller)\b/gi, '')
+      .replace(/\b(\d+\s*copies?)\b/gi, '')
+      .replace(/\b(ltd\s*\d+|ltd\s*to\s*\d+|limited\s*\d+|limited\s*to\s*\d+)\b/gi, '')
+      .replace(/\b(1:\d+)\b/gi, '') // ratio variants
+      .replace(/\b(spot\s+foil|gold\s+foil|silver\s+foil|metallic|embossed)\b/gi, '')
+      .replace(/\b(sketch|remark|remarked?|blank|trade\s+dress)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
   // Helper: find most common non-null value + count
   const getMostCommon = (values) => {
     const freq = {};
@@ -301,13 +321,31 @@ export const extractConsensus = (parsedRows) => {
     return { value: winner, count: maxCount };
   };
 
+  // For title consensus, extract series name from RAW titles (more consistent)
+  // CRITICAL: strip variant noise FIRST, then extract main title.
+  const extractMainTitle = (rawTitle) => {
+    if (!rawTitle) return null;
+    let s = stripVariantNoise(rawTitle); // <-- STRIP VARIANT NOISE
+    // Strip everything after #issue or (year)
+    s = s.replace(/#\s*\d{1,3}\b.*$/i, '');
+    s = s.replace(/\(\d{4}\).*$/i, '');
+    // Strip publisher/slab markers
+    s = s.replace(/\b(marvel|dc|image|cgc|cbcs|pgx|psa)\b/gi, '');
+    // Strip year at end
+    s = s.replace(/\b(19\d{2}|20\d{2})\b.*$/i, '');
+    // Normalize whitespace
+    s = s.replace(/\s+/g, ' ').trim();
+    if (!s || s.length < 3) return null;
+    return s;
+  };
+
   // Extract values for each field
-  const titles = parsedRows.map((r) => r.title).filter(Boolean);
+  const mainTitles = parsedRows.map((r) => extractMainTitle(r.rawTitle)).filter(Boolean);
   const issues = parsedRows.map((r) => r.issue).filter(Boolean);
   const years = parsedRows.map((r) => r.year).filter(Boolean);
 
   // Find consensus for each field
-  const titleResult = getMostCommon(titles);
+  const titleResult = getMostCommon(mainTitles);
   const issueResult = getMostCommon(issues);
   const yearResult = getMostCommon(years);
 
