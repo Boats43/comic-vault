@@ -22,6 +22,8 @@
 // - UNCERTAIN (60-89): Partial agreement, needs review
 // - UNVERIFIED (<60): Major conflicts, block listing
 
+import { extractIdentityFromImageSearch, extractConsensus } from './imageSearchIdentity.js';
+
 export function alignIdentity({
   visionTitle,
   visionIssue,
@@ -103,9 +105,13 @@ export function alignIdentity({
     return str || null;
   };
 
-  // Build consensus from eBay image search
-  const ebayTitleConsensus = buildEbayConsensus(ebayImageResults);
-  const ebayIssueConsensus = buildEbayIssueConsensus(ebayImageResults);
+  // Build consensus from eBay image search using proper variant-stripping logic
+  const parsedEbayRows = ebayImageResults?.length
+    ? extractIdentityFromImageSearch(ebayImageResults)
+    : [];
+  const ebayConsensus = extractConsensus(parsedEbayRows);
+  const ebayTitleConsensus = ebayConsensus?.title || null;
+  const ebayIssueConsensus = ebayConsensus?.issue || null;
 
   // Normalize inputs
   const visionYearNorm = normalizeYear(visionYear);
@@ -340,40 +346,6 @@ function normalizeTitle(str) {
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function buildEbayConsensus(items) {
-  if (!items?.length) return null;
-  // Extract series titles from eBay results
-  // Find most common (≥2 agree)
-  const titles = items.map((i) => i.title).filter(Boolean);
-  const freq = {};
-  titles.forEach((t) => {
-    freq[t] = (freq[t] || 0) + 1;
-  });
-  const entries = Object.entries(freq).sort((a, b) => b[1] - a[1]);
-  const top = entries[0];
-  return top?.[1] >= 2 ? top[0] : null;
-}
-
-function buildEbayIssueConsensus(items) {
-  if (!items?.length) return null;
-  // Extract issue numbers from eBay results
-  // Find most common (≥2 agree)
-  const issues = items
-    .map((i) => {
-      const m = String(i.title || '').match(/#\s*(\d+)/);
-      return m ? m[1] : null;
-    })
-    .filter(Boolean);
-  if (issues.length === 0) return null;
-  const freq = {};
-  issues.forEach((iss) => {
-    freq[iss] = (freq[iss] || 0) + 1;
-  });
-  const entries = Object.entries(freq).sort((a, b) => b[1] - a[1]);
-  const top = entries[0];
-  return top?.[1] >= 2 ? top[0] : null;
 }
 
 function tokenize(str) {
