@@ -2555,16 +2555,15 @@ export default async function handler(req, res) {
     out.confidenceLevel = confidenceLevel;
 
     // Ship #23 FIX 2 — Refuse to price with zero verified comps.
-    // Never show a price when we have no verified active comps, no sold comps,
-    // and the price came from browse_api (unverified eBay data).
+    // Never show a price when we have no verified active comps and no sold comps,
+    // regardless of source (PC base, browse_api, or price bands).
     if (
       verifiedCount === 0 &&
       soldCount === 0 &&
-      out.price != null &&
-      out.pricingSource === "browse_api"
+      out.price != null
     ) {
       console.log(
-        `[refuse-to-price] 0 verified comps + 0 sold comps — refusing browse_api price ${out.price}`
+        `[refuse-to-price] 0 verified comps + 0 sold comps — refusing price ${out.price} (source: ${out.pricingSource})`
       );
       out.price = null;
       out.priceLow = null;

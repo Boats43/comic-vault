@@ -69,66 +69,55 @@ assertFalse(testYearGateFilter(1969, 2020), '1969 book rejects 2020 (51y gap, pr
 // ─── FIX 2: Refuse-to-price logic ───────────────────────────────────
 console.log('\nFIX 2 — Refuse to price (zero verified comps):');
 
-// Test the refuse-to-price condition
-const shouldRefuseToPrice = (verifiedCount, soldCount, pricingSource, hasPrice) => {
+// Test the refuse-to-price condition (updated: no longer checks pricingSource)
+const shouldRefuseToPrice = (verifiedCount, soldCount, hasPrice) => {
   return (
     verifiedCount === 0 &&
     soldCount === 0 &&
-    hasPrice &&
-    pricingSource === 'browse_api'
+    hasPrice
   );
 };
 
-// Should refuse
+// Should refuse (browse_api source)
 assertTrue(
-  shouldRefuseToPrice(0, 0, 'browse_api', true),
+  shouldRefuseToPrice(0, 0, true),
   'Refuse when 0 verified + 0 sold + browse_api price'
+);
+
+// Should refuse (PC source with no comps)
+assertTrue(
+  shouldRefuseToPrice(0, 0, true),
+  'Refuse when 0 verified + 0 sold + PC price (no comp validation)'
 );
 
 // Should NOT refuse (has verified comps)
 assertFalse(
-  shouldRefuseToPrice(2, 0, 'browse_api', true),
-  'Keep when 2 verified + 0 sold + browse_api'
+  shouldRefuseToPrice(2, 0, true),
+  'Keep when 2 verified + 0 sold'
 );
 
 // Should NOT refuse (has sold comps)
 assertFalse(
-  shouldRefuseToPrice(0, 1, 'browse_api', true),
-  'Keep when 0 verified + 1 sold + browse_api'
+  shouldRefuseToPrice(0, 1, true),
+  'Keep when 0 verified + 1 sold'
 );
 
 // Should NOT refuse (has both)
 assertFalse(
-  shouldRefuseToPrice(2, 1, 'browse_api', true),
-  'Keep when 2 verified + 1 sold + browse_api'
-);
-
-// Should NOT refuse (PC source is reliable)
-assertFalse(
-  shouldRefuseToPrice(0, 0, 'pricecharting', true),
-  'Keep when PC source even with 0 comps'
-);
-
-// Should NOT refuse (verified_sold source)
-assertFalse(
-  shouldRefuseToPrice(0, 0, 'verified_sold', true),
-  'Keep when verified_sold source'
+  shouldRefuseToPrice(2, 1, true),
+  'Keep when 2 verified + 1 sold'
 );
 
 // Should NOT refuse (no price set)
 assertFalse(
-  shouldRefuseToPrice(0, 0, 'browse_api', false),
+  shouldRefuseToPrice(0, 0, false),
   'Keep when no price (already null)'
 );
 
 // Edge cases
 assertFalse(
-  shouldRefuseToPrice(1, 0, 'browse_api', true),
+  shouldRefuseToPrice(1, 0, true),
   'Keep when exactly 1 verified comp'
-);
-assertFalse(
-  shouldRefuseToPrice(0, 0, 'pc_estimate', true),
-  'Keep when pc_estimate source'
 );
 
 // ─── FIX 3 & 4: UI behavior (not unit-testable) ─────────────────────
