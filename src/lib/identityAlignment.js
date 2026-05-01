@@ -29,6 +29,7 @@ export function alignIdentity({
   visionPublisher,
   visionConfidence,
   ebayImageResults,
+  ebayImageOverride,
   pcProductName,
   pcIssue,
   pcYear,
@@ -49,39 +50,41 @@ export function alignIdentity({
   };
 
   // RULE 0: eBay visual hard override
-  // If eBay image search returns ≥10 results and overlap with Vision < 20%,
-  // eBay wins unconditionally. eBay physically compared the cover art to its
-  // database — 20 Crow results vs Vision saying Van Helsing = Vision hallucinated.
-  if (ebayImageResults?.length >= 10) {
-    const ebayConsensus = buildEbayConsensus(ebayImageResults);
-    if (ebayConsensus) {
-      const ebayVisionOverlap = overlap(
-        normalizeTitle(ebayConsensus),
-        normalizeTitle(visionTitle)
-      );
-      if (ebayVisionOverlap < 0.2) {
-        // Complete mismatch — eBay saw different book
-        return {
-          confirmedTitle: ebayConsensus,
-          confirmedIssue: visionIssue,
-          confirmedYear: visionYear,
-          confirmedSource: 'ebay_image_override',
-          overrodeVision: true,
-          visionWas: visionTitle,
-          confidence: 'UNCERTAIN',
-          authenticationScore: 65,
-          conflicts: [{
-            field: 'title',
-            severity: 'CRITICAL',
-            vision: visionTitle,
-            ebay: ebayConsensus,
-            ebayCount: ebayImageResults.length,
-            message: `eBay image search (${ebayImageResults.length} results) disagrees with Vision — cover art does not match`
-          }],
-          needsReview: true,
-          breakdown: { title: 65, issue: 0, year: 0, publisher: 0 }
-        };
-      }
+  // If eBay image search extracted a clean base title (ebayImageOverride) and
+  // overlap with Vision < 20%, eBay wins unconditionally. eBay physically
+  // compared the cover art to its database — 20 Crow results vs Vision saying
+  // Van Helsing = Vision hallucinated.
+  //
+  // ebayImageOverride is pre-extracted in api/enrich.js via extractConsensus,
+  // which strips variant noise and returns the clean series title.
+  if (ebayImageOverride && ebayImageResults?.length >= 10) {
+    const ebayVisionOverlap = overlap(
+      normalizeTitle(ebayImageOverride),
+      normalizeTitle(visionTitle)
+    );
+    if (ebayVisionOverlap < 0.2) {
+      // Complete mismatch — eBay saw different book
+      console.log(`[RULE 0] eBay override: "${ebayImageOverride}" vs Vision: "${visionTitle}" (overlap ${(ebayVisionOverlap * 100).toFixed(0)}%)`);
+      return {
+        confirmedTitle: ebayImageOverride,
+        confirmedIssue: visionIssue,
+        confirmedYear: visionYear,
+        confirmedSource: 'ebay_image_override',
+        overrodeVision: true,
+        visionWas: visionTitle,
+        confidence: 'UNCERTAIN',
+        authenticationScore: 65,
+        conflicts: [{
+          field: 'title',
+          severity: 'CRITICAL',
+          vision: visionTitle,
+          ebay: ebayImageOverride,
+          ebayCount: ebayImageResults.length,
+          message: `eBay image search (${ebayImageResults.length} results) disagrees with Vision — cover art does not match`
+        }],
+        needsReview: true,
+        breakdown: { title: 65, issue: 0, year: 0, publisher: 0 }
+      };
     }
   }
 

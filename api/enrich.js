@@ -47,7 +47,7 @@ import {
   sanitizeIdentityFields,
   assessIdentityConfidence,
 } from "../src/lib/identityGate.js";
-import { extractIdentityFromImageSearch } from "../src/lib/imageSearchIdentity.js";
+import { extractIdentityFromImageSearch, extractConsensus } from "../src/lib/imageSearchIdentity.js";
 // Ship #20b — price bands engine (verified sold-first pricing).
 import { computePriceBands, enforceFloor } from "../src/lib/priceBands.js";
 // Ship #21 — demand signals from sales data.
@@ -1267,6 +1267,17 @@ export default async function handler(req, res) {
     ]);
     mark('phase1_complete');
 
+    // Ship #EBAY-VISUAL-OVERRIDE — extract clean base title from eBay image search
+    // before alignIdentity runs. This becomes PRIMARY identity source when overlap
+    // with Vision < 20%. Downstream queries (PC, CV) use this instead of Vision.
+    const parsedVisualRows = extractIdentityFromImageSearch(visualResult?.items || []);
+    const visualConsensus = extractConsensus(parsedVisualRows);
+    const visualBase = visualConsensus?.title || null;
+
+    if (visualBase) {
+      console.log(`[visual-base] extracted: "${visualBase}" from ${visualResult?.items?.length || 0} eBay results`);
+    }
+
     // Ship #24 — Identity Authentication Score: cross-reference Vision, eBay
     // image search, PriceCharting, ComicVine, and CGC to validate ALL identity
     // fields (title/issue/year/publisher) and produce 0-100 authentication score.
@@ -1277,6 +1288,7 @@ export default async function handler(req, res) {
       visionPublisher: publisher,
       visionConfidence: confidence,
       ebayImageResults: visualResult?.items,
+      ebayImageOverride: visualBase, // Clean base title from eBay consensus
       pcProductName: priceChartingInitial?.productName,
       pcIssue: null, // PC embeds issue in productName, extract if needed
       pcYear: priceChartingInitial?.year,

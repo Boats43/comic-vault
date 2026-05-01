@@ -306,6 +306,7 @@ test('extractIssueFromEbayResults: no issues in titles → null', () => {
 test('RULE 0: 20 eBay results, 0% overlap with Vision → eBay wins unconditionally', () => {
   // Real-world case: Vision identified "Grimm Fairy Tales Van Helsing vs. Dracula"
   // but eBay image search returned 20 "The Crow: Dead Time" results
+  // ebayImageOverride = clean extracted title from consensus
   const result = alignIdentity({
     visionTitle: 'Grimm Fairy Tales Presents Van Helsing vs. Dracula #1',
     visionIssue: '1',
@@ -334,6 +335,7 @@ test('RULE 0: 20 eBay results, 0% overlap with Vision → eBay wins unconditiona
       { title: "The Crow InHyuk Lee Virgin Ed (Slight Damage) - limited 200 W/COA (MegaCon '26)" },
       { title: 'The Crow: Dead Time Megacon Inhyuk Lee Virgin Exclusive LTD To 100 Worldwide COA' },
     ],
+    ebayImageOverride: 'The Crow Dead Time', // Clean base title extracted by extractConsensus
     pcProductName: null,
     cvVolumeName: null,
   });
@@ -347,11 +349,11 @@ test('RULE 0: 20 eBay results, 0% overlap with Vision → eBay wins unconditiona
   assert(result.conflicts.length === 1, 'should have 1 conflict');
   assert(result.conflicts[0].severity === 'CRITICAL', 'conflict should be CRITICAL');
   assert(result.conflicts[0].ebayCount === 20, 'should record 20 eBay results');
-  assert(result.confirmedTitle.includes('Crow') || result.confirmedTitle.includes('CROW'), 'eBay consensus should be Crow-related');
+  assert(result.confirmedTitle === 'The Crow Dead Time', 'should use eBay clean base title');
 });
 
 test('RULE 0: 15 eBay results, 100% overlap with Vision → no override, existing logic runs', () => {
-  // eBay agrees with Vision — RULE 0 does not fire
+  // eBay agrees with Vision — RULE 0 does not fire (overlap >= 20%)
   const result = alignIdentity({
     visionTitle: 'Amazing Spider-Man #300',
     visionIssue: '300',
@@ -375,6 +377,7 @@ test('RULE 0: 15 eBay results, 100% overlap with Vision → no override, existin
       { title: 'Amazing Spider-Man #300' },
       { title: 'Amazing Spider-Man #300' },
     ],
+    ebayImageOverride: 'Amazing Spider-Man', // Clean base title matches Vision
     pcProductName: 'Amazing Spider-Man #300',
     cvVolumeName: 'Amazing Spider-Man',
   });
@@ -400,13 +403,14 @@ test('RULE 0: 5 eBay results, 0% overlap → no override (threshold not met)', (
       { title: 'Superman #1' },
       { title: 'Superman #1' },
     ],
+    ebayImageOverride: 'Superman', // Clean base title (BUT only 5 results, threshold not met)
     pcProductName: 'Batman (2024)',
     cvVolumeName: 'Batman',
   });
 
   assert(result.confirmedSource !== 'ebay_image_override', 'should NOT fire RULE 0 (< 10 results)');
   assert(result.confirmedTitle === 'Batman #1', 'should keep Vision title');
-  // eBay consensus would be "Superman" but with only 5 results, the ≥10 threshold blocks the override
+  // eBay consensus is "Superman" but with only 5 results, the ≥10 threshold blocks the override
 });
 
 run();
