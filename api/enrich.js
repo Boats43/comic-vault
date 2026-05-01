@@ -1251,27 +1251,45 @@ export default async function handler(req, res) {
     ]);
     mark('phase1_complete');
 
-    // Ship #20a.6.7c — Identity Alignment: cross-reference Vision, eBay image
-    // search, PriceCharting, and ComicVine to determine most accurate title.
-    // eBay image search has highest trust (matched actual cover image).
+    // Ship #24 — Identity Authentication Score: cross-reference Vision, eBay
+    // image search, PriceCharting, ComicVine, and CGC to validate ALL identity
+    // fields (title/issue/year/publisher) and produce 0-100 authentication score.
     const alignment = alignIdentity({
       visionTitle: title,
       visionIssue: issueNum,
       visionYear: year,
+      visionPublisher: publisher,
       visionConfidence: confidence,
       ebayImageResults: visualResult?.items,
       pcProductName: priceChartingInitial?.productName,
+      pcIssue: null, // PC embeds issue in productName, extract if needed
+      pcYear: priceChartingInitial?.year,
       cvVolumeName: comicVine?.volume,
+      cvIssue: comicVine?.issueNumber,
+      cvYear: comicVine?.coverDate ? parseInt(String(comicVine.coverDate).match(/(\d{4})/)?.[1], 10) : null,
+      cvPublisher: comicVine?.publisher,
+      cgcTitle: cgcResult?.title || null,
+      cgcIssue: cgcResult?.issue || null,
     });
+
+    // Ship #24 — Log authentication score and conflicts
+    console.log(
+      `[identity] auth=${alignment.authenticationScore}% ${alignment.confidence} ` +
+      `source=${alignment.confirmedSource} ` +
+      `conflicts=${alignment.conflicts.length} ` +
+      `breakdown=${JSON.stringify(alignment.breakdown)}`
+    );
 
     if (alignment.overrodeVision) {
       console.log(
-        `[identity] eBay overrides Vision: "${alignment.visionWas}" → "${alignment.confirmedTitle}"`
+        `[identity] OVERRIDE: Vision="${alignment.visionWas}" → "${alignment.confirmedTitle}"`
       );
-    } else if (alignment.confirmedSource === 'vision+text') {
-      console.log(`[identity] Vision confirmed by text sources (${alignment.confidence})`);
-    } else {
-      console.log(`[identity] Vision only, confidence=${alignment.confidence}${alignment.needsReview ? ' (needs review)' : ''}`);
+    }
+
+    if (alignment.conflicts.length > 0) {
+      console.log(
+        `[identity] CONFLICTS: ${JSON.stringify(alignment.conflicts.slice(0, 3))}`
+      );
     }
 
     // Ship #20a.6.7c — Instrumentation: log image search titles for Option B
@@ -2500,6 +2518,33 @@ export default async function handler(req, res) {
       out.salesVelocity = pcSales.salesVelocity;
     }
 
+    // Ship #25 — Velocity analysis + dynamic pricing
+    if (out.salesVelocity && out.priceBands) {
+      const { analyzeVelocity } = await import('../src/lib/velocityAnalyzer.js');
+      const velocityAnalysis = analyzeVelocity({
+        salesVelocity: out.salesVelocity,
+        userGrade: numericGrade || (isGraded ? null : 'raw'),
+        priceBands: out.priceBands,
+      });
+
+      if (velocityAnalysis) {
+        out.velocityAnalysis = velocityAnalysis;
+
+        // Log velocity insights
+        if (velocityAnalysis.hasData) {
+          console.log(
+            `[velocity] tier=${velocityAnalysis.tier} ` +
+            `perDay=${velocityAnalysis.perDay?.toFixed(3)} ` +
+            `label="${velocityAnalysis.label}" ` +
+            `rec=${velocityAnalysis.recommendation.recommendedBand} ` +
+            `price=$${velocityAnalysis.recommendation.recommendedPrice || 'N/A'}`
+          );
+        } else {
+          console.log('[velocity] no data for user grade');
+        }
+      }
+    }
+
     // Confidence level — PC data guarantees at least MEDIUM.
     const verifiedCount = rawComps?.count || 0;
     const soldCount = filteredSold.length;
@@ -2594,19 +2639,22 @@ export default async function handler(req, res) {
       }
     }
 
-    // Ship #20a.6.7c — Identity alignment cross-reference result
+    // Ship #24 — Identity authentication score (0-100 cross-source validation)
     if (alignment) {
       out.identityAlignment = {
         confirmedTitle: alignment.confirmedTitle,
+        confirmedIssue: alignment.confirmedIssue,
+        confirmedYear: alignment.confirmedYear,
         confirmedSource: alignment.confirmedSource,
         overrodeVision: alignment.overrodeVision,
         confidence: alignment.confidence,
+        authenticationScore: alignment.authenticationScore,
+        breakdown: alignment.breakdown,
+        conflicts: alignment.conflicts,
+        needsReview: alignment.needsReview,
       };
       if (alignment.overrodeVision) {
         out.identityAlignment.visionWas = alignment.visionWas;
-      }
-      if (alignment.needsReview) {
-        out.identityAlignment.needsReview = true;
       }
     }
 

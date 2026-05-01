@@ -2566,6 +2566,82 @@ function CollectionDetail({
         </div>
       )}
 
+      {/* Ship #24 — AUTHENTICATION BADGE */}
+      {item.identityAlignment?.authenticationScore != null && (
+        <div style={{
+          background:
+            item.identityAlignment.authenticationScore >= 90
+              ? '#d4edda'
+              : item.identityAlignment.authenticationScore >= 60
+                ? '#fff3cd'
+                : '#f8d7da',
+          border: `1px solid ${
+            item.identityAlignment.authenticationScore >= 90
+              ? '#28a745'
+              : item.identityAlignment.authenticationScore >= 60
+                ? '#ffc107'
+                : '#dc3545'
+          }`,
+          borderRadius: '8px',
+          padding: '12px',
+          marginTop: '12px',
+          fontSize: '13px',
+        }}>
+          <div style={{
+            fontWeight: 700,
+            marginBottom: item.identityAlignment.conflicts?.length > 0 ? 6 : 0,
+            color:
+              item.identityAlignment.authenticationScore >= 90
+                ? '#155724'
+                : item.identityAlignment.authenticationScore >= 60
+                  ? '#856404'
+                  : '#721c24'
+          }}>
+            {item.identityAlignment.authenticationScore >= 90 ? '🟢' :
+             item.identityAlignment.authenticationScore >= 60 ? '🟡' : '🔴'}
+            {' '}
+            {item.identityAlignment.confidence} ({item.identityAlignment.authenticationScore}%)
+          </div>
+          {item.identityAlignment.breakdown && (
+            <div style={{
+              fontSize: '11px',
+              opacity: 0.8,
+              marginBottom: item.identityAlignment.conflicts?.length > 0 ? 6 : 0,
+              fontFamily: 'monospace',
+            }}>
+              Title: {item.identityAlignment.breakdown.title}% ·
+              Issue: {item.identityAlignment.breakdown.issue}% ·
+              Year: {item.identityAlignment.breakdown.year}% ·
+              Pub: {item.identityAlignment.breakdown.publisher}%
+            </div>
+          )}
+          {item.identityAlignment.conflicts?.length > 0 && (
+            <div style={{
+              fontSize: '11px',
+              color: '#721c24',
+              background: 'rgba(220,53,69,0.1)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              marginTop: 6,
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                Conflicts ({item.identityAlignment.conflicts.length}):
+              </div>
+              {item.identityAlignment.conflicts.slice(0, 3).map((c, i) => (
+                <div key={i} style={{ marginBottom: 2 }}>
+                  • {c.field}: Vision={JSON.stringify(c.vision)} vs {Object.keys(c).filter(k => k !== 'field' && k !== 'vision').map(k => `${k}=${JSON.stringify(c[k])}`).join(', ')}
+                </div>
+              ))}
+              {item.identityAlignment.conflicts.length > 3 && (
+                <div style={{ opacity: 0.7, marginTop: 4 }}>
+                  ...and {item.identityAlignment.conflicts.length - 3} more
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 4b. PC-TRACKED CGC POP (Phase 5a.3) */}
       {item.pop && Array.isArray(item.pop.cgc) && item.pop.cgc.length === POP_GRADE_INDEX.length && (
         <div className="pop-panel">
@@ -3541,6 +3617,81 @@ function CollectionDetail({
               </div>
             )}
 
+            {/* Ship #25 — Velocity Analysis */}
+            {item.velocityAnalysis && item.velocityAnalysis.hasData && (
+              <div style={{
+                background: (() => {
+                  const tier = item.velocityAnalysis.tier;
+                  if (tier === 'HOT') return 'rgba(220,38,38,0.1)';
+                  if (tier === 'FAST') return 'rgba(234,88,12,0.1)';
+                  if (tier === 'NORMAL') return 'rgba(22,163,74,0.1)';
+                  if (tier === 'SLOW') return 'rgba(202,138,4,0.1)';
+                  return 'rgba(156,163,175,0.1)';
+                })(),
+                border: `1px solid ${(() => {
+                  const tier = item.velocityAnalysis.tier;
+                  if (tier === 'HOT') return 'rgba(220,38,38,0.3)';
+                  if (tier === 'FAST') return 'rgba(234,88,12,0.3)';
+                  if (tier === 'NORMAL') return 'rgba(22,163,74,0.3)';
+                  if (tier === 'SLOW') return 'rgba(202,138,4,0.3)';
+                  return 'rgba(156,163,175,0.3)';
+                })()}`,
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 12,
+              }}>
+                <div style={{ color: "#888", fontSize: 11, marginBottom: 8, letterSpacing: 0.5 }}>
+                  MARKET VELOCITY
+                </div>
+                <div style={{ fontSize: 13, marginBottom: 8, lineHeight: 1.4 }}>
+                  {item.velocityAnalysis.summary}
+                </div>
+                {item.velocityAnalysis.recommendation.recommendedPrice && (
+                  <div style={{
+                    background: 'rgba(255,255,255,0.04)',
+                    borderRadius: 6,
+                    padding: '8px 12px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginTop: 8,
+                  }}>
+                    <span style={{ fontSize: 12, color: '#888' }}>
+                      Recommended ({item.velocityAnalysis.recommendation.recommendedBand}):
+                    </span>
+                    <button
+                      onClick={() => {
+                        setListPrice(item.velocityAnalysis.recommendation.recommendedPrice);
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#60a5fa',
+                        fontSize: 15,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        padding: 0,
+                      }}
+                    >
+                      ${item.velocityAnalysis.recommendation.recommendedPrice}
+                    </button>
+                  </div>
+                )}
+                {item.velocityAnalysis.saturation?.saturated && (
+                  <div style={{
+                    marginTop: 8,
+                    fontSize: 11,
+                    color: '#fbbf24',
+                    background: 'rgba(251,191,36,0.1)',
+                    padding: '6px 8px',
+                    borderRadius: 4,
+                  }}>
+                    ⚠️ {item.velocityAnalysis.saturation.reason}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Ship #21 — Decision Path UI */}
             {item.claudeCheck && item.claudeCheck.recommendation && (
               <div style={{
@@ -3785,6 +3936,40 @@ function CollectionDetail({
                       style={{ width: "100%", background: "#da3633", color: "white" }}
                     >
                       Acknowledge edition warning and Enable Listing
+                    </button>
+                  </>
+                );
+              }
+              // Ship #24 — Authentication gate (block listing when score < 80)
+              const needsAuthAck =
+                item.identityAlignment?.authenticationScore != null &&
+                item.identityAlignment.authenticationScore < 80 &&
+                !item.authenticationConfirmed;
+              if (needsAuthAck) {
+                const authScore = item.identityAlignment.authenticationScore;
+                const conflicts = item.identityAlignment.conflicts || [];
+                const conflictFields = conflicts.map(c => c.field).join(", ");
+                return (
+                  <>
+                    <div style={{
+                      padding: "8px 10px",
+                      marginBottom: 8,
+                      background: authScore >= 60 ? "rgba(255,193,7,0.1)" : "rgba(218,54,51,0.1)",
+                      border: `1px solid ${authScore >= 60 ? "#ffc107" : "#da3633"}`,
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: authScore >= 60 ? "#856404" : "#fca5a5",
+                    }}>
+                      {authScore >= 60 ? '⚠️' : '🚨'} LOW AUTHENTICATION ({authScore}%) —
+                      Identity conflicts detected{conflictFields ? ` (${conflictFields})` : ""}.
+                      Cross-source validation shows disagreement. Review data accuracy before listing.
+                    </div>
+                    <button
+                      className="reset-btn"
+                      onClick={() => onUpdateField(item, 'authenticationConfirmed', true)}
+                      style={{ width: "100%", background: authScore >= 60 ? "#ffc107" : "#da3633", color: authScore >= 60 ? "#856404" : "white" }}
+                    >
+                      Acknowledge conflicts and Enable Listing
                     </button>
                   </>
                 );
