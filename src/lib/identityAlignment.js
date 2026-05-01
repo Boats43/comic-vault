@@ -48,6 +48,43 @@ export function alignIdentity({
     return matches.length / Math.max(ta.length, 1);
   };
 
+  // RULE 0: eBay visual hard override
+  // If eBay image search returns ≥10 results and overlap with Vision < 20%,
+  // eBay wins unconditionally. eBay physically compared the cover art to its
+  // database — 20 Crow results vs Vision saying Van Helsing = Vision hallucinated.
+  if (ebayImageResults?.length >= 10) {
+    const ebayConsensus = buildEbayConsensus(ebayImageResults);
+    if (ebayConsensus) {
+      const ebayVisionOverlap = overlap(
+        normalizeTitle(ebayConsensus),
+        normalizeTitle(visionTitle)
+      );
+      if (ebayVisionOverlap < 0.2) {
+        // Complete mismatch — eBay saw different book
+        return {
+          confirmedTitle: ebayConsensus,
+          confirmedIssue: visionIssue,
+          confirmedYear: visionYear,
+          confirmedSource: 'ebay_image_override',
+          overrodeVision: true,
+          visionWas: visionTitle,
+          confidence: 'UNCERTAIN',
+          authenticationScore: 65,
+          conflicts: [{
+            field: 'title',
+            severity: 'CRITICAL',
+            vision: visionTitle,
+            ebay: ebayConsensus,
+            ebayCount: ebayImageResults.length,
+            message: `eBay image search (${ebayImageResults.length} results) disagrees with Vision — cover art does not match`
+          }],
+          needsReview: true,
+          breakdown: { title: 65, issue: 0, year: 0, publisher: 0 }
+        };
+      }
+    }
+  }
+
   // Normalize year helper (handle cover date strings)
   const normalizeYear = (y) => {
     if (!y) return null;
@@ -291,6 +328,15 @@ export function alignIdentity({
       publisher: Math.round(publisherScore),
     },
   };
+}
+
+function normalizeTitle(str) {
+  if (!str) return '';
+  return String(str)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function buildEbayConsensus(items) {
