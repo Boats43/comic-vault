@@ -344,18 +344,28 @@ export const extractConsensus = (parsedRows) => {
   const issues = parsedRows.map((r) => r.issue).filter(Boolean);
   const years = parsedRows.map((r) => r.year).filter(Boolean);
 
+  console.log(`[consensus-debug] total=${total}, mainTitles=${mainTitles.length}, issues=${issues.length}`);
+  console.log(`[consensus-debug] first 3 mainTitles:`, mainTitles.slice(0, 3));
+  console.log(`[consensus-debug] first 3 issues:`, issues.slice(0, 3));
+
   // Find consensus for each field
   const titleResult = getMostCommon(mainTitles);
   const issueResult = getMostCommon(issues);
   const yearResult = getMostCommon(years);
+
+  console.log(`[consensus-debug] titleResult:`, titleResult);
+  console.log(`[consensus-debug] issueResult:`, issueResult);
 
   // Require ≥50% agreement for each field
   const titleOk = titleResult.count / total >= 0.5;
   const issueOk = issueResult.count / total >= 0.5;
   const yearOk = yearResult.count / total >= 0.5;
 
+  console.log(`[consensus-debug] titleOk=${titleOk} (${titleResult.count}/${total}), issueOk=${issueOk} (${issueResult.count}/${total})`);
+
   if (!titleOk || !issueOk) {
     // Can't establish consensus on basic identity
+    console.log(`[consensus-debug] FAILED: titleOk=${titleOk}, issueOk=${issueOk}`);
     return null;
   }
 
