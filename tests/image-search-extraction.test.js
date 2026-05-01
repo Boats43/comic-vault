@@ -18,6 +18,7 @@ import {
   extractYearFromTitle,
   extractSeriesTitle,
   extractIdentityFromImageSearch,
+  extractConsensus,
 } from '../src/lib/imageSearchIdentity.js';
 
 let passed = 0;
@@ -356,6 +357,114 @@ console.log('\nShip #20a.6.7c — Consensus threshold + artist extraction:');
   assertContains(extractVariantTokens('Crow #1 Fanexpo Variant'), 'fanexpo', 'fanexpo (no space)');
   assertContains(extractVariantTokens('Crow #1 Fan Expo Variant'), 'fanexpo', 'fan expo (space)');
   assertContains(extractVariantTokens('Crow #1 Fan-Expo Variant'), 'fanexpo', 'fan-expo (hyphen)');
+}
+
+// ─── Ship #EBAY-FIRST: extractConsensus ──────────────────────────────
+console.log('\nShip #EBAY-FIRST — extractConsensus:');
+{
+  // High consensus — 17/20 listings agree on ASM #300
+  const items = [
+    { title: 'Amazing Spider-Man #300 (1988) Marvel CGC 9.8' },
+    { title: 'Amazing Spider-Man 300 Marvel 1988 VF/NM' },
+    { title: 'Amazing Spider-Man #300 (1988)' },
+    { title: 'Amazing Spider-Man #300 1988' },
+    { title: 'Amazing Spider-Man #300 Marvel' },
+    { title: 'ASM #300 1988' },
+    { title: 'ASM #300 1988' },
+    { title: 'Amazing Spider-Man #300 (1988)' },
+    { title: 'Amazing Spider-Man #300 Marvel 1988' },
+    { title: 'Amazing Spider-Man #300' },
+    { title: 'Amazing Spider-Man #300 (1988)' },
+    { title: 'Amazing Spider-Man #300 Marvel' },
+    { title: 'Amazing Spider-Man #300 1988' },
+    { title: 'Amazing Spider-Man #300' },
+    { title: 'Amazing Spider-Man #300 (1988) Marvel' },
+    { title: 'Amazing Spider-Man #300 Marvel 1988' },
+    { title: 'Amazing Spider-Man #300 (1988)' },
+    { title: 'Spider-Man #301 (1988)' }, // outlier
+    { title: 'ASM #302' }, // outlier
+    { title: 'Amazing Spider-Man #300 (1988) Marvel' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  const consensus = extractConsensus(rows);
+
+  assertTrue(consensus !== null, 'consensus returned');
+  assertEq(consensus.issue, '300', 'consensus issue #300');
+  assertTrue(consensus.title && consensus.title.toLowerCase().includes('spider'), 'consensus title contains spider');
+  assertEq(consensus.year, '1988', 'consensus year 1988');
+  assertEq(consensus.publisher, 'Marvel', 'consensus publisher Marvel');
+  assertTrue(consensus.confidence >= 0.75, `confidence ≥0.75 (got ${consensus.confidence})`);
+  assertEq(consensus.source, 'ebay_image_search', 'source field');
+  assertTrue(consensus.agreement.total === 20, 'total listings = 20');
+}
+
+{
+  // Low consensus — no majority
+  const items = [
+    { title: 'Book A #1' },
+    { title: 'Book B #2' },
+    { title: 'Book C #3' },
+    { title: 'Book D #4' },
+    { title: 'Book E #5' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  const consensus = extractConsensus(rows);
+
+  assertEq(consensus, null, 'no consensus when no majority');
+}
+
+{
+  // Minimum threshold — need at least 5 listings
+  const items = [
+    { title: 'Crow #1 (2024)' },
+    { title: 'Crow #1 (2024)' },
+    { title: 'Crow #1' },
+    { title: 'Crow #1' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  const consensus = extractConsensus(rows);
+
+  assertEq(consensus, null, 'minimum 5 listings required');
+}
+
+{
+  // Exactly 50% agreement — should pass
+  const items = [
+    { title: 'Crow #1 (2024) Image' },
+    { title: 'Crow #1 (2024) Image' },
+    { title: 'Crow #1 (2024) Image' },
+    { title: 'Crow #1 (2024) Image' },
+    { title: 'Crow #1 (2024) Image' },
+    { title: 'Different #2' },
+    { title: 'Different #2' },
+    { title: 'Different #2' },
+    { title: 'Different #2' },
+    { title: 'Different #2' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  const consensus = extractConsensus(rows);
+
+  assertTrue(consensus !== null, '50% agreement passes');
+  assertTrue(consensus.title && consensus.title.toLowerCase().includes('crow'), 'consensus title Crow');
+  assertEq(consensus.issue, '1', 'consensus issue #1');
+  assertEq(consensus.confidence, 0.5, 'confidence exactly 0.5');
+}
+
+{
+  // Variant consensus — virgin appears in 3+ listings
+  const items = [
+    { title: 'Absolute Batman #1 Virgin Variant (2024) DC' },
+    { title: 'Absolute Batman #1 Virgin Cover DC' },
+    { title: 'Absolute Batman 1 Virgin Edition' },
+    { title: 'Absolute Batman #1 (2024)' },
+    { title: 'Absolute Batman #1 DC' },
+    { title: 'Absolute Batman #1' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  const consensus = extractConsensus(rows);
+
+  assertTrue(consensus !== null, 'consensus with variant');
+  assertEq(consensus.variant, 'virgin', 'variant consensus virgin');
 }
 
 // ─── Done ────────────────────────────────────────────────────────────
