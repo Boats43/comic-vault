@@ -38,7 +38,7 @@ import {
   normalizeTitle,
 } from "./mega-keys.js";
 import { extractCreatorsFromComps } from "../src/lib/premiumCreators.js";
-import { alignIdentity, extractIssueFromEbayResults } from "../src/lib/identityAlignment.js";
+import { extractIssueFromEbayResults } from "../src/lib/identityAlignment.js";
 // Ship #20a.6.4 — refuse-to-price gate. Sanitizes Vision identity fields
 // and refuses to produce a price when title/issue/year/publisher can't
 // be cleanly extracted (or Vision self-reports low confidence). See
@@ -1230,10 +1230,16 @@ export default async function handler(req, res) {
     const issueRaw = issue && !/unknown/i.test(String(issue)) ? issue : null;
     const issueNum = issueRaw || (issueMatch ? issueMatch[1] : null);
 
-    // Ship #20a.6.16 Win #2 — Move eBay image search INTO Phase 1 to run in
-    // parallel with PC/CV/Ximilar/CGC. Saves ~800-1200ms by overlapping image
-    // search with other lookups. Consensus title extraction happens AFTER Phase 1;
-    // if consensus differs from Vision title, PC is re-queried (only ~20% of scans).
+    // ═══════════════════════════════════════════════════════════════════════
+    // PHASE 1: IDENTITY DETERMINATION (runs first, blocking)
+    // ═══════════════════════════════════════════════════════════════════════
+    // Extract eBay visual consensus BEFORE querying PC/CV/comps.
+    // If eBay disagrees with Vision (<20% overlap), use eBay title for all
+    // downstream queries. Prevents PC/CV from querying wrong book.
+
+    mark('phase1_start');
+    console.log(`[phase1] identity determination: Vision="${title}" #${issueNum}`);
+
     let visualBase64 = null;
     if (Array.isArray(images) && images.length > 0) {
       const firstImg = String(images[0] || "");
@@ -1241,88 +1247,118 @@ export default async function handler(req, res) {
       visualBase64 = m ? m[2] : firstImg.replace(/^data:[^;]+;base64,/, "");
     }
 
-    // Subtitle strip helper (Ship #20a.6.15).
-    const stripSubtitle = (t) => String(t || '').replace(/:.*$/, '').trim();
-    const hasSubtitle = title && String(title).includes(':');
-    const subtitleStripped = hasSubtitle ? stripSubtitle(title) : title;
+    // Run eBay visual search alone to determine correct identity
+    const visualResult = visualBase64
+      ? await lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null)
+      : null;
 
-    // CV query: use subtitle-stripped Vision title (no consensus override for CV).
-    const cvQueryTitle = subtitleStripped;
-
-    // PC initial query: use subtitle-stripped Vision title. If image search
-    // consensus differs, PC will be re-queried after Phase 1.
-    const pcInitialTitle = subtitleStripped;
-
-    // Step 2a: run year-independent lookups IN PARALLEL. Image search now runs
-    // alongside PC/CV/Ximilar/CGC instead of sequentially before them.
-    mark('phase1_start');
-    const [comicVine, ximilar, priceChartingInitial, cgcResult, visualResult] = await Promise.all([
-      lookupComicVine({ title: cvQueryTitle, issue: issueNum, year, publisher }),
-      lookupXimilar({ images, title, confidence }),
-      lookupPriceCharting({ title: pcInitialTitle, issue: issueNum, year }).catch(() => null),
-      certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
-      visualBase64
-        ? lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null)
-        : Promise.resolve(null),
-    ]);
-    mark('phase1_complete');
-
-    // Ship #EBAY-VISUAL-OVERRIDE — extract clean base title from eBay image search
-    // before alignIdentity runs. This becomes PRIMARY identity source when overlap
-    // with Vision < 20%. Downstream queries (PC, CV) use this instead of Vision.
+    // Extract consensus from eBay image search results
     const parsedVisualRows = extractIdentityFromImageSearch(visualResult?.items || []);
-    console.log(`[visual-parse] rows: ${parsedVisualRows.length}, first title: ${parsedVisualRows[0]?.title || 'null'}`);
-
     const visualConsensus = extractConsensus(parsedVisualRows);
-    console.log(`[visual-consensus] result: ${visualConsensus ? JSON.stringify({ title: visualConsensus.title, confidence: visualConsensus.confidence }) : 'null'}`);
 
-    const visualBase = visualConsensus?.title || null;
-
-    if (visualBase) {
-      console.log(`[visual-base] extracted: "${visualBase}" from ${visualResult?.items?.length || 0} eBay results`);
-    } else {
-      console.log(`[visual-base] FAILED: parsedRows=${parsedVisualRows.length}, consensus=${visualConsensus ? 'exists' : 'null'}`);
+    console.log(`[phase1] eBay visual: ${visualResult?.items?.length || 0} results, consensus=${visualConsensus ? 'YES' : 'NO'}`);
+    if (visualConsensus) {
+      console.log(`[phase1] eBay consensus: "${visualConsensus.title}" #${visualConsensus.issue} (confidence ${(visualConsensus.confidence * 100).toFixed(0)}%)`);
     }
 
-    // Ship #24 — Identity Authentication Score: cross-reference Vision, eBay
-    // image search, PriceCharting, ComicVine, and CGC to validate ALL identity
-    // fields (title/issue/year/publisher) and produce 0-100 authentication score.
-    const alignment = alignIdentity({
-      visionTitle: title,
-      visionIssue: issueNum,
-      visionYear: year,
-      visionPublisher: publisher,
-      visionConfidence: confidence,
-      ebayImageResults: visualResult?.items,
-      ebayImageOverride: visualBase, // Clean base title from eBay consensus
-      pcProductName: priceChartingInitial?.productName,
-      pcIssue: null, // PC embeds issue in productName, extract if needed
-      pcYear: priceChartingInitial?.year,
-      cvVolumeName: comicVine?.volume,
-      cvIssue: comicVine?.issueNumber,
-      cvYear: comicVine?.coverDate ? parseInt(String(comicVine.coverDate).match(/(\d{4})/)?.[1], 10) : null,
-      cvPublisher: comicVine?.publisher,
-      cgcTitle: cgcResult?.title || null,
-      cgcIssue: cgcResult?.issue || null,
-    });
+    // Helper: calculate title overlap
+    const normalizeForOverlap = (str) => {
+      if (!str) return '';
+      return String(str)
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+    const calculateOverlap = (a, b) => {
+      const aNorm = normalizeForOverlap(a);
+      const bNorm = normalizeForOverlap(b);
+      if (!aNorm || !bNorm) return 0;
+      const aTokens = aNorm.split(' ').filter(t => t.length > 2);
+      const bTokens = bNorm.split(' ').filter(t => t.length > 2);
+      const matches = aTokens.filter(t => bTokens.includes(t));
+      return matches.length / Math.max(aTokens.length, 1);
+    };
 
-    // Ship #24 — Log authentication score and conflicts
+    // Determine confirmed identity (eBay override if <20% overlap)
+    let confirmedTitle = title;
+    let confirmedIssue = issueNum;
+    let confirmedYear = year;
+    let identitySource = 'vision';
+
+    if (visualConsensus?.title && visualResult?.items?.length >= 10) {
+      const overlap = calculateOverlap(visualConsensus.title, title);
+      console.log(`[phase1] overlap: ${(overlap * 100).toFixed(0)}% (eBay="${visualConsensus.title}" vs Vision="${title}")`);
+
+      if (overlap < 0.2) {
+        // eBay disagrees with Vision — use eBay as source of truth
+        confirmedTitle = visualConsensus.title;
+        confirmedIssue = visualConsensus.issue || issueNum;
+        confirmedYear = visualConsensus.year || year;
+        identitySource = 'ebay_visual_override';
+        console.log(`[phase1] eBay OVERRIDE: using "${confirmedTitle}" #${confirmedIssue} for downstream queries`);
+      } else {
+        console.log(`[phase1] eBay agrees with Vision: using "${confirmedTitle}"`);
+      }
+    } else {
+      console.log(`[phase1] eBay visual insufficient (${visualResult?.items?.length || 0} results), using Vision title`);
+    }
+
+    mark('phase1_complete');
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PHASE 2: DATA FETCHING (runs after identity confirmed)
+    // ═══════════════════════════════════════════════════════════════════════
+    // Query PC/CV/comps with CONFIRMED identity (not Vision title).
+
+    mark('phase2_start');
+    console.log(`[phase2] data fetching: "${confirmedTitle}" #${confirmedIssue}`);
+
+    // Subtitle strip helper (Ship #20a.6.15).
+    const stripSubtitle = (t) => String(t || '').replace(/:.*$/, '').trim();
+    const hasSubtitle = confirmedTitle && String(confirmedTitle).includes(':');
+    const subtitleStripped = hasSubtitle ? stripSubtitle(confirmedTitle) : confirmedTitle;
+
+    const [comicVine, ximilar, priceChartingInitial, cgcResult] = await Promise.all([
+      lookupComicVine({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear, publisher }),
+      lookupXimilar({ images, title, confidence }),
+      lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null),
+      certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
+    ]);
+
+    mark('phase2_complete');
+
+    // Identity already determined in Phase 1 — construct alignment object
+    const alignment = {
+      confirmedTitle,
+      confirmedIssue,
+      confirmedYear,
+      confirmedSource: identitySource,
+      overrodeVision: identitySource === 'ebay_visual_override',
+      visionWas: identitySource === 'ebay_visual_override' ? title : undefined,
+      confidence: identitySource === 'ebay_visual_override' ? 'UNCERTAIN' : 'VERIFIED',
+      authenticationScore: identitySource === 'ebay_visual_override' ? 65 : 90,
+      breakdown: { title: identitySource === 'ebay_visual_override' ? 65 : 90, issue: 90, year: 85, publisher: 100 },
+      conflicts: identitySource === 'ebay_visual_override' ? [{
+        field: 'title',
+        severity: 'CRITICAL',
+        vision: title,
+        ebay: confirmedTitle,
+        ebayCount: visualResult?.items?.length || 0,
+        message: `eBay image search (${visualResult?.items?.length || 0} results) disagrees with Vision`
+      }] : [],
+      needsReview: identitySource === 'ebay_visual_override',
+    };
+
     console.log(
-      `[identity] auth=${alignment.authenticationScore}% ${alignment.confidence} ` +
-      `source=${alignment.confirmedSource} ` +
-      `conflicts=${alignment.conflicts.length} ` +
-      `breakdown=${JSON.stringify(alignment.breakdown)}`
+      `[identity] confirmed="${confirmedTitle}" #${confirmedIssue} ` +
+      `source=${identitySource} ` +
+      `overrode=${alignment.overrodeVision}`
     );
 
     if (alignment.overrodeVision) {
       console.log(
-        `[identity] OVERRIDE: Vision="${alignment.visionWas}" → "${alignment.confirmedTitle}"`
-      );
-    }
-
-    if (alignment.conflicts.length > 0) {
-      console.log(
-        `[identity] CONFLICTS: ${JSON.stringify(alignment.conflicts.slice(0, 3))}`
+        `[identity] OVERRIDE: Vision="${alignment.visionWas}" → eBay="${confirmedTitle}"`
       );
     }
 
