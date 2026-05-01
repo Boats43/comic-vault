@@ -365,20 +365,26 @@ export const extractConsensus = (parsedRows) => {
   console.log(`[consensus-debug] first 3 mainTitles:`, mainTitles.slice(0, 3));
   console.log(`[consensus-debug] first 3 issues:`, issues.slice(0, 3));
 
+  // Normalize titles before consensus (extra normalization beyond extractMainTitle)
+  const normalizedTitles = mainTitles.map(t =>
+    String(t).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  );
+
   // Find consensus for each field
-  const titleResult = getMostCommon(mainTitles);
+  const titleResult = getMostCommon(normalizedTitles);
   const issueResult = getMostCommon(issues);
   const yearResult = getMostCommon(years);
 
   console.log(`[consensus-debug] titleResult:`, titleResult);
   console.log(`[consensus-debug] issueResult:`, issueResult);
 
-  // Require ≥50% agreement for each field
-  const titleOk = titleResult.count / total >= 0.5;
+  // Lower threshold: 30% for title (when issue passes at 60%, title at 30% is sufficient)
+  // Issue still requires 50% agreement as critical field
+  const titleOk = titleResult.count / total >= 0.3;
   const issueOk = issueResult.count / total >= 0.5;
   const yearOk = yearResult.count / total >= 0.5;
 
-  console.log(`[consensus-debug] titleOk=${titleOk} (${titleResult.count}/${total}), issueOk=${issueOk} (${issueResult.count}/${total})`);
+  console.log(`[consensus-debug] titleOk=${titleOk} (${titleResult.count}/${total} >= 30%), issueOk=${issueOk} (${issueResult.count}/${total} >= 50%)`);
 
   if (!titleOk || !issueOk) {
     // Can't establish consensus on basic identity

@@ -1478,7 +1478,7 @@ export default async function handler(req, res) {
         keyIssueStr
       );
 
-    let confirmedYear;
+    // confirmedYear already declared in Phase 1, just reassign if needed
     let yearOverrideRejected = false;
     if (isEraSpecific && userYear) {
       confirmedYear = String(userYear);
