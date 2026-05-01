@@ -814,14 +814,41 @@ export const fetchComps = async ({
             const m = String(t || '').match(/\b(19|20)\d{2}\b/);
             return m ? parseInt(m[0], 10) : null;
           };
+          // Ship #25.1 — Modern relaunch marker detection
+          // Reject listings with New 52, Rebirth, Infinite Frontier markers
+          // when user's book is pre-2000 (catches relaunches that share issue #s)
+          const MODERN_RELAUNCH_RE = /\b(n52|new\s*52|rebirth|infinite\s*frontier|legacy|prime\s*earth)\b/i;
+
           const beforeEra = p.length;
           const eraFiltered = p.filter((it) => {
-            const ly = extractYear(it.title);
-            if (ly == null) return true;
+            const titleStr = String(it.title || '');
+
+            // Reject modern relaunches for pre-2000 books
+            if (yearNum < 2000 && MODERN_RELAUNCH_RE.test(titleStr)) {
+              console.log('[era-filter] rejected (modern relaunch marker):',
+                titleStr.slice(0, 55));
+              return false;
+            }
+
+            const ly = extractYear(titleStr);
+
+            // Ship #25.1 — Golden Age year-missing rejection
+            // For pre-1970 books, REJECT listings with no year (assume modern).
+            // Modern reprints often omit year: "Action Comics #33" (2011 relaunch)
+            // but Golden Age originals usually have year in seller titles.
+            if (ly == null) {
+              if (yearNum < 1970) {
+                console.log('[era-filter] rejected (no year, pre-1970 book):',
+                  titleStr.slice(0, 55));
+                return false;
+              }
+              return true; // Modern books: keep listings without year
+            }
+
             const diff = Math.abs(ly - yearNum);
             if (diff > tolerance) {
               console.log('[era-filter] rejected:',
-                String(it.title || '').slice(0, 55),
+                titleStr.slice(0, 55),
                 `(year ${ly} vs ${yearNum}, tol ±${tolerance})`);
               return false;
             }
