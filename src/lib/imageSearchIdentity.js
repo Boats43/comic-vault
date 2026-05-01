@@ -175,8 +175,12 @@ export const extractVariantTokens = (title) => {
 // — issue # in 1-999 only, no trailing digits.
 const ISSUE_RE = /#\s*(\d{1,3})(?!\d)/;
 export const extractIssueFromTitle = (title) => {
-  const m = String(title || '').match(ISSUE_RE);
-  if (!m) return null;
+  const titleStr = String(title || '');
+  const m = titleStr.match(ISSUE_RE);
+  if (!m) {
+    console.log(`[extractIssue] NO MATCH for: "${titleStr.slice(0, 80)}"`);
+    return null;
+  }
   const n = parseInt(m[1], 10);
   if (n > 999) return null;
   return m[1];
@@ -238,17 +242,30 @@ export const extractSeriesTitle = (rawTitle) => {
 // variantTokens. Items without a string title are kept with all-null
 // fields so callers can correlate index-aligned with the original items.
 export const extractIdentityFromImageSearch = (items) => {
-  if (!Array.isArray(items)) return [];
-  return items.map((it) => {
+  if (!Array.isArray(items)) {
+    console.log(`[extractIdentity] NOT AN ARRAY:`, typeof items);
+    return [];
+  }
+  console.log(`[extractIdentity] processing ${items.length} items, first item:`, items[0]);
+  const results = items.map((it, idx) => {
     const rawTitle = (it && typeof it.title === 'string') ? it.title : null;
-    return {
+    if (!rawTitle && idx < 3) {
+      console.log(`[extractIdentity] item ${idx} has no title:`, it);
+    }
+    const parsed = {
       rawTitle,
       title: extractSeriesTitle(rawTitle),
       issue: extractIssueFromTitle(rawTitle),
       year: extractYearFromTitle(rawTitle),
       variantTokens: extractVariantTokens(rawTitle),
     };
+    if (idx < 2) {
+      console.log(`[extractIdentity] item ${idx} parsed:`, { rawTitle: parsed.rawTitle?.slice(0, 50), title: parsed.title, issue: parsed.issue });
+    }
+    return parsed;
   });
+  console.log(`[extractIdentity] extracted ${results.filter(r => r.issue).length} issues from ${results.length} items`);
+  return results;
 };
 
 // Ship #EBAY-FIRST — consensus extraction from eBay image search results.
