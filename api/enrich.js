@@ -588,6 +588,22 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
       }
     }
 
+    // Language gate: filter out non-English editions (German, French, Spanish, Italian).
+    // Prevents Scumbag #1 (German) and other foreign-language editions from winning.
+    const beforeLang = candidates.length;
+    const langFiltered = candidates.filter((r) => {
+      const vol = volDetails[r?.volume?.id];
+      if (!vol?.name) return true;
+      return !/\b(german|deutsch|french|français|spanish|español|italian|italiano)\b/i
+        .test(String(vol.name));
+    });
+    if (langFiltered.length > 0) {
+      candidates.splice(0, candidates.length, ...langFiltered);
+      console.log(
+        `[cv-lang-gate] ${beforeLang} → ${candidates.length} volumes (non-English filtered)`
+      );
+    }
+
     // Re-score with volume detail data (start_year, publisher).
     const scoreWithDetails = (r) => {
       const base = scoreMatch(r);

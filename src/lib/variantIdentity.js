@@ -90,9 +90,9 @@ export const extractConfirmedVariant = (
     return null;
   }
 
-  // Gate 3: modern book only (year >= 2000)
+  // Gate 3: bookYear must exist (any era)
   const y = parseInt(bookYear, 10);
-  if (!y || y < 2000) {
+  if (!y) {
     return null;
   }
 

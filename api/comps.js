@@ -1232,6 +1232,20 @@ export const fetchComps = async ({
       const filtered = applyFilterChain(raw);
       console.log(`[comps] attempt ${attempt.n} post-filter=${filtered.parsed.length}`);
       if (filtered.parsed.length > 0) {
+        // Issue verification: when searching for a specific issue, ensure at least
+        // one comp actually has the correct issue number before accepting the pool.
+        // Prevents broader queries (attempt 3: "title year", attempt 4: "title only")
+        // from returning wrong-issue comps that survive other filters.
+        if (iss) {
+          const issueRe = new RegExp(`#\\s*${iss}\\b`, 'i');
+          const hasCorrectIssue = filtered.parsed.some((p) =>
+            issueRe.test(String(p.title || ''))
+          );
+          if (!hasCorrectIssue && i < uniqueAttempts.length - 1) {
+            console.log(`[comps] attempt ${attempt.n} no #${iss} match — continuing`);
+            continue;
+          }
+        }
         parsed = filtered.parsed;
         reprintFallback = filtered.reprintFallback;
         variantFallback = filtered.variantFallback;

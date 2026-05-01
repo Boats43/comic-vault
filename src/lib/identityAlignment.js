@@ -102,7 +102,7 @@ export function alignIdentity({
   else if (ebayTitleConsensus && overlap(ebayTitleConsensus, visionTitle) >= 0.5) {
     const ebayOverlap = overlap(ebayTitleConsensus, visionTitle);
     titleScore = Math.min(95, ebayOverlap * 100);
-    if (ebayOverlap < 0.7) {
+    if (ebayOverlap < 0.9) {
       confirmedTitle = ebayTitleConsensus;
       titleOverrodeVision = true;
       conflicts.push({ field: 'title', vision: visionTitle, ebay: ebayTitleConsensus });

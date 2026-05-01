@@ -80,8 +80,9 @@ export const COVERLESS_RE =
 // Card #20 Elektra" trading card sales. PriceCharting API includes
 // `&type=comic` parameter but still returns trading card products for some
 // queries. Downstream filter required. Closes Avengers #20 trading-card class.
+// Extended to include Impel, Marvel Universe, Series I/II/III, Score, Leaf, etc.
 export const TRADING_CARD_RE =
-  /\b(?:fleer|upper\s*deck|topps|panini|skybox|base\s*card|trading\s*card|insert\s*card|parallel|chase\s*card)\b/i;
+  /\b(?:fleer|upper\s*deck|topps|panini|skybox|impel|score|leaf|pro\s*set|press\s*pass|stadium\s*club|finest|chrome|marvel\s*universe|base\s*card|trading\s*card|insert\s*card|parallel|chase\s*card|series\s*[ivx]+|card\s*#\d+)\b/i;
 
 // Cover artist patterns — used both for active-comp creator filter
 // (api/comps.js Filter 3b) and sold-row variant-artist matching
