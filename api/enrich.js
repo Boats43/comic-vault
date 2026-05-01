@@ -566,6 +566,28 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
     console.log(`[comicvine] volDetails fetched: ${Object.keys(volDetails).length}/${uniqueVolIds.length} — ${
       Object.entries(volDetails).map(([id, v]) => `${id}:${v.name}(${v.start_year},${v.publisher?.name || "?"})`).join(", ")}`);
 
+    // Ship #23 FIX 1 — CV year gate: filter out modern volumes for pre-1970 books.
+    // Prevents 1941 books from matching 2014 story arcs with the same character name.
+    if (comicYear && comicYear < 1970) {
+      const beforeFilter = candidates.length;
+      const filteredCandidates = candidates.filter((r) => {
+        const vid = r?.volume?.id;
+        const vol = volDetails[vid];
+        if (!vol || !vol.start_year) return true; // keep if no year data
+        return Math.abs(vol.start_year - comicYear) <= 15;
+      });
+      if (filteredCandidates.length > 0) {
+        candidates.splice(0, candidates.length, ...filteredCandidates);
+        console.log(
+          `[cv-year-gate] ${comicYear}: ${beforeFilter} → ${candidates.length} volumes (filtered ±15y)`
+        );
+      } else {
+        console.log(
+          `[cv-year-gate] ${comicYear}: would remove all ${beforeFilter} volumes — keeping original set`
+        );
+      }
+    }
+
     // Re-score with volume detail data (start_year, publisher).
     const scoreWithDetails = (r) => {
       const base = scoreMatch(r);
@@ -2486,6 +2508,27 @@ export default async function handler(req, res) {
     if (soldCount >= 2 && verifiedCount >= 2) confidenceLevel = "HIGH";
     else if (verifiedCount >= 2 || soldCount >= 1 || hasPCData) confidenceLevel = "MEDIUM";
     out.confidenceLevel = confidenceLevel;
+
+    // Ship #23 FIX 2 — Refuse to price with zero verified comps.
+    // Never show a price when we have no verified active comps, no sold comps,
+    // and the price came from browse_api (unverified eBay data).
+    if (
+      verifiedCount === 0 &&
+      soldCount === 0 &&
+      out.price != null &&
+      out.pricingSource === "browse_api"
+    ) {
+      console.log(
+        `[refuse-to-price] 0 verified comps + 0 sold comps — refusing browse_api price ${out.price}`
+      );
+      out.price = null;
+      out.priceLow = null;
+      out.priceHigh = null;
+      out.priceBands = null;
+      out.priceNote = "Insufficient data — no verified comps found";
+      out.refusedToPrice = true;
+      out.pricingSource = "refused";
+    }
 
     // Surface confirmedYear so the client can heal an incorrectly-stored
     // year on the catalogue item (e.g. Claude vision read 2025 but PC /

@@ -3836,7 +3836,7 @@ function CollectionDetail({
 
 // --- Manage Tab: Claude Command Center ---
 
-function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleList }) {
+function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleList, onUpdateAll }) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bundling, setBundling] = useState(false);
@@ -3844,6 +3844,8 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   const [postAllOpen, setPostAllOpen] = useState(false);
   const [postAllRunning, setPostAllRunning] = useState(false);
   const [postAllResults, setPostAllResults] = useState([]); // [{ id, title, issue, priceNum, state, msg }]
+  const [updateAllRunning, setUpdateAllRunning] = useState(false);
+  const [updateAllProgress, setUpdateAllProgress] = useState({ current: 0, total: 0 });
 
   const toggleSelected = (id) => {
     setSelectedIds((prev) => {
@@ -3937,6 +3939,29 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
     if (postAllRunning) return;
     setPostAllOpen(false);
     setPostAllResults([]);
+  };
+
+  // Ship #23 FIX 4 — Update All Books button handler.
+  const runUpdateAll = async () => {
+    const staleBooks = catalogue.filter(
+      (c) => !c.priceBands || !c.claudeCheck || !c.demandSignals
+    );
+    if (staleBooks.length === 0) return;
+    setUpdateAllRunning(true);
+    setUpdateAllProgress({ current: 0, total: staleBooks.length });
+    for (let i = 0; i < staleBooks.length; i++) {
+      setUpdateAllProgress({ current: i + 1, total: staleBooks.length });
+      try {
+        await onUpdateAll(staleBooks[i]);
+      } catch (err) {
+        console.error(`[update-all] failed for ${staleBooks[i].title}:`, err);
+      }
+      if (i < staleBooks.length - 1) {
+        await new Promise((res) => setTimeout(res, 2000)); // 2s between updates
+      }
+    }
+    setUpdateAllRunning(false);
+    setUpdateAllProgress({ current: 0, total: 0 });
   };
 
   const submitBundle = async () => {
@@ -4342,6 +4367,37 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
                 }}
               >
                 📋 Post All HOT ({hotUnlisted.length})
+              </button>
+            );
+          })()}
+          {(() => {
+            const staleCount = catalogue.filter(
+              (c) => !c.priceBands || !c.claudeCheck || !c.demandSignals
+            ).length;
+            if (staleCount === 0) return null;
+            return (
+              <button
+                onClick={runUpdateAll}
+                disabled={selectionMode || postAllRunning || updateAllRunning}
+                style={{
+                  padding: "6px 12px",
+                  background: updateAllRunning
+                    ? "rgba(59,130,246,0.2)"
+                    : "rgba(34,197,94,0.2)",
+                  border: updateAllRunning
+                    ? "1px solid rgba(59,130,246,0.4)"
+                    : "1px solid rgba(34,197,94,0.4)",
+                  borderRadius: 20,
+                  color: updateAllRunning ? "#3b82f6" : "#22c55e",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: updateAllRunning ? "default" : "pointer",
+                  opacity: selectionMode || postAllRunning ? 0.5 : 1,
+                }}
+              >
+                {updateAllRunning
+                  ? `🔄 Updating ${updateAllProgress.current}/${updateAllProgress.total}...`
+                  : `🔄 Update All Books (${staleCount})`}
               </button>
             );
           })()}
@@ -6750,6 +6806,14 @@ export default function App() {
               collectionScrollPos.current = window.scrollY;
               prevTabRef.current = "collection";
               setSelectedItem(item);
+              // Ship #23 FIX 3 — Auto-refresh stale records when opened.
+              const isStale = !item.priceBands || !item.claudeCheck || !item.demandSignals;
+              if (isStale) {
+                console.log(`[stale-refresh] auto-refreshing ${item.title} #${item.issue || "?"}`);
+                refreshMarketData(item).catch((err) =>
+                  console.error("[stale-refresh] failed:", err)
+                );
+              }
             }}
             onDelete={deleteFromCatalogue}
           />
@@ -6765,9 +6829,18 @@ export default function App() {
             prevTabRef.current = "manage";
             setSelectedItem(item);
             setTab("collection");
+            // Ship #23 FIX 3 — Auto-refresh stale records when opened.
+            const isStale = !item.priceBands || !item.claudeCheck || !item.demandSignals;
+            if (isStale) {
+              console.log(`[stale-refresh] auto-refreshing ${item.title} #${item.issue || "?"}`);
+              refreshMarketData(item).catch((err) =>
+                console.error("[stale-refresh] failed:", err)
+              );
+            }
           }}
           onListComic={listOnEbay}
           onBundleList={listBundleOnEbay}
+          onUpdateAll={refreshMarketData}
         />
       )}
 
