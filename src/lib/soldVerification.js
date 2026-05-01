@@ -40,11 +40,13 @@ import {
   extractArtist,
 } from "./compHygiene.js";
 
-// Stale recency thresholds (per user Q3 answer, Ship #20a.6):
-//   Modern (bookYear >= 1985): reject rows older than 540 days.
+// Stale recency thresholds (tiered by era):
+//   Modern (bookYear >= 2000): reject rows older than 90 days.
+//   Copper (1985-1999): reject rows older than 180 days.
 //   Vintage (< 1985): keep all (sold pools naturally thin), tag with
 //   recencyBand='stale' for future Ship #20b weighting.
-const MODERN_STALE_DAYS = 540;
+const MODERN_STALE_DAYS = 90;   // 2000+ books
+const COPPER_STALE_DAYS = 180;  // 1985-1999
 const MODERN_ERA_CUTOFF_YEAR = 1985;
 
 // Cap raw rows preserved in out.soldCompsRaw (per Q5 answer). Diagnostics
@@ -189,13 +191,14 @@ const gradeTabMismatch = (rowTitle, rowGradeTab) => {
   return Math.abs(titleGrade - tabNum) > 0.3;
 };
 
-// Stale recency for modern books. Vintage rows are tagged but not rejected.
+// Stale recency for modern/copper books. Vintage rows are tagged but not rejected.
 const isStaleForBookYear = (daysAgo, bookYear) => {
   if (daysAgo == null) return false;
   const y = parseInt(bookYear);
   if (isNaN(y)) return false;
   if (y < MODERN_ERA_CUTOFF_YEAR) return false;
-  return daysAgo > MODERN_STALE_DAYS;
+  const cutoff = y >= 2000 ? MODERN_STALE_DAYS : COPPER_STALE_DAYS;
+  return daysAgo > cutoff;
 };
 
 // ───────────────────────────── main entry ─────────────────────────────
