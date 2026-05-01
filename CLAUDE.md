@@ -305,10 +305,10 @@ Phase 2 (deferred): Ships #28-29 (image forensics, cross-source validation) — 
 **Last 5 only — overwritten when 6th lands.**
 
 - `1751f4c` — Ship #23 — consistency engine (CV year gate + refuse-to-price + stale refresh + Update All Books). FIX 1: Pre-1970 books filter CV volumes by ±15y. FIX 2: Refuse browse_api price when 0 verified + 0 sold comps. FIX 3: Auto-refresh stale records (missing priceBands/claudeCheck/demandSignals). FIX 4: Manage tab batch update button. 1,539 → 1,570 tests (31 new). Zero regressions.
-- `24bd280` — Ship #20a.6.22 — error visibility + graceful degradation + autofix engine. Read server error body (not generic "Failed to enrich"). Graceful fallback to Vision-only when enrich fails. 8-fix autofix engine (sold-anchor, wrong-issue, series-mismatch, magazine, grade-mult, modern-contam, newsstand-penalty, single-comp). 1,416 → 1,442 tests. Zero regressions.
+- `83c7c30` — Ship #22 — best practice eBay listings (item specifics, multi-image, market proof, Claude title, Best Offer, confidence gate). Item specifics auto-populated (grade, era, publisher, key issue flags). Multi-image upload (up to 12). Claude-generated titles (variant-aware). Best Offer enabled. Confidence gate (blocks LOW confidence books). 768 listing tests added. Auto-listing complete.
+- `7d9d18c` — Ship #21 — complete card + Claude quality check + decision path. Haiku analyzes enrich result for identity/pricing quality. Demand signals (velocity/trend/liquidity). Decision recommendations (SELL/HOLD/PRESS). Layer 3 unlocked.
+- `e5240d5` — Ship #20b — verified sold first pricing + Quick/Market/Stretch bands. Sold comps = primary anchor (90d history). Price bands: Quick (10th %ile), Market (median), Stretch (90th %ile). Grade-aware anchoring. Recency weighting. Pricing-math greenlit.
 - `d971267` — Ship #20a.6 — sold comp verification + hygiene extraction. Pure-fn `verifySoldComps` filter chain (10 reject reasons + diagnostics). `compHygiene.js` extracted from `api/comps.js` (-271 lines). 911 → 1,002 tests. Pricing-math change (greenlit).
-- `4114bcb` — Ship #20a.7 — mega-key strict canonical guard. `getMegaKeyEntry(title, issue, publisher, year)`. Schema 1.0.0 → 2.0.0. Closes TMNT #1 IDW 2016 → $15K floor false-positive. 778 → 911 tests.
-- `0e3679f` — Ship #20a.5 — PriceCharting price ladder + sales velocity extraction. `out.priceLadder` (14 grades) + `out.salesVelocity` (perDay numeric). 759 → 778 tests. Data capture only.
 
 ## Active Priority Queue
 
@@ -442,11 +442,9 @@ ASM #129 auction:
 
 ### COMPLETED SHIPS (Reference)
 - ✅ Ship #20b — Verified sold pricing (Quick/Market/Stretch bands)
-- ✅ Ship #21 — Claude quality check + demand signals
+- ✅ Ship #21 — Claude quality check + demand signals  
+- ✅ Ship #22 — Best practice eBay listings (item specifics, multi-image, Claude titles, Best Offer)
 - ✅ Ship #23 — Consistency engine (CV gate, refuse-to-price, stale refresh)
-
-### PENDING USER GREENLIGHT
-- Ship #22 — Auto-listing (eBay category + description generation)
 
 ## Recalibration
 
