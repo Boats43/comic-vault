@@ -156,11 +156,21 @@ const lookupEbayIdentity = async (imageBase64) => {
   }
 
   try {
+    // Strip data URI prefix if present (eBay expects pure base64)
+    let cleanBase64 = String(imageBase64);
+    const dataUriMatch = cleanBase64.match(/^data:image\/[a-zA-Z0-9.+-]+;base64,(.*)$/);
+    if (dataUriMatch) {
+      cleanBase64 = dataUriMatch[1];
+      console.log('[ebay-id] stripped data URI prefix');
+    }
+
     const token = await getOAuthToken(appId, certId, BROWSE_SCOPE);
+    // Category 259104 = Comic Books > Single Issues (correct category for comics)
     const url =
       "https://api.ebay.com/buy/browse/v1/item_summary/search_by_image" +
-      "?category_ids=63&limit=20";
+      "?category_ids=259104&limit=20";
 
+    console.log('[ebay-id] calling eBay image search API...');
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -168,11 +178,12 @@ const lookupEbayIdentity = async (imageBase64) => {
         "Content-Type": "application/json",
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
       },
-      body: JSON.stringify({ image: imageBase64 }),
+      body: JSON.stringify({ image: cleanBase64 }),
     });
 
     if (!res.ok) {
-      console.error(`[ebay-id] HTTP ${res.status}`);
+      const errorText = await res.text();
+      console.error(`[ebay-id] HTTP ${res.status}: ${errorText}`);
       return null;
     }
 
@@ -180,11 +191,13 @@ const lookupEbayIdentity = async (imageBase64) => {
     const items = Array.isArray(json?.itemSummaries) ? json.itemSummaries : [];
 
     if (items.length === 0) {
-      console.log('[ebay-id] no results');
+      console.log('[ebay-id] no results from eBay');
+      console.log('[ebay-id] response:', JSON.stringify(json).slice(0, 500));
       return null;
     }
 
     console.log(`[ebay-id] found ${items.length} matches`);
+    console.log('[ebay-id] first 3 titles:', items.slice(0, 3).map(i => i.title));
 
     // Parse all listings into structured identity rows
     const parsedRows = extractIdentityFromImageSearch(items);
