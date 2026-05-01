@@ -250,3 +250,134 @@ export const extractIdentityFromImageSearch = (items) => {
     };
   });
 };
+
+// Ship #EBAY-FIRST — consensus extraction from eBay image search results.
+// Takes parsed identity rows and returns majority-vote consensus for each field.
+//
+// Returns:
+//   {
+//     title: "Amazing Spider-Man",
+//     issue: "300",
+//     year: "1988",
+//     publisher: "Marvel",        // extracted from titles
+//     variant: "newsstand",        // most common variant token
+//     confidence: 0.85,            // 0-1 score (% agreement)
+//     agreement: {
+//       title: 17,      // how many listings agreed
+//       issue: 19,
+//       year: 18,
+//       total: 20       // total listings processed
+//     },
+//     source: "ebay_image_search"
+//   }
+//
+// Confidence calculation: average agreement across title+issue+year fields.
+// Only fields with ≥50% agreement are returned (null otherwise).
+// Minimum 5 listings required for consensus (returns null if < 5).
+export const extractConsensus = (parsedRows) => {
+  if (!Array.isArray(parsedRows) || parsedRows.length < 5) {
+    return null;
+  }
+
+  const total = parsedRows.length;
+
+  // Helper: find most common non-null value + count
+  const getMostCommon = (values) => {
+    const freq = {};
+    let maxCount = 0;
+    let winner = null;
+
+    for (const v of values) {
+      if (!v) continue;
+      const key = String(v).toLowerCase().trim();
+      if (!key) continue;
+      freq[key] = (freq[key] || 0) + 1;
+      if (freq[key] > maxCount) {
+        maxCount = freq[key];
+        winner = v; // preserve original casing
+      }
+    }
+
+    return { value: winner, count: maxCount };
+  };
+
+  // Extract values for each field
+  const titles = parsedRows.map((r) => r.title).filter(Boolean);
+  const issues = parsedRows.map((r) => r.issue).filter(Boolean);
+  const years = parsedRows.map((r) => r.year).filter(Boolean);
+
+  // Find consensus for each field
+  const titleResult = getMostCommon(titles);
+  const issueResult = getMostCommon(issues);
+  const yearResult = getMostCommon(years);
+
+  // Require ≥50% agreement for each field
+  const titleOk = titleResult.count / total >= 0.5;
+  const issueOk = issueResult.count / total >= 0.5;
+  const yearOk = yearResult.count / total >= 0.5;
+
+  if (!titleOk || !issueOk) {
+    // Can't establish consensus on basic identity
+    return null;
+  }
+
+  // Extract publisher from titles (Marvel, DC, Image, etc.)
+  const publisherPatterns = [
+    { re: /\bmarvel\b/i, name: 'Marvel' },
+    { re: /\bdc\b/i, name: 'DC' },
+    { re: /\bimage\b/i, name: 'Image' },
+    { re: /\bdark\s+horse\b/i, name: 'Dark Horse' },
+    { re: /\bidw\b/i, name: 'IDW' },
+    { re: /\bboom\b/i, name: 'Boom' },
+    { re: /\bvaliant\b/i, name: 'Valiant' },
+    { re: /\bdynamite\b/i, name: 'Dynamite' },
+  ];
+
+  const publisherCounts = {};
+  for (const row of parsedRows) {
+    if (!row.rawTitle) continue;
+    for (const { re, name } of publisherPatterns) {
+      if (re.test(row.rawTitle)) {
+        publisherCounts[name] = (publisherCounts[name] || 0) + 1;
+        break; // first match wins
+      }
+    }
+  }
+
+  let publisher = null;
+  let maxPubCount = 0;
+  for (const [name, count] of Object.entries(publisherCounts)) {
+    if (count > maxPubCount) {
+      maxPubCount = count;
+      publisher = name;
+    }
+  }
+
+  // Extract most common variant token
+  const allVariantTokens = parsedRows
+    .flatMap((r) => r.variantTokens || [])
+    .filter(Boolean);
+  const variantResult = getMostCommon(allVariantTokens);
+  const variant = variantResult.count >= 2 ? variantResult.value : null;
+
+  // Calculate confidence: average agreement across title+issue+year
+  const confidenceScore = yearOk
+    ? (titleResult.count + issueResult.count + yearResult.count) / (total * 3)
+    : (titleResult.count + issueResult.count) / (total * 2);
+
+  return {
+    title: titleResult.value,
+    issue: issueResult.value,
+    year: yearOk ? yearResult.value : null,
+    publisher,
+    variant,
+    confidence: Math.round(confidenceScore * 100) / 100,
+    agreement: {
+      title: titleResult.count,
+      issue: issueResult.count,
+      year: yearResult.count,
+      total,
+    },
+    source: 'ebay_image_search',
+  };
+};

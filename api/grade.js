@@ -1,7 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { lookupPedigree } from "../src/lib/pedigreeRegistry.js";
+import {
+  extractIdentityFromImageSearch,
+  extractConsensus
+} from "../src/lib/imageSearchIdentity.js";
+import { getOAuthToken } from "./comps.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope";
 
 const SYSTEM_PROMPT =
   "You are an expert comic book grader with 30 years experience. You know the CGC grading scale 0.5 to 10.0. You know every key issue. You know Golden age  Silver Age Bronze Age Copper Age Modern Age pricing. Return JSON only no markdown no explanation.";
@@ -14,6 +20,31 @@ const STANDARD_PROMPT =
 
 const WATCH_PROMPT =
   `Grade this comic book from a live video frame. Read the issue number DIRECTLY from the cover. Read the title DIRECTLY from the cover masthead. Do not infer or guess — only report what you see. If a price overlay is visible report as detectedPrice. Return ONLY this JSON shape with no markdown, no commentary: ${JSON_SHAPE}. title is the series name WITHOUT the issue number. issue is the issue number as a string. Set isGraded to true ONLY when a CGC/CBCS/PGX slab label is clearly visible. grade: always return both letter grade AND numeric e.g. "VG 4.0". certNumber: extract from slab label if visible, else null. keyIssue: first appearance, origin, death of major character, first issue, classic artist significance, notable covers — null for all others. NEVER return No, N/A, None. variant: standardized short description under 5 words. Ratio: "1:25 variant". Artist: "Alex Ross variant". Cover letter: "Cover B". Print: "newsstand", "2nd print". Special: "virgin variant", "gold foil variant". Null for standard Cover A. Never return just "variant" alone. restoration: describe briefly if detected, null if none. defectPenalty: 0.5-0.9 multiplier for significant cover defects, null if normal wear.`;
+
+// Ship #EBAY-FIRST — Grade-only prompt for Sonnet when identity is already known from eBay.
+// Simplified task: just assess condition and defects. Identity fields passed in separately.
+const GRADE_JSON_SHAPE = '{ "grade": string, "isGraded": boolean, "numericGrade": number or null, "certNumber": string or null, "restoration": string or null, "defectPenalty": number or null, "cgcPenaltyFlags": { "storeStamp": { "detected": boolean, "pedigreeName": string or null }, "staplePopping": { "detected": boolean, "severity": "minor" or "severe" or null }, "polybagIndents": { "detected": boolean }, "cornerChips": { "detected": boolean, "count": number or null }, "pedigreeStamp": { "detected": boolean, "pedigreeName": string or null } } or null, "reason": string, "confidence": string, "detectedPrice": string or null }';
+
+const buildGradeOnlyPrompt = (consensus) => {
+  return `You are grading this comic book: ${consensus.title} #${consensus.issue}${consensus.year ? ` (${consensus.year})` : ''}${consensus.publisher ? ` - ${consensus.publisher}` : ''}.
+
+The book's identity has already been verified by eBay image search (${consensus.agreement.total} matching listings, ${Math.round(consensus.confidence * 100)}% confidence).
+
+Your ONLY task: Grade this book and detect defects.
+
+Return ONLY this JSON shape with no markdown: ${GRADE_JSON_SHAPE}
+
+grade: letter grade AND numeric e.g. "VG 4.0", "NM 9.4"
+isGraded: true if CGC/CBCS/PGX slab visible, else false
+numericGrade: numeric grade from slab label (e.g. 9.8), null if not slabbed
+certNumber: CGC/CBCS/PGX cert number if visible, else null
+restoration: describe if detected (tape, color touch, etc.), null if none
+defectPenalty: 0.5-0.9 multiplier for significant defects (writing, sticker, tear, water damage), null if normal wear
+cgcPenaltyFlags: detect 5 specific defects (storeStamp, staplePopping, polybagIndents, cornerChips, pedigreeStamp) - same format as full prompt
+reason: brief condition report (2-3 sentences)
+confidence: "low", "medium", or "high"
+detectedPrice: any visible price/bid overlay (e.g. "45.00"), null if none`;
+};
 
 // Parse Claude response text into JSON, tolerating markdown fences.
 const parseResponse = (text) => {
@@ -111,6 +142,72 @@ const enrichPedigree = (parsed) => {
     ped.pedigreeName = lookup.canonical;
   }
   return parsed;
+};
+
+// Ship #EBAY-FIRST — eBay image search for primary identity source.
+// Returns { consensus, rawItems } when successful, null when failed or low confidence.
+const lookupEbayIdentity = async (imageBase64) => {
+  const appId = process.env.EBAY_APP_ID;
+  const certId = process.env.EBAY_CERT_ID;
+
+  if (!appId || !certId || !imageBase64) {
+    console.log('[ebay-id] missing credentials or image');
+    return null;
+  }
+
+  try {
+    const token = await getOAuthToken(appId, certId, BROWSE_SCOPE);
+    const url =
+      "https://api.ebay.com/buy/browse/v1/item_summary/search_by_image" +
+      "?category_ids=63&limit=20";
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+      },
+      body: JSON.stringify({ image: imageBase64 }),
+    });
+
+    if (!res.ok) {
+      console.error(`[ebay-id] HTTP ${res.status}`);
+      return null;
+    }
+
+    const json = await res.json();
+    const items = Array.isArray(json?.itemSummaries) ? json.itemSummaries : [];
+
+    if (items.length === 0) {
+      console.log('[ebay-id] no results');
+      return null;
+    }
+
+    console.log(`[ebay-id] found ${items.length} matches`);
+
+    // Parse all listings into structured identity rows
+    const parsedRows = extractIdentityFromImageSearch(items);
+
+    // Extract consensus
+    const consensus = extractConsensus(parsedRows);
+
+    if (!consensus) {
+      console.log('[ebay-id] no consensus (low agreement)');
+      return null;
+    }
+
+    console.log(`[ebay-id] consensus: ${consensus.title} #${consensus.issue} (${consensus.confidence} confidence)`);
+
+    return {
+      consensus,
+      rawItems: items,
+      parsedRows,
+    };
+  } catch (err) {
+    console.error(`[ebay-id] error: ${err?.message || err}`);
+    return null;
+  }
 };
 
 // Build image content blocks from base64 array.
@@ -244,7 +341,61 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Standard path: single Opus call
+    // Ship #EBAY-FIRST: Try eBay image search for identity, fallback to Vision if needed
+    console.log('[grade] attempting eBay-first identification...');
+    const ebayResult = await lookupEbayIdentity(images[0]);
+
+    if (ebayResult && ebayResult.consensus && ebayResult.consensus.confidence >= 0.5) {
+      // eBay consensus successful — use Sonnet for grade-only
+      console.log(`[grade] eBay consensus: ${ebayResult.consensus.title} #${ebayResult.consensus.issue} (${ebayResult.consensus.confidence} confidence)`);
+      console.log('[grade] using Sonnet for grade-only assessment...');
+
+      const gradePrompt = buildGradeOnlyPrompt(ebayResult.consensus);
+      const { parsed: gradeResult } = await callModel("claude-sonnet-4-20250514", imageContent, gradePrompt);
+
+      // Merge eBay identity + Sonnet grade
+      const result = {
+        // Identity from eBay consensus
+        title: ebayResult.consensus.title,
+        issue: ebayResult.consensus.issue,
+        publisher: ebayResult.consensus.publisher || null,
+        year: ebayResult.consensus.year || null,
+        variant: ebayResult.consensus.variant || null,
+        identitySource: 'ebay_image_search',
+        identityConfidence: ebayResult.consensus.confidence,
+        ebayAgreement: ebayResult.consensus.agreement,
+
+        // Grade + condition from Sonnet
+        grade: gradeResult.grade || null,
+        isGraded: gradeResult.isGraded || false,
+        numericGrade: gradeResult.numericGrade || null,
+        certNumber: gradeResult.certNumber || null,
+        restoration: gradeResult.restoration || null,
+        defectPenalty: gradeResult.defectPenalty || null,
+        cgcPenaltyFlags: gradeResult.cgcPenaltyFlags || null,
+        reason: gradeResult.reason || null,
+        confidence: gradeResult.confidence || 'medium',
+        detectedPrice: gradeResult.detectedPrice || null,
+
+        // Metadata
+        keyIssue: null, // will be enriched by enrich.js
+        creator: null,  // will be enriched by enrich.js
+        price: null,    // will be calculated by enrich.js
+        priceLow: null,
+        priceHigh: null,
+      };
+
+      enrichPedigree(result);
+      result.editionWarning = detectEditionWarning(result.reason);
+      if (noImage) result.noImage = true;
+
+      console.log('[grade] eBay-first path succeeded');
+      res.status(200).json(result);
+      return;
+    }
+
+    // Fallback: Vision full identification (current approach)
+    console.log('[grade] eBay-first failed or low confidence — falling back to Vision full identification');
     let userPrompt = STANDARD_PROMPT;
     if (body.voiceContext) {
       userPrompt += "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
@@ -254,6 +405,7 @@ export default async function handler(req, res) {
     if (noImage) parsed.noImage = true;
     enrichPedigree(parsed);
     parsed.editionWarning = detectEditionWarning(parsed.reason);
+    parsed.identitySource = 'vision_fallback'; // mark as fallback
 
     res.status(200).json(parsed);
   } catch (err) {
