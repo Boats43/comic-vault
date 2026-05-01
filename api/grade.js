@@ -197,25 +197,52 @@ const lookupEbayIdentity = async (imageBase64) => {
     }
 
     console.log(`[ebay-id] found ${items.length} matches`);
-    console.log('[ebay-id] first 3 titles:', items.slice(0, 3).map(i => i.title));
+    console.log('[ebay-id] first result:', items[0].title);
 
-    // Parse all listings into structured identity rows
+    // SIMPLIFIED: Use eBay's #1 result directly - no voting, no thresholds
     const parsedRows = extractIdentityFromImageSearch(items);
+    const firstResult = parsedRows[0];
 
-    // Extract consensus
-    const consensus = extractConsensus(parsedRows);
-
-    if (!consensus) {
-      console.log('[ebay-id] no consensus (low agreement)');
+    if (!firstResult || !firstResult.issue) {
+      console.log('[ebay-id] first result missing title or issue');
       return null;
     }
 
-    console.log(`[ebay-id] consensus: ${consensus.title} #${consensus.issue} (${consensus.confidence} confidence)`);
+    // Extract publisher from first result's raw title
+    const publisherPatterns = [
+      { re: /\bmarvel\b/i, name: 'Marvel' },
+      { re: /\bdc\b/i, name: 'DC' },
+      { re: /\bimage\b/i, name: 'Image' },
+      { re: /\bidw\b/i, name: 'IDW' },
+      { re: /\bdark\s+horse\b/i, name: 'Dark Horse' },
+      { re: /\bboom\b/i, name: 'Boom' },
+      { re: /\bvaliant\b/i, name: 'Valiant' },
+      { re: /\bdynamite\b/i, name: 'Dynamite' },
+      { re: /\bzenescope\b/i, name: 'Zenescope' },
+    ];
+
+    let publisher = null;
+    for (const { re, name } of publisherPatterns) {
+      if (re.test(firstResult.rawTitle || '')) {
+        publisher = name;
+        break;
+      }
+    }
+
+    const identity = {
+      title: firstResult.title || items[0].title.split('#')[0].trim(),
+      issue: firstResult.issue,
+      year: firstResult.year || null,
+      publisher: publisher,
+      variant: firstResult.variantTokens?.[0] || null,
+      confidence: 1.0, // eBay's #1 result = 100% confidence
+    };
+
+    console.log(`[ebay-id] identified: ${identity.title} #${identity.issue} (${identity.publisher || 'unknown publisher'})`);
 
     return {
-      consensus,
+      consensus: identity, // renamed for compatibility with existing code
       rawItems: items,
-      parsedRows,
     };
   } catch (err) {
     console.error(`[ebay-id] error: ${err?.message || err}`);
@@ -354,13 +381,13 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Ship #EBAY-FIRST: Try eBay image search for identity, fallback to Vision if needed
+    // Ship #EBAY-FIRST: eBay image search = primary identity source (no fallback)
     console.log('[grade] attempting eBay-first identification...');
     const ebayResult = await lookupEbayIdentity(images[0]);
 
-    if (ebayResult && ebayResult.consensus && ebayResult.consensus.confidence >= 0.5) {
-      // eBay consensus successful — use Sonnet for grade-only
-      console.log(`[grade] eBay consensus: ${ebayResult.consensus.title} #${ebayResult.consensus.issue} (${ebayResult.consensus.confidence} confidence)`);
+    if (ebayResult && ebayResult.consensus) {
+      // eBay returned results — use #1 result as identity
+      console.log(`[grade] eBay identified: ${ebayResult.consensus.title} #${ebayResult.consensus.issue}`);
       console.log('[grade] using Sonnet for grade-only assessment...');
 
       const gradePrompt = buildGradeOnlyPrompt(ebayResult.consensus);
