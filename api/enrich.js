@@ -1595,8 +1595,13 @@ export default async function handler(req, res) {
           verifyCount > 0 &&
           (verifyCount - verifiedCount) / verifyCount < 1.0;
 
+        const verifiedPricesArray = Array.isArray(rawComps.prices)
+          ? rawComps.prices.filter((_, i) => keepFlags[i])
+          : [];
+
         rawComps = {
           ...rawComps,
+          prices: verifiedPricesArray,
           recentSales: verifiedSales,
           count: verifiedCount,
           average: verifiedAvg,
@@ -2572,6 +2577,7 @@ export default async function handler(req, res) {
       out.priceNote = "Insufficient data — no verified comps found";
       out.refusedToPrice = true;
       out.pricingSource = "refused";
+      out.confidenceLevel = "LOW";
     }
 
     // Surface confirmedYear so the client can heal an incorrectly-stored
