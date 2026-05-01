@@ -631,6 +631,81 @@ console.log('\n── Ship #20a.6.20 — Filter parity gaps ──');
   assertEq(r.diagnostics.reasons.format, 1, 'format reason incremented (coverless)');
 }
 
+// ── Variant token mismatch ──
+console.log('\nVariant token mismatch:');
+
+// Case 1: User has foil, comp has foil → KEPT
+{
+  const rows = [
+    { price: 150, title: 'Amazing Spider-Man #1 foil Bryan Hitch variant', daysAgo: 10, grade: '9.8' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Amazing Spider-Man', issue: '1', variant: 'foil', bookYear: 2022, userGradeKey: '9.8',
+  });
+  assertEq(r.verified.length, 1, 'User "foil", comp "foil Bryan Hitch" → KEPT');
+  assertEq(r.diagnostics.reasons.variantMismatch, 0, 'no variantMismatch');
+}
+
+// Case 2: User has foil, comp has ratio virgin → REJECTED
+{
+  const rows = [
+    { price: 200, title: 'Amazing Spider-Man #1 1:50 ratio virgin variant', daysAgo: 10, grade: '9.8' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Amazing Spider-Man', issue: '1', variant: 'foil', bookYear: 2022, userGradeKey: '9.8',
+  });
+  assertEq(r.verified.length, 0, 'User "foil", comp "1:50 ratio virgin" → REJECTED');
+  assertEq(r.diagnostics.reasons.variantMismatch, 1, 'variantMismatch = 1');
+}
+
+// Case 3: User has Cover A, comp has Comic Mint Exclusive → REJECTED
+{
+  const rows = [
+    { price: 180, title: 'Batman #1 Shannon Maer Comic Mint Exclusive', daysAgo: 10, grade: '9.8' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Batman', issue: '1', variant: 'Cover A', bookYear: 2022, userGradeKey: '9.8',
+  });
+  assertEq(r.verified.length, 0, 'User "Cover A", comp "Comic Mint Exclusive" → REJECTED');
+  assertEq(r.diagnostics.reasons.variantMismatch, 1, 'variantMismatch = 1 (exclusive)');
+}
+
+// Case 4: User has LaRosa variant, comp has Silver Foil 1:50 → REJECTED
+{
+  const rows = [
+    { price: 220, title: 'Venom #1 Silver Foil 1:50 Star Wars Homage Variant', daysAgo: 10, grade: '9.8' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Venom', issue: '1', variant: 'LaRosa variant', bookYear: 2022, userGradeKey: '9.8',
+  });
+  assertEq(r.verified.length, 0, 'User "LaRosa variant", comp "Silver Foil 1:50" → REJECTED');
+  assertEq(r.diagnostics.reasons.variantMismatch, 1, 'variantMismatch = 1 (foil+ratio)');
+}
+
+// Case 5: User no variant, comp has foil variant → REJECTED
+{
+  const rows = [
+    { price: 160, title: 'X-Men #1 foil variant CGC 9.8', daysAgo: 10, grade: '9.8' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'X-Men', issue: '1', variant: null, bookYear: 2022, userGradeKey: '9.8',
+  });
+  assertEq(r.verified.length, 0, 'User no variant, comp "foil variant" → REJECTED');
+  assertEq(r.diagnostics.reasons.variantMismatch, 1, 'variantMismatch = 1 (user none)');
+}
+
+// Case 6: User no variant, comp no variant → KEPT
+{
+  const rows = [
+    { price: 90, title: 'Wolverine #1 CGC 9.8 regular cover', daysAgo: 10, grade: '9.8' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Wolverine', issue: '1', variant: null, bookYear: 2022, userGradeKey: '9.8',
+  });
+  assertEq(r.verified.length, 1, 'User no variant, comp no variant → KEPT');
+  assertEq(r.diagnostics.reasons.variantMismatch, 0, 'variantMismatch = 0');
+}
+
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

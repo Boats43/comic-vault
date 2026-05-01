@@ -163,6 +163,22 @@ const variantArtistMismatch = (rowTitle, ourArtist) => {
   return rowArtist !== ourArtist;
 };
 
+// Extract variant tokens from string. Returns array of normalized tokens.
+// Used to detect variant type mismatches (foil vs ratio, newsstand vs
+// exclusive, etc.). Covers the main variant types that should NOT mix.
+const extractVariantTokens = (str) => {
+  const tokens = [];
+  const s = String(str).toLowerCase();
+  if (/foil/.test(s)) tokens.push('foil');
+  if (/virgin/.test(s)) tokens.push('virgin');
+  if (/newsstand/.test(s)) tokens.push('newsstand');
+  if (/exclusive|excl\./.test(s)) tokens.push('exclusive');
+  if (/1:\d+|ratio|incentive/.test(s)) tokens.push('ratio');
+  if (/sketch/.test(s)) tokens.push('sketch');
+  if (/cover [b-z]/.test(s)) tokens.push('altcover');
+  return tokens;
+};
+
 // Slab/raw mismatch.
 //   Our user grade is 'raw' → reject SLAB_RE rows (CGC/CBCS/PGX listings).
 //   Our user grade is numeric (CGC) → keep SLAB_RE rows (they're our peers).
@@ -401,18 +417,38 @@ export const verifySoldComps = (rawRows, ctx) => {
     return true;
   });
 
-  // 8. Variant-contamination broad: our book is NOT a variant but row
-  //    title flags a variant marker (virgin/foil/ratio/incentive/etc.).
-  if (!variant) {
-    working = working.filter((r) => {
-      if (VARIANT_CONTAM_RE.test(String(r.title || ''))) {
+  // 8. Variant token mismatch. Three cases:
+  //    (a) User has NO variant → reject comps with variant tokens
+  //    (b) User HAS variant → reject comps with DIFFERENT variant tokens
+  //    (c) Both have variant tokens that overlap → keep
+  working = working.filter((r) => {
+    const userVariantTokens = variant
+      ? extractVariantTokens(String(variant).toLowerCase())
+      : [];
+    const compVariantTokens = extractVariantTokens(String(r.title || '').toLowerCase());
+
+    // Case (a): comp has variant tokens, user has none → reject
+    if (compVariantTokens.length > 0 && userVariantTokens.length === 0) {
+      reasons.variantMismatch++;
+      pushSample(r, 'variantMismatch:comp_has_user_none');
+      return false;
+    }
+
+    // Case (b): both have tokens but NO overlap → reject
+    if (compVariantTokens.length > 0 && userVariantTokens.length > 0) {
+      const overlap = compVariantTokens.some((t) =>
+        userVariantTokens.some((u) => u === t || u.includes(t) || t.includes(u))
+      );
+      if (!overlap) {
         reasons.variantMismatch++;
-        pushSample(r, 'variantMismatch:contam');
+        pushSample(r, 'variantMismatch:different_tokens');
         return false;
       }
-      return true;
-    });
-  }
+    }
+
+    // Case (c): overlap exists OR neither has tokens → keep
+    return true;
+  });
 
   // 9. Slab / raw. Reject CGC slabs from raw pools.
   working = working.filter((r) => {
