@@ -358,7 +358,7 @@ export default async function handler(req, res) {
     console.log('[grade] attempting eBay-first identification...');
     const ebayResult = await lookupEbayIdentity(images[0]);
 
-    if (ebayResult && ebayResult.consensus && ebayResult.consensus.confidence >= 0.5) {
+    if (ebayResult && ebayResult.consensus && ebayResult.consensus.confidence >= 0.3) {
       // eBay consensus successful — use Sonnet for grade-only
       console.log(`[grade] eBay consensus: ${ebayResult.consensus.title} #${ebayResult.consensus.issue} (${ebayResult.consensus.confidence} confidence)`);
       console.log('[grade] using Sonnet for grade-only assessment...');

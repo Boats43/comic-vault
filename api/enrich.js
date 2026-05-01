@@ -1253,7 +1253,8 @@ export default async function handler(req, res) {
       : null;
 
     // Extract consensus from eBay image search results
-    const parsedVisualRows = extractIdentityFromImageSearch(visualResult?.items || []);
+    // visualResult.items already contains parsed rows from lookupEbayVisual
+    const parsedVisualRows = visualResult?.items || [];
     const visualConsensus = extractConsensus(parsedVisualRows);
 
     console.log(`[phase1] eBay visual: ${visualResult?.items?.length || 0} results, consensus=${visualConsensus ? 'YES' : 'NO'}`);
