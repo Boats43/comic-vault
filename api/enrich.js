@@ -1271,11 +1271,17 @@ export default async function handler(req, res) {
     // before alignIdentity runs. This becomes PRIMARY identity source when overlap
     // with Vision < 20%. Downstream queries (PC, CV) use this instead of Vision.
     const parsedVisualRows = extractIdentityFromImageSearch(visualResult?.items || []);
+    console.log(`[visual-parse] rows: ${parsedVisualRows.length}, first title: ${parsedVisualRows[0]?.title || 'null'}`);
+
     const visualConsensus = extractConsensus(parsedVisualRows);
+    console.log(`[visual-consensus] result: ${visualConsensus ? JSON.stringify({ title: visualConsensus.title, confidence: visualConsensus.confidence }) : 'null'}`);
+
     const visualBase = visualConsensus?.title || null;
 
     if (visualBase) {
       console.log(`[visual-base] extracted: "${visualBase}" from ${visualResult?.items?.length || 0} eBay results`);
+    } else {
+      console.log(`[visual-base] FAILED: parsedRows=${parsedVisualRows.length}, consensus=${visualConsensus ? 'exists' : 'null'}`);
     }
 
     // Ship #24 — Identity Authentication Score: cross-reference Vision, eBay
