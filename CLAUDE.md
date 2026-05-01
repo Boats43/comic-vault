@@ -259,15 +259,16 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - **Editable list price**: numeric `listPrice` input above List on eBay button. `handleList` passes `{ ...item, price: "$X.XX" }` so override drives eBay StartPrice + persists to catalogue.
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 
-## Current State (as of 2026-04-29)
+## Current State (as of 2026-04-30)
 
-Latest commit: 24bd280 — Ship #20a.6.22 error visibility + graceful degradation + autofix engine
+Latest commit: 1751f4c — Ship #23 consistency engine (CV year gate + refuse-to-price + stale refresh + Update All Books)
 
-Test count: 1,442 passing across 18 suites
+Test count: 1,570 passing across 23 suites (31 new Ship #23 tests)
 Vercel functions: 12/12
-Layer 1: ~93% (autofix engine + graceful degradation shipped)
-Layer 2: ~40%
-Layer 3-4: 0%
+Layer 1: ~95% (consistency engine shipped)
+Layer 2: ~45% (Ship #20b/21 deployed, #24-27 queued)
+Layer 3: ~15% (decision signals live, full engine pending)
+Layer 4: 0% (portfolio intelligence queued as Ship #26)
 
 Performance: Scan time 7.5s → 2.5s (66% improvement)
   phase1_complete: 769ms (was ~2800ms)
@@ -276,101 +277,186 @@ Performance: Scan time 7.5s → 2.5s (66% improvement)
 Deploy: git push origin main = auto-deploy (confirmed)
 Rollback: git revert [hash] && git push origin main
 
-THREE SHIPS TO COMPLETE THE PRODUCT:
+NEXT SHIPS (Intelligence Layer):
 
-**Ship #20b — VERIFIED SOLD PRICING** (6-8 hours)
-  Sold comps = primary anchor
-  Price bands: Quick / Market / Stretch
-  Closes: F-007, F-LGF1, F-LGF2, F-GRD1
-  Requires: MAJOR pricing greenlight
+**Ship #24 — VELOCITY CURVES** (6 hours)
+  90d/30d/7d sales velocity trends
+  Dynamic pricing (accelerating → Stretch, decelerating → Quick)
+  Price peak detection + sell urgency
   
-**Ship #21 — DECISION ENGINE** (4-6 hours)
-  Keep/Sell/Press/CGC/Hold recommendations per book
-  ROI calculator with market timing
-  Layer 3 unlock
+**Ship #25 — GRADE-JUMP ROI** (4 hours)
+  Press + submit profit calculator (uses PC price ladder)
+  Grade scenario comparison (9.4 raw vs 9.6 CGC)
+  Submission sweet-spot detector
   
-**Ship #22 — ONE-TAP LISTING** (3-4 hours)
-  eBay auto-listing with correct category + description
-  Batch listing workflow
-  Closes listing UX gap
+**Ship #26 — PORTFOLIO INTELLIGENCE** (10 hours)
+  Diversification scoring (character/era/publisher exposure)
+  Gap detection (story arcs, trilogy completeness)
+  Bundle opportunities (correlated books)
+  
+**Ship #27 — AUCTION INTELLIGENCE** (8 hours)
+  eBay auction watch counts (demand leading indicator)
+  Bid velocity (liquidity scoring)
+  Auction calendar (supply forecast)
 
-Micro-fixes deferred — autofix engine handles edge cases
+Phase 2 (deferred): Ships #28-29 (image forensics, cross-source validation) — high effort, lower priority
 
 ## Recent Ships
 **Last 5 only — overwritten when 6th lands.**
 
+- `1751f4c` — Ship #23 — consistency engine (CV year gate + refuse-to-price + stale refresh + Update All Books). FIX 1: Pre-1970 books filter CV volumes by ±15y. FIX 2: Refuse browse_api price when 0 verified + 0 sold comps. FIX 3: Auto-refresh stale records (missing priceBands/claudeCheck/demandSignals). FIX 4: Manage tab batch update button. 1,539 → 1,570 tests (31 new). Zero regressions.
 - `24bd280` — Ship #20a.6.22 — error visibility + graceful degradation + autofix engine. Read server error body (not generic "Failed to enrich"). Graceful fallback to Vision-only when enrich fails. 8-fix autofix engine (sold-anchor, wrong-issue, series-mismatch, magazine, grade-mult, modern-contam, newsstand-penalty, single-comp). 1,416 → 1,442 tests. Zero regressions.
-- `d971267` — Ship #20a.6 — sold comp verification + hygiene extraction. Pure-fn `verifySoldComps` filter chain (10 reject reasons + diagnostics). `compHygiene.js` extracted from `api/comps.js` (-271 lines). 911 → 1002 tests. Pricing-math change (greenlit).
+- `d971267` — Ship #20a.6 — sold comp verification + hygiene extraction. Pure-fn `verifySoldComps` filter chain (10 reject reasons + diagnostics). `compHygiene.js` extracted from `api/comps.js` (-271 lines). 911 → 1,002 tests. Pricing-math change (greenlit).
 - `4114bcb` — Ship #20a.7 — mega-key strict canonical guard. `getMegaKeyEntry(title, issue, publisher, year)`. Schema 1.0.0 → 2.0.0. Closes TMNT #1 IDW 2016 → $15K floor false-positive. 778 → 911 tests.
 - `0e3679f` — Ship #20a.5 — PriceCharting price ladder + sales velocity extraction. `out.priceLadder` (14 grades) + `out.salesVelocity` (perDay numeric). 759 → 778 tests. Data capture only.
-- `7d20c93` — Ship #20a — restore sold data via PC sales-history scrape. `fetchPricechartingSales(productId, userGrade)`. soldComps + salesByGrade. 728 → 759 tests. Closes dead pipeline (eBay APIs gated/bypassed).
 
 ## Active Priority Queue
 
-**Streamlined roadmap — 3 ships to complete the product.**
+**Intelligence layer roadmap — maximizing all data sources.**
 
-### 1. Ship #20b — VERIFIED SOLD PRICING (NEXT)
-**Est: 6-8 hours | Pricing greenlight REQUIRED**
+### Ship #24 — VELOCITY CURVES + DYNAMIC PRICING (NEXT)
+**Est: 6 hours | Highest ROI**
 
-Sold comps become primary anchor. Active comps validate but don't drive.
-- Price bands: Quick (10th %ile sold) / Market (median sold) / Stretch (90th %ile sold)
-- Sold verification must match active verification (cross-pool consistency)
-- Grade-aware anchoring (sold grade → user grade multiplier)
-- Recency weighting (30d/90d/180d bands)
-- Closes open failures: F-007, F-LGF1, F-LGF2, F-GRD1
+Extract 90d/30d/7d velocity trends from PC sales-history (already captured, currently unused).
+- Velocity classification: ACCELERATING / FLAT / DECELERATING
+- Dynamic pricing strategy:
+  - Accelerating → price at Stretch band (sell into demand)
+  - Decelerating → price at Quick band (exit before drop)
+  - High auction watch counts → +5% premium (demand spike)
+  - 3+ auctions ending this week → -10% (undercut flood)
+- Price peak detection: "Sell NOW — velocity tripling (peak in 7-14d)"
+- Market saturation warnings: "Comp pool flooding — wait or drop price"
 
-Sub-ships:
-- #20b.1 — Cross-pool consistency gate (sold titles must match active)
-- #20b.2 — Sold-first pricing architecture + price bands
-- #20b.3 — Grade-aware sold anchoring
-- #20b.4 — Recency weighting + stale suppression
+**Impact:** Catch price peaks (+15% sell price), avoid dumps (-25% loss prevention)
 
-### 2. Ship #21 — DECISION ENGINE
-**Est: 4-6 hours | Unlocks Layer 3**
+**Files:**
+- `src/lib/velocityCurves.js` (NEW — velocity extraction + trend classification)
+- `src/lib/priceBands.js` (ENHANCE — dynamic pricing adjustments)
+- `api/enrich.js` (ENHANCE — plumb velocity trend to output)
 
-Per-book Keep/Sell/Press/CGC/Hold recommendations with ROI math.
-- Market timing signals (velocity, trend, seasonality)
-- CGC submission net profit (grade scenarios × FMV - costs)
-- Press recommendation (defect flags × FMV gap)
-- Hold recommendation (appreciation potential)
-- Sell urgency (price decay risk, market saturation)
+**Tests:** 40 tests (velocity math, trend detection, dynamic pricing logic)
 
-### 3. Ship #22 — ONE-TAP LISTING
-**Est: 3-4 hours**
+---
 
-eBay auto-listing with correct category + AI-generated description.
-- One tap → listed (title, price, category, description, photos)
-- Batch listing workflow (select multiple → post all)
-- Auto-category (vision signals → eBay category ID)
-- Template descriptions (era-aware, key-aware)
+### Ship #25 — GRADE-JUMP ROI CALCULATOR
+**Est: 4 hours | High profit finder**
 
-### DEFERRED — Autofix engine handles micro-fixes
-Edge cases now caught by Ship #20a.6.22 autofix:
-- Wrong-issue comps → flagged
-- Series mismatch → flagged
-- Magazine format → flagged
-- Grade multiplier errors → auto-corrected
-- Modern contamination → auto-filtered
-- Newsstand penalty → auto-removed (pre-1985)
-- Single-comp warnings → auto-suppressed
+Use PC price ladder (already captured, 14 grades per book) to calculate press/submit ROI.
+- Grade scenario comparison:
+  - Current: 9.4 raw → $2,100 market
+  - Scenario A: Press + 9.6 submit → $4,200 FMV - $55 cost = $2,045 profit (97% ROI)
+  - Scenario B: Raw 9.4 submit → $2,800 FMV - $35 cost = $665 profit (32% ROI)
+  - Recommendation: Press first, target 9.6
+- Downside protection: "If grade drops to 9.2 → -$385 loss"
+- Submission sweet-spot: Only recommend when ROI > 50%
 
-Remaining micro-fixes (low priority):
-- Bundle routing automation
-- Layer 4 portfolio OS (scan-gated at 250+)
-- Phase 5b scarcity-aware pricing
-- Variant-type discrimination (Whitman/Mark Jewelers/Type 1A-1B)
-- Creator-aware multiplier (Ship #16b)
-- KeyFromComps promotion (Ship #12b)
+**Impact:** Identify $2K+ profit opportunities, prevent bad submissions (< 30% ROI)
+
+**Files:**
+- `src/lib/gradeJumpROI.js` (NEW — ROI calculator, scenario builder)
+- `src/App.jsx` (ENHANCE — add ROI panel to CollectionDetail)
+
+**Tests:** 25 tests (ROI math, cost scenarios, grade-drop risk)
+
+---
+
+### Ship #26 — PORTFOLIO INTELLIGENCE
+**Est: 10 hours | Differentiator (no competitor has this)**
+
+Analyze 84-book catalogue for portfolio-level insights.
+
+**A. Diversification Scoring**
+- Character exposure: "Spider-Man: 22 books (26% portfolio) — HIGH RISK"
+- Era exposure: "Bronze Age: 38 books (45%) — balanced"
+- Publisher exposure: "Marvel: 68 books (81%) — consider DC/indie"
+- Correlation risk: "ASM #129 + Punisher #1 move together (r²=0.87)"
+
+**B. Gap Detection (ComicVine story arcs)**
+- "You own 5/6 Kraven's Last Hunt — buy Spectacular #132 ($45)"
+- "Complete set premium: +25% ($280 → $350) = $70 net value gain"
+
+**C. Bundle Opportunities**
+- Detect: ASM #121, #122, #129 (Death of Gwen trilogy)
+- Individual value: $850 + $420 + $2,100 = $3,370
+- Bundle premium: +18% = $3,977
+- Gain: $607 vs selling individually
+
+**D. Liquidity Profile**
+- FAST (sell <7d): 12 books ($8,400)
+- NORMAL (7-30d): 48 books ($22,100)
+- SLOW (>30d): 24 books ($18,200)
+
+**Impact:** Risk reduction (diversify), value capture (complete sets), buy targeting (gap-fill)
+
+**Files:**
+- `src/lib/portfolioAnalyzer.js` (NEW — correlation, gaps, bundles)
+- `api/comicvine-arcs.js` (NEW — story arc lookup)
+- `src/App.jsx` (ENHANCE — Manage tab portfolio dashboard)
+
+**Tests:** 50 tests (correlation math, gap detection, bundle scoring)
+
+---
+
+### Ship #27 — AUCTION INTELLIGENCE
+**Est: 8 hours | Leading indicator**
+
+Track eBay auctions (already queried in Browse API, data currently unused).
+- **Watch counts:** High watchers → price spike coming (leading indicator)
+- **Bid velocity:** 12 bids in 2 days → FAST liquidity
+- **Auction calendar:** "3 auctions ending this week → wait for dip"
+- **Reserve tracking:** Reserve met = price floor hint
+
+**Example:**
+```
+ASM #129 auction:
+  • Watch count: 47 (HIGH demand)
+  • Bid velocity: 2.4 bids/day (FAST)
+  • Ending: 2026-05-02 (3 days)
+  → Recommendation: List NOW before auction flood
+```
+
+**Impact:** Timing optimizer (list before flood), demand forecasting (watch → spike)
+
+**Files:**
+- `api/comps.js` (ENHANCE — capture auction data from Browse API)
+- `src/lib/auctionIntelligence.js` (NEW — watch/bid extraction, calendar)
+
+**Tests:** 35 tests (watch/bid parsing, calendar logic, demand scoring)
+
+---
+
+### PHASE 2 (Deferred — Lower Priority)
+
+**Ship #28 — IMAGE FORENSICS** (12 hours)
+- Color histogram → detect color-touch restoration
+- Edge sharpness → detect pressing
+- Paper texture → detect modern reprint
+**Reason:** High effort, incremental authentication value
+
+**Ship #29 — CROSS-SOURCE VALIDATION** (10 hours)
+- Compare Vision vs CV vs PC vs eBay consensus
+- Authentication score 0-100 (all sources agree → 99%)
+**Reason:** Nice-to-have polish, current confidence scoring sufficient
+
+---
+
+### COMPLETED SHIPS (Reference)
+- ✅ Ship #20b — Verified sold pricing (Quick/Market/Stretch bands)
+- ✅ Ship #21 — Claude quality check + demand signals
+- ✅ Ship #23 — Consistency engine (CV gate, refuse-to-price, stale refresh)
+
+### PENDING USER GREENLIGHT
+- Ship #22 — Auto-listing (eBay category + description generation)
 
 ## Recalibration
 
 **GPT external review insights — keep for ongoing reference.**
 
-### Layer status (updated 2026-04-29)
-- Layer 1 Foundation: ~93% (error visibility + graceful degradation + autofix engine shipped).
-- Layer 2 Data Leverage: ~40% (sold verification complete, pricing architecture next).
-- Layer 3 Decision Engine: 0% (unlocks after Ship #21).
-- Layer 4 Portfolio OS: 0% (scan-gated at 250+ books; currently ~84).
+### Layer status (updated 2026-04-30)
+- Layer 1 Foundation: ~95% (consistency engine shipped — CV year gate, refuse-to-price, stale refresh).
+- Layer 2 Data Leverage: ~45% (sold pricing live, velocity/ROI queued as Ships #24-25).
+- Layer 3 Decision Engine: ~15% (demand signals live, full recommendations pending).
+- Layer 4 Portfolio OS: 0% (queued as Ship #26, scan-gated at 250+ books; currently ~84).
 
 ### Architecture-before-features priority shift
 1. Trust hardening (Layer A) before pricing math (Layer B).
@@ -378,9 +464,10 @@ Remaining micro-fixes (low priority):
 3. Features compound on broken logic if shipped first.
 
 ### Timeline
-- Three ships to complete: 13-18 hours total.
-- Est completion: 2-3 weeks (at current pace).
-- Original estimate was 130-200 hours — streamlined via autofix engine.
+- Core intelligence layer (Ships #24-27): 28 hours total
+- Est completion: 4-5 weeks (at current pace)
+- Phase 2 (Ships #28-29): 22 hours — deferred to lower priority
+- Total to "best out there" status: ~50 hours remaining (7 weeks)
 
 ### Category framing
 - Current: "Asset decision system for collectibles."
