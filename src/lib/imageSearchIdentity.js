@@ -177,10 +177,7 @@ const ISSUE_RE = /#\s*(\d{1,3})(?!\d)/;
 export const extractIssueFromTitle = (title) => {
   const titleStr = String(title || '');
   const m = titleStr.match(ISSUE_RE);
-  if (!m) {
-    console.log(`[extractIssue] NO MATCH for: "${titleStr.slice(0, 80)}"`);
-    return null;
-  }
+  if (!m) return null;
   const n = parseInt(m[1], 10);
   if (n > 999) return null;
   return m[1];
@@ -249,9 +246,6 @@ export const extractIdentityFromImageSearch = (items) => {
   console.log(`[extractIdentity] processing ${items.length} items, first item:`, items[0]);
   const results = items.map((it, idx) => {
     const rawTitle = (it && typeof it.title === 'string') ? it.title : null;
-    if (!rawTitle && idx < 3) {
-      console.log(`[extractIdentity] item ${idx} has no title:`, it);
-    }
     const parsed = {
       rawTitle,
       title: extractSeriesTitle(rawTitle),
@@ -259,9 +253,6 @@ export const extractIdentityFromImageSearch = (items) => {
       year: extractYearFromTitle(rawTitle),
       variantTokens: extractVariantTokens(rawTitle),
     };
-    if (idx < 2) {
-      console.log(`[extractIdentity] item ${idx} parsed:`, { rawTitle: parsed.rawTitle?.slice(0, 50), title: parsed.title, issue: parsed.issue });
-    }
     return parsed;
   });
   console.log(`[extractIdentity] extracted ${results.filter(r => r.issue).length} issues from ${results.length} items`);
@@ -361,10 +352,6 @@ export const extractConsensus = (parsedRows) => {
   const issues = parsedRows.map((r) => r.issue).filter(Boolean);
   const years = parsedRows.map((r) => r.year).filter(Boolean);
 
-  console.log(`[consensus-debug] total=${total}, mainTitles=${mainTitles.length}, issues=${issues.length}`);
-  console.log(`[consensus-debug] first 3 mainTitles:`, mainTitles.slice(0, 3));
-  console.log(`[consensus-debug] first 3 issues:`, issues.slice(0, 3));
-
   // Normalize titles before consensus (extra normalization beyond extractMainTitle)
   const normalizedTitles = mainTitles.map(t =>
     String(t).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -375,20 +362,14 @@ export const extractConsensus = (parsedRows) => {
   const issueResult = getMostCommon(issues);
   const yearResult = getMostCommon(years);
 
-  console.log(`[consensus-debug] titleResult:`, titleResult);
-  console.log(`[consensus-debug] issueResult:`, issueResult);
-
   // Lower threshold: 30% for title (when issue passes at 60%, title at 30% is sufficient)
   // Issue still requires 50% agreement as critical field
   const titleOk = titleResult.count / total >= 0.3;
   const issueOk = issueResult.count / total >= 0.5;
   const yearOk = yearResult.count / total >= 0.5;
 
-  console.log(`[consensus-debug] titleOk=${titleOk} (${titleResult.count}/${total} >= 30%), issueOk=${issueOk} (${issueResult.count}/${total} >= 50%)`);
-
   if (!titleOk || !issueOk) {
     // Can't establish consensus on basic identity
-    console.log(`[consensus-debug] FAILED: titleOk=${titleOk}, issueOk=${issueOk}`);
     return null;
   }
 

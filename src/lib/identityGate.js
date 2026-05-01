@@ -111,6 +111,8 @@ export const sanitizeIdentityFields = (input) => {
 //
 // Confident requires:
 //   - title, issue, year, publisher all non-null
+//   - EXCEPT: publisher is optional when identitySource includes 'ebay'
+//     (eBay image search verified visually, publisher not needed)
 //   - visionConfidence is NOT 'low' (null/medium/high all OK; null default
 //     avoids gating books where Vision didn't surface a confidence string)
 //
@@ -120,7 +122,7 @@ export const sanitizeIdentityFields = (input) => {
 // Vision (Biker Mice #1 2024, Whatnot exclusives, indie Webtoon prints).
 // Conflating "we don't know this book" with "the world hasn't catalogued
 // this book" produces too many false-positive gates.
-export const assessIdentityConfidence = (sanitized) => {
+export const assessIdentityConfidence = (sanitized, identitySource) => {
   const missingFields = [];
   const reasons = [];
 
@@ -136,7 +138,9 @@ export const assessIdentityConfidence = (sanitized) => {
     missingFields.push('year');
     reasons.push('year missing or not a 4-digit value');
   }
-  if (!sanitized?.publisher) {
+  // Skip publisher requirement when eBay image search confirmed identity
+  const skipPublisher = identitySource && String(identitySource).includes('ebay');
+  if (!sanitized?.publisher && !skipPublisher) {
     missingFields.push('publisher');
     reasons.push('publisher missing or uncertainty marker');
   }

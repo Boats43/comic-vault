@@ -1905,7 +1905,7 @@ export default async function handler(req, res) {
       publisher,
       visionConfidence: confidence,
     });
-    const idCheck = assessIdentityConfidence(sanitizedIdentity);
+    const idCheck = assessIdentityConfidence(sanitizedIdentity, identitySource);
     out.identityConfident = idCheck.confident;
     if (!idCheck.confident) {
       out.identityMissingFields = idCheck.missingFields;

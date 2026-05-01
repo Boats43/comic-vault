@@ -38,7 +38,7 @@ function buildVerificationPrompt(data) {
 
   // Format active comps
   const activeLines = (activeComps?.prices || []).slice(0, 3).map(p =>
-    `  $${p.toFixed(2)}`
+    `  $${(Number(p) || 0).toFixed(2)}`
   ).join('\n') || '  (none)';
 
   // Format creators
