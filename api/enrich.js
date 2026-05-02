@@ -1321,6 +1321,7 @@ export default async function handler(req, res) {
     const stripSubtitle = (t) => String(t || '').replace(/:.*$/, '').trim();
     const hasSubtitle = confirmedTitle && String(confirmedTitle).includes(':');
     const subtitleStripped = hasSubtitle ? stripSubtitle(confirmedTitle) : confirmedTitle;
+    const pcInitialTitle = subtitleStripped; // Title used for initial PC query
 
     const [comicVine, ximilar, priceChartingInitial, cgcResult] = await Promise.all([
       lookupComicVine({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }),
