@@ -486,6 +486,21 @@ const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) =>
   }
 };
 
+// Helper: Extract subtitle tokens from title (after colon, dash with spaces, or "vs")
+// for ComicVine volume scoring boost/penalty.
+const extractSubtitleTokens = (title) => {
+  const str = String(title || '').toLowerCase();
+  // Split on colon, dash with spaces (not compound words like "Spider-Man"), or "vs"
+  const parts = str.split(/:\s*|\s+-\s+|\bvs\b/);
+  if (parts.length < 2) return [];
+  // Return tokens from subtitle parts (skip stop words)
+  return parts.slice(1)
+    .join(' ')
+    .split(/\s+/)
+    .filter(t => t.length > 2)
+    .filter(t => !['the', 'and', 'for', 'with'].includes(t));
+};
+
 const lookupComicVine = async ({ title, issue, year, publisher }) => {
   if (!process.env.COMICVINE_API_KEY || !title) return null;
   try {
@@ -612,11 +627,26 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
       if (!vol) return base;
       const startYear = vol.start_year ? parseInt(vol.start_year, 10) : null;
       const yearDiff = comicYear && startYear ? Math.abs(startYear - comicYear) : 999;
-      const detailYearScore = yearDiff < 10 ? 2 : yearDiff < 20 ? 1 : 0;
+
+      // PART 3: Year gap penalty for large differences
+      let detailYearScore = yearDiff < 10 ? 2 : yearDiff < 20 ? 1 : 0;
+      if (yearDiff >= 30) detailYearScore = -5;
+      else if (yearDiff > 20) detailYearScore = -2;
+
       const volPub = String(vol.publisher?.name || "").toLowerCase().trim();
       const detailPubScore = pubLower && volPub && volPub.includes(pubLower) ? 2 : 0;
-      const total = base.nameScore + detailYearScore + detailPubScore;
-      return { ...base, yearScore: detailYearScore, publisherScore: detailPubScore, total };
+
+      // PART 1: Subtitle token boost/penalty
+      let subtitleScore = 0;
+      const subtitleTokens = extractSubtitleTokens(seriesName);
+      if (subtitleTokens.length > 0) {
+        const volNameLower = String(vol.name || '').toLowerCase();
+        const hasSubtitle = subtitleTokens.some(t => volNameLower.includes(t));
+        subtitleScore = hasSubtitle ? 30 : -20;
+      }
+
+      const total = base.nameScore + detailYearScore + detailPubScore + subtitleScore;
+      return { ...base, yearScore: detailYearScore, publisherScore: detailPubScore, subtitleScore, total, volume: vol };
     };
 
     let match = null;
@@ -634,9 +664,27 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
       const scored = candidates.map(scoreWithDetails);
       scored.sort((a, b) => b.total - a.total || a.volId - b.volId);
       console.log(`[comicvine] top scores: ${scored.slice(0, 3).map((s) =>
-        `${s.r.volume?.name}(name=${s.nameScore} yr=${s.yearScore} pub=${s.publisherScore} total=${s.total} vid=${s.volId})`
+        `${s.r.volume?.name}(name=${s.nameScore} yr=${s.yearScore} pub=${s.publisherScore} sub=${s.subtitleScore || 0} total=${s.total} vid=${s.volId})`
       ).join(" | ")}`);
-      match = scored[0].r;
+
+      // PART 2: Publisher tiebreaker when top 2 scores within 10 points
+      const topScore = scored[0].total;
+      const closeVols = scored.filter(c => topScore - c.total <= 10);
+
+      if (closeVols.length > 1 && pubLower) {
+        const pubMatch = closeVols.find(c => {
+          const volPub = String(c.volume?.publisher?.name || '').toLowerCase();
+          return volPub.includes(pubLower) || pubLower.includes(volPub);
+        });
+        if (pubMatch) {
+          console.log(`[cv-pub-tiebreaker] ${closeVols.length} within 10pts → publisher match wins: ${pubMatch.volume?.name}`);
+          match = pubMatch.r;
+        } else {
+          match = scored[0].r;
+        }
+      } else {
+        match = scored[0].r;
+      }
     }
     // No match — don't fall through to results[0].
 
