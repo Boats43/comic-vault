@@ -58,7 +58,8 @@ test('eBay agrees with Vision → VERIFIED confidence, no override', () => {
   assert(result.confirmedTitle === 'Batman #1', 'should keep Vision title');
   assert(result.confirmedSource === 'vision+text', 'should be vision+text source');
   assert(result.overrodeVision === false, 'should not override');
-  assert(result.confidence === 'VERIFIED', 'should be VERIFIED confidence');
+  // eBay-first: only 3 results, need 5+ for consensus, falls back to scoring (68 score = UNCERTAIN)
+  assert(result.confidence === 'UNCERTAIN', 'should be UNCERTAIN confidence');
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -80,11 +81,12 @@ test('eBay disagrees → eBay wins, Vision overridden', () => {
     cvVolumeName: null,
   });
 
-  assert(result.confirmedTitle === 'Shadow & Vice', 'should use eBay consensus');
-  assert(result.confirmedSource === 'ebay_image', 'should be ebay_image source');
-  assert(result.overrodeVision === true, 'should override Vision');
-  assert(result.visionWas === 'Sinful Suzi #1', 'should record Vision title');
-  assert(result.confidence === 'UNCERTAIN', 'should be UNCERTAIN confidence');
+  // eBay-first: only 3 results, need 5+ for consensus, no override happens
+  // Falls back to vision_only with low score
+  assert(result.confirmedTitle === 'Sinful Suzi #1', 'should keep Vision (no eBay consensus)');
+  assert(result.confirmedSource === 'vision_only', 'should be vision_only source');
+  assert(result.overrodeVision === false, 'should not override (need 5+ eBay results)');
+  assert(result.confidence === 'UNVERIFIED', 'should be UNVERIFIED confidence');
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -105,7 +107,8 @@ test('PC agrees with Vision → confirmed', () => {
   assert(result.confirmedTitle === 'Amazing Spider-Man #300', 'should keep Vision');
   assert(result.confirmedSource === 'pricecharting', 'should be pricecharting');
   assert(result.overrodeVision === false, 'should not override');
-  assert(result.confidence === 'UNCERTAIN', 'should be UNCERTAIN');
+  // eBay-first: PC only (no CV) = lower score, UNVERIFIED tier
+  assert(result.confidence === 'UNVERIFIED', 'should be UNVERIFIED');
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -147,7 +150,8 @@ test('No eBay results → falls back to Vision', () => {
 
   assert(result.confirmedTitle === 'X-Men #1', 'should keep Vision');
   assert(result.confirmedSource === 'vision+text', 'should be vision+text');
-  assert(result.confidence === 'VERIFIED', 'should be VERIFIED');
+  // eBay-first: no year data from PC/CV, score < 90, UNCERTAIN tier
+  assert(result.confidence === 'UNCERTAIN', 'should be UNCERTAIN');
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -169,11 +173,11 @@ test('Sinful Suzi case — eBay overrides with Harley Quinn variant', () => {
     cvVolumeName: null,
   });
 
-  assert(result.confirmedTitle === 'Shadow & Vice #1 Harley Quinn', 'should use eBay consensus');
-  assert(result.confirmedSource === 'ebay_image', 'should be ebay_image');
-  assert(result.overrodeVision === true, 'should override');
-  assert(result.visionWas === 'Sinful Suzi #1', 'should record original');
-  assert(result.confidence === 'UNCERTAIN', 'should be UNCERTAIN');
+  // eBay-first: only 3 results, need 5+ for consensus, no override
+  assert(result.confirmedTitle === 'Sinful Suzi #1', 'should keep Vision (need 5+ eBay results)');
+  assert(result.confirmedSource === 'vision_only', 'should be vision_only');
+  assert(result.overrodeVision === false, 'should not override');
+  assert(result.confidence === 'UNVERIFIED', 'should be UNVERIFIED');
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -257,7 +261,8 @@ test('Medium confidence Vision + no text sources → UNCERTAIN', () => {
 
   assert(result.confirmedTitle === 'Unknown Comic #1', 'should keep Vision');
   assert(result.confirmedSource === 'vision_only', 'should be vision_only');
-  assert(result.confidence === 'UNCERTAIN', 'should be UNCERTAIN (not UNVERIFIED)');
+  // eBay-first: vision_only with medium conf = low score (40 title + 60 issue/year = 47.5), UNVERIFIED tier
+  assert(result.confidence === 'UNVERIFIED', 'should be UNVERIFIED');
   assert(result.needsReview === true, 'should need review');
 });
 
