@@ -1332,6 +1332,9 @@ export default async function handler(req, res) {
 
     mark('phase2_complete');
 
+    // Publisher fallback from ComicVine when eBay/Vision didn't provide it
+    confirmedPublisher = confirmedPublisher || comicVine?.volume?.publisher?.name || publisher;
+
     // Identity already determined in Phase 1 — construct alignment object
     const alignment = {
       confirmedTitle,

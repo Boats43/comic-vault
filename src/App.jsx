@@ -1769,6 +1769,11 @@ function CollectionDetail({
   const [listPriceWarningDismissed, setListPriceWarningDismissed] = useState(false);
   // Ship #20a.6.1 — collapsible drawer for soldCompDiagnostics rejected samples.
   const [soldDrawerOpen, setSoldDrawerOpen] = useState(false);
+  // Collapsible sections for enriched data
+  const [creatorsExpanded, setCreatorsExpanded] = useState(false);
+  const [velocityExpanded, setVelocityExpanded] = useState(false);
+  const [ladderExpanded, setLadderExpanded] = useState(false);
+  const [popExpanded, setPopExpanded] = useState(false);
   const addPhotoRef = useRef(null);
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
@@ -2124,6 +2129,190 @@ function CollectionDetail({
         {item.publisher && item.year ? " · " : ""}
         {item.year}
       </div>
+
+      {/* 2a-1. ENRICHED DATA SECTIONS */}
+      {/* Creator Credits */}
+      {item.creatorFromComps && item.creatorFromComps.length > 0 && (
+        <div style={{ marginTop: 8, marginBottom: 4 }}>
+          <div
+            onClick={() => setCreatorsExpanded(!creatorsExpanded)}
+            style={{
+              cursor: 'pointer',
+              fontSize: 11,
+              color: '#888',
+              fontWeight: 600,
+              letterSpacing: 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
+            }}
+          >
+            <span>{creatorsExpanded ? '▼' : '▶'}</span>
+            <span>CREATOR CREDITS ({item.creatorFromComps.length})</span>
+          </div>
+          {creatorsExpanded && (
+            <div style={{
+              marginTop: 6,
+              padding: '8px 10px',
+              background: 'rgba(255,255,255,0.04)',
+              borderRadius: 6,
+              fontSize: 13
+            }}>
+              {item.creatorFromComps.map((creator, idx) => (
+                <div key={idx} style={{ marginBottom: idx < item.creatorFromComps.length - 1 ? 4 : 0 }}>
+                  <strong>{creator.name}</strong>
+                  {creator.role && <span style={{ color: '#888', marginLeft: 6 }}>({creator.role})</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Sales Velocity */}
+      {item.salesVelocity && (item.salesVelocity['90d'] > 0 || item.salesVelocity['30d'] > 0 || item.salesVelocity['7d'] > 0) && (
+        <div style={{ marginTop: 8, marginBottom: 4 }}>
+          <div
+            onClick={() => setVelocityExpanded(!velocityExpanded)}
+            style={{
+              cursor: 'pointer',
+              fontSize: 11,
+              color: '#888',
+              fontWeight: 600,
+              letterSpacing: 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
+            }}
+          >
+            <span>{velocityExpanded ? '▼' : '▶'}</span>
+            <span>SALES VELOCITY</span>
+          </div>
+          {velocityExpanded && (
+            <div style={{
+              marginTop: 6,
+              padding: '8px 10px',
+              background: 'rgba(255,255,255,0.04)',
+              borderRadius: 6,
+              fontSize: 13,
+              display: 'flex',
+              gap: 12
+            }}>
+              {item.salesVelocity['90d'] != null && (
+                <span><strong>{item.salesVelocity['90d']}</strong> <span style={{ color: '#888' }}>90d</span></span>
+              )}
+              {item.salesVelocity['30d'] != null && (
+                <span><strong>{item.salesVelocity['30d']}</strong> <span style={{ color: '#888' }}>30d</span></span>
+              )}
+              {item.salesVelocity['7d'] != null && (
+                <span><strong>{item.salesVelocity['7d']}</strong> <span style={{ color: '#888' }}>7d</span></span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Price Ladder */}
+      {item.priceLadder && Object.keys(item.priceLadder).length > 0 && (
+        <div style={{ marginTop: 8, marginBottom: 4 }}>
+          <div
+            onClick={() => setLadderExpanded(!ladderExpanded)}
+            style={{
+              cursor: 'pointer',
+              fontSize: 11,
+              color: '#888',
+              fontWeight: 600,
+              letterSpacing: 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
+            }}
+          >
+            <span>{ladderExpanded ? '▼' : '▶'}</span>
+            <span>PRICE LADDER ({Object.keys(item.priceLadder).length} grades)</span>
+          </div>
+          {ladderExpanded && (
+            <div style={{
+              marginTop: 6,
+              padding: '8px 10px',
+              background: 'rgba(255,255,255,0.04)',
+              borderRadius: 6,
+              fontSize: 12,
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: 6
+            }}>
+              {Object.entries(item.priceLadder)
+                .sort((a, b) => parseFloat(b[0]) - parseFloat(a[0]))
+                .map(([grade, price]) => (
+                  <div key={grade}>
+                    <span style={{ color: '#888' }}>{grade}</span>
+                    <span style={{ marginLeft: 6, fontWeight: 600 }}>
+                      ${typeof price === 'number' ? price.toLocaleString('en-US') : price}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CGC Population */}
+      {item.pop && item.pop.total > 0 && (
+        <div style={{ marginTop: 8, marginBottom: 4 }}>
+          <div
+            onClick={() => setPopExpanded(!popExpanded)}
+            style={{
+              cursor: 'pointer',
+              fontSize: 11,
+              color: '#888',
+              fontWeight: 600,
+              letterSpacing: 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
+            }}
+          >
+            <span>{popExpanded ? '▼' : '▶'}</span>
+            <span>CGC POPULATION (Total: {item.pop.total.toLocaleString('en-US')})</span>
+          </div>
+          {popExpanded && (
+            <div style={{
+              marginTop: 6,
+              padding: '8px 10px',
+              background: 'rgba(255,255,255,0.04)',
+              borderRadius: 6,
+              fontSize: 12
+            }}>
+              {item.pop.universal != null && (
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ color: '#888' }}>Universal:</span>
+                  <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.universal.toLocaleString('en-US')}</span>
+                </div>
+              )}
+              {item.pop.graded != null && (
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ color: '#888' }}>Qualified:</span>
+                  <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.graded.toLocaleString('en-US')}</span>
+                </div>
+              )}
+              {item.pop.restored != null && (
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ color: '#888' }}>Restored:</span>
+                  <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.restored.toLocaleString('en-US')}</span>
+                </div>
+              )}
+              {item.pop.signature != null && (
+                <div>
+                  <span style={{ color: '#888' }}>Signature:</span>
+                  <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.signature.toLocaleString('en-US')}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 2a. STATS BAR */}
       {(() => {
         const lastSoldPrice = item.soldComps?.[0]?.price || item.comps?.recentSales?.[0]?.price || null;
