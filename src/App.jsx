@@ -2120,6 +2120,55 @@ function CollectionDetail({
         );
       })()}
 
+      {/* Ship #27 WIN 3 — Authentication Score + Identity Source + Pricing Source */}
+      <div style={{ fontSize: 11, marginTop: 6, marginBottom: 6 }}>
+        {/* Authentication Score */}
+        {item.identityAlignment?.authenticationScore != null && (
+          <div style={{ marginBottom: 4 }}>
+            <span style={{ color: '#888' }}>Auth: </span>
+            <strong style={{
+              color: item.identityAlignment.authenticationScore >= 85 ? '#22c55e' :
+                     item.identityAlignment.authenticationScore >= 65 ? '#fbbf24' : '#e05656'
+            }}>
+              {item.identityAlignment.authenticationScore}%
+            </strong>
+          </div>
+        )}
+
+        {/* Identity Source */}
+        {item.identityAlignment?.confirmedSource && (
+          <div style={{ marginBottom: 4 }}>
+            <span style={{ color: '#888' }}>ID: </span>
+            <strong>
+              {item.identityAlignment.confirmedSource === 'ebay_visual_override' ? 'eBay image search' :
+               item.identityAlignment.confirmedSource === 'vision+text' ? 'Vision + text sources' :
+               item.identityAlignment.confirmedSource === 'vision_only' ? 'Vision' :
+               item.identityAlignment.confirmedSource}
+            </strong>
+          </div>
+        )}
+
+        {/* Pricing Source */}
+        {item.pricingSource && (
+          <div>
+            <span style={{ color: '#888' }}>Price from: </span>
+            <strong>
+              {item.pricingSource === 'sold_verified' ? 'sold comps (verified)' :
+               item.pricingSource === 'pricecharting' ? 'PriceCharting' :
+               item.pricingSource === 'browse_api' ? 'active listings' :
+               item.pricingSource === 'sanity' ? 'sanity fallback' :
+               item.pricingSource === 'refused' ? 'insufficient data' :
+               item.pricingSource}
+            </strong>
+            {item.gradeMultiplier != null && item.gradeMultiplier !== 1 && (
+              <span style={{ color: '#888' }}>
+                {' '}· ×{item.gradeMultiplier.toFixed(2)} {item.isGraded ? 'CGC' : 'raw'} {item.grade}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* 2. TITLE BLOCK */}
       <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
         {item.title || "Unknown"}{item.issue && !/unknown/i.test(String(item.issue)) && !String(item.title || "").includes('#' + item.issue) ? ` #${item.issue}` : ''}

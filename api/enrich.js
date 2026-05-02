@@ -1323,12 +1323,13 @@ export default async function handler(req, res) {
     const subtitleStripped = hasSubtitle ? stripSubtitle(confirmedTitle) : confirmedTitle;
     const pcInitialTitle = subtitleStripped; // Title used for initial PC query
 
-    const [comicVine, ximilar, priceChartingInitial, cgcResult] = await Promise.all([
+    const [comicVine, priceChartingInitial, cgcResult] = await Promise.all([
       lookupComicVine({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }),
-      lookupXimilar({ images, title, confidence }),
+      // lookupXimilar({ images, title, confidence }), // REMOVED — fetched but never used for identity/pricing (-200ms)
       lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
     ]);
+    const ximilar = null; // Ximilar lookup disabled
 
     mark('phase2_complete');
 

@@ -21,7 +21,7 @@
 
 // ───────────────────────── shared HTML fetch + cache ─────────────────────────
 
-const HTML_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const HTML_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (was 24h) — stable books don't change weekly
 const htmlCache = new Map();
 
 const fetchPCProductHtml = async (productId) => {
