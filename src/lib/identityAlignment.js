@@ -41,7 +41,7 @@ export function alignIdentity({
   cvPublisher,
   cgcTitle,
   cgcIssue,
-}) {
+} = {}) {
   // Token overlap helper
   const overlap = (a, b) => {
     if (!a || !b) return 0;
