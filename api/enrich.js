@@ -1372,7 +1372,7 @@ export default async function handler(req, res) {
     const pcInitialTitle = subtitleStripped; // Title used for initial PC query
 
     const [comicVine, priceChartingInitial, cgcResult] = await Promise.all([
-      lookupComicVine({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }),
+      lookupComicVine({ title: confirmedTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }),
       // lookupXimilar({ images, title, confidence }), // REMOVED — fetched but never used for identity/pricing (-200ms)
       lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
