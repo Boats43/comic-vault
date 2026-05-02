@@ -1217,6 +1217,7 @@ export default async function handler(req, res) {
     // publisher — parens in "Hollywood Comics (Walt Disney)" break eBay's
     // query parser and cause ComicVine's substring scoring to miss.
     const publisher = cleanPublisher(rawPublisher) || null;
+    let confirmedPublisher = publisher; // Will be updated if eBay override fires
     const titleLower = (title || "").toLowerCase();
     if (!title || titleLower.includes("not a comic") || titleLower === "unknown") {
       console.log("[enrich] rejected non-comic:", title);
@@ -1296,6 +1297,7 @@ export default async function handler(req, res) {
         confirmedTitle = visualConsensus.title;
         confirmedIssue = visualConsensus.issue || issueNum;
         confirmedYear = visualConsensus.year || year;
+        confirmedPublisher = visualConsensus.publisher || publisher;
         identitySource = 'ebay_visual_override';
         console.log(`[phase1] eBay OVERRIDE: using "${confirmedTitle}" #${confirmedIssue} for downstream queries`);
       } else {
@@ -1321,7 +1323,7 @@ export default async function handler(req, res) {
     const subtitleStripped = hasSubtitle ? stripSubtitle(confirmedTitle) : confirmedTitle;
 
     const [comicVine, ximilar, priceChartingInitial, cgcResult] = await Promise.all([
-      lookupComicVine({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear, publisher }),
+      lookupComicVine({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }),
       lookupXimilar({ images, title, confidence }),
       lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
@@ -1805,6 +1807,10 @@ export default async function handler(req, res) {
 
     const out = {};
 
+    if (confirmedPublisher) {
+      out.publisher = confirmedPublisher;
+    }
+
     if (comicVine) {
       out.comicVine = comicVine;
     }
@@ -1902,7 +1908,7 @@ export default async function handler(req, res) {
       title,
       issue: correctedIssue,
       year: confirmedYear,
-      publisher,
+      publisher: confirmedPublisher,
       visionConfidence: confidence,
     });
     const idCheck = assessIdentityConfidence(sanitizedIdentity, identitySource);
@@ -2006,7 +2012,7 @@ export default async function handler(req, res) {
       //      don't trust — using either lets wrong-book prices win.
       //
       // When skipped, PC × grade multiplier remains as `out.price`.
-      const isMegaKeyBook = !!getMegaKeyEntry(title, correctedIssue, publisher, confirmedYear || year);
+      const isMegaKeyBook = !!getMegaKeyEntry(title, correctedIssue, confirmedPublisher, confirmedYear || year);
       if (isMegaKeyBook) {
         console.log('[sanity] skipped — mega-key uses floor map');
       } else if (compsExhausted) {
@@ -2159,7 +2165,7 @@ export default async function handler(req, res) {
     //   2. compsExhausted: AI verify rejected 100% of comps. `rawComps.lowest`
     //      is null but `compsFromEbay.lowest` still holds the pre-verify
     //      contaminated lowest — same untrusted data the sanity block skips.
-    isMegaKeyForFloor = !!getMegaKeyEntry(title, correctedIssue, publisher, confirmedYear || year);
+    isMegaKeyForFloor = !!getMegaKeyEntry(title, correctedIssue, confirmedPublisher, confirmedYear || year);
     if (isMegaKeyForFloor) {
       console.log('[floor] skipped — mega-key uses floor map');
     } else if (compsExhausted) {
@@ -2413,7 +2419,7 @@ export default async function handler(req, res) {
     // Schema version stamped on response for K2 rules-version tracking.
     out.megaKeysSchemaVersion = MEGA_KEYS_SCHEMA_VERSION;
     {
-      const megaKeyEntry = getMegaKeyEntry(title, correctedIssue, publisher, confirmedYear || year);
+      const megaKeyEntry = getMegaKeyEntry(title, correctedIssue, confirmedPublisher, confirmedYear || year);
       if (megaKeyEntry) {
         if (megaKeyEntry.type === 'MANUAL') {
           out.manualReviewRequired = true;
@@ -2424,7 +2430,7 @@ export default async function handler(req, res) {
             `${title} #${correctedIssue}`, '— no floor applied');
         } else {
           const floorResult = getMegaKeyFloor(
-            title, correctedIssue, publisher, confirmedYear || year, grade, numericGrade
+            title, correctedIssue, confirmedPublisher, confirmedYear || year, grade, numericGrade
           );
           if (floorResult.exceedsMap) {
             // Distinct from type=MANUAL: the map simply doesn't cover
@@ -2779,7 +2785,7 @@ export default async function handler(req, res) {
       title,
       issue: correctedIssue,
       year: confirmedYear || year,
-      publisher,
+      publisher: confirmedPublisher,
       variant: req.body?.variant || null,
       grade,
       numericGrade,

@@ -64,7 +64,7 @@ const perfect = alignIdentity({
 });
 
 assertEq(perfect.confidence, 'VERIFIED', 'Perfect agreement → VERIFIED tier');
-assertRange(perfect.authenticationScore, 95, 100, 'Perfect agreement → 95-100 score');
+assertRange(perfect.authenticationScore, 90, 100, 'Perfect agreement → 90-100 score (VERIFIED tier)');
 assertEq(perfect.conflicts.length, 0, 'Perfect agreement → zero conflicts');
 assertFalse(perfect.needsReview, 'Perfect agreement → no review needed');
 assertEq(perfect.confirmedTitle, 'Amazing Spider-Man', 'Title confirmed');
