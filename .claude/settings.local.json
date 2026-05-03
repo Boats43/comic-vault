@@ -52,7 +52,20 @@
       "Bash(awk '/<div class=\"completed-auctions-used\"/,/<\\\\/div>$/' /tmp/pc_game.html)",
       "Bash(npx --yes vercel --prod --yes)",
       "Bash(awk *)",
-      "Bash(npm test *)"
+      "Bash(npm test *)",
+      "Bash(grep -n \"selectedItem\\\\\\\\.title\\\\|selectedItem\\\\\\\\.issue\\\\|selectedItem\\\\\\\\.year\" src/App.jsx)",
+      "PowerShell(git add *)",
+      "PowerShell(git push *)",
+      "PowerShell(npm run *)",
+      "PowerShell(node tests/image-search-extraction.test.js)",
+      "PowerShell(node -e \"import\\('./src/lib/imageSearchIdentity.js'\\).then\\(m => { const t = m.extractSeriesTitle\\('Amazing Spider-Man #300 \\(1988\\) Marvel CGC 9.8'\\); console.log\\('Title:', JSON.stringify\\(t\\)\\); }\\)\")",
+      "PowerShell(node -e \"import\\('./src/lib/imageSearchIdentity.js'\\).then\\(m => { const titles = ['Amazing Spider-Man #300 \\(1988\\) Marvel CGC 9.8', 'Amazing Spider-Man 300 Marvel 1988 VF/NM', 'ASM #300 1988']; titles.forEach\\(t => console.log\\(JSON.stringify\\(t\\), '->', JSON.stringify\\(m.extractSeriesTitle\\(t\\)\\)\\)\\); }\\)\")",
+      "PowerShell(node -e \"import\\('./src/lib/imageSearchIdentity.js'\\).then\\(m => { const v = m.extractVariantTokens\\('ASM #300 Newsstand \\(1988\\) Marvel'\\); console.log\\('Variant tokens:', JSON.stringify\\(v\\)\\); }\\)\")",
+      "PowerShell(git commit *)",
+      "PowerShell(git checkout *)",
+      "PowerShell(git merge *)",
+      "Bash(grep *)",
+      "PowerShell(git restore *)"
     ]
   }
 }

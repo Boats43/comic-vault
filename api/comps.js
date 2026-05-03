@@ -1241,9 +1241,15 @@ export const fetchComps = async ({
           const hasCorrectIssue = filtered.parsed.some((p) =>
             issueRe.test(String(p.title || ''))
           );
-          if (!hasCorrectIssue && i < uniqueAttempts.length - 1) {
-            console.log(`[comps] attempt ${attempt.n} no #${iss} match — continuing`);
-            continue;
+          if (!hasCorrectIssue) {
+            if (i < uniqueAttempts.length - 1) {
+              console.log(`[comps] attempt ${attempt.n} no #${iss} match — continuing`);
+              continue;
+            } else {
+              console.log(`[comps] all attempts exhausted, no #${iss} match — returning empty`);
+              parsed = [];
+              break;
+            }
           }
         }
         parsed = filtered.parsed;

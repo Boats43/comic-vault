@@ -4221,7 +4221,9 @@ function CollectionDetail({
                 >
                   {listing
                     ? "Listing on eBay..."
-                    : `📋 List on eBay — $${listPrice || "0"}`}
+                    : listPrice
+                      ? `📋 List on eBay — $${listPrice}`
+                      : `📋 List on eBay — No price available`}
                 </button>
               );
             })()}
