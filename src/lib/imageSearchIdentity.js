@@ -383,6 +383,9 @@ export const extractConsensus = (parsedRows) => {
     { re: /\bboom\b/i, name: 'Boom' },
     { re: /\bvaliant\b/i, name: 'Valiant' },
     { re: /\bdynamite\b/i, name: 'Dynamite' },
+    { re: /\bsumerian\b/i, name: 'Sumerian' },
+    { re: /\bbad\s*kitty\b/i, name: 'Bad Kitty Studios' },
+    { re: /\bkitchen\s*sink\b/i, name: 'Kitchen Sink' },
   ];
 
   const publisherCounts = {};
