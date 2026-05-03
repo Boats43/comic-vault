@@ -1369,7 +1369,9 @@ export default async function handler(req, res) {
       ebayConsensusYearInt >= 1900 &&
       ebayConsensusYearInt <= 2099 &&
       (visualResult?.items?.length || 0) >= 10 &&
-      yearAgreementRatio >= 0.7
+      (visualConsensus?.agreement?.year || 0) >= 8 &&
+      ((visualConsensus?.agreement?.year || 0) /
+       (visualConsensus?.agreement?.total || 1)) >= 0.5
     ) ? ebayConsensusYearInt : null;
 
     console.log(`[year-ebay] raw="${ebayConsensusYearRaw}" int=${ebayConsensusYearInt} ratio=${yearAgreementRatio.toFixed(2)} authoritative=${ebayYearAuthoritative}`);
@@ -1553,43 +1555,38 @@ export default async function handler(req, res) {
 
     // confirmedYear already declared in Phase 1, just reassign if needed
     let yearOverrideRejected = false;
-    // eBay consensus year has highest authority when agreement ≥70%
     if (ebayYearAuthoritative) {
-      const cvYearInt = cvYear ? parseInt(String(cvYear), 10) : null;
-      if (cvYearInt && Math.abs(ebayYearAuthoritative - cvYearInt) > 5) {
-        console.log(`[year-divergence] eBay=${ebayYearAuthoritative} CV=${cvYearInt} gap=${Math.abs(ebayYearAuthoritative - cvYearInt)} — eBay wins`);
-      }
       confirmedYear = String(ebayYearAuthoritative);
-    } else if (isEraSpecific && userYear) {
-      confirmedYear = String(userYear);
-      console.log(
-        '[enrich] era-specific key — trusting user year:',
-        userYear,
-        'keyIssue:', keyIssueStr,
-        'pc:', pcYear, 'cv:', cvYear
-      );
-    } else if (pcYear && cvYear && Math.abs(pcYear - cvYear) <= 2) {
-      // PC and CV agree (within ±2y) — trust them even if user year differs.
+      if (cvYear && Math.abs(cvYear - ebayYearAuthoritative) > 3) {
+        console.warn(`[year-divergence] CV=${cvYear} vs eBay=${ebayYearAuthoritative} — CV likely wrong volume`);
+      }
+    }
+    else if (pcYear && cvYear && Math.abs(pcYear - cvYear) <= 2) {
       confirmedYear = String(Math.round((pcYear + cvYear) / 2));
-    } else if (pcYear && (!userYear || pcGap <= 2)) {
+    }
+    else if (pcYear && (!userYear || Math.abs(pcYear - userYear) <= 2)) {
       confirmedYear = String(pcYear);
-    } else if (cvYear && (!userYear || cvGap <= 2 || (cvGap > 5 && !pcYear))) {
+    }
+    else if (cvYear && (!userYear || Math.abs(cvYear - userYear) <= 2)) {
       confirmedYear = String(cvYear);
-    } else if (userYear) {
+    }
+    else if (userYear) {
       confirmedYear = String(userYear);
       yearOverrideRejected = true;
-      console.log(
-        '[enrich] year override REJECTED:',
-        'user:', userYear,
-        'pc:', pcYear,
-        'cv:', cvYear,
-        'keeping user year'
-      );
-    } else {
-      confirmedYear = pcYear ? String(pcYear) : (cvYear ? String(cvYear) : year);
     }
-    if (confirmedYear && String(confirmedYear) !== String(year || "")) {
-      console.log('[enrich] year corrected:', year, '→', confirmedYear);
+    else {
+      confirmedYear = pcYear
+        ? String(pcYear)
+        : (cvYear ? String(cvYear) : year);
+    }
+
+    if (confirmedYear !== year) {
+      const source = ebayYearAuthoritative ? 'ebay-consensus' :
+        (pcYear && cvYear && Math.abs(pcYear - cvYear) <= 2)
+          ? 'pc-cv-agreement' :
+        pcYear ? 'pricecharting' :
+        cvYear ? 'comicvine' : 'fallback';
+      console.log(`[year-resolved] ${year} → ${confirmedYear} (source=${source})`);
     }
 
     // Ship #20a.6.18 — Variant identity check (additive, gated). Only runs
