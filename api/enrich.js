@@ -1357,6 +1357,23 @@ export default async function handler(req, res) {
 
     mark('phase1_complete');
 
+    // eBay year authority — requires year-specific agreement ≥70%
+    const ebayConsensusYearRaw = visualConsensus?.year;
+    const ebayConsensusYearInt = ebayConsensusYearRaw
+      ? parseInt(String(ebayConsensusYearRaw).trim(), 10)
+      : null;
+    const yearAgreementRatio = (visualConsensus?.agreement?.year || 0) /
+      (visualConsensus?.agreement?.total || 1);
+    const ebayYearAuthoritative = (
+      Number.isFinite(ebayConsensusYearInt) &&
+      ebayConsensusYearInt >= 1900 &&
+      ebayConsensusYearInt <= 2099 &&
+      (visualResult?.items?.length || 0) >= 10 &&
+      yearAgreementRatio >= 0.7
+    ) ? ebayConsensusYearInt : null;
+
+    console.log(`[year-ebay] raw="${ebayConsensusYearRaw}" int=${ebayConsensusYearInt} ratio=${yearAgreementRatio.toFixed(2)} authoritative=${ebayYearAuthoritative}`);
+
     // ═══════════════════════════════════════════════════════════════════════
     // PHASE 2: DATA FETCHING (runs after identity confirmed)
     // ═══════════════════════════════════════════════════════════════════════
@@ -1536,7 +1553,14 @@ export default async function handler(req, res) {
 
     // confirmedYear already declared in Phase 1, just reassign if needed
     let yearOverrideRejected = false;
-    if (isEraSpecific && userYear) {
+    // eBay consensus year has highest authority when agreement ≥70%
+    if (ebayYearAuthoritative) {
+      const cvYearInt = cvYear ? parseInt(String(cvYear), 10) : null;
+      if (cvYearInt && Math.abs(ebayYearAuthoritative - cvYearInt) > 5) {
+        console.log(`[year-divergence] eBay=${ebayYearAuthoritative} CV=${cvYearInt} gap=${Math.abs(ebayYearAuthoritative - cvYearInt)} — eBay wins`);
+      }
+      confirmedYear = String(ebayYearAuthoritative);
+    } else if (isEraSpecific && userYear) {
       confirmedYear = String(userYear);
       console.log(
         '[enrich] era-specific key — trusting user year:',
