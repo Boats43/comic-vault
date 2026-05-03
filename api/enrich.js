@@ -58,6 +58,8 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
 import { extractConfirmedVariant } from "../src/lib/variantIdentity.js";
+// Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
+import { detectEditionWarning } from "./grade.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1266,6 +1268,15 @@ export default async function handler(req, res) {
     // query parser and cause ComicVine's substring scoring to miss.
     const publisher = cleanPublisher(rawPublisher) || null;
     let confirmedPublisher = publisher; // Will be updated if eBay override fires
+
+    // Ship #1.3 — Edition warning detection (reprint/facsimile/later-print).
+    // Scans Vision's reason text for reprint signals. When detected, comp pool
+    // will be filtered to reprint-only listings or refuse-to-price if <3 matches.
+    const editionWarning = detectEditionWarning(req.body?.reason);
+    if (editionWarning?.detected) {
+      console.log('[edition-gate] detected:', editionWarning.signals.join(', '));
+    }
+
     const titleLower = (title || "").toLowerCase();
     if (!title || titleLower.includes("not a comic") || titleLower === "unknown") {
       console.log("[enrich] rejected non-comic:", title);
@@ -1779,6 +1790,51 @@ export default async function handler(req, res) {
       }
     }
 
+    // Ship #1.3 — Edition warning comp filter. When Vision detected reprint/
+    // facsimile/later-print signals, filter rawComps to reprint-only listings.
+    // If <3 reprint comps remain, refuse-to-price (prevents 1st-print comps
+    // from anchoring reprint book prices at 100-1000% over market).
+    if (editionWarning?.detected) {
+      console.log(`[edition-gate] reprint/later-print detected — filtering comps`);
+      const reprintComps = (rawComps?.prices || []).filter((c) =>
+        /reprint|facsimile|2nd\s*print|3rd\s*print|loot.?crate|millennium/i.test(
+          String(c.title || '')
+        )
+      );
+      if (reprintComps.length < 3) {
+        out.price = null;
+        out.pricingSource = 'refused-reprint-thin-pool';
+        out.priceNote = 'Reprint edition detected — insufficient reprint-specific comps';
+        out.refusedToPrice = true;
+        out.confidenceLevel = 'LOW';
+        console.log(`[edition-gate] only ${reprintComps.length} reprint comps — refused to price`);
+      } else {
+        // Recalculate stats with reprint-only pool
+        const reprintPrices = reprintComps.map((c) => c.price).filter((p) => p > 0);
+        const reprintAvg = reprintPrices.length > 0
+          ? reprintPrices.reduce((s, p) => s + p, 0) / reprintPrices.length
+          : 0;
+        const reprintLow = reprintPrices.length > 0 ? Math.min(...reprintPrices) : 0;
+        const reprintHigh = reprintPrices.length > 0 ? Math.max(...reprintPrices) : 0;
+        rawComps = {
+          ...rawComps,
+          prices: reprintComps,
+          count: reprintComps.length,
+          average: reprintAvg,
+          averageFormatted: fmtUsd(reprintAvg),
+          lowest: reprintLow,
+          lowestFormatted: fmtUsd(reprintLow),
+          highest: reprintHigh,
+          highestFormatted: fmtUsd(reprintHigh),
+          reprintFiltered: true,
+        };
+        console.log(
+          `[edition-gate] filtered to ${reprintComps.length} reprint comps ` +
+          `(avg $${reprintAvg.toFixed(2)}, was $${compsFromEbay?.average?.toFixed(2) || 'null'})`
+        );
+      }
+    }
+
     // Ship #20a — sold comp source. Prefer PriceCharting sales-history
     // (real eBay + Heritage completed sales) when populated; fall back to
     // soldResult (eBay Insights, currently dormant).
@@ -2167,6 +2223,9 @@ export default async function handler(req, res) {
         out.artistFallback = true;
         out.compBasis = rawComps.compBasis || 'generic-variant-fallback';
       }
+      // Ship #1.3 — surface edition warning when reprint/facsimile detected
+      if (editionWarning) out.editionWarning = editionWarning;
+      if (rawComps?.reprintFiltered) out.reprintFiltered = true;
 
       // Defect penalty: reduce price if Claude detected a significant defect.
       if (req.body.defectPenalty) {
