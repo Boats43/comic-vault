@@ -1549,7 +1549,7 @@ export default async function handler(req, res) {
       confirmedYear = String(Math.round((pcYear + cvYear) / 2));
     } else if (pcYear && (!userYear || pcGap <= 2)) {
       confirmedYear = String(pcYear);
-    } else if (cvYear && (!userYear || cvGap <= 2)) {
+    } else if (cvYear && (!userYear || cvGap <= 2 || (cvGap > 5 && !pcYear))) {
       confirmedYear = String(cvYear);
     } else if (userYear) {
       confirmedYear = String(userYear);
