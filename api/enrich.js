@@ -60,8 +60,6 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 import { extractConfirmedVariant } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning } from "./grade.js";
-// Ship 1.3.2 — reprint regex for eBay consensus fallback.
-import { REPRINT_RE } from "../src/lib/compHygiene.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1274,10 +1272,7 @@ export default async function handler(req, res) {
     // Ship #1.3 — Edition warning detection (reprint/facsimile/later-print).
     // Scans Vision's reason text for reprint signals. When detected, comp pool
     // will be filtered to reprint-only listings or refuse-to-price if <3 matches.
-    // Ship 1.3.2 — declared `let` so eBay image-search consensus can upgrade
-    // it later in Phase 1 when Vision missed the reprint signal (e.g. polybag
-    // reprints where front cover looks like the original).
-    let editionWarning = detectEditionWarning(req.body?.reason);
+    const editionWarning = detectEditionWarning(req.body?.reason);
     if (editionWarning?.detected) {
       console.log('[edition-gate] detected:', editionWarning.signals.join(', '));
     }
@@ -1466,41 +1461,6 @@ export default async function handler(req, res) {
           }))
         )
       );
-    }
-
-    // Ship 1.3.2 — eBay image-search consensus fallback for edition warning.
-    // When ≥60% of image-search titles match REPRINT_RE but Vision missed
-    // the reprint signal (e.g. polybag reprints where front cover looks
-    // identical to the original), force editionWarning.detected = true so
-    // downstream gates fire (Ship 1.3 reprint comp filter, Ship 1.3.1
-    // mega-key floor bypass).
-    //
-    // B&B #28 polybag scan (5/4/2026): 18/20 titles matched REPRINT_RE,
-    // but Vision couldn't see the polybag-only "Loot Crate" branding
-    // through the bag in the cover photo. Mega-key floor pushed price
-    // to $1,500-$3,500 false-original range as result.
-    if (!editionWarning?.detected && visualResult?.items?.length >= 5) {
-      const consensusTitles = visualResult.items
-        .map(i => String(i?.rawTitle || i?.title || ''))
-        .filter(Boolean);
-      if (consensusTitles.length >= 5) {
-        const reprintHits = consensusTitles.filter(t => REPRINT_RE.test(t)).length;
-        const ratio = reprintHits / consensusTitles.length;
-        if (ratio >= 0.6) {
-          editionWarning = {
-            detected: true,
-            signals: ['ebay-consensus-reprint'],
-            source: 'ebay-image-search-consensus',
-            consensusRatio: ratio,
-            consensusHits: reprintHits,
-            consensusTotal: consensusTitles.length
-          };
-          console.log(
-            `[edition-gate] ebay-consensus override: ${reprintHits}/${consensusTitles.length} ` +
-            `(${(ratio * 100).toFixed(0)}%) titles match REPRINT_RE — forcing detected=true`
-          );
-        }
-      }
     }
 
     // Extract corrected issue from image search consensus (issue correction).
