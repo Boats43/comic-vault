@@ -2553,7 +2553,16 @@ export default async function handler(req, res) {
     out.megaKeysSchemaVersion = MEGA_KEYS_SCHEMA_VERSION;
     {
       const megaKeyEntry = getMegaKeyEntry(title, correctedIssue, confirmedPublisher, confirmedYear || year);
-      if (megaKeyEntry) {
+      // Ship 1.3.1 — mega-key floor must yield to edition warning.
+      // Reprints/facsimiles/later-prints of mega-keys (e.g., B&B #28
+      // Loot Crate polybag) must NOT receive 1st-print floor pricing.
+      if (megaKeyEntry && editionWarning?.detected) {
+        out.megaKeyFloorSkipped = true;
+        out.megaKeyFloorSkipReason = 'edition-warning';
+        console.log('[mega-key-floor] SKIPPED — reprint/later-print detected',
+          `(signals: ${editionWarning.signals.join(', ')})`,
+          `${title} #${correctedIssue}`);
+      } else if (megaKeyEntry) {
         if (megaKeyEntry.type === 'MANUAL') {
           out.manualReviewRequired = true;
           out.manualReviewReason = megaKeyEntry.volatilityNote ||
