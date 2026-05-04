@@ -157,18 +157,20 @@ export function variantMatch(compTitle, expectedVariant) {
 export function buildVerifiedSoldPool(soldComps, { title, issue, variant }) {
   if (!soldComps || soldComps.length === 0) return [];
 
+  // Ship 1.6 — Trust Layer 10 sold-verify (verifySoldComps in
+  // api/enrich.js). Comps reaching this function have already been
+  // verified for title/issue/variant/grade match. Re-running stricter
+  // regex matchers here was rejecting valid Layer-10 comps and forcing
+  // price to fall through to pc_estimate.
+  //
+  // B&B #28 polybag scan: 16/30 verified at Layer 10, 0 surviving here
+  // → source=pc_estimate instead of verified_sold.
   return soldComps.filter(s => {
     if (!s.title || s.price == null) return false;
-
-    // Require title match
-    if (!titleMatch(s.title, title)) return false;
-
-    // Require issue match
-    if (!issueMatch(s.title, issue)) return false;
-
-    // Require variant match (when variant specified)
-    if (!variantMatch(s.title, variant)) return false;
-
+    const priceNum = typeof s.price === 'number'
+      ? s.price
+      : parseFloat(String(s.price).replace(/[$,]/g, ''));
+    if (!Number.isFinite(priceNum) || priceNum <= 0) return false;
     return true;
   });
 }
