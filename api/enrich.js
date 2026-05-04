@@ -2476,14 +2476,47 @@ export default async function handler(req, res) {
     );
     const keyMult = isMajorKey ? 1.5 : isMinorKey ? 1.2 : 1.0;
     console.log('[key] keyIssue:', out.keyIssue, 'major:', isMajorKey, 'minor:', isMinorKey, 'mult:', keyMult, 'isFromPC:', isFromPC);
-    if (keyMult > 1.0 && out.price && isFromPC && blendedAvg) {
+    // Ship 1.6.1 — key multiplier must work across all pricing sources.
+    // Previous gate required isFromPC && blendedAvg, which silently
+    // no-op'd whenever priceBands fired (verified_sold/verified_active).
+    // Captain America #359 (1st Crossbones cameo, 23 sources) was
+    // priced at $6.70 with no multiplier instead of $7.50–$9 range.
+    if (keyMult > 1.0 && out.price) {
       const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
       if (curPrice > 0) {
-        out.price = fmtUsd(curPrice * keyMult);
-        out.priceLow = fmtUsd(curPrice * keyMult * 0.75);
-        out.priceHigh = fmtUsd(curPrice * keyMult * 1.25);
-        out.keyMultiplier = keyMult;
-        console.log('[key]', isMajorKey ? 'major' : 'minor', '×' + keyMult, '→', out.price);
+        // Determine multiplier base: blendedAvg (PC source) or current price (price-bands)
+        let keyMultBase;
+        let keyMultBaseSource;
+        if (isFromPC && blendedAvg) {
+          keyMultBase = blendedAvg;
+          keyMultBaseSource = 'blendedAvg';
+        } else if (out.pricingSource === 'verified_sold' || out.pricingSource === 'verified_active') {
+          keyMultBase = curPrice;
+          keyMultBaseSource = 'priceBandsMarket';
+        }
+        if (keyMultBase) {
+          const newPrice = keyMultBase * keyMult;
+          const ratio = newPrice / curPrice;
+          // Sanity ceiling: only apply if multiplier would change price
+          // by less than 50% in either direction. Prevents thin-pool
+          // edge cases from blowing up.
+          if (ratio <= 1.5 && ratio >= 0.67) {
+            out.price = fmtUsd(newPrice);
+            out.priceLow = fmtUsd(newPrice * 0.75);
+            out.priceHigh = fmtUsd(newPrice * 1.25);
+            out.keyMultiplier = keyMult;
+            out.keyMultBaseSource = keyMultBaseSource;
+            console.log('[key]', isMajorKey ? 'major' : 'minor',
+              `×${keyMult} (base=${keyMultBaseSource}=${keyMultBase.toFixed(2)})`,
+              `${curPrice.toFixed(2)} → ${newPrice.toFixed(2)}`);
+          } else {
+            console.log('[key] SKIPPED — sanity ceiling',
+              `(ratio=${ratio.toFixed(2)}, ${curPrice.toFixed(2)} → ${newPrice.toFixed(2)})`);
+          }
+        } else {
+          console.log('[key] SKIPPED — no multiplier base available',
+            `(source=${out.pricingSource}, isFromPC=${isFromPC})`);
+        }
       }
     }
 
