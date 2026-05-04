@@ -1600,6 +1600,100 @@ export default async function handler(req, res) {
       console.log(`[year-resolved] ${year} → ${confirmedYear} (source=${source})`);
     }
 
+    // Ship 1.8 — Comp consensus backfill for confirmedYear / confirmedPublisher.
+    // When primary resolution (Vision + eBay year + PC + CV) leaves year or
+    // publisher null but eBay image search has 5+ comps with consensus, use
+    // the consensus to backfill so identity-required gate doesn't dead-end
+    // a scan that has authoritative comp data sitting right there.
+    //
+    // TITLE SANITY GATE: Backfill ONLY runs when ≥70% of comp titles
+    // fuzzy-match confirmedTitle. Prevents Conan #124 (Conan the Barbarian
+    // 1970) from absorbing year/publisher from Savage Sword of Conan comps,
+    // and prevents any series from absorbing data from a different volume
+    // that happened to surface in image-search.
+    //
+    // Closes: Luke Cage Power Man #34 identity-required dead-end where
+    // 18+ verified comps exist but year/publisher null in primary path.
+    if ((!confirmedYear || !confirmedPublisher) && visualResult?.items?.length >= 5) {
+      const compTitles = visualResult.items
+        .map(i => String(i?.rawTitle || i?.title || ''))
+        .filter(Boolean);
+
+      // Title sanity: how many comp titles share core tokens with confirmedTitle?
+      const coreTokens = String(confirmedTitle || '')
+        .toLowerCase()
+        .replace(/[#:,'"\.\-\(\)]/g, ' ')
+        .split(/\s+/)
+        .filter(t => t.length >= 3 && !/^(the|and|of|a|comics?|comic|book)$/i.test(t));
+
+      const titleMatchCount = coreTokens.length === 0 ? 0 : compTitles.filter(t => {
+        const lower = t.toLowerCase();
+        const hits = coreTokens.filter(tok => lower.includes(tok)).length;
+        return hits / coreTokens.length >= 0.6;
+      }).length;
+
+      const titleMatchRatio = compTitles.length > 0
+        ? titleMatchCount / compTitles.length
+        : 0;
+
+      if (titleMatchRatio >= 0.7) {
+        // Year backfill — extract years from passing titles, find consensus
+        if (!confirmedYear) {
+          const yearCounts = {};
+          compTitles.forEach(t => {
+            const matches = t.match(/\b(19[3-9]\d|20[0-2]\d)\b/g) || [];
+            matches.forEach(y => { yearCounts[y] = (yearCounts[y] || 0) + 1; });
+          });
+          const sortedYears = Object.entries(yearCounts).sort((a, b) => b[1] - a[1]);
+          if (sortedYears.length > 0) {
+            const [topYear, topCount] = sortedYears[0];
+            const yearRatio = topCount / compTitles.length;
+            if (yearRatio >= 0.5) {
+              confirmedYear = topYear;
+              out.yearBackfilledFromComps = true;
+              out.yearBackfillRatio = yearRatio;
+              console.log(`[ship-1.8] year backfilled from comp consensus: ${topYear} (${topCount}/${compTitles.length}=${(yearRatio*100).toFixed(0)}%)`);
+            }
+          }
+        }
+
+        // Publisher backfill — pattern-match common publisher tokens
+        if (!confirmedPublisher) {
+          const pubPatterns = [
+            { re: /\b(?:dc\s+comics?|dc\s+universe|dcu)\b/i, name: 'DC Comics' },
+            { re: /\b(?:marvel\s+comics?|marvel\s+universe)\b/i, name: 'Marvel Comics' },
+            { re: /\b(?:image\s+comics?)\b/i, name: 'Image Comics' },
+            { re: /\b(?:dark\s+horse)\b/i, name: 'Dark Horse Comics' },
+            { re: /\b(?:idw\s+publishing|idw)\b/i, name: 'IDW Publishing' },
+            { re: /\b(?:boom!?\s+studios)\b/i, name: 'BOOM! Studios' },
+            { re: /\b(?:dynamite\s+entertainment|dynamite)\b/i, name: 'Dynamite Entertainment' },
+            { re: /\b(?:valiant\s+(?:comics?|entertainment))\b/i, name: 'Valiant Entertainment' },
+            { re: /\b(?:archie\s+comics?)\b/i, name: 'Archie Comics' },
+            { re: /\b(?:vault\s+comics?)\b/i, name: 'Vault Comics' },
+          ];
+          const pubCounts = {};
+          compTitles.forEach(t => {
+            pubPatterns.forEach(({ re, name }) => {
+              if (re.test(t)) pubCounts[name] = (pubCounts[name] || 0) + 1;
+            });
+          });
+          const sortedPubs = Object.entries(pubCounts).sort((a, b) => b[1] - a[1]);
+          if (sortedPubs.length > 0) {
+            const [topPub, topCount] = sortedPubs[0];
+            const pubRatio = topCount / compTitles.length;
+            if (pubRatio >= 0.5) {
+              confirmedPublisher = topPub;
+              out.publisherBackfilledFromComps = true;
+              out.publisherBackfillRatio = pubRatio;
+              console.log(`[ship-1.8] publisher backfilled from comp consensus: ${topPub} (${topCount}/${compTitles.length}=${(pubRatio*100).toFixed(0)}%)`);
+            }
+          }
+        }
+      } else {
+        console.log(`[ship-1.8] backfill ABORTED — title sanity ${titleMatchCount}/${compTitles.length}=${(titleMatchRatio*100).toFixed(0)}% < 70% threshold (confirmedTitle="${confirmedTitle}")`);
+      }
+    }
+
     // Ship #20a.6.18 — Variant identity check (additive, gated). Only runs
     // on modern books (year >= 2000) with variant detected AND Vision
     // confidence not HIGH AND eBay image search returned results. Extracts
