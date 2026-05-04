@@ -259,9 +259,9 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - **Editable list price**: numeric `listPrice` input above List on eBay button. `handleList` passes `{ ...item, price: "$X.XX" }` so override drives eBay StartPrice + persists to catalogue.
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 
-## Current State (as of 2026-04-30)
+## Current State (as of 2026-05-04)
 
-Latest commit: 1751f4c — Ship #23 consistency engine (CV year gate + refuse-to-price + stale refresh + Update All Books)
+Latest commit: 1b020d3 — Ship 1.6 (trust Layer 10 sold-verify) + Ship 1.6.1 (key mult all sources) + Ship 1.3.1 (mega-key edition gate)
 
 Test count: 1,570 passing across 23 suites (31 new Ship #23 tests)
 Vercel functions: 12/12
@@ -304,11 +304,11 @@ Phase 2 (deferred): Ships #28-29 (image forensics, cross-source validation) — 
 ## Recent Ships
 **Last 5 only — overwritten when 6th lands.**
 
+- `1b020d3` — Ship 1.6 — trust Layer 10 sold-verify, remove double-filter. buildVerifiedSoldPool was re-running title/issue/variant regex on already-verified sold comps, dropping valid Layer 10 comps and forcing fallthrough to pc_estimate. Layer 10 (verifySoldComps) is authoritative; priceBands now only sanity-checks price validity. Closes: Wolverine Origins, Absolute Batman, ASM #549, B&B #28, MMPR/TMNT — all now use verified_sold source.
+- `5a581a8` — Ship 1.6.1 — key multiplier applies across all pricing sources. Previous gate (isFromPC && blendedAvg) silently no-op'd when priceBands fired (verified_sold/verified_active). Captain America #359 (1st Crossbones, 23 sources) priced at $6.70 with no multiplier instead of $7.50–$9. New gate accepts any source; uses priceBandsMarket as base for verified sources. Sanity ceiling: 0.67–1.5× ratio.
+- `a5d48d0` — Ship 1.3.1 — mega-key floor yields to edition warning. Reprints/facsimiles/later-prints of mega-keys (B&B #28 Loot Crate polybag, Aliens #1 2nd print) must NOT receive 1st-print floor pricing. Added editionWarning.detected gate before mega-key floor enforcement. Surfaces out.megaKeyFloorSkipped + out.megaKeyFloorSkipReason.
 - `1751f4c` — Ship #23 — consistency engine (CV year gate + refuse-to-price + stale refresh + Update All Books). FIX 1: Pre-1970 books filter CV volumes by ±15y. FIX 2: Refuse browse_api price when 0 verified + 0 sold comps. FIX 3: Auto-refresh stale records (missing priceBands/claudeCheck/demandSignals). FIX 4: Manage tab batch update button. 1,539 → 1,570 tests (31 new). Zero regressions.
 - `83c7c30` — Ship #22 — best practice eBay listings (item specifics, multi-image, market proof, Claude title, Best Offer, confidence gate). Item specifics auto-populated (grade, era, publisher, key issue flags). Multi-image upload (up to 12). Claude-generated titles (variant-aware). Best Offer enabled. Confidence gate (blocks LOW confidence books). 768 listing tests added. Auto-listing complete.
-- `7d9d18c` — Ship #21 — complete card + Claude quality check + decision path. Haiku analyzes enrich result for identity/pricing quality. Demand signals (velocity/trend/liquidity). Decision recommendations (SELL/HOLD/PRESS). Layer 3 unlocked.
-- `e5240d5` — Ship #20b — verified sold first pricing + Quick/Market/Stretch bands. Sold comps = primary anchor (90d history). Price bands: Quick (10th %ile), Market (median), Stretch (90th %ile). Grade-aware anchoring. Recency weighting. Pricing-math greenlit.
-- `d971267` — Ship #20a.6 — sold comp verification + hygiene extraction. Pure-fn `verifySoldComps` filter chain (10 reject reasons + diagnostics). `compHygiene.js` extracted from `api/comps.js` (-271 lines). 911 → 1,002 tests. Pricing-math change (greenlit).
 
 ## Active Priority Queue
 
