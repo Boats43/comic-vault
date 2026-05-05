@@ -1930,53 +1930,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Ship 6 retry — Polybag pricing flag. Declared here (above polybag
-    // detection block) so assignment at line ~1970 is in scope. When
-    // true, ALL downstream pricing blocks skip so polybag price stands
-    // as final answer.
-    let isPolybagPricing = false;
-
-    // Ship 6 retry — Polybag comp pool from eBay image-search items.
-    // When ≥60% of visualResult.items rawTitles match REPRINT_RE AND
-    // ≥5 items have valid prices, use those active-listing prices as
-    // the polybag pool with 0.75x ask-to-sold haircut. Sets
-    // isPolybagPricing=true to bypass ALL downstream pricing logic.
-    if (visualResult?.items?.length >= 5) {
-      const itemsWithPrice = visualResult.items.filter(
-        (i) => typeof i?.price === 'number' && i.price > 0
-      );
-      if (itemsWithPrice.length >= 5) {
-        const reprintItems = itemsWithPrice.filter((i) =>
-          REPRINT_RE.test(String(i.rawTitle || ''))
-        );
-        const reprintRatio = reprintItems.length / itemsWithPrice.length;
-
-        if (reprintRatio >= 0.6) {
-          const askPrices = reprintItems.map((i) => i.price).sort((a, b) => a - b);
-          const askMedian = askPrices[Math.floor(askPrices.length / 2)];
-          const polybagPrice = askMedian * 0.75;
-          const polybagLow = askPrices[0] * 0.75;
-          const polybagHigh = askPrices[askPrices.length - 1] * 0.75;
-
-          console.log(
-            `[polybag-pool] detected: ${reprintItems.length}/${itemsWithPrice.length} ` +
-            `(${(reprintRatio * 100).toFixed(0)}%) reprint titles · ` +
-            `ask median=$${askMedian.toFixed(2)} · haircut=0.75 → $${polybagPrice.toFixed(2)}`
-          );
-
-          out.price = fmtUsd(polybagPrice);
-          out.priceLow = fmtUsd(polybagLow);
-          out.priceHigh = fmtUsd(polybagHigh);
-          out.pricingSource = 'ebay-polybag-active';
-          out.priceNote = 'eBay polybag listings (active asks, 0.75x haircut)';
-          out.polybagDetected = true;
-          out.polybagComps = reprintItems.length;
-          out.polybagAskMedian = askMedian;
-          out.polybagReprintRatio = reprintRatio;
-          isPolybagPricing = true;
-        }
-      }
-    }
 
     // Ship #20a — sold comp source. Prefer PriceCharting sales-history
     // (real eBay + Heritage completed sales) when populated; fall back to
@@ -2168,6 +2121,58 @@ export default async function handler(req, res) {
       if (creatorResult.consensus.length > 0) {
         console.log('[creator-from-comps] consensus:',
           creatorResult.consensus.map((e) => `${e.tier}/${e.canonical}×${e.hits}`).join(', '));
+      }
+    }
+
+    // Ship 6 retry — Polybag pricing flag. Set true by polybag detection
+    // block below. When true, ALL downstream pricing blocks skip so
+    // polybag price stands as final answer.
+    let isPolybagPricing = false;
+
+    // Ship 6 retry — Polybag comp pool from eBay image-search items.
+    // When ≥60% of visualResult.items rawTitles match REPRINT_RE AND
+    // ≥5 items have valid prices, use those active-listing prices as
+    // the polybag pool with 0.75x ask-to-sold haircut. Sets
+    // isPolybagPricing=true to bypass ALL downstream pricing logic.
+    //
+    // MOVED FROM line 1933 — original location was BEFORE `out`
+    // declaration causing ReferenceError: Cannot access 'out' before
+    // initialization. Now placed after metadata population, before
+    // identity gate.
+    if (visualResult?.items?.length >= 5) {
+      const itemsWithPrice = visualResult.items.filter(
+        (i) => typeof i?.price === 'number' && i.price > 0
+      );
+      if (itemsWithPrice.length >= 5) {
+        const reprintItems = itemsWithPrice.filter((i) =>
+          REPRINT_RE.test(String(i.rawTitle || ''))
+        );
+        const reprintRatio = reprintItems.length / itemsWithPrice.length;
+
+        if (reprintRatio >= 0.6) {
+          const askPrices = reprintItems.map((i) => i.price).sort((a, b) => a - b);
+          const askMedian = askPrices[Math.floor(askPrices.length / 2)];
+          const polybagPrice = askMedian * 0.75;
+          const polybagLow = askPrices[0] * 0.75;
+          const polybagHigh = askPrices[askPrices.length - 1] * 0.75;
+
+          console.log(
+            `[polybag-pool] detected: ${reprintItems.length}/${itemsWithPrice.length} ` +
+            `(${(reprintRatio * 100).toFixed(0)}%) reprint titles · ` +
+            `ask median=$${askMedian.toFixed(2)} · haircut=0.75 → $${polybagPrice.toFixed(2)}`
+          );
+
+          out.price = fmtUsd(polybagPrice);
+          out.priceLow = fmtUsd(polybagLow);
+          out.priceHigh = fmtUsd(polybagHigh);
+          out.pricingSource = 'ebay-polybag-active';
+          out.priceNote = 'eBay polybag listings (active asks, 0.75x haircut)';
+          out.polybagDetected = true;
+          out.polybagComps = reprintItems.length;
+          out.polybagAskMedian = askMedian;
+          out.polybagReprintRatio = reprintRatio;
+          isPolybagPricing = true;
+        }
       }
     }
 
