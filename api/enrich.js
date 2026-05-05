@@ -2172,6 +2172,34 @@ export default async function handler(req, res) {
           out.polybagAskMedian = askMedian;
           out.polybagReprintRatio = reprintRatio;
           isPolybagPricing = true;
+
+          // Ship 6 — populate out.comps with polybag listings instead of
+          // first-print comps. UI reads recentSales / average / lowest from
+          // out.comps. Without this override, UI shows $1200/$1500 first-print
+          // sold comps alongside $9.71 polybag price = confusing/dangerous.
+          out.comps = {
+            count: reprintItems.length,
+            average: fmtUsd(askMedian * 0.75),
+            averageNum: askMedian * 0.75,
+            lowest: fmtUsd(polybagLow),
+            lowestNum: polybagLow,
+            highest: fmtUsd(polybagHigh),
+            highestNum: polybagHigh,
+            lastSoldDate: null,
+            recentSales: reprintItems.map((item) => ({
+              price: item.price * 0.75,
+              priceFormatted: fmtUsd(item.price * 0.75),
+              title: item.rawTitle,
+              date: item.endTime || null,
+              daysAgo: null,
+              itemWebUrl: item.itemWebUrl || null,
+            })),
+            query: 'polybag-pool',
+            fellBack: false,
+            source: 'ebay-polybag-active',
+            verifiedByAI: false,
+            verificationRemoved: 0,
+          };
         }
       }
     }
@@ -2845,7 +2873,10 @@ export default async function handler(req, res) {
       'lowGradeFloorApplied:', out.lowGradeFloorApplied === true
     );
 
-    if (rawComps && rawComps.count > 0) {
+    // Ship 6 — skip first-print comps overwrite when polybag pricing active.
+    // Polybag block at line ~2168 already populated out.comps with polybag
+    // listings. Without this guard, first-print comp pool overwrites it.
+    if (rawComps && rawComps.count > 0 && !isPolybagPricing) {
       out.comps = {
         count: rawComps.count,
         average: rawComps.averageFormatted,
