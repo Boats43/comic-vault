@@ -3323,7 +3323,20 @@ export default async function handler(req, res) {
       // Closes failure class: any case where pricing engine produces a
       // confident wrong answer that claude-check catches but cannot block.
       // Includes Thanos #11 wrong-issue comps, B&B polybag, future cases.
-      if (claudeCheck.verified === false && claudeCheck.confidence === 'LOW') {
+      //
+      // Ship 6.1 — Skip kill switch when polybag pricing active.
+      // claudeCheck runs first-print verification logic (story description
+      // matching, creator credits, era-appropriate comps). For polybags,
+      // these checks always fail by design — the polybag has its own
+      // verification (60% reprint ratio + ≥5 priced items in pool, applied
+      // at line ~2148). Letting Ship 5 kill the polybag price would null
+      // every legitimate polybag scan. claudeCheck still runs for telemetry
+      // but the kill switch is bypassed when polybag pricing is active.
+      if (
+        claudeCheck.verified === false &&
+        claudeCheck.confidence === 'LOW' &&
+        !isPolybagPricing
+      ) {
         const refusalReason = (claudeCheck.flags?.[0]) || 'Claude verification failed';
         console.log(
           '[claude-gate] REFUSED to price — verified=false confidence=LOW · flag:',
@@ -3336,6 +3349,16 @@ export default async function handler(req, res) {
         out.priceNote = `Claude verification failed — ${refusalReason}`;
         out.refusedToPrice = true;
         out.confidenceLevel = 'LOW';
+      } else if (
+        claudeCheck.verified === false &&
+        claudeCheck.confidence === 'LOW' &&
+        isPolybagPricing
+      ) {
+        console.log(
+          '[claude-gate] BYPASSED — polybag pricing active. ' +
+          'claudeCheck flag:', (claudeCheck.flags?.[0]) || 'none'
+        );
+        out.claudeCheckBypassedForPolybag = true;
       }
     }
 
