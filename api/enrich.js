@@ -2265,6 +2265,25 @@ export default async function handler(req, res) {
           out.keyIssueSource = null;
           out.polybagSuppressedKey = true;
 
+          // Ship 6.1 — Clear ComicVine object on polybag scans.
+          // out.comicVine was assigned at line ~2046 before polybag detection
+          // ran, carrying first-print volume info, characters, story arcs,
+          // and creator credits. UI components reading comicVine.description
+          // or comicVine.firstAppearanceCharacters would surface first-print
+          // data as if it described the polybag. Preserves originalComicVine
+          // for reference/debug. Final cleanup of all first-print metadata
+          // paths flowing to the response shape.
+          if (out.comicVine) {
+            out.originalComicVine = out.comicVine;
+            console.log(
+              `[polybag-cv-suppress] cleared comicVine ` +
+              `(volume=${out.comicVine.volume || 'null'}, ` +
+              `chars=${out.comicVine.firstAppearanceCharacters?.length || 0})`
+            );
+          }
+          out.comicVine = null;
+          out.polybagSuppressedComicVine = true;
+
           // Ship 6 — populate out.comps with polybag listings instead of
           // first-print comps. UI reads recentSales / average / lowest from
           // out.comps. Without this override, UI shows $1200/$1500 first-print
