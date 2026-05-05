@@ -3285,8 +3285,12 @@ export default async function handler(req, res) {
       numericGrade,
       conditionSummary: req.body?.reason || null,
       keyIssue: out.keyIssue,
-      storyDescription: comicVine?.description || null,
-      creators: comicVine?.personCredits || [],
+      // Ship 6.1 — Suppress ComicVine story/creators on polybag scans.
+      // ComicVine returns first-print metadata (story, creators) that
+      // doesn't apply to a Loot Crate reprint. UI displays this as the
+      // book's story description, creating misleading product info.
+      storyDescription: isPolybagPricing ? null : (comicVine?.description || null),
+      creators: isPolybagPricing ? [] : (comicVine?.personCredits || []),
       priceBands: out.priceBands,
       soldComps: filteredSold,
       activeComps: rawComps,
