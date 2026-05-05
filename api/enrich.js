@@ -2254,7 +2254,11 @@ export default async function handler(req, res) {
         `source=${out.pricingSource} count=${priceBandsRaw.count} ` +
         `gradeMult=${gradeMultiplier}`
       );
-    } else if (priceCharting) {
+    } else if (priceCharting && !isPolybagPricing) {
+      // Ship 6 — skip priceCharting fallback when polybag pricing active.
+      // priceBands block above is guarded with !isPolybagPricing, but
+      // its else-if branch still fires and overwrites polybag price
+      // ($9.71 → $622.63) without this guard.
       let pc = priceCharting.price;
       // Era-aware multipliers use confirmedYear (healed via PC/CV crosscheck)
       // when available; falls back to user year; then vintage default.
