@@ -6007,7 +6007,9 @@ export default function App() {
                   cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
                   variant: enrich.variantNote || cur.variant || null,
                   variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
-                  year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year,
+                  year: enrich.polybagDetected && enrich.year
+                    ? enrich.year
+                    : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
                   // Mega-key floor flags (Tier 0 hotfix — persist from enrich)
                   megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
                   megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
@@ -6308,7 +6310,9 @@ export default function App() {
                 goCollect: enrich.goCollect || cur.goCollect || null,
                 variant: enrich.variantNote || cur.variant || null,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
-                year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year,
+                year: enrich.polybagDetected && enrich.year
+                  ? enrich.year
+                  : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
                 // Mega-key floor flags
                 megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
                 megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
@@ -6673,7 +6677,9 @@ export default function App() {
       goCollect: enrich.goCollect || item.goCollect || null,
       variant: enrich.variantNote || item.variant || null,
       variantMultiplier: enrich.variantMultiplier || item.variantMultiplier || null,
-      year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : item.year,
+      year: enrich.polybagDetected && enrich.year
+        ? enrich.year
+        : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : item.year),
       // Mega-key floor flags
       megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
       megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
