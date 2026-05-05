@@ -2230,7 +2230,12 @@ export default async function handler(req, res) {
     // can see what eBay/PC found, but no price recommendation is produced.
     if (idCheck.confident) {
     // Ship #20b — Use price bands as primary pricing source
-    if (priceBandsRaw) {
+    // Ship 6 — skip price-bands assignment when polybag pricing active.
+    // Polybag block at line ~2127 already set out.price using polybag
+    // comp pool ($9 from $12 ask × 0.75 haircut). Without this guard,
+    // priceBandsRaw.market ($422.83 from contaminated 1960 first-print
+    // sold comps) overwrites the polybag price.
+    if (priceBandsRaw && !isPolybagPricing) {
       out.price = fmtUsd(priceBandsRaw.market);
       out.priceLow = fmtUsd(priceBandsRaw.quick);
       out.priceHigh = fmtUsd(priceBandsRaw.stretch);
