@@ -49,6 +49,7 @@ import {
 export {
   VARIANT_CONTAM_RE,
   SIGNED_RE,
+  REPRINT_RE,
   cleanPublisher,
   hasIssueNumber,
   hasMultipleDistinctIssues,
