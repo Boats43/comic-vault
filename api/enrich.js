@@ -3189,6 +3189,12 @@ export default async function handler(req, res) {
 
     res.status(200).json(out);
   } catch (err) {
-    res.status(500).json({ error: err?.message || "Server error" });
+    // Ship 6 debug — log full error and stack trace to Vercel logs.
+    // Without this, 500s appear in production with no diagnostic info.
+    console.error('[enrich-error] message:', err?.message || 'unknown');
+    console.error('[enrich-error] stack:', err?.stack || 'no stack');
+    console.error('[enrich-error] name:', err?.name || 'unknown');
+    console.error('[enrich-error] isPolybagPricing:', typeof isPolybagPricing !== 'undefined' ? isPolybagPricing : 'out of scope');
+    res.status(500).json({ error: err?.message || "Server error", stack: err?.stack });
   }
 }
