@@ -3317,7 +3317,15 @@ export default async function handler(req, res) {
       demandSignals: out.demandSignals
     };
 
-    const claudeCheck = await runClaudeCheck(claudeCheckData);
+    // Ship 6.3 — Skip claudeCheck API call entirely when polybag pricing active.
+    // Ship 6.1 already bypasses the kill switch on polybags, but the API call
+    // itself was still firing — costing ~3s per polybag scan and burning
+    // Anthropic API credits on a result we discard. Skip the call entirely
+    // when isPolybagPricing=true; polybag has its own verification (60%
+    // reprint ratio + ≥5 priced items at line ~2148).
+    const claudeCheck = isPolybagPricing
+      ? null
+      : await runClaudeCheck(claudeCheckData);
     if (claudeCheck) {
       out.claudeCheck = claudeCheck;
       out.verified = claudeCheck.verified;
