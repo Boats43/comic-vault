@@ -2248,6 +2248,23 @@ export default async function handler(req, res) {
           out.originalTitle = baseTitle;
           out.polybagEditionLabel = editionLabel;
 
+          // Ship 6.1 — Suppress key issue flag on polybag scans.
+          // Reprints/facsimiles/Loot Crates are NOT key issues — only the
+          // original first-print is the key. Without this override, polybag
+          // cards display "⭐ 1st appearance of [hero]" creating a false
+          // listing claim. Preserves originalKeyIssue for reference.
+          if (out.keyIssue) {
+            out.originalKeyIssue = out.keyIssue;
+            out.originalKeyIssueSource = out.keyIssueSource;
+            console.log(
+              `[polybag-key-suppress] cleared "${out.keyIssue}" ` +
+              `(source=${out.keyIssueSource}) — reprints are not keys`
+            );
+          }
+          out.keyIssue = null;
+          out.keyIssueSource = null;
+          out.polybagSuppressedKey = true;
+
           // Ship 6 — populate out.comps with polybag listings instead of
           // first-print comps. UI reads recentSales / average / lowest from
           // out.comps. Without this override, UI shows $1200/$1500 first-print
