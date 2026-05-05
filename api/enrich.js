@@ -3075,6 +3075,39 @@ export default async function handler(req, res) {
       out.verified = claudeCheck.verified;
       out.recommendation = claudeCheck.recommendation;
       out.suggestedListingTitle = claudeCheck.suggestedListingTitle;
+
+      // Ship 5 — Claude-check kill switch. When claude-check returns
+      // verified=false AND confidence=LOW, refuse to ship the computed
+      // price. Two-factor requirement is intentional — HIGH confidence on
+      // verified=false may indicate principled disagreement worth surfacing
+      // (not blocking). LOW + unverified is the "system is wrong, do not
+      // ship" signal.
+      //
+      // B&B #28 Loot Crate polybag (5/4/2026): scanned as 1960 original,
+      // priced at $2,275.34 via mega-key floor + key multiplier. Claude
+      // check correctly flagged "Story description is for modern Flash/
+      // Blackhawks crossover NOT 1960 Justice League debut" with
+      // verified=false confidence=LOW. Pre-Ship-5: flag surfaced but
+      // price still recommended. Post-Ship-5: price nulled, refusal
+      // surfaced with flag as priceNote.
+      //
+      // Closes failure class: any case where pricing engine produces a
+      // confident wrong answer that claude-check catches but cannot block.
+      // Includes Thanos #11 wrong-issue comps, B&B polybag, future cases.
+      if (claudeCheck.verified === false && claudeCheck.confidence === 'LOW') {
+        const refusalReason = (claudeCheck.flags?.[0]) || 'Claude verification failed';
+        console.log(
+          '[claude-gate] REFUSED to price — verified=false confidence=LOW · flag:',
+          refusalReason
+        );
+        out.price = null;
+        out.priceLow = null;
+        out.priceHigh = null;
+        out.pricingSource = 'refused-claude-gate';
+        out.priceNote = `Claude verification failed — ${refusalReason}`;
+        out.refusedToPrice = true;
+        out.confidenceLevel = 'LOW';
+      }
     }
 
     mark('final_response');
