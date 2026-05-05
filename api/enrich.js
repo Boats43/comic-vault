@@ -2139,7 +2139,7 @@ export default async function handler(req, res) {
     // declaration causing ReferenceError: Cannot access 'out' before
     // initialization. Now placed after metadata population, before
     // identity gate.
-    if (visualResult?.items?.length >= 5) {
+    if (false && visualResult?.items?.length >= 5) {
       const itemsWithPrice = visualResult.items.filter(
         (i) => typeof i?.price === 'number' && i.price > 0
       );
