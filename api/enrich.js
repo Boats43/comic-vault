@@ -1988,7 +1988,12 @@ export default async function handler(req, res) {
     // key-mult gate / confidence below. Raw rows are surfaced (capped at
     // 20) on out.soldCompsRaw for UI debug + diagnostics shape on
     // out.soldCompDiagnostics for the "V of R verified" chip.
-    const rawSoldRows = pcSales.soldComps.length > 0
+    //
+    // Ship 6 hotfix — null-safe access. Polybag-detected books may have
+    // pcSales = null because PriceCharting flow short-circuited when
+    // polybag pricing fired. Crash here was the hidden 500 that
+    // followed `[polybag-pool] detected:` log without warning.
+    const rawSoldRows = (pcSales?.soldComps?.length || 0) > 0
       ? pcSales.soldComps
       : (Array.isArray(soldResult) ? soldResult : []);
     const userGradeKeyForSold =
@@ -2959,7 +2964,8 @@ export default async function handler(req, res) {
 
     // Confidence level — PC data guarantees at least MEDIUM.
     const verifiedCount = rawComps?.count || 0;
-    const soldCount = filteredSold.length;
+    // Ship 6 hotfix — null-safe access. Same defensive pattern as line 1991.
+    const soldCount = filteredSold?.length || 0;
     const hasPCData = out.pricingSource === "pricecharting";
     let confidenceLevel = "LOW";
     if (soldCount >= 2 && verifiedCount >= 2) confidenceLevel = "HIGH";
