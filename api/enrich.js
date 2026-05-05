@@ -2203,6 +2203,51 @@ export default async function handler(req, res) {
             out.originalYear = String(confirmedYear || year || '');
           }
 
+          // Ship 6.1 — Polybag edition type detection from title patterns.
+          // Detects specific edition labels in seller titles to produce
+          // accurate displayed title and edition tag. Falls back to generic
+          // "Reprint" label if no specific edition keyword detected.
+          const editionPatterns = [
+            { pattern: /loot\s*crate/i, label: 'Loot Crate Reprint' },
+            { pattern: /facsimile/i, label: 'Facsimile Edition' },
+            { pattern: /millennium\s*edition/i, label: 'Millennium Edition' },
+            { pattern: /silver\s*age\s*classics/i, label: 'Silver Age Classics' },
+            { pattern: /direct\s*reprint/i, label: 'Direct Edition Reprint' },
+            { pattern: /2nd\s*print|second\s*print/i, label: '2nd Print' },
+            { pattern: /3rd\s*print|third\s*print/i, label: '3rd Print' },
+            { pattern: /polybag/i, label: 'Polybag Reprint' },
+          ];
+
+          let editionLabel = 'Reprint';
+          const editionCounts = {};
+          reprintItems.forEach((item) => {
+            const titleStr = String(item.rawTitle || '');
+            for (const { pattern, label } of editionPatterns) {
+              if (pattern.test(titleStr)) {
+                editionCounts[label] = (editionCounts[label] || 0) + 1;
+                break;
+              }
+            }
+          });
+
+          if (Object.keys(editionCounts).length > 0) {
+            editionLabel = Object.entries(editionCounts)
+              .sort((a, b) => b[1] - a[1])[0][0];
+          }
+
+          console.log(
+            `[polybag-edition] label="${editionLabel}" ` +
+            `(distribution: ${JSON.stringify(editionCounts)})`
+          );
+
+          // Override title with edition-aware label.
+          // Uses confirmedTitle (cleanest source) + correctedIssue + edition.
+          const baseTitle = title || confirmedTitle || '';
+          const issueStr = correctedIssue ? ` #${correctedIssue}` : '';
+          out.title = `${baseTitle}${issueStr} ${editionLabel}`;
+          out.originalTitle = baseTitle;
+          out.polybagEditionLabel = editionLabel;
+
           // Ship 6 — populate out.comps with polybag listings instead of
           // first-print comps. UI reads recentSales / average / lowest from
           // out.comps. Without this override, UI shows $1200/$1500 first-print
