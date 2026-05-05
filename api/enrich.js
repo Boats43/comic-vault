@@ -2981,17 +2981,24 @@ export default async function handler(req, res) {
       out.soldCompsRaw = capRawSoldRows(rawSoldRows);
       out.soldCompDiagnostics = soldVerifyResult.diagnostics;
     }
-    if (pcSales.salesByGrade && Object.keys(pcSales.salesByGrade).length > 0) {
-      out.salesByGrade = pcSales.salesByGrade;
-    }
-    // Ship #20a.5 — per-grade price guide + per-grade sales velocity from
-    // the same PC HTML. Pure data capture; downstream Ship #20b consumes
-    // these for sold-first weighting and grade-aware pricing math.
-    if (pcSales.priceLadder && Object.keys(pcSales.priceLadder).length > 0) {
-      out.priceLadder = pcSales.priceLadder;
-    }
-    if (pcSales.salesVelocity && Object.keys(pcSales.salesVelocity).length > 0) {
-      out.salesVelocity = pcSales.salesVelocity;
+    // Ship 6 — skip PriceCharting per-grade arrays when polybag pricing active.
+    // salesByGrade / priceLadder / salesVelocity all hold first-print PC data
+    // (B&B #28 1960 graded ladder, sales history). UI displays "PRICE LADDER
+    // (14 grades)" and "2 sales per month" labels from these — confusing for
+    // a $9.71 polybag. Clear them so UI has only polybag data to render.
+    if (!isPolybagPricing) {
+      if (pcSales.salesByGrade && Object.keys(pcSales.salesByGrade).length > 0) {
+        out.salesByGrade = pcSales.salesByGrade;
+      }
+      // Ship #20a.5 — per-grade price guide + per-grade sales velocity from
+      // the same PC HTML. Pure data capture; downstream Ship #20b consumes
+      // these for sold-first weighting and grade-aware pricing math.
+      if (pcSales.priceLadder && Object.keys(pcSales.priceLadder).length > 0) {
+        out.priceLadder = pcSales.priceLadder;
+      }
+      if (pcSales.salesVelocity && Object.keys(pcSales.salesVelocity).length > 0) {
+        out.salesVelocity = pcSales.salesVelocity;
+      }
     }
 
     // Ship #25 — Velocity analysis + dynamic pricing
