@@ -2173,6 +2173,36 @@ export default async function handler(req, res) {
           out.polybagReprintRatio = reprintRatio;
           isPolybagPricing = true;
 
+          // Ship 6.1 — Polybag year extraction.
+          // Reprint titles often carry the actual reprint year ("POLYBAGGED 2017",
+          // "Loot Crate 2020", "Facsimile 2026"). Extract any 4-digit year >= 2000
+          // from polybag titles and use the highest-frequency year as the actual
+          // edition year. Falls back to original year if no polybag year detected.
+          const yearMatches = reprintItems
+            .map((item) => {
+              const matches = String(item.rawTitle || '').match(/\b(20\d{2})\b/g);
+              return matches ? matches.map((y) => parseInt(y, 10)) : [];
+            })
+            .flat()
+            .filter((y) => y >= 2000 && y <= new Date().getFullYear() + 1);
+
+          if (yearMatches.length > 0) {
+            // Most frequent year wins — handles mixed years across listings.
+            const yearCounts = {};
+            yearMatches.forEach((y) => { yearCounts[y] = (yearCounts[y] || 0) + 1; });
+            const polybagYear = Object.entries(yearCounts)
+              .sort((a, b) => b[1] - a[1])[0][0];
+
+            console.log(
+              `[polybag-year] extracted ${polybagYear} from ${yearMatches.length} title hits ` +
+              `(distribution: ${JSON.stringify(yearCounts)})`
+            );
+
+            out.year = polybagYear;
+            out.polybagYear = polybagYear;
+            out.originalYear = String(confirmedYear || year || '');
+          }
+
           // Ship 6 — populate out.comps with polybag listings instead of
           // first-print comps. UI reads recentSales / average / lowest from
           // out.comps. Without this override, UI shows $1200/$1500 first-print
