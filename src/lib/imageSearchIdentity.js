@@ -246,12 +246,26 @@ export const extractIdentityFromImageSearch = (items) => {
   console.log(`[extractIdentity] processing ${items.length} items, first item:`, items[0]);
   const results = items.map((it, idx) => {
     const rawTitle = (it && typeof it.title === 'string') ? it.title : null;
+    // Ship 6 prep — preserve commerce fields per item so downstream pricing
+    // logic can use eBay image-search results directly as a polybag comp
+    // pool. When ≥60% of titles match REPRINT_RE (Ship 6), use these items'
+    // prices as the polybag pool instead of refusing-to-price.
+    //
+    // NOTE: These are ACTIVE listing prices from search_by_image (Browse API),
+    // NOT sold comps. Ship 6 must apply ask-to-sold haircut (~0.75x) and label
+    // pricingSource accordingly. Field name `endTime` is raw eBay `itemEndDate`
+    // and differs from rawComps.recentSales.date — Ship 6 build will need a
+    // mapVisualToRecentSale() helper for plumbing into existing comp pool.
+    const priceVal = (it?.price?.value != null) ? parseFloat(it.price.value) : NaN;
     const parsed = {
       rawTitle,
       title: extractSeriesTitle(rawTitle),
       issue: extractIssueFromTitle(rawTitle),
       year: extractYearFromTitle(rawTitle),
       variantTokens: extractVariantTokens(rawTitle),
+      price: !isNaN(priceVal) && priceVal > 0 ? priceVal : null,
+      itemWebUrl: it?.itemWebUrl || null,
+      endTime: it?.itemEndDate || null,
     };
     return parsed;
   });
