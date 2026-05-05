@@ -2967,9 +2967,20 @@ export default async function handler(req, res) {
     // pricing math). out.soldCompsRaw exposes the raw pool (capped at 20)
     // for UI debug. out.soldCompDiagnostics gives reason counts + top 3
     // rejected samples so post-deploy phone QA can see what was filtered.
-    out.soldComps = filteredSold;
-    out.soldCompsRaw = capRawSoldRows(rawSoldRows);
-    out.soldCompDiagnostics = soldVerifyResult.diagnostics;
+    // Ship 6 — clear sold comp arrays when polybag pricing active.
+    // soldComps holds first-print sales ($1200/$1500/$561 for B&B #28).
+    // UI reads these and miscomputes recommended price as ~$857 instead
+    // of using out.price = $9.71. Polybag pricing has no PriceCharting
+    // sold history (these are reprint stock, not graded keys).
+    if (isPolybagPricing) {
+      out.soldComps = [];
+      out.soldCompsRaw = [];
+      out.soldCompDiagnostics = { kept: 0, rejected: 0, reasons: {} };
+    } else {
+      out.soldComps = filteredSold;
+      out.soldCompsRaw = capRawSoldRows(rawSoldRows);
+      out.soldCompDiagnostics = soldVerifyResult.diagnostics;
+    }
     if (pcSales.salesByGrade && Object.keys(pcSales.salesByGrade).length > 0) {
       out.salesByGrade = pcSales.salesByGrade;
     }
