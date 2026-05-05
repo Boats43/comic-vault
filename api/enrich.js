@@ -2684,11 +2684,62 @@ export default async function handler(req, res) {
           'second print': 1.5,
           'pence': 1.5,
           'dc universe logo': 1.5,
-          'newsstand': 1.3,
+          // Ship 7 — newsstand removed from flat table; era-aware logic
+          // runs BEFORE this table lookup. Pre-1985: 1.0× (default print
+          // run, no premium). 1985-1995: 1.2×. 1996-2000: 1.5×. 2001-2013:
+          // 2.5×. Post-2013: null (Marvel/DC killed newsstand).
         };
         let vMult = null;
+
+        // Ship 7 — Era-aware newsstand multiplier (runs BEFORE table lookup).
+        // Newsstand premium varies dramatically by year:
+        //   pre-1985: 1.0×  (was the DEFAULT print run, no premium)
+        //   1985-1995: 1.2× (direct market growing, newsstand still common)
+        //   1996-2000: 1.5× (direct dominant, newsstand becoming scarce)
+        //   2001-2013: 2.5× (newsstand <10% print run, scarce)
+        //   post-2013: null (Marvel killed newsstand 2013, DC in 2017)
+        // Calibrated against mega-keys.js note "NEWSSTAND commands 2-4×
+        // direct edition" and observed eBay sold data on Anti-Venom #569,
+        // X-Men v4 #1, etc. Surfaces newsstandEra for telemetry.
+        if (vLower.includes('newsstand')) {
+          const yr = parseInt(confirmedYear || year || 0, 10);
+          let newsstandMult = null;
+          let newsstandEra = null;
+          if (yr >= 1 && yr < 1985) {
+            newsstandMult = 1.0;
+            newsstandEra = 'pre-1985-default';
+          } else if (yr >= 1985 && yr <= 1995) {
+            newsstandMult = 1.2;
+            newsstandEra = '1985-1995-modest';
+          } else if (yr >= 1996 && yr <= 2000) {
+            newsstandMult = 1.5;
+            newsstandEra = '1996-2000-scarce';
+          } else if (yr >= 2001 && yr <= 2013) {
+            newsstandMult = 2.5;
+            newsstandEra = '2001-2013-rare';
+          } else if (yr > 2013) {
+            newsstandEra = 'post-2013-discontinued';
+          }
+          if (newsstandMult !== null && newsstandMult > 1.0) {
+            vMult = newsstandMult;
+            out.newsstandEra = newsstandEra;
+            out.newsstandMultiplier = newsstandMult;
+            console.log(
+              `[variant] newsstand era=${newsstandEra} year=${yr} mult=${newsstandMult}×`
+            );
+          } else {
+            out.newsstandEra = newsstandEra;
+            console.log(
+              `[variant] newsstand era=${newsstandEra} year=${yr} — no premium applied`
+            );
+          }
+        }
+
+        // Standard variant table lookup. Skipped if Ship 7 newsstand block
+        // already set vMult. Catches non-newsstand variants (price variants,
+        // canadian, whitman, 2nd prints, etc.).
         for (const [key, mult] of Object.entries(variantMultipliers)) {
-          if (vLower.includes(key)) {
+          if (!vMult && vLower.includes(key)) {
             // Test-market price-variant gate (Ship #9 + #10). Vision
             // labels any 35¢ / 30¢ price box as a test-market variant,
             // but those are also standard cover prices outside the
