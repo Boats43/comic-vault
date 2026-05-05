@@ -1833,7 +1833,16 @@ function CollectionDetail({
       ? `CGC ${item.numericGrade}`
       : item.grade || "RAW COPY";
 
-  const conditionBullets = parseConditionReport(item.reason);
+  // Ship 6.4 — Filter key-related bullets when polybag detected.
+  // Vision generates conditionReport BEFORE polybag detection runs, so
+  // bullets often reference "Major Silver Age key", "1st appearance",
+  // "first JLA" etc. for what's actually a Loot Crate reprint. Filter at
+  // render only — preserves item.reason in storage so first-print scans
+  // are unaffected and we can revert later. Pattern matches case-insensitive.
+  const KEY_LANGUAGE_RE = /\b(?:1st|first)\s+(?:app|appearance|jla|justice|issue)|\bmajor\s+(?:silver|bronze|golden|copper)\s+age\s+key|\bkey\s+issue|\borigin\s+of\b|\bdebut\s+of\b/i;
+  const conditionBullets = item.polybagDetected
+    ? parseConditionReport(item.reason).filter((b) => !KEY_LANGUAGE_RE.test(b.text || ''))
+    : parseConditionReport(item.reason);
   const confidenceText = formatConfidence(item.confidence);
   const scannedText = item.timestamp
     ? new Date(item.timestamp).toLocaleString()
