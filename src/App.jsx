@@ -5611,8 +5611,20 @@ export default function App() {
                 identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
                 identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                 identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
-                keyIssue: enrich.keyIssue || cur.keyIssue,
-                keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
+                // Ship 6.2 — Polybag-aware merge.
+                // When backend detects polybag, enrich.keyIssue is null and
+                // enrich.title/year/comicVine are overridden. Default ||
+                // fallback would preserve old first-print values. Polybag
+                // flag forces use of enrich values even when null.
+                keyIssue: enrich.polybagDetected ? null : (enrich.keyIssue || cur.keyIssue),
+                keyIssueSource: enrich.polybagDetected ? null : (enrich.keyIssueSource || cur.keyIssueSource || null),
+                polybagDetected: enrich.polybagDetected === true,
+                polybagYear: enrich.polybagYear || null,
+                polybagEditionLabel: enrich.polybagEditionLabel || null,
+                originalTitle: enrich.originalTitle || cur.originalTitle || null,
+                originalYear: enrich.originalYear || cur.originalYear || null,
+                originalKeyIssue: enrich.originalKeyIssue || cur.originalKeyIssue || null,
+                title: enrich.polybagDetected && enrich.title ? enrich.title : cur.title,
                 keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
                 keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
                 creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
@@ -5630,14 +5642,16 @@ export default function App() {
                 priceNote: lowMatch ? cur.priceNote : (enrich.priceNote || null),
                 gradeMultiplier: lowMatch ? cur.gradeMultiplier : (enrich.gradeMultiplier || null),
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
-                comicVine: enrich.comicVine || cur.comicVine || null,
+                comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
                 certNumber: enrich.certNumber || cur.certNumber || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
                 goCollect: enrich.goCollect || cur.goCollect || null,
                 variant: enrich.variantNote || cur.variant || null,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
-                year: enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year,
+                year: enrich.polybagDetected && enrich.year
+                  ? enrich.year
+                  : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
                 // Mega-key floor flags — flow even under lowMatch (they're identity, not price)
                 megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
                 megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
@@ -6247,8 +6261,20 @@ export default function App() {
                 identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
                 identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                 identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
-                keyIssue: enrich.keyIssue || cur.keyIssue,
-                keyIssueSource: enrich.keyIssueSource || cur.keyIssueSource || null,
+                // Ship 6.2 — Polybag-aware merge.
+                // When backend detects polybag, enrich.keyIssue is null and
+                // enrich.title/year/comicVine are overridden. Default ||
+                // fallback would preserve old first-print values. Polybag
+                // flag forces use of enrich values even when null.
+                keyIssue: enrich.polybagDetected ? null : (enrich.keyIssue || cur.keyIssue),
+                keyIssueSource: enrich.polybagDetected ? null : (enrich.keyIssueSource || cur.keyIssueSource || null),
+                polybagDetected: enrich.polybagDetected === true,
+                polybagYear: enrich.polybagYear || null,
+                polybagEditionLabel: enrich.polybagEditionLabel || null,
+                originalTitle: enrich.originalTitle || cur.originalTitle || null,
+                originalYear: enrich.originalYear || cur.originalYear || null,
+                originalKeyIssue: enrich.originalKeyIssue || cur.originalKeyIssue || null,
+                title: enrich.polybagDetected && enrich.title ? enrich.title : cur.title,
                 keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
                 keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
                 creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
@@ -6266,7 +6292,7 @@ export default function App() {
                 priceNote: enrich.priceNote || null,
                 gradeMultiplier: enrich.gradeMultiplier || null,
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
-                comicVine: enrich.comicVine || cur.comicVine || null,
+                comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
                 certNumber: enrich.certNumber || cur.certNumber || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
