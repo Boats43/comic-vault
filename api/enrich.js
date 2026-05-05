@@ -1206,11 +1206,27 @@ const lookupEbayVisual = async ({ imageBase64, claudeIssue }) => {
       console.log('[visual] winner:', mostCommon, `(${maxCount}/${issueNumbers.length})`);
 
       if (maxCount >= 3) {
-        if (mostCommon && claudeStr && mostCommon !== claudeStr) {
-          console.log(`[visual] Claude=#${claudeStr} eBay=#${mostCommon} → using #${mostCommon}`);
+        // Ship 8 — Vision-presence guard. Previous behavior: override
+        // Vision whenever any other issue won frequency vote. This
+        // produced false negatives like Thanos #11 where eBay returned
+        // 4 hits for #11 and 6 hits for #3 (a more popular issue with
+        // similar cover art). Frequency vote picked #3, system priced
+        // wrong book. Fix: only override when Vision's issue is ABSENT
+        // from eBay results entirely (zero hits). When Vision is in
+        // results, even at minority count, trust Vision — it physically
+        // saw the book on the user's desk.
+        const claudeHits = claudeStr ? (freq[claudeStr] || 0) : 0;
+        const claudeInResults = claudeHits > 0;
+
+        if (mostCommon && claudeStr && mostCommon !== claudeStr && !claudeInResults) {
+          console.log(`[visual] Claude=#${claudeStr} NOT in eBay results — using consensus #${mostCommon} (${maxCount} hits)`);
           result.issue = mostCommon;
           result.issueSource = "ebay_visual";
           result.claudeIssue = claudeStr;
+        } else if (mostCommon && claudeStr && mostCommon !== claudeStr && claudeInResults) {
+          console.log(`[visual] Claude=#${claudeStr} present in eBay results (${claudeHits} hits) — keeping Claude over consensus #${mostCommon}`);
+          result.issue = claudeStr;
+          result.issueSource = "claude_vision_confirmed";
         } else {
           console.log(`[visual] Claude=#${claudeStr} matches eBay=#${mostCommon || "none"} — keeping Claude`);
           result.issue = claudeStr;
