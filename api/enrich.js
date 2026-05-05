@@ -2403,7 +2403,10 @@ export default async function handler(req, res) {
           console.log(`[enrich] defect penalty ×${pen} applied`);
         }
       }
-    } else if (rawComps && rawComps.count > 0) {
+    } else if (rawComps && rawComps.count > 0 && !isPolybagPricing) {
+      // Ship 6 — skip browse_api fallback when polybag pricing active.
+      // Third in chained if/priceBands/else-if/priceCharting/else-if/browse_api.
+      // All three branches now respect polybag price set at line ~2168.
       // eBay listings already reflect market grade — do not multiply again.
       const browseBase = rawComps.average || 0;
       let browsePrice = browseBase;
