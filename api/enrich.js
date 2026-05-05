@@ -16,7 +16,6 @@ import {
   computeMatchConfidence,
   cleanPublisher,
   VARIANT_CONTAM_RE,
-  REPRINT_RE,
 } from "./comps.js";
 // Ship #20a.6 — sold comp verification (pure regex, no I/O). Replaces the
 // single #issue regex filter with full hygiene chain. See
@@ -1930,59 +1929,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Ship 6 — Polybag comp pool from eBay image-search items.
-    // When ≥60% of visualResult.items[].rawTitle match REPRINT_RE AND
-    // ≥5 items have valid prices, use those active-listing prices as
-    // the polybag pool with a 0.75x ask-to-sold haircut. Bypasses
-    // mega-key floor, key multiplier, and floor enforcement so the
-    // polybag price stands as the final answer.
-    //
-    // B&B #28 Loot Crate polybag: eBay image search returns 17/20
-    // titles matching reprint markers with first item priced at $57.
-    // Pre-Ship-6: priced as 1960 first print at $2,275. Post-Ship-6:
-    // priced from polybag listings ~$30-50 with source label.
-    //
-    // Active-listing prices skew 15-30% above sold (eBay asks vs
-    // closes). 0.75x haircut applies a conservative ask-to-sold
-    // adjustment. Source labeled 'ebay-polybag-active' so UI shows
-    // it's an ask-price floor, not a sold comp.
-    if (visualResult?.items?.length >= 5) {
-      const itemsWithPrice = visualResult.items.filter(
-        (i) => typeof i?.price === 'number' && i.price > 0
-      );
-      if (itemsWithPrice.length >= 5) {
-        const reprintItems = itemsWithPrice.filter((i) =>
-          REPRINT_RE.test(String(i.rawTitle || ''))
-        );
-        const reprintRatio = reprintItems.length / itemsWithPrice.length;
-
-        if (reprintRatio >= 0.6) {
-          const askPrices = reprintItems.map((i) => i.price).sort((a, b) => a - b);
-          const askMedian = askPrices[Math.floor(askPrices.length / 2)];
-          const polybagPrice = askMedian * 0.75; // ask-to-sold haircut
-          const polybagLow = askPrices[0] * 0.75;
-          const polybagHigh = askPrices[askPrices.length - 1] * 0.75;
-
-          console.log(
-            `[polybag-pool] detected: ${reprintItems.length}/${itemsWithPrice.length} ` +
-            `(${(reprintRatio * 100).toFixed(0)}%) reprint titles · ` +
-            `ask median=$${askMedian.toFixed(2)} · haircut=0.75 → $${polybagPrice.toFixed(2)}`
-          );
-
-          out.price = fmtUsd(polybagPrice);
-          out.priceLow = fmtUsd(polybagLow);
-          out.priceHigh = fmtUsd(polybagHigh);
-          out.pricingSource = 'ebay-polybag-active';
-          out.priceNote = 'eBay polybag listings (active asks, 0.75x haircut)';
-          out.polybagDetected = true;
-          out.polybagComps = reprintItems.length;
-          out.polybagAskMedian = askMedian;
-          out.polybagReprintRatio = reprintRatio;
-          isPolybagPricing = true;
-        }
-      }
-    }
-
     // Ship #20a — sold comp source. Prefer PriceCharting sales-history
     // (real eBay + Heritage completed sales) when populated; fall back to
     // soldResult (eBay Insights, currently dormant).
@@ -2207,10 +2153,6 @@ export default async function handler(req, res) {
 
     // Hoisted out of the pricing block so the [price-trace] log below has
     // these in scope when the gate fires (pricing block is skipped entirely).
-    // Ship 6 — Polybag pricing flag. Set by polybag detection block at
-    // ~line 1931. When true, mega-key floor, key multiplier, and floor
-    // enforcement skip themselves so polybag price stands as-is.
-    let isPolybagPricing = false;
     let sanityFired = false;
     let floorNum = 0;
     let floorFired = false;
@@ -2451,9 +2393,7 @@ export default async function handler(req, res) {
     //      is null but `compsFromEbay.lowest` still holds the pre-verify
     //      contaminated lowest — same untrusted data the sanity block skips.
     isMegaKeyForFloor = !!getMegaKeyEntry(title, correctedIssue, confirmedPublisher, confirmedYear || year);
-    if (isPolybagPricing) {
-      console.log('[floor] skipped — polybag pricing active');
-    } else if (isMegaKeyForFloor) {
+    if (isMegaKeyForFloor) {
       console.log('[floor] skipped — mega-key uses floor map');
     } else if (compsExhausted) {
       console.log('[floor] skipped — all comps rejected by AI verify');
@@ -2635,10 +2575,7 @@ export default async function handler(req, res) {
     // no-op'd whenever priceBands fired (verified_sold/verified_active).
     // Captain America #359 (1st Crossbones cameo, 23 sources) was
     // priced at $6.70 with no multiplier instead of $7.50–$9 range.
-    // Ship 6 — Skip key multiplier when polybag pricing active.
-    if (keyMult > 1.0 && out.price && isPolybagPricing) {
-      console.log('[key] SKIPPED — polybag pricing active (no key premium for reprints)');
-    } else if (keyMult > 1.0 && out.price) {
+    if (keyMult > 1.0 && out.price) {
       const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
       if (curPrice > 0) {
         // Determine multiplier base: blendedAvg (PC source) or current price (price-bands)
@@ -2746,12 +2683,7 @@ export default async function handler(req, res) {
       // Ship 1.3.1 — mega-key floor must yield to edition warning.
       // Reprints/facsimiles/later-prints of mega-keys (e.g., B&B #28
       // Loot Crate polybag) must NOT receive 1st-print floor pricing.
-      // Ship 6 — Skip mega-key floor when polybag pricing active.
-      if (megaKeyEntry && isPolybagPricing) {
-        out.megaKeyFloorSkipped = true;
-        out.megaKeyFloorSkipReason = 'polybag-pricing';
-        console.log('[mega-key-floor] SKIPPED — polybag pricing active');
-      } else if (megaKeyEntry && editionWarning?.detected) {
+      if (megaKeyEntry && editionWarning?.detected) {
         out.megaKeyFloorSkipped = true;
         out.megaKeyFloorSkipReason = 'edition-warning';
         console.log('[mega-key-floor] SKIPPED — reprint/later-print detected',
