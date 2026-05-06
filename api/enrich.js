@@ -1521,10 +1521,24 @@ export default async function handler(req, res) {
     };
 
     const visionConfidenceLower = String(confidence || 'medium').toLowerCase();
-    const imageConsensusTitle =
-      (visionConfidenceLower !== 'high' && visualResult)
-        ? getImageSearchConsensusTitle(visualResult)
-        : null;
+
+    // Ship 26.0 — Gate PC requery on accepted visual consensus. Previously,
+    // imageConsensusTitle could be derived from visualResult.items frequency
+    // voting even when extractConsensus rejected the pool (title <30% or
+    // issue <50% agreement). This allowed wrong-family titles like "Catwoman
+    // Uncovered" to poison PC queries for "Batman Catwoman Gotham War" scans.
+    // Fix: only use consensus title when visualConsensus passed validation.
+    const imageConsensusTitle = visualConsensus
+      ? (visualConsensus.title || getImageSearchConsensusTitle(visualResult))
+      : null;
+
+    // Diagnostic: log when rejected visual consensus suppresses a requery
+    if (!visualConsensus && visualResult?.items?.length >= 5) {
+      const wouldHaveBeenTitle = getImageSearchConsensusTitle(visualResult);
+      if (wouldHaveBeenTitle && wouldHaveBeenTitle !== pcInitialTitle) {
+        console.log(`[pc-requery] gated: visualConsensus rejected, suppressed requery for "${wouldHaveBeenTitle}"`);
+      }
+    }
 
     // Ship #20a.6.16 Win #2 — PC re-query logic. If image consensus title differs
     // from Vision title AND the initial PC product might be wrong (main-token check),
@@ -1555,7 +1569,7 @@ export default async function handler(req, res) {
 
       if (needsRequery) {
         mark('pc_requery_start');
-        console.log(`[pc-requery] consensus "${imageConsensusTitle}" differs from Vision "${pcInitialTitle}" — re-querying PC`);
+        console.log(`[pc-requery] consensus "${imageConsensusTitle}" differs from Vision "${pcInitialTitle}" — re-querying PC (gated: visualConsensus accepted)`);
         priceCharting = await lookupPriceCharting({
           title: imageConsensusTitle,
           issue: correctedIssue,
