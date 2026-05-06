@@ -521,3 +521,327 @@ export const extractConsensus = (parsedRows) => {
     source: 'ebay_image_search',
   };
 };
+
+// ═════════════════════════════════════════════════════════════════════════
+// Ship 26.1 — Title-family clustering helpers
+// ═════════════════════════════════════════════════════════════════════════
+//
+// Pure helpers for rank-weighted visual title-family consensus. Used to
+// resolve wrong-family pricing (Catwoman/Gotham War class bugs where
+// frequency voting picks larger unrelated family over correct top-ranked
+// result). No production integration yet — Ship 26.2 wires into enrich.js.
+//
+// Architecture: Pure functions, no API calls, no pricing logic. Accept
+// title arrays, return candidate selection decision. Four decision types:
+//
+// 1. 'top-rank-protection' — items[0] family selected by rank override
+// 2. 'weighted-consensus' — family selected by rank-weighted voting
+// 3. 'fallback-vision' — no safe family, preserve Vision identity
+// 4. 'refused-identity-conflict' — visual pool unrelated, refuse pricing
+//
+// Top-rank protection rule: If items[0] has exact issue match, ≥5 tokens,
+// family weight ≥5, ≥1 token overlap with Vision, AND no competing family
+// has ≥2× weight, select items[0] family. Protects against majority-vote
+// bias when correct result ranks first but has lower inventory than wrong
+// family (Catwoman Uncovered has more eBay listings than Gotham War).
+//
+// Vision-overlap requirement prevents top-rank protection from firing on
+// completely unrelated visual pools (Hunt for Wolverine / Sinful Suzi
+// cases where items[0] is noise).
+
+/**
+ * Ship 26.1 — Tokenize title for family clustering.
+ *
+ * Uses extractSeriesTitle (not extractMainTitle) to preserve publisher-
+ * bearing identity titles like "Marvel Tales", "DC Pride", "Marvel Boy".
+ * extractMainTitle strips "marvel"/"dc" globally except via whitelist;
+ * extractSeriesTitle has no publisher-strip logic (line 230 NOISE_WORDS_RE).
+ *
+ * Filters tokens <3 chars AFTER splitting to preserve two-letter identity
+ * tokens like "dc" (DC Pride) when they appear as series initials.
+ *
+ * @param {string} title - raw eBay title
+ * @returns {string[]} - lowercase token array, filtered, deduped
+ */
+export const tokenizeTitleFamily = (title) => {
+  if (!title) return [];
+  // extractSeriesTitle strips variant noise, slab markers, years, prices,
+  // ratio, noise words. Returns null when result <2 chars.
+  const cleaned = extractSeriesTitle(title);
+  if (!cleaned) return [];
+
+  const tokens = String(cleaned)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 2); // preserve "dc" but drop single chars
+
+  // Dedupe via Set, preserving order
+  return [...new Set(tokens)];
+};
+
+/**
+ * Ship 26.1 — Build title families via Jaccard clustering.
+ *
+ * Accepts raw title strings or item objects with .rawTitle or .title field.
+ * Preserves rank index (eBay search_by_image returns bestMatch order).
+ * Clusters titles by Jaccard similarity ≥0.4. Returns families array with
+ * member indices, tokens, and representative title.
+ *
+ * @param {Array<string|object>} itemsOrTitles - raw titles or item objects
+ * @returns {Array<{title: string, tokens: string[], indices: number[]}>}
+ */
+export const buildTitleFamilies = (itemsOrTitles) => {
+  if (!Array.isArray(itemsOrTitles) || itemsOrTitles.length === 0) {
+    return [];
+  }
+
+  // Extract titles, preserving index
+  const entries = itemsOrTitles.map((item, idx) => {
+    const title = typeof item === 'string'
+      ? item
+      : (item?.rawTitle || item?.title || '');
+    const tokens = tokenizeTitleFamily(title);
+    return { idx, title, tokens };
+  }).filter(e => e.tokens.length > 0);
+
+  if (entries.length === 0) return [];
+
+  // Jaccard similarity helper
+  const jaccard = (tokensA, tokensB) => {
+    const setA = new Set(tokensA);
+    const setB = new Set(tokensB);
+    const intersection = [...setA].filter(t => setB.has(t)).length;
+    const union = new Set([...setA, ...setB]).size;
+    return union > 0 ? intersection / union : 0;
+  };
+
+  // Greedy clustering: first entry starts first family, subsequent entries
+  // join first family with Jaccard ≥0.4 or start new family.
+  const families = [];
+  const JACCARD_THRESHOLD = 0.4;
+
+  for (const entry of entries) {
+    let assigned = false;
+    for (const family of families) {
+      // Check similarity against family representative (first member)
+      const sim = jaccard(entry.tokens, family.tokens);
+      if (sim >= JACCARD_THRESHOLD) {
+        family.indices.push(entry.idx);
+        assigned = true;
+        break;
+      }
+    }
+    if (!assigned) {
+      // Start new family
+      families.push({
+        title: entry.tokens.join(' '), // normalized canonical
+        tokens: entry.tokens,
+        indices: [entry.idx],
+      });
+    }
+  }
+
+  return families;
+};
+
+/**
+ * Ship 26.1 — Score title families by rank-weighted voting.
+ *
+ * Rank weights: index 0=5, 1=4, 2=3, 3-9=1, 10-19=0.5, ≥20=0.
+ * Returns scored families with count, weightSum, topRank, canonicalTitle,
+ * rawTitle (from top-ranked member), tokens.
+ *
+ * @param {Array<{title: string, tokens: string[], indices: number[]}>} families
+ * @param {Array<string|object>} itemsOrTitles - original items for rawTitle lookup
+ * @returns {Array<{title: string, tokens: string[], count: number, weightSum: number, topRank: number, rawTitle: string}>}
+ */
+export const scoreTitleFamilies = (families, itemsOrTitles) => {
+  if (!Array.isArray(families)) return [];
+
+  const getRankWeight = (idx) => {
+    if (idx === 0) return 5;
+    if (idx === 1) return 4;
+    if (idx === 2) return 3;
+    if (idx >= 3 && idx <= 9) return 1;
+    if (idx >= 10 && idx <= 19) return 0.5;
+    return 0;
+  };
+
+  const scored = families.map(family => {
+    const count = family.indices.length;
+    const weightSum = family.indices.reduce((sum, idx) => sum + getRankWeight(idx), 0);
+    const topRank = Math.min(...family.indices);
+
+    // Extract rawTitle from top-ranked member
+    const topIdx = topRank;
+    const topItem = itemsOrTitles[topIdx];
+    const rawTitle = typeof topItem === 'string'
+      ? topItem
+      : (topItem?.rawTitle || topItem?.title || family.title);
+
+    return {
+      title: family.title,
+      tokens: family.tokens,
+      indices: family.indices,
+      count,
+      weightSum,
+      topRank,
+      rawTitle,
+    };
+  });
+
+  // Sort by weightSum descending
+  scored.sort((a, b) => b.weightSum - a.weightSum);
+
+  return scored;
+};
+
+/**
+ * Ship 26.1 — Select title-family candidate.
+ *
+ * Pure function. No API calls, no pricing logic. Returns decision object
+ * with four possible outcomes:
+ *
+ * 1. 'top-rank-protection' — items[0] family selected by rank override
+ * 2. 'weighted-consensus' — family selected by rank-weighted voting
+ * 3. 'fallback-vision' — no safe family, preserve Vision
+ * 4. 'refused-identity-conflict' — visual pool unrelated, refuse pricing
+ *
+ * Top-rank protection fires when:
+ * - items[0] has exact issue match to visionIssue
+ * - items[0] has ≥5 meaningful tokens
+ * - items[0] is in a family with weightSum ≥5
+ * - that family shares ≥1 token with Vision title
+ * - no competing family has weightSum ≥2× this family's weightSum
+ *
+ * Vision-overlap requirement prevents noise cases (Hunt for Wolverine /
+ * Sinful Suzi) where items[0] is completely unrelated.
+ *
+ * @param {Array<string|object>} items - eBay search_by_image results
+ * @param {string} visionTitle - Vision-identified title
+ * @param {string|number} visionIssue - Vision-identified issue
+ * @returns {{decision: string, selectedTitle: string|null, rawTitle: string|null, reason: string, topFamily: object|null, runnerUp: object|null, families: array}}
+ */
+export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue) => {
+  // Guard clauses
+  if (!Array.isArray(items) || items.length === 0) {
+    return {
+      decision: 'refused-identity-conflict',
+      selectedTitle: null,
+      rawTitle: null,
+      reason: 'No visual results from eBay',
+      topFamily: null,
+      runnerUp: null,
+      families: [],
+    };
+  }
+
+  if (items.length < 5) {
+    return {
+      decision: 'fallback-vision',
+      selectedTitle: null,
+      rawTitle: null,
+      reason: `Only ${items.length} visual results (minimum 5 required)`,
+      topFamily: null,
+      runnerUp: null,
+      families: [],
+    };
+  }
+
+  // Build and score families
+  const families = buildTitleFamilies(items);
+  const scored = scoreTitleFamilies(families, items);
+
+  if (scored.length === 0) {
+    return {
+      decision: 'refused-identity-conflict',
+      selectedTitle: null,
+      rawTitle: null,
+      reason: 'No valid title families extracted',
+      topFamily: null,
+      runnerUp: null,
+      families: [],
+    };
+  }
+
+  const topFamily = scored[0];
+  const runnerUp = scored[1] || null;
+
+  // Extract issue from items[0]
+  const item0 = items[0];
+  const item0Title = typeof item0 === 'string' ? item0 : (item0?.rawTitle || item0?.title || '');
+  const item0Issue = extractIssueFromTitle(item0Title);
+  const item0Tokens = tokenizeTitleFamily(item0Title);
+
+  // Tokenize Vision title for overlap check
+  const visionTokens = tokenizeTitleFamily(visionTitle || '');
+
+  // Top-rank protection check: Find which family contains items[0]
+  const item0Family = scored.find(f => f.indices?.includes(0));
+
+  if (item0Family) {
+    const issueMatch = item0Issue && visionIssue && String(item0Issue) === String(visionIssue);
+    const hasEnoughTokens = item0Tokens.length >= 5;
+    const familyWeightOk = item0Family.weightSum >= 5;
+
+    // Vision-overlap: require ≥1 shared token between item0 and Vision
+    const sharedTokens = item0Tokens.filter(t => visionTokens.includes(t));
+    const hasVisionOverlap = sharedTokens.length >= 1;
+
+    // Competing family check: find strongest competing family (not item0Family)
+    const competingFamilies = scored.filter(f => f !== item0Family);
+    const strongestCompetitor = competingFamilies[0]; // already sorted by weight descending
+    const competingFamilyTooStrong = strongestCompetitor && strongestCompetitor.weightSum >= (item0Family.weightSum * 2);
+
+    if (issueMatch && hasEnoughTokens && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong) {
+      return {
+        decision: 'top-rank-protection',
+        selectedTitle: item0Family.title,
+        rawTitle: item0Family.rawTitle,
+        reason: `Top-ranked result protected (${item0Tokens.length} tokens, weight ${item0Family.weightSum.toFixed(1)}, ${sharedTokens.length} Vision overlap)`,
+        topFamily: item0Family,
+        runnerUp: strongestCompetitor,
+        families: scored,
+      };
+    }
+  }
+
+  // Weighted-consensus: select top family if it shares ≥2 tokens with Vision
+  const topFamilyOverlap = topFamily.tokens.filter(t => visionTokens.includes(t));
+  if (topFamilyOverlap.length >= 2) {
+    return {
+      decision: 'weighted-consensus',
+      selectedTitle: topFamily.title,
+      rawTitle: topFamily.rawTitle,
+      reason: `Weighted consensus (${topFamily.count} members, weight ${topFamily.weightSum.toFixed(1)}, ${topFamilyOverlap.length} Vision tokens shared)`,
+      topFamily,
+      runnerUp,
+      families: scored,
+    };
+  }
+
+  // Fallback-vision: top family exists but lacks Vision overlap
+  if (topFamilyOverlap.length === 1) {
+    return {
+      decision: 'fallback-vision',
+      selectedTitle: null,
+      rawTitle: null,
+      reason: `Top family weak overlap (${topFamilyOverlap.length} token shared: "${topFamilyOverlap[0]}") — preserve Vision`,
+      topFamily,
+      runnerUp,
+      families: scored,
+    };
+  }
+
+  // Refused-identity-conflict: no overlap, visual pool unrelated
+  return {
+    decision: 'refused-identity-conflict',
+    selectedTitle: null,
+    rawTitle: null,
+    reason: `Visual pool families lack overlap with Vision (best: ${topFamilyOverlap.length} tokens)`,
+    topFamily,
+    runnerUp,
+    families: scored,
+  };
+};
