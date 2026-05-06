@@ -1892,7 +1892,10 @@ export default async function handler(req, res) {
     const compsPromise =
       process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? fetchComps({
-            title,
+            // Ship 26.3A — propagate confirmedTitle (Ship 26.2 override) into comps query.
+            // Previously used original req.body.title, bypassing title-family correction.
+            // Catwoman/Gotham War: confirmedTitle resolved to Gotham War, but comps queried Catwoman Uncovered.
+            title: confirmedTitle,
             issue: correctedIssue,
             grade,
             isGraded,
