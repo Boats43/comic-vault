@@ -2638,6 +2638,34 @@ export default async function handler(req, res) {
       out.priceLow = fmtUsd(browsePrice * 0.75);
       out.priceHigh = fmtUsd(browsePrice * 1.25);
       out.pricingSource = "browse_api";
+    } else {
+      // Ship 21 — Silent-empty refusal with diagnostic.
+      //
+      // The pricing chain has three branches: priceBands, priceCharting,
+      // browse_api. When all three fail (no verified comps, no PC match,
+      // no Browse API results), the chain previously had no else clause.
+      // Response returned with undefined pricingSource/refusedToPrice,
+      // confusing UI merge logic and showing stale or empty pricing.
+      //
+      // Production cases 2026-05-06:
+      //   Amazing Spider-Man #282 (1986) — common book returned empty
+      //   Limited Collectors C-44 (post-Ship-15) — gate ok but pricing empty
+      //
+      // This else clause forces explicit refusal so UI can show the user
+      // what to do (refresh, edit fields, accept book is uncomputable).
+      out.price = null;
+      out.priceLow = null;
+      out.priceHigh = null;
+      out.pricingSource = 'refused-no-data-sources';
+      out.priceNote = 'No pricing sources returned data — try refresh or edit title/issue/year';
+      out.refusedToPrice = true;
+      out.confidenceLevel = 'LOW';
+      console.log(
+        '[refuse-to-price] no-data-sources —',
+        'priceBands:', !!priceBandsRaw,
+        'PC:', !!(priceCharting && priceCharting.price),
+        'rawComps:', (rawComps && rawComps.count) || 0
+      );
     }
 
     // Ship 13 — editionWarning must reach response for ALL code paths,

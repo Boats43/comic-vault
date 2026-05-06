@@ -2178,6 +2178,7 @@ function CollectionDetail({
                item.pricingSource === 'refused-claude-gate' ? 'verification failed' :
                item.pricingSource === 'refused-reprint-thin-pool' ? 'reprint (insufficient data)' :
                item.pricingSource === 'identity-required' ? 'identity required' :
+               item.pricingSource === 'refused-no-data-sources' ? 'no data available' :
                item.pricingSource === 'refused' ? 'insufficient data' :
                item.pricingSource}
             </strong>
