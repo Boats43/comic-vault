@@ -194,6 +194,29 @@ const FIXTURES = [
     requiresApiKeys: true,
   },
   {
+    name: 'Limited Collectors Edition #C-44 (Ship 15 — treasury format)',
+    input: {
+      title: "Limited Collectors' Edition",
+      issue: 'C-44',
+      grade: '6.0',
+      year: 1976,
+      publisher: 'DC',
+      isGraded: false,
+      numericGrade: 6.0,
+    },
+    expected: {
+      // CRITICAL: must NOT refuse with identity-required.
+      // Pre-Ship-15: refused at identityGate.js:79 "issue number missing
+      // or non-numeric" — whole treasury format excluded.
+      // Post-Ship-15: identity gate accepts C-NN format, comp search runs.
+      priceMin: 5,
+      priceMax: 100,
+      pricingSourceNotIn: ['identity-required', 'refused-identity'],
+    },
+    currentlyPassing: true,
+    requiresApiKeys: true, // needs live comps to validate end-to-end pricing
+  },
+  {
     name: 'One World Under Doom #1 virgin (Ship 18 target — variant subtype)',
     input: {
       title: 'One World Under Doom',

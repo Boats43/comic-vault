@@ -76,7 +76,40 @@ export const sanitizeIdentityFields = (input) => {
   // issue — accept number or numeric string
   if (input.issue != null) {
     const s = String(input.issue).trim();
-    if (s && !isUncertaintyString(s) && /^\d+(\.\d+)?$/.test(s)) {
+    // Ship 15 — Accept treasury/annual/special issue formats.
+    //
+    // Production data 2026-05-05: Limited Collectors' Edition #C-44 (Batman
+    // Treasury, 1976) refused with "issue number missing or non-numeric"
+    // despite having $15-$58 active comps. Whole format (DC treasuries +
+    // annuals + specials + magazines with letter codes) was excluded by
+    // overly-strict numeric-only regex.
+    //
+    // Accepted formats:
+    //   Pure numeric:    "1", "123", "1.5"           (existing)
+    //   Treasury:        "C-44", "F-21", "P-1", "R-12"
+    //   Letter suffix:   "1A", "100B", "606Z"
+    //   Year special:    "'85", "'92"
+    //   Annual/Special:  "Annual 1", "Special 1", "Giant-Size 1", "King-Size 1"
+    //   No-number:       "nn"
+    //
+    // Still rejected: empty strings, pure letters ("ABC"), uncertainty
+    // markers ("?", "unknown", etc.) — handled by isUncertaintyString.
+    const isAcceptableIssue = (str) => {
+      // Pure numeric (existing behavior preserved)
+      if (/^\d+(\.\d+)?$/.test(str)) return true;
+      // Treasury format: letter-dash-digits (C-44, F-21, P-1, R-12)
+      if (/^[A-Z]-\d+$/i.test(str)) return true;
+      // Letter suffix: digits-letter (1A, 100B, 606Z)
+      if (/^\d+[A-Z]$/i.test(str)) return true;
+      // Year special: apostrophe-2-digits ('85, '92)
+      if (/^'\d{2}$/.test(str)) return true;
+      // Annual/Special/Giant-Size/King-Size + number
+      if (/^(?:annual|special|giant[\s-]?size|king[\s-]?size)\s*#?\s*\d+$/i.test(str)) return true;
+      // No-number placeholder (one-shots, undated specials)
+      if (/^nn$/i.test(str)) return true;
+      return false;
+    };
+    if (s && !isUncertaintyString(s) && isAcceptableIssue(s)) {
       out.issue = s;
     }
   }
