@@ -176,6 +176,16 @@ const extractVariantTokens = (str) => {
   if (/1:\d+|ratio|incentive/.test(s)) tokens.push('ratio');
   if (/sketch/.test(s)) tokens.push('sketch');
   if (/cover [b-z]/.test(s)) tokens.push('altcover');
+  // Ship 18 — Add reprint-class tokens. Without these, first-print sold
+  // comps leaked into reprint pricing pools (B&B #28 Loot Crate, Detective
+  // #27 facsimile, etc.). Active comps had VARIANT_CONTAM_RE protection
+  // but sold comps did not.
+  if (/\breprint(?!\s+series)\b/.test(s)) tokens.push('reprint');
+  if (/facsimile/.test(s)) tokens.push('reprint'); // facsimile = reprint family
+  if (/loot.?crate/.test(s)) tokens.push('reprint');
+  if (/\b(?:2nd|3rd|second|third)\s*print(?:ing)?\b/.test(s)) tokens.push('reprint');
+  if (/millennium\s+edition/.test(s)) tokens.push('reprint');
+  if (/famous\s+first\s+edition/.test(s)) tokens.push('reprint');
   return tokens;
 };
 
@@ -431,6 +441,19 @@ export const verifySoldComps = (rawRows, ctx) => {
     if (compVariantTokens.length > 0 && userVariantTokens.length === 0) {
       reasons.variantMismatch++;
       pushSample(r, 'variantMismatch:comp_has_user_none');
+      return false;
+    }
+
+    // Case (a-inverse) — Ship 18 — user has variant tokens, comp has none → reject
+    // When subject is virgin/foil/etc. and comp title shows no variant signals,
+    // the comp is likely a different (typically standard) variant of the same
+    // issue. Production cases:
+    //   One World Under Doom #1 virgin → MegaCon Secret Drop comps leaked
+    //   Mega Man X Timelines #1 virgin → Cvr B Steinbach comps leaked
+    // Sold pool contamination caused 100-300% overpricing.
+    if (compVariantTokens.length === 0 && userVariantTokens.length > 0) {
+      reasons.variantMismatch++;
+      pushSample(r, 'variantMismatch:user_has_comp_none');
       return false;
     }
 

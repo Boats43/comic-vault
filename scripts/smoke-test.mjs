@@ -194,6 +194,24 @@ const FIXTURES = [
     requiresApiKeys: true,
   },
   {
+    name: 'One World Under Doom #1 virgin (Ship 18 target — variant subtype)',
+    input: {
+      title: 'One World Under Doom',
+      issue: '1',
+      grade: '9.4',
+      year: 2025,
+      publisher: 'Marvel',
+      isGraded: false,
+      numericGrade: 9.4,
+      variant: 'virgin',
+    },
+    expected: {
+      priceMaxStrict: 30, // CRITICAL: must NOT pull MegaCon Secret Drop comps ($35+)
+    },
+    currentlyPassing: false, // Validates with API keys after Ship 18
+    requiresApiKeys: true,
+  },
+  {
     name: 'Detective Comics #27 REPRINT (Ship 13 target)',
     input: {
       title: 'Detective Comics',
