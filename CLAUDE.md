@@ -259,9 +259,9 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - **Editable list price**: numeric `listPrice` input above List on eBay button. `handleList` passes `{ ...item, price: "$X.XX" }` so override drives eBay StartPrice + persists to catalogue.
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 
-## Current State (as of 2026-05-04)
+## Current State (as of 2026-05-06)
 
-Latest commit: 1b020d3 — Ship 1.6 (trust Layer 10 sold-verify) + Ship 1.6.1 (key mult all sources) + Ship 1.3.1 (mega-key edition gate)
+Latest commit: f05f8d6 — Ship 22 (preserve publisher words in series titles)
 
 Test count: 1,570 passing across 23 suites (31 new Ship #23 tests)
 Vercel functions: 12/12
@@ -304,11 +304,11 @@ Phase 2 (deferred): Ships #28-29 (image forensics, cross-source validation) — 
 ## Recent Ships
 **Last 5 only — overwritten when 6th lands.**
 
-- `1b020d3` — Ship 1.6 — trust Layer 10 sold-verify, remove double-filter. buildVerifiedSoldPool was re-running title/issue/variant regex on already-verified sold comps, dropping valid Layer 10 comps and forcing fallthrough to pc_estimate. Layer 10 (verifySoldComps) is authoritative; priceBands now only sanity-checks price validity. Closes: Wolverine Origins, Absolute Batman, ASM #549, B&B #28, MMPR/TMNT — all now use verified_sold source.
-- `5a581a8` — Ship 1.6.1 — key multiplier applies across all pricing sources. Previous gate (isFromPC && blendedAvg) silently no-op'd when priceBands fired (verified_sold/verified_active). Captain America #359 (1st Crossbones, 23 sources) priced at $6.70 with no multiplier instead of $7.50–$9. New gate accepts any source; uses priceBandsMarket as base for verified sources. Sanity ceiling: 0.67–1.5× ratio.
-- `a5d48d0` — Ship 1.3.1 — mega-key floor yields to edition warning. Reprints/facsimiles/later-prints of mega-keys (B&B #28 Loot Crate polybag, Aliens #1 2nd print) must NOT receive 1st-print floor pricing. Added editionWarning.detected gate before mega-key floor enforcement. Surfaces out.megaKeyFloorSkipped + out.megaKeyFloorSkipReason.
-- `1751f4c` — Ship #23 — consistency engine (CV year gate + refuse-to-price + stale refresh + Update All Books). FIX 1: Pre-1970 books filter CV volumes by ±15y. FIX 2: Refuse browse_api price when 0 verified + 0 sold comps. FIX 3: Auto-refresh stale records (missing priceBands/claudeCheck/demandSignals). FIX 4: Manage tab batch update button. 1,539 → 1,570 tests (31 new). Zero regressions.
-- `83c7c30` — Ship #22 — best practice eBay listings (item specifics, multi-image, market proof, Claude title, Best Offer, confidence gate). Item specifics auto-populated (grade, era, publisher, key issue flags). Multi-image upload (up to 12). Claude-generated titles (variant-aware). Best Offer enabled. Confidence gate (blocks LOW confidence books). 768 listing tests added. Auto-listing complete.
+- `f05f8d6` — Ship 22 — preserve publisher words in series titles. eBay visual search extractMainTitle was stripping publisher names from ALL titles, corrupting series names ("Marvel Tales" → "Tales"). Added 25-entry PUBLISHER_IN_TITLE_SERIES whitelist protecting known publisher-in-title series. Fixes identity override path storing wrong titles. Validated with 18-case unit test.
+- `e53d033` — Ship 21 — explicit refusal for silent-empty pricing case. When all pricing branches fail (priceBands null, priceCharting null, rawComps.count=0), handler returned empty response. Added else clause setting pricingSource='refused-no-data-sources' with diagnostic reason. UI mapping added ("no data available"). Surfaces when book has zero eBay comps, no PC match, no CV match.
+- `9140284` — Ship 20 — filter ComicVine cross-reference artifacts from storyDescription. CV description field returns meta-text ("Translate:", "Collects:", "Reprints:", "Featured Story Arcs:") instead of story content. Added 9-pattern CROSS_REF_RE filter (70+ chars, starts-with any pattern) with IIFE wrapper and inline validation. Preserves genuine story text, strips meta-blocks.
+- `6110fb8` — Ship 17 — complete pricingSource label mapping for UI. Raw backend slugs displaying in UI ("verified_sold", "refused-claude-gate"). Frontend had incomplete mapping (5 entries), backend had 9 values. Added all 7 missing mappings: verified_sold, verified_active, refused-no-data-sources, ebay-polybag-active, refused-claude-gate, refused-identity, identity-required, pc_estimate, claude_price.
+- `402de50` — Ship 14 — newsstand multiplier applies to verified_active/pc_estimate/browse_api paths. Newsstand variant gate restricted to single source ('pricecharting'), causing modern newsstand books to price without multiplier when priced via other paths. Replaced single-source isFromPC boolean with Set-based VARIANT_MULT_ELIGIBLE_SOURCES check (4 sources). Marvel Saga #18 (1987 newsstand) now applies 1.3× across all eligible paths.
 
 ## Active Priority Queue
 
