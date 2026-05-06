@@ -351,8 +351,61 @@ export const extractConsensus = (parsedRows) => {
     // Strip everything after #issue or (year)
     s = s.replace(/#\s*\d{1,3}\b.*$/i, '');
     s = s.replace(/\(\d{4}\).*$/i, '');
-    // Strip publisher/slab markers
-    s = s.replace(/\b(marvel|dc|image|cgc|cbcs|pgx|psa)\b/gi, '');
+    // Ship 22 — Preserve publisher names in series titles.
+    //
+    // Production case 2026-05-06: Marvel Tales #111 (1952) priced wrong
+    // because "Marvel Tales" → "Tales" via this strip. eBay visual override
+    // fired with corrupted title, identity stored as "tales", comp pool
+    // matched arbitrary "tales" series (Tales of Suspense, Astonishing
+    // Tales, Strange Tales, etc.). Era-filter bypass warning fired but
+    // pricing proceeded against wrong pool.
+    //
+    // The strip was added to remove standalone publisher/slab markers like
+    // "Amazing Spider-Man #129 Marvel CGC 9.8" → "Amazing Spider-Man #129 9.8".
+    // But it also stripped publisher names that are LEGITIMATE PARTS of
+    // series titles. Affects every series starting with publisher name.
+    //
+    // Whitelist preserves known publisher-in-title series. New series not
+    // on this list will still be incorrectly stripped — extend list as
+    // production data surfaces them.
+    const PUBLISHER_IN_TITLE_SERIES = [
+      'marvel tales',
+      'marvel presents',
+      'marvel preview',
+      'marvel spotlight',
+      'marvel super action',
+      'marvel super heroes',
+      'marvel team-up',
+      'marvel team up',
+      'marvel triple action',
+      'marvel two-in-one',
+      'marvel two in one',
+      'marvel age',
+      'marvel chillers',
+      'marvel feature',
+      'marvel fanfare',
+      'marvel comics presents',
+      'marvel saga',
+      'marvel premiere',
+      'marvel mystery comics',
+      'dc universe presents',
+      'dc retroactive',
+      'dc comics presents',
+      'dc special',
+      'image comics presents',
+      'image united',
+    ];
+    const titleLower = s.toLowerCase().trim();
+    const isPublisherSeries = PUBLISHER_IN_TITLE_SERIES.some((p) =>
+      titleLower.startsWith(p)
+    );
+    if (!isPublisherSeries) {
+      // Original behavior preserved for non-publisher-series titles
+      s = s.replace(/\b(marvel|dc|image|cgc|cbcs|pgx|psa)\b/gi, '');
+    } else {
+      // Strip ONLY slab markers when title starts with publisher series name
+      s = s.replace(/\b(cgc|cbcs|pgx|psa)\b/gi, '');
+    }
     // Strip year at end
     s = s.replace(/\b(19\d{2}|20\d{2})\b.*$/i, '');
     // Normalize whitespace
