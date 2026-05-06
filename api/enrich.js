@@ -1367,8 +1367,7 @@ export default async function handler(req, res) {
     let identityRefused = false;
 
     if (familyCandidate) {
-      const evalTime = performance.now() - (marks.family_candidate_start || 0);
-      console.log(`[title-family] decision=${familyCandidate.decision} eval=${Math.round(evalTime)}ms`);
+      console.log(`[title-family] decision=${familyCandidate.decision}`);
       console.log(`[title-family] selected=${familyCandidate.selectedTitle || 'null'}`);
       console.log(`[title-family] reason: ${familyCandidate.reason}`);
 
