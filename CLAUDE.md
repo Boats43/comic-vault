@@ -554,3 +554,84 @@ ASM #129 auction:
 - eef344b: Ship 6 - priceCharting fallback guard (10th)
 - c087c5d: Ship 6 - priceBands guard (9th)
 - c1304ab: Ship 6 - move polybag block AFTER out declaration
+
+---
+
+## Session 2026-05-06 — 11 ships deployed (10 commits, 1h 59m)
+
+**HEAD:** f05f8d6
+**Total deployed:** 23 (1 reverted: Ship 12 original)
+**Refusal rate:** <15% (holding from yesterday)
+**Session window:** 08:37–10:36 Pacific
+
+### Ships deployed today (chronological)
+
+| Time | Commit | Ship | Effect |
+|------|--------|------|--------|
+| 08:37 | ab6caff | 0.5 | Smoke test harness with 11 fixtures, crash detection |
+| 08:37 | ab6caff | 0.6 | Move const out = {} to handler top, fix ReferenceError on reprint thin pools |
+| 08:57 | 9033186 | 13 | editionWarning reaches response for mega-key reprints (Detective #27 class) |
+| 09:06 | 49b679b | 18 | Sold comp variant subtype strict matching, fixes virgin/foil overpricing |
+| 09:19 | 376a33d | 15 | Identity gate accepts treasury/annual/special issue formats |
+| 09:33 | 12d924a | 12r | Variant canonical title via Approach C (scope-correct, no out reference) |
+| 09:46 | 402de50 | 14 | Newsstand multiplier applies to verified_active/pc_estimate/browse_api paths |
+| 10:06 | 9140284 | 20 | ComicVine cross-reference filter (Translate:/Collects: artifacts) |
+| 10:13 | 6110fb8 | 17 | Complete pricingSource label mapping (9 missing labels, typo fix) |
+| 10:20 | e53d033 | 21 | Explicit refusal for silent-empty pricing chain (refused-no-data-sources) |
+| 10:36 | f05f8d6 | 22 | Preserve publisher words in series titles (Marvel Tales/Team-Up/etc.) |
+
+Average commit interval: ~13 minutes. Diagnostic-first discipline applied to every ship.
+
+### Skipped (reasoned)
+
+- Ship 19 (era grade multiplier) — system working as designed, calibration acceptable
+- Ship 23 (magazine format) — insufficient calibration data, sample size of 1, defer
+- Ship 16 (floor recalibration) — depends on Ship 19, deferred
+- Ship 24/25 (perf optimizations) — gains marginal (~50-100ms), defer
+
+### Deferred
+
+- Ship 9 (mega-keys top 100) — manual data entry, separate workflow
+
+### Validation pending (next session — DO THIS FIRST)
+
+Phone validation of today's 11 ships not yet complete. Punch list:
+
+1. Detective Comics #27 reprint — Ship 13 — should NOT show $150K, edition banner present
+2. Marvel Tales #111 (1952) — Ship 22 — title preserved as "Marvel Tales" (delete + re-scan if cached as "tales")
+3. Marvel Saga #18 newsstand — Ship 14 — price up from $3.99 (~$4.79)
+4. One World Under Doom #1 virgin — Ship 18 — price down from $47 (target $13-25)
+5. Mega Man X Timelines #1 virgin — Ship 18 — price down from $22 (target $10-15)
+6. Limited Collectors C-44 Treasury — Ship 15 — not refused
+7. Catwoman Uncovered #1 foil — Ship 12r — improved comps
+8. B&B #28 polybag — Ship 0.6 — still works, price reasonable
+9. Wolverine #1 (1982) — Ship 20 — story field "Translate:" garbage gone
+10. Uncanny X-Men #173 — Ship 20 — story field "Collects:" garbage gone
+
+Plus UI label spot check: pick 3 cards, verify "Price from:" shows human labels (not raw slugs).
+
+### Critical caveat — IndexedDB caching
+
+Ship 22 fix applies to FRESH scans only. Existing collection items have stored title fields cached in IndexedDB. Marvel Tales/Team-Up/Two-In-One/Saga/etc. books that show truncated titles need DELETE + re-scan from camera to validate Ship 22.
+
+### Diagnostic discipline outcomes
+
+4 scope/over-correction errors stopped at dev time:
+
+1. **Ship 0.6** — caught by harness on first run (variable referenced 147 lines before declaration)
+2. **Ship 12 retry** — caught by diagnostic #2 (would have referenced confirmedVariant 157 lines before declaration)
+3. **Ship 14** — caught by diagnostic #2 (would have double-counted multiplier on verified_sold path)
+4. **Ship 22** — caught by user reading production card (static analysis missed actual title was "Marvel Tales", not generic stop-word)
+
+Pattern: empirical evidence > static analysis. Harness validates code paths. Production data validates calibration. Ship anything affecting pricing only after both checks.
+
+### Architectural learnings
+
+- **Variable scope discipline:** Variables referenced across handler must declare at function top (Ship 0.6 lesson, repeated in Ship 12r design)
+- **Filter parity:** Active comp filters and sold comp filters should both implement the same variant rejection logic (Ship 18 fixed sold-side gap)
+- **Variant filter symmetry:** Asymmetric Case (a) without Case (a-inverse) leaks comps. Both directions need protection (Ship 18)
+- **Multi-source coordination:** Pricing path multipliers should be applied based on whether the source pool is variant-filtered or mixed (Ship 14 path-by-path map)
+- **Identity preservation:** Title field should not be modified by publisher extraction or stripping logic (Ship 22)
+- **UI label completeness:** Every pricingSource value must have a UI label, otherwise raw slugs leak to users (Ship 17)
+- **Fail-loud over fail-silent:** Pricing chain must have an else clause; silent empty responses confuse UI merge logic (Ship 21)
+
