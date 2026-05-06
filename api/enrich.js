@@ -1574,9 +1574,47 @@ export default async function handler(req, res) {
       console.log(`[pc-query] subtitle stripped: "${title}" → "${subtitleStripped}"`);
     }
 
-    // Ship #20a.6.7b.3 — Image search title for comp query. Top rawTitle from
-    // visual result becomes first comp attempt when available.
-    const imageSearchTitle = visualResult?.items?.[0]?.rawTitle || null;
+    // Ship 12 retry — Approach C (scope-correct, no `out` reference).
+    //
+    // For variant scans (foil/virgin/exclusive/etc.), the default
+    // imageSearchTitle = visualResult.items[0].rawTitle picks whichever
+    // result eBay ranked first. That can be the wrong variant tier:
+    // Catwoman Uncovered #1 standard ranked above the Artgerm foil that
+    // Vision actually identified, suboptimal Phase 2 comp pool resulted.
+    //
+    // Approach C: scan visualResult.items for a candidate where ALL
+    // Vision title tokens appear in the rawTitle. That candidate is the
+    // canonical search title. If no candidate matches all tokens, fall
+    // back to items[0] (existing behavior preserved).
+    //
+    // Original Ship 12 (4f5f35a, reverted as 36962b5) referenced `out`
+    // before declaration AND `confirmedVariant` before declaration.
+    // This iteration uses only locals available at this line:
+    //   req.body.variant, title, confirmedTitle, visualResult.
+    //
+    // No persistent storage — imageSearchTitle is consumed at line 1767
+    // (fetchComps) and not surfaced to the response.
+    let imageSearchTitle = visualResult?.items?.[0]?.rawTitle || null;
+    const isVariantScan = !!(
+      req.body?.variant ||
+      /\b(foil|virgin|variant|exclusive|sketch|incentive|1:\d+)\b/i.test(String(title || ''))
+    );
+    if (isVariantScan && Array.isArray(visualResult?.items) && visualResult.items.length > 0) {
+      const refTitle = String(confirmedTitle || title || '').toLowerCase();
+      const refTokens = refTitle.split(/\s+/).filter((t) => t.length >= 3);
+      if (refTokens.length > 0) {
+        const canonical = visualResult.items.find((item) => {
+          const itemTitle = String(item?.rawTitle || '').toLowerCase();
+          return refTokens.every((tok) => itemTitle.includes(tok));
+        });
+        if (canonical?.rawTitle) {
+          imageSearchTitle = canonical.rawTitle;
+          console.log('[ship12] variant canonical title selected:', imageSearchTitle);
+        } else {
+          console.log('[ship12] no canonical match found, using items[0] fallback');
+        }
+      }
+    }
 
     // Derive the confirmed year — trust but verify. PC and CV can return
     // the wrong volume (e.g. ComicVine matched Marvel Super-Heroes vol 2

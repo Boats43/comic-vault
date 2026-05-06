@@ -194,6 +194,28 @@ const FIXTURES = [
     requiresApiKeys: true,
   },
   {
+    name: 'Catwoman Uncovered #1 foil (Ship 12 retry — variant canonical)',
+    input: {
+      title: 'Catwoman Uncovered',
+      issue: '1',
+      grade: '9.4',
+      year: 2023,
+      publisher: 'DC',
+      isGraded: false,
+      numericGrade: 9.4,
+      variant: 'foil artgerm',
+    },
+    expected: {
+      priceMin: 10,
+      priceMax: 50,
+      pricingSourceNotIn: ['refused', 'refused-claude-gate'],
+      // Without API keys, locally skips. With keys in CI, must price
+      // within the foil variant tier (was $8.99 floor without Ship 12).
+    },
+    currentlyPassing: false, // until validated in CI
+    requiresApiKeys: true,
+  },
+  {
     name: 'Limited Collectors Edition #C-44 (Ship 15 — treasury format)',
     input: {
       title: "Limited Collectors' Edition",
