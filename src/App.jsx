@@ -2175,6 +2175,7 @@ function CollectionDetail({
                item.pricingSource === 'ebay-polybag-active' ? 'polybag comps' :
                item.pricingSource === 'visual_pool_fallback' ? 'image search fallback' :
                item.pricingSource === 'sanity' ? 'sanity fallback' :
+               item.pricingSource === 'refused-identity-conflict' ? 'visual identification uncertain' :
                item.pricingSource === 'refused-claude-gate' ? 'verification failed' :
                item.pricingSource === 'refused-reprint-thin-pool' ? 'reprint (insufficient data)' :
                item.pricingSource === 'identity-required' ? 'identity required' :

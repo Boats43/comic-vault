@@ -1,0 +1,45 @@
+═══════════════════════════════════════════════════════════
+  COMIC VAULT — BATCH SCAN TEST RESULTS
+═══════════════════════════════════════════════════════════
+
+Total comics scanned:    15
+Successful:              15
+Failed:                  0
+Refused to price:        14
+Identity not confident:  2
+Polybag detected:        0
+
+─── TIMING ──────────────────────────────────────────────
+Total wall time:         263.8s
+Mean per scan:           17586ms
+Median per scan:         16538ms
+Min / Max:               11176ms / 36527ms
+P95:                     36527ms
+Throughput:              3.41 comics/min
+
+─── CONFIDENCE DISTRIBUTION ─────────────────────────────
+  LOW                  15 (100%)
+
+─── PRICING SOURCE DISTRIBUTION ─────────────────────────
+  refused-claude-gate          13 (87%)
+  refused                      1 (7%)
+  browse_api                   1 (7%)
+
+─── PER-COMIC RESULTS ───────────────────────────────────
+10356_t.jpg                    13050ms  batman                         #1 () LOW
+153160_t.jpg                   19851ms  Radio Funnies                  #nn (1940) LOW
+17320_t.jpg                    16936ms  Captain America Comics         #1 (1941) LOW
+256_t.jpg                      13846ms  action comics                  #1 () LOW
+27581_t.jpg                    20762ms  Detective Comics               #27 (1939) LOW
+27585_t.jpg                    16538ms  Detective Comics               #31 (1939) LOW
+3269_t.jpg                     20457ms  All-American Comics            #16 (1940) LOW
+56702_t.jpg                    18024ms  New Fun                        #1 (1935) LOW
+63092_t.jpg                    20369ms  Marvel Comics                  #1 (1939) LOW
+86912_t.jpg                    15749ms  superman                       #1 () LOW
+download.jpg                   13178ms  crow dead time                 #1 () LOW
+eyJidWNrZXQiOiJnb2NvbGxlY3QuaW1hZ2VzLnB1YiIsImtleSI6ImU3ODRiNTg1LTFiMWYtNGUwNy05NjJkLTNmNWNjNzg5NGRhNy5qcGciLCJlZGl0cyI6W119.webp 14940ms  Action Comics                  #33 (1941) LOW
+s-l1600.jpg                    36527ms  fantastic four                 #1 (2018) LOW
+s-l16000.jpg                   11176ms  fantastic four                 #1 (2018) LOW
+s-l16001.jpg                   12383ms  catwoman uncovered             #1 () LOW
+
+═══════════════════════════════════════════════════════════

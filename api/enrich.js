@@ -48,7 +48,7 @@ import {
   sanitizeIdentityFields,
   assessIdentityConfidence,
 } from "../src/lib/identityGate.js";
-import { extractIdentityFromImageSearch, extractConsensus } from "../src/lib/imageSearchIdentity.js";
+import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate } from "../src/lib/imageSearchIdentity.js";
 // Ship #20b — price bands engine (verified sold-first pricing).
 import { computePriceBands, enforceFloor } from "../src/lib/priceBands.js";
 // Ship #21 — demand signals from sales data.
@@ -1354,6 +1354,39 @@ export default async function handler(req, res) {
       console.log(`[phase1] eBay consensus: "${visualConsensus.title}" #${visualConsensus.issue} (confidence ${(visualConsensus.confidence * 100).toFixed(0)}%)`);
     }
 
+    // Ship 26.2 — Title-family clustering for rank-weighted identity resolution.
+    // Runs after extractConsensus to detect wrong-family pricing (Catwoman/Gotham
+    // War class bugs where exact-frequency voting picks larger unrelated family
+    // over correct top-ranked result).
+    mark('family_candidate_start');
+    const familyCandidate = (visualResult?.items?.length >= 5)
+      ? selectTitleFamilyCandidate(visualResult.items, title, issueNum)
+      : null;
+    mark('family_candidate_complete');
+
+    let identityRefused = false;
+
+    if (familyCandidate) {
+      const evalTime = performance.now() - (marks.family_candidate_start || 0);
+      console.log(`[title-family] decision=${familyCandidate.decision} eval=${Math.round(evalTime)}ms`);
+      console.log(`[title-family] selected=${familyCandidate.selectedTitle || 'null'}`);
+      console.log(`[title-family] reason: ${familyCandidate.reason}`);
+
+      if (familyCandidate.topFamily) {
+        console.log(`[title-family] top family: "${familyCandidate.topFamily.title}" (weight ${familyCandidate.topFamily.weightSum.toFixed(1)}, ${familyCandidate.topFamily.count} members)`);
+      }
+      if (familyCandidate.runnerUp) {
+        console.log(`[title-family] runner-up: "${familyCandidate.runnerUp.title}" (weight ${familyCandidate.runnerUp.weightSum.toFixed(1)}, ${familyCandidate.runnerUp.count} members)`);
+      }
+
+      // Handle refused-identity-conflict: block Phase 2, comps, and pricing
+      if (familyCandidate.decision === 'refused-identity-conflict') {
+        identityRefused = true;
+        console.log(`[title-family] refusing identity — ${familyCandidate.reason}`);
+        // Will be gated below; continue to preserve card response shape
+      }
+    }
+
     // Helper: calculate title overlap
     const normalizeForOverlap = (str) => {
       if (!str) return '';
@@ -1379,7 +1412,23 @@ export default async function handler(req, res) {
     let confirmedYear = year;
     let identitySource = 'vision';
 
-    if (visualConsensus?.title && visualResult?.items?.length >= 10) {
+    // Ship 26.2 — Family candidate overrides when top-rank-protection or
+    // weighted-consensus selected. Takes precedence over visualConsensus
+    // exact-frequency voting.
+    if (familyCandidate && ['top-rank-protection', 'weighted-consensus'].includes(familyCandidate.decision)) {
+      const normalizeTitle = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      const familyNorm = normalizeTitle(familyCandidate.selectedTitle);
+      const consensusNorm = visualConsensus?.title ? normalizeTitle(visualConsensus.title) : null;
+
+      // Check if family candidate differs from visualConsensus
+      if (consensusNorm && familyNorm !== consensusNorm) {
+        console.log(`[title-family] OVERRIDE: family="${familyCandidate.selectedTitle}" vs consensus="${visualConsensus.title}"`);
+      }
+
+      confirmedTitle = familyCandidate.selectedTitle;
+      identitySource = 'title-family-' + familyCandidate.decision;
+      console.log(`[phase1] family candidate OVERRIDE: using "${confirmedTitle}" (source: ${identitySource})`);
+    } else if (visualConsensus?.title && visualResult?.items?.length >= 10) {
       const overlap = calculateOverlap(visualConsensus.title, title);
       console.log(`[phase1] overlap: ${(overlap * 100).toFixed(0)}% (eBay="${visualConsensus.title}" vs Vision="${title}")`);
 
@@ -1522,14 +1571,17 @@ export default async function handler(req, res) {
 
     const visionConfidenceLower = String(confidence || 'medium').toLowerCase();
 
-    // Ship 26.0 — Gate PC requery on accepted visual consensus. Previously,
-    // imageConsensusTitle could be derived from visualResult.items frequency
-    // voting even when extractConsensus rejected the pool (title <30% or
-    // issue <50% agreement). This allowed wrong-family titles like "Catwoman
-    // Uncovered" to poison PC queries for "Batman Catwoman Gotham War" scans.
-    // Fix: only use consensus title when visualConsensus passed validation.
-    const imageConsensusTitle = visualConsensus
-      ? (visualConsensus.title || getImageSearchConsensusTitle(visualResult))
+    // Ship 26.0 / 26.2 — Gate PC requery on accepted visual consensus OR
+    // accepted family candidate. Previously, imageConsensusTitle could be
+    // derived from visualResult.items frequency voting even when extractConsensus
+    // rejected the pool (title <30% or issue <50% agreement). This allowed
+    // wrong-family titles like "Catwoman Uncovered" to poison PC queries for
+    // "Batman Catwoman Gotham War" scans.
+    // Fix: only use consensus title when visualConsensus passed validation OR
+    // when family candidate selected via top-rank-protection/weighted-consensus.
+    const familyCandidateAccepted = familyCandidate && ['top-rank-protection', 'weighted-consensus'].includes(familyCandidate.decision);
+    const imageConsensusTitle = (visualConsensus || familyCandidateAccepted)
+      ? (familyCandidate?.selectedTitle || visualConsensus?.title || getImageSearchConsensusTitle(visualResult))
       : null;
 
     // Diagnostic: log when rejected visual consensus suppresses a requery
@@ -1569,7 +1621,10 @@ export default async function handler(req, res) {
 
       if (needsRequery) {
         mark('pc_requery_start');
-        console.log(`[pc-requery] consensus "${imageConsensusTitle}" differs from Vision "${pcInitialTitle}" — re-querying PC (gated: visualConsensus accepted)`);
+        const gateSource = familyCandidateAccepted
+          ? `family-candidate ${familyCandidate.decision}`
+          : 'visualConsensus';
+        console.log(`[pc-requery] consensus "${imageConsensusTitle}" differs from Vision "${pcInitialTitle}" — re-querying PC (gated: ${gateSource} accepted)`);
         priceCharting = await lookupPriceCharting({
           title: imageConsensusTitle,
           issue: correctedIssue,
@@ -1588,32 +1643,36 @@ export default async function handler(req, res) {
       console.log(`[pc-query] subtitle stripped: "${title}" → "${subtitleStripped}"`);
     }
 
-    // Ship 12 retry — Approach C (scope-correct, no `out` reference).
+    // Ship 26.2 / Ship 12 — Canonical search title selection.
     //
-    // For variant scans (foil/virgin/exclusive/etc.), the default
-    // imageSearchTitle = visualResult.items[0].rawTitle picks whichever
-    // result eBay ranked first. That can be the wrong variant tier:
-    // Catwoman Uncovered #1 standard ranked above the Artgerm foil that
-    // Vision actually identified, suboptimal Phase 2 comp pool resulted.
+    // When family candidate selected (top-rank-protection or weighted-consensus),
+    // use familyCandidate.rawTitle (from top-ranked family member). This replaces
+    // Ship 12 token-matching logic with rank-weighted family selection.
     //
-    // Approach C: scan visualResult.items for a candidate where ALL
-    // Vision title tokens appear in the rawTitle. That candidate is the
-    // canonical search title. If no candidate matches all tokens, fall
-    // back to items[0] (existing behavior preserved).
+    // Fallback to Ship 12 Approach C when family candidate not applicable:
+    // For variant scans, scan visualResult.items for a candidate where ALL
+    // Vision title tokens appear in the rawTitle. If no candidate matches all
+    // tokens, fall back to items[0] (existing behavior preserved).
     //
-    // Original Ship 12 (4f5f35a, reverted as 36962b5) referenced `out`
-    // before declaration AND `confirmedVariant` before declaration.
-    // This iteration uses only locals available at this line:
-    //   req.body.variant, title, confirmedTitle, visualResult.
-    //
-    // No persistent storage — imageSearchTitle is consumed at line 1767
+    // No persistent storage — imageSearchTitle is consumed at line ~1800
     // (fetchComps) and not surfaced to the response.
     let imageSearchTitle = visualResult?.items?.[0]?.rawTitle || null;
-    const isVariantScan = !!(
-      req.body?.variant ||
-      /\b(foil|virgin|variant|exclusive|sketch|incentive|1:\d+)\b/i.test(String(title || ''))
-    );
-    if (isVariantScan && Array.isArray(visualResult?.items) && visualResult.items.length > 0) {
+
+    if (familyCandidateAccepted && familyCandidate.rawTitle) {
+      // Use family candidate's rawTitle (from top-ranked family member)
+      imageSearchTitle = familyCandidate.rawTitle;
+      console.log(`[ship12] using title-family rawTitle: ${imageSearchTitle}`);
+    } else if (familyCandidate?.decision === 'fallback-vision') {
+      // On fallback-vision, block imageSearchTitle from unrelated visual pool
+      imageSearchTitle = null;
+      console.log(`[ship12] fallback-vision — blocking unrelated visual pool from comps`);
+    } else {
+      // Ship 12 fallback logic
+      const isVariantScan = !!(
+        req.body?.variant ||
+        /\b(foil|virgin|variant|exclusive|sketch|incentive|1:\d+)\b/i.test(String(title || ''))
+      );
+      if (isVariantScan && Array.isArray(visualResult?.items) && visualResult.items.length > 0) {
       const refTitle = String(confirmedTitle || title || '').toLowerCase();
       const refTokens = refTitle.split(/\s+/).filter((t) => t.length >= 3);
       if (refTokens.length > 0) {
@@ -1627,6 +1686,7 @@ export default async function handler(req, res) {
         } else {
           console.log('[ship12] no canonical match found, using items[0] fallback');
         }
+      }
       }
     }
 
@@ -1804,6 +1864,32 @@ export default async function handler(req, res) {
 
     // Step 2b: year-dependent lookups using confirmedYear.
     mark('phase2_start');
+
+    // Ship 26.2 — Gate Phase 2 when identity refused
+    if (identityRefused) {
+      console.log(`[phase2] SKIPPED — identity refused by title-family clustering`);
+      // Skip to response construction with refusal data
+      const out = {
+        ...sanitizeIdentityFields(req.body),
+        pricingSource: 'refused-identity-conflict',
+        refusedToPrice: true,
+        refusalReason: familyCandidate?.reason || 'Visual pool families lack overlap with Vision',
+        message: familyCandidate?.reason || 'Visual identification uncertain',
+        price: null,
+        priceCharting: null,
+        comicVine: null,
+        comps: null,
+        soldComps: null,
+        familyCandidateDiagnostic: familyCandidate ? {
+          decision: familyCandidate.decision,
+          topFamily: familyCandidate.topFamily,
+          runnerUp: familyCandidate.runnerUp,
+          families: familyCandidate.families
+        } : null
+      };
+      return res.status(200).json(out);
+    }
+
     const compsPromise =
       process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? fetchComps({
