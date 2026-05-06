@@ -1301,6 +1301,21 @@ export default async function handler(req, res) {
       return;
     }
 
+    // Ship 0.6 — Move `const out = {}` declaration to top of handler.
+    //
+    // Previously declared at line ~2055 but referenced as early as line 1670
+    // (yearBackfill) and line 1916 (edition-gate refusal). ReferenceError
+    // crashed any reprint scan with thin comp pool. Caught by Ship 0.5
+    // smoke harness 5/6/2026.
+    //
+    // Original Ships 1.3+1.4 (commit 6bd864f, 5/3/2026) introduced the
+    // edition-gate writes to `out` without verifying declaration order.
+    // Same bug class as Ship 12 (4f5f35a, reverted).
+    //
+    // Lesson encoded: variable declarations referenced across a function
+    // must be at function top, not deep in execution flow.
+    const out = {};
+
     // Prefer explicit issue param, fall back to parsing from title.
     // Ship #20a.6.22 hotfix: treat "Unknown" as null (Vision failure case).
     const issueMatch = String(title).match(/#\s*(\d+)/);
@@ -2052,7 +2067,9 @@ export default async function handler(req, res) {
       );
     }
 
-    const out = {};
+    // Ship 0.6 — `out` declaration moved to handler top (line ~1303).
+    // Do not redeclare here — would shadow the existing object and lose
+    // any earlier writes (yearBackfill, publisherBackfill, edition-gate refusal).
 
     if (confirmedPublisher) {
       out.publisher = confirmedPublisher;
