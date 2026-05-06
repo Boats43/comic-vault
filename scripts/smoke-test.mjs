@@ -194,6 +194,29 @@ const FIXTURES = [
     requiresApiKeys: true,
   },
   {
+    name: 'Marvel Saga #18 newsstand 1987 (Ship 14 — multiplier on pc_estimate)',
+    input: {
+      title: 'The Marvel Saga',
+      issue: '18',
+      grade: '8.0',
+      year: 1987,
+      publisher: 'Marvel',
+      isGraded: false,
+      numericGrade: 8.0,
+      variant: 'newsstand',
+    },
+    expected: {
+      priceMin: 4,
+      priceMax: 25,
+      pricingSourceNotIn: ['refused', 'refused-claude-gate'],
+      // Pre-Ship-14: priced $3.99 (no multiplier on pc_estimate)
+      // Post-Ship-14 + API keys: should price $4-12 range with 1.2× applied
+      // Without API keys: skips. Validates only with CI.
+    },
+    currentlyPassing: false, // until validated in CI
+    requiresApiKeys: true,
+  },
+  {
     name: 'Catwoman Uncovered #1 foil (Ship 12 retry — variant canonical)',
     input: {
       title: 'Catwoman Uncovered',

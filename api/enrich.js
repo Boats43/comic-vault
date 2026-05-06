@@ -2662,10 +2662,31 @@ export default async function handler(req, res) {
     // that era filter wiped the pool and was skipped as graceful fallback.
     if (rawComps?.eraFilterBypassed) out.compEraFilterBypassed = true;
 
-    // Snapshot pricing source BEFORE floor guard / variant / key blocks.
-    // Variant and key multipliers should only apply when the base price
-    // came from PriceCharting (not from browse_api or sanity fallback).
-    const isFromPC = !!(priceCharting?.price) && !sanityFired && out.pricingSource === 'pricecharting';
+    // Ship 14 — Variant multiplier applies to ALL pricing paths that use
+    // unfiltered comp pools. Previously gated to pricingSource ===
+    // 'pricecharting' only. Three paths were incorrectly excluded:
+    //
+    //   verified_active — mixed comp pool (active filter only fires when
+    //                     variant is null), needs newsstand compensation
+    //   pc_estimate     — generic PriceCharting API price (no variant
+    //                     specificity), needs compensation
+    //   browse_api      — mixed comp pool (sanity/raw fallbacks), needs
+    //                     compensation
+    //
+    // verified_sold remains EXCLUDED because Ship 18 strict variant filter
+    // already restricts sold comps to matching variant tier — applying
+    // multiplier would double-count the newsstand premium.
+    //
+    // Pre-Ship-14 production case: Marvel Saga #18 (1987 newsstand) priced
+    // at $3.99 via pc_estimate path. Ship 7 era multiplier (1.2× for
+    // 1985-1995) skipped, underpriced ~20%. Should price ~$4.79.
+    const VARIANT_MULT_ELIGIBLE_SOURCES = new Set([
+      'pricecharting',
+      'pc_estimate',
+      'verified_active',
+      'browse_api',
+    ]);
+    const isFromPC = !!(priceCharting?.price) && !sanityFired && VARIANT_MULT_ELIGIBLE_SOURCES.has(out.pricingSource);
 
     // Floor guard: never price below the lowest eBay comp.
     // eBay comps already reflect market grade — no grade multiplier on floor.
