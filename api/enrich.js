@@ -1559,83 +1559,9 @@ export default async function handler(req, res) {
       console.log(`[pc-query] subtitle stripped: "${title}" → "${subtitleStripped}"`);
     }
 
-    // Ship #20a.6.7b.3 — Image search title for comp query.
-    //
-    // Ship 12 — eBay-CANONICAL TITLE for variant books.
-    //
-    // For variant books, eBay item titles ARE the canonical book identity.
-    // Vision returns the BASE title ("catwoman uncovered"), but the actual
-    // marketplace title includes variant/artist/edition context that defines
-    // the specific book.
-    //
-    // Production observation:
-    //   Vision: "catwoman uncovered"
-    //   eBay canonical: "Catwoman: Uncovered #1 Stanley Artgerm Lau Foil Variant"
-    //
-    // The full eBay title is how the book is listed, searched, and traded.
-    // Adopt it as canonical when:
-    //   1. Variant flag is present
-    //   2. Vision identity tokens are present in pool item title
-    //   3. Pool item title is meaningfully more specific than Vision title
-    //
-    // This ensures comp searches use the marketplace's identity convention,
-    // not our internal short-form title.
-    const isVariantScan = !!(
-      req.body?.variant ||
-      confirmedVariant ||
-      (typeof title === 'string' &&
-        /\b(foil|virgin|variant|exclusive|signed|sketch|cosplay|limited|holo|holographic|cover\s*[a-z])\b/i.test(title))
-    );
-
-    // Find pool item whose title contains Vision identity tokens
-    const findCanonicalPoolItem = (items, refTitle) => {
-      if (!items?.length || !refTitle) return null;
-      const refTokens = String(refTitle)
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter((t) => t.length >= 3);
-      if (refTokens.length === 0) return null;
-      for (const item of items) {
-        const raw = String(item?.rawTitle || '').toLowerCase();
-        const matchedCount = refTokens.filter((t) => raw.includes(t)).length;
-        if (matchedCount === refTokens.length) {
-          // ALL Vision tokens present in this pool item → it's the canonical title
-          return item;
-        }
-      }
-      return null;
-    };
-
-    let imageSearchTitle = null;
-    if (isVariantScan) {
-      const canonical = findCanonicalPoolItem(
-        visualResult?.items,
-        confirmedTitle || title
-      );
-      if (canonical?.rawTitle) {
-        imageSearchTitle = canonical.rawTitle.slice(0, 100);
-        out.ebayCanonicalTitle = canonical.rawTitle;
-        console.log(
-          `[ship12] variant scan — adopting eBay canonical title: "${imageSearchTitle}"`
-        );
-      } else {
-        // No pool item contains all Vision tokens — pool is contaminated.
-        // Fall back to identity-based broad search.
-        const parts = [
-          confirmedTitle || title,
-          confirmedIssue || issueNum ? `#${confirmedIssue || issueNum}` : '',
-          confirmedYear || year || '',
-        ].filter(Boolean);
-        imageSearchTitle = parts.join(' ').trim().slice(0, 100) || null;
-        console.log(
-          `[ship12] variant scan — no canonical match in pool, using identity broad query: "${imageSearchTitle}"`
-        );
-      }
-    } else {
-      // Non-variant book: existing behavior preserved
-      imageSearchTitle = visualResult?.items?.[0]?.rawTitle || null;
-    }
+    // Ship #20a.6.7b.3 — Image search title for comp query. Top rawTitle from
+    // visual result becomes first comp attempt when available.
+    const imageSearchTitle = visualResult?.items?.[0]?.rawTitle || null;
 
     // Derive the confirmed year — trust but verify. PC and CV can return
     // the wrong volume (e.g. ComicVine matched Marvel Super-Heroes vol 2
