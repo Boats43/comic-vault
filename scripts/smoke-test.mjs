@@ -210,7 +210,8 @@ const FIXTURES = [
       priceMaxStrict: 5000, // CRITICAL: must NOT fire $150K mega-key floor
       editionWarningExpected: true,
     },
-    currentlyPassing: false, // Ship 13 will fix this
+    currentlyPassing: true,
+    requiresApiKeys: false, // tests editionWarning path, no API needed
   },
 ];
 

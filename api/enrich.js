@@ -2557,8 +2557,6 @@ export default async function handler(req, res) {
         out.artistFallback = true;
         out.compBasis = rawComps.compBasis || 'generic-variant-fallback';
       }
-      // Ship #1.3 — surface edition warning when reprint/facsimile detected
-      if (editionWarning) out.editionWarning = editionWarning;
       if (rawComps?.reprintFiltered) out.reprintFiltered = true;
 
       // Defect penalty: reduce price if Claude detected a significant defect.
@@ -2603,6 +2601,14 @@ export default async function handler(req, res) {
       out.priceHigh = fmtUsd(browsePrice * 1.25);
       out.pricingSource = "browse_api";
     }
+
+    // Ship 13 — editionWarning must reach response for ALL code paths,
+    // including mega-key books and comps-exhausted cases. Previously
+    // misplaced inside the sanity-fallback else block, which mega-keys
+    // skip via line 2483 short-circuit. Caused Detective #27 reprint and
+    // B&B #28 Loot Crate to lose editionWarning from response, hiding
+    // edition warning UI banner. Caught by Ship 0.5 harness 2026-05-06.
+    if (editionWarning) out.editionWarning = editionWarning;
 
     // Surface artistFallback / compBasis for browse_api-only books too
     // (the priceCharting branch already sets these, but not the
