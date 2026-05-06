@@ -5649,7 +5649,7 @@ export default function App() {
                 originalTitle: enrich.originalTitle || cur.originalTitle || null,
                 originalYear: enrich.originalYear || cur.originalYear || null,
                 originalKeyIssue: enrich.originalKeyIssue || cur.originalKeyIssue || null,
-                title: enrich.polybagDetected && enrich.title ? enrich.title : cur.title,
+                title: enrich.title || cur.title,
                 keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
                 keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
                 creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
@@ -6307,7 +6307,7 @@ export default function App() {
                 originalTitle: enrich.originalTitle || cur.originalTitle || null,
                 originalYear: enrich.originalYear || cur.originalYear || null,
                 originalKeyIssue: enrich.originalKeyIssue || cur.originalKeyIssue || null,
-                title: enrich.polybagDetected && enrich.title ? enrich.title : cur.title,
+                title: enrich.title || cur.title,
                 keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
                 keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
                 creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
@@ -6668,6 +6668,7 @@ export default function App() {
     const priceChangedRM = newPriceRM !== item.price;
     let updated = {
       ...item,
+      title: enrich.title || item.title,
       comps: enrich.comps ?? item.comps,
       price: newPriceRM,
       priceLow: idGatedRM ? null : (enrich.priceLow ?? item.priceLow),
