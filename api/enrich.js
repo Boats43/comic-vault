@@ -1848,8 +1848,20 @@ export default async function handler(req, res) {
     let variantIdentitySource = 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
+
+    // Ship 26.3B — Restrict variant extraction to selected title family when
+    // family candidate fires. Prevents wrong-family variant contamination.
+    // Catwoman/Gotham War: previously variant pool was 20 mixed items, electing
+    // Artgerm from Catwoman Uncovered family. Now uses Gotham War family subset only.
+    const variantSourceItems = (familyCandidate &&
+      ['top-rank-protection', 'weighted-consensus'].includes(familyCandidate.decision) &&
+      familyCandidate.topFamily?.indices &&
+      Array.isArray(visualResult?.items))
+      ? familyCandidate.topFamily.indices.map(i => visualResult.items[i]).filter(Boolean)
+      : visualResult?.items;
+
     const variantCheck = extractConfirmedVariant(
-      visualResult?.items,
+      variantSourceItems,
       req.body.variant,
       confirmedYear,
       confidence
@@ -2127,7 +2139,7 @@ export default async function handler(req, res) {
             : String(numericGrade))
         : 'raw';
     const soldVerifyResult = verifySoldComps(rawSoldRows, {
-      title,
+      title: confirmedTitle,
       issue: correctedIssue,
       variant: req.body?.variant || null,
       publisher,
@@ -2192,7 +2204,7 @@ export default async function handler(req, res) {
       activeComps: rawComps,
       pcBase,
       gradeMultiplier,
-      title,
+      title: confirmedTitle,
       issue: correctedIssue,
       variant: req.body?.variant || null
     });
@@ -2415,7 +2427,7 @@ export default async function handler(req, res) {
 
           // Override title with edition-aware label.
           // Uses confirmedTitle (cleanest source) + correctedIssue + edition.
-          const baseTitle = title || confirmedTitle || '';
+          const baseTitle = confirmedTitle || title || '';
           const issueStr = correctedIssue ? ` #${correctedIssue}` : '';
           out.title = `${baseTitle}${issueStr} ${editionLabel}`;
           out.originalTitle = baseTitle;
@@ -2500,7 +2512,7 @@ export default async function handler(req, res) {
     // $50 with Vision returning "Cannot determine from visible cover" as
     // literal issue value. Real Golden Age key in same shape would be 10× wrong.
     const sanitizedIdentity = sanitizeIdentityFields({
-      title,
+      title: confirmedTitle,
       issue: correctedIssue,
       year: confirmedYear,
       publisher: confirmedPublisher,
@@ -3534,8 +3546,8 @@ export default async function handler(req, res) {
 
     // [verify] log line
     const seriesTitle = issueMatch
-      ? String(title).replace(issueMatch[0], "").trim()
-      : title;
+      ? String(confirmedTitle).replace(issueMatch[0], "").trim()
+      : confirmedTitle;
     console.log(
       `[verify] ${seriesTitle} #${correctedIssue || "?"} | ` +
       `grade: ${grade || "unknown"} | ` +
@@ -3639,7 +3651,7 @@ export default async function handler(req, res) {
 
     // Ship #21 — Claude Haiku quality check (verify all data alignment)
     const claudeCheckData = {
-      title,
+      title: confirmedTitle,
       issue: correctedIssue,
       year: confirmedYear || year,
       publisher: confirmedPublisher,
@@ -3777,6 +3789,13 @@ export default async function handler(req, res) {
         );
         out.claudeCheckBypassedForPolybag = true;
       }
+    }
+
+    // Ship 26.3B — Ensure confirmedTitle propagates to final response.
+    // Frontend merge: enrich.title || cur.title. Without explicit assignment,
+    // out.title remains undefined and UI displays original grade.js title.
+    if (!out.title) {
+      out.title = confirmedTitle;
     }
 
     mark('final_response');
