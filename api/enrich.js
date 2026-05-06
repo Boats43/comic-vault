@@ -3216,13 +3216,78 @@ export default async function handler(req, res) {
     else if (verifiedCount >= 2 || soldCount >= 1 || hasPCData) confidenceLevel = "MEDIUM";
     out.confidenceLevel = confidenceLevel;
 
+    // Ship 11 — Visual pool fallback pricing.
+    //
+    // Production data (5/5/2026): modern variant books (Catwoman Uncovered #1
+    // Artgerm Foil, Crow Dead Time #1 FanExpo Variant, etc.) refuse-to-price
+    // because:
+    //   - ComicVine doesn't catalog convention exclusives within months of release
+    //   - PriceCharting has no entry for limited variants
+    //   - Comp search builds queries that return zero exact matches
+    // BUT eBay image search already returned 10-20 visually similar listings
+    // WITH prices during identity verification (Phase 1). Those prices are sitting
+    // in visualResult.items, already fetched, already parsed, currently discarded.
+    //
+    // When primary comp pipeline returns zero AND visual pool has ≥5 priced items,
+    // use the pool itself as the comp source. The pool was selected by eBay's
+    // visual similarity engine — for variant books, that's better signal than
+    // catalog matches that don't exist yet.
+    //
+    // Triggers ONLY when refuse-to-price would otherwise fire. Working books
+    // (Tomb of Dracula, ASM #606, Wolverine #1) skip this entire block because
+    // their primary path already produced verified comps.
+    if (
+      verifiedCount === 0 &&
+      soldCount === 0 &&
+      visualResult?.items?.length >= 10
+    ) {
+      const poolPrices = (visualResult.items || [])
+        .map((i) => Number(i?.price))
+        .filter((p) => Number.isFinite(p) && p > 0 && p < 10000)
+        .sort((a, b) => a - b);
+
+      if (poolPrices.length >= 5) {
+        const pct = (arr, p) => arr[Math.min(arr.length - 1, Math.floor(arr.length * p))];
+        const median = pct(poolPrices, 0.5);
+        const low = pct(poolPrices, 0.25);
+        const high = pct(poolPrices, 0.75);
+
+        out.price = Math.round(median * 100) / 100;
+        out.priceLow = Math.round(low * 100) / 100;
+        out.priceHigh = Math.round(high * 100) / 100;
+        out.priceBands = {
+          quick: low,
+          market: median,
+          stretch: high,
+          source: 'visual_pool_fallback',
+          count: poolPrices.length,
+        };
+        out.pricingSource = 'visual_pool_fallback';
+        out.priceNote = `Estimated from ${poolPrices.length} visually similar active listings. Verify identity before listing.`;
+        out.refusedToPrice = false;
+        out.confidenceLevel = 'MEDIUM';
+        out.visualPoolUsed = true;
+        out.visualPoolSize = poolPrices.length;
+
+        console.log(
+          `[ship11] visual_pool_fallback: ${poolPrices.length} prices, median=$${median.toFixed(2)} range=$${low.toFixed(2)}-$${high.toFixed(2)}`
+        );
+      } else {
+        console.log(
+          `[ship11] visual pool insufficient — ${poolPrices.length} priced items (need ≥5), falling through to refuse`
+        );
+      }
+    }
+
     // Ship #23 FIX 2 — Refuse to price with zero verified comps.
+    // Original refuse-to-price block — only fires if Ship 11 didn't populate price.
     // Never show a price when we have no verified active comps and no sold comps,
     // regardless of source (PC base, browse_api, or price bands).
     if (
       verifiedCount === 0 &&
       soldCount === 0 &&
-      out.price != null
+      out.price != null &&
+      out.pricingSource !== 'visual_pool_fallback'
     ) {
       console.log(
         `[refuse-to-price] 0 verified comps + 0 sold comps — refusing price ${out.price} (source: ${out.pricingSource})`
