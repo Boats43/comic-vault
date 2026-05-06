@@ -3431,18 +3431,57 @@ export default async function handler(req, res) {
         claudeCheck.confidence === 'LOW' &&
         !isPolybagPricing
       ) {
+        // Ship 10 — Reclassify claude-gate refusals.
+        // Production data (5/5/2026 batch test on 77-book collection):
+        // ~70% false-refusal rate because gate flagged METADATA nits as
+        // pricing-critical:
+        //   - "No condition details provided" (caused by frontend not
+        //     passing req.body.reason; fixed in Ship 10.2 too)
+        //   - "Higher grade comps than subject" (normal for thin markets)
+        //   - "Story field wrong" (ComicVine data quality, irrelevant to price)
+        //   - "Creators not listed" (cosmetic, irrelevant to price)
+        // Now refuses ONLY when refusal indicates the priced book is
+        // actually a different book than what comps cover. Otherwise
+        // surfaces as warning and lets price ship.
         const refusalReason = (claudeCheck.flags?.[0]) || 'Claude verification failed';
-        console.log(
-          '[claude-gate] REFUSED to price — verified=false confidence=LOW · flag:',
-          refusalReason
+        const PRICING_CRITICAL_PATTERNS = [
+          /wrong\s+issue/i,
+          /different\s+(?:book|series|comic)/i,
+          /wrong\s+era/i,
+          /era\s+mismatch/i,
+          /comp\s+pool\s+contaminated/i,
+          /no\s+comparable\s+sales/i,
+          /completely\s+different/i,
+          /\bnot\s+the\s+same\s+(?:book|comic|issue)/i,
+          /issue\s+misidentified/i,
+          /critical:\s*key\s+issue\s+misidentified/i,
+        ];
+        const isPricingCritical = PRICING_CRITICAL_PATTERNS.some((re) =>
+          re.test(refusalReason)
         );
-        out.price = null;
-        out.priceLow = null;
-        out.priceHigh = null;
-        out.pricingSource = 'refused-claude-gate';
-        out.priceNote = `Claude verification failed — ${refusalReason}`;
-        out.refusedToPrice = true;
-        out.confidenceLevel = 'LOW';
+
+        if (isPricingCritical) {
+          console.log(
+            '[claude-gate] REFUSED — pricing-critical failure · flag:',
+            refusalReason
+          );
+          out.price = null;
+          out.priceLow = null;
+          out.priceHigh = null;
+          out.pricingSource = 'refused-claude-gate';
+          out.priceNote = `Claude verification failed — ${refusalReason}`;
+          out.refusedToPrice = true;
+          out.confidenceLevel = 'LOW';
+          out.claudeCheckMode = 'pricing_critical_refusal';
+        } else {
+          console.log(
+            '[claude-gate] WARNING ONLY — metadata nit, price stands · flag:',
+            refusalReason
+          );
+          out.claudeCheckWarning = refusalReason;
+          out.claudeCheckMode = 'metadata_warning_only';
+          // Note: price/priceLow/priceHigh/pricingSource preserved.
+        }
       } else if (
         claudeCheck.verified === false &&
         claudeCheck.confidence === 'LOW' &&

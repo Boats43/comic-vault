@@ -5582,6 +5582,8 @@ export default function App() {
             confidence: item.confidence,
             variant: item.variant || null,
             keyIssue: item.keyIssue || null,
+            // Ship 10.2 — Pass Vision condition report to enrich.
+            reason: item.reason || null,
             images: item.images?.[0] ? [item.images[0]] : [],  // Ship #20a.6.19: pass stored image for variant identity
           }),
           signal: controller.signal,
@@ -5940,6 +5942,10 @@ export default function App() {
           variant: data.variant || null,
           keyIssue: data.keyIssue || null,
           creator: data.creator || null,
+          // Ship 10.2 — Pass Vision condition report to enrich so claudeCheck
+          // has condition data and stops false-refusing with "No condition
+          // details provided".
+          reason: data.reason || null,
         };
         if (!buyerMode) enrichBody.images = [b64];
         fetch("/api/enrich", {
@@ -6248,6 +6254,8 @@ export default function App() {
             defectPenalty: data.defectPenalty || null,
             variant: data.variant || null,
             keyIssue: data.keyIssue || null,
+            // Ship 10.2 — Pass Vision condition report to enrich.
+            reason: data.reason || null,
             images: [b64],
           }),
         })
@@ -6611,6 +6619,8 @@ export default function App() {
           confidence: item.confidence,
           variant: item.variant || null,
           keyIssue: item.keyIssue || null,
+          // Ship 10.2 — Pass Vision condition report to enrich.
+          reason: item.reason || null,
           images: item.images?.[0] ? [item.images[0]] : [],  // Ship #20a.6.19: pass stored image for variant identity
         }),
         signal: controller.signal,
@@ -6803,6 +6813,8 @@ export default function App() {
           keyIssue: gradeData.keyIssue || null,
           certNumber: gradeData.certNumber || null,
           defectPenalty: gradeData.defectPenalty || null,
+          // Ship 10.2 — Pass Vision condition report to enrich.
+          reason: gradeData.reason || null,
           images: [b64],
         }),
       });
