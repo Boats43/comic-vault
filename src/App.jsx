@@ -2162,10 +2162,22 @@ function CollectionDetail({
           <div>
             <span style={{ color: '#888' }}>Price from: </span>
             <strong>
-              {item.pricingSource === 'sold_verified' ? 'sold comps (verified)' :
+              {/* Ship 17 — Complete pricingSource label mapping. Previously missing
+                 mappings displayed raw backend slugs in UI ("refused-claude-gate",
+                 "verified_sold", "ebay-polybag-active", etc.). Production cards
+                 showed technical strings instead of human labels for any source
+                 not explicitly mapped. Also fixes typo: backend emits 'verified_sold'
+                 but old code checked for 'sold_verified' (never fired). */}
+              {item.pricingSource === 'verified_sold' ? 'sold comps (verified)' :
+               item.pricingSource === 'verified_active' ? 'active comps (verified)' :
                item.pricingSource === 'pricecharting' ? 'PriceCharting' :
                item.pricingSource === 'browse_api' ? 'active listings' :
+               item.pricingSource === 'ebay-polybag-active' ? 'polybag comps' :
+               item.pricingSource === 'visual_pool_fallback' ? 'image search fallback' :
                item.pricingSource === 'sanity' ? 'sanity fallback' :
+               item.pricingSource === 'refused-claude-gate' ? 'verification failed' :
+               item.pricingSource === 'refused-reprint-thin-pool' ? 'reprint (insufficient data)' :
+               item.pricingSource === 'identity-required' ? 'identity required' :
                item.pricingSource === 'refused' ? 'insufficient data' :
                item.pricingSource}
             </strong>
