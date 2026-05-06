@@ -3522,7 +3522,14 @@ export default async function handler(req, res) {
       // ComicVine returns first-print metadata (story, creators) that
       // doesn't apply to a Loot Crate reprint. UI displays this as the
       // book's story description, creating misleading product info.
-      storyDescription: isPolybagPricing ? null : (comicVine?.description || null),
+      storyDescription: isPolybagPricing
+        ? null
+        : (() => {
+            const raw = comicVine?.description;
+            if (!raw || typeof raw !== 'string') return null;
+            const CROSS_REF_RE = /^(?:\s*<[^>]+>)*\s*(?:Translate|Collects?|Reprints?|Featured\s+Story\s+Arcs?)\s*:/i;
+            return CROSS_REF_RE.test(raw) ? null : raw;
+          })(),
       creators: isPolybagPricing ? [] : (comicVine?.personCredits || []),
       priceBands: out.priceBands,
       soldComps: filteredSold,
