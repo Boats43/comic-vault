@@ -504,6 +504,107 @@ const extractSubtitleTokens = (title) => {
     .filter(t => !['the', 'and', 'for', 'with'].includes(t));
 };
 
+// Ship 26.3C-2 Patch C2-A — Clean title for ComicVine query
+// Strip artist/variant noise tokens to prevent wrong-volume matching.
+// Preserves publisher-in-title series (Marvel Tales, DC Pride, etc.).
+// Safeguard: restores last meaningful token if cleaned result < 2 tokens.
+const cleanTitleForComicVine = (title, variant) => {
+  const PUBLISHER_IN_TITLE_SERIES = [
+    'marvel tales', 'marvel presents', 'marvel preview', 'marvel spotlight',
+    'marvel super action', 'marvel super heroes', 'marvel team-up', 'marvel team up',
+    'marvel triple action', 'marvel two-in-one', 'marvel two in one', 'marvel age',
+    'marvel chillers', 'marvel feature', 'marvel fanfare', 'marvel comics presents',
+    'marvel saga', 'marvel premiere', 'marvel mystery comics',
+    'dc universe presents', 'dc retroactive', 'dc comics presents', 'dc special',
+    'image comics presents', 'image united',
+  ];
+
+  // Artist patterns from compHygiene (subset for cleaning — multi-word + high-frequency singles)
+  const ARTIST_NOISE = [
+    /tyler kirkham/i, /jim lee/i, /inhyuk lee/i, /skottie young/i, /frank cho/i,
+    /frank miller/i, /dell'?otto/i, /jeehyung lee/i, /alex ross/i, /kaare andrews/i,
+    /alan quah/i, /mico suayan/i, /puppeteer lee/i, /derrick chew/i, /jonboy meyers/i,
+    /kael ngu/i, /natali sanders/i, /kendrick lim/i, /lucio parrillo/i,
+    /artgerm/i, /stanley lau/i, /kunkka/i, /momoko/i, /mcfarlane/i, /campbell/i,
+    /nakayama/i, /hughes/i, /fabok/i, /lim/i, /chew/i, /ngu/i, /sanders/i,
+  ];
+
+  // Variant/format/noise keywords
+  const VARIANT_NOISE = [
+    /\bvirgin\b/i, /\bfoil\b/i, /\bvariant\b/i, /\bcover\b/i, /\bcvr\b/i,
+    /\bratio\b/i, /\b1:\d+\b/i, /\bincentive\b/i, /\bexclusive\b/i, /\bexcl\.?\b/i,
+    /\bnm\b/i, /\bvf\b/i, /\bfn\b/i, /\bvg\b/i, /\bgd\b/i,
+  ];
+
+  const titleLower = String(title || '').toLowerCase().trim();
+
+  // Preserve publisher-in-title series
+  const isProtected = PUBLISHER_IN_TITLE_SERIES.some(p => titleLower.startsWith(p));
+  if (isProtected) {
+    return title; // Don't strip anything from Marvel Tales, etc.
+  }
+
+  let cleaned = title;
+  const removedTokens = [];
+
+  // Strip artist names
+  for (const pattern of ARTIST_NOISE) {
+    const before = cleaned;
+    cleaned = cleaned.replace(pattern, ' ');
+    if (before !== cleaned) {
+      const removed = before.match(pattern);
+      if (removed) removedTokens.push(removed[0]);
+    }
+  }
+
+  // Strip variant keywords
+  for (const pattern of VARIANT_NOISE) {
+    const before = cleaned;
+    cleaned = cleaned.replace(pattern, ' ');
+    if (before !== cleaned) {
+      const removed = before.match(pattern);
+      if (removed) removedTokens.push(removed[0]);
+    }
+  }
+
+  // Character-name stripping when acting as variant descriptors
+  // Example: "fantastic four human torch artgerm" → "fantastic four"
+  // BUT: "human torch" alone → keep "human torch"
+  const characterNoisePatterns = [
+    { series: /fantastic\s+four/i, character: /human\s+torch/i },
+    { series: /x-?men/i, character: /wolverine|cyclops|storm|rogue|gambit/i },
+    { series: /avengers/i, character: /iron\s+man|captain\s+america|thor|hulk/i },
+  ];
+
+  for (const { series, character } of characterNoisePatterns) {
+    if (series.test(cleaned) && character.test(cleaned)) {
+      const before = cleaned;
+      cleaned = cleaned.replace(character, ' ');
+      if (before !== cleaned) {
+        const removed = before.match(character);
+        if (removed) removedTokens.push(removed[0]);
+      }
+    }
+  }
+
+  // Normalize whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  // Safeguard: if cleaned title < 2 meaningful tokens, restore last removed token
+  const tokens = cleaned.split(/\s+/).filter(t => t.length >= 2 && !/^\d+$/.test(t));
+  if (tokens.length < 2 && removedTokens.length > 0) {
+    const restore = removedTokens[removedTokens.length - 1];
+    cleaned = `${cleaned} ${restore}`.replace(/\s+/g, ' ').trim();
+    console.log(`[cv-clean-safeguard] restored "${restore}" (result was < 2 tokens)`);
+  }
+
+  if (cleaned.toLowerCase() !== titleLower) {
+    console.log(`[cv-clean] "${title}" → "${cleaned}"`);
+  }
+
+  return cleaned;
+};
+
 const lookupComicVine = async ({ title, issue, year, publisher }) => {
   if (!process.env.COMICVINE_API_KEY || !title) return null;
   try {
@@ -622,6 +723,92 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
       );
     }
 
+    // Ship 26.3C-2 Patch C2-B — Token gate: require volume name to overlap ≥50%
+    // with cleaned query core tokens. Prevents generic volumes (e.g., "Scorched
+    // Earth" sci-fi volume) from matching specific series (Batman/Catwoman Gotham War).
+    const beforeToken = candidates.length;
+    const tokenizeForGate = (str) => {
+      return String(str || '')
+        .toLowerCase()
+        .replace(/#\s*\d+/g, ' ')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .split(/\s+/)
+        .filter(t => t.length >= 2 && !/^\d+$/.test(t))
+        .filter(t => !['the', 'a', 'an', 'of', 'and', 'or', 'in', 'on', 'at', 'to', 'for', 'with'].includes(t));
+    };
+    const queryTokens = tokenizeForGate(seriesName);
+    const coreTokens = queryTokens.slice(0, 3); // First 3 significant tokens
+
+    const tokenFiltered = candidates.filter((r) => {
+      const vol = volDetails[r?.volume?.id];
+      if (!vol?.name) return true; // Keep if no volume name data
+      const volTokens = tokenizeForGate(vol.name);
+      const overlap = queryTokens.filter(qt => volTokens.includes(qt)).length;
+      const overlapRatio = queryTokens.length > 0 ? overlap / queryTokens.length : 0;
+
+      // Hard fail: volume missing ALL of first 3 core tokens
+      const coreOverlap = coreTokens.filter(ct => volTokens.includes(ct)).length;
+      if (coreOverlap === 0 && coreTokens.length > 0) {
+        console.log(`[cv-token-gate] REJECT ${vol.name} (0/${coreTokens.length} core tokens: ${coreTokens.join(', ')})`);
+        return false;
+      }
+
+      // Soft fail: overlap < 50%
+      if (overlapRatio < 0.5) {
+        console.log(`[cv-token-gate] REJECT ${vol.name} (${Math.round(overlapRatio * 100)}% overlap < 50%)`);
+        return false;
+      }
+
+      return true;
+    });
+    if (tokenFiltered.length > 0) {
+      candidates.splice(0, candidates.length, ...tokenFiltered);
+      console.log(
+        `[cv-token-gate] ${beforeToken} → ${candidates.length} volumes (token overlap ≥50%)`
+      );
+    } else {
+      console.log(
+        `[cv-token-gate] would remove all ${beforeToken} volumes — keeping original set`
+      );
+    }
+
+    // Ship 26.3C-2 Patch C2-C — Publisher gate: reject weak matches (nameScore < 75)
+    // when publisher doesn't match. Prevents generic/unrelated volumes from winning
+    // on partial title overlap alone.
+    const beforePub = candidates.length;
+    const pubFiltered = candidates.filter((r) => {
+      const vol = volDetails[r?.volume?.id];
+      if (!vol?.name) return true; // Keep if no volume data
+
+      // Compute preliminary nameScore (same logic as scoreMatch)
+      const volName = String(vol.name || '').toLowerCase().replace(/^(the|a|an)\s+/i, '').trim();
+      const nameScore = volName === seriesLower ? 100
+        : volName.includes(seriesLower) || seriesLower.includes(volName) ? 50
+        : 0;
+
+      // Compute preliminary publisherScore
+      const volPub = String(vol.publisher?.name || '').toLowerCase().trim();
+      const publisherScore = pubLower && volPub && (volPub.includes(pubLower) || pubLower.includes(volPub)) ? 2 : 0;
+
+      // Reject weak matches without publisher confirmation
+      if (nameScore < 75 && publisherScore === 0 && pubLower) {
+        console.log(`[cv-pub-gate] REJECT ${vol.name} (nameScore=${nameScore} < 75, publisherScore=0)`);
+        return false;
+      }
+
+      return true;
+    });
+    if (pubFiltered.length > 0) {
+      candidates.splice(0, candidates.length, ...pubFiltered);
+      console.log(
+        `[cv-pub-gate] ${beforePub} → ${candidates.length} volumes (weak matches without publisher rejected)`
+      );
+    } else {
+      console.log(
+        `[cv-pub-gate] would remove all ${beforePub} volumes — keeping original set`
+      );
+    }
+
     // Re-score with volume detail data (start_year, publisher).
     const scoreWithDetails = (r) => {
       const base = scoreMatch(r);
@@ -732,6 +919,55 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
     const vid = match.volume?.id;
     const volDetail = volDetails[vid];
 
+    // Ship 26.3C-2 Patch C2-D-lite — Story safety: suppress description/deck
+    // for borderline matches to prevent wrong-volume story contamination.
+    // KEEP the ComicVine match (volume, characters, credits, etc.) — suppress
+    // story fields only when match quality is questionable.
+    let description = match.description;
+    let deck = match.deck;
+    let storySuppressedReason = null;
+
+    if (volDetail?.name) {
+      // Compute final nameScore (same logic as scoreMatch)
+      const volName = String(volDetail.name || '').toLowerCase().replace(/^(the|a|an)\s+/i, '').trim();
+      const nameScore = volName === seriesLower ? 100
+        : volName.includes(seriesLower) || seriesLower.includes(volName) ? 50
+        : 0;
+
+      // Compute final publisherScore
+      const volPub = String(volDetail.publisher?.name || '').toLowerCase().trim();
+      const publisherScore = pubLower && volPub && (volPub.includes(pubLower) || pubLower.includes(volPub)) ? 2 : 0;
+
+      // Compute final token overlap
+      const volTokens = tokenizeForGate(volDetail.name);
+      const overlap = queryTokens.filter(qt => volTokens.includes(qt)).length;
+      const overlapRatio = queryTokens.length > 0 ? overlap / queryTokens.length : 0;
+
+      // Borderline conditions
+      const isBorderline = nameScore < 75 || publisherScore === 0 || overlapRatio < 0.6;
+
+      if (isBorderline) {
+        // Suppress story fields
+        description = null;
+        deck = null;
+
+        // Determine reason
+        if (nameScore < 75) {
+          storySuppressedReason = 'title-weak-match';
+        } else if (overlapRatio < 0.6) {
+          storySuppressedReason = 'title-token-mismatch';
+        } else if (publisherScore === 0) {
+          storySuppressedReason = 'publisher-mismatch';
+        }
+
+        console.log(
+          `[comicvine-story] SUPPRESSED reason=${storySuppressedReason} ` +
+          `nameScore=${nameScore} pubScore=${publisherScore} tokenOverlap=${Math.round(overlapRatio * 100)}% ` +
+          `volume="${volDetail.name}"`
+        );
+      }
+    }
+
     return {
       id: match.id,
       name: match.name,
@@ -740,8 +976,9 @@ const lookupComicVine = async ({ title, issue, year, publisher }) => {
       volumeId: vid,
       publisher: volDetail?.publisher?.name || match.volume?.publisher?.name || null,
       startYear: volDetail?.start_year || null,
-      description: match.description,
-      deck: match.deck,
+      description,
+      deck,
+      storySuppressedReason,
       coverDate: match.cover_date || null,
       aliases: Array.isArray(match.aliases) ? match.aliases : [],
       firstAppearanceCharacters: hasFirstApps
@@ -1481,8 +1718,12 @@ export default async function handler(req, res) {
     const subtitleStripped = hasSubtitle ? stripSubtitle(confirmedTitle) : confirmedTitle;
     const pcInitialTitle = subtitleStripped; // Title used for initial PC query
 
+    // Ship 26.3C-2 — Clean confirmedTitle before passing to ComicVine to prevent
+    // artist/variant noise from matching wrong volumes (Catwoman/Gotham War class).
+    const cleanedCVTitle = cleanTitleForComicVine(confirmedTitle, req.body.variant);
+
     const [comicVine, priceChartingInitial, cgcResult] = await Promise.all([
-      lookupComicVine({ title: confirmedTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }),
+      lookupComicVine({ title: cleanedCVTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }),
       // lookupXimilar({ images, title, confidence }), // REMOVED — fetched but never used for identity/pricing (-200ms)
       lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
