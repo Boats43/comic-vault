@@ -1425,7 +1425,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
         </div>
         <div className="stat">
           <div className="stat-value">
-            {catalogue.some(c => !c.marketPending)
+            {items.some(c => !c.marketPending)
               ? fmt(totalValue)
               : "Updating…"}
           </div>
