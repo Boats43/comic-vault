@@ -69,7 +69,9 @@
       "Bash(xargs -I {} ls -la \"{}\")",
       "Bash(tee scripts/smoke-test-baseline.log)",
       "PowerShell(node -e \"import\\('./api/enrich.js'\\).then\\(\\(\\) => console.log\\('✓ api/enrich.js parses'\\)\\).catch\\(e => { console.error\\('✗ Parse error:', e.message\\); process.exit\\(1\\); }\\)\")",
-      "PowerShell(node scripts/smoke-test.mjs)"
+      "PowerShell(node scripts/smoke-test.mjs)",
+      "PowerShell(node tests/decision-engine.test.js)",
+      "PowerShell(node tests/family-clustering.test.js; node tests/ship26-integration.test.js)"
     ]
   }
 }
