@@ -4048,6 +4048,79 @@ function CollectionDetail({
               </div>
             )}
 
+            {/* Ship #26 — Decision Engine v0-C Display */}
+            {item.decision?.action && (
+              <div style={{
+                marginBottom: 12,
+                padding: "12px",
+                background: "rgba(99,102,241,0.08)",
+                border: "1px solid rgba(99,102,241,0.25)",
+                borderRadius: 8,
+              }}>
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 8
+                }}>
+                  <span style={{ fontWeight: 700, fontSize: 11, color: "#888", letterSpacing: 0.5 }}>
+                    DECISION
+                  </span>
+                  <span className={`pill-decision-${item.decision.action.toLowerCase().replace(/_/g, '-')}`}>
+                    {item.decision.action.replace(/_/g, ' ')}
+                  </span>
+                  {item.decision.confidence && (
+                    <span style={{
+                      fontSize: 10,
+                      color: "#888",
+                      marginLeft: "auto"
+                    }}>
+                      {item.decision.confidence} confidence
+                    </span>
+                  )}
+                </div>
+                {item.decision.reason && (
+                  <div style={{ fontSize: 12, color: "#ccc", marginBottom: 6, lineHeight: 1.4 }}>
+                    {item.decision.reason}
+                  </div>
+                )}
+                {item.decision.price != null && (
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#60a5fa", marginBottom: 6 }}>
+                    Price: ${typeof item.decision.price === 'number' ? item.decision.price.toFixed(2) : item.decision.price}
+                  </div>
+                )}
+                {item.decision.blockers && item.decision.blockers.length > 0 && (
+                  <div style={{
+                    fontSize: 11,
+                    color: "#fca5a5",
+                    background: "rgba(239,68,68,0.1)",
+                    padding: "4px 8px",
+                    borderRadius: 4,
+                    marginBottom: 4,
+                  }}>
+                    🚫 Blockers: {item.decision.blockers.join(', ')}
+                  </div>
+                )}
+                {item.decision.warnings && item.decision.warnings.length > 0 && (
+                  <div style={{
+                    fontSize: 11,
+                    color: "#fde68a",
+                    background: "rgba(251,191,36,0.1)",
+                    padding: "4px 8px",
+                    borderRadius: 4,
+                    marginBottom: 4,
+                  }}>
+                    ⚠️ Warnings: {item.decision.warnings.join(', ')}
+                  </div>
+                )}
+                {item.decision.nextStep && (
+                  <div style={{ fontSize: 11, color: "#888", marginTop: 6, fontStyle: "italic" }}>
+                    → {item.decision.nextStep}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               <span style={{ color: "#aaa", fontSize: 13 }}>List price</span>
               <input

@@ -327,6 +327,53 @@ body,
   color: white;
 }
 
+/* Ship #26 — Decision Engine pill styles */
+.pill-decision-list-now {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.pill-decision-list-high {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+}
+
+.pill-decision-list-low {
+  background: rgba(234, 179, 8, 0.2);
+  color: #eab308;
+}
+
+.pill-decision-research {
+  background: rgba(249, 115, 22, 0.2);
+  color: #f97316;
+}
+
+.pill-decision-id-required {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.pill-decision-do-not-list {
+  background: rgba(220, 38, 38, 0.3);
+  color: #dc2626;
+  font-weight: 700;
+}
+
+.pill-decision-grade-candidate {
+  background: rgba(168, 85, 247, 0.2);
+  color: #a855f7;
+}
+
+.pill-decision-hold {
+  background: rgba(139, 92, 246, 0.2);
+  color: #8b5cf6;
+}
+
+.pill-decision-bundle {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+}
+
 /* PC-tracked CGC pop panel (Phase 5a.3) */
 .pop-panel {
   background: rgba(255, 255, 255, 0.03);
