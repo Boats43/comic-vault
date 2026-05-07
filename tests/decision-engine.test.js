@@ -126,6 +126,37 @@ test('Brave and Bold #28 Loot Crate catastrophic overprice', () => {
     'Next step should suggest market price or bundle');
 });
 
+// TEST 3A: B&B #28 Loot Crate with zero verified comps (Ship #26 v0-D.1)
+test('B&B #28 Loot Crate reprint zero verified comps', () => {
+  const item = {
+    title: "dc the brave and bold justice league starro conqueror #28 Loot Crate Reprint",
+    issue: "28",
+    publisher: "DC Comics",
+    year: 2017,
+    price: null,
+    pricingSource: "refused-no-data-sources",
+    rawComps: {
+      count: 0,
+      average: null
+    },
+    editionWarning: {
+      detected: true,
+      signals: ["loot crate", "reprint"]
+    },
+    compsExhausted: true,
+    identityConfident: true
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'DO_NOT_LIST', 'Should be DO_NOT_LIST');
+  assertIncludes(decision.blockers, 'reprint-no-verified-comps',
+    'Should have reprint-no-verified-comps blocker');
+  assertIncludes(decision.blockers, 'no-data-sources',
+    'Should have no-data-sources blocker');
+  assertExists(decision.evidence.reprintNoComps, 'Should have reprintNoComps evidence');
+});
+
 // TEST 4: Catwoman/Gotham War with story warning (REAL FIXTURE, post Ship 26.3C)
 test('Catwoman Gotham War with story metadata', () => {
   const item = {
@@ -162,7 +193,7 @@ test('Catwoman Gotham War with story metadata', () => {
   assertExists(decision.evidence, 'Should have evidence');
 });
 
-// TEST 5: Catwoman/Gotham War with correctedIssue normalization (v0-B.1 REGRESSION)
+// TEST 6: Catwoman/Gotham War with correctedIssue normalization (v0-B.1 REGRESSION)
 test('Catwoman Gotham War issue normalization', () => {
   const item = {
     title: "batman catwoman gotham war",
@@ -190,7 +221,7 @@ test('Catwoman Gotham War issue normalization', () => {
   assertExists(decision.evidence, 'Should have evidence');
 });
 
-// TEST 6: Action Comics #33 thin-active-pool poisoning (REAL PRODUCTION FAILURE)
+// TEST 7: Action Comics #33 thin-active-pool poisoning (REAL PRODUCTION FAILURE)
 test('Action Comics #33 Golden Age thin-active-pool', () => {
   const item = {
     title: "Action Comics",
@@ -225,7 +256,7 @@ test('Action Comics #33 Golden Age thin-active-pool', () => {
   assertNotIncludes(['LIST_NOW'], decision.action, 'Should NOT be LIST_NOW');
 });
 
-// TEST 7: Amazing Adventures #3 (REAL FIXTURE)
+// TEST 8: Amazing Adventures #3 (REAL FIXTURE)
 test('Amazing Adventures #3 clean vintage', () => {
   const item = {
     title: "Amazing Adventures",
@@ -259,7 +290,7 @@ test('Amazing Adventures #3 clean vintage', () => {
   assertExists(decision.price, 'Should have price recommendation');
 });
 
-// TEST 8: Amazing Adventures #5 - NOT a duplicate of #3 (REAL FIXTURE)
+// TEST 9: Amazing Adventures #5 - NOT a duplicate of #3 (REAL FIXTURE)
 test('Amazing Adventures #5 not duplicate of #3', () => {
   const item = {
     title: "Amazing Adventures",
@@ -298,7 +329,7 @@ test('Amazing Adventures #5 not duplicate of #3', () => {
     'Should be listable action');
 });
 
-// TEST 9: Low-dollar modern bundle candidate (REAL FIXTURE)
+// TEST 10: Low-dollar modern bundle candidate (REAL FIXTURE)
 test('Low-dollar modern bundle candidate', () => {
   const item = {
     title: "Fantastic Four Artgerm Human Torch",
@@ -336,7 +367,7 @@ test('Low-dollar modern bundle candidate', () => {
   assertNotIncludes(['LIST_HIGH'], decision.action, 'Should NOT be LIST_HIGH');
 });
 
-// TEST 10: No data sources (REAL FIXTURE)
+// TEST 11: No data sources (REAL FIXTURE)
 test('No data sources', () => {
   const item = {
     title: "Unknown",
@@ -356,7 +387,7 @@ test('No data sources', () => {
   assertEqual(decision.price, null, 'Price should be null');
 });
 
-// TEST 11: High-value grading candidate (SYNTHETIC FIXTURE)
+// TEST 12: High-value grading candidate (SYNTHETIC FIXTURE)
 test('High-value grading candidate (SYNTHETIC)', () => {
   const item = {
     title: "Wolverine",
@@ -391,7 +422,7 @@ test('High-value grading candidate (SYNTHETIC)', () => {
   console.log('  [SYNTHETIC FIXTURE]');
 });
 
-// TEST 12: No mutation of input item
+// TEST 13: No mutation of input item
 test('No mutation of input item', () => {
   const item = {
     title: "Test Comic",
@@ -410,7 +441,7 @@ test('No mutation of input item', () => {
   assertEqual(originalJson, afterJson, 'Input item should not be mutated');
 });
 
-// TEST 13: Decision object is JSON-safe
+// TEST 14: Decision object is JSON-safe
 test('Decision object is JSON-safe', () => {
   const item = {
     title: "Test Comic",
@@ -435,7 +466,7 @@ test('Decision object is JSON-safe', () => {
   assertEqual(jsonSafe, true, 'Decision should be JSON-safe');
 });
 
-// TEST 14: All required fields present
+// TEST 15: All required fields present
 test('All required decision fields present', () => {
   const item = {
     title: "Test Comic",
@@ -459,7 +490,7 @@ test('All required decision fields present', () => {
   assertExists(decision.timestamp, 'Should have timestamp');
 });
 
-// TEST 15: Catastrophic system overprice detection
+// TEST 16: Catastrophic system overprice detection
 test('Catastrophic system overprice catches system-generated bad prices', () => {
   const item = {
     title: "Test Comic",
@@ -483,7 +514,7 @@ test('Catastrophic system overprice catches system-generated bad prices', () => 
   assertExists(decision.evidence.catastrophicOverprice, 'Should have evidence');
 });
 
-// TEST 16: Story warning does not block pricing
+// TEST 17: Story warning does not block pricing
 test('Story warning does not block pricing action', () => {
   const item = {
     title: "Test Comic",
@@ -512,7 +543,7 @@ test('Story warning does not block pricing action', () => {
   }
 });
 
-// TEST 17: Missing title blocker
+// TEST 18: Missing title blocker
 test('Missing title triggers ID_REQUIRED', () => {
   const item = {
     title: "",
@@ -527,7 +558,7 @@ test('Missing title triggers ID_REQUIRED', () => {
   assertIncludes(decision.blockers, 'missing-title', 'Should have missing-title blocker');
 });
 
-// TEST 18: Missing issue blocker
+// TEST 19: Missing issue blocker
 test('Missing issue triggers ID_REQUIRED', () => {
   const item = {
     title: "Test Comic",
@@ -542,7 +573,7 @@ test('Missing issue triggers ID_REQUIRED', () => {
   assertIncludes(decision.blockers, 'missing-issue', 'Should have missing-issue blocker');
 });
 
-// TEST 19: Mega-key manual review blocker
+// TEST 20: Mega-key manual review blocker
 test('Mega-key manual review triggers DO_NOT_LIST', () => {
   const item = {
     title: "Action Comics",
@@ -563,7 +594,7 @@ test('Mega-key manual review triggers DO_NOT_LIST', () => {
   assertTruthy(decision.nextStep.includes('appraisal'), 'Next step should mention appraisal');
 });
 
-// TEST 20: Thin pool anchor warning
+// TEST 21: Thin pool anchor warning
 test('Thin pool anchor adds warning', () => {
   const item = {
     title: "Test Comic",
@@ -586,7 +617,7 @@ test('Thin pool anchor adds warning', () => {
     'Should be conservative action');
 });
 
-// TEST 21: Vision low confidence warning
+// TEST 22: Vision low confidence warning
 test('Vision low confidence adds warning', () => {
   const item = {
     title: "Test Comic",
@@ -607,7 +638,7 @@ test('Vision low confidence adds warning', () => {
   assertIncludes(decision.warnings, 'vision-low-confidence', 'Should have vision-low-confidence warning');
 });
 
-// TEST 22: Sold comps stale warning
+// TEST 23: Sold comps stale warning
 test('Sold comps stale adds warning', () => {
   const item = {
     title: "Test Comic",
@@ -631,7 +662,7 @@ test('Sold comps stale adds warning', () => {
   assertIncludes(decision.warnings, 'sold-comps-stale', 'Should have sold-comps-stale warning');
 });
 
-// TEST 23: AI verify rejected all warning
+// TEST 24: AI verify rejected all warning
 test('AI verify rejected all adds warning and triggers RESEARCH', () => {
   const item = {
     title: "Test Comic",
@@ -653,7 +684,7 @@ test('AI verify rejected all adds warning and triggers RESEARCH', () => {
   assertEqual(decision.action, 'RESEARCH', 'Should escalate to RESEARCH');
 });
 
-// TEST 24: Variant contamination warning
+// TEST 25: Variant contamination warning
 test('Variant contamination adds warning', () => {
   const item = {
     title: "Test Comic",
@@ -674,7 +705,7 @@ test('Variant contamination adds warning', () => {
   assertIncludes(decision.warnings, 'variant-contamination', 'Should have variant-contamination warning');
 });
 
-// TEST 25: Reprint/polybag warning
+// TEST 26: Reprint/polybag warning
 test('Reprint detected adds warning', () => {
   const item = {
     title: "Test Comic",
@@ -698,7 +729,7 @@ test('Reprint detected adds warning', () => {
   assertIncludes(decision.warnings, 'reprint-polybag-detected', 'Should have reprint-polybag-detected warning');
 });
 
-// TEST 26: Active floor far below warning
+// TEST 27: Active floor far below warning
 test('Active floor far below recommended adds warning', () => {
   const item = {
     title: "Test Comic",
@@ -769,4 +800,5 @@ console.log('  Warnings tested: 12 types\n');
 if (failed > 0) {
   process.exit(1);
 }
+
 

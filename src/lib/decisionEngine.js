@@ -92,6 +92,22 @@ export function computeDecision(item, context = {}) {
     };
   }
 
+  // Blocker: Reprint/polybag with no verified comps
+  // Ship #26 v0-D.1 — When reprint detected AND zero verified comps AND AI verify rejected all,
+  // we have NO reliable pricing data. This combination is objectively unpriceable.
+  // Only blocks when verification was attempted and rejected 100% of comps.
+  const rawCompsCount = item.rawComps?.count || 0;
+
+  if ((isReprint || isPolybag) && rawCompsCount === 0 && item.compsExhausted === true) {
+    decision.blockers.push('reprint-no-verified-comps');
+    decision.evidence.reprintNoComps = {
+      isReprint,
+      isPolybag,
+      verifiedCount: 0,
+      aiVerifyRejectedAll: true
+    };
+  }
+
   // If blockers exist, return DO_NOT_LIST or ID_REQUIRED
   if (decision.blockers.length > 0) {
     // Determine if it's ID_REQUIRED vs DO_NOT_LIST

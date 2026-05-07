@@ -211,6 +211,26 @@ const showKeyIssue = (k) => {
     .some((x) => s.includes(x));
 };
 
+// Ship #26 v0-D.1 — Reprint key-label safety helper
+// When reprint/polybag detected, prepend "Reprint of" to key issue label.
+// Prevents misleading users that a modern reprint is an original first appearance.
+const displayKeyIssue = (item) => {
+  if (!showKeyIssue(item.keyIssue)) return null;
+
+  const isReprint = item.editionWarning?.detected === true || item.polybagDetected === true;
+
+  if (isReprint) {
+    const key = item.keyIssue;
+    // Avoid double-prefix if already starts with "Reprint of"
+    if (key.toLowerCase().startsWith('reprint of')) {
+      return key;
+    }
+    return `Reprint of ${key}`;
+  }
+
+  return item.keyIssue;
+};
+
 function ScanZone({ onFile, inputRef, compact, label }) {
   const cameraRef = useRef(null);
 
@@ -299,7 +319,10 @@ function ResultCard({ result, enriching }) {
         : result.grade
           ? <div className="grade-badge raw">{result.grade}</div>
           : null}
-      {showKeyIssue(result.keyIssue) && <div className="key-box">⭐ {result.keyIssue}</div>}
+      {(() => {
+        const keyText = displayKeyIssue(result);
+        return keyText ? <div className="key-box">⭐ {keyText}</div> : null;
+      })()}
       {result.variant && (
         <div style={{ color: "#FFD700", fontSize: 13, marginTop: 4, fontWeight: "bold" }}>
           ⚡ {result.variant}
@@ -2489,11 +2512,34 @@ function CollectionDetail({
       </div>
 
       {/* 3. KEY ISSUE BLOCK */}
-      {showKeyIssue(item.keyIssue) && (
-        <div className="key-box" style={{ marginTop: 12 }}>
-          ⭐ {item.keyIssue}
-        </div>
-      )}
+      {(() => {
+        const keyText = displayKeyIssue(item);
+        if (!keyText) return null;
+
+        const isReprint = item.editionWarning?.detected === true || item.polybagDetected === true;
+
+        return (
+          <>
+            <div className="key-box" style={{ marginTop: 12 }}>
+              ⭐ {keyText}
+            </div>
+            {isReprint && (
+              <div style={{
+                marginTop: 8,
+                padding: "8px 10px",
+                background: "rgba(255,193,7,0.1)",
+                border: "1px solid #ffc107",
+                borderRadius: 6,
+                fontSize: 12,
+                color: "#856404",
+                lineHeight: 1.4,
+              }}>
+                ⚠️ REPRINT/FACSIMILE — Not original first appearance. This is a modern reprint, facsimile, or polybag copy.
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* Ship #21 — STORY & CREATORS from ComicVine */}
       {item.comicVine && (item.comicVine.description || item.comicVine.personCredits?.length > 0 || item.comicVine.characterCredits?.length > 0) && (
