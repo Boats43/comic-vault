@@ -1803,10 +1803,43 @@ function CollectionDetail({
   const touchStartT = useRef(null);
 
   useEffect(() => {
-    setListPrice(getDisplayPrice(item));
+    // Rule precedence (highest first):
+    // 1. Blocked decision: always overwrite stale listPrice with current price
+    // 2. Explicit manual edit: preserve user value (unless blocked)
+    // 3. Old items without manual flag: overwrite if >50% deviation from current price
+    // 4. New items: always sync system price
+
+    const isBlocked =
+      item.decision?.action === 'DO_NOT_LIST' ||
+      item.decision?.action === 'ID_REQUIRED' ||
+      (item.decision?.blockers?.length || 0) > 0;
+
+    const currentSystemPrice = getDisplayPrice(item);
+
+    if (isBlocked) {
+      // Rule 1: Blocked items always show current system price
+      setListPrice(currentSystemPrice);
+    } else if (item.listPriceManual === true) {
+      // Rule 2: Preserve manual value (only for non-blocked items)
+      setListPrice(item.listPrice != null ? item.listPrice : currentSystemPrice);
+    } else if (item.listPrice != null && item.listPriceManual === undefined) {
+      // Rule 3: Old items without manual flag - detect stale system data
+      const deviation = Math.abs(item.listPrice - currentSystemPrice) / Math.max(currentSystemPrice, 0.01);
+      if (deviation > 0.5) {
+        // >50% deviation = stale system data, overwrite
+        setListPrice(currentSystemPrice);
+      } else {
+        // Within 50% = preserve
+        setListPrice(item.listPrice);
+      }
+    } else {
+      // Rule 4: New items or items without listPrice field
+      setListPrice(currentSystemPrice);
+    }
+
     setShowEngineRec(false);
     setListPriceWarningDismissed(false);
-  }, [item?.id]);
+  }, [item?.id, item?.price, item?.decision, item?.listPrice, item?.listPriceManual]);
 
   // Abort any in-flight card enrich when the item changes or the detail
   // view unmounts. Prevents a pending /api/enrich response from a PRIOR
@@ -4174,7 +4207,18 @@ function CollectionDetail({
               <input
                 type="number"
                 value={listPrice}
-                onChange={(e) => setListPrice(e.target.value)}
+                onChange={(e) => {
+                  const newPrice = e.target.value;
+                  setListPrice(newPrice);
+                  // Mark as manual edit and persist flag to catalogue
+                  const updated = {
+                    ...item,
+                    listPrice: parseFloat(newPrice) || 0,
+                    listPriceManual: true
+                  };
+                  putComic(updated).catch(() => {});
+                  setCatalogue((prev) => prev.map((x) => x.id === item.id ? updated : x));
+                }}
                 style={{
                   background: "rgba(255,255,255,0.08)",
                   border: "1px solid rgba(255,255,255,0.2)",
@@ -6199,6 +6243,9 @@ export default function App() {
                   pricingSource: enrich.pricingSource || null,
                   priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
+                  // Preserve manual list price edits
+                  listPrice: cur.listPrice,
+                  listPriceManual: cur.listPriceManual,
                   comicVine: enrich.comicVine || cur.comicVine || null,
                   certNumber: enrich.certNumber || cur.certNumber || null,
                   cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
@@ -6280,6 +6327,9 @@ export default function App() {
                   pricingSource: enrich.pricingSource || null,
                   priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
+                  // Preserve manual list price edits
+                  listPrice: s.listPrice,
+                  listPriceManual: s.listPriceManual,
                   defectPenalty: enrich.defectPenalty || s.defectPenalty || null,
                   comicVine: enrich.comicVine || s.comicVine || null,
                   certNumber: enrich.certNumber || s.certNumber || null,
@@ -6507,6 +6557,9 @@ export default function App() {
                 pricingSource: enrich.pricingSource || null,
                 priceNote: enrich.priceNote || null,
                 gradeMultiplier: enrich.gradeMultiplier || null,
+                // Preserve manual list price edits
+                listPrice: cur.listPrice,
+                listPriceManual: cur.listPriceManual,
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
                 comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
                 certNumber: enrich.certNumber || cur.certNumber || null,
@@ -6877,6 +6930,9 @@ export default function App() {
       decision: enrich.decision || item.decision,
       pricingSource: enrich.pricingSource ?? null,
       priceNote: enrich.priceNote || null,
+      // Preserve manual list price edits
+      listPrice: item.listPrice,
+      listPriceManual: item.listPriceManual,
       gradeMultiplier: enrich.gradeMultiplier || null,
       defectPenalty: enrich.defectPenalty || item.defectPenalty || null,
       comicVine: enrich.comicVine || item.comicVine || null,
