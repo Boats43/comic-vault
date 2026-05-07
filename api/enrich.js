@@ -4082,6 +4082,25 @@ export default async function handler(req, res) {
     // 5. isPolybagPricing: expose function parameter on out
     out.isPolybagPricing = isPolybagPricing;
 
+    // Ship #26 v0-B.1 — Normalize critical identity fields for decision engine.
+    // correctedIssue / confirmedYear / confirmedPublisher drive pricing and comps,
+    // but decisionEngine reads out.issue / out.year / out.publisher directly.
+    if (!out.issue) {
+      out.issue = correctedIssue || confirmedIssue || issueNum || null;
+    }
+
+    if (!out.year) {
+      out.year = confirmedYear || year || null;
+    }
+
+    if (!out.publisher) {
+      out.publisher = confirmedPublisher || publisher || null;
+    }
+
+    if (!out.visionConfidence && out.matchConfidence?.visionConfidence) {
+      out.visionConfidence = out.matchConfidence.visionConfidence;
+    }
+
     // Compute decision after full enrich object assembled
     out.decision = computeDecision(out, {
       source: 'enrich',
