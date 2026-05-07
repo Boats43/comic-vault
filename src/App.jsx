@@ -4086,7 +4086,9 @@ function CollectionDetail({
                 )}
                 {item.decision.price != null && (
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#60a5fa", marginBottom: 6 }}>
-                    Price: ${typeof item.decision.price === 'number' ? item.decision.price.toFixed(2) : item.decision.price}
+                    Price: {typeof item.decision.price === 'number'
+                      ? `$${item.decision.price.toFixed(2)}`
+                      : (String(item.decision.price).startsWith('$') ? item.decision.price : `$${item.decision.price}`)}
                   </div>
                 )}
                 {item.decision.blockers && item.decision.blockers.length > 0 && (
