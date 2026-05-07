@@ -6059,6 +6059,8 @@ export default function App() {
                   // Ship #19 — preserve Vision-set editionWarning + ack state
                   editionWarning: enrich.editionWarning || cur.editionWarning || null,
                   editionConfirmed: cur.editionConfirmed || false,
+                  // Ship #26 — Decision Engine v0-B
+                  decision: enrich.decision || cur.decision,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
                 };
@@ -6137,6 +6139,8 @@ export default function App() {
                   // Ship #19 — preserve Vision-set editionWarning + ack state
                   editionWarning: enrich.editionWarning || s.editionWarning || null,
                   editionConfirmed: s.editionConfirmed || false,
+                  // Ship #26 — Decision Engine v0-B
+                  decision: enrich.decision || s.decision,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChangedSel ? false : (s.manualConfirmed || false),
                 };
