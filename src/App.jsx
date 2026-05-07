@@ -1424,7 +1424,11 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
           <div className="stat-label">Comics</div>
         </div>
         <div className="stat">
-          <div className="stat-value">{fmt(totalValue)}</div>
+          <div className="stat-value">
+            {catalogue.some(c => !c.marketPending)
+              ? fmt(totalValue)
+              : "Updating…"}
+          </div>
           <div className="stat-label">Est. Value</div>
         </div>
       </div>
@@ -1655,6 +1659,8 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                   <span className="collection-price" style={{ color: "#d17105" }}>
                     Appraise
                   </span>
+                ) : item.marketPending ? (
+                  <span className="collection-price" style={{ color: "#666" }}>—</span>
                 ) : getDisplayPrice(item) > 0 && (
                   <span className="collection-price">${getDisplayPrice(item).toLocaleString("en-US")}</span>
                 )}
@@ -6057,9 +6063,9 @@ export default function App() {
         typeof data.numericGrade === "number" ? data.numericGrade : null,
       issue: data.issue || null,
       keyIssue: data.keyIssue || "",
-      price: data.price || "",
-      priceLow: data.priceLow || "",
-      priceHigh: data.priceHigh || "",
+      price: null,  // ignore data.price, will be calculated by enrich.js
+      priceLow: null,
+      priceHigh: null,
       reason: data.reason || "",
       confidence: data.confidence || "",
       restoration: data.restoration || null,
@@ -6074,6 +6080,7 @@ export default function App() {
       cgcLabel: data.cgcLabel || null,
       purchasePrice: data.purchasePrice != null ? parseFloat(data.purchasePrice) || null : null,
       timestamp: Date.now(),
+      marketPending: true,  // signal price not ready, enrich in progress
       images: thumb ? [thumb] : [],
     };
     try {
@@ -6246,6 +6253,8 @@ export default function App() {
                   // Preserve manual list price edits
                   listPrice: cur.listPrice,
                   listPriceManual: cur.listPriceManual,
+                  // Clear pending flag when enrich completes
+                  marketPending: false,
                   comicVine: enrich.comicVine || cur.comicVine || null,
                   certNumber: enrich.certNumber || cur.certNumber || null,
                   cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
@@ -6330,6 +6339,8 @@ export default function App() {
                   // Preserve manual list price edits
                   listPrice: s.listPrice,
                   listPriceManual: s.listPriceManual,
+                  // Clear pending flag when enrich completes
+                  marketPending: false,
                   defectPenalty: enrich.defectPenalty || s.defectPenalty || null,
                   comicVine: enrich.comicVine || s.comicVine || null,
                   certNumber: enrich.certNumber || s.certNumber || null,
@@ -6560,6 +6571,8 @@ export default function App() {
                 // Preserve manual list price edits
                 listPrice: cur.listPrice,
                 listPriceManual: cur.listPriceManual,
+                // Clear pending flag when enrich completes
+                marketPending: false,
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
                 comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
                 certNumber: enrich.certNumber || cur.certNumber || null,
@@ -6933,6 +6946,8 @@ export default function App() {
       // Preserve manual list price edits
       listPrice: item.listPrice,
       listPriceManual: item.listPriceManual,
+      // Clear pending flag when enrich completes
+      marketPending: false,
       gradeMultiplier: enrich.gradeMultiplier || null,
       defectPenalty: enrich.defectPenalty || item.defectPenalty || null,
       comicVine: enrich.comicVine || item.comicVine || null,
@@ -7206,6 +7221,7 @@ export default function App() {
   const marketValue = marketValueOf(result);
 
   const totalValue = catalogue.reduce((sum, item) => {
+    if (item.marketPending) return sum;  // exclude pending items
     return sum + (getDisplayPrice(item) || 0);
   }, 0);
 
