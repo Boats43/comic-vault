@@ -4310,6 +4310,44 @@ function CollectionDetail({
                   </>
                 );
               }
+              // Ship #26 v0-D — Decision Engine hard-block gate
+              // Block listing when decision.action is ID_REQUIRED or DO_NOT_LIST,
+              // or when decision.blockers array has items.
+              const hasDecisionBlocker =
+                item.decision?.action === 'ID_REQUIRED' ||
+                item.decision?.action === 'DO_NOT_LIST' ||
+                (item.decision?.blockers?.length || 0) > 0;
+
+              if (hasDecisionBlocker) {
+                const firstBlocker = item.decision?.blockers?.[0] || 'unknown';
+                const reason = item.decision?.reason || 'Decision Engine blocked this listing';
+                return (
+                  <>
+                    <div style={{
+                      padding: "10px 12px",
+                      marginBottom: 8,
+                      background: "rgba(239,68,68,0.10)",
+                      border: "1px solid #da3633",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: "#fca5a5",
+                    }}>
+                      🚫 DECISION ENGINE BLOCKED — {firstBlocker.replace(/-/g, ' ')}
+                      <div style={{ marginTop: 4, fontSize: 11, color: "#888" }}>
+                        {reason}
+                      </div>
+                    </div>
+                    <button
+                      className="reset-btn"
+                      disabled={true}
+                      style={{ width: "100%", opacity: 0.5 }}
+                    >
+                      📋 Listing Blocked
+                    </button>
+                  </>
+                );
+              }
+
               return (
                 <button
                   className="reset-btn primary"
@@ -4383,14 +4421,17 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
     setSelectedIds(new Set());
   };
 
-  // Books eligible for "Post All HOT": tagged HOT, not already listed, and
-  // have a resolved display price. Computed from current aiTags and catalogue.
-  const getHotUnlisted = (aiTagsSnapshot) =>
+  // Ship #26 v0-D — Decision Engine aware filtering for bulk listing.
+  // Only include books with listable decision actions and no blockers.
+  // Renamed from getHotUnlisted to getListableBooks.
+  const getListableBooks = (aiTagsSnapshot) =>
     catalogue.filter(
       (c) =>
-        aiTagsSnapshot?.[c.id]?.label === "HOT" &&
         c.status !== "listed" &&
-        getDisplayPrice(c) > 0
+        getDisplayPrice(c) > 0 &&
+        (c.decision?.action === 'LIST_NOW' || c.decision?.action === 'LIST_HIGH') &&
+        (c.decision?.blockers?.length || 0) === 0 &&
+        c.identityConfident !== false
     );
 
   const runPostAll = async (ids) => {
@@ -4490,6 +4531,21 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   const submitBundle = async () => {
     if (bundling || !onBundleList) return;
     const items = catalogue.filter((c) => selectedIds.has(c.id));
+
+    // Ship #26 v0-D — Decision Engine blocker validation for bundle submission
+    const blocked = items.filter(c =>
+      c.decision?.action === 'ID_REQUIRED' ||
+      c.decision?.action === 'DO_NOT_LIST' ||
+      (c.decision?.blockers?.length || 0) > 0
+    );
+    if (blocked.length > 0) {
+      setBundleMsg({
+        type: "err",
+        text: `${blocked.length} book${blocked.length === 1 ? '' : 's'} ha${blocked.length === 1 ? 's' : 've'} decision blockers. Deselect them first.`
+      });
+      return;
+    }
+
     if (items.length < 2) {
       setBundleMsg({ type: "err", text: "Select at least 2 comics" });
       return;
@@ -4871,11 +4927,11 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
             {selectionMode ? "✕ Cancel Bundle" : "📦 Create Bundle"}
           </button>
           {(() => {
-            const hotUnlisted = getHotUnlisted(aiTags);
-            if (hotUnlisted.length === 0) return null;
+            const listableBooks = getListableBooks(aiTags);
+            if (listableBooks.length === 0) return null;
             return (
               <button
-                onClick={() => openPostAll(hotUnlisted)}
+                onClick={() => openPostAll(listableBooks)}
                 disabled={selectionMode || postAllRunning}
                 style={{
                   padding: "6px 12px",
@@ -4889,7 +4945,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
                   opacity: selectionMode || postAllRunning ? 0.5 : 1,
                 }}
               >
-                📋 Post All HOT ({hotUnlisted.length})
+                📋 Post All Listable ({listableBooks.length})
               </button>
             );
           })()}
