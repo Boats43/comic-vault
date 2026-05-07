@@ -228,6 +228,59 @@ if (hasApiKeys) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// DECISION ENGINE v0-B SHAPE VALIDATION
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\n=== DECISION ENGINE v0-B SHAPE VALIDATION ===\n');
+
+// Test decision object presence and shape on Catwoman result
+console.log('Decision object shape validation:');
+if (catwomanResult.decision) {
+  assertTrue(catwomanResult.decision, 'decision object exists');
+
+  const validActions = ['LIST_NOW', 'LIST_HIGH', 'LIST_LOW', 'HOLD', 'GRADE_CANDIDATE', 'BUNDLE', 'RESEARCH', 'ID_REQUIRED', 'DO_NOT_LIST'];
+  assertTrue(
+    validActions.includes(catwomanResult.decision.action),
+    `decision.action is valid enum (got: ${catwomanResult.decision.action})`
+  );
+
+  assertTrue(
+    typeof catwomanResult.decision.evidence === 'object',
+    'decision.evidence is object'
+  );
+
+  assertTrue(
+    Array.isArray(catwomanResult.decision.blockers),
+    'decision.blockers is array'
+  );
+
+  assertTrue(
+    Array.isArray(catwomanResult.decision.warnings),
+    'decision.warnings is array'
+  );
+
+  assertTrue(
+    typeof catwomanResult.decision.confidence === 'string',
+    'decision.confidence is string'
+  );
+
+  assertTrue(
+    typeof catwomanResult.decision.reason === 'string',
+    'decision.reason is string'
+  );
+
+  assertTrue(
+    typeof catwomanResult.decision.nextStep === 'string',
+    'decision.nextStep is string'
+  );
+
+  console.log(`  → Decision: ${catwomanResult.decision.action} (${catwomanResult.decision.confidence} confidence)`);
+  console.log(`  → Blockers: ${catwomanResult.decision.blockers.length}, Warnings: ${catwomanResult.decision.warnings.length}`);
+} else {
+  failed++;
+  console.log('  ✗ decision object missing from response');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // SUMMARY
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

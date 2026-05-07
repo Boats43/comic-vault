@@ -48,6 +48,9 @@ import {
   sanitizeIdentityFields,
   assessIdentityConfidence,
 } from "../src/lib/identityGate.js";
+// Ship v0-B — Decision Engine integration. Computes accountable decision
+// (LIST_NOW, RESEARCH, ID_REQUIRED, etc.) after full enrich object assembled.
+import { computeDecision } from "../src/lib/decisionEngine.js";
 import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate } from "../src/lib/imageSearchIdentity.js";
 // Ship #20b — price bands engine (verified sold-first pricing).
 import { computePriceBands, enforceFloor } from "../src/lib/priceBands.js";
@@ -4048,6 +4051,49 @@ export default async function handler(req, res) {
       marks: t,
     };
     console.log('[timing] summary:', JSON.stringify(out.timings));
+
+    // Ship v0-B — Decision Engine integration.
+    // Normalize fields for decision engine (field mapping from Step 0):
+    // 1. rawComps: construct from local rawComps variable
+    out.rawComps = rawComps ? {
+      average: rawComps.average,
+      lowest: rawComps.lowest,
+      highest: rawComps.highest,
+      count: rawComps.count
+    } : { count: 0 };
+
+    // 2. variantContamFallback: alias from variantFallback
+    if (out.variantFallback) {
+      out.variantContamFallback = out.variantFallback;
+    }
+
+    // 3. storySuppressedReason: normalize from nested comicVine
+    if (out.comicVine?.storySuppressedReason) {
+      out.storySuppressedReason = out.comicVine.storySuppressedReason;
+    }
+
+    // 4. megaKey: construct from flags
+    if (out.manualReviewRequired) {
+      out.megaKey = { badge: 'MANUAL REVIEW' };
+    } else if (out.gradeExceedsMap) {
+      out.megaKey = { badge: 'GRADE EXCEEDS MAP' };
+    }
+
+    // 5. isPolybagPricing: expose function parameter on out
+    out.isPolybagPricing = isPolybagPricing;
+
+    // Compute decision after full enrich object assembled
+    out.decision = computeDecision(out, {
+      source: 'enrich',
+      timestamp: Date.now()
+    });
+
+    console.log(
+      `[decision] action=${out.decision.action} ` +
+      `confidence=${out.decision.confidence} ` +
+      `blockers=${out.decision.blockers?.length || 0} ` +
+      `warnings=${out.decision.warnings?.length || 0}`
+    );
 
     res.status(200).json(out);
   } catch (err) {
