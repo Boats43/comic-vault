@@ -224,13 +224,17 @@ When `rawComps.count < 3`, cap `out.price` at `rawComps.highest × 1.05`. No `is
 **Display only.** Ship #16b (creator-aware multiplier) gated behind explicit greenlight.
 
 ### Decision Engine (Layer 3, v0-D.1 deployed)
-Pure helper `computeDecision(item)` in `src/lib/decisionEngine.js` returns BUY/SELL/HOLD/WAIT recommendation:
-- **BUY:** `matchConfidence >= 75 && netProfit >= minProfit` (Buyer tab)
-- **SELL:** `matchConfidence >= 75 && displayPrice >= $10` (Collection tab)
-- **HOLD:** `matchConfidence >= 60 && displayPrice >= $5`
-- **WAIT:** Default when confidence low or blockers present
+Pure helper `computeDecision(item)` in `src/lib/decisionEngine.js` returns structured decision with action, confidence, blockers, warnings, and next steps.
 
-**Blockers:** low match/vision confidence, manual review required, grade exceeds map, reprint detected, no comps, incomplete identity fields.
+**Actions:**
+- **ID_REQUIRED:** Identity fields incomplete (missing title/issue/publisher, identity conflict)
+- **DO_NOT_LIST:** Hard blockers present (manual review required, mega-key, catastrophic overprice, reprint with no comps)
+- **RESEARCH:** Critical warnings escalated (sold/active mismatch, thin Golden Age pool, active avg far below)
+- **GRADE_CANDIDATE:** Grading upside detected (price ladder shows 2x+ uplift)
+- **LIST_LOW:** Moderate warnings present (thin pool, variant contamination, bundle candidate, reprint/polybag)
+- **LIST_NOW:** Clean identification and pricing, ready to list
+
+**Blockers:** missing identity fields, manual review required, grade exceeds map, reprint/polybag with no verified comps, catastrophic overprice.
 
 **Integration:** Called at end of `api/enrich.js`, persisted through all merge paths, gates eBay listing actions (soft gate with user override).
 
