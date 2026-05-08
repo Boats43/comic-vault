@@ -19,7 +19,7 @@ npx vercel --prod       # uncommitted-tree fallback only
 
 ## Key Files
 - `src/App.jsx` — entire frontend (ResultCard, CollectionDetail, grading flow, catalogue, FloatingSearchBar, BidCalculator)
-- `api/enrich.js` — second-pass enrichment (PriceCharting, eBay comps, ComicVine, Ximilar, CGC lookup, GoCollect)
+- `api/enrich.js` — second-pass enrichment (PriceCharting, eBay comps, ComicVine, Ximilar, CGC lookup, GoCollect, Decision Engine)
 - `api/grade.js` — Claude Vision comic identification and grading
 - `api/chat.js` — Claude collection chat (inline queries, Whatnot session context)
 - `api/comps.js` — eBay Browse API comp fetching
@@ -36,6 +36,7 @@ npx vercel --prod       # uncommitted-tree fallback only
 - `src/lib/listPriceWarning.js` — UI helper (over-reach detection)
 - `src/lib/premiumCreators.js` — 80-creator tiered registry
 - `src/lib/pedigreeRegistry.js` — 22-pedigree canonical lookup
+- `src/lib/decisionEngine.js` — pure decision helper (BUY/SELL/HOLD/WAIT recommendations)
 
 ## Repo & Live
 - **Repo**: Boats43/comic-vault
@@ -222,6 +223,17 @@ When `rawComps.count < 3`, cap `out.price` at `rawComps.highest × 1.05`. No `is
 80 tiered creators (legend 20 / premium 25 / modern-premium 20 / current 15). `extractCreatorsFromComps(titles)` returns `{ consensus, singletons }`. Alias policy: 39 unambiguous last-names allowed (Wrightson, Aparo, Kirby, Ditko, McFarlane, Mignola, Capullo, Dell'Otto, Artgerm, ...); full-name required for ambiguous (Neal Adams vs Arthur Adams, Jim Lee vs Stan Lee, Frank Miller vs Mike Miller). Optional `role: 'writer'|'artist'|'cover'`.
 **Display only.** Ship #16b (creator-aware multiplier) gated behind explicit greenlight.
 
+### Decision Engine (Layer 3, v0-D.1 deployed)
+Pure helper `computeDecision(item)` in `src/lib/decisionEngine.js` returns BUY/SELL/HOLD/WAIT recommendation:
+- **BUY:** `matchConfidence >= 75 && netProfit >= minProfit` (Buyer tab)
+- **SELL:** `matchConfidence >= 75 && displayPrice >= $10` (Collection tab)
+- **HOLD:** `matchConfidence >= 60 && displayPrice >= $5`
+- **WAIT:** Default when confidence low or blockers present
+
+**Blockers:** low match/vision confidence, manual review required, grade exceeds map, reprint detected, no comps, incomplete identity fields.
+
+**Integration:** Called at end of `api/enrich.js`, persisted through all merge paths, gates eBay listing actions (soft gate with user override).
+
 ### App.jsx merge paths
 5 client merge paths plumb enrich response fields through IndexedDB: auto-refresh→catalogue, scan→catalogue, scan→selectedItem, bulk-import→catalogue, refreshMarketData. Pattern: `enrich.X || cur.X || defaultValue`.
 
@@ -258,227 +270,54 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - **Post All HOT**: Manage tab `📋 Post All HOT (X)` button. Filters `aiTags[id]?.label === 'HOT' && status !== 'listed' && getDisplayPrice > 0`. Sequential post via `onListComic` with 1500ms between rows.
 - **Editable list price**: numeric `listPrice` input above List on eBay button. `handleList` passes `{ ...item, price: "$X.XX" }` so override drives eBay StartPrice + persists to catalogue.
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
+- **Decision recommendations**: BUY/SELL/HOLD/WAIT badges on comic detail cards with blocking reasons. Gates listing actions when decision=WAIT.
 
-## Current State (as of 2026-05-06)
+## Current State (as of 2026-05-07)
 
-Latest commit: f05f8d6 — Ship 22 (preserve publisher words in series titles)
+**Latest commit:** fd0a313 — A-lite hotfix 3 (collection screen crash fix)  
+**Vercel functions:** 12/12  
+**Test count:** 1,570 passing across 23 suites
 
-Test count: 1,570 passing across 23 suites (31 new Ship #23 tests)
-Vercel functions: 12/12
-Layer 1: ~95% (consistency engine shipped)
-Layer 2: ~45% (Ship #20b/21 deployed, #24-27 queued)
-Layer 3: ~15% (decision signals live, full engine pending)
-Layer 4: 0% (portfolio intelligence queued as Ship #26)
+**Layer Progress:**
+- Layer 1 (Foundation): ~95% (consistency engine shipped)
+- Layer 2 (Data Leverage): ~45% (sold pricing live, velocity/ROI queued)
+- Layer 3 (Decision Engine): ~20% (v0-D.1 deployed, calibration pending)
+- Layer 4 (Portfolio OS): 0% (queued as Ship #26)
 
-Performance: Scan time 7.5s → 2.5s (66% improvement)
-  phase1_complete: 769ms (was ~2800ms)
-  total_ms: 2550ms (was ~7500ms)
+**Performance:**
+- Scan time: 7.5s → 2.5s (66% improvement)
+- phase1_complete: 769ms (was ~2800ms)
+- total_ms: 2550ms (was ~7500ms)
 
-Deploy: git push origin main = auto-deploy (confirmed)
-Rollback: git revert [hash] && git push origin main
+**Deploy:** git push origin main = auto-deploy (confirmed)  
+**Rollback:** git revert [hash] && git push origin main
 
-NEXT SHIPS (Intelligence Layer):
+## Recent Ships (Last 5)
 
-**Ship #24 — VELOCITY CURVES** (6 hours)
-  90d/30d/7d sales velocity trends
-  Dynamic pricing (accelerating → Stretch, decelerating → Quick)
-  Price peak detection + sell urgency
-  
-**Ship #25 — GRADE-JUMP ROI** (4 hours)
-  Press + submit profit calculator (uses PC price ladder)
-  Grade scenario comparison (9.4 raw vs 9.6 CGC)
-  Submission sweet-spot detector
-  
-**Ship #26 — PORTFOLIO INTELLIGENCE** (10 hours)
-  Diversification scoring (character/era/publisher exposure)
-  Gap detection (story arcs, trilogy completeness)
-  Bundle opportunities (correlated books)
-  
-**Ship #27 — AUCTION INTELLIGENCE** (8 hours)
-  eBay auction watch counts (demand leading indicator)
-  Bid velocity (liquidity scoring)
-  Auction calendar (supply forecast)
+| Hash | Ship | Summary |
+|------|------|---------|
+| fd0a313 | A-lite hotfix 3 | Fix collection screen crash (wrong variable reference) |
+| 1a9e6c1 | A-lite hotfix 2 | Prevent provisional Vision prices from entering catalogue |
+| a90388d | A-lite hotfix 1 | Sync system listPrice after enrich completion |
+| 238280b | v0-D.1 | Reprint key-label safety + no-comps blocker |
+| 316318b | v0-D | Decision Engine — gate listing actions by decision blockers |
 
-Phase 2 (deferred): Ships #28-29 (image forensics, cross-source validation) — high effort, lower priority
+**Full ship history:** See `docs/archive/SESSION_2026_05_06.md` and `docs/archive/SESSION_2026_05_07_DECISION_ENGINE.md`
 
-## Recent Ships
-**Last 5 only — overwritten when 6th lands.**
+## Next Session Priorities
 
-- `f05f8d6` — Ship 22 — preserve publisher words in series titles. eBay visual search extractMainTitle was stripping publisher names from ALL titles, corrupting series names ("Marvel Tales" → "Tales"). Added 25-entry PUBLISHER_IN_TITLE_SERIES whitelist protecting known publisher-in-title series. Fixes identity override path storing wrong titles. Validated with 18-case unit test.
-- `e53d033` — Ship 21 — explicit refusal for silent-empty pricing case. When all pricing branches fail (priceBands null, priceCharting null, rawComps.count=0), handler returned empty response. Added else clause setting pricingSource='refused-no-data-sources' with diagnostic reason. UI mapping added ("no data available"). Surfaces when book has zero eBay comps, no PC match, no CV match.
-- `9140284` — Ship 20 — filter ComicVine cross-reference artifacts from storyDescription. CV description field returns meta-text ("Translate:", "Collects:", "Reprints:", "Featured Story Arcs:") instead of story content. Added 9-pattern CROSS_REF_RE filter (70+ chars, starts-with any pattern) with IIFE wrapper and inline validation. Preserves genuine story text, strips meta-blocks.
-- `6110fb8` — Ship 17 — complete pricingSource label mapping for UI. Raw backend slugs displaying in UI ("verified_sold", "refused-claude-gate"). Frontend had incomplete mapping (5 entries), backend had 9 values. Added all 7 missing mappings: verified_sold, verified_active, refused-no-data-sources, ebay-polybag-active, refused-claude-gate, refused-identity, identity-required, pc_estimate, claude_price.
-- `402de50` — Ship 14 — newsstand multiplier applies to verified_active/pc_estimate/browse_api paths. Newsstand variant gate restricted to single source ('pricecharting'), causing modern newsstand books to price without multiplier when priced via other paths. Replaced single-source isFromPC boolean with Set-based VARIANT_MULT_ELIGIBLE_SOURCES check (4 sources). Marvel Saga #18 (1987 newsstand) now applies 1.3× across all eligible paths.
+See `docs/NEXT_SESSION.md` for full details.
 
-## Active Priority Queue
+**Immediate:**
+1. Decision Engine validation (confidence calibration, blocker audit, BUY path testing)
+2. Day 2 ship phone validation (10-item punch list)
+3. Ship 6 polybag UI bug diagnosis
 
-**Intelligence layer roadmap — maximizing all data sources.**
-
-### Ship #24 — VELOCITY CURVES + DYNAMIC PRICING (NEXT)
-**Est: 6 hours | Highest ROI**
-
-Extract 90d/30d/7d velocity trends from PC sales-history (already captured, currently unused).
-- Velocity classification: ACCELERATING / FLAT / DECELERATING
-- Dynamic pricing strategy:
-  - Accelerating → price at Stretch band (sell into demand)
-  - Decelerating → price at Quick band (exit before drop)
-  - High auction watch counts → +5% premium (demand spike)
-  - 3+ auctions ending this week → -10% (undercut flood)
-- Price peak detection: "Sell NOW — velocity tripling (peak in 7-14d)"
-- Market saturation warnings: "Comp pool flooding — wait or drop price"
-
-**Impact:** Catch price peaks (+15% sell price), avoid dumps (-25% loss prevention)
-
-**Files:**
-- `src/lib/velocityCurves.js` (NEW — velocity extraction + trend classification)
-- `src/lib/priceBands.js` (ENHANCE — dynamic pricing adjustments)
-- `api/enrich.js` (ENHANCE — plumb velocity trend to output)
-
-**Tests:** 40 tests (velocity math, trend detection, dynamic pricing logic)
-
----
-
-### Ship #25 — GRADE-JUMP ROI CALCULATOR
-**Est: 4 hours | High profit finder**
-
-Use PC price ladder (already captured, 14 grades per book) to calculate press/submit ROI.
-- Grade scenario comparison:
-  - Current: 9.4 raw → $2,100 market
-  - Scenario A: Press + 9.6 submit → $4,200 FMV - $55 cost = $2,045 profit (97% ROI)
-  - Scenario B: Raw 9.4 submit → $2,800 FMV - $35 cost = $665 profit (32% ROI)
-  - Recommendation: Press first, target 9.6
-- Downside protection: "If grade drops to 9.2 → -$385 loss"
-- Submission sweet-spot: Only recommend when ROI > 50%
-
-**Impact:** Identify $2K+ profit opportunities, prevent bad submissions (< 30% ROI)
-
-**Files:**
-- `src/lib/gradeJumpROI.js` (NEW — ROI calculator, scenario builder)
-- `src/App.jsx` (ENHANCE — add ROI panel to CollectionDetail)
-
-**Tests:** 25 tests (ROI math, cost scenarios, grade-drop risk)
-
----
-
-### Ship #26 — PORTFOLIO INTELLIGENCE
-**Est: 10 hours | Differentiator (no competitor has this)**
-
-Analyze 84-book catalogue for portfolio-level insights.
-
-**A. Diversification Scoring**
-- Character exposure: "Spider-Man: 22 books (26% portfolio) — HIGH RISK"
-- Era exposure: "Bronze Age: 38 books (45%) — balanced"
-- Publisher exposure: "Marvel: 68 books (81%) — consider DC/indie"
-- Correlation risk: "ASM #129 + Punisher #1 move together (r²=0.87)"
-
-**B. Gap Detection (ComicVine story arcs)**
-- "You own 5/6 Kraven's Last Hunt — buy Spectacular #132 ($45)"
-- "Complete set premium: +25% ($280 → $350) = $70 net value gain"
-
-**C. Bundle Opportunities**
-- Detect: ASM #121, #122, #129 (Death of Gwen trilogy)
-- Individual value: $850 + $420 + $2,100 = $3,370
-- Bundle premium: +18% = $3,977
-- Gain: $607 vs selling individually
-
-**D. Liquidity Profile**
-- FAST (sell <7d): 12 books ($8,400)
-- NORMAL (7-30d): 48 books ($22,100)
-- SLOW (>30d): 24 books ($18,200)
-
-**Impact:** Risk reduction (diversify), value capture (complete sets), buy targeting (gap-fill)
-
-**Files:**
-- `src/lib/portfolioAnalyzer.js` (NEW — correlation, gaps, bundles)
-- `api/comicvine-arcs.js` (NEW — story arc lookup)
-- `src/App.jsx` (ENHANCE — Manage tab portfolio dashboard)
-
-**Tests:** 50 tests (correlation math, gap detection, bundle scoring)
-
----
-
-### Ship #27 — AUCTION INTELLIGENCE
-**Est: 8 hours | Leading indicator**
-
-Track eBay auctions (already queried in Browse API, data currently unused).
-- **Watch counts:** High watchers → price spike coming (leading indicator)
-- **Bid velocity:** 12 bids in 2 days → FAST liquidity
-- **Auction calendar:** "3 auctions ending this week → wait for dip"
-- **Reserve tracking:** Reserve met = price floor hint
-
-**Example:**
-```
-ASM #129 auction:
-  • Watch count: 47 (HIGH demand)
-  • Bid velocity: 2.4 bids/day (FAST)
-  • Ending: 2026-05-02 (3 days)
-  → Recommendation: List NOW before auction flood
-```
-
-**Impact:** Timing optimizer (list before flood), demand forecasting (watch → spike)
-
-**Files:**
-- `api/comps.js` (ENHANCE — capture auction data from Browse API)
-- `src/lib/auctionIntelligence.js` (NEW — watch/bid extraction, calendar)
-
-**Tests:** 35 tests (watch/bid parsing, calendar logic, demand scoring)
-
----
-
-### PHASE 2 (Deferred — Lower Priority)
-
-**Ship #28 — IMAGE FORENSICS** (12 hours)
-- Color histogram → detect color-touch restoration
-- Edge sharpness → detect pressing
-- Paper texture → detect modern reprint
-**Reason:** High effort, incremental authentication value
-
-**Ship #29 — CROSS-SOURCE VALIDATION** (10 hours)
-- Compare Vision vs CV vs PC vs eBay consensus
-- Authentication score 0-100 (all sources agree → 99%)
-**Reason:** Nice-to-have polish, current confidence scoring sufficient
-
----
-
-### COMPLETED SHIPS (Reference)
-- ✅ Ship #20b — Verified sold pricing (Quick/Market/Stretch bands)
-- ✅ Ship #21 — Claude quality check + demand signals  
-- ✅ Ship #22 — Best practice eBay listings (item specifics, multi-image, Claude titles, Best Offer)
-- ✅ Ship #23 — Consistency engine (CV gate, refuse-to-price, stale refresh)
-
-## Recalibration
-
-**GPT external review insights — keep for ongoing reference.**
-
-### Layer status (updated 2026-04-30)
-- Layer 1 Foundation: ~95% (consistency engine shipped — CV year gate, refuse-to-price, stale refresh).
-- Layer 2 Data Leverage: ~45% (sold pricing live, velocity/ROI queued as Ships #24-25).
-- Layer 3 Decision Engine: ~15% (demand signals live, full recommendations pending).
-- Layer 4 Portfolio OS: 0% (queued as Ship #26, scan-gated at 250+ books; currently ~84).
-
-### Architecture-before-features priority shift
-1. Trust hardening (Layer A) before pricing math (Layer B).
-2. Pricing math before features.
-3. Features compound on broken logic if shipped first.
-
-### Timeline
-- Core intelligence layer (Ships #24-27): 28 hours total
-- Est completion: 4-5 weeks (at current pace)
-- Phase 2 (Ships #28-29): 22 hours — deferred to lower priority
-- Total to "best out there" status: ~50 hours remaining (7 weeks)
-
-### Category framing
-- Current: "Asset decision system for collectibles."
-- Aspirational: "Bloomberg terminal for comic assets."
-- Don't overclaim present state.
-
-### Field intelligence (2026-04-27 phone validation)
-- 25 distinct fixes surfaced from 7 real scans.
-- Reorganized into Layers A / B / C / D in Active Priority Queue above.
-- Detail in `docs/session-history.md`.
+**Intelligence Layer Roadmap:**
+See `docs/ROADMAP.md` for full specs (Ships #24-27, ~28 hours remaining).
 
 ## Pattern Library
-**Descriptive names, not letters.** Listed in approximate order of discovery.
+**Descriptive names, not letters. Listed in approximate order of discovery.**
 
 - **Sinful Suzie class** — wrong-title comp contamination (different series under same nominal title).
 - **Thor #4 class** — printing version mismatch (1st vs 2nd print same cover).
@@ -499,6 +338,9 @@ ASM #129 auction:
 - **House of Secrets #106 class** — alias-only creator detection — Ship #16 territory.
 - **TMNT #1 IDW 2016 class** — mega-key publisher+year disambiguation — Ship #20a.7 territory.
 - **Donald Duck Whitman #978 class** — refuse-to-price gate — Ship #20a.6.4 territory.
+- **Provisional State Write class** — component writes optimistic state before backend confirmation, persists through merge.
+- **Vision Hallucination class** — Vision infers fields from JSON_SHAPE context when confidence low.
+- **Build-Pass Runtime-Fail class** — code passes build + tests but crashes at runtime (JSX scope errors).
 
 ## Open Blockers
 
@@ -507,131 +349,26 @@ ASM #129 auction:
 - **eBay Marketplace Insights API** — gated for indie devs (DEAD).
 - **eBay Finding API** — rate-limited 100% as of late April 2026, bypassed.
 
-### Workaround active
+### Workaround Active
 - PriceCharting sales-history scrape (Ship #20a foundation data layer).
+
+### Known Bugs
+- **Ship 6 polybag UI bug:** UI displays "Recommended: $4,500" despite backend refusing (pricingSource=refused-claude-gate). Backend working, frontend display incorrect. Location: likely src/App.jsx or PriceCard component.
 
 ## Handoff Pointers
 
-- Detailed history: `docs/session-history.md`
-- Behavioral specs: `tests/` directory (1002 tests, 13 suites)
+- Session history: `docs/archive/SESSION_2026_05_06.md`, `docs/archive/SESSION_2026_05_07_DECISION_ENGINE.md`
+- Ship 6 polybag: `docs/archive/SHIP_6_POLYBAG.md`
+- Next priorities: `docs/NEXT_SESSION.md`
+- Intelligence roadmap: `docs/ROADMAP.md`
+- Behavioral specs: `tests/` directory (1,570 tests, 23 suites)
 - Pricing math: `api/enrich.js`
 - Sold verification: `src/lib/soldVerification.js`
 - Comp hygiene: `src/lib/compHygiene.js`
 - Pedigree registry: `src/lib/pedigreeRegistry.js`
 - Premium creators: `src/lib/premiumCreators.js`
 - List-price warning: `src/lib/listPriceWarning.js`
+- Decision Engine: `src/lib/decisionEngine.js`
 - Vision integration: `api/grade.js`
 - PriceCharting scrape: `api/pricecharting-pop.js`
 - Mega-keys floor: `api/mega-keys.js`
-
-## Ship 6 — Polybag Pricing — SEALED 2026-05-05
-
-### Status: BACKEND COMPLETE, UI DISPLAY BUG OUTSTANDING
-
-**Backend (deployed, working):**
-- Polybag detection: 60% reprint title threshold on visualResult.items
-- 11 bypass guards across all pricing branches
-- out.comps populated with polybag listings when isPolybagPricing=true
-- out.soldComps/salesByGrade/priceLadder/salesVelocity gated when polybag active
-- Final price: ebay-polybag-active source, polybag median × 0.75 haircut
-- Verified: B&B #28 polybag prices $9.00 in production logs
-
-**Frontend bug (not yet diagnosed):**
-- UI displays "Recommended: $4,500" despite backend returning out.price=null and pricingSource=refused-claude-gate
-- Polybag comp data displays correctly ($3-$525 range, $9 avg)
-- Bug location unknown - likely src/App.jsx or PriceCard component
-- Three possible causes: cached state, priceLadder lookup in React, vision.price merge
-
-**Pending ships:**
-- Ship 5.2: claude-check polybag-aware (skip veto when ebay-polybag-active)
-- UI fix: Recommended price source resolution
-
-**Final commits:**
-- 8466ea4: Ship 6 - skip PC per-grade arrays when polybag pricing active
-- e2c02f1: Ship 6 - clear soldComps arrays when polybag pricing active
-- 02da165: Ship 6 - populate out.comps with polybag listings
-- acd0193: Ship 6 - browse_api fallback guard (11th)
-- eef344b: Ship 6 - priceCharting fallback guard (10th)
-- c087c5d: Ship 6 - priceBands guard (9th)
-- c1304ab: Ship 6 - move polybag block AFTER out declaration
-
----
-
-## Session 2026-05-06 — 11 ships deployed (10 commits, 1h 59m)
-
-**HEAD:** f05f8d6
-**Total deployed:** 23 (1 reverted: Ship 12 original)
-**Refusal rate:** <15% (holding from yesterday)
-**Session window:** 08:37–10:36 Pacific
-
-### Ships deployed today (chronological)
-
-| Time | Commit | Ship | Effect |
-|------|--------|------|--------|
-| 08:37 | ab6caff | 0.5 | Smoke test harness with 11 fixtures, crash detection |
-| 08:37 | ab6caff | 0.6 | Move const out = {} to handler top, fix ReferenceError on reprint thin pools |
-| 08:57 | 9033186 | 13 | editionWarning reaches response for mega-key reprints (Detective #27 class) |
-| 09:06 | 49b679b | 18 | Sold comp variant subtype strict matching, fixes virgin/foil overpricing |
-| 09:19 | 376a33d | 15 | Identity gate accepts treasury/annual/special issue formats |
-| 09:33 | 12d924a | 12r | Variant canonical title via Approach C (scope-correct, no out reference) |
-| 09:46 | 402de50 | 14 | Newsstand multiplier applies to verified_active/pc_estimate/browse_api paths |
-| 10:06 | 9140284 | 20 | ComicVine cross-reference filter (Translate:/Collects: artifacts) |
-| 10:13 | 6110fb8 | 17 | Complete pricingSource label mapping (9 missing labels, typo fix) |
-| 10:20 | e53d033 | 21 | Explicit refusal for silent-empty pricing chain (refused-no-data-sources) |
-| 10:36 | f05f8d6 | 22 | Preserve publisher words in series titles (Marvel Tales/Team-Up/etc.) |
-
-Average commit interval: ~13 minutes. Diagnostic-first discipline applied to every ship.
-
-### Skipped (reasoned)
-
-- Ship 19 (era grade multiplier) — system working as designed, calibration acceptable
-- Ship 23 (magazine format) — insufficient calibration data, sample size of 1, defer
-- Ship 16 (floor recalibration) — depends on Ship 19, deferred
-- Ship 24/25 (perf optimizations) — gains marginal (~50-100ms), defer
-
-### Deferred
-
-- Ship 9 (mega-keys top 100) — manual data entry, separate workflow
-
-### Validation pending (next session — DO THIS FIRST)
-
-Phone validation of today's 11 ships not yet complete. Punch list:
-
-1. Detective Comics #27 reprint — Ship 13 — should NOT show $150K, edition banner present
-2. Marvel Tales #111 (1952) — Ship 22 — title preserved as "Marvel Tales" (delete + re-scan if cached as "tales")
-3. Marvel Saga #18 newsstand — Ship 14 — price up from $3.99 (~$4.79)
-4. One World Under Doom #1 virgin — Ship 18 — price down from $47 (target $13-25)
-5. Mega Man X Timelines #1 virgin — Ship 18 — price down from $22 (target $10-15)
-6. Limited Collectors C-44 Treasury — Ship 15 — not refused
-7. Catwoman Uncovered #1 foil — Ship 12r — improved comps
-8. B&B #28 polybag — Ship 0.6 — still works, price reasonable
-9. Wolverine #1 (1982) — Ship 20 — story field "Translate:" garbage gone
-10. Uncanny X-Men #173 — Ship 20 — story field "Collects:" garbage gone
-
-Plus UI label spot check: pick 3 cards, verify "Price from:" shows human labels (not raw slugs).
-
-### Critical caveat — IndexedDB caching
-
-Ship 22 fix applies to FRESH scans only. Existing collection items have stored title fields cached in IndexedDB. Marvel Tales/Team-Up/Two-In-One/Saga/etc. books that show truncated titles need DELETE + re-scan from camera to validate Ship 22.
-
-### Diagnostic discipline outcomes
-
-4 scope/over-correction errors stopped at dev time:
-
-1. **Ship 0.6** — caught by harness on first run (variable referenced 147 lines before declaration)
-2. **Ship 12 retry** — caught by diagnostic #2 (would have referenced confirmedVariant 157 lines before declaration)
-3. **Ship 14** — caught by diagnostic #2 (would have double-counted multiplier on verified_sold path)
-4. **Ship 22** — caught by user reading production card (static analysis missed actual title was "Marvel Tales", not generic stop-word)
-
-Pattern: empirical evidence > static analysis. Harness validates code paths. Production data validates calibration. Ship anything affecting pricing only after both checks.
-
-### Architectural learnings
-
-- **Variable scope discipline:** Variables referenced across handler must declare at function top (Ship 0.6 lesson, repeated in Ship 12r design)
-- **Filter parity:** Active comp filters and sold comp filters should both implement the same variant rejection logic (Ship 18 fixed sold-side gap)
-- **Variant filter symmetry:** Asymmetric Case (a) without Case (a-inverse) leaks comps. Both directions need protection (Ship 18)
-- **Multi-source coordination:** Pricing path multipliers should be applied based on whether the source pool is variant-filtered or mixed (Ship 14 path-by-path map)
-- **Identity preservation:** Title field should not be modified by publisher extraction or stripping logic (Ship 22)
-- **UI label completeness:** Every pricingSource value must have a UI label, otherwise raw slugs leak to users (Ship 17)
-- **Fail-loud over fail-silent:** Pricing chain must have an else clause; silent empty responses confuse UI merge logic (Ship 21)
-
