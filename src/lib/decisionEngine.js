@@ -292,7 +292,10 @@ export function computeDecision(item, context = {}) {
   // PHASE 5: NORMAL PRICING DECISIONS
 
   // Determine band recommendation based on warnings
-  const hasModerateWarnings = decision.warnings.length > 0 && !hasCriticalWarning;
+  // Exclude informational-only warnings that don't affect market confidence
+  const informationalWarnings = ['story-suppressed'];
+  const actionableWarnings = decision.warnings.filter(w => !informationalWarnings.includes(w));
+  const hasModerateWarnings = actionableWarnings.length > 0 && !hasCriticalWarning;
 
   if (hasModerateWarnings || decision.warnings.includes('bundle-candidate')) {
     decision.action = 'LIST_LOW';

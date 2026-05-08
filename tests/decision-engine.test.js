@@ -751,6 +751,40 @@ test('Active floor far below recommended adds warning', () => {
   assertIncludes(decision.warnings, 'active-floor-far-below', 'Should have active-floor-far-below warning');
 });
 
+// TEST 28: Story-suppressed is informational only (v1-B)
+test('Story-suppressed warning does not downgrade to LIST_LOW', () => {
+  const item = {
+    title: "Walking Dead",
+    issue: "98",
+    publisher: "Image",
+    year: 2012,
+    price: 25,
+    identityConfident: true,
+    pricingSource: "verified_sold",
+    storySuppressedReason: "text_artifacts",
+    soldComps: [
+      { price: 24, daysAgo: 10 },
+      { price: 26, daysAgo: 15 },
+      { price: 23, daysAgo: 20 }
+    ],
+    rawComps: {
+      average: 25,
+      count: 5,
+      lowest: 20,
+      highest: 30,
+      prices: [20, 23, 25, 27, 30]
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'LIST_NOW', 'Story-suppressed alone should not downgrade to LIST_LOW');
+  assertEqual(decision.confidence, 'high', 'Story-suppressed should not reduce confidence');
+  assertEqual(decision.blockers.length, 0, 'Story-suppressed should not create blockers');
+  assertIncludes(decision.warnings, 'story-suppressed', 'Story-suppressed should appear in warnings for metadata tracking');
+  console.log('  [Story-suppressed correctly classified as informational]');
+});
+
 // RUN ALL TESTS
 console.log('\n🧪 Decision Engine v0-A Tests\n');
 console.log('='.repeat(60));
