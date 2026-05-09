@@ -2161,9 +2161,14 @@ export default async function handler(req, res) {
         const gateSource = familyCandidateAccepted
           ? `family-candidate ${familyCandidate.decision}`
           : 'visualConsensus';
-        console.log(`[pc-requery] consensus "${imageConsensusTitle}" differs from Vision "${pcInitialTitle}" — re-querying PC (gated: ${gateSource} accepted)`);
+        // Ship Pattern-J — Use sanitized confirmedTitle for pc-requery instead of
+        // raw imageConsensusTitle to prevent seller inventory codes (mm22, A2, etc.)
+        // from contaminating PriceCharting queries. confirmedTitle has already been
+        // sanitized via detectTitleContamination + sanitizeTitle at line ~1980.
+        const pcRequeryTitle = confirmedTitle || imageConsensusTitle || title;
+        console.log(`[pc-requery] consensus "${imageConsensusTitle}" differs from Vision "${pcInitialTitle}" — re-querying PC with "${pcRequeryTitle}" (gated: ${gateSource} accepted)`);
         priceCharting = await lookupPriceCharting({
-          title: imageConsensusTitle,
+          title: pcRequeryTitle,
           issue: correctedIssue,
           year
         }).catch(() => null);
