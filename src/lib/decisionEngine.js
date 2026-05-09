@@ -58,6 +58,15 @@ export function computeDecision(item, context = {}) {
     decision.blockers.push('mega-key-manual-review');
   }
 
+  // Blocker: Claude check critical severity
+  if (item.claudeCheckBlocker) {
+    decision.blockers.push('claude-check-critical');
+    decision.evidence.claudeCritical = {
+      reason: item.claudeCheckBlocker,
+      source: 'claude-gate'
+    };
+  }
+
   // Blocker: Catastrophic system overprice
   // System-generated price far above active comps = broken pricing logic
   // EXCEPT: Golden Age thin pools may have contaminated active comps - handle as warning
@@ -273,6 +282,17 @@ export function computeDecision(item, context = {}) {
     };
   }
 
+  // Warning: Claude check high severity
+  // HIGH-severity flag from claude-gate. Price ships but decision must cap at LIST_LOW.
+  // Confidence capped to LOW, never LIST_NOW.
+  if (item.claudeCheckHighSeverity) {
+    decision.warnings.push('claude-check-high-severity');
+    decision.evidence.claudeHighSeverity = {
+      reason: item.claudeCheckHighSeverity,
+      source: 'claude-gate'
+    };
+  }
+
   // PHASE 3: CRITICAL WARNING ESCALATION
 
   // Escalate to RESEARCH if critical warnings
@@ -284,7 +304,8 @@ export function computeDecision(item, context = {}) {
     'verification-failed-claude',
     'verification-failed-no-data',
     'verification-failed-visual-fallback',
-    'verification-failed-reprint-thin'
+    'verification-failed-reprint-thin',
+    'claude-check-high-severity'  // HIGH severity from claude-gate
   ];
 
   const hasCriticalWarning = decision.warnings.some(w => criticalWarnings.includes(w));
@@ -389,6 +410,9 @@ function buildBlockerReason(blockers, item) {
   if (blockers.includes('catastrophic-reprint-overprice')) {
     reasons.push('reprint/polybag detected with extreme overprice');
   }
+  if (blockers.includes('claude-check-critical')) {
+    reasons.push('Claude critical verification failure');
+  }
 
   return reasons.join('; ');
 }
@@ -471,6 +495,9 @@ function buildWarningReason(warnings, item) {
   }
   if (warnings.includes('era-filter-bypassed')) {
     reasons.push('vintage year missing from comps');
+  }
+  if (warnings.includes('claude-check-high-severity')) {
+    reasons.push('Claude high-severity verification warning');
   }
 
   return reasons.join('; ') || 'Warnings detected, review before listing';

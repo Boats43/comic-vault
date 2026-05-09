@@ -4247,6 +4247,10 @@ export default async function handler(req, res) {
         // surfaces as warning and lets price ship.
         const refusalReason = (claudeCheck.flags?.[0]) || 'Claude verification failed';
         const PRICING_CRITICAL_PATTERNS = [
+          /^CRITICAL:/i,                          // Severity prefix (start of line)
+          /\bCRITICAL:/i,                         // Severity embedded mid-sentence
+          /^HIGH:/i,                              // High-severity prefix
+          /\bHIGH:/i,                             // High-severity embedded
           /wrong\s+issue/i,
           /different\s+(?:book|series|comic)/i,
           /wrong\s+era/i,
@@ -4275,14 +4279,27 @@ export default async function handler(req, res) {
           out.refusedToPrice = true;
           out.confidenceLevel = 'LOW';
           out.claudeCheckMode = 'pricing_critical_refusal';
+          out.claudeCheckBlocker = refusalReason;  // Decision engine blocker field
         } else {
-          console.log(
-            '[claude-gate] WARNING ONLY — metadata nit, price stands · flag:',
-            refusalReason
-          );
-          out.claudeCheckWarning = refusalReason;
-          out.claudeCheckMode = 'metadata_warning_only';
-          // Note: price/priceLow/priceHigh/pricingSource preserved.
+          // Detect HIGH severity in WARNING ONLY path
+          const isHighSeverity = /^HIGH:/i.test(refusalReason) || /\bHIGH:/i.test(refusalReason);
+
+          if (isHighSeverity) {
+            console.log(
+              '[claude-gate] HIGH SEVERITY WARNING — price ships, decision capped · flag:',
+              refusalReason
+            );
+            out.claudeCheckHighSeverity = refusalReason;  // Decision engine warning field
+            out.claudeCheckMode = 'high_severity_warning';
+          } else {
+            console.log(
+              '[claude-gate] WARNING ONLY — metadata nit, price stands · flag:',
+              refusalReason
+            );
+            out.claudeCheckWarning = refusalReason;
+            out.claudeCheckMode = 'metadata_warning_only';
+          }
+          // Note: price/priceLow/priceHigh/pricingSource preserved in both paths.
         }
       } else if (
         claudeCheck.verified === false &&
