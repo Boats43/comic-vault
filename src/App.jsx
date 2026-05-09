@@ -88,6 +88,32 @@ const getDisplayPrice = (item) => {
   return 0;
 };
 
+// v0-E: Decision Engine price authority helper
+// Returns the authoritative price for listPrice initialization.
+// Precedence: blocked → 0, decision.price when decision permits listing → system price fallback
+const getAuthorityPrice = (item) => {
+  if (!item) return 0;
+
+  // Blocked decisions: use system price (may be 0)
+  const isBlocked =
+    item.decision?.action === 'DO_NOT_LIST' ||
+    item.decision?.action === 'ID_REQUIRED' ||
+    (item.decision?.blockers?.length || 0) > 0;
+
+  if (isBlocked) {
+    return getDisplayPrice(item);
+  }
+
+  // Non-blocked decisions with decision.price: use it
+  // Includes LIST_NOW, LIST_LOW, RESEARCH, GRADE_CANDIDATE
+  if (item.decision?.price != null && item.decision.price > 0) {
+    return item.decision.price;
+  }
+
+  // Fallback to system price
+  return getDisplayPrice(item);
+};
+
 const marketValueOf = (r) => {
   if (!r) return null;
   const v = getDisplayPrice(r);
@@ -1792,7 +1818,7 @@ function CollectionDetail({
   const [addPhotoError, setAddPhotoError] = useState(null);
   const [expandedPhoto, setExpandedPhoto] = useState(null);
   const [ppInput, setPpInput] = useState(item.purchasePrice != null ? String(item.purchasePrice) : "");
-  const [listPrice, setListPrice] = useState(() => getDisplayPrice(item));
+  const [listPrice, setListPrice] = useState(() => getAuthorityPrice(item)); // v0-E: use decision.price when available
   const [swipeHint, setSwipeHint] = useState(() => !localStorage.getItem("cv_swipe_hint_seen"));
   const [showEngineRec, setShowEngineRec] = useState(false);
   const [expandedKeyIdx, setExpandedKeyIdx] = useState(null);
@@ -1810,38 +1836,40 @@ function CollectionDetail({
   const touchStartT = useRef(null);
 
   useEffect(() => {
-    // Rule precedence (highest first):
+    // v0-E: Rule precedence (highest first):
     // 1. Blocked decision: always overwrite stale listPrice with current price
     // 2. Explicit manual edit: preserve user value (unless blocked)
-    // 3. Old items without manual flag: overwrite if >50% deviation from current price
-    // 4. New items: always sync system price
+    // 3. Decision.price authority: use decision.price when decision permits listing
+    // 4. Old items without manual flag: overwrite if >50% deviation from authority price
+    // 5. New items: always sync authority price
 
     const isBlocked =
       item.decision?.action === 'DO_NOT_LIST' ||
       item.decision?.action === 'ID_REQUIRED' ||
       (item.decision?.blockers?.length || 0) > 0;
 
-    const currentSystemPrice = getDisplayPrice(item);
+    // v0-E: Use authority price (decision.price when available, else system price)
+    const authorityPrice = getAuthorityPrice(item);
 
     if (isBlocked) {
-      // Rule 1: Blocked items always show current system price
-      setListPrice(currentSystemPrice);
+      // Rule 1: Blocked items always show current authority price (may be 0)
+      setListPrice(authorityPrice);
     } else if (item.listPriceManual === true) {
       // Rule 2: Preserve manual value (only for non-blocked items)
-      setListPrice(item.listPrice != null ? item.listPrice : currentSystemPrice);
+      setListPrice(item.listPrice != null ? item.listPrice : authorityPrice);
     } else if (item.listPrice != null && item.listPriceManual === undefined) {
-      // Rule 3: Old items without manual flag - detect stale system data
-      const deviation = Math.abs(item.listPrice - currentSystemPrice) / Math.max(currentSystemPrice, 0.01);
+      // Rule 3: Old items without manual flag - detect stale data vs authority price
+      const deviation = Math.abs(item.listPrice - authorityPrice) / Math.max(authorityPrice, 0.01);
       if (deviation > 0.5) {
-        // >50% deviation = stale system data, overwrite
-        setListPrice(currentSystemPrice);
+        // >50% deviation = stale data, overwrite with authority price
+        setListPrice(authorityPrice);
       } else {
         // Within 50% = preserve
         setListPrice(item.listPrice);
       }
     } else {
       // Rule 4: New items or items without listPrice field
-      setListPrice(currentSystemPrice);
+      setListPrice(authorityPrice);
     }
 
     setShowEngineRec(false);
