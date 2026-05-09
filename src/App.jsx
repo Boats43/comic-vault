@@ -264,9 +264,10 @@ function ResultCard({ result, enriching }) {
 
   const comps = result.comps;
   const hasComps =
-    comps &&
-    Array.isArray(comps.recentSales) &&
-    comps.recentSales.length > 0;
+    (comps &&
+     Array.isArray(comps.recentSales) &&
+     comps.recentSales.length > 0) ||
+    (Array.isArray(result.soldComps) && result.soldComps.length > 0);
   const displayPrice = getDisplayPrice(result);
   const recommendedLabel = displayPrice > 0
     ? `$${displayPrice.toLocaleString("en-US")}`
@@ -1881,9 +1882,10 @@ function CollectionDetail({
 
   // Pricing: single source of truth via getDisplayPrice.
   const hasComps =
-    item.comps &&
-    Array.isArray(item.comps.recentSales) &&
-    item.comps.recentSales.length > 0;
+    (item.comps &&
+     Array.isArray(item.comps.recentSales) &&
+     item.comps.recentSales.length > 0) ||
+    (Array.isArray(item.soldComps) && item.soldComps.length > 0);
   const displayPrice = getDisplayPrice(item);
   const recommendedLabel = displayPrice > 0
     ? `$${displayPrice.toLocaleString("en-US")}`
