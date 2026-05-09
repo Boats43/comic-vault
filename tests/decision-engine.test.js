@@ -1038,6 +1038,135 @@ test('No sold comp data - no zero-verified warning', () => {
     'Should NOT have zero-verified-comps warning when no sold comps exist');
 });
 
+// TEST 38: Floor enforcement - recommended below floor (v0-F)
+test('Recommended below floor - floor enforced', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: 3, // Recommended price
+    identityConfident: true,
+    pricingSource: "pricecharting",
+    rawComps: {
+      average: 4,
+      lowest: 6, // Floor
+      highest: 10,
+      count: 5
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'LIST_NOW', 'Should be LIST_NOW');
+  assertEqual(decision.price, 6, 'Decision price should be raised to floor');
+  assertIncludes(decision.warnings, 'recommended-below-floor', 'Should have recommended-below-floor warning');
+  assertExists(decision.evidence.recommendedBelowFloor, 'Should have recommendedBelowFloor evidence');
+  assertEqual(decision.evidence.recommendedBelowFloor.floor, 6, 'Evidence should show floor value');
+});
+
+// TEST 39: Floor enforcement - LIST_LOW below floor (v0-F)
+test('LIST_LOW below floor - floor enforced', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: 10, // System price
+    identityConfident: true,
+    pricingSource: "pricecharting",
+    thinPoolAnchored: true, // Triggers LIST_LOW
+    rawComps: {
+      average: 9,
+      lowest: 9, // Floor
+      highest: 11,
+      count: 2
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'LIST_LOW', 'Should be LIST_LOW');
+  // LIST_LOW uses price * 0.8 = 8, but floor is 9
+  assertEqual(decision.price, 9, 'Decision price should be raised to floor');
+  assertIncludes(decision.warnings, 'thin-pool-anchor', 'Should have thin-pool-anchor warning');
+});
+
+// TEST 40: Floor enforcement - RESEARCH below floor (v0-F)
+test('RESEARCH below floor - floor enforced', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: 15,
+    identityConfident: true,
+    compsExhausted: true, // Triggers RESEARCH
+    rawComps: {
+      average: 3, // RESEARCH uses average
+      lowest: 8, // Floor
+      highest: 12,
+      count: 0
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'RESEARCH', 'Should be RESEARCH');
+  // RESEARCH uses rawComps.average = 3, but floor is 8
+  assertEqual(decision.price, 8, 'Decision price should be raised to floor');
+  assertIncludes(decision.warnings, 'ai-verify-rejected-all', 'Should have ai-verify-rejected-all warning');
+});
+
+// TEST 41: Floor enforcement - DO_NOT_LIST with floor (v0-F regression)
+test('DO_NOT_LIST with floor - remains blocked', () => {
+  const item = {
+    title: "",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: 3,
+    rawComps: {
+      average: 4,
+      lowest: 6,
+      highest: 10,
+      count: 5
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'ID_REQUIRED', 'Should remain ID_REQUIRED');
+  assertIncludes(decision.blockers, 'missing-title', 'Should have missing-title blocker');
+  // Blocked decisions don't get decision.price
+  assertEqual(decision.price, null, 'Blocked decision should have null price');
+});
+
+// TEST 42: Floor enforcement - price above floor (v0-F regression)
+test('Price above floor - no floor enforcement', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: 15, // Above floor
+    identityConfident: true,
+    pricingSource: "pricecharting",
+    rawComps: {
+      average: 14,
+      lowest: 10, // Floor
+      highest: 18,
+      count: 5
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'LIST_NOW', 'Should be LIST_NOW');
+  assertEqual(decision.price, 15, 'Decision price should remain at recommended');
+  assertNotIncludes(decision.warnings, 'recommended-below-floor', 'Should NOT have recommended-below-floor warning');
+});
+
 // RUN ALL TESTS
 console.log('\n🧪 Decision Engine v0-A Tests\n');
 console.log('='.repeat(60));

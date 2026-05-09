@@ -1,4 +1,15 @@
 /**
+ * v0-F: Floor enforcement helper
+ * Ensures decision.price is not below the active floor (rawComps.lowest).
+ * Returns max(price, floor) when floor exists, otherwise returns price.
+ */
+function enforceFloor(price, floor) {
+  if (price == null || price <= 0) return price;
+  if (floor == null || floor <= 0) return price;
+  return Math.max(price, floor);
+}
+
+/**
  * Decision Engine v0-A
  *
  * Pure helper that analyzes a comic item and returns a structured decision
@@ -149,6 +160,17 @@ export function computeDecision(item, context = {}) {
   if (systemPrice && activeLowest && systemPrice > activeLowest * 3) {
     decision.warnings.push('active-floor-far-below');
     decision.evidence.activeFloor = { systemPrice, activeLowest };
+  }
+
+  // Warning: Recommended price below floor (v0-F)
+  // When item.price < floor, decision.price will be raised to floor
+  if (item.price && activeLowest && item.price < activeLowest) {
+    decision.warnings.push('recommended-below-floor');
+    decision.evidence.recommendedBelowFloor = {
+      recommended: item.price,
+      floor: activeLowest,
+      adjusted: activeLowest
+    };
   }
 
   // Warning: Active average far below recommended
@@ -337,7 +359,10 @@ export function computeDecision(item, context = {}) {
     decision.confidence = 'low';
     decision.reason = buildWarningReason(decision.warnings, item);
     decision.nextStep = 'Verify market state and review comps manually before listing';
-    decision.price = item.rawComps?.average || item.price;
+    // v0-F: Enforce floor even in RESEARCH
+    const researchPrice = item.rawComps?.average || item.price;
+    const floor = item.rawComps?.lowest;
+    decision.price = enforceFloor(researchPrice, floor);
     decision.evidence.warnings = decision.warnings;
     return decision;
   }
@@ -389,7 +414,8 @@ export function computeDecision(item, context = {}) {
   // Determine band recommendation based on warnings
   // Exclude informational-only warnings that don't affect market confidence
   // v1-C: zero-verified-comps is informational when activeCount >= 3 (escalates to RESEARCH only when < 3)
-  const informationalWarnings = ['story-suppressed', 'zero-verified-comps'];
+  // v0-F: recommended-below-floor is informational (floor already enforced in decision.price)
+  const informationalWarnings = ['story-suppressed', 'zero-verified-comps', 'recommended-below-floor'];
   const actionableWarnings = decision.warnings.filter(w => !informationalWarnings.includes(w));
   const hasModerateWarnings = actionableWarnings.length > 0 && !hasCriticalWarning;
 
@@ -398,7 +424,10 @@ export function computeDecision(item, context = {}) {
     decision.confidence = 'medium';
     decision.reason = buildWarningReason(decision.warnings, item);
     decision.nextStep = 'List at Quick band or bundle with similar books';
-    decision.price = item.price * 0.8; // Conservative pricing
+    // v0-F: Enforce floor on conservative pricing
+    const conservativePrice = item.price * 0.8;
+    const floor = item.rawComps?.lowest;
+    decision.price = enforceFloor(conservativePrice, floor);
     decision.evidence.warnings = decision.warnings;
     return decision;
   }
@@ -415,7 +444,11 @@ export function computeDecision(item, context = {}) {
 
   decision.reason = 'Clean identification and pricing, ready to list';
   decision.nextStep = 'List at market band';
-  decision.price = item.price;
+
+  // v0-F: Enforce floor on list price
+  const floor = item.rawComps?.lowest;
+  decision.price = enforceFloor(item.price, floor);
+
   decision.evidence.clean = true;
   decision.evidence.pricingSource = item.pricingSource;
 
@@ -531,6 +564,11 @@ function buildWarningReason(warnings, item) {
   }
   if (warnings.includes('zero-verified-comps')) {
     reasons.push('sold comps exist but none verified');
+  }
+  if (warnings.includes('recommended-below-floor')) {
+    const floor = item.rawComps?.lowest;
+    const floorStr = floor != null && !isNaN(floor) ? floor.toFixed(2) : '?';
+    reasons.push(`recommended below floor (raised to $${floorStr})`);
   }
 
   return reasons.join('; ') || 'Warnings detected, review before listing';
