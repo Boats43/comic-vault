@@ -262,6 +262,17 @@ export function computeDecision(item, context = {}) {
     };
   }
 
+  // Warning: Era-filter bypassed (Ship v0-I)
+  // Vintage comps passed reprint guardrail but year missing from listings.
+  // Moderate warning ensures LIST_LOW ceiling, not LIST_NOW.
+  if (item.compEraFilterBypassed === true || item.matchConfidence?.eraFilterBypassed === true) {
+    decision.warnings.push('era-filter-bypassed');
+    decision.evidence.eraFilterBypassed = {
+      message: 'Vintage year missing from comp listings',
+      matchConfidenceCapped: item.matchConfidence?.tier === 'LOW'
+    };
+  }
+
   // PHASE 3: CRITICAL WARNING ESCALATION
 
   // Escalate to RESEARCH if critical warnings

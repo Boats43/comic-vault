@@ -3842,8 +3842,26 @@ export default async function handler(req, res) {
         finalMc.visionModerate = true;
       }
 
+      // Ship v0-I — era-filter bypass cap. When vintage book comps were
+      // rescued via v0-I guardrail fallback (year missing from listings),
+      // cap confidence to LOW. The comp pool passed reprint guardrail but
+      // couldn't be era-validated, so user must verify before listing.
+      if (rawComps?.eraFilterBypassed) {
+        const originalScore = finalMc.score;
+        const originalTier = finalMc.tier;
+        finalMc.tier = 'LOW';
+        finalMc.score = Math.min(finalMc.score, 60);
+        finalMc.displayMessage = 'Vintage year missing — verify comps before listing';
+        finalMc.eraFilterBypassed = true;
+        if (originalTier !== 'LOW') {
+          finalMc.originalScore = originalScore;
+          finalMc.originalTier = originalTier;
+          console.log(`[match-conf] era-filter bypass: ${originalTier}→LOW (${originalScore}→${finalMc.score})`);
+        }
+      }
+
       out.matchConfidence = finalMc;
-      console.log(`[match-conf] score=${finalMc.score} tier=${finalMc.tier} comps=${compTitlesForScore.length} vision=${visionConfidence}${finalMc.visionCapped ? ' CAPPED' : ''}`);
+      console.log(`[match-conf] score=${finalMc.score} tier=${finalMc.tier} comps=${compTitlesForScore.length} vision=${visionConfidence}${finalMc.visionCapped ? ' CAPPED' : ''}${finalMc.eraFilterBypassed ? ' ERA-BYPASSED' : ''}`);
     }
 
     // Sold comps — Ship #20a: now populated from PriceCharting sales-history

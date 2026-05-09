@@ -704,6 +704,10 @@ export const fetchComps = async ({
     let sequelRejected = 0;
     let signedRejected = 0;
 
+    // Ship v0-I — era-filter fallback tracking. Collects raw candidates when
+    // post-filter=0 for vintage books, applies reprint guardrail after loop.
+    const rawCandidates = [];
+
     // Full filter chain on a single raw result set. Called inside the
     // attempt loop so we can move on to the next (broader) query when
     // filters wipe everything — prevents a too-specific query from
@@ -1232,6 +1236,12 @@ export const fetchComps = async ({
 
       const filtered = applyFilterChain(raw);
       console.log(`[comps] attempt ${attempt.n} post-filter=${filtered.parsed.length}`);
+
+      // Ship v0-I — collect raw candidates when post-filter=0 for era-filter fallback
+      if (filtered.parsed.length === 0 && raw.length > 0) {
+        rawCandidates.push({ raw, attempt, filtered });
+      }
+
       if (filtered.parsed.length > 0) {
         // Issue verification: when searching for a specific issue, ensure at least
         // one comp actually has the correct issue number before accepting the pool.
@@ -1267,6 +1277,125 @@ export const fetchComps = async ({
       }
       if (i < uniqueAttempts.length - 1) {
         console.log(`[comps] attempt ${attempt.n} post-filter empty, trying next`);
+      }
+    }
+
+    // Ship v0-I — era-filter fallback for vintage books.
+    //
+    // When all 6 attempts return post-filter=0 for pre-1970 books, the era
+    // filter likely rejected every listing because sellers omitted the year
+    // (e.g., "Yellow Claw #1 Jimmy Woo 1st Appearance"). Without this fallback,
+    // legitimate vintage books refuse to price due to reprint-contamination
+    // paranoia. We collect the best raw candidate, apply a reprint guardrail
+    // reject list, validate title/issue match, and surface with LOW confidence.
+    //
+    // Guardrail: reject listings with explicit reprint markers to prevent
+    // modern reprints from poisoning the pool (the original era-filter goal).
+    if (parsed.length === 0 && rawCandidates.length > 0 && year) {
+      const yearNum = parseInt(String(year), 10);
+      if (!isNaN(yearNum) && yearNum < 1970) {
+        console.log(`[v0-I] era-filter fallback: ${rawCandidates.length} attempts had raw results`);
+
+        // Find best raw candidate (most raw results)
+        const bestCandidate = rawCandidates.reduce((best, curr) =>
+          curr.raw.length > best.raw.length ? curr : best
+        );
+
+        console.log(`[v0-I] best candidate: attempt ${bestCandidate.attempt.n}, ${bestCandidate.raw.length} raw results`);
+
+        // Reprint guardrail: explicit reject list
+        const REPRINT_GUARDRAIL_RE = /\b(reprint|facsimile|replica|cover\s+only|full\s+color\s+reprint|modern\s+reprint|commemorative|tribute|reproduction|poster|lot|bundle|mystery)\b/i;
+
+        let guardedPool = bestCandidate.raw.filter((item) => {
+          const titleStr = String(item.title || '');
+          if (REPRINT_GUARDRAIL_RE.test(titleStr)) {
+            console.log('[v0-I] guardrail rejected:', titleStr.slice(0, 60));
+            return false;
+          }
+          return true;
+        });
+
+        console.log(`[v0-I] after guardrail: ${guardedPool.length}/${bestCandidate.raw.length} survived`);
+
+        if (guardedPool.length === 0) {
+          console.log('[v0-I] guardrail rejected all — returning empty');
+          return { ...emptyComps(query, "no sales after filters"), attemptUsed: 0 };
+        }
+
+        // Title token match: require sufficient overlap with search title
+        const titleTokens = searchTokens; // already computed at function top
+        guardedPool = guardedPool.filter((item) => {
+          const titleStr = String(item.title || '').toLowerCase();
+          const matched = titleTokens.filter(t => titleStr.includes(t)).length;
+          const overlap = titleTokens.length > 0 ? matched / titleTokens.length : 0;
+          if (overlap < 0.5) {
+            console.log('[v0-I] title-mismatch:', titleStr.slice(0, 60));
+            return false;
+          }
+          return true;
+        });
+
+        console.log(`[v0-I] after title-match: ${guardedPool.length} survived`);
+
+        if (guardedPool.length === 0) {
+          console.log('[v0-I] title-match rejected all — returning empty');
+          return { ...emptyComps(query, "no sales after filters"), attemptUsed: 0 };
+        }
+
+        // Issue match: require correct issue number if we're searching for one
+        if (iss) {
+          const issueRe = new RegExp(`#\\s*${iss}\\b`, 'i');
+          guardedPool = guardedPool.filter((item) => {
+            const titleStr = String(item.title || '');
+            if (!issueRe.test(titleStr)) {
+              console.log('[v0-I] issue-mismatch:', titleStr.slice(0, 60));
+              return false;
+            }
+            return true;
+          });
+
+          console.log(`[v0-I] after issue-match: ${guardedPool.length} survived`);
+
+          if (guardedPool.length === 0) {
+            console.log('[v0-I] issue-match rejected all — returning empty');
+            return { ...emptyComps(query, "no sales after filters"), attemptUsed: 0 };
+          }
+        }
+
+        // No explicit conflicting year: reject listings with years that are
+        // WAY outside tolerance (>20 years off). Prevents Action Comics #1 (1938)
+        // from matching Action Comics #1 (2011 relaunch).
+        const extractYear = (t) => {
+          const m = String(t).match(/\(?(19\d{2}|20\d{2})\)?/);
+          return m ? parseInt(m[1], 10) : null;
+        };
+
+        guardedPool = guardedPool.filter((item) => {
+          const titleStr = String(item.title || '');
+          const ly = extractYear(titleStr);
+          if (ly == null) return true; // no year in title = pass (the whole point of v0-I)
+          const diff = Math.abs(ly - yearNum);
+          if (diff > 20) {
+            console.log('[v0-I] conflicting-year:', titleStr.slice(0, 60), `(${ly} vs ${yearNum})`);
+            return false;
+          }
+          return true;
+        });
+
+        console.log(`[v0-I] after year-conflict check: ${guardedPool.length} survived`);
+
+        if (guardedPool.length === 0) {
+          console.log('[v0-I] year-conflict rejected all — returning empty');
+          return { ...emptyComps(query, "no sales after filters"), attemptUsed: 0 };
+        }
+
+        // Success: use guarded pool with eraFilterBypassed flag
+        console.log(`[v0-I] SUCCESS: ${guardedPool.length} comps survived guardrail`);
+        parsed = guardedPool;
+        eraFilterBypassed = true;
+        attemptUsed = bestCandidate.attempt.n;
+        attemptLabel = bestCandidate.attempt.label || 'vintage-year-missing';
+        query = bestCandidate.attempt.q;
       }
     }
 
