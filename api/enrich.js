@@ -533,9 +533,10 @@ const cleanTitleForComicVine = (title, variant) => {
   ];
 
   // Variant/format/noise keywords
+  // Ship v0-G.1 — preserve real variant labels (newsstand, foil, virgin, 1:N)
   const VARIANT_NOISE = [
-    /\bvirgin\b/i, /\bfoil\b/i, /\bvariant\b/i, /\bcover\b/i, /\bcvr\b/i,
-    /\bratio\b/i, /\b1:\d+\b/i, /\bincentive\b/i, /\bexclusive\b/i, /\bexcl\.?\b/i,
+    /\bvariant\b/i, /\bcover\b/i, /\bcvr\b/i,
+    /\bratio\b/i, /\bincentive\b/i, /\bexclusive\b/i, /\bexcl\.?\b/i,
     /\bnm\b/i, /\bvf\b/i, /\bfn\b/i, /\bvg\b/i, /\bgd\b/i,
   ];
 
@@ -678,6 +679,27 @@ const sanitizeTitle = (title, context = {}) => {
     return ' ';
   });
 
+  // Ship v0-G.1 — Single-word creators (noise, not credit)
+  const CREATOR_NOISE_RE = /\b(kirby|severin|ditko|lee|buscema|romita|steranko|bartel|mayhew|byrne|miller|mcfarlane|mignola|ross|campbell|cho|fabok|aparo|wrightson|kubert|adams|bolland|perez|simonson|sook|capullo|finch|sale|coipel|quesada)\b/gi;
+  cleaned = cleaned.replace(CREATOR_NOISE_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Ship v0-G.1 — Publisher filler words
+  const PUBLISHER_FILLER_RE = /\b(atlas\s+series|silver\s+age|golden\s+age|bronze\s+age|copper\s+age|modern\s+age|pre\s+code|horror|crime|western|romance)\b/gi;
+  cleaned = cleaned.replace(PUBLISHER_FILLER_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Ship v0-G.1 — Modern listing language
+  const LISTING_LANGUAGE_RE = /\b(set\s+main|1st\s+app(?:earance)?|trade\s+dress|empire|new\s+series|ongoing|limited\s+series|mini\s+series|one[\s-]?shot)\b/gi;
+  cleaned = cleaned.replace(LISTING_LANGUAGE_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
   // Bare years (only when year exists separately)
   if (year && parseInt(year) >= 1900 && parseInt(year) <= 2099) {
     const YEAR_RE = new RegExp(`\\b${year}\\b`, 'g');
@@ -749,10 +771,20 @@ const detectTitleContamination = (title, context = {}) => {
   // Signal 2: Seller-description cluster (grade + year + creator)
   const hasGrade = /\b(vg|fn|vf|nm|gd|fr|pr|raw|low\s+grade|mid\s+grade|high\s+grade|apparent)\b/i.test(title);
   const hasYear = year && new RegExp(`\\b${year}\\b`).test(title);
-  const hasCreator = /\b(kirby|ditko|lee|buscema|romita|byrne|miller|mcfarlane|ross|campbell|cho|fabok)\b/i.test(title);
+  const hasCreator = /\b(kirby|severin|ditko|lee|buscema|romita|steranko|bartel|mayhew|byrne|miller|mcfarlane|mignola|ross|campbell|cho|fabok|aparo|wrightson|kubert|adams|bolland|perez|simonson|sook|capullo|finch|sale|coipel|quesada)\b/i.test(title);
 
   if (hasGrade && hasYear && hasCreator) {
     signals.push('seller-description-cluster');
+  }
+
+  // Signal 6: Publisher filler
+  if (/\b(atlas\s+series|silver\s+age|golden\s+age|bronze\s+age|copper\s+age|modern\s+age|pre\s+code)\b/i.test(title)) {
+    signals.push('publisher-filler');
+  }
+
+  // Signal 7: Listing language
+  if (/\b(set\s+main|1st\s+app(?:earance)?|trade\s+dress|empire|new\s+series|ongoing|limited\s+series|mini\s+series|one[\s-]?shot)\b/i.test(title)) {
+    signals.push('listing-language');
   }
 
   // Signal 3: Excessive length
@@ -773,7 +805,19 @@ const detectTitleContamination = (title, context = {}) => {
   }
 
   const contaminated = signals.length > 0;
-  const severity = signals.length >= 2 ? 'high' : signals.length === 1 ? 'medium' : 'none';
+
+  // Ship v0-G.1 — Tightened severity rules
+  // High: ≥2 signals OR any single high-priority signal
+  // Medium: 1 signal
+  const highPrioritySignals = ['seller-description-cluster', 'listing-language', 'publisher-filler'];
+  const hasHighPriority = signals.some(s => highPrioritySignals.includes(s));
+
+  let severity = 'none';
+  if (signals.length >= 2 || hasHighPriority) {
+    severity = 'high';
+  } else if (signals.length === 1) {
+    severity = 'medium';
+  }
 
   if (contaminated) {
     console.log(`[title-contamination] ${severity}: ${signals.join(', ')}`);

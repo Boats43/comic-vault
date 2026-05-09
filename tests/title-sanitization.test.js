@@ -60,9 +60,10 @@ const cleanTitleForComicVine = (title, variant) => {
     /nakayama/i, /hughes/i, /fabok/i, /lim/i, /chew/i, /ngu/i, /sanders/i,
   ];
 
+  // Ship v0-G.1 — preserve real variant labels (newsstand, foil, virgin, 1:N)
   const VARIANT_NOISE = [
-    /\bvirgin\b/i, /\bfoil\b/i, /\bvariant\b/i, /\bcover\b/i, /\bcvr\b/i,
-    /\bratio\b/i, /\b1:\d+\b/i, /\bincentive\b/i, /\bexclusive\b/i, /\bexcl\.?\b/i,
+    /\bvariant\b/i, /\bcover\b/i, /\bcvr\b/i,
+    /\bratio\b/i, /\bincentive\b/i, /\bexclusive\b/i, /\bexcl\.?\b/i,
     /\bnm\b/i, /\bvf\b/i, /\bfn\b/i, /\bvg\b/i, /\bgd\b/i,
   ];
 
@@ -173,6 +174,27 @@ const sanitizeTitle = (title, context = {}) => {
     return ' ';
   });
 
+  // Ship v0-G.1 — Single-word creators (noise, not credit)
+  const CREATOR_NOISE_RE = /\b(kirby|severin|ditko|lee|buscema|romita|steranko|bartel|mayhew|byrne|miller|mcfarlane|mignola|ross|campbell|cho|fabok|aparo|wrightson|kubert|adams|bolland|perez|simonson|sook|capullo|finch|sale|coipel|quesada)\b/gi;
+  cleaned = cleaned.replace(CREATOR_NOISE_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Ship v0-G.1 — Publisher filler words
+  const PUBLISHER_FILLER_RE = /\b(atlas\s+series|silver\s+age|golden\s+age|bronze\s+age|copper\s+age|modern\s+age|pre\s+code|horror|crime|western|romance)\b/gi;
+  cleaned = cleaned.replace(PUBLISHER_FILLER_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Ship v0-G.1 — Modern listing language
+  const LISTING_LANGUAGE_RE = /\b(set\s+main|1st\s+app(?:earance)?|trade\s+dress|empire|new\s+series|ongoing|limited\s+series|mini\s+series|one[\s-]?shot)\b/gi;
+  cleaned = cleaned.replace(LISTING_LANGUAGE_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
   if (year && parseInt(year) >= 1900 && parseInt(year) <= 2099) {
     const YEAR_RE = new RegExp(`\\b${year}\\b`, 'g');
     cleaned = cleaned.replace(YEAR_RE, (match) => {
@@ -218,10 +240,20 @@ const detectTitleContamination = (title, context = {}) => {
 
   const hasGrade = /\b(vg|fn|vf|nm|gd|fr|pr|raw|low\s+grade|mid\s+grade|high\s+grade|apparent)\b/i.test(title);
   const hasYear = year && new RegExp(`\\b${year}\\b`).test(title);
-  const hasCreator = /\b(kirby|ditko|lee|buscema|romita|byrne|miller|mcfarlane|ross|campbell|cho|fabok)\b/i.test(title);
+  const hasCreator = /\b(kirby|severin|ditko|lee|buscema|romita|steranko|bartel|mayhew|byrne|miller|mcfarlane|mignola|ross|campbell|cho|fabok|aparo|wrightson|kubert|adams|bolland|perez|simonson|sook|capullo|finch|sale|coipel|quesada)\b/i.test(title);
 
   if (hasGrade && hasYear && hasCreator) {
     signals.push('seller-description-cluster');
+  }
+
+  // Signal 6: Publisher filler
+  if (/\b(atlas\s+series|silver\s+age|golden\s+age|bronze\s+age|copper\s+age|modern\s+age|pre\s+code)\b/i.test(title)) {
+    signals.push('publisher-filler');
+  }
+
+  // Signal 7: Listing language
+  if (/\b(set\s+main|1st\s+app(?:earance)?|trade\s+dress|empire|new\s+series|ongoing|limited\s+series|mini\s+series|one[\s-]?shot)\b/i.test(title)) {
+    signals.push('listing-language');
   }
 
   const tokens = title.split(/\s+/).filter(t => t.length > 1);
@@ -239,7 +271,17 @@ const detectTitleContamination = (title, context = {}) => {
   }
 
   const contaminated = signals.length > 0;
-  const severity = signals.length >= 2 ? 'high' : signals.length === 1 ? 'medium' : 'none';
+
+  // Ship v0-G.1 — Tightened severity rules
+  const highPrioritySignals = ['seller-description-cluster', 'listing-language', 'publisher-filler'];
+  const hasHighPriority = signals.some(s => highPrioritySignals.includes(s));
+
+  let severity = 'none';
+  if (signals.length >= 2 || hasHighPriority) {
+    severity = 'high';
+  } else if (signals.length === 1) {
+    severity = 'medium';
+  }
 
   return { contaminated, signals, severity };
 };
@@ -418,6 +460,92 @@ test('detectTitleContamination: rarity stacking', () => {
 
   assertEqual(result.contaminated, true, 'Should detect contamination');
   assertIncludes(result.signals, 'rarity-stacking', 'Should detect rarity stacking');
+});
+
+// ============================================================================
+// Ship v0-G.1 — Sanitizer tightening tests
+// ============================================================================
+
+test('sanitizeTitle: Yellow Claw publisher filler', () => {
+  const title = "Yellow Claw #1 atlas series kirby severin 1956";
+  const context = { year: 1956, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.includes('atlas series'), false, 'Should strip publisher filler');
+  assertEqual(result.includes('kirby'), false, 'Should strip single-word creator');
+  assertEqual(result.includes('severin'), false, 'Should strip single-word creator');
+  assertEqual(result.includes('1956'), false, 'Should strip year');
+  assertTruthy(result.includes('Yellow Claw'), 'Should preserve title');
+});
+
+test('sanitizeTitle: Miles Morales listing language', () => {
+  const title = "Miles Morales #1 set main bartel 1st app spider smasher empire 2022";
+  const context = { year: 2022, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.includes('set main'), false, 'Should strip listing language');
+  assertEqual(result.includes('1st app'), false, 'Should strip listing language');
+  assertEqual(result.includes('empire'), false, 'Should strip listing language');
+  assertEqual(result.includes('bartel'), false, 'Should strip single-word creator');
+  assertTruthy(result.includes('Miles Morales'), 'Should preserve title');
+});
+
+test('sanitizeTitle: Dick Tracy creator noise', () => {
+  const title = "Dick Tracy #3 kirby 1950";
+  const context = { year: 1950, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.includes('kirby'), false, 'Should strip single-word creator');
+  assertEqual(result.includes('1950'), false, 'Should strip year');
+  assertTruthy(result.includes('Dick Tracy'), 'Should preserve title');
+});
+
+test('sanitizeTitle: preserve newsstand variant', () => {
+  const title = "Amazing Spider-Man #300 newsstand";
+  const context = { year: 1988, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertTruthy(result.includes('newsstand'), 'Should preserve newsstand variant label');
+  assertTruthy(result.includes('Spider-Man'), 'Should preserve title');
+});
+
+test('sanitizeTitle: preserve 1:25 virgin variant', () => {
+  const title = "Batman #1 1:25 virgin";
+  const context = { year: 2016, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertTruthy(result.includes('1:25'), 'Should preserve ratio variant label');
+  assertTruthy(result.includes('virgin'), 'Should preserve virgin variant label');
+  assertTruthy(result.includes('Batman'), 'Should preserve title');
+});
+
+test('sanitizeTitle: preserve foil variant', () => {
+  const title = "X-Men #1 foil";
+  const context = { year: 1991, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertTruthy(result.includes('foil'), 'Should preserve foil variant label');
+  assertTruthy(result.includes('X-Men'), 'Should preserve title');
+});
+
+test('detectTitleContamination: Yellow Claw high severity (publisher filler)', () => {
+  const title = "Yellow Claw #1 atlas series 1956";
+  const context = { year: 1956, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  assertEqual(result.contaminated, true, 'Should detect contamination');
+  assertEqual(result.severity, 'high', 'Publisher filler should escalate to high');
+  assertIncludes(result.signals, 'publisher-filler', 'Should detect publisher filler');
+});
+
+test('detectTitleContamination: Miles high severity (listing language)', () => {
+  const title = "Miles Morales #1 set main 1st app empire";
+  const context = { year: 2022, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  assertEqual(result.contaminated, true, 'Should detect contamination');
+  assertEqual(result.severity, 'high', 'Listing language should escalate to high');
+  assertIncludes(result.signals, 'listing-language', 'Should detect listing language');
 });
 
 // ============================================================================
