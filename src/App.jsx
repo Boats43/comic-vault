@@ -6866,13 +6866,22 @@ export default function App() {
     activeCardEnrichIdRef.current = enrichId;
     console.log(`[enrich] refresh start id=${enrichId} title=${item.title}`);
 
+    // Ship v0-G — Defense-in-depth: minimal frontend sanitization before refresh.
+    // Backend sanitizer (api/enrich.js) is authoritative, but this prevents obvious
+    // contaminated titles from entering the refresh loop.
+    const sanitizedTitle = (item.title || '')
+      .replace(/\b(free\s+shipping|stock\s+image|select\s+an?\s+issue|see\s+pics?|combine\s+(?:shipping|s&h))\b/gi, ' ')
+      .replace(/\b(vg|fn|vf|nm|gd|fr|pr|raw)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || item.title;  // Fallback to original if empty
+
     let res;
     try {
       res = await fetch("/api/enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: item.title,
+          title: sanitizedTitle,
           issue: item.issue || item.title?.match(/#(\d+)/)?.[1] || null,
           grade: item.grade,
           isGraded: item.isGraded,

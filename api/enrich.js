@@ -608,6 +608,180 @@ const cleanTitleForComicVine = (title, variant) => {
   return cleaned;
 };
 
+/**
+ * Ship v0-G — Title sanitization for contaminated eBay listing text.
+ *
+ * Removes seller/marketplace noise that poisons ComicVine, PriceCharting,
+ * and eBay comps queries. Preserves canonical format markers.
+ *
+ * @param {string} title - Title to sanitize
+ * @param {Object} context - { year, isGraded, preservePublisherInTitle }
+ * @returns {string} Sanitized title
+ */
+const sanitizeTitle = (title, context = {}) => {
+  const { year, isGraded, preservePublisherInTitle = true } = context;
+
+  if (!title || typeof title !== 'string') return title;
+
+  const titleLower = title.toLowerCase().trim();
+
+  // Protected series (publisher-in-title)
+  const PUBLISHER_IN_TITLE = [
+    'marvel tales', 'marvel presents', 'marvel preview', 'marvel spotlight',
+    'marvel super action', 'marvel super heroes', 'marvel team-up', 'marvel team up',
+    'marvel triple action', 'marvel two-in-one', 'marvel two in one', 'marvel age',
+    'marvel chillers', 'marvel feature', 'marvel fanfare', 'marvel comics presents',
+    'marvel saga', 'marvel premiere', 'marvel mystery comics',
+    'dc universe presents', 'dc retroactive', 'dc comics presents', 'dc special',
+    'image comics presents', 'image united',
+  ];
+
+  const isProtected = preservePublisherInTitle &&
+    PUBLISHER_IN_TITLE.some(p => titleLower.includes(p));
+
+  if (isProtected) {
+    // Minimal cleanup only for protected titles
+    return title.replace(/\b(free\s+shipping|stock\s+image)\b/gi, ' ')
+      .replace(/\s+/g, ' ').trim();
+  }
+
+  let cleaned = title;
+  const removedTokens = [];
+
+  // Marketplace/auction keywords
+  const MARKETPLACE_RE = /\b(free\s+shipping|combine\s+(?:shipping|s&h)|select\s+an?\s+issue|stock\s+image|see\s+pics?|must\s+see|hot\s+read)\b/gi;
+  cleaned = cleaned.replace(MARKETPLACE_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Grade codes (when raw)
+  if (!isGraded) {
+    const GRADE_RE = /\b(vg|fn|vf|nm|gd|fr|pr|raw|low\s+grade|mid\s+grade|high\s+grade)\b/gi;
+    cleaned = cleaned.replace(GRADE_RE, (match) => {
+      removedTokens.push(match);
+      return ' ';
+    });
+  }
+
+  // Rarity adjectives
+  const RARITY_RE = /\b(rare|scarce|hot|gem|beauty|wow)\b/gi;
+  cleaned = cleaned.replace(RARITY_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Condition adjectives
+  const CONDITION_RE = /\b(apparent|complete|missing|intact|sharp)\b/gi;
+  cleaned = cleaned.replace(CONDITION_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Bare years (only when year exists separately)
+  if (year && parseInt(year) >= 1900 && parseInt(year) <= 2099) {
+    const YEAR_RE = new RegExp(`\\b${year}\\b`, 'g');
+    cleaned = cleaned.replace(YEAR_RE, (match) => {
+      removedTokens.push(match);
+      return ' ';
+    });
+
+    // Also strip nearby years (±5 range for seller confusion)
+    const yearInt = parseInt(year);
+    for (let y = yearInt - 5; y <= yearInt + 5; y++) {
+      if (y !== yearInt && y >= 1900 && y <= 2099) {
+        const nearYearRe = new RegExp(`\\b${y}\\b`, 'g');
+        cleaned = cleaned.replace(nearYearRe, ' ');
+      }
+    }
+  }
+
+  // Reuse existing cleanTitleForComicVine artist-stripping logic
+  cleaned = cleanTitleForComicVine(cleaned, null);
+
+  // Normalize whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  // Safeguard: if cleaned < 2 meaningful tokens, restore original
+  const tokens = cleaned.split(/\s+/).filter(t =>
+    t.length >= 2 && !/^\d+$/.test(t) &&
+    !/^(the|a|an|of|and|or|in|on|at|to|for|with)$/i.test(t)
+  );
+
+  if (tokens.length < 2) {
+    console.log(`[title-sanitized-rejected] safeguard triggered: "${cleaned}" < 2 tokens, restoring "${title}"`);
+    return title;
+  }
+
+  // Log changes
+  if (cleaned.toLowerCase() !== titleLower) {
+    console.log(`[title-sanitized] "${title}" → "${cleaned}"`);
+  }
+
+  return cleaned;
+};
+
+/**
+ * Ship v0-G — Detect title contamination signals.
+ *
+ * Flags titles that appear to contain seller/marketplace noise.
+ * Does NOT downgrade decision.action — only triggers sanitization.
+ *
+ * @param {string} title - Title to check
+ * @param {Object} context - { year, isGraded, issue, publisher }
+ * @returns {Object} { contaminated, signals, severity }
+ */
+const detectTitleContamination = (title, context = {}) => {
+  const { year, isGraded, issue, publisher } = context;
+  const signals = [];
+
+  if (!title || typeof title !== 'string') {
+    return { contaminated: false, signals: [], severity: 'none' };
+  }
+
+  const titleLower = title.toLowerCase();
+
+  // Signal 1: Marketplace keywords
+  if (/\b(free\s+shipping|select\s+an?\s+issue|stock\s+image|see\s+pics?|combine\s+(?:shipping|s&h))\b/i.test(title)) {
+    signals.push('marketplace-keywords');
+  }
+
+  // Signal 2: Seller-description cluster (grade + year + creator)
+  const hasGrade = /\b(vg|fn|vf|nm|gd|fr|pr|raw|low\s+grade|mid\s+grade|high\s+grade|apparent)\b/i.test(title);
+  const hasYear = year && new RegExp(`\\b${year}\\b`).test(title);
+  const hasCreator = /\b(kirby|ditko|lee|buscema|romita|byrne|miller|mcfarlane|ross|campbell|cho|fabok)\b/i.test(title);
+
+  if (hasGrade && hasYear && hasCreator) {
+    signals.push('seller-description-cluster');
+  }
+
+  // Signal 3: Excessive length
+  const tokens = title.split(/\s+/).filter(t => t.length > 1);
+  if (title.length > 60 || tokens.length > 8) {
+    signals.push('excessive-length');
+  }
+
+  // Signal 4: Grading service mismatch
+  if (!isGraded && /\b(cgc|cbcs|slabbed|graded)\b/i.test(title)) {
+    signals.push('grading-service-mismatch');
+  }
+
+  // Signal 5: Rarity stacking
+  const rarityMatches = (title.match(/\b(rare|scarce|hot|key|gem|beauty)\b/gi) || []).length;
+  if (rarityMatches >= 2) {
+    signals.push('rarity-stacking');
+  }
+
+  const contaminated = signals.length > 0;
+  const severity = signals.length >= 2 ? 'high' : signals.length === 1 ? 'medium' : 'none';
+
+  if (contaminated) {
+    console.log(`[title-contamination] ${severity}: ${signals.join(', ')}`);
+  }
+
+  return { contaminated, signals, severity };
+};
+
 const lookupComicVine = async ({ title, issue, year, publisher }) => {
   if (!process.env.COMICVINE_API_KEY || !title) return null;
   try {
@@ -1687,6 +1861,32 @@ export default async function handler(req, res) {
     }
 
     mark('phase1_complete');
+
+    // Ship v0-G — Title contamination detection and sanitization.
+    // Detects seller/marketplace noise in confirmedTitle and sanitizes before
+    // downstream queries (ComicVine, PriceCharting, eBay comps). Preserves
+    // original for evidence/display metadata.
+    const titleOriginalBeforeSanitize = confirmedTitle;
+    const titleContamination = detectTitleContamination(confirmedTitle, {
+      year: confirmedYear,
+      isGraded: isGraded || false,
+      issue: confirmedIssue,
+      publisher: confirmedPublisher
+    });
+
+    let titleSanitized = false;
+    if (titleContamination.severity === 'high') {
+      const sanitized = sanitizeTitle(confirmedTitle, {
+        year: confirmedYear,
+        isGraded: isGraded || false,
+        preservePublisherInTitle: true
+      });
+
+      if (sanitized !== confirmedTitle) {
+        confirmedTitle = sanitized;
+        titleSanitized = true;
+      }
+    }
 
     // eBay year authority — requires year-specific agreement ≥70%
     const ebayConsensusYearRaw = visualConsensus?.year;
@@ -4099,6 +4299,15 @@ export default async function handler(req, res) {
 
     if (!out.visionConfidence && out.matchConfidence?.visionConfidence) {
       out.visionConfidence = out.matchConfidence.visionConfidence;
+    }
+
+    // Ship v0-G — Surface title sanitization metadata
+    if (titleSanitized) {
+      out.titleSanitized = true;
+      out.titleOriginalBeforeSanitize = titleOriginalBeforeSanitize;
+    }
+    if (titleContamination.contaminated) {
+      out.titleContamination = titleContamination;
     }
 
     // Compute decision after full enrich object assembled
