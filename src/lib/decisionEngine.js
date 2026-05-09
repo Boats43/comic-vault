@@ -166,6 +166,21 @@ export function computeDecision(item, context = {}) {
     }
   }
 
+  // Warning: Zero verified sold comps (v1-C)
+  // When sold comp data exists but none passed verification, we lack reliable sold evidence
+  const verifiedSoldCount = item.soldCompDiagnostics?.verifiedCount || 0;
+  const rawSoldCount = item.soldCompDiagnostics?.rawCount || 0;
+  const activeCount = item.rawComps?.count || 0;
+
+  if (verifiedSoldCount === 0 && rawSoldCount > 0) {
+    decision.warnings.push('zero-verified-comps');
+    decision.evidence.zeroVerifiedComps = {
+      rawSoldCount,
+      verifiedCount: 0,
+      activeCount
+    };
+  }
+
   // Warning: Thin pool anchor
   if (item.thinPoolAnchored === true) {
     decision.warnings.push('thin-pool-anchor');
@@ -295,6 +310,13 @@ export function computeDecision(item, context = {}) {
 
   // PHASE 3: CRITICAL WARNING ESCALATION
 
+  // Escalate zero-verified-comps to critical if thin active pool (v1-C)
+  // When sold comps exist but none verified AND active pool is thin (< 3),
+  // we lack sufficient market evidence for confident pricing
+  const isZeroVerifiedCritical = verifiedSoldCount === 0 &&
+                                  rawSoldCount > 0 &&
+                                  activeCount < 3;
+
   // Escalate to RESEARCH if critical warnings
   const criticalWarnings = [
     'sold-active-mismatch-extreme',
@@ -308,7 +330,7 @@ export function computeDecision(item, context = {}) {
     'claude-check-high-severity'  // HIGH severity from claude-gate
   ];
 
-  const hasCriticalWarning = decision.warnings.some(w => criticalWarnings.includes(w));
+  const hasCriticalWarning = decision.warnings.some(w => criticalWarnings.includes(w)) || isZeroVerifiedCritical;
 
   if (hasCriticalWarning) {
     decision.action = 'RESEARCH';
@@ -366,7 +388,8 @@ export function computeDecision(item, context = {}) {
 
   // Determine band recommendation based on warnings
   // Exclude informational-only warnings that don't affect market confidence
-  const informationalWarnings = ['story-suppressed'];
+  // v1-C: zero-verified-comps is informational when activeCount >= 3 (escalates to RESEARCH only when < 3)
+  const informationalWarnings = ['story-suppressed', 'zero-verified-comps'];
   const actionableWarnings = decision.warnings.filter(w => !informationalWarnings.includes(w));
   const hasModerateWarnings = actionableWarnings.length > 0 && !hasCriticalWarning;
 
@@ -383,6 +406,13 @@ export function computeDecision(item, context = {}) {
   // Clean book - LIST_NOW at market
   decision.action = 'LIST_NOW';
   decision.confidence = 'high';
+
+  // v1-C: Cap confidence at medium when zero verified sold comps
+  // Active comps may pass verification, but without sold confirmation we cap confidence
+  if (verifiedSoldCount === 0 && rawSoldCount > 0) {
+    decision.confidence = 'medium';
+  }
+
   decision.reason = 'Clean identification and pricing, ready to list';
   decision.nextStep = 'List at market band';
   decision.price = item.price;
@@ -498,6 +528,9 @@ function buildWarningReason(warnings, item) {
   }
   if (warnings.includes('claude-check-high-severity')) {
     reasons.push('Claude high-severity verification warning');
+  }
+  if (warnings.includes('zero-verified-comps')) {
+    reasons.push('sold comps exist but none verified');
   }
 
   return reasons.join('; ') || 'Warnings detected, review before listing';

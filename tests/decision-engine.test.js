@@ -881,6 +881,163 @@ test('ai-verify-rejected-all still escalates to RESEARCH', () => {
   assertNotIncludes(decision.warnings, 'verification-failed-reprint-thin', 'Should NOT have verification-failed-reprint-thin');
 });
 
+// TEST 33: Zero verified sold comps + active >= 3 caps confidence at medium (v1-C)
+test('Zero verified sold comps + active >= 3 caps confidence at medium', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: 15,
+    identityConfident: true,
+    pricingSource: "active_listings",
+    soldCompDiagnostics: {
+      rawCount: 5,
+      verifiedCount: 0,
+      rejectedCount: 5
+    },
+    rawComps: {
+      average: 14,
+      count: 4, // >= 3 active comps, so not critical
+      lowest: 12,
+      highest: 16
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'LIST_NOW', 'Should be LIST_NOW (not escalated to RESEARCH)');
+  assertEqual(decision.confidence, 'medium', 'Confidence should be capped at medium');
+  assertIncludes(decision.warnings, 'zero-verified-comps', 'Should have zero-verified-comps warning');
+  assertExists(decision.evidence.zeroVerifiedComps, 'Should have zeroVerifiedComps evidence');
+});
+
+// TEST 34: Zero verified sold comps + thin active pool escalates to RESEARCH (v1-C)
+test('Zero verified sold comps + active < 3 escalates to RESEARCH', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: 15,
+    identityConfident: true,
+    pricingSource: "active_listings",
+    soldCompDiagnostics: {
+      rawCount: 5,
+      verifiedCount: 0,
+      rejectedCount: 5
+    },
+    rawComps: {
+      average: 14,
+      count: 2, // < 3 active comps = critical escalation
+      lowest: 12,
+      highest: 16
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'RESEARCH', 'Should escalate to RESEARCH');
+  assertEqual(decision.confidence, 'low', 'Confidence should be low');
+  assertIncludes(decision.warnings, 'zero-verified-comps', 'Should have zero-verified-comps warning');
+  assertExists(decision.evidence.zeroVerifiedComps, 'Should have zeroVerifiedComps evidence');
+});
+
+// TEST 35: Zero verified sold comps + zero active comps (v1-C)
+test('Zero verified sold comps + zero active comps', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: null,
+    identityConfident: true,
+    pricingSource: "refused",
+    soldCompDiagnostics: {
+      rawCount: 3,
+      verifiedCount: 0,
+      rejectedCount: 3
+    },
+    rawComps: {
+      count: 0,
+      average: null
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'RESEARCH', 'Should be RESEARCH');
+  assertIncludes(decision.warnings, 'zero-verified-comps', 'Should have zero-verified-comps warning');
+  assertIncludes(decision.warnings, 'verification-failed-no-data', 'Should also have verification-failed-no-data');
+  assertExists(decision.evidence.zeroVerifiedComps, 'Should have zeroVerifiedComps evidence');
+});
+
+// TEST 36: Has verified sold comps - no confidence cap (v1-C regression)
+test('Has verified sold comps - no confidence cap', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: 15,
+    identityConfident: true,
+    pricingSource: "verified_sold",
+    soldCompDiagnostics: {
+      rawCount: 5,
+      verifiedCount: 3, // Has verified comps
+      rejectedCount: 2
+    },
+    soldComps: [
+      { price: 14, daysAgo: 10 },
+      { price: 15, daysAgo: 20 },
+      { price: 16, daysAgo: 30 }
+    ],
+    rawComps: {
+      average: 14,
+      count: 4,
+      lowest: 12,
+      highest: 16
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'LIST_NOW', 'Should be LIST_NOW');
+  assertEqual(decision.confidence, 'high', 'Confidence should be high (no cap)');
+  assertNotIncludes(decision.warnings, 'zero-verified-comps', 'Should NOT have zero-verified-comps warning');
+});
+
+// TEST 37: No sold comp data - no zero-verified warning (v1-C edge case)
+test('No sold comp data - no zero-verified warning', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: 15,
+    identityConfident: true,
+    pricingSource: "active_listings",
+    soldCompDiagnostics: {
+      rawCount: 0, // No sold comp attempt
+      verifiedCount: 0,
+      rejectedCount: 0
+    },
+    rawComps: {
+      average: 14,
+      count: 5,
+      lowest: 12,
+      highest: 16
+    }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'LIST_NOW', 'Should be LIST_NOW');
+  assertEqual(decision.confidence, 'high', 'Confidence should be high');
+  assertNotIncludes(decision.warnings, 'zero-verified-comps',
+    'Should NOT have zero-verified-comps warning when no sold comps exist');
+});
+
 // RUN ALL TESTS
 console.log('\n🧪 Decision Engine v0-A Tests\n');
 console.log('='.repeat(60));
