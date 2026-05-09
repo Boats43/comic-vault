@@ -698,6 +698,41 @@ export const scoreTitleFamilies = (families, itemsOrTitles) => {
 };
 
 /**
+ * Pattern K — Dedupe embedded issue-number token from family title.
+ *
+ * Removes bare issue-number token when it duplicates the accepted issue,
+ * preventing title pollution like "luke cage 34 power man" + #34.
+ *
+ * Protects series-name numbers (2099, 2000, 3D, 1984, 2001) via safelist.
+ * Only removes if exactly one token matches accepted issue (safety check).
+ *
+ * @param {string} familyTitle - normalized family title (space-separated tokens)
+ * @param {string|number} acceptedIssue - the accepted issue number
+ * @returns {string} - deduplicated title
+ */
+const dedupeIssueToken = (familyTitle, acceptedIssue) => {
+  if (!acceptedIssue || !familyTitle) return familyTitle;
+
+  // Series-name number safelist
+  const SERIES_NUMBER_SAFELIST = ['2099', '2000', '3d', '1984', '2001'];
+  const issueStr = String(acceptedIssue).toLowerCase();
+
+  // Skip when issue number is a protected series identifier
+  if (SERIES_NUMBER_SAFELIST.includes(issueStr)) {
+    return familyTitle;
+  }
+
+  const tokens = familyTitle.split(' ');
+  const filtered = tokens.filter(t => t.toLowerCase() !== issueStr);
+
+  // Only apply if exactly one token removed (safety check)
+  // Prevents over-stripping when number appears multiple times
+  return (tokens.length - filtered.length === 1)
+    ? filtered.join(' ')
+    : familyTitle;
+};
+
+/**
  * Ship 26.1 — Select title-family candidate.
  *
  * Pure function. No API calls, no pricing logic. Returns decision object
@@ -797,7 +832,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue) => {
     if (issueMatch && hasEnoughTokens && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong) {
       return {
         decision: 'top-rank-protection',
-        selectedTitle: item0Family.title,
+        selectedTitle: dedupeIssueToken(item0Family.title, visionIssue), // Pattern K: remove embedded issue
         rawTitle: item0Family.rawTitle,
         reason: `Top-ranked result protected (${item0Tokens.length} tokens, weight ${item0Family.weightSum.toFixed(1)}, ${sharedTokens.length} Vision overlap)`,
         topFamily: item0Family,
@@ -812,7 +847,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue) => {
   if (topFamilyOverlap.length >= 2) {
     return {
       decision: 'weighted-consensus',
-      selectedTitle: topFamily.title,
+      selectedTitle: dedupeIssueToken(topFamily.title, visionIssue), // Pattern K: remove embedded issue
       rawTitle: topFamily.rawTitle,
       reason: `Weighted consensus (${topFamily.count} members, weight ${topFamily.weightSum.toFixed(1)}, ${topFamilyOverlap.length} Vision tokens shared)`,
       topFamily,
