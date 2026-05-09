@@ -212,7 +212,7 @@ const sanitizeTitle = (title, context = {}) => {
   }
 
   // Ship Pattern-J — Seller inventory code stripping
-  const INVENTORY_CODE_RE = /\b(?!(?:19|20)\d{2}\b)(?![#\d+:])([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/gi;
+  const INVENTORY_CODE_RE = /\b(?!(?:19|20)\d{2}\b)(?!#)(?!\d+:)([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/gi;
   const hasMarkers = /(\bvf\b|\bnm\b|\bfn\b|\bvg\b|\bgd\b|\(19\d{2}\)|\(20\d{2}\)|\$\d+|!|\bvariant\b)/i.test(cleaned);
 
   if (hasMarkers) {
@@ -287,10 +287,16 @@ const detectTitleContamination = (title, context = {}) => {
     signals.push('rarity-stacking');
   }
 
+  // Ship Pattern-J — Inventory code detection
+  const INVENTORY_CODE_DETECTOR = /\b(?!(?:19|20)\d{2}\b)(?!#)(?!\d+:)([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/i;
+  if (INVENTORY_CODE_DETECTOR.test(title)) {
+    signals.push('inventory-code');
+  }
+
   const contaminated = signals.length > 0;
 
   // Ship v0-G.1 — Tightened severity rules
-  const highPrioritySignals = ['seller-description-cluster', 'listing-language', 'publisher-filler', 'marketplace-keywords'];
+  const highPrioritySignals = ['seller-description-cluster', 'listing-language', 'publisher-filler', 'marketplace-keywords', 'inventory-code'];
   const hasHighPriority = signals.some(s => highPrioritySignals.includes(s));
 
   let severity = 'none';
@@ -733,6 +739,86 @@ test('sanitizeTitle: Pattern J - complex case with markers', () => {
   assertEqual(result.includes('#28'), true, 'Should preserve issue number');
   assertTruthy(result.toLowerCase().includes('luke'), 'Should keep title');
   assertTruthy(result.toLowerCase().includes('cage'), 'Should keep title');
+});
+
+// ============================================================================
+// PATTERN J — INVENTORY CODE DETECTION
+// ============================================================================
+
+test('detectTitleContamination: Luke Cage mm22 inventory code', () => {
+  const title = "Luke Cage Power Man mm22";
+  const context = { year: 1977, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  assertEqual(result.contaminated, true, 'Should detect contamination');
+  assertEqual(result.severity, 'high', 'Inventory code should trigger high severity');
+  assertIncludes(result.signals, 'inventory-code', 'Should detect inventory-code signal');
+});
+
+test('detectTitleContamination: Green Hornet Z4405 catalog code', () => {
+  const title = "Green Hornet #1 Z4405";
+  const context = { year: 1940, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  assertEqual(result.contaminated, true, 'Should detect contamination');
+  assertEqual(result.severity, 'high', 'Inventory code should trigger high severity');
+  assertIncludes(result.signals, 'inventory-code', 'Should detect inventory-code signal');
+});
+
+test('detectTitleContamination: Avengers A2 seller code', () => {
+  const title = "Avengers A2 variant";
+  const context = { year: 2020, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  assertEqual(result.contaminated, true, 'Should detect contamination');
+  assertEqual(result.severity, 'high', 'Inventory code should trigger high severity');
+  assertIncludes(result.signals, 'inventory-code', 'Should detect inventory-code signal');
+});
+
+test('detectTitleContamination: Batman 9176 numeric code', () => {
+  const title = "Batman #50 9176";
+  const context = { year: 1990, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  assertEqual(result.contaminated, true, 'Should detect contamination');
+  assertEqual(result.severity, 'high', 'Inventory code should trigger high severity');
+  assertIncludes(result.signals, 'inventory-code', 'Should detect inventory-code signal');
+});
+
+test('detectTitleContamination: preserves Spider-Man 2099', () => {
+  const title = "Spider-Man 2099 #1";
+  const context = { year: 1992, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  // Should NOT trigger inventory-code (2099 is protected)
+  assertEqual(result.signals.includes('inventory-code'), false, 'Should NOT detect 2099 as inventory code');
+});
+
+test('detectTitleContamination: preserves 2000 AD', () => {
+  const title = "2000 AD #100";
+  const context = { year: 1978, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  // Should NOT trigger inventory-code (2000 is protected, AD suffix)
+  assertEqual(result.signals.includes('inventory-code'), false, 'Should NOT detect 2000 AD as inventory code');
+});
+
+test('detectTitleContamination: preserves issue numbers', () => {
+  const title = "Amazing Spider-Man #300";
+  const context = { year: 1988, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  // Should NOT trigger inventory-code (#300 is issue number)
+  assertEqual(result.signals.includes('inventory-code'), false, 'Should NOT detect #300 as inventory code');
+});
+
+test('detectTitleContamination: preserves ratios', () => {
+  const title = "X-Men #1 1:25 variant";
+  const context = { year: 2021, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  // Should NOT trigger inventory-code (1:25 is ratio)
+  assertEqual(result.signals.includes('inventory-code'), false, 'Should NOT detect 1:25 as inventory code');
 });
 
 // ============================================================================

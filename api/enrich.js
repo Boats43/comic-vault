@@ -735,7 +735,7 @@ const sanitizeTitle = (title, context = {}) => {
   // - [a-z]\d+[a-z]: letter-digits-letter (a1b)
   // - \d{4,5}(?!AD): pure 4-5 digit codes NOT followed by AD (9176, not "2000 AD")
   try {
-    const INVENTORY_CODE_RE = /\b(?!(?:19|20)\d{2}\b)(?![#\d+:])([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/gi;
+    const INVENTORY_CODE_RE = /\b(?!(?:19|20)\d{2}\b)(?!#)(?!\d+:)([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/gi;
 
     // Check if title has markers indicating end-of-title (safer to strip broadly)
     const hasMarkers = cleaned && /(\bvf\b|\bnm\b|\bfn\b|\bvg\b|\bgd\b|\(19\d{2}\)|\(20\d{2}\)|\$\d+|!|\bvariant\b)/i.test(cleaned);
@@ -845,12 +845,21 @@ const detectTitleContamination = (title, context = {}) => {
     signals.push('rarity-stacking');
   }
 
+  // Ship Pattern-J — Seller inventory code detection.
+  // Detects short alphanumeric codes like mm22, A2, Z4405, 9176.
+  // Preserves legitimate title numbers (2099, 2000 AD), issue numbers (#22),
+  // ratios (1:25), and years (1900-2099).
+  const INVENTORY_CODE_DETECTOR = /\b(?!(?:19|20)\d{2}\b)(?!#)(?!\d+:)([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/i;
+  if (INVENTORY_CODE_DETECTOR.test(title)) {
+    signals.push('inventory-code');
+  }
+
   const contaminated = signals.length > 0;
 
   // Ship v0-G.1 — Tightened severity rules
   // High: ≥2 signals OR any single high-priority signal
   // Medium: 1 signal
-  const highPrioritySignals = ['seller-description-cluster', 'listing-language', 'publisher-filler', 'marketplace-keywords'];
+  const highPrioritySignals = ['seller-description-cluster', 'listing-language', 'publisher-filler', 'marketplace-keywords', 'inventory-code'];
   const hasHighPriority = signals.some(s => highPrioritySignals.includes(s));
 
   let severity = 'none';
@@ -2192,21 +2201,22 @@ export default async function handler(req, res) {
       // to prevent wrong-issue comp contamination (Luke Cage #28 vs #46 class).
       try {
         const rawTitleIssue = familyCandidate.rawTitle.match(/#\s*(\d+)/)?.[1];
-        const consensusIssue = String((out && out.issue) || body.issue || '');
+        // Use confirmedIssue (set at line ~1909) which holds the accepted issue
+        const acceptedIssue = String(confirmedIssue || issue || '');
 
-        if (rawTitleIssue && consensusIssue && rawTitleIssue !== consensusIssue) {
+        if (rawTitleIssue && acceptedIssue && rawTitleIssue !== acceptedIssue) {
           console.log(
             `[rawTitle-skipped-issue-mismatch] rawTitle has #${rawTitleIssue}, ` +
-            `consensus is #${consensusIssue} — using sanitized title instead`
+            `consensus is #${acceptedIssue} — using sanitized title instead`
           );
-          // Use confirmedTitle + issue instead of contaminated rawTitle
-          const fallbackTitle = (out && out.confirmedTitle) || confirmedTitle || body.title || '';
-          if (fallbackTitle && consensusIssue) {
-            imageSearchTitle = `${fallbackTitle} #${consensusIssue}`;
+          // Use confirmedTitle + accepted issue instead of contaminated rawTitle
+          const fallbackTitle = confirmedTitle || title || '';
+          if (fallbackTitle && acceptedIssue) {
+            imageSearchTitle = `${fallbackTitle} #${acceptedIssue}`;
           } else {
-            // Can't construct fallback, use rawTitle as-is
-            imageSearchTitle = familyCandidate.rawTitle;
-            console.log(`[rawTitle-guard] fallback construction failed, using rawTitle`);
+            // Can't construct fallback — fail closed, don't use contaminated rawTitle
+            imageSearchTitle = null;
+            console.log(`[rawTitle-guard] fallback construction failed, skipping rawTitle`);
           }
         } else {
           // Use family candidate's rawTitle (from top-ranked family member)
@@ -2215,8 +2225,8 @@ export default async function handler(req, res) {
         }
       } catch (err) {
         console.error('[rawTitle-guard] failed:', err.message);
-        // Fall back to using rawTitle as-is
-        imageSearchTitle = familyCandidate.rawTitle;
+        // Fail closed — don't use potentially contaminated rawTitle
+        imageSearchTitle = null;
       }
     } else if (familyCandidate?.decision === 'fallback-vision') {
       // On fallback-vision, block imageSearchTitle from unrelated visual pool
