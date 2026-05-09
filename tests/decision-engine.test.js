@@ -785,6 +785,102 @@ test('Story-suppressed warning does not downgrade to LIST_LOW', () => {
   console.log('  [Story-suppressed correctly classified as informational]');
 });
 
+// TEST 29: refused-claude-gate with Claude verification failure (v1-A)
+test('Claude verification failed - refused-claude-gate', () => {
+  const item = {
+    title: "DC 100 Page Super Spectacular",
+    issue: "17",
+    publisher: "DC",
+    year: 1973,
+    identityConfident: true,
+    pricingSource: 'refused-claude-gate',
+    price: null,
+    refusedToPrice: true,
+    confidenceLevel: 'LOW',
+    priceNote: 'Claude verification failed — no comparable sales',
+    rawComps: { count: 0, average: null }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'RESEARCH', 'Should be RESEARCH not LIST_NOW');
+  assertNotIncludes(['high'], decision.confidence, 'Confidence should not be high');
+  assertIncludes(decision.warnings, 'verification-failed-claude', 'Should warn about Claude verification failure');
+  assertEqual(decision.blockers.length, 0, 'Should have no blockers (allow user override)');
+  assertExists(decision.evidence.verificationFailed, 'Should have verificationFailed evidence');
+});
+
+// TEST 30: refused with zero verified/sold comps (v1-A)
+test('Zero verified and sold comps - refused', () => {
+  const item = {
+    title: "Popeye",
+    issue: "85",
+    publisher: "Gold Key",
+    year: 1967,
+    identityConfident: true,
+    pricingSource: 'refused',
+    price: null,
+    refusedToPrice: true,
+    confidenceLevel: 'LOW',
+    priceNote: 'Insufficient data — no verified comps found',
+    rawComps: { count: 0, average: null },
+    soldComps: []
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'RESEARCH', 'Should be RESEARCH not LIST_NOW');
+  assertIncludes(decision.warnings, 'verification-failed-no-data', 'Should warn about no data');
+  assertEqual(decision.blockers.length, 0, 'Should have no blockers');
+});
+
+// TEST 31: visual_pool_fallback with image search (v1-A)
+test('Image search fallback - visual_pool_fallback', () => {
+  const item = {
+    title: "Mystery Comic",
+    issue: "1",
+    publisher: "Unknown",
+    year: 1975,
+    identityConfident: true,
+    pricingSource: 'visual_pool_fallback',
+    price: 12.50,
+    confidenceLevel: 'MEDIUM',
+    visualPoolSize: 8,
+    priceNote: 'Estimated from 8 visually similar active listings. Verify identity before listing.'
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'RESEARCH', 'Should be RESEARCH not LIST_NOW');
+  assertIncludes(decision.warnings, 'verification-failed-visual-fallback', 'Should warn about visual fallback');
+  assertEqual(decision.blockers.length, 0, 'Should have no blockers');
+  assertExists(decision.evidence.verificationFailed, 'Should have verificationFailed evidence with visualPoolSize');
+});
+
+// TEST 32: ai-verify-rejected-all still works (v1-A regression check)
+test('ai-verify-rejected-all still escalates to RESEARCH', () => {
+  const item = {
+    title: "Howard the Duck",
+    issue: "28",
+    publisher: "Marvel",
+    year: 1978,
+    identityConfident: true,
+    pricingSource: 'browse_api',
+    price: 8.50,
+    compsExhausted: true,
+    rawComps: { count: 0, average: null }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'RESEARCH', 'Should still be RESEARCH via compsExhausted');
+  assertIncludes(decision.warnings, 'ai-verify-rejected-all', 'Should still have ai-verify-rejected-all warning');
+  assertNotIncludes(decision.warnings, 'verification-failed-claude', 'Should NOT have verification-failed-claude');
+  assertNotIncludes(decision.warnings, 'verification-failed-no-data', 'Should NOT have verification-failed-no-data');
+  assertNotIncludes(decision.warnings, 'verification-failed-visual-fallback', 'Should NOT have verification-failed-visual-fallback');
+  assertNotIncludes(decision.warnings, 'verification-failed-reprint-thin', 'Should NOT have verification-failed-reprint-thin');
+});
+
 // RUN ALL TESTS
 console.log('\n🧪 Decision Engine v0-A Tests\n');
 console.log('='.repeat(60));

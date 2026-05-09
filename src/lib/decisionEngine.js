@@ -177,6 +177,43 @@ export function computeDecision(item, context = {}) {
     decision.warnings.push('ai-verify-rejected-all');
   }
 
+  // Warning: Verification failed (Claude gate)
+  if (item.pricingSource === 'refused-claude-gate') {
+    decision.warnings.push('verification-failed-claude');
+    decision.evidence.verificationFailed = {
+      source: 'claude-gate',
+      note: item.priceNote || 'Claude verification rejected pricing'
+    };
+  }
+
+  // Warning: No verified or sold comps (zero data)
+  if (item.pricingSource === 'refused' && item.price == null) {
+    decision.warnings.push('verification-failed-no-data');
+    decision.evidence.verificationFailed = {
+      source: 'zero-comps',
+      note: item.priceNote || 'No verified comps or sold comps found'
+    };
+  }
+
+  // Warning: Visual pool fallback (identity uncertain)
+  if (item.pricingSource === 'visual_pool_fallback') {
+    decision.warnings.push('verification-failed-visual-fallback');
+    decision.evidence.verificationFailed = {
+      source: 'visual-pool',
+      visualPoolSize: item.visualPoolSize,
+      note: item.priceNote || 'Image search fallback — verify identity'
+    };
+  }
+
+  // Warning: Reprint thin pool
+  if (item.pricingSource === 'refused-reprint-thin-pool') {
+    decision.warnings.push('verification-failed-reprint-thin');
+    decision.evidence.verificationFailed = {
+      source: 'reprint-thin-pool',
+      note: 'Reprint with insufficient comp data'
+    };
+  }
+
   // Warning: Story metadata suspicious
   const hasStory = item.comicVine?.description && item.comicVine.description.length > 50;
   const hasStorySuppression = item.storySuppressedReason;
@@ -232,7 +269,11 @@ export function computeDecision(item, context = {}) {
     'sold-active-mismatch-extreme',
     'golden-age-thin-active-mismatch',
     'active-avg-far-below',
-    'ai-verify-rejected-all'
+    'ai-verify-rejected-all',
+    'verification-failed-claude',
+    'verification-failed-no-data',
+    'verification-failed-visual-fallback',
+    'verification-failed-reprint-thin'
   ];
 
   const hasCriticalWarning = decision.warnings.some(w => criticalWarnings.includes(w));
@@ -400,6 +441,18 @@ function buildWarningReason(warnings, item) {
   }
   if (warnings.includes('reprint-polybag-detected')) {
     reasons.push('reprint/polybag warning');
+  }
+  if (warnings.includes('verification-failed-claude')) {
+    reasons.push('Claude verification failed');
+  }
+  if (warnings.includes('verification-failed-no-data')) {
+    reasons.push('no verified comps found');
+  }
+  if (warnings.includes('verification-failed-visual-fallback')) {
+    reasons.push('image search fallback (verify identity)');
+  }
+  if (warnings.includes('verification-failed-reprint-thin')) {
+    reasons.push('reprint with thin data');
   }
 
   return reasons.join('; ') || 'Warnings detected, review before listing';
