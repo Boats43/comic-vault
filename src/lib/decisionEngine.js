@@ -431,9 +431,13 @@ function buildWarningReason(warnings, item) {
   const reasons = [];
 
   if (warnings.includes('sold-active-mismatch-extreme')) {
-    const soldAvg = item.soldComps?.reduce((sum, c) => sum + c.price, 0) / item.soldComps?.length;
+    const soldSum = item.soldComps?.reduce((sum, c) => sum + c.price, 0) || 0;
+    const soldCount = item.soldComps?.length || 0;
+    const soldAvg = soldCount > 0 ? soldSum / soldCount : null;
     const activeAvg = item.rawComps?.average;
-    reasons.push(`sold $${soldAvg?.toFixed(0)} vs active $${activeAvg?.toFixed(0)} mismatch`);
+    const soldStr = soldAvg != null && !isNaN(soldAvg) ? soldAvg.toFixed(0) : '?';
+    const activeStr = activeAvg != null && !isNaN(activeAvg) ? activeAvg.toFixed(0) : '?';
+    reasons.push(`sold $${soldStr} vs active $${activeStr} mismatch`);
   }
   if (warnings.includes('golden-age-thin-active-mismatch')) {
     reasons.push('Golden Age thin active pool with sold/active conflict');
@@ -464,6 +468,9 @@ function buildWarningReason(warnings, item) {
   }
   if (warnings.includes('verification-failed-reprint-thin')) {
     reasons.push('reprint with thin data');
+  }
+  if (warnings.includes('era-filter-bypassed')) {
+    reasons.push('vintage year missing from comps');
   }
 
   return reasons.join('; ') || 'Warnings detected, review before listing';
