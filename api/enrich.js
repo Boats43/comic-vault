@@ -4326,9 +4326,35 @@ export default async function handler(req, res) {
       // at line ~2148). Letting Ship 5 kill the polybag price would null
       // every legitimate polybag scan. claudeCheck still runs for telemetry
       // but the kill switch is bypassed when polybag pricing is active.
+      //
+      // Hotfix 2026-05-09 — Check PRICING_CRITICAL_PATTERNS BEFORE confidence gate.
+      // BUG: CRITICAL flags were bypassed when confidence=HIGH. CRITICAL flags
+      // must always be evaluated regardless of confidence level.
+      const refusalReason = (claudeCheck.flags?.[0]) || 'Claude verification failed';
+      const PRICING_CRITICAL_PATTERNS = [
+        /^CRITICAL:/i,                          // Severity prefix (start of line)
+        /\bCRITICAL:/i,                         // Severity embedded mid-sentence
+        /^HIGH:/i,                              // High-severity prefix
+        /\bHIGH:/i,                             // High-severity embedded
+        /\bKEY ISSUE\b/i,                       // KEY ISSUE pattern variants (MISIDENTIFICATION, MISMATCH, MISLABELED)
+        /wrong\s+issue/i,
+        /different\s+(?:book|series|comic)/i,
+        /wrong\s+era/i,
+        /era\s+mismatch/i,
+        /comp\s+pool\s+contaminated/i,
+        /no\s+comparable\s+sales/i,
+        /completely\s+different/i,
+        /\bnot\s+the\s+same\s+(?:book|comic|issue)/i,
+        /issue\s+misidentified/i,
+        /critical:\s*key\s+issue\s+misidentified/i,
+      ];
+      const isPricingCritical = claudeCheck.verified === false && PRICING_CRITICAL_PATTERNS.some((re) =>
+        re.test(refusalReason)
+      );
+
       if (
-        claudeCheck.verified === false &&
-        claudeCheck.confidence === 'LOW' &&
+        (isPricingCritical ||
+         (claudeCheck.verified === false && claudeCheck.confidence === 'LOW')) &&
         !isPolybagPricing
       ) {
         // Ship 10 — Reclassify claude-gate refusals.
@@ -4343,27 +4369,6 @@ export default async function handler(req, res) {
         // Now refuses ONLY when refusal indicates the priced book is
         // actually a different book than what comps cover. Otherwise
         // surfaces as warning and lets price ship.
-        const refusalReason = (claudeCheck.flags?.[0]) || 'Claude verification failed';
-        const PRICING_CRITICAL_PATTERNS = [
-          /^CRITICAL:/i,                          // Severity prefix (start of line)
-          /\bCRITICAL:/i,                         // Severity embedded mid-sentence
-          /^HIGH:/i,                              // High-severity prefix
-          /\bHIGH:/i,                             // High-severity embedded
-          /^KEY ISSUE MISIDENTIFICATION:/i,       // Key issue misidentification prefix
-          /wrong\s+issue/i,
-          /different\s+(?:book|series|comic)/i,
-          /wrong\s+era/i,
-          /era\s+mismatch/i,
-          /comp\s+pool\s+contaminated/i,
-          /no\s+comparable\s+sales/i,
-          /completely\s+different/i,
-          /\bnot\s+the\s+same\s+(?:book|comic|issue)/i,
-          /issue\s+misidentified/i,
-          /critical:\s*key\s+issue\s+misidentified/i,
-        ];
-        const isPricingCritical = PRICING_CRITICAL_PATTERNS.some((re) =>
-          re.test(refusalReason)
-        );
 
         if (isPricingCritical) {
           console.log(

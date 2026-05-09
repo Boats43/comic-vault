@@ -129,6 +129,96 @@ const testCases = [
       action: 'LIST_NOW',
       blockers: []
     }
+  },
+  {
+    name: 'KEY ISSUE MISMATCH - blocks pricing',
+    input: {
+      title: 'Marvel Team-Up',
+      issue: '141',
+      year: '1984',
+      publisher: 'Marvel',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      claudeCheckBlocker: 'KEY ISSUE MISMATCH: This is not the 1st appearance claimed in listings',
+      rawComps: { average: 45, count: 3 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST',
+      reasonContains: 'critical verification failure'
+    }
+  },
+  {
+    name: 'KEY ISSUE MISLABELED - blocks pricing',
+    input: {
+      title: 'Marvel Team-Up',
+      issue: '141',
+      year: '1984',
+      publisher: 'Marvel',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      claudeCheckBlocker: 'KEY ISSUE MISLABELED: Sellers incorrectly label this as first black costume',
+      rawComps: { average: 45, count: 3 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST',
+      reasonContains: 'critical verification failure'
+    }
+  },
+  {
+    name: 'CRITICAL flag with confidence=HIGH - blocks pricing',
+    input: {
+      title: 'Detective Comics',
+      issue: '27',
+      year: '2010',
+      publisher: 'DC',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      claudeCheckBlocker: 'CRITICAL: This is a reprint/facsimile, not the 1939 original',
+      rawComps: { average: 25, count: 2 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST',
+      reasonContains: 'critical verification failure'
+    }
+  },
+  {
+    name: 'HIGH flag with confidence=HIGH - caps decision',
+    input: {
+      title: 'Amazing Spider-Man',
+      issue: '252',
+      year: '1984',
+      publisher: 'Marvel',
+      price: 200,
+      pricingSource: 'pricecharting',
+      claudeCheckHighSeverity: 'HIGH: Pricing may be inflated due to key issue contamination',
+      rawComps: { average: 180, count: 4 }
+    },
+    expected: {
+      warnings: ['claude-check-high-severity'],
+      action: 'RESEARCH',
+      reasonContains: 'high-severity verification warning'
+    }
+  },
+  {
+    name: 'MEDIUM/LOW no-prefix with confidence=HIGH - no blocker',
+    input: {
+      title: 'X-Men',
+      issue: '101',
+      year: '1976',
+      publisher: 'Marvel',
+      price: 75,
+      pricingSource: 'pricecharting',
+      claudeCheckWarning: 'Story description differs slightly from ComicVine',
+      rawComps: { average: 70, count: 5 }
+    },
+    expected: {
+      warnings: [],
+      blockers: [],
+      action: 'LIST_NOW'
+    }
   }
 ];
 
