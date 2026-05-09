@@ -71,7 +71,13 @@
       "PowerShell(node -e \"import\\('./api/enrich.js'\\).then\\(\\(\\) => console.log\\('✓ api/enrich.js parses'\\)\\).catch\\(e => { console.error\\('✗ Parse error:', e.message\\); process.exit\\(1\\); }\\)\")",
       "PowerShell(node scripts/smoke-test.mjs)",
       "PowerShell(node tests/decision-engine.test.js)",
-      "PowerShell(node tests/family-clustering.test.js; node tests/ship26-integration.test.js)"
+      "PowerShell(node tests/family-clustering.test.js; node tests/ship26-integration.test.js)",
+      "PowerShell(node test-tokenization.js)",
+      "PowerShell(node -e \"const soldComps = []; const soldAvg = soldComps.reduce\\(\\(sum, c\\) => sum + c.price, 0\\) / soldComps.length; console.log\\('soldAvg:', soldAvg\\); console.log\\('toFixed:', soldAvg.toFixed\\(0\\)\\);\")",
+      "PowerShell(node -e \"const activeAvg = undefined; console.log\\('toFixed:', activeAvg?.toFixed\\(0\\)\\);\")",
+      "PowerShell(node tests/title-sanitization.test.js)",
+      "PowerShell(node tests/ship26-integration.test.js)",
+      "PowerShell(node tests/claude-gate-severity.test.js)"
     ]
   }
 }

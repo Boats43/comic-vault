@@ -211,6 +211,23 @@ const sanitizeTitle = (title, context = {}) => {
     }
   }
 
+  // Ship Pattern-J — Seller inventory code stripping
+  const INVENTORY_CODE_RE = /\b(?!(?:19|20)\d{2}\b)(?![#\d+:])([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/gi;
+  const hasMarkers = /(\bvf\b|\bnm\b|\bfn\b|\bvg\b|\bgd\b|\(19\d{2}\)|\(20\d{2}\)|\$\d+|!|\bvariant\b)/i.test(cleaned);
+
+  if (hasMarkers) {
+    cleaned = cleaned.replace(INVENTORY_CODE_RE, (match) => {
+      removedTokens.push(match);
+      return ' ';
+    });
+  } else {
+    const tailMatch = cleaned.match(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i);
+    if (tailMatch) {
+      removedTokens.push(tailMatch[1]);
+      cleaned = cleaned.replace(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i, '');
+    }
+  }
+
   cleaned = cleanTitleForComicVine(cleaned, null);
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
@@ -610,6 +627,112 @@ test('detectTitleContamination: Dick Tracy marketplace high severity', () => {
   assertEqual(result.contaminated, true, 'Should detect contamination');
   assertEqual(result.severity, 'high', 'Marketplace keywords should trigger high severity');
   assertIncludes(result.signals, 'marketplace-keywords', 'Should detect marketplace keywords');
+});
+
+// ============================================================================
+// PATTERN J — SELLER INVENTORY CODE STRIPPING
+// ============================================================================
+
+test('sanitizeTitle: Pattern J - Luke Cage mm22', () => {
+  const title = "Luke Cage Power Man mm22";
+  const context = { year: 1977, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.toLowerCase().includes('mm22'), false, 'Should strip mm22 inventory code');
+  assertTruthy(result.toLowerCase().includes('luke'), 'Should keep title');
+  assertTruthy(result.toLowerCase().includes('cage'), 'Should keep title');
+  assertTruthy(result.toLowerCase().includes('power'), 'Should keep title');
+});
+
+test('sanitizeTitle: Pattern J - Green Hornet Z4405', () => {
+  const title = "Green Hornet #1 Z4405";
+  const context = { year: 1940, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.includes('Z4405'), false, 'Should strip Z4405 catalog code');
+  assertEqual(result.includes('#1'), true, 'Should preserve issue number');
+  assertTruthy(result.toLowerCase().includes('green'), 'Should keep title');
+  assertTruthy(result.toLowerCase().includes('hornet'), 'Should keep title');
+});
+
+test('sanitizeTitle: Pattern J - Avengers A2 variant', () => {
+  const title = "Avengers A2 variant";
+  const context = { year: 2020, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.includes('A2'), false, 'Should strip A2 inventory code');
+  assertTruthy(result.toLowerCase().includes('avengers'), 'Should keep title');
+});
+
+test('sanitizeTitle: Pattern J - Batman 9176 with grade marker', () => {
+  const title = "Batman #50 VF 9176";
+  const context = { year: 1990, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.includes('9176'), false, 'Should strip 9176 seller code after grade marker');
+  assertEqual(result.includes('#50'), true, 'Should preserve issue number');
+  assertTruthy(result.toLowerCase().includes('batman'), 'Should keep title');
+});
+
+test('sanitizeTitle: Pattern J - preserves Spider-Man 2099', () => {
+  const title = "Spider-Man 2099 #1";
+  const context = { year: 1992, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertTruthy(result.includes('2099'), 'Should preserve 2099 in title');
+  assertEqual(result.includes('#1'), true, 'Should preserve issue number');
+  assertTruthy(result.toLowerCase().includes('spider-man'), 'Should keep title');
+});
+
+test('sanitizeTitle: Pattern J - preserves 2000 AD', () => {
+  const title = "2000 AD #100";
+  const context = { year: 1978, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertTruthy(result.includes('2000'), 'Should preserve 2000 in title');
+  assertEqual(result.includes('#100'), true, 'Should preserve issue number');
+  assertTruthy(result.toLowerCase().includes('ad'), 'Should keep title');
+});
+
+test('sanitizeTitle: Pattern J - preserves Star Wars 3D', () => {
+  const title = "Star Wars 3D #1";
+  const context = { year: 2015, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertTruthy(result.includes('3D'), 'Should preserve 3D in title');
+  assertEqual(result.includes('#1'), true, 'Should preserve issue number');
+  assertTruthy(result.toLowerCase().includes('star'), 'Should keep title');
+  assertTruthy(result.toLowerCase().includes('wars'), 'Should keep title');
+});
+
+test('sanitizeTitle: Pattern J - preserves ratios', () => {
+  const title = "X-Men #1 1:25 variant";
+  const context = { year: 2021, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertTruthy(result.includes('1:25'), 'Should preserve 1:25 ratio');
+  assertEqual(result.includes('#1'), true, 'Should preserve issue number');
+  assertTruthy(result.toLowerCase().includes('x-men'), 'Should keep title');
+});
+
+test('sanitizeTitle: Pattern J - preserves issue numbers', () => {
+  const title = "Amazing Spider-Man #300";
+  const context = { year: 1988, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.includes('#300'), true, 'Should preserve issue number #300');
+  assertTruthy(result.toLowerCase().includes('spider-man'), 'Should keep title');
+});
+
+test('sanitizeTitle: Pattern J - complex case with markers', () => {
+  const title = "Luke Cage Power Man #28! 4.5 + mm22";
+  const context = { year: 1977, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.toLowerCase().includes('mm22'), false, 'Should strip mm22 after exclamation marker');
+  assertEqual(result.includes('#28'), true, 'Should preserve issue number');
+  assertTruthy(result.toLowerCase().includes('luke'), 'Should keep title');
+  assertTruthy(result.toLowerCase().includes('cage'), 'Should keep title');
 });
 
 // ============================================================================

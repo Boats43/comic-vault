@@ -718,6 +718,42 @@ const sanitizeTitle = (title, context = {}) => {
     }
   }
 
+  // Ship Pattern-J — Seller inventory code stripping.
+  // Targets short alphanumeric codes that appear AFTER core title content.
+  // Catches: mm22, A2, z4405, 9176, seller SKUs, catalog codes.
+  // Preserves: issue numbers (#22), ratios (1:25), title years (2099, 2000 AD).
+  //
+  // Strategy: Strip standalone alphanumeric tokens 2-6 chars that are NOT:
+  // - Four-digit years 1900-2099
+  // - Prefixed with # (issue numbers)
+  // - Part of ratio pattern (1:N)
+  // - Protected title numbers (2099, 2000, 3D, etc.)
+  //
+  // Patterns:
+  // - [a-z]{1,2}\d{1,5}: letter(s) + digits (mm22, A2, z4405)
+  // - \d{1,5}[a-z]{1,2}: digits + letter(s) (22mm, 4405z)
+  // - [a-z]\d+[a-z]: letter-digits-letter (a1b)
+  // - \d{4,5}(?!AD): pure 4-5 digit codes NOT followed by AD (9176, not "2000 AD")
+  const INVENTORY_CODE_RE = /\b(?!(?:19|20)\d{2}\b)(?![#\d+:])([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/gi;
+
+  // Check if title has markers indicating end-of-title (safer to strip broadly)
+  const hasMarkers = /(\bvf\b|\bnm\b|\bfn\b|\bvg\b|\bgd\b|\(19\d{2}\)|\(20\d{2}\)|\$\d+|!|\bvariant\b)/i.test(cleaned);
+
+  if (hasMarkers) {
+    // Title has markers — safe to strip codes broadly
+    cleaned = cleaned.replace(INVENTORY_CODE_RE, (match) => {
+      removedTokens.push(match);
+      return ' ';
+    });
+  } else {
+    // No markers — only strip codes at string end (safer)
+    const tailMatch = cleaned.match(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i);
+    if (tailMatch) {
+      removedTokens.push(tailMatch[1]);
+      cleaned = cleaned.replace(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i, '');
+    }
+  }
+
   // Reuse existing cleanTitleForComicVine artist-stripping logic
   cleaned = cleanTitleForComicVine(cleaned, null);
 
@@ -2146,9 +2182,24 @@ export default async function handler(req, res) {
     let imageSearchTitle = visualResult?.items?.[0]?.rawTitle || null;
 
     if (familyCandidateAccepted && familyCandidate.rawTitle) {
-      // Use family candidate's rawTitle (from top-ranked family member)
-      imageSearchTitle = familyCandidate.rawTitle;
-      console.log(`[ship12] using title-family rawTitle: ${imageSearchTitle}`);
+      // Ship Pattern-J — rawTitle issue-mismatch guard.
+      // When family rawTitle contains different issue # than consensus, skip it
+      // to prevent wrong-issue comp contamination (Luke Cage #28 vs #46 class).
+      const rawTitleIssue = familyCandidate.rawTitle.match(/#\s*(\d+)/)?.[1];
+      const consensusIssue = String(out.issue || body.issue || '');
+
+      if (rawTitleIssue && consensusIssue && rawTitleIssue !== consensusIssue) {
+        console.log(
+          `[rawTitle-skipped-issue-mismatch] rawTitle has #${rawTitleIssue}, ` +
+          `consensus is #${consensusIssue} — using sanitized title instead`
+        );
+        // Use confirmedTitle + issue instead of contaminated rawTitle
+        imageSearchTitle = `${out.confirmedTitle || body.title} #${consensusIssue}`;
+      } else {
+        // Use family candidate's rawTitle (from top-ranked family member)
+        imageSearchTitle = familyCandidate.rawTitle;
+        console.log(`[ship12] using title-family rawTitle: ${imageSearchTitle}`);
+      }
     } else if (familyCandidate?.decision === 'fallback-vision') {
       // On fallback-vision, block imageSearchTitle from unrelated visual pool
       imageSearchTitle = null;
