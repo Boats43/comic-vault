@@ -2195,28 +2195,42 @@ export default async function handler(req, res) {
     // (fetchComps) and not surfaced to the response.
     let imageSearchTitle = visualResult?.items?.[0]?.rawTitle || null;
 
-    if (familyCandidateAccepted && familyCandidate.rawTitle) {
+    if (familyCandidateAccepted && familyCandidate?.rawTitle) {
       // Ship Pattern-J — rawTitle issue-mismatch guard.
       // When family rawTitle contains different issue # than consensus, skip it
       // to prevent wrong-issue comp contamination (Luke Cage #28 vs #46 class).
       try {
-        const rawTitleIssue = familyCandidate.rawTitle.match(/#\s*(\d+)/)?.[1];
-        // Use confirmedIssue (set at line ~1909) which holds the accepted issue
-        const acceptedIssue = String(confirmedIssue || issue || '');
+        const rawTitleIssue = String(familyCandidate.rawTitle || '').match(/#\s*(\d+)/)?.[1];
+        // Use confirmedIssue (set at line ~1909) which holds the accepted issue.
+        // Safely access all variables with explicit String() and trim to avoid any
+        // undefined references. NO body.* references - all variables in scope.
+        const acceptedIssue = String(
+          (typeof confirmedIssue !== 'undefined' && confirmedIssue) ||
+          (typeof issue !== 'undefined' && issue) ||
+          (out && out.issue) ||
+          ''
+        ).trim();
 
         if (rawTitleIssue && acceptedIssue && rawTitleIssue !== acceptedIssue) {
           console.log(
             `[rawTitle-skipped-issue-mismatch] rawTitle has #${rawTitleIssue}, ` +
             `consensus is #${acceptedIssue} — using sanitized title instead`
           );
-          // Use confirmedTitle + accepted issue instead of contaminated rawTitle
-          const fallbackTitle = confirmedTitle || title || '';
+          // Use confirmedTitle + accepted issue instead of contaminated rawTitle.
+          // Safely access all variables - NO body.* references.
+          const fallbackTitle = String(
+            (typeof confirmedTitle !== 'undefined' && confirmedTitle) ||
+            (typeof title !== 'undefined' && title) ||
+            (out && out.confirmedTitle) ||
+            ''
+          ).trim();
+
           if (fallbackTitle && acceptedIssue) {
             imageSearchTitle = `${fallbackTitle} #${acceptedIssue}`;
           } else {
             // Can't construct fallback — fail closed, don't use contaminated rawTitle
             imageSearchTitle = null;
-            console.log(`[rawTitle-guard] fallback construction failed, skipping rawTitle`);
+            console.log(`[rawTitle-guard] fallback unavailable — skipping rawTitle`);
           }
         } else {
           // Use family candidate's rawTitle (from top-ranked family member)
@@ -2224,7 +2238,7 @@ export default async function handler(req, res) {
           console.log(`[ship12] using title-family rawTitle: ${imageSearchTitle}`);
         }
       } catch (err) {
-        console.error('[rawTitle-guard] failed:', err.message);
+        console.error('[rawTitle-guard] failed:', err.message, err.stack);
         // Fail closed — don't use potentially contaminated rawTitle
         imageSearchTitle = null;
       }
