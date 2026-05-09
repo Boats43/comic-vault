@@ -734,24 +734,29 @@ const sanitizeTitle = (title, context = {}) => {
   // - \d{1,5}[a-z]{1,2}: digits + letter(s) (22mm, 4405z)
   // - [a-z]\d+[a-z]: letter-digits-letter (a1b)
   // - \d{4,5}(?!AD): pure 4-5 digit codes NOT followed by AD (9176, not "2000 AD")
-  const INVENTORY_CODE_RE = /\b(?!(?:19|20)\d{2}\b)(?![#\d+:])([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/gi;
+  try {
+    const INVENTORY_CODE_RE = /\b(?!(?:19|20)\d{2}\b)(?![#\d+:])([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/gi;
 
-  // Check if title has markers indicating end-of-title (safer to strip broadly)
-  const hasMarkers = /(\bvf\b|\bnm\b|\bfn\b|\bvg\b|\bgd\b|\(19\d{2}\)|\(20\d{2}\)|\$\d+|!|\bvariant\b)/i.test(cleaned);
+    // Check if title has markers indicating end-of-title (safer to strip broadly)
+    const hasMarkers = cleaned && /(\bvf\b|\bnm\b|\bfn\b|\bvg\b|\bgd\b|\(19\d{2}\)|\(20\d{2}\)|\$\d+|!|\bvariant\b)/i.test(cleaned);
 
-  if (hasMarkers) {
-    // Title has markers — safe to strip codes broadly
-    cleaned = cleaned.replace(INVENTORY_CODE_RE, (match) => {
-      removedTokens.push(match);
-      return ' ';
-    });
-  } else {
-    // No markers — only strip codes at string end (safer)
-    const tailMatch = cleaned.match(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i);
-    if (tailMatch) {
-      removedTokens.push(tailMatch[1]);
-      cleaned = cleaned.replace(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i, '');
+    if (hasMarkers) {
+      // Title has markers — safe to strip codes broadly
+      cleaned = cleaned.replace(INVENTORY_CODE_RE, (match) => {
+        removedTokens.push(match);
+        return ' ';
+      });
+    } else if (cleaned) {
+      // No markers — only strip codes at string end (safer)
+      const tailMatch = cleaned.match(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i);
+      if (tailMatch && tailMatch[1]) {
+        removedTokens.push(tailMatch[1]);
+        cleaned = cleaned.replace(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i, '');
+      }
     }
+  } catch (err) {
+    console.error('[sanitize-inventory-code] failed:', err.message);
+    // Continue with cleaned as-is
   }
 
   // Reuse existing cleanTitleForComicVine artist-stripping logic
@@ -2185,20 +2190,33 @@ export default async function handler(req, res) {
       // Ship Pattern-J — rawTitle issue-mismatch guard.
       // When family rawTitle contains different issue # than consensus, skip it
       // to prevent wrong-issue comp contamination (Luke Cage #28 vs #46 class).
-      const rawTitleIssue = familyCandidate.rawTitle.match(/#\s*(\d+)/)?.[1];
-      const consensusIssue = String(out.issue || body.issue || '');
+      try {
+        const rawTitleIssue = familyCandidate.rawTitle.match(/#\s*(\d+)/)?.[1];
+        const consensusIssue = String((out && out.issue) || body.issue || '');
 
-      if (rawTitleIssue && consensusIssue && rawTitleIssue !== consensusIssue) {
-        console.log(
-          `[rawTitle-skipped-issue-mismatch] rawTitle has #${rawTitleIssue}, ` +
-          `consensus is #${consensusIssue} — using sanitized title instead`
-        );
-        // Use confirmedTitle + issue instead of contaminated rawTitle
-        imageSearchTitle = `${out.confirmedTitle || body.title} #${consensusIssue}`;
-      } else {
-        // Use family candidate's rawTitle (from top-ranked family member)
+        if (rawTitleIssue && consensusIssue && rawTitleIssue !== consensusIssue) {
+          console.log(
+            `[rawTitle-skipped-issue-mismatch] rawTitle has #${rawTitleIssue}, ` +
+            `consensus is #${consensusIssue} — using sanitized title instead`
+          );
+          // Use confirmedTitle + issue instead of contaminated rawTitle
+          const fallbackTitle = (out && out.confirmedTitle) || confirmedTitle || body.title || '';
+          if (fallbackTitle && consensusIssue) {
+            imageSearchTitle = `${fallbackTitle} #${consensusIssue}`;
+          } else {
+            // Can't construct fallback, use rawTitle as-is
+            imageSearchTitle = familyCandidate.rawTitle;
+            console.log(`[rawTitle-guard] fallback construction failed, using rawTitle`);
+          }
+        } else {
+          // Use family candidate's rawTitle (from top-ranked family member)
+          imageSearchTitle = familyCandidate.rawTitle;
+          console.log(`[ship12] using title-family rawTitle: ${imageSearchTitle}`);
+        }
+      } catch (err) {
+        console.error('[rawTitle-guard] failed:', err.message);
+        // Fall back to using rawTitle as-is
         imageSearchTitle = familyCandidate.rawTitle;
-        console.log(`[ship12] using title-family rawTitle: ${imageSearchTitle}`);
       }
     } else if (familyCandidate?.decision === 'fallback-vision') {
       // On fallback-vision, block imageSearchTitle from unrelated visual pool
