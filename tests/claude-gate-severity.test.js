@@ -60,6 +60,24 @@ const testCases = [
     }
   },
   {
+    name: 'KEY ISSUE MISIDENTIFICATION prefix - blocks pricing',
+    input: {
+      title: 'Marvel Team-Up',
+      issue: '141',
+      year: '1984',
+      publisher: 'Marvel',
+      price: 50,
+      pricingSource: 'refused-claude-gate',
+      claudeCheckBlocker: 'KEY ISSUE MISIDENTIFICATION: Marvel Team-Up #141 is NOT the 1st appearance of Spider-Man\'s black costume - that\'s Secret Wars #8 (1984)',
+      rawComps: { average: 45, count: 3 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST',
+      reasonContains: 'critical verification failure'
+    }
+  },
+  {
     name: 'Existing wrong-issue pattern still fires',
     input: {
       title: 'X-Men',

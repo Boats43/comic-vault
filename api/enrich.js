@@ -4349,6 +4349,7 @@ export default async function handler(req, res) {
           /\bCRITICAL:/i,                         // Severity embedded mid-sentence
           /^HIGH:/i,                              // High-severity prefix
           /\bHIGH:/i,                             // High-severity embedded
+          /^KEY ISSUE MISIDENTIFICATION:/i,       // Key issue misidentification prefix
           /wrong\s+issue/i,
           /different\s+(?:book|series|comic)/i,
           /wrong\s+era/i,
