@@ -650,7 +650,7 @@ const sanitizeTitle = (title, context = {}) => {
   const removedTokens = [];
 
   // Marketplace/auction keywords
-  const MARKETPLACE_RE = /\b(free\s+shipping|combine\s+(?:shipping|s&h)|select\s+an?\s+issue|stock\s+image|see\s+pics?|must\s+see|hot\s+read)\b/gi;
+  const MARKETPLACE_RE = /\b(free\s+(?:shipping|ship)|select\s+an?\s+issue|choose\s+(?:your\s+)?issue|your\s+choice|stock\s+image|see\s+pics?|combine(?:d)?\s+(?:shipping|ship|s&h)|buy\s+it\s+now|must\s+see|hot\s+read)\b/gi;
   cleaned = cleaned.replace(MARKETPLACE_RE, (match) => {
     removedTokens.push(match);
     return ' ';
@@ -764,7 +764,7 @@ const detectTitleContamination = (title, context = {}) => {
   const titleLower = title.toLowerCase();
 
   // Signal 1: Marketplace keywords
-  if (/\b(free\s+shipping|select\s+an?\s+issue|stock\s+image|see\s+pics?|combine\s+(?:shipping|s&h))\b/i.test(title)) {
+  if (/\b(free\s+(?:shipping|ship)|select\s+an?\s+issue|choose\s+(?:your\s+)?issue|your\s+choice|stock\s+image|see\s+pics?|combine(?:d)?\s+(?:shipping|ship|s&h)|buy\s+it\s+now|must\s+see|hot\s+read)\b/i.test(title)) {
     signals.push('marketplace-keywords');
   }
 
@@ -809,7 +809,7 @@ const detectTitleContamination = (title, context = {}) => {
   // Ship v0-G.1 — Tightened severity rules
   // High: ≥2 signals OR any single high-priority signal
   // Medium: 1 signal
-  const highPrioritySignals = ['seller-description-cluster', 'listing-language', 'publisher-filler'];
+  const highPrioritySignals = ['seller-description-cluster', 'listing-language', 'publisher-filler', 'marketplace-keywords'];
   const hasHighPriority = signals.some(s => highPrioritySignals.includes(s));
 
   let severity = 'none';

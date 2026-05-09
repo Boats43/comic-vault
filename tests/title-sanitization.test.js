@@ -148,7 +148,7 @@ const sanitizeTitle = (title, context = {}) => {
   let cleaned = title;
   const removedTokens = [];
 
-  const MARKETPLACE_RE = /\b(free\s+shipping|combine\s+(?:shipping|s&h)|select\s+an?\s+issue|stock\s+image|see\s+pics?|must\s+see|hot\s+read)\b/gi;
+  const MARKETPLACE_RE = /\b(free\s+(?:shipping|ship)|select\s+an?\s+issue|choose\s+(?:your\s+)?issue|your\s+choice|stock\s+image|see\s+pics?|combine(?:d)?\s+(?:shipping|ship|s&h)|buy\s+it\s+now|must\s+see|hot\s+read)\b/gi;
   cleaned = cleaned.replace(MARKETPLACE_RE, (match) => {
     removedTokens.push(match);
     return ' ';
@@ -234,7 +234,7 @@ const detectTitleContamination = (title, context = {}) => {
     return { contaminated: false, signals: [], severity: 'none' };
   }
 
-  if (/\b(free\s+shipping|select\s+an?\s+issue|stock\s+image|see\s+pics?|combine\s+(?:shipping|s&h))\b/i.test(title)) {
+  if (/\b(free\s+(?:shipping|ship)|select\s+an?\s+issue|choose\s+(?:your\s+)?issue|your\s+choice|stock\s+image|see\s+pics?|combine(?:d)?\s+(?:shipping|ship|s&h)|buy\s+it\s+now|must\s+see|hot\s+read)\b/i.test(title)) {
     signals.push('marketplace-keywords');
   }
 
@@ -273,7 +273,7 @@ const detectTitleContamination = (title, context = {}) => {
   const contaminated = signals.length > 0;
 
   // Ship v0-G.1 — Tightened severity rules
-  const highPrioritySignals = ['seller-description-cluster', 'listing-language', 'publisher-filler'];
+  const highPrioritySignals = ['seller-description-cluster', 'listing-language', 'publisher-filler', 'marketplace-keywords'];
   const hasHighPriority = signals.some(s => highPrioritySignals.includes(s));
 
   let severity = 'none';
@@ -443,13 +443,13 @@ test('detectTitleContamination: clean title passes', () => {
   assertEqual(result.signals.length, 0, 'Should have no signals');
 });
 
-test('detectTitleContamination: marketplace keywords medium severity', () => {
+test('detectTitleContamination: marketplace keywords high severity', () => {
   const title = "Amazing Spider-Man #1 free shipping";
   const context = { year: 1963, isGraded: false };
   const result = detectTitleContamination(title, context);
 
   assertEqual(result.contaminated, true, 'Should detect contamination');
-  assertEqual(result.severity, 'medium', 'Should be medium severity (1 signal)');
+  assertEqual(result.severity, 'high', 'Marketplace keywords should escalate to high');
   assertIncludes(result.signals, 'marketplace-keywords', 'Should detect marketplace');
 });
 
@@ -546,6 +546,70 @@ test('detectTitleContamination: Miles high severity (listing language)', () => {
   assertEqual(result.contaminated, true, 'Should detect contamination');
   assertEqual(result.severity, 'high', 'Listing language should escalate to high');
   assertIncludes(result.signals, 'listing-language', 'Should detect listing language');
+});
+
+// ============================================================================
+// MARKETPLACE KEYWORD POLLUTION FIX TESTS
+// ============================================================================
+
+test('sanitizeTitle: Dick Tracy select an issue free shipping', () => {
+  const title = "Dick Tracy Select an Issue Free Shipping #1";
+  const context = { year: 1950, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.toLowerCase().includes('select'), false, 'Should strip select an issue');
+  assertEqual(result.toLowerCase().includes('free shipping'), false, 'Should strip free shipping');
+  assertTruthy(result.toLowerCase().includes('dick'), 'Should keep title');
+  assertTruthy(result.toLowerCase().includes('tracy'), 'Should keep title');
+});
+
+test('sanitizeTitle: Batman choose your issue', () => {
+  const title = "Batman Choose Your Issue #423";
+  const context = { year: 1988, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.toLowerCase().includes('choose'), false, 'Should strip choose your issue');
+  assertEqual(result.toLowerCase().includes('your issue'), false, 'Should strip your issue');
+  assertTruthy(result.toLowerCase().includes('batman'), 'Should keep title');
+});
+
+test('sanitizeTitle: Amazing Spider-Man free ship', () => {
+  const title = "Amazing Spider-Man Free Ship #300";
+  const context = { year: 1988, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.toLowerCase().includes('free ship'), false, 'Should strip free ship');
+  assertTruthy(result.toLowerCase().includes('spider'), 'Should keep title');
+});
+
+test('sanitizeTitle: X-Men your choice buy it now', () => {
+  const title = "X-Men Your Choice Buy It Now #94";
+  const context = { year: 1975, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.toLowerCase().includes('your choice'), false, 'Should strip your choice');
+  assertEqual(result.toLowerCase().includes('buy it now'), false, 'Should strip buy it now');
+  assertTruthy(result.toLowerCase().includes('x-men'), 'Should keep title');
+});
+
+test('sanitizeTitle: Fantastic Four combined ship see pics', () => {
+  const title = "Fantastic Four Combined Ship See Pics #52";
+  const context = { year: 1966, isGraded: false };
+  const result = sanitizeTitle(title, context);
+
+  assertEqual(result.toLowerCase().includes('combined ship'), false, 'Should strip combined ship');
+  assertEqual(result.toLowerCase().includes('see pics'), false, 'Should strip see pics');
+  assertTruthy(result.toLowerCase().includes('fantastic'), 'Should keep title');
+});
+
+test('detectTitleContamination: Dick Tracy marketplace high severity', () => {
+  const title = "Dick Tracy Select an Issue Free Shipping #1";
+  const context = { year: 1950, isGraded: false };
+  const result = detectTitleContamination(title, context);
+
+  assertEqual(result.contaminated, true, 'Should detect contamination');
+  assertEqual(result.severity, 'high', 'Marketplace keywords should trigger high severity');
+  assertIncludes(result.signals, 'marketplace-keywords', 'Should detect marketplace keywords');
 });
 
 // ============================================================================
