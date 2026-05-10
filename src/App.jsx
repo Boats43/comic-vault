@@ -88,6 +88,64 @@ const getDisplayPrice = (item) => {
   return 0;
 };
 
+// Decision-first UI helpers (Ship SPEED-2a+1)
+const getActionColor = (decision) => {
+  if (!decision?.action) return { bg: 'rgba(99,102,241,0.08)', border: 'rgba(99,102,241,0.25)', text: '#6366f1' };
+
+  const action = decision.action;
+  const confidence = decision.confidence;
+
+  // GREEN: LIST_NOW with high or medium confidence
+  if (action === 'LIST_NOW' && (confidence === 'high' || confidence === 'medium')) {
+    return { bg: 'rgba(34,197,94,0.1)', border: 'rgba(34,197,94,0.3)', text: '#22c55e' };
+  }
+
+  // YELLOW: LIST_LOW, RESEARCH, GRADE_CANDIDATE, BUNDLE
+  if (action === 'LIST_LOW' || action === 'RESEARCH' || action === 'GRADE_CANDIDATE' || action === 'BUNDLE') {
+    return { bg: 'rgba(251,191,36,0.1)', border: 'rgba(251,191,36,0.3)', text: '#fbbf24' };
+  }
+
+  // RED: DO_NOT_LIST, ID_REQUIRED
+  if (action === 'DO_NOT_LIST' || action === 'ID_REQUIRED') {
+    return { bg: 'rgba(239,68,68,0.1)', border: 'rgba(239,68,68,0.3)', text: '#e05656' };
+  }
+
+  // Default: blue
+  return { bg: 'rgba(99,102,241,0.08)', border: 'rgba(99,102,241,0.25)', text: '#6366f1' };
+};
+
+const getMarketSignal = (item) => {
+  if (!item) return { badge: 'UNKNOWN', color: '#888', icon: '❓' };
+
+  const soldComps = item.soldComps || [];
+  const activeCount = item.rawComps?.count || 0;
+  const soldCount = soldComps.length;
+
+  // Find most recent sold comp
+  let mostRecentDays = null;
+  if (soldComps.length > 0) {
+    mostRecentDays = Math.min(...soldComps.map(s => s.daysAgo || 999));
+  }
+
+  // HOT: recent sold recency <= 30 days AND soldCount >= 3 AND activeCount <= 5
+  if (mostRecentDays != null && mostRecentDays <= 30 && soldCount >= 3 && activeCount <= 5) {
+    return { badge: 'HOT', color: '#22c55e', icon: '🔥' };
+  }
+
+  // NORMAL: recency <= 90 days OR soldCount >= 1 OR activeCount >= 2
+  if ((mostRecentDays != null && mostRecentDays <= 90) || soldCount >= 1 || activeCount >= 2) {
+    return { badge: 'NORMAL', color: '#60a5fa', icon: '📊' };
+  }
+
+  // COLD: recency > 90 days OR (soldCount === 0 and activeCount <= 1)
+  if ((mostRecentDays != null && mostRecentDays > 90) || (soldCount === 0 && activeCount <= 1)) {
+    return { badge: 'COLD', color: '#888', icon: '❄️' };
+  }
+
+  // UNKNOWN: insufficient data
+  return { badge: 'UNKNOWN', color: '#888', icon: '❓' };
+};
+
 // v0-E: Decision Engine price authority helper
 // Returns the authoritative price for listPrice initialization.
 // Precedence: blocked → 0, decision.price when decision permits listing → system price fallback
@@ -2288,11 +2346,133 @@ function CollectionDetail({
       <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
         {item.title || "Unknown"}{item.issue && !/unknown/i.test(String(item.issue)) && !String(item.title || "").includes('#' + item.issue) ? ` #${item.issue}` : ''}
       </div>
-      <div className="muted small">
+      <div className="muted small" style={{ marginBottom: 12 }}>
         {item.publisher}
         {item.publisher && item.year ? " · " : ""}
         {item.year}
+        {item.grade && ` · ${gradeBadgeText}`}
       </div>
+
+      {/* 2a. DECISION CARD — Decision-first layout */}
+      {item.decision?.action && (() => {
+        const colors = getActionColor(item.decision);
+        const marketSignal = getMarketSignal(item);
+        const displayPrice = getDisplayPrice(item);
+
+        return (
+          <div style={{
+            marginBottom: 16,
+            padding: "14px",
+            background: colors.bg,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+          }}>
+            {/* Action + Confidence + Market Signal */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 10,
+              flexWrap: "wrap"
+            }}>
+              <span className={`pill-decision-${item.decision.action.toLowerCase().replace(/_/g, '-')}`}
+                style={{
+                  background: colors.bg,
+                  borderColor: colors.border,
+                  color: colors.text,
+                  fontSize: 12,
+                  fontWeight: 800,
+                  padding: '6px 12px',
+                  letterSpacing: 0.5
+                }}>
+                {item.decision.action.replace(/_/g, ' ')}
+              </span>
+              {item.decision.confidence && (
+                <span style={{
+                  fontSize: 10,
+                  color: "#888",
+                  textTransform: "uppercase",
+                  fontWeight: 600,
+                  letterSpacing: 0.5
+                }}>
+                  {item.decision.confidence}
+                </span>
+              )}
+              <div style={{
+                marginLeft: "auto",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 10,
+                fontWeight: 700,
+                color: marketSignal.color,
+                background: `${marketSignal.color}15`,
+                padding: "4px 8px",
+                borderRadius: 6,
+                border: `1px solid ${marketSignal.color}40`
+              }}>
+                <span>{marketSignal.icon}</span>
+                <span>{marketSignal.badge}</span>
+              </div>
+            </div>
+
+            {/* Recommended Price */}
+            {(item.decision.price != null || displayPrice > 0) && (
+              <div style={{ fontSize: 24, fontWeight: 800, color: colors.text, marginBottom: 8 }}>
+                {item.decision.price != null
+                  ? (typeof item.decision.price === 'number'
+                    ? `$${item.decision.price.toFixed(2)}`
+                    : (String(item.decision.price).startsWith('$') ? item.decision.price : `$${item.decision.price}`))
+                  : `$${displayPrice.toFixed(2)}`}
+              </div>
+            )}
+
+            {/* Reason */}
+            {item.decision.reason && (
+              <div style={{ fontSize: 13, color: "#ccc", marginBottom: 8, lineHeight: 1.5 }}>
+                {item.decision.reason}
+              </div>
+            )}
+
+            {/* Blockers */}
+            {item.decision.blockers && item.decision.blockers.length > 0 && (
+              <div style={{
+                fontSize: 11,
+                color: "#fca5a5",
+                background: "rgba(239,68,68,0.15)",
+                padding: "6px 10px",
+                borderRadius: 6,
+                marginBottom: 6,
+                fontWeight: 600
+              }}>
+                🚫 {item.decision.blockers.join(', ')}
+              </div>
+            )}
+
+            {/* Warnings */}
+            {item.decision.warnings && item.decision.warnings.length > 0 && (
+              <div style={{
+                fontSize: 11,
+                color: "#fde68a",
+                background: "rgba(251,191,36,0.15)",
+                padding: "6px 10px",
+                borderRadius: 6,
+                marginBottom: 6,
+                fontWeight: 600
+              }}>
+                ⚠️ {item.decision.warnings.join(', ')}
+              </div>
+            )}
+
+            {/* Next Step */}
+            {item.decision.nextStep && (
+              <div style={{ fontSize: 11, color: "#888", marginTop: 8, fontStyle: "italic" }}>
+                → {item.decision.nextStep}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* 2a-1. ENRICHED DATA SECTIONS */}
       {/* Creator Credits */}
@@ -4163,81 +4343,7 @@ function CollectionDetail({
               </div>
             )}
 
-            {/* Ship #26 — Decision Engine v0-C Display */}
-            {item.decision?.action && (
-              <div style={{
-                marginBottom: 12,
-                padding: "12px",
-                background: "rgba(99,102,241,0.08)",
-                border: "1px solid rgba(99,102,241,0.25)",
-                borderRadius: 8,
-              }}>
-                <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  marginBottom: 8
-                }}>
-                  <span style={{ fontWeight: 700, fontSize: 11, color: "#888", letterSpacing: 0.5 }}>
-                    DECISION
-                  </span>
-                  <span className={`pill-decision-${item.decision.action.toLowerCase().replace(/_/g, '-')}`}>
-                    {item.decision.action.replace(/_/g, ' ')}
-                  </span>
-                  {item.decision.confidence && (
-                    <span style={{
-                      fontSize: 10,
-                      color: "#888",
-                      marginLeft: "auto"
-                    }}>
-                      {item.decision.confidence} confidence
-                    </span>
-                  )}
-                </div>
-                {item.decision.reason && (
-                  <div style={{ fontSize: 12, color: "#ccc", marginBottom: 6, lineHeight: 1.4 }}>
-                    {item.decision.reason}
-                  </div>
-                )}
-                {item.decision.price != null && (
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#60a5fa", marginBottom: 6 }}>
-                    Price: {typeof item.decision.price === 'number'
-                      ? `$${item.decision.price.toFixed(2)}`
-                      : (String(item.decision.price).startsWith('$') ? item.decision.price : `$${item.decision.price}`)}
-                  </div>
-                )}
-                {item.decision.blockers && item.decision.blockers.length > 0 && (
-                  <div style={{
-                    fontSize: 11,
-                    color: "#fca5a5",
-                    background: "rgba(239,68,68,0.1)",
-                    padding: "4px 8px",
-                    borderRadius: 4,
-                    marginBottom: 4,
-                  }}>
-                    🚫 Blockers: {item.decision.blockers.join(', ')}
-                  </div>
-                )}
-                {item.decision.warnings && item.decision.warnings.length > 0 && (
-                  <div style={{
-                    fontSize: 11,
-                    color: "#fde68a",
-                    background: "rgba(251,191,36,0.1)",
-                    padding: "4px 8px",
-                    borderRadius: 4,
-                    marginBottom: 4,
-                  }}>
-                    ⚠️ Warnings: {item.decision.warnings.join(', ')}
-                  </div>
-                )}
-                {item.decision.nextStep && (
-                  <div style={{ fontSize: 11, color: "#888", marginTop: 6, fontStyle: "italic" }}>
-                    → {item.decision.nextStep}
-                  </div>
-                )}
-              </div>
-            )}
-
+            {/* 3. PRIMARY ACTION — List Price Input */}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               <span style={{ color: "#aaa", fontSize: 13 }}>List price</span>
               <input
