@@ -4451,6 +4451,46 @@ export default async function handler(req, res) {
         // Price ships, decision will cap at RESEARCH via claudeCheckHighSeverity warning
       }
 
+      // Fix B (Phase 1 finalization) — Historical key-issue hallucination downgrade.
+      // Batman #59 class: Claude verification hallucinates historical corrections
+      // without source-backing (claimed Deadshot first appeared 1959 not 1950).
+      // When CRITICAL flag matches historical key-correction language AND Vision
+      // confirmed the key claim AND visionConfidence is not low AND active comps >= 2,
+      // downgrade to HIGH/RESEARCH instead of hard DO_NOT_LIST.
+      const HISTORICAL_KEY_PATTERNS = [
+        /first\s+appear(?:ed|ance)/i,                      // "first appeared", "first appearance"
+        /does\s+not\s+feature\s+first\s+appearance/i,      // "does not feature first appearance"
+        /not\s+the\s+first\s+appearance/i,                 // "not the first appearance"
+        /wrong\s+year/i,                                    // "wrong year"
+        /(?:debut|origin|introduced)\s+in\s+\d{4}/i,       // "debuted in 1959" (year claim)
+        /actually\s+(?:appeared|debuted|introduced)/i,     // "actually appeared", "actually debuted"
+        /historical(?:ly)?\s+inaccurate/i,                 // "historically inaccurate"
+      ];
+      const isHistoricalKeyCorrection = isCriticalFlag &&
+        HISTORICAL_KEY_PATTERNS.some(re => re.test(refusalReason));
+      const visionConfirmedKey = !!(req.body.keyIssue && String(req.body.keyIssue).trim().length > 0);
+      const visionConfidenceNotLow = out.visionConfidence !== 'low';
+      const hasActiveComps = activeCount >= 2;
+
+      if (isHistoricalKeyCorrection && visionConfirmedKey && visionConfidenceNotLow && hasActiveComps && !isPolybagPricing) {
+        shouldDowngradeCritical = true;
+        console.log(
+          '[claude-gate] DOWNGRADE — historical key-issue hallucination · flag:',
+          refusalReason,
+          '· visionKey:',
+          req.body.keyIssue,
+          '· visionConf:',
+          out.visionConfidence,
+          '· comps:',
+          activeCount
+        );
+        out.claudeCheckHighSeverity = refusalReason.replace(/\bCRITICAL:/i, 'HIGH:');
+        out.claudeCheckMode = 'historical_key_hallucination_downgraded';
+        // Price ships, decision will cap at RESEARCH via claudeCheckHighSeverity warning.
+        // This downgrade does NOT fully trust the book into LIST_NOW — only prevents
+        // hard DO_NOT_LIST block. User must review before listing.
+      }
+
       if (
         ((isPricingCritical && !shouldDowngradeCritical) ||
          ((claudeCheck.verified === false && claudeCheck.confidence === 'LOW') && !shouldDowngradeCritical)) &&
