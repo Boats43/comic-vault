@@ -4352,9 +4352,59 @@ export default async function handler(req, res) {
         re.test(refusalReason)
       );
 
+      // Ship Pattern M — Story-only CRITICAL downgrade.
+      // When Haiku flags CRITICAL due to ComicVine story metadata corruption
+      // (not identity/comp pool failures), downgrade to HIGH severity if
+      // identity and market evidence are strong. Story metadata is known
+      // unreliable (line 4367 comment acknowledges this).
+      const STORY_ONLY_PATTERNS = [
+        /story\s+(?:content|description|field|metadata)\s+(?:is|references|mentions|describes)/i,
+        /story.*(?:wrong|incorrect|mismatch|different|unrelated|corrupt)/i,
+        /(?:wrong|different|unrelated|corrupt).*story/i,
+        /description\s+(?:is|references|describes).*(?:wrong|different|unrelated)/i
+      ];
+
+      const IDENTITY_FAILURE_PATTERNS = [
+        /\bKEY ISSUE\b/i,
+        /key\s+claim/i,
+        /wrong\s+(?:issue|book|era|series)/i,
+        /different\s+(?:book|series|comic|era)/i,
+        /\breprint\b/i,
+        /\bfacsimile\b/i,
+        /\bcounterfeit\b/i,
+        /comp\s+pool.*(?:wrong|contaminated|mismatch)/i,
+        /\bnot\s+the\s+same\s+(?:book|comic|issue)/i,
+        /chronological.*impossible/i,
+        /\bauthenticity\b/i,
+        /completely\s+different/i,
+        /issue\s+misidentified/i
+      ];
+
+      const isCriticalFlag = /\bCRITICAL:/i.test(refusalReason);
+      const isStoryOnly = STORY_ONLY_PATTERNS.some(re => re.test(refusalReason)) &&
+                          !IDENTITY_FAILURE_PATTERNS.some(re => re.test(refusalReason));
+      const activeCount = rawComps?.count || 0;
+      const verifiedCount = out.soldCompDiagnostics?.verifiedCount || 0;
+      const isIdentityStrong = out.visionConfidence !== 'low' &&
+                               (activeCount >= 3 || verifiedCount >= 2);
+
+      let shouldDowngradeCritical = false;
+      if (isCriticalFlag && isStoryOnly && isIdentityStrong) {
+        shouldDowngradeCritical = true;
+        console.log(
+          '[claude-gate] DOWNGRADE — story-only CRITICAL with strong identity · flag:',
+          refusalReason
+        );
+        // Convert CRITICAL to HIGH and route to high-severity warning path
+        const downgradedReason = refusalReason.replace(/\bCRITICAL:/i, 'HIGH:');
+        out.claudeCheckHighSeverity = downgradedReason;
+        out.claudeCheckMode = 'story_only_downgraded';
+        // Price ships, decision will cap at RESEARCH via claudeCheckHighSeverity warning
+      }
+
       if (
-        (isPricingCritical ||
-         (claudeCheck.verified === false && claudeCheck.confidence === 'LOW')) &&
+        ((isPricingCritical && !shouldDowngradeCritical) ||
+         ((claudeCheck.verified === false && claudeCheck.confidence === 'LOW') && !shouldDowngradeCritical)) &&
         !isPolybagPricing
       ) {
         // Ship 10 — Reclassify claude-gate refusals.

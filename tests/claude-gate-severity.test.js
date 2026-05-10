@@ -219,6 +219,158 @@ const testCases = [
       blockers: [],
       action: 'LIST_NOW'
     }
+  },
+  {
+    name: 'Pattern M: Story-only CRITICAL + strong identity + active comps → downgrade to RESEARCH',
+    input: {
+      title: 'Batman Gotham Adventures',
+      issue: '2',
+      year: '1998',
+      publisher: 'DC',
+      price: 11,
+      pricingSource: 'pricecharting',
+      visionConfidence: 'high',
+      claudeCheckHighSeverity: 'HIGH: Story content is Italian and references Detective Comics 2019 issues — does NOT match Batman: Gotham Adventures #2 1998',
+      rawComps: { average: 9, count: 5 },
+      soldCompDiagnostics: { verifiedCount: 2 }
+    },
+    expected: {
+      warnings: ['claude-check-high-severity'],
+      blockers: [],
+      action: 'RESEARCH',
+      reasonContains: 'high-severity'
+    }
+  },
+  {
+    name: 'Pattern M: Story-only CRITICAL + verified sold comps ≥ 2 → downgrade to RESEARCH',
+    input: {
+      title: 'Infinity',
+      issue: '1',
+      year: '2013',
+      publisher: 'Marvel',
+      price: 10,
+      pricingSource: 'pricecharting',
+      visionConfidence: 'medium',
+      claudeCheckHighSeverity: 'HIGH: Story description is for unrelated music industry conspiracy story, not Marvel Infinity',
+      rawComps: { average: 8, count: 2 },
+      soldCompDiagnostics: { verifiedCount: 3 }
+    },
+    expected: {
+      warnings: ['claude-check-high-severity'],
+      blockers: [],
+      action: 'RESEARCH'
+    }
+  },
+  {
+    name: 'Pattern M: KEY ISSUE in CRITICAL stays hard block despite story language',
+    input: {
+      title: 'Marvel Team-Up',
+      issue: '141',
+      year: '1984',
+      publisher: 'Marvel',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      visionConfidence: 'high',
+      claudeCheckBlocker: 'CRITICAL: MTU #141 is NOT the first appearance - KEY ISSUE misidentified',
+      rawComps: { average: 45, count: 5 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST',
+      reasonContains: 'critical verification failure'
+    }
+  },
+  {
+    name: 'Pattern M: Story-only CRITICAL + weak identity → stays hard block',
+    input: {
+      title: 'Infinity',
+      issue: '1',
+      year: '2013',
+      publisher: 'Marvel',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      visionConfidence: 'low',
+      claudeCheckBlocker: 'CRITICAL: Story description is for unrelated music industry conspiracy',
+      rawComps: { average: 8, count: 2 },
+      soldCompDiagnostics: { verifiedCount: 0 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST'
+    }
+  },
+  {
+    name: 'Pattern M: Story-only CRITICAL + thin comps → stays hard block',
+    input: {
+      title: 'Obscure Comic',
+      issue: '1',
+      year: '2020',
+      publisher: 'Indie',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      visionConfidence: 'medium',
+      claudeCheckBlocker: 'CRITICAL: Story metadata is wrong',
+      rawComps: { average: 5, count: 2 },
+      soldCompDiagnostics: { verifiedCount: 1 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST'
+    }
+  },
+  {
+    name: 'Pattern M: Wrong issue CRITICAL → stays hard block',
+    input: {
+      title: 'X-Men',
+      issue: '94',
+      year: '1975',
+      publisher: 'Marvel',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      visionConfidence: 'high',
+      claudeCheckBlocker: 'CRITICAL: Comps are for wrong issue #93 not #94',
+      rawComps: { average: 200, count: 5 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST'
+    }
+  },
+  {
+    name: 'Pattern M: Reprint CRITICAL → stays hard block',
+    input: {
+      title: 'Detective Comics',
+      issue: '27',
+      year: '2010',
+      publisher: 'DC',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      visionConfidence: 'high',
+      claudeCheckBlocker: 'CRITICAL: This is a reprint/facsimile, not the 1939 original',
+      rawComps: { average: 25, count: 5 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST'
+    }
+  },
+  {
+    name: 'Pattern M: Chronological impossibility → stays hard block',
+    input: {
+      title: 'Marvel Team-Up',
+      issue: '11',
+      year: '1973',
+      publisher: 'Marvel',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      visionConfidence: 'medium',
+      claudeCheckBlocker: 'CRITICAL: Venom appears in 1973 story - chronologically impossible',
+      rawComps: { average: 30, count: 4 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST'
+    }
   }
 ];
 

@@ -72,6 +72,8 @@ CGC POP: ${pop?.total || '?'} copies tracked${pop?.atGrade ? `, ${pop.atGrade} a
 
 DEMAND: ${demandSignals?.velocity || '?'} velocity, ${demandSignals?.trend || '?'} trend, ${demandSignals?.liquidity || '?'} liquidity
 
+IMPORTANT: storyDescription is ComicVine metadata and may be corrupt or pulled from a wrong edition. Only flag story/description problems as pricing-critical if they prove the comp pool or pricing evidence is for a completely different book. Story metadata corruption alone is NOT pricing-critical.
+
 VERIFY ALL OF THE FOLLOWING:
 1. Do sold/active comps match this exact book?
 2. Is grade consistent with condition described?
