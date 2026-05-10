@@ -876,7 +876,8 @@ const detectTitleContamination = (title, context = {}) => {
   return { contaminated, signals, severity };
 };
 
-const lookupComicVine = async ({ title, issue, year, publisher }) => {
+// SPEED-2a — Export for metadata endpoint
+export const lookupComicVine = async ({ title, issue, year, publisher }) => {
   if (!process.env.COMICVINE_API_KEY || !title) return null;
   try {
     // Prefer explicit issue param, fall back to parsing from title.
@@ -4556,7 +4557,28 @@ export default async function handler(req, res) {
       `warnings=${out.decision.warnings?.length || 0}`
     );
 
-    res.status(200).json(out);
+    // SPEED-2a — Defer display-only metadata from initial response.
+    // Keep story/creators/pop/goCollect on server for Claude-check processing,
+    // but exclude from client response to reduce network transfer time.
+    // Client can request via /api/metadata endpoint.
+    const responseOut = { ...out };
+
+    // Remove display-only fields from client response
+    if (out.comicVine) {
+      const { description, personCredits, ...restCV } = out.comicVine;
+      responseOut.comicVine = restCV;
+    }
+    delete responseOut.pop;
+    delete responseOut.goCollect;
+
+    // Add metadata pending flag and IDs for metadata endpoint
+    responseOut.metadataPending = true;
+    responseOut.metadataIds = {
+      pcProductId: priceCharting?.id || null,
+      grade: grade || null,
+    };
+
+    res.status(200).json(responseOut);
   } catch (err) {
     // Ship 6 debug — log full error and stack trace to Vercel logs.
     // Without this, 500s appear in production with no diagnostic info.
