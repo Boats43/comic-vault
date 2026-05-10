@@ -343,6 +343,7 @@ const getCollectionMetrics = (catalogue) => {
       } else if (readiness.badge === 'PHOTOS NEEDED') {
         metrics.photosNeeded.count++;
         metrics.photosNeeded.value += price;
+        metrics.liquidValue += price; // PHOTOS_NEEDED items are listable/liquid
       } else if (readiness.badge === 'NEEDS REVIEW') {
         metrics.needsReview.count++;
         metrics.needsReview.value += price;
@@ -1846,6 +1847,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
             <div style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", textAlign: "center" }}>
               <div style={{ fontSize: 10, fontWeight: 600, color: "#22c55e", marginBottom: 1 }}>💰 LIQUID VALUE</div>
               <div style={{ fontSize: 18, fontWeight: 800, color: "#22c55e" }}>{fmt(metrics.liquidValue)}</div>
+              <div style={{ fontSize: 9, color: "#22c55e", opacity: 0.7, marginTop: 2 }}>Ready + Photos Needed</div>
             </div>
           </div>
         );
