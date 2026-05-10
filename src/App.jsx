@@ -270,6 +270,58 @@ const getReadinessStatus = (item) => {
   };
 };
 
+// Collection-level metrics helper
+const getCollectionMetrics = (catalogue) => {
+  if (!catalogue || catalogue.length === 0) {
+    return {
+      totalComics: 0,
+      totalValue: 0,
+      ready: { count: 0, value: 0 },
+      photosNeeded: { count: 0, value: 0 },
+      needsReview: { count: 0, value: 0 },
+      blocked: { count: 0, value: 0 },
+      liquidValue: 0
+    };
+  }
+
+  const metrics = {
+    totalComics: catalogue.length,
+    totalValue: 0,
+    ready: { count: 0, value: 0 },
+    photosNeeded: { count: 0, value: 0 },
+    needsReview: { count: 0, value: 0 },
+    blocked: { count: 0, value: 0 },
+    liquidValue: 0
+  };
+
+  for (const item of catalogue) {
+    const displayPrice = getDisplayPrice(item);
+    const listPrice = parseFloat(item.listPrice || 0);
+    const price = Math.max(displayPrice, listPrice);
+
+    metrics.totalValue += price;
+
+    const readiness = getReadinessStatus(item);
+
+    if (readiness.badge === 'READY') {
+      metrics.ready.count++;
+      metrics.ready.value += price;
+      metrics.liquidValue += price;
+    } else if (readiness.badge === 'PHOTOS NEEDED') {
+      metrics.photosNeeded.count++;
+      metrics.photosNeeded.value += price;
+    } else if (readiness.badge === 'NEEDS REVIEW') {
+      metrics.needsReview.count++;
+      metrics.needsReview.value += price;
+    } else if (readiness.badge === 'BLOCKED') {
+      metrics.blocked.count++;
+      metrics.blocked.value += price;
+    }
+  }
+
+  return metrics;
+};
+
 // v0-E: Decision Engine price authority helper
 // Returns the authoritative price for listPrice initialization.
 // Precedence: blocked → 0, decision.price when decision permits listing → system price fallback
@@ -1487,6 +1539,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
   const [importStatus, setImportStatus] = useState(null);
   const [claudeCardVisible, setClaudeCardVisible] = useState(false);
   const [backupBanner, setBackupBanner] = useState(false);
+  const [readinessFilter, setReadinessFilter] = useState(null); // 'READY' | 'PHOTOS NEEDED' | 'NEEDS REVIEW' | 'BLOCKED' | null
   const importRef = useRef(null);
 
   // Track collection changes for backup reminder
@@ -1672,6 +1725,106 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
         );
       })()}
 
+      {/* Collection Action Dashboard */}
+      {(() => {
+        const metrics = getCollectionMetrics(items);
+        return (
+          <div style={{ margin: "12px 0 8px", padding: "12px", borderRadius: 8, background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.15)" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: "#888", marginBottom: 10, textAlign: "center" }}>
+              Collection Status
+            </div>
+
+            {/* Action buckets grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6, marginBottom: 8 }}>
+              {/* Ready to List */}
+              <div
+                onClick={() => setReadinessFilter(readinessFilter === 'READY' ? null : 'READY')}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  background: readinessFilter === 'READY' ? "rgba(34,197,94,0.15)" : "rgba(34,197,94,0.08)",
+                  border: readinessFilter === 'READY' ? "1.5px solid rgba(34,197,94,0.5)" : "1px solid rgba(34,197,94,0.25)",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#22c55e", marginBottom: 2 }}>✓ READY</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#22c55e", marginBottom: 1 }}>{metrics.ready.count}</div>
+                <div style={{ fontSize: 10, color: "#22c55e", opacity: 0.8 }}>{fmt(metrics.ready.value)}</div>
+              </div>
+
+              {/* Photos Needed */}
+              <div
+                onClick={() => setReadinessFilter(readinessFilter === 'PHOTOS NEEDED' ? null : 'PHOTOS NEEDED')}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  background: readinessFilter === 'PHOTOS NEEDED' ? "rgba(251,191,36,0.15)" : "rgba(251,191,36,0.08)",
+                  border: readinessFilter === 'PHOTOS NEEDED' ? "1.5px solid rgba(251,191,36,0.5)" : "1px solid rgba(251,191,36,0.25)",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#fbbf24", marginBottom: 2 }}>📷 PHOTOS</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#fbbf24", marginBottom: 1 }}>{metrics.photosNeeded.count}</div>
+                <div style={{ fontSize: 10, color: "#fbbf24", opacity: 0.8 }}>{fmt(metrics.photosNeeded.value)}</div>
+              </div>
+
+              {/* Needs Review */}
+              <div
+                onClick={() => setReadinessFilter(readinessFilter === 'NEEDS REVIEW' ? null : 'NEEDS REVIEW')}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  background: readinessFilter === 'NEEDS REVIEW' ? "rgba(251,146,60,0.15)" : "rgba(251,146,60,0.08)",
+                  border: readinessFilter === 'NEEDS REVIEW' ? "1.5px solid rgba(251,146,60,0.5)" : "1px solid rgba(251,146,60,0.25)",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#fb923c", marginBottom: 2 }}>⚠️ REVIEW</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#fb923c", marginBottom: 1 }}>{metrics.needsReview.count}</div>
+                <div style={{ fontSize: 10, color: "#fb923c", opacity: 0.8 }}>{fmt(metrics.needsReview.value)}</div>
+              </div>
+
+              {/* Blocked */}
+              <div
+                onClick={() => setReadinessFilter(readinessFilter === 'BLOCKED' ? null : 'BLOCKED')}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  background: readinessFilter === 'BLOCKED' ? "rgba(239,68,68,0.15)" : "rgba(239,68,68,0.08)",
+                  border: readinessFilter === 'BLOCKED' ? "1.5px solid rgba(239,68,68,0.5)" : "1px solid rgba(239,68,68,0.25)",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#e05656", marginBottom: 2 }}>🚫 BLOCKED</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#e05656", marginBottom: 1 }}>{metrics.blocked.count}</div>
+                <div style={{ fontSize: 10, color: "#e05656", opacity: 0.8 }}>{fmt(metrics.blocked.value)}</div>
+              </div>
+            </div>
+
+            {/* Liquid Value highlight */}
+            <div style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", textAlign: "center" }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "#22c55e", marginBottom: 1 }}>💰 LIQUID VALUE</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "#22c55e" }}>{fmt(metrics.liquidValue)}</div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Active filter indicator */}
+      {readinessFilter && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, margin: "4px 0 8px", padding: "6px 10px", borderRadius: 6, background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)" }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "#6366f1" }}>Showing: {readinessFilter}</span>
+          <button
+            onClick={() => setReadinessFilter(null)}
+            style={{ background: "transparent", border: "none", color: "#6366f1", fontSize: 16, cursor: "pointer", padding: "0 4px", lineHeight: 1, fontWeight: 700 }}
+          >&times;</button>
+        </div>
+      )}
+
       {refreshingPrices > 0 && (
         <div className="muted small" style={{ textAlign: "center", margin: "4px 0 8px" }}>
           Updating prices... ({refreshingPrices} remaining)
@@ -1793,6 +1946,11 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
             if (eraFilter === "unlisted") return item.status !== "listed";
             return true;
           })
+          .filter((item) => {
+            if (!readinessFilter) return true;
+            const readiness = getReadinessStatus(item);
+            return readiness.badge === readinessFilter;
+          })
           .sort((a, b) => {
             if (sortBy === "value") return (getDisplayPrice(b) || 0) - (getDisplayPrice(a) || 0);
             if (sortBy === "title") return (a.title || "").localeCompare(b.title || "");
@@ -1801,7 +1959,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
             if (sortBy === "recent") return (b.timestamp || 0) - (a.timestamp || 0);
             return 0;
           });
-        const isFiltered = eraFilter !== "all" || sq;
+        const isFiltered = eraFilter !== "all" || sq || readinessFilter;
         return (
           <>
             {isFiltered && (
