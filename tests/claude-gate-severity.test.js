@@ -371,6 +371,100 @@ const testCases = [
       blockers: ['claude-check-critical'],
       action: 'DO_NOT_LIST'
     }
+  },
+  {
+    name: 'No-comparable-sales phrase does not hard-block by itself',
+    input: {
+      title: 'Fantastic Four Artgerm Invisible Woman',
+      issue: '1',
+      year: '2024',
+      publisher: 'Marvel',
+      price: 12,
+      pricingSource: 'pricecharting',
+      claudeCheckWarning: 'No comparable sales data (0 comps) - pricing estimate is unreliable',
+      rawComps: { average: 0, count: 0 },
+      visionConfidence: 'medium'
+    },
+    expected: {
+      warnings: [],  // No claude-check-critical from this phrase
+      blockers: [],  // No blocker solely from no-comps phrase
+      action: 'LIST_NOW'  // Price from PC ships, not hard-blocked
+    }
+  },
+  {
+    name: 'Zero comparable variants remain warning-only',
+    input: {
+      title: 'Test Comic',
+      issue: '1',
+      year: '2024',
+      publisher: 'Marvel',
+      price: 10,
+      pricingSource: 'pricecharting',
+      claudeCheckWarning: 'Zero comparable sales (0 comps)',
+      rawComps: { average: 0, count: 0 }
+    },
+    expected: {
+      warnings: [],
+      blockers: [],
+      action: 'LIST_NOW'  // Price from PC ships, not hard-blocked
+    }
+  },
+  {
+    name: 'Crossover with supporting comps downgrades to RESEARCH',
+    input: {
+      title: 'DC Marvel Superman Spider-Man Jorge Jimenez',
+      issue: '1',
+      year: '2026',
+      publisher: 'DC',
+      price: 26,
+      pricingSource: 'pricecharting',
+      claudeCheckHighSeverity: 'HIGH: Listing title mixes DC (Superman) and Marvel (Spider-Man) properties - verify crossover product',
+      rawComps: { average: 22.49, count: 2 },
+      soldCompDiagnostics: { verifiedCount: 1 },
+      visionConfidence: 'medium'
+    },
+    expected: {
+      warnings: ['claude-check-high-severity'],
+      blockers: [],
+      action: 'RESEARCH',
+      reasonContains: 'high-severity'
+    }
+  },
+  {
+    name: 'Crossover without supporting comps remains blocked',
+    input: {
+      title: 'DC Marvel Superman Spider-Man',
+      issue: '1',
+      year: '2026',
+      publisher: 'DC',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      claudeCheckBlocker: 'CRITICAL: Listing title mixes DC (Superman) and Marvel (Spider-Man) properties - factually impossible',
+      rawComps: { average: 0, count: 0 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST',
+      reasonContains: 'critical verification failure'
+    }
+  },
+  {
+    name: 'Crossover with only 1 comp remains blocked (threshold not met)',
+    input: {
+      title: 'DC Marvel Superman Spider-Man',
+      issue: '1',
+      year: '2026',
+      publisher: 'DC',
+      price: null,
+      pricingSource: 'refused-claude-gate',
+      claudeCheckBlocker: 'CRITICAL: Listing title mixes DC (Superman) and Marvel (Spider-Man) properties - factually impossible',
+      rawComps: { average: 20, count: 1 }
+    },
+    expected: {
+      blockers: ['claude-check-critical'],
+      action: 'DO_NOT_LIST',
+      reasonContains: 'critical verification failure'
+    }
   }
 ];
 

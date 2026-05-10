@@ -4343,7 +4343,6 @@ export default async function handler(req, res) {
         /wrong\s+era/i,
         /era\s+mismatch/i,
         /comp\s+pool\s+contaminated/i,
-        /no\s+comparable\s+sales/i,
         /completely\s+different/i,
         /\bnot\s+the\s+same\s+(?:book|comic|issue)/i,
         /issue\s+misidentified/i,
@@ -4400,6 +4399,28 @@ export default async function handler(req, res) {
         const downgradedReason = refusalReason.replace(/\bCRITICAL:/i, 'HIGH:');
         out.claudeCheckHighSeverity = downgradedReason;
         out.claudeCheckMode = 'story_only_downgraded';
+        // Price ships, decision will cap at RESEARCH via claudeCheckHighSeverity warning
+      }
+
+      // Crossover/intercompany downgrade — DC+Marvel mix with supporting comps
+      // Real crossovers exist (Superman vs Spider-Man 1976, JLA/Avengers, Amalgam).
+      // When market evidence validates product existence, downgrade to HIGH for manual review.
+      const isCrossoverFlag = /mixes\s+(?:DC|Marvel).*(?:Marvel|DC)/i.test(refusalReason);
+      const activeAvg = rawComps?.average || 0;
+      const hasSupportingComps = activeCount >= 2 && activeAvg > 0;
+
+      if (isCrossoverFlag && hasSupportingComps && !isPolybagPricing) {
+        shouldDowngradeCritical = true;
+        console.log(
+          '[claude-gate] DOWNGRADE — crossover with supporting comps · flag:',
+          refusalReason,
+          '· comps:',
+          activeCount,
+          '· avg:',
+          activeAvg
+        );
+        out.claudeCheckHighSeverity = refusalReason.replace(/\bCRITICAL:/i, 'HIGH:');
+        out.claudeCheckMode = 'crossover_downgraded';
         // Price ships, decision will cap at RESEARCH via claudeCheckHighSeverity warning
       }
 
