@@ -3959,6 +3959,24 @@ export default async function handler(req, res) {
         }
       }
 
+      // Fix D (Phase 1 finalization) — zero-verified-sold-comps confidence cap.
+      // When sold comp verification filter rejected 100% of sold listings
+      // (soldCompDiagnostics.verifiedCount === 0 AND rawSoldRows existed),
+      // cap tier to MEDIUM and score to 75. Active comps alone can't produce
+      // HIGH confidence — need at least ONE verified sold comp to confirm
+      // realized market value matches active listings.
+      const verifiedCount = soldVerifyResult?.diagnostics?.verifiedCount ?? null;
+      const hadSoldComps = Array.isArray(rawSoldRows) && rawSoldRows.length > 0;
+      if (verifiedCount === 0 && hadSoldComps && finalMc.tier === 'HIGH') {
+        const originalScore = finalMc.score;
+        finalMc.tier = 'MEDIUM';
+        finalMc.score = Math.min(finalMc.score, 75);
+        finalMc.displayMessage = 'No verified sold comps — verify before listing';
+        finalMc.zeroVerifiedSold = true;
+        finalMc.originalScore = originalScore;
+        console.log(`[match-conf] zero-verified-sold cap: HIGH→MEDIUM (${originalScore}→${finalMc.score})`);
+      }
+
       out.matchConfidence = finalMc;
       console.log(`[match-conf] score=${finalMc.score} tier=${finalMc.tier} comps=${compTitlesForScore.length} vision=${visionConfidence}${finalMc.visionCapped ? ' CAPPED' : ''}${finalMc.eraFilterBypassed ? ' ERA-BYPASSED' : ''}`);
     }

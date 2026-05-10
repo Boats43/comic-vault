@@ -2742,9 +2742,9 @@ function CollectionDetail({
               <div style={{ fontSize: 24, fontWeight: 800, color: colors.text, marginBottom: 8 }}>
                 {item.decision.price != null
                   ? (typeof item.decision.price === 'number'
-                    ? `$${item.decision.price.toFixed(2)}`
+                    ? `$${Number(item.decision.price).toFixed(2)}`
                     : (String(item.decision.price).startsWith('$') ? item.decision.price : `$${item.decision.price}`))
-                  : `$${displayPrice.toFixed(2)}`}
+                  : `$${Number(displayPrice).toFixed(2)}`}
               </div>
             )}
 
@@ -4911,7 +4911,7 @@ function CollectionDetail({
                   {listing
                     ? "Listing on eBay..."
                     : listPrice
-                      ? `📋 List on eBay — $${listPrice}`
+                      ? `📋 List on eBay — $${Number(listPrice).toFixed(2)}`
                       : `📋 List on eBay — No price available`}
                 </button>
               );
