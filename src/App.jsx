@@ -117,14 +117,14 @@ const getActionColor = (decision) => {
 const getMarketSignal = (item) => {
   if (!item) return { badge: 'UNKNOWN', color: '#888', icon: '❓' };
 
-  const soldComps = item.soldComps || [];
+  const soldComps = Array.isArray(item.soldComps) ? item.soldComps : [];
   const activeCount = item.rawComps?.count || 0;
   const soldCount = soldComps.length;
 
   // Find most recent sold comp
   let mostRecentDays = null;
   if (soldComps.length > 0) {
-    mostRecentDays = Math.min(...soldComps.map(s => s.daysAgo || 999));
+    mostRecentDays = Math.min(...soldComps.map(s => s?.daysAgo || 999));
   }
 
   // HOT: recent sold recency <= 30 days AND soldCount >= 3 AND activeCount <= 5
@@ -148,6 +148,9 @@ const getMarketSignal = (item) => {
 
 // Listing Readiness helpers
 const getPhotoChecklist = (item) => {
+  if (!item) {
+    return { front: false, back: false, spine: false, pages: false, count: 0 };
+  }
   const photos = getComicPhotos(item);
   return {
     front: photos.length > 0,
@@ -159,14 +162,28 @@ const getPhotoChecklist = (item) => {
 };
 
 const getListingReadiness = (item) => {
+  if (!item) {
+    return {
+      frontPhoto: { status: 'fail', label: 'Front photo', required: true },
+      backPhoto: { status: 'caution', label: 'Back photo', required: false },
+      spinePhoto: { status: 'caution', label: 'Spine photo', required: false },
+      pagesPhoto: { status: 'caution', label: 'Pages photo', required: false },
+      identityConfirmed: { status: 'fail', label: 'Identity confirmed', required: true },
+      priceReady: { status: 'fail', label: 'Price ready', required: true },
+      decisionSafe: { status: 'fail', label: 'Decision safe', required: true },
+      marketEvidence: { status: 'fail', label: 'Market evidence', required: false }
+    };
+  }
+
   const photos = getPhotoChecklist(item);
   const decision = item.decision || {};
   const displayPrice = getDisplayPrice(item);
   const listPrice = parseFloat(item.listPrice || 0);
   const price = Math.max(displayPrice, listPrice);
-  const soldComps = item.soldComps || [];
+  const soldComps = Array.isArray(item.soldComps) ? item.soldComps : [];
   const activeCount = item.rawComps?.count || 0;
-  const hasBlockers = (decision.blockers?.length || 0) > 0;
+  const blockers = Array.isArray(decision.blockers) ? decision.blockers : [];
+  const hasBlockers = blockers.length > 0;
 
   return {
     frontPhoto: {
@@ -190,7 +207,7 @@ const getListingReadiness = (item) => {
       required: false
     },
     identityConfirmed: {
-      status: decision.action === 'ID_REQUIRED' || hasBlockers && decision.blockers.includes('identity-not-confident') ? 'fail' : 'pass',
+      status: decision.action === 'ID_REQUIRED' || (hasBlockers && blockers.includes('identity-not-confident')) ? 'fail' : 'pass',
       label: 'Identity confirmed',
       required: true
     },
@@ -217,9 +234,20 @@ const getListingReadiness = (item) => {
 };
 
 const getReadinessStatus = (item) => {
+  if (!item) {
+    return {
+      badge: 'BLOCKED',
+      color: '#e05656',
+      icon: '🚫',
+      bg: 'rgba(239,68,68,0.1)',
+      border: 'rgba(239,68,68,0.3)'
+    };
+  }
+
   const checklist = getListingReadiness(item);
   const decision = item.decision || {};
-  const hasBlockers = (decision.blockers?.length || 0) > 0;
+  const blockers = Array.isArray(decision.blockers) ? decision.blockers : [];
+  const hasBlockers = blockers.length > 0;
 
   // BLOCKED: DO_NOT_LIST, ID_REQUIRED, or blockers present
   if (decision.action === 'DO_NOT_LIST' || decision.action === 'ID_REQUIRED' || hasBlockers) {
@@ -233,7 +261,7 @@ const getReadinessStatus = (item) => {
   }
 
   // PHOTOS NEEDED: missing front photo or decision safe but missing photos
-  if (!checklist.frontPhoto.status === 'pass' ||
+  if (checklist.frontPhoto.status !== 'pass' ||
       (checklist.decisionSafe.status === 'pass' && checklist.frontPhoto.status === 'pass' &&
        (checklist.backPhoto.status !== 'pass' || checklist.spinePhoto.status !== 'pass' || checklist.pagesPhoto.status !== 'pass'))) {
     return {
@@ -272,7 +300,7 @@ const getReadinessStatus = (item) => {
 
 // Collection-level metrics helper
 const getCollectionMetrics = (catalogue) => {
-  if (!catalogue || catalogue.length === 0) {
+  if (!catalogue || !Array.isArray(catalogue) || catalogue.length === 0) {
     return {
       totalComics: 0,
       totalValue: 0,
@@ -295,27 +323,36 @@ const getCollectionMetrics = (catalogue) => {
   };
 
   for (const item of catalogue) {
-    const displayPrice = getDisplayPrice(item);
-    const listPrice = parseFloat(item.listPrice || 0);
-    const price = Math.max(displayPrice, listPrice);
+    if (!item) continue;
 
-    metrics.totalValue += price;
+    try {
+      const displayPrice = getDisplayPrice(item);
+      const listPrice = parseFloat(item.listPrice || 0);
+      const price = Math.max(displayPrice, listPrice);
 
-    const readiness = getReadinessStatus(item);
+      if (isNaN(price) || !isFinite(price)) continue;
 
-    if (readiness.badge === 'READY') {
-      metrics.ready.count++;
-      metrics.ready.value += price;
-      metrics.liquidValue += price;
-    } else if (readiness.badge === 'PHOTOS NEEDED') {
-      metrics.photosNeeded.count++;
-      metrics.photosNeeded.value += price;
-    } else if (readiness.badge === 'NEEDS REVIEW') {
-      metrics.needsReview.count++;
-      metrics.needsReview.value += price;
-    } else if (readiness.badge === 'BLOCKED') {
-      metrics.blocked.count++;
-      metrics.blocked.value += price;
+      metrics.totalValue += price;
+
+      const readiness = getReadinessStatus(item);
+
+      if (readiness.badge === 'READY') {
+        metrics.ready.count++;
+        metrics.ready.value += price;
+        metrics.liquidValue += price;
+      } else if (readiness.badge === 'PHOTOS NEEDED') {
+        metrics.photosNeeded.count++;
+        metrics.photosNeeded.value += price;
+      } else if (readiness.badge === 'NEEDS REVIEW') {
+        metrics.needsReview.count++;
+        metrics.needsReview.value += price;
+      } else if (readiness.badge === 'BLOCKED') {
+        metrics.blocked.count++;
+        metrics.blocked.value += price;
+      }
+    } catch (err) {
+      console.warn('[getCollectionMetrics] skipping malformed item:', err.message);
+      continue;
     }
   }
 
