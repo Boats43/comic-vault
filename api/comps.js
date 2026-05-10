@@ -696,6 +696,7 @@ export const fetchComps = async ({
     let attemptUsed = 0;
     let attemptLabel = null;
     let parsed = [];
+    let gradeFilteredPrices = null;  // Fix C: grade-proximity filtered prices for floor calc
     let reprintFallback = false;
     let variantFallback = false;
     let fellBack = false;
@@ -1125,6 +1126,12 @@ export const fetchComps = async ({
       }
 
       // Filter 3: ±1.5 grade proximity.
+      // Fix C (Phase 1): track grade-filtered pool for floor calculation.
+      // When grade filter would remove all comps, we fall back to full pool
+      // for pricing (to avoid refusing to price), but we still track the
+      // grade-filtered minimum for floor guard use. This prevents VG 4.0 books
+      // from anchoring floor to FR 1.0 listings.
+      let gradeFilteredPrices = null;
       if (p.length > 0 && numericTarget != null && !isNaN(numericTarget)) {
         const filtered = p.filter((it) => {
           const listingGrade = parseListingGrade(it.title);
@@ -1141,8 +1148,13 @@ export const fetchComps = async ({
         });
         if (filtered.length > 0) {
           p = filtered;
+          // Snapshot grade-filtered prices for floor calculation
+          gradeFilteredPrices = filtered.map(item => item.price).filter(price => typeof price === 'number' && price > 0);
         } else {
           _fellBack = true;
+          // Even when falling back, track what the grade-filtered pool would have been
+          // (empty in this case, so floor guard will skip)
+          gradeFilteredPrices = [];
         }
       }
 
@@ -1204,6 +1216,7 @@ export const fetchComps = async ({
 
       return {
         parsed: p,
+        gradeFilteredPrices,  // Fix C: grade-proximity filtered prices for floor calc
         reprintFallback: _reprintFallback,
         variantFallback: _variantFallback,
         fellBack: _fellBack,
@@ -1264,6 +1277,7 @@ export const fetchComps = async ({
           }
         }
         parsed = filtered.parsed;
+        gradeFilteredPrices = filtered.gradeFilteredPrices;  // Fix C: plumb through
         reprintFallback = filtered.reprintFallback;
         variantFallback = filtered.variantFallback;
         fellBack = filtered.fellBack;
@@ -1432,6 +1446,16 @@ export const fetchComps = async ({
       !!artistName &&
       !winningQuery.includes(String(artistName).toLowerCase());
 
+    // Fix C (Phase 1): calculate grade-filtered lowest for floor guard.
+    // When grade-proximity filter ran, gradeFilteredPrices holds the
+    // prices from items within ±1.5 grades. Use this for floor calculation
+    // instead of global lowest to prevent VG 4.0 books from anchoring to
+    // FR 1.0 listings.
+    const gradeFilteredLowest =
+      Array.isArray(gradeFilteredPrices) && gradeFilteredPrices.length > 0
+        ? Math.min(...gradeFilteredPrices)
+        : null;
+
     return {
       count: parsed.length,
       prices: parsed,
@@ -1440,6 +1464,7 @@ export const fetchComps = async ({
       averageFormatted: formatUsd(average),
       lowest,
       lowestFormatted: formatUsd(lowest),
+      gradeFilteredLowest,  // Fix C: grade-aware floor minimum
       highest,
       highestFormatted: formatUsd(highest),
       lastSoldDate,

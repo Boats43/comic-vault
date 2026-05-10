@@ -303,9 +303,11 @@ export const computeThinPoolAnchor = (currentPrice, rawComps, opts = {}) => {
 
   // Never anchor below floor. Floor guard runs before anchor (line 1704) but
   // anchor has no floor awareness. If anchorCap would lower price below
-  // rawComps.lowest, suppress the anchor entirely.
-  const floor = typeof rawComps.lowest === 'number' && rawComps.lowest > 0
-    ? rawComps.lowest : 0;
+  // grade-filtered floor, suppress the anchor entirely.
+  // Fix C (Phase 1): use grade-filtered lowest for floor comparison.
+  const floorValue = rawComps.gradeFilteredLowest ?? rawComps.lowest;
+  const floor = typeof floorValue === 'number' && floorValue > 0
+    ? floorValue : 0;
   if (floor > 0 && anchorCap < floor) {
     console.log(`[thin-pool] anchorCap $${anchorCap.toFixed(2)} < floor $${floor.toFixed(2)} — anchor suppressed`);
     return null;
@@ -417,7 +419,10 @@ export const computeLowGradeFloor = (currentPrice, rawComps, pop, opts = {}) => 
   if (!pop || !(Number(pop.total) > 0)) return null;
   if (pop.belowGrade !== 0) return null;
   if (!rawComps) return null;
-  const lowest = Number(rawComps.lowest);
+  // Fix C (Phase 1): use grade-filtered lowest instead of global lowest.
+  // Prevents VG 4.0 books from anchoring floor to FR 1.0 listings.
+  // Falls back to global lowest when grade filter wasn't applied.
+  const lowest = Number(rawComps.gradeFilteredLowest ?? rawComps.lowest);
   if (!(lowest > 0)) return null;
   if (typeof currentPrice !== 'number' || !(currentPrice > 0)) return null;
   if (currentPrice <= lowest) return null;
@@ -3441,7 +3446,11 @@ export default async function handler(req, res) {
       const finalNum = parseFloat(
         String(out.price || '0').replace(/[$,]/g, '')
       );
-      const rawFloor = rawComps?.lowest || compsFromEbay?.lowest || 0;
+      // Fix C (Phase 1): use grade-filtered lowest for floor guard.
+      // Prevents VG 4.0 books from anchoring to FR 1.0 listings.
+      // Falls back to global lowest when grade filter wasn't applied.
+      const gradeAwareFloor = rawComps?.gradeFilteredLowest ?? rawComps?.lowest;
+      const rawFloor = gradeAwareFloor || compsFromEbay?.lowest || 0;
       const compsAvgForCap = blendedAvg || compsFromEbay?.average || 0;
       floorNum = rawFloor;
       if (floorNum > compsAvgForCap && compsAvgForCap > 0) {
