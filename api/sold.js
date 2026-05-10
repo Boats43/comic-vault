@@ -18,6 +18,10 @@ const CACHE_TTL = 6 * 60 * 60 * 1000;
 
 const tokenCache = {};
 
+// SPEED-1a — Track when insights scope is unavailable (process lifetime).
+// Once OAuth fails with scope unavailable, skip future attempts.
+let insightsScopeUnavailable = false;
+
 const getOAuthToken = async (appId, certId, scope) => {
   const now = Date.now();
   const cached = tokenCache[scope];
@@ -37,6 +41,11 @@ const getOAuthToken = async (appId, certId, scope) => {
   });
   if (!res.ok) {
     console.error(`[sold] oauth HTTP ${res.status}`);
+    // SPEED-1a — Cache scope unavailability flag
+    if (scope === INSIGHTS_SCOPE && res.status === 400) {
+      insightsScopeUnavailable = true;
+      console.log('[sold] insights scope unavailable — future attempts will be skipped');
+    }
     return null;
   }
   const json = await res.json();
@@ -57,6 +66,12 @@ export const fetchSold = async ({ title, issue, year }) => {
   const cacheKey = `sold:${query.toLowerCase()}`;
   const cached = CACHE.get(cacheKey);
   if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+
+  // SPEED-1a — Skip OAuth attempt when insights scope known unavailable
+  if (insightsScopeUnavailable) {
+    CACHE.set(cacheKey, { ts: Date.now(), data: [] });
+    return [];
+  }
 
   const appId = process.env.EBAY_APP_ID;
   const certId = process.env.EBAY_CERT_ID;
