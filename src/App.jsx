@@ -146,6 +146,130 @@ const getMarketSignal = (item) => {
   return { badge: 'UNKNOWN', color: '#888', icon: '❓' };
 };
 
+// Listing Readiness helpers
+const getPhotoChecklist = (item) => {
+  const photos = getComicPhotos(item);
+  return {
+    front: photos.length > 0,
+    back: photos.length > 1,
+    spine: photos.length > 2,
+    pages: photos.length > 3,
+    count: photos.length
+  };
+};
+
+const getListingReadiness = (item) => {
+  const photos = getPhotoChecklist(item);
+  const decision = item.decision || {};
+  const displayPrice = getDisplayPrice(item);
+  const listPrice = parseFloat(item.listPrice || 0);
+  const price = Math.max(displayPrice, listPrice);
+  const soldComps = item.soldComps || [];
+  const activeCount = item.rawComps?.count || 0;
+  const hasBlockers = (decision.blockers?.length || 0) > 0;
+
+  return {
+    frontPhoto: {
+      status: photos.front ? 'pass' : 'fail',
+      label: 'Front photo',
+      required: true
+    },
+    backPhoto: {
+      status: photos.back ? 'pass' : 'caution',
+      label: 'Back photo',
+      required: false
+    },
+    spinePhoto: {
+      status: photos.spine ? 'pass' : 'caution',
+      label: 'Spine photo',
+      required: false
+    },
+    pagesPhoto: {
+      status: photos.pages ? 'pass' : 'caution',
+      label: 'Pages photo',
+      required: false
+    },
+    identityConfirmed: {
+      status: decision.action === 'ID_REQUIRED' || hasBlockers && decision.blockers.includes('identity-not-confident') ? 'fail' : 'pass',
+      label: 'Identity confirmed',
+      required: true
+    },
+    priceReady: {
+      status: price > 0 ? 'pass' : 'fail',
+      label: 'Price ready',
+      required: true
+    },
+    decisionSafe: {
+      status: decision.action === 'LIST_NOW' || decision.action === 'LIST_LOW' ? 'pass' :
+              decision.action === 'RESEARCH' || decision.action === 'GRADE_CANDIDATE' ? 'caution' :
+              'fail',
+      label: 'Decision safe',
+      required: true
+    },
+    marketEvidence: {
+      status: soldComps.length > 0 || activeCount > 0 ? 'pass' :
+              item.pricingSource === 'pricecharting' ? 'caution' :
+              'fail',
+      label: 'Market evidence',
+      required: false
+    }
+  };
+};
+
+const getReadinessStatus = (item) => {
+  const checklist = getListingReadiness(item);
+  const decision = item.decision || {};
+  const hasBlockers = (decision.blockers?.length || 0) > 0;
+
+  // BLOCKED: DO_NOT_LIST, ID_REQUIRED, or blockers present
+  if (decision.action === 'DO_NOT_LIST' || decision.action === 'ID_REQUIRED' || hasBlockers) {
+    return {
+      badge: 'BLOCKED',
+      color: '#e05656',
+      icon: '🚫',
+      bg: 'rgba(239,68,68,0.1)',
+      border: 'rgba(239,68,68,0.3)'
+    };
+  }
+
+  // PHOTOS NEEDED: missing front photo or decision safe but missing photos
+  if (!checklist.frontPhoto.status === 'pass' ||
+      (checklist.decisionSafe.status === 'pass' && checklist.frontPhoto.status === 'pass' &&
+       (checklist.backPhoto.status !== 'pass' || checklist.spinePhoto.status !== 'pass' || checklist.pagesPhoto.status !== 'pass'))) {
+    return {
+      badge: 'PHOTOS NEEDED',
+      color: '#fbbf24',
+      icon: '📷',
+      bg: 'rgba(251,191,36,0.1)',
+      border: 'rgba(251,191,36,0.3)'
+    };
+  }
+
+  // READY: required items pass, decision LIST_NOW or LIST_LOW
+  if (checklist.frontPhoto.status === 'pass' &&
+      checklist.identityConfirmed.status === 'pass' &&
+      checklist.priceReady.status === 'pass' &&
+      checklist.decisionSafe.status === 'pass' &&
+      !hasBlockers) {
+    return {
+      badge: 'READY',
+      color: '#22c55e',
+      icon: '✓',
+      bg: 'rgba(34,197,94,0.1)',
+      border: 'rgba(34,197,94,0.3)'
+    };
+  }
+
+  // NEEDS REVIEW: everything else (RESEARCH, caution states, etc.)
+  return {
+    badge: 'NEEDS REVIEW',
+    color: '#fbbf24',
+    icon: '⚠️',
+    bg: 'rgba(251,191,36,0.1)',
+    border: 'rgba(251,191,36,0.3)'
+  };
+};
+
 // v0-E: Decision Engine price authority helper
 // Returns the authoritative price for listPrice initialization.
 // Precedence: blocked → 0, decision.price when decision permits listing → system price fallback
@@ -4602,6 +4726,121 @@ function CollectionDetail({
             {listError}
           </div>
         )}
+
+        {/* LISTING READINESS CHECKLIST */}
+        {(() => {
+          const readiness = getListingReadiness(item);
+          const status = getReadinessStatus(item);
+          const photos = getPhotoChecklist(item);
+
+          return (
+            <div style={{
+              marginTop: 16,
+              marginBottom: 16,
+              padding: "12px",
+              background: status.bg,
+              border: `1px solid ${status.border}`,
+              borderRadius: 8,
+            }}>
+              {/* Header with status badge */}
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 12,
+              }}>
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#888",
+                  letterSpacing: 0.5
+                }}>
+                  LISTING READINESS
+                </span>
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: status.color,
+                  background: `${status.color}15`,
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: `1px solid ${status.color}40`,
+                  letterSpacing: 0.5
+                }}>
+                  <span>{status.icon}</span>
+                  <span>{status.badge}</span>
+                </div>
+              </div>
+
+              {/* Checklist items */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {Object.entries(readiness).map(([key, item]) => {
+                  const icon = item.status === 'pass' ? '✓' : item.status === 'caution' ? '⚠️' : '✗';
+                  const color = item.status === 'pass' ? '#22c55e' : item.status === 'caution' ? '#fbbf24' : '#e05656';
+
+                  return (
+                    <div
+                      key={key}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontSize: 12,
+                      }}
+                    >
+                      <span style={{
+                        fontSize: 14,
+                        color,
+                        width: 16,
+                        textAlign: "center"
+                      }}>
+                        {icon}
+                      </span>
+                      <span style={{
+                        color: item.status === 'pass' ? '#ccc' : item.status === 'caution' ? '#fde68a' : '#fca5a5',
+                        flex: 1
+                      }}>
+                        {item.label}
+                      </span>
+                      {item.required && (
+                        <span style={{
+                          fontSize: 9,
+                          color: '#888',
+                          textTransform: 'uppercase',
+                          letterSpacing: 0.5
+                        }}>
+                          Required
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Photo summary */}
+              <div style={{
+                marginTop: 10,
+                paddingTop: 10,
+                borderTop: '1px solid rgba(255,255,255,0.1)',
+                fontSize: 11,
+                color: '#888'
+              }}>
+                {photos.count}/4 photos · {
+                  photos.front ? 'Front ✓' : 'Front missing'
+                } · {
+                  photos.back ? 'Back ✓' : 'Back missing'
+                } · {
+                  photos.spine ? 'Spine ✓' : 'Spine missing'
+                } · {
+                  photos.pages ? 'Pages ✓' : 'Pages missing'
+                }
+              </div>
+            </div>
+          );
+        })()}
 
         <button
           className="reset-btn danger"
