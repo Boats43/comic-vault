@@ -3,13 +3,13 @@
 // Returns FMV at key CGC grades (9.8, 9.6, 9.4, 9.2, 9.0) plus a
 // submit recommendation based on raw-vs-graded gap.
 //
-// Returns null silently when GOCOLLECT_API_KEY is not set — safe to
+// Returns null silently when GOCOLLECT_API_TOKEN is not set — safe to
 // deploy without the key. Add key to Vercel env when approved.
 
 const GOCOLLECT_BASE = "https://api.gocollect.com/api/v2";
 
 export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
-  const apiKey = process.env.GOCOLLECT_API_KEY;
+  const apiKey = process.env.GOCOLLECT_API_TOKEN;
   if (!apiKey) return null;
   if (!title || !issue) return null;
 

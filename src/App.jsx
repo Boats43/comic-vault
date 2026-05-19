@@ -88,6 +88,15 @@ const getDisplayPrice = (item) => {
   return 0;
 };
 
+// Fix A — Phase 1: Format currency to exactly 2 decimal places.
+// Prevents float artifacts like $13.796000000000001 from rendering.
+const formatCurrency = (value) => {
+  if (value == null || value === '') return '$0.00';
+  const num = typeof value === 'number' ? value : parseFloat(String(value).replace(/[$,]/g, ''));
+  if (isNaN(num)) return '$0.00';
+  return `$${num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+};
+
 // Decision-first UI helpers (Ship SPEED-2a+1)
 const getActionColor = (decision) => {
   if (!decision?.action) return { bg: 'rgba(99,102,241,0.08)', border: 'rgba(99,102,241,0.25)', text: '#6366f1' };
@@ -568,7 +577,7 @@ function ResultCard({ result, enriching }) {
     (Array.isArray(result.soldComps) && result.soldComps.length > 0);
   const displayPrice = getDisplayPrice(result);
   const recommendedLabel = displayPrice > 0
-    ? `$${displayPrice.toLocaleString("en-US")}`
+    ? formatCurrency(displayPrice)
     : result.price || "—";
   // Ship #20a.6.4 — refuse-to-price state. When server returns
   // identityConfident:false, the price area is replaced with a red
@@ -2068,7 +2077,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                 ) : item.marketPending ? (
                   <span className="collection-price" style={{ color: "#666" }}>—</span>
                 ) : getDisplayPrice(item) > 0 && (
-                  <span className="collection-price">${getDisplayPrice(item).toLocaleString("en-US")}</span>
+                  <span className="collection-price">{formatCurrency(getDisplayPrice(item))}</span>
                 )}
               </div>
               {item.variant && !['cover a','corner box','masterpieces'].some(v => item.variant.toLowerCase().includes(v)) && (
@@ -2295,7 +2304,7 @@ function CollectionDetail({
     (Array.isArray(item.soldComps) && item.soldComps.length > 0);
   const displayPrice = getDisplayPrice(item);
   const recommendedLabel = displayPrice > 0
-    ? `$${displayPrice.toLocaleString("en-US")}`
+    ? formatCurrency(displayPrice)
     : "—";
 
   // Grade badge: CGC numeric if graded, raw grade if available, else RAW COPY.
@@ -2639,7 +2648,8 @@ function CollectionDetail({
                  showed technical strings instead of human labels for any source
                  not explicitly mapped. Also fixes typo: backend emits 'verified_sold'
                  but old code checked for 'sold_verified' (never fired). */}
-              {item.pricingSource === 'verified_sold' ? 'sold comps (verified)' :
+              {item.pricingSource === 'gocollect_fmv' ? 'GoCollect FMV' :
+               item.pricingSource === 'verified_sold' ? 'sold comps (verified)' :
                item.pricingSource === 'verified_active' ? 'active comps (verified)' :
                item.pricingSource === 'pricecharting' ? 'PriceCharting' :
                item.pricingSource === 'browse_api' ? 'active listings' :
@@ -2913,7 +2923,7 @@ function CollectionDetail({
                   <div key={grade}>
                     <span style={{ color: '#888' }}>{grade}</span>
                     <span style={{ marginLeft: 6, fontWeight: 600 }}>
-                      ${typeof price === 'number' ? price.toLocaleString('en-US') : price}
+                      {formatCurrency(price)}
                     </span>
                   </div>
                 ))}
@@ -3071,8 +3081,8 @@ function CollectionDetail({
           const pos = gain >= 0;
           return (
             <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 14 }}>
-              <span className="muted">Paid: <strong>${item.purchasePrice.toLocaleString("en-US")}</strong></span>
-              <span className="muted">Current: <strong>${displayPrice.toLocaleString("en-US")}</strong></span>
+              <span className="muted">Paid: <strong>{formatCurrency(item.purchasePrice)}</strong></span>
+              <span className="muted">Current: <strong>{formatCurrency(displayPrice)}</strong></span>
               <span style={{ fontWeight: 700, color: pos ? "#16a34a" : "#e05656" }}>
                 ROI: {pos ? "+" : ""}{fmt(gain)} ({pos ? "+" : ""}{Math.round(pct)}%)
               </span>

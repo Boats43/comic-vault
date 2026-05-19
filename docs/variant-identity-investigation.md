@@ -391,7 +391,7 @@ Modern variant coverage:
 ### GoCollect
 
 **File**: `api/gocollect.js`  
-**Current usage**: CGC FMV lookup (requires GOCOLLECT_API_KEY, pending approval)
+**Current usage**: CGC FMV lookup (requires GOCOLLECT_API_TOKEN, live as of 2026-05-19)
 
 **Capability**: Tracks CGC census + FMV by grade  
 **Variant granularity**: Unknown (API key not yet approved, implementation incomplete)

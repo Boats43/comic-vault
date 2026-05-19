@@ -3950,6 +3950,26 @@ export default async function handler(req, res) {
         finalMc.visionModerate = true;
       }
 
+      // Fix D — Phase 1: Zero-verified-comps cap. When sold comps exist but
+      // NONE verify (soldCompDiagnostics.verifiedCount === 0), cap match
+      // confidence to MEDIUM/75. 5 Ronin #1 class: soldComps present, all
+      // rejected → signals data exists but quality uncertain.
+      const soldCompDx = out.soldCompDiagnostics;
+      const hasSoldCompsButNoneVerified =
+        soldCompDx &&
+        typeof soldCompDx.rawCount === 'number' &&
+        soldCompDx.rawCount > 0 &&
+        soldCompDx.verifiedCount === 0;
+      if (hasSoldCompsButNoneVerified && finalMc.tier === 'HIGH') {
+        const originalScore = finalMc.score;
+        finalMc.tier = 'MEDIUM';
+        finalMc.score = Math.min(finalMc.score, 75);
+        finalMc.displayMessage = 'Sold comps exist but none verified — review data quality';
+        finalMc.zeroVerifiedCapped = true;
+        finalMc.originalScore = originalScore;
+        console.log(`[match-conf] zero-verified cap: HIGH→MEDIUM (${originalScore}→${finalMc.score})`);
+      }
+
       // Ship v0-I — era-filter bypass cap. When vintage book comps were
       // rescued via v0-I guardrail fallback (year missing from listings),
       // cap confidence to LOW. The comp pool passed reprint guardrail but
