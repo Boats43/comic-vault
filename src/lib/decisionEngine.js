@@ -359,10 +359,15 @@ export function computeDecision(item, context = {}) {
     decision.confidence = 'low';
     decision.reason = buildWarningReason(decision.warnings, item);
     decision.nextStep = 'Verify market state and review comps manually before listing';
-    // v0-F: Enforce floor even in RESEARCH
+    // v0-F: Enforce floor even in RESEARCH, EXCEPT for sold-active-mismatch-extreme
+    // where the floor comes from garbage active comps and should not override
+    // the recommended price derived from sold data.
     const researchPrice = item.rawComps?.average || item.price;
     const floor = item.rawComps?.lowest;
-    decision.price = enforceFloor(researchPrice, floor);
+    const hasSoldActiveMismatch = decision.warnings.includes('sold-active-mismatch-extreme');
+    decision.price = hasSoldActiveMismatch
+      ? researchPrice
+      : enforceFloor(researchPrice, floor);
     decision.evidence.warnings = decision.warnings;
     return decision;
   }
