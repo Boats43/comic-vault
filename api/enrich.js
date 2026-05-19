@@ -4519,7 +4519,6 @@ export default async function handler(req, res) {
         HISTORICAL_KEY_PATTERNS.some(re => re.test(refusalReason));
       const visionConfirmedKey = !!(req.body.keyIssue && String(req.body.keyIssue).trim().length > 0);
       const visionConfidenceNotLow = out.visionConfidence !== 'low';
-      const verifiedCount = out.soldCompDiagnostics?.verifiedCount || 0;
       const hasComps = activeCount >= 2 || verifiedCount >= 2;
 
       if (!hasHardBlock && isHistoricalKeyCorrection && visionConfirmedKey && visionConfidenceNotLow && hasComps && !isPolybagPricing) {
