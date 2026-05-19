@@ -18,9 +18,16 @@ export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
     const query = encodeURIComponent(`${seriesName} ${issue}`);
     const url = `${GOCOLLECT_BASE}/search?q=${query}&type=comic&api_key=${encodeURIComponent(apiKey)}`;
 
+    // 3-second timeout to prevent pipeline blocking (HTTP 522 can hang for ~19s)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
     const res = await fetch(url, {
       headers: { Accept: "application/json" },
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       console.error(`[gocollect] HTTP ${res.status}`);
@@ -125,7 +132,11 @@ export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
       matchId: match.id || null,
     };
   } catch (err) {
-    console.error(`[gocollect] error: ${err?.message || err}`);
+    if (err.name === 'AbortError') {
+      console.log(`[gocollect] timeout after 3s — falling through gracefully`);
+    } else {
+      console.error(`[gocollect] error: ${err?.message || err}`);
+    }
     return null;
   }
 };
