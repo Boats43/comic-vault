@@ -2,7 +2,7 @@
 //
 // Helper: lookupGoCollect({ title, issue, year, publisher })
 //   Queries GoCollect API for CGC Fair Market Values at grades 9.0-9.8.
-//   Returns null when GOCOLLECT_API_TOKEN not set or no match found.
+//   Returns null when GOCOLLECT_API not set or no match found.
 //   Returns FMV object with grade-specific prices when match found.
 //
 // Invoke: node tests/gocollect.test.js
@@ -60,8 +60,8 @@ assertEq(typeof lookupGoCollect, 'function', 'lookupGoCollect exported');
 
 // ─── Null safety (no API key set) ──────────────────────────────────
 console.log('\nNull safety (no API key):');
-const savedKey = process.env.GOCOLLECT_API_TOKEN;
-delete process.env.GOCOLLECT_API_TOKEN;
+const savedKey = process.env.GOCOLLECT_API;
+delete process.env.GOCOLLECT_API;
 
 const noKeyResult = await lookupGoCollect({
   title: 'Amazing Spider-Man',
@@ -74,7 +74,7 @@ assertNull(noKeyResult, 'no API key → returns null');
 // ─── Input validation ──────────────────────────────────────────────
 console.log('\nInput validation:');
 if (savedKey) {
-  process.env.GOCOLLECT_API_TOKEN = savedKey;
+  process.env.GOCOLLECT_API = savedKey;
 
   const noTitle = await lookupGoCollect({ issue: '1', year: 1963, publisher: 'Marvel' });
   assertNull(noTitle, 'missing title → returns null');

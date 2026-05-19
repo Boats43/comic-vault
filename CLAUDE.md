@@ -25,7 +25,7 @@ npx vercel --prod       # uncommitted-tree fallback only
 - `api/comps.js` — eBay Browse API comp fetching
 - `api/sold.js` — eBay completed/sold listings (legacy, dormant — Ship #20a routes via PC scrape)
 - `api/cgc-lookup.js` — CGC cert number verification
-- `api/gocollect.js` — GoCollect CGC FMV lookup (requires GOCOLLECT_API_TOKEN, returns null without it)
+- `api/gocollect.js` — GoCollect CGC FMV lookup (requires GOCOLLECT_API, returns null without it)
 - `api/manage.js` — collection analysis via Claude
 - `api/list-ebay.js` — eBay listing creation
 - `api/delist-ebay.js` — eBay listing removal
@@ -45,7 +45,7 @@ npx vercel --prod       # uncommitted-tree fallback only
 ## Environment Variables
 Nine keys required (all set in Vercel), one optional:
 `ANTHROPIC_API_KEY`, `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DEV_ID`, `EBAY_AUTH_TOKEN`, `EBAY_SANDBOX`, `COMICVINE_API_KEY`, `XIMILAR_API_TOKEN`, `PRICECHARTING_TOKEN`
-Optional: `GOCOLLECT_API_TOKEN` (CGC FMV — live as of 2026-05-19)
+Optional: `GOCOLLECT_API` (CGC FMV — live as of 2026-05-19)
 
 ## Rules
 
