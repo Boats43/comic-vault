@@ -4472,11 +4472,36 @@ export default async function handler(req, res) {
       }
 
       // Fix B (Phase 1 finalization) — Historical key-issue hallucination downgrade.
-      // Batman #59 class: Claude verification hallucinates historical corrections
-      // without source-backing (claimed Deadshot first appeared 1959 not 1950).
-      // When CRITICAL flag matches historical key-correction language AND Vision
-      // confirmed the key claim AND visionConfidence is not low AND active comps >= 2,
-      // downgrade to HIGH/RESEARCH instead of hard DO_NOT_LIST.
+      // Fix B — Phase 1: Batman #59 historical key-issue hallucination gate.
+      // Claude verification sometimes hallucinates historical corrections without
+      // source-backing (Batman #59: claimed Deadshot first appeared 1959 not 1950).
+      //
+      // Hard-block phrases (must NOT downgrade):
+      //   - wrong issue / wrong book / wrong series / wrong era
+      //   - reprint / facsimile
+      //   - KEY ISSUE MISMATCH / KEY ISSUE MISIDENTIFICATION
+      //   - comp pool contaminated
+      //
+      // Downgrade-eligible phrases (downgrade to RESEARCH when guards pass):
+      //   - "first appeared in X (year)" correction language
+      //   - "does not feature first appearance"
+      //   - "not the first appearance"
+      //
+      // Guards (ALL required for downgrade):
+      //   - visionConfidence !== low
+      //   - activeCount >= 2 OR verifiedCount >= 2
+      //   - flag does NOT contain hard-block phrases
+      const HARD_BLOCK_PHRASES = [
+        /wrong\s+issue/i,
+        /wrong\s+book/i,
+        /wrong\s+series/i,
+        /wrong\s+era/i,
+        /\breprint\b/i,
+        /\bfacsimile\b/i,
+        /KEY\s+ISSUE\s+MISMATCH/i,
+        /KEY\s+ISSUE\s+MISIDENTIFICATION/i,
+        /comp\s+pool\s+contaminated/i,
+      ];
       const HISTORICAL_KEY_PATTERNS = [
         /first\s+appear(?:ed|ance)/i,                      // "first appeared", "first appearance"
         /does\s+not\s+feature\s+first\s+appearance/i,      // "does not feature first appearance"
@@ -4486,13 +4511,18 @@ export default async function handler(req, res) {
         /actually\s+(?:appeared|debuted|introduced)/i,     // "actually appeared", "actually debuted"
         /historical(?:ly)?\s+inaccurate/i,                 // "historically inaccurate"
       ];
+
+      // Evaluate hard blocks FIRST — if any present, skip downgrade path entirely
+      const hasHardBlock = HARD_BLOCK_PHRASES.some(re => re.test(refusalReason));
+
       const isHistoricalKeyCorrection = isCriticalFlag &&
         HISTORICAL_KEY_PATTERNS.some(re => re.test(refusalReason));
       const visionConfirmedKey = !!(req.body.keyIssue && String(req.body.keyIssue).trim().length > 0);
       const visionConfidenceNotLow = out.visionConfidence !== 'low';
-      const hasActiveComps = activeCount >= 2;
+      const verifiedCount = out.soldCompDiagnostics?.verifiedCount || 0;
+      const hasComps = activeCount >= 2 || verifiedCount >= 2;
 
-      if (isHistoricalKeyCorrection && visionConfirmedKey && visionConfidenceNotLow && hasActiveComps && !isPolybagPricing) {
+      if (!hasHardBlock && isHistoricalKeyCorrection && visionConfirmedKey && visionConfidenceNotLow && hasComps && !isPolybagPricing) {
         shouldDowngradeCritical = true;
         console.log(
           '[claude-gate] DOWNGRADE — historical key-issue hallucination · flag:',
@@ -4501,8 +4531,10 @@ export default async function handler(req, res) {
           req.body.keyIssue,
           '· visionConf:',
           out.visionConfidence,
-          '· comps:',
-          activeCount
+          '· activeComps:',
+          activeCount,
+          '· verifiedSold:',
+          verifiedCount
         );
         out.claudeCheckHighSeverity = refusalReason.replace(/\bCRITICAL:/i, 'HIGH:');
         out.claudeCheckMode = 'historical_key_hallucination_downgraded';
