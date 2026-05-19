@@ -29,12 +29,25 @@ export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
 
     clearTimeout(timeoutId);
 
+    // DEBUG: Temporary logging to diagnose API connectivity
+    console.log(`[gocollect-debug] HTTP ${res.status} ${res.statusText}`);
+    console.log(`[gocollect-debug] Content-Type: ${res.headers.get('content-type')}`);
+
     if (!res.ok) {
       console.error(`[gocollect] HTTP ${res.status}`);
+      // DEBUG: Log error response body
+      const errorText = await res.text();
+      console.error(`[gocollect-debug] Error body: ${errorText.substring(0, 500)}`);
       return null;
     }
 
     const json = await res.json();
+    // DEBUG: Log successful response structure
+    console.log(`[gocollect-debug] Response keys: ${Object.keys(json).join(', ')}`);
+    console.log(`[gocollect-debug] Results count: ${Array.isArray(json?.results) ? json.results.length : 'N/A'}`);
+    if (json?.results?.[0]) {
+      console.log(`[gocollect-debug] First result: ${JSON.stringify(json.results[0]).substring(0, 200)}`);
+    }
     const results = Array.isArray(json?.results) ? json.results : [];
     if (results.length === 0) {
       console.log(`[gocollect] no results for "${seriesName} ${issue}"`);
