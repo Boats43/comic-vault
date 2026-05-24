@@ -898,9 +898,18 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       `&format=json&resources=issue&query=${encodeURIComponent(searchQuery)}` +
       `&field_list=id,name,issue_number,cover_date,description,deck,first_appearance_characters,character_credits,person_credits,story_arc_credits,aliases,volume` +
       `&limit=20`;
+
+    // 2-second timeout to prevent pipeline blocking
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+
     const res = await fetch(url, {
       headers: { "User-Agent": "ComicVault/1.0" },
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
+
     if (!res.ok) return null;
     const json = await res.json();
     const results = Array.isArray(json?.results) ? json.results : [];
@@ -947,7 +956,13 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
         const vUrl =
           `https://comicvine.gamespot.com/api/volume/4050-${vid}/?api_key=${encodeURIComponent(process.env.COMICVINE_API_KEY)}` +
           `&format=json&field_list=id,name,start_year,publisher`;
-        const vRes = await fetch(vUrl, { headers: { "User-Agent": "ComicVault/1.0" } });
+        const vController = new AbortController();
+        const vTimeoutId = setTimeout(() => vController.abort(), 2000);
+        const vRes = await fetch(vUrl, {
+          headers: { "User-Agent": "ComicVault/1.0" },
+          signal: vController.signal,
+        });
+        clearTimeout(vTimeoutId);
         if (vRes.ok) {
           const vJson = await vRes.json();
           if (vJson?.results) return { vid, data: vJson.results };
@@ -1276,7 +1291,11 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       derivedKeyIssue: derivedKey,
     };
   } catch (err) {
-    console.error(`[enrich] comicvine error: ${err?.message || err}`);
+    if (err.name === 'AbortError') {
+      console.log(`[comicvine] timeout after 2s — falling through gracefully`);
+    } else {
+      console.error(`[enrich] comicvine error: ${err?.message || err}`);
+    }
     return null;
   }
 };
@@ -4352,9 +4371,11 @@ export default async function handler(req, res) {
     // Anthropic API credits on a result we discard. Skip the call entirely
     // when isPolybagPricing=true; polybag has its own verification (60%
     // reprint ratio + ≥5 priced items at line ~2148).
+    mark('claude_check_start');
     const claudeCheck = isPolybagPricing
       ? null
       : await runClaudeCheck(claudeCheckData);
+    mark('claude_check_complete');
     if (claudeCheck) {
       out.claudeCheck = claudeCheck;
       out.verified = claudeCheck.verified;
@@ -4635,6 +4656,7 @@ export default async function handler(req, res) {
       phase1_ms: (t.phase1_complete != null && t.phase1_start != null) ? t.phase1_complete - t.phase1_start : null,
       comps_ms: (t.comps_fetched != null && t.phase2_start != null) ? t.comps_fetched - t.phase2_start : null,
       verify_ms: (t.ai_verify_complete != null && t.ai_verify_start != null) ? t.ai_verify_complete - t.ai_verify_start : null,
+      claude_check_ms: (t.claude_check_complete != null && t.claude_check_start != null) ? t.claude_check_complete - t.claude_check_start : null,
       marks: t,
     };
     console.log('[timing] summary:', JSON.stringify(out.timings));
