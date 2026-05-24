@@ -1135,7 +1135,22 @@ export const fetchComps = async ({
       if (p.length > 0 && numericTarget != null && !isNaN(numericTarget)) {
         const filtered = p.filter((it) => {
           const listingGrade = parseListingGrade(it.title);
-          if (listingGrade === null) return true;
+
+          // Fix C (Phase 2): Fair/Poor label filter.
+          // When parseListingGrade returns null (no numeric grade found),
+          // check for Fair/Poor/FR/PR text labels. These listings represent
+          // low-grade books that would poison the floor for VG+ books.
+          // Prevents VG 4.0 books from anchoring to Fair/Poor listings.
+          if (listingGrade === null) {
+            const titleStr = String(it.title || '');
+            if (/\b(FR|PR|Fair|Poor)\b/i.test(titleStr)) {
+              console.log('[grade-filter] rejected (Fair/Poor label):',
+                titleStr.slice(0, 50));
+              return false;
+            }
+            return true;
+          }
+
           const diff = Math.abs(listingGrade - numericTarget);
           if (diff > 1.5) {
             console.log('[grade-filter] rejected:',
