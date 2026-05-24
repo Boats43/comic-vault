@@ -77,7 +77,10 @@
       "PowerShell(node -e \"const activeAvg = undefined; console.log\\('toFixed:', activeAvg?.toFixed\\(0\\)\\);\")",
       "PowerShell(node tests/title-sanitization.test.js)",
       "PowerShell(node tests/ship26-integration.test.js)",
-      "PowerShell(node tests/claude-gate-severity.test.js)"
+      "PowerShell(node tests/claude-gate-severity.test.js)",
+      "Bash(npm list *)",
+      "PowerShell($env:GOCOLLECT_API = \\(Get-Content \"go collect api\" -Raw\\).Trim\\(\\); node test-gocollect.mjs)",
+      "PowerShell($env:GOCOLLECT_API = \\(Get-Content \"go collect api.txt\" -Raw\\).Trim\\(\\); node test-gocollect.mjs)"
     ]
   }
 }

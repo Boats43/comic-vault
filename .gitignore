@@ -32,3 +32,6 @@ dist-ssr
 .env*.local
 
 .env*.local
+
+# Debug files
+go collect api.txt
