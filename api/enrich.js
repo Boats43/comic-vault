@@ -3988,22 +3988,36 @@ export default async function handler(req, res) {
         }
       }
 
-      // Fix D (Phase 1 finalization) — zero-verified-sold-comps confidence cap.
-      // When sold comp verification filter rejected 100% of sold listings
-      // (soldCompDiagnostics.verifiedCount === 0 AND rawSoldRows existed),
-      // cap tier to MEDIUM and score to 75. Active comps alone can't produce
-      // HIGH confidence — need at least ONE verified sold comp to confirm
-      // realized market value matches active listings.
+      // Fix D (Phase 2) — zero-verified-sold-comps + thin-active-pool confidence cap.
+      // Cap HIGH confidence to MEDIUM when insufficient market evidence exists:
+      //   1. Sold comps existed but verification rejected 100% (verifiedCount === 0)
+      //   2. OR no sold comps AND active pool is thin (activeCount < 3)
+      // Active comps alone can't produce HIGH confidence without sold validation.
+      // Need at least ONE verified sold comp OR 3+ active comps to confirm market.
       const verifiedCount = soldVerifyResult?.diagnostics?.verifiedCount ?? null;
       const hadSoldComps = Array.isArray(rawSoldRows) && rawSoldRows.length > 0;
-      if (verifiedCount === 0 && hadSoldComps && finalMc.tier === 'HIGH') {
+      const activeCount = rawComps?.count || 0;
+
+      if ((verifiedCount === 0 || verifiedCount === null) &&
+          (hadSoldComps || activeCount < 3) &&
+          finalMc.tier === 'HIGH') {
         const originalScore = finalMc.score;
         finalMc.tier = 'MEDIUM';
         finalMc.score = Math.min(finalMc.score, 75);
-        finalMc.displayMessage = 'No verified sold comps — verify before listing';
+
+        // Display message based on which condition triggered
+        if (verifiedCount === 0 && hadSoldComps) {
+          finalMc.displayMessage = 'No verified sold comps — verify before listing';
+        } else if (activeCount < 3) {
+          finalMc.displayMessage = 'Limited comps — verify before listing';
+        } else {
+          finalMc.displayMessage = 'Insufficient market evidence — verify before listing';
+        }
+
         finalMc.zeroVerifiedSold = true;
         finalMc.originalScore = originalScore;
-        console.log(`[match-conf] zero-verified-sold cap: HIGH→MEDIUM (${originalScore}→${finalMc.score})`);
+        console.log(`[match-conf] thin-data cap: HIGH→MEDIUM (${originalScore}→${finalMc.score}) ` +
+                    `verifiedSold=${verifiedCount} active=${activeCount}`);
       }
 
       out.matchConfidence = finalMc;
