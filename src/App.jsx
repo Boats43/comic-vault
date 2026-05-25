@@ -2293,8 +2293,8 @@ function CollectionDetail({
     } else if (item.listPriceManual === true) {
       // Rule 2: Preserve manual value (only for non-blocked items)
       setListPrice(item.listPrice != null ? item.listPrice : authorityPrice);
-    } else if (item.listPrice != null && item.listPriceManual === undefined) {
-      // Rule 3: Old items without manual flag - detect stale data vs authority price
+    } else if (item.listPrice != null && (item.listPriceManual === undefined || item.listPriceManual === false)) {
+      // Rule 3: Items without manual edit - detect stale data vs authority price
       const deviation = Math.abs(item.listPrice - authorityPrice) / Math.max(authorityPrice, 0.01);
       if (deviation > 0.5) {
         // >50% deviation = stale data, overwrite with authority price
