@@ -10,6 +10,74 @@ function enforceFloor(price, floor) {
 }
 
 /**
+ * Session 2A: Compute best sales channel based on decision + item characteristics
+ *
+ * Channels:
+ * - cash_sale: Quick individual sale for clean HOT books
+ * - bundle: Group low-value items for batch listing
+ * - grade: Submit for professional grading (upside detected)
+ * - barter: Trade for items with collector appeal but weak cash market
+ * - research: Verify market before deciding channel
+ * - blocked: Cannot route (identity or quality issues)
+ */
+function computeBestChannel(decision, item) {
+  const price = item.price || 0;
+  const isHOT = item.aiTags?.label === 'HOT';
+  const isCOLD = item.aiTags?.label === 'COLD';
+  const soldCount = item.soldComps?.length || 0;
+  const hasKeyIssue = item.keyIssue && item.keyIssue.trim().length > 3 &&
+                      !['no', 'n/a', 'none', 'false', 'not a key', 'non-key', 'non key', 'not key']
+                        .some(x => item.keyIssue.toLowerCase().includes(x));
+  const isGraded = item.isGraded === true;
+  const isRecognizable = item.title && item.title.trim().length > 0 &&
+                         !item.title.toLowerCase().includes('unknown');
+
+  // Rule 5: Blocked (DO_NOT_LIST or ID_REQUIRED)
+  if (decision.action === 'DO_NOT_LIST' || decision.action === 'ID_REQUIRED') {
+    return 'blocked';
+  }
+
+  // Rule 4: Research
+  if (decision.action === 'RESEARCH') {
+    return 'research';
+  }
+
+  // Rule 3: Grade candidate (already detected by decision engine)
+  if (decision.action === 'GRADE_CANDIDATE') {
+    return 'grade';
+  }
+
+  // Additional grade detection: high raw key value
+  if (!isGraded && price > 50 && hasKeyIssue) {
+    return 'grade';
+  }
+
+  // Rule 6: Barter (value < $25 + recognizable + no blockers + cold/thin market)
+  const isThinMarket = soldCount < 2;
+  if (price < 25 && isRecognizable && decision.blockers.length === 0 && (isCOLD || isThinMarket)) {
+    return 'barter';
+  }
+
+  // Rule 2: Bundle (LIST_LOW or low value)
+  if (decision.action === 'LIST_LOW' || price < 10) {
+    return 'bundle';
+  }
+
+  // Rule 1: Cash sale (LIST_NOW + high + HOT)
+  if (decision.action === 'LIST_NOW' && decision.confidence === 'high' && isHOT) {
+    return 'cash_sale';
+  }
+
+  // Default: Cash sale for clean LIST_NOW books
+  if (decision.action === 'LIST_NOW') {
+    return 'cash_sale';
+  }
+
+  // Fallback
+  return 'research';
+}
+
+/**
  * Decision Engine v0-A
  *
  * Pure helper that analyzes a comic item and returns a structured decision
@@ -29,6 +97,7 @@ export function computeDecision(item, context = {}) {
     warnings: [],
     nextStep: '',
     evidence: {},
+    bestChannel: null,
     timestamp: Date.now()
   };
 
@@ -150,6 +219,7 @@ export function computeDecision(item, context = {}) {
     }
 
     decision.evidence.blockers = decision.blockers;
+    decision.bestChannel = computeBestChannel(decision, item);
     return decision;
   }
 
@@ -369,6 +439,7 @@ export function computeDecision(item, context = {}) {
       ? researchPrice
       : enforceFloor(researchPrice, floor);
     decision.evidence.warnings = decision.warnings;
+    decision.bestChannel = computeBestChannel(decision, item);
     return decision;
   }
 
@@ -393,6 +464,7 @@ export function computeDecision(item, context = {}) {
         potentialFmv: highestGradeFmv,
         uplift: highestGradeFmv - item.price
       };
+      decision.bestChannel = computeBestChannel(decision, item);
       return decision;
     }
   }
@@ -434,6 +506,7 @@ export function computeDecision(item, context = {}) {
     const floor = item.rawComps?.lowest;
     decision.price = enforceFloor(conservativePrice, floor);
     decision.evidence.warnings = decision.warnings;
+    decision.bestChannel = computeBestChannel(decision, item);
     return decision;
   }
 
@@ -456,6 +529,7 @@ export function computeDecision(item, context = {}) {
 
   decision.evidence.clean = true;
   decision.evidence.pricingSource = item.pricingSource;
+  decision.bestChannel = computeBestChannel(decision, item);
 
   return decision;
 }

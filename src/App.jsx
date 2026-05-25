@@ -369,6 +369,52 @@ const getCollectionMetrics = (catalogue) => {
   return metrics;
 };
 
+// Session 2A: Channel routing metrics
+const getChannelMetrics = (catalogue) => {
+  if (!catalogue || !Array.isArray(catalogue) || catalogue.length === 0) {
+    return {
+      cash_sale: { count: 0, value: 0 },
+      bundle: { count: 0, value: 0 },
+      grade: { count: 0, value: 0 },
+      barter: { count: 0, value: 0 },
+      research: { count: 0, value: 0 },
+      blocked: { count: 0, value: 0 }
+    };
+  }
+
+  const metrics = {
+    cash_sale: { count: 0, value: 0 },
+    bundle: { count: 0, value: 0 },
+    grade: { count: 0, value: 0 },
+    barter: { count: 0, value: 0 },
+    research: { count: 0, value: 0 },
+    blocked: { count: 0, value: 0 }
+  };
+
+  for (const item of catalogue) {
+    if (!item || !item.decision?.bestChannel) continue;
+
+    try {
+      const displayPrice = getDisplayPrice(item);
+      const listPrice = parseFloat(item.listPrice || 0);
+      const price = Math.max(displayPrice, listPrice);
+
+      if (isNaN(price) || !isFinite(price)) continue;
+
+      const channel = item.decision.bestChannel;
+      if (metrics[channel]) {
+        metrics[channel].count++;
+        metrics[channel].value += price;
+      }
+    } catch (err) {
+      console.warn('[getChannelMetrics] skipping malformed item:', err.message);
+      continue;
+    }
+  }
+
+  return metrics;
+};
+
 // v0-E: Decision Engine price authority helper
 // Returns the authoritative price for listPrice initialization.
 // Precedence: blocked → 0, decision.price when decision permits listing → system price fallback
@@ -1906,6 +1952,71 @@ function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onD
         );
       })()}
 
+      {/* Channel Routing Dashboard */}
+      {(() => {
+        const channels = getChannelMetrics(items);
+        const hasChannels = Object.values(channels).some(ch => ch.count > 0);
+        if (!hasChannels) return null;
+
+        return (
+          <div style={{ margin: "12px 0 8px", padding: "12px", borderRadius: 8, background: "rgba(168,85,247,0.06)", border: "1px solid rgba(168,85,247,0.15)" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: "#888", marginBottom: 10, textAlign: "center" }}>
+              Channel Routing
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+              {channels.cash_sale.count > 0 && (
+                <div style={{ padding: "6px 8px", borderRadius: 6, background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)" }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#22c55e", marginBottom: 1 }}>💵 LIST</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#22c55e", marginBottom: 1 }}>{channels.cash_sale.count}</div>
+                  <div style={{ fontSize: 9, color: "#22c55e", opacity: 0.8 }}>{fmt(channels.cash_sale.value)}</div>
+                </div>
+              )}
+
+              {channels.bundle.count > 0 && (
+                <div style={{ padding: "6px 8px", borderRadius: 6, background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.25)" }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#eab308", marginBottom: 1 }}>📦 BUNDLE</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#eab308", marginBottom: 1 }}>{channels.bundle.count}</div>
+                  <div style={{ fontSize: 9, color: "#eab308", opacity: 0.8 }}>{fmt(channels.bundle.value)}</div>
+                </div>
+              )}
+
+              {channels.grade.count > 0 && (
+                <div style={{ padding: "6px 8px", borderRadius: 6, background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.25)" }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#a855f7", marginBottom: 1 }}>⭐ GRADE</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#a855f7", marginBottom: 1 }}>{channels.grade.count}</div>
+                  <div style={{ fontSize: 9, color: "#a855f7", opacity: 0.8 }}>{fmt(channels.grade.value)}</div>
+                </div>
+              )}
+
+              {channels.barter.count > 0 && (
+                <div style={{ padding: "6px 8px", borderRadius: 6, background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)" }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#3b82f6", marginBottom: 1 }}>🔁 TRADE</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#3b82f6", marginBottom: 1 }}>{channels.barter.count}</div>
+                  <div style={{ fontSize: 9, color: "#3b82f6", opacity: 0.8 }}>{fmt(channels.barter.value)}</div>
+                </div>
+              )}
+
+              {channels.research.count > 0 && (
+                <div style={{ padding: "6px 8px", borderRadius: 6, background: "rgba(249,115,22,0.08)", border: "1px solid rgba(249,115,22,0.25)" }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#f97316", marginBottom: 1 }}>🔍 RESEARCH</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#f97316", marginBottom: 1 }}>{channels.research.count}</div>
+                  <div style={{ fontSize: 9, color: "#f97316", opacity: 0.8 }}>{fmt(channels.research.value)}</div>
+                </div>
+              )}
+
+              {channels.blocked.count > 0 && (
+                <div style={{ padding: "6px 8px", borderRadius: 6, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#ef4444", marginBottom: 1 }}>🚫 BLOCKED</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#ef4444", marginBottom: 1 }}>{channels.blocked.count}</div>
+                  <div style={{ fontSize: 9, color: "#ef4444", opacity: 0.8 }}>{fmt(channels.blocked.value)}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Active filter indicator */}
       {readinessFilter && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, margin: "4px 0 8px", padding: "6px 10px", borderRadius: 6, background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)" }}>
@@ -2172,8 +2283,26 @@ function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onD
                   })() : ''}
                 </div>
               )}
-              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.status === "sold" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired || item.gradeExceedsMap) && (
+              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.status === "sold" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired || item.gradeExceedsMap || item.decision?.bestChannel) && (
                 <div className="cl-row3">
+                  {item.decision?.bestChannel && (() => {
+                    const ch = item.decision.bestChannel;
+                    const badges = {
+                      cash_sale: { emoji: '💵', label: 'LIST', className: 'pill-channel-cash' },
+                      bundle: { emoji: '📦', label: 'BUNDLE', className: 'pill-channel-bundle' },
+                      barter: { emoji: '🔁', label: 'TRADE', className: 'pill-channel-barter' },
+                      research: { emoji: '🔍', label: 'RESEARCH', className: 'pill-channel-research' },
+                      blocked: { emoji: '🚫', label: 'BLOCKED', className: 'pill-channel-blocked' },
+                      grade: { emoji: '⭐', label: 'GRADE', className: 'pill-channel-grade' }
+                    };
+                    const badge = badges[ch];
+                    if (!badge) return null;
+                    return (
+                      <span className={`pill ${badge.className}`} title={`Best channel: ${ch.replace('_', ' ')}`}>
+                        {badge.emoji} {badge.label}
+                      </span>
+                    );
+                  })()}
                   {showKeyIssue(item.keyIssue) && <span className="pill pill-key">KEY</span>}
                   {item.manualReviewRequired && (
                     <span

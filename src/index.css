@@ -312,6 +312,36 @@ body,
   color: #eab308;
 }
 
+.pill-channel-cash {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.pill-channel-bundle {
+  background: rgba(234, 179, 8, 0.2);
+  color: #eab308;
+}
+
+.pill-channel-barter {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+}
+
+.pill-channel-research {
+  background: rgba(249, 115, 22, 0.2);
+  color: #f97316;
+}
+
+.pill-channel-blocked {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.pill-channel-grade {
+  background: rgba(168, 85, 247, 0.2);
+  color: #a855f7;
+}
+
 .pill-mega-verified {
   background: #2ea043;
   color: white;
