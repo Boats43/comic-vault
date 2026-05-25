@@ -276,22 +276,15 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 - **Decision recommendations**: BUY/SELL/HOLD/WAIT badges on comic detail cards with blocking reasons. Gates listing actions when decision=WAIT.
 
-## Current State (as of 2026-05-07)
+## Current State (as of 2026-05-25)
 
-**Latest commit:** fd0a313 — A-lite hotfix 3 (collection screen crash fix)  
-**Vercel functions:** 12/12  
+**Latest commit:** dfd7e68 — bestChannel routing + channel badges  
+**Current session:** 2A complete, 2B pending  
+**Vercel functions:** 12/12 (at cap)  
 **Test count:** 1,570 passing across 23 suites
 
-**Layer Progress:**
-- Layer 1 (Foundation): ~95% (consistency engine shipped)
-- Layer 2 (Data Leverage): ~45% (sold pricing live, velocity/ROI queued)
-- Layer 3 (Decision Engine): ~20% (v0-D.1 deployed, calibration pending)
-- Layer 4 (Portfolio OS): 0% (queued as Ship #26)
-
 **Performance:**
-- Scan time: 7.5s → 2.5s (66% improvement)
-- phase1_complete: 769ms (was ~2800ms)
-- total_ms: 2550ms (was ~7500ms)
+- Average scan time: 2.5s (66% improvement from 7.5s baseline)
 
 **Deploy:** git push origin main = auto-deploy (confirmed)  
 **Rollback:** git revert [hash] && git push origin main
@@ -300,25 +293,46 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 
 | Hash | Ship | Summary |
 |------|------|---------|
-| fd0a313 | A-lite hotfix 3 | Fix collection screen crash (wrong variable reference) |
-| 1a9e6c1 | A-lite hotfix 2 | Prevent provisional Vision prices from entering catalogue |
-| a90388d | A-lite hotfix 1 | Sync system listPrice after enrich completion |
-| 238280b | v0-D.1 | Reprint key-label safety + no-comps blocker |
-| 316318b | v0-D | Decision Engine — gate listing actions by decision blockers |
+| dfd7e68 | Session 2A | bestChannel routing + channel badges |
+| 6259392 | Session 2A | Harden ComicVine timeout fallback paths |
+| db1e3c2 | Session 2A | Show non-comic asset message instead of comic issue error |
+| d947629 | Session 2A | Sync stale listPrice to decision price on extreme mismatch |
+| 61e00d2 | Session 2A | eBay sold status sync + sold tracking |
 
-**Full ship history:** See `docs/archive/SESSION_2026_05_06.md` and `docs/archive/SESSION_2026_05_07_DECISION_ENGINE.md`
+**Full ship history:** See `docs/archive/` for session logs
 
-## Next Session Priorities
+## Roadmap
 
-See `docs/NEXT_SESSION.md` for full details.
+**Session 2A** ✅ Complete
+- bestChannel routing
+- Channel badges
+- Sold status sync
+- ComicVine timeout hardening
 
-**Immediate:**
-1. Decision Engine validation (confidence calibration, blocker audit, BUY path testing)
-2. Day 2 ship phone validation (10-item punch list)
-3. Ship 6 polybag UI bug diagnosis
+**Session 2B** (Next) — Trade Pile / Barter
+- Trade pile management
+- Barter value calculations
+- Multi-party trade scenarios
 
-**Intelligence Layer Roadmap:**
-See `docs/ROADMAP.md` for full specs (Ships #24-27, ~28 hours remaining).
+**Session 2C** — Marketplace listing packets
+- Platform-specific listing generators
+- Multi-channel posting
+
+**Session 3** — AssetCore extraction
+- Core asset abstraction layer
+- Shared identity/pricing primitives
+
+**Session 4** — BookAdapter / CardAdapter
+- Adapter pattern for comics vs cards
+- Format-specific handlers
+
+**Session 5** — Asset Vault API
+- Unified multi-format backend
+- Cross-asset querying
+
+**Session 6** — Portfolio intelligence
+- Cross-collection analytics
+- Portfolio optimization recommendations
 
 ## Pattern Library
 **Descriptive names, not letters. Listed in approximate order of discovery.**
@@ -356,15 +370,9 @@ See `docs/ROADMAP.md` for full specs (Ships #24-27, ~28 hours remaining).
 ### Workaround Active
 - PriceCharting sales-history scrape (Ship #20a foundation data layer).
 
-### Known Bugs
-- **Ship 6 polybag UI bug:** UI displays "Recommended: $4,500" despite backend refusing (pricingSource=refused-claude-gate). Backend working, frontend display incorrect. Location: likely src/App.jsx or PriceCard component.
-
 ## Handoff Pointers
 
-- Session history: `docs/archive/SESSION_2026_05_06.md`, `docs/archive/SESSION_2026_05_07_DECISION_ENGINE.md`
-- Ship 6 polybag: `docs/archive/SHIP_6_POLYBAG.md`
-- Next priorities: `docs/NEXT_SESSION.md`
-- Intelligence roadmap: `docs/ROADMAP.md`
+- Session history: `docs/archive/` directory
 - Behavioral specs: `tests/` directory (1,570 tests, 23 suites)
 - Pricing math: `api/enrich.js`
 - Sold verification: `src/lib/soldVerification.js`
