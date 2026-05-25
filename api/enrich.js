@@ -967,7 +967,12 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
           const vJson = await vRes.json();
           if (vJson?.results) return { vid, data: vJson.results };
         }
-      } catch { /* skip */ }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          console.log(`[comicvine] volume ${vid} timeout — continuing without details`);
+        }
+        // Gracefully continue on any error
+      }
       return null;
     });
     const volumeResults = await Promise.all(volumePromises);
@@ -2045,7 +2050,7 @@ export default async function handler(req, res) {
     const cleanedCVTitle = cleanTitleForComicVine(confirmedTitle, req.body.variant);
 
     const [comicVine, priceChartingInitial, cgcResult] = await Promise.all([
-      lookupComicVine({ title: cleanedCVTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }),
+      lookupComicVine({ title: cleanedCVTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }).catch(() => null),
       // lookupXimilar({ images, title, confidence }), // REMOVED — fetched but never used for identity/pricing (-200ms)
       lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
