@@ -21,7 +21,7 @@ function enforceFloor(price, floor) {
  * - blocked: Cannot route (identity or quality issues)
  */
 function computeBestChannel(decision, item) {
-  const price = item.price || 0;
+  const price = item.price ?? null;
   const isHOT = item.aiTags?.label === 'HOT';
   const isCOLD = item.aiTags?.label === 'COLD';
   const soldCount = item.soldComps?.length || 0;
@@ -39,6 +39,11 @@ function computeBestChannel(decision, item) {
 
   // Rule 4: Research
   if (decision.action === 'RESEARCH') {
+    return 'research';
+  }
+
+  // Rule 0: Unpriced items always route to research
+  if (price == null) {
     return 'research';
   }
 
