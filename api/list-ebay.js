@@ -1,6 +1,8 @@
 // POST /api/list-ebay
 //
 // Creates a real eBay fixed-price listing via the Trading API (AddFixedPriceItem).
+// Also handles status sync: { checkStatus: true, ebayItemId } calls GetItem to detect sold/ended.
+//
 // Requires these env vars on Vercel:
 //   EBAY_APP_ID     — your Trading API App ID (client id)
 //   EBAY_CERT_ID    — your Trading API Cert ID (client secret)
@@ -564,6 +566,79 @@ ${itemSpecifics}    <BestOfferDetails>
 </AddFixedPriceItemRequest>`;
 };
 
+// Check listing status via GetItem API.
+// Returns { status: "sold"|"ended"|"active", soldPrice?, soldAt?, buyerFeedback? }
+const checkListingStatus = async (ebayItemId, authToken, headers) => {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${xmlEscape(authToken)}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>${xmlEscape(ebayItemId)}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
+
+  console.log("[ebay] GetItem request for ItemID:", ebayItemId);
+
+  const ebayRes = await fetch(EBAY_ENDPOINT, {
+    method: "POST",
+    headers: {
+      ...headers,
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": "GetItem",
+    },
+    body: xml,
+  });
+
+  const responseXml = await ebayRes.text();
+  const ack = extractTag(responseXml, "Ack");
+
+  if (!ack || /Failure/i.test(ack)) {
+    const shortMsg =
+      extractTag(responseXml, "ShortMessage") ||
+      extractTag(responseXml, "LongMessage") ||
+      "GetItem failed";
+    console.error(`[ebay] GetItem failed (ack=${ack}): ${shortMsg}`);
+    throw new Error(shortMsg);
+  }
+
+  // Parse SellingStatus
+  const sellingState = extractTag(responseXml, "SellingState");
+  const currentPrice = extractTag(responseXml, "CurrentPrice");
+  const quantitySold = extractTag(responseXml, "QuantitySold");
+  const endTime = extractTag(responseXml, "EndTime");
+
+  // Parse buyer feedback (if sold)
+  const buyerFeedbackScore = extractTag(responseXml, "FeedbackScore");
+
+  console.log(
+    `[ebay] GetItem result: state=${sellingState}, price=${currentPrice}, qtySold=${quantitySold}, endTime=${endTime}`
+  );
+
+  // SellingState values: Active, Ended, Sold
+  // Ended includes expired/cancelled/out-of-stock
+  const isSold =
+    sellingState === "Ended" && parseInt(quantitySold || "0", 10) > 0;
+  const isEnded = sellingState === "Ended" && !isSold;
+  const isActive = sellingState === "Active";
+
+  const result = {
+    status: isSold ? "sold" : isEnded ? "ended" : "active",
+  };
+
+  if (isSold) {
+    result.soldPrice = currentPrice ? parseFloat(currentPrice) : null;
+    result.soldAt = endTime ? new Date(endTime).getTime() : Date.now();
+    if (buyerFeedbackScore) {
+      result.buyerFeedback = parseInt(buyerFeedbackScore, 10);
+    }
+  } else if (isEnded) {
+    result.endedAt = endTime ? new Date(endTime).getTime() : Date.now();
+  }
+
+  return result;
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -589,6 +664,21 @@ export default async function handler(req, res) {
       "X-EBAY-API-CERT-NAME": EBAY_CERT_ID,
       "X-EBAY-API-SITEID": SITE_ID,
     };
+
+    // Status check branch: { checkStatus: true, ebayItemId }
+    if (item.checkStatus === true) {
+      if (!item.ebayItemId) {
+        res.status(400).json({ error: "ebayItemId required for status check" });
+        return;
+      }
+      const statusResult = await checkListingStatus(
+        item.ebayItemId,
+        EBAY_AUTH_TOKEN,
+        ebayHeaders
+      );
+      res.status(200).json(statusResult);
+      return;
+    }
 
     // Bundle branch: combined lot listing for multiple comics.
     if (item.bundle === true) {

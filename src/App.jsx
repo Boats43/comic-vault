@@ -372,6 +372,8 @@ const getCollectionMetrics = (catalogue) => {
 // v0-E: Decision Engine price authority helper
 // Returns the authoritative price for listPrice initialization.
 // Precedence: blocked → 0, decision.price when decision permits listing → system price fallback
+// Fix v0-H: When floor enforcement creates extreme mismatch with recommended price,
+// use the recommended price (from verified sold comps) instead of floor.
 const getAuthorityPrice = (item) => {
   if (!item) return 0;
 
@@ -383,6 +385,30 @@ const getAuthorityPrice = (item) => {
 
   if (isBlocked) {
     return getDisplayPrice(item);
+  }
+
+  // Fix v0-H: Floor-enforcement mismatch detection
+  // When decision is RESEARCH or LIST_NOW and the system price (floor-enforced)
+  // differs significantly from sold comp average (verified market value),
+  // use the sold comp average instead of the floor-anchored price.
+  // Prevents garbage active comps from anchoring listPrice below verified sold data.
+  const action = item.decision?.action;
+  if (action === 'RESEARCH' || action === 'LIST_NOW') {
+    const systemPrice = getDisplayPrice(item);
+    const soldAvg = item.soldCompDiagnostics?.soldAvg;
+    const hasVerifiedSold = (item.soldCompDiagnostics?.verifiedCount || 0) > 0;
+
+    if (hasVerifiedSold && soldAvg && systemPrice > 0) {
+      const ratio = soldAvg / systemPrice;
+      // If sold average is >50% different from system price, use sold average
+      if (ratio > 1.5 || ratio < 0.67) {
+        console.log(
+          `[authority-price] floor mismatch: system=$${systemPrice.toFixed(2)} soldAvg=$${soldAvg.toFixed(2)} ` +
+          `ratio=${ratio.toFixed(2)}x — using soldAvg`
+        );
+        return soldAvg;
+      }
+    }
   }
 
   // Non-blocked decisions with decision.price: use it
@@ -1577,7 +1603,7 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude, onClaudeCardCh
   );
 }
 
-function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices, snapshots, bulkEnrichProgress }) {
+function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onDelete, refreshingPrices, snapshots, bulkEnrichProgress }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [sortBy, setSortBy] = useState("recent");
@@ -1738,8 +1764,16 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
               ? fmt(totalValue)
               : "Updating…"}
           </div>
-          <div className="stat-label">Est. Value</div>
+          <div className="stat-label">Liquid Value</div>
         </div>
+        {soldCount > 0 && (
+          <div className="stat">
+            <div className="stat-value" style={{ color: "#eab308" }}>
+              {fmt(soldRevenue)}
+            </div>
+            <div className="stat-label">Sold ({soldCount})</div>
+          </div>
+        )}
       </div>
       {/* Value trend sparkline */}
       {trendData.length >= 2 && (() => {
@@ -1958,7 +1992,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
 
       {/* Era filter pills */}
       <div style={{ display: "flex", gap: 4, padding: "4px 0 8px", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-        {[["all", "All"], ["silver", "Silver Age"], ["bronze", "Bronze"], ["modern", "Modern"], ["keys", "Keys"], ["listed", "Listed"], ["unlisted", "Unlisted"]].map(([key, label]) => (
+        {[["all", "All"], ["silver", "Silver Age"], ["bronze", "Bronze"], ["modern", "Modern"], ["keys", "Keys"], ["listed", "Listed"], ["unlisted", "Unlisted"], ["sold", "Sold"]].map(([key, label]) => (
           <button
             key={key}
             onClick={() => setEraFilter(eraFilter === key ? "all" : key)}
@@ -1978,6 +2012,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
           if (sq === "key" || sq === "keys") return showKeyIssue(item.keyIssue);
           if (sq === "listed") return item.status === "listed";
           if (sq === "unlisted") return item.status !== "listed";
+          if (sq === "sold") return item.status === "sold";
           const hay = `${item.title} ${item.publisher} ${item.year} ${item.grade} ${item.keyIssue}`.toLowerCase();
           return hay.includes(sq);
         };
@@ -1992,6 +2027,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
             if (eraFilter === "keys") return showKeyIssue(item.keyIssue);
             if (eraFilter === "listed") return item.status === "listed";
             if (eraFilter === "unlisted") return item.status !== "listed";
+            if (eraFilter === "sold") return item.status === "sold";
             return true;
           })
           .filter((item) => {
@@ -2118,7 +2154,15 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                   </div>
                 );
               })()}
-              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired || item.gradeExceedsMap) && (
+              {item.status === "sold" && item.soldPrice != null && (
+                <div style={{ fontSize: 11, color: '#eab308', marginTop: 2, fontWeight: 600 }}>
+                  💰 Sold ${item.soldPrice.toFixed(2)} {item.soldAt ? (() => {
+                    const d = new Date(item.soldAt);
+                    return `on ${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
+                  })() : ''}
+                </div>
+              )}
+              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.status === "sold" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired || item.gradeExceedsMap) && (
                 <div className="cl-row3">
                   {showKeyIssue(item.keyIssue) && <span className="pill pill-key">KEY</span>}
                   {item.manualReviewRequired && (
@@ -2146,6 +2190,7 @@ function CollectionList({ items, totalValue, onOpen, onDelete, refreshingPrices,
                     </span>
                   )}
                   {item.status === "listed" && <span className="pill pill-listed">LISTED</span>}
+                  {item.status === "sold" && <span className="pill pill-sold">SOLD</span>}
                   {item.purchasePrice > 0 && getDisplayPrice(item) > 0 && (() => {
                     const roi = ((getDisplayPrice(item) - item.purchasePrice) / item.purchasePrice) * 100;
                     const pos = roi >= 0;
@@ -2204,6 +2249,9 @@ function CollectionDetail({
   const [reIdentifyError, setReIdentifyError] = useState(null);
   const [addingPhoto, setAddingPhoto] = useState(false);
   const [addPhotoError, setAddPhotoError] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState(null);
+  const [syncSuccess, setSyncSuccess] = useState(null);
   const [expandedPhoto, setExpandedPhoto] = useState(null);
   const [ppInput, setPpInput] = useState(item.purchasePrice != null ? String(item.purchasePrice) : "");
   const [listPrice, setListPrice] = useState(() => getAuthorityPrice(item)); // v0-E: use decision.price when available
@@ -2391,6 +2439,27 @@ function CollectionDetail({
       setAddPhotoError(err.message || "Failed to add photo");
     } finally {
       setAddingPhoto(false);
+    }
+  };
+
+  const handleSync = async () => {
+    if (!onSyncEbay) return;
+    setSyncing(true);
+    setSyncError(null);
+    setSyncSuccess(null);
+    try {
+      const result = await onSyncEbay(item);
+      if (result.status === "sold") {
+        setSyncSuccess(`Sold for $${result.soldPrice?.toFixed(2) || "?"}`);
+      } else if (result.status === "ended") {
+        setSyncSuccess("Listing ended (not sold)");
+      } else {
+        setSyncSuccess("Still active on eBay");
+      }
+    } catch (err) {
+      setSyncError(err.message || "Failed to sync status");
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -4399,7 +4468,38 @@ function CollectionDetail({
 
       {/* 6. ACTION BUTTONS */}
       <div style={{ marginTop: 18 }}>
-        {isListed ? (
+        {item.status === "sold" ? (
+          <div className="listed-card" style={{ borderColor: "rgba(234,179,8,0.4)" }}>
+            <div className="listed-header">
+              <span className="listed-badge" style={{ background: "rgba(234,179,8,0.2)", color: "#eab308" }}>Sold</span>
+              <span className="muted small">on eBay</span>
+            </div>
+            {item.soldPrice != null && (
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#eab308", marginTop: 8 }}>
+                ${item.soldPrice.toFixed(2)}
+              </div>
+            )}
+            {item.soldAt && (
+              <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                Sold {(() => {
+                  const d = new Date(item.soldAt);
+                  return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
+                })()}
+              </div>
+            )}
+            {item.ebayUrl && (
+              <a
+                href={item.ebayUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="listed-link"
+                style={{ marginTop: 8, fontSize: 11 }}
+              >
+                View listing
+              </a>
+            )}
+          </div>
+        ) : isListed ? (
           <div className="listed-card">
             <div className="listed-header">
               <span className="listed-badge">Listed</span>
@@ -4413,6 +4513,46 @@ function CollectionDetail({
             >
               {item.ebayUrl}
             </a>
+            <button
+              className="reset-btn"
+              onClick={handleSync}
+              disabled={syncing}
+              style={{
+                marginTop: 10,
+                width: "100%",
+                background: syncing ? "rgba(255,255,255,0.05)" : "rgba(59,130,246,0.15)",
+                color: syncing ? "#888" : "#60a5fa",
+                border: "1px solid rgba(59,130,246,0.3)",
+              }}
+            >
+              {syncing ? "Checking eBay..." : "🔄 Sync eBay Status"}
+            </button>
+            {syncSuccess && (
+              <div style={{
+                marginTop: 8,
+                padding: 8,
+                borderRadius: 6,
+                background: "rgba(34,197,94,0.15)",
+                color: "#22c55e",
+                fontSize: 12,
+                textAlign: "center",
+              }}>
+                {syncSuccess}
+              </div>
+            )}
+            {syncError && (
+              <div style={{
+                marginTop: 8,
+                padding: 8,
+                borderRadius: 6,
+                background: "rgba(239,68,68,0.15)",
+                color: "#ef4444",
+                fontSize: 12,
+                textAlign: "center",
+              }}>
+                {syncError}
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -7495,6 +7635,46 @@ export default function App() {
     return { ebayItemId, ebayUrl, count: items.length };
   }, []);
 
+  const syncEbayStatus = useCallback(async (item) => {
+    if (!item.ebayItemId) {
+      throw new Error("No eBay Item ID — cannot sync status");
+    }
+    const res = await fetch("/api/list-ebay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        checkStatus: true,
+        ebayItemId: item.ebayItemId,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to check eBay status");
+    }
+
+    // Update item with new status
+    const updates = {
+      ...item,
+      status: data.status, // "sold", "ended", or "active"
+    };
+
+    if (data.status === "sold") {
+      updates.soldPrice = data.soldPrice;
+      updates.soldAt = data.soldAt;
+      if (data.buyerFeedback != null) {
+        updates.buyerFeedback = data.buyerFeedback;
+      }
+    } else if (data.status === "ended") {
+      updates.endedAt = data.endedAt;
+    }
+
+    await putComic(updates);
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updates : x)));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? updates : cur));
+
+    return data;
+  }, []);
+
   // Update a single field on a catalogue entry and persist to IndexedDB.
   const updateComicField = useCallback((item, field, value) => {
     const updated = { ...item, [field]: value };
@@ -7893,6 +8073,15 @@ export default function App() {
     return sum + (getDisplayPrice(item) || 0);
   }, 0);
 
+  const soldRevenue = catalogue.reduce((sum, item) => {
+    if (item.status === "sold" && item.soldPrice != null) {
+      return sum + item.soldPrice;
+    }
+    return sum;
+  }, 0);
+
+  const soldCount = catalogue.filter((item) => item.status === "sold").length;
+
   // Record a daily value snapshot whenever catalogue changes.
   useEffect(() => {
     if (catalogue.length === 0) return;
@@ -8189,6 +8378,7 @@ export default function App() {
             }}
             onDelete={deleteFromCatalogue}
             onList={listOnEbay}
+            onSyncEbay={syncEbayStatus}
             onRefreshMarket={refreshMarketData}
             onReIdentify={reIdentifyBook}
             onAbortEnrich={() => {
@@ -8216,6 +8406,8 @@ export default function App() {
           <CollectionList
             items={catalogue}
             totalValue={totalValue}
+            soldCount={soldCount}
+            soldRevenue={soldRevenue}
             refreshingPrices={refreshingPrices}
             bulkEnrichProgress={bulkEnrichProgress}
             snapshots={snapshots}

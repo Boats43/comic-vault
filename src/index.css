@@ -307,6 +307,11 @@ body,
   color: #16a34a;
 }
 
+.pill-sold {
+  background: rgba(234, 179, 8, 0.2);
+  color: #eab308;
+}
+
 .pill-mega-verified {
   background: #2ea043;
   color: white;
