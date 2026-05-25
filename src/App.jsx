@@ -682,9 +682,19 @@ function ResultCard({ result, enriching }) {
             🔍 Identification Required
           </div>
           <div className="small" style={{ marginBottom: 8, color: "#fecaca" }}>
-            Cannot price safely — verified title, issue, year, and publisher all required.
+            {(() => {
+              const isLikelyNonComic =
+                result.identityMissingFields?.includes('issue') &&
+                result.title &&
+                /\b(book|novel|paperback|hardcover|toy|figure|statue|bust|print|poster|art|sketch|original|painting|lithograph|magazine|guide|handbook|encyclopedia)\b/i.test(result.title);
+
+              if (isLikelyNonComic) {
+                return "📚 Book/Object detected — comic pricing disabled. Scan ISBN/barcode or archive this item.";
+              }
+              return "Cannot price safely — verified title, issue, year, and publisher all required.";
+            })()}
           </div>
-          {Array.isArray(result.identityMissingFields) && result.identityMissingFields.length > 0 && (
+          {!(/\b(book|novel|paperback|hardcover|toy|figure|statue|bust|print|poster|art|sketch|original|painting|lithograph|magazine|guide|handbook|encyclopedia)\b/i.test(result.title || '') && result.identityMissingFields?.includes('issue')) && Array.isArray(result.identityMissingFields) && result.identityMissingFields.length > 0 && (
             <div className="small" style={{ marginBottom: 8 }}>
               <span style={{ opacity: 0.7 }}>Missing: </span>
               <span style={{ fontWeight: 600 }}>
@@ -3670,9 +3680,27 @@ function CollectionDetail({
                   Identification Required
                 </div>
                 <div style={{ marginTop: 6, fontSize: 12, color: "#fecaca", lineHeight: 1.4 }}>
-                  Cannot price safely without verified title, issue, year, and publisher.
+                  {(() => {
+                    // Non-comic detection: missing issue + title suggests book/toy/collectible
+                    const isLikelyNonComic =
+                      item.identityMissingFields?.includes('issue') &&
+                      item.title &&
+                      /\b(book|novel|paperback|hardcover|toy|figure|statue|bust|print|poster|art|sketch|original|painting|lithograph|magazine|guide|handbook|encyclopedia)\b/i.test(item.title);
+
+                    if (isLikelyNonComic) {
+                      return (
+                        <>
+                          📚 Book/Object detected — comic pricing disabled.
+                          <div style={{ marginTop: 4, fontSize: 11, color: "#fca5a5" }}>
+                            Scan ISBN/barcode or archive this item.
+                          </div>
+                        </>
+                      );
+                    }
+                    return "Cannot price safely without verified title, issue, year, and publisher.";
+                  })()}
                 </div>
-                {Array.isArray(item.identityMissingFields) && item.identityMissingFields.length > 0 && (
+                {!(/\b(book|novel|paperback|hardcover|toy|figure|statue|bust|print|poster|art|sketch|original|painting|lithograph|magazine|guide|handbook|encyclopedia)\b/i.test(item.title || '') && item.identityMissingFields?.includes('issue')) && Array.isArray(item.identityMissingFields) && item.identityMissingFields.length > 0 && (
                   <div style={{ marginTop: 6, fontSize: 12, color: "#fca5a5" }}>
                     Missing: <span style={{ fontWeight: 700 }}>{item.identityMissingFields.join(", ")}</span>
                   </div>
