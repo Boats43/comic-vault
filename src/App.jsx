@@ -404,7 +404,10 @@ const getChannelMetrics = (catalogue) => {
       const channel = item.decision.bestChannel;
       if (metrics[channel]) {
         metrics[channel].count++;
-        metrics[channel].value += price;
+        // Only add to value if item has a valid price (not null/undefined)
+        if (price > 0 && item.price != null) {
+          metrics[channel].value += price;
+        }
       }
     } catch (err) {
       console.warn('[getChannelMetrics] skipping malformed item:', err.message);
