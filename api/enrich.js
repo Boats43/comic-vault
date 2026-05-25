@@ -1999,7 +1999,8 @@ export default async function handler(req, res) {
     });
 
     let titleSanitized = false;
-    if (titleContamination.severity === 'high') {
+    // Widen gate to catch medium severity (e.g., "champions cgc origin", "house of mystery 1965 vg")
+    if (titleContamination.severity !== 'none') {
       const sanitized = sanitizeTitle(confirmedTitle, {
         year: confirmedYear,
         isGraded: isGraded || false,
