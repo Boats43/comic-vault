@@ -11,6 +11,7 @@ import {
 } from "./db.js";
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 import { runAutoFix } from "./lib/autoFix.js";
+import { generatePacket } from "./lib/marketplacePackets.js";
 
 const LOADING_STEPS = [
   "Reading cover...",
@@ -1160,6 +1161,30 @@ const getTradePiles = () => {
 };
 const saveTradePiles = (piles) => {
   localStorage.setItem(TRADE_PILES_KEY, JSON.stringify(piles));
+};
+
+// Listing Packets persistence (24h TTL)
+const LISTING_PACKETS_KEY = "cv_listing_packets";
+const getListingPackets = () => {
+  try {
+    return JSON.parse(localStorage.getItem(LISTING_PACKETS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+};
+const saveListingPacket = (itemId, channel, packet) => {
+  const packets = getListingPackets();
+  if (!packets[itemId]) packets[itemId] = {};
+  packets[itemId][channel] = { packet, createdAt: Date.now() };
+  localStorage.setItem(LISTING_PACKETS_KEY, JSON.stringify(packets));
+};
+const getStoredPacket = (itemId, channel) => {
+  const packets = getListingPackets();
+  const stored = packets[itemId]?.[channel];
+  if (!stored) return null;
+  const age = Date.now() - stored.createdAt;
+  if (age > 86400000) return null; // 24h TTL
+  return stored.packet;
 };
 
 const loadBuyerSettings = () => {
@@ -2426,6 +2451,11 @@ function CollectionDetail({
   const [velocityExpanded, setVelocityExpanded] = useState(false);
   const [ladderExpanded, setLadderExpanded] = useState(false);
   const [popExpanded, setPopExpanded] = useState(false);
+  const [packetModal, setPacketModal] = useState(null); // { channel, packet }
+  const [packetDropdownOpen, setPacketDropdownOpen] = useState(false);
+  const [packetEditTitle, setPacketEditTitle] = useState("");
+  const [packetEditDesc, setPacketEditDesc] = useState("");
+  const [packetEditPrice, setPacketEditPrice] = useState("");
   const addPhotoRef = useRef(null);
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
@@ -2550,6 +2580,38 @@ function CollectionDetail({
     } finally {
       setListing(false);
     }
+  };
+
+  const handlePreparePacket = (channel) => {
+    setPacketDropdownOpen(false);
+    const packet = generatePacket(item, channel, getDisplayPrice, getComicPhotos);
+
+    if (packet.error) {
+      const messages = {
+        DO_NOT_LIST: 'Cannot create listing packet: blocked by decision engine',
+        ID_REQUIRED: 'Cannot create listing packet: identity verification required',
+        BLOCKED: `Cannot create listing packet: ${packet.reason}`,
+        SOLD: 'Cannot create listing packet: item already sold',
+        NO_PRICE: 'Cannot create listing packet: no price available',
+        RESEARCH: `Cannot create listing packet: marked for research\n${packet.reason || ''}`
+      };
+      alert(messages[packet.error] || 'Cannot create listing packet');
+      return;
+    }
+
+    saveListingPacket(item.id, channel, packet);
+    setPacketEditTitle(packet.title);
+    setPacketEditDesc(packet.description);
+    setPacketEditPrice(packet.price.toFixed(2));
+    setPacketModal({ channel, packet });
+  };
+
+  const copyToClipboard = (text, label) => {
+    navigator.clipboard.writeText(text).then(() => {
+      alert(`${label} copied to clipboard!`);
+    }).catch(() => {
+      alert('Failed to copy to clipboard');
+    });
   };
 
   const handleRefresh = async () => {
@@ -5246,6 +5308,114 @@ function CollectionDetail({
             })()}
           </>
         )}
+
+        {/* Prepare Listing Dropdown */}
+        {item.status !== "sold" && getDisplayPrice(item) > 0 && (
+          <div style={{ position: "relative", marginTop: 8 }}>
+            <button
+              className="reset-btn"
+              onClick={() => setPacketDropdownOpen(!packetDropdownOpen)}
+              style={{
+                width: "100%",
+                background: "rgba(100,200,100,0.15)",
+                border: "1px solid rgba(100,200,100,0.35)",
+                color: "#4caf50",
+              }}
+            >
+              📤 Prepare Listing {packetDropdownOpen ? "▲" : "▼"}
+            </button>
+            {packetDropdownOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  right: 0,
+                  background: "#1a1a1a",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: 8,
+                  padding: 4,
+                  zIndex: 10,
+                  marginTop: 4,
+                }}
+              >
+                <button
+                  onClick={() => handlePreparePacket("mercari")}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    background: "transparent",
+                    border: "none",
+                    color: "#ccc",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    borderRadius: 4,
+                  }}
+                  onMouseEnter={(e) => (e.target.style.background = "rgba(255,255,255,0.1)")}
+                  onMouseLeave={(e) => (e.target.style.background = "transparent")}
+                >
+                  📦 Mercari
+                </button>
+                <button
+                  onClick={() => handlePreparePacket("facebook")}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    background: "transparent",
+                    border: "none",
+                    color: "#ccc",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    borderRadius: 4,
+                  }}
+                  onMouseEnter={(e) => (e.target.style.background = "rgba(255,255,255,0.1)")}
+                  onMouseLeave={(e) => (e.target.style.background = "transparent")}
+                >
+                  👥 Facebook Marketplace
+                </button>
+                <button
+                  onClick={() => handlePreparePacket("craigslist")}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    background: "transparent",
+                    border: "none",
+                    color: "#ccc",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    borderRadius: 4,
+                  }}
+                  onMouseEnter={(e) => (e.target.style.background = "rgba(255,255,255,0.1)")}
+                  onMouseLeave={(e) => (e.target.style.background = "transparent")}
+                >
+                  📋 Craigslist
+                </button>
+                <button
+                  onClick={() => handlePreparePacket("whatnot")}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    background: "transparent",
+                    border: "none",
+                    color: "#ccc",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    borderRadius: 4,
+                  }}
+                  onMouseEnter={(e) => (e.target.style.background = "rgba(255,255,255,0.1)")}
+                  onMouseLeave={(e) => (e.target.style.background = "transparent")}
+                >
+                  🎙️ Whatnot
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {listError && (
           <div className="error-text small" style={{ marginTop: 6 }}>
             {listError}
@@ -5387,6 +5557,244 @@ function CollectionDetail({
       >
         {photos.length} photo{photos.length === 1 ? "" : "s"} stored
       </div>
+
+      {/* Packet Modal */}
+      {packetModal && (() => {
+        const { channel, packet } = packetModal;
+        const channelNames = {
+          mercari: 'Mercari',
+          facebook: 'Facebook Marketplace',
+          craigslist: 'Craigslist',
+          whatnot: 'Whatnot'
+        };
+        const channelName = channelNames[channel] || channel;
+
+        return (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.8)",
+              zIndex: 1000,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+            onClick={(e) => { if (e.target === e.currentTarget) setPacketModal(null); }}
+          >
+            <div
+              style={{
+                background: "#0a0a0a",
+                border: "1px solid rgba(100,200,100,0.35)",
+                borderRadius: 12,
+                padding: 16,
+                maxWidth: 500,
+                width: "100%",
+                maxHeight: "90vh",
+                overflowY: "auto",
+                color: "#ccc",
+              }}
+            >
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#4caf50", marginBottom: 10 }}>
+                📤 {channelName} Listing Packet
+              </div>
+
+              {packet.warnings.length > 0 && (
+                <div style={{
+                  padding: "8px 12px",
+                  background: "rgba(245,158,11,0.15)",
+                  border: "1px solid rgba(245,158,11,0.35)",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: "#f59e0b",
+                  marginBottom: 12,
+                }}>
+                  ⚠️ {packet.warnings.join(', ')}
+                </div>
+              )}
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#4caf50", marginBottom: 4 }}>
+                  Title ({packetEditTitle.length} chars):
+                </label>
+                <textarea
+                  value={packetEditTitle}
+                  onChange={(e) => setPacketEditTitle(e.target.value)}
+                  rows={2}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    background: "#1a1a1a",
+                    border: "1px solid rgba(100,200,100,0.3)",
+                    borderRadius: 6,
+                    color: "#ccc",
+                    fontSize: 13,
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#4caf50", marginBottom: 4 }}>
+                  Description:
+                </label>
+                <textarea
+                  value={packetEditDesc}
+                  onChange={(e) => setPacketEditDesc(e.target.value)}
+                  rows={6}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    background: "#1a1a1a",
+                    border: "1px solid rgba(100,200,100,0.3)",
+                    borderRadius: 6,
+                    color: "#ccc",
+                    fontSize: 13,
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#4caf50", marginBottom: 4 }}>
+                  Price:
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={packetEditPrice}
+                  onChange={(e) => setPacketEditPrice(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    background: "#1a1a1a",
+                    border: "1px solid rgba(100,200,100,0.3)",
+                    borderRadius: 6,
+                    color: "#ccc",
+                    fontSize: 13,
+                  }}
+                />
+              </div>
+
+              {channel === 'whatnot' && packet.startingBid && (
+                <div style={{
+                  padding: "8px 12px",
+                  background: "rgba(100,200,100,0.1)",
+                  border: "1px solid rgba(100,200,100,0.25)",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  marginBottom: 12,
+                }}>
+                  💡 Suggested starting bid: ${packet.startingBid.toFixed(2)}
+                  {packet.warnings.find(w => w.includes('floor')) && (
+                    <div style={{ color: "#f59e0b", marginTop: 4 }}>
+                      ⚠️ {packet.warnings.find(w => w.includes('floor'))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => copyToClipboard(packetEditTitle, 'Title')}
+                  style={{
+                    flex: 1,
+                    minWidth: "calc(50% - 4px)",
+                    padding: "8px 12px",
+                    background: "rgba(100,200,100,0.15)",
+                    border: "1px solid rgba(100,200,100,0.35)",
+                    borderRadius: 6,
+                    color: "#4caf50",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  📋 Copy Title
+                </button>
+                <button
+                  onClick={() => copyToClipboard(packetEditDesc, 'Description')}
+                  style={{
+                    flex: 1,
+                    minWidth: "calc(50% - 4px)",
+                    padding: "8px 12px",
+                    background: "rgba(100,200,100,0.15)",
+                    border: "1px solid rgba(100,200,100,0.35)",
+                    borderRadius: 6,
+                    color: "#4caf50",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  📋 Copy Description
+                </button>
+                <button
+                  onClick={() => {
+                    const all = `Title:\n${packetEditTitle}\n\nDescription:\n${packetEditDesc}\n\nPrice: $${packetEditPrice}`;
+                    copyToClipboard(all, 'All');
+                  }}
+                  style={{
+                    flex: 1,
+                    minWidth: "calc(50% - 4px)",
+                    padding: "8px 12px",
+                    background: "rgba(100,200,100,0.25)",
+                    border: "1px solid rgba(100,200,100,0.5)",
+                    borderRadius: 6,
+                    color: "#4caf50",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  📋 Copy All
+                </button>
+                {navigator.share && (
+                  <button
+                    onClick={() => {
+                      const text = `Title:\n${packetEditTitle}\n\nDescription:\n${packetEditDesc}\n\nPrice: $${packetEditPrice}`;
+                      navigator.share({ text }).catch(() => {});
+                    }}
+                    style={{
+                      flex: 1,
+                      minWidth: "calc(50% - 4px)",
+                      padding: "8px 12px",
+                      background: "rgba(59,130,246,0.15)",
+                      border: "1px solid rgba(59,130,246,0.35)",
+                      borderRadius: 6,
+                      color: "#3b82f6",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    📤 Share
+                  </button>
+                )}
+              </div>
+
+              <button
+                onClick={() => setPacketModal(null)}
+                style={{
+                  width: "100%",
+                  marginTop: 12,
+                  padding: "10px 14px",
+                  background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: 6,
+                  color: "#ccc",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
