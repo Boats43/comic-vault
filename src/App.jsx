@@ -1149,6 +1149,19 @@ const getSessionSummary = () => {
 
 const DEFAULT_BUYER_SETTINGS = { whatnotFee: 10, supplies: 0.75, labor: 2.0, minProfit: 5.0 };
 
+// Trade Pile persistence
+const TRADE_PILES_KEY = "cv_trade_piles";
+const getTradePiles = () => {
+  try {
+    return JSON.parse(localStorage.getItem(TRADE_PILES_KEY) || "[]");
+  } catch {
+    return [];
+  }
+};
+const saveTradePiles = (piles) => {
+  localStorage.setItem(TRADE_PILES_KEY, JSON.stringify(piles));
+};
+
 const loadBuyerSettings = () => {
   try {
     const raw = localStorage.getItem("cv_buyer_settings");
@@ -2306,6 +2319,11 @@ function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onD
                       </span>
                     );
                   })()}
+                  {item.inTradePile && (
+                    <span className="pill pill-in-trade" title="In trade pile">
+                      🔁 IN TRADE
+                    </span>
+                  )}
                   {showKeyIssue(item.keyIssue) && <span className="pill pill-key">KEY</span>}
                   {item.manualReviewRequired && (
                     <span
@@ -5375,8 +5393,8 @@ function CollectionDetail({
 
 // --- Manage Tab: Claude Command Center ---
 
-function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleList, onUpdateAll }) {
-  const [selectionMode, setSelectionMode] = useState(false);
+function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleList, onUpdateAll, tradePiles, setTradePiles, setCatalogue }) {
+  const [selectionType, setSelectionType] = useState(null); // 'bundle' | 'trade' | null
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bundling, setBundling] = useState(false);
   const [bundleMsg, setBundleMsg] = useState(null);
@@ -5385,6 +5403,9 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   const [postAllResults, setPostAllResults] = useState([]); // [{ id, title, issue, priceNum, state, msg }]
   const [updateAllRunning, setUpdateAllRunning] = useState(false);
   const [updateAllProgress, setUpdateAllProgress] = useState({ current: 0, total: 0 });
+  const [tradePileModal, setTradePileModal] = useState(null); // { step: 1|2, wants: string[], notes: string }
+
+  const selectionMode = selectionType !== null;
 
   const toggleSelected = (id) => {
     setSelectedIds((prev) => {
@@ -5395,7 +5416,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   };
 
   const exitSelection = () => {
-    setSelectionMode(false);
+    setSelectionType(null);
     setSelectedIds(new Set());
   };
 
@@ -5410,6 +5431,18 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
         (c.decision?.action === 'LIST_NOW' || c.decision?.action === 'LIST_HIGH') &&
         (c.decision?.blockers?.length || 0) === 0 &&
         c.identityConfident !== false
+    );
+
+  const getEligibleForTrade = () =>
+    catalogue.filter(
+      (c) =>
+        c.decision?.action !== 'ID_REQUIRED' &&
+        c.decision?.action !== 'DO_NOT_LIST' &&
+        (c.decision?.blockers?.length || 0) === 0 &&
+        c.status !== 'listed' &&
+        c.status !== 'sold' &&
+        getDisplayPrice(c) > 0 &&
+        c.decision?.bestChannel !== 'research'
     );
 
   const runPostAll = async (ids) => {
@@ -5540,6 +5573,45 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
     } finally {
       setBundling(false);
     }
+  };
+
+  const createTradePile = async () => {
+    if (!tradePileModal) return;
+    const items = catalogue.filter((c) => selectedIds.has(c.id));
+    if (items.length === 0) return;
+
+    const pileId = `pile_${Date.now()}`;
+    const totalValue = items.reduce((s, c) => s + getDisplayPrice(c), 0);
+
+    const newPile = {
+      id: pileId,
+      name: `Trade Pile ${tradePiles.length + 1}`,
+      itemIds: items.map(c => c.id),
+      wants: tradePileModal.wants.filter(w => w.trim()),
+      notes: tradePileModal.notes || '',
+      totalValue,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+
+    // Update items with trade pile flags
+    for (const item of items) {
+      const updated = {
+        ...item,
+        inTradePile: true,
+        tradePileId: pileId,
+        tradeValue: getDisplayPrice(item)
+      };
+      await putComic(updated);
+      setCatalogue((prev) => prev.map((c) => c.id === item.id ? updated : c));
+    }
+
+    // Add pile to state
+    setTradePiles((prev) => [...prev, newPile]);
+
+    // Clean up
+    setTradePileModal(null);
+    exitSelection();
   };
 
   const [chatInput, setChatInput] = useState("");
@@ -5769,6 +5841,125 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   return (
     <div style={{ paddingBottom: selectionMode ? 120 : 8, display: "flex", flexDirection: "column", gap: 12 }}>
 
+      {/* Trade Piles Section */}
+      {tradePiles.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {tradePiles.map((pile) => {
+            const pileItems = catalogue.filter(c => pile.itemIds.includes(c.id));
+            return (
+              <div
+                key={pile.id}
+                style={{
+                  border: "1px solid rgba(100,200,100,0.4)",
+                  borderRadius: 12,
+                  padding: 12,
+                  background: "rgba(100,200,100,0.06)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#4caf50", marginBottom: 4 }}>
+                      🔁 {pile.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#999" }}>
+                      {pileItems.length} comic{pileItems.length === 1 ? '' : 's'} • ${pile.totalValue.toFixed(2)} value
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (confirm(`Delete "${pile.name}"?`)) {
+                        // Clear item flags
+                        pile.itemIds.forEach(async (itemId) => {
+                          const item = catalogue.find(c => c.id === itemId);
+                          if (item) {
+                            const updated = { ...item, inTradePile: false, tradePileId: null, tradeValue: null };
+                            await putComic(updated);
+                            setCatalogue((prev) => prev.map((c) => c.id === itemId ? updated : c));
+                          }
+                        });
+                        setTradePiles((prev) => prev.filter(p => p.id !== pile.id));
+                      }
+                    }}
+                    style={{
+                      padding: "4px 8px",
+                      background: "rgba(220,38,38,0.15)",
+                      border: "1px solid rgba(220,38,38,0.3)",
+                      borderRadius: 6,
+                      color: "#dc2626",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+                {pile.wants.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, color: "#999", marginBottom: 4 }}>Looking for:</div>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {pile.wants.map((want, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            padding: "2px 8px",
+                            background: "rgba(100,200,100,0.15)",
+                            border: "1px solid rgba(100,200,100,0.3)",
+                            borderRadius: 12,
+                            fontSize: 11,
+                            color: "#4caf50",
+                          }}
+                        >
+                          {want}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    const lines = [
+                      "Trading:",
+                      ...pileItems.map(c => `- ${c.title}${c.issue ? ` #${c.issue}` : ''} — ${fmtPrice(c.tradeValue || getDisplayPrice(c))}`),
+                      "",
+                      `Estimated trade value: ~${fmtPrice(pile.totalValue)}`,
+                      "",
+                      "Looking for:",
+                      ...pile.wants.map(w => `- ${w}`),
+                      "",
+                      "Contact:",
+                      "[your info]",
+                      "",
+                      "Notes:",
+                      pile.notes || "[none]"
+                    ].join("\n");
+
+                    if (navigator.share) {
+                      navigator.share({ text: lines }).catch(() => {});
+                    } else {
+                      navigator.clipboard.writeText(lines);
+                      alert("Copied to clipboard!");
+                    }
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    background: "rgba(100,200,100,0.15)",
+                    border: "1px solid rgba(100,200,100,0.35)",
+                    borderRadius: 8,
+                    color: "#4caf50",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  📤 Share Trade Offer
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* A. CLAUDE RESPONSE BOX (top) */}
       <div style={{
         border: "1px solid rgba(212,175,55,0.4)",
@@ -5889,20 +6080,40 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
           <button
             onClick={() => {
               if (selectionMode) exitSelection();
-              else setSelectionMode(true);
+              else setSelectionType('bundle');
             }}
             style={{
               padding: "6px 12px",
-              background: selectionMode ? "rgba(220,38,38,0.2)" : "rgba(212,175,55,0.15)",
-              border: `1px solid ${selectionMode ? "rgba(220,38,38,0.4)" : "rgba(212,175,55,0.35)"}`,
+              background: selectionMode && selectionType === 'bundle' ? "rgba(220,38,38,0.2)" : "rgba(212,175,55,0.15)",
+              border: `1px solid ${selectionMode && selectionType === 'bundle' ? "rgba(220,38,38,0.4)" : "rgba(212,175,55,0.35)"}`,
               borderRadius: 20,
-              color: selectionMode ? "#dc2626" : "#d4af37",
+              color: selectionMode && selectionType === 'bundle' ? "#dc2626" : "#d4af37",
               fontSize: 12,
               fontWeight: 700,
               cursor: "pointer",
             }}
           >
-            {selectionMode ? "✕ Cancel Bundle" : "📦 Create Bundle"}
+            {selectionMode && selectionType === 'bundle' ? "✕ Cancel Bundle" : "📦 Create Bundle"}
+          </button>
+          <button
+            onClick={() => {
+              if (selectionMode) exitSelection();
+              else setSelectionType('trade');
+            }}
+            disabled={postAllRunning}
+            style={{
+              padding: "6px 12px",
+              background: selectionMode && selectionType === 'trade' ? "rgba(100,200,100,0.2)" : "rgba(100,200,100,0.15)",
+              border: `1px solid ${selectionMode && selectionType === 'trade' ? "rgba(100,200,100,0.4)" : "rgba(100,200,100,0.35)"}`,
+              borderRadius: 20,
+              color: selectionMode && selectionType === 'trade' ? "#64c864" : "#4caf50",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+              opacity: postAllRunning ? 0.5 : 1,
+            }}
+          >
+            {selectionMode && selectionType === 'trade' ? "✕ Cancel Trade" : "🔁 Create Trade Pile"}
           </button>
           {(() => {
             const listableBooks = getListableBooks(aiTags);
@@ -6149,7 +6360,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
         </div>
       )}
 
-      {selectionMode && (
+      {selectionMode && selectionType === 'bundle' && (
         <div style={{
           position: "fixed",
           left: 0,
@@ -6207,6 +6418,71 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
             }}
           >
             {bundling ? "Listing…" : "📦 List Bundle"}
+          </button>
+        </div>
+      )}
+
+      {selectionMode && selectionType === 'trade' && (
+        <div style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: 56,
+          padding: "10px 12px",
+          background: "rgba(15,15,15,0.96)",
+          borderTop: "1px solid rgba(100,200,100,0.4)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          zIndex: 40,
+          backdropFilter: "blur(8px)",
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#4caf50" }}>
+              {selectedIds.size} selected
+            </div>
+            <div style={{ fontSize: 11, color: "#999" }}>
+              {bundleItems.length >= 1
+                ? `Total trade value: $${bundleSum.toFixed(2)}`
+                : "Select comics for trade pile"}
+            </div>
+          </div>
+          <button
+            onClick={exitSelection}
+            style={{
+              padding: "10px 14px",
+              border: "1px solid rgba(255,255,255,0.15)",
+              borderRadius: 8,
+              background: "transparent",
+              color: "#ccc",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              if (selectedIds.size >= 1) {
+                setTradePileModal({ step: 1, wants: [], notes: '' });
+              }
+            }}
+            disabled={selectedIds.size < 1}
+            style={{
+              padding: "10px 16px",
+              border: "none",
+              borderRadius: 8,
+              background: selectedIds.size >= 1
+                ? "linear-gradient(135deg, #4caf50, #45a049)"
+                : "rgba(100,200,100,0.2)",
+              color: selectedIds.size >= 1 ? "#0a0a0a" : "#4caf50",
+              fontSize: 13,
+              fontWeight: 800,
+              cursor: selectedIds.size >= 1 ? "pointer" : "not-allowed",
+            }}
+          >
+            🔁 Next
           </button>
         </div>
       )}
@@ -6328,6 +6604,131 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {tradePileModal && (() => {
+        const items = catalogue.filter((c) => selectedIds.has(c.id));
+        const totalValue = items.reduce((s, c) => s + getDisplayPrice(c), 0);
+        return (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.7)",
+              zIndex: 1000,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+            onClick={(e) => { if (e.target === e.currentTarget) setTradePileModal(null); }}
+          >
+            <div
+              style={{
+                background: "#0a0a0a",
+                border: "1px solid rgba(100,200,100,0.35)",
+                borderRadius: 12,
+                padding: 16,
+                maxWidth: 440,
+                width: "100%",
+                maxHeight: "85vh",
+                overflowY: "auto",
+                color: "#ccc",
+              }}
+            >
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#4caf50", marginBottom: 10 }}>
+                Create Trade Pile
+              </div>
+
+              {tradePileModal.step === 1 && (
+                <>
+                  <div style={{ fontSize: 13, color: "#999", marginBottom: 12 }}>
+                    {items.length} comic{items.length === 1 ? '' : 's'} selected — ${totalValue.toFixed(2)} total value
+                  </div>
+
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#4caf50", marginBottom: 6 }}>
+                      Looking for (comma separated, max 3):
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Amazing Spider-Man #1, Hulk #181"
+                      value={tradePileModal.wants.join(', ')}
+                      onChange={(e) => {
+                        const vals = e.target.value.split(',').map(v => v.trim()).filter(Boolean).slice(0, 3);
+                        setTradePileModal({ ...tradePileModal, wants: vals });
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        background: "#1a1a1a",
+                        border: "1px solid rgba(100,200,100,0.3)",
+                        borderRadius: 8,
+                        color: "#ccc",
+                        fontSize: 13,
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#4caf50", marginBottom: 6 }}>
+                      Notes (optional):
+                    </label>
+                    <textarea
+                      placeholder="Any additional details..."
+                      value={tradePileModal.notes}
+                      onChange={(e) => setTradePileModal({ ...tradePileModal, notes: e.target.value })}
+                      rows={3}
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        background: "#1a1a1a",
+                        border: "1px solid rgba(100,200,100,0.3)",
+                        borderRadius: 8,
+                        color: "#ccc",
+                        fontSize: 13,
+                        resize: "vertical",
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <button
+                      onClick={() => setTradePileModal(null)}
+                      style={{
+                        padding: "8px 14px",
+                        background: "rgba(255,255,255,0.08)",
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        borderRadius: 8,
+                        color: "#ccc",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={createTradePile}
+                      style={{
+                        padding: "8px 14px",
+                        background: "rgba(100,200,100,0.25)",
+                        border: "1px solid rgba(100,200,100,0.5)",
+                        borderRadius: 8,
+                        color: "#4caf50",
+                        fontSize: 13,
+                        fontWeight: 800,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Create Pile
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         );
@@ -6584,6 +6985,7 @@ export default function App() {
   const [refreshingPrices, setRefreshingPrices] = useState(0);
   const [duplicateWarning, setDuplicateWarning] = useState(null);
   const [pendingDuplicate, setPendingDuplicate] = useState(null);
+  const [tradePiles, setTradePiles] = useState(() => getTradePiles());
   const fileRef = useRef(null);
   const buyerFileRef = useRef(null);
   const bulkRef = useRef(null);
@@ -6671,6 +7073,11 @@ export default function App() {
       });
   }, []);
 
+  // Sync tradePiles to localStorage on change
+  useEffect(() => {
+    saveTradePiles(tradePiles);
+  }, [tradePiles]);
+
   // Load catalogue, snapshots, and cached analysis from IndexedDB on mount.
   useEffect(() => {
     // Warm up grade + enrich endpoints silently
@@ -6720,6 +7127,7 @@ export default function App() {
       (c) =>
         !isRecentlyImported(c) &&
         !isUnverifiedMegaKey(c) &&
+        !c.inTradePile &&
         (!c.pricingSource || !c.comps)
     );
     const missingIds = new Set(missingSource.map((c) => c.id));
@@ -8610,6 +9018,9 @@ export default function App() {
           onListComic={listOnEbay}
           onBundleList={listBundleOnEbay}
           onUpdateAll={refreshMarketData}
+          tradePiles={tradePiles}
+          setTradePiles={setTradePiles}
+          setCatalogue={setCatalogue}
         />
       )}
 

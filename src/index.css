@@ -342,6 +342,12 @@ body,
   color: #a855f7;
 }
 
+.pill-in-trade {
+  background: rgba(100, 200, 100, 0.15);
+  border: 1px solid rgba(100, 200, 100, 0.3);
+  color: #4caf50;
+}
+
 .pill-mega-verified {
   background: #2ea043;
   color: white;
