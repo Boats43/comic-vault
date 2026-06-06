@@ -51,8 +51,9 @@ const CARD_PATTERN = /\b(psa|bgs|sgc)\s*\d+|\b(rookie|rc|auto|autograph|patch|re
 
 /**
  * Book-specific signals (novels, TPBs already handled by compHygiene)
+ * Session 4B — Expanded to catch hardcover and edition markers
  */
-const BOOK_PATTERN = /\b(isbn|978-\d{10}|novel|paperback|kindle|ebook)\b/i;
+const BOOK_PATTERN = /\b(isbn|978-\d{10}|novel|paperback|hardcover|kindle|ebook|first\s+edition|revised\s+edition|trade\s+paperback)\b/i;
 
 // ─────────────────────────── CLASSIFICATION ───────────────────────────
 
