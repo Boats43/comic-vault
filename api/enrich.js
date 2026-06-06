@@ -2313,8 +2313,8 @@ export default async function handler(req, res) {
     // never override on era-specific keys (King-Size, Annual, Giant-Size).
     const userYear = year ? parseInt(String(year).trim(), 10) : null;
     const pcYear = priceCharting?.year ? parseInt(priceCharting.year, 10) : null;
-    const cvYear = comicVine?.coverDate
-      ? parseInt(String(comicVine.coverDate).slice(0, 4), 10)
+    const cvYear = comicVine?.startYear
+      ? parseInt(String(comicVine.startYear), 10)
       : null;
     const pcGap = pcYear && userYear ? Math.abs(userYear - pcYear) : 999;
     const cvGap = cvYear && userYear ? Math.abs(userYear - cvYear) : 999;
