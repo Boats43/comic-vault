@@ -1,13 +1,4 @@
-/**
- * v0-F: Floor enforcement helper
- * Ensures decision.price is not below the active floor (rawComps.lowest).
- * Returns max(price, floor) when floor exists, otherwise returns price.
- */
-function enforceFloor(price, floor) {
-  if (price == null || price <= 0) return price;
-  if (floor == null || floor <= 0) return price;
-  return Math.max(price, floor);
-}
+import { enforceFloor } from './pricingEngine.js';
 
 /**
  * Session 2A: Compute best sales channel based on decision + item characteristics
