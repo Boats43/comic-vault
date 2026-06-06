@@ -35,7 +35,16 @@ import {
   backfillFromComps,
   resolveYear,
 } from "../src/lib/identityCore.js";
-import { verifyStory, detectKeyValue, computeEraRisk } from "../src/adapters/ComicAdapter.js";
+import {
+  verifyStory,
+  detectKeyValue,
+  computeEraRisk,
+  cleanTitleForComicVine,
+  PUBLISHER_IN_TITLE_SERIES,
+  CREATOR_NOISE_RE,
+  PUBLISHER_FILLER_RE,
+  LISTING_LANGUAGE_RE,
+} from "../src/adapters/ComicAdapter.js";
 // Ship #20a.6 — sold comp verification (pure regex, no I/O). Replaces the
 // single #issue regex filter with full hygiene chain. See
 // src/lib/soldVerification.js for filter list + diagnostics shape.
@@ -353,104 +362,8 @@ const extractSubtitleTokens = (title) => {
 // Ship 26.3C-2 Patch C2-A — Clean title for ComicVine query
 // Strip artist/variant noise tokens to prevent wrong-volume matching.
 // Preserves publisher-in-title series (Marvel Tales, DC Pride, etc.).
-// Safeguard: restores last meaningful token if cleaned result < 2 tokens.
-const cleanTitleForComicVine = (title, variant) => {
-  const PUBLISHER_IN_TITLE_SERIES = [
-    'marvel tales', 'marvel presents', 'marvel preview', 'marvel spotlight',
-    'marvel super action', 'marvel super heroes', 'marvel team-up', 'marvel team up',
-    'marvel triple action', 'marvel two-in-one', 'marvel two in one', 'marvel age',
-    'marvel chillers', 'marvel feature', 'marvel fanfare', 'marvel comics presents',
-    'marvel saga', 'marvel premiere', 'marvel mystery comics',
-    'dc universe presents', 'dc retroactive', 'dc comics presents', 'dc special',
-    'image comics presents', 'image united',
-  ];
-
-  // Artist patterns from compHygiene (subset for cleaning — multi-word + high-frequency singles)
-  const ARTIST_NOISE = [
-    /tyler kirkham/i, /jim lee/i, /inhyuk lee/i, /skottie young/i, /frank cho/i,
-    /frank miller/i, /dell'?otto/i, /jeehyung lee/i, /alex ross/i, /kaare andrews/i,
-    /alan quah/i, /mico suayan/i, /puppeteer lee/i, /derrick chew/i, /jonboy meyers/i,
-    /kael ngu/i, /natali sanders/i, /kendrick lim/i, /lucio parrillo/i,
-    /artgerm/i, /stanley lau/i, /kunkka/i, /momoko/i, /mcfarlane/i, /campbell/i,
-    /nakayama/i, /hughes/i, /fabok/i, /lim/i, /chew/i, /ngu/i, /sanders/i,
-  ];
-
-  // Variant/format/noise keywords
-  // Ship v0-G.1 — preserve real variant labels (newsstand, foil, virgin, 1:N)
-  const VARIANT_NOISE = [
-    /\bvariant\b/i, /\bcover\b/i, /\bcvr\b/i,
-    /\bratio\b/i, /\bincentive\b/i, /\bexclusive\b/i, /\bexcl\.?\b/i,
-    /\bnm\b/i, /\bvf\b/i, /\bfn\b/i, /\bvg\b/i, /\bgd\b/i,
-  ];
-
-  const titleLower = String(title || '').toLowerCase().trim();
-
-  // Preserve publisher-in-title series
-  const isProtected = PUBLISHER_IN_TITLE_SERIES.some(p => titleLower.startsWith(p));
-  if (isProtected) {
-    return title; // Don't strip anything from Marvel Tales, etc.
-  }
-
-  let cleaned = title;
-  const removedTokens = [];
-
-  // Strip artist names
-  for (const pattern of ARTIST_NOISE) {
-    const before = cleaned;
-    cleaned = cleaned.replace(pattern, ' ');
-    if (before !== cleaned) {
-      const removed = before.match(pattern);
-      if (removed) removedTokens.push(removed[0]);
-    }
-  }
-
-  // Strip variant keywords
-  for (const pattern of VARIANT_NOISE) {
-    const before = cleaned;
-    cleaned = cleaned.replace(pattern, ' ');
-    if (before !== cleaned) {
-      const removed = before.match(pattern);
-      if (removed) removedTokens.push(removed[0]);
-    }
-  }
-
-  // Character-name stripping when acting as variant descriptors
-  // Example: "fantastic four human torch artgerm" → "fantastic four"
-  // BUT: "human torch" alone → keep "human torch"
-  const characterNoisePatterns = [
-    { series: /fantastic\s+four/i, character: /human\s+torch/i },
-    { series: /x-?men/i, character: /wolverine|cyclops|storm|rogue|gambit/i },
-    { series: /avengers/i, character: /iron\s+man|captain\s+america|thor|hulk/i },
-  ];
-
-  for (const { series, character } of characterNoisePatterns) {
-    if (series.test(cleaned) && character.test(cleaned)) {
-      const before = cleaned;
-      cleaned = cleaned.replace(character, ' ');
-      if (before !== cleaned) {
-        const removed = before.match(character);
-        if (removed) removedTokens.push(removed[0]);
-      }
-    }
-  }
-
-  // Normalize whitespace
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
-
-  // Safeguard: if cleaned title < 2 meaningful tokens, restore last removed token
-  const tokens = cleaned.split(/\s+/).filter(t => t.length >= 2 && !/^\d+$/.test(t));
-  if (tokens.length < 2 && removedTokens.length > 0) {
-    const restore = removedTokens[removedTokens.length - 1];
-    cleaned = `${cleaned} ${restore}`.replace(/\s+/g, ' ').trim();
-    console.log(`[cv-clean-safeguard] restored "${restore}" (result was < 2 tokens)`);
-  }
-
-  if (cleaned.toLowerCase() !== titleLower) {
-    console.log(`[cv-clean] "${title}" → "${cleaned}"`);
-  }
-
-  return cleaned;
-};
+// Ship 3B.7 — cleanTitleForComicVine now in ComicAdapter.js
+// Imported above, no local definition needed
 
 /**
  * Ship v0-G — Title sanitization for contaminated eBay listing text.
@@ -469,19 +382,9 @@ const sanitizeTitle = (title, context = {}) => {
 
   const titleLower = title.toLowerCase().trim();
 
-  // Protected series (publisher-in-title)
-  const PUBLISHER_IN_TITLE = [
-    'marvel tales', 'marvel presents', 'marvel preview', 'marvel spotlight',
-    'marvel super action', 'marvel super heroes', 'marvel team-up', 'marvel team up',
-    'marvel triple action', 'marvel two-in-one', 'marvel two in one', 'marvel age',
-    'marvel chillers', 'marvel feature', 'marvel fanfare', 'marvel comics presents',
-    'marvel saga', 'marvel premiere', 'marvel mystery comics',
-    'dc universe presents', 'dc retroactive', 'dc comics presents', 'dc special',
-    'image comics presents', 'image united',
-  ];
-
+  // Ship 3B.7 — PUBLISHER_IN_TITLE_SERIES now imported from ComicAdapter
   const isProtected = preservePublisherInTitle &&
-    PUBLISHER_IN_TITLE.some(p => titleLower.includes(p));
+    PUBLISHER_IN_TITLE_SERIES.some(p => titleLower.includes(p));
 
   if (isProtected) {
     // Minimal cleanup only for protected titles
@@ -522,22 +425,17 @@ const sanitizeTitle = (title, context = {}) => {
     return ' ';
   });
 
-  // Ship v0-G.1 — Single-word creators (noise, not credit)
-  const CREATOR_NOISE_RE = /\b(kirby|severin|ditko|lee|buscema|romita|steranko|bartel|mayhew|byrne|miller|mcfarlane|mignola|ross|campbell|cho|fabok|aparo|wrightson|kubert|adams|bolland|perez|simonson|sook|capullo|finch|sale|coipel|quesada)\b/gi;
+  // Ship 3B.7 — Comic pattern lists now imported from ComicAdapter
   cleaned = cleaned.replace(CREATOR_NOISE_RE, (match) => {
     removedTokens.push(match);
     return ' ';
   });
 
-  // Ship v0-G.1 — Publisher filler words
-  const PUBLISHER_FILLER_RE = /\b(atlas\s+series|silver\s+age|golden\s+age|bronze\s+age|copper\s+age|modern\s+age|pre\s+code|horror|crime|western|romance)\b/gi;
   cleaned = cleaned.replace(PUBLISHER_FILLER_RE, (match) => {
     removedTokens.push(match);
     return ' ';
   });
 
-  // Ship v0-G.1 — Modern listing language
-  const LISTING_LANGUAGE_RE = /\b(set\s+main|1st\s+app(?:earance)?|trade\s+dress|empire|new\s+series|ongoing|limited\s+series|mini\s+series|one[\s-]?shot)\b/gi;
   cleaned = cleaned.replace(LISTING_LANGUAGE_RE, (match) => {
     removedTokens.push(match);
     return ' ';
