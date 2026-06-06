@@ -209,3 +209,67 @@ export const backfillFromComps = (confirmedTitle, confirmedYear, confirmedPublis
 
   return result;
 };
+
+/**
+ * Resolve year from multiple sources with trust-but-verify logic.
+ * PC and CV can return wrong volume; reject overrides >±2y from user input.
+ *
+ * @param {string|null} visionYear - Year from Vision
+ * @param {number|null} pcYear - Year from PriceCharting
+ * @param {number|null} cvYear - Year from ComicVine
+ * @param {number|null} ebayYear - Authoritative year from eBay consensus
+ * @param {Object} opts - { keyIssue } for era-specific detection
+ * @returns {Object} { confirmedYear, yearOverrideRejected, yearSource }
+ */
+export const resolveYear = (visionYear, pcYear, cvYear, ebayYear, opts = {}) => {
+  const { keyIssue = '' } = opts;
+
+  const userYear = visionYear ? parseInt(String(visionYear).trim(), 10) : null;
+  const pcGap = pcYear && userYear ? Math.abs(userYear - pcYear) : 999;
+  const cvGap = cvYear && userYear ? Math.abs(userYear - cvYear) : 999;
+
+  let confirmedYear = visionYear;
+  let yearOverrideRejected = false;
+  let yearSource = 'vision';
+
+  if (ebayYear) {
+    confirmedYear = String(ebayYear);
+    yearSource = 'ebay-consensus';
+    if (cvYear && Math.abs(cvYear - ebayYear) > 3) {
+      console.warn(`[year-divergence] CV=${cvYear} vs eBay=${ebayYear} — CV likely wrong volume`);
+    }
+  }
+  else if (pcYear && cvYear && Math.abs(pcYear - cvYear) <= 2) {
+    confirmedYear = String(Math.round((pcYear + cvYear) / 2));
+    yearSource = 'pc-cv-agreement';
+  }
+  else if (pcYear && (!userYear || Math.abs(pcYear - userYear) <= 2)) {
+    confirmedYear = String(pcYear);
+    yearSource = 'pricecharting';
+  }
+  else if (cvYear && (!userYear || Math.abs(cvYear - userYear) <= 2)) {
+    confirmedYear = String(cvYear);
+    yearSource = 'comicvine';
+  }
+  else if (userYear) {
+    confirmedYear = String(userYear);
+    yearOverrideRejected = true;
+    yearSource = 'vision-rejected-override';
+  }
+  else {
+    confirmedYear = pcYear
+      ? String(pcYear)
+      : (cvYear ? String(cvYear) : visionYear);
+    yearSource = pcYear ? 'pricecharting-fallback' : (cvYear ? 'comicvine-fallback' : 'vision-fallback');
+  }
+
+  if (confirmedYear !== visionYear) {
+    console.log(`[year-resolved] ${visionYear} → ${confirmedYear} (source=${yearSource})`);
+  }
+
+  return {
+    confirmedYear,
+    yearOverrideRejected,
+    yearSource
+  };
+};

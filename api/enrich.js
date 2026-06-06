@@ -33,6 +33,7 @@ import {
   resolveIdentity,
   resolveIssue,
   backfillFromComps,
+  resolveYear,
 } from "../src/lib/identityCore.js";
 // Ship #20a.6 — sold comp verification (pure regex, no I/O). Replaces the
 // single #issue regex filter with full hygiene chain. See
@@ -2134,59 +2135,29 @@ export default async function handler(req, res) {
       }
     }
 
-    // Derive the confirmed year — trust but verify. PC and CV can return
-    // the wrong volume (e.g. ComicVine matched Marvel Super-Heroes vol 2
-    // (1980) when user passed 1966 for the King-Size Special). Reject any
-    // override that disagrees with the user year by more than ±2y, and
-    // never override on era-specific keys (King-Size, Annual, Giant-Size).
-    const userYear = year ? parseInt(String(year).trim(), 10) : null;
-    const pcYear = priceCharting?.year ? parseInt(priceCharting.year, 10) : null;
-    const cvYear = comicVine?.startYear
-      ? parseInt(String(comicVine.startYear), 10)
-      : null;
-    const pcGap = pcYear && userYear ? Math.abs(userYear - pcYear) : 999;
-    const cvGap = cvYear && userYear ? Math.abs(userYear - cvYear) : 999;
+    // Ship 3B.3 — Year resolution core now in identityCore.js
+    // Era-specific detection (king-size, annual, etc.) remains inline for Step 5
     const keyIssueStr = req.body?.keyIssue ? String(req.body.keyIssue) : "";
     const isEraSpecific =
       /silver age|bronze age|king[-\s]?size|giant[-\s]?size|annual|spectacular|first issue/i.test(
         keyIssueStr
       );
 
-    // confirmedYear already declared in Phase 1, just reassign if needed
-    let yearOverrideRejected = false;
-    if (ebayYearAuthoritative) {
-      confirmedYear = String(ebayYearAuthoritative);
-      if (cvYear && Math.abs(cvYear - ebayYearAuthoritative) > 3) {
-        console.warn(`[year-divergence] CV=${cvYear} vs eBay=${ebayYearAuthoritative} — CV likely wrong volume`);
-      }
-    }
-    else if (pcYear && cvYear && Math.abs(pcYear - cvYear) <= 2) {
-      confirmedYear = String(Math.round((pcYear + cvYear) / 2));
-    }
-    else if (pcYear && (!userYear || Math.abs(pcYear - userYear) <= 2)) {
-      confirmedYear = String(pcYear);
-    }
-    else if (cvYear && (!userYear || Math.abs(cvYear - userYear) <= 2)) {
-      confirmedYear = String(cvYear);
-    }
-    else if (userYear) {
-      confirmedYear = String(userYear);
-      yearOverrideRejected = true;
-    }
-    else {
-      confirmedYear = pcYear
-        ? String(pcYear)
-        : (cvYear ? String(cvYear) : year);
-    }
+    const pcYear = priceCharting?.year ? parseInt(priceCharting.year, 10) : null;
+    const cvYear = comicVine?.startYear
+      ? parseInt(String(comicVine.startYear), 10)
+      : null;
 
-    if (confirmedYear !== year) {
-      const source = ebayYearAuthoritative ? 'ebay-consensus' :
-        (pcYear && cvYear && Math.abs(pcYear - cvYear) <= 2)
-          ? 'pc-cv-agreement' :
-        pcYear ? 'pricecharting' :
-        cvYear ? 'comicvine' : 'fallback';
-      console.log(`[year-resolved] ${year} → ${confirmedYear} (source=${source})`);
-    }
+    const yearResolution = resolveYear(
+      year,
+      pcYear,
+      cvYear,
+      ebayYearAuthoritative,
+      { keyIssue: keyIssueStr }
+    );
+
+    confirmedYear = yearResolution.confirmedYear;
+    let yearOverrideRejected = yearResolution.yearOverrideRejected;
 
     // Ship 3B.3 — Comp consensus backfill now in identityCore.js
     const backfill = backfillFromComps(
