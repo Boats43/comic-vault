@@ -756,9 +756,10 @@ const dedupeIssueToken = (familyTitle, acceptedIssue) => {
  * @param {Array<string|object>} items - eBay search_by_image results
  * @param {string} visionTitle - Vision-identified title
  * @param {string|number} visionIssue - Vision-identified issue
+ * @param {string|number} visionYear - Vision-identified year (optional, for era-aware gates)
  * @returns {{decision: string, selectedTitle: string|null, rawTitle: string|null, reason: string, topFamily: object|null, runnerUp: object|null, families: array}}
  */
-export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue) => {
+export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visionYear = null) => {
   // Guard clauses
   if (!Array.isArray(items) || items.length === 0) {
     return {
@@ -842,14 +843,21 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue) => {
     }
   }
 
-  // Weighted-consensus: select top family if it shares ≥2 tokens with Vision
+  // Weighted-consensus: select top family if it shares ≥N tokens with Vision.
+  // Era-aware gate: pre-1970 Silver Age titles require only 1 token overlap
+  // (short canonical names like "Marvel Tales" vs noisy eBay listings).
+  // Modern titles (1970+) require 2 tokens (stricter gate for abundant data).
   const topFamilyOverlap = topFamily.tokens.filter(t => visionTokens.includes(t));
-  if (topFamilyOverlap.length >= 2) {
+  const yearNum = visionYear ? parseInt(String(visionYear), 10) : null;
+  const isVintage = yearNum && yearNum > 0 && yearNum < 1970;
+  const overlapRequired = isVintage ? 1 : 2;
+
+  if (topFamilyOverlap.length >= overlapRequired) {
     return {
       decision: 'weighted-consensus',
       selectedTitle: dedupeIssueToken(topFamily.title, visionIssue), // Pattern K: remove embedded issue
       rawTitle: topFamily.rawTitle,
-      reason: `Weighted consensus (${topFamily.count} members, weight ${topFamily.weightSum.toFixed(1)}, ${topFamilyOverlap.length} Vision tokens shared)`,
+      reason: `Weighted consensus (${topFamily.count} members, weight ${topFamily.weightSum.toFixed(1)}, ${topFamilyOverlap.length} Vision tokens shared${isVintage ? ', vintage gate' : ''})`,
       topFamily,
       runnerUp,
       families: scored,

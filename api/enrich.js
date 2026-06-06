@@ -1896,9 +1896,10 @@ export default async function handler(req, res) {
     // Runs after extractConsensus to detect wrong-family pricing (Catwoman/Gotham
     // War class bugs where exact-frequency voting picks larger unrelated family
     // over correct top-ranked result).
+    // Ship 3A: Pass year for era-aware overlap gate (pre-1970 requires 1 token, modern 2).
     mark('family_candidate_start');
     const familyCandidate = (visualResult?.items?.length >= 5)
-      ? selectTitleFamilyCandidate(visualResult.items, title, issueNum)
+      ? selectTitleFamilyCandidate(visualResult.items, title, issueNum, year)
       : null;
     mark('family_candidate_complete');
 
