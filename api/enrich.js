@@ -4169,9 +4169,6 @@ export default async function handler(req, res) {
     // 3c. hasKeyValue: universal flag computed by ComicAdapter.detectKeyValue
     out.hasKeyValue = detectKeyValue(req.body.keyIssue);
 
-    // 3d. identityComplete: comic-specific flag (issue + publisher required)
-    out.identityComplete = !!(out.issue && out.publisher);
-
     // 3e. eraRisk: comic-specific era risk (Golden Age thin-pool, modern bundle)
     out.eraRisk = computeEraRisk(out.year, out.rawComps);
 
@@ -4199,6 +4196,10 @@ export default async function handler(req, res) {
     if (!out.publisher) {
       out.publisher = confirmedPublisher || publisher || null;
     }
+
+    // 3d. identityComplete: comic-specific flag (issue + publisher required)
+    // Computed AFTER fallback assignments so out.issue and out.publisher are populated
+    out.identityComplete = !!(out.issue && out.publisher);
 
     if (!out.visionConfidence && out.matchConfidence?.visionConfidence) {
       out.visionConfidence = out.matchConfidence.visionConfidence;
