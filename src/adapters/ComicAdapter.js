@@ -60,6 +60,22 @@ export function verifyStory(comicVine) {
  * @returns {string|null} 'vintage-thin' | 'modern-bundle' | null
  */
 export function computeEraRisk(year, rawComps) {
+  const y = parseInt(year);
+  if (!y || isNaN(y)) return null;
+
+  // Golden Age: 1938-1955
+  const isGoldenAge = y >= 1938 && y <= 1955;
+  const isThinActive = rawComps?.count <= 2;
+
+  if (isGoldenAge && isThinActive) {
+    return 'vintage-thin';
+  }
+
+  // Modern bundle candidate: post-1991, low value
+  if (y >= 1992 && rawComps?.average && rawComps.average < 10) {
+    return 'modern-bundle';
+  }
+
   return null;
 }
 

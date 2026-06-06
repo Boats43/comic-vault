@@ -143,16 +143,14 @@ export function computeDecision(item, context = {}) {
 
   // Blocker: Catastrophic system overprice
   // System-generated price far above active comps = broken pricing logic
-  // EXCEPT: Golden Age thin pools may have contaminated active comps - handle as warning
+  // EXCEPT: vintage-thin era risk (Golden Age thin pools) may have contaminated active comps
   const activeAvg = item.rawComps?.average;
   const systemPrice = item.price;
-  const year = parseInt(item.year);
-  const isGoldenAge = year >= 1938 && year <= 1955;
-  const isThinActive = item.rawComps?.count <= 2;
+  const eraRisk = item.eraRisk; // computed by ComicAdapter.computeEraRisk()
 
   if (systemPrice && activeAvg && systemPrice > activeAvg * 10) {
-    // Skip blocker for Golden Age thin pools - let warnings handle it
-    if (!(isGoldenAge && isThinActive)) {
+    // Skip blocker for vintage-thin pools - let warnings handle it
+    if (eraRisk !== 'vintage-thin') {
       decision.blockers.push('catastrophic-system-overprice');
       decision.evidence.catastrophicOverprice = {
         systemPrice,
@@ -342,11 +340,16 @@ export function computeDecision(item, context = {}) {
     decision.evidence.soldActiveMismatch = { soldAvg, activeAvg };
   }
 
-  // Warning: Golden Age thin-active-pool
-  // Note: year, isGoldenAge, isThinActive already defined in blocker section above
-  if (isGoldenAge && isThinActive && soldAvg && activeAvg && soldAvg > activeAvg * 3) {
-    decision.warnings.push('golden-age-thin-active-mismatch');
-    decision.evidence.goldenAgeThin = { year, activeCount: item.rawComps?.count, soldAvg, activeAvg };
+  // Warning: Vintage-thin era risk (Golden Age thin-active-pool)
+  if (eraRisk === 'vintage-thin' && soldAvg && activeAvg && soldAvg > activeAvg * 3) {
+    decision.warnings.push('era-risk-vintage-thin');
+    decision.evidence.eraRisk = {
+      type: 'vintage-thin',
+      year: item.year,
+      activeCount: item.rawComps?.count,
+      soldAvg,
+      activeAvg
+    };
   }
 
   // Warning: Reprint/polybag
@@ -393,7 +396,7 @@ export function computeDecision(item, context = {}) {
   // Escalate to RESEARCH if critical warnings
   const criticalWarnings = [
     'sold-active-mismatch-extreme',
-    'golden-age-thin-active-mismatch',
+    'era-risk-vintage-thin',
     'active-avg-far-below',
     'ai-verify-rejected-all',
     'verification-failed-claude',
@@ -576,8 +579,8 @@ function buildWarningReason(warnings, item) {
     const activeStr = activeAvg != null && !isNaN(activeAvg) ? activeAvg.toFixed(0) : '?';
     reasons.push(`sold $${soldStr} vs active $${activeStr} mismatch`);
   }
-  if (warnings.includes('golden-age-thin-active-mismatch')) {
-    reasons.push('Golden Age thin active pool with sold/active conflict');
+  if (warnings.includes('era-risk-vintage-thin')) {
+    reasons.push('vintage era thin pool with sold/active conflict');
   }
   if (warnings.includes('active-avg-far-below')) {
     reasons.push('recommended price far above active comps');

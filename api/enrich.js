@@ -35,7 +35,7 @@ import {
   backfillFromComps,
   resolveYear,
 } from "../src/lib/identityCore.js";
-import { verifyStory, detectKeyValue } from "../src/adapters/ComicAdapter.js";
+import { verifyStory, detectKeyValue, computeEraRisk } from "../src/adapters/ComicAdapter.js";
 // Ship #20a.6 — sold comp verification (pure regex, no I/O). Replaces the
 // single #issue regex filter with full hygiene chain. See
 // src/lib/soldVerification.js for filter list + diagnostics shape.
@@ -4429,6 +4429,9 @@ export default async function handler(req, res) {
 
     // 3d. identityComplete: comic-specific flag (issue + publisher required)
     out.identityComplete = !!(out.issue && out.publisher);
+
+    // 3e. eraRisk: comic-specific era risk (Golden Age thin-pool, modern bundle)
+    out.eraRisk = computeEraRisk(out.year, out.rawComps);
 
     // 4. megaKey: construct from flags
     if (out.manualReviewRequired) {
