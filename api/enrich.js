@@ -1262,6 +1262,33 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
           `nameScore=${nameScore} pubScore=${publisherScore} tokenOverlap=${Math.round(overlapRatio * 100)}% ` +
           `volume="${volDetail.name}"`
         );
+
+        // Build fallback description from available metadata
+        const fallbackParts = [
+          match.volume?.name,
+          match.issue_number ? `#${match.issue_number}` : null,
+          volDetail?.publisher?.name || match.volume?.publisher?.name,
+          volDetail?.start_year ? `(${volDetail.start_year})` : null,
+        ].filter(Boolean);
+
+        const characters = Array.isArray(match.character_credits)
+          ? match.character_credits.map(c => c?.name).filter(Boolean).slice(0, 3)
+          : [];
+        if (characters.length > 0) {
+          fallbackParts.push(`Featuring: ${characters.join(', ')}`);
+        }
+
+        const firstApps = Array.isArray(match.first_appearance_characters)
+          ? match.first_appearance_characters.map(c => c?.name).filter(Boolean)
+          : [];
+        if (firstApps.length > 0) {
+          fallbackParts.push(`First appearance: ${firstApps[0]}`);
+        }
+
+        description = fallbackParts.length > 0
+          ? fallbackParts.join(' · ')
+          : 'No description available.';
+        deck = null; // deck already suppressed above
       }
     }
 
@@ -1276,6 +1303,7 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       description,
       deck,
       storySuppressedReason,
+      storySource: storySuppressedReason ? 'generated-fallback' : null,
       coverDate: match.cover_date || null,
       aliases: Array.isArray(match.aliases) ? match.aliases : [],
       firstAppearanceCharacters: hasFirstApps
