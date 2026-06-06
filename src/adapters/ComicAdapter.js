@@ -104,7 +104,8 @@ export const PUBLISHER_IN_TITLE_SERIES = [
  * appear as variant descriptors in eBay listing titles.
  */
 export const ARTIST_NOISE = [
-  /tyler kirkham/i, /jim lee/i, /inhyuk lee/i, /skottie young/i, /frank cho/i,
+  /tyler kirkham/i, /jim lee/i, /john byrne/i, /neal adams/i, /gene colan/i,
+  /jack kirby/i, /steve ditko/i, /inhyuk lee/i, /skottie young/i, /frank cho/i,
   /frank miller/i, /dell'?otto/i, /jeehyung lee/i, /alex ross/i, /kaare andrews/i,
   /alan quah/i, /mico suayan/i, /puppeteer lee/i, /derrick chew/i, /jonboy meyers/i,
   /kael ngu/i, /natali sanders/i, /kendrick lim/i, /lucio parrillo/i,
