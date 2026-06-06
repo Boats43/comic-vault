@@ -80,6 +80,8 @@ import {
 // (LIST_NOW, RESEARCH, ID_REQUIRED, etc.) after full enrich object assembled.
 import { computeDecision } from "../src/lib/decisionEngine.js";
 import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate } from "../src/lib/imageSearchIdentity.js";
+// Session 4A — Universal category filter (pre-clustering)
+import { filterByCategory } from "../src/lib/categoryClassifier.js";
 // Ship #20b — price bands engine (verified sold-first pricing).
 import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforceFloorFromBands } from "../src/lib/priceBands.js";
 // Ship #21 — demand signals from sales data.
@@ -1495,6 +1497,13 @@ export default async function handler(req, res) {
     const visualResult = visualBase64
       ? await lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null)
       : null;
+
+    // Session 4A — Category filter removes non-comic results (posters, prints,
+    // collectibles) before clustering. Gracefully falls back to original pool
+    // if filtering would drop below minimum threshold (5 results).
+    if (visualResult?.items?.length) {
+      visualResult.items = filterByCategory(visualResult.items, 'COMIC');
+    }
 
     // Extract consensus from eBay image search results
     // visualResult.items already contains parsed rows from lookupEbayVisual
