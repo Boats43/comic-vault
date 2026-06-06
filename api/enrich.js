@@ -2136,12 +2136,10 @@ export default async function handler(req, res) {
     }
 
     // Ship 3B.3 — Year resolution core now in identityCore.js
-    // Era-specific detection (king-size, annual, etc.) remains inline for Step 5
+    // TODO-016: Era-specific detection moved to ComicAdapter in Phase 3
+    // Stub remains for Phase 3 extraction — currently unused
     const keyIssueStr = req.body?.keyIssue ? String(req.body.keyIssue) : "";
-    const isEraSpecific =
-      /silver age|bronze age|king[-\s]?size|giant[-\s]?size|annual|spectacular|first issue/i.test(
-        keyIssueStr
-      );
+    const eraSpecific = /silver age|bronze age|king[-\s]?size|giant[-\s]?size|annual|spectacular|first issue/i.test(keyIssueStr);
 
     const pcYear = priceCharting?.year ? parseInt(priceCharting.year, 10) : null;
     const cvYear = comicVine?.startYear
@@ -4406,9 +4404,9 @@ export default async function handler(req, res) {
       count: rawComps.count
     } : { count: 0 };
 
-    // 2. variantContamFallback: alias from variantFallback
-    if (out.variantFallback) {
-      out.variantContamFallback = out.variantFallback;
+    // 2. compPoolContaminated: universal flag for variant/reprint fallback
+    if (out.variantFallback || out.reprintFallback) {
+      out.compPoolContaminated = true;
     }
 
     // 3. storySuppressedReason: normalize from nested comicVine

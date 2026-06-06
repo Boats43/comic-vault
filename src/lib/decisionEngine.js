@@ -274,9 +274,9 @@ export function computeDecision(item, context = {}) {
     decision.warnings.push('thin-pool-anchor');
   }
 
-  // Warning: Variant weak
-  if (item.variantContamFallback === true || item.reprintFallback === true) {
-    decision.warnings.push('variant-contamination');
+  // Warning: Comp pool contamination
+  if (item.compPoolContaminated === true) {
+    decision.warnings.push('comp-pool-contaminated');
   }
 
   // Warning: Grade low confidence
@@ -342,10 +342,10 @@ export function computeDecision(item, context = {}) {
     }
   }
 
-  // Warning: Story suppressed (informational)
+  // Warning: Content unverified (informational)
   if (hasStorySuppression) {
-    decision.warnings.push('story-suppressed');
-    decision.evidence.storySuppressed = hasStorySuppression;
+    decision.warnings.push('content-unverified');
+    decision.evidence.contentUnverified = hasStorySuppression;
   }
 
   // Warning: Active/sold mismatch
@@ -533,9 +533,9 @@ export function computeDecision(item, context = {}) {
 function buildBlockerReason(blockers, item) {
   const reasons = [];
 
-  if (blockers.includes('missing-title')) reasons.push('title missing');
-  if (blockers.includes('missing-issue')) reasons.push('issue missing');
-  if (blockers.includes('missing-publisher')) reasons.push('publisher missing');
+  if (blockers.includes('missing-title')) reasons.push('identity-incomplete: title not resolved');
+  if (blockers.includes('missing-issue')) reasons.push('identity-incomplete: issue not resolved');
+  if (blockers.includes('missing-publisher')) reasons.push('identity-incomplete: publisher not resolved');
   if (blockers.includes('identity-not-confident')) reasons.push('identity uncertain');
   if (blockers.includes('refused-identity-conflict')) reasons.push('identity conflict');
   if (blockers.includes('no-data-sources')) reasons.push('no pricing data available');
@@ -559,16 +559,10 @@ function buildIdentityNextStep(blockers, item) {
   const steps = [];
 
   if (blockers.includes('missing-publisher')) {
-    // Infer publisher based on year if possible
-    const year = parseInt(item.year);
-    if (item.title?.toLowerCase().includes('green hornet') && year === 1991) {
-      steps.push('Add publisher: NOW Comics (1991 series)');
-    } else {
-      steps.push('Add publisher or rescan indicia');
-    }
+    steps.push('Verify publisher via external source or rescan indicia');
   }
-  if (blockers.includes('missing-title')) steps.push('Rescan cover for clear title');
-  if (blockers.includes('missing-issue')) steps.push('Rescan cover for issue number');
+  if (blockers.includes('missing-title')) steps.push('Rescan asset for clear title');
+  if (blockers.includes('missing-issue')) steps.push('Rescan asset for issue number');
   if (blockers.includes('identity-not-confident')) steps.push('Retake photo with better lighting or verify identity manually');
 
   return steps.join('; ') || 'Fix identity fields before listing';
@@ -611,7 +605,7 @@ function buildWarningReason(warnings, item) {
     reasons.push('thin comp pool (limited data)');
   }
   if (warnings.includes('bundle-candidate')) {
-    reasons.push('low-dollar modern, better in bundle');
+    reasons.push('low-value, bundle recommended');
   }
   if (warnings.includes('story-metadata-suspicious')) {
     reasons.push('story metadata needs review');
