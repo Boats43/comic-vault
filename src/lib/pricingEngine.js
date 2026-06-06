@@ -249,3 +249,38 @@ export const computePriceBands = (price, opts = {}) => {
     floor: price * floorMult,
   };
 };
+
+/**
+ * Floor enforcement with ceiling cap.
+ *
+ * Computes the effective floor (raw floor capped at ceiling to prevent
+ * floor from exceeding average comps) and returns the enforced price if
+ * current price is below floor, otherwise returns null (no enforcement needed).
+ *
+ * Used in api/enrich.js floor guard block (~line 3335). The raw floor comes
+ * from grade-filtered lowest comp, ceiling is the blended/active average.
+ * When floor > ceiling, we cap the floor at ceiling to prevent anchoring
+ * above the market average.
+ *
+ * @param {number} price - Current price to check against floor
+ * @param {number} rawFloor - Raw floor value (from comps.lowest)
+ * @param {number} ceiling - Ceiling cap (typically comps average)
+ * @returns {number|null} Enforced price if below floor, null if no enforcement needed
+ */
+export const enforceFloorWithCap = (price, rawFloor, ceiling) => {
+  if (typeof price !== 'number' || !(price > 0)) return null;
+  if (typeof rawFloor !== 'number' || !(rawFloor > 0)) return null;
+
+  // Cap floor at ceiling when ceiling exists and is positive
+  let effectiveFloor = rawFloor;
+  if (typeof ceiling === 'number' && ceiling > 0 && rawFloor > ceiling) {
+    effectiveFloor = ceiling;
+  }
+
+  // Only enforce if price is below effective floor
+  if (price < effectiveFloor) {
+    return effectiveFloor;
+  }
+
+  return null;
+};

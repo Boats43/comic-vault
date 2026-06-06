@@ -26,6 +26,7 @@ import {
   computeLowGradeFloor,
   getEra,
   enforceFloor,
+  enforceFloorWithCap,
 } from "../src/lib/pricingEngine.js";
 // Ship #20a.6 — sold comp verification (pure regex, no I/O). Replaces the
 // single #issue regex filter with full hygiene chain. See
@@ -1643,6 +1644,7 @@ export {
   computeLowGradeFloor,
   getEra,
   enforceFloor,
+  enforceFloorWithCap,
 };
 
 export default async function handler(req, res) {
@@ -3341,19 +3343,23 @@ export default async function handler(req, res) {
       const gradeAwareFloor = rawComps?.gradeFilteredLowest ?? rawComps?.lowest;
       const rawFloor = gradeAwareFloor || compsFromEbay?.lowest || 0;
       const compsAvgForCap = blendedAvg || compsFromEbay?.average || 0;
-      floorNum = rawFloor;
-      if (floorNum > compsAvgForCap && compsAvgForCap > 0) {
-        floorNum = compsAvgForCap;
-        console.log('[floor] capped at comps avg', compsAvgForCap.toFixed(2));
-      }
 
-      if (floorNum > 0 && finalNum < floorNum) {
+      const enforcedFloor = enforceFloorWithCap(finalNum, rawFloor, compsAvgForCap);
+
+      if (enforcedFloor !== null) {
         floorFired = true;
+        floorNum = enforcedFloor;
+
+        // Log cap if applied
+        if (rawFloor > compsAvgForCap && compsAvgForCap > 0) {
+          console.log('[floor] capped at comps avg', compsAvgForCap.toFixed(2));
+        }
+
         console.log('[floor] price', finalNum,
-          '< floor', floorNum, `(raw ${rawFloor}, cap ${compsAvgForCap})`, '— enforcing');
-        out.price = fmtUsd(floorNum);
-        out.priceLow = fmtUsd(floorNum * 0.85);
-        out.priceHigh = fmtUsd(floorNum * 1.25);
+          '< floor', enforcedFloor, `(raw ${rawFloor}, cap ${compsAvgForCap})`, '— enforcing');
+        out.price = fmtUsd(enforcedFloor);
+        out.priceLow = fmtUsd(enforcedFloor * 0.85);
+        out.priceHigh = fmtUsd(enforcedFloor * 1.25);
         out.priceNote = (out.priceNote || '') + ' · floor enforced';
       }
     }
