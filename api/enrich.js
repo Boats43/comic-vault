@@ -4427,6 +4427,9 @@ export default async function handler(req, res) {
     // 3c. hasKeyValue: universal flag computed by ComicAdapter.detectKeyValue
     out.hasKeyValue = detectKeyValue(req.body.keyIssue);
 
+    // 3d. identityComplete: comic-specific flag (issue + publisher required)
+    out.identityComplete = !!(out.issue && out.publisher);
+
     // 4. megaKey: construct from flags
     if (out.manualReviewRequired) {
       out.megaKey = { badge: 'MANUAL REVIEW' };

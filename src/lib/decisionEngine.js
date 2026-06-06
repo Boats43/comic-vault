@@ -102,11 +102,10 @@ export function computeDecision(item, context = {}) {
   if (!item.title || item.title.trim() === '') {
     decision.blockers.push('missing-title');
   }
-  if (item.issue == null || item.issue === '') {
-    decision.blockers.push('missing-issue');
-  }
-  if (!item.publisher || item.publisher.trim() === '') {
-    decision.blockers.push('missing-publisher');
+  // Blocker: Identity incomplete (comic-specific: issue + publisher required)
+  // identityComplete flag computed by ComicAdapter
+  if (item.identityComplete === false) {
+    decision.blockers.push('identity-incomplete');
   }
 
   // Blocker: Identity not confident
@@ -195,12 +194,11 @@ export function computeDecision(item, context = {}) {
   // If blockers exist, return DO_NOT_LIST or ID_REQUIRED
   if (decision.blockers.length > 0) {
     // Determine if it's ID_REQUIRED vs DO_NOT_LIST
-    // Note: missing-issue, missing-publisher remain comic-specific (Phase 3)
-    // Universal flag identityComplete will replace these in Phase 3
     const identityBlockers = [
-      'missing-title', 'missing-issue', 'missing-publisher',
-      'identity-not-confident', 'refused-identity-conflict',
-      'identity-incomplete'
+      'missing-title',
+      'identity-incomplete',
+      'identity-not-confident',
+      'refused-identity-conflict'
     ];
     const hasIdentityBlocker = decision.blockers.some(b => identityBlockers.includes(b));
 
@@ -521,8 +519,7 @@ function buildBlockerReason(blockers, item) {
   const reasons = [];
 
   if (blockers.includes('missing-title')) reasons.push('identity-incomplete: title not resolved');
-  if (blockers.includes('missing-issue')) reasons.push('identity-incomplete: issue not resolved');
-  if (blockers.includes('missing-publisher')) reasons.push('identity-incomplete: publisher not resolved');
+  if (blockers.includes('identity-incomplete')) reasons.push('identity-incomplete: required fields missing');
   if (blockers.includes('identity-not-confident')) reasons.push('identity uncertain');
   if (blockers.includes('refused-identity-conflict')) reasons.push('identity conflict');
   if (blockers.includes('no-data-sources')) reasons.push('no pricing data available');
@@ -545,11 +542,8 @@ function buildBlockerReason(blockers, item) {
 function buildIdentityNextStep(blockers, item) {
   const steps = [];
 
-  if (blockers.includes('missing-publisher')) {
-    steps.push('Verify publisher via external source or rescan indicia');
-  }
   if (blockers.includes('missing-title')) steps.push('Rescan asset for clear title');
-  if (blockers.includes('missing-issue')) steps.push('Rescan asset for issue number');
+  if (blockers.includes('identity-incomplete')) steps.push('Rescan asset for missing identity fields');
   if (blockers.includes('identity-not-confident')) steps.push('Retake photo with better lighting or verify identity manually');
 
   return steps.join('; ') || 'Fix identity fields before listing';
