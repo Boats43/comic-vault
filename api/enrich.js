@@ -40,6 +40,7 @@ import {
   detectKeyValue,
   computeEraRisk,
   cleanTitleForComicVine,
+  sanitizeComicTitle,
   PUBLISHER_IN_TITLE_SERIES,
   CREATOR_NOISE_RE,
   PUBLISHER_FILLER_RE,
@@ -365,165 +366,8 @@ const extractSubtitleTokens = (title) => {
 // Ship 3B.7 — cleanTitleForComicVine now in ComicAdapter.js
 // Imported above, no local definition needed
 
-/**
- * Ship v0-G — Title sanitization for contaminated eBay listing text.
- *
- * Removes seller/marketplace noise that poisons ComicVine, PriceCharting,
- * and eBay comps queries. Preserves canonical format markers.
- *
- * @param {string} title - Title to sanitize
- * @param {Object} context - { year, isGraded, preservePublisherInTitle }
- * @returns {string} Sanitized title
- */
-const sanitizeTitle = (title, context = {}) => {
-  const { year, isGraded, preservePublisherInTitle = true } = context;
-
-  if (!title || typeof title !== 'string') return title;
-
-  const titleLower = title.toLowerCase().trim();
-
-  // Ship 3B.7 — PUBLISHER_IN_TITLE_SERIES now imported from ComicAdapter
-  const isProtected = preservePublisherInTitle &&
-    PUBLISHER_IN_TITLE_SERIES.some(p => titleLower.includes(p));
-
-  if (isProtected) {
-    // Minimal cleanup only for protected titles
-    return title.replace(/\b(free\s+shipping|stock\s+image)\b/gi, ' ')
-      .replace(/\s+/g, ' ').trim();
-  }
-
-  let cleaned = title;
-  const removedTokens = [];
-
-  // Marketplace/auction keywords
-  const MARKETPLACE_RE = /\b(free\s+(?:shipping|ship)|select\s+an?\s+issue|choose\s+(?:your\s+)?issue|your\s+choice|stock\s+image|see\s+pics?|combine(?:d)?\s+(?:shipping|ship|s&h)|buy\s+it\s+now|must\s+see|hot\s+read)\b/gi;
-  cleaned = cleaned.replace(MARKETPLACE_RE, (match) => {
-    removedTokens.push(match);
-    return ' ';
-  });
-
-  // Grade codes (when raw)
-  if (!isGraded) {
-    const GRADE_RE = /\b(vg|fn|vf|nm|gd|fr|pr|raw|low\s+grade|mid\s+grade|high\s+grade)\b/gi;
-    cleaned = cleaned.replace(GRADE_RE, (match) => {
-      removedTokens.push(match);
-      return ' ';
-    });
-  }
-
-  // Rarity adjectives
-  const RARITY_RE = /\b(rare|scarce|hot|gem|beauty|wow)\b/gi;
-  cleaned = cleaned.replace(RARITY_RE, (match) => {
-    removedTokens.push(match);
-    return ' ';
-  });
-
-  // Condition adjectives
-  const CONDITION_RE = /\b(apparent|complete|missing|intact|sharp)\b/gi;
-  cleaned = cleaned.replace(CONDITION_RE, (match) => {
-    removedTokens.push(match);
-    return ' ';
-  });
-
-  // Ship 3B.7 — Comic pattern lists now imported from ComicAdapter
-  cleaned = cleaned.replace(CREATOR_NOISE_RE, (match) => {
-    removedTokens.push(match);
-    return ' ';
-  });
-
-  cleaned = cleaned.replace(PUBLISHER_FILLER_RE, (match) => {
-    removedTokens.push(match);
-    return ' ';
-  });
-
-  cleaned = cleaned.replace(LISTING_LANGUAGE_RE, (match) => {
-    removedTokens.push(match);
-    return ' ';
-  });
-
-  // Bare years (only when year exists separately)
-  if (year && parseInt(year) >= 1900 && parseInt(year) <= 2099) {
-    const YEAR_RE = new RegExp(`\\b${year}\\b`, 'g');
-    cleaned = cleaned.replace(YEAR_RE, (match) => {
-      removedTokens.push(match);
-      return ' ';
-    });
-
-    // Also strip nearby years (±5 range for seller confusion)
-    const yearInt = parseInt(year);
-    for (let y = yearInt - 5; y <= yearInt + 5; y++) {
-      if (y !== yearInt && y >= 1900 && y <= 2099) {
-        const nearYearRe = new RegExp(`\\b${y}\\b`, 'g');
-        cleaned = cleaned.replace(nearYearRe, ' ');
-      }
-    }
-  }
-
-  // Ship Pattern-J — Seller inventory code stripping.
-  // Targets short alphanumeric codes that appear AFTER core title content.
-  // Catches: mm22, A2, z4405, 9176, seller SKUs, catalog codes.
-  // Preserves: issue numbers (#22), ratios (1:25), title years (2099, 2000 AD).
-  //
-  // Strategy: Strip standalone alphanumeric tokens 2-6 chars that are NOT:
-  // - Four-digit years 1900-2099
-  // - Prefixed with # (issue numbers)
-  // - Part of ratio pattern (1:N)
-  // - Protected title numbers (2099, 2000, 3D, etc.)
-  //
-  // Patterns:
-  // - [a-z]{1,2}\d{1,5}: letter(s) + digits (mm22, A2, z4405)
-  // - \d{1,5}[a-z]{1,2}: digits + letter(s) (22mm, 4405z)
-  // - [a-z]\d+[a-z]: letter-digits-letter (a1b)
-  // - \d{4,5}(?!AD): pure 4-5 digit codes NOT followed by AD (9176, not "2000 AD")
-  try {
-    const INVENTORY_CODE_RE = /\b(?!(?:19|20)\d{2}\b)(?!#)(?!\d+:)([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/gi;
-
-    // Check if title has markers indicating end-of-title (safer to strip broadly)
-    const hasMarkers = cleaned && /(\bvf\b|\bnm\b|\bfn\b|\bvg\b|\bgd\b|\(19\d{2}\)|\(20\d{2}\)|\$\d+|!|\bvariant\b)/i.test(cleaned);
-
-    if (hasMarkers) {
-      // Title has markers — safe to strip codes broadly
-      cleaned = cleaned.replace(INVENTORY_CODE_RE, (match) => {
-        removedTokens.push(match);
-        return ' ';
-      });
-    } else if (cleaned) {
-      // No markers — only strip codes at string end (safer)
-      const tailMatch = cleaned.match(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i);
-      if (tailMatch && tailMatch[1]) {
-        removedTokens.push(tailMatch[1]);
-        cleaned = cleaned.replace(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i, '');
-      }
-    }
-  } catch (err) {
-    console.error('[sanitize-inventory-code] failed:', err.message);
-    // Continue with cleaned as-is
-  }
-
-  // Reuse existing cleanTitleForComicVine artist-stripping logic
-  cleaned = cleanTitleForComicVine(cleaned, null);
-
-  // Normalize whitespace
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
-
-  // Safeguard: if cleaned < 2 meaningful tokens, restore original
-  const tokens = cleaned.split(/\s+/).filter(t =>
-    t.length >= 2 && !/^\d+$/.test(t) &&
-    !/^(the|a|an|of|and|or|in|on|at|to|for|with)$/i.test(t)
-  );
-
-  if (tokens.length < 2) {
-    console.log(`[title-sanitized-rejected] safeguard triggered: "${cleaned}" < 2 tokens, restoring "${title}"`);
-    return title;
-  }
-
-  // Log changes
-  if (cleaned.toLowerCase() !== titleLower) {
-    console.log(`[title-sanitized] "${title}" → "${cleaned}"`);
-  }
-
-  return cleaned;
-};
+// Ship 3B.7 — sanitizeTitle moved to ComicAdapter.sanitizeComicTitle
+// Now imported above, no local definition needed
 
 /**
  * Ship v0-G — Detect title contamination signals.
@@ -1728,8 +1572,9 @@ export default async function handler(req, res) {
 
     let titleSanitized = false;
     // Widen gate to catch medium severity (e.g., "champions cgc origin", "house of mystery 1965 vg")
+    // Ship 3B.7 — sanitizeComicTitle now in ComicAdapter.js
     if (titleContamination.severity !== 'none') {
-      const sanitized = sanitizeTitle(confirmedTitle, {
+      const sanitized = sanitizeComicTitle(confirmedTitle, {
         year: confirmedYear,
         isGraded: isGraded || false,
         preservePublisherInTitle: true

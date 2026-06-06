@@ -227,12 +227,139 @@ export function cleanTitleForComicVine(title, variant) {
 
 /**
  * Comic-specific title sanitization.
- * Stub for Phase 3 Part 2 — will replace inline sanitizeTitle in enrich.js.
+ * Removes seller/marketplace noise + comic-specific patterns.
+ * Replaces inline sanitizeTitle in enrich.js.
  *
  * @param {string} title - Title to sanitize
  * @param {Object} context - { year, isGraded, preservePublisherInTitle }
  * @returns {string} Sanitized title
  */
-export function sanitizeComicTitle(title, context) {
-  return title;
+export function sanitizeComicTitle(title, context = {}) {
+  const { year, isGraded, preservePublisherInTitle = true } = context;
+
+  if (!title || typeof title !== 'string') return title;
+
+  const titleLower = title.toLowerCase().trim();
+
+  // Protected series (publisher-in-title)
+  const isProtected = preservePublisherInTitle &&
+    PUBLISHER_IN_TITLE_SERIES.some(p => titleLower.includes(p));
+
+  if (isProtected) {
+    // Minimal cleanup only for protected titles
+    return title.replace(/\b(free\s+shipping|stock\s+image)\b/gi, ' ')
+      .replace(/\s+/g, ' ').trim();
+  }
+
+  let cleaned = title;
+  const removedTokens = [];
+
+  // Marketplace/auction keywords (universal)
+  const MARKETPLACE_RE = /\b(free\s+(?:shipping|ship)|select\s+an?\s+issue|choose\s+(?:your\s+)?issue|your\s+choice|stock\s+image|see\s+pics?|combine(?:d)?\s+(?:shipping|ship|s&h)|buy\s+it\s+now|must\s+see|hot\s+read)\b/gi;
+  cleaned = cleaned.replace(MARKETPLACE_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Grade codes (universal - comics, cards, etc.)
+  if (!isGraded) {
+    const GRADE_RE = /\b(vg|fn|vf|nm|gd|fr|pr|raw|low\s+grade|mid\s+grade|high\s+grade)\b/gi;
+    cleaned = cleaned.replace(GRADE_RE, (match) => {
+      removedTokens.push(match);
+      return ' ';
+    });
+  }
+
+  // Rarity adjectives (universal)
+  const RARITY_RE = /\b(rare|scarce|hot|gem|beauty|wow)\b/gi;
+  cleaned = cleaned.replace(RARITY_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Condition adjectives (universal)
+  const CONDITION_RE = /\b(apparent|complete|missing|intact|sharp)\b/gi;
+  cleaned = cleaned.replace(CONDITION_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Comic-specific patterns (from ComicAdapter exports)
+  cleaned = cleaned.replace(CREATOR_NOISE_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  cleaned = cleaned.replace(PUBLISHER_FILLER_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  cleaned = cleaned.replace(LISTING_LANGUAGE_RE, (match) => {
+    removedTokens.push(match);
+    return ' ';
+  });
+
+  // Bare years (universal - applies to any collectible)
+  if (year && parseInt(year) >= 1900 && parseInt(year) <= 2099) {
+    const YEAR_RE = new RegExp(`\\b${year}\\b`, 'g');
+    cleaned = cleaned.replace(YEAR_RE, (match) => {
+      removedTokens.push(match);
+      return ' ';
+    });
+
+    // Also strip nearby years (±5 range for seller confusion)
+    const yearInt = parseInt(year);
+    for (let y = yearInt - 5; y <= yearInt + 5; y++) {
+      if (y !== yearInt && y >= 1900 && y <= 2099) {
+        const nearYearRe = new RegExp(`\\b${y}\\b`, 'g');
+        cleaned = cleaned.replace(nearYearRe, ' ');
+      }
+    }
+  }
+
+  // Inventory code stripping (universal)
+  try {
+    const INVENTORY_CODE_RE = /\b(?!(?:19|20)\d{2}\b)(?!#)(?!\d+:)([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|[a-z]\d+[a-z]|\d{4,5}(?!AD))\b/gi;
+    const hasMarkers = cleaned && /(\bvf\b|\bnm\b|\bfn\b|\bvg\b|\bgd\b|\(19\d{2}\)|\(20\d{2}\)|\$\d+|!|\bvariant\b)/i.test(cleaned);
+
+    if (hasMarkers) {
+      cleaned = cleaned.replace(INVENTORY_CODE_RE, (match) => {
+        removedTokens.push(match);
+        return ' ';
+      });
+    } else if (cleaned) {
+      const tailMatch = cleaned.match(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i);
+      if (tailMatch && tailMatch[1]) {
+        removedTokens.push(tailMatch[1]);
+        cleaned = cleaned.replace(/\s+([a-z]{1,2}\d{1,5}|\d{1,5}[a-z]{1,2}|\d{4,5})$/i, '');
+      }
+    }
+  } catch (err) {
+    console.error('[sanitize-inventory-code] failed:', err.message);
+  }
+
+  // Comic-specific artist stripping
+  cleaned = cleanTitleForComicVine(cleaned, null);
+
+  // Normalize whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  // Safeguard: if cleaned < 2 meaningful tokens, restore original
+  const tokens = cleaned.split(/\s+/).filter(t =>
+    t.length >= 2 && !/^\d+$/.test(t) &&
+    !/^(the|a|an|of|and|or|in|on|at|to|for|with)$/i.test(t)
+  );
+
+  if (tokens.length < 2) {
+    console.log(`[title-sanitized-rejected] safeguard triggered: "${cleaned}" < 2 tokens, restoring "${title}"`);
+    return title;
+  }
+
+  // Log changes
+  if (cleaned.toLowerCase() !== titleLower) {
+    console.log(`[title-sanitized] "${title}" → "${cleaned}"`);
+  }
+
+  return cleaned;
 }
