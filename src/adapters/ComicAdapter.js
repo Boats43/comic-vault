@@ -1,0 +1,60 @@
+/**
+ * ComicAdapter.js
+ *
+ * Session 3B Step 5 — Comic-specific domain logic.
+ * Extracts comic knowledge from AssetCore (decisionEngine, pricingEngine).
+ *
+ * AssetCore operates on universal primitives only.
+ * ComicAdapter owns: issue, publisher, variant, keyIssue, era, ComicVine,
+ * creator patterns, artist patterns, comic-specific title sanitization.
+ *
+ * Phase 1+2 implementation: stubs and flag migrations.
+ * Phase 3 implementation: full enrichComic() orchestration.
+ */
+
+/**
+ * Detect key-issue value from keyIssue string.
+ * Replaces inline hasKeyIssue logic in decisionEngine.js.
+ *
+ * @param {string|null} keyIssue - Key issue descriptor
+ * @returns {boolean} True if key issue detected
+ */
+export function detectKeyValue(keyIssue) {
+  return null;
+}
+
+/**
+ * Verify story content from ComicVine metadata.
+ * Replaces inline comicVine.description check in decisionEngine.js.
+ *
+ * @param {Object|null} comicVine - ComicVine API response
+ * @returns {boolean} True if story verified (not ad/pinup)
+ */
+export function verifyStory(comicVine) {
+  return null;
+}
+
+/**
+ * Compute era-based risk flag.
+ * Replaces Golden Age thin-pool and modern bundle detection in decisionEngine.js.
+ *
+ * @param {string|number} year - Publication year
+ * @param {Object} rawComps - Raw comp data { count, average }
+ * @returns {string|null} 'vintage-thin' | 'modern-bundle' | null
+ */
+export function computeEraRisk(year, rawComps) {
+  return null;
+}
+
+/**
+ * Comic-specific title sanitization.
+ * Owns comic pattern lists (creators, eras, artists).
+ * Replaces inline sanitizeTitle + cleanTitleForComicVine in enrich.js.
+ *
+ * @param {string} title - Title to sanitize
+ * @param {Object} context - { year, isGraded, preservePublisherInTitle }
+ * @returns {string} Sanitized title
+ */
+export function sanitizeComicTitle(title, context) {
+  return title;
+}
