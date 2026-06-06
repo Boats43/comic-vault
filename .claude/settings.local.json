@@ -82,7 +82,8 @@
       "PowerShell($env:GOCOLLECT_API = \\(Get-Content \"go collect api\" -Raw\\).Trim\\(\\); node test-gocollect.mjs)",
       "PowerShell($env:GOCOLLECT_API = \\(Get-Content \"go collect api.txt\" -Raw\\).Trim\\(\\); node test-gocollect.mjs)",
       "PowerShell(npm test *)",
-      "PowerShell($lines = Get-Content \"C:\\\\Users\\\\matam\\\\OneDrive\\\\Desktop\\\\comic-vault\\\\src\\\\App.jsx\"; for \\($i = 2414; $i -lt $lines.Count; $i++\\) { if \\($lines[$i] -match \"^function \"\\) { Write-Output $i; break } })"
+      "PowerShell($lines = Get-Content \"C:\\\\Users\\\\matam\\\\OneDrive\\\\Desktop\\\\comic-vault\\\\src\\\\App.jsx\"; for \\($i = 2414; $i -lt $lines.Count; $i++\\) { if \\($lines[$i] -match \"^function \"\\) { Write-Output $i; break } })",
+      "PowerShell(\\(Get-Content api\\\\enrich.js | Measure-Object -Line\\).Lines)"
     ]
   }
 }

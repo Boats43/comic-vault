@@ -28,6 +28,12 @@ import {
   enforceFloor,
   enforceFloorWithCap,
 } from "../src/lib/pricingEngine.js";
+import {
+  calculateTitleOverlap,
+  resolveIdentity,
+  resolveIssue,
+  backfillFromComps,
+} from "../src/lib/identityCore.js";
 // Ship #20a.6 — sold comp verification (pure regex, no I/O). Replaces the
 // single #issue regex filter with full hygiene chain. See
 // src/lib/soldVerification.js for filter list + diagnostics shape.
@@ -1790,65 +1796,21 @@ export default async function handler(req, res) {
       }
     }
 
-    // Helper: calculate title overlap
-    const normalizeForOverlap = (str) => {
-      if (!str) return '';
-      return String(str)
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    };
-    const calculateOverlap = (a, b) => {
-      const aNorm = normalizeForOverlap(a);
-      const bNorm = normalizeForOverlap(b);
-      if (!aNorm || !bNorm) return 0;
-      const aTokens = aNorm.split(' ').filter(t => t.length > 2);
-      const bTokens = bNorm.split(' ').filter(t => t.length > 2);
-      const matches = aTokens.filter(t => bTokens.includes(t));
-      return matches.length / Math.max(aTokens.length, 1);
-    };
+    // Ship 3B.3 — calculateTitleOverlap now in identityCore.js
 
-    // Determine confirmed identity (eBay override if <20% overlap)
-    let confirmedTitle = title;
-    let confirmedIssue = issueNum;
-    let confirmedYear = year;
-    let identitySource = 'vision';
+    // Ship 3B.3 — Identity resolution now in identityCore.js
+    const identity = resolveIdentity(
+      { title, issue: issueNum, year, publisher },
+      visualConsensus,
+      familyCandidate,
+      { ebayResultCount: visualResult?.items?.length || 0, overlapThreshold: 0.2 }
+    );
 
-    // Ship 26.2 — Family candidate overrides when top-rank-protection or
-    // weighted-consensus selected. Takes precedence over visualConsensus
-    // exact-frequency voting.
-    if (familyCandidate && ['top-rank-protection', 'weighted-consensus'].includes(familyCandidate.decision)) {
-      const normalizeTitle = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-      const familyNorm = normalizeTitle(familyCandidate.selectedTitle);
-      const consensusNorm = visualConsensus?.title ? normalizeTitle(visualConsensus.title) : null;
-
-      // Check if family candidate differs from visualConsensus
-      if (consensusNorm && familyNorm !== consensusNorm) {
-        console.log(`[title-family] OVERRIDE: family="${familyCandidate.selectedTitle}" vs consensus="${visualConsensus.title}"`);
-      }
-
-      confirmedTitle = familyCandidate.selectedTitle;
-      identitySource = 'title-family-' + familyCandidate.decision;
-      console.log(`[phase1] family candidate OVERRIDE: using "${confirmedTitle}" (source: ${identitySource})`);
-    } else if (visualConsensus?.title && visualResult?.items?.length >= 10) {
-      const overlap = calculateOverlap(visualConsensus.title, title);
-      console.log(`[phase1] overlap: ${(overlap * 100).toFixed(0)}% (eBay="${visualConsensus.title}" vs Vision="${title}")`);
-
-      if (overlap < 0.2) {
-        // eBay disagrees with Vision — use eBay as source of truth
-        confirmedTitle = visualConsensus.title;
-        confirmedIssue = visualConsensus.issue || issueNum;
-        confirmedYear = visualConsensus.year || year;
-        confirmedPublisher = visualConsensus.publisher || publisher;
-        identitySource = 'ebay_visual_override';
-        console.log(`[phase1] eBay OVERRIDE: using "${confirmedTitle}" #${confirmedIssue} for downstream queries`);
-      } else {
-        console.log(`[phase1] eBay agrees with Vision: using "${confirmedTitle}"`);
-      }
-    } else {
-      console.log(`[phase1] eBay visual insufficient (${visualResult?.items?.length || 0} results), using Vision title`);
-    }
+    let confirmedTitle = identity.confirmedTitle;
+    let confirmedIssue = identity.confirmedIssue;
+    let confirmedYear = identity.confirmedYear;
+    let confirmedPublisher = identity.confirmedPublisher;
+    let identitySource = identity.identitySource;
 
     mark('phase1_complete');
 
@@ -1978,15 +1940,15 @@ export default async function handler(req, res) {
       );
     }
 
-    // Extract corrected issue from image search consensus (issue correction).
-    // Ship #20a.6.7c: Also extract issue when identity alignment overrides Vision.
-    let correctedIssue = issueNum;
-    if (visualResult?.issueSource === "ebay_visual" && visualResult.issue) {
-      correctedIssue = visualResult.issue;
-    } else if (alignment.overrodeVision) {
-      const ebayIssue = extractIssueFromEbayResults(visualResult?.items);
-      if (ebayIssue) correctedIssue = ebayIssue;
-    }
+    // Ship 3B.3 — Issue resolution now in identityCore.js
+    const ebayIssue = (alignment.overrodeVision && visualResult?.items)
+      ? extractIssueFromEbayResults(visualResult.items)
+      : null;
+    const correctedIssue = resolveIssue(
+      issueNum,
+      visualResult?.issueSource === "ebay_visual" ? visualResult.issue : null,
+      ebayIssue
+    );
 
     // Ship #20a.6.7b.2 — Image search consensus title extraction. Extract
     // consensus title (≥2 matching titles) from visual result when Vision
@@ -2226,98 +2188,24 @@ export default async function handler(req, res) {
       console.log(`[year-resolved] ${year} → ${confirmedYear} (source=${source})`);
     }
 
-    // Ship 1.8 — Comp consensus backfill for confirmedYear / confirmedPublisher.
-    // When primary resolution (Vision + eBay year + PC + CV) leaves year or
-    // publisher null but eBay image search has 5+ comps with consensus, use
-    // the consensus to backfill so identity-required gate doesn't dead-end
-    // a scan that has authoritative comp data sitting right there.
-    //
-    // TITLE SANITY GATE: Backfill ONLY runs when ≥70% of comp titles
-    // fuzzy-match confirmedTitle. Prevents Conan #124 (Conan the Barbarian
-    // 1970) from absorbing year/publisher from Savage Sword of Conan comps,
-    // and prevents any series from absorbing data from a different volume
-    // that happened to surface in image-search.
-    //
-    // Closes: Luke Cage Power Man #34 identity-required dead-end where
-    // 18+ verified comps exist but year/publisher null in primary path.
-    if ((!confirmedYear || !confirmedPublisher) && visualResult?.items?.length >= 5) {
-      const compTitles = visualResult.items
-        .map(i => String(i?.rawTitle || i?.title || ''))
-        .filter(Boolean);
+    // Ship 3B.3 — Comp consensus backfill now in identityCore.js
+    const backfill = backfillFromComps(
+      confirmedTitle,
+      confirmedYear,
+      confirmedPublisher,
+      visualResult?.items
+    );
 
-      // Title sanity: how many comp titles share core tokens with confirmedTitle?
-      const coreTokens = String(confirmedTitle || '')
-        .toLowerCase()
-        .replace(/[#:,'"\.\-\(\)]/g, ' ')
-        .split(/\s+/)
-        .filter(t => t.length >= 3 && !/^(the|and|of|a|comics?|comic|book)$/i.test(t));
+    if (backfill.yearBackfilled) {
+      confirmedYear = backfill.year;
+      out.yearBackfilledFromComps = true;
+      out.yearBackfillRatio = backfill.yearBackfillRatio;
+    }
 
-      const titleMatchCount = coreTokens.length === 0 ? 0 : compTitles.filter(t => {
-        const lower = t.toLowerCase();
-        const hits = coreTokens.filter(tok => lower.includes(tok)).length;
-        return hits / coreTokens.length >= 0.6;
-      }).length;
-
-      const titleMatchRatio = compTitles.length > 0
-        ? titleMatchCount / compTitles.length
-        : 0;
-
-      if (titleMatchRatio >= 0.7) {
-        // Year backfill — extract years from passing titles, find consensus
-        if (!confirmedYear) {
-          const yearCounts = {};
-          compTitles.forEach(t => {
-            const matches = t.match(/\b(19[3-9]\d|20[0-2]\d)\b/g) || [];
-            matches.forEach(y => { yearCounts[y] = (yearCounts[y] || 0) + 1; });
-          });
-          const sortedYears = Object.entries(yearCounts).sort((a, b) => b[1] - a[1]);
-          if (sortedYears.length > 0) {
-            const [topYear, topCount] = sortedYears[0];
-            const yearRatio = topCount / compTitles.length;
-            if (yearRatio >= 0.5) {
-              confirmedYear = topYear;
-              out.yearBackfilledFromComps = true;
-              out.yearBackfillRatio = yearRatio;
-              console.log(`[ship-1.8] year backfilled from comp consensus: ${topYear} (${topCount}/${compTitles.length}=${(yearRatio*100).toFixed(0)}%)`);
-            }
-          }
-        }
-
-        // Publisher backfill — pattern-match common publisher tokens
-        if (!confirmedPublisher) {
-          const pubPatterns = [
-            { re: /\b(?:dc\s+comics?|dc\s+universe|dcu)\b/i, name: 'DC Comics' },
-            { re: /\b(?:marvel\s+comics?|marvel\s+universe)\b/i, name: 'Marvel Comics' },
-            { re: /\b(?:image\s+comics?)\b/i, name: 'Image Comics' },
-            { re: /\b(?:dark\s+horse)\b/i, name: 'Dark Horse Comics' },
-            { re: /\b(?:idw\s+publishing|idw)\b/i, name: 'IDW Publishing' },
-            { re: /\b(?:boom!?\s+studios)\b/i, name: 'BOOM! Studios' },
-            { re: /\b(?:dynamite\s+entertainment|dynamite)\b/i, name: 'Dynamite Entertainment' },
-            { re: /\b(?:valiant\s+(?:comics?|entertainment))\b/i, name: 'Valiant Entertainment' },
-            { re: /\b(?:archie\s+comics?)\b/i, name: 'Archie Comics' },
-            { re: /\b(?:vault\s+comics?)\b/i, name: 'Vault Comics' },
-          ];
-          const pubCounts = {};
-          compTitles.forEach(t => {
-            pubPatterns.forEach(({ re, name }) => {
-              if (re.test(t)) pubCounts[name] = (pubCounts[name] || 0) + 1;
-            });
-          });
-          const sortedPubs = Object.entries(pubCounts).sort((a, b) => b[1] - a[1]);
-          if (sortedPubs.length > 0) {
-            const [topPub, topCount] = sortedPubs[0];
-            const pubRatio = topCount / compTitles.length;
-            if (pubRatio >= 0.5) {
-              confirmedPublisher = topPub;
-              out.publisherBackfilledFromComps = true;
-              out.publisherBackfillRatio = pubRatio;
-              console.log(`[ship-1.8] publisher backfilled from comp consensus: ${topPub} (${topCount}/${compTitles.length}=${(pubRatio*100).toFixed(0)}%)`);
-            }
-          }
-        }
-      } else {
-        console.log(`[ship-1.8] backfill ABORTED — title sanity ${titleMatchCount}/${compTitles.length}=${(titleMatchRatio*100).toFixed(0)}% < 70% threshold (confirmedTitle="${confirmedTitle}")`);
-      }
+    if (backfill.publisherBackfilled) {
+      confirmedPublisher = backfill.publisher;
+      out.publisherBackfilledFromComps = true;
+      out.publisherBackfillRatio = backfill.yearBackfillRatio;
     }
 
     // Ship #20a.6.18 — Variant identity check (additive, gated). Only runs
