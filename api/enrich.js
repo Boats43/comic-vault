@@ -466,7 +466,7 @@ const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) =>
 
     const message = await anthropic.messages.create({
       model: "claude-haiku-4-5",
-      max_tokens: 256,
+      max_tokens: 512,
       messages: [{ role: "user", content: prompt }],
     });
 
