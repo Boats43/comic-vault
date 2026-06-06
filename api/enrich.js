@@ -1437,7 +1437,6 @@ export default async function handler(req, res) {
     // publisher — parens in "Hollywood Comics (Walt Disney)" break eBay's
     // query parser and cause ComicVine's substring scoring to miss.
     const publisher = cleanPublisher(rawPublisher) || null;
-    let confirmedPublisher = publisher; // Will be updated if eBay override fires
 
     // Ship #1.3 — Edition warning detection (reprint/facsimile/later-print).
     // Scans Vision's reason text for reprint signals. When detected, comp pool
