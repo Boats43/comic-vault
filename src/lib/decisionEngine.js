@@ -16,9 +16,8 @@ function computeBestChannel(decision, item) {
   const isHOT = item.aiTags?.label === 'HOT';
   const isCOLD = item.aiTags?.label === 'COLD';
   const soldCount = item.soldComps?.length || 0;
-  const hasKeyIssue = item.keyIssue && item.keyIssue.trim().length > 3 &&
-                      !['no', 'n/a', 'none', 'false', 'not a key', 'non-key', 'non key', 'not key']
-                        .some(x => item.keyIssue.toLowerCase().includes(x));
+  // hasKeyValue flag computed by ComicAdapter.detectKeyValue()
+  const hasKeyValue = item.hasKeyValue === true;
   const isGraded = item.isGraded === true;
   const isRecognizable = item.title && item.title.trim().length > 0 &&
                          !item.title.toLowerCase().includes('unknown');
@@ -44,7 +43,7 @@ function computeBestChannel(decision, item) {
   }
 
   // Additional grade detection: high raw key value
-  if (!isGraded && price > 50 && hasKeyIssue) {
+  if (!isGraded && price > 50 && hasKeyValue) {
     return 'grade';
   }
 
@@ -196,9 +195,12 @@ export function computeDecision(item, context = {}) {
   // If blockers exist, return DO_NOT_LIST or ID_REQUIRED
   if (decision.blockers.length > 0) {
     // Determine if it's ID_REQUIRED vs DO_NOT_LIST
+    // Note: missing-issue, missing-publisher remain comic-specific (Phase 3)
+    // Universal flag identityComplete will replace these in Phase 3
     const identityBlockers = [
       'missing-title', 'missing-issue', 'missing-publisher',
-      'identity-not-confident', 'refused-identity-conflict'
+      'identity-not-confident', 'refused-identity-conflict',
+      'identity-incomplete'
     ];
     const hasIdentityBlocker = decision.blockers.some(b => identityBlockers.includes(b));
 
@@ -326,26 +328,11 @@ export function computeDecision(item, context = {}) {
     };
   }
 
-  // Warning: Story metadata suspicious
-  const hasStory = item.comicVine?.description && item.comicVine.description.length > 50;
-  const hasStorySuppression = item.storySuppressedReason;
-  if (hasStory && !hasStorySuppression) {
-    // Story present but not flagged for suppression - could be suspicious
-    const storyLower = item.comicVine.description.toLowerCase();
-    const suspicious = storyLower.includes('translate:') ||
-                       storyLower.includes('collects:') ||
-                       storyLower.includes('reprints:') ||
-                       storyLower.includes('featured story arcs:');
-    if (suspicious) {
-      decision.warnings.push('story-metadata-suspicious');
-      decision.evidence.storyIssue = 'Metadata artifacts present';
-    }
-  }
-
-  // Warning: Content unverified (informational)
-  if (hasStorySuppression) {
+  // Warning: Content verification
+  // contentVerified flag computed by ComicAdapter.verifyStory()
+  if (item.contentVerified === false) {
     decision.warnings.push('content-unverified');
-    decision.evidence.contentUnverified = hasStorySuppression;
+    decision.evidence.contentUnverified = 'Story metadata suspicious or suppressed';
   }
 
   // Warning: Active/sold mismatch
@@ -374,13 +361,13 @@ export function computeDecision(item, context = {}) {
     };
   }
 
-  // Warning: Era-filter bypassed (Ship v0-I)
-  // Vintage comps passed reprint guardrail but year missing from listings.
+  // Warning: Filter bypass detected (Ship v0-I)
+  // Comps passed hygiene but filter criteria missing (year, set, etc.).
   // Moderate warning ensures LIST_LOW ceiling, not LIST_NOW.
-  if (item.compEraFilterBypassed === true || item.matchConfidence?.eraFilterBypassed === true) {
-    decision.warnings.push('era-filter-bypassed');
-    decision.evidence.eraFilterBypassed = {
-      message: 'Vintage year missing from comp listings',
+  if (item.filterBypassDetected === true) {
+    decision.warnings.push('filter-bypass-detected');
+    decision.evidence.filterBypassDetected = {
+      message: 'Filter criteria missing from comp listings',
       matchConfidenceCapped: item.matchConfidence?.tier === 'LOW'
     };
   }
@@ -625,8 +612,8 @@ function buildWarningReason(warnings, item) {
   if (warnings.includes('verification-failed-reprint-thin')) {
     reasons.push('reprint with thin data');
   }
-  if (warnings.includes('era-filter-bypassed')) {
-    reasons.push('vintage year missing from comps');
+  if (warnings.includes('filter-bypass-detected')) {
+    reasons.push('filter criteria missing from comps');
   }
   if (warnings.includes('claude-check-high-severity')) {
     reasons.push('Claude high-severity verification warning');

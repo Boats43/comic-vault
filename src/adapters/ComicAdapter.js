@@ -20,7 +20,14 @@
  * @returns {boolean} True if key issue detected
  */
 export function detectKeyValue(keyIssue) {
-  return null;
+  if (!keyIssue || keyIssue.trim().length <= 3) {
+    return false;
+  }
+
+  const lower = keyIssue.toLowerCase();
+  const negatives = ['no', 'n/a', 'none', 'false', 'not a key', 'non-key', 'non key', 'not key'];
+
+  return !negatives.some(x => lower.includes(x));
 }
 
 /**
@@ -28,10 +35,20 @@ export function detectKeyValue(keyIssue) {
  * Replaces inline comicVine.description check in decisionEngine.js.
  *
  * @param {Object|null} comicVine - ComicVine API response
- * @returns {boolean} True if story verified (not ad/pinup)
+ * @returns {boolean} True if story verified (not ad/pinup/metadata artifact)
  */
 export function verifyStory(comicVine) {
-  return null;
+  if (!comicVine?.description || comicVine.description.length <= 50) {
+    return false;
+  }
+
+  const storyLower = comicVine.description.toLowerCase();
+  const suspicious = storyLower.includes('translate:') ||
+                     storyLower.includes('collects:') ||
+                     storyLower.includes('reprints:') ||
+                     storyLower.includes('featured story arcs:');
+
+  return !suspicious;
 }
 
 /**

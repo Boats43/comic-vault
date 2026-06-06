@@ -35,6 +35,7 @@ import {
   backfillFromComps,
   resolveYear,
 } from "../src/lib/identityCore.js";
+import { verifyStory, detectKeyValue } from "../src/adapters/ComicAdapter.js";
 // Ship #20a.6 — sold comp verification (pure regex, no I/O). Replaces the
 // single #issue regex filter with full hygiene chain. See
 // src/lib/soldVerification.js for filter list + diagnostics shape.
@@ -3139,10 +3140,11 @@ export default async function handler(req, res) {
       out.compBasis = rawComps.compBasis || 'generic-variant-fallback';
     }
 
-    // Era-filter bypass flag — set in both pricing branches (PC + browse).
-    // Surfaces to UI via out.compEraFilterBypassed so user can be warned
-    // that era filter wiped the pool and was skipped as graceful fallback.
-    if (rawComps?.eraFilterBypassed) out.compEraFilterBypassed = true;
+    // Filter bypass flag — set in both pricing branches (PC + browse).
+    // Universal flag: era filter (comics) or set filter (cards) bypassed.
+    if (rawComps?.eraFilterBypassed || out.matchConfidence?.eraFilterBypassed) {
+      out.filterBypassDetected = true;
+    }
 
     // Ship 14 — Variant multiplier applies to ALL pricing paths that use
     // unfiltered comp pools. Previously gated to pricingSource ===
@@ -4413,6 +4415,17 @@ export default async function handler(req, res) {
     if (out.comicVine?.storySuppressedReason) {
       out.storySuppressedReason = out.comicVine.storySuppressedReason;
     }
+
+    // 3b. contentVerified: universal flag computed by ComicAdapter.verifyStory
+    // False when story suppressed OR story metadata suspicious
+    if (out.storySuppressedReason) {
+      out.contentVerified = false;
+    } else {
+      out.contentVerified = verifyStory(out.comicVine);
+    }
+
+    // 3c. hasKeyValue: universal flag computed by ComicAdapter.detectKeyValue
+    out.hasKeyValue = detectKeyValue(req.body.keyIssue);
 
     // 4. megaKey: construct from flags
     if (out.manualReviewRequired) {
