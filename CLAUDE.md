@@ -18,7 +18,20 @@ npx vercel --prod       # uncommitted-tree fallback only
 ```
 
 ## Key Files
-- `src/App.jsx` — entire frontend (ResultCard, CollectionDetail, grading flow, catalogue, FloatingSearchBar, BidCalculator)
+
+### AssetCore (Universal Pricing & Decision Engine)
+- `src/lib/pricingEngine.js` — 9 universal pricing helpers (floor guards, sanity checks, multipliers)
+- `src/lib/identityCore.js` — 5 universal identity resolvers (overlap, resolveIdentity, resolveIssue, backfillFromComps, resolveYear)
+- `src/lib/decisionEngine.js` — universal decision engine (LIST_NOW/RESEARCH/GRADE_CANDIDATE/etc.)
+- `docs/ASSETCORE_INTERFACE.md` — contract between AssetCore and format adapters (18 TODOs resolved)
+- `docs/ASSETCORE_BASELINE.md` — pre-extraction snapshot (Session 3A)
+- `docs/ASSETCORE_STOP_CONDITIONS.md` — 9 stop conditions for extraction safety
+- `docs/ASSETCORE_EXTRACTION_SEQUENCE.md` — 7-step extraction plan
+
+### Comic Adapter (Format-Specific Logic)
+- `src/adapters/ComicAdapter.js` — 312 lines, 4/4 functions (verifyStory, detectKeyValue, computeEraRisk, sanitizeComicTitle)
+
+### API Endpoints
 - `api/enrich.js` — second-pass enrichment (PriceCharting, eBay comps, ComicVine, Ximilar, CGC lookup, GoCollect, Decision Engine)
 - `api/grade.js` — Claude Vision comic identification and grading
 - `api/chat.js` — Claude collection chat (inline queries, Whatnot session context)
@@ -31,12 +44,16 @@ npx vercel --prod       # uncommitted-tree fallback only
 - `api/delist-ebay.js` — eBay listing removal
 - `api/mega-keys.js` — mega-key floor map (29 entries, publisher+year strict)
 - `api/pricecharting-pop.js` — PC pop + sales-history + price ladder + velocity scrape
+
+### Shared Libraries
 - `src/lib/compHygiene.js` — shared regex + helpers (REPRINT_RE, SLAB_RE, VARIANT_CONTAM_RE, SIGNED_RE, ARTIST_PATTERNS, etc.)
 - `src/lib/soldVerification.js` — `verifySoldComps(rawRows, ctx)` filter chain
 - `src/lib/listPriceWarning.js` — UI helper (over-reach detection)
 - `src/lib/premiumCreators.js` — 80-creator tiered registry
 - `src/lib/pedigreeRegistry.js` — 22-pedigree canonical lookup
-- `src/lib/decisionEngine.js` — pure decision helper (BUY/SELL/HOLD/WAIT recommendations)
+
+### Frontend
+- `src/App.jsx` — entire frontend (ResultCard, CollectionDetail, grading flow, catalogue, FloatingSearchBar, BidCalculator)
 
 ## Repo & Live
 - **Repo**: Boats43/comic-vault
@@ -276,12 +293,20 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 - **Decision recommendations**: BUY/SELL/HOLD/WAIT badges on comic detail cards with blocking reasons. Gates listing actions when decision=WAIT.
 
-## Current State (as of 2026-05-25)
+## Current State (as of 2026-06-05)
 
-**Latest commit:** dfd7e68 — bestChannel routing + channel badges  
-**Current session:** 2A complete, 2B pending  
+**Latest commit:** 4b8a574 — sanitizeComicTitle call-site migration  
+**Current session:** 3B complete ✅ (AssetCore extraction)  
+**Next session:** 4A — BookAdapter  
 **Vercel functions:** 12/12 (at cap)  
-**Test count:** 1,570 passing across 23 suites
+**Test count:** 48/48 title-sanitization tests passing
+
+**AssetCore Extraction:**
+- enrich.js: 4,642 → 3,938 lines (-704 lines, -15%)
+- ComicAdapter.js: 312 lines (4/4 functions implemented)
+- identityCore.js: 250 lines (5 universal resolvers)
+- pricingEngine.js: 9 universal helpers
+- Zero regressions across all extraction steps
 
 **Performance:**
 - Average scan time: 2.5s (66% improvement from 7.5s baseline)
@@ -293,38 +318,44 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 
 | Hash | Ship | Summary |
 |------|------|---------|
-| dfd7e68 | Session 2A | bestChannel routing + channel badges |
-| 6259392 | Session 2A | Harden ComicVine timeout fallback paths |
-| db1e3c2 | Session 2A | Show non-comic asset message instead of comic issue error |
-| d947629 | Session 2A | Sync stale listPrice to decision price on extreme mismatch |
-| 61e00d2 | Session 2A | eBay sold status sync + sold tracking |
+| 4b8a574 | Session 3B | sanitizeComicTitle call-site migration |
+| 85cfc13 | Session 3B | Title sanitization patterns → ComicAdapter |
+| c3e5bcd | Session 3B | Golden Age era → eraRisk flag |
+| 37e9f35 | Session 3B | issue null check → identityComplete flag |
+| 8c7b8b0 | Session 3B | Phase 2 medium-risk flag migrations |
 
+**Session 3B extraction range:** 0a9d761 → 4b8a574 (12 commits)  
 **Full ship history:** See `docs/archive/` for session logs
 
 ## Roadmap
 
-**Session 2A** ✅ Complete
-- bestChannel routing
-- Channel badges
-- Sold status sync
-- ComicVine timeout hardening
+**Session 3B** ✅ Complete (2026-06-05)
+- AssetCore extraction complete (18/18 TODOs resolved)
+- identityCore.js — 5 universal identity resolvers
+- pricingEngine.js — 9 universal pricing helpers
+- ComicAdapter.js — 312 lines, all comic domain knowledge
+- enrich.js reduced 4,642 → 3,938 lines (-15%)
+- Zero regressions, 48/48 title-sanitization tests passing
 
-**Session 2B** (Next) — Trade Pile / Barter
-- Trade pile management
-- Barter value calculations
-- Multi-party trade scenarios
+**Session 4A** (Next) — BookAdapter
+- Pre-req: AssetCore extraction complete ✅
+- Create BookAdapter.js (one new adapter file)
+- Book-specific: ISBN lookup, condition keywords, edition detection
+- Universal AssetCore handles pricing/decision
 
-**Session 2C** — Marketplace listing packets
-- Platform-specific listing generators
-- Multi-channel posting
+**Session 4B** — CardAdapter
+- Create CardAdapter.js (one new adapter file)
+- Card-specific: player name, team, card number, set, rookie flag
+- Universal AssetCore handles pricing/decision
 
-**Session 3** — AssetCore extraction
-- Core asset abstraction layer
-- Shared identity/pricing primitives
+**Session 5** — Multi-format UI
+- Asset type selector (comic/book/card)
+- Format-specific scan flows
+- Unified collection view
 
-**Session 4** — BookAdapter / CardAdapter
-- Adapter pattern for comics vs cards
-- Format-specific handlers
+**Session 6** — Portfolio intelligence
+- Cross-collection analytics
+- Portfolio optimization recommendations
 
 **Session 5** — Asset Vault API
 - Unified multi-format backend
@@ -333,6 +364,24 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 **Session 6** — Portfolio intelligence
 - Cross-collection analytics
 - Portfolio optimization recommendations
+
+## Architecture Notes
+
+### AssetCore Abstraction (Session 3B)
+AssetCore is now **universal** — operates on primitives only (title, year, grade, price, rawComps, etc.). All format-specific domain knowledge lives in adapters:
+
+- **ComicAdapter.js** (312 lines) — issue, publisher, variant, keyIssue, certNumber, cgcPenaltyFlags, comicVine, era detection, creator patterns, artist names, character-in-series, publisher-in-title protection, title sanitization
+- **BookAdapter.js** (future) — ISBN, edition, condition keywords, format (hardcover/paperback)
+- **CardAdapter.js** (future) — player, team, cardNumber, set, rookie flag, PSA/BGS grading
+
+**Universal modules:**
+- `identityCore.js` — title overlap, identity resolution, issue resolution, year resolution, comp backfill
+- `pricingEngine.js` — floor guards, sanity checks, grade multipliers, thin-pool anchor
+- `decisionEngine.js` — action selection (LIST_NOW/RESEARCH/GRADE_CANDIDATE/etc.), blocker/warning detection
+
+**Creating a new adapter:** One new file (e.g., `src/adapters/BookAdapter.js`). Implement 4 functions (detectKeyValue, verifyStory, computeEraRisk, sanitizeFormatTitle). Set universal flags (hasKeyValue, contentVerified, eraRisk, identityComplete, etc.). AssetCore handles the rest.
+
+**Boundary enforcement:** AssetCore MUST NOT reference format-specific fields (issue, publisher, variant, player, team, ISBN, etc.). See `docs/ASSETCORE_INTERFACE.md` for the complete contract.
 
 ## Pattern Library
 **Descriptive names, not letters. Listed in approximate order of discovery.**
