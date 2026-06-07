@@ -89,6 +89,12 @@ const detectBookSignals = (parsed) => {
     /\bnovel\b/i,
     /\btitle\s+page\b/i,
     /\bdust\s+jacket\b/i,
+    // Session 4B — Abbreviations
+    /\bhc\b/i,                     // hardcover (abbreviated)
+    /\bdj\b/i,                     // dust jacket (abbreviated)
+    /\b\d+(st|nd|rd|th)\s*ed\b/i, // 1st ed, 5th ed, etc.
+    /\bpress\b/i,                  // university press, publishing house
+    /\bvol\b/i,                    // volume
   ];
 
   const matchCount = BOOK_SIGNALS.filter(pattern => pattern.test(combined)).length;
