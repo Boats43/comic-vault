@@ -1476,6 +1476,7 @@ export default async function handler(req, res) {
     // Session 4B — Set assetType early so identityComplete logic can use it.
     // Defaults to 'comic' when not provided (backward compatibility).
     out.assetType = assetType || 'comic';
+    console.log(`[enrich-entry] assetType from req.body: ${assetType}, out.assetType: ${out.assetType}`);
 
     // Prefer explicit issue param, fall back to parsing from title.
     // Ship #20a.6.22 hotfix: treat "Unknown" as null (Vision failure case).
@@ -2621,6 +2622,7 @@ export default async function handler(req, res) {
     // Session 4B — Pass adapter identityFields for asset-aware confidence check
     const adapter = getAdapter(out.assetType);
     const idCheck = assessIdentityConfidence(sanitizedIdentity, identitySource, adapter.identityFields);
+    console.log(`[identity-gate] assetType=${out.assetType} fields=${JSON.stringify(adapter.identityFields)} missing=${JSON.stringify(idCheck.missingFields)}`);
     out.identityConfident = idCheck.confident;
     if (!idCheck.confident) {
       out.identityMissingFields = idCheck.missingFields;
