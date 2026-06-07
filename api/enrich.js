@@ -95,7 +95,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // agree on specific tokens (convention, artist, exclusive, limitation).
 import { extractConfirmedVariant } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
-import { detectEditionWarning } from "./grade.js";
+import { detectEditionWarning, detectBookSignals } from "./grade.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -2597,6 +2597,31 @@ export default async function handler(req, res) {
             verificationRemoved: 0,
           };
         }
+      }
+    }
+
+    // Session 4B — Derive assetType server-side from eBay category + title signals.
+    // Do not trust client handoff (grade→App→enrich drops assetType repeatedly).
+    // Server derivation is source of truth. Client req.body.assetType is a hint
+    // only — if it arrives as 'book', trust it; otherwise derive from data we have.
+    if (out.assetType !== 'book' && out.assetType !== 'comic' || out.assetType === 'comic') {
+      // Count eBay results categorized as books
+      const bookCatRows = (parsedVisualRows || []).filter(r =>
+        (r.categories || []).some(c =>
+          /book|magazine|antiquarian/i.test(c.categoryName || '')
+        )
+      ).length;
+      const total = (parsedVisualRows || []).length || 1;
+      const ebaySaysBook = bookCatRows / total >= 0.5;
+
+      const titleSaysBook = detectBookSignals({
+        title: confirmedTitle,
+        issue: confirmedIssue
+      });
+
+      if (ebaySaysBook || titleSaysBook) {
+        out.assetType = 'book';
+        console.log(`[assetType-derive] book detected: ebayCat=${bookCatRows}/${total} titleSignals=${titleSaysBook}`);
       }
     }
 
