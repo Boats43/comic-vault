@@ -4215,8 +4215,8 @@ export default async function handler(req, res) {
     // Comic: issue + publisher required
     // Book: title + author required
     // Computed AFTER fallback assignments so identity fields are populated
-    const assetType = out.assetType || 'comic';
-    out.identityComplete = assetType === 'book'
+    // assetType already set at line 1475 from req.body destructure
+    out.identityComplete = out.assetType === 'book'
       ? !!(out.title && out.author)
       : !!(out.issue && out.publisher);
 
