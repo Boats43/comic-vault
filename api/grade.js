@@ -67,8 +67,13 @@ const parseResponse = (text) => {
 const detectBookSignals = (parsed) => {
   if (!parsed) return false;
 
-  // Must have null or empty issue (not a comic)
-  if (parsed.issue && String(parsed.issue).trim().length > 0) {
+  // Must have null or empty issue (not a comic).
+  // Vision returns "N/A", "n/a", "none", "-" for books — treat as empty.
+  const issueStr = String(parsed.issue || '').trim().toLowerCase();
+  const issueEmpty = !parsed.issue ||
+    ['n/a', 'na', 'none', '-', '', 'null'].includes(issueStr);
+
+  if (!issueEmpty) {
     return false;
   }
 

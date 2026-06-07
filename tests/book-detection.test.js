@@ -27,8 +27,13 @@ function assertTrue(condition, message) {
 const detectBookSignals = (parsed) => {
   if (!parsed) return false;
 
-  // Must have null or empty issue (not a comic)
-  if (parsed.issue && String(parsed.issue).trim().length > 0) {
+  // Must have null or empty issue (not a comic).
+  // Vision returns "N/A", "n/a", "none", "-" for books — treat as empty.
+  const issueStr = String(parsed.issue || '').trim().toLowerCase();
+  const issueEmpty = !parsed.issue ||
+    ['n/a', 'na', 'none', '-', '', 'null'].includes(issueStr);
+
+  if (!issueEmpty) {
     return false;
   }
 
@@ -212,6 +217,67 @@ test('Comic with edition variant — has issue so NOT book', () => {
 
   const isBook = detectBookSignals(parsed);
   assertEqual(isBook, false, 'Comic with issue should NOT be book (issue check prevents false positive)');
+});
+
+// TEST 13: PRODUCTION CASE — Einstein book with issue="N/A"
+test('Einstein book with issue="N/A" — detected as book', () => {
+  const parsed = {
+    title: "princeton press einstein the meaning of relativity 5th ed hc dj",
+    issue: "N/A",  // Vision returns this for books
+    publisher: "Princeton University Press",
+    reason: "This is not a comic book. Hardcover edition."
+  };
+
+  const isBook = detectBookSignals(parsed);
+  assertTrue(isBook, 'Should detect as book (N/A treated as empty, 4+ signals present)');
+});
+
+// TEST 14: PRODUCTION CASE — issue="n/a" lowercase
+test('Book with issue="n/a" lowercase — detected as book', () => {
+  const parsed = {
+    title: "Thinking Fast and Slow",
+    issue: "n/a",
+    reason: "Paperback edition. Author Daniel Kahneman."
+  };
+
+  const isBook = detectBookSignals(parsed);
+  assertTrue(isBook, 'Should detect as book (n/a treated as empty)');
+});
+
+// TEST 15: PRODUCTION CASE — issue="none"
+test('Book with issue="none" — detected as book', () => {
+  const parsed = {
+    title: "The Great Gatsby",
+    issue: "none",
+    reason: "Hardcover first edition"
+  };
+
+  const isBook = detectBookSignals(parsed);
+  assertTrue(isBook, 'Should detect as book (none treated as empty)');
+});
+
+// TEST 16: PRODUCTION CASE — issue="-"
+test('Book with issue="-" — detected as book', () => {
+  const parsed = {
+    title: "Programming Book",
+    issue: "-",
+    reason: "Published by MIT Press. Hardcover."
+  };
+
+  const isBook = detectBookSignals(parsed);
+  assertTrue(isBook, 'Should detect as book (- treated as empty)');
+});
+
+// TEST 17: PRODUCTION CASE — issue="null" string
+test('Book with issue="null" string — detected as book', () => {
+  const parsed = {
+    title: "Reference Vol 3",
+    issue: "null",
+    reason: "Hardcover edition"
+  };
+
+  const isBook = detectBookSignals(parsed);
+  assertTrue(isBook, 'Should detect as book (null string treated as empty)');
 });
 
 // Run all tests
