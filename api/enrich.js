@@ -82,6 +82,8 @@ import { computeDecision } from "../src/lib/decisionEngine.js";
 import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate } from "../src/lib/imageSearchIdentity.js";
 // Session 4A — Universal category filter (pre-clustering)
 import { filterByCategory } from "../src/lib/categoryClassifier.js";
+// Session 4B — Adapter registry (per-asset routing config)
+import { getAdapter } from "../src/adapters/adapterRegistry.js";
 // Ship #20b — price bands engine (verified sold-first pricing).
 import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforceFloorFromBands } from "../src/lib/priceBands.js";
 // Ship #21 — demand signals from sales data.
@@ -2614,8 +2616,11 @@ export default async function handler(req, res) {
       year: confirmedYear,
       publisher: confirmedPublisher,
       visionConfidence: confidence,
+      author: req.body.author || null,  // Session 4B — book identity field
     });
-    const idCheck = assessIdentityConfidence(sanitizedIdentity, identitySource);
+    // Session 4B — Pass adapter identityFields for asset-aware confidence check
+    const adapter = getAdapter(out.assetType);
+    const idCheck = assessIdentityConfidence(sanitizedIdentity, identitySource, adapter.identityFields);
     out.identityConfident = idCheck.confident;
     if (!idCheck.confident) {
       out.identityMissingFields = idCheck.missingFields;

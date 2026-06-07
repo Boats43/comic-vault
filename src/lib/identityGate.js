@@ -62,9 +62,10 @@ const isCleanYearString = (s) => {
 //   issue       — must be numeric (123 / "123" / "1.5"); otherwise null.
 //   year        — strict 4-digit string in [1900, 2100]; otherwise null.
 //   publisher   — uncertainty → null; otherwise trimmed non-empty string.
+//   author      — Session 4B: uncertainty → null; otherwise trimmed non-empty string.
 //   visionConfidence — normalized to 'high' | 'medium' | 'low' | null.
 export const sanitizeIdentityFields = (input) => {
-  const out = { title: null, issue: null, year: null, publisher: null, visionConfidence: null };
+  const out = { title: null, issue: null, year: null, publisher: null, author: null, visionConfidence: null };
   if (!input || typeof input !== 'object') return out;
 
   // title
@@ -128,6 +129,12 @@ export const sanitizeIdentityFields = (input) => {
     if (p && !isUncertaintyString(p)) out.publisher = p;
   }
 
+  // author — Session 4B: book identity field
+  if (typeof input.author === 'string') {
+    const a = input.author.trim();
+    if (a && !isUncertaintyString(a)) out.author = a;
+  }
+
   // visionConfidence — normalize 'high'/'medium'/'low'; anything else null
   if (typeof input.visionConfidence === 'string') {
     const v = input.visionConfidence.trim().toLowerCase();
@@ -142,41 +149,43 @@ export const sanitizeIdentityFields = (input) => {
 // Assess identity confidence on sanitized fields. Returns
 //   { confident: boolean, missingFields: string[], reasons: string[] }
 //
-// Confident requires:
-//   - title, issue, year, publisher all non-null
-//   - EXCEPT: publisher is optional when identitySource includes 'ebay'
-//     (eBay image search verified visually, publisher not needed)
-//   - visionConfidence is NOT 'low' (null/medium/high all OK; null default
-//     avoids gating books where Vision didn't surface a confidence string)
+// Session 4B — Adapter-aware identity confidence.
+// Required fields vary by asset type (from adapterRegistry):
+//   - Comic: title, issue, year, publisher
+//   - Book: title, author, year
+//   - Card: player, year, cardNumber, set
+//
+// Publisher is optional when identitySource includes 'ebay' (visual confirmation).
+// visionConfidence must NOT be 'low' (null/medium/high all OK).
 //
 // External-lookup signals (PriceCharting / ComicVine / eBay match) are
-// NOT consulted. Per Ship #20a.6.4 refinement A: legit indie books may
-// fail all three external lookups while being cleanly identified by
-// Vision (Biker Mice #1 2024, Whatnot exclusives, indie Webtoon prints).
-// Conflating "we don't know this book" with "the world hasn't catalogued
-// this book" produces too many false-positive gates.
-export const assessIdentityConfidence = (sanitized, identitySource) => {
+// NOT consulted. Per Ship #20a.6.4 refinement A: legit indie items may
+// fail all external lookups while being cleanly identified by Vision.
+export const assessIdentityConfidence = (sanitized, identitySource, identityFields = ['title', 'issue', 'year', 'publisher']) => {
   const missingFields = [];
   const reasons = [];
 
-  if (!sanitized?.title) {
-    missingFields.push('title');
-    reasons.push('title missing or uncertainty marker');
+  // Check each required field from adapter config
+  for (const field of identityFields) {
+    // Publisher gets special eBay skip logic (visual confirmation)
+    if (field === 'publisher') {
+      const skipPublisher = identitySource && String(identitySource).includes('ebay');
+      if (!sanitized?.publisher && !skipPublisher) {
+        missingFields.push('publisher');
+        reasons.push('publisher missing or uncertainty marker');
+      }
+      continue;
+    }
+
+    // All other fields required unconditionally
+    if (!sanitized?.[field]) {
+      missingFields.push(field);
+      const fieldName = field === 'issue' ? 'issue number' : field;
+      reasons.push(`${fieldName} missing or uncertainty marker`);
+    }
   }
-  if (!sanitized?.issue) {
-    missingFields.push('issue');
-    reasons.push('issue number missing or non-numeric');
-  }
-  if (!sanitized?.year) {
-    missingFields.push('year');
-    reasons.push('year missing or not a 4-digit value');
-  }
-  // Skip publisher requirement when eBay image search confirmed identity
-  const skipPublisher = identitySource && String(identitySource).includes('ebay');
-  if (!sanitized?.publisher && !skipPublisher) {
-    missingFields.push('publisher');
-    reasons.push('publisher missing or uncertainty marker');
-  }
+
+  // Vision confidence check (universal across all asset types)
   if (sanitized?.visionConfidence === 'low') {
     reasons.push('Vision self-reported low confidence');
   }
