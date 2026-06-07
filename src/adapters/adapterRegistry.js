@@ -29,6 +29,7 @@ export const ADAPTERS = {
     usesComicVine: true,
     usesPriceCharting: true,
     gradeScale: 'cgc',
+    ebayCategoryId: '259104', // Comics > Comic Books > Single Issues
     buildQuery: null, // Comic queries built inline in api/comps.js (existing logic)
   },
 
@@ -37,6 +38,7 @@ export const ADAPTERS = {
     usesComicVine: false,
     usesPriceCharting: false,
     gradeScale: 'book',
+    ebayCategoryId: '267', // Books & Magazines
     buildQuery: buildBookQuery, // From BookAdapter.js (Session 4B STEP 4)
   },
 

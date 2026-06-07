@@ -61,7 +61,7 @@ const FINDING_ENDPOINT =
 const OAUTH_ENDPOINT = "https://api.ebay.com/identity/v1/oauth2/token";
 const BROWSE_ENDPOINT =
   "https://api.ebay.com/buy/browse/v1/item_summary/search";
-const CATEGORY_ID = "259104"; // Comics > Comic Books > Single Issues
+const DEFAULT_CATEGORY_ID = "259104"; // Comics > Comic Books > Single Issues (fallback)
 const BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope";
 
 // Log presence + first 20 chars of credentials once per cold start so we
@@ -258,12 +258,13 @@ const tryBrowse = async ({ appId, certId, query }) => {
     //  - buyingOptions includes AUCTION so real market bids count.
     //  - sort=bestMatch returns relevance-ranked results instead of
     //    stale end-of-listing relists that bias the top 20 toward junk.
+    const effectiveCategoryId = categoryId || DEFAULT_CATEGORY_ID;
     const url =
       `${BROWSE_ENDPOINT}?q=${encodeURIComponent(query)}` +
-      `&category_ids=${CATEGORY_ID}` +
+      `&category_ids=${effectiveCategoryId}` +
       `&filter=${encodeURIComponent("buyingOptions:{FIXED_PRICE|AUCTION}")}` +
       `&limit=100&sort=bestMatch`;
-    console.log(`[comps] browse url=${url}`);
+    console.log(`[comps] assetType=${assetType || 'comic'} category=${effectiveCategoryId} query="${query}" browse url=${url}`);
     const res = await fetch(url, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -484,6 +485,9 @@ export const fetchComps = async ({
   imageSearchTitle,
   appId,
   certId,
+  categoryId,  // Session 4B — eBay category (259104 comics, 267 books)
+  assetType,   // Session 4B — 'comic' | 'book' for query builder routing
+  author,      // Session 4B — book identity field (for buildBookQuery)
 }) => {
   if (!appId || !certId) {
     return emptyComps(null, "missing eBay credentials");
@@ -568,6 +572,21 @@ export const fetchComps = async ({
     attempts.push({ q: imgQuery, n: -1, label: 'image-search', useGrade: false });
     console.log(`[comps] image-search attempt: "${imgQuery}"`);
   }
+
+  // Session 4B — Book query builder routing (no #issue, uses author)
+  if (assetType === 'book') {
+    // Import buildBookQuery from adapter registry
+    const { getAdapter } = await import('../src/adapters/adapterRegistry.js');
+    const adapter = getAdapter('book');
+    if (adapter.buildQuery) {
+      const bookQueries = adapter.buildQuery(title, author, null, null, year);
+      for (let i = 0; i < bookQueries.length; i++) {
+        attempts.push({ q: bookQueries[i], n: i, label: 'book', useGrade: false });
+      }
+      console.log(`[comps] book queries: ${bookQueries.length} attempts`);
+    }
+  } else {
+    // Comic query builder (existing logic)
 
   // Attempt 0: most specific — cleanTitle #issue fullVariant year publisher (+ grade suffix)
   if (iss && yr) {
@@ -680,6 +699,7 @@ export const fetchComps = async ({
     attempts.unshift({ q: tpbQ, n: -2, label: 'tpb-aware', useGrade: true });
     console.log('[comps] tpb-aware attempt:', tpbQ, '(marker:', tpbMarker, ')');
   }
+  } // end comic query builder
 
   // Deduplicate (e.g. if no year was provided, attempts 1 & 2 are identical).
   const seen = new Set();

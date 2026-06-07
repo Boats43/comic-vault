@@ -2022,6 +2022,10 @@ export default async function handler(req, res) {
             imageSearchTitle,
             appId: process.env.EBAY_APP_ID,
             certId: process.env.EBAY_CERT_ID,
+            // Session 4B — adapter-aware comp queries (book category 267, comic 259104)
+            categoryId: getAdapter(out.assetType).ebayCategoryId,
+            assetType: out.assetType,
+            author: out.author || null,  // book identity field for buildBookQuery
           }).catch((err) => {
             console.error(`[enrich] comps error: ${err?.message || err}`);
             return null;
