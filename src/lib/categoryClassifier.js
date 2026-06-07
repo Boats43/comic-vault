@@ -181,3 +181,51 @@ export const filterByCategory = (items, expectedCategory = 'COMIC') => {
 
   return filtered;
 };
+
+// ─────────────────────────── ASSET TYPE DETECTION ───────────────────────────
+
+/**
+ * Detect if parsed Vision result is a book (not a comic).
+ *
+ * Session 4B — Moved from api/grade.js to shared classifier module.
+ * Used by both grade.js (initial scan routing) and enrich.js (server-side
+ * assetType derivation when client handoff fails).
+ *
+ * @param {Object} parsed - Vision scan result with title/reason fields
+ * @returns {boolean} - true if 2+ book signals detected
+ */
+export const detectBookSignals = (parsed) => {
+  if (!parsed || typeof parsed !== 'object') {
+    return false;
+  }
+
+  // Check for book-specific signals in title or reason text
+  const title = String(parsed.title || '').toLowerCase();
+  const reason = String(parsed.reason || '').toLowerCase();
+  const combined = `${title} ${reason}`;
+
+  const BOOK_SIGNALS = [
+    /\bauthor\b/i,
+    /\bisbn\b/i,
+    /\b978-\d{10}\b/,              // ISBN-13 pattern
+    /\bpublished\s+by\b/i,
+    /\bcopyright\b/i,
+    /\bedition\b/i,
+    /\bhardcover\b/i,
+    /\bpaperback\b/i,
+    /\bnovel\b/i,
+    /\btitle\s+page\b/i,
+    /\bdust\s+jacket\b/i,
+    // Session 4B — Abbreviations
+    /\bhc\b/i,                     // hardcover (abbreviated)
+    /\bdj\b/i,                     // dust jacket (abbreviated)
+    /\b\d+(st|nd|rd|th)\s*ed\b/i, // 1st ed, 5th ed, etc.
+    /\bpress\b/i,                  // university press, publishing house
+    /\bvol\b/i,                    // volume
+  ];
+
+  const matchCount = BOOK_SIGNALS.filter(pattern => pattern.test(combined)).length;
+
+  // Require 2+ book signals to avoid false positives
+  return matchCount >= 2;
+};

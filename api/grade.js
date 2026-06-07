@@ -62,51 +62,10 @@ const parseResponse = (text) => {
   }
 };
 
-// Session 4B — Detect book signals from Vision result.
-// Returns true when Vision returns null issue AND identifiable book markers.
-const detectBookSignals = (parsed) => {
-  if (!parsed) return false;
-
-  // Must have null or empty issue (not a comic).
-  // Vision returns "N/A", "n/a", "none", "-" for books — treat as empty.
-  const issueStr = String(parsed.issue || '').trim().toLowerCase();
-  const issueEmpty = !parsed.issue ||
-    ['n/a', 'na', 'none', '-', '', 'null'].includes(issueStr);
-
-  if (!issueEmpty) {
-    return false;
-  }
-
-  // Check for book-specific signals in title or reason text
-  const title = String(parsed.title || '').toLowerCase();
-  const reason = String(parsed.reason || '').toLowerCase();
-  const combined = `${title} ${reason}`;
-
-  const BOOK_SIGNALS = [
-    /\bauthor\b/i,
-    /\bisbn\b/i,
-    /\b978-\d{10}\b/,              // ISBN-13 pattern
-    /\bpublished\s+by\b/i,
-    /\bcopyright\b/i,
-    /\bedition\b/i,
-    /\bhardcover\b/i,
-    /\bpaperback\b/i,
-    /\bnovel\b/i,
-    /\btitle\s+page\b/i,
-    /\bdust\s+jacket\b/i,
-    // Session 4B — Abbreviations
-    /\bhc\b/i,                     // hardcover (abbreviated)
-    /\bdj\b/i,                     // dust jacket (abbreviated)
-    /\b\d+(st|nd|rd|th)\s*ed\b/i, // 1st ed, 5th ed, etc.
-    /\bpress\b/i,                  // university press, publishing house
-    /\bvol\b/i,                    // volume
-  ];
-
-  const matchCount = BOOK_SIGNALS.filter(pattern => pattern.test(combined)).length;
-
-  // Require 2+ book signals to avoid false positives
-  return matchCount >= 2;
-};
+// Session 4B — Import book signal detection from shared classifier module.
+// Moved from local definition to avoid cross-module handler imports (api/enrich
+// importing api/grade pulls grade's handler into enrich's bundle).
+import { detectBookSignals } from '../src/lib/categoryClassifier.js';
 
 // Session 4B — Ensure assetType is set on every response path.
 // Single choke point: all res.status(200).json() calls pass through this.

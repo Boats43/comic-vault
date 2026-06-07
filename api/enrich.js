@@ -95,7 +95,9 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // agree on specific tokens (convention, artist, exclusive, limitation).
 import { extractConfirmedVariant } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
-import { detectEditionWarning, detectBookSignals } from "./grade.js";
+import { detectEditionWarning } from "./grade.js";
+// Session 4B — Import book signal detection from shared classifier
+import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
