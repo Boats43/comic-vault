@@ -249,7 +249,7 @@ const tryFindCompleted = async ({ appId, query }) => {
 // Fall back to the Browse API (active listings, not true sold data).
 // Uses the standard api_scope which every production app has. Returns
 // parsed results or null on failure.
-const tryBrowse = async ({ appId, certId, query }) => {
+const tryBrowse = async ({ appId, certId, query, categoryId, assetType }) => {
   try {
     const token = await getOAuthToken(appId, certId, BROWSE_SCOPE);
     // Pool expansion:
@@ -1276,7 +1276,7 @@ export const fetchComps = async ({
       }
       if (!raw || raw.length === 0) {
         source = "browse_api";
-        raw = await tryBrowse({ appId, certId, query });
+        raw = await tryBrowse({ appId, certId, query, categoryId, assetType });
       }
       const rawCount = raw ? raw.length : 0;
       console.log(`[comps] attempt ${attempt.n} query="${query}" raw=${rawCount}`);
