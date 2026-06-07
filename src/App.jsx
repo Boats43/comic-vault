@@ -7958,6 +7958,8 @@ export default function App() {
           // has condition data and stops false-refusing with "No condition
           // details provided".
           reason: data.reason || null,
+          // Session 4B — Pass assetType from grade.js (book vs comic routing)
+          assetType: data.assetType || 'comic',
         };
         if (!buyerMode) enrichBody.images = [b64];
         fetch("/api/enrich", {

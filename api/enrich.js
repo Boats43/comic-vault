@@ -1434,6 +1434,7 @@ export default async function handler(req, res) {
       year,
       publisher: rawPublisher,
       certNumber,
+      assetType,
     } = req.body || {};
     // Strip brackets/quotes/slashes before anything downstream sees the
     // publisher — parens in "Hollywood Comics (Walt Disney)" break eBay's
@@ -1469,6 +1470,10 @@ export default async function handler(req, res) {
     // Lesson encoded: variable declarations referenced across a function
     // must be at function top, not deep in execution flow.
     const out = {};
+
+    // Session 4B — Set assetType early so identityComplete logic can use it.
+    // Defaults to 'comic' when not provided (backward compatibility).
+    out.assetType = assetType || 'comic';
 
     // Prefer explicit issue param, fall back to parsing from title.
     // Ship #20a.6.22 hotfix: treat "Unknown" as null (Vision failure case).
