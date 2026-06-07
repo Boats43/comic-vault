@@ -509,7 +509,10 @@ export const fetchComps = async ({
   // Precompute relevance helpers once per request.
   const searchTokens = tokenizeTitle(title);
   // Issue number: prefer explicit `issue` param, fall back to extracting from title.
-  const issueNum = issue ? String(issue).trim() : extractIssueNumber(title);
+  // Session 4B — Books have no issues; never extract from title for books.
+  const issueNum = assetType === 'book'
+    ? null
+    : (issue ? String(issue).trim() : extractIssueNumber(title));
 
   const cleanTitle = cleanTitleForSearch(title);
   const iss = issue ? String(issue).trim() : null;
@@ -753,7 +756,8 @@ export const fetchComps = async ({
       // OR a TPB-format marker; otherwise the standard #issue check.
       // Ship #13 Bug 1: multi-issue compound rejection embedded in
       // hasIssueNumber. Count separately for observability.
-      if (issueNum) {
+      // Session 4B — Skip for books (books have no issue numbers).
+      if (assetType !== 'book' && issueNum) {
         const before = p.length;
         p = p.filter((it) => {
           const t = String(it.title || '');
