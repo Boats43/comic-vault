@@ -21,6 +21,12 @@ const STANDARD_PROMPT =
 const WATCH_PROMPT =
   `Grade this comic book from a live video frame. Read the issue number DIRECTLY from the cover. Read the title DIRECTLY from the cover masthead. Do not infer or guess — only report what you see. If a price overlay is visible report as detectedPrice. Return ONLY this JSON shape with no markdown, no commentary: ${JSON_SHAPE}. title is the series name WITHOUT the issue number. CRITICAL: Return ONLY the series name — no grade labels, years, publishers, or metadata. issue is the issue number as a string. Set isGraded to true ONLY when a CGC/CBCS/PGX slab label is clearly visible. grade: always return both letter grade AND numeric e.g. "VG 4.0". certNumber: extract from slab label if visible, else null. keyIssue: first appearance, origin, death of major character, first issue, classic artist significance, notable covers — null for all others. NEVER return No, N/A, None. variant: standardized short description under 5 words. Ratio: "1:25 variant". Artist: "Alex Ross variant". Cover letter: "Cover B". Print: "newsstand", "2nd print". Special: "virgin variant", "gold foil variant". Null for standard Cover A. Never return just "variant" alone. restoration: describe briefly if detected, null if none. defectPenalty: 0.5-0.9 multiplier for significant cover defects, null if normal wear.`;
 
+// Session 4B — Book Vision prompt
+const BOOK_JSON_SHAPE = '{ "title": string, "author": string or null, "publisher": string or null, "year": string or null, "edition": string or null, "format": string, "isbn": string or null, "grade": string, "signed": boolean, "restoration": string or null, "defectPenalty": number or null, "price": string, "priceLow": string, "priceHigh": string, "reason": string, "confidence": string, "detectedPrice": string or null, "assetType": "book" }';
+
+const BOOK_PROMPT =
+  `Identify and assess this book. Return ONLY this JSON shape with no markdown, no commentary: ${BOOK_JSON_SHAPE}. title is the book title WITHOUT edition/format markers (e.g. "Thinking Fast and Slow" not "Thinking Fast and Slow Paperback First Edition"). Extract from cover or title page. author is the author name (e.g. "Daniel Kahneman"). Return null if not visible. publisher is the publisher name if visible on cover or spine (e.g. "Farrar, Straus and Giroux"). Return null if not visible. year: Read publication year from copyright page, cover, or spine. Return null if not visible — do NOT guess. edition: extract edition descriptor if visible (e.g. "First Edition", "Revised Edition", "Second Edition"). Return null for standard/unmarked editions. format: REQUIRED. Return one of: "Hardcover", "Paperback", "Trade Paperback", "Mass Market", "Kindle", "eBook". Read from cover — hardcovers have dust jackets or stiff boards; paperbacks have flexible covers. isbn: extract ISBN from barcode or back cover (10 or 13 digits, with or without hyphens). Return null if not visible. grade: assess book condition using book grading scale. Return one of: "Fine" (minimal wear, tight binding, clean pages), "Very Good" (minor wear, pages clean, binding solid), "Good" (moderate wear, some foxing/aging, binding intact), "Fair" (heavy wear, loose binding, staining/marks present), "Poor" (severe damage, loose pages, heavy staining). Always return condition as word grade, NOT numeric. signed: true if author signature is visible on title page or elsewhere, otherwise false. restoration: describe if detected (tape on spine, rebinding, torn page repair). Return null if none detected. defectPenalty: if significant defects exist (water damage, torn pages, missing dust jacket when expected, heavy staining, broken spine) return a multiplier between 0.5 and 0.9. Return null if normal wear for grade. price, priceLow, priceHigh: estimate market value based on edition, condition, author significance, and scarcity. If you see a price visible in the image (price sticker, auction overlay, listing price), return it as detectedPrice. Otherwise set detectedPrice to null. reason: brief condition report (2-3 sentences) describing visible wear, edition notes, and value factors. confidence: "low", "medium", or "high" based on image quality and visible information. assetType: ALWAYS set to "book" for this prompt.`;
+
 // Ship #EBAY-FIRST — Grade-only prompt for Sonnet when identity is already known from eBay.
 // Simplified task: just assess condition and defects. Identity fields passed in separately.
 const GRADE_JSON_SHAPE = '{ "grade": string, "isGraded": boolean, "numericGrade": number or null, "certNumber": string or null, "restoration": string or null, "defectPenalty": number or null, "cgcPenaltyFlags": { "storeStamp": { "detected": boolean, "pedigreeName": string or null }, "staplePopping": { "detected": boolean, "severity": "minor" or "severe" or null }, "polybagIndents": { "detected": boolean }, "cornerChips": { "detected": boolean, "count": number or null }, "pedigreeStamp": { "detected": boolean, "pedigreeName": string or null } } or null, "reason": string, "confidence": string, "detectedPrice": string or null }';
@@ -54,6 +60,41 @@ const parseResponse = (text) => {
     const match = text.match(/\{[\s\S]*\}/);
     return match ? JSON.parse(match[0]) : { raw: text };
   }
+};
+
+// Session 4B — Detect book signals from Vision result.
+// Returns true when Vision returns null issue AND identifiable book markers.
+const detectBookSignals = (parsed) => {
+  if (!parsed) return false;
+
+  // Must have null or empty issue (not a comic)
+  if (parsed.issue && String(parsed.issue).trim().length > 0) {
+    return false;
+  }
+
+  // Check for book-specific signals in title or reason text
+  const title = String(parsed.title || '').toLowerCase();
+  const reason = String(parsed.reason || '').toLowerCase();
+  const combined = `${title} ${reason}`;
+
+  const BOOK_SIGNALS = [
+    /\bauthor\b/i,
+    /\bisbn\b/i,
+    /\b978-\d{10}\b/,              // ISBN-13 pattern
+    /\bpublished\s+by\b/i,
+    /\bcopyright\b/i,
+    /\bedition\b/i,
+    /\bhardcover\b/i,
+    /\bpaperback\b/i,
+    /\bnovel\b/i,
+    /\btitle\s+page\b/i,
+    /\bdust\s+jacket\b/i,
+  ];
+
+  const matchCount = BOOK_SIGNALS.filter(pattern => pattern.test(combined)).length;
+
+  // Require 2+ book signals to avoid false positives
+  return matchCount >= 2;
 };
 
 // Ship #19 MVP — AI-CROSS-LAYER-DISCONNECT edition warning detection.
@@ -409,18 +450,40 @@ export default async function handler(req, res) {
 
     // Fallback: Vision full identification (current approach)
     console.log('[grade] eBay-first failed or low confidence — falling back to Vision full identification');
+
+    // Session 4B — Initial scan to detect asset type
+    const { parsed: initialScan } = await callModel("claude-opus-4-7", imageContent, STANDARD_PROMPT);
+    const isBook = detectBookSignals(initialScan);
+
     let userPrompt = STANDARD_PROMPT;
-    if (body.voiceContext) {
-      userPrompt += "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
+    let finalParsed = initialScan;
+
+    if (isBook) {
+      console.log('[grade] Book signals detected — using BOOK_PROMPT');
+      userPrompt = BOOK_PROMPT;
+      if (body.voiceContext) {
+        userPrompt += "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
+      }
+      const { parsed: bookScan } = await callModel("claude-opus-4-7", imageContent, userPrompt);
+      finalParsed = bookScan;
+      finalParsed.assetType = 'book';
+    } else {
+      // Comic — use initial scan result
+      if (body.voiceContext) {
+        // Re-scan with voice context
+        userPrompt = STANDARD_PROMPT + "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
+        const { parsed: contextScan } = await callModel("claude-opus-4-7", imageContent, userPrompt);
+        finalParsed = contextScan;
+      }
+      finalParsed.assetType = 'comic';
     }
 
-    const { parsed } = await callModel("claude-opus-4-7", imageContent, userPrompt);
-    if (noImage) parsed.noImage = true;
-    enrichPedigree(parsed);
-    parsed.editionWarning = detectEditionWarning(parsed.reason);
-    parsed.identitySource = 'vision_fallback'; // mark as fallback
+    if (noImage) finalParsed.noImage = true;
+    enrichPedigree(finalParsed);
+    finalParsed.editionWarning = detectEditionWarning(finalParsed.reason);
+    finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
-    res.status(200).json(parsed);
+    res.status(200).json(finalParsed);
   } catch (err) {
     res.status(500).json({ error: err?.message || "Server error" });
   }
