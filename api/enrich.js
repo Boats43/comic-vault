@@ -1439,6 +1439,7 @@ export default async function handler(req, res) {
       publisher: rawPublisher,
       certNumber,
       assetType,
+      author,  // Session 4B — book identity field from BOOK_PROMPT
     } = req.body || {};
     // Strip brackets/quotes/slashes before anything downstream sees the
     // publisher — parens in "Hollywood Comics (Walt Disney)" break eBay's
@@ -2627,6 +2628,45 @@ export default async function handler(req, res) {
       }
     }
 
+    // Session 4B — Derive author for books server-side when missing from client.
+    // Same pattern as assetType: don't trust handoff, derive from data we have.
+    if (out.assetType === 'book') {
+      // First check if author arrived from grade.js BOOK_PROMPT
+      const authorFromGrade = author || null;
+
+      // If not, extract from eBay titles (author name repeats across listings)
+      let derivedAuthor = null;
+      if (!authorFromGrade && parsedVisualRows?.length > 0) {
+        // Extract capitalized name sequences from titles (excluding the book title)
+        const titleLower = (confirmedTitle || '').toLowerCase();
+        const nameFreq = {};
+
+        for (const row of parsedVisualRows) {
+          const title = row.title || '';
+          // Match sequences of 2+ capitalized words (typical author names)
+          const matches = title.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g) || [];
+          for (const name of matches) {
+            // Skip if it's part of the book title
+            if (titleLower.includes(name.toLowerCase())) continue;
+            nameFreq[name] = (nameFreq[name] || 0) + 1;
+          }
+        }
+
+        // Pick most frequent name (if appears in ≥30% of listings)
+        const threshold = parsedVisualRows.length * 0.3;
+        const candidates = Object.entries(nameFreq)
+          .filter(([name, count]) => count >= threshold)
+          .sort((a, b) => b[1] - a[1]);
+
+        if (candidates.length > 0) {
+          derivedAuthor = candidates[0][0];
+        }
+      }
+
+      out.author = authorFromGrade || derivedAuthor || null;
+      console.log(`[author-derive] reqBody=${authorFromGrade} derived=${derivedAuthor} final=${out.author}`);
+    }
+
     // Ship #20a.6.4 — identity gate. Runs AFTER phase 1 (so PC/CV year-heal
     // chain has applied → confirmedYear; visual issue correction → correctedIssue;
     // publisher cleanup → publisher) and BEFORE the pricing block. When
@@ -2644,7 +2684,7 @@ export default async function handler(req, res) {
       year: confirmedYear,
       publisher: confirmedPublisher,
       visionConfidence: confidence,
-      author: req.body.author || null,  // Session 4B — book identity field
+      author: out.author || null,  // Session 4B — book identity field (server-derived)
     });
     // Session 4B — Pass adapter identityFields for asset-aware confidence check
     const adapter = getAdapter(out.assetType);
