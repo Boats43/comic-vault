@@ -4206,9 +4206,14 @@ export default async function handler(req, res) {
       out.publisher = confirmedPublisher || publisher || null;
     }
 
-    // 3d. identityComplete: comic-specific flag (issue + publisher required)
-    // Computed AFTER fallback assignments so out.issue and out.publisher are populated
-    out.identityComplete = !!(out.issue && out.publisher);
+    // 3d. identityComplete: adapter-aware flag
+    // Comic: issue + publisher required
+    // Book: title + author required
+    // Computed AFTER fallback assignments so identity fields are populated
+    const assetType = out.assetType || 'comic';
+    out.identityComplete = assetType === 'book'
+      ? !!(out.title && out.author)
+      : !!(out.issue && out.publisher);
 
     if (!out.visionConfidence && out.matchConfidence?.visionConfidence) {
       out.visionConfidence = out.matchConfidence.visionConfidence;
