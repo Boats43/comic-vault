@@ -108,6 +108,19 @@ const detectBookSignals = (parsed) => {
   return matchCount >= 2;
 };
 
+// Session 4B — Ensure assetType is set on every response path.
+// Single choke point: all res.status(200).json() calls pass through this.
+// Prevents assetType from being undefined regardless of which path
+// (Vision fallback, eBay-first, watch pipeline) the scan takes.
+const ensureAssetType = (responseObj, initialScan = null) => {
+  if (!responseObj.assetType) {
+    const isBook = detectBookSignals(responseObj) ||
+                   (initialScan && detectBookSignals(initialScan));
+    responseObj.assetType = isBook ? 'book' : 'comic';
+  }
+  return responseObj;
+};
+
 // Ship #19 MVP — AI-CROSS-LAYER-DISCONNECT edition warning detection.
 //
 // Scans Vision's free-form `reason` text for reprint / later-print /
@@ -402,7 +415,7 @@ export default async function handler(req, res) {
       if (noImage) result.noImage = true;
       res.setHeader("x-watch-passes", String(passes));
       res.setHeader("x-watch-timing", JSON.stringify(timings));
-      res.status(200).json(result);
+      res.status(200).json(ensureAssetType(result));
       return;
     }
 
@@ -455,7 +468,7 @@ export default async function handler(req, res) {
       if (noImage) result.noImage = true;
 
       console.log('[grade] eBay-first path succeeded');
-      res.status(200).json(result);
+      res.status(200).json(ensureAssetType(result));
       return;
     }
 
@@ -477,7 +490,6 @@ export default async function handler(req, res) {
       }
       const { parsed: bookScan } = await callModel("claude-opus-4-7", imageContent, userPrompt);
       finalParsed = bookScan;
-      finalParsed.assetType = 'book';
     } else {
       // Comic — use initial scan result
       if (body.voiceContext) {
@@ -486,7 +498,6 @@ export default async function handler(req, res) {
         const { parsed: contextScan } = await callModel("claude-opus-4-7", imageContent, userPrompt);
         finalParsed = contextScan;
       }
-      finalParsed.assetType = 'comic';
     }
 
     if (noImage) finalParsed.noImage = true;
@@ -494,7 +505,7 @@ export default async function handler(req, res) {
     finalParsed.editionWarning = detectEditionWarning(finalParsed.reason);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
-    res.status(200).json(finalParsed);
+    res.status(200).json(ensureAssetType(finalParsed, initialScan));
   } catch (err) {
     res.status(500).json({ error: err?.message || "Server error" });
   }

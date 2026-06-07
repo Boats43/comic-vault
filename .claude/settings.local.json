@@ -84,7 +84,9 @@
       "PowerShell(npm test *)",
       "PowerShell($lines = Get-Content \"C:\\\\Users\\\\matam\\\\OneDrive\\\\Desktop\\\\comic-vault\\\\src\\\\App.jsx\"; for \\($i = 2414; $i -lt $lines.Count; $i++\\) { if \\($lines[$i] -match \"^function \"\\) { Write-Output $i; break } })",
       "PowerShell(\\(Get-Content api\\\\enrich.js | Measure-Object -Line\\).Lines)",
-      "PowerShell(\\(Get-Content src\\\\lib\\\\decisionEngine.js | Measure-Object -Line\\).Lines)"
+      "PowerShell(\\(Get-Content src\\\\lib\\\\decisionEngine.js | Measure-Object -Line\\).Lines)",
+      "PowerShell(cd .. *)",
+      "PowerShell(node tests/book-detection.test.js)"
     ]
   }
 }
