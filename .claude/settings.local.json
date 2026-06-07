@@ -86,7 +86,9 @@
       "PowerShell(\\(Get-Content api\\\\enrich.js | Measure-Object -Line\\).Lines)",
       "PowerShell(\\(Get-Content src\\\\lib\\\\decisionEngine.js | Measure-Object -Line\\).Lines)",
       "PowerShell(cd .. *)",
-      "PowerShell(node tests/book-detection.test.js)"
+      "PowerShell(node tests/book-detection.test.js)",
+      "PowerShell(node --check api/enrich.js; node --check api/grade.js; node --check api/comps.js)",
+      "PowerShell(node -e \"import\\('./api/enrich.js'\\).catch\\(e => {console.error\\(e.message\\); process.exit\\(1\\)}\\)\")"
     ]
   }
 }

@@ -1624,6 +1624,72 @@ export default async function handler(req, res) {
 
     console.log(`[year-ebay] raw="${ebayConsensusYearRaw}" int=${ebayConsensusYearInt} ratio=${yearAgreementRatio.toFixed(2)} authoritative=${ebayYearAuthoritative}`);
 
+    // Session 4B — Derive assetType server-side from eBay category + title signals.
+    // MUST run BEFORE phase2 comp fetch so book category routing fires.
+    // Do not trust client handoff (grade→App→enrich drops assetType repeatedly).
+    // Server derivation is source of truth. Client req.body.assetType is a hint
+    // only — if it arrives as 'book', trust it; otherwise derive from data we have.
+    if (out.assetType !== 'book' && out.assetType !== 'comic' || out.assetType === 'comic') {
+      // Count eBay results categorized as books
+      const bookCatRows = (parsedVisualRows || []).filter(r =>
+        (r.categories || []).some(c =>
+          /book|magazine|antiquarian/i.test(c.categoryName || '')
+        )
+      ).length;
+      const total = (parsedVisualRows || []).length || 1;
+      const ebaySaysBook = bookCatRows / total >= 0.5;
+
+      const titleSaysBook = detectBookSignals({
+        title: confirmedTitle,
+        issue: confirmedIssue
+      });
+
+      if (ebaySaysBook || titleSaysBook) {
+        out.assetType = 'book';
+        console.log(`[assetType-derive] book detected: ebayCat=${bookCatRows}/${total} titleSignals=${titleSaysBook}`);
+      }
+    }
+
+    // Session 4B — Derive author for books server-side when missing from client.
+    // MUST run BEFORE phase2 comp fetch so buildBookQuery has author param.
+    // Same pattern as assetType: don't trust handoff, derive from data we have.
+    if (out.assetType === 'book') {
+      // First check if author arrived from grade.js BOOK_PROMPT
+      const authorFromGrade = author || null;
+
+      // If not, extract from eBay titles (author name repeats across listings)
+      let derivedAuthor = null;
+      if (!authorFromGrade && parsedVisualRows?.length > 0) {
+        // Extract capitalized name sequences from titles (excluding the book title)
+        const titleLower = (confirmedTitle || '').toLowerCase();
+        const nameFreq = {};
+
+        for (const row of parsedVisualRows) {
+          const title = row.title || '';
+          // Match sequences of 2+ capitalized words (typical author names)
+          const matches = title.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g) || [];
+          for (const name of matches) {
+            // Skip if it's part of the book title
+            if (titleLower.includes(name.toLowerCase())) continue;
+            nameFreq[name] = (nameFreq[name] || 0) + 1;
+          }
+        }
+
+        // Pick most frequent name (if appears in ≥30% of listings)
+        const threshold = parsedVisualRows.length * 0.3;
+        const candidates = Object.entries(nameFreq)
+          .filter(([name, count]) => count >= threshold)
+          .sort((a, b) => b[1] - a[1]);
+
+        if (candidates.length > 0) {
+          derivedAuthor = candidates[0][0];
+        }
+      }
+
+      out.author = authorFromGrade || derivedAuthor || null;
+      console.log(`[author-derive] reqBody=${authorFromGrade} derived=${derivedAuthor} final=${out.author}`);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // PHASE 2: DATA FETCHING (runs after identity confirmed)
     // ═══════════════════════════════════════════════════════════════════════
@@ -2605,70 +2671,6 @@ export default async function handler(req, res) {
           };
         }
       }
-    }
-
-    // Session 4B — Derive assetType server-side from eBay category + title signals.
-    // Do not trust client handoff (grade→App→enrich drops assetType repeatedly).
-    // Server derivation is source of truth. Client req.body.assetType is a hint
-    // only — if it arrives as 'book', trust it; otherwise derive from data we have.
-    if (out.assetType !== 'book' && out.assetType !== 'comic' || out.assetType === 'comic') {
-      // Count eBay results categorized as books
-      const bookCatRows = (parsedVisualRows || []).filter(r =>
-        (r.categories || []).some(c =>
-          /book|magazine|antiquarian/i.test(c.categoryName || '')
-        )
-      ).length;
-      const total = (parsedVisualRows || []).length || 1;
-      const ebaySaysBook = bookCatRows / total >= 0.5;
-
-      const titleSaysBook = detectBookSignals({
-        title: confirmedTitle,
-        issue: confirmedIssue
-      });
-
-      if (ebaySaysBook || titleSaysBook) {
-        out.assetType = 'book';
-        console.log(`[assetType-derive] book detected: ebayCat=${bookCatRows}/${total} titleSignals=${titleSaysBook}`);
-      }
-    }
-
-    // Session 4B — Derive author for books server-side when missing from client.
-    // Same pattern as assetType: don't trust handoff, derive from data we have.
-    if (out.assetType === 'book') {
-      // First check if author arrived from grade.js BOOK_PROMPT
-      const authorFromGrade = author || null;
-
-      // If not, extract from eBay titles (author name repeats across listings)
-      let derivedAuthor = null;
-      if (!authorFromGrade && parsedVisualRows?.length > 0) {
-        // Extract capitalized name sequences from titles (excluding the book title)
-        const titleLower = (confirmedTitle || '').toLowerCase();
-        const nameFreq = {};
-
-        for (const row of parsedVisualRows) {
-          const title = row.title || '';
-          // Match sequences of 2+ capitalized words (typical author names)
-          const matches = title.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g) || [];
-          for (const name of matches) {
-            // Skip if it's part of the book title
-            if (titleLower.includes(name.toLowerCase())) continue;
-            nameFreq[name] = (nameFreq[name] || 0) + 1;
-          }
-        }
-
-        // Pick most frequent name (if appears in ≥30% of listings)
-        const threshold = parsedVisualRows.length * 0.3;
-        const candidates = Object.entries(nameFreq)
-          .filter(([name, count]) => count >= threshold)
-          .sort((a, b) => b[1] - a[1]);
-
-        if (candidates.length > 0) {
-          derivedAuthor = candidates[0][0];
-        }
-      }
-
-      out.author = authorFromGrade || derivedAuthor || null;
-      console.log(`[author-derive] reqBody=${authorFromGrade} derived=${derivedAuthor} final=${out.author}`);
     }
 
     // Ship #20a.6.4 — identity gate. Runs AFTER phase 1 (so PC/CV year-heal
