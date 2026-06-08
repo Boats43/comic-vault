@@ -749,6 +749,14 @@ export const fetchComps = async ({
       let _sequelRejected = 0;
       let _signedRejected = 0;
 
+      // Session 4B — Survivor trace counters
+      let afterTitle = 0;
+      let afterEra = 0;
+      let afterReprint = 0;
+      let afterVariant = 0;
+      let afterLot = 0;
+      let afterSanity = 0;
+
       // Filter 0a: issue-number enforcement. RELAXED for TPBs — TPB
       // listings typically lack a `#1` token (sellers write "TPB Vol 1"
       // or omit issue numbers since a TPB is a single-volume product).
@@ -779,13 +787,17 @@ export const fetchComps = async ({
       }
 
       // Filter 0b: title similarity.
+      // Session 4B — Books: 0.3 threshold (editions vary by subtitle).
+      // Comics: 0.5 default (titles near-identical).
       if (searchTokens.length > 0) {
         const before = p.length;
-        p = p.filter((it) => hasSufficientTitleOverlap(it.title, searchTokens));
+        const titleThreshold = assetType === 'book' ? 0.3 : 0.5;
+        p = p.filter((it) => hasSufficientTitleOverlap(it.title, searchTokens, titleThreshold));
         if (p.length < before) {
           console.log(`[comps] title similarity filter removed ${before - p.length}`);
         }
       }
+      afterTitle = p.length;
 
       // Ship #13 Bug 2: sequel / volume / extension asymmetry filter.
       // Token overlap alone (filter 0b) can't tell "Last Ronin II
@@ -833,7 +845,8 @@ export const fetchComps = async ({
       //   ≥1985 (Modern):              ±3y — deep comp pools, collision risk
       // Graceful wipe-out fallback: if filter removes every listing, keep
       // all and flag eraFilterBypassed so UI can warn user.
-      if (year) {
+      // Session 4B — Skip for books (book year = edition, spans decades).
+      if (year && assetType !== 'book') {
         const yearNum = parseInt(String(year), 10);
         if (!isNaN(yearNum)) {
           const tolerance =
@@ -896,6 +909,7 @@ export const fetchComps = async ({
           }
         }
       }
+      afterEra = p.length;
 
       // Filter 1: reprints / facsimiles / anniversary variants / nth printings.
       const isNthPrint = (variant || '').toLowerCase().match(/\d+(?:st|nd|rd|th)\s*p(?:rint|tg)/);
@@ -914,6 +928,7 @@ export const fetchComps = async ({
       } else {
         console.log(`[comps] reprint filter skipped — book is ${variant}`);
       }
+      afterReprint = p.length;
 
       // Filter 1b: variant contamination. Hard reject when our book is NOT
       // a variant. VARIANT_CONTAM_RE hoisted to module scope so the
@@ -931,6 +946,7 @@ export const fetchComps = async ({
           }
         }
       }
+      afterVariant = p.length;
 
       // Filter 1c: variant preference.
       if (variant && p.length > 0) {
@@ -1027,6 +1043,7 @@ export const fetchComps = async ({
           }
         }
       }
+      afterLot = p.length;
 
       // Filter 1f: half-issue / ashcan / promo filter. Books like Fathom
       // #1 (1998 Wizard World Chicago Exclusive) were getting Fathom #1/2
@@ -1231,6 +1248,7 @@ export const fetchComps = async ({
           console.log(`[comps] price sanity removed ${before - p.length}`);
         }
       }
+      afterSanity = p.length;
 
       // Filter 5: dedup near-identical listings.
       {
@@ -1252,6 +1270,9 @@ export const fetchComps = async ({
           console.log(`[comps] dedup removed ${before - p.length}`);
         }
       }
+
+      // Session 4B — Survivor trace (diagnose book comp over-filtering)
+      console.log(`[comps] survivors: afterTitle=${afterTitle} afterEra=${afterEra} afterReprint=${afterReprint} afterVariant=${afterVariant} afterLot=${afterLot} afterSanity=${afterSanity} final=${p.length}`);
 
       return {
         parsed: p,

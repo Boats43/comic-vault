@@ -157,7 +157,7 @@ export const tokenizeTitle = (title) => {
 // Require ≥50% of our non-stop-word tokens to appear in the listing's
 // non-stop-word tokens. When all our tokens are stop-words, returns true
 // (no signal to gate on — let other filters handle it).
-export const hasSufficientTitleOverlap = (listingTitle, searchTokens) => {
+export const hasSufficientTitleOverlap = (listingTitle, searchTokens, threshold = 0.5) => {
   if (!searchTokens || searchTokens.length === 0) return true;
   const listingSet = new Set(tokenizeTitle(listingTitle));
   if (listingSet.size === 0) return false;
@@ -165,7 +165,7 @@ export const hasSufficientTitleOverlap = (listingTitle, searchTokens) => {
   for (const t of searchTokens) {
     if (listingSet.has(t)) matches++;
   }
-  return matches / searchTokens.length >= 0.5;
+  return matches / searchTokens.length >= threshold;
 };
 
 // ──────────────────────────── GRADE PARSING ────────────────────────────
