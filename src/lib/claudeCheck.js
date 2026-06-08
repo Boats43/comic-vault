@@ -52,7 +52,6 @@ function buildVerificationPrompt(data) {
   ).join('\n') || '  (unknown)';
 
   // Ship #26: web search mode prompt when rawComps=0
-  // Hotfix: Removed web search instruction — using market knowledge instead
   if (needsWebSearch) {
     return `BOOK: ${title}${issue ? ` #${issue}` : ''} ${year || '?'} ${publisher || '?'}
 VARIANT: ${variant || 'standard'}
@@ -60,28 +59,29 @@ GRADE: ${grade || 'unknown'}${numericGrade ? ` (${numericGrade})` : ''}
 
 NO EBAY COMP DATA AVAILABLE (rawComps=0).
 
-Based on your knowledge of the comic book market, provide your best price estimate for this book.
+Use web search to find current sold and active eBay listings for this exact book.
 
-Consider:
-- Typical market value for this title, issue, and era
-- Grade/condition impact on value
-- Publisher and key issue status
-- Era-specific pricing trends
+Search for: site:ebay.com/itm "${title}${issue ? ` #${issue}` : ''}" ${year || ''} sold
+
+Extract from results:
+- Recent sold prices (prefer last 30 days)
+- Active listing prices
+- Typical price range for this grade/condition
 
 KEY ISSUE: ${keyIssue || 'None identified'}
 CREATORS:
 ${creatorLines}
 
-Provide your estimate based on market knowledge.
+Provide your best price estimate based on web search evidence.
 
 JSON response:
 {
   "verified": true/false,
   "flags": ["specific issue if any"],
   "web_price": <your estimate in dollars, number only>,
-  "web_source": "market_knowledge",
+  "web_source": "ebay_sold|ebay_active|estimate",
   "web_confidence": "HIGH|MEDIUM|LOW",
-  "web_evidence": "brief reasoning for estimate (max 100 chars)",
+  "web_evidence": "brief description of what you found (max 100 chars)",
   "recommendation": "SELL_RAW|PRESS|CGC|HOLD",
   "recommendationReason": "one sentence",
   "suggestedListingTitle": "exact eBay title",
@@ -157,13 +157,16 @@ export async function runClaudeCheck(data) {
   try {
     const prompt = buildVerificationPrompt(data);
 
-    // Ship #26: Standard Sonnet 4.6 for web search (NO computer use)
-    // Computer use was causing UI hangs — web search is a standard tool
+    // Ship #26: Sonnet 4.6 with web search tool for zero-comp pricing
     const modelConfig = needsWebSearch
       ? {
           model: "claude-sonnet-4-6-20250415",
           max_tokens: 2048,
-          system: "You are a comic book expert and pricing analyst. When comp data is unavailable, provide a price estimate based on your knowledge of the market. Be concise. Respond in JSON only.",
+          system: "You are a comic book expert and pricing analyst. When comp data is unavailable, use web search to find current eBay sold/active listings and provide a price estimate. Be concise. Respond in JSON only.",
+          tools: [{
+            type: "web_search_20250305",
+            name: "web_search"
+          }]
         }
       : {
           model: "claude-haiku-4-5-20251001",
