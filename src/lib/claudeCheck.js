@@ -151,8 +151,8 @@ export async function runClaudeCheck(data) {
 
   const needsWebSearch = data.needsWebSearch;
 
-  // Ship #26 hotfix: Add 8s timeout for web search calls
-  const TIMEOUT_MS = needsWebSearch ? 8000 : 30000;
+  // Ship #26: Web search timeout — 20s for web search (Sonnet 4 + tool), 30s for standard
+  const TIMEOUT_MS = needsWebSearch ? 20000 : 30000;
 
   try {
     const prompt = buildVerificationPrompt(data);
