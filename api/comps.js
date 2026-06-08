@@ -806,7 +806,8 @@ export const fetchComps = async ({
       // in each listing and reject when listing has a marker our title does
       // NOT. Graceful wipe-out fallback: keep all if filter removes every
       // listing (e.g. user scanned a Vol 2 book but didn't type "Vol 2").
-      {
+      // Session 4B — SKIP for books. Vol/Book/Part = editions, not sequels.
+      if (assetType !== 'book') {
         const ourMarkers = detectSeriesMarkers(title);
         const beforeSeq = p.length;
         let localSequelRejected = 0;
@@ -829,9 +830,11 @@ export const fetchComps = async ({
           p = sequelFiltered;
           _sequelRejected = localSequelRejected;
           if (localSequelRejected > 0) {
-            console.log(`[comps] sequel filter removed ${localSequelRejected}`);
+            console.log(`[comps] sequel filter: before=${beforeSeq} after=${p.length} removed=${localSequelRejected}`);
           }
         }
+      } else {
+        console.log('[comps] sequel filter skipped (assetType=book)');
       }
 
       // Filter 0c: era consistency (F2). Reject listings whose year
@@ -942,13 +945,15 @@ export const fetchComps = async ({
         } else {
           p = afterVariant;
           if (p.length < beforeVariant.length) {
-            console.log(`[comps] variant filter removed ${beforeVariant.length - p.length}`);
+            const beforeV = beforeVariant.length;
+            console.log(`[comps] variant filter: before=${beforeV} after=${p.length} removed=${beforeV - p.length}`);
           }
         }
       }
       afterVariant = p.length;
 
       // Filter 1c: variant preference.
+      const beforeVarPref = p.length;
       if (variant && p.length > 0) {
         const varWords = String(variant).toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['variant', 'cover', 'print', 'edition'].includes(w));
         if (varWords.length > 0) {
@@ -957,10 +962,10 @@ export const fetchComps = async ({
             return varWords.some(w => t.includes(w));
           });
           if (variantMatches.length >= 2) {
-            console.log(`[comps] variant preference: ${variantMatches.length}/${p.length} match "${variant}" words [${varWords.join(',')}]`);
+            console.log(`[comps] variant preference filter: before=${beforeVarPref} after=${variantMatches.length} kept=${variantMatches.length} (match "${variant}")`);
             p = variantMatches;
           } else {
-            console.log(`[comps] variant preference: only ${variantMatches.length} match — keeping all ${p.length}`);
+            console.log(`[comps] variant preference filter: before=${beforeVarPref} after=${p.length} (only ${variantMatches.length} match — keeping all)`);
           }
         }
       }
@@ -972,7 +977,9 @@ export const fetchComps = async ({
       //  - Our book has a specific cover letter (B/C/...): keep ONLY
       //    listings matching that letter; fall back to all if zero match
       //    (prefer weak comp over no comp).
-      {
+      // Session 4B — SKIP for books. Cover letters are comic-only variants.
+      const beforeCover = p.length;
+      if (assetType !== 'book') {
         const ourVariant = String(variant || '').toLowerCase();
         const ourCoverMatch = ourVariant.match(/\b(?:cover|cvr)\s*([a-z])\b/);
         const ourCoverLetter = ourCoverMatch ? ourCoverMatch[1].toLowerCase() : null;
@@ -984,7 +991,6 @@ export const fetchComps = async ({
 
         if (isCoverAorStandard) {
           // OTHER_COVER_RE imported from src/lib/compHygiene.js (Ship #20a.6).
-          const before = p.length;
           p = p.filter((item) => {
             if (OTHER_COVER_RE.test(String(item.title || ''))) {
               console.log('[other-cover] rejected:',
@@ -993,22 +999,23 @@ export const fetchComps = async ({
             }
             return true;
           });
-          if (p.length < before) {
-            console.log(`[comps] other-cover filter removed ${before - p.length}`);
+          if (p.length < beforeCover) {
+            console.log(`[comps] cover-letter filter: before=${beforeCover} after=${p.length} removed=${beforeCover - p.length}`);
           }
         } else if (ourCoverLetter) {
           const OUR_COVER_RE = new RegExp(
             `\\b(?:cover|cvr)\\s*${ourCoverLetter}\\b`, 'i'
           );
-          const before = p.length;
           const matched = p.filter((item) => OUR_COVER_RE.test(String(item.title || '')));
           if (matched.length > 0) {
             p = matched;
-            console.log(`[comps] our-cover filter kept ${matched.length}/${before} with cover ${ourCoverLetter}`);
+            console.log(`[comps] cover-letter filter: before=${beforeCover} after=${p.length} kept=${matched.length} (cover ${ourCoverLetter})`);
           } else {
-            console.log(`[comps] our-cover filter: no listings match cover ${ourCoverLetter} — keeping all`);
+            console.log(`[comps] cover-letter filter: before=${beforeCover} after=${p.length} (no cover ${ourCoverLetter} match — keeping all)`);
           }
         }
+      } else {
+        console.log('[comps] cover-letter filter skipped (assetType=book)');
       }
 
       // Filter 1e: lot / set / bundle / multi-book filter. Multi-book
@@ -1039,7 +1046,7 @@ export const fetchComps = async ({
             return true;
           });
           if (p.length < before) {
-            console.log(`[comps] lot filter removed ${before - p.length}`);
+            console.log(`[comps] lot filter: before=${before} after=${p.length} removed=${before - p.length}`);
           }
         }
       }
@@ -1053,7 +1060,9 @@ export const fetchComps = async ({
       // #1/2, etc.). Tightened from spec: `#` prefix REQUIRED on the
       // `#N/M` and `#N.M` alternations — otherwise grades like "9.4" or
       // date strings like "9/2026" would match and wipe legitimate comps.
-      {
+      // Session 4B — SKIP for books. #1/2 format is comic-only.
+      const beforeHalfIssue = p.length;
+      if (assetType !== 'book') {
         const issueStr = String(issue || '');
         const isOurBookHalfIssue =
           issueStr.includes('/') ||
@@ -1061,7 +1070,6 @@ export const fetchComps = async ({
           issueStr.includes('½');
         if (!isOurBookHalfIssue) {
           // HALF_ISSUE_RE imported from src/lib/compHygiene.js (Ship #20a.6).
-          const before = p.length;
           p = p.filter((item) => {
             const t = String(item.title || '');
             if (HALF_ISSUE_RE.test(t)) {
@@ -1070,10 +1078,12 @@ export const fetchComps = async ({
             }
             return true;
           });
-          if (p.length < before) {
-            console.log(`[comps] half-issue filter removed ${before - p.length}`);
+          if (p.length < beforeHalfIssue) {
+            console.log(`[comps] half-issue filter: before=${beforeHalfIssue} after=${p.length} removed=${beforeHalfIssue - p.length}`);
           }
         }
+      } else {
+        console.log('[comps] half-issue filter skipped (assetType=book)');
       }
 
       // Filter 1g: TPB / collected-edition format match. ARROW 2 of the
@@ -1083,15 +1093,19 @@ export const fetchComps = async ({
       // single issues poison the avg (e.g. Batman vs Predator Collected
       // Edition was getting $8.97 floppy avg vs ~$30 real TPB market).
       // Graceful fallback to keeping all if zero TPB-format matches.
-      if (isTPB && p.length > 0) {
-        const before = p.length;
+      // Session 4B — SKIP for books. HC/PB markers in book titles trigger
+      // comic TPB logic incorrectly.
+      const beforeTPB = p.length;
+      if (assetType !== 'book' && isTPB && p.length > 0) {
         const tpbFiltered = p.filter((item) => TPB_MARKER_RE.test(String(item.title || '')));
         if (tpbFiltered.length > 0) {
-          console.log(`[tpb-format] kept ${tpbFiltered.length} of ${before} (marker required)`);
+          console.log(`[comps] tpb-format filter: before=${beforeTPB} after=${tpbFiltered.length} kept=${tpbFiltered.length} (marker required)`);
           p = tpbFiltered;
         } else {
-          console.log(`[tpb-format] 0 TPB matches — keeping all ${before} (graceful fallback)`);
+          console.log(`[comps] tpb-format filter: before=${beforeTPB} after=${p.length} (0 TPB matches — keeping all)`);
         }
+      } else if (assetType === 'book') {
+        console.log('[comps] tpb-format filter skipped (assetType=book)');
       }
 
       // Filter 1h: Trading card / non-comic format. Ship #20a.6.20 parity
@@ -1101,23 +1115,27 @@ export const fetchComps = async ({
         const before = p.length;
         p = p.filter((item) => !TRADING_CARD_RE.test(String(item.title || '')));
         if (p.length < before) {
-          console.log(`[comps] trading-card filter removed ${before - p.length}`);
+          console.log(`[comps] trading-card filter: before=${before} after=${p.length} removed=${before - p.length}`);
         }
       }
 
       // Filter 2: raw-vs-graded title separation.
-      if (rawOnly) {
-        const before = p.length;
-        p = p.filter((it) => !SLAB_RE.test(String(it.title || "")));
-        if (p.length < before) {
-          console.log(`[comps] slab filter removed ${before - p.length}`);
+      // Session 4B — SKIP for books. CGC/CBCS slabbing is comic/card-only.
+      const beforeSlab = p.length;
+      if (assetType !== 'book') {
+        if (rawOnly) {
+          p = p.filter((it) => !SLAB_RE.test(String(it.title || "")));
+          if (p.length < beforeSlab) {
+            console.log(`[comps] slab filter: before=${beforeSlab} after=${p.length} removed=${beforeSlab - p.length}`);
+          }
+        } else if (gradedOnly) {
+          p = p.filter((it) => GRADED_RE.test(String(it.title || "")));
+          if (p.length < beforeSlab) {
+            console.log(`[comps] non-graded filter: before=${beforeSlab} after=${p.length} removed=${beforeSlab - p.length}`);
+          }
         }
-      } else if (gradedOnly) {
-        const before = p.length;
-        p = p.filter((it) => GRADED_RE.test(String(it.title || "")));
-        if (p.length < before) {
-          console.log(`[comps] non-graded filter removed ${before - p.length}`);
-        }
+      } else {
+        console.log('[comps] slab filter skipped (assetType=book)');
       }
 
       // Ship #13 Bug 3 (Filter 2b): signed / autographed / signature-series
@@ -1141,7 +1159,7 @@ export const fetchComps = async ({
             return true;
           });
           if (p.length < before) {
-            console.log(`[comps] signed filter removed ${before - p.length}`);
+            console.log(`[comps] signed filter: before=${before} after=${p.length} removed=${before - p.length}`);
           }
         }
       }
@@ -1150,9 +1168,10 @@ export const fetchComps = async ({
       // Books with missing covers poison comps (Sensation #1 Crowley 9.4 case
       // where "Sensation Comics #11 CGC-NG COVERLESS" set floor at $1,250).
       // Hard-reject unless our book is also coverless (which never happens in
-      // the standard grading flow). No observability counter — these are rare.
-      {
-        const before = p.length;
+      // the standard grading flow).
+      // Session 4B — SKIP for books. Coverless = comic-specific defect.
+      const beforeCoverless = p.length;
+      if (assetType !== 'book') {
         p = p.filter((it) => {
           if (COVERLESS_RE.test(String(it.title || ''))) {
             console.log('[coverless-filter] rejected:',
@@ -1161,9 +1180,11 @@ export const fetchComps = async ({
           }
           return true;
         });
-        if (p.length < before) {
-          console.log(`[comps] coverless filter removed ${before - p.length}`);
+        if (p.length < beforeCoverless) {
+          console.log(`[comps] coverless filter: before=${beforeCoverless} after=${p.length} removed=${beforeCoverless - p.length}`);
         }
+      } else {
+        console.log('[comps] coverless filter skipped (assetType=book)');
       }
 
       // Filter 3: ±1.5 grade proximity.
@@ -1172,6 +1193,7 @@ export const fetchComps = async ({
       // for pricing (to avoid refusing to price), but we still track the
       // grade-filtered minimum for floor guard use. This prevents VG 4.0 books
       // from anchoring floor to FR 1.0 listings.
+      const beforeGrade = p.length;
       let gradeFilteredPrices = null;
       if (p.length > 0 && numericTarget != null && !isNaN(numericTarget)) {
         const filtered = p.filter((it) => {
@@ -1203,15 +1225,19 @@ export const fetchComps = async ({
           return true;
         });
         if (filtered.length > 0) {
+          console.log(`[comps] grade-proximity filter: before=${beforeGrade} after=${filtered.length} removed=${beforeGrade - filtered.length} (±1.5 from ${numericTarget})`);
           p = filtered;
           // Snapshot grade-filtered prices for floor calculation
           gradeFilteredPrices = filtered.map(item => item.price).filter(price => typeof price === 'number' && price > 0);
         } else {
+          console.log(`[comps] grade-proximity filter: before=${beforeGrade} after=${beforeGrade} (fallback — all rejected, keeping all)`);
           _fellBack = true;
           // Even when falling back, track what the grade-filtered pool would have been
           // (empty in this case, so floor guard will skip)
           gradeFilteredPrices = [];
         }
+      } else {
+        console.log(`[comps] grade-proximity filter skipped (no numeric grade: numericTarget=${numericTarget})`);
       }
 
       // Filter 3b (creator-aware soft preference, moved from 1b-creator):
@@ -1223,6 +1249,7 @@ export const fetchComps = async ({
       // never selects a variant — even when variant fallback kept the
       // pool (e.g. Usagi Yojimbo #1 Cover A where Eastman-branded RI-C
       // Variant was slipping through because Eastman matched the creator).
+      const beforeCreator = p.length;
       if (!variant && creator && p.length > 0) {
         const creatorLower = String(creator).toLowerCase().trim();
         if (creatorLower.length >= 3) {
@@ -1232,10 +1259,10 @@ export const fetchComps = async ({
             return t.includes(creatorLower);
           });
           if (creatorMatches.length >= 2) {
-            console.log(`[creator-match] kept ${creatorMatches.length} of ${p.length} matching creator "${creator}"`);
+            console.log(`[comps] creator-preference filter: before=${beforeCreator} after=${creatorMatches.length} kept=${creatorMatches.length} (creator "${creator}")`);
             p = creatorMatches;
           } else {
-            console.log(`[creator-match] only ${creatorMatches.length} match creator "${creator}" — keeping all ${p.length}`);
+            console.log(`[comps] creator-preference filter: before=${beforeCreator} after=${p.length} (only ${creatorMatches.length} match — keeping all)`);
           }
         }
       }
@@ -1245,7 +1272,7 @@ export const fetchComps = async ({
         const before = p.length;
         p = applyPriceSanity(p);
         if (p.length < before) {
-          console.log(`[comps] price sanity removed ${before - p.length}`);
+          console.log(`[comps] price-sanity filter: before=${before} after=${p.length} removed=${before - p.length}`);
         }
       }
       afterSanity = p.length;
@@ -1267,7 +1294,7 @@ export const fetchComps = async ({
           return true;
         });
         if (p.length < before) {
-          console.log(`[comps] dedup removed ${before - p.length}`);
+          console.log(`[comps] dedup filter: before=${before} after=${p.length} removed=${before - p.length}`);
         }
       }
 

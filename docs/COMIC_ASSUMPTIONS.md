@@ -26,6 +26,68 @@ This document catalogs assumptions baked into the comp filter chain that are COM
 
 ---
 
+---
+
+## Sequel / Volume / Extension Filter (between 0b and 0c)
+
+**Comic assumption:** Vol 2, Part II, Book 3 = different works in a series. "Last Ronin II" ≠ "Last Ronin". Roman numerals, volume numbers, part numbers distinguish separate comic titles.
+
+**Why this breaks for books:** Vol/Part/Book numbers = editions or volumes of the SAME work. "Einstein Vol 2" and "Einstein Vol 1" are legitimate comps for a multi-volume set. "Relativity Part 1" vs "Part 2" = same book split across volumes.
+
+**Book relaxation:** Skip sequel filter entirely when `assetType === 'book'`.
+
+---
+
+## Cover-Letter Filter (Filter 1d)
+
+**Comic assumption:** Cover A, B, C, D are separate products with separate prices. Never compare across cover letters. A Cover B variant can be worth 10× Cover A.
+
+**Why this breaks for books:** Books don't have "Cover A/B/C/D" variants in the comic sense. Any listing with "Cover B" in title is unrelated book metadata or irrelevant.
+
+**Book relaxation:** Skip cover-letter filter when `assetType === 'book'`.
+
+---
+
+## Half-Issue Filter (Filter 1f)
+
+**Comic assumption:** #1/2, #½, #N.M formats are promo/ashcan/preview issues. Different product from the main #N issue. Fathom #1/2 ≠ Fathom #1.
+
+**Why this breaks for books:** Books don't have half-issue numbering. Any "/" or "." in book listings is unrelated (dates, grades, ISBNs).
+
+**Book relaxation:** Skip half-issue filter when `assetType === 'book'`.
+
+---
+
+## TPB Format Filter (Filter 1g)
+
+**Comic assumption:** When title contains TPB markers (hardcover, omnibus, collected edition), require comps to also have TPB markers. Prevents floppy single-issue prices from poisoning TPB averages.
+
+**Why this breaks for books:** Books naturally have "Hardcover" / "Paperback" in titles. Requiring format marker match would reject all HC comps when searching for PB (or vice versa), when both are legitimate comps for book pricing.
+
+**Book relaxation:** Skip TPB format filter when `assetType === 'book'`.
+
+---
+
+## Slab Separation Filter (Filter 2)
+
+**Comic assumption:** Raw vs graded (CGC/CBCS/PSA slabs) are separate markets with separate pricing. Never mix raw and graded comps.
+
+**Why this breaks for books:** Books aren't CGC-slabbed (except rare signed collectibles). SLAB_RE pattern would reject all book comps that mention grading in unrelated context.
+
+**Book relaxation:** Skip slab filter when `assetType === 'book'`.
+
+---
+
+## Coverless Filter (Filter 2c)
+
+**Comic assumption:** Coverless comics are defective products that poison comps. "Sensation Comics #11 CGC-NG COVERLESS" at $1,250 would anchor floor incorrectly for complete copies.
+
+**Why this breaks for books:** "Coverless" is a comic-specific defect marker. Books don't use this terminology in listings.
+
+**Book relaxation:** Skip coverless filter when `assetType === 'book'`.
+
+---
+
 ## Future Additions
 
 As the 4C filter registry is built (Session 4C+), additional comic-vs-book assumptions will be cataloged here:
