@@ -3911,6 +3911,18 @@ export default async function handler(req, res) {
     }
 
     // Ship #21 — Claude Haiku quality check (verify all data alignment)
+    // Ship #26 — Web search trigger: when rawComps=0 AND no verified_sold data
+    const shouldTriggerWebSearch =
+      (rawComps?.count === 0 || !rawComps) &&
+      out.pricingSource !== 'verified_sold' &&
+      out.pricingSource !== 'pricecharting' &&
+      !out.refusedToPrice &&  // Don't search when identity refused
+      !isPolybagPricing;
+
+    if (shouldTriggerWebSearch) {
+      console.log('[claude-check] web search mode triggered (rawComps=0, no verified_sold)');
+    }
+
     const claudeCheckData = {
       title: confirmedTitle,
       issue: correctedIssue,
@@ -3938,7 +3950,11 @@ export default async function handler(req, res) {
       soldComps: filteredSold,
       activeComps: rawComps,
       pop: out.pop,
-      demandSignals: out.demandSignals
+      demandSignals: out.demandSignals,
+      // Ship #26: web search flags
+      needsWebSearch: shouldTriggerWebSearch,
+      rawCompsCount: rawComps?.count || 0,
+      pricingSource: out.pricingSource
     };
 
     // Ship 6.3 — Skip claudeCheck API call entirely when polybag pricing active.
@@ -3957,6 +3973,30 @@ export default async function handler(req, res) {
       out.verified = claudeCheck.verified;
       out.recommendation = claudeCheck.recommendation;
       out.suggestedListingTitle = claudeCheck.suggestedListingTitle;
+
+      // Ship #26: Handle web search pricing
+      if (claudeCheck.web_price && claudeCheck.web_confidence !== 'LOW') {
+        const webPrice = Number(claudeCheck.web_price);
+        if (webPrice > 0) {
+          out.price = fmtUsd(webPrice);
+          out.priceLow = fmtUsd(webPrice * 0.85);
+          out.priceHigh = fmtUsd(webPrice * 1.15);
+          out.pricingSource = 'web_search_fallback';
+          out.priceNote = `Web search estimate (${claudeCheck.web_source || 'unknown source'})`;
+          out.webSearchEvidence = claudeCheck.web_evidence || null;
+          out.confidenceLevel = claudeCheck.web_confidence || 'MEDIUM';
+
+          console.log(
+            `[claude-check] web search pricing: $${webPrice} ` +
+            `source=${claudeCheck.web_source} ` +
+            `confidence=${claudeCheck.web_confidence} ` +
+            `evidence="${claudeCheck.web_evidence}"`
+          );
+
+          // Decision engine will re-evaluate with new price
+          // Web search prices default to RESEARCH (user must verify)
+        }
+      }
 
       // Ship 5 — Claude-check kill switch. When claude-check returns
       // verified=false AND confidence=LOW, refuse to ship the computed

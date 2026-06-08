@@ -315,6 +315,16 @@ export function computeDecision(item, context = {}) {
     };
   }
 
+  // Ship #26: Warning: Web search fallback (comp data unavailable)
+  if (item.pricingSource === 'web_search_fallback') {
+    decision.warnings.push('web-search-pricing');
+    decision.evidence.webSearchPricing = {
+      source: item.claudeCheck?.web_source || 'unknown',
+      confidence: item.confidenceLevel,
+      evidence: item.webSearchEvidence || 'No details available'
+    };
+  }
+
   // Warning: Reprint thin pool
   if (item.pricingSource === 'refused-reprint-thin-pool') {
     decision.warnings.push('verification-failed-reprint-thin');
@@ -403,7 +413,8 @@ export function computeDecision(item, context = {}) {
     'verification-failed-no-data',
     'verification-failed-visual-fallback',
     'verification-failed-reprint-thin',
-    'claude-check-high-severity'  // HIGH severity from claude-gate
+    'claude-check-high-severity',  // HIGH severity from claude-gate
+    'web-search-pricing'  // Ship #26: web search fallback (verify before listing)
   ];
 
   const hasCriticalWarning = decision.warnings.some(w => criticalWarnings.includes(w)) || isZeroVerifiedCritical;

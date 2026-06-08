@@ -10,6 +10,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 /**
  * Build the verification prompt from assembled data.
+ * Ship #26: Add web search mode when rawComps=0 (no eBay comp data).
  */
 function buildVerificationPrompt(data) {
   const {
@@ -28,7 +29,11 @@ function buildVerificationPrompt(data) {
     soldComps,
     activeComps,
     pop,
-    demandSignals
+    demandSignals,
+    // Ship #26: web search trigger flags
+    needsWebSearch,
+    rawCompsCount,
+    pricingSource
   } = data;
 
   // Format sold comps
@@ -46,6 +51,45 @@ function buildVerificationPrompt(data) {
     `  ${c.name}${c.role ? ` (${c.role})` : ''}`
   ).join('\n') || '  (unknown)';
 
+  // Ship #26: web search mode prompt when rawComps=0
+  if (needsWebSearch) {
+    return `BOOK: ${title}${issue ? ` #${issue}` : ''} ${year || '?'} ${publisher || '?'}
+VARIANT: ${variant || 'standard'}
+GRADE: ${grade || 'unknown'}${numericGrade ? ` (${numericGrade})` : ''}
+
+NO EBAY COMP DATA AVAILABLE (rawComps=0).
+
+Your task: Search the web for current sold and active eBay listings for this exact book.
+
+Search query suggestion: site:ebay.com/itm "${title}${issue ? ` #${issue}` : ''}" ${year || ''} sold
+
+Extract from search results:
+- Recent sold prices (prefer last 30 days)
+- Active listing prices
+- Typical price range for this grade/condition
+
+KEY ISSUE: ${keyIssue || 'None identified'}
+CREATORS:
+${creatorLines}
+
+Provide your best price estimate based on web search evidence.
+
+JSON response:
+{
+  "verified": true/false,
+  "flags": ["specific issue if any"],
+  "web_price": <your estimate in dollars, number only>,
+  "web_source": "ebay_sold|ebay_active|estimate",
+  "web_confidence": "HIGH|MEDIUM|LOW",
+  "web_evidence": "brief description of what you found (max 100 chars)",
+  "recommendation": "SELL_RAW|PRESS|CGC|HOLD",
+  "recommendationReason": "one sentence",
+  "suggestedListingTitle": "exact eBay title",
+  "confidence": "HIGH|MEDIUM|LOW"
+}`;
+  }
+
+  // Standard verification mode (comp data available)
   return `BOOK: ${title}${issue ? ` #${issue}` : ''} ${year || '?'} ${publisher || '?'}
 VARIANT: ${variant || 'standard'}
 GRADE: ${grade || 'unknown'}${numericGrade ? ` (${numericGrade})` : ''}
@@ -108,10 +152,22 @@ export async function runClaudeCheck(data) {
   try {
     const prompt = buildVerificationPrompt(data);
 
+    // Ship #26: Use Sonnet 4.6 with computer use for web search mode
+    const needsWebSearch = data.needsWebSearch;
+    const modelConfig = needsWebSearch
+      ? {
+          model: "claude-sonnet-4-6-20250415",
+          max_tokens: 2048,
+          system: "You are a comic book expert and pricing analyst with web search capabilities. When comp data is unavailable, search eBay for sold/active listings and provide a price estimate. Be concise. Respond in JSON only.",
+        }
+      : {
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1024,
+          system: "You are a comic book expert and pricing analyst. Review this complete record for accuracy. Be concise. Respond in JSON only.",
+        };
+
     const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      system: "You are a comic book expert and pricing analyst. Review this complete record for accuracy. Be concise. Respond in JSON only.",
+      ...modelConfig,
       messages: [
         {
           role: "user",
