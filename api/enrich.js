@@ -2140,8 +2140,10 @@ export default async function handler(req, res) {
     // Tracks the "AI verify nuked everything" case so the sanity
     // check downstream can skip rather than read compsFromEbay.average
     // (which still holds the contaminated pre-verify mean).
+    // Session 4B — SKIP for books. AI verify matches issue+series; books have no issues.
     let compsExhausted = false;
     if (
+      out.assetType !== 'book' &&
       rawComps &&
       Array.isArray(rawComps.recentSales) &&
       rawComps.recentSales.length > 0 &&
@@ -2245,7 +2247,8 @@ export default async function handler(req, res) {
     // facsimile/later-print signals, filter rawComps to reprint-only listings.
     // If <3 reprint comps remain, refuse-to-price (prevents 1st-print comps
     // from anchoring reprint book prices at 100-1000% over market).
-    if (editionWarning?.detected) {
+    // Session 4B — SKIP for books. Edition warning is comic-specific (facsimile detection).
+    if (out.assetType !== 'book' && editionWarning?.detected) {
       console.log(`[edition-gate] reprint/later-print detected — filtering comps`);
       const reprintComps = (rawComps?.prices || []).filter((c) =>
         /reprint|facsimile|2nd\s*print|3rd\s*print|loot.?crate|millennium/i.test(

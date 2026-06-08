@@ -88,6 +88,30 @@ This document catalogs assumptions baked into the comp filter chain that are COM
 
 ---
 
+## AI Comp Verification (enrich.js lines 2140-2242)
+
+**Comic assumption:** Comps can be verified by matching series title + issue number against listing titles. Extract `#N` from title, verify each listing mentions the same series + issue.
+
+**Why this breaks for books:** Books don't have issue numbers. The pattern `/#\s*(\d+)/` extracts null for books. `verifyCompsTitles` receives `issue: null` and rejects ALL listings because none match the non-existent issue number.
+
+**Impact:** AI verify overwrites `rawComps.count = 33` (filter chain survivors) → `count = 0` (verified count) → refused-no-data-sources at pricing gate despite 33 valid comps.
+
+**Book relaxation:** Skip AI verify entirely when `assetType === 'book'`. Book comps already filtered by title similarity (0.3 threshold) and lot/price-sanity/dedup filters. No issue-based verification needed.
+
+---
+
+## Edition Warning Comp Filter (enrich.js lines 2244-2287)
+
+**Comic assumption:** When Vision detects reprint/facsimile/later-print markers, filter comps to ONLY reprint listings. Prevents 1st-print comps from pricing reprints at 100-1000% over market.
+
+**Pattern match:** `/reprint|facsimile|2nd\s*print|3rd\s*print|loot.?crate|millennium/i`
+
+**Why this breaks for books:** Edition detection is comic-specific. Books don't have "facsimile" variants or "2nd print" markers in the same sense. `editionWarning.detected` is unlikely for books, but if it fires, the reprint-only filter would zero book comps.
+
+**Book relaxation:** Skip edition filter when `assetType === 'book'`. Reprint filter already ran in comp filter chain (Filter 1, lines 914-931 in comps.js).
+
+---
+
 ## Future Additions
 
 As the 4C filter registry is built (Session 4C+), additional comic-vs-book assumptions will be cataloged here:
