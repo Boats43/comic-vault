@@ -717,20 +717,22 @@ export const fetchComps = async ({
     return true;
   });
 
+  // Declare state variables outside try block so they're accessible in catch
+  let query = "";
+  let source = "";
+  let attemptUsed = 0;
+  let attemptLabel = null;
+  let parsed = [];
+  let gradeFilteredPrices = null;  // Fix C: grade-proximity filtered prices for floor calc
+  let reprintFallback = false;
+  let variantFallback = false;
+  let fellBack = false;
+  let eraFilterBypassed = false;
+  let multiIssueRejected = 0;
+  let sequelRejected = 0;
+  let signedRejected = 0;
+
   try {
-    let query = "";
-    let source = "";
-    let attemptUsed = 0;
-    let attemptLabel = null;
-    let parsed = [];
-    let gradeFilteredPrices = null;  // Fix C: grade-proximity filtered prices for floor calc
-    let reprintFallback = false;
-    let variantFallback = false;
-    let fellBack = false;
-    let eraFilterBypassed = false;
-    let multiIssueRejected = 0;
-    let sequelRejected = 0;
-    let signedRejected = 0;
 
     // Ship v0-I — era-filter fallback tracking. Collects raw candidates when
     // post-filter=0 for vintage books, applies reprint guardrail after loop.
