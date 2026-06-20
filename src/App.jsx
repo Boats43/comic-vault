@@ -4361,7 +4361,12 @@ function CollectionDetail({
             </div>
             {item.comps.highestNum != null && (
               <div className="muted small" style={{ marginTop: 4, fontSize: 12 }}>
-                Low ${item.comps.lowestNum?.toLocaleString("en-US")} → Avg ${(Math.round((item.comps.averageNum || 0) * 100) / 100).toLocaleString("en-US")} → High ${item.comps.highestNum?.toLocaleString("en-US")}
+                {/* Floor display fix: when recommended < floor, show sold vs active instead of Low→Avg→High */}
+                {displayPrice > 0 && displayPrice < (item.comps.lowestNum || 0) && item.soldCompsAvg > 0 ? (
+                  <>Sold avg: ${item.soldCompsAvg.toLocaleString("en-US")} · Active: ${item.comps.lowestNum?.toLocaleString("en-US")}–${item.comps.highestNum?.toLocaleString("en-US")}</>
+                ) : (
+                  <>Low ${item.comps.lowestNum?.toLocaleString("en-US")} → Avg ${(Math.round((item.comps.averageNum || 0) * 100) / 100).toLocaleString("en-US")} → High ${item.comps.highestNum?.toLocaleString("en-US")}</>
+                )}
               </div>
             )}
             {item.gradeMultiplier != null && (
