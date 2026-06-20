@@ -465,27 +465,39 @@ export function computeDecision(item, context = {}) {
     const cgcValue = ladder[nearestGrade];
 
     if (cgcValue && cgcValue > 0) {
-      const cgcUpside = cgcValue - item.price - CGC_ALL_IN_COST;
+      // BUG 1 FIX: Use raw market price (pre-floor) for CGC upside calculation
+      // item.price is floor-enforced final price (e.g., $173)
+      // rawMarketPrice is pre-floor sold avg or PC×gradeMult (e.g., $62)
+      const rawMarketPrice = item.soldCompsAvg
+        || (item.priceCharting?.price && item.gradeMultiplier
+            ? item.priceCharting.price * item.gradeMultiplier
+            : item.price);
+
+      const cgcUpside = cgcValue - rawMarketPrice - CGC_ALL_IN_COST;
 
       // Debug diagnostic for CGC candidate detection
-      console.log('[cgc-check] rawPrice=', item.price,
+      console.log('[cgc-check] floorPrice=', item.price,
+        'rawMarketPrice=', rawMarketPrice,
+        'soldCompsAvg=', item.soldCompsAvg,
+        'pcBase=', item.priceCharting?.price,
+        'gradeMult=', item.gradeMultiplier,
         'grade=', currentGrade,
         'mappedGrade=', targetNumeric,
-        'priceLadder keys=', Object.keys(ladder || {}),
         'nearestGrade=', nearestGrade,
         'cgcValue=', cgcValue,
         'cgcUpside=', cgcUpside,
-        'triggered=', cgcUpside > item.price);
+        'triggered=', cgcUpside > rawMarketPrice);
 
-      // Trigger when upside exceeds current raw price (more than doubles your money)
-      if (cgcUpside > item.price) {
+      // Trigger when upside exceeds raw market price (more than doubles your money)
+      if (cgcUpside > rawMarketPrice) {
         decision.action = 'HOLD_FOR_CGC';
         decision.confidence = 'medium';
         decision.reason = `CGC ${nearestGrade} target: $${cgcValue.toFixed(0)} (+$${cgcUpside.toFixed(0)} after ~$${CGC_ALL_IN_COST} cost)`;
         decision.nextStep = 'Submit for professional grading — upside exceeds raw value';
         decision.price = null; // Not listing, grading instead
         decision.evidence.gradingUpside = {
-          currentPrice: item.price,
+          floorEnforcedPrice: item.price,      // $173 floor-enforced (display)
+          rawMarketPrice: rawMarketPrice,      // $62 pre-floor (calculation)
           targetGrade: nearestGrade,
           cgcValue: cgcValue,
           gradingCost: CGC_ALL_IN_COST,
