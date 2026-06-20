@@ -34,7 +34,7 @@ const GRADE_JSON_SHAPE = '{ "grade": string, "isGraded": boolean, "numericGrade"
 const buildGradeOnlyPrompt = (consensus) => {
   return `You are grading this comic book: ${consensus.title} #${consensus.issue}${consensus.year ? ` (${consensus.year})` : ''}${consensus.publisher ? ` - ${consensus.publisher}` : ''}.
 
-The book's identity has already been verified by eBay image search (${consensus.agreement.total} matching listings, ${Math.round(consensus.confidence * 100)}% confidence).
+The book's identity has already been verified by eBay image search (${consensus.agreement?.total ?? 'multiple'} matching listings, ${Math.round(consensus.confidence * 100)}% confidence).
 
 Your ONLY task: Grade this book and detect defects.
 
@@ -58,7 +58,10 @@ const parseResponse = (text) => {
     return JSON.parse(text);
   } catch {
     const match = text.match(/\{[\s\S]*\}/);
-    return match ? JSON.parse(match[0]) : { raw: text };
+    if (match) {
+      try { return JSON.parse(match[0]); } catch { return { raw: text }; }
+    }
+    return { raw: text };
   }
 };
 

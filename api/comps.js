@@ -128,7 +128,8 @@ export const getOAuthToken = async (appId, certId, scope) => {
   });
 
   const text = await res.text();
-  console.log(`[comps][diag] oauth url=${OAUTH_ENDPOINT} scope=${scope} appId=${appId?.slice(0,10)}... status=${res.status} body=${text.slice(0,300)}`);
+  const redacted = text.replace(/"access_token":"[^"]+"/, '"access_token":"[REDACTED]"');
+  console.log(`[comps][diag] oauth url=${OAUTH_ENDPOINT} scope=${scope} appId=${appId?.slice(0,10)}... status=${res.status} body=${redacted.slice(0,300)}`);
   if (!res.ok) {
     console.error(`[comps] oauth failed body=${text}`);
     throw new Error(`eBay OAuth HTTP ${res.status}`);
