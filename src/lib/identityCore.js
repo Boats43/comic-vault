@@ -157,28 +157,31 @@ export const backfillFromComps = (confirmedTitle, confirmedYear, confirmedPublis
       ? titleMatchCount / compTitles.length
       : 0;
 
-    if (titleMatchRatio >= 0.7) {
-      // Year backfill — extract years from passing titles, find consensus
-      if (!confirmedYear) {
-        const yearCounts = {};
-        compTitles.forEach(t => {
-          const matches = t.match(/\b(19[3-9]\d|20[0-2]\d)\b/g) || [];
-          matches.forEach(y => { yearCounts[y] = (yearCounts[y] || 0) + 1; });
-        });
-        const sortedYears = Object.entries(yearCounts).sort((a, b) => b[1] - a[1]);
-        if (sortedYears.length > 0) {
-          const [topYear, topCount] = sortedYears[0];
-          const yearRatio = topCount / compTitles.length;
-          if (yearRatio >= 0.5) {
-            result.year = topYear;
-            result.yearBackfilled = true;
-            result.yearBackfillRatio = yearRatio;
-            console.log(`[ship-1.8] year backfilled from comp consensus: ${topYear} (${topCount}/${compTitles.length}=${(yearRatio*100).toFixed(0)}%)`);
-          }
+    // FIX 1 — Year backfill now runs ALWAYS when confirmedYear missing
+    // (not gated by title match ratio). Year is pure consensus extraction
+    // with no cross-title contamination risk (unlike publisher).
+    if (!confirmedYear) {
+      const yearCounts = {};
+      compTitles.forEach(t => {
+        const matches = t.match(/\b(19[3-9]\d|20[0-2]\d)\b/g) || [];
+        matches.forEach(y => { yearCounts[y] = (yearCounts[y] || 0) + 1; });
+      });
+      const sortedYears = Object.entries(yearCounts).sort((a, b) => b[1] - a[1]);
+      if (sortedYears.length > 0) {
+        const [topYear, topCount] = sortedYears[0];
+        const yearRatio = topCount / compTitles.length;
+        if (yearRatio >= 0.5) {
+          result.year = topYear;
+          result.yearBackfilled = true;
+          result.yearBackfillRatio = yearRatio;
+          result.yearBackfillSource = 'ebay-comp-consensus';
+          console.log(`[year-backfill] ${topYear} from eBay comp consensus (${topCount}/${compTitles.length}=${(yearRatio*100).toFixed(0)}%)`);
         }
       }
+    }
 
-      // Publisher backfill — pattern-match common publisher tokens
+    if (titleMatchRatio >= 0.7) {
+      // Publisher backfill — pattern-match common publisher tokens (requires title match)
       if (!confirmedPublisher) {
         const pubPatterns = [
           { re: /\b(?:dc\s+comics?|dc\s+universe|dcu)\b/i, name: 'DC Comics' },

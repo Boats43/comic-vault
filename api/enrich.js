@@ -1998,6 +1998,7 @@ export default async function handler(req, res) {
       confirmedYear = backfill.year;
       out.yearBackfilledFromComps = true;
       out.yearBackfillRatio = backfill.yearBackfillRatio;
+      out.yearBackfillSource = backfill.yearBackfillSource;
     }
 
     if (backfill.publisherBackfilled) {
