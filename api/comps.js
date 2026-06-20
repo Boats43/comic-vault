@@ -11,6 +11,9 @@
 // All failures fall through silently (empty comps) so the UI can show
 // its AI-estimate fallback instead of erroring out the grade flow.
 
+// Issue 6 — Shared grade utilities for numeric extraction
+import { extractNumericFromGrade } from '../src/lib/gradeUtils.js';
+
 // Comp hygiene primitives extracted Ship #20a.6 to src/lib/compHygiene.js
 // for reuse by sold-comp verification (src/lib/soldVerification.js).
 // Behavior preserved exactly. api/enrich.js + tests continue to import
@@ -497,13 +500,20 @@ export const fetchComps = async ({
     return emptyComps(null, "title required");
   }
 
-  // Prefer explicit numericGrade, fall back to parsing the legacy `grade` field.
+  // Issue 6 FIX: Extract numeric from grade strings ("GD 2.5" → 2.5, "VF" → 8.0)
+  // Prefer explicit numericGrade, fall back to extracting from grade string
   const numericTarget =
     numericGrade != null && !isNaN(Number(numericGrade))
-      ? Number(numericGrade)
-      : grade != null && !isNaN(parseFloat(grade))
-      ? parseFloat(grade)
+      ? Number(numericGrade)                          // CGC: 9.4
+      : grade != null
+      ? extractNumericFromGrade(grade)                 // "GD 2.5" → 2.5, "VF" → 8.0
       : null;
+
+  // Diagnostic log for grade numeric extraction
+  console.log('[grade-numeric] input=', grade,
+    'numericGrade=', numericGrade,
+    'numericTarget=', numericTarget,
+    'source=', numericGrade != null ? 'explicit' : 'extracted');
   const rawOnly = isGraded === false;
   const gradedOnly = isGraded === true;
 

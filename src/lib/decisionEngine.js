@@ -1,4 +1,5 @@
 import { enforceFloor } from './pricingEngine.js';
+import { GRADE_TO_NUMERIC } from './gradeUtils.js';
 
 /**
  * Session 2A: Compute best sales channel based on decision + item characteristics
@@ -445,16 +446,7 @@ export function computeDecision(item, context = {}) {
   const CGC_ALL_IN_COST = 75; // grading + press, economy tier
 
   if (!item.isGraded && item.priceLadder && item.price != null && item.price > 0) {
-    // Map raw grade to nearest CGC numeric grade
-    const GRADE_TO_NUMERIC = {
-      'GM': 10.0, 'MT': 10.0, 'NM/MT': 9.8, 'NM+': 9.6, 'NM': 9.4, 'NM-': 9.2,
-      'VF/NM': 9.0, 'VF+': 8.5, 'VF': 8.0, 'VF-': 7.5,
-      'FN/VF': 7.0, 'FN+': 7.0, 'FN': 6.0, 'FN-': 5.5,
-      'VG/FN': 5.0, 'VG+': 4.5, 'VG': 4.0, 'VG-': 3.5,
-      'GD/VG': 3.0, 'GD+': 2.5, 'GD': 2.0, 'GD-': 1.8,
-      'FR/GD': 1.5, 'FR': 1.0, 'PR': 0.5
-    };
-
+    // Map raw grade to nearest CGC numeric grade (using shared gradeUtils.js)
     const currentGrade = item.grade || item.rawGrade || 'VG';
     const targetNumeric = GRADE_TO_NUMERIC[currentGrade] || 6.0;
     const ladder = item.priceLadder;
