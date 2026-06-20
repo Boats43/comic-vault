@@ -1424,7 +1424,7 @@ export const fetchComps = async ({
 
         if (guardedPool.length === 0) {
           console.log('[v0-I] guardrail rejected all — returning empty');
-          return { ...emptyComps(query, "no sales after filters"), attemptUsed: 0 };
+          return { ...emptyComps(bestCandidate.attempt.q, "no sales after filters"), attemptUsed: 0 };
         }
 
         // Title token match: require sufficient overlap with search title
@@ -1444,7 +1444,7 @@ export const fetchComps = async ({
 
         if (guardedPool.length === 0) {
           console.log('[v0-I] title-match rejected all — returning empty');
-          return { ...emptyComps(query, "no sales after filters"), attemptUsed: 0 };
+          return { ...emptyComps(bestCandidate.attempt.q, "no sales after filters"), attemptUsed: 0 };
         }
 
         // Issue match: require correct issue number if we're searching for one
@@ -1463,7 +1463,7 @@ export const fetchComps = async ({
 
           if (guardedPool.length === 0) {
             console.log('[v0-I] issue-match rejected all — returning empty');
-            return { ...emptyComps(query, "no sales after filters"), attemptUsed: 0 };
+            return { ...emptyComps(bestCandidate.attempt.q, "no sales after filters"), attemptUsed: 0 };
           }
         }
 
@@ -1491,7 +1491,7 @@ export const fetchComps = async ({
 
         if (guardedPool.length === 0) {
           console.log('[v0-I] year-conflict rejected all — returning empty');
-          return { ...emptyComps(query, "no sales after filters"), attemptUsed: 0 };
+          return { ...emptyComps(bestCandidate.attempt.q, "no sales after filters"), attemptUsed: 0 };
         }
 
         // Success: use guarded pool with eraFilterBypassed flag
