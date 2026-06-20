@@ -2093,6 +2093,7 @@ export default async function handler(req, res) {
             assetType: out.assetType,
             author: out.author || null,  // book identity field for buildBookQuery
           }).catch((err) => {
+            console.error('[enrich] comps error stack:', err?.stack);
             console.error(`[enrich] comps error: ${err?.message || err}`);
             return null;
           })
