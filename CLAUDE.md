@@ -35,7 +35,7 @@ npx vercel --prod       # uncommitted-tree fallback only
 - `api/enrich.js` — second-pass enrichment (PriceCharting, eBay comps, ComicVine, Ximilar, CGC lookup, GoCollect, Decision Engine)
 - `api/grade.js` — Claude Vision comic identification and grading
 - `api/chat.js` — Claude collection chat (inline queries, Whatnot session context)
-- `api/comps.js` — eBay Browse API comp fetching
+- `api/comps.js` — eBay Browse API comp fetching (Ship #20a.8: all state variables scoped outside try/catch + if/else branches)
 - `api/sold.js` — eBay completed/sold listings (legacy, dormant — Ship #20a routes via PC scrape)
 - `api/cgc-lookup.js` — CGC cert number verification
 - `api/gocollect.js` — GoCollect CGC FMV lookup (requires GOCOLLECT_API, returns null without it)
@@ -75,6 +75,7 @@ Optional: `GOCOLLECT_API` (CGC FMV — live as of 2026-05-19)
 - **Auto-deploy on push to main.** Production deploys trigger automatically. Verify locally before push: `npm run build` clean, tests passing.
 - **Investigation-first protocol:** when a bug is reported or surfaced, investigate root cause before implementing. Don't bypass safety checks (`--no-verify`, etc.) as a shortcut.
 - **Diff-before-commit on all changes.** Show the user the diff for review before committing high-impact admin changes.
+- **Variable scope discipline:** variables used in shared code paths (catch blocks, final return statements, post-conditional code) must be declared BEFORE any try/catch or if/else branches that might skip their initialization. Ship #20a.8 pattern: `query`, `artistName`, state vars moved outside try block and before assetType conditionals.
 - **Phone validation immediately after deploy.** Tests verify code correctness, not feature correctness. Production behavior must be observed on real scans before next ship.
 - **Conservative direction preferred when uncertain.** Bias toward under-pricing rather than over-pricing on weak signals; under-confident rather than over-confident on identification.
 
@@ -293,11 +294,11 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 - **Decision recommendations**: BUY/SELL/HOLD/WAIT badges on comic detail cards with blocking reasons. Gates listing actions when decision=WAIT.
 
-## Current State (as of 2026-06-05)
+## Current State (as of 2026-06-20)
 
-**Latest commit:** 4b8a574 — sanitizeComicTitle call-site migration  
-**Current session:** 3B complete ✅ (AssetCore extraction)  
-**Next session:** 4A — BookAdapter  
+**Latest commit:** 6a431de — Ship #20a.8 variable scope fixes  
+**Current session:** P0 bugfix (comps.js ReferenceError) ✅  
+**Next session:** TBD  
 **Vercel functions:** 12/12 (at cap)  
 **Test count:** 48/48 title-sanitization tests passing
 
@@ -318,13 +319,13 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 
 | Hash | Ship | Summary |
 |------|------|---------|
-| 4b8a574 | Session 3B | sanitizeComicTitle call-site migration |
-| 85cfc13 | Session 3B | Title sanitization patterns → ComicAdapter |
-| c3e5bcd | Session 3B | Golden Age era → eraRisk flag |
-| 37e9f35 | Session 3B | issue null check → identityComplete flag |
-| 8c7b8b0 | Session 3B | Phase 2 medium-risk flag migrations |
+| 6a431de | Ship #20a.8 | Variable scope fix — artistName before if/else split |
+| 29b5888 | Ship #20a.8 | Variable scope fix — state vars before try block |
+| 8cb9aac | Ship #20a.8 | Variable scope fix — v0-I bestCandidate.attempt.q |
+| e4c5df9 | debug | Stack trace logging for comps error |
+| c410d5b | fix | Model strings — Sonnet 4.5 correct ID |
 
-**Session 3B extraction range:** 0a9d761 → 4b8a574 (12 commits)  
+**Session 6/20/26 (Ship #20a.8):** e4c5df9 → 6a431de (3 commits)  
 **Full ship history:** See `docs/archive/` for session logs
 
 ## Roadmap
