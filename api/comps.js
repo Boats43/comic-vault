@@ -577,6 +577,9 @@ export const fetchComps = async ({
     console.log(`[comps] image-search attempt: "${imgQuery}"`);
   }
 
+  // FIX: isTPB scoping — declare before if/else so it's accessible in filter chain (line 1100)
+  let isTPB = false;
+
   // Session 4B — Book query builder routing (no #issue, uses author)
   if (assetType === 'book') {
     // Import buildBookQuery from adapter registry
@@ -689,7 +692,7 @@ export const fetchComps = async ({
   // floppies. Marker is appended only if cleanTitle doesn't already
   // contain it (avoids "Collected Edition Collected Edition" duplication).
   const tpbMatch = String(title || '').match(TPB_MARKER_RE);
-  const isTPB = !!tpbMatch;
+  isTPB = !!tpbMatch;  // FIX: assign to outer scope variable (declared at line 578)
   const tpbMarker = isTPB ? tpbMatch[0] : null;
   if (isTPB) {
     const titleHasMarker = TPB_MARKER_RE.test(cleanTitle);
