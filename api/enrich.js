@@ -2050,8 +2050,17 @@ export default async function handler(req, res) {
     if (identityRefused) {
       console.log(`[phase2] SKIPPED — identity refused by title-family clustering`);
       // Skip to response construction with refusal data
-      const out = {
+      // FIX 1: Include backfilled year/publisher in refused response
+      // (backfillFromComps ran at line 1990, may have set confirmedYear/confirmedPublisher)
+      const refusedOut = {
         ...sanitizeIdentityFields(req.body),
+        // Override with backfilled values (if available)
+        year: confirmedYear || req.body.year,
+        publisher: confirmedPublisher || req.body.publisher,
+        yearBackfilledFromComps: out.yearBackfilledFromComps || false,
+        yearBackfillRatio: out.yearBackfillRatio || 0,
+        yearBackfillSource: out.yearBackfillSource || null,
+        publisherBackfilledFromComps: out.publisherBackfilledFromComps || false,
         pricingSource: 'refused-identity-conflict',
         refusedToPrice: true,
         refusalReason: familyCandidate?.reason || 'Visual pool families lack overlap with Vision',
@@ -2068,7 +2077,7 @@ export default async function handler(req, res) {
           families: familyCandidate.families
         } : null
       };
-      return res.status(200).json(out);
+      return res.status(200).json(refusedOut);
     }
 
     const compsPromise =
