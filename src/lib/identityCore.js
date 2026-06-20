@@ -135,6 +135,11 @@ export const backfillFromComps = (confirmedTitle, confirmedYear, confirmedPublis
     publisherBackfillSource: null
   };
 
+  // Debug diagnostic for FIX 1
+  console.log('[year-backfill-debug] compItems available:', compItems?.length || 0,
+    'confirmedYear:', confirmedYear || '(null)',
+    'needsBackfill:', !confirmedYear);
+
   if ((!confirmedYear || !confirmedPublisher) && compItems?.length >= 5) {
     const compTitles = compItems
       .map(i => String(i?.rawTitle || i?.title || ''))
