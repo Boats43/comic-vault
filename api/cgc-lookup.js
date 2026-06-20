@@ -79,4 +79,5 @@ const lookupCGC = async (certNumber) => {
 };
 
 export { lookupCGC };
-export default lookupCGC;
+// Removed export default to free Vercel function slot.
+// Named export { lookupCGC } remains for import by api/enrich.js.
