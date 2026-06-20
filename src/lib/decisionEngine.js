@@ -467,6 +467,16 @@ export function computeDecision(item, context = {}) {
     if (cgcValue && cgcValue > 0) {
       const cgcUpside = cgcValue - item.price - CGC_ALL_IN_COST;
 
+      // Debug diagnostic for CGC candidate detection
+      console.log('[cgc-check] rawPrice=', item.price,
+        'grade=', currentGrade,
+        'mappedGrade=', targetNumeric,
+        'priceLadder keys=', Object.keys(ladder || {}),
+        'nearestGrade=', nearestGrade,
+        'cgcValue=', cgcValue,
+        'cgcUpside=', cgcUpside,
+        'triggered=', cgcUpside > item.price);
+
       // Trigger when upside exceeds current raw price (more than doubles your money)
       if (cgcUpside > item.price) {
         decision.action = 'HOLD_FOR_CGC';
