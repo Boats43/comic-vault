@@ -157,10 +157,10 @@ export async function runClaudeCheck(data) {
   try {
     const prompt = buildVerificationPrompt(data);
 
-    // Ship #26: Sonnet 4 with web search tool for zero-comp pricing
+    // Ship #26: Sonnet 4.5 with web search tool for zero-comp pricing
     const modelConfig = needsWebSearch
       ? {
-          model: "claude-sonnet-4-5-20251022",
+          model: "claude-sonnet-4-5-20250929",
           max_tokens: 2048,
           system: "You are a comic book expert and pricing analyst. When comp data is unavailable, use web search to find current eBay sold/active listings and provide a price estimate. Be concise. Respond in JSON only.",
           tools: [{

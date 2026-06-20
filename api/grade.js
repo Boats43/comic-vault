@@ -283,7 +283,7 @@ const callModel = async (model, imageContent, promptText) => {
 
 // Self-correcting watch pipeline: Sonnet fast → Sonnet self-correct → Opus escalation.
 const watchPipeline = async (imageContent, voiceContext) => {
-  const SONNET = "claude-sonnet-4-5-20251022";
+  const SONNET = "claude-sonnet-4-5-20250929";
   const OPUS = "claude-opus-4-7";
 
   let prompt = WATCH_PROMPT;
@@ -392,7 +392,7 @@ export default async function handler(req, res) {
       console.log('[grade] using Sonnet for grade-only assessment...');
 
       const gradePrompt = buildGradeOnlyPrompt(ebayResult.consensus);
-      const { parsed: gradeResult } = await callModel("claude-sonnet-4-5-20251022", imageContent, gradePrompt);
+      const { parsed: gradeResult } = await callModel("claude-sonnet-4-5-20250929", imageContent, gradePrompt);
 
       // Merge eBay identity + Sonnet grade
       const result = {
