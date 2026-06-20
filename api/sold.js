@@ -155,14 +155,10 @@ export const fetchSold = async ({ title, issue, year }) => {
   }
 };
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
-  const { title, issue, year } = req.body || {};
-  const issueNum =
-    issue || (title && String(title).match(/#\s*(\d+)/)?.[1]) || null;
-  const results = await fetchSold({ title, issue: issueNum, year });
-  res.status(200).json(results);
-}
+// HTTP handler removed — sold.js converted to pure helper.
+// eBay Marketplace Insights API gated since Ship #20a (April 2026).
+// Sold comps now sourced from PriceCharting sales-history scrape
+// (api/pricecharting-pop.js fetchPricechartingSales).
+// fetchSold remains available for import (returns [] gracefully when
+// Insights scope unavailable) so future eBay API approval can light
+// it up without re-wiring.
