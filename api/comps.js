@@ -579,6 +579,8 @@ export const fetchComps = async ({
 
   // FIX: isTPB scoping — declare before if/else so it's accessible in filter chain (line 1100)
   let isTPB = false;
+  // FIX: artistName scoping — declare before if/else so it's accessible in return statement (book vs comic)
+  let artistName = null;
 
   // Session 4B — Book query builder routing (no #issue, uses author)
   if (assetType === 'book') {
@@ -658,7 +660,6 @@ export const fetchComps = async ({
   // Falls through gracefully when nothing matches — caller flags
   // artistFallback so the UI can warn the user. ARTIST_PATTERNS list
   // moved to src/lib/compHygiene.js (Ship #20a.6).
-  let artistName = null;
   if (variant) {
     for (const pattern of ARTIST_PATTERNS) {
       const m = String(variant).match(pattern);
