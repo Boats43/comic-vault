@@ -38,7 +38,8 @@ function computeBestChannel(decision, item) {
   }
 
   // Rule 3: Grade candidate (already detected by decision engine)
-  if (decision.action === 'GRADE_CANDIDATE') {
+  // FIX 3: Also handle HOLD_FOR_CGC action
+  if (decision.action === 'GRADE_CANDIDATE' || decision.action === 'HOLD_FOR_CGC') {
     return 'grade';
   }
 
@@ -440,27 +441,50 @@ export function computeDecision(item, context = {}) {
 
   // PHASE 4: OPPORTUNITY DETECTION
 
-  // Check for grading upside
-  if (item.price > 100 && !item.isGraded && item.priceLadder) {
-    const currentGrade = item.grade || item.rawGrade;
-    // Simple check: if price ladder shows significant upside
-    const ladder = item.priceLadder;
-    const ladderKeys = Object.keys(ladder).map(k => parseFloat(k)).sort((a, b) => b - a);
-    const highestGradeFmv = ladder[ladderKeys[0]];
+  // FIX 3: CGC grading upside detection (cost-aware, target-grade)
+  const CGC_ALL_IN_COST = 75; // grading + press, economy tier
 
-    if (highestGradeFmv && highestGradeFmv > item.price * 2) {
-      decision.action = 'GRADE_CANDIDATE';
-      decision.confidence = 'medium';
-      decision.reason = `Grading upside detected: potential $${(highestGradeFmv - item.price).toFixed(0)} gain`;
-      decision.nextStep = 'Consider professional grading submission';
-      decision.price = null; // Not listing, grading instead
-      decision.evidence.gradingUpside = {
-        currentPrice: item.price,
-        potentialFmv: highestGradeFmv,
-        uplift: highestGradeFmv - item.price
-      };
-      decision.bestChannel = computeBestChannel(decision, item);
-      return decision;
+  if (!item.isGraded && item.priceLadder && item.price != null && item.price > 0) {
+    // Map raw grade to nearest CGC numeric grade
+    const GRADE_TO_NUMERIC = {
+      'GM': 10.0, 'MT': 10.0, 'NM/MT': 9.8, 'NM+': 9.6, 'NM': 9.4, 'NM-': 9.2,
+      'VF/NM': 9.0, 'VF+': 8.5, 'VF': 8.0, 'VF-': 7.5,
+      'FN/VF': 7.0, 'FN+': 7.0, 'FN': 6.0, 'FN-': 5.5,
+      'VG/FN': 5.0, 'VG+': 4.5, 'VG': 4.0, 'VG-': 3.5,
+      'GD/VG': 3.0, 'GD+': 2.5, 'GD': 2.0, 'GD-': 1.8,
+      'FR/GD': 1.5, 'FR': 1.0, 'PR': 0.5
+    };
+
+    const currentGrade = item.grade || item.rawGrade || 'VG';
+    const targetNumeric = GRADE_TO_NUMERIC[currentGrade] || 6.0;
+    const ladder = item.priceLadder;
+
+    // Find nearest available grade in ladder
+    const ladderGrades = Object.keys(ladder).map(k => parseFloat(k)).sort((a, b) => Math.abs(a - targetNumeric) - Math.abs(b - targetNumeric));
+    const nearestGrade = ladderGrades[0];
+    const cgcValue = ladder[nearestGrade];
+
+    if (cgcValue && cgcValue > 0) {
+      const cgcUpside = cgcValue - item.price - CGC_ALL_IN_COST;
+
+      // Trigger when upside exceeds current raw price (more than doubles your money)
+      if (cgcUpside > item.price) {
+        decision.action = 'HOLD_FOR_CGC';
+        decision.confidence = 'medium';
+        decision.reason = `CGC ${nearestGrade} target: $${cgcValue.toFixed(0)} (+$${cgcUpside.toFixed(0)} after ~$${CGC_ALL_IN_COST} cost)`;
+        decision.nextStep = 'Submit for professional grading — upside exceeds raw value';
+        decision.price = null; // Not listing, grading instead
+        decision.evidence.gradingUpside = {
+          currentPrice: item.price,
+          targetGrade: nearestGrade,
+          cgcValue: cgcValue,
+          gradingCost: CGC_ALL_IN_COST,
+          netUpside: cgcUpside,
+          rawGrade: currentGrade
+        };
+        decision.bestChannel = computeBestChannel(decision, item);
+        return decision;
+      }
     }
   }
 
