@@ -1049,9 +1049,12 @@ function ResultCard({ result, enriching }) {
               fontSize: 14,
             }}
           >
-            <span className="muted small">30-day average</span>
+            {/* FIX 2: Display sold avg separately from active listings */}
+            <span className="muted small">
+              {result.soldCompsAvg != null && result.soldCompsAvg > 0 ? 'Sold avg (30d)' : 'Active listing avg'}
+            </span>
             <span style={{ fontWeight: 600 }}>
-              {fmtPrice(comps.averageNum)}
+              {fmtPrice(result.soldCompsAvg != null && result.soldCompsAvg > 0 ? result.soldCompsAvg : comps.averageNum)}
             </span>
           </div>
           <div
@@ -4340,8 +4343,13 @@ function CollectionDetail({
             })}
             <div style={{ borderTop: "1px solid rgba(212,175,55,0.25)", margin: "8px 0" }} />
             <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
-              <span className="muted small">30-day average</span>
-              <span style={{ fontWeight: 600 }}>{fmtPrice(item.comps.averageNum)}</span>
+              {/* FIX 2: Display sold avg separately from active listings */}
+              <span className="muted small">
+                {item.soldCompsAvg != null && item.soldCompsAvg > 0 ? 'Sold avg (30d)' : 'Active listing avg'}
+              </span>
+              <span style={{ fontWeight: 600 }}>
+                {fmtPrice(item.soldCompsAvg != null && item.soldCompsAvg > 0 ? item.soldCompsAvg : item.comps.averageNum)}
+              </span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
               <span className="muted small">Recommended</span>

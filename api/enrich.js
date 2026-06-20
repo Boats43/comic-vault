@@ -3650,10 +3650,13 @@ export default async function handler(req, res) {
       out.soldComps = [];
       out.soldCompsRaw = [];
       out.soldCompDiagnostics = { kept: 0, rejected: 0, reasons: {} };
+      out.soldCompsAvg = null;  // FIX 2: Surface sold-only average
     } else {
       out.soldComps = filteredSold;
       out.soldCompsRaw = capRawSoldRows(rawSoldRows);
       out.soldCompDiagnostics = soldVerifyResult.diagnostics;
+      // FIX 2: Surface sold-only average (computed at line 2354-2356)
+      out.soldCompsAvg = soldAvg;
     }
     // Ship 6 — skip PriceCharting per-grade arrays when polybag pricing active.
     // salesByGrade / priceLadder / salesVelocity all hold first-print PC data
