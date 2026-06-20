@@ -296,8 +296,8 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 
 ## Current State (as of 2026-06-20)
 
-**Latest commit:** 6a431de — Ship #20a.8 variable scope fixes  
-**Current session:** P0 bugfix (comps.js ReferenceError) ✅  
+**Latest commit:** 19b0984 — Floor display fix (recommended < active listings)  
+**Current session:** Pricing investigation + prompt caching ✅  
 **Next session:** TBD  
 **Vercel functions:** 12/12 (at cap)  
 **Test count:** 48/48 title-sanitization tests passing
@@ -307,25 +307,45 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - ComicAdapter.js: 312 lines (4/4 functions implemented)
 - identityCore.js: 250 lines (5 universal resolvers)
 - pricingEngine.js: 9 universal helpers
+- gradeUtils.js: shared grade utilities (GRADE_TO_NUMERIC, extractNumericFromGrade)
 - Zero regressions across all extraction steps
 
 **Performance:**
 - Average scan time: 2.5s (66% improvement from 7.5s baseline)
+- Prompt caching enabled: ~96% savings on Vision prompt for batch scans (5-min TTL)
 
 **Deploy:** git push origin main = auto-deploy (confirmed)  
 **Rollback:** git revert [hash] && git push origin main
 
-## Recent Ships (Last 5)
+## Recent Ships (Last 7)
 
 | Hash | Ship | Summary |
 |------|------|---------|
-| 6a431de | Ship #20a.8 | Variable scope fix — artistName before if/else split |
-| 29b5888 | Ship #20a.8 | Variable scope fix — state vars before try block |
-| 8cb9aac | Ship #20a.8 | Variable scope fix — v0-I bestCandidate.attempt.q |
-| e4c5df9 | debug | Stack trace logging for comps error |
-| c410d5b | fix | Model strings — Sonnet 4.5 correct ID |
+| 19b0984 | fix | Floor display: sold vs active when recommended < floor |
+| 0006d78 | perf | Prompt caching on STANDARD_PROMPT (96% savings batch scans) |
+| e96ea3d | ISSUE 6 | Grade-proximity filter for raw vintage (gradeUtils.js) |
+| 83deb41 | FIX 3 BUG 1 | CGC upside uses raw market price (not floor-enforced) |
+| df4d6c5 | FIX 3 | CGC detection diagnostic logging |
+| 06468e7 | FIX 2 | Sold avg display separated from active listings |
+| 1abac22 | FIX 1 | Year backfill from comp consensus |
 
-**Session 6/20/26 (Ship #20a.8):** e4c5df9 → 6a431de (3 commits)  
+**Session 6/20/26:** Pricing investigation complete (7 commits)  
+- FIX 1: Year backfill from eBay comp consensus (1abac22, a5e1a22)
+- FIX 2: Sold avg displayed separately from active listings (06468e7)
+- FIX 3: CGC detection cost-aware calculation (df4d6c5, 83deb41)
+- ISSUE 6: Grade-proximity filter fix for raw vintage comics (e96ea3d)
+  - gradeUtils.js shared module (GRADE_TO_NUMERIC, extractNumericFromGrade)
+  - Batman #222 validated: $173 → $60 (GD-range comps, VF/NM excluded)
+- Prompt caching: STANDARD_PROMPT/WATCH_PROMPT/BOOK_PROMPT system cache (0006d78)
+- Floor display fix: sold vs active markets when recommended < floor (19b0984)
+- Token usage June: 9.7M total, cache_read=0 (monitoring post-deploy)
+
+**Open items:**
+- FIX 3 positive trigger validation: need FN+ Bronze/Silver comic to confirm HOLD_FOR_CGC fires
+- Wolverine #8 blocker: catastrophic-overprice hypothesis, awaiting Vercel logs
+- Issue 1B (title contamination / Beatles card): on hold pending design discussion
+- Prompt caching monitoring: check tomorrow's token usage CSV for cache_read > 0
+
 **Full ship history:** See `docs/archive/` for session logs
 
 ## Roadmap
