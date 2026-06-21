@@ -1,6 +1,6 @@
 // Force redeploy 2026-06-19 — Pro plan active
 import Anthropic from "@anthropic-ai/sdk";
-import Jimp from "jimp";
+import { Jimp } from "jimp";
 import { lookupPedigree } from "../src/lib/pedigreeRegistry.js";
 import {
   extractIdentityFromImageSearch,
