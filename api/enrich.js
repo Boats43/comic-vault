@@ -4076,6 +4076,24 @@ export default async function handler(req, res) {
         }
       }
 
+      // AI estimate fallback: never show a blank card (Principle 3)
+      // When all verified sources fail, use AI range estimate as last resort.
+      // Rank 6 (ai_estimate) means any verified source will override on refresh.
+      if (!out.price && claudeCheck?.estimated_range_low && claudeCheck?.estimated_range_high) {
+        const lowEst = parseFloat(claudeCheck.estimated_range_low) || 0;
+        const highEst = parseFloat(claudeCheck.estimated_range_high) || 0;
+        if (lowEst > 0 && highEst > lowEst) {
+          const midpoint = (lowEst + highEst) / 2;
+          out.price = fmtUsd(midpoint);
+          out.priceLow = fmtUsd(lowEst);
+          out.priceHigh = fmtUsd(highEst);
+          out.pricingSource = 'ai_estimate';
+          out.priceNote = 'Unverified AI estimate — verify before listing';
+          out.confidenceLevel = 'LOW';
+          console.log(`[ai-estimate] fallback: $${lowEst}-$${highEst} → market $${midpoint.toFixed(2)}`);
+        }
+      }
+
       // Ship 5 — Claude-check kill switch. When claude-check returns
       // verified=false AND confidence=LOW, refuse to ship the computed
       // price. Two-factor requirement is intentional — HIGH confidence on

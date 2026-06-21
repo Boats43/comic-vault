@@ -12,6 +12,7 @@ import {
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
+import { chooseBetterPrice, chooseBetterGrade } from "./lib/dataQualityGuard.js";
 
 const LOADING_STEPS = [
   "Reading cover...",
@@ -7632,14 +7633,28 @@ export default function App() {
               // "enrich.price || cur.price". Default-true on missing
               // identityConfident protects existing catalog entries.
               const idGated = enrich.identityConfident === false;
-              const newPriceAR = idGated ? null : (lowMatch ? cur.price : (enrich.price || cur.price));
-              const priceChangedAR = newPriceAR !== cur.price;
+
+              // Quality guard: better data never replaced by worse (Principle 2)
+              const priceGuard = idGated || lowMatch
+                ? { price: idGated ? null : cur.price,
+                    priceLow: idGated ? null : cur.priceLow,
+                    priceHigh: idGated ? null : cur.priceHigh,
+                    pricingSource: cur.pricingSource,
+                    priceNote: cur.priceNote }
+                : chooseBetterPrice(enrich, cur);
+              const gradeGuard = chooseBetterGrade(enrich, cur);
+
+              const priceChangedAR = priceGuard.price !== cur.price;
               const updated = {
                 ...cur,
                 comps: lowMatch ? cur.comps : (enrich.comps || cur.comps),
-                price: newPriceAR,
-                priceLow: idGated ? null : (lowMatch ? cur.priceLow : (enrich.priceLow || cur.priceLow)),
-                priceHigh: idGated ? null : (lowMatch ? cur.priceHigh : (enrich.priceHigh || cur.priceHigh)),
+                price: priceGuard.price,
+                priceLow: priceGuard.priceLow,
+                priceHigh: priceGuard.priceHigh,
+                pricingSource: priceGuard.pricingSource,
+                priceNote: priceGuard.priceNote,
+                grade: gradeGuard.grade,
+                confidenceLevel: gradeGuard.confidenceLevel,
                 identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
                 identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                 identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
@@ -7668,11 +7683,8 @@ export default function App() {
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
-                confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: enrich.decision || cur.decision,
-                pricingSource: lowMatch ? cur.pricingSource : (enrich.pricingSource || null),
-                priceNote: lowMatch ? cur.priceNote : (enrich.priceNote || null),
                 gradeMultiplier: lowMatch ? cur.gradeMultiplier : (enrich.gradeMultiplier || null),
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
                 comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
@@ -8004,15 +8016,27 @@ export default function App() {
                 if (enrich.yearCorrected && enrich.confirmedYear) {
                   console.log('[scan] year healed:', cur.year, '→', enrich.confirmedYear);
                 }
-                const priceChanged = enrich.price && enrich.price !== cur.price;
                 // Ship #20a.6.4 — see auto-refresh path for full rationale.
                 const idGated = enrich.identityConfident === false;
+
+                // Quality guard: better data never replaced by worse (Principle 2)
+                const priceGuardB = idGated
+                  ? { price: null, priceLow: null, priceHigh: null,
+                      pricingSource: cur.pricingSource, priceNote: cur.priceNote }
+                  : chooseBetterPrice(enrich, cur);
+                const gradeGuardB = chooseBetterGrade(enrich, cur);
+                const priceChanged = priceGuardB.price && priceGuardB.price !== cur.price;
+
                 const updated = {
                   ...cur,
                   comps: enrich.comps || cur.comps,
-                  price: idGated ? null : (enrich.price || cur.price),
-                  priceLow: idGated ? null : (enrich.priceLow || cur.priceLow),
-                  priceHigh: idGated ? null : (enrich.priceHigh || cur.priceHigh),
+                  price: priceGuardB.price,
+                  priceLow: priceGuardB.priceLow,
+                  priceHigh: priceGuardB.priceHigh,
+                  pricingSource: priceGuardB.pricingSource,
+                  priceNote: priceGuardB.priceNote,
+                  grade: gradeGuardB.grade,
+                  confidenceLevel: gradeGuardB.confidenceLevel,
                   identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
                   identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                   identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
@@ -8029,10 +8053,7 @@ export default function App() {
                   salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                   priceLadder: enrich.priceLadder || cur.priceLadder || null,
                   salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
-                  confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
-                  pricingSource: enrich.pricingSource || null,
-                  priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
                   // Preserve manual list price edits
                   listPrice: cur.listPrice,
@@ -8311,15 +8332,27 @@ export default function App() {
               if (enrich.yearCorrected && enrich.confirmedYear) {
                 console.log('[bulk] year healed:', cur.year, '→', enrich.confirmedYear);
               }
-              const priceChangedBulk = enrich.price && enrich.price !== cur.price;
               // Ship #20a.6.4 — see auto-refresh path for full rationale.
               const idGatedBulk = enrich.identityConfident === false;
+
+              // Quality guard: better data never replaced by worse (Principle 2)
+              const priceGuardC = idGatedBulk
+                ? { price: null, priceLow: null, priceHigh: null,
+                    pricingSource: cur.pricingSource, priceNote: cur.priceNote }
+                : chooseBetterPrice(enrich, cur);
+              const gradeGuardC = chooseBetterGrade(enrich, cur);
+              const priceChangedBulk = priceGuardC.price && priceGuardC.price !== cur.price;
+
               const updated = {
                 ...cur,
                 comps: enrich.comps || cur.comps,
-                price: idGatedBulk ? null : (enrich.price || cur.price),
-                priceLow: idGatedBulk ? null : (enrich.priceLow || cur.priceLow),
-                priceHigh: idGatedBulk ? null : (enrich.priceHigh || cur.priceHigh),
+                price: priceGuardC.price,
+                priceLow: priceGuardC.priceLow,
+                priceHigh: priceGuardC.priceHigh,
+                pricingSource: priceGuardC.pricingSource,
+                priceNote: priceGuardC.priceNote,
+                grade: gradeGuardC.grade,
+                confidenceLevel: gradeGuardC.confidenceLevel,
                 identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
                 identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                 identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
@@ -8348,11 +8381,8 @@ export default function App() {
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
-                confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: enrich.decision || cur.decision,
-                pricingSource: enrich.pricingSource || null,
-                priceNote: enrich.priceNote || null,
                 gradeMultiplier: enrich.gradeMultiplier || null,
                 // Preserve manual list price edits
                 listPrice: cur.listPrice,
