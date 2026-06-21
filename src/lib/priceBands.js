@@ -277,14 +277,19 @@ export function computePriceBands({
 }) {
   // STEP 1 — VERIFIED SOLD POOL
   const verifiedSolds = buildVerifiedSoldPool(soldComps, { title, issue, variant });
+  const soldPrices = verifiedSolds.map(s => s.price);
 
   if (verifiedSolds.length >= 2) {
-    const soldPrices = verifiedSolds.map(s => s.price);
     const recencyData = verifiedSolds.map(s => ({ daysAgo: s.daysAgo }));
     const bands = calculatePriceBands(soldPrices, 'verified_sold', recencyData);
 
     if (bands) {
-      return applyGradeMultiplierToBands(bands, gradeMultiplier);
+      const result = applyGradeMultiplierToBands(bands, gradeMultiplier);
+      console.log('[price-bands] soldPool=', soldPrices.length,
+        'activePool=', activeComps?.prices?.length || 0,
+        'source=', result?.source,
+        'market=', result?.market);
+      return result;
     }
   }
 
@@ -304,7 +309,12 @@ export function computePriceBands({
     } else {
       const bands = calculatePriceBands(verifiedActive, 'verified_active');
       if (bands) {
-        return applyGradeMultiplierToBands(bands, gradeMultiplier);
+        const result = applyGradeMultiplierToBands(bands, gradeMultiplier);
+        console.log('[price-bands] soldPool=', soldPrices.length,
+          'activePool=', verifiedActive.length,
+          'source=', result?.source,
+          'market=', result?.market);
+        return result;
       }
     }
   }
@@ -312,7 +322,7 @@ export function computePriceBands({
   // STEP 3 — PC BASE (last resort)
   if (pcBase && pcBase > 0) {
     const basePrice = pcBase * gradeMultiplier;
-    return {
+    const result = {
       quick: Math.round(basePrice * 0.8 * 100) / 100,   // 80% of base
       market: Math.round(basePrice * 100) / 100,        // base
       stretch: Math.round(basePrice * 1.2 * 100) / 100, // 120% of base
@@ -320,9 +330,17 @@ export function computePriceBands({
       count: 0,
       recencyDays: null
     };
+    console.log('[price-bands] soldPool=', soldPrices.length,
+      'activePool=', verifiedActive?.length || 0,
+      'source=', result?.source,
+      'market=', result?.market);
+    return result;
   }
 
   // No data available
+  console.log('[price-bands] soldPool=', soldPrices.length,
+    'activePool=', 0,
+    'source=null (no data)');
   return null;
 }
 
