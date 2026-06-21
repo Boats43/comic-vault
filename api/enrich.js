@@ -4041,10 +4041,32 @@ export default async function handler(req, res) {
     // Anthropic API credits on a result we discard. Skip the call entirely
     // when isPolybagPricing=true; polybag has its own verification (60%
     // reprint ratio + ≥5 priced items at line ~2148).
+    //
+    // P0 CRITICAL — Gate claudeCheck to initial scan only (disable on auto-refresh).
+    // Auto-refresh fires enrich on every collection update, burning 3K Sonnet tokens
+    // per book per refresh with zero new information gained. claudeCheck result is
+    // stored on book record after initial scan. Refreshes use cached result.
+    // Token audit: 71K Sonnet input / 521 output (ratio 0.007) = verify re-running
+    // on every refresh. After fix: verify fires ONCE per book, zero on refresh.
+    // Projected savings: 90%+ Sonnet spend eliminated.
+    const isRefresh = req.body?.skipClaudeCheck === true || req.body?.claudeCheckCached != null;
     mark('claude_check_start');
-    const claudeCheck = isPolybagPricing
-      ? null
-      : await runClaudeCheck(claudeCheckData);
+    let claudeCheck;
+    if (isPolybagPricing) {
+      claudeCheck = null;
+    } else if (isRefresh && req.body?.claudeCheckCached) {
+      // Use cached result from initial scan — zero AI calls on refresh
+      claudeCheck = req.body.claudeCheckCached;
+      console.log('[claude-check] using cached result — skip AI call (refresh)');
+    } else if (!isRefresh) {
+      // Initial scan only — fire AI verify
+      claudeCheck = await runClaudeCheck(claudeCheckData);
+      console.log('[claude-check] initial scan — AI call fired');
+    } else {
+      // Refresh but no cached result available — skip entirely
+      claudeCheck = null;
+      console.log('[claude-check] refresh with no cached result — skip AI call');
+    }
     mark('claude_check_complete');
     if (claudeCheck) {
       out.claudeCheck = claudeCheck;

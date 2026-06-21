@@ -7607,6 +7607,9 @@ export default function App() {
             // Ship 10.2 — Pass Vision condition report to enrich.
             reason: item.reason || null,
             images: item.images?.[0] ? [item.images[0]] : [],  // Ship #20a.6.19: pass stored image for variant identity
+            // P0 CRITICAL — Pass cached claudeCheck to skip AI on refresh
+            skipClaudeCheck: true,
+            claudeCheckCached: item.claudeCheck || null,
           }),
           signal: controller.signal,
         })
@@ -8752,6 +8755,9 @@ export default function App() {
           // Ship 10.2 — Pass Vision condition report to enrich.
           reason: item.reason || null,
           images: item.images?.[0] ? [item.images[0]] : [],  // Ship #20a.6.19: pass stored image for variant identity
+          // P0 CRITICAL — Pass cached claudeCheck to skip AI on refresh
+          skipClaudeCheck: true,
+          claudeCheckCached: item.claudeCheck || null,
         }),
         signal: controller.signal,
       });
