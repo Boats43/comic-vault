@@ -294,11 +294,11 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 - **Decision recommendations**: BUY/SELL/HOLD/WAIT badges on comic detail cards with blocking reasons. Gates listing actions when decision=WAIT.
 
-## Current State (as of 2026-06-20)
+## Current State (as of 2026-06-21)
 
-**Latest commit:** 19b0984 — Floor display fix (recommended < active listings)  
-**Current session:** Pricing investigation + prompt caching ✅  
-**Next session:** TBD  
+**Latest commit:** ccc7936 — Web search timeout log fix + debug cleanup  
+**Current session:** Pipeline hardening — accuracy + resilience + cost ✅  
+**Next session:** Variant fallback (thin-market books)  
 **Vercel functions:** 12/12 (at cap)  
 **Test count:** 48/48 title-sanitization tests passing
 
@@ -321,30 +321,40 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 
 | Hash | Ship | Summary |
 |------|------|---------|
-| 19b0984 | fix | Floor display: sold vs active when recommended < floor |
-| 0006d78 | perf | Prompt caching on STANDARD_PROMPT (96% savings batch scans) |
-| e96ea3d | ISSUE 6 | Grade-proximity filter for raw vintage (gradeUtils.js) |
-| 83deb41 | FIX 3 BUG 1 | CGC upside uses raw market price (not floor-enforced) |
-| df4d6c5 | FIX 3 | CGC detection diagnostic logging |
-| 06468e7 | FIX 2 | Sold avg display separated from active listings |
-| 1abac22 | FIX 1 | Year backfill from comp consensus |
+| ccc7936 | fix | Web search timeout log fix (was correct 20s, log said 8s) |
+| a8fae30 | debug | Web search fire/skip diagnostic logging |
+| 6549578 | feat | Aggressive caching: CV/PC 24h, GoCollect 24h, active 1h |
+| 55c4e16 | fix | Gate AI comp verify on refresh (closes token drain) |
+| 4ebd6c0 | fix | Story-only mismatch clears story, never nulls price |
+| dabc281 | fix | Gate claudeCheck to initial scan only (90%+ savings) |
+| b1b2750 | feat | Data quality write-back guard + AI estimate fallback |
 
 **Session 6/20/26:** Pricing investigation complete (7 commits)  
 - FIX 1: Year backfill from eBay comp consensus (1abac22, a5e1a22)
 - FIX 2: Sold avg displayed separately from active listings (06468e7)
 - FIX 3: CGC detection cost-aware calculation (df4d6c5, 83deb41)
 - ISSUE 6: Grade-proximity filter fix for raw vintage comics (e96ea3d)
-  - gradeUtils.js shared module (GRADE_TO_NUMERIC, extractNumericFromGrade)
-  - Batman #222 validated: $173 → $60 (GD-range comps, VF/NM excluded)
 - Prompt caching: STANDARD_PROMPT/WATCH_PROMPT/BOOK_PROMPT system cache (0006d78)
 - Floor display fix: sold vs active markets when recommended < floor (19b0984)
-- Token usage June: 9.7M total, cache_read=0 (monitoring post-deploy)
+
+**Session 6/21/26:** Pipeline hardening — accuracy + resilience + cost (7 commits) ✅  
+- P0-B: AI comp verify gated on refresh (55c4e16) — 600 tokens per refresh stopped
+- P0 Token drain: claudeCheck cached on refresh (dabc281) — 90%+ Sonnet savings
+- Story-only fix: wrong edition clears story, never nulls verified comps (4ebd6c0)
+- Write-back guard: better data never replaced by worse (b1b2750)
+- Aggressive caching: CV/PC 24h, GoCollect 24h, active comps 1h (6549578) — 95% API savings
+- Web search timeout: log fix (was correct 20s, message said 8s) (ccc7936)
+- Diagnostics: AI verify, web search, sold rejection logging (a8fae30, 55c4e16)
+- **Phase 3B correction:** Web search timeout was ALWAYS 20s (line 155), Phase 3B investigation was wrong. Only the error log was incorrect ("8s" hardcoded).
 
 **Open items:**
-- FIX 3 positive trigger validation: need FN+ Bronze/Silver comic to confirm HOLD_FOR_CGC fires
-- Wolverine #8 blocker: catastrophic-overprice hypothesis, awaiting Vercel logs
-- Issue 1B (title contamination / Beatles card): on hold pending design discussion
-- Prompt caching monitoring: check tomorrow's token usage CSV for cache_read > 0
+- Variant fallback for thin markets (Batman LOTDK #62 foil: 0/5 kept, need fallback pool)
+  - Architecture confirmed: belongs in soldVerification.js (has rawRows + reasons)
+  - Pattern: if verified=0 AND variantMismatch>0, re-run WITHOUT variant filters
+  - Awaiting greenlight before implementing
+- Future cache: Vercel KV for cross-session persistence (in-memory resets on cold start)
+- Pagination/virtualization at 500+ books
+- ComicVine rate limit handling (200/hr cap, request queue with throttle)
 
 **Full ship history:** See `docs/archive/` for session logs
 
