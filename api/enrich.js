@@ -4038,6 +4038,12 @@ export default async function handler(req, res) {
       !out.refusedToPrice &&  // Don't search when identity refused
       !isPolybagPricing;
 
+    // P0-B diagnostic: confirm web search Sonnet gate on refresh
+    console.log('[web-search]',
+      shouldTriggerWebSearch ? 'FIRING Sonnet' : 'skipped',
+      'rawComps.count=', rawComps?.count ?? 'null',
+      'skipFlag=', !!req.body?.skipClaudeCheck);
+
     if (shouldTriggerWebSearch) {
       console.log('[claude-check] web search mode triggered (rawComps=0, no verified_sold)');
     }
