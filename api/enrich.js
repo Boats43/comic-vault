@@ -574,25 +574,28 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
     console.log(`[comicvine] volDetails fetched: ${Object.keys(volDetails).length}/${uniqueVolIds.length} — ${
       Object.entries(volDetails).map(([id, v]) => `${id}:${v.name}(${v.start_year},${v.publisher?.name || "?"})`).join(", ")}`);
 
-    // Ship #23 FIX 1 — CV year gate: filter out modern volumes for pre-1970 books.
-    // Prevents 1941 books from matching 2014 story arcs with the same character name.
-    if (comicYear && comicYear < 1970) {
-      const beforeFilter = candidates.length;
-      const filteredCandidates = candidates.filter((r) => {
-        const vid = r?.volume?.id;
-        const vol = volDetails[vid];
-        if (!vol || !vol.start_year) return true; // keep if no year data
-        return Math.abs(vol.start_year - comicYear) <= 15;
+    // Strict year filter: reject issues where cover_date differs >4y from comicYear.
+    // Uses issue cover_date, NOT volume start_year (prevents long-running series rejection).
+    // ASM #518 (2005): cover_date "2005-01-01" vs start_year 1963 — cover_date is correct.
+    if (comicYear) {
+      const beforeYearStrict = candidates.length;
+      const yearStrictFiltered = candidates.filter((r) => {
+        const coverDate = r?.cover_date; // Format: "2005-01-01"
+        if (!coverDate) return true; // keep if no cover_date
+        const coverYear = parseInt(String(coverDate).split('-')[0], 10);
+        if (isNaN(coverYear)) return true;
+        const yearDiff = Math.abs(coverYear - comicYear);
+        if (yearDiff > 4) {
+          console.log(`[cv-year-strict] REJECT ${r.volume?.name} #${r.issue_number} (cover ${coverYear} vs ${comicYear}, ${yearDiff}y gap)`);
+          return false;
+        }
+        return true;
       });
-      if (filteredCandidates.length > 0) {
-        candidates.splice(0, candidates.length, ...filteredCandidates);
-        console.log(
-          `[cv-year-gate] ${comicYear}: ${beforeFilter} → ${candidates.length} volumes (filtered ±15y)`
-        );
+      if (yearStrictFiltered.length > 0) {
+        candidates.splice(0, candidates.length, ...yearStrictFiltered);
+        console.log(`[cv-year-strict] ${beforeYearStrict} → ${candidates.length} issues (±4y cover_date)`);
       } else {
-        console.log(
-          `[cv-year-gate] ${comicYear}: would remove all ${beforeFilter} volumes — keeping original set`
-        );
+        console.log(`[cv-year-strict] would remove all ${beforeYearStrict} issues — keeping original set`);
       }
     }
 
