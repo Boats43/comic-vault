@@ -4201,14 +4201,15 @@ export default async function handler(req, res) {
                           !IDENTITY_FAILURE_PATTERNS.some(re => re.test(refusalReason));
       const activeCount = rawComps?.count || 0;
       const verifiedCount = out.soldCompDiagnostics?.verifiedCount || 0;
-      const isIdentityStrong = out.visionConfidence !== 'low' &&
-                               (activeCount >= 3 || verifiedCount >= 2);
 
+      // Story-only mismatch fix: wrong story description NEVER grounds to null price.
+      // Identity (title+issue+year) and comps (verified sold) are independent of story.
+      // Removed isIdentityStrong gate — story metadata corruption alone is NOT pricing-critical.
       let shouldDowngradeCritical = false;
-      if (isCriticalFlag && isStoryOnly && isIdentityStrong) {
+      if (isCriticalFlag && isStoryOnly) {
         shouldDowngradeCritical = true;
         console.log(
-          '[claude-gate] DOWNGRADE — story-only CRITICAL with strong identity · flag:',
+          '[claude-gate] DOWNGRADE — story-only CRITICAL, verified comps protected · flag:',
           refusalReason
         );
         // Convert CRITICAL to HIGH and route to high-severity warning path
@@ -4216,6 +4217,11 @@ export default async function handler(req, res) {
         out.claudeCheckHighSeverity = downgradedReason;
         out.claudeCheckMode = 'story_only_downgraded';
         // Price ships, decision will cap at RESEARCH via claudeCheckHighSeverity warning
+
+        // Clear wrong story description — user sees empty field instead of wrong edition
+        out.story = null;
+        out.storySource = 'cleared-wrong-edition';
+        console.log('[story-cleared] wrong edition description removed');
       }
 
       // Crossover/intercompany downgrade — DC+Marvel mix with supporting comps
