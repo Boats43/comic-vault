@@ -2149,8 +2149,24 @@ export default async function handler(req, res) {
       return res.status(200).json(refusedOut);
     }
 
+    // Book-level comps cache — skip 5-9s eBay fetch on refresh.
+    // Comps stored on book record with timestamp, 6-hour TTL.
+    // Survives Vercel cold starts (in-memory cache does not).
+    const COMPS_BOOK_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
+    const bookCompsCachedAt = req.body?.compsCachedAt || null;
+    const bookCompsAge = bookCompsCachedAt ? now - bookCompsCachedAt : null;
+    const useBookCompsCache = bookCompsCachedAt &&
+                                bookCompsAge < COMPS_BOOK_CACHE_TTL &&
+                                req.body?.activeCached &&
+                                req.body?.soldCompsRawCached;
+
     const compsPromise =
-      process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
+      useBookCompsCache
+        ? (async () => {
+            console.log(`[comps-cache] HIT from book record, age=${Math.round(bookCompsAge/60000)}min`);
+            return req.body.activeCached;
+          })()
+        : process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? (async () => {
             const activeKey = `${confirmedTitle}|${correctedIssue}`;
             const cached = _activeCompsCache.get(activeKey);
@@ -2158,6 +2174,7 @@ export default async function handler(req, res) {
               console.log(`[active-cache] HIT: ${activeKey}`);
               return cached.data;
             }
+            console.log(`[comps-cache] MISS — fetching from eBay`);
             const result = await fetchComps({
               // Ship 26.3A — propagate confirmedTitle (Ship 26.2 override) into comps query.
               // Previously used original req.body.title, bypassing title-family correction.
@@ -2227,7 +2244,12 @@ export default async function handler(req, res) {
       priceCharting?.id
         ? fetchPricechartingPop(priceCharting.id, req.body?.grade).catch(() => null)
         : Promise.resolve(null),
-      priceCharting?.id
+      useBookCompsCache
+        ? (async () => {
+            // Use cached sold comps from book record
+            return { soldComps: req.body.soldCompsRawCached || [], salesByGrade: {} };
+          })()
+        : priceCharting?.id
         ? fetchPricechartingSales(priceCharting.id, userGradeForSales).catch(() => null)
         : Promise.resolve(null),
     ]);
@@ -3765,6 +3787,10 @@ export default async function handler(req, res) {
       out.soldCompDiagnostics = soldVerifyResult.diagnostics;
       // FIX 2: Surface sold-only average (computed at line 2354-2356)
       out.soldCompsAvg = soldAvg;
+      // Book-level comps cache — surface timestamp and comps for persistence
+      out.compsCachedAt = useBookCompsCache ? bookCompsCachedAt : now;
+      out.activeCached = compsFromEbay;
+      out.soldCompsRawCached = capRawSoldRows(rawSoldRows);
     }
     // Ship 6 — skip PriceCharting per-grade arrays when polybag pricing active.
     // salesByGrade / priceLadder / salesVelocity all hold first-print PC data

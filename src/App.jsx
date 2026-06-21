@@ -7610,6 +7610,10 @@ export default function App() {
             // P0 CRITICAL — Pass cached claudeCheck to skip AI on refresh
             skipClaudeCheck: true,
             claudeCheckCached: item.claudeCheck || null,
+            // Book-level comps cache — skip 5-9s eBay fetch on refresh
+            compsCachedAt: item.compsCachedAt || null,
+            activeCached: item.activeCached || null,
+            soldCompsRawCached: item.soldCompsRawCached || [],
           }),
           signal: controller.signal,
         })
@@ -7682,6 +7686,10 @@ export default function App() {
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
                 soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
+                // Book-level comps cache fields
+                compsCachedAt: enrich.compsCachedAt || cur.compsCachedAt || null,
+                activeCached: enrich.activeCached || cur.activeCached || null,
+                soldCompsRawCached: enrich.soldCompsRawCached || cur.soldCompsRawCached || [],
                 imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
@@ -8380,6 +8388,10 @@ export default function App() {
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
                 soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
+                // Book-level comps cache fields
+                compsCachedAt: enrich.compsCachedAt || cur.compsCachedAt || null,
+                activeCached: enrich.activeCached || cur.activeCached || null,
+                soldCompsRawCached: enrich.soldCompsRawCached || cur.soldCompsRawCached || [],
                 imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
