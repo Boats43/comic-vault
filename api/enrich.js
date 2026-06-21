@@ -2255,13 +2255,6 @@ export default async function handler(req, res) {
                                rawComps.recentSales.length > 0 &&
                                Array.isArray(rawComps.prices);
 
-    // P0-B diagnostic: confirm whether AI verify fires for comics vs books
-    console.log('[ai-comp-verify]',
-      shouldRunAIVerify ? 'FIRING' : 'skipped',
-      'assetType=', out.assetType,
-      'skipFlag=', !!req.body?.skipClaudeCheck,
-      'comps=', rawComps?.recentSales?.length || 0);
-
     if (shouldRunAIVerify) {
       const verifyCount = rawComps.recentSales.length;
       const titlesToVerify = rawComps.prices

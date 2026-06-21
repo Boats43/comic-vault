@@ -214,7 +214,7 @@ export async function runClaudeCheck(data) {
     // Ship #26 hotfix: Graceful fallback for web search errors
     if (needsWebSearch) {
       if (err.message === 'timeout') {
-        console.error('[web-search] timeout after 8s — skipping web search fallback');
+        console.error(`[web-search] timeout after ${TIMEOUT_MS/1000}s — skipping web search fallback`);
       } else {
         console.error(`[web-search] failed: ${err?.message || err} — skipping web search fallback`);
       }
