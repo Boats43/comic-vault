@@ -261,6 +261,12 @@ const resizeImageForVision = async (base64String) => {
     'isArray=', Array.isArray(base64String),
     'ctor=', base64String?.constructor?.name,
     'sample=', String(base64String).slice(0,40));
+
+  // Pre-validation: fail-fast on invalid input (never send raw image to Vision)
+  if (typeof base64String !== 'string' || base64String.length < 100) {
+    throw new Error('Invalid image input: expected base64 string');
+  }
+
   try {
     // Strip data URI prefix if present
     const raw = base64String.replace(
@@ -291,8 +297,8 @@ const resizeImageForVision = async (base64String) => {
 
     return resizedBuffer.toString('base64');
   } catch (err) {
-    console.error('[resize] failed, using original:', err?.message);
-    return base64String.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, ''); // Safe fallback
+    console.error('[resize] failed:', err?.message);
+    throw new Error('Image resize failed — please retake photo');
   }
 };
 
@@ -433,7 +439,18 @@ export default async function handler(req, res) {
       }
     }
     const noImage = !image;
-    const imageContent = await buildImageContent(images);
+
+    // Build image content with resize — fail-fast on invalid input
+    let imageContent;
+    try {
+      imageContent = await buildImageContent(images);
+    } catch (resizeErr) {
+      console.error('[grade] image resize failed:', resizeErr?.message);
+      res.status(400).json({
+        error: resizeErr?.message || "Image processing failed — please retake photo"
+      });
+      return;
+    }
 
     // Watch mode: self-correcting multi-pass pipeline
     if (body.source === "watch") {
