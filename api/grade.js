@@ -257,6 +257,10 @@ const lookupEbayIdentity = async (imageBase64) => {
 // images = faster upload + inference + lower image token cost (~75% reduction).
 const resizeImageForVision = async (base64String) => {
   const MAX_DIMENSION = 800;
+  console.log('[resize-debug] type=', typeof base64String,
+    'isArray=', Array.isArray(base64String),
+    'ctor=', base64String?.constructor?.name,
+    'sample=', String(base64String).slice(0,40));
   try {
     // Strip data URI prefix if present
     const raw = base64String.replace(
@@ -294,6 +298,11 @@ const resizeImageForVision = async (base64String) => {
 
 // Build image content blocks from base64 array.
 const buildImageContent = async (images) => {
+  console.log('[img-debug] imagesType=', typeof images,
+    'isArray=', Array.isArray(images),
+    'len=', images?.length,
+    'elem0Type=', typeof images?.[0],
+    'elem0Sample=', String(images?.[0]).slice(0,40));
   const content = [];
   for (const img of images) {
     const s = String(img);
