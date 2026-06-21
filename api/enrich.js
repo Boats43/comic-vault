@@ -2216,14 +2216,19 @@ export default async function handler(req, res) {
     // check downstream can skip rather than read compsFromEbay.average
     // (which still holds the contaminated pre-verify mean).
     // Session 4B — SKIP for books. AI verify matches issue+series; books have no issues.
+    // P0-B — Gate AI comp verify on refresh (skipClaudeCheck flag).
+    // This Haiku call fires on EVERY enrich when comps exist, burning ~600 tokens
+    // per refresh with zero new information (comps don't change between refreshes).
+    // Same gate pattern as claudeCheck: skip on refresh, re-use from initial scan.
     let compsExhausted = false;
-    if (
-      out.assetType !== 'book' &&
-      rawComps &&
-      Array.isArray(rawComps.recentSales) &&
-      rawComps.recentSales.length > 0 &&
-      Array.isArray(rawComps.prices)
-    ) {
+    const shouldRunAIVerify = !req.body?.skipClaudeCheck &&
+                               out.assetType !== 'book' &&
+                               rawComps &&
+                               Array.isArray(rawComps.recentSales) &&
+                               rawComps.recentSales.length > 0 &&
+                               Array.isArray(rawComps.prices);
+
+    if (shouldRunAIVerify) {
       const verifyCount = rawComps.recentSales.length;
       const titlesToVerify = rawComps.prices
         .slice(0, verifyCount)
@@ -2316,6 +2321,8 @@ export default async function handler(req, res) {
           console.log('[verify] all comps rejected — no comp-based sanity applied');
         }
       }
+    } else if (req.body?.skipClaudeCheck && rawComps?.recentSales?.length > 0) {
+      console.log('[ai-comp-verify] skipped — refresh/cached (', rawComps.recentSales.length, 'comps)');
     }
 
     // Ship #1.3 — Edition warning comp filter. When Vision detected reprint/

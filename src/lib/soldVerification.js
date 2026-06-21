@@ -311,9 +311,11 @@ export const verifySoldComps = (rawRows, ctx) => {
 
   // 1. Issue number — must contain `#issue`. Also catches lot listings
   //    (commas, "lot" word, multi-issue compound).
+  // P0-A DIAGNOSTIC: log all rejections to find actual filter.
   if (issue) {
     working = working.filter((r) => {
       if (hasIssueNumber(r.title, issue)) return true;
+      console.log('[sold-reject] issueMismatch |', r.title?.slice(0, 80), '| issue:', issue);
       reasons.issueMismatch++;
       pushSample(r, 'issueMismatch');
       return false;
@@ -399,8 +401,25 @@ export const verifySoldComps = (rawRows, ctx) => {
   });
 
   // 5. Title-token overlap (≥50%). Reuses existing helper.
+  // P0-A DIAGNOSTIC: log actual rejection to trace titleMismatch mystery.
+  // Production shows titleMismatch=22 but test proves 100% overlap. Measure both.
   working = working.filter((r) => {
-    if (hasSufficientTitleOverlap(r.title, ourTokens)) return true;
+    const compTokens = tokenizeTitle(r.title);
+    let matches = 0;
+    for (const tok of ourTokens) {
+      if (compTokens.includes(tok)) matches++;
+    }
+    const overlap = ourTokens.length > 0 ? matches / ourTokens.length : 0;
+    const passes = hasSufficientTitleOverlap(r.title, ourTokens);
+
+    if (passes) return true;
+
+    // REJECTED — log diagnostic
+    console.log('[sold-reject] titleMismatch |',
+      r.title?.slice(0, 80),
+      '| overlap:', overlap.toFixed(2),
+      '(' + matches + '/' + ourTokens.length + ')',
+      '| ourTokens:', ourTokens.slice(0, 5).join(','));
     reasons.titleMismatch++;
     pushSample(r, 'titleMismatch');
     return false;
@@ -410,6 +429,7 @@ export const verifySoldComps = (rawRows, ctx) => {
   working = working.filter((r) => {
     const m = printingMatch(r.title, variant);
     if (m === 'mismatch') {
+      console.log('[sold-reject] printingMismatch |', r.title?.slice(0, 80), '| variant:', variant);
       reasons.printingMismatch++;
       pushSample(r, 'printingMismatch');
       return false;
@@ -439,6 +459,8 @@ export const verifySoldComps = (rawRows, ctx) => {
 
     // Case (a): comp has variant tokens, user has none → reject
     if (compVariantTokens.length > 0 && userVariantTokens.length === 0) {
+      console.log('[sold-reject] variantMismatch:comp_has_user_none |', r.title?.slice(0, 80),
+        '| userVariant:', variant, '| compTokens:', compVariantTokens.join(','));
       reasons.variantMismatch++;
       pushSample(r, 'variantMismatch:comp_has_user_none');
       return false;
@@ -452,6 +474,8 @@ export const verifySoldComps = (rawRows, ctx) => {
     //   Mega Man X Timelines #1 virgin → Cvr B Steinbach comps leaked
     // Sold pool contamination caused 100-300% overpricing.
     if (compVariantTokens.length === 0 && userVariantTokens.length > 0) {
+      console.log('[sold-reject] variantMismatch:user_has_comp_none |', r.title?.slice(0, 80),
+        '| userVariant:', variant, '| userTokens:', userVariantTokens.join(','));
       reasons.variantMismatch++;
       pushSample(r, 'variantMismatch:user_has_comp_none');
       return false;
@@ -463,6 +487,8 @@ export const verifySoldComps = (rawRows, ctx) => {
         userVariantTokens.some((u) => u === t || u.includes(t) || t.includes(u))
       );
       if (!overlap) {
+        console.log('[sold-reject] variantMismatch:different_tokens |', r.title?.slice(0, 80),
+          '| userTokens:', userVariantTokens.join(','), '| compTokens:', compVariantTokens.join(','));
         reasons.variantMismatch++;
         pushSample(r, 'variantMismatch:different_tokens');
         return false;
