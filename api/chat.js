@@ -75,13 +75,21 @@ Recent decisions: ${JSON.stringify(bs.recentSessions.slice(-10).map((s) => ({ ti
 You also have access to the user's Whatnot buying history. Use it to give advice on their buying patterns, best deals, and areas to improve.`;
     }
 
+    // Build compact collection summary (title, grade, value only — not full objects)
+    const compactComics = comics.map(c => {
+      const val = parseFloat(String(c.price || "0").replace(/[$,]/g, ""));
+      const displayVal = val > 0 ? val : (c.comps?.averageNum || 0);
+      return `${c.issue ? `${c.title} #${c.issue}` : c.title} (${c.grade || 'ungraded'}) ~$${Math.round(displayVal)}`;
+    }).join('\n');
+
     const truncNote = truncated > 0
       ? ` (showing top ${comics.length} by value; ${truncated} more in full collection)`
       : "";
+
     const systemPrompt = `You are the collection manager AI for Comic Vault. You have complete knowledge of this collector's inventory.
 
 COLLECTION (${allComics.length} comics total${truncNote}, ~$${Math.round(totalValue).toLocaleString()} estimated value):
-${JSON.stringify(comics)}${buyerContext}
+${compactComics}${buyerContext}
 
 RULES:
 - Keep responses under 3 sentences. Be direct and actionable.
@@ -105,10 +113,10 @@ Each: string like "📈 Variant covers +12% this week" or "🔥 ASM #300 — hig
 
 Always include metrics and signals in EVERY response.`;
 
-    // Build message history (keep last 5 exchanges for continuity).
+    // Build message history (keep last 3 exchanges for continuity).
     const messages = [];
     if (Array.isArray(history)) {
-      for (const h of history.slice(-10)) {
+      for (const h of history.slice(-6)) {  // Last 3 exchanges = 6 messages (3 user + 3 assistant)
         messages.push({
           role: h.role === "assistant" ? "assistant" : "user",
           content: h.content,

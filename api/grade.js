@@ -287,9 +287,9 @@ const callModel = async (model, imageContent, promptText) => {
   return { parsed: parseResponse(text), ms: Date.now() - t0 };
 };
 
-// Self-correcting watch pipeline: Sonnet fast → Sonnet self-correct → Opus escalation.
+// Self-correcting watch pipeline: Haiku fast → Haiku self-correct → Opus escalation.
 const watchPipeline = async (imageContent, voiceContext) => {
-  const SONNET = "claude-sonnet-4-5-20250929";
+  const HAIKU = "claude-haiku-4-5-20251001";
   const OPUS = "claude-opus-4-7";
 
   let prompt = WATCH_PROMPT;
@@ -298,7 +298,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
   }
 
   // Pass 1: Sonnet fast identification
-  const pass1 = await callModel(SONNET, imageContent, prompt);
+  const pass1 = await callModel(HAIKU, imageContent, prompt);
   const r1 = pass1.parsed;
   const conf1 = String(r1.confidence || "").toLowerCase();
   const title1 = String(r1.title || "").toLowerCase();
@@ -320,7 +320,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
     `Return corrected JSON in this shape: ${JSON_SHAPE}. ` +
     `Return JSON only, no markdown.`;
 
-  const pass2 = await callModel(SONNET, imageContent, correctionPrompt);
+  const pass2 = await callModel(HAIKU, imageContent, correctionPrompt);
   const r2 = pass2.parsed;
   const conf2 = String(r2.confidence || "").toLowerCase();
   const title2 = String(r2.title || "").toLowerCase();
@@ -398,7 +398,7 @@ export default async function handler(req, res) {
       console.log('[grade] using Sonnet for grade-only assessment...');
 
       const gradePrompt = buildGradeOnlyPrompt(ebayResult.consensus);
-      const { parsed: gradeResult } = await callModel("claude-sonnet-4-5-20250929", imageContent, gradePrompt);
+      const { parsed: gradeResult } = await callModel("claude-haiku-4-5-20251001", imageContent, gradePrompt);
 
       // Merge eBay identity + Sonnet grade
       const result = {
