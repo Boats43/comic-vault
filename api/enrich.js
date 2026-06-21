@@ -615,29 +615,28 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       );
     }
 
-    // Reprint publisher gate: reject known reprint imprints when user publisher is Marvel/DC.
+    // Reprint publisher gate: UNCONDITIONALLY reject known reprint imprints.
+    // Panini/Marvel UK/DynaPubs/etc are NEVER original publishers — always reprints.
     // Prevents Hulk #110 → Panini reprint, ASM #518 → Marvel UK, Punisher story bleed.
     const beforeReprint = candidates.length;
     const REPRINT_PUBLISHERS = [
       'marvel uk', 'panini', 'dynapubs', 'revolutionary',
       'sergio bonelli', 'dennis förlag', 'condor', 'titan books'
     ];
-    if (pubLower && (pubLower.includes('marvel') || pubLower.includes('dc'))) {
-      const reprintFiltered = candidates.filter((r) => {
-        const vol = volDetails[r?.volume?.id];
-        if (!vol?.publisher?.name) return true;
-        const volPub = String(vol.publisher.name).toLowerCase();
-        const isReprint = REPRINT_PUBLISHERS.some(rp => volPub.includes(rp));
-        if (isReprint) {
-          console.log(`[cv-reprint-gate] REJECT ${vol.name} (reprint publisher: ${vol.publisher.name})`);
-          return false;
-        }
-        return true;
-      });
-      if (reprintFiltered.length > 0) {
-        candidates.splice(0, candidates.length, ...reprintFiltered);
-        console.log(`[cv-reprint-gate] ${beforeReprint} → ${candidates.length} volumes`);
+    const reprintFiltered = candidates.filter((r) => {
+      const vol = volDetails[r?.volume?.id];
+      if (!vol?.publisher?.name) return true;
+      const volPub = String(vol.publisher.name).toLowerCase();
+      const isReprint = REPRINT_PUBLISHERS.some(rp => volPub.includes(rp));
+      if (isReprint) {
+        console.log(`[cv-reprint-gate] REJECT ${vol.name} (reprint publisher: ${vol.publisher.name})`);
+        return false;
       }
+      return true;
+    });
+    if (reprintFiltered.length > 0) {
+      candidates.splice(0, candidates.length, ...reprintFiltered);
+      console.log(`[cv-reprint-gate] ${beforeReprint} → ${candidates.length} volumes`);
     }
 
     // Ship 26.3C-2 Patch C2-B — Token gate: require volume name to overlap ≥50%
