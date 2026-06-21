@@ -101,11 +101,16 @@ import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// Session 6/20/26 — In-memory request cache (5-min TTL, same as Anthropic prompt cache).
-// Prevents identical ComicVine + PriceCharting calls within Watch Mode 3-pass pipeline.
+// Session 6/20/26 — In-memory request cache (5-min → 24h).
+// CV/PC data is stable (story/creators/price ladder change rarely, not per-scan).
+// 24h cache = 95% reduction in CV/PC API calls. Watch Mode still benefits (cache HIT faster).
 const _cvCache = new Map();  // key: title|issue|publisher → { data, expires }
 const _pcCache = new Map();  // key: title|issue → { data, expires }
-const CACHE_TTL = 5 * 60 * 1000;  // 5 minutes
+const _goCollectCache = new Map();  // key: title|issue → { data, expires }
+const _activeCompsCache = new Map();  // key: cleanTitle|issue → { data, expires }
+const CV_PC_TTL = 24 * 60 * 60 * 1000;  // 24 hours (was 5 min)
+const GC_TTL = 24 * 60 * 60 * 1000;  // 24 hours (FMV changes monthly)
+const ACTIVE_COMPS_TTL = 60 * 60 * 1000;  // 1 hour (listings change hourly)
 
 
 // Marvel test-market price-variant allowlists. Vision labels any 35¢ /
@@ -1754,7 +1759,7 @@ export default async function handler(req, res) {
           return cached.data;
         }
         const result = await lookupComicVine({ title: cleanedCVTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }).catch(() => null);
-        _cvCache.set(cvKey, { data: result, expires: now + CACHE_TTL });
+        _cvCache.set(cvKey, { data: result, expires: now + CV_PC_TTL });
         return result;
       })(),
       // lookupXimilar({ images, title, confidence }), // REMOVED — fetched but never used for identity/pricing (-200ms)
@@ -1765,7 +1770,7 @@ export default async function handler(req, res) {
           return cached.data;
         }
         const result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null);
-        _pcCache.set(pcKey, { data: result, expires: now + CACHE_TTL });
+        _pcCache.set(pcKey, { data: result, expires: now + CV_PC_TTL });
         return result;
       })(),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
@@ -2146,31 +2151,42 @@ export default async function handler(req, res) {
 
     const compsPromise =
       process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
-        ? fetchComps({
-            // Ship 26.3A — propagate confirmedTitle (Ship 26.2 override) into comps query.
-            // Previously used original req.body.title, bypassing title-family correction.
-            // Catwoman/Gotham War: confirmedTitle resolved to Gotham War, but comps queried Catwoman Uncovered.
-            title: confirmedTitle,
-            issue: correctedIssue,
-            grade,
-            isGraded,
-            numericGrade,
-            year: confirmedYear,
-            variant: confirmedVariant,  // Ship #20a.6.18: uses confirmed variant (eBay consensus when gate fires, Vision otherwise)
-            creator: req.body.creator || null,
-            publisher: publisher || null,
-            imageSearchTitle,
-            appId: process.env.EBAY_APP_ID,
-            certId: process.env.EBAY_CERT_ID,
-            // Session 4B — adapter-aware comp queries (book category 267, comic 259104)
-            categoryId: getAdapter(out.assetType).ebayCategoryId,
-            assetType: out.assetType,
-            author: out.author || null,  // book identity field for buildBookQuery
-          }).catch((err) => {
-            console.error('[enrich] comps error stack:', err?.stack);
-            console.error(`[enrich] comps error: ${err?.message || err}`);
-            return null;
-          })
+        ? (async () => {
+            const activeKey = `${confirmedTitle}|${correctedIssue}`;
+            const cached = _activeCompsCache.get(activeKey);
+            if (cached && cached.expires > now) {
+              console.log(`[active-cache] HIT: ${activeKey}`);
+              return cached.data;
+            }
+            const result = await fetchComps({
+              // Ship 26.3A — propagate confirmedTitle (Ship 26.2 override) into comps query.
+              // Previously used original req.body.title, bypassing title-family correction.
+              // Catwoman/Gotham War: confirmedTitle resolved to Gotham War, but comps queried Catwoman Uncovered.
+              title: confirmedTitle,
+              issue: correctedIssue,
+              grade,
+              isGraded,
+              numericGrade,
+              year: confirmedYear,
+              variant: confirmedVariant,  // Ship #20a.6.18: uses confirmed variant (eBay consensus when gate fires, Vision otherwise)
+              creator: req.body.creator || null,
+              publisher: publisher || null,
+              imageSearchTitle,
+              appId: process.env.EBAY_APP_ID,
+              certId: process.env.EBAY_CERT_ID,
+              // Session 4B — adapter-aware comp queries (book category 267, comic 259104)
+              categoryId: getAdapter(out.assetType).ebayCategoryId,
+              assetType: out.assetType,
+              author: out.author || null,  // book identity field for buildBookQuery
+            }).catch((err) => {
+              console.error('[enrich] comps error stack:', err?.stack);
+              console.error(`[enrich] comps error: ${err?.message || err}`);
+              return null;
+            });
+            _activeCompsCache.set(activeKey, { data: result, expires: now + ACTIVE_COMPS_TTL });
+            console.log(`[active-cache] MISS: ${activeKey}`);
+            return result;
+          })()
         : Promise.resolve(null);
 
     // Ship #20a — fetchPricechartingSales userGrade is the numeric CGC
@@ -2196,7 +2212,18 @@ export default async function handler(req, res) {
       // approval lights it up without re-wiring. Ship #20a sources sold
       // data from PriceCharting instead (pcSalesResult below).
       fetchSold({ title, issue: correctedIssue, year: confirmedYear }).catch(() => []),
-      lookupGoCollect({ title, issue: correctedIssue, year: confirmedYear, publisher }).catch(() => null),
+      (async () => {
+        const gcKey = `${title}|${correctedIssue}`;
+        const cached = _goCollectCache.get(gcKey);
+        if (cached && cached.expires > now) {
+          console.log(`[gocollect-cache] HIT: ${gcKey}`);
+          return cached.data;
+        }
+        const result = await lookupGoCollect({ title, issue: correctedIssue, year: confirmedYear, publisher }).catch(() => null);
+        _goCollectCache.set(gcKey, { data: result, expires: now + GC_TTL });
+        console.log(`[gocollect-cache] MISS: ${gcKey}`);
+        return result;
+      })(),
       priceCharting?.id
         ? fetchPricechartingPop(priceCharting.id, req.body?.grade).catch(() => null)
         : Promise.resolve(null),
