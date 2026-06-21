@@ -273,7 +273,8 @@ export function computePriceBands({
   gradeMultiplier = 1,
   title,
   issue,
-  variant
+  variant,
+  variantAdjusted = false,
 }) {
   // STEP 1 — VERIFIED SOLD POOL
   const verifiedSolds = buildVerifiedSoldPool(soldComps, { title, issue, variant });
@@ -288,7 +289,12 @@ export function computePriceBands({
       console.log('[price-bands] soldPool=', soldPrices.length,
         'activePool=', activeComps?.prices?.length || 0,
         'source=', result?.source,
-        'market=', result?.market);
+        'market=', result?.market,
+        variantAdjusted ? '| VARIANT-ADJUSTED' : '');
+      // Flag variant-adjusted pricing for UI warning
+      if (variantAdjusted) {
+        result.variantAdjusted = true;
+      }
       return result;
     }
   }

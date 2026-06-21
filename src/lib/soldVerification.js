@@ -584,6 +584,92 @@ export const verifySoldComps = (rawRows, ctx) => {
     pushSample({ title: null, price: null }, `outlier×${outlierRemoved}`);
   }
 
+  // VARIANT FALLBACK — thin-market variants use grade-matched any-variant comps.
+  // When ALL comps rejected for variant mismatch only (foil/virgin/newsstand
+  // with zero exact-match sold data), re-run WITHOUT variant filters (7-8) to
+  // get grade-matched fallback pool. Flags result with variantAdjusted so
+  // pricing layer can warn user that variant premium is estimated.
+  if (working.length === 0 && reasons.variantMismatch > 0 && rawCount > 0) {
+    console.log('[sold-verify] variant fallback triggered — variantMismatch rejected all',
+      rawCount, 'comps, retrying without variant filters');
+
+    // Re-run filters WITHOUT variant checks (filters 7-8).
+    // Keep all other filters: issue, lot, printing, slab, signed, grade, year, stale, outlier.
+    let fallbackPool = rows.map((r) => ({
+      ...r,
+      recencyBand: recencyBandFor(r?.daysAgo),
+    }));
+
+    // Apply filters 1-6 (issue, lot, format, title, printing) — no variant filters
+    if (issue) {
+      fallbackPool = fallbackPool.filter((r) => hasIssueNumber(r.title, issue));
+    }
+    if (!ourIsLot) {
+      fallbackPool = fallbackPool.filter((r) => {
+        const t = String(r.title || '');
+        return !LOT_RE.test(t) && !isValidIssueRange(t) && !hasCrossSeriesSeparator(t);
+      });
+    }
+    if (!ourIsHalf) {
+      fallbackPool = fallbackPool.filter((r) => !HALF_ISSUE_RE.test(String(r.title || '')));
+    }
+    fallbackPool = fallbackPool.filter((r) => !TRADING_CARD_RE.test(String(r.title || '')));
+    fallbackPool = fallbackPool.filter((r) => !TPB_MARKER_RE.test(String(r.title || '')));
+    fallbackPool = fallbackPool.filter((r) => !COVERLESS_RE.test(String(r.title || '')));
+    fallbackPool = fallbackPool.filter((r) => {
+      const { mismatch } = hasFormatAsymmetry(r.title, ourMarkers);
+      return !mismatch;
+    });
+    fallbackPool = fallbackPool.filter((r) => hasSufficientTitleOverlap(r.title, ourTokens));
+    fallbackPool = fallbackPool.filter((r) => {
+      const m = printingMatch(r.title, variant);
+      return m !== 'mismatch';
+    });
+
+    // SKIP filters 7-8 (variant-artist + variant-token) — this is the fallback
+
+    // Apply filters 9-13 (slab, signed, grade, year, stale, outlier)
+    fallbackPool = fallbackPool.filter((r) => !slabMismatch(r.title, userGradeKey));
+    if (!ourIsSigned) {
+      fallbackPool = fallbackPool.filter((r) => !SIGNED_RE.test(String(r.title || '')));
+    }
+    fallbackPool = fallbackPool.filter((r) => !gradeTabMismatch(r.title, r.grade));
+    if (bookYear) {
+      fallbackPool = fallbackPool.filter((r) => {
+        const rowYear = r.year || null;
+        if (!rowYear) return true;
+        const ourYear = parseInt(bookYear, 10);
+        const theirYear = parseInt(rowYear, 10);
+        if (isNaN(ourYear) || isNaN(theirYear)) return true;
+        const tolerance =
+          ourYear < 1956 ? 5 : ourYear < 1970 ? 5 : ourYear < 1985 ? 3 : 2;
+        return Math.abs(theirYear - ourYear) <= tolerance;
+      });
+    }
+    fallbackPool = fallbackPool.filter((r) => !isStaleForBookYear(r.daysAgo, bookYear));
+    const beforeOutlierFallback = fallbackPool.length;
+    fallbackPool = applyPriceSanity(fallbackPool);
+
+    if (fallbackPool.length >= 2) {
+      console.log('[sold-verify] variant fallback —', fallbackPool.length,
+        'any-variant grade-matched comps (was 0 exact-variant)');
+      return {
+        verified: fallbackPool,
+        diagnostics: {
+          rawCount,
+          verifiedCount: fallbackPool.length,
+          rejectedCount: rawCount - fallbackPool.length,
+          reasons,
+          rejectedSamples,
+        },
+        variantAdjusted: true,
+      };
+    } else {
+      console.log('[sold-verify] variant fallback insufficient —',
+        fallbackPool.length, 'comps (need ≥2), falling through');
+    }
+  }
+
   return {
     verified: working,
     diagnostics: {

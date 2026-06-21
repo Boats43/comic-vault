@@ -2491,7 +2491,8 @@ export default async function handler(req, res) {
       gradeMultiplier,
       title: confirmedTitle,
       issue: correctedIssue,
-      variant: req.body?.variant || null
+      variant: req.body?.variant || null,
+      variantAdjusted: soldVerifyResult.variantAdjusted || false,
     });
 
     if (priceBandsRaw) {
@@ -2531,7 +2532,8 @@ export default async function handler(req, res) {
         stretch: fmtUsd(priceBandsRaw.stretch),
         source: priceBandsRaw.source,
         count: priceBandsRaw.count,
-        recencyDays: priceBandsRaw.recencyDays
+        recencyDays: priceBandsRaw.recencyDays,
+        variantAdjusted: priceBandsRaw.variantAdjusted || false,
       };
     }
 
@@ -2858,14 +2860,22 @@ export default async function handler(req, res) {
         : priceBandsRaw.source === 'verified_active'
         ? 'verified_active'
         : 'pc_estimate';
-      out.priceNote = gradeLabel
+      let priceNoteBase = gradeLabel
         ? `${gradeLabel} · ${priceBandsRaw.count} verified comps`
         : `${priceBandsRaw.count} verified comps`;
+
+      // Variant fallback warning — user should verify variant premium manually
+      if (priceBandsRaw.variantAdjusted) {
+        priceNoteBase += ' · variant-adjusted (verify premium)';
+      }
+
+      out.priceNote = priceNoteBase;
 
       console.log(
         `[price-bands-pricing] market=${priceBandsRaw.market.toFixed(2)} ` +
         `source=${out.pricingSource} count=${priceBandsRaw.count} ` +
-        `gradeMult=${gradeMultiplier}`
+        `gradeMult=${gradeMultiplier}` +
+        (priceBandsRaw.variantAdjusted ? ' VARIANT-ADJUSTED' : '')
       );
     } else if (priceCharting && !isPolybagPricing) {
       // Ship 6 — skip priceCharting fallback when polybag pricing active.
