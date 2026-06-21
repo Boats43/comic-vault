@@ -1,5 +1,6 @@
 // Force redeploy 2026-06-19 — Pro plan active
 import Anthropic from "@anthropic-ai/sdk";
+import Jimp from "jimp";
 import { lookupPedigree } from "../src/lib/pedigreeRegistry.js";
 import {
   extractIdentityFromImageSearch,
@@ -251,14 +252,58 @@ const lookupEbayIdentity = async (imageBase64) => {
   }
 };
 
+// Resize image to 800px max dimension before sending to Vision API.
+// Claude Vision accuracy plateaus at ~800px for comic cover ID, and smaller
+// images = faster upload + inference + lower image token cost (~75% reduction).
+const resizeImageForVision = async (base64String) => {
+  const MAX_DIMENSION = 800;
+  try {
+    // Strip data URI prefix if present
+    const raw = base64String.replace(
+      /^data:image\/[a-zA-Z0-9.+-]+;base64,/, ''
+    );
+    const buffer = Buffer.from(raw, 'base64');
+    const image = await Jimp.read(buffer);
+    const { width, height } = image.bitmap;
+
+    // Already small enough — return original
+    if (width <= MAX_DIMENSION && height <= MAX_DIMENSION) {
+      return raw;
+    }
+
+    // Resize maintaining aspect ratio
+    const resized = width > height
+      ? image.resize(MAX_DIMENSION, Jimp.AUTO)
+      : image.resize(Jimp.AUTO, MAX_DIMENSION);
+
+    const resizedBuffer = await resized
+      .quality(85)
+      .getBufferAsync(Jimp.MIME_JPEG);
+
+    const originalKB = Math.round(raw.length / 1024);
+    const resizedKB = Math.round(resizedBuffer.length * 4 / 3 / 1024); // base64 is ~4/3 larger
+
+    console.log(`[resize] ${width}×${height} → ${resized.bitmap.width}×${resized.bitmap.height} (${originalKB}KB → ${resizedKB}KB)`);
+
+    return resizedBuffer.toString('base64');
+  } catch (err) {
+    console.error('[resize] failed, using original:', err?.message);
+    return base64String.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, ''); // Safe fallback
+  }
+};
+
 // Build image content blocks from base64 array.
-const buildImageContent = (images) => {
+const buildImageContent = async (images) => {
   const content = [];
   for (const img of images) {
     const s = String(img);
     const m = s.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/);
     const media_type = m ? m[1] : "image/jpeg";
-    const data = m ? m[2] : s.replace(/^data:[^;]+;base64,/, "");
+    const rawData = m ? m[2] : s.replace(/^data:[^;]+;base64,/, "");
+
+    // Resize before sending to Vision
+    const data = await resizeImageForVision(rawData);
+
     content.push({ type: "image", source: { type: "base64", media_type, data } });
   }
   return content;
@@ -306,6 +351,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
   if (conf1 === "high" && !title1.includes("unknown")) {
     r1._watchPasses = 1;
     console.log(`[watch] pass1: ${pass1.ms}ms — high confidence, done`);
+    console.log(`[watch-stats] pass=1 conf=${r1.confidence} title=${r1.title ? 'present' : 'missing'}`);
     return { result: r1, passes: 1, timings: { pass1: pass1.ms } };
   }
 
@@ -325,9 +371,10 @@ const watchPipeline = async (imageContent, voiceContext) => {
   const conf2 = String(r2.confidence || "").toLowerCase();
   const title2 = String(r2.title || "").toLowerCase();
 
-  if (conf2 !== "low" || title2.includes("unknown")) {
+  if (conf2 !== "low" && !title2.includes("unknown")) {
     r2._watchPasses = 2;
     console.log(`[watch] pass1: ${pass1.ms}ms pass2: ${pass2.ms}ms total: ${pass1.ms + pass2.ms}ms — ${conf2} confidence after correction`);
+    console.log(`[watch-stats] pass=2 conf=${r2.confidence} title=${r2.title ? 'present' : 'missing'}`);
     return { result: r2, passes: 2, timings: { pass1: pass1.ms, pass2: pass2.ms } };
   }
 
@@ -342,6 +389,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
   r3.editionWarning = detectEditionWarning(r3.reason);
   r3._watchPasses = 3;
   console.log(`[watch] pass1: ${pass1.ms}ms pass2: ${pass2.ms}ms pass3: ${pass3.ms}ms total: ${pass1.ms + pass2.ms + pass3.ms}ms — Opus escalation`);
+  console.log(`[watch-stats] pass=3 (opus) conf=${r3?.confidence}`);
   return { result: r3, passes: 3, timings: { pass1: pass1.ms, pass2: pass2.ms, pass3: pass3.ms } };
 };
 
@@ -376,7 +424,7 @@ export default async function handler(req, res) {
       }
     }
     const noImage = !image;
-    const imageContent = buildImageContent(images);
+    const imageContent = await buildImageContent(images);
 
     // Watch mode: self-correcting multi-pass pipeline
     if (body.source === "watch") {

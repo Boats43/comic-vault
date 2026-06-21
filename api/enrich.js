@@ -101,6 +101,12 @@ import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Session 6/20/26 — In-memory request cache (5-min TTL, same as Anthropic prompt cache).
+// Prevents identical ComicVine + PriceCharting calls within Watch Mode 3-pass pipeline.
+const _cvCache = new Map();  // key: title|issue|publisher → { data, expires }
+const _pcCache = new Map();  // key: title|issue → { data, expires }
+const CACHE_TTL = 5 * 60 * 1000;  // 5 minutes
+
 
 // Marvel test-market price-variant allowlists. Vision labels any 35¢ /
 // 30¢ price box on a cover as a "test market" variant, but those price
@@ -1708,10 +1714,33 @@ export default async function handler(req, res) {
     // artist/variant noise from matching wrong volumes (Catwoman/Gotham War class).
     const cleanedCVTitle = cleanTitleForComicVine(confirmedTitle, req.body.variant);
 
+    // Session 6/20/26 — Cache lookups (5-min TTL, same as Anthropic prompt cache)
+    const cvKey = `${cleanedCVTitle}|${confirmedIssue}|${confirmedPublisher}`;
+    const pcKey = `${subtitleStripped}|${confirmedIssue}`;
+    const now = Date.now();
+
     const [comicVine, priceChartingInitial, cgcResult] = await Promise.all([
-      lookupComicVine({ title: cleanedCVTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }).catch(() => null),
+      (async () => {
+        const cached = _cvCache.get(cvKey);
+        if (cached && cached.expires > now) {
+          console.log(`[cache-hit] ComicVine: ${cvKey}`);
+          return cached.data;
+        }
+        const result = await lookupComicVine({ title: cleanedCVTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }).catch(() => null);
+        _cvCache.set(cvKey, { data: result, expires: now + CACHE_TTL });
+        return result;
+      })(),
       // lookupXimilar({ images, title, confidence }), // REMOVED — fetched but never used for identity/pricing (-200ms)
-      lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null),
+      (async () => {
+        const cached = _pcCache.get(pcKey);
+        if (cached && cached.expires > now) {
+          console.log(`[cache-hit] PriceCharting: ${pcKey}`);
+          return cached.data;
+        }
+        const result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null);
+        _pcCache.set(pcKey, { data: result, expires: now + CACHE_TTL });
+        return result;
+      })(),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
     ]);
     const ximilar = null; // Ximilar lookup disabled
