@@ -2061,6 +2061,14 @@ export default async function handler(req, res) {
       out.publisherBackfillRatio = backfill.yearBackfillRatio;
     }
 
+    // Publisher autofill from ComicVine: when publisher=null but CV volume has it, backfill.
+    // Unblocks Pacific Silver Star and similar cases where Vision didn't extract publisher.
+    if (!confirmedPublisher && comicVine?.volume?.publisher?.name) {
+      confirmedPublisher = comicVine.volume.publisher.name;
+      out.publisherBackfilledFromCV = true;
+      console.log(`[cv-pub-autofill] ${confirmedPublisher} (from CV volume)`);
+    }
+
     // Ship #20a.6.18 — Variant identity check (additive, gated). Only runs
     // on modern books (year >= 2000) with variant detected AND Vision
     // confidence not HIGH AND eBay image search returned results. Extracts
