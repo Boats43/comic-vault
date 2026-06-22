@@ -327,6 +327,16 @@ export function computeDecision(item, context = {}) {
     };
   }
 
+  // Ship #27 FIX 2: UK weekly/pence variant with zero comps — flag as manual research
+  if (item.ukWeeklyNoComps === true) {
+    decision.warnings.push('uk-weekly-no-comps');
+    decision.evidence.ukWeeklyNoComps = {
+      variant: item.variant,
+      publisher: item.publisher,
+      note: 'UK weekly/pence variant with no eBay comps — manual research required'
+    };
+  }
+
   // Warning: Reprint thin pool
   if (item.pricingSource === 'refused-reprint-thin-pool') {
     decision.warnings.push('verification-failed-reprint-thin');

@@ -4061,17 +4061,39 @@ export default async function handler(req, res) {
 
     // Ship #21 — Claude Haiku quality check (verify all data alignment)
     // Ship #26 — Web search trigger: when rawComps=0 AND no verified_sold data
+    // Ship #27 — FIX 2: Kill web search for UK/pence zero-comp books
+    const isZeroComp = (rawComps?.count === 0 || !rawComps);
+    const variantLower = String(req.body?.variant || '').toLowerCase();
+    const publisherLower = String(confirmedPublisher || '').toLowerCase();
+    const isPenceVariant = variantLower.includes('pence');
+    const isUKPublisher = publisherLower.includes('uk') ||
+                          publisherLower.includes('panini') ||
+                          publisherLower.includes('marvel uk') ||
+                          publisherLower.includes('titan');
+
+    // Skip web search for UK weeklies/pence variants — they never have eBay sold comps,
+    // web search fires, times out at 20s, burns Sonnet tokens, returns nothing.
+    // Flag as MANUAL_RESEARCH instead.
+    let ukWeeklySkip = false;
+    if (isZeroComp && (isPenceVariant || isUKPublisher)) {
+      ukWeeklySkip = true;
+      out.ukWeeklyNoComps = true;
+      console.log('[web-search] UK/pence zero-comp book detected — skipping web search, flagging MANUAL_RESEARCH');
+    }
+
     const shouldTriggerWebSearch =
-      (rawComps?.count === 0 || !rawComps) &&
+      isZeroComp &&
       out.pricingSource !== 'verified_sold' &&
       out.pricingSource !== 'pricecharting' &&
       !out.refusedToPrice &&  // Don't search when identity refused
-      !isPolybagPricing;
+      !isPolybagPricing &&
+      !ukWeeklySkip;  // FIX 2: Skip web search for UK/pence books
 
     // P0-B diagnostic: confirm web search Sonnet gate on refresh
     console.log('[web-search]',
       shouldTriggerWebSearch ? 'FIRING Sonnet' : 'skipped',
       'rawComps.count=', rawComps?.count ?? 'null',
+      'ukWeeklySkip=', ukWeeklySkip,
       'skipFlag=', !!req.body?.skipClaudeCheck);
 
     if (shouldTriggerWebSearch) {
@@ -4151,6 +4173,17 @@ export default async function handler(req, res) {
       out.recommendation = claudeCheck.recommendation;
       out.suggestedListingTitle = claudeCheck.suggestedListingTitle;
 
+      // Ship #27: Surface WARNING flags separately (non-blocking)
+      // Parse flags into criticalFlags and warningFlags (reuse flags array from earlier parse)
+      const allFlags = Array.isArray(claudeCheck.flags) ? claudeCheck.flags : [];
+      out.criticalFlags = allFlags.filter(f =>
+        (typeof f === 'object' && f.severity === 'CRITICAL') ||
+        (typeof f === 'string' && /CRITICAL:/i.test(f))
+      );
+      out.warningFlags = allFlags.filter(f =>
+        (typeof f === 'object' && f.severity === 'WARNING')
+      );
+
       // Ship #26: Handle web search pricing
       if (claudeCheck.web_price && claudeCheck.web_confidence !== 'LOW') {
         const webPrice = Number(claudeCheck.web_price);
@@ -4224,26 +4257,41 @@ export default async function handler(req, res) {
       // Hotfix 2026-05-09 — Check PRICING_CRITICAL_PATTERNS BEFORE confidence gate.
       // BUG: CRITICAL flags were bypassed when confidence=HIGH. CRITICAL flags
       // must always be evaluated regardless of confidence level.
-      const refusalReason = (claudeCheck.flags?.[0]) || 'Claude verification failed';
-      const PRICING_CRITICAL_PATTERNS = [
-        /^CRITICAL:/i,                          // Severity prefix (start of line)
-        /\bCRITICAL:/i,                         // Severity embedded mid-sentence
-        /^HIGH:/i,                              // High-severity prefix
-        /\bHIGH:/i,                             // High-severity embedded
-        /\bKEY ISSUE\b/i,                       // KEY ISSUE pattern variants (MISIDENTIFICATION, MISMATCH, MISLABELED)
-        /wrong\s+issue/i,
-        /different\s+(?:book|series|comic)/i,
-        /wrong\s+era/i,
-        /era\s+mismatch/i,
-        /comp\s+pool\s+contaminated/i,
-        /completely\s+different/i,
-        /\bnot\s+the\s+same\s+(?:book|comic|issue)/i,
-        /issue\s+misidentified/i,
-        /critical:\s*key\s+issue\s+misidentified/i,
-      ];
-      const isPricingCritical = claudeCheck.verified === false && PRICING_CRITICAL_PATTERNS.some((re) =>
-        re.test(refusalReason)
-      );
+      // Ship #27: Parse severity-tiered flags from claude-check response
+      // Flags can be: array of strings (legacy) or array of {message, severity} objects (new)
+      const flags = Array.isArray(claudeCheck.flags) ? claudeCheck.flags : [];
+      const criticalFlags = flags.filter(f => {
+        if (typeof f === 'object' && f.severity === 'CRITICAL') return true;
+        if (typeof f === 'string') {
+          // Legacy string flags — apply pattern matching for backward compatibility
+          const PRICING_CRITICAL_PATTERNS = [
+            /^CRITICAL:/i,
+            /\bCRITICAL:/i,
+            /^HIGH:/i,
+            /\bHIGH:/i,
+            /\bKEY ISSUE\b/i,
+            /wrong\s+issue/i,
+            /different\s+(?:book|series|comic)/i,
+            /wrong\s+era/i,
+            /era\s+mismatch/i,
+            /comp\s+pool\s+contaminated/i,
+            /completely\s+different/i,
+            /\bnot\s+the\s+same\s+(?:book|comic|issue)/i,
+            /issue\s+misidentified/i,
+            /critical:\s*key\s+issue\s+misidentified/i,
+          ];
+          return PRICING_CRITICAL_PATTERNS.some(re => re.test(f));
+        }
+        return false;
+      });
+
+      const warningFlags = flags.filter(f => {
+        if (typeof f === 'object' && f.severity === 'WARNING') return true;
+        return false;
+      });
+
+      const refusalReason = criticalFlags[0]?.message || criticalFlags[0] || 'Claude verification failed';
+      const isPricingCritical = claudeCheck.verified === false && criticalFlags.length > 0;
 
       // Ship Pattern M — Story-only CRITICAL downgrade.
       // When Haiku flags CRITICAL due to ComicVine story metadata corruption
