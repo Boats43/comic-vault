@@ -10,7 +10,53 @@
  * - Identity source selection (Vision vs eBay vs family)
  * - Issue resolution chain
  * - Comp consensus backfill
+ * - Title sanitization (remove descriptive noise from Vision titles)
  */
+
+/**
+ * Sanitize Vision descriptive title to canonical series name.
+ *
+ * Vision returns descriptive titles like "Batman Classic Neal Adams Beatles Cover 1970"
+ * because that's useful for identity. But for comp matching, we need just the series name
+ * ("Batman") to match eBay listings like "Batman #222 (DC Comics June 1970)".
+ *
+ * Strip: creator names, cover descriptors, condition words, edition markers, embedded years
+ * Keep: series name, volume indicators
+ *
+ * @param {string} rawTitle - Vision title with descriptive additions
+ * @returns {string} Canonical series name for comp matching
+ */
+export const sanitizeSeriesTitle = (rawTitle) => {
+  if (!rawTitle) return rawTitle;
+
+  const NOISE_PATTERNS = [
+    // Creator names that bleed into titles
+    /\b(neal|adams|john|romita|jack|kirby|steve|ditko|barry|windsor|smith|jim|lee|todd|mcfarlane|frank|miller|alan|moore|chris|claremont|joe|jusko|kaare|andrews|alex|ross)\b/gi,
+    // Cover descriptors
+    /\b(classic|vintage|original|key|issue|cover|homage|parody|takeoff|beatles|art|lesson)\b/gi,
+    // Condition/grade words
+    /\b(high|grade|very|good|fine|near|mint|vf|nm|fn|gd|vg|cgc|raw|unslabbed|slabbed|graded)\b/gi,
+    // Edition markers in title
+    /\b(first|premiere|ongoing|series|vol|volume|edition|print|printing|reprint|book)\b/gi,
+    // Year when embedded in title (year is separate field)
+    /\b(19|20)\d{2}\b/g,
+    // Publisher name in title (publisher is separate field)
+    /\b(marvel|dc|image|dark|horse|comics|comic)\b/gi,
+  ];
+
+  let clean = rawTitle;
+  for (const pattern of NOISE_PATTERNS) {
+    clean = clean.replace(pattern, ' ');
+  }
+
+  // Collapse whitespace
+  clean = clean.replace(/\s+/g, ' ').trim();
+
+  // If sanitization removed everything, return original
+  if (!clean || clean.length < 3) return rawTitle;
+
+  return clean;
+};
 
 /**
  * Calculate title overlap percentage between two strings.
@@ -91,12 +137,16 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     console.log(`[phase1] eBay visual insufficient (${ebayResultCount} results), using Vision title`);
   }
 
+  // Sanitize confirmedTitle to canonical series name for comp matching
+  const sanitizedTitle = sanitizeSeriesTitle(confirmedTitle);
+
   return {
-    confirmedTitle,
+    confirmedTitle: sanitizedTitle,
     confirmedIssue,
     confirmedYear,
     confirmedPublisher,
-    identitySource
+    identitySource,
+    displayTitle: confirmedTitle,  // Keep original for display
   };
 };
 
