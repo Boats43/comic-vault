@@ -23,7 +23,6 @@ function buildVerificationPrompt(data) {
     numericGrade,
     conditionSummary,
     keyIssue,
-    storyDescription,
     creators,
     priceBands,
     soldComps,
@@ -46,12 +45,13 @@ function buildVerificationPrompt(data) {
     `  $${(Number(p) || 0).toFixed(2)}`
   ).join('\n') || '  (none)';
 
-  // Format creators
-  const creatorLines = (creators || []).slice(0, 3).map(c =>
+  // Format creators (Ship #27: cap to 2 for token reduction)
+  const creatorLines = (creators || []).slice(0, 2).map(c =>
     `  ${c.name}${c.role ? ` (${c.role})` : ''}`
   ).join('\n') || '  (unknown)';
 
   // Ship #26: web search mode when rawComps=0
+  // Ship #27: Return only dynamic data (static instructions moved to runClaudeCheck)
   if (needsWebSearch) {
     return `BOOK: ${title}${issue ? ` #${issue}` : ''} ${year || '?'} ${publisher || '?'}
 VARIANT: ${variant || 'standard'}
@@ -70,26 +70,11 @@ Extract from results:
 
 KEY ISSUE: ${keyIssue || 'None identified'}
 CREATORS:
-${creatorLines}
-
-Provide your best price estimate based on web search evidence.
-
-JSON response:
-{
-  "verified": true/false,
-  "flags": ["specific issue if any"],
-  "web_price": <your estimate in dollars, number only>,
-  "web_source": "ebay_sold|ebay_active|estimate",
-  "web_confidence": "HIGH|MEDIUM|LOW",
-  "web_evidence": "brief description of what you found (max 100 chars)",
-  "recommendation": "SELL_RAW|PRESS|CGC|HOLD",
-  "recommendationReason": "one sentence",
-  "suggestedListingTitle": "exact eBay title",
-  "confidence": "HIGH|MEDIUM|LOW"
-}`;
+${creatorLines}`;
   }
 
   // Standard verification mode (comp data available)
+  // Ship #27: Return only dynamic data (static instructions moved to runClaudeCheck)
   return `BOOK: ${title}${issue ? ` #${issue}` : ''} ${year || '?'} ${publisher || '?'}
 VARIANT: ${variant || 'standard'}
 GRADE: ${grade || 'unknown'}${numericGrade ? ` (${numericGrade})` : ''}
@@ -98,7 +83,6 @@ CONDITION REPORT:
 ${conditionSummary || 'No condition details available'}
 
 KEY ISSUE: ${keyIssue || 'None identified'}
-STORY: ${storyDescription || 'No story description available'}
 CREATORS:
 ${creatorLines}
 
@@ -114,11 +98,11 @@ ${activeLines}
 
 CGC POP: ${pop?.total || '?'} copies tracked${pop?.atGrade ? `, ${pop.atGrade} at this grade` : ''}
 
-DEMAND: ${demandSignals?.velocity || '?'} velocity, ${demandSignals?.trend || '?'} trend, ${demandSignals?.liquidity || '?'} liquidity
+DEMAND: ${demandSignals?.velocity || '?'} velocity, ${demandSignals?.trend || '?'} trend, ${demandSignals?.liquidity || '?'} liquidity`;
+}
 
-IMPORTANT: storyDescription is ComicVine metadata and may be corrupt or pulled from a wrong edition. Only flag story/description problems as pricing-critical if they prove the comp pool or pricing evidence is for a completely different book. Story metadata corruption alone is NOT pricing-critical.
-
-VERIFY ALL OF THE FOLLOWING:
+// Ship #27: Static instructions for prompt caching (cacheable block)
+const STATIC_INSTRUCTIONS = `VERIFY ALL OF THE FOLLOWING:
 1. Do sold/active comps match this exact book?
 2. Is grade consistent with condition described?
 3. Are price bands reasonable for this grade/era?
@@ -128,7 +112,7 @@ VERIFY ALL OF THE FOLLOWING:
 JSON response:
 {
   "verified": true/false,
-  "flags": ["specific issue if any"],
+  "flags": [{"message": "specific issue", "severity": "CRITICAL|WARNING"}],
   "gradeConsistent": true/false,
   "compsAccurate": true/false,
   "pricingReasonable": true/false,
@@ -137,8 +121,31 @@ JSON response:
   "recommendationReason": "one sentence",
   "suggestedListingTitle": "exact eBay title",
   "confidence": "HIGH|MEDIUM|LOW"
-}`;
 }
+
+Flag severity rules:
+- CRITICAL: Cross-title price contamination, wrong category comps (MTG cards), volume mismatch, identity failure
+- WARNING: Title variant differences (e.g. "Groo #1" vs "Groo in the Wild #1"), story metadata corruption, minor publisher disambiguation, cover letter mismatch`;
+
+const WEB_SEARCH_INSTRUCTIONS = `Provide your best price estimate based on web search evidence.
+
+JSON response:
+{
+  "verified": true/false,
+  "flags": [{"message": "specific issue", "severity": "CRITICAL|WARNING"}],
+  "web_price": <your estimate in dollars, number only>,
+  "web_source": "ebay_sold|ebay_active|estimate",
+  "web_confidence": "HIGH|MEDIUM|LOW",
+  "web_evidence": "brief description of what you found (max 100 chars)",
+  "recommendation": "SELL_RAW|PRESS|CGC|HOLD",
+  "recommendationReason": "one sentence",
+  "suggestedListingTitle": "exact eBay title",
+  "confidence": "HIGH|MEDIUM|LOW"
+}
+
+Flag severity rules:
+- CRITICAL: Cross-title price contamination, wrong category comps, volume mismatch, identity failure
+- WARNING: Title variant differences, story metadata corruption, minor publisher disambiguation`;
 
 /**
  * Call Claude Haiku to verify data and provide recommendation.
@@ -155,7 +162,8 @@ export async function runClaudeCheck(data) {
   const TIMEOUT_MS = needsWebSearch ? 20000 : 30000;
 
   try {
-    const prompt = buildVerificationPrompt(data);
+    const dynamicPrompt = buildVerificationPrompt(data);
+    const staticInstructions = needsWebSearch ? WEB_SEARCH_INSTRUCTIONS : STATIC_INSTRUCTIONS;
 
     // Ship #26: Sonnet 4.5 with web search tool for zero-comp pricing
     const modelConfig = needsWebSearch
@@ -174,13 +182,24 @@ export async function runClaudeCheck(data) {
           system: "You are a comic book expert and pricing analyst. Review this complete record for accuracy. Be concise. Respond in JSON only.",
         };
 
+    // Ship #27: Prompt caching — static instructions cached, dynamic data fresh
     // Create API call with timeout wrapper
     const apiCallPromise = anthropic.messages.create({
       ...modelConfig,
       messages: [
         {
           role: "user",
-          content: prompt
+          content: [
+            {
+              type: "text",
+              text: staticInstructions,
+              cache_control: { type: "ephemeral" }
+            },
+            {
+              type: "text",
+              text: dynamicPrompt
+            }
+          ]
         }
       ]
     });
