@@ -35,7 +35,7 @@ export const sanitizeSeriesTitle = (rawTitle) => {
     // Cover descriptors
     /\b(classic|vintage|original|key|issue|cover|homage|parody|takeoff|beatles|art|lesson)\b/gi,
     // Condition/grade words
-    /\b(high|grade|very|good|fine|near|mint|vf|nm|fn|gd|vg|cgc|raw|unslabbed|slabbed|graded)\b/gi,
+    /\b(high|grade|very|good|fine|near|mint|vf|nm|fn|gd|vg|cgc|raw|unslabbed|slabbed|graded|stock)\b/gi,
     // Edition markers in title
     /\b(first|premiere|ongoing|series|vol|volume|edition|print|printing|reprint|book)\b/gi,
     // Year when embedded in title (year is separate field)

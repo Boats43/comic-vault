@@ -626,7 +626,8 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
     const beforeReprint = candidates.length;
     const REPRINT_PUBLISHERS = [
       'marvel uk', 'panini', 'dynapubs', 'revolutionary',
-      'sergio bonelli', 'dennis förlag', 'condor', 'titan books'
+      'sergio bonelli', 'dennis förlag', 'condor', 'titan books',
+      'grupo editorial', 'vid', 'novedades'  // Mexican reprint publishers
     ];
     const reprintFiltered = candidates.filter((r) => {
       const vol = volDetails[r?.volume?.id];
