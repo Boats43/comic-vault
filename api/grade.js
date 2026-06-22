@@ -510,7 +510,7 @@ export default async function handler(req, res) {
     console.log('[grade] eBay-first failed or low confidence — falling back to Vision full identification');
 
     // Session 4B — Initial scan to detect asset type
-    const { parsed: initialScan } = await callModel("claude-opus-4-7", imageContent, STANDARD_PROMPT);
+    const { parsed: initialScan } = await callModel("claude-sonnet-4-5-20250929", imageContent, STANDARD_PROMPT);
     const isBook = detectBookSignals(initialScan);
 
     let userPrompt = STANDARD_PROMPT;
@@ -522,14 +522,14 @@ export default async function handler(req, res) {
       if (body.voiceContext) {
         userPrompt += "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
       }
-      const { parsed: bookScan } = await callModel("claude-opus-4-7", imageContent, userPrompt);
+      const { parsed: bookScan } = await callModel("claude-sonnet-4-5-20250929", imageContent, userPrompt);
       finalParsed = bookScan;
     } else {
       // Comic — use initial scan result
       if (body.voiceContext) {
         // Re-scan with voice context
         userPrompt = STANDARD_PROMPT + "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
-        const { parsed: contextScan } = await callModel("claude-opus-4-7", imageContent, userPrompt);
+        const { parsed: contextScan } = await callModel("claude-sonnet-4-5-20250929", imageContent, userPrompt);
         finalParsed = contextScan;
       }
     }
