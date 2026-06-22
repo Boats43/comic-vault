@@ -7165,6 +7165,8 @@ function WatchMode({ onStop }) {
   const lastTitleRef = useRef("");
   const busyRef = useRef(false);
   const recognitionRef = useRef(null);
+  const scanCountRef = useRef(0);
+  const idleSecondsRef = useRef(0);
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState("Starting camera...");
   const [settings] = useState(loadBuyerSettings);
@@ -7172,13 +7174,29 @@ function WatchMode({ onStop }) {
   const [listening, setListening] = useState(false);
   const [voiceNote, setVoiceNote] = useState(null);
   const [bid, setBid] = useState("");
+  const [scanCount, setScanCount] = useState(0);
   const watchContextRef = useRef("");
   useEffect(() => { watchContextRef.current = watchContext; }, [watchContext]);
+
+  // GUARD 5: Daily cap check
+  useEffect(() => {
+    const today = new Date().toDateString();
+    const dailyKey = `cv_watch_daily_${today}`;
+    const dailyCount = parseInt(localStorage.getItem(dailyKey) || "0", 10);
+    if (dailyCount >= 200) {
+      alert("Daily Watch Mode scan limit reached (200). Resets at midnight.");
+      onStop();
+    }
+  }, [onStop]);
 
   useEffect(() => {
     let stream = null;
     let intervalId = null;
     let cancelled = false;
+
+    // GUARD 3: UI cost warning
+    const estimatedMaxCost = (0.003 * 50).toFixed(2);
+    console.log(`[watch] Watch Mode active — scanning every 3s. Each scan costs ~$0.003. Auto-stops at 50 scans or 30s idle. Max cost this session: ~$${estimatedMaxCost}`);
 
     (async () => {
       try {
@@ -7194,7 +7212,25 @@ function WatchMode({ onStop }) {
         setStatus("Watching...");
 
         const captureAndGrade = async () => {
+          // GUARD 1: Hard session cap at 50 scans
+          if (scanCountRef.current >= 50) {
+            clearInterval(intervalId);
+            onStop();
+            alert("Watch Mode stopped — 50 scan limit reached. Restart to continue.");
+            console.log("[watch] stopped — 50 scan cap hit");
+            return;
+          }
+
           if (busyRef.current) return;
+
+          scanCountRef.current++;
+          setScanCount(scanCountRef.current);
+
+          // Update daily counter
+          const today = new Date().toDateString();
+          const dailyKey = `cv_watch_daily_${today}`;
+          const dailyCount = parseInt(localStorage.getItem(dailyKey) || "0", 10);
+          localStorage.setItem(dailyKey, String(dailyCount + 1));
           const v = videoRef.current;
           const c = canvasRef.current;
           if (!v || !c || !v.videoWidth) return;
@@ -7218,8 +7254,21 @@ function WatchMode({ onStop }) {
             if (low.includes("not a comic") || low.includes("unknown")) return;
             const issueNum = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
             const key = `${data.title}|${issueNum}`;
-            if (key === lastTitleRef.current) return;
-            lastTitleRef.current = key;
+
+            // GUARD 2: Idle detection — stop if no new book for 30 seconds
+            if (key === lastTitleRef.current) {
+              idleSecondsRef.current += 3;
+              if (idleSecondsRef.current >= 30) {
+                clearInterval(intervalId);
+                onStop();
+                console.log("[watch] stopped — idle 30s");
+                return;
+              }
+              return;
+            } else {
+              idleSecondsRef.current = 0;
+              lastTitleRef.current = key;
+            }
             setResult({ ...data, issue: issueNum, image: b64, _enriching: true });
 
             fetch("/api/enrich", {
@@ -7316,7 +7365,7 @@ function WatchMode({ onStop }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#d4af37" }}>👁 Watch Mode</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#d4af37" }}>👁 Watch Mode: {scanCount}/50 scans</div>
         <button
           onClick={onStop}
           style={{ padding: "6px 14px", background: "transparent", border: "1px solid #e05656", borderRadius: 8, color: "#e05656", fontWeight: 700, cursor: "pointer" }}
@@ -7327,6 +7376,9 @@ function WatchMode({ onStop }) {
         <canvas ref={canvasRef} style={{ display: "none" }} />
         <div style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.6)", color: "#d4af37", padding: "4px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
           {status}
+        </div>
+        <div style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.6)", color: "#d4af37", padding: "4px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
+          ~${(scanCount * 0.003).toFixed(3)}
         </div>
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2 }}>
