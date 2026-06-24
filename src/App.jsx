@@ -615,16 +615,181 @@ const displayKeyIssue = (item) => {
   return item.keyIssue;
 };
 
-function ScanZone({ onFile, inputRef, compact, label }) {
+// Barcode auto-detect: camera-based UPC scanner with Vision fallback
+function ScanZone({ onFile, inputRef, compact, label, onBarcodeDetected }) {
   const cameraRef = useRef(null);
+  const [scanningBarcode, setScanningBarcode] = useState(false);
+  const [barcodeHint, setBarcodeHint] = useState('');
+  const videoRef = useRef(null);
+  const codeReaderRef = useRef(null);
+  const barcodeTimeoutRef = useRef(null);
+
+  // Comic barcode validation (UPC-A/EAN-13)
+  const isValidComicBarcode = (code) => {
+    // Must be 12 or 13 digits
+    if (!/^\d{12,13}$/.test(code)) return false;
+
+    // Known comic publisher prefixes (optional check, still try CV on unknown)
+    const knownPrefixes = [
+      '759606',  // Marvel
+      '761941',  // DC
+      '725130',  // Dark Horse
+      '70985',   // Image
+      '827714',  // IDW
+      '84428',   // Boom
+    ];
+
+    // Accept all numeric barcodes (CV will validate)
+    return true;
+  };
+
+  // Start barcode detection
+  const startBarcodeScanning = async () => {
+    setScanningBarcode(true);
+    setBarcodeHint('Point camera at barcode');
+
+    try {
+      // Dynamic import to avoid bundle bloat
+      const { BrowserMultiFormatReader } = await import('@zxing/browser');
+      const codeReader = new BrowserMultiFormatReader();
+      codeReaderRef.current = codeReader;
+
+      // Get video stream
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 } },
+        audio: false,
+      });
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+
+      // Start barcode detection
+      codeReader.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
+        if (result) {
+          const barcode = result.getText();
+          console.log('[barcode-scan] detected:', barcode);
+
+          if (isValidComicBarcode(barcode)) {
+            console.log('[barcode-scan] valid comic UPC, stopping scanner');
+            stopBarcodeScanning();
+            if (onBarcodeDetected) {
+              onBarcodeDetected(barcode);
+            }
+          }
+        }
+      });
+
+      // Fallback to Vision after 2s if no barcode found
+      barcodeTimeoutRef.current = setTimeout(() => {
+        console.log('[barcode-scan] timeout, falling back to Vision');
+        setBarcodeHint('No barcode found, switching to cover scan...');
+        setTimeout(() => {
+          stopBarcodeScanning();
+          cameraRef.current?.click(); // trigger file input for Vision
+        }, 500);
+      }, 2000);
+
+    } catch (err) {
+      console.error('[barcode-scan] error:', err);
+      setScanningBarcode(false);
+      setBarcodeHint('');
+      // Fallback to file input
+      cameraRef.current?.click();
+    }
+  };
+
+  // Stop barcode detection
+  const stopBarcodeScanning = () => {
+    if (barcodeTimeoutRef.current) {
+      clearTimeout(barcodeTimeoutRef.current);
+    }
+
+    if (codeReaderRef.current) {
+      codeReaderRef.current.reset();
+      codeReaderRef.current = null;
+    }
+
+    if (videoRef.current?.srcObject) {
+      const stream = videoRef.current.srcObject;
+      stream.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
+
+    setScanningBarcode(false);
+    setBarcodeHint('');
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => stopBarcodeScanning();
+  }, []);
+
+  if (scanningBarcode) {
+    return (
+      <div style={{
+        maxWidth: 420,
+        margin: '0 auto',
+        padding: 20,
+        textAlign: 'center',
+      }}>
+        <div style={{ marginBottom: 12, color: '#d4af37', fontWeight: 600, fontSize: 15 }}>
+          {barcodeHint}
+        </div>
+        <div style={{
+          position: 'relative',
+          width: '100%',
+          paddingTop: '75%',
+          background: '#000',
+          borderRadius: 12,
+          overflow: 'hidden',
+          border: '2px dashed rgba(212,175,55,0.5)',
+        }}>
+          <video
+            ref={videoRef}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+            }}
+          />
+        </div>
+        <button
+          onClick={stopBarcodeScanning}
+          style={{
+            marginTop: 12,
+            padding: '8px 16px',
+            background: 'transparent',
+            color: 'rgba(212,175,55,0.6)',
+            border: '1px solid rgba(212,175,55,0.3)',
+            borderRadius: 8,
+            fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
       className={`upload-zone${compact ? " compact" : ""}`}
-      onClick={() => cameraRef.current?.click()}
+      onClick={() => {
+        if (onBarcodeDetected) {
+          startBarcodeScanning();
+        } else {
+          cameraRef.current?.click();
+        }
+      }}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => e.key === "Enter" && cameraRef.current?.click()}
+      onKeyDown={(e) => e.key === "Enter" && (onBarcodeDetected ? startBarcodeScanning() : cameraRef.current?.click())}
     >
       <div className="upload-emoji">📷</div>
       <div className="upload-text">{label}</div>
@@ -9390,6 +9555,7 @@ export default function App() {
                 onFile={(e) => handleFile(e, "scan")}
                 inputRef={fileRef}
                 label="Tap to scan a comic"
+                onBarcodeDetected={handleBarcodeSubmit}
               />
               <button
                 onClick={() => bulkRef.current?.click()}
