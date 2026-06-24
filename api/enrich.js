@@ -1616,6 +1616,17 @@ export default async function handler(req, res) {
 
     mark('phase1_complete');
 
+    // Ship #28a COMMIT 3: Conflict detection (LOG ONLY)
+    // Deterministic conflict detection across all data sources.
+    // Ship #28b will gate AI calls on conflicts.length.
+    // Ship #28a logs + stores conflicts but doesn't change AI behavior yet.
+    const { detectIdentityConflicts, detectPricingConflicts, detectCompsConflicts } =
+      await import('../src/lib/conflictDetector.js');
+
+    // Note: Pricing conflicts require comp data (computed later in pipeline).
+    // For now, only run identity + comps conflicts after Phase 1.
+    // Full conflict suite runs after comp fetching (post-Phase 2).
+
     // Ship v0-G — Title contamination detection and sanitization.
     // Detects seller/marketplace noise in confirmedTitle and sanitizes before
     // downstream queries (ComicVine, PriceCharting, eBay comps). Preserves
@@ -2266,6 +2277,41 @@ export default async function handler(req, res) {
     ]);
     const pcSales = pcSalesResult || { soldComps: [], salesByGrade: {} };
     mark('comps_fetched');
+
+    // Ship #28a COMMIT 3: Run conflict detection after all data sources assembled
+    const identityConflicts = detectIdentityConflicts(
+      { title, issue: issueNum, year, publisher },  // Vision
+      visualConsensus,  // eBay
+      comicVine,  // ComicVine
+      priceCharting  // PriceCharting
+    );
+
+    // Pricing conflicts require processed comp data (computed later)
+    // Comps conflicts need eBay metadata (from visualResult)
+    const compsConflicts = detectCompsConflicts(
+      compsFromEbay,
+      visualResult?.items && out.ebayLeafCategories ? out.ebayLeafCategories : []
+    );
+
+    const allConflicts = [
+      ...identityConflicts,
+      ...compsConflicts,
+      // Pricing conflicts added after sold/active medians computed
+    ];
+
+    // Log conflicts for Ship #28a observation
+    console.log(
+      '[ship28a-conflicts]',
+      JSON.stringify({
+        title: title || '?',
+        issue: issueNum || '?',
+        conflictCount: allConflicts.length,
+        conflicts: allConflicts,
+      })
+    );
+
+    // Store conflicts on out object (not used to gate AI yet)
+    out.conflicts = allConflicts;
 
     // AI verification pass on the comps that will be displayed. Verifies
     // each listing title from rawComps.prices (which carries titles in the
