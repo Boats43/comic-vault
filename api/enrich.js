@@ -2037,6 +2037,16 @@ export default async function handler(req, res) {
       ? parseInt(String(comicVine.startYear), 10)
       : null;
 
+    // Ship #28a COMMIT 2: Persist PriceCharting identity anchors
+    if (priceCharting) {
+      out.pcProductId = priceCharting.id || null;
+      out.pcProductName = priceCharting.productName || null;
+      // TODO Ship #28a.2: Extract from PC HTML when available
+      out.pcEbayEpid = null;  // ebay_product_id field (requires HTML parse)
+      out.pcLastUpdated = null;  // last_updated timestamp (requires HTML parse)
+      console.log(`[ship28a] PC anchors: id=${out.pcProductId} name="${out.pcProductName}"`);
+    }
+
     const yearResolution = resolveYear(
       year,
       pcYear,
@@ -4050,6 +4060,30 @@ export default async function handler(req, res) {
     // GoCollect CGC FMV data (null when API key not set)
     if (goCollectResult) {
       out.goCollect = goCollectResult;
+
+      // Ship #28a COMMIT 2: Extract GoCollect identity anchors + full FMV ladder
+      out.gcId = goCollectResult.id || null;
+      out.gcLastUpdated = goCollectResult.last_updated || null;
+
+      // Extend FMV ladder to lower grades (7.0-8.5) for raw upgrade scenarios
+      out.gcFmvLadder = {
+        '7.0': goCollectResult.fmv70 || null,
+        '7.5': goCollectResult.fmv75 || null,
+        '8.0': goCollectResult.fmv80 || null,
+        '8.5': goCollectResult.fmv85 || null,
+        '9.0': goCollectResult.fmv90 || null,
+        '9.2': goCollectResult.fmv92 || null,
+        '9.4': goCollectResult.fmv94 || null,
+        '9.6': goCollectResult.fmv96 || null,
+        '9.8': goCollectResult.fmv98 || null,
+      };
+
+      console.log(
+        `[ship28a] GC anchors: id=${out.gcId} ` +
+        `lastUpdated=${out.gcLastUpdated || 'unknown'} ` +
+        `fmv98=${out.gcFmvLadder['9.8'] || 'N/A'} ` +
+        `fmv70=${out.gcFmvLadder['7.0'] || 'N/A'}`
+      );
     }
 
     // PriceCharting CGC pop data (Phase 5a.1 — backend only, no UI

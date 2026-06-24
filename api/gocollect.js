@@ -66,11 +66,12 @@ export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
     }
 
     // Extract FMV at key grades from the match data.
+    // Ship #28a: Extend to lower grades (7.0-8.5) for raw upgrade scenarios
     const fmv = {};
     const grades = match.grades || match.fmv || {};
     for (const [grade, value] of Object.entries(grades)) {
       const g = parseFloat(grade);
-      if (!isNaN(g) && g >= 9.0 && value > 0) {
+      if (!isNaN(g) && g >= 7.0 && value > 0) {  // was: g >= 9.0
         fmv[g] = typeof value === "number" ? value : parseFloat(value) || null;
       }
     }
@@ -80,6 +81,10 @@ export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
     const fmv94 = fmv[9.4] || null;
     const fmv92 = fmv[9.2] || null;
     const fmv90 = fmv[9.0] || null;
+    const fmv85 = fmv[8.5] || null;
+    const fmv80 = fmv[8.0] || null;
+    const fmv75 = fmv[7.5] || null;
+    const fmv70 = fmv[7.0] || null;
 
     // Census / population count — total graded copies if exposed by the
     // payload. Shape varies: sometimes a flat number, sometimes per-grade.
@@ -125,12 +130,18 @@ export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
       fmv94,
       fmv92,
       fmv90,
+      fmv85,  // Ship #28a
+      fmv80,  // Ship #28a
+      fmv75,  // Ship #28a
+      fmv70,  // Ship #28a
       census,
       submitRecommended,
       submitGap,
       source: "gocollect",
       matchTitle: match.title || null,
       matchId: match.id || null,
+      id: match.id || null,  // Ship #28a: identity anchor
+      last_updated: match.last_updated || match.updated_at || null,  // Ship #28a
     };
   } catch (err) {
     if (err.name === 'AbortError') {
