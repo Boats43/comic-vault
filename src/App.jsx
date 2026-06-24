@@ -7585,7 +7585,7 @@ export default function App() {
     if (catalogue.length === 0) return;
     if (tab !== "collection") return;
     if (selectedItem) return;
-    if (Date.now() - lastAutoRefreshRef.current < 60000) return;
+    if (Date.now() - lastAutoRefreshRef.current < 300000) return;
     lastAutoRefreshRef.current = Date.now();
     // Skip books imported in the last 5 minutes — bulk import enrich is still
     // in flight and would race with auto-refresh, overwriting fresh data.
