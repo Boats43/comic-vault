@@ -266,6 +266,10 @@ export const extractIdentityFromImageSearch = (items) => {
       price: !isNaN(priceVal) && priceVal > 0 ? priceVal : null,
       itemWebUrl: it?.itemWebUrl || null,
       endTime: it?.itemEndDate || null,
+      // Ship #28a: Preserve eBay metadata for conflict detection
+      leafCategoryIds: Array.isArray(it?.leafCategoryIds) ? it.leafCategoryIds : [],
+      buyingOptions: Array.isArray(it?.buyingOptions) ? it.buyingOptions : [],
+      sellerUsername: it?.seller?.username || null,
     };
     return parsed;
   });

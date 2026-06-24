@@ -3990,6 +3990,24 @@ export default async function handler(req, res) {
     if (visualResult) {
       if (Array.isArray(visualResult.items) && visualResult.items.length > 0) {
         out.imageSearchResults = visualResult.items;
+
+        // Ship #28a: Extract eBay metadata for conflict detection
+        const allCategories = visualResult.items.flatMap(i => i.leafCategoryIds || []);
+        const allBuyingOptions = visualResult.items.flatMap(i => i.buyingOptions || []);
+        const uniqueSellers = new Set(
+          visualResult.items.map(i => i.sellerUsername).filter(Boolean)
+        );
+
+        out.ebayLeafCategories = [...new Set(allCategories)]; // dedupe
+        out.ebayBuyingOptions = [...new Set(allBuyingOptions)]; // dedupe
+        out.ebaySellerCount = uniqueSellers.size;
+
+        console.log(
+          `[ship28a] eBay metadata: ` +
+          `categories=[${out.ebayLeafCategories.join(',')}] ` +
+          `buyingOptions=[${out.ebayBuyingOptions.join(',')}] ` +
+          `sellers=${out.ebaySellerCount}`
+        );
       }
       if (visualResult.issueSource) {
         out.issueSource = visualResult.issueSource;
