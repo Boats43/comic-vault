@@ -142,6 +142,10 @@ export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
       matchId: match.id || null,
       id: match.id || null,  // Ship #28a: identity anchor
       last_updated: match.last_updated || match.updated_at || null,  // Ship #28a
+      // TRACK B.3: GoCollect velocity + trend
+      velocity: match.velocity || match.sale_velocity || null,
+      trend: match.trend || match.price_trend || null,
+      daysToSell: match.days_to_sell || match.average_days_to_sell || null,
     };
   } catch (err) {
     if (err.name === 'AbortError') {

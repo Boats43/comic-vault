@@ -299,6 +299,9 @@ const tryBrowse = async ({ appId, certId, query, categoryId, assetType }) => {
           endTime: it?.itemEndDate || null,
           title: it?.title || null,
           url: it?.itemWebUrl || null,
+          // TRACK B.2: eBay condition codes
+          conditionId: it?.condition || null,
+          conditionDisplayName: it?.conditionDisplayName || null,
         };
       })
       .filter(Boolean);

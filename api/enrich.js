@@ -2148,6 +2148,9 @@ export default async function handler(req, res) {
       // TODO Ship #28a.2: Extract from PC HTML when available
       out.pcEbayEpid = null;  // ebay_product_id field (requires HTML parse)
       out.pcLastUpdated = null;  // last_updated timestamp (requires HTML parse)
+      // TRACK B.5: PriceCharting loose/graded prices
+      out.pcLoosePrice = priceCharting.loosePrice || priceCharting['loose-price'] || null;
+      out.pcGradedPrice = priceCharting.cibPrice || priceCharting['cib-price'] || priceCharting.gradedPrice || null;
       console.log(`[ship28a] PC anchors: id=${out.pcProductId} name="${out.pcProductName}"`);
     }
 
@@ -2688,6 +2691,10 @@ export default async function handler(req, res) {
 
     if (comicVine) {
       out.comicVine = comicVine;
+      // TRACK B.1: Extract character_credits
+      out.cvCharacterCredits = Array.isArray(comicVine.character_credits)
+        ? comicVine.character_credits.map(c => ({ name: c.name, id: c.id }))
+        : [];
     }
 
     // Ship #20a.6.18 — Variant identity fields (moved after out initialization)
@@ -4217,6 +4224,11 @@ export default async function handler(req, res) {
         '9.6': goCollectResult.fmv96 || null,
         '9.8': goCollectResult.fmv98 || null,
       };
+
+      // TRACK B.3: GoCollect velocity + trend
+      out.gcVelocity = goCollectResult.velocity || null;
+      out.gcTrend = goCollectResult.trend || null;
+      out.gcDaysToSell = goCollectResult.daysToSell || null;
 
       console.log(
         `[ship28a] GC anchors: id=${out.gcId} ` +
