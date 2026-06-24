@@ -640,6 +640,145 @@ function ScanZone({ onFile, inputRef, compact, label }) {
   );
 }
 
+// Isolated barcode scanner component - completely separate from Vision camera
+function BarcodeScanner({ onDetected, onCancel }) {
+  const videoRef = useRef(null);
+  const codeReaderRef = useRef(null);
+  const [hint, setHint] = useState('Point camera at barcode');
+
+  useEffect(() => {
+    let mounted = true;
+
+    const startScanning = async () => {
+      try {
+        // Dynamic import ZXing
+        const { BrowserMultiFormatReader } = await import('@zxing/browser');
+        if (!mounted) return;
+
+        const codeReader = new BrowserMultiFormatReader();
+        codeReaderRef.current = codeReader;
+
+        // Get video stream
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 } },
+          audio: false,
+        });
+
+        if (!mounted || !videoRef.current) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+
+        // Start barcode detection
+        codeReader.decodeFromVideoDevice(null, videoRef.current, (result) => {
+          if (!mounted) return;
+          if (result) {
+            const barcode = result.getText();
+            console.log('[barcode] detected:', barcode);
+
+            // Validate UPC-A (12 digits) or EAN-13 (13 digits)
+            if (/^\d{12,13}$/.test(barcode)) {
+              console.log('[barcode] valid UPC, closing scanner');
+              onDetected(barcode);
+            }
+          }
+        });
+      } catch (err) {
+        console.error('[barcode] error:', err);
+        setHint('Camera access denied or unavailable');
+      }
+    };
+
+    startScanning();
+
+    // Cleanup on unmount
+    return () => {
+      mounted = false;
+
+      if (codeReaderRef.current) {
+        try {
+          codeReaderRef.current.reset();
+        } catch (err) {
+          console.warn('[barcode] reset error:', err);
+        }
+        codeReaderRef.current = null;
+      }
+
+      if (videoRef.current?.srcObject) {
+        const stream = videoRef.current.srcObject;
+        stream.getTracks().forEach(track => {
+          track.stop();
+          console.log('[barcode] stopped track:', track.kind);
+        });
+        videoRef.current.srcObject = null;
+      }
+    };
+  }, [onDetected]);
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      background: '#000',
+      zIndex: 9999,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+    }}>
+      <div style={{
+        color: '#d4af37',
+        fontSize: 16,
+        fontWeight: 600,
+        marginBottom: 16,
+        textAlign: 'center',
+      }}>
+        {hint}
+      </div>
+      <div style={{
+        width: '90%',
+        maxWidth: 500,
+        aspectRatio: '4/3',
+        position: 'relative',
+        border: '2px dashed rgba(212,175,55,0.6)',
+        borderRadius: 12,
+        overflow: 'hidden',
+      }}>
+        <video
+          ref={videoRef}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+          }}
+        />
+      </div>
+      <button
+        onClick={onCancel}
+        style={{
+          marginTop: 20,
+          padding: '12px 24px',
+          background: 'transparent',
+          color: '#d4af37',
+          border: '2px solid rgba(212,175,55,0.5)',
+          borderRadius: 10,
+          fontSize: 16,
+          fontWeight: 600,
+          cursor: 'pointer',
+        }}
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 function ResultCard({ result, enriching }) {
   // Ship #20a.6.1 — collapsible drawer for soldCompDiagnostics rejected
   // samples. Toggled by clicking the V/R chip. Per-card state — different
@@ -7436,6 +7575,7 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState(null);
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [catalogue, setCatalogue] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [installPrompt, setInstallPrompt] = useState(null);
@@ -9349,15 +9489,71 @@ export default function App() {
                 }} />
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#16a34a" }}>Scanner ready</span>
               </div>
-              {/* TRACK A: Barcode input */}
+
+              {/* Separate barcode scanner - completely isolated from Vision camera */}
+              {showBarcodeScanner && (
+                <BarcodeScanner
+                  onDetected={(barcode) => {
+                    setShowBarcodeScanner(false);
+                    handleBarcodeSubmit(barcode);
+                  }}
+                  onCancel={() => setShowBarcodeScanner(false)}
+                />
+              )}
+
+              {/* Section 1: Vision Cover Scan (UNCHANGED) */}
+              <ScanZone
+                onFile={(e) => handleFile(e, "scan")}
+                inputRef={fileRef}
+                label="📷 Scan Cover"
+              />
+
+              {/* Divider */}
+              <div style={{
+                textAlign: 'center',
+                margin: '16px 0',
+                color: 'rgba(212,175,55,0.5)',
+                fontSize: 13,
+                fontWeight: 600,
+              }}>
+                ──── or ────
+              </div>
+
+              {/* Section 2: Barcode Scan (isolated from Vision) */}
               <div style={{
                 maxWidth: 420,
                 margin: "0 auto 16px",
                 padding: "0 20px",
               }}>
+                <button
+                  onClick={() => setShowBarcodeScanner(true)}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    padding: "16px",
+                    background: "transparent",
+                    color: "#d4af37",
+                    border: "2px solid rgba(212,175,55,0.4)",
+                    borderRadius: 10,
+                    fontSize: 16,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textAlign: "center",
+                  }}
+                >
+                  📊 Scan Barcode
+                </button>
+                <div style={{
+                  textAlign: 'center',
+                  fontSize: 12,
+                  color: 'rgba(212,175,55,0.6)',
+                  marginTop: 8,
+                }}>
+                  Point camera at barcode or type UPC below
+                </div>
                 <input
                   type="text"
-                  placeholder="Enter UPC/Barcode (or use camera below)"
+                  placeholder="Or type UPC manually"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && e.target.value.trim()) {
                       handleBarcodeSubmit(e.target.value.trim());
@@ -9366,31 +9562,18 @@ export default function App() {
                   }}
                   style={{
                     width: '100%',
-                    padding: '12px 16px',
-                    background: 'rgba(255,255,255,0.08)',
-                    border: '1px solid rgba(212,175,55,0.3)',
-                    borderRadius: 10,
+                    padding: '10px 14px',
+                    marginTop: 10,
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(212,175,55,0.25)',
+                    borderRadius: 8,
                     color: '#f4f4f4',
-                    fontSize: 15,
+                    fontSize: 14,
                     fontFamily: 'inherit',
                     textAlign: 'center',
                   }}
                 />
-                <div style={{
-                  textAlign: 'center',
-                  margin: '12px 0',
-                  color: 'rgba(212,175,55,0.6)',
-                  fontSize: 13,
-                  fontWeight: 600,
-                }}>
-                  ──── or ────
-                </div>
               </div>
-              <ScanZone
-                onFile={(e) => handleFile(e, "scan")}
-                inputRef={fileRef}
-                label="Tap to scan a comic"
-              />
               <button
                 onClick={() => bulkRef.current?.click()}
                 style={{
