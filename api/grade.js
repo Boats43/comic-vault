@@ -415,6 +415,21 @@ export default async function handler(req, res) {
 
   try {
     const body = req.body || {};
+
+    // FIX 4: Grade lock - skip Vision on HIGH confidence books
+    if (body.existingGrade &&
+        body.gradeConfidence === 'HIGH' &&
+        body.gradeLocked === true &&
+        !body.forceRegrade) {
+      console.log('[grade-lock] returning locked grade, skipping Vision');
+      return res.status(200).json({
+        ...body.existingGrade,
+        skipReason: 'grade_locked',
+        locked: true,
+        skippedVision: true,
+      });
+    }
+
     const { images, image } = body;
     if (!Array.isArray(images) || images.length === 0) {
       res.status(400).json({ error: "images array required" });

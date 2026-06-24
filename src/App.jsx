@@ -8017,6 +8017,11 @@ export default function App() {
           setPendingDuplicate(null);
         }
 
+        // FIX 4: Set grade lock on HIGH confidence
+        if (data.confidence?.toLowerCase() === 'high') {
+          data.gradeLocked = true;
+        }
+
         // Show the Claude result immediately.
         setResult({ ...data, issue: issueNum, image: b64 });
         setLoading(false);
@@ -8990,10 +8995,23 @@ export default function App() {
     const b64 = item.images[0];
 
     // Step 1: Re-grade with stored image
+    // FIX 4: Pass existing grade for lock check
     const gradeRes = await fetch("/api/grade", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ images: [b64] }),
+      body: JSON.stringify({
+        images: [b64],
+        existingGrade: {
+          grade: item.grade,
+          isGraded: item.isGraded,
+          numericGrade: item.numericGrade,
+          conditionSummary: item.conditionSummary,
+          confidence: item.confidence,
+        },
+        gradeConfidence: item.confidence?.toUpperCase(),
+        gradeLocked: item.gradeLocked || false,
+        forceRegrade: false,
+      }),
     });
     if (!gradeRes.ok) throw new Error("Failed to re-grade book");
     const gradeData = await gradeRes.json();
