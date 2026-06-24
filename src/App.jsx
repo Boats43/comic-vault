@@ -673,73 +673,52 @@ function ScanZone({ onFile, inputRef, compact, label, onBarcodeDetected }) {
 
           if (isValidComicBarcode(barcode)) {
             console.log('[barcode-scan] valid comic UPC, stopping scanner');
-            // Async stop to ensure cleanup completes
-            stopBarcodeScanning().then(() => {
-              if (onBarcodeDetected) {
-                onBarcodeDetected(barcode);
-              }
-            });
+            stopBarcodeScanning();
+            if (onBarcodeDetected) {
+              onBarcodeDetected(barcode);
+            }
           }
         }
       });
 
       // Fallback to Vision after 2s if no barcode found
-      barcodeTimeoutRef.current = setTimeout(async () => {
+      barcodeTimeoutRef.current = setTimeout(() => {
         console.log('[barcode-scan] timeout, falling back to Vision');
         setBarcodeHint('No barcode found, switching to cover scan...');
-
-        // CRITICAL: Stop ZXing and release stream BEFORE triggering file input
-        await stopBarcodeScanning();
-
-        // Wait 300ms to ensure camera is fully released
-        await new Promise(resolve => setTimeout(resolve, 300));
-
-        // Now trigger Vision file input
-        cameraRef.current?.click();
+        setTimeout(() => {
+          stopBarcodeScanning();
+          cameraRef.current?.click(); // trigger file input for Vision
+        }, 500);
       }, 2000);
 
     } catch (err) {
       console.error('[barcode-scan] error:', err);
-      // Ensure cleanup on error
-      await stopBarcodeScanning();
+      setScanningBarcode(false);
+      setBarcodeHint('');
       // Fallback to file input
       cameraRef.current?.click();
     }
   };
 
   // Stop barcode detection
-  const stopBarcodeScanning = async () => {
-    console.log('[barcode-scan] stopping scanner...');
-
+  const stopBarcodeScanning = () => {
     if (barcodeTimeoutRef.current) {
       clearTimeout(barcodeTimeoutRef.current);
-      barcodeTimeoutRef.current = null;
     }
 
-    // CRITICAL: Reset ZXing first
     if (codeReaderRef.current) {
-      try {
-        await codeReaderRef.current.reset();
-      } catch (err) {
-        console.warn('[barcode-scan] reset error:', err);
-      }
+      codeReaderRef.current.reset();
       codeReaderRef.current = null;
     }
 
-    // CRITICAL: Release video stream tracks
     if (videoRef.current?.srcObject) {
       const stream = videoRef.current.srcObject;
-      const tracks = stream.getTracks();
-      tracks.forEach(track => {
-        track.stop();
-        console.log('[barcode-scan] stopped track:', track.kind);
-      });
+      stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
 
     setScanningBarcode(false);
     setBarcodeHint('');
-    console.log('[barcode-scan] scanner stopped');
   };
 
   // Cleanup on unmount
@@ -780,7 +759,7 @@ function ScanZone({ onFile, inputRef, compact, label, onBarcodeDetected }) {
           />
         </div>
         <button
-          onClick={() => stopBarcodeScanning()}
+          onClick={stopBarcodeScanning}
           style={{
             marginTop: 12,
             padding: '8px 16px',
