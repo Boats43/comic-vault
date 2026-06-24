@@ -479,6 +479,63 @@ const detectTitleContamination = (title, context = {}) => {
 };
 
 // SPEED-2a — Export for metadata endpoint
+// TRACK A: ComicVine UPC/barcode lookup
+export const lookupComicVineByUPC = async (upc) => {
+  if (!process.env.COMICVINE_API_KEY || !upc) return null;
+  try {
+    const url =
+      `https://comicvine.gamespot.com/api/issues/?api_key=${encodeURIComponent(process.env.COMICVINE_API_KEY)}` +
+      `&format=json&filter=upc:${encodeURIComponent(upc)}` +
+      `&field_list=id,name,issue_number,cover_date,volume,upc`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+    const res = await fetch(url, {
+      headers: { "User-Agent": "ComicVault/1.0" },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!res.ok) return null;
+    const json = await res.json();
+    const results = Array.isArray(json?.results) ? json.results : [];
+
+    if (results.length === 0) {
+      console.log(`[cv-upc] no results for UPC: ${upc}`);
+      return null;
+    }
+
+    // Take first match (UPC should be unique)
+    const issue = results[0];
+    const title = issue?.volume?.name || issue?.name || null;
+    const issueNumber = issue?.issue_number || null;
+    const coverDate = issue?.cover_date || null;
+    const year = coverDate ? coverDate.slice(0, 4) : null;
+    const publisher = issue?.volume?.publisher?.name || null;
+
+    console.log(`[cv-upc] found: ${title} #${issueNumber} (${year}) - ${publisher}`);
+
+    return {
+      title,
+      issue: issueNumber,
+      year,
+      publisher,
+      upc,
+      volume: issue.volume,
+      cvIssueId: issue.id,
+    };
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      console.log('[cv-upc] timeout after 3s');
+    } else {
+      console.error(`[cv-upc] error: ${err?.message || err}`);
+    }
+    return null;
+  }
+};
+
 export const lookupComicVine = async ({ title, issue, year, publisher }) => {
   if (!process.env.COMICVINE_API_KEY || !title) return null;
   try {
@@ -1479,11 +1536,34 @@ export default async function handler(req, res) {
       certNumber,
       assetType,
       author,  // Session 4B — book identity field from BOOK_PROMPT
+      barcode,  // TRACK A — UPC/barcode scan
     } = req.body || {};
+
+    // TRACK A: Barcode bypass - lookup identity from ComicVine UPC
+    let barcodeIdentity = null;
+    if (barcode) {
+      mark('barcode_lookup_start');
+      barcodeIdentity = await lookupComicVineByUPC(barcode);
+      mark('barcode_lookup_complete');
+      if (!barcodeIdentity) {
+        console.log('[barcode] UPC not found:', barcode);
+        res.status(404).json({ error: "Barcode not found in ComicVine database" });
+        return;
+      }
+      // Inject barcode identity into pipeline
+      console.log('[barcode] identity resolved:', barcodeIdentity.title, '#' + barcodeIdentity.issue);
+    }
+
+    // Use barcode identity if available, otherwise use Vision data
+    const effectiveTitle = barcodeIdentity?.title || title;
+    const effectiveIssue = barcodeIdentity?.issue || issue;
+    const effectiveYear = barcodeIdentity?.year || year;
+    const effectivePublisher = barcodeIdentity?.publisher || rawPublisher;
+
     // Strip brackets/quotes/slashes before anything downstream sees the
     // publisher — parens in "Hollywood Comics (Walt Disney)" break eBay's
     // query parser and cause ComicVine's substring scoring to miss.
-    const publisher = cleanPublisher(rawPublisher) || null;
+    const publisher = cleanPublisher(effectivePublisher) || null;
 
     // Ship #1.3 — Edition warning detection (reprint/facsimile/later-print).
     // Scans Vision's reason text for reprint signals. When detected, comp pool
@@ -1493,9 +1573,9 @@ export default async function handler(req, res) {
       console.log('[edition-gate] detected:', editionWarning.signals.join(', '));
     }
 
-    const titleLower = (title || "").toLowerCase();
-    if (!title || titleLower.includes("not a comic") || titleLower === "unknown") {
-      console.log("[enrich] rejected non-comic:", title);
+    const titleLower = (effectiveTitle || "").toLowerCase();
+    if (!effectiveTitle || (!barcodeIdentity && (titleLower.includes("not a comic") || titleLower === "unknown"))) {
+      console.log("[enrich] rejected non-comic:", effectiveTitle);
       res.status(400).json({ error: "Not a comic book" });
       return;
     }
@@ -1601,18 +1681,31 @@ export default async function handler(req, res) {
     // Ship 3B.3 — calculateTitleOverlap now in identityCore.js
 
     // Ship 3B.3 — Identity resolution now in identityCore.js
-    const identity = resolveIdentity(
-      { title, issue: issueNum, year, publisher },
-      visualConsensus,
-      familyCandidate,
-      { ebayResultCount: visualResult?.items?.length || 0, overlapThreshold: 0.2 }
-    );
+    // TRACK A: Skip identity resolution for barcode scans (100% certain)
+    let identity, confirmedTitle, confirmedIssue, confirmedYear, confirmedPublisher, identitySource;
 
-    let confirmedTitle = identity.confirmedTitle;
-    let confirmedIssue = identity.confirmedIssue;
-    let confirmedYear = identity.confirmedYear;
-    let confirmedPublisher = identity.confirmedPublisher;
-    let identitySource = identity.identitySource;
+    if (barcodeIdentity) {
+      // Barcode provides authoritative identity
+      confirmedTitle = barcodeIdentity.title;
+      confirmedIssue = barcodeIdentity.issue;
+      confirmedYear = barcodeIdentity.year;
+      confirmedPublisher = barcodeIdentity.publisher;
+      identitySource = 'barcode';
+      console.log('[barcode] identity locked:', confirmedTitle, '#' + confirmedIssue);
+    } else {
+      // Standard Vision-based identity resolution
+      identity = resolveIdentity(
+        { title: effectiveTitle, issue: issueNum, year: effectiveYear, publisher },
+        visualConsensus,
+        familyCandidate,
+        { ebayResultCount: visualResult?.items?.length || 0, overlapThreshold: 0.2 }
+      );
+      confirmedTitle = identity.confirmedTitle;
+      confirmedIssue = identity.confirmedIssue;
+      confirmedYear = identity.confirmedYear;
+      confirmedPublisher = identity.confirmedPublisher;
+      identitySource = identity.identitySource;
+    }
 
     mark('phase1_complete');
 

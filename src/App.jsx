@@ -8280,6 +8280,48 @@ export default function App() {
     if (which === "buyer" && buyerFileRef.current) buyerFileRef.current.value = "";
   };
 
+  // TRACK A: Barcode submit handler
+  const handleBarcodeSubmit = async (barcode) => {
+    if (!barcode) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      // Skip Vision entirely - go straight to enrich with barcode
+      const enrichRes = await fetch("/api/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          barcode,
+          title: "Barcode scan",  // placeholder
+          skipVision: true,
+        }),
+      });
+      if (!enrichRes.ok) throw new Error("Barcode lookup failed");
+      const enrichData = await enrichRes.json();
+
+      if (!enrichData.title || enrichData.identitySource !== 'barcode') {
+        throw new Error("Barcode not found in ComicVine database");
+      }
+
+      // Show result with barcode-derived identity
+      setResult({
+        ...enrichData,
+        identitySource: 'barcode',
+        gradeLocked: true,
+      });
+
+      // Save to catalogue
+      const savedId = await addToCatalogue(enrichData, null);
+      console.log('[barcode] saved:', savedId);
+
+    } catch (err) {
+      setError(err.message || "Barcode scan failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleBulkImport = useCallback(async (files) => {
     setBulkDone(null);
     setBulkProgress({ current: 1, total: files.length, title: "" });
@@ -9306,6 +9348,43 @@ export default function App() {
                   animation: "pulse-dot 2s ease-in-out infinite",
                 }} />
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#16a34a" }}>Scanner ready</span>
+              </div>
+              {/* TRACK A: Barcode input */}
+              <div style={{
+                maxWidth: 420,
+                margin: "0 auto 16px",
+                padding: "0 20px",
+              }}>
+                <input
+                  type="text"
+                  placeholder="Enter UPC/Barcode (or use camera below)"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.target.value.trim()) {
+                      handleBarcodeSubmit(e.target.value.trim());
+                      e.target.value = '';
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(212,175,55,0.3)',
+                    borderRadius: 10,
+                    color: '#f4f4f4',
+                    fontSize: 15,
+                    fontFamily: 'inherit',
+                    textAlign: 'center',
+                  }}
+                />
+                <div style={{
+                  textAlign: 'center',
+                  margin: '12px 0',
+                  color: 'rgba(212,175,55,0.6)',
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}>
+                  ──── or ────
+                </div>
               </div>
               <ScanZone
                 onFile={(e) => handleFile(e, "scan")}
