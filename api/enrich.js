@@ -2278,7 +2278,8 @@ export default async function handler(req, res) {
     const pcSales = pcSalesResult || { soldComps: [], salesByGrade: {} };
     mark('comps_fetched');
 
-    // Ship #28a COMMIT 3: Run conflict detection after all data sources assembled
+    // Ship #28b FIX 1: Run conflict detection BEFORE AI to gate AI calls
+    // Order: comps → conflicts → (gate AI on conflicts) → AI verify → claudeCheck
     const identityConflicts = detectIdentityConflicts(
       { title, issue: issueNum, year, publisher },  // Vision
       visualConsensus,  // eBay
@@ -2299,9 +2300,9 @@ export default async function handler(req, res) {
       // Pricing conflicts added after sold/active medians computed
     ];
 
-    // Log conflicts for Ship #28a observation
+    // Log conflicts
     console.log(
-      '[ship28a-conflicts]',
+      '[ship28b-conflicts]',
       JSON.stringify({
         title: title || '?',
         issue: issueNum || '?',
@@ -2310,7 +2311,7 @@ export default async function handler(req, res) {
       })
     );
 
-    // Store conflicts on out object (not used to gate AI yet)
+    // Store conflicts on out object
     out.conflicts = allConflicts;
 
     // AI verification pass on the comps that will be displayed. Verifies
@@ -2322,12 +2323,12 @@ export default async function handler(req, res) {
     // check downstream can skip rather than read compsFromEbay.average
     // (which still holds the contaminated pre-verify mean).
     // Session 4B — SKIP for books. AI verify matches issue+series; books have no issues.
-    // P0-B — Gate AI comp verify on refresh (skipClaudeCheck flag).
-    // This Haiku call fires on EVERY enrich when comps exist, burning ~600 tokens
-    // per refresh with zero new information (comps don't change between refreshes).
-    // Same gate pattern as claudeCheck: skip on refresh, re-use from initial scan.
+    // Ship #28b FIX 1: Gate AI comp verify on conflicts
+    // Zero conflicts = deterministic data, skip AI entirely
+    // Has conflicts = needs AI verification to resolve
     let compsExhausted = false;
-    const shouldRunAIVerify = !req.body?.skipClaudeCheck &&
+    const shouldRunAIVerify = allConflicts.length > 0 &&
+                               !req.body?.skipClaudeCheck &&
                                out.assetType !== 'book' &&
                                rawComps &&
                                Array.isArray(rawComps.recentSales) &&
@@ -4255,10 +4256,14 @@ export default async function handler(req, res) {
       // Use cached result from initial scan — zero AI calls on refresh
       claudeCheck = req.body.claudeCheckCached;
       console.log('[claude-check] using cached result — skip AI call (refresh)');
-    } else if (!isRefresh) {
-      // Initial scan only — fire AI verify
+    } else if (!isRefresh && out.conflicts && out.conflicts.length > 0) {
+      // Ship #28b FIX 1: Only fire AI when conflicts exist
       claudeCheck = await runClaudeCheck(claudeCheckData);
-      console.log('[claude-check] initial scan — AI call fired');
+      console.log('[claude-check] conflicts detected — AI call fired');
+    } else if (!isRefresh && (!out.conflicts || out.conflicts.length === 0)) {
+      // Ship #28b: Zero conflicts = deterministic pricing, skip AI
+      claudeCheck = { verified: true, skipReason: 'no_conflicts' };
+      console.log('[claude-check] zero conflicts — skip AI call (deterministic)');
     } else {
       // Refresh but no cached result available — skip entirely
       claudeCheck = null;
