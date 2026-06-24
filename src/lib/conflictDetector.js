@@ -30,7 +30,10 @@ export const detectIdentityConflicts = (vision, ebay, comicVine, priceCharting) 
     const overlap = visionTokens.filter(t => ebayTokens.includes(t)).length;
     const overlapRatio = visionTokens.length > 0 ? overlap / visionTokens.length : 0;
 
-    if (overlapRatio < 0.5) {
+    // Ship #28a: Require BOTH < 50% overlap AND low eBay agreement to flag
+    // Abbreviations like "LOTDK" vs "Legends of the Dark Knight" should pass
+    // when eBay agreement is decent (≥0.7 = sellers know what they're listing)
+    if (overlapRatio < 0.5 && ebay.agreement < 0.7) {
       conflicts.push({
         type: 'TITLE_FAMILY_MISMATCH',
         severity: 'CRITICAL',
