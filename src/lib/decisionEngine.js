@@ -458,6 +458,30 @@ export function computeDecision(item, context = {}) {
   const keyCharacters = item.keyCharacters || [];
   const hasAutoKey = autoDetectedKey && keyCharacters.length > 0;
 
+  // BUILD 2: Market velocity routing from GoCollect
+  // Answers "who's the next buyer" — the 2026 market question
+  const gcVelocity = item.goCollect?.velocity; // 'HIGH' | 'MEDIUM' | 'LOW' | null
+  const gcTrend = item.goCollect?.trend;       // 'UP' | 'FLAT' | 'DOWN' | null
+  const gcDaysToSell = item.goCollect?.daysToSell; // average days to sell
+
+  // Classify market temperature
+  const isHotMarket = gcVelocity === 'HIGH' || gcVelocity === 'FAST';
+  const isColdMarket = gcVelocity === 'LOW' || gcVelocity === 'SLOW' || gcVelocity === 'NONE';
+  const isTrendingUp = gcTrend === 'UP' || gcTrend === 'RISING' || gcTrend === 'BULLISH';
+  const isTrendingDown = gcTrend === 'DOWN' || gcTrend === 'FALLING' || gcTrend === 'BEARISH';
+  const isStale = gcDaysToSell && gcDaysToSell > 60; // Takes >2 months to sell
+
+  decision.evidence.marketVelocity = {
+    velocity: gcVelocity,
+    trend: gcTrend,
+    daysToSell: gcDaysToSell,
+    isHot: isHotMarket,
+    isCold: isColdMarket,
+    trendingUp: isTrendingUp,
+    trendingDown: isTrendingDown,
+    isStale: isStale
+  };
+
   // FIX 3: CGC grading upside detection (cost-aware, target-grade)
   // BUILD 1: Lower threshold for auto-detected keys (higher grading priority)
   const CGC_ALL_IN_COST = 75; // grading + press, economy tier
@@ -568,9 +592,54 @@ export function computeDecision(item, context = {}) {
     return decision;
   }
 
+  // BUILD 2: Market velocity routing
+  // Route based on GoCollect velocity + trend signals
+  if (isColdMarket && isTrendingDown && item.price < 15) {
+    // Cold + trending down → bundle or hold
+    decision.action = 'LIST_LOW';
+    decision.confidence = 'low';
+    decision.reason = 'Cold market (low velocity, trending down) — bundle or wait';
+    decision.nextStep = 'Bundle with similar books or hold for market recovery';
+    decision.price = item.price * 0.7; // Deep discount for cold market
+    decision.warnings.push('cold-market-velocity');
+    decision.bestChannel = computeBestChannel(decision, item);
+    return decision;
+  }
+
+  if (gcVelocity === 'NONE' || (isColdMarket && isStale)) {
+    // No market activity or very slow → research
+    decision.action = 'RESEARCH';
+    decision.confidence = 'low';
+    decision.reason = 'No market velocity detected — verify demand before listing';
+    decision.nextStep = 'Check recent sales and adjust expectations';
+    decision.price = item.price;
+    decision.warnings.push('zero-velocity');
+    decision.bestChannel = computeBestChannel(decision, item);
+    return decision;
+  }
+
   // Clean book - LIST_NOW at market
   decision.action = 'LIST_NOW';
   decision.confidence = 'high';
+
+  // BUILD 2: Adjust pricing band based on velocity + trend
+  if (isHotMarket && isTrendingUp) {
+    // Hot market + trending up → aggressive pricing (stretch band)
+    decision.confidence = 'high';
+    decision.reason = 'Hot market (high velocity, trending up) — list at stretch band';
+    decision.nextStep = 'List aggressively — strong buyer demand';
+    decision.warnings.push('hot-market-velocity'); // Positive warning
+  } else if (isHotMarket) {
+    // Hot market + flat trend → market pricing
+    decision.confidence = 'high';
+    decision.reason = 'Active market (high velocity) — list at market band';
+    decision.nextStep = 'List at market price — steady demand';
+  } else if (isTrendingUp && !isColdMarket) {
+    // Warming market → optimistic pricing
+    decision.confidence = 'high';
+    decision.reason = 'Trending up — list at market-to-stretch band';
+    decision.nextStep = 'Market gaining momentum — price optimistically';
+  }
 
   // v1-C: Cap confidence at medium when zero verified sold comps
   // Active comps may pass verification, but without sold confirmation we cap confidence
