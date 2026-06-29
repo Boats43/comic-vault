@@ -9416,16 +9416,18 @@ export default function App() {
 
           {!loading && !result && !error && !bulkProgress && bulkDone == null && (
             <>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "8px 0 4px" }}>
-                <div style={{
-                  width: 8, height: 8, borderRadius: "50%", background: "#16a34a",
-                  boxShadow: "0 0 6px #16a34a, 0 0 12px rgba(22,163,106,0.4)",
-                  animation: "pulse-dot 2s ease-in-out infinite",
-                }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#16a34a" }}>Scanner ready</span>
+              {/* Scanner ready indicator - compact, top right */}
+              <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 20px 8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{
+                    width: 6, height: 6, borderRadius: "50%", background: "#16a34a",
+                    boxShadow: "0 0 4px #16a34a",
+                  }} />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "#16a34a", opacity: 0.8 }}>Ready</span>
+                </div>
               </div>
 
-              {/* Separate barcode scanner - completely isolated from Vision camera */}
+              {/* Barcode scanner modal */}
               {showBarcodeScanner && (
                 <BarcodeScanner
                   onDetected={(barcode) => {
@@ -9436,30 +9438,38 @@ export default function App() {
                 />
               )}
 
-              {/* Section 1: Vision Cover Scan (UNCHANGED) */}
-              <ScanZone
-                onFile={(e) => handleFile(e, "scan")}
-                inputRef={fileRef}
-                label="📷 Scan Cover"
-              />
+              {/* Clean 3-option layout */}
+              <div style={{ maxWidth: 420, margin: "0 auto", padding: "0 20px" }}>
+                {/* Option 1: Scan Cover */}
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    padding: "16px",
+                    background: "transparent",
+                    color: "#d4af37",
+                    border: "2px solid rgba(212,175,55,0.4)",
+                    borderRadius: 10,
+                    fontSize: 16,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textAlign: "center",
+                    marginBottom: 12,
+                  }}
+                >
+                  📷 Scan Cover
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => handleFile(e, "scan")}
+                  hidden
+                />
 
-              {/* Divider */}
-              <div style={{
-                textAlign: 'center',
-                margin: '16px 0',
-                color: 'rgba(212,175,55,0.5)',
-                fontSize: 13,
-                fontWeight: 600,
-              }}>
-                ──── or ────
-              </div>
-
-              {/* Section 2: Barcode Scan (isolated from Vision) */}
-              <div style={{
-                maxWidth: 420,
-                margin: "0 auto 16px",
-                padding: "0 20px",
-              }}>
+                {/* Option 2: Scan Barcode */}
                 <button
                   onClick={() => setShowBarcodeScanner(true)}
                   style={{
@@ -9474,21 +9484,53 @@ export default function App() {
                     fontWeight: 600,
                     cursor: "pointer",
                     textAlign: "center",
+                    marginBottom: 12,
                   }}
                 >
                   📊 Scan Barcode
                 </button>
+
+                {/* Option 3: Search by Title */}
+                <button
+                  onClick={() => {
+                    // Future: expand inline manual entry form
+                    // For now: just focus the text input
+                    const input = document.querySelector('input[placeholder*="UPC"]');
+                    if (input) input.focus();
+                  }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    padding: "16px",
+                    background: "transparent",
+                    color: "#d4af37",
+                    border: "2px solid rgba(212,175,55,0.4)",
+                    borderRadius: 10,
+                    fontSize: 16,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textAlign: "center",
+                    marginBottom: 20,
+                  }}
+                >
+                  ✏️ Search by Title
+                </button>
+
+                {/* Divider */}
                 <div style={{
                   textAlign: 'center',
+                  margin: '0 0 16px',
+                  color: 'rgba(212,175,55,0.4)',
                   fontSize: 12,
-                  color: 'rgba(212,175,55,0.6)',
-                  marginTop: 8,
+                  fontWeight: 600,
                 }}>
-                  Point camera at barcode or type UPC below
+                  ───── or ─────
                 </div>
+
+                {/* Text input for UPC/title */}
                 <input
                   type="text"
-                  placeholder="Or type UPC manually"
+                  placeholder="Enter UPC barcode..."
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && e.target.value.trim()) {
                       handleBarcodeSubmit(e.target.value.trim());
@@ -9497,8 +9539,7 @@ export default function App() {
                   }}
                   style={{
                     width: '100%',
-                    padding: '10px 14px',
-                    marginTop: 10,
+                    padding: '12px 16px',
                     background: 'rgba(255,255,255,0.05)',
                     border: '1px solid rgba(212,175,55,0.25)',
                     borderRadius: 8,
@@ -9506,41 +9547,42 @@ export default function App() {
                     fontSize: 14,
                     fontFamily: 'inherit',
                     textAlign: 'center',
+                    marginBottom: 16,
                   }}
                 />
+
+                {/* Bulk import */}
+                <button
+                  onClick={() => bulkRef.current?.click()}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    padding: "12px 16px",
+                    background: "transparent",
+                    color: "#d4af37",
+                    border: "1px solid rgba(212,175,55,0.3)",
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textAlign: "center",
+                  }}
+                >
+                  📚 Bulk Import from Gallery
+                </button>
+                <input
+                  ref={bulkRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || []);
+                    if (bulkRef.current) bulkRef.current.value = "";
+                    if (files.length > 0) handleBulkImport(files);
+                  }}
+                  hidden
+                />
               </div>
-              <button
-                onClick={() => bulkRef.current?.click()}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  maxWidth: 420,
-                  margin: "12px auto 0",
-                  padding: "12px 16px",
-                  background: "transparent",
-                  color: "#d4af37",
-                  border: "1px solid rgba(212,175,55,0.4)",
-                  borderRadius: 10,
-                  fontSize: 15,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  textAlign: "center",
-                }}
-              >
-                📚 Bulk Import from Gallery
-              </button>
-              <input
-                ref={bulkRef}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={(e) => {
-                  const files = Array.from(e.target.files || []);
-                  if (bulkRef.current) bulkRef.current.value = "";
-                  if (files.length > 0) handleBulkImport(files);
-                }}
-                hidden
-              />
             </>
           )}
           {loading && !bulkProgress && (
