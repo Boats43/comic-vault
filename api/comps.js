@@ -13,10 +13,8 @@
 
 // Issue 6 — Shared grade utilities for numeric extraction
 import { extractNumericFromGrade } from '../src/lib/gradeUtils.js';
-
-// FIX 5: In-memory comps cache (6hr TTL)
-const _compsCache = new Map();
-const COMPS_TTL = 6 * 60 * 60 * 1000;  // 6 hours
+// FIX 3 — Vercel KV persistent cache (replaces in-memory Map)
+import { kvGet, kvSet, KV_TTL } from './kv-cache.js';
 
 // Comp hygiene primitives extracted Ship #20a.6 to src/lib/compHygiene.js
 // for reuse by sold-comp verification (src/lib/soldVerification.js).
@@ -1615,13 +1613,11 @@ export default async function handler(req, res) {
       return;
     }
 
-    // FIX 5: Check cache before eBay call
+    // FIX 3 — KV cache check before eBay call
     const cacheKey = `comps:${title}:${issue || 'null'}:${grade || 'null'}`;
-    const now = Date.now();
-    const cached = _compsCache.get(cacheKey);
-    if (cached && (now - cached.ts) < COMPS_TTL) {
-      console.log('[comps-cache] HIT', cacheKey);
-      return res.status(200).json(cached.data);
+    const cached = await kvGet(`bc:${cacheKey}`);
+    if (cached) {
+      return res.status(200).json(cached);
     }
 
     const comps = await fetchComps({
@@ -1635,9 +1631,8 @@ export default async function handler(req, res) {
       certId: EBAY_CERT_ID,
     });
 
-    // FIX 5: Cache successful result
-    _compsCache.set(cacheKey, { data: comps, ts: now });
-    console.log('[comps-cache] SET', cacheKey);
+    // FIX 3 — Cache successful result
+    await kvSet(`bc:${cacheKey}`, comps, KV_TTL.BROWSE);
 
     res.status(200).json(comps);
   } catch (err) {

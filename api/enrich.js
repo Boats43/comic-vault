@@ -98,19 +98,10 @@ import { extractConfirmedVariant } from "../src/lib/variantIdentity.js";
 import { detectEditionWarning } from "./grade.js";
 // Session 4B — Import book signal detection from shared classifier
 import { detectBookSignals } from "../src/lib/categoryClassifier.js";
+// FIX 3 — Vercel KV persistent cache (replaces in-memory Map caches)
+import { kvGet, kvSet, KV_TTL } from "./kv-cache.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-// Session 6/20/26 — In-memory request cache (5-min → 24h).
-// CV/PC data is stable (story/creators/price ladder change rarely, not per-scan).
-// 24h cache = 95% reduction in CV/PC API calls. Watch Mode still benefits (cache HIT faster).
-const _cvCache = new Map();  // key: title|issue|publisher → { data, expires }
-const _pcCache = new Map();  // key: title|issue → { data, expires }
-const _goCollectCache = new Map();  // key: title|issue → { data, expires }
-const _activeCompsCache = new Map();  // key: cleanTitle|issue → { data, expires }
-const CV_PC_TTL = 24 * 60 * 60 * 1000;  // 24 hours (was 5 min)
-const GC_TTL = 24 * 60 * 60 * 1000;  // 24 hours (FMV changes monthly)
-const ACTIVE_COMPS_TTL = 60 * 60 * 1000;  // 1 hour (listings change hourly)
 
 
 // Marvel test-market price-variant allowlists. Vision labels any 35¢ /
@@ -1857,25 +1848,22 @@ export default async function handler(req, res) {
     const now = Date.now();
 
     const [comicVine, priceChartingInitial, cgcResult] = await Promise.all([
+      // FIX 3 — ComicVine KV cache (persistent across cold starts)
       (async () => {
-        const cached = _cvCache.get(cvKey);
-        if (cached && cached.expires > now) {
-          console.log(`[cache-hit] ComicVine: ${cvKey}`);
-          return cached.data;
-        }
+        const kvKey = `cv:${cvKey}`;
+        const cached = await kvGet(kvKey);
+        if (cached) return cached;
         const result = await lookupComicVine({ title: cleanedCVTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }).catch(() => null);
-        _cvCache.set(cvKey, { data: result, expires: now + CV_PC_TTL });
+        await kvSet(kvKey, result, KV_TTL.CV);
         return result;
       })(),
-      // lookupXimilar({ images, title, confidence }), // REMOVED — fetched but never used for identity/pricing (-200ms)
+      // FIX 3 — PriceCharting KV cache (persistent across cold starts)
       (async () => {
-        const cached = _pcCache.get(pcKey);
-        if (cached && cached.expires > now) {
-          console.log(`[cache-hit] PriceCharting: ${pcKey}`);
-          return cached.data;
-        }
+        const kvKey = `pc:${pcKey}`;
+        const cached = await kvGet(kvKey);
+        if (cached) return cached;
         const result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null);
-        _pcCache.set(pcKey, { data: result, expires: now + CV_PC_TTL });
+        await kvSet(kvKey, result, KV_TTL.PC);
         return result;
       })(),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
@@ -2287,8 +2275,8 @@ export default async function handler(req, res) {
         : process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? (async () => {
             const activeKey = `${confirmedTitle}|${correctedIssue}`;
-            const cached = _activeCompsCache.get(activeKey);
-            if (cached && cached.expires > now) {
+            const cached = await kvGet(`ac:${activeKey}`);
+            if (cached) {
               console.log(`[active-cache] HIT: ${activeKey}`);
               return cached.data;
             }
@@ -2318,7 +2306,7 @@ export default async function handler(req, res) {
               console.error(`[enrich] comps error: ${err?.message || err}`);
               return null;
             });
-            _activeCompsCache.set(activeKey, { data: result, expires: now + ACTIVE_COMPS_TTL });
+            await kvSet(`ac:${activeKey}`, result, KV_TTL.ACTIVE);
             console.log(`[active-cache] MISS: ${activeKey}`);
             return result;
           })()
@@ -2347,16 +2335,14 @@ export default async function handler(req, res) {
       // approval lights it up without re-wiring. Ship #20a sources sold
       // data from PriceCharting instead (pcSalesResult below).
       fetchSold({ title, issue: correctedIssue, year: confirmedYear }).catch(() => []),
+      // FIX 3 — GoCollect KV cache (persistent across cold starts)
       (async () => {
         const gcKey = `${title}|${correctedIssue}`;
-        const cached = _goCollectCache.get(gcKey);
-        if (cached && cached.expires > now) {
-          console.log(`[gocollect-cache] HIT: ${gcKey}`);
-          return cached.data;
-        }
+        const kvKey = `gc:${gcKey}`;
+        const cached = await kvGet(kvKey);
+        if (cached) return cached;
         const result = await lookupGoCollect({ title, issue: correctedIssue, year: confirmedYear, publisher }).catch(() => null);
-        _goCollectCache.set(gcKey, { data: result, expires: now + GC_TTL });
-        console.log(`[gocollect-cache] MISS: ${gcKey}`);
+        await kvSet(kvKey, result, KV_TTL.GC);
         return result;
       })(),
       priceCharting?.id

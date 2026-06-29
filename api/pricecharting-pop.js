@@ -19,17 +19,16 @@
 // an empty soldComps array. Indie books, new products, PC outages, or
 // HTML schema drift never break the enrich pipeline.
 
-// ───────────────────────── shared HTML fetch + cache ─────────────────────────
+// FIX 3 — Vercel KV persistent cache (replaces in-memory Map)
+import { kvGet, kvSet, KV_TTL } from './kv-cache.js';
 
-const HTML_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (was 24h) — stable books don't change weekly
-const htmlCache = new Map();
+// ───────────────────────── shared HTML fetch + cache ─────────────────────────
 
 const fetchPCProductHtml = async (productId) => {
   if (!productId) return null;
-  const cached = htmlCache.get(productId);
-  if (cached && Date.now() - cached.ts < HTML_CACHE_TTL_MS) {
-    return cached.html;
-  }
+  // FIX 3 — KV cache returns HTML directly (no wrapper object)
+  const cached = await kvGet(`ph:${productId}`);
+  if (cached) return cached;
   try {
     const url = `https://www.pricecharting.com/game/${productId}`;
     const res = await fetch(url, { redirect: "follow" });
@@ -38,7 +37,7 @@ const fetchPCProductHtml = async (productId) => {
       return null;
     }
     const html = await res.text();
-    htmlCache.set(productId, { ts: Date.now(), html });
+    await kvSet(`ph:${productId}`, html, KV_TTL.PC_HTML);
     return html;
   } catch (err) {
     console.error(`[pc-html] fetch error id=${productId}: ${err?.message || err}`);
