@@ -2626,22 +2626,43 @@ export default async function handler(req, res) {
       );
     }
 
+    // BUILD 3: Recency-weighted pricing for sold comps
+    // Weight recent sales 3× more than 90d+ stale sales
+    const { computeRecencyWeightedPrice } = await import('../src/lib/pricingEngine.js');
+    const recencyWeighted = computeRecencyWeightedPrice(filteredSold);
+
     // Blended average: weight sold comps (60%) + active comps (40%).
-    const soldPrices = filteredSold
-      .map(s => typeof s.price === 'number' ? s.price : parseFloat(String(s.price || '0').replace(/[$,]/g, '')))
-      .filter(p => p > 0);
-    const soldAvg = soldPrices.length > 0
-      ? soldPrices.reduce((a, b) => a + b, 0) / soldPrices.length
-      : null;
+    // BUILD 3: Use recency-weighted avg instead of flat avg for sold comps
+    const soldAvg = recencyWeighted.price; // BUILD 3: weighted instead of flat
     const activeAvg = rawComps?.average || null;
     let blendedAvg = null;
     if (soldAvg && activeAvg) {
       blendedAvg = (soldAvg * 0.6) + (activeAvg * 0.4);
-      console.log('[blend] sold:', soldAvg, 'active:', activeAvg, 'blended:', blendedAvg.toFixed(2));
+      console.log(
+        '[blend] sold:', soldAvg.toFixed(2),
+        `(recency: ${recencyWeighted.recencyDays}d, fresh:${recencyWeighted.weights.fresh} recent:${recencyWeighted.weights.recent} stale:${recencyWeighted.weights.stale})`,
+        'active:', activeAvg.toFixed(2),
+        'blended:', blendedAvg.toFixed(2)
+      );
     } else if (soldAvg) {
       blendedAvg = soldAvg * 1.1;
+      console.log('[blend] sold-only:', soldAvg.toFixed(2), `(recency: ${recencyWeighted.recencyDays}d)`);
     } else if (activeAvg) {
       blendedAvg = activeAvg;
+    }
+
+    // BUILD 3: Surface recency metadata
+    if (recencyWeighted.price) {
+      out.recencyWeighted = {
+        price: recencyWeighted.price,
+        recencyDays: recencyWeighted.recencyDays,
+        weights: recencyWeighted.weights,
+        note: recencyWeighted.recencyDays <= 30
+          ? `Price reflects last 30 days`
+          : recencyWeighted.recencyDays <= 60
+          ? `Price reflects last 60 days`
+          : `Price includes ${recencyWeighted.weights.stale} stale comps (90d+)`
+      };
     }
 
     // Ship #20b — Price bands (verified sold-first pricing).

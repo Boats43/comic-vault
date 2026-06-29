@@ -284,3 +284,74 @@ export const enforceFloorWithCap = (price, rawFloor, ceiling) => {
 
   return null;
 };
+
+/**
+ * BUILD 3: Recency-weighted pricing
+ * Weight sold comps by how recent they are (0-30d most valuable).
+ * More current than CovrPrice's flat averaging.
+ *
+ * Weights:
+ * - 0-30 days: ×3.0 (most recent market signal)
+ * - 31-60 days: ×1.5 (recent but aging)
+ * - 61-90 days: ×1.0 (baseline)
+ * - 91+ days: ×0.5 (stale, less relevant)
+ *
+ * Returns weighted average + recency metadata.
+ */
+export const computeRecencyWeightedPrice = (soldComps) => {
+  if (!Array.isArray(soldComps) || soldComps.length === 0) {
+    return { price: null, recencyDays: null, weights: {} };
+  }
+
+  const weights = {
+    fresh: 0,    // 0-30d
+    recent: 0,   // 31-60d
+    baseline: 0, // 61-90d
+    stale: 0     // 91+d
+  };
+
+  let weightedSum = 0;
+  let totalWeight = 0;
+  let mostRecentDays = 999;
+
+  for (const comp of soldComps) {
+    const price = comp.price;
+    const daysAgo = comp.daysAgo;
+
+    if (price == null || price <= 0) continue;
+    if (daysAgo == null) continue; // Skip comps without date
+
+    let weight = 1.0;
+    if (daysAgo <= 30) {
+      weight = 3.0;
+      weights.fresh++;
+    } else if (daysAgo <= 60) {
+      weight = 1.5;
+      weights.recent++;
+    } else if (daysAgo <= 90) {
+      weight = 1.0;
+      weights.baseline++;
+    } else {
+      weight = 0.5;
+      weights.stale++;
+    }
+
+    weightedSum += price * weight;
+    totalWeight += weight;
+    mostRecentDays = Math.min(mostRecentDays, daysAgo);
+  }
+
+  if (totalWeight === 0) {
+    return { price: null, recencyDays: null, weights };
+  }
+
+  const weightedAvg = weightedSum / totalWeight;
+
+  return {
+    price: weightedAvg,
+    recencyDays: mostRecentDays < 999 ? mostRecentDays : null,
+    weights,
+    count: soldComps.length,
+    weightedCount: totalWeight // Effective count after weighting
+  };
+};
