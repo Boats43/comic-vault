@@ -9112,7 +9112,7 @@ export default function App() {
     const b64 = item.images[0];
 
     // Step 1: Re-grade with stored image
-    // FIX 4: Pass existing grade for lock check
+    // FIX 2: Force regrade bypasses grade lock (user explicitly requested re-identification)
     const gradeRes = await fetch("/api/grade", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -9127,7 +9127,7 @@ export default function App() {
         },
         gradeConfidence: item.confidence?.toUpperCase(),
         gradeLocked: item.gradeLocked || false,
-        forceRegrade: false,
+        forceRegrade: true, // FIX 2: Bypass grade lock for explicit re-identification
       }),
     });
     if (!gradeRes.ok) throw new Error("Failed to re-grade book");
