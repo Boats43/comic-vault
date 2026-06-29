@@ -7576,6 +7576,10 @@ export default function App() {
   const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState(null);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualTitle, setManualTitle] = useState('');
+  const [manualIssue, setManualIssue] = useState('');
+  const [manualYear, setManualYear] = useState('');
   const [catalogue, setCatalogue] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [installPrompt, setInstallPrompt] = useState(null);
@@ -9492,17 +9496,12 @@ export default function App() {
 
                 {/* Option 3: Search by Title */}
                 <button
-                  onClick={() => {
-                    // Future: expand inline manual entry form
-                    // For now: just focus the text input
-                    const input = document.querySelector('input[placeholder*="UPC"]');
-                    if (input) input.focus();
-                  }}
+                  onClick={() => setShowManualEntry(!showManualEntry)}
                   style={{
                     display: "block",
                     width: "100%",
                     padding: "16px",
-                    background: "transparent",
+                    background: showManualEntry ? "rgba(212,175,55,0.1)" : "transparent",
                     color: "#d4af37",
                     border: "2px solid rgba(212,175,55,0.4)",
                     borderRadius: 10,
@@ -9510,11 +9509,142 @@ export default function App() {
                     fontWeight: 600,
                     cursor: "pointer",
                     textAlign: "center",
-                    marginBottom: 20,
+                    marginBottom: showManualEntry ? 12 : 20,
                   }}
                 >
                   ✏️ Search by Title
                 </button>
+
+                {/* Manual entry form (expandable) */}
+                {showManualEntry && (
+                  <div style={{
+                    background: 'rgba(212,175,55,0.05)',
+                    border: '1px solid rgba(212,175,55,0.2)',
+                    borderRadius: 8,
+                    padding: 16,
+                    marginBottom: 20,
+                  }}>
+                    <input
+                      type="text"
+                      placeholder="Title (e.g., Batman)"
+                      value={manualTitle}
+                      onChange={(e) => setManualTitle(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        marginBottom: 10,
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(212,175,55,0.25)',
+                        borderRadius: 6,
+                        color: '#f4f4f4',
+                        fontSize: 14,
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Issue # (e.g., 222)"
+                      value={manualIssue}
+                      onChange={(e) => setManualIssue(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        marginBottom: 10,
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(212,175,55,0.25)',
+                        borderRadius: 6,
+                        color: '#f4f4f4',
+                        fontSize: 14,
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Year (e.g., 1970)"
+                      value={manualYear}
+                      onChange={(e) => setManualYear(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        marginBottom: 12,
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(212,175,55,0.25)',
+                        borderRadius: 6,
+                        color: '#f4f4f4',
+                        fontSize: 14,
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    <button
+                      onClick={async () => {
+                        if (!manualTitle.trim() || !manualIssue.trim()) {
+                          setError('Title and Issue # are required');
+                          return;
+                        }
+                        setLoading(true);
+                        setError(null);
+                        setShowManualEntry(false);
+                        try {
+                          const enrichRes = await fetch('/api/enrich', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              manualIdentity: true,
+                              skipVision: true,
+                              skipImageSearch: true,
+                              title: manualTitle.trim(),
+                              issue: manualIssue.trim(),
+                              year: manualYear.trim() || null,
+                              publisher: null,
+                              grade: null,
+                              isGraded: false,
+                              confidence: 'HIGH',
+                              identitySource: 'manual',
+                            }),
+                          });
+                          if (!enrichRes.ok) {
+                            throw new Error(`Enrich failed: ${enrichRes.status}`);
+                          }
+                          const enrichData = await enrichRes.json();
+                          setResult({
+                            ...enrichData,
+                            title: enrichData.title || manualTitle.trim(),
+                            issue: enrichData.issue || manualIssue.trim(),
+                            year: enrichData.year || manualYear.trim() || null,
+                            identitySource: 'manual',
+                          });
+                          setManualTitle('');
+                          setManualIssue('');
+                          setManualYear('');
+                        } catch (err) {
+                          setError(err.message || 'Search failed');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      disabled={!manualTitle.trim() || !manualIssue.trim()}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        background: (!manualTitle.trim() || !manualIssue.trim())
+                          ? 'rgba(212,175,55,0.2)'
+                          : '#d4af37',
+                        color: (!manualTitle.trim() || !manualIssue.trim())
+                          ? 'rgba(212,175,55,0.5)'
+                          : '#000',
+                        border: 'none',
+                        borderRadius: 6,
+                        fontSize: 15,
+                        fontWeight: 600,
+                        cursor: (!manualTitle.trim() || !manualIssue.trim())
+                          ? 'not-allowed'
+                          : 'pointer',
+                      }}
+                    >
+                      Search →
+                    </button>
+                  </div>
+                )}
 
                 {/* Divider */}
                 <div style={{

@@ -1528,6 +1528,9 @@ export default async function handler(req, res) {
       assetType,
       author,  // Session 4B — book identity field from BOOK_PROMPT
       barcode,  // TRACK A — UPC/barcode scan
+      manualIdentity,  // FIX 4 — Manual text search (title/issue/year)
+      skipVision,      // FIX 4 — Skip Vision when manual identity provided
+      skipImageSearch, // FIX 4 — Skip eBay image search when manual
     } = req.body || {};
 
     // TRACK A: Barcode bypass - lookup identity from ComicVine UPC
@@ -1545,11 +1548,17 @@ export default async function handler(req, res) {
       console.log('[barcode] identity resolved:', barcodeIdentity.title, '#' + barcodeIdentity.issue);
     }
 
-    // Use barcode identity if available, otherwise use Vision data
-    const effectiveTitle = barcodeIdentity?.title || title;
-    const effectiveIssue = barcodeIdentity?.issue || issue;
-    const effectiveYear = barcodeIdentity?.year || year;
-    const effectivePublisher = barcodeIdentity?.publisher || rawPublisher;
+    // FIX 4: Manual identity bypass (user typed title/issue/year, no camera)
+    // Skip Vision + eBay image search, use provided fields as confirmed identity
+    if (manualIdentity) {
+      console.log('[manual] identity provided:', title, '#' + issue, year || 'no-year');
+    }
+
+    // Use barcode identity if available, manual if flagged, otherwise Vision data
+    const effectiveTitle = barcodeIdentity?.title || (manualIdentity ? title : title);
+    const effectiveIssue = barcodeIdentity?.issue || (manualIdentity ? issue : issue);
+    const effectiveYear = barcodeIdentity?.year || (manualIdentity ? year : year);
+    const effectivePublisher = barcodeIdentity?.publisher || (manualIdentity ? null : rawPublisher);
 
     // Strip brackets/quotes/slashes before anything downstream sees the
     // publisher — parens in "Hollywood Comics (Walt Disney)" break eBay's
@@ -1615,7 +1624,8 @@ export default async function handler(req, res) {
     }
 
     // Run eBay visual search alone to determine correct identity
-    const visualResult = visualBase64
+    // FIX 4: Skip image search when manual identity provided
+    const visualResult = (visualBase64 && !skipImageSearch)
       ? await lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null)
       : null;
 
@@ -1673,6 +1683,7 @@ export default async function handler(req, res) {
 
     // Ship 3B.3 — Identity resolution now in identityCore.js
     // TRACK A: Skip identity resolution for barcode scans (100% certain)
+    // FIX 4: Also skip for manual identity (user typed, no camera)
     let identity, confirmedTitle, confirmedIssue, confirmedYear, confirmedPublisher, identitySource;
 
     if (barcodeIdentity) {
@@ -1683,6 +1694,14 @@ export default async function handler(req, res) {
       confirmedPublisher = barcodeIdentity.publisher;
       identitySource = 'barcode';
       console.log('[barcode] identity locked:', confirmedTitle, '#' + confirmedIssue);
+    } else if (manualIdentity) {
+      // FIX 4: Manual identity (user typed title/issue/year)
+      confirmedTitle = effectiveTitle;
+      confirmedIssue = effectiveIssue;
+      confirmedYear = effectiveYear;
+      confirmedPublisher = effectivePublisher;
+      identitySource = 'manual';
+      console.log('[manual] identity locked:', confirmedTitle, '#' + confirmedIssue, confirmedYear || 'no-year');
     } else {
       // Standard Vision-based identity resolution
       identity = resolveIdentity(
