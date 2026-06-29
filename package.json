@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.86.1",
-    "@vercel/kv": "^3.0.0",
+    "@upstash/redis": "^1.38.0",
     "@zxing/browser": "^0.2.0",
     "jimp": "^0.22.12",
     "react": "^19.2.4",

@@ -17,27 +17,27 @@
 //   bc: — Browse comps
 //   ph: — PriceCharting HTML
 
-let kv = null;
+let redis = null;
 let kvUnavailable = false;
 let kvInitPromise = null;
 
-// Lazy-load KV client (only when first used)
+// Lazy-load Upstash Redis client (only when first used)
 const getKV = async () => {
   if (kvUnavailable) return null;
-  if (kv) return kv;
+  if (redis) return redis;
 
   // Prevent concurrent initialization
   if (kvInitPromise) return kvInitPromise;
 
   kvInitPromise = (async () => {
     try {
-      // Try to import @vercel/kv (may not exist locally)
-      const kvModule = await import('@vercel/kv');
-      kv = kvModule.kv;
-      console.log('[kv-cache] KV client initialized');
-      return kv;
+      // Upstash Redis SDK - reads KV_REST_API_URL + KV_REST_API_TOKEN from env
+      const { Redis } = await import('@upstash/redis');
+      redis = Redis.fromEnv();
+      console.log('[kv-cache] Upstash Redis client initialized');
+      return redis;
     } catch (err) {
-      console.warn('[kv-cache] KV client unavailable (local dev or not provisioned)');
+      console.warn('[kv-cache] Redis unavailable (local dev or not provisioned):', err.message);
       kvUnavailable = true;
       return null;
     }
