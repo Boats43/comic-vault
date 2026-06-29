@@ -534,23 +534,3 @@ export const fetchPricechartingSales = async (
     return { ...EMPTY_SALES_RESULT };
   }
 };
-
-// ───────────────────────── HTTP handler (calibration / debug) ────────────────
-
-// Default handler — exercises both extractors with one HTTP call so a
-// single curl can verify both pipelines without driving a full scan.
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
-  const { productId, grade } = req.body || {};
-  const [pop, sales] = await Promise.all([
-    fetchPricechartingPop(productId, grade),
-    fetchPricechartingSales(productId, grade),
-  ]);
-  res.status(200).json({
-    pop: pop || null,
-    sales: sales || { soldComps: [], salesByGrade: {} },
-  });
-}

@@ -156,14 +156,3 @@ export const lookupGoCollect = async ({ title, issue, year, publisher }) => {
     return null;
   }
 };
-
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
-
-  const { title, issue, year, publisher } = req.body || {};
-  const result = await lookupGoCollect({ title, issue, year, publisher });
-  res.status(200).json(result || { unavailable: true });
-}
