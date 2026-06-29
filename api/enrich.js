@@ -4828,28 +4828,11 @@ export default async function handler(req, res) {
       `warnings=${out.decision.warnings?.length || 0}`
     );
 
-    // SPEED-2a — Defer display-only metadata from initial response.
-    // Keep story/creators/pop/goCollect on server for Claude-check processing,
-    // but exclude from client response to reduce network transfer time.
-    // Client can request via /api/metadata endpoint.
-    const responseOut = { ...out };
-
-    // Remove display-only fields from client response
-    if (out.comicVine) {
-      const { description, personCredits, ...restCV } = out.comicVine;
-      responseOut.comicVine = restCV;
-    }
-    delete responseOut.pop;
-    delete responseOut.goCollect;
-
-    // Add metadata pending flag and IDs for metadata endpoint
-    responseOut.metadataPending = true;
-    responseOut.metadataIds = {
-      pcProductId: priceCharting?.id || null,
-      grade: grade || null,
-    };
-
-    res.status(200).json(responseOut);
+    // FIX 1 PHASE 2 — api/metadata.js merged into enrich.
+    // Return full enrichment including display-only fields (story, creators, pop, goCollect).
+    // Previously these were stripped and fetched via separate /api/metadata call (SPEED-2a).
+    // Eliminates duplicate CV/PC/GoCollect API calls and second HTTP round-trip.
+    res.status(200).json(out);
   } catch (err) {
     // Ship 6 debug — log full error and stack trace to Vercel logs.
     // Without this, 500s appear in production with no diagnostic info.

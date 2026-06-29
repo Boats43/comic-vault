@@ -7618,74 +7618,9 @@ export default function App() {
   // in-flight fetch so responses can't land after the user opens a card.
   const autoRefreshAbortersRef = useRef(new Set());
 
-  // SPEED-2a: Async metadata loader for deferred display-only fields.
-  // Fires after enrich completes if metadataPending flag is set.
-  // Does NOT block initial card render — price/decision appear immediately,
-  // metadata (story/creators/pop/goCollect) loads asynchronously.
-  const loadDeferredMetadata = useCallback((enrich, savedId) => {
-    if (!enrich?.metadataPending) return;
-    if (!savedId) return;
-
-    const metadataBody = {
-      title: enrich.title,
-      issue: enrich.issue,
-      year: enrich.year,
-      publisher: enrich.publisher,
-      ...(enrich.metadataIds || {})
-    };
-
-    fetch('/api/metadata', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(metadataBody)
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((metadata) => {
-        if (!metadata) return;
-
-        // Merge metadata into catalogue
-        setCatalogue((prev) => {
-          const cur = prev.find((x) => x.id === savedId);
-          if (!cur) return prev;
-
-          const updated = {
-            ...cur,
-            comicVine: metadata.story || metadata.creators?.length > 0
-              ? {
-                  ...(cur.comicVine || {}),
-                  description: metadata.story || cur.comicVine?.description || null,
-                  personCredits: metadata.creators || cur.comicVine?.personCredits || []
-                }
-              : cur.comicVine,
-            pop: metadata.pop || cur.pop || null,
-            goCollect: metadata.goCollect || cur.goCollect || null
-          };
-
-          putComic(updated).catch(() => {});
-          return prev.map((x) => x.id === savedId ? updated : x);
-        });
-
-        // Merge metadata into selectedItem if open and matching
-        setSelectedItem((s) => {
-          if (!s || s.id !== savedId) return s;
-          return {
-            ...s,
-            comicVine: metadata.story || metadata.creators?.length > 0
-              ? {
-                  ...(s.comicVine || {}),
-                  description: metadata.story || s.comicVine?.description || null,
-                  personCredits: metadata.creators || s.comicVine?.personCredits || []
-                }
-              : s.comicVine,
-            pop: metadata.pop || s.pop || null,
-            goCollect: metadata.goCollect || s.goCollect || null
-          };
-        });
-      })
-      .catch((err) => {
-        console.warn('[metadata] failed to load deferred metadata:', err.message);
-      });
-  }, []);
+  // FIX 1 PHASE 2 — Metadata now bundled in /api/enrich response.
+  // No separate fetch needed (story/creators/pop/goCollect arrive with pricing).
+  // loadDeferredMetadata removed (was SPEED-2a optimization, now reversed).
 
   // Sync tradePiles to localStorage on change
   useEffect(() => {
@@ -7966,7 +7901,7 @@ export default function App() {
               };
             });
             // SPEED-2a: Load deferred metadata asynchronously
-            loadDeferredMetadata(enrich, item.id);
+            // Metadata now bundled in enrich response (no separate fetch)
           })
           .catch((err) => {
             if (err?.name === "AbortError") {
@@ -8397,7 +8332,7 @@ export default function App() {
                 };
               });
               // SPEED-2a: Load deferred metadata asynchronously
-              loadDeferredMetadata(enrich, savedId);
+              // Metadata now bundled in enrich response (no separate fetch)
             }
           })
           .catch(() => {
@@ -8692,7 +8627,7 @@ export default function App() {
               return prev.map((x) => x.id === savedId ? updated : x);
             });
             // SPEED-2a: Load deferred metadata asynchronously
-            loadDeferredMetadata(enrich, savedId);
+            // Metadata now bundled in enrich response (no separate fetch)
           })
           .catch(() => {})
           .finally(bumpEnrichSettled);
@@ -9163,8 +9098,8 @@ export default function App() {
     }));
     setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
     // SPEED-2a: Load deferred metadata asynchronously
-    loadDeferredMetadata(enrich, item.id);
-  }, [loadDeferredMetadata]);
+    // Metadata now bundled in enrich response (no separate fetch)
+  }, []);
 
   // Ship #20a.6.19 — Re-identify book (re-grade + re-enrich with stored image).
   // Differs from refreshMarketData: refreshes Vision identity (title/variant/
