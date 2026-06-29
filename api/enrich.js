@@ -2729,26 +2729,35 @@ export default async function handler(req, res) {
     });
     out.demandSignals = demandSignals;
 
-    // Key issue: prefer ComicVine structured data, then description-derived,
-    // then Claude's keyIssue from /api/grade. keyIssueSource surfaces which
-    // branch won so the UI can render an attribution hint.
-    const cvChars = comicVine?.firstAppearanceCharacters;
-    if (Array.isArray(cvChars) && cvChars.length > 0) {
-      out.keyIssue = `1st appearance of ${cvChars.join(", ")}`;
-      out.keyIssueSource = 'comicvine';
-    } else if (comicVine?.derivedKeyIssue) {
-      out.keyIssue = comicVine.derivedKeyIssue;
-      out.keyIssueSource = 'comicvine-derived';
-    } else if (
-      req.body?.keyIssue &&
-      req.body.keyIssue !== "N/A" &&
-      String(req.body.keyIssue).length > 3
-    ) {
-      out.keyIssue = req.body.keyIssue;
-      out.keyIssueSource = 'claude';
-    } else {
-      out.keyIssue = null;
-      out.keyIssueSource = null;
+    // BUILD 1 — Auto key detection from ComicVine character credits
+    // Detects first appearances deterministically (zero AI cost, beats competitors)
+    const { enhanceKeyIssue } = await import('../src/lib/autoKeyDetector.js');
+    const existingKey = req.body?.keyIssue && req.body.keyIssue !== "N/A" && String(req.body.keyIssue).length > 3
+      ? req.body.keyIssue
+      : null;
+    const keyEnhanced = enhanceKeyIssue(existingKey, comicVine);
+
+    out.keyIssue = keyEnhanced.keyIssue;
+    out.keyIssueSource = keyEnhanced.keySource || (existingKey ? 'claude' : null);
+    out.autoDetectedKey = keyEnhanced.autoDetected;
+    out.keyCharacters = keyEnhanced.keyCharacters;
+
+    // Legacy logic preserved for backward compatibility (Vision/manual override priority)
+    // Priority chain (highest first):
+    // 1. Vision/manual keyIssue (user saw it on cover)
+    // 2. ComicVine first_appearance_characters (authoritative)
+    // 3. ComicVine derivedKeyIssue (from description text)
+    if (!out.keyIssue) {
+      const cvChars = comicVine?.firstAppearanceCharacters;
+      if (Array.isArray(cvChars) && cvChars.length > 0) {
+        out.keyIssue = `1st appearance of ${cvChars.join(", ")}`;
+        out.keyIssueSource = 'comicvine';
+        out.autoDetectedKey = true;
+        out.keyCharacters = cvChars;
+      } else if (comicVine?.derivedKeyIssue) {
+        out.keyIssue = comicVine.derivedKeyIssue;
+        out.keyIssueSource = 'comicvine-derived';
+      }
     }
 
     // Ship #12a + Ship #16 — comp-title attribution scans.

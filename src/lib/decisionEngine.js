@@ -452,8 +452,16 @@ export function computeDecision(item, context = {}) {
 
   // PHASE 4: OPPORTUNITY DETECTION
 
+  // BUILD 1: Auto key detection influences grading decisions
+  // Keys with strong auto-detection signal → lean toward CGC/HOLD
+  const autoDetectedKey = item.autoDetectedKey === true;
+  const keyCharacters = item.keyCharacters || [];
+  const hasAutoKey = autoDetectedKey && keyCharacters.length > 0;
+
   // FIX 3: CGC grading upside detection (cost-aware, target-grade)
+  // BUILD 1: Lower threshold for auto-detected keys (higher grading priority)
   const CGC_ALL_IN_COST = 75; // grading + press, economy tier
+  const CGC_UPSIDE_THRESHOLD = hasAutoKey ? 30 : 50; // Lower bar for keys
 
   if (!item.isGraded && item.priceLadder && item.price != null && item.price > 0) {
     // Map raw grade to nearest CGC numeric grade (using shared gradeUtils.js)
@@ -490,12 +498,17 @@ export function computeDecision(item, context = {}) {
         'cgcUpside=', cgcUpside,
         'triggered=', cgcUpside > rawMarketPrice);
 
-      // Trigger when upside exceeds raw market price (more than doubles your money)
-      if (cgcUpside > rawMarketPrice) {
+      // BUILD 1: Lower threshold for auto-detected keys OR upside exceeds raw market price
+      const meetsThreshold = hasAutoKey ? cgcUpside > CGC_UPSIDE_THRESHOLD : cgcUpside > rawMarketPrice;
+
+      if (meetsThreshold) {
         decision.action = 'HOLD_FOR_CGC';
-        decision.confidence = 'medium';
-        decision.reason = `CGC ${nearestGrade} target: $${cgcValue.toFixed(0)} (+$${cgcUpside.toFixed(0)} after ~$${CGC_ALL_IN_COST} cost)`;
-        decision.nextStep = 'Submit for professional grading — upside exceeds raw value';
+        decision.confidence = hasAutoKey ? 'high' : 'medium';
+        const keyNote = hasAutoKey ? ` (key: ${keyCharacters.join(', ')})` : '';
+        decision.reason = `CGC ${nearestGrade} target: $${cgcValue.toFixed(0)} (+$${cgcUpside.toFixed(0)} after ~$${CGC_ALL_IN_COST} cost)${keyNote}`;
+        decision.nextStep = hasAutoKey
+          ? 'Key issue detected — submit for grading to maximize value'
+          : 'Submit for professional grading — upside exceeds raw value';
         decision.price = null; // Not listing, grading instead
         decision.evidence.gradingUpside = {
           floorEnforcedPrice: item.price,      // $173 floor-enforced (display)
@@ -504,7 +517,9 @@ export function computeDecision(item, context = {}) {
           cgcValue: cgcValue,
           gradingCost: CGC_ALL_IN_COST,
           netUpside: cgcUpside,
-          rawGrade: currentGrade
+          rawGrade: currentGrade,
+          autoDetectedKey: hasAutoKey,         // BUILD 1
+          keyCharacters: keyCharacters          // BUILD 1
         };
         decision.bestChannel = computeBestChannel(decision, item);
         return decision;
