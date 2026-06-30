@@ -3210,7 +3210,7 @@ function CollectionDetail({
                 marginBottom: 6,
                 fontWeight: 600
               }}>
-                🚫 {item.decision.blockers.join(', ')}
+                🚫 {item.decision.blockers.map(b => typeof b === 'string' ? b : (b?.message || b?.type || String(b))).join(', ')}
               </div>
             )}
 
@@ -3225,7 +3225,7 @@ function CollectionDetail({
                 marginBottom: 6,
                 fontWeight: 600
               }}>
-                ⚠️ {item.decision.warnings.join(', ')}
+                ⚠️ {item.decision.warnings.map(w => typeof w === 'string' ? w : (w?.message || w?.type || String(w))).join(', ')}
               </div>
             )}
 
