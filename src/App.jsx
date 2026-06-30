@@ -7904,6 +7904,10 @@ export default function App() {
                 cgcVerified: enrich.cgcVerified || s.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || s.cgcLabel || null,
                 goCollect: enrich.goCollect || s.goCollect || null,
+                // FIX: Explicit preservation (redundant with spread, but defensive)
+                claudeCheck: enrich.claudeCheck || s.claudeCheck || null,
+                priceBands: enrich.priceBands || s.priceBands || null,
+                demandSignals: enrich.demandSignals || s.demandSignals || null,
                 manualConfirmed: pc ? false : (s.manualConfirmed || false),
               };
             });
@@ -8249,6 +8253,10 @@ export default function App() {
                   editionConfirmed: cur.editionConfirmed || false,
                   // Ship #26 — Decision Engine v0-B
                   decision: enrich.decision || cur.decision,
+                  // FIX: Persist AI/pricing state to eliminate stale-refresh loop
+                  claudeCheck: enrich.claudeCheck || cur.claudeCheck || null,
+                  priceBands: enrich.priceBands || cur.priceBands || null,
+                  demandSignals: enrich.demandSignals || cur.demandSignals || null,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
                 };
