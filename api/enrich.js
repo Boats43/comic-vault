@@ -3063,8 +3063,9 @@ export default async function handler(req, res) {
       author: out.author || null,  // Session 4B — book identity field (server-derived)
     });
     // Session 4B — Pass adapter identityFields for asset-aware confidence check
+    // Crow Dead Time fix — pass pcProductId to allow publisher skip when PC matched a real product
     const adapter = getAdapter(out.assetType);
-    const idCheck = assessIdentityConfidence(sanitizedIdentity, identitySource, adapter.identityFields);
+    const idCheck = assessIdentityConfidence(sanitizedIdentity, identitySource, adapter.identityFields, out.pcProductId);
     console.log(`[identity-gate] assetType=${out.assetType} fields=${JSON.stringify(adapter.identityFields)} missing=${JSON.stringify(idCheck.missingFields)}`);
     out.identityConfident = idCheck.confident;
     if (!idCheck.confident) {

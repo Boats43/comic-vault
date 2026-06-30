@@ -161,20 +161,29 @@ export const sanitizeIdentityFields = (input) => {
 // External-lookup signals (PriceCharting / ComicVine / eBay match) are
 // NOT consulted. Per Ship #20a.6.4 refinement A: legit indie items may
 // fail all external lookups while being cleanly identified by Vision.
-export const assessIdentityConfidence = (sanitized, identitySource, identityFields = ['title', 'issue', 'year', 'publisher']) => {
+export const assessIdentityConfidence = (sanitized, identitySource, identityFields = ['title', 'issue', 'year', 'publisher'], pcProductId = null) => {
   const missingFields = [];
   const reasons = [];
 
   // Check each required field from adapter config
   for (const field of identityFields) {
     // Publisher gets special skip logic for visual/manual sources
-    // BUG 1 FIX: Manual entry + eBay visual both skip publisher requirement
-    // (CV/PC backfill publisher after identity lock)
+    // Crow Dead Time fix: Broadened to cover ANY identitySource where the book
+    // was resolved via eBay-based signals (visual search, title-family clustering)
+    // OR where PC successfully resolved a real product match (pcProductId exists).
+    // If PC matched a specific real product page, that's strong enough signal to
+    // proceed without requiring publisher separately.
     if (field === 'publisher') {
       const skipPublisher = identitySource && (
         String(identitySource).includes('ebay') ||
-        String(identitySource) === 'manual'
+        String(identitySource).includes('title-family') ||
+        String(identitySource) === 'manual' ||
+        Boolean(pcProductId)  // PC resolved a real product = trust it even without publisher
       );
+      // Skip publisher requirement if:
+      // 1. Publisher is already present (backfilled from CV/PC upstream)
+      // 2. OR identitySource allows backfill (ebay/manual/title-family)
+      // 3. OR PriceCharting matched a real product (pcProductId exists)
       if (!sanitized?.publisher && !skipPublisher) {
         missingFields.push('publisher');
         reasons.push('publisher missing or uncertainty marker');
