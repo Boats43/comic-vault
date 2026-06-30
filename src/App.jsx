@@ -3210,10 +3210,10 @@ function CollectionDetail({
             </div>
 
             {/* Recommended Price */}
-            {(item.decision.price != null || displayPrice > 0) && (
+            {(item.decision?.price != null || displayPrice > 0) && (
               <div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: colors.text, marginBottom: 4 }}>
-                  {item.decision.price != null
+                  {item.decision?.price != null
                     ? (typeof item.decision.price === 'number'
                       ? `$${Number(item.decision.price).toFixed(2)}`
                       : (String(item.decision.price).startsWith('$') ? item.decision.price : `$${item.decision.price}`))
@@ -3229,14 +3229,14 @@ function CollectionDetail({
             )}
 
             {/* Reason */}
-            {item.decision.reason && (
+            {item.decision?.reason && (
               <div style={{ fontSize: 13, color: "#ccc", marginBottom: 8, lineHeight: 1.5 }}>
                 {item.decision.reason}
               </div>
             )}
 
             {/* Blockers */}
-            {item.decision.blockers && item.decision.blockers.length > 0 && (
+            {item.decision?.blockers && item.decision.blockers.length > 0 && (
               <div style={{
                 fontSize: 11,
                 color: "#fca5a5",
@@ -3251,7 +3251,7 @@ function CollectionDetail({
             )}
 
             {/* Warnings */}
-            {item.decision.warnings && item.decision.warnings.length > 0 && (
+            {item.decision?.warnings && item.decision.warnings.length > 0 && (
               <div style={{
                 fontSize: 11,
                 color: "#fde68a",
@@ -3266,7 +3266,7 @@ function CollectionDetail({
             )}
 
             {/* Next Step */}
-            {item.decision.nextStep && (
+            {item.decision?.nextStep && (
               <div style={{ fontSize: 11, color: "#888", marginTop: 8, fontStyle: "italic" }}>
                 → {item.decision.nextStep}
               </div>
