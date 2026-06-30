@@ -4720,17 +4720,26 @@ export default async function handler(req, res) {
 
         if (isPricingCritical) {
           console.log(
-            '[claude-gate] REFUSED — pricing-critical failure · flag:',
+            '[claude-gate] CRITICAL FLAG — price preserved, decision will block · flag:',
             refusalReason
           );
-          out.price = null;
-          out.priceLow = null;
-          out.priceHigh = null;
-          out.pricingSource = 'refused-claude-gate';
-          out.priceNote = `Claude verification failed — ${refusalReason}`;
-          out.refusedToPrice = true;
-          out.confidenceLevel = 'LOW';
-          out.claudeCheckMode = 'pricing_critical_refusal';
+          // FIX 2: NEVER null the price due to AI refusal
+          // Price from deterministic sources (verified_sold, browse_api, pricecharting)
+          // is ALWAYS computed and stored. claudeCheck adds flags ONLY.
+          // Decision engine reads claudeCheckBlocker → sets DO_NOT_LIST.
+          // User sees: price + DO_NOT_LIST + warning flag (informed context).
+          // NOT: null price + DO_NOT_LIST (no market data, no context).
+
+          // REMOVED: out.price = null
+          // REMOVED: out.priceLow = null
+          // REMOVED: out.priceHigh = null
+          // REMOVED: out.pricingSource = 'refused-claude-gate'
+
+          // Price/priceLow/priceHigh/pricingSource preserved from comp sources
+          out.priceNote = `⚠️ ${refusalReason}`;  // Show flag to user
+          out.refusedToPrice = false;  // Price IS provided (from comps)
+          out.confidenceLevel = 'LOW';  // Keep low confidence signal
+          out.claudeCheckMode = 'pricing_critical_flagged';
           out.claudeCheckBlocker = refusalReason;  // Decision engine blocker field
         } else {
           // Detect HIGH severity in WARNING ONLY path
