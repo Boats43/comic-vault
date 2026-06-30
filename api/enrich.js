@@ -4897,9 +4897,21 @@ export default async function handler(req, res) {
     // Book: title + author required
     // Computed AFTER fallback assignments so identity fields are populated
     // assetType already set at line 1475 from req.body destructure
+    // Crow Dead Time fix — use same publisher-skip logic as identity gate (pcProductId exists = trust)
+    const publisherRequired = out.assetType === 'comic' && !(
+      (identitySource && (
+        String(identitySource).includes('ebay') ||
+        String(identitySource).includes('title-family') ||
+        String(identitySource) === 'manual'
+      )) ||
+      Boolean(out.pcProductId)
+    );
+
     out.identityComplete = out.assetType === 'book'
       ? !!(out.title && out.author)
-      : !!(out.issue && out.publisher);
+      : publisherRequired
+        ? !!(out.issue && out.publisher)
+        : !!out.issue;
 
     if (!out.visionConfidence && out.matchConfidence?.visionConfidence) {
       out.visionConfidence = out.matchConfidence.visionConfidence;
