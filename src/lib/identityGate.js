@@ -167,9 +167,14 @@ export const assessIdentityConfidence = (sanitized, identitySource, identityFiel
 
   // Check each required field from adapter config
   for (const field of identityFields) {
-    // Publisher gets special eBay skip logic (visual confirmation)
+    // Publisher gets special skip logic for visual/manual sources
+    // BUG 1 FIX: Manual entry + eBay visual both skip publisher requirement
+    // (CV/PC backfill publisher after identity lock)
     if (field === 'publisher') {
-      const skipPublisher = identitySource && String(identitySource).includes('ebay');
+      const skipPublisher = identitySource && (
+        String(identitySource).includes('ebay') ||
+        String(identitySource) === 'manual'
+      );
       if (!sanitized?.publisher && !skipPublisher) {
         missingFields.push('publisher');
         reasons.push('publisher missing or uncertainty marker');
