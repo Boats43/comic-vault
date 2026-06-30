@@ -1549,16 +1549,18 @@ export default async function handler(req, res) {
     }
 
     // FIX 4: Manual identity bypass (user typed title/issue/year, no camera)
+    // FIX B: Manual identity now includes publisher, grade, variant (optional fields)
     // Skip Vision + eBay image search, use provided fields as confirmed identity
     if (manualIdentity) {
-      console.log('[manual] identity provided:', title, '#' + issue, year || 'no-year');
+      console.log('[manual] identity provided:', title, '#' + issue, year || 'no-year', rawPublisher || 'no-publisher');
     }
 
     // Use barcode identity if available, manual if flagged, otherwise Vision data
+    // FIX B: Manual entry now passes publisher (was hardcoded null)
     const effectiveTitle = barcodeIdentity?.title || (manualIdentity ? title : title);
     const effectiveIssue = barcodeIdentity?.issue || (manualIdentity ? issue : issue);
     const effectiveYear = barcodeIdentity?.year || (manualIdentity ? year : year);
-    const effectivePublisher = barcodeIdentity?.publisher || (manualIdentity ? null : rawPublisher);
+    const effectivePublisher = barcodeIdentity?.publisher || (manualIdentity ? rawPublisher : rawPublisher);
 
     // Strip brackets/quotes/slashes before anything downstream sees the
     // publisher — parens in "Hollywood Comics (Walt Disney)" break eBay's

@@ -7580,6 +7580,9 @@ export default function App() {
   const [manualTitle, setManualTitle] = useState('');
   const [manualIssue, setManualIssue] = useState('');
   const [manualYear, setManualYear] = useState('');
+  const [manualPublisher, setManualPublisher] = useState(''); // FIX B
+  const [manualGrade, setManualGrade] = useState(''); // FIX B
+  const [manualVariant, setManualVariant] = useState(''); // FIX B
   const [catalogue, setCatalogue] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [installPrompt, setInstallPrompt] = useState(null);
@@ -9566,6 +9569,70 @@ export default function App() {
                       style={{
                         width: '100%',
                         padding: '10px 12px',
+                        marginBottom: 10,
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(212,175,55,0.25)',
+                        borderRadius: 6,
+                        color: '#f4f4f4',
+                        fontSize: 14,
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    {/* FIX B: Publisher field (optional, helps disambiguation) */}
+                    <input
+                      type="text"
+                      placeholder="Publisher (optional, e.g., DC, Marvel)"
+                      value={manualPublisher}
+                      onChange={(e) => setManualPublisher(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        marginBottom: 10,
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(212,175,55,0.25)',
+                        borderRadius: 6,
+                        color: '#f4f4f4',
+                        fontSize: 14,
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    {/* FIX B: Grade dropdown (optional) */}
+                    <select
+                      value={manualGrade}
+                      onChange={(e) => setManualGrade(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        marginBottom: 10,
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(212,175,55,0.25)',
+                        borderRadius: 6,
+                        color: '#f4f4f4',
+                        fontSize: 14,
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      <option value="">Grade (optional)</option>
+                      <option value="Raw">Raw</option>
+                      <option value="GD 2.0">GD 2.0</option>
+                      <option value="VG 4.0">VG 4.0</option>
+                      <option value="FN 6.0">FN 6.0</option>
+                      <option value="VF 8.0">VF 8.0</option>
+                      <option value="VF+ 8.5">VF+ 8.5</option>
+                      <option value="NM- 9.2">NM- 9.2</option>
+                      <option value="NM 9.4">NM 9.4</option>
+                      <option value="NM+ 9.6">NM+ 9.6</option>
+                      <option value="NM/M 9.8">NM/M 9.8</option>
+                    </select>
+                    {/* FIX B: Variant field (optional) */}
+                    <input
+                      type="text"
+                      placeholder="Variant (optional, e.g., newsstand, pence)"
+                      value={manualVariant}
+                      onChange={(e) => setManualVariant(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
                         marginBottom: 12,
                         background: 'rgba(255,255,255,0.05)',
                         border: '1px solid rgba(212,175,55,0.25)',
@@ -9595,8 +9662,9 @@ export default function App() {
                               title: manualTitle.trim(),
                               issue: manualIssue.trim(),
                               year: manualYear.trim() || null,
-                              publisher: null,
-                              grade: null,
+                              publisher: manualPublisher.trim() || null, // FIX B
+                              grade: manualGrade || null, // FIX B
+                              variant: manualVariant.trim() || null, // FIX B
                               isGraded: false,
                               confidence: 'HIGH',
                               identitySource: 'manual',
@@ -9616,6 +9684,9 @@ export default function App() {
                           setManualTitle('');
                           setManualIssue('');
                           setManualYear('');
+                          setManualPublisher(''); // FIX B
+                          setManualGrade(''); // FIX B
+                          setManualVariant(''); // FIX B
                         } catch (err) {
                           setError(err.message || 'Search failed');
                         } finally {
