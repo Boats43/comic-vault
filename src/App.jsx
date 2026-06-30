@@ -16,7 +16,7 @@ import { chooseBetterPrice, chooseBetterGrade } from "./lib/dataQualityGuard.js"
 
 // STRUCTURAL FIX: Normalize all items before render to prevent "cannot read property of undefined" crashes
 // Legacy books scanned before Fix 2/3 lack decision/claudeCheck/priceBands objects.
-// This function GUARANTEES all expected parent objects exist (as {} minimum) so optional
+// This function GUARANTEES all expected parent objects AND nested arrays exist so optional
 // chaining becomes backup defense, not primary. Applied at EVERY entry point to component state.
 function normalizeItem(item) {
   if (!item) return item;
@@ -28,8 +28,17 @@ function normalizeItem(item) {
     demandSignals: item.demandSignals || {},
     comicVine: item.comicVine || {},
     goCollect: item.goCollect || {},
-    rawComps: item.rawComps || {},
-    soldComps: item.soldComps || [],
+    // CRITICAL: Provide nested array defaults to prevent .recentSales.map() crashes
+    comps: item.comps ? {
+      recentSales: [],
+      ...item.comps,
+    } : { recentSales: [] },
+    rawComps: item.rawComps ? {
+      recentSales: [],
+      prices: [],
+      ...item.rawComps,
+    } : { recentSales: [], prices: [] },
+    soldComps: Array.isArray(item.soldComps) ? item.soldComps : [],
     pop: item.pop || {},
   };
 }
@@ -4513,7 +4522,7 @@ function CollectionDetail({
             >
               Active Listings
             </div>
-            {item.comps.recentSales.slice(0, 3).map((s, i) => {
+            {(item.comps?.recentSales || []).slice(0, 3).map((s, i) => {
               const rowStyle = { padding: "6px 0", fontSize: 14 };
               const inner = (
                 <div>
@@ -4544,7 +4553,7 @@ function CollectionDetail({
                 {item.soldCompsAvg != null && item.soldCompsAvg > 0 ? 'Sold avg (30d)' : 'Active listing avg'}
               </span>
               <span style={{ fontWeight: 600 }}>
-                {fmtPrice(item.soldCompsAvg != null && item.soldCompsAvg > 0 ? item.soldCompsAvg : item.comps.averageNum)}
+                {fmtPrice(item.soldCompsAvg != null && item.soldCompsAvg > 0 ? item.soldCompsAvg : item.comps?.averageNum)}
               </span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
@@ -4553,13 +4562,13 @@ function CollectionDetail({
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
               <span className="muted small">Floor</span>
-              <span style={{ fontWeight: 600, color: "#e05656" }}>{fmtPrice(item.comps.lowestNum)}</span>
+              <span style={{ fontWeight: 600, color: "#e05656" }}>{fmtPrice(item.comps?.lowestNum)}</span>
             </div>
-            {item.comps.highestNum != null && (
+            {item.comps?.highestNum != null && (
               <div className="muted small" style={{ marginTop: 4, fontSize: 12 }}>
                 {/* Floor display fix: when recommended < floor, show sold vs active instead of Low→Avg→High */}
-                {displayPrice > 0 && displayPrice < (item.comps.lowestNum || 0) && item.soldCompsAvg > 0 ? (
-                  <>Sold avg: ${item.soldCompsAvg.toLocaleString("en-US")} · Active: ${item.comps.lowestNum?.toLocaleString("en-US")}–${item.comps.highestNum?.toLocaleString("en-US")}</>
+                {displayPrice > 0 && displayPrice < (item.comps?.lowestNum || 0) && item.soldCompsAvg > 0 ? (
+                  <>Sold avg: ${item.soldCompsAvg.toLocaleString("en-US")} · Active: ${item.comps?.lowestNum?.toLocaleString("en-US")}–${item.comps?.highestNum?.toLocaleString("en-US")}</>
                 ) : (
                   <>Low ${item.comps.lowestNum?.toLocaleString("en-US")} → Avg ${(Math.round((item.comps.averageNum || 0) * 100) / 100).toLocaleString("en-US")} → High ${item.comps.highestNum?.toLocaleString("en-US")}</>
                 )}
