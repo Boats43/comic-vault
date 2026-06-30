@@ -14,6 +14,26 @@ import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade } from "./lib/dataQualityGuard.js";
 
+// STRUCTURAL FIX: Normalize all items before render to prevent "cannot read property of undefined" crashes
+// Legacy books scanned before Fix 2/3 lack decision/claudeCheck/priceBands objects.
+// This function GUARANTEES all expected parent objects exist (as {} minimum) so optional
+// chaining becomes backup defense, not primary. Applied at EVERY entry point to component state.
+function normalizeItem(item) {
+  if (!item) return item;
+  return {
+    ...item,
+    decision: item.decision || {},
+    claudeCheck: item.claudeCheck || {},
+    priceBands: item.priceBands || {},
+    demandSignals: item.demandSignals || {},
+    comicVine: item.comicVine || {},
+    goCollect: item.goCollect || {},
+    rawComps: item.rawComps || {},
+    soldComps: item.soldComps || [],
+    pop: item.pop || {},
+  };
+}
+
 const LOADING_STEPS = [
   "Reading cover...",
   "Identifying issue...",
@@ -7687,7 +7707,7 @@ export default function App() {
     (async () => {
       await migrateFromLocalStorage();
       const items = await getAllComics();
-      setCatalogue(items);
+      setCatalogue(items.map(normalizeItem)); // STRUCTURAL FIX: normalize on load
       const snaps = await getAllSnapshots();
       setSnapshots(snaps);
       const cached = await getAnalysis();
@@ -8089,7 +8109,7 @@ export default function App() {
         return null;
       }
     }
-    setCatalogue((prev) => [entry, ...prev]);
+    setCatalogue((prev) => [normalizeItem(entry), ...prev]); // STRUCTURAL FIX
     return entry.id;
   }, []);
 
@@ -8856,8 +8876,8 @@ export default function App() {
       listedAt: Date.now(),
     };
     await putComic(updated);
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
-    setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updated) : x)));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
   }, []);
 
   const listBundleOnEbay = useCallback(async (items) => {
@@ -8945,8 +8965,8 @@ export default function App() {
     }
 
     await putComic(updates);
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updates : x)));
-    setSelectedItem((cur) => (cur && cur.id === item.id ? updates : cur));
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updates) : x)));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updates) : cur));
 
     return data;
   }, []);
@@ -8957,8 +8977,8 @@ export default function App() {
     // Optimistic UI: update React state immediately so ROI and any other
     // derived views render instantly, then flush to IndexedDB in the
     // background. Users never see the putComic latency.
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
-    setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updated) : x)));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
     putComic(updated).catch((err) => console.error("[db] write failed:", err));
   }, []);
 
@@ -9163,7 +9183,7 @@ export default function App() {
       }
       return x;
     }));
-    setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
     // SPEED-2a: Load deferred metadata asynchronously
     // Metadata now bundled in enrich response (no separate fetch)
   }, []);
@@ -9281,7 +9301,7 @@ export default function App() {
     }
 
     await putComic(finalUpdated);
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? finalUpdated : x)));
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(finalUpdated) : x)));
     setSelectedItem(finalUpdated);
 
     return finalUpdated;
@@ -9355,8 +9375,8 @@ export default function App() {
       );
       return;
     }
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
-    setSelectedItem((cur) => (cur && cur.id === item.id ? updated : cur));
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updated) : x)));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
   }, []);
 
   const marketValue = marketValueOf(result);
