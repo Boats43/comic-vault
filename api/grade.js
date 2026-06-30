@@ -556,6 +556,8 @@ export default async function handler(req, res) {
 
     res.status(200).json(ensureAssetType(finalParsed, initialScan));
   } catch (err) {
+    console.error('[FATAL /api/grade]', err?.message || err);
+    console.error('[FATAL STACK]', err?.stack || 'no stack trace');
     res.status(500).json({ error: err?.message || "Server error" });
   }
 }
