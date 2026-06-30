@@ -102,30 +102,33 @@ DEMAND: ${demandSignals?.velocity || '?'} velocity, ${demandSignals?.trend || '?
 }
 
 // Ship #27: Static instructions for prompt caching (cacheable block)
-const STATIC_INSTRUCTIONS = `VERIFY ALL OF THE FOLLOWING:
-1. Do sold/active comps match this exact book?
-2. Is grade consistent with condition described?
-3. Are price bands reasonable for this grade/era?
-4. Is key issue description accurate for THIS issue?
-5. What is your recommendation?
+// FIX 3: Binary checklist for deterministic verification (temp=0 + factual yes/no)
+const STATIC_INSTRUCTIONS = `Answer each question with EXACTLY "YES" or "NO" based on the data provided.
+No interpretation, no judgment calls — count and compare only.
 
-JSON response:
+Q1. TITLE MATCH: Do 80% or more of the sold comp titles contain the same series name as the stated title?
+    Count comps with matching series name. If ≥80% match → YES. Otherwise → NO.
+
+Q2. YEAR CONSISTENCY: Do 80% or more of the comp listings fall within ±2 years of the stated year?
+    Count comps within year±2 range. If ≥80% within range → YES. Otherwise → NO.
+
+Q3. KEY ISSUE PRESENCE: If a key issue is stated, does it appear in 50% or more of comp titles?
+    If no key stated, answer YES. If key stated, count comps mentioning it. If ≥50% mention → YES. Otherwise → NO.
+
+Q4. PUBLISHER CONSISTENCY: Is the stated publisher mentioned in 80% or more of comps?
+    Count comps referencing this publisher. If ≥80% match → YES. Otherwise → NO.
+
+Return ONLY this JSON structure with boolean values:
 {
-  "verified": true/false,
-  "flags": [{"message": "specific issue", "severity": "CRITICAL|WARNING"}],
-  "gradeConsistent": true/false,
-  "compsAccurate": true/false,
-  "pricingReasonable": true/false,
-  "keyIssueAccurate": true/false,
+  "q1_title_match": true/false,
+  "q2_year_consistent": true/false,
+  "q3_key_issue_present": true/false,
+  "q4_publisher_consistent": true/false,
   "recommendation": "SELL_RAW|PRESS|CGC|HOLD",
-  "recommendationReason": "one sentence",
-  "suggestedListingTitle": "exact eBay title",
-  "confidence": "HIGH|MEDIUM|LOW"
+  "suggestedListingTitle": "exact eBay title"
 }
 
-Flag severity rules:
-- CRITICAL: Cross-title price contamination, wrong category comps (MTG cards), volume mismatch, identity failure
-- WARNING: Title variant differences (e.g. "Groo #1" vs "Groo in the Wild #1"), story metadata corruption, minor publisher disambiguation, cover letter mismatch`;
+DO NOT add narrative, flags, or explanations. Answer the 4 questions with true/false only.`;
 
 const WEB_SEARCH_INSTRUCTIONS = `Provide your best price estimate based on web search evidence.
 
@@ -223,12 +226,60 @@ export async function runClaudeCheck(data) {
 
     const result = JSON.parse(jsonMatch[0]);
 
-    console.log(
-      `[claude-check] verified=${result.verified} ` +
-      `recommendation=${result.recommendation} ` +
-      `confidence=${result.confidence}` +
-      (result.flags?.length > 0 ? ` flags=${result.flags.join(', ')}` : '')
-    );
+    // FIX 3: Deterministic scoring from binary checklist responses
+    // AI answered 4 factual yes/no questions. Now compute decision deterministically.
+    if (result.q1_title_match !== undefined) {
+      // Binary checklist mode (Fix 3)
+      const score = [
+        result.q1_title_match,
+        result.q2_year_consistent,
+        result.q3_key_issue_present,
+        result.q4_publisher_consistent
+      ].filter(Boolean).length;
+
+      // Deterministic scoring rules
+      if (score === 4) {
+        result.verified = true;
+        result.flags = [];
+        result.confidence = 'HIGH';
+      } else if (score === 3) {
+        result.verified = true;
+        result.flags = [{
+          message: 'One verification check failed — manual review recommended',
+          severity: 'WARNING'
+        }];
+        result.confidence = 'MEDIUM';
+      } else {
+        // score <= 2
+        result.verified = false;
+        const failedChecks = [];
+        if (!result.q1_title_match) failedChecks.push('title mismatch');
+        if (!result.q2_year_consistent) failedChecks.push('year inconsistency');
+        if (!result.q3_key_issue_present) failedChecks.push('key issue not verified');
+        if (!result.q4_publisher_consistent) failedChecks.push('publisher mismatch');
+        result.flags = [{
+          message: `CRITICAL: Identity verification failed (${failedChecks.join(', ')})`,
+          severity: 'CRITICAL'
+        }];
+        result.confidence = 'LOW';
+      }
+
+      console.log(
+        `[claude-check] binary checklist score=${score}/4 ` +
+        `verified=${result.verified} ` +
+        `confidence=${result.confidence} ` +
+        `(q1=${result.q1_title_match} q2=${result.q2_year_consistent} ` +
+        `q3=${result.q3_key_issue_present} q4=${result.q4_publisher_consistent})`
+      );
+    } else {
+      // Legacy response format (backward compatibility)
+      console.log(
+        `[claude-check] verified=${result.verified} ` +
+        `recommendation=${result.recommendation} ` +
+        `confidence=${result.confidence}` +
+        (result.flags?.length > 0 ? ` flags=${result.flags.join(', ')}` : '')
+      );
+    }
 
     return result;
   } catch (err) {
