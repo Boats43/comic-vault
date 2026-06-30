@@ -90,7 +90,23 @@
       "PowerShell(node --check api/enrich.js; node --check api/grade.js; node --check api/comps.js)",
       "PowerShell(node -e \"import\\('./api/enrich.js'\\).catch\\(e => {console.error\\(e.message\\); process.exit\\(1\\)}\\)\")",
       "PowerShell(node -e \"import\\('./api/comps.js'\\).catch\\(e => {console.error\\(e.message\\); process.exit\\(1\\)}\\)\")",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(tee /tmp/enrich_call1.json)",
+      "Bash(python3 -c ' *)",
+      "PowerShell(git reset *)",
+      "PowerShell(git *)",
+      "Bash(chmod +x run-speed-test.sh)",
+      "Bash(bash run-speed-test.sh)",
+      "Bash(tee speed-test-results.txt)",
+      "Bash(npm run *)",
+      "Bash(npm search *)",
+      "Bash(sed -i 's/_activeCompsCache.get\\(activeKey\\)/await kvGet\\(`ac:${activeKey}`\\)/g' api/enrich.js)",
+      "Bash(sed -i 's/_activeCompsCache.set\\(activeKey, { data: result, expires: now + ACTIVE_COMPS_TTL }\\)/await kvSet\\(`ac:${activeKey}`, result, KV_TTL.ACTIVE\\)/g' api/enrich.js)",
+      "Bash(sed -i 's/_compsCache.get\\(cacheKey\\)/await kvGet\\(`bc:${cacheKey}`\\)/g' api/comps.js)",
+      "Bash(sed -i 's/_compsCache.set\\(cacheKey, { data: comps, ts: now }\\)/await kvSet\\(`bc:${cacheKey}`, comps, KV_TTL.BROWSE\\)/g' api/comps.js)",
+      "Bash(sed -i 's/htmlCache.get\\(productId\\)/await kvGet\\(`ph:${productId}`\\)/g' api/pricecharting-pop.js)",
+      "Bash(sed -i 's/htmlCache.set\\(productId, { ts: Date.now\\(\\), html }\\)/await kvSet\\(`ph:${productId}`, html, KV_TTL.PC_HTML\\)/g' api/pricecharting-pop.js)",
+      "Bash(git add *)"
     ]
   }
 }

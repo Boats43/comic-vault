@@ -99,6 +99,34 @@ const formatCurrency = (value) => {
   return `$${num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
 };
 
+// P0-D: Format timestamp as "X ago" for price recency display
+const formatTimeAgo = (timestamp) => {
+  if (!timestamp) return null;
+  const diffMs = Date.now() - timestamp;
+  if (diffMs < 0) return 'just now';
+  if (diffMs < 60000) return 'just now';
+  if (diffMs < 3600000) {
+    const mins = Math.floor(diffMs / 60000);
+    return `${mins} min${mins === 1 ? '' : 's'} ago`;
+  }
+  if (diffMs < 86400000) {
+    const hours = Math.floor(diffMs / 3600000);
+    return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  }
+  const days = Math.floor(diffMs / 86400000);
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  if (days < 30) {
+    const weeks = Math.floor(days / 7);
+    return `${weeks} week${weeks === 1 ? '' : 's'} ago`;
+  }
+  if (days < 365) {
+    const months = Math.floor(days / 30);
+    return `${months} month${months === 1 ? '' : 's'} ago`;
+  }
+  return 'over a year ago';
+};
+
 // Decision-first UI helpers (Ship SPEED-2a+1)
 const getActionColor = (decision) => {
   if (!decision?.action) return { bg: 'rgba(99,102,241,0.08)', border: 'rgba(99,102,241,0.25)', text: '#6366f1' };
@@ -3183,12 +3211,20 @@ function CollectionDetail({
 
             {/* Recommended Price */}
             {(item.decision.price != null || displayPrice > 0) && (
-              <div style={{ fontSize: 24, fontWeight: 800, color: colors.text, marginBottom: 8 }}>
-                {item.decision.price != null
-                  ? (typeof item.decision.price === 'number'
-                    ? `$${Number(item.decision.price).toFixed(2)}`
-                    : (String(item.decision.price).startsWith('$') ? item.decision.price : `$${item.decision.price}`))
-                  : `$${Number(displayPrice).toFixed(2)}`}
+              <div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: colors.text, marginBottom: 4 }}>
+                  {item.decision.price != null
+                    ? (typeof item.decision.price === 'number'
+                      ? `$${Number(item.decision.price).toFixed(2)}`
+                      : (String(item.decision.price).startsWith('$') ? item.decision.price : `$${item.decision.price}`))
+                    : `$${Number(displayPrice).toFixed(2)}`}
+                </div>
+                {/* P0-D: Show when price was last updated */}
+                {item.priceUpdatedAt && (
+                  <div style={{ fontSize: 11, color: "#888", marginBottom: 8 }}>
+                    Updated {formatTimeAgo(item.priceUpdatedAt)}
+                  </div>
+                )}
               </div>
             )}
 
@@ -7659,10 +7695,9 @@ export default function App() {
     })();
   }, []);
 
-  // Auto-refresh stale prices: items saved before enrich persistence was fixed
-  // may have null pricingSource or comps. Also sync duplicate copies where
-  // prices differ. Only fires when on collection tab with no detail open,
-  // and at least 60s since last refresh to prevent rapid re-firing.
+  // P0-B: Auto-heal books with NO price at all (genuinely incomplete scans).
+  // A book with a price is NEVER auto-refreshed — price is frozen after initial scan.
+  // Only fires when on collection tab with no detail open, 5-min cooldown.
   useEffect(() => {
     if (catalogue.length === 0) return;
     if (tab !== "collection") return;
@@ -7679,12 +7714,19 @@ export default function App() {
     const isUnverifiedMegaKey = (c) =>
       c.manualReviewRequired ||
       (c.megaKeyFloorApplied && !c.megaKeyFloorVerified);
+    // P0-B: ONLY auto-refresh books that:
+    //  1. Have NO price/comps at all (genuinely incomplete)
+    //  2. Are >24h old (not recent scans)
+    //  3. Are not currently enriching (marketPending !== true)
+    // A book WITH a price is never touched — user must manually refresh.
     const missingSource = catalogue.filter(
       (c) =>
         !isRecentlyImported(c) &&
         !isUnverifiedMegaKey(c) &&
         !c.inTradePile &&
-        (!c.pricingSource || !c.comps)
+        (!c.pricingSource || !c.comps) &&
+        (Date.now() - (c.timestamp || 0) > 86400000) &&  // >24h old
+        c.marketPending !== true  // Not currently enriching
     );
     const missingIds = new Set(missingSource.map((c) => c.id));
 
@@ -7785,7 +7827,11 @@ export default function App() {
                 : chooseBetterPrice(enrich, cur);
               const gradeGuard = chooseBetterGrade(enrich, cur);
 
+              // P0-C: Sync decision to displayed price. If quality guard keeps old price,
+              // keep old decision too. Decision and price must always match.
               const priceChangedAR = priceGuard.price !== cur.price;
+              const syncedDecision = priceChangedAR ? enrich.decision : cur.decision;
+
               const updated = {
                 ...cur,
                 comps: lowMatch ? cur.comps : (enrich.comps || cur.comps),
@@ -7794,6 +7840,7 @@ export default function App() {
                 priceHigh: priceGuard.priceHigh,
                 pricingSource: priceGuard.pricingSource,
                 priceNote: priceGuard.priceNote,
+                priceUpdatedAt: priceChangedAR ? (enrich.priceUpdatedAt || Date.now()) : (cur.priceUpdatedAt || cur.timestamp),
                 grade: gradeGuard.grade,
                 confidenceLevel: gradeGuard.confidenceLevel,
                 identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
@@ -7829,7 +7876,7 @@ export default function App() {
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
-                decision: enrich.decision || cur.decision,
+                decision: syncedDecision,
                 gradeMultiplier: lowMatch ? cur.gradeMultiplier : (enrich.gradeMultiplier || null),
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
                 comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
@@ -8181,6 +8228,9 @@ export default function App() {
                 const gradeGuardB = chooseBetterGrade(enrich, cur);
                 const priceChanged = priceGuardB.price && priceGuardB.price !== cur.price;
 
+                // P0-C: Sync decision to displayed price (scan path)
+                const syncedDecisionB = priceChanged ? enrich.decision : cur.decision;
+
                 const updated = {
                   ...cur,
                   comps: enrich.comps || cur.comps,
@@ -8189,6 +8239,7 @@ export default function App() {
                   priceHigh: priceGuardB.priceHigh,
                   pricingSource: priceGuardB.pricingSource,
                   priceNote: priceGuardB.priceNote,
+                  priceUpdatedAt: priceChanged ? (enrich.priceUpdatedAt || Date.now()) : (cur.priceUpdatedAt || cur.timestamp),
                   grade: gradeGuardB.grade,
                   confidenceLevel: gradeGuardB.confidenceLevel,
                   identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
@@ -8252,7 +8303,7 @@ export default function App() {
                   editionWarning: enrich.editionWarning || cur.editionWarning || null,
                   editionConfirmed: cur.editionConfirmed || false,
                   // Ship #26 — Decision Engine v0-B
-                  decision: enrich.decision || cur.decision,
+                  decision: syncedDecisionB,
                   // FIX: Persist AI/pricing state to eliminate stale-refresh loop
                   claudeCheck: enrich.claudeCheck || cur.claudeCheck || null,
                   priceBands: enrich.priceBands || cur.priceBands || null,
@@ -8996,6 +9047,7 @@ export default function App() {
       price: newPriceRM,
       priceLow: idGatedRM ? null : (enrich.priceLow ?? item.priceLow),
       priceHigh: idGatedRM ? null : (enrich.priceHigh ?? item.priceHigh),
+      priceUpdatedAt: priceChangedRM ? (enrich.priceUpdatedAt || Date.now()) : (item.priceUpdatedAt || item.timestamp),
       identityConfident: enrich.identityConfident ?? item.identityConfident ?? true,
       identityMissingFields: enrich.identityMissingFields ?? item.identityMissingFields ?? null,
       identityReasons: enrich.identityReasons ?? item.identityReasons ?? null,
@@ -9972,14 +10024,8 @@ export default function App() {
               collectionScrollPos.current = window.scrollY;
               prevTabRef.current = "collection";
               setSelectedItem(item);
-              // Ship #23 FIX 3 — Auto-refresh stale records when opened.
-              const isStale = !item.priceBands || !item.claudeCheck || !item.demandSignals;
-              if (isStale) {
-                console.log(`[stale-refresh] auto-refreshing ${item.title} #${item.issue || "?"}`);
-                refreshMarketData(item).catch((err) =>
-                  console.error("[stale-refresh] failed:", err)
-                );
-              }
+              // P0-A: Card open is now a pure READ — no silent refresh.
+              // Price frozen after initial scan. User taps "Refresh Market Data" to update.
             }}
             onDelete={deleteFromCatalogue}
           />
@@ -9995,14 +10041,8 @@ export default function App() {
             prevTabRef.current = "manage";
             setSelectedItem(item);
             setTab("collection");
-            // Ship #23 FIX 3 — Auto-refresh stale records when opened.
-            const isStale = !item.priceBands || !item.claudeCheck || !item.demandSignals;
-            if (isStale) {
-              console.log(`[stale-refresh] auto-refreshing ${item.title} #${item.issue || "?"}`);
-              refreshMarketData(item).catch((err) =>
-                console.error("[stale-refresh] failed:", err)
-              );
-            }
+            // P0-A: Card open is now a pure READ — no silent refresh.
+            // Price frozen after initial scan. User taps "Refresh Market Data" to update.
           }}
           onListComic={listOnEbay}
           onBundleList={listBundleOnEbay}

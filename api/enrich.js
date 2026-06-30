@@ -4878,6 +4878,9 @@ export default async function handler(req, res) {
       `warnings=${out.decision.warnings?.length || 0}`
     );
 
+    // P0-D: Add timestamp so UI can show "Updated X ago"
+    out.priceUpdatedAt = Date.now();
+
     // FIX 1 PHASE 2 — api/metadata.js merged into enrich.
     // Return full enrichment including display-only fields (story, creators, pop, goCollect).
     // Previously these were stripped and fetched via separate /api/metadata call (SPEED-2a).
