@@ -1905,7 +1905,7 @@ export default async function handler(req, res) {
 
         // No cache hit — try live query with full title first
         console.log(`[pc-query] trying full title: "${confirmedTitle}"`);
-        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year: confirmedYear }).catch(() => null);
+        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year }).catch(() => null);
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
@@ -1916,7 +1916,7 @@ export default async function handler(req, res) {
         // Full title returned zero results — fallback to subtitle-stripped
         if (hasSubtitle && subtitleStripped !== confirmedTitle) {
           console.log(`[pc-query] full title zero results — fallback to stripped: "${subtitleStripped}"`);
-          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null);
+          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year }).catch(() => null);
           if (result) {
             console.log(`[pc-query] stripped title matched: "${result.productName}"`);
             await kvSet(strippedTitleKey, result, KV_TTL.PC);
