@@ -184,8 +184,10 @@ export async function runClaudeCheck(data) {
 
     // Ship #27: Prompt caching — static instructions cached, dynamic data fresh
     // Create API call with timeout wrapper
+    // FIX 1: temperature=0 for deterministic output (Incredible Hulk #181 non-determinism bug)
     const apiCallPromise = anthropic.messages.create({
       ...modelConfig,
+      temperature: 0,
       messages: [
         {
           role: "user",
