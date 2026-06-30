@@ -854,6 +854,11 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       ` matched=${match ? `${match.volume?.name} #${match.issue_number} (vol_id=${match.volume?.id})` : "none"}`
     );
 
+    // DIAGNOSTIC: Track publisher backfill from ComicVine match (The Crow case)
+    if (match?.volume) {
+      console.log(`[cv-publisher-debug] vol_id=${match.volume.id} publisher=${JSON.stringify(match.volume.publisher)}`);
+    }
+
     if (!match) return null;
     const firstApps = match.first_appearance_characters;
     const hasFirstApps = Array.isArray(firstApps) && firstApps.length > 0;
