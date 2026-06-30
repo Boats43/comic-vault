@@ -4301,23 +4301,36 @@ export default async function handler(req, res) {
     // Ship #21 — Claude Haiku quality check (verify all data alignment)
     // Ship #26 — Web search trigger: when rawComps=0 AND no verified_sold data
     // Ship #27 — FIX 2: Kill web search for UK/pence zero-comp books
+    // FIX A: Title-based UK detection (manual entry often has null publisher)
     const isZeroComp = (rawComps?.count === 0 || !rawComps);
     const variantLower = String(req.body?.variant || '').toLowerCase();
     const publisherLower = String(confirmedPublisher || '').toLowerCase();
+    const ukTitleLower = String(confirmedTitle || '').toLowerCase();
+
     const isPenceVariant = variantLower.includes('pence');
     const isUKPublisher = publisherLower.includes('uk') ||
                           publisherLower.includes('panini') ||
                           publisherLower.includes('marvel uk') ||
                           publisherLower.includes('titan');
 
+    // FIX A: Detect UK weeklies by TITLE patterns (for manual entry with null publisher)
+    const isUKWeeklyTitle = ukTitleLower.includes('mighty world of marvel') ||
+                            ukTitleLower.includes('marvel uk') ||
+                            ukTitleLower.includes('panini') ||
+                            ukTitleLower.includes('titan') ||
+                            ukTitleLower.includes('weekly') ||
+                            ukTitleLower.includes('british') ||
+                            ukTitleLower.includes('pence edition');
+
     // Skip web search for UK weeklies/pence variants — they never have eBay sold comps,
     // web search fires, times out at 20s, burns Sonnet tokens, returns nothing.
     // Flag as MANUAL_RESEARCH instead.
     let ukWeeklySkip = false;
-    if (isZeroComp && (isPenceVariant || isUKPublisher)) {
+    if (isZeroComp && (isPenceVariant || isUKPublisher || isUKWeeklyTitle)) {
       ukWeeklySkip = true;
       out.ukWeeklyNoComps = true;
       console.log('[web-search] UK/pence zero-comp book detected — skipping web search, flagging MANUAL_RESEARCH');
+      console.log('[uk-gate] triggered by:', isPenceVariant ? 'pence-variant' : isUKPublisher ? 'uk-publisher' : 'uk-title-pattern');
     }
 
     const shouldTriggerWebSearch =
