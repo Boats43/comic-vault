@@ -1884,12 +1884,45 @@ export default async function handler(req, res) {
         return result;
       })(),
       // FIX 3 — PriceCharting KV cache (persistent across cold starts)
+      // Crow: Dead Time fix — try full title FIRST, fallback to stripped only if zero results
       (async () => {
-        const kvKey = `pc:${pcKey}`;
-        const cached = await kvGet(kvKey);
-        if (cached) return cached;
-        const result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null);
-        await kvSet(kvKey, result, KV_TTL.PC);
+        const fullTitleKey = `pc:${confirmedTitle}|${confirmedIssue}`;
+        const strippedTitleKey = `pc:${pcKey}`;
+
+        // Try cache for full title first
+        const cachedFull = await kvGet(fullTitleKey);
+        if (cachedFull) {
+          console.log('[pc-query] cache hit for full title');
+          return cachedFull;
+        }
+
+        // Try cache for stripped title
+        const cachedStripped = await kvGet(strippedTitleKey);
+        if (cachedStripped) {
+          console.log('[pc-query] cache hit for stripped title (fallback)');
+          return cachedStripped;
+        }
+
+        // No cache hit — try live query with full title first
+        console.log(`[pc-query] trying full title: "${confirmedTitle}"`);
+        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year: confirmedYear }).catch(() => null);
+
+        if (result) {
+          console.log(`[pc-query] full title matched: "${result.productName}"`);
+          await kvSet(fullTitleKey, result, KV_TTL.PC);
+          return result;
+        }
+
+        // Full title returned zero results — fallback to subtitle-stripped
+        if (hasSubtitle && subtitleStripped !== confirmedTitle) {
+          console.log(`[pc-query] full title zero results — fallback to stripped: "${subtitleStripped}"`);
+          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: confirmedYear }).catch(() => null);
+          if (result) {
+            console.log(`[pc-query] stripped title matched: "${result.productName}"`);
+            await kvSet(strippedTitleKey, result, KV_TTL.PC);
+          }
+        }
+
         return result;
       })(),
       certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
