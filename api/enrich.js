@@ -1869,8 +1869,9 @@ export default async function handler(req, res) {
     const cleanedCVTitle = cleanTitleForComicVine(confirmedTitle, req.body.variant);
 
     // Session 6/20/26 — Cache lookups (5-min TTL, same as Anthropic prompt cache)
+    // Crow fix — PC cache key MUST include year (year validation makes year-dependent results)
     const cvKey = `${cleanedCVTitle}|${confirmedIssue}|${confirmedPublisher}`;
-    const pcKey = `${subtitleStripped}|${confirmedIssue}`;
+    const pcKey = `${subtitleStripped}|${confirmedIssue}|${year || ''}`;
     const now = Date.now();
 
     const [comicVine, priceChartingInitial, cgcResult] = await Promise.all([
@@ -1886,7 +1887,7 @@ export default async function handler(req, res) {
       // FIX 3 — PriceCharting KV cache (persistent across cold starts)
       // Crow: Dead Time fix — try full title FIRST, fallback to stripped only if zero results
       (async () => {
-        const fullTitleKey = `pc:${confirmedTitle}|${confirmedIssue}`;
+        const fullTitleKey = `pc:${confirmedTitle}|${confirmedIssue}|${year || ''}`;
         const strippedTitleKey = `pc:${pcKey}`;
 
         // Try cache for full title first
