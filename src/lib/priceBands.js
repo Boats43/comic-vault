@@ -297,11 +297,19 @@ export function computePriceBands({
           '→ blend=', blendedAvg.toFixed(2), '(sold+active 60/40)');
       }
 
-      const result = applyGradeMultiplierToBands(bands, gradeMultiplier);
+      // CRITICAL FIX: Do NOT apply gradeMultiplier to eBay comp prices.
+      // eBay sold/active comps are already at-grade market prices (sellers grade
+      // in the title). Multiplying by gradeMultiplier double-discounts.
+      // gradeMultiplier exists to adjust PC baseline (mint/NM reference) DOWN to
+      // user's actual grade. eBay comps are ALREADY at the actual grade.
+      // Amazing Adventures #3: blend=$107.12 (raw) × 0.45 = $48.20 (WRONG).
+      // Only apply gradeMultiplier to pc_estimate source (STEP 3 below).
+      const result = { ...bands };
       console.log('[price-bands] soldPool=', soldPrices.length,
         'activePool=', activeComps?.prices?.length || 0,
         'source=', result?.source,
         'market=', result?.market,
+        '(NO gradeMultiplier — eBay comps already at-grade)',
         variantAdjusted ? '| VARIANT-ADJUSTED' : '');
       // Flag variant-adjusted pricing for UI warning
       if (variantAdjusted) {
@@ -327,11 +335,13 @@ export function computePriceBands({
     } else {
       const bands = calculatePriceBands(verifiedActive, 'verified_active');
       if (bands) {
-        const result = applyGradeMultiplierToBands(bands, gradeMultiplier);
+        // Same fix as sold path: eBay active comps are already at-grade.
+        const result = { ...bands };
         console.log('[price-bands] soldPool=', soldPrices.length,
           'activePool=', verifiedActive.length,
           'source=', result?.source,
-          'market=', result?.market);
+          'market=', result?.market,
+          '(NO gradeMultiplier — eBay comps already at-grade)');
         return result;
       }
     }

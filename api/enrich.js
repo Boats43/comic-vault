@@ -3137,10 +3137,13 @@ export default async function handler(req, res) {
       out.priceLow = fmtUsd(priceBandsRaw.quick);
       out.priceHigh = fmtUsd(priceBandsRaw.stretch);
       out.gradeMultiplier = gradeMultiplier;
+      // FIX 2: Add explicit case for verified_sold_active_blend source
       out.pricingSource = priceBandsRaw.source === 'verified_sold'
         ? 'verified_sold'
         : priceBandsRaw.source === 'verified_active'
         ? 'verified_active'
+        : priceBandsRaw.source === 'verified_sold_active_blend'
+        ? 'verified_sold_active_blend'
         : 'pc_estimate';
       let priceNoteBase = gradeLabel
         ? `${gradeLabel} · ${priceBandsRaw.count} verified comps`
