@@ -275,6 +275,7 @@ export function computePriceBands({
   issue,
   variant,
   variantAdjusted = false,
+  blendedAvg = null,
 }) {
   // STEP 1 — VERIFIED SOLD POOL
   const verifiedSolds = buildVerifiedSoldPool(soldComps, { title, issue, variant });
@@ -285,6 +286,17 @@ export function computePriceBands({
     const bands = calculatePriceBands(soldPrices, 'verified_sold', recencyData);
 
     if (bands) {
+      // FIX 1: When blendedAvg exists (both sold + active pools contributed),
+      // use blend as market value instead of sold-only 50th percentile.
+      // Batman #222: market was pcBase×mult ($127.08) not blend ($118.73).
+      // Blend already has recency weighting from enrich.js calculation.
+      if (blendedAvg && blendedAvg > 0 && activeComps?.prices?.length > 0) {
+        bands.market = blendedAvg;
+        bands.source = 'verified_sold_active_blend';
+        console.log('[price-bands] BLEND OVERRIDE: sold-median=', bands.market,
+          '→ blend=', blendedAvg.toFixed(2), '(sold+active 60/40)');
+      }
+
       const result = applyGradeMultiplierToBands(bands, gradeMultiplier);
       console.log('[price-bands] soldPool=', soldPrices.length,
         'activePool=', activeComps?.prices?.length || 0,

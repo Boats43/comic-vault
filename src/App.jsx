@@ -9158,6 +9158,12 @@ export default function App() {
       editionConfirmed: item.editionConfirmed || false,
       megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
       manualConfirmed: priceChangedRM ? false : (item.manualConfirmed || false),
+      // FIX 2: Preserve book-level comps cache fields across refresh
+      // Bug: activeCached dropped on refresh #2 → backend can't use cache → full re-fetch
+      // Amazing Adventures #3: refresh #1 had active data, refresh #2 lost it (undefined)
+      activeCached: enrich.activeCached || item.activeCached || null,
+      compsCachedAt: enrich.compsCachedAt || item.compsCachedAt || null,
+      soldCompsRawCached: enrich.soldCompsRawCached || item.soldCompsRawCached || [],
     };
 
     // Ship #20a.6.22 — Apply autofix engine

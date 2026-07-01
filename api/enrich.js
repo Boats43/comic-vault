@@ -2747,6 +2747,8 @@ export default async function handler(req, res) {
       issue: correctedIssue,
       variant: req.body?.variant || null,
       variantAdjusted: soldVerifyResult.variantAdjusted || false,
+      // FIX 1: Pass blendedAvg so price-bands can use it as market value
+      blendedAvg,
     });
 
     if (priceBandsRaw) {
