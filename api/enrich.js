@@ -3833,6 +3833,30 @@ export default async function handler(req, res) {
 
     } // end if (idCheck.confident) — Ship #20a.6.4 identity-gate wrap
 
+    // FIX: Final floor re-enforcement AFTER all adjustments.
+    // BUG: Floor was enforced at line 3434 (floorFired=true, note added), but
+    // variant/key multipliers (lines 3624, 3684), thin-pool anchor (line 3722),
+    // and low-grade floor (line 3750) all OVERWROTE out.price without re-checking
+    // the floor. Result: recommended price shown BELOW its own stated floor.
+    //
+    // Batman #222 case: floor=$172.98, recommended=$149.95 (thin-pool anchored).
+    // ASM #76 case: floor=$49.99, recommended=$33.96 (variant/key mult reduced).
+    //
+    // Fix: Re-enforce floor as FINAL step before price-trace. If any downstream
+    // adjustment pushed price below floorNum, raise it back and update note.
+    if (floorFired && floorNum > 0 && out.price) {
+      const finalPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
+      if (finalPrice < floorNum) {
+        console.log('[floor] FINAL RE-ENFORCEMENT:',
+          `downstream adjustment pushed $${finalPrice.toFixed(2)} below floor $${floorNum.toFixed(2)}`);
+        out.price = fmtUsd(floorNum);
+        out.priceLow = fmtUsd(floorNum * 0.85);
+        out.priceHigh = fmtUsd(floorNum * 1.25);
+        out.floorReEnforced = true;
+        // Note already has "· floor enforced" from first enforcement
+      }
+    }
+
     // Ship #13.1: relocated to run AFTER all pricing adjustments
     // (variant mult, key mult, thin-pool anchor, mega-key floor) so
     // `finalPrice` reflects the actual returned value. `afterMult` stays
@@ -3846,6 +3870,7 @@ export default async function handler(req, res) {
       'rawFloor:', rawComps?.lowest || 0,
       'floor:', floorNum,
       'floorFired:', floorFired,
+      'floorReEnforced:', out.floorReEnforced === true,
       'sanityFired:', sanityFired || false,
       'finalPrice:', out.price,
       'source:', out.pricingSource,
