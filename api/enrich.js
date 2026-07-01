@@ -2151,9 +2151,20 @@ export default async function handler(req, res) {
         imageSearchTitle = null;
       }
     } else if (familyCandidate?.decision === 'fallback-vision') {
-      // On fallback-vision, block imageSearchTitle from unrelated visual pool
+      // FIX A3: On fallback-vision with LOW Vision confidence, escalate to refused.
+      // Mark Spears Monsters case: Vision hallucinated "Monster of Frankenstein #1 1973"
+      // when eBay pool was empty and Vision confidence was implicitly low. Fallback-vision
+      // blocked comps query but left confirmedTitle = fabricated Vision output.
       imageSearchTitle = null;
-      console.log(`[ship12] fallback-vision — blocking unrelated visual pool from comps`);
+      const visionConfidence = String(confidence || 'medium').toLowerCase();
+      if (visionConfidence === 'low') {
+        console.log(`[ship12] fallback-vision + LOW Vision confidence → escalate to refused`);
+        familyCandidate.decision = 'refused-identity-conflict';
+        familyCandidate.reason = `Fallback-vision with LOW Vision confidence — cannot trust identity`;
+        identityRefused = true;
+      } else {
+        console.log(`[ship12] fallback-vision — blocking unrelated visual pool from comps`);
+      }
     } else {
       // Ship 12 fallback logic
       const isVariantScan = !!(

@@ -737,6 +737,32 @@ const dedupeIssueToken = (familyTitle, acceptedIssue) => {
 };
 
 /**
+ * FIX A4 — Sanitize selected title to remove seller boilerplate.
+ *
+ * Applied AFTER family selection (not during token extraction) to avoid
+ * over-stripping legitimate content during clustering. Removes only KNOWN
+ * seller noise patterns that contaminate merged family titles.
+ *
+ * House of Mystery #157 case: family title was "dc batman house of mystery 161
+ * dial for hero read description" - "read description" is seller boilerplate,
+ * "batman" is character cross-contamination, "161" is wrong issue.
+ *
+ * @param {string} title - normalized family title
+ * @returns {string} - sanitized title
+ */
+const sanitizeSelectedTitle = (title) => {
+  if (!title) return title;
+  return String(title)
+    // Seller boilerplate
+    .replace(/\b(?:read|description|free|ship|shipping|combine|discount|pics|photos|wow|nice|hot|deal|sale|offer|check|out|must|see|look|nm|near|mint)\b/gi, '')
+    // Common cross-contamination patterns (character names in wrong series)
+    // NOTE: Only removes when NOT at start of title (preserves "Batman", "Superman" series)
+    .replace(/(?<!^)\b(?:batman|superman|wonder woman|aquaman|flash|green lantern|arrow|spider man|spiderman|hulk|iron man|captain america|thor|widow|hawkeye|panther|strange|doctor|ant man|wasp)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+/**
  * Ship 26.1 — Select title-family candidate.
  *
  * Pure function. No API calls, no pricing logic. Returns decision object
@@ -817,7 +843,8 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   // Tokenize Vision title for overlap check
   const visionTokens = tokenizeTitleFamily(visionTitle || '');
 
-  // Top-rank protection check: Find which family contains items[0]
+  // FIX A1: Top-rank protection check - stricter threshold to prevent weight inversion.
+  // Find which family contains items[0] and check if it should override top-weighted family.
   const item0Family = scored.find(f => f.indices?.includes(0));
 
   if (item0Family) {
@@ -829,15 +856,21 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     const sharedTokens = item0Tokens.filter(t => visionTokens.includes(t));
     const hasVisionOverlap = sharedTokens.length >= 1;
 
-    // Competing family check: find strongest competing family (not item0Family)
+    // FIX A1: Stricter competing family threshold (3x instead of 2x) to prevent
+    // top-ranked correct result from being overridden by high-volume wrong family.
+    // Black Panther #1 case: item[0] weight 5.0 (correct) vs competing weight 6.5 (wrong).
+    // Old threshold (2x): 6.5 >= 10.0? NO → protection fires → wrong answer.
+    // New threshold (3x): 6.5 >= 15.0? NO → protection fires → correct.
     const competingFamilies = scored.filter(f => f !== item0Family);
     const strongestCompetitor = competingFamilies[0]; // already sorted by weight descending
-    const competingFamilyTooStrong = strongestCompetitor && strongestCompetitor.weightSum >= (item0Family.weightSum * 2);
+    const competingFamilyTooStrong = strongestCompetitor && strongestCompetitor.weightSum >= (item0Family.weightSum * 3);
 
     if (issueMatch && hasEnoughTokens && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong) {
+      // FIX A4: Post-selection boilerplate sanitization
+      const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(item0Family.title, visionIssue));
       return {
         decision: 'top-rank-protection',
-        selectedTitle: dedupeIssueToken(item0Family.title, visionIssue), // Pattern K: remove embedded issue
+        selectedTitle: sanitizedTitle,
         rawTitle: item0Family.rawTitle,
         reason: `Top-ranked result protected (${item0Tokens.length} tokens, weight ${item0Family.weightSum.toFixed(1)}, ${sharedTokens.length} Vision overlap)`,
         topFamily: item0Family,
@@ -847,34 +880,37 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     }
   }
 
-  // Weighted-consensus: select top family if it shares ≥N tokens with Vision.
-  // Era-aware gate: pre-1970 Silver Age titles require only 1 token overlap
-  // (short canonical names like "Marvel Tales" vs noisy eBay listings).
-  // Modern titles (1970+) require 2 tokens (stricter gate for abundant data).
+  // FIX A2: Weighted-consensus with percentage-based overlap (40% of shorter token set).
+  // Catwoman #5 case: "catwoman 2018 stanley artgerm lau" (5 tokens) vs Vision "catwoman" (1 token).
+  // Old logic: 1 shared / min(5,1) = 100% → but threshold was absolute count (2 tokens).
+  // New logic: 1 shared / 1 Vision token = 100% ≥ 40% → ACCEPT.
   const topFamilyOverlap = topFamily.tokens.filter(t => visionTokens.includes(t));
-  const yearNum = visionYear ? parseInt(String(visionYear), 10) : null;
-  const isVintage = yearNum && yearNum > 0 && yearNum < 1970;
-  const overlapRequired = isVintage ? 1 : 2;
+  const shorterTokenCount = Math.min(topFamily.tokens.length, visionTokens.length);
+  const overlapRatio = shorterTokenCount > 0 ? topFamilyOverlap.length / shorterTokenCount : 0;
+  const OVERLAP_THRESHOLD = 0.4; // 40% of shorter token set
 
-  if (topFamilyOverlap.length >= overlapRequired) {
+  if (overlapRatio >= OVERLAP_THRESHOLD) {
+    // FIX A4: Post-selection boilerplate sanitization
+    const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(topFamily.title, visionIssue));
     return {
       decision: 'weighted-consensus',
-      selectedTitle: dedupeIssueToken(topFamily.title, visionIssue), // Pattern K: remove embedded issue
+      selectedTitle: sanitizedTitle,
       rawTitle: topFamily.rawTitle,
-      reason: `Weighted consensus (${topFamily.count} members, weight ${topFamily.weightSum.toFixed(1)}, ${topFamilyOverlap.length} Vision tokens shared${isVintage ? ', vintage gate' : ''})`,
+      reason: `Weighted consensus (${topFamily.count} members, weight ${topFamily.weightSum.toFixed(1)}, ${topFamilyOverlap.length}/${shorterTokenCount} tokens = ${Math.round(overlapRatio * 100)}% overlap)`,
       topFamily,
       runnerUp,
       families: scored,
     };
   }
 
-  // Fallback-vision: top family exists but lacks Vision overlap
-  if (topFamilyOverlap.length === 1) {
+  // Fallback-vision: top family exists but lacks sufficient overlap
+  // FIX A2: Updated condition - now checking overlap ratio instead of absolute count
+  if (overlapRatio < OVERLAP_THRESHOLD && topFamilyOverlap.length > 0) {
     return {
       decision: 'fallback-vision',
       selectedTitle: null,
       rawTitle: null,
-      reason: `Top family weak overlap (${topFamilyOverlap.length} token shared: "${topFamilyOverlap[0]}") — preserve Vision`,
+      reason: `Top family weak overlap (${topFamilyOverlap.length}/${shorterTokenCount} tokens = ${Math.round(overlapRatio * 100)}% < 40%) — preserve Vision`,
       topFamily,
       runnerUp,
       families: scored,
@@ -886,7 +922,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     decision: 'refused-identity-conflict',
     selectedTitle: null,
     rawTitle: null,
-    reason: `Visual pool families lack overlap with Vision (best: ${topFamilyOverlap.length} tokens)`,
+    reason: `Visual pool families lack overlap with Vision (best: ${topFamilyOverlap.length}/${shorterTokenCount} tokens)`,
     topFamily,
     runnerUp,
     families: scored,
