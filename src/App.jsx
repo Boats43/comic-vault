@@ -9039,6 +9039,13 @@ export default function App() {
           // P0 CRITICAL — Pass cached claudeCheck to skip AI on refresh
           skipClaudeCheck: true,
           claudeCheckCached: item.claudeCheck || null,
+          // FIX: Skip image search on refresh to prevent identity re-resolution.
+          // Batman #222 bug: refresh triggered eBay visual search → title-family
+          // clustering → identity refusal → Phase 2 skipped → comps=null returned
+          // → overwrote original comps with null → "No eBay comps found" despite
+          // real comps existing. Refresh should only update PRICING, not re-run
+          // identity resolution.
+          skipImageSearch: true,
         }),
         signal: controller.signal,
       });
