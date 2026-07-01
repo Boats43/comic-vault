@@ -4386,23 +4386,34 @@ export default async function handler(req, res) {
       console.log('[uk-gate] triggered by:', isPenceVariant ? 'pence-variant' : isUKPublisher ? 'uk-publisher' : 'uk-title-pattern');
     }
 
+    // FIX C: Gate web search on clean identity (identityComplete flag).
+    // House of Mystery #157 case: title-family selection produced garbage title
+    // "dc batman house of mystery 161 dial for hero read description", rawComps=0,
+    // web search fired spending 20s + tokens on Sonnet query guaranteed to fail.
+    // New gate: only fire web search when identity is COMPLETE and CLEAN.
+    const identityComplete = !!(confirmedTitle && correctedIssue && confirmedYear);
+
     const shouldTriggerWebSearch =
       isZeroComp &&
       out.pricingSource !== 'verified_sold' &&
       out.pricingSource !== 'pricecharting' &&
       !out.refusedToPrice &&  // Don't search when identity refused
       !isPolybagPricing &&
-      !ukWeeklySkip;  // FIX 2: Skip web search for UK/pence books
+      !ukWeeklySkip &&  // FIX 2: Skip web search for UK/pence books
+      identityComplete;  // FIX C: Only search when identity is clean
 
     // P0-B diagnostic: confirm web search Sonnet gate on refresh
     console.log('[web-search]',
       shouldTriggerWebSearch ? 'FIRING Sonnet' : 'skipped',
       'rawComps.count=', rawComps?.count ?? 'null',
       'ukWeeklySkip=', ukWeeklySkip,
+      'identityComplete=', identityComplete,
       'skipFlag=', !!req.body?.skipClaudeCheck);
 
     if (shouldTriggerWebSearch) {
-      console.log('[claude-check] web search mode triggered (rawComps=0, no verified_sold)');
+      console.log('[claude-check] web search mode triggered (rawComps=0, no verified_sold, identity complete)');
+    } else if (isZeroComp && !identityComplete) {
+      console.log('[web-search] SKIPPED — identity incomplete (title/issue/year missing)');
     }
 
     const claudeCheckData = {
