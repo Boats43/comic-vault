@@ -752,12 +752,15 @@ const dedupeIssueToken = (familyTitle, acceptedIssue) => {
  */
 const sanitizeSelectedTitle = (title) => {
   if (!title) return title;
+
+  // Conservative boilerplate removal: only strip KNOWN seller noise.
+  // Character cross-contamination (batman/superman in wrong series) is a real
+  // problem BUT auto-removal risks stripping legitimate series names (Black
+  // Panther, Captain America, etc.). The clustering + overlap logic should
+  // already prevent cross-series contamination. This sanitizer only handles
+  // seller filler that clustering can't detect.
   return String(title)
-    // Seller boilerplate
-    .replace(/\b(?:read|description|free|ship|shipping|combine|discount|pics|photos|wow|nice|hot|deal|sale|offer|check|out|must|see|look|nm|near|mint)\b/gi, '')
-    // Common cross-contamination patterns (character names in wrong series)
-    // NOTE: Only removes when NOT at start of title (preserves "Batman", "Superman" series)
-    .replace(/(?<!^)\b(?:batman|superman|wonder woman|aquaman|flash|green lantern|arrow|spider man|spiderman|hulk|iron man|captain america|thor|widow|hawkeye|panther|strange|doctor|ant man|wasp)\b/gi, '')
+    .replace(/\b(?:read|description|free|ship|shipping|combine|discount|pics|photos|wow|nice|hot|deal|sale|offer|check|out|must|see|look)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 };
