@@ -7819,6 +7819,12 @@ export default function App() {
             compsCachedAt: item.compsCachedAt || null,
             activeCached: item.activeCached || null,
             soldCompsRawCached: item.soldCompsRawCached || [],
+            // FIX: Skip image search on auto-refresh (same as manual refreshMarketData).
+            // Auto-refresh updates PRICING for existing books (identity already confirmed).
+            // Ambush Bug flicker + "prices change on card open" root cause: auto-refresh
+            // sent stored image → title-family clustering → identity changed/refused →
+            // comps=null → overwrote real data. Creates infinite loop for price=null books.
+            skipImageSearch: true,
           }),
           signal: controller.signal,
         })
