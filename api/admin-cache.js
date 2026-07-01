@@ -43,12 +43,12 @@ export default async function handler(req, res) {
     }
 
     if (action === 'delete') {
-      const key = req.query.key;
-      if (!key) {
-        return res.status(400).json({ error: 'Missing key parameter' });
+      const cacheKey = req.query.cacheKey;
+      if (!cacheKey) {
+        return res.status(400).json({ error: 'Missing cacheKey parameter' });
       }
-      await redis.del(key);
-      return res.json({ action: 'delete', key, deleted: true });
+      await redis.del(cacheKey);
+      return res.json({ action: 'delete', key: cacheKey, deleted: true });
     }
 
     if (action === 'deleteAll') {
@@ -61,13 +61,13 @@ export default async function handler(req, res) {
     }
 
     if (action === 'get') {
-      const key = req.query.key;
-      if (!key) {
-        return res.status(400).json({ error: 'Missing key parameter' });
+      const cacheKey = req.query.cacheKey;
+      if (!cacheKey) {
+        return res.status(400).json({ error: 'Missing cacheKey parameter' });
       }
-      const value = await redis.get(key);
-      const ttl = await redis.ttl(key);
-      return res.json({ key, value, ttl });
+      const value = await redis.get(cacheKey);
+      const ttl = await redis.ttl(cacheKey);
+      return res.json({ key: cacheKey, value, ttl });
     }
 
     return res.status(400).json({
