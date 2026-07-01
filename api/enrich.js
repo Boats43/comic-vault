@@ -2346,10 +2346,15 @@ export default async function handler(req, res) {
         : process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? (async () => {
             const activeKey = `${confirmedTitle}|${correctedIssue}`;
-            const cached = await kvGet(`ac:${activeKey}`);
+            // CACHE-BUST: skipCache flag bypasses poisoned cache entries
+            const skipCache = req.body?.skipCache === true;
+            const cached = !skipCache ? await kvGet(`ac:${activeKey}`) : null;
             if (cached) {
               console.log(`[active-cache] HIT: ${activeKey}`);
               return cached.data;
+            }
+            if (skipCache) {
+              console.log(`[active-cache] SKIP: ${activeKey} — skipCache=true`);
             }
             console.log(`[comps-cache] MISS — fetching from eBay`);
             const result = await fetchComps({
@@ -2377,8 +2382,15 @@ export default async function handler(req, res) {
               console.error(`[enrich] comps error: ${err?.message || err}`);
               return null;
             });
-            await kvSet(`ac:${activeKey}`, result, KV_TTL.ACTIVE);
-            console.log(`[active-cache] MISS: ${activeKey}`);
+            // FIX: Never cache empty/null active-comps results (prevents cache poisoning)
+            // Amazing Adventures #3: bad empty value cached → replayed on every request
+            // → blocked FIX 1 blend-override from ever having real data.
+            if (result && result.count > 0) {
+              await kvSet(`ac:${activeKey}`, result, KV_TTL.ACTIVE);
+              console.log(`[active-cache] MISS: ${activeKey} — cached ${result.count} comps`);
+            } else {
+              console.log(`[active-cache] MISS: ${activeKey} — NOT caching (empty result)`);
+            }
             return result;
           })()
         : Promise.resolve(null);
