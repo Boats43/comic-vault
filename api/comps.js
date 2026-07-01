@@ -882,10 +882,12 @@ export const fetchComps = async ({
             const m = String(t || '').match(/\b(19|20)\d{2}\b/);
             return m ? parseInt(m[0], 10) : null;
           };
-          // Ship #25.1 — Modern relaunch marker detection
-          // Reject listings with New 52, Rebirth, Infinite Frontier markers
-          // when user's book is pre-2000 (catches relaunches that share issue #s)
-          const MODERN_RELAUNCH_RE = /\b(n52|new\s*52|rebirth|infinite\s*frontier|legacy|prime\s*earth)\b/i;
+          // FIX B: Expanded modern relaunch marker detection.
+          // Reject listings with explicit modern relaunch markers when user's book
+          // is pre-2000. Catches New 52, Rebirth, vol/volume numbering, etc.
+          // World's Finest #139-#163 fix: accept missing-year listings (vintage
+          // sellers often omit year), reject only when CONFLICTING year/marker present.
+          const MODERN_RELAUNCH_RE = /\b(n52|new\s*52|rebirth|infinite\s*frontier|legacy|prime\s*earth|vol\.?\s*[2-9]|volume\s*[2-9]|v[2-9]\b|all[\s-]?new|now!)\b/i;
 
           const beforeEra = p.length;
           const eraFiltered = p.filter((it) => {
@@ -900,17 +902,18 @@ export const fetchComps = async ({
 
             const ly = extractYear(titleStr);
 
-            // Ship #25.1 — Golden Age year-missing rejection
-            // For pre-1970 books, REJECT listings with no year (assume modern).
-            // Modern reprints often omit year: "Action Comics #33" (2011 relaunch)
-            // but Golden Age originals usually have year in seller titles.
+            // FIX B: Removed year-missing rejection (Ship #25.1 over-strict gate).
+            // Old logic rejected ALL no-year listings for pre-1970 books, throwing away
+            // legitimate vintage comps. World's Finest #139/#149/#159/#163 all hit
+            // final=0 comps because eBay sellers frequently title as "World's Finest
+            // #139 VG" without explicit year.
+            //
+            // New logic: ACCEPT missing-year listings (can't determine era conflict).
+            // REJECT only when year is PRESENT and WRONG (tolerance check below).
+            // Modern relaunch contamination mitigated by MODERN_RELAUNCH_RE filter above.
             if (ly == null) {
-              if (yearNum < 1970) {
-                console.log('[era-filter] rejected (no year, pre-1970 book):',
-                  titleStr.slice(0, 55));
-                return false;
-              }
-              return true; // Modern books: keep listings without year
+              // No year in listing title - ACCEPT (insufficient evidence to reject)
+              return true;
             }
 
             const diff = Math.abs(ly - yearNum);
