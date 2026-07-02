@@ -360,14 +360,39 @@ function tokenize(str) {
 // Extract issue number from eBay image results consensus
 export function extractIssueFromEbayResults(items) {
   if (!items?.length) return null;
+
+  // Ship #24 Q12b — Marketing-copy discriminator. "#1" frequently appears in
+  // "Anniversary Issue #1" / "Special Issue #1" marketing language, NOT as the
+  // actual comic issue number. Apply semantic filter BEFORE frequency voting.
+  const MARKETING_KEYWORDS = /\b(anniversary|special|collector|limited|exclusive|variant)\b/i;
+  const MARKETING_WINDOW = 3; // tokens
+
   const issues = items
     .map((i) => {
-      const m = String(i.title || '').match(/#\s*(\d+)/);
-      return m ? m[1] : null;
+      const title = String(i.title || '');
+      const m = title.match(/#\s*(\d+)/);
+      if (!m) return null;
+
+      const issueNum = m[1];
+      const matchIndex = m.index;
+
+      // Extract 3-token window around "#N" to check for marketing-copy context
+      const beforeMatch = title.slice(Math.max(0, matchIndex - 30), matchIndex);
+      const afterMatch = title.slice(matchIndex, matchIndex + 30);
+      const window = beforeMatch + afterMatch;
+
+      // Flag "#1" as SUSPECT when it appears near marketing keywords
+      if (issueNum === '1' && MARKETING_KEYWORDS.test(window)) {
+        return null; // Exclude from issue-number voting
+      }
+
+      return issueNum;
     })
     .filter(Boolean);
+
   if (issues.length === 0) return null;
-  // Find most common issue
+
+  // Find most common issue (among non-marketing entries)
   const freq = {};
   issues.forEach((iss) => {
     freq[iss] = (freq[iss] || 0) + 1;
