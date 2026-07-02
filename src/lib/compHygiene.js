@@ -319,12 +319,13 @@ export const detectSeriesMarkers = (title) => {
       const beforeMatch = t.slice(0, m.index);
       const afterMatch = t.slice(m.index + m[0].length);
 
-      // Pattern: preceding word ends with capital letter(s) (e.g., "Fighter", "Marvel")
-      const hasPrecedingCap = /[A-Z][a-z]+\s*$/.test(beforeMatch);
-      // Pattern: following word starts with capital (includes abbreviations like "G.I.")
-      const hasFollowingCap = /^\s+[A-Z]/.test(afterMatch);
+      // Pattern: preceding word contains letters (any case, incl. all-caps "FIGHTER")
+      const hasPrecedingWord = /[A-Za-z]\s*$/.test(beforeMatch);
+      // Pattern: following starts with optional whitespace/punctuation + letter
+      // Catches: "X G.I.", "X GIJOE", "X GI JOE", "X Joe"
+      const hasFollowingWord = /^[\s.]*[A-Za-z]/.test(afterMatch);
 
-      if (hasPrecedingCap && hasFollowingCap) {
+      if (hasPrecedingWord && hasFollowingWord) {
         continue; // Skip this "X" — crossover symbol between two franchise names
       }
     }
