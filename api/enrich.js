@@ -3145,9 +3145,25 @@ export default async function handler(req, res) {
         : priceBandsRaw.source === 'verified_sold_active_blend'
         ? 'verified_sold_active_blend'
         : 'pc_estimate';
+
+      // Ship #24 — source-specific comp count. priceBandsRaw.count reflects
+      // the pool that calculatePriceBands() received (sold comps when source
+      // is verified_sold, active comps when source is verified_active). For
+      // blended sources, sum BOTH pools. For active-only, read rawComps.count
+      // (the AI-verified active pool) instead of priceBandsRaw.count (which
+      // would be the sold pool size, potentially zero).
+      let displayCount = priceBandsRaw.count;
+      if (out.pricingSource === 'verified_active' && rawComps?.count != null) {
+        displayCount = rawComps.count;
+      } else if (out.pricingSource === 'verified_sold_active_blend') {
+        const soldCount = priceBandsRaw.count || 0;
+        const activeCount = rawComps?.count || 0;
+        displayCount = soldCount + activeCount;
+      }
+
       let priceNoteBase = gradeLabel
-        ? `${gradeLabel} · ${priceBandsRaw.count} verified comps`
-        : `${priceBandsRaw.count} verified comps`;
+        ? `${gradeLabel} · ${displayCount} verified comps`
+        : `${displayCount} verified comps`;
 
       // Variant fallback warning — user should verify variant premium manually
       if (priceBandsRaw.variantAdjusted) {
@@ -3703,6 +3719,14 @@ export default async function handler(req, res) {
             out.priceHigh = fmtUsd(newPrice * 1.25);
             out.keyMultiplier = keyMult;
             out.keyMultBaseSource = keyMultBaseSource;
+
+            // Ship #24 — preserve blend-sourced label when key mult applied to blendedAvg.
+            // Without this, blend-derived pricing shows as 'pc_estimate' even though the
+            // base came from verified sold+active comps (Street Fighter G.I. #1 case).
+            if (keyMultBaseSource === 'blendedAvg' && out.pricingSource === 'pc_estimate') {
+              out.pricingSource = 'verified_sold_active_blend';
+            }
+
             console.log('[key]', isMajorKey ? 'major' : 'minor',
               `×${keyMult} (base=${keyMultBaseSource}=${keyMultBase.toFixed(2)})`,
               `${curPrice.toFixed(2)} → ${newPrice.toFixed(2)}`);

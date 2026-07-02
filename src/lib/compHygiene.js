@@ -308,8 +308,27 @@ export const detectSeriesMarkers = (title) => {
   const markers = [];
   // Roman numerals II-X — `(?<![\w-])` and `(?![\w-])` exclude
   // hyphenated adjacency (X-Men / V-Wars don't false-positive).
+  // Ship #24 — crossover-X guard: "X" between two capitalized words
+  // (e.g., "Street Fighter X G.I. Joe") is a crossover symbol, NOT
+  // a sequel marker. Bidirectional check: requires BOTH (a) preceding
+  // capitalized word AND (b) following capitalized word/abbreviation.
   for (const m of t.matchAll(/(?<![\w-])(III|II|IV|VI{0,3}|IX|X)(?![\w-])/g)) {
-    markers.push(`roman-${m[1].toLowerCase()}`);
+    const numeral = m[1];
+    // Crossover-X filter: if "X" has capitalized words on BOTH sides, it's a crossover.
+    if (numeral === 'X') {
+      const beforeMatch = t.slice(0, m.index);
+      const afterMatch = t.slice(m.index + m[0].length);
+
+      // Pattern: preceding word ends with capital letter(s) (e.g., "Fighter", "Marvel")
+      const hasPrecedingCap = /[A-Z][a-z]+\s*$/.test(beforeMatch);
+      // Pattern: following word starts with capital (includes abbreviations like "G.I.")
+      const hasFollowingCap = /^\s+[A-Z]/.test(afterMatch);
+
+      if (hasPrecedingCap && hasFollowingCap) {
+        continue; // Skip this "X" — crossover symbol between two franchise names
+      }
+    }
+    markers.push(`roman-${numeral.toLowerCase()}`);
   }
   // Vol / Volume N
   const volMatch = t.match(/\bVol(?:\.|ume)?\s*(\d+)\b/i);

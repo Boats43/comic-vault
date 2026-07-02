@@ -29,6 +29,22 @@
 export const sanitizeSeriesTitle = (rawTitle) => {
   if (!rawTitle) return rawTitle;
 
+  // Ship #24 FIX #12 — preserve numeric tokens that are part of the actual title
+  // (e.g., "Spider-Man 2099", "X-Men 2099"). Detect when a 4-digit number appears
+  // ADJACENT to a word token (no space) or in a well-known title pattern. These
+  // are title components, not standalone year metadata.
+  const TITLE_NUMERIC_PATTERNS = [
+    /\b\w+\s+\d{4}\b/g,        // "Spider-Man 2099", "Conan 2099"
+    /\b\d{4}\s+\w+/g,          // "2099 Unlimited"
+  ];
+  const numericTokens = [];
+  for (const pattern of TITLE_NUMERIC_PATTERNS) {
+    const matches = rawTitle.matchAll(pattern);
+    for (const m of matches) {
+      numericTokens.push(m[0]);
+    }
+  }
+
   const NOISE_PATTERNS = [
     // Creator names that bleed into titles
     /\b(neal|adams|john|romita|jack|kirby|steve|ditko|barry|windsor|smith|jim|lee|todd|mcfarlane|frank|miller|alan|moore|chris|claremont|joe|jusko|kaare|andrews|alex|ross)\b/gi,
@@ -38,7 +54,7 @@ export const sanitizeSeriesTitle = (rawTitle) => {
     /\b(high|grade|very|good|fine|near|mint|vf|nm|fn|gd|vg|cgc|raw|unslabbed|slabbed|graded|stock)\b/gi,
     // Edition markers in title
     /\b(first|premiere|ongoing|series|vol|volume|edition|print|printing|reprint|book)\b/gi,
-    // Year when embedded in title (year is separate field)
+    // Year when embedded in title (year is separate field) — BUT preserve title-numeric tokens
     /\b(19|20)\d{2}\b/g,
     // Publisher name in title (publisher is separate field)
     /\b(marvel|dc|image|dark|horse|comics|comic)\b/gi,
@@ -47,6 +63,14 @@ export const sanitizeSeriesTitle = (rawTitle) => {
   let clean = rawTitle;
   for (const pattern of NOISE_PATTERNS) {
     clean = clean.replace(pattern, ' ');
+  }
+
+  // Restore preserved numeric tokens
+  for (const token of numericTokens) {
+    if (!clean.includes(token)) {
+      // Token was stripped — restore it at the position where it should be
+      clean = clean + ' ' + token;
+    }
   }
 
   // Collapse whitespace
@@ -123,13 +147,29 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     console.log(`[phase1] overlap: ${(overlap * 100).toFixed(0)}% (eBay="${ebay.title}" vs Vision="${vision.title}")`);
 
     if (overlap < overlapThreshold) {
-      // eBay disagrees with Vision — use eBay as source of truth
-      confirmedTitle = ebay.title;
-      confirmedIssue = ebay.issue || vision.issue;
-      confirmedYear = ebay.year || vision.year;
-      confirmedPublisher = ebay.publisher || vision.publisher;
-      identitySource = 'ebay_visual_override';
-      console.log(`[phase1] eBay OVERRIDE: using "${confirmedTitle}" #${confirmedIssue} for downstream queries`);
+      // Ship #24 FIX #13 — numeric-token Vision protection. When Vision contains
+      // a numeric component (e.g., "Spider-Man 2099") and eBay consensus lacks it
+      // (e.g., "Spider-Man"), prefer Vision UNLESS overlap is extremely low (<10%).
+      // This prevents stripping meaningful numeric identifiers when eBay comp pool
+      // has mixed results (some with "2099", some without).
+      const visionHasNumeric = /\b\d{4}\b/.test(vision.title);
+      const ebayHasNumeric = /\b\d{4}\b/.test(ebay.title);
+
+      if (visionHasNumeric && !ebayHasNumeric && overlap >= 0.10) {
+        // Vision has numeric token, eBay doesn't, but there's SOME overlap (≥10%)
+        // → trust Vision's more specific title
+        confirmedTitle = vision.title;
+        identitySource = 'vision_numeric_protection';
+        console.log(`[phase1] VISION NUMERIC PROTECTION: "${vision.title}" has numeric token missing from eBay consensus "${ebay.title}" — keeping Vision (overlap=${(overlap*100).toFixed(0)}%)`);
+      } else {
+        // Standard eBay override when overlap is low
+        confirmedTitle = ebay.title;
+        confirmedIssue = ebay.issue || vision.issue;
+        confirmedYear = ebay.year || vision.year;
+        confirmedPublisher = ebay.publisher || vision.publisher;
+        identitySource = 'ebay_visual_override';
+        console.log(`[phase1] eBay OVERRIDE: using "${confirmedTitle}" #${confirmedIssue} for downstream queries`);
+      }
     } else {
       console.log(`[phase1] eBay agrees with Vision: using "${confirmedTitle}"`);
     }
