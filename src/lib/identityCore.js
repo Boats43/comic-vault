@@ -30,18 +30,25 @@ export const sanitizeSeriesTitle = (rawTitle) => {
   if (!rawTitle) return rawTitle;
 
   // Ship #24 FIX #12 — preserve numeric tokens that are part of the actual title
-  // (e.g., "Spider-Man 2099", "X-Men 2099"). Detect when a 4-digit number appears
-  // ADJACENT to a word token (no space) or in a well-known title pattern. These
-  // are title components, not standalone year metadata.
-  const TITLE_NUMERIC_PATTERNS = [
-    /\b\w+\s+\d{4}\b/g,        // "Spider-Man 2099", "Conan 2099"
-    /\b\d{4}\s+\w+/g,          // "2099 Unlimited"
-  ];
-  const numericTokens = [];
-  for (const pattern of TITLE_NUMERIC_PATTERNS) {
-    const matches = rawTitle.matchAll(pattern);
-    for (const m of matches) {
-      numericTokens.push(m[0]);
+  // (e.g., "Spider-Man 2099", "X-Men 2099", "2099 Unlimited"). Only protect years
+  // that appear in KNOWN title-numeric patterns, not standalone metadata.
+  const protectedYears = new Set();
+
+  // Pattern 1: series name + space + 4-digit (Spider-Man 2099)
+  const pattern1 = /\b([A-Za-z][\w-]*)\s+(\d{4})(?:\s|$)/g;
+  for (const match of rawTitle.matchAll(pattern1)) {
+    const year = match[2];
+    if (year === '2099' || parseInt(year) > 2100) {
+      protectedYears.add(year);
+    }
+  }
+
+  // Pattern 2: 4-digit + space + series name (2099 Unlimited)
+  const pattern2 = /\b(\d{4})\s+([A-Za-z][\w-]*)(?:\s|$)/g;
+  for (const match of rawTitle.matchAll(pattern2)) {
+    const year = match[1];
+    if (year === '2099' || parseInt(year) > 2100) {
+      protectedYears.add(year);
     }
   }
 
@@ -54,8 +61,6 @@ export const sanitizeSeriesTitle = (rawTitle) => {
     /\b(high|grade|very|good|fine|near|mint|vf|nm|fn|gd|vg|cgc|raw|unslabbed|slabbed|graded|stock)\b/gi,
     // Edition markers in title
     /\b(first|premiere|ongoing|series|vol|volume|edition|print|printing|reprint|book)\b/gi,
-    // Year when embedded in title (year is separate field) — BUT preserve title-numeric tokens
-    /\b(19|20)\d{2}\b/g,
     // Publisher name in title (publisher is separate field)
     /\b(marvel|dc|image|dark|horse|comics|comic)\b/gi,
   ];
@@ -65,13 +70,10 @@ export const sanitizeSeriesTitle = (rawTitle) => {
     clean = clean.replace(pattern, ' ');
   }
 
-  // Restore preserved numeric tokens
-  for (const token of numericTokens) {
-    if (!clean.includes(token)) {
-      // Token was stripped — restore it at the position where it should be
-      clean = clean + ' ' + token;
-    }
-  }
+  // Year stripping with protection for title-numeric tokens
+  clean = clean.replace(/\b(19|20)\d{2}\b/g, (match) => {
+    return protectedYears.has(match) ? match : ' ';
+  });
 
   // Collapse whitespace
   clean = clean.replace(/\s+/g, ' ').trim();
