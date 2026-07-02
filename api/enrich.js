@@ -3215,6 +3215,12 @@ export default async function handler(req, res) {
       }
       out.pricingSource = "pricecharting";
 
+      // Ship #24 Q5b — Comp count display for pc_estimate path. When PC pricing
+      // is used but eBay comps exist (used for sanity check), surface comp count.
+      if (rawComps?.count > 0) {
+        out.priceNote += ` (${rawComps.count} comps for reference)`;
+      }
+
       // Sanity check: compare PC price against blended/eBay comps average.
       // Two skip conditions, both close upstream-of-floor leaks:
       //   1. Mega-keys (MEGA or MANUAL): the floor map is the source

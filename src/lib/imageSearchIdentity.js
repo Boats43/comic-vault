@@ -174,13 +174,35 @@ export const extractVariantTokens = (title) => {
 // pattern from api/enrich.js lookupEbayVisual so behavior is identical
 // — issue # in 1-999 only, no trailing digits.
 const ISSUE_RE = /#\s*(\d{1,3})(?!\d)/;
+
+// Ship #24 Q12c — Marketing-copy discriminator for title-family path.
+// Same logic as Q12b (identityAlignment.js), applied to title-family
+// weighted-consensus issue extraction. Excludes "#1" when it appears
+// near marketing keywords (Anniversary Issue #1, Special Issue #1, etc.)
+const MARKETING_KEYWORDS_RE = /\b(anniversary|special|collector|limited|exclusive|variant)\b/i;
+
 export const extractIssueFromTitle = (title) => {
   const titleStr = String(title || '');
   const m = titleStr.match(ISSUE_RE);
   if (!m) return null;
-  const n = parseInt(m[1], 10);
+
+  const issueNum = m[1];
+  const n = parseInt(issueNum, 10);
   if (n > 999) return null;
-  return m[1];
+
+  // Q12c discriminator: flag "#1" as suspect when near marketing keywords
+  if (issueNum === '1') {
+    const matchIndex = m.index;
+    const beforeMatch = titleStr.slice(Math.max(0, matchIndex - 30), matchIndex);
+    const afterMatch = titleStr.slice(matchIndex, matchIndex + 30);
+    const window = beforeMatch + afterMatch;
+
+    if (MARKETING_KEYWORDS_RE.test(window)) {
+      return null; // Exclude marketing-copy "#1" from title-family issue extraction
+    }
+  }
+
+  return issueNum;
 };
 
 // Extract a 4-digit year from a title. Range: 1900-2099. Prefers a
