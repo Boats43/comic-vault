@@ -55,7 +55,10 @@ import {
 } from "../src/lib/soldVerification.js";
 import { fetchSold } from "./sold.js";
 import { lookupCGC } from "./cgc-lookup.js";
-import { lookupGoCollect } from "./gocollect.js";
+// Q25 FIX — GoCollect removed. 100% timeout rate (4.5s tax, zero successful
+// returns across all sessions). API key #019483 status unknown, but evidence
+// confirms dead integration. Recover 4.5s per scan by removing the call.
+// import { lookupGoCollect } from "./gocollect.js";
 import {
   fetchPricechartingPop,
   fetchPricechartingSales,
@@ -2418,16 +2421,9 @@ export default async function handler(req, res) {
       // approval lights it up without re-wiring. Ship #20a sources sold
       // data from PriceCharting instead (pcSalesResult below).
       fetchSold({ title, issue: correctedIssue, year: confirmedYear }).catch(() => []),
-      // FIX 3 — GoCollect KV cache (persistent across cold starts)
-      (async () => {
-        const gcKey = `${title}|${correctedIssue}`;
-        const kvKey = `gc:${gcKey}`;
-        const cached = await kvGet(kvKey);
-        if (cached) return cached;
-        const result = await lookupGoCollect({ title, issue: correctedIssue, year: confirmedYear, publisher }).catch(() => null);
-        await kvSet(kvKey, result, KV_TTL.GC);
-        return result;
-      })(),
+      // Q25 FIX — GoCollect removed (100% timeout, 4.5s tax, zero returns).
+      // Return null immediately instead of waiting 4.5s per scan.
+      Promise.resolve(null),
       priceCharting?.id
         ? fetchPricechartingPop(priceCharting.id, req.body?.grade).catch(() => null)
         : Promise.resolve(null),
