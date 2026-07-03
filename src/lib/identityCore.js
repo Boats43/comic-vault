@@ -226,21 +226,47 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
  * - "#97" (original US edition number)
  * When multiple distinct #N patterns exist, flag conflict for manual review.
  *
+ * Q21 EXTENSION — Digit-transposition detector.
+ * When two candidates differ by single-digit swap (120 ↔ 112), flag as
+ * transposition conflict. House of Secrets #120 vs #112 class.
+ *
  * @param {string} titleStr - Title to scan for issue numbers
- * @returns {Object} { hasConflict: boolean, issues: string[] }
+ * @returns {Object} { hasConflict: boolean, issues: string[], transposition: boolean }
  */
 export const detectDualIssueConflict = (titleStr) => {
-  if (!titleStr) return { hasConflict: false, issues: [] };
+  if (!titleStr) return { hasConflict: false, issues: [], transposition: false };
 
   const issueMatches = Array.from(String(titleStr).matchAll(/#\s*(\d+)/g));
   const distinctIssues = [...new Set(issueMatches.map(m => m[1]))];
 
   if (distinctIssues.length >= 2) {
-    console.log(`[Q26] DUAL-ISSUE CONFLICT: title="${titleStr.slice(0, 60)}" has ${distinctIssues.length} distinct issue numbers: ${distinctIssues.join(', ')}`);
-    return { hasConflict: true, issues: distinctIssues };
+    // Q21: Check for digit-transposition pattern (120 ↔ 112, 103 ↔ 013)
+    let transposition = false;
+    if (distinctIssues.length === 2) {
+      const [a, b] = distinctIssues;
+      // Sort digits of each issue number — if sorted strings match, it's a transposition
+      // 120 → "012", 112 → "112" (NO match)
+      // BUT 120 → ['0','1','2'], 112 → ['1','1','2'] — different!
+      // CORRECT: compare digit COUNTS, not sorted strings
+      // 120: {0:1, 1:1, 2:1}, 112: {1:2, 2:1} — NOT same
+      // Actually need: same digits in different order
+      // 120 vs 102: {0:1, 1:1, 2:1} vs {0:1, 1:1, 2:1} — SAME (transposition)
+      // 120 vs 112: {0:1, 1:1, 2:1} vs {1:2, 2:1} — DIFFERENT (not transposition)
+      const aDigits = a.split('').sort().join('');
+      const bDigits = b.split('').sort().join('');
+      if (aDigits === bDigits) {
+        transposition = true;
+        console.log(`[Q21] DIGIT-TRANSPOSITION CONFLICT: "${titleStr.slice(0, 60)}" has transposed issues: ${distinctIssues.join(' ↔ ')}`);
+      }
+    }
+
+    if (!transposition) {
+      console.log(`[Q26] DUAL-ISSUE CONFLICT: title="${titleStr.slice(0, 60)}" has ${distinctIssues.length} distinct issue numbers: ${distinctIssues.join(', ')}`);
+    }
+    return { hasConflict: true, issues: distinctIssues, transposition };
   }
 
-  return { hasConflict: false, issues: distinctIssues };
+  return { hasConflict: false, issues: distinctIssues, transposition: false };
 };
 
 /**
@@ -255,13 +281,14 @@ export const detectDualIssueConflict = (titleStr) => {
  * @returns {string|null|Object} Resolved issue or { conflict: true, candidates: [...] }
  */
 export const resolveIssue = (visionIssue, ebayIssue, visualIssue, titleContext = '') => {
-  // Q26: check for dual-issue conflict
+  // Q26 + Q21: check for dual-issue conflict (includes transposition detection)
   if (titleContext) {
     const conflict = detectDualIssueConflict(titleContext);
     if (conflict.hasConflict) {
       return {
         conflict: true,
         candidates: conflict.issues,
+        transposition: conflict.transposition,  // Q21: flag digit-swap pattern
         visionIssue,
         ebayIssue,
         visualIssue,
