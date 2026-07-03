@@ -158,6 +158,14 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // Ship 26.2 — Family candidate overrides when top-rank-protection or
   // weighted-consensus selected. Takes precedence over visualConsensus
   // exact-frequency voting.
+  // Q12c REGRESSION FIX — Preserve eBay issue/year/publisher when family
+  // overrides title. Family clustering operates on series-name tokens only
+  // (title-level resolution), NOT on issue/year/publisher (which come from
+  // eBay visual consensus). When family fires, keep eBay's identity fields.
+  // X-Men Anniversary case: family selectedTitle="X-Men Anniversary Special"
+  // has no issue number, but eBay consensus correctly extracted issue="325".
+  // Prior bug: confirmedIssue stayed at Vision's wrong value ("1" from
+  // marketing-copy "#1"). Fix: backfill from eBay when available.
   if (family?.selectedTitle && ['top-rank-protection', 'weighted-consensus'].includes(family.decision)) {
     const normalizeTitle = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
     const familyNorm = normalizeTitle(family.selectedTitle);
@@ -169,8 +177,15 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     }
 
     confirmedTitle = family.selectedTitle;
+    // Q12c FIX: Backfill issue/year/publisher from eBay consensus when available
+    confirmedIssue = ebay?.issue || vision.issue;
+    confirmedYear = ebay?.year || vision.year;
+    confirmedPublisher = ebay?.publisher || vision.publisher;
     identitySource = 'title-family-' + family.decision;
     console.log(`[phase1] family candidate OVERRIDE: using "${confirmedTitle}" (source: ${identitySource})`);
+    if (ebay?.issue) {
+      console.log(`[q12c-fix] family override preserved eBay issue="${ebay.issue}" (not Vision "${vision.issue}")`);
+    }
   } else if (ebay?.title && ebayResultCount >= 10) {
     const overlap = calculateTitleOverlap(ebay.title, vision.title);
     console.log(`[phase1] overlap: ${(overlap * 100).toFixed(0)}% (eBay="${ebay.title}" vs Vision="${vision.title}")`);
