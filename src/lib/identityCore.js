@@ -63,12 +63,21 @@ export const sanitizeSeriesTitle = (rawTitle) => {
     /\b(first|premiere|ongoing|series|vol|volume|edition|print|printing|reprint|book)\b/gi,
     // Publisher name in title (publisher is separate field)
     /\b(marvel|dc|image|dark|horse|comics|comic)\b/gi,
+    // Q28 FIX — Seller noise contamination (intro, indie, uk, feat, htf, oop, rare).
+    // Strip AFTER cluster selection only (not during scoring) to avoid stripping
+    // legitimate title components during comp scoring phase.
+    /\b(intro|indie|feat|featuring|htf|oop|rare|lew\s+stringer)\b/gi,
   ];
 
   let clean = rawTitle;
   for (const pattern of NOISE_PATTERNS) {
     clean = clean.replace(pattern, ' ');
   }
+
+  // Q28 FIX — Contextual "uk" stripping. Only strip when NOT part of title.
+  // "UK Indie" → strip, but "UK Comic" (publisher context) → keep.
+  // Strip standalone "uk" tokens when surrounded by whitespace or at boundaries.
+  clean = clean.replace(/\b(uk)\b(?!\s+comic)/gi, ' ');
 
   // Year stripping with protection for title-numeric tokens
   clean = clean.replace(/\b(19|20)\d{2}\b/g, (match) => {

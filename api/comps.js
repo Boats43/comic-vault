@@ -42,6 +42,7 @@ import {
   parseListingGrade,
   applyPriceSanity,
   extractIssueNumber,
+  normalizeIssueFormat,  // Q23 FIX
   hasIssueNumber,
   hasMultipleDistinctIssues,
   hasCrossSeriesSeparator,
@@ -526,14 +527,25 @@ export const fetchComps = async ({
   const searchTokens = tokenizeTitle(title);
   // Issue number: prefer explicit `issue` param, fall back to extracting from title.
   // Session 4B — Books have no issues; never extract from title for books.
-  const issueNum = assetType === 'book'
+  // Q23 FIX — Normalize issue-format strings ("Annual 14" → 14 + format=annual)
+  let issueNum = assetType === 'book'
     ? null
     : (issue ? String(issue).trim() : extractIssueNumber(title));
 
+  let issueFormat = null;  // Q23: track format flag (annual/special/king-size/giant-size)
+  if (issueNum) {
+    const normalized = normalizeIssueFormat(issueNum);
+    issueNum = normalized.issue;
+    issueFormat = normalized.format;
+    if (issueFormat) {
+      console.log(`[comps] Q23 issue-format normalization: "${issue}" → issue="${issueNum}" format="${issueFormat}"`);
+    }
+  }
+
   const cleanTitle = cleanTitleForSearch(title);
-  const iss = issue ? String(issue).trim() : null;
+  const iss = issueNum;  // Q23: use normalized numeric issue for queries
   const yr = year ? String(year).trim() : null;
-  console.log('[comps] title=', title, 'issue=', issue, 'cleanTitle=', cleanTitle);
+  console.log('[comps] title=', title, 'issue=', issue, 'issueNum=', issueNum, 'cleanTitle=', cleanTitle);
 
   // Grade suffix appended to every attempt query.
   const gradeSuffix =
@@ -787,6 +799,9 @@ export const fetchComps = async ({
       // Ship #13 Bug 1: multi-issue compound rejection embedded in
       // hasIssueNumber. Count separately for observability.
       // Session 4B — Skip for books (books have no issue numbers).
+      // Q23 FIX — Format-aware issue matching. When issueFormat is set
+      // (Annual/Special/King-Size/Giant-Size), require comp titles to
+      // contain the format word + the numeric issue number together.
       if (assetType !== 'book' && issueNum) {
         const before = p.length;
         p = p.filter((it) => {
@@ -800,6 +815,16 @@ export const fetchComps = async ({
             _multiIssueRejected++;
             console.log('[issue-filter] multi-issue rejected:', t.slice(0, 55));
             return false;
+          }
+          // Q23: format-aware match
+          if (issueFormat) {
+            const formatWord = issueFormat.replace(/-/g, '[-\\s]?');  // king-size → king[-\s]?size
+            const formatRe = new RegExp(`\\b${formatWord}\\s*#?\\s*${issueNum}\\b`, 'i');
+            if (!formatRe.test(t)) {
+              console.log(`[issue-filter] Q23 format-mismatch rejected (need ${issueFormat} #${issueNum}):`, t.slice(0, 55));
+              return false;
+            }
+            return true;
           }
           return hasIssueNumber(t, issueNum);
         });

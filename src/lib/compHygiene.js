@@ -140,9 +140,11 @@ export const MIN_TOKEN_LEN = 2;
 // Tokenize a title for similarity matching. Lowercases, strips the issue#
 // hash, splits on non-alphanumerics, drops stop-words and pure-digit
 // tokens (years, raw numbers carry no series-name signal).
+// Q22 FIX — Normalize hyphens before tokenization to match "Spider-Man" vs "Spiderman"
 export const tokenizeTitle = (title) => {
   const words = String(title || "")
     .toLowerCase()
+    .replace(/-/g, "")  // Q22: strip hyphens before tokenization (spider-man → spiderman)
     .replace(/#\s*\d+/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .split(/\s+/)
@@ -221,6 +223,43 @@ export const applyPriceSanity = (items) => {
 export const extractIssueNumber = (title) => {
   const m = String(title || "").match(/#\s*(\d+)/);
   return m ? m[1] : null;
+};
+
+// Q23 FIX — Normalize issue-format strings (Annual 14 → 14 + format=annual).
+// Vision and eBay sometimes return "Annual 14", "Special", "King-Size 3" as
+// the issue field. Comp filters expect numeric issue strings, so non-numeric
+// formats kill all matches. Extract the numeric portion and flag the format.
+export const normalizeIssueFormat = (issueStr) => {
+  if (!issueStr) return { issue: null, format: null };
+
+  const str = String(issueStr).trim();
+
+  // Pure numeric — no format marker
+  if (/^\d+$/.test(str)) return { issue: str, format: null };
+
+  // Annual #14 or Annual 14 → 14 + format=annual
+  const annualMatch = str.match(/^Annual\s*#?\s*(\d+)$/i);
+  if (annualMatch) return { issue: annualMatch[1], format: 'annual' };
+
+  // Special #3 or Special 3 → 3 + format=special
+  const specialMatch = str.match(/^Special\s*#?\s*(\d+)$/i);
+  if (specialMatch) return { issue: specialMatch[1], format: 'special' };
+
+  // Giant-Size #7 or King-Size #5 → N + format=giant-size/king-size
+  const giantMatch = str.match(/^Giant[-\s]?Size\s*#?\s*(\d+)$/i);
+  if (giantMatch) return { issue: giantMatch[1], format: 'giant-size' };
+
+  const kingMatch = str.match(/^King[-\s]?Size\s*#?\s*(\d+)$/i);
+  if (kingMatch) return { issue: kingMatch[1], format: 'king-size' };
+
+  // Bare format words without numbers → flag format, null issue
+  if (/^(Annual|Special|Giant[-\s]?Size|King[-\s]?Size)$/i.test(str)) {
+    const format = str.toLowerCase().replace(/\s+/g, '-');
+    return { issue: null, format };
+  }
+
+  // Unrecognized format → return as-is
+  return { issue: str, format: null };
 };
 
 // Listing must contain the issue number as "#N" with a word boundary
