@@ -52,6 +52,18 @@ export const sanitizeSeriesTitle = (rawTitle) => {
     }
   }
 
+  // Q24 FIX — Publisher-name whitelist for compound character titles.
+  // "Captain Marvel" → must NOT strip "Marvel" as publisher noise.
+  // Deterministic list: titles where publisher name is PART of the series name.
+  const COMPOUND_TITLE_WHITELIST = [
+    'captain marvel', 'ms. marvel', 'ms marvel',
+    'marvel team-up', 'marvel team up', 'marvel two-in-one', 'marvel two in one',
+    'marvel presents', 'detective comics', 'dc comics presents',
+  ];
+
+  const rawLower = rawTitle.toLowerCase();
+  const isCompoundTitle = COMPOUND_TITLE_WHITELIST.some(w => rawLower.includes(w));
+
   const NOISE_PATTERNS = [
     // Creator names that bleed into titles
     /\b(neal|adams|john|romita|jack|kirby|steve|ditko|barry|windsor|smith|jim|lee|todd|mcfarlane|frank|miller|alan|moore|chris|claremont|joe|jusko|kaare|andrews|alex|ross)\b/gi,
@@ -61,8 +73,6 @@ export const sanitizeSeriesTitle = (rawTitle) => {
     /\b(high|grade|very|good|fine|near|mint|vf|nm|fn|gd|vg|cgc|raw|unslabbed|slabbed|graded|stock)\b/gi,
     // Edition markers in title
     /\b(first|premiere|ongoing|series|vol|volume|edition|print|printing|reprint|book)\b/gi,
-    // Publisher name in title (publisher is separate field)
-    /\b(marvel|dc|image|dark|horse|comics|comic)\b/gi,
     // Q28 FIX — Seller noise contamination (intro, indie, uk, feat, htf, oop, rare).
     // Strip AFTER cluster selection only (not during scoring) to avoid stripping
     // legitimate title components during comp scoring phase.
@@ -72,6 +82,14 @@ export const sanitizeSeriesTitle = (rawTitle) => {
   let clean = rawTitle;
   for (const pattern of NOISE_PATTERNS) {
     clean = clean.replace(pattern, ' ');
+  }
+
+  // Q24 FIX — Publisher-name stripping with compound-title guard.
+  // Only strip publisher tokens when NOT part of a whitelisted compound title.
+  if (!isCompoundTitle) {
+    clean = clean.replace(/\b(marvel|dc|image|dark|horse|comics|comic)\b/gi, ' ');
+  } else {
+    console.log(`[sanitize] Q24 compound-title guard: preserving publisher tokens in "${rawTitle}"`);
   }
 
   // Q28 FIX — Contextual "uk" stripping. Only strip when NOT part of title.
@@ -202,15 +220,55 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
 };
 
 /**
+ * Q26 FIX — Detect dual-issue-number conflict.
+ * Foreign/reprint editions sometimes contain TWO distinct issue numbers in title:
+ * - "#103" (foreign edition number)
+ * - "#97" (original US edition number)
+ * When multiple distinct #N patterns exist, flag conflict for manual review.
+ *
+ * @param {string} titleStr - Title to scan for issue numbers
+ * @returns {Object} { hasConflict: boolean, issues: string[] }
+ */
+export const detectDualIssueConflict = (titleStr) => {
+  if (!titleStr) return { hasConflict: false, issues: [] };
+
+  const issueMatches = Array.from(String(titleStr).matchAll(/#\s*(\d+)/g));
+  const distinctIssues = [...new Set(issueMatches.map(m => m[1]))];
+
+  if (distinctIssues.length >= 2) {
+    console.log(`[Q26] DUAL-ISSUE CONFLICT: title="${titleStr.slice(0, 60)}" has ${distinctIssues.length} distinct issue numbers: ${distinctIssues.join(', ')}`);
+    return { hasConflict: true, issues: distinctIssues };
+  }
+
+  return { hasConflict: false, issues: distinctIssues };
+};
+
+/**
  * Resolve issue number from multiple sources.
  * Priority: Vision → eBay visual → Visual search consensus
+ * Q26 FIX — Flag conflict when title contains 2+ distinct issue numbers.
  *
  * @param {string|null} visionIssue - Issue from Vision
  * @param {string|null} ebayIssue - Issue from eBay visual consensus
  * @param {string|null} visualIssue - Issue from visual search
- * @returns {string|null} Resolved issue
+ * @param {string} titleContext - Title string for conflict detection (Q26)
+ * @returns {string|null|Object} Resolved issue or { conflict: true, candidates: [...] }
  */
-export const resolveIssue = (visionIssue, ebayIssue, visualIssue) => {
+export const resolveIssue = (visionIssue, ebayIssue, visualIssue, titleContext = '') => {
+  // Q26: check for dual-issue conflict
+  if (titleContext) {
+    const conflict = detectDualIssueConflict(titleContext);
+    if (conflict.hasConflict) {
+      return {
+        conflict: true,
+        candidates: conflict.issues,
+        visionIssue,
+        ebayIssue,
+        visualIssue,
+      };
+    }
+  }
+
   if (ebayIssue) return ebayIssue;
   if (visualIssue) return visualIssue;
   return visionIssue;
