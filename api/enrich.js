@@ -3174,11 +3174,15 @@ export default async function handler(req, res) {
         `gradeMult=${gradeMultiplier}` +
         (priceBandsRaw.variantAdjusted ? ' VARIANT-ADJUSTED' : '')
       );
-    } else if (priceCharting && !isPolybagPricing) {
+    } else if (priceCharting && !isPolybagPricing && !req.body.foreignEdition) {
       // Ship 6 — skip priceCharting fallback when polybag pricing active.
       // priceBands block above is guarded with !isPolybagPricing, but
       // its else-if branch still fires and overwrites polybag price
       // ($9.71 → $622.63) without this guard.
+      // Q27 FIX — Block pc_estimate for foreign editions. PriceCharting
+      // tracks US market only. Foreign editions (UK pence variants,
+      // Canadian editions, foreign publisher reprints) have different
+      // pricing vs US originals. Require edition-matched comps instead.
       let pc = priceCharting.price;
       // Era-aware multipliers use confirmedYear (healed via PC/CV crosscheck)
       // when available; falls back to user year; then vintage default.
@@ -4980,6 +4984,12 @@ export default async function handler(req, res) {
 
     if (!out.publisher) {
       out.publisher = confirmedPublisher || publisher || null;
+    }
+
+    // Q27: Surface foreign edition flag from Vision
+    if (req.body.foreignEdition === true) {
+      out.foreignEdition = true;
+      console.log('[q27] foreign edition detected — pc_estimate blocked');
     }
 
     // 3d. identityComplete: adapter-aware flag
