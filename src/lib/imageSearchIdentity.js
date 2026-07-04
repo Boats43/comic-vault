@@ -756,12 +756,46 @@ export const buildTitleFamilies = (itemsOrTitles) => {
       return true;
     });
 
-    // Rebuild family title and tokens from consensus
-    family.title = cleaned.join(' ');
-    family.tokens = cleaned;
+    // Q45-GUARD: Empty-consensus fallback. When divergent members cause
+    // cleaned=[] after noise stripping, fall back to top-2 highest-frequency
+    // non-noise tokens to preserve identity. If still empty, drop family
+    // (better than emitting "" as title → downstream identity on empty string).
+    if (cleaned.length === 0) {
+      console.log(`[family-consensus] empty after cleaning — attempting fallback`);
+      const fallbackTokens = Object.entries(tokenFreq)
+        .filter(([token]) => {
+          // Exclude noise tokens
+          if (NOISE_TOKENS.has(token.toLowerCase())) return false;
+          // Exclude standalone years
+          if (/^\d{4}$/.test(token)) {
+            const y = parseInt(token, 10);
+            if (y >= 1900 && y <= 2099) return false;
+          }
+          return true;
+        })
+        .sort((a, b) => b[1] - a[1]) // sort by frequency descending
+        .slice(0, 2) // top 2
+        .map(([token]) => token);
+
+      if (fallbackTokens.length > 0) {
+        family.title = fallbackTokens.join(' ');
+        family.tokens = fallbackTokens;
+        console.log(`[family-consensus] fallback: "${family.title}" (${fallbackTokens.length} tokens)`);
+      } else {
+        // Mark for removal (will be filtered out below)
+        family.title = null;
+        family.tokens = [];
+        console.log(`[family-consensus] family dropped — no valid tokens after noise filter`);
+      }
+    } else {
+      // Rebuild family title and tokens from consensus
+      family.title = cleaned.join(' ');
+      family.tokens = cleaned;
+    }
   }
 
-  return families;
+  // Filter out families marked for removal (title=null from empty-consensus guard)
+  return families.filter(f => f.title !== null && f.title.length > 0);
 };
 
 /**
