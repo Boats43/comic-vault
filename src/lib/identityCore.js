@@ -77,6 +77,12 @@ export const sanitizeSeriesTitle = (rawTitle) => {
     // Strip AFTER cluster selection only (not during scoring) to avoid stripping
     // legitimate title components during comp scoring phase.
     /\b(intro|indie|feat|featuring|htf|oop|rare|lew\s+stringer)\b/gi,
+    // Q28-EXTEND-2 — Additional seller noise patterns.
+    // - "preamble", "crossover" (generic standalone title-leading words)
+    // - "limited to", "only [N]", ratio-ordinal fragments (marketing copy)
+    /\b(preamble|limited\s+to|only\s+\d+)\b/gi,
+    // Q30 — Merchandise listing contamination (wall decor, trading card, poster, etc.)
+    /\b(?:wall\s+decor|wall\s+art|poster|print|sticker|magnet|keychain|figurine|statue|puzzle|coaster|trading\s+card|tradin\s+card)\b/gi,
   ];
 
   let clean = rawTitle;

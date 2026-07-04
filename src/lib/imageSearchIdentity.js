@@ -769,6 +769,10 @@ const dedupeIssueToken = (familyTitle, acceptedIssue) => {
  * dial for hero read description" - "read description" is seller boilerplate,
  * "batman" is character cross-contamination, "161" is wrong issue.
  *
+ * Q30 EXTENSION (merchandise contamination):
+ * "Captain America and the Falcon 3D Wooden Wall Decor #201" → "Captain America and the Falcon #201"
+ * "Daredevil Legacy Tradin[g Card]" → "Daredevil Legacy"
+ *
  * @param {string} title - normalized family title
  * @returns {string} - sanitized title
  */
@@ -781,8 +785,12 @@ const sanitizeSelectedTitle = (title) => {
   // Panther, Captain America, etc.). The clustering + overlap logic should
   // already prevent cross-series contamination. This sanitizer only handles
   // seller filler that clustering can't detect.
+  //
+  // Q30: merchandise-listing contamination (wall decor, trading card, poster, etc.)
   return String(title)
     .replace(/\b(?:read|description|free|ship|shipping|combine|discount|pics|photos|wow|nice|hot|deal|sale|offer|check|out|must|see|look)\b/gi, '')
+    .replace(/\b(?:wall\s+decor|wall\s+art|poster|print|sticker|magnet|keychain|figurine|statue|puzzle|coaster|trading\s+card|tradin\s+card)\b/gi, '')
+    .replace(/\b(?:3d\s+wooden)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 };
