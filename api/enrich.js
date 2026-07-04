@@ -2813,6 +2813,7 @@ export default async function handler(req, res) {
     }
 
     const pcBase = priceCharting?.price || null;
+    // Ship #20b: Pass soldVerifyResult for tier-based pricing (live recency bands)
     const priceBandsRaw = computePriceBandsFromSold({
       soldComps: filteredSold,
       activeComps: rawComps,
@@ -2822,8 +2823,7 @@ export default async function handler(req, res) {
       issue: confirmedIssue,
       variant: req.body?.variant || null,
       variantAdjusted: soldVerifyResult.variantAdjusted || false,
-      // FIX 1: Pass blendedAvg so price-bands can use it as market value
-      blendedAvg,
+      soldVerifyResult,
     });
 
     if (priceBandsRaw) {
@@ -2859,7 +2859,7 @@ export default async function handler(req, res) {
       out.variantOverriddenVision = variantOverriddenVision;
     }
 
-    // Ship #20b — Price bands (Quick/Market/Stretch) from verified sold/active comps
+    // Ship #20b — Price bands (Quick/Market/Stretch) from tier-based pricing
     if (priceBandsRaw) {
       out.priceBands = {
         quick: fmtUsd(priceBandsRaw.quick),
@@ -2867,9 +2867,17 @@ export default async function handler(req, res) {
         stretch: fmtUsd(priceBandsRaw.stretch),
         source: priceBandsRaw.source,
         count: priceBandsRaw.count,
-        recencyDays: priceBandsRaw.recencyDays,
+        tier: priceBandsRaw.tier,
         variantAdjusted: priceBandsRaw.variantAdjusted || false,
       };
+
+      // Tier-specific warnings
+      if (priceBandsRaw.sanityCeilingWarning) {
+        out.sanityCeilingWarning = priceBandsRaw.sanityCeilingWarning;
+      }
+      if (priceBandsRaw.askDerivedWarning) {
+        out.askDerivedWarning = priceBandsRaw.askDerivedWarning;
+      }
     }
 
     // Ship #21e: Surface blendedAvg for price derivation trace UI

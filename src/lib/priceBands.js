@@ -259,12 +259,23 @@ export function applyGradeMultiplierToBands(bands, gradeMultiplier) {
 }
 
 /**
- * Main price bands engine.
- * Returns price bands with source attribution.
+ * Main price bands engine — Ship #20b Tier Architecture.
  *
- * STEP 1: Try verified sold pool (min 2)
- * STEP 2: Try verified active pool (min 2)
- * STEP 3: Fall to PC base estimate
+ * TIER 1 (soldCount ≥5 fresh): recency-weighted sold avg
+ *   - fresh (≤30d) ×1.0, recent (31-90d) ×0.6, stale (>90d) ×0.25
+ *   - Actives = SANITY CEILING only (if soldAvg > activeLow → warn)
+ *
+ * TIER 2 (soldCount 1-4 fresh): 70/30 blend
+ *   - (soldAvg × 0.7) + (activeAvg × 0.3)
+ *   - Active weight capped at 30%
+ *
+ * TIER 3 (soldCount=0, activeCount≥3): activeAvg × 0.85
+ *   - 15% discount (asks > realized prices)
+ *   - Decision cap: LIST_LOW, warning "ask-derived"
+ *
+ * TIER 4 (no market data): pc_estimate
+ *
+ * FLOORS: Tier 0 liability + verified-sold low ONLY (never asks)
  */
 export function computePriceBands({
   soldComps,
@@ -275,109 +286,157 @@ export function computePriceBands({
   issue,
   variant,
   variantAdjusted = false,
-  blendedAvg = null,
+  soldVerifyResult = null,
 }) {
-  // STEP 1 — VERIFIED SOLD POOL
+  // Build verified pools
   const verifiedSolds = buildVerifiedSoldPool(soldComps, { title, issue, variant });
   const soldPrices = verifiedSolds.map(s => s.price);
-
-  if (verifiedSolds.length >= 2) {
-    const recencyData = verifiedSolds.map(s => ({ daysAgo: s.daysAgo }));
-    const bands = calculatePriceBands(soldPrices, 'verified_sold', recencyData);
-
-    if (bands) {
-      // FIX 1: When blendedAvg exists (both sold + active pools contributed),
-      // use blend as market value instead of sold-only 50th percentile.
-      // Batman #222: market was pcBase×mult ($127.08) not blend ($118.73).
-      // Blend already has recency weighting from enrich.js calculation.
-      if (blendedAvg && blendedAvg > 0 && activeComps?.prices?.length > 0) {
-        bands.market = blendedAvg;
-        bands.source = 'verified_sold_active_blend';
-        console.log('[price-bands] BLEND OVERRIDE: sold-median=', bands.market,
-          '→ blend=', blendedAvg.toFixed(2), '(sold+active 60/40)');
-      }
-
-      // CRITICAL FIX: Do NOT apply gradeMultiplier to eBay comp prices.
-      // eBay sold/active comps are already at-grade market prices (sellers grade
-      // in the title). Multiplying by gradeMultiplier double-discounts.
-      // gradeMultiplier exists to adjust PC baseline (mint/NM reference) DOWN to
-      // user's actual grade. eBay comps are ALREADY at the actual grade.
-      // Amazing Adventures #3: blend=$107.12 (raw) × 0.45 = $48.20 (WRONG).
-      // Only apply gradeMultiplier to pc_estimate source (STEP 3 below).
-      const result = { ...bands };
-      console.log('[price-bands] soldPool=', soldPrices.length,
-        'activePool=', activeComps?.prices?.length || 0,
-        'source=', result?.source,
-        'market=', result?.market,
-        '(NO gradeMultiplier — eBay comps already at-grade)',
-        variantAdjusted ? '| VARIANT-ADJUSTED' : '');
-      // Flag variant-adjusted pricing for UI warning
-      if (variantAdjusted) {
-        result.variantAdjusted = true;
-      }
-      return result;
-    }
-  }
-
-  // STEP 2 — VERIFIED ACTIVE POOL
   const verifiedActive = buildVerifiedActivePool(activeComps, { title, issue });
 
-  if (verifiedActive.length >= 2) {
-    // Check for contamination
-    const soldMedian = verifiedSolds.length >= 2
-      ? percentile([...verifiedSolds.map(s => s.price)].sort((a,b) => a-b), 50)
-      : null;
-    const activeMedian = percentile([...verifiedActive].sort((a,b) => a-b), 50);
+  // Extract recency band counts from LIVE soldVerifyResult
+  let freshCount = 0;
+  let recentCount = 0;
+  let staleCount = 0;
 
-    if (isActiveContaminated(soldMedian, activeMedian)) {
-      // Skip active, it's contaminated
-      // Fall through to PC
-    } else {
-      const bands = calculatePriceBands(verifiedActive, 'verified_active');
-      if (bands) {
-        // Same fix as sold path: eBay active comps are already at-grade.
-        const result = { ...bands };
-        console.log('[price-bands] soldPool=', soldPrices.length,
-          'activePool=', verifiedActive.length,
-          'source=', result?.source,
-          'market=', result?.market,
-          '(NO gradeMultiplier — eBay comps already at-grade)');
-        return result;
-      }
-    }
+  if (soldVerifyResult?.verified && Array.isArray(soldVerifyResult.verified)) {
+    soldVerifyResult.verified.forEach(s => {
+      const band = s.recencyBand;
+      if (band === 'fresh') freshCount++;
+      else if (band === 'recent') recentCount++;
+      else if (band === 'stale') staleCount++;
+    });
   }
 
-  // STEP 3 — PC BASE (last resort)
+  // TIER SELECTION
+  let tier = 4; // default: no data
+  if (freshCount >= 5) tier = 1;
+  else if (freshCount >= 1 && freshCount <= 4) tier = 2;
+  else if (freshCount === 0 && verifiedActive.length >= 3) tier = 3;
+
+  console.log(`[price-trace] tier=${tier} fresh=${freshCount} recent=${recentCount} stale=${staleCount} soldPool=${soldPrices.length} activePool=${verifiedActive.length}`);
+
+  // TIER 1: Recency-weighted sold avg
+  if (tier === 1) {
+    const weights = { fresh: 1.0, recent: 0.6, stale: 0.25 };
+    let weightedSum = 0;
+    let weightSum = 0;
+
+    soldVerifyResult.verified.forEach(s => {
+      const band = s.recencyBand;
+      const weight = weights[band] || 0.25;
+      weightedSum += s.price * weight;
+      weightSum += weight;
+    });
+
+    const recencyWeighted = weightSum > 0 ? weightedSum / weightSum : 0;
+    const soldLow = Math.min(...soldPrices);
+
+    // Sanity ceiling: warn if soldAvg > activeLow
+    let sanityCeilingWarning = null;
+    if (verifiedActive.length > 0) {
+      const activeLow = Math.min(...verifiedActive);
+      if (recencyWeighted > activeLow) {
+        sanityCeilingWarning = `sold $${recencyWeighted.toFixed(2)} > activeLow $${activeLow.toFixed(2)}`;
+        console.log(`[tier-1-sanity] ${sanityCeilingWarning}`);
+      }
+    }
+
+    const result = {
+      quick: Math.round(soldLow * 100) / 100,
+      market: Math.round(recencyWeighted * 100) / 100,
+      stretch: Math.round(recencyWeighted * 1.15 * 100) / 100,
+      source: 'tier1_recency_weighted',
+      count: soldPrices.length,
+      tier: 1,
+      sanityCeilingWarning,
+      variantAdjusted: variantAdjusted || false,
+    };
+
+    console.log(`[tier-1] recencyWeighted=$${recencyWeighted.toFixed(2)} soldLow=$${soldLow.toFixed(2)}`);
+    return result;
+  }
+
+  // TIER 2: 70/30 blend (soldAvg × 0.7 + activeAvg × 0.3)
+  if (tier === 2) {
+    const soldAvg = soldPrices.reduce((a, b) => a + b, 0) / soldPrices.length;
+    const activeAvg = verifiedActive.length > 0
+      ? verifiedActive.reduce((a, b) => a + b, 0) / verifiedActive.length
+      : 0;
+
+    let market;
+    if (activeAvg > 0) {
+      market = (soldAvg * 0.7) + (activeAvg * 0.3);
+    } else {
+      // Sold-only: use soldAvg raw (no bump needed — Tier 2 already conservative)
+      market = soldAvg;
+    }
+
+    const soldLow = Math.min(...soldPrices);
+
+    const result = {
+      quick: Math.round(soldLow * 100) / 100,
+      market: Math.round(market * 100) / 100,
+      stretch: Math.round(market * 1.15 * 100) / 100,
+      source: activeAvg > 0 ? 'tier2_blend_70_30' : 'tier2_sold_only',
+      count: soldPrices.length + verifiedActive.length,
+      tier: 2,
+      variantAdjusted: variantAdjusted || false,
+    };
+
+    console.log(`[tier-2] soldAvg=$${soldAvg.toFixed(2)} activeAvg=$${activeAvg.toFixed(2)} blend=$${market.toFixed(2)}`);
+    return result;
+  }
+
+  // TIER 3: Active-only × 0.85 discount
+  if (tier === 3) {
+    const activeAvg = verifiedActive.reduce((a, b) => a + b, 0) / verifiedActive.length;
+    const discounted = activeAvg * 0.85;
+    const activeLow = Math.min(...verifiedActive);
+
+    const result = {
+      quick: Math.round(activeLow * 0.85 * 100) / 100,
+      market: Math.round(discounted * 100) / 100,
+      stretch: Math.round(discounted * 1.15 * 100) / 100,
+      source: 'tier3_active_discounted',
+      count: verifiedActive.length,
+      tier: 3,
+      askDerivedWarning: 'ask-derived pricing — verify before listing',
+    };
+
+    console.log(`[tier-3] activeAvg=$${activeAvg.toFixed(2)} discounted=$${discounted.toFixed(2)}`);
+    return result;
+  }
+
+  // TIER 4: PC estimate (last resort)
   if (pcBase && pcBase > 0) {
     const basePrice = pcBase * gradeMultiplier;
     const result = {
-      quick: Math.round(basePrice * 0.8 * 100) / 100,   // 80% of base
-      market: Math.round(basePrice * 100) / 100,        // base
-      stretch: Math.round(basePrice * 1.2 * 100) / 100, // 120% of base
-      source: 'pc_estimate',
+      quick: Math.round(basePrice * 0.8 * 100) / 100,
+      market: Math.round(basePrice * 100) / 100,
+      stretch: Math.round(basePrice * 1.2 * 100) / 100,
+      source: 'tier4_pc_estimate',
       count: 0,
-      recencyDays: null
+      tier: 4,
     };
-    console.log('[price-bands] soldPool=', soldPrices.length,
-      'activePool=', verifiedActive?.length || 0,
-      'source=', result?.source,
-      'market=', result?.market);
+
+    console.log(`[tier-4] pc_estimate=$${basePrice.toFixed(2)}`);
     return result;
   }
 
   // No data available
-  console.log('[price-bands] soldPool=', soldPrices.length,
-    'activePool=', 0,
-    'source=null (no data)');
+  console.log('[price-bands] tier=4 no data available');
   return null;
 }
 
 /**
- * Enforce floor on recommended price.
- * Recommended never below floor.
+ * Enforce floor on recommended price — Ship #20b.
+ * Floors: Tier 0 liability table + verified-sold low ONLY.
+ * NEVER ask-based floors (active comps do NOT set floor).
  */
-export function enforceFloor(recommendedPrice, floor) {
-  if (!floor || !recommendedPrice) return recommendedPrice;
-  if (recommendedPrice >= floor) return recommendedPrice;
-  return floor;
+export function enforceFloor(recommendedPrice, verifiedSoldLow) {
+  if (!verifiedSoldLow || !recommendedPrice) return recommendedPrice;
+  if (recommendedPrice >= verifiedSoldLow) return recommendedPrice;
+
+  console.log(`[floor-enforcement] price $${recommendedPrice.toFixed(2)} < soldLow $${verifiedSoldLow.toFixed(2)} → enforced to soldLow`);
+  return verifiedSoldLow;
 }
