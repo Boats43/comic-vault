@@ -963,7 +963,8 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   const overlapRatio = shorterTokenCount > 0 ? topFamilyOverlap.length / shorterTokenCount : 0;
   const OVERLAP_THRESHOLD = 0.4; // 40% of shorter token set
 
-  if (overlapRatio >= OVERLAP_THRESHOLD) {
+  // Q38: Require ≥3 members for weighted-consensus override
+  if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD) {
     // FIX A4: Post-selection boilerplate sanitization
     const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(topFamily.title, visionIssue));
     return {
@@ -971,6 +972,19 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
       selectedTitle: sanitizedTitle,
       rawTitle: topFamily.rawTitle,
       reason: `Weighted consensus (${topFamily.count} members, weight ${topFamily.weightSum.toFixed(1)}, ${topFamilyOverlap.length}/${shorterTokenCount} tokens = ${Math.round(overlapRatio * 100)}% overlap)`,
+      topFamily,
+      runnerUp,
+      families: scored,
+    };
+  }
+
+  // Q38: 1-2 member case with sufficient overlap → fallback-vision (insufficient consensus)
+  if (topFamily.count >= 1 && topFamily.count < 3 && overlapRatio >= OVERLAP_THRESHOLD) {
+    return {
+      decision: 'fallback-vision',
+      selectedTitle: null,
+      rawTitle: null,
+      reason: `Top family has only ${topFamily.count} members (need ≥3 for consensus override) — preserve Vision`,
       topFamily,
       runnerUp,
       families: scored,
