@@ -3177,6 +3177,41 @@ function CollectionDetail({
         {item.grade && ` · ${gradeBadgeText}`}
       </div>
 
+      {/* Ship #21f: Identity provenance line (Rule 21-0: always render post-Phase-1) */}
+      {(() => {
+        const identitySource = item.identityAlignment?.confirmedSource || item.identitySource || 'vision';
+        const assetWarning = item.assetType === 'book' ? '⚠ book detected' : '✓ comic confirmed';
+        const soldDiag = item.soldCompDiagnostics;
+        const filterSummary = soldDiag ? (() => {
+          const reasons = soldDiag.reasons || {};
+          const total = soldDiag.rawCount || 0;
+          const verified = soldDiag.verifiedCount || 0;
+          if (total === 0) return null;
+          const topReasons = Object.entries(reasons)
+            .filter(([_, count]) => count > 0)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([reason, count]) => `${count} ${reason}`)
+            .join(', ');
+          return `${total}→${verified} verified${topReasons ? ` (${topReasons})` : ''}`;
+        })() : null;
+
+        return (
+          <div style={{
+            fontSize: 10,
+            color: '#888',
+            marginBottom: 8,
+            padding: '4px 8px',
+            background: 'rgba(255,255,255,0.02)',
+            borderRadius: 4,
+            borderLeft: '2px solid rgba(212,175,55,0.3)'
+          }}>
+            📋 Identity: {identitySource} | {assetWarning}
+            {filterSummary && ` | ${filterSummary}`}
+          </div>
+        );
+      })()}
+
       {/* 2a. DECISION CARD — Decision-first layout */}
       {item.decision?.action && (() => {
         const colors = getActionColor(item.decision);
