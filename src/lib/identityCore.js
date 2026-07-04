@@ -89,6 +89,8 @@ export const sanitizeSeriesTitle = (rawTitle) => {
     /\b(preamble|limited\s+to|only\s+\d+)\b/gi,
     // Q30 — Merchandise listing contamination (wall decor, trading card, poster, etc.)
     /\b(?:wall\s+decor|wall\s+art|poster|print|sticker|magnet|keychain|figurine|statue|puzzle|coaster|trading\s+card|tradin\s+card)\b/gi,
+    // Q33 — Accessory token poisoning (bag, board, coa, w/)
+    /\b(bag|board|w\/|with\s+bag|with\s+board|bagged|boarded|coa|certificate)\b/gi,
   ];
 
   let clean = rawTitle;
