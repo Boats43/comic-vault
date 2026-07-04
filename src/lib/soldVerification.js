@@ -175,7 +175,18 @@ const extractVariantTokens = (str) => {
   if (/exclusive|excl\./.test(s)) tokens.push('exclusive');
   if (/1:\d+|ratio|incentive/.test(s)) tokens.push('ratio');
   if (/sketch/.test(s)) tokens.push('sketch');
-  if (/cover [b-z]/.test(s)) tokens.push('altcover');
+
+  // Q48: "Cover B/C/D" detection — must NOT match artist-name + "cover" descriptors.
+  // Batman #423 has ONE McFarlane cover → "Iconic Todd McFarlane Cover" is NOT
+  // a variant, it's a descriptor. Rejecting those 5 correct comps while keeping
+  // "High Grade" ones compounds Q47 inflation.
+  //
+  // Pattern: require letter immediately after "cover " with NO intervening words.
+  // "cover b" / "cover-b" → variant ✓
+  // "todd mcfarlane cover" / "iconic...cover" → descriptor ✗
+  if (/\bcover\s*[b-z]\b/.test(s) && !/(?:mcfarlane|iconic|classic|stunning|amazing|rare)\s+cover\b/.test(s)) {
+    tokens.push('altcover');
+  }
   // Ship 18 — Add reprint-class tokens. Without these, first-print sold
   // comps leaked into reprint pricing pools (B&B #28 Loot Crate, Detective
   // #27 facsimile, etc.). Active comps had VARIANT_CONTAM_RE protection
