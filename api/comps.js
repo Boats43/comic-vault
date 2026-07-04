@@ -826,7 +826,8 @@ export const fetchComps = async ({
             }
             return true;
           }
-          return hasIssueNumber(t, issueNum);
+          // Q37: Pass series title for adjacency-aware dual-number parsing
+          return hasIssueNumber(t, issueNum, title);
         });
         if (p.length < before) {
           console.log(`[comps] issue# filter removed ${before - p.length}`);

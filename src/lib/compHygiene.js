@@ -273,23 +273,61 @@ export const normalizeIssueFormat = (issueStr) => {
 
 // Listing must contain the issue number as "#N" with a word boundary
 // after (so "#1710" and "#21" don't match "#1"). Also rejects lot
-// listings with commas-between-digits, "lot" keyword, or multiple
-// distinct #N patterns (multi-issue compound listings like
-// "#1 + #4 variant set").
-export const hasIssueNumber = (listingTitle, issueNum) => {
+// listings with commas-between-digits, "lot" keyword.
+//
+// Q37: Adjacency-aware dual-number parsing. When title contains multiple
+// issue numbers (UK weeklies: "MWOM #198 feat. Hulk #181"), prefer the
+// number nearest series-title tokens. Falls back to first-number for UK
+// weeklies when no adjacency match (weekly issue comes before reprint issue).
+export const hasIssueNumber = (listingTitle, issueNum, seriesTitle = null) => {
   if (!issueNum) return true;
   const t = String(listingTitle || "");
   if (/\blot\b/i.test(t) || /\d+\s*,\s*\d+/.test(t)) return false;
   const escaped = String(issueNum).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (!new RegExp(`#\\s*${escaped}\\b`, "i").test(t)) return false;
-  return !hasMultipleDistinctIssues(t);
+
+  // Q37: UK weeklies use "no." instead of "#" (e.g., "MWOM no.198")
+  // Accept both "#N" and "no.N" patterns
+  const hasHashOrNo = new RegExp(`(?:#|\\bno\\.?)\\s*${escaped}\\b`, "i").test(t);
+  if (!hasHashOrNo) return false;
+
+  // Q37: Multi-number adjacency logic (matches both "#N" and "no.N")
+  const issueMatches = [...t.matchAll(/(?:#|\bno\.?)\s*(\d+)\b/gi)];
+  if (issueMatches.length === 0) return false;
+  if (issueMatches.length === 1) {
+    // Single issue — standard check
+    return hasHashOrNo;
+  }
+
+  // Multiple issues — adjacency-aware resolution
+  if (seriesTitle) {
+    const seriesTokens = tokenizeTitle(seriesTitle); // Reuse existing tokenizer
+    for (const match of issueMatches) {
+      if (match[1] === String(issueNum)) {
+        // Extract 15-char window around this match
+        const start = Math.max(0, match.index - 15);
+        const end = Math.min(t.length, match.index + 20);
+        const window = t.slice(start, end).toLowerCase();
+
+        // Check if any series token appears in window
+        const hasSeriesToken = seriesTokens.some(token =>
+          window.includes(token.toLowerCase())
+        );
+        if (hasSeriesToken) return true; // Adjacency match
+      }
+    }
+  }
+
+  // No adjacency — use first-number heuristic for UK weeklies
+  // (weekly issue comes before featured issue: "MWOM #198 feat. Hulk #181")
+  return issueMatches[0][1] === String(issueNum);
 };
 
-// Helper: count distinct #N patterns in a title. Returns true when ≥2
+// Helper: count distinct #N or no.N patterns in a title. Returns true when ≥2
 // different issue numbers are present.
+// Q37: Updated to match UK "no." format
 export const hasMultipleDistinctIssues = (listingTitle) => {
   const distinct = new Set();
-  for (const m of String(listingTitle || "").matchAll(/#\s*(\d+)\b/gi)) {
+  for (const m of String(listingTitle || "").matchAll(/(?:#|\bno\.?)\s*(\d+)\b/gi)) {
     distinct.add(m[1]);
     if (distinct.size > 1) return true;
   }

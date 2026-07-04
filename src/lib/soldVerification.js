@@ -312,9 +312,10 @@ export const verifySoldComps = (rawRows, ctx) => {
   // 1. Issue number — must contain `#issue`. Also catches lot listings
   //    (commas, "lot" word, multi-issue compound).
   // P0-A DIAGNOSTIC: log all rejections to find actual filter.
+  // Q37: Pass series title for adjacency-aware dual-number parsing
   if (issue) {
     working = working.filter((r) => {
-      if (hasIssueNumber(r.title, issue)) return true;
+      if (hasIssueNumber(r.title, issue, title)) return true;
       console.log('[sold-reject] issueMismatch |', r.title?.slice(0, 80), '| issue:', issue);
       reasons.issueMismatch++;
       pushSample(r, 'issueMismatch');
@@ -601,8 +602,9 @@ export const verifySoldComps = (rawRows, ctx) => {
     }));
 
     // Apply filters 1-6 (issue, lot, format, title, printing) — no variant filters
+    // Q37: Pass series title for adjacency-aware dual-number parsing
     if (issue) {
-      fallbackPool = fallbackPool.filter((r) => hasIssueNumber(r.title, issue));
+      fallbackPool = fallbackPool.filter((r) => hasIssueNumber(r.title, issue, title));
     }
     if (!ourIsLot) {
       fallbackPool = fallbackPool.filter((r) => {
