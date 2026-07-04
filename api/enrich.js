@@ -3213,6 +3213,19 @@ export default async function handler(req, res) {
 
       out.priceNote = priceNoteBase;
 
+      // Q30 FLOOR-ONLY FIX: Set floorFired=true when priceBands assigns from
+      // blend so floor re-enforcement runs at line 3896. Without this, Batman
+      // #222 showed $167.95 recommended < $173.05 displayed floor (incoherence).
+      // Bug: floorFired only set in PC/sanity branch, not in priceBands branch.
+      // Fix: When priceBands uses blendedAvg (verified_sold_active_blend source)
+      // AND rawComps.lowest exists, set floorFired so final re-enforcement gate
+      // runs. Does NOT change blend math — only ensures floor coherence display.
+      if (priceBandsRaw.source === 'verified_sold_active_blend' && rawComps?.lowest) {
+        floorFired = true;
+        floorNum = parseFloat(String(rawComps.lowest).replace(/[$,]/g, ''));
+        console.log('[Q30] priceBands blend path → floorFired=true for re-enforcement at line 3896');
+      }
+
       console.log(
         `[price-bands-pricing] market=${priceBandsRaw.market.toFixed(2)} ` +
         `source=${out.pricingSource} count=${priceBandsRaw.count} ` +
