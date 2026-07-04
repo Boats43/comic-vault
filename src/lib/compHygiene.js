@@ -137,13 +137,39 @@ export const STOP_WORDS = new Set([
 ]);
 export const MIN_TOKEN_LEN = 2;
 
+// Q42 C-A3: Abbreviation expansion map (single source of truth).
+// Applied BEFORE tokenization in comp verification path (compHygiene →
+// soldVerification issueMismatch) AND conflict detection (conflictDetector).
+//
+// TMNT failure: Vision "Teenage Mutant Ninja Turtles Adventures" vs comps
+// "TMNT Adventures #4" → tokens ["teenage", "mutant", "ninja", "turtles"]
+// vs ["tmnt"] → 0% overlap → 0/30 kept (100% issueMismatch rejection).
+export const ABBREV_MAP = {
+  'tmnt': 'teenage mutant ninja turtles',
+  'asm': 'amazing spider man',
+  'ff': 'fantastic four',
+  'jla': 'justice league',
+  'mwom': 'mighty world of marvel',
+  'gsx': 'giant size x men',
+  'dd': 'daredevil',
+  'xm': 'x men',
+};
+
 // Tokenize a title for similarity matching. Lowercases, strips the issue#
 // hash, splits on non-alphanumerics, drops stop-words and pure-digit
 // tokens (years, raw numbers carry no series-name signal).
 // Q22 FIX — Normalize hyphens before tokenization to match "Spider-Man" vs "Spiderman"
+// Q42 C-A3 — Expand abbreviations BEFORE tokenization (TMNT → teenage mutant ninja turtles)
 export const tokenizeTitle = (title) => {
-  const words = String(title || "")
-    .toLowerCase()
+  let normalized = String(title || "").toLowerCase();
+
+  // C-A3: Expand abbreviations (word-boundary anchored)
+  for (const [abbrev, expanded] of Object.entries(ABBREV_MAP)) {
+    const pattern = new RegExp(`\\b${abbrev}\\b`, 'gi');
+    normalized = normalized.replace(pattern, expanded);
+  }
+
+  const words = normalized
     .replace(/-/g, "")  // Q22: strip hyphens before tokenization (spider-man → spiderman)
     .replace(/#\s*\d+/g, " ")
     .replace(/[^a-z0-9]+/g, " ")

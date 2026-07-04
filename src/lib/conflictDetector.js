@@ -9,6 +9,9 @@
 // Ship #28b will use conflicts to gate AI calls.
 // Ship #28a observes only (logs conflicts, stores on out.conflicts).
 
+// Q42 C-A3: Import abbreviation map (single source of truth from compHygiene)
+import { ABBREV_MAP } from './compHygiene.js';
+
 /**
  * Q44 A2 — Normalize title for conflict checking (strip cosmetic variants).
  *
@@ -86,9 +89,15 @@ export const detectIdentityConflicts = (vision, ebay, comicVine, priceCharting) 
 
   // CONFLICT 1: Title family mismatch (Vision vs eBay)
   if (ebay?.title && ebay.agreement >= 0.7) {
-    // Q44 A2: Normalize BOTH titles before tokenizing to strip cosmetic variants
-    const visionNorm = normalizeTitleForConflict(vision.title || '');
-    const ebayNorm = normalizeTitleForConflict(ebay.title);
+    // Q44 C-A2: Normalize BOTH titles before tokenizing to strip cosmetic variants.
+    // Track whether normalization altered either title for observability.
+    const visionRaw = vision.title || '';
+    const ebayRaw = ebay.title;
+    const visionNorm = normalizeTitleForConflict(visionRaw);
+    const ebayNorm = normalizeTitleForConflict(ebayRaw);
+
+    const visionNormalized = visionRaw.toLowerCase().trim() !== visionNorm;
+    const ebayNormalized = ebayRaw.toLowerCase().trim() !== ebayNorm;
 
     const visionTokens = tokenize(visionNorm);
     const ebayTokens = tokenize(ebayNorm);
@@ -102,11 +111,27 @@ export const detectIdentityConflicts = (vision, ebay, comicVine, priceCharting) 
       conflicts.push({
         type: 'TITLE_FAMILY_MISMATCH',
         severity: 'CRITICAL',
-        detail: `Vision "${vision.title}" vs eBay "${ebay.title}" (${Math.round(overlapRatio * 100)}% overlap after normalization)`,
+        detail: `Vision "${visionRaw}" vs eBay "${ebayRaw}" (${Math.round(overlapRatio * 100)}% overlap after normalization)`,
         sources: {
-          vision: vision.title,
-          ebay: ebay.title,
+          vision: visionRaw,
+          ebay: ebayRaw,
           ebayAgreement: ebay.agreement,
+        },
+      });
+    }
+
+    // C-A2: Observability conflict — when adjective/article/imprint normalization
+    // fired on either title, push INFO-severity flag. Never silent.
+    if ((visionNormalized || ebayNormalized) && overlapRatio >= 0.5) {
+      conflicts.push({
+        type: 'ADJECTIVE_NORMALIZED',
+        severity: 'INFO',
+        detail: `Cosmetic variant normalized: Vision "${visionRaw}" → "${visionNorm}", eBay "${ebayRaw}" → "${ebayNorm}" (${Math.round(overlapRatio * 100)}% overlap)`,
+        sources: {
+          visionRaw,
+          visionNorm,
+          ebayRaw,
+          ebayNorm,
         },
       });
     }
@@ -165,7 +190,7 @@ export const detectIdentityConflicts = (vision, ebay, comicVine, priceCharting) 
     const vPub = String(vision.publisher).toLowerCase().trim();
     const cvPub = String(comicVine.publisher).toLowerCase().trim();
 
-    // Q44 A2: Expand imprint normalization map
+    // Q44 C-A2: Expand imprint normalization map
     // Imprints: Vertigo/Wildstorm/Max → parent DC/Marvel
     // Colloquial: "dc" matches "dc comics", "marvel" matches "marvel comics"
     const IMPRINT_PARENTS = {
@@ -189,13 +214,15 @@ export const detectIdentityConflicts = (vision, ebay, comicVine, priceCharting) 
                   (cvNorm === 'marvel' && vNorm.includes('marvel'));
 
     if (!match) {
-      // Q44 A2: Downgrade severity from MEDIUM → INFO for cosmetic variants
-      // "The Mighty Thor" / "Thor" title variance + "Marvel" / "Marvel Comics"
-      // publisher variance should NOT escalate to HIGH severity conflict.
+      // C-A2 REVERT: Severity back to MEDIUM (was INFO in A2, regression).
+      // INFO downgrade allowed GENUINE cross-publisher conflicts (Marvel vs DC,
+      // Editorial Novaro class) to slip through. Imprint normalization already
+      // neutralizes cosmetic cases by producing match=true — only real conflicts
+      // reach this push. MEDIUM is correct.
       conflicts.push({
         type: 'PUBLISHER_MISMATCH',
-        severity: 'INFO',
-        detail: `Vision "${vision.publisher}" vs CV "${comicVine.publisher}" (cosmetic variant)`,
+        severity: 'MEDIUM',
+        detail: `Vision "${vision.publisher}" vs CV "${comicVine.publisher}"`,
         sources: {
           vision: vision.publisher,
           comicVine: comicVine.publisher,
@@ -321,24 +348,9 @@ export const detectCompsConflicts = (comps, leafCategories) => {
 const tokenize = (title) => {
   if (!title) return [];
 
-  // Q42 A3: Abbreviation expansion map — apply BEFORE tokenization
-  // Prevents issueMismatch on "TMNT Archie #4" (Vision: "Teenage Mutant Ninja Turtles")
-  // vs comps "TMNT Adventures #4" where tokens "teenage", "mutant", "ninja", "turtles"
-  // never match "tmnt" abbreviation.
-  const ABBREV_MAP = {
-    'tmnt': 'teenage mutant ninja turtles',
-    'asm': 'amazing spider man',
-    'ff': 'fantastic four',
-    'jla': 'justice league',
-    'mwom': 'mighty world of marvel',
-    'gsx': 'giant size x men',
-    'dd': 'daredevil',
-    'xm': 'x men',
-  };
-
   let normalized = String(title).toLowerCase();
 
-  // Expand abbreviations (word-boundary anchored to avoid false matches)
+  // C-A3: Expand abbreviations (imported from compHygiene.js — single source of truth)
   for (const [abbrev, expanded] of Object.entries(ABBREV_MAP)) {
     const pattern = new RegExp(`\\b${abbrev}\\b`, 'gi');
     normalized = normalized.replace(pattern, expanded);
