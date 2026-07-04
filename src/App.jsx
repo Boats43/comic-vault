@@ -3332,12 +3332,19 @@ function CollectionDetail({
               borderRadius: 6,
               fontSize: 13
             }}>
-              {item.creatorFromComps.map((creator, idx) => (
-                <div key={idx} style={{ marginBottom: idx < item.creatorFromComps.length - 1 ? 4 : 0 }}>
-                  <strong>{creator.name}</strong>
-                  {creator.role && <span style={{ color: '#888', marginLeft: 6 }}>({creator.role})</span>}
+              {/* Ship #21b: Filter null names per Rule 21-0 (no blank sections). When all names null, show "Creator not detected". */}
+              {item.creatorFromComps.filter(c => c.name).length > 0 ? (
+                item.creatorFromComps.filter(c => c.name).map((creator, idx) => (
+                  <div key={idx} style={{ marginBottom: idx < item.creatorFromComps.filter(c => c.name).length - 1 ? 4 : 0 }}>
+                    <strong>{creator.name}</strong>
+                    {creator.role && <span style={{ color: '#888', marginLeft: 6 }}>({creator.role})</span>}
+                  </div>
+                ))
+              ) : (
+                <div style={{ color: '#888', fontSize: 11, opacity: 0.7 }}>
+                  Creator not detected
                 </div>
-              ))}
+              )}
             </div>
           )}
         </div>
