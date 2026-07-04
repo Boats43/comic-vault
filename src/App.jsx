@@ -2652,6 +2652,7 @@ function CollectionDetail({
   const [ladderExpanded, setLadderExpanded] = useState(false);
   const [popExpanded, setPopExpanded] = useState(false);
   const [storyExpanded, setStoryExpanded] = useState(false); // Ship #21c
+  const [derivationExpanded, setDerivationExpanded] = useState(false); // Ship #21e
   const [packetModal, setPacketModal] = useState(null); // { channel, packet }
   const [packetDropdownOpen, setPacketDropdownOpen] = useState(false);
   const [packetEditTitle, setPacketEditTitle] = useState("");
@@ -4596,6 +4597,96 @@ function CollectionDetail({
                   </div>
                 ))}
                 <div style={{ borderTop: "1px solid rgba(212,175,55,0.25)", margin: "8px 0" }} />
+              </div>
+            )}
+
+            {/* Ship #21e: PRICE DERIVATION trace */}
+            {item.price && (
+              <div style={{ marginBottom: 10 }}>
+                <div
+                  onClick={() => setDerivationExpanded(!derivationExpanded)}
+                  style={{
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    color: '#888',
+                    fontWeight: 600,
+                    letterSpacing: 0.5,
+                    textTransform: 'uppercase',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    marginBottom: 6
+                  }}
+                >
+                  <span>{derivationExpanded ? '▼' : '▶'}</span>
+                  <span>PRICE DERIVATION</span>
+                </div>
+                {derivationExpanded && (
+                  <div style={{
+                    padding: '8px 10px',
+                    background: 'rgba(255,255,255,0.03)',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                    fontFamily: 'monospace'
+                  }}>
+                    {/* Ship #21e: Rule 21-0 compliant — shows DATA state with source tags, or NO-DATA state */}
+                    {item.priceCharting?.price && (
+                      <>
+                        <div style={{ color: '#888' }}>
+                          PC base: <span style={{ color: '#d4af37' }}>{item.priceCharting.price}</span>{' '}
+                          <span style={{ fontSize: 10, opacity: 0.7 }}>(PriceCharting {item.priceCharting.grade || 'raw'})</span>
+                        </div>
+                        {item.gradeMultiplier && (
+                          <div style={{ color: '#888', marginTop: 2 }}>
+                            × Grade mult: <span style={{ color: '#d4af37' }}>{item.gradeMultiplier.toFixed(2)}</span>{' '}
+                            <span style={{ fontSize: 10, opacity: 0.7 }}>({item.grade || 'raw'} {item.year >= 1985 ? 'modern' : 'vintage'})</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {item.soldCompsAvg && (
+                      <div style={{ color: '#888', marginTop: 6 }}>
+                        Sold avg: <span style={{ color: '#22c55e' }}>${item.soldCompsAvg.toFixed(2)}</span>{' '}
+                        <span style={{ fontSize: 10, opacity: 0.7 }}>
+                          ({item.soldCompDiagnostics?.verifiedCount || 0} verified, {item.soldComps?.[0]?.daysAgo || '?'}d recency)
+                        </span>
+                      </div>
+                    )}
+
+                    {item.comps?.average && (
+                      <div style={{ color: '#888', marginTop: 2 }}>
+                        Active avg: <span style={{ color: '#3b82f6' }}>${item.comps.average.toFixed(2)}</span>{' '}
+                        <span style={{ fontSize: 10, opacity: 0.7 }}>({item.comps.count || 0} comps)</span>
+                      </div>
+                    )}
+
+                    {item.blendedAvg && (
+                      <div style={{ color: '#888', marginTop: 4 }}>
+                        → Blend (60/40): <span style={{ color: '#a78bfa' }}>${item.blendedAvg.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {(item.rawComps?.lowest || item.rawComps?.gradeFilteredLowest) && (
+                      <div style={{ color: '#888', marginTop: 6 }}>
+                        Floor guard: <span style={{ color: '#f59e0b' }}>${(item.rawComps.gradeFilteredLowest || item.rawComps.lowest).toFixed(2)}</span>{' '}
+                        <span style={{ fontSize: 10, opacity: 0.7 }}>(lowest ask)</span>
+                      </div>
+                    )}
+
+                    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid rgba(212,175,55,0.15)', color: '#d4af37', fontWeight: 600 }}>
+                      = Final: ${parseFloat(item.price.replace(/[$,]/g, '')).toFixed(2)}{' '}
+                      <span style={{ fontSize: 10, opacity: 0.7, fontWeight: 400 }}>({item.pricingSource || 'unknown'})</span>
+                    </div>
+
+                    {!item.priceCharting?.price && !item.soldCompsAvg && !item.comps?.average && (
+                      <div style={{ color: '#888', fontSize: 11, opacity: 0.7 }}>
+                        Price derivation unavailable (identity incomplete)
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

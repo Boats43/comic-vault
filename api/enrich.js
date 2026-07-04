@@ -2824,6 +2824,11 @@ export default async function handler(req, res) {
       };
     }
 
+    // Ship #21e: Surface blendedAvg for price derivation trace UI
+    if (blendedAvg != null) {
+      out.blendedAvg = blendedAvg;
+    }
+
     // Ship #21 — Demand signals (velocity, trend, liquidity)
     const demandSignals = computeDemandSignals({
       soldComps: filteredSold,
