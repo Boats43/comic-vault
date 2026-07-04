@@ -2044,7 +2044,36 @@ export default async function handler(req, res) {
       titles.forEach(t => { freq[t] = (freq[t] || 0) + 1; });
       const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
       const top = sorted[0];
-      return top && top[1] >= 2 ? top[0] : null;
+      if (!top || top[1] < 2) return null;
+
+      // C4: Arc-subtitle residual cleanup — strip words appearing in <40% of comp titles
+      // Evidence: "Action Silver Banshee" #595, "Action Deadman" #610, goliath/secret six class
+      const consensusTitle = top[0];
+      const consensusWords = consensusTitle.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+
+      // For each word in consensus, check if ≥60% of comps include it
+      const wordInclusion = {};
+      consensusWords.forEach(word => {
+        const includeCount = titles.filter(t => t.toLowerCase().includes(word)).length;
+        wordInclusion[word] = includeCount / titles.length;
+      });
+
+      // Strip words with <60% inclusion (arc words, not canonical title)
+      const canonicalWords = consensusWords.filter(word => wordInclusion[word] >= 0.6);
+
+      // If stripping would remove ALL words, keep original (safety)
+      if (canonicalWords.length === 0) return consensusTitle;
+
+      // Rebuild title from canonical words, preserving original casing
+      const strippedTitle = consensusTitle.split(/\s+/)
+        .filter(w => canonicalWords.includes(w.toLowerCase()))
+        .join(' ');
+
+      if (strippedTitle !== consensusTitle) {
+        console.log(`[C4-arc-strip] "${consensusTitle}" → "${strippedTitle}" (removed <60% words)`);
+      }
+
+      return strippedTitle || consensusTitle;
     };
 
     const visionConfidenceLower = String(confidence || 'medium').toLowerCase();
