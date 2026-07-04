@@ -217,11 +217,18 @@ export const parseListingGrade = (title) => {
   // CGC prefix (highest priority): "CGC 9.4" → 9.4
   const cgc = t.match(/CGC\s*([\d.]+)/i);
   if (cgc) return parseFloat(cgc[1]);
-  // Bare numeric tokens: "6.0", "FN 6.0", "raw 7.5" → extract digit, not label
-  const numericToken = t.match(/\b(\d+(?:\.\d+)?)\b/);
-  if (numericToken) {
-    const val = parseFloat(numericToken[1]);
-    // Sanity: grade range 0.5–10.0 (rejects year-like "1985", issue "#133")
+  // Q51 HOTFIX: Strip issue tokens BEFORE numeric extraction (Venom #1: "1" → grade 1.0 regression).
+  // Remove: "#1", "No. 133", "Issue 8" → prevents bare integers from matching as grades.
+  const t2 = t.replace(/#\s*\d+/g, ' ')
+               .replace(/\bno\.?\s*\d+/gi, ' ')
+               .replace(/\bissue\s*\d+/gi, ' ');
+  // Decimal-format ONLY: "6.0", "8.5", "9.4" (grades in listings use decimal; bare integers are years/issues).
+  // Pattern \b(\d\.\d)\b requires exactly ONE digit before AND after decimal (rejects "10.0", matches "6.0").
+  // Edge case 10.0 handled by label fallback ("Gem Mint" unlikely in raw listings, CGC branch catches slabs).
+  const decimalToken = t2.match(/\b(\d\.\d)\b/);
+  if (decimalToken) {
+    const val = parseFloat(decimalToken[1]);
+    // Sanity: grade range 0.5–10.0 (decimal pattern already enforces this, kept for defensive coding)
     if (val >= 0.5 && val <= 10.0) return val;
   }
   // Label midpoint fallback: "FN", "VF+", "nm/mt" → canonical grade
