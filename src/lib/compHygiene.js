@@ -307,8 +307,22 @@ export const normalizeIssueFormat = (issueStr) => {
 // weeklies when no adjacency match (weekly issue comes before reprint issue).
 export const hasIssueNumber = (listingTitle, issueNum, seriesTitle = null) => {
   if (!issueNum) return true;
-  const t = String(listingTitle || "");
-  if (/\blot\b/i.test(t) || /\d+\s*,\s*\d+/.test(t)) return false;
+  const tRaw = String(listingTitle || "");
+  if (/\blot\b/i.test(tRaw) || /\d+\s*,\s*\d+/.test(tRaw)) return false;
+
+  // Q46: Apply ABBREV expansion to comp title BEFORE adjacency scan.
+  // TMNT failure: Vision tokens expanded ("teenage", "mutant", "ninja", "turtles"),
+  // but comp title "TMNT Adventures #4" left raw → adjacency window search finds
+  // "tmnt" (unexpanded) → no anchor match → 0/30 kept.
+  //
+  // Fix: normalize BOTH sides identically. Comp title gets same ABBREV expansion
+  // as seriesTitle tokenization below.
+  let t = tRaw.toLowerCase();
+  for (const [abbrev, expanded] of Object.entries(ABBREV_MAP)) {
+    const pattern = new RegExp(`\\b${abbrev}\\b`, 'gi');
+    t = t.replace(pattern, expanded);
+  }
+
   const escaped = String(issueNum).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   // Q37: UK weeklies use "no." instead of "#" (e.g., "MWOM no.198")
@@ -326,13 +340,15 @@ export const hasIssueNumber = (listingTitle, issueNum, seriesTitle = null) => {
 
   // Multiple issues — adjacency-aware resolution
   if (seriesTitle) {
-    const seriesTokens = tokenizeTitle(seriesTitle); // Reuse existing tokenizer
+    // Q46: seriesTitle tokenization already expands abbreviations via tokenizeTitle
+    // (which calls ABBREV_MAP internally). Both sides now normalized identically.
+    const seriesTokens = tokenizeTitle(seriesTitle);
     for (const match of issueMatches) {
       if (match[1] === String(issueNum)) {
-        // Extract 15-char window around this match
+        // Extract 15-char window around this match (from EXPANDED comp title)
         const start = Math.max(0, match.index - 15);
         const end = Math.min(t.length, match.index + 20);
-        const window = t.slice(start, end).toLowerCase();
+        const window = t.slice(start, end);
 
         // Check if any series token appears in window
         const hasSeriesToken = seriesTokens.some(token =>
