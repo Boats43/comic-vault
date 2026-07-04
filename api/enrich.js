@@ -921,16 +921,23 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       const overlap = queryTokens.filter(qt => volTokens.includes(qt)).length;
       const overlapRatio = queryTokens.length > 0 ? overlap / queryTokens.length : 0;
 
+      // Ship #21i: Foreign edition check (Q35 pattern — metadata gate, NOT pricing logic)
+      // Detect translation/foreign volumes from description or name metadata
+      const isForeignEdition = (volDetail?.description && /translat(e|ion)|foreign|edition\s+\w+\s+language/i.test(volDetail.description)) ||
+                               (description && /translat(e|ion):/i.test(description));
+
       // Borderline conditions
       const isBorderline = nameScore < 75 || publisherScore === 0 || overlapRatio < 0.6;
 
-      if (isBorderline) {
+      if (isBorderline || isForeignEdition) {
         // Suppress story fields
         description = null;
         deck = null;
 
         // Determine reason
-        if (nameScore < 75) {
+        if (isForeignEdition) {
+          storySuppressedReason = 'foreign-edition';
+        } else if (nameScore < 75) {
           storySuppressedReason = 'title-weak-match';
         } else if (overlapRatio < 0.6) {
           storySuppressedReason = 'title-token-mismatch';
