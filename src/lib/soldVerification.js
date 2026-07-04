@@ -177,14 +177,20 @@ const extractVariantTokens = (str) => {
   if (/sketch/.test(s)) tokens.push('sketch');
 
   // Q48: "Cover B/C/D" detection — must NOT match artist-name + "cover" descriptors.
-  // Batman #423 has ONE McFarlane cover → "Iconic Todd McFarlane Cover" is NOT
-  // a variant, it's a descriptor. Rejecting those 5 correct comps while keeping
-  // "High Grade" ones compounds Q47 inflation.
+  // Q48-FIX: Remove adjective blocklist. Trailing \b alone fixes "Cover Key"
+  // class (word boundary prevents "cover k" match). Blocklist suppresses
+  // genuine "Rare Cover B" variants.
   //
-  // Pattern: require letter immediately after "cover " with NO intervening words.
-  // "cover b" / "cover-b" → variant ✓
-  // "todd mcfarlane cover" / "iconic...cover" → descriptor ✗
-  if (/\bcover\s*[b-z]\b/.test(s) && !/(?:mcfarlane|iconic|classic|stunning|amazing|rare)\s+cover\b/.test(s)) {
+  // Pattern: /\bcover\s*[b-z]\b/ requires letter IMMEDIATELY after "cover"
+  // (optional whitespace only). Prevents matches on:
+  // - "todd mcfarlane cover" (no b-z after "cover")
+  // - "iconic cover" (no b-z after "cover")
+  // - "cover key" (k not in [b-z])
+  //
+  // Keeps matches on:
+  // - "cover b" / "cover-b" → variant ✓
+  // - "rare cover b" → variant ✓ (b-z present)
+  if (/\bcover\s*[b-z]\b/.test(s)) {
     tokens.push('altcover');
   }
   // Ship 18 — Add reprint-class tokens. Without these, first-print sold
