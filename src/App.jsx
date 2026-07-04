@@ -3485,17 +3485,32 @@ function CollectionDetail({
             <span>PRICE LADDER ({Object.keys(item.priceLadder).length} grades)</span>
           </div>
           {ladderExpanded && (() => {
-            // Ship #21g: Detect price ladder inversions (Rule 21-0: only render when detected)
+            // Ship #21k: Preserve literal grade strings ("raw", "9.8", etc.) — parseFloat("raw") = NaN
             const entries = Object.entries(item.priceLadder)
-              .map(([grade, price]) => ({ grade: parseFloat(grade), price: parseFloat(price) }))
-              .sort((a, b) => a.grade - b.grade); // ascending for inversion check
+              .map(([gradeStr, price]) => ({
+                gradeStr,
+                gradeNum: parseFloat(gradeStr),
+                price: parseFloat(price)
+              }));
+
+            // Ship #21g: Detect inversions (numeric grades only, skip NaN "raw")
+            const numericEntries = entries
+              .filter(e => !isNaN(e.gradeNum))
+              .sort((a, b) => a.gradeNum - b.gradeNum);
 
             const inversions = new Set();
-            for (let i = 1; i < entries.length; i++) {
-              if (entries[i].price < entries[i-1].price) {
-                inversions.add(entries[i].grade);
+            for (let i = 1; i < numericEntries.length; i++) {
+              if (numericEntries[i].price < numericEntries[i-1].price) {
+                inversions.add(numericEntries[i].gradeNum);
               }
             }
+
+            // Sort for display: numeric descending, then "raw" last
+            const sortedEntries = entries.sort((a, b) => {
+              if (isNaN(a.gradeNum)) return 1;  // "raw" to end
+              if (isNaN(b.gradeNum)) return -1;
+              return b.gradeNum - a.gradeNum;   // numeric descending
+            });
 
             return (
               <div style={{
@@ -3508,26 +3523,24 @@ function CollectionDetail({
                 gridTemplateColumns: 'repeat(2, 1fr)',
                 gap: 6
               }}>
-                {entries
-                  .sort((a, b) => b.grade - a.grade) // descending for display
-                  .map(({ grade, price }) => (
-                    <div key={grade}>
-                      <span style={{ color: '#888' }}>{grade}</span>
-                      <span style={{ marginLeft: 6, fontWeight: 600 }}>
-                        {formatCurrency(price)}
+                {sortedEntries.map(({ gradeStr, gradeNum, price }) => (
+                  <div key={gradeStr}>
+                    <span style={{ color: '#888' }}>{gradeStr}</span>
+                    <span style={{ marginLeft: 6, fontWeight: 600 }}>
+                      {formatCurrency(price)}
+                    </span>
+                    {!isNaN(gradeNum) && inversions.has(gradeNum) && (
+                      <span style={{
+                        marginLeft: 4,
+                        fontSize: 10,
+                        color: '#f59e0b',
+                        opacity: 0.8
+                      }}>
+                        ⚠ thin data
                       </span>
-                      {inversions.has(grade) && (
-                        <span style={{
-                          marginLeft: 4,
-                          fontSize: 10,
-                          color: '#f59e0b',
-                          opacity: 0.8
-                        }}>
-                          ⚠ thin data
-                        </span>
-                      )}
-                    </div>
-                  ))}
+                    )}
+                  </div>
+                ))}
               </div>
             );
           })()}
