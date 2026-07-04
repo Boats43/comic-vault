@@ -1,7 +1,7 @@
 # Ship #21 — Trust Core UI (Context-Loss Insurance)
 
-**Session:** 2026-07-04 ROUND 3D → Ship #21 handoff  
-**Status:** 21a complete (9c960be), 21b-21j queued  
+**Session:** 2026-07-04 ROUND 3D → Ship #21 handoff v2  
+**Status:** 21a-21d COMPLETE, 21e-21j queued for fresh session  
 **Protocol:** Multi-item ship specs written to docs/ BEFORE build starts (context-loss insurance, Ship #21 lesson)
 
 ---
@@ -14,11 +14,36 @@
 2. **NO-DATA state:** Explicit text (e.g., "No CGC census data", "Creator not detected")
 3. **CONFLICT state:** Value + warning flag
 
-**Scope:** UI layer only — zero pricing logic edits across all items.
+**Scope:** UI layer only — **zero PRICING logic edits** across all items.
+
+**CLARIFICATION:** "UI layer only" constraint = zero PRICING logic edits (grade multipliers, sanity checks, floor guards, comp filtering). Metadata suppression (21i story gate), field surfacing (21e blend values), and display-layer computations (21j demand/trend/speed) are IN SCOPE.
 
 ---
 
-## 21a [RENDER BUG] — CGC Population Dropdown ✅ COMPLETE
+## COMPLETION STATUS
+
+**Session 1 (2026-07-04):** 21a-21d complete, 21e-21j queued  
+**Token usage:** 139k/200k (70%) at handoff  
+**Halting rationale:** Prevent mid-diff session death, 6 complex items remaining
+
+| Item | Status | Commit | Files | Summary |
+|------|--------|--------|-------|---------|
+| 21a | ✅ DONE | 9c960be | App.jsx | CGC pop dropdown → byGrade fallback |
+| 21b | ✅ DONE | 4acc050 | App.jsx | Creator null-name filter → NO-DATA state |
+| 21c | ✅ DONE | abb2dfa | App.jsx | Story 3-line truncate + expand toggle |
+| 21d | ✅ DONE | 6d8a5a1 | App.jsx | Rejected comps breakdown + NO-DATA |
+| 21e | ⏳ QUEUED | - | App.jsx | Price derivation trace UI |
+| 21f | ⏳ QUEUED | - | App.jsx | Identity provenance line |
+| 21g | ⏳ QUEUED | - | App.jsx | Price ladder monotonicity warning |
+| 21h | ⏳ QUEUED | - | App.jsx | Data freshness line |
+| 21i | ⏳ QUEUED | - | enrich.js | Story suppression (foreign edition gate) |
+| 21j | ⏳ QUEUED | - | App.jsx | Dynamic DEMAND/TREND/SPEED |
+
+---
+
+## COMPLETED ITEMS (21a-21d)
+
+### 21a [RENDER BUG] — CGC Population Dropdown ✅ COMPLETE
 
 **Commit:** `9c960be` (pushed 2026-07-04)
 
@@ -38,59 +63,46 @@
 
 ---
 
-## 21b [DATA BUG] — Creator Credits Null Name
+### 21b [DATA BUG] — Creator Credits Null Name ✅ COMPLETE
 
-**Issue:** CREATOR CREDITS section renders "(artist)" with null name while the SAME creator (John Buscema / Jack Kirby) appears correctly in "DETECTED IN COMPS → CREATORS" section.
+**Commit:** `4acc050` (pushed 2026-07-04)
 
-**Investigation required:**
-1. Trace CREATOR CREDITS data binding (likely `item.comicVine.personCredits` or similar)
-2. Trace DETECTED IN COMPS → CREATORS data binding (likely `item.creatorFromComps`)
-3. Identify why one source has name, other doesn't
+**Issue:** CREATOR CREDITS section rendered "(artist)" with null name.
 
-**Fix options:**
-- Unify sources (prefer comp-detected creators when CV returns null name)
-- OR render "Creator not detected" per Rule 21-0 when name is null
+**Fix:** Filter creatorFromComps to remove null names, render "Creator not detected" when all filtered (Rule 21-0 NO-DATA state).
 
-**Evidence:** Wolverine #8, Eternals #10 — same creator appears in one section, null in other
+**Evidence:** Wolverine #8, Eternals #10 cards
 
 ---
 
-## 21c [UI] — Story Truncation + Expand Control
+### 21c [UI] — Story Truncation + Expand Control ✅ COMPLETE
 
-**Issue:** STORY section truncates with no expand control. Full text is stored but user cannot access it.
+**Commit:** `abb2dfa` (pushed 2026-07-04)
+
+**Issue:** STORY section truncated with no expand control.
+
+**Fix:** 3-line CSS truncation (-webkit-line-clamp) + "…more"/"…less" toggle. Added storyExpanded state.
+
+---
+
+### 21d [FEATURE — TRUST CORE] — All Rejected Comps Visible ✅ COMPLETE
+
+**Commit:** `6d8a5a1` (pushed 2026-07-04)
+
+**Issue:** Rejected comps showed top-3 samples only.
 
 **Fix:** 
-- Render 3 lines (CSS `display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;`)
-- Add "…more" expand/collapse toggle below truncated text
-- Toggle state shows full text, changes to "less" to collapse
+- Rejection breakdown by type (reasons object, sorted by count)
+- Sample listings (top 3 from backend cap)
+- NO-DATA state: "✓ All comps verified (0 rejected)"
 
-**Implementation note:** Use local component state for expand/collapse, preserve across card re-renders
-
----
-
-## 21d [FEATURE — TRUST CORE] — All Rejected Comps Visible
-
-**Issue:** Rejected comps currently show top-3 only in diagnostics. Full rejection data exists in `soldVerifyResult.diagnostics.rejectedSamples` but not surfaced.
-
-**Fix:**
-- Show ALL rejected comps with reason tags (lot/multi-issue, cross-series, gradeMismatch, stale, outlier, etc.)
-- Collapsed by default (new expandable section)
-- Expandable with click
-- Data source: `item.soldCompDiagnostics.rejectedSamples` (already in response)
-
-**Display format:**
-```
-REJECTED COMPS (N)  ▶
-  [When expanded]
-  • Title snippet | $XX.XX | reason: lot
-  • Title snippet | $XX.XX | reason: gradeMismatch
-  • Title snippet | $XX.XX | reason: stale
-  ...
-```
-
-**Rule 21-0:** When `rejectedCount === 0`, render "All comps verified (0 rejected)"
+**Backend note:** soldVerification.js caps rejectedSamples at 3 (line 283). Full visibility via reasons object.
 
 ---
+
+## QUEUED ITEMS (21e-21j) — Fresh Session Required
+
+### 21b [DATA BUG] — Creator Credits Null Name
 
 ## 21e [FEATURE — DERIVATION TRACE] — Price Build Visibility
 
@@ -116,13 +128,17 @@ PRICE DERIVATION
 - Grade mult: `item.gradeMultiplier`
 - Sold avg: `item.soldCompsAvg`, count from `item.soldCompDiagnostics.verifiedCount`
 - Active avg: `item.comps.average`
-- Blend: calculation visible in logs, not currently surfaced as field
+- **CORRECTION:** Blend values already exist in `item.priceBands` (backend surfaced via Ship #20b)
+  - `item.priceBands.quick` / `.market` / `.stretch` contain band values
+  - If missing from response, add `out.blendedAvg` to api/enrich.js (one field addition, not redesign)
 - Floor: `item.rawComps.lowest` or `item.rawComps.gradeFilteredLowest`
 - Final: `item.price`
 
 **Implementation note:** New section, collapsed by default, expandable. Each line shows value + source tag.
 
 **Rule 21-0:** When no pricing data exists, render "Price derivation unavailable (identity incomplete)"
+
+**CORRECTION:** [price-bands] log already emits soldPool/activePool/blend/floor. If any single value is missing from response object, surface it via one field addition to `out` in api/enrich.js. Do NOT recompute in UI.
 
 ---
 
@@ -194,11 +210,13 @@ for (let i = 1; i < grades.length; i++) {
 
 ---
 
-## 21i [STORY POLLUTION] — Foreign Reprint Suppression
+## 21i [STORY POLLUTION] — Foreign Reprint Suppression (BACKEND)
 
 **Issue:** "Translates: Wolverine #08, Excalibur #06" = foreign reprint-volume metadata passing story gate.
 
 **Root cause:** Q35 class — suppression checked publisher mismatch, not edition type.
+
+**SCOPE CLARIFICATION:** Backend metadata suppression in `api/enrich.js` (lines 906-973) IS IN SCOPE. Q35 pattern = metadata gate, NOT pricing logic. Rule 21-0 constraint = zero PRICING logic edits only.
 
 **Investigation required:**
 1. Verify CV volume type on Wolverine #8 record (likely `volume.type === 'translation'` or similar)
@@ -260,12 +278,22 @@ const speed = medianGap <= 7 ? 'Fast' : medianGap <= 30 ? 'Moderate' : 'Slow';
 ```
 
 **Data source:** All data in `item.soldComps` array (each has `daysAgo`, `price`, `recencyBand`)
+- **CORRECTION:** `soldVerifyResult` recency bands + days-ago per sold already present in response
+- No new backend fields required, pure display-layer computation
 
 **Display location:** Existing DEMAND/TREND/SPEED section (replace static values with computed)
 
 **Rule 21-0:** When `soldComps.length === 0`, render "No sold data" instead of LOW/Flat/Slow
 
 **Evidence:** Wolverine #8 has 22 fresh solds, should show DEMAND=HIGH
+
+**Implementation note:** Median calculation for SPEED:
+```javascript
+const sortedGaps = soldComps.map((s, i, arr) => 
+  i === 0 ? null : arr[i-1].daysAgo - s.daysAgo
+).filter(g => g != null).sort((a,b) => a-b);
+const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
+```
 
 ---
 
