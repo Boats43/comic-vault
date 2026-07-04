@@ -8514,13 +8514,16 @@ export default function App() {
       enrichDone++;
       setBulkEnrichProgress({ current: enrichDone, total: enrichTotal });
     };
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+
+    // SPEED BUILD 1 — Parallel grade worker pool (concurrency=3)
+    const CONCURRENCY = 3;
+    const startTime = Date.now();
+    let completed = 0;
+
+    // Worker function: process one file (compress → grade → save → fire enrich)
+    const processFile = async (file, index) => {
       console.log('[bulk] processing file:', file.name);
-      setBulkProgress({ current: i + 1, total: files.length, title: "" });
       try {
-        const rawB64 = await fileToBase64(file);
-        const b64 = await makeThumbnail(rawB64, 1200, 0.85);
         const res = await fetch("/api/grade", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -8531,7 +8534,7 @@ export default function App() {
           const msg = data.error || `HTTP ${res.status}`;
           console.warn('[bulk] grade error for', file.name, msg);
           errors.push(`${file.name}: ${msg}`);
-          continue;
+          return;
         }
         console.log('[bulk] grade result:', JSON.stringify(data));
 
@@ -8543,7 +8546,7 @@ export default function App() {
             (!data.publisher && !data.year && !data.issue)) {
           console.warn('[bulk] not a comic, skipping:', file.name);
           errors.push(`${file.name}: not a comic`);
-          continue;
+          return;
         }
 
         // Publisher-as-title detection — WARN, don't block. Book still gets
@@ -8575,10 +8578,13 @@ export default function App() {
         if (isDuplicate) {
           console.log('[bulk] duplicate, skipping:', data.title, '#' + bulkIssue);
           errors.push(`${file.name}: duplicate (${data.title} #${bulkIssue})`);
-          continue;
+          return;
         }
 
-        setBulkProgress({ current: i + 1, total: files.length, title: data.title || "" });
+        // Update progress counter (thread-safe via closure)
+        completed++;
+        setBulkProgress({ current: completed, total: files.length, title: data.title || "" });
+
         const savedId = await addToCatalogue({ ...data, issue: bulkIssue }, b64);
         if (savedId) {
           added++;
@@ -8586,6 +8592,7 @@ export default function App() {
         } else {
           console.warn('[bulk] addToCatalogue returned null for', file.name);
           errors.push(`${file.name}: failed to save`);
+          return;
         }
         // Fire-and-forget enrichment — tracked via bulkEnrichProgress.
         bumpEnrichFired();
@@ -8736,7 +8743,24 @@ export default function App() {
         console.warn('[bulk] unexpected error for', file.name, err);
         errors.push(`${file.name}: ${err.message || 'unexpected error'}`);
       }
+    };
+
+    // Worker pool: process files with concurrency=3
+    const queue = files.map((f, i) => ({ file: f, index: i }));
+    const workers = [];
+    for (let i = 0; i < CONCURRENCY; i++) {
+      workers.push((async () => {
+        while (queue.length > 0) {
+          const task = queue.shift();
+          if (task) await processFile(task.file, task.index);
+        }
+      })());
     }
+    await Promise.all(workers);
+
+    const elapsedMs = Date.now() - startTime;
+    console.log(`[bulk-parallel] grade phase complete: ${files.length} files, ${elapsedMs}ms wall-clock, ${(elapsedMs / files.length).toFixed(0)}ms per book`);
+
     setBulkProgress(null);
     // Poll enrich completion; clear progress when all settle (max 45s wait).
     const pollStart = Date.now();
