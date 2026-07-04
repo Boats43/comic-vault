@@ -3458,28 +3458,41 @@ function CollectionDetail({
               borderRadius: 6,
               fontSize: 12
             }}>
-              {item.pop.universal != null && (
-                <div style={{ marginBottom: 4 }}>
-                  <span style={{ color: '#888' }}>Universal:</span>
-                  <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.universal.toLocaleString('en-US')}</span>
+              {/* Ship #21a: PC-tracked pop structure (cgc array + byGrade) doesn't have
+                  CGC API fields (universal/qualified/restored/signature). Render byGrade
+                  breakdown or link to histogram below per Rule 21-0 (no blank sections). */}
+              {item.pop.universal != null ? (
+                <>
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={{ color: '#888' }}>Universal:</span>
+                    <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.universal.toLocaleString('en-US')}</span>
+                  </div>
+                  {item.pop.graded != null && (
+                    <div style={{ marginBottom: 4 }}>
+                      <span style={{ color: '#888' }}>Qualified:</span>
+                      <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.graded.toLocaleString('en-US')}</span>
+                    </div>
+                  )}
+                  {item.pop.restored != null && (
+                    <div style={{ marginBottom: 4 }}>
+                      <span style={{ color: '#888' }}>Restored:</span>
+                      <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.restored.toLocaleString('en-US')}</span>
+                    </div>
+                  )}
+                  {item.pop.signature != null && (
+                    <div>
+                      <span style={{ color: '#888' }}>Signature:</span>
+                      <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.signature.toLocaleString('en-US')}</span>
+                    </div>
+                  )}
+                </>
+              ) : item.pop.byGrade && Object.keys(item.pop.byGrade).length > 0 ? (
+                <div style={{ color: '#aaa', fontSize: 11 }}>
+                  📊 PC-tracked census — see histogram below for grade distribution
                 </div>
-              )}
-              {item.pop.graded != null && (
-                <div style={{ marginBottom: 4 }}>
-                  <span style={{ color: '#888' }}>Qualified:</span>
-                  <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.graded.toLocaleString('en-US')}</span>
-                </div>
-              )}
-              {item.pop.restored != null && (
-                <div style={{ marginBottom: 4 }}>
-                  <span style={{ color: '#888' }}>Restored:</span>
-                  <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.restored.toLocaleString('en-US')}</span>
-                </div>
-              )}
-              {item.pop.signature != null && (
-                <div>
-                  <span style={{ color: '#888' }}>Signature:</span>
-                  <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.pop.signature.toLocaleString('en-US')}</span>
+              ) : (
+                <div style={{ color: '#888', fontSize: 11, opacity: 0.7 }}>
+                  No CGC census data available
                 </div>
               )}
             </div>
