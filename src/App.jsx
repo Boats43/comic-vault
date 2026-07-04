@@ -3411,7 +3411,13 @@ function CollectionDetail({
             }}
           >
             <span>{creatorsExpanded ? '▼' : '▶'}</span>
-            <span>CREATOR CREDITS ({item.creatorFromComps.length})</span>
+            {/* 21b-fix: Count valid creators only (filter nulls). Hide count when all null (NO-DATA state). */}
+            {(() => {
+              const validCount = item.creatorFromComps.filter(c => c.name).length;
+              return validCount > 0
+                ? <span>CREATOR CREDITS ({validCount})</span>
+                : <span>CREATOR CREDITS</span>;
+            })()}
           </div>
           {creatorsExpanded && (
             <div style={{
