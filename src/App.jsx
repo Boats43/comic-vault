@@ -3809,38 +3809,80 @@ function CollectionDetail({
         </div>
       )}
 
-      {/* Ship #21 — DEMAND SIGNALS */}
-      {item.demandSignals && (
-        <div style={{
-          marginTop: 8,
-          padding: "8px 12px",
-          background: "rgba(168,85,247,0.06)",
-          border: "1px solid rgba(168,85,247,0.15)",
-          borderRadius: 8,
-          display: "flex",
-          gap: 12,
-          fontSize: 11,
-        }}>
-          <div>
-            <span style={{ color: "#888" }}>DEMAND:</span>{' '}
-            <span style={{ fontWeight: 600, color: item.demandSignals.demandLevel === 'HIGH' ? '#22c55e' : item.demandSignals.demandLevel === 'NORMAL' ? '#3b82f6' : '#888' }}>
-              {item.demandSignals.demandLevel === 'HIGH' ? '🔥 HIGH' : item.demandSignals.demandLevel === 'NORMAL' ? '➡️ NORMAL' : '📉 LOW'}
-            </span>
+      {/* Ship #21j: DEMAND SIGNALS (dynamic from soldComps, Rule 21-0: NO-DATA when soldComps=0) */}
+      {(() => {
+        const soldComps = item.soldComps || [];
+
+        if (soldComps.length === 0) {
+          return (
+            <div style={{
+              marginTop: 8,
+              padding: "8px 12px",
+              background: "rgba(168,85,247,0.06)",
+              border: "1px solid rgba(168,85,247,0.15)",
+              borderRadius: 8,
+              fontSize: 11,
+              color: "#888"
+            }}>
+              No sold data
+            </div>
+          );
+        }
+
+        // DEMAND: fresh sold count
+        const freshSolds = soldComps.filter(s => s.recencyBand === 'fresh').length;
+        const demand = freshSolds >= 15 ? 'HIGH' : freshSolds >= 5 ? 'MEDIUM' : 'LOW';
+
+        // TREND: fresh vs stale avg delta
+        const average = (arr) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+        const freshPrices = soldComps.filter(s => s.recencyBand === 'fresh').map(s => s.price);
+        const stalePrices = soldComps.filter(s => s.recencyBand !== 'fresh').map(s => s.price);
+        const freshAvg = average(freshPrices);
+        const staleAvg = average(stalePrices);
+        const trend = freshAvg > staleAvg * 1.2 ? 'Rising'
+                    : freshAvg < staleAvg * 0.8 ? 'Falling'
+                    : 'Flat';
+
+        // SPEED: median days-between-solds
+        const sortedByDays = [...soldComps].sort((a, b) => a.daysAgo - b.daysAgo);
+        const gaps = sortedByDays.map((s, i, arr) =>
+          i === 0 ? null : s.daysAgo - arr[i-1].daysAgo
+        ).filter(g => g != null).sort((a, b) => a - b);
+        const medianGap = gaps.length > 0 ? gaps[Math.floor(gaps.length / 2)] : 999;
+        const speed = medianGap <= 7 ? 'Fast' : medianGap <= 30 ? 'Moderate' : 'Slow';
+
+        return (
+          <div style={{
+            marginTop: 8,
+            padding: "8px 12px",
+            background: "rgba(168,85,247,0.06)",
+            border: "1px solid rgba(168,85,247,0.15)",
+            borderRadius: 8,
+            display: "flex",
+            gap: 12,
+            fontSize: 11,
+          }}>
+            <div>
+              <span style={{ color: "#888" }}>DEMAND:</span>{' '}
+              <span style={{ fontWeight: 600, color: demand === 'HIGH' ? '#22c55e' : demand === 'MEDIUM' ? '#3b82f6' : '#888' }}>
+                {demand === 'HIGH' ? '🔥 HIGH' : demand === 'MEDIUM' ? '➡️ MEDIUM' : '📉 LOW'}
+              </span>
+            </div>
+            <div>
+              <span style={{ color: "#888" }}>TREND:</span>{' '}
+              <span style={{ fontWeight: 600 }}>
+                {trend === 'Rising' ? '↑ Rising' : trend === 'Falling' ? '↓ Falling' : '→ Flat'}
+              </span>
+            </div>
+            <div>
+              <span style={{ color: "#888" }}>SPEED:</span>{' '}
+              <span style={{ fontWeight: 600 }}>
+                {speed === 'Fast' ? '⚡ Fast' : speed === 'Moderate' ? '➡️ Moderate' : '🐌 Slow'}
+              </span>
+            </div>
           </div>
-          <div>
-            <span style={{ color: "#888" }}>TREND:</span>{' '}
-            <span style={{ fontWeight: 600 }}>
-              {item.demandSignals.trend === 'RISING' ? '↑ Rising' : item.demandSignals.trend === 'DECLINING' ? '↓ Declining' : '→ Flat'}
-            </span>
-          </div>
-          <div>
-            <span style={{ color: "#888" }}>SPEED:</span>{' '}
-            <span style={{ fontWeight: 600 }}>
-              {item.demandSignals.liquidity === 'FAST' ? 'Fast' : item.demandSignals.liquidity === 'NORMAL' ? 'Normal' : 'Slow'}
-            </span>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 3a. Ship #12a + Ship #16 — DETECTED IN COMPS (keys + creators) */}
       {((Array.isArray(item.keyFromComps) && item.keyFromComps.length > 0) ||
