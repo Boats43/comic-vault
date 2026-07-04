@@ -55,10 +55,16 @@ export const sanitizeSeriesTitle = (rawTitle) => {
   // Q24 FIX — Publisher-name whitelist for compound character titles.
   // "Captain Marvel" → must NOT strip "Marvel" as publisher noise.
   // Deterministic list: titles where publisher name is PART of the series name.
+  //
+  // Q31 Part 2: Add "world of" / "age of" / "tales of" compound patterns
+  // to prevent "Mighty World of Marvel" → "mighty world" token-thinning.
   const COMPOUND_TITLE_WHITELIST = [
     'captain marvel', 'ms. marvel', 'ms marvel',
     'marvel team-up', 'marvel team up', 'marvel two-in-one', 'marvel two in one',
     'marvel presents', 'detective comics', 'dc comics presents',
+    // Q31: Publisher + "of" compounds
+    'world of marvel', 'mighty world of marvel', 'world of dc',
+    'tales of marvel', 'age of marvel', 'age of dc',
   ];
 
   const rawLower = rawTitle.toLowerCase();

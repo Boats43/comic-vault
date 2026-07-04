@@ -159,15 +159,24 @@ export const tokenizeTitle = (title) => {
 // Require ≥50% of our non-stop-word tokens to appear in the listing's
 // non-stop-word tokens. When all our tokens are stop-words, returns true
 // (no signal to gate on — let other filters handle it).
+//
+// Q31 Part 1: Adaptive threshold — when our title reduces to ≤2 tokens
+// (e.g., "Groo in the Wild" → ["groo", "wild"]), require ≥75% overlap
+// to prevent cross-series contamination (MWOM/Mighty Samson, Groo/Groo:
+// The Prophecy class bugs). Thin titles have higher false-positive risk.
 export const hasSufficientTitleOverlap = (listingTitle, searchTokens, threshold = 0.5) => {
   if (!searchTokens || searchTokens.length === 0) return true;
   const listingSet = new Set(tokenizeTitle(listingTitle));
   if (listingSet.size === 0) return false;
+
+  // Q31: Adaptive threshold for thin titles (≤2 tokens after sanitization)
+  const adaptiveThreshold = searchTokens.length <= 2 ? 0.75 : threshold;
+
   let matches = 0;
   for (const t of searchTokens) {
     if (listingSet.has(t)) matches++;
   }
-  return matches / searchTokens.length >= threshold;
+  return matches / searchTokens.length >= adaptiveThreshold;
 };
 
 // ──────────────────────────── GRADE PARSING ────────────────────────────
