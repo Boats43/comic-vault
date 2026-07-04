@@ -4184,19 +4184,21 @@ export default async function handler(req, res) {
       }
 
       // Ship #21l: Fix D (Phase 2) — zero-verified-sold-comps + thin-active-pool confidence cap.
-      // Cap HIGH confidence to MEDIUM when insufficient market evidence exists:
-      //   1. Sold comps existed but verification rejected 100% (verifiedCount === 0)
-      //   2. OR no sold comps AND active pool is thin (activeCount < 3)
-      // Ship #21l correction: ONE TRUTH SOURCE per Rule 21-0.
-      // When verifiedCount > 0, NEVER apply thin-data cap (user has verified sold comps).
+      // 21l-b [P1]: Gate on tier-path. Tier 1/2/3 has verified market data, suppress
+      // "no comps" banners. Only tier 4 (pc_estimate fallback) permits estimate banner.
       const verifiedCount = soldVerifyResult?.diagnostics?.verifiedCount ?? null;
       const hadSoldComps = Array.isArray(rawSoldRows) && rawSoldRows.length > 0;
       const activeCount = rawComps?.count || 0;
+      const tierPathActive = priceBandsRaw && priceBandsRaw.tier != null;
+      const tier = priceBandsRaw?.tier;
 
-      // Ship #21l: Guard against contradictory states — verifiedCount > 0 bypasses all thin-data caps
+      // Tier 1/2 has verified solds, tier 3 has verified actives → suppress thin-data caps
       const hasVerifiedSoldComps = verifiedCount != null && verifiedCount > 0;
+      const tierHasMarketData = tier === 1 || tier === 2 || tier === 3;
 
-      if (!hasVerifiedSoldComps &&
+      // Only apply thin-data caps when NO tier path OR tier=4 (pc_estimate fallback)
+      if (!tierHasMarketData &&
+          !hasVerifiedSoldComps &&
           (verifiedCount === 0 || verifiedCount === null) &&
           (hadSoldComps || activeCount < 3) &&
           finalMc.tier === 'HIGH') {
@@ -4216,7 +4218,9 @@ export default async function handler(req, res) {
         finalMc.zeroVerifiedSold = true;
         finalMc.originalScore = originalScore;
         console.log(`[match-conf] thin-data cap: HIGH→MEDIUM (${originalScore}→${finalMc.score}) ` +
-                    `verifiedSold=${verifiedCount} active=${activeCount}`);
+                    `tier=${tier || 'none'} verifiedSold=${verifiedCount} active=${activeCount}`);
+      } else if (tierHasMarketData) {
+        console.log(`[match-conf] tier ${tier} has market data — thin-data caps suppressed`);
       }
 
       out.matchConfidence = finalMc;

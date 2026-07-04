@@ -409,7 +409,21 @@ export function computePriceBands({
 
   // TIER 4: PC estimate (last resort)
   if (pcBase && pcBase > 0) {
-    const basePrice = pcBase * gradeMultiplier;
+    let basePrice = pcBase * gradeMultiplier;
+
+    // T4-CAP [P2]: Sanity cap tier-4 pc_estimate at compsAvg when comps exist.
+    // Evidence: FF Invisible Woman $17.08 vs compsAvg $5.69.
+    // When verified comps exist (even if <2 for tier pricing), cap PC at compsAvg.
+    let sanityCapped = false;
+    if (verifiedActive.length > 0) {
+      const compsAvg = verifiedActive.reduce((a, b) => a + b, 0) / verifiedActive.length;
+      if (basePrice > compsAvg * 1.5) {
+        console.log(`[tier-4-sanity] pc_estimate $${basePrice.toFixed(2)} > compsAvg×1.5 ($${(compsAvg * 1.5).toFixed(2)}) → capped to compsAvg $${compsAvg.toFixed(2)}`);
+        basePrice = compsAvg;
+        sanityCapped = true;
+      }
+    }
+
     const result = {
       quick: Math.round(basePrice * 0.8 * 100) / 100,
       market: Math.round(basePrice * 100) / 100,
@@ -417,9 +431,10 @@ export function computePriceBands({
       source: 'tier4_pc_estimate',
       count: 0,
       tier: 4,
+      sanityCapped,
     };
 
-    console.log(`[tier-4] pc_estimate=$${basePrice.toFixed(2)}`);
+    console.log(`[tier-4] pc_estimate=$${basePrice.toFixed(2)}${sanityCapped ? ' (sanity-capped)' : ''}`);
     return result;
   }
 
