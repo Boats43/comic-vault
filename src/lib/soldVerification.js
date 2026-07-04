@@ -532,6 +532,66 @@ export const verifySoldComps = (rawRows, ctx) => {
     return true;
   });
 
+  // Q47: User-grade proximity filter (±1.5 parity with active comps.js:1241).
+  //      Batman #423 FN 6.0 sold avg $159 (4× real $25-45) — high-grade solds
+  //      ($159 = 9.0+ mix) flow into blend while [price-bands] asserts
+  //      "already at-grade" (false for sold pool). Fix: reject solds outside
+  //      ±1.5 grades from user's book, same as active chain does.
+  //
+  //      Also reject slabbed solds (SLAB_RE) for raw scans — active chain
+  //      does this at comps.js:1173-1190; sold chain had no equivalent.
+  if (userGradeKey) {
+    const beforeProximity = working.length;
+    // Import GRADE_TO_NUMERIC from gradeUtils or inline minimal map
+    const GRADE_MAP = {
+      '0.5': 0.5, '1.0': 1.0, '1.5': 1.5, '1.8': 1.8, '2.0': 2.0,
+      '2.5': 2.5, '3.0': 3.0, '3.5': 3.5, '4.0': 4.0, '4.5': 4.5,
+      '5.0': 5.0, '5.5': 5.5, '6.0': 6.0, '6.5': 6.5, '7.0': 7.0,
+      '7.5': 7.5, '8.0': 8.0, '8.5': 8.5, '9.0': 9.0, '9.2': 9.2,
+      '9.4': 9.4, '9.6': 9.6, '9.8': 9.8, '9.9': 9.9, '10.0': 10.0,
+    };
+    const numericTarget = GRADE_MAP[userGradeKey];
+
+    if (numericTarget != null && !isNaN(numericTarget)) {
+      working = working.filter((r) => {
+        // Slab filter for raw scans (same as active comps)
+        if (!userGradeKey.includes('CGC') && !userGradeKey.includes('CBCS')) {
+          if (SLAB_RE.test(String(r.title || ''))) {
+            console.log('[sold-reject] slab (raw scan) |', r.title?.slice(0, 60));
+            reasons.slabMismatch++;
+            pushSample(r, 'slabMismatch');
+            return false;
+          }
+        }
+
+        // Grade proximity ±1.5
+        const listingGrade = parseListingGrade(r.title);
+
+        // Fair/Poor label filter (same as active comps.js:1258-1265)
+        if (listingGrade === null) {
+          const titleStr = String(r.title || '');
+          if (/\b(FR|PR|Fair|Poor)\b/i.test(titleStr)) {
+            console.log('[sold-reject] Fair/Poor label |', titleStr.slice(0, 60));
+            reasons.gradeMismatch++;
+            pushSample(r, 'gradeMismatch');
+            return false;
+          }
+          return true; // no parseable grade, keep (already passed tab check)
+        }
+
+        const diff = Math.abs(listingGrade - numericTarget);
+        if (diff > 1.5) {
+          console.log('[sold-reject] grade-proximity |', r.title?.slice(0, 60), 'grade:', listingGrade, 'vs our:', numericTarget);
+          reasons.gradeMismatch++;
+          pushSample(r, 'gradeMismatch');
+          return false;
+        }
+        return true;
+      });
+      console.log(`[sold-verify] grade-proximity filter: before=${beforeProximity} after=${working.length} removed=${beforeProximity - working.length} (±1.5 from ${numericTarget})`);
+    }
+  }
+
   // 11.5. Era year tolerance (Ship #20a.6.20 parity with active Filter 0c).
   //       Vintage books: reject sold rows from wrong era (±5y Golden/Silver,
   //       ±3y Bronze, ±2y Modern). Skips when r.year missing (PC rows often
