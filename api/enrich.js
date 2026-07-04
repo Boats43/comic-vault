@@ -3377,7 +3377,7 @@ export default async function handler(req, res) {
         }
       }
       // Session 4B — Diagnostic: what does the pricing gate see?
-      console.log('[pricing-gate] rawComps.count=', rawComps?.count, 'type=', typeof rawComps, 'isPolybagPricing=', isPolybagPricing, 'assetType=', out.assetType);
+      console.log('[pricing-gate] rawComps.count=', rawComps?.count ?? 0, 'type=', typeof rawComps?.count, 'isPolybagPricing=', isPolybagPricing, 'assetType=', out.assetType);
     } else if (rawComps && rawComps.count > 0 && !isPolybagPricing) {
       // Ship 6 — skip browse_api fallback when polybag pricing active.
       // Third in chained if/priceBands/else-if/priceCharting/else-if/browse_api.

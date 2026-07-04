@@ -976,8 +976,8 @@ function ResultCard({ result, enriching }) {
           {hasComps && (
             <div className="muted small">
               {comps.source === "browse_api"
-                ? `Based on ${comps.count} active eBay listing${comps.count === 1 ? "" : "s"}`
-                : `Based on ${comps.count} eBay sale${comps.count === 1 ? "" : "s"} in last 30 days`}
+                ? `Based on ${comps.count ?? 0} active eBay listing${comps.count === 1 ? "" : "s"}`
+                : `Based on ${comps.count ?? 0} eBay sale${comps.count === 1 ? "" : "s"} in last 30 days`}
             </div>
           )}
           {result.priceNote && /defect adj/i.test(result.priceNote) && (
@@ -4594,8 +4594,8 @@ function CollectionDetail({
             </div>
             <div className="muted small" style={{ fontSize: 11 }}>
               {item.comps.source === "browse_api"
-                ? `Based on ${item.comps.count} active eBay listing${item.comps.count !== 1 ? "s" : ""}`
-                : `Based on ${item.comps.count} eBay sale${item.comps.count !== 1 ? "s" : ""} in last 30 days`}
+                ? `Based on ${item.comps.count ?? 0} active eBay listing${item.comps.count !== 1 ? "s" : ""}`
+                : `Based on ${item.comps.count ?? 0} eBay sale${item.comps.count !== 1 ? "s" : ""} in last 30 days`}
               {item.comps.verifiedByAI ? " · AI verified" : ""}
             </div>
             {item.priceNote && /defect adj/i.test(item.priceNote) && (
@@ -5093,7 +5093,7 @@ function CollectionDetail({
                 </div>
                 {/* Source info */}
                 <div style={{ marginTop: 8, fontSize: 11, color: "#888" }}>
-                  {item.priceBands.count > 0 && `Based on ${item.priceBands.count} ${
+                  {item.priceBands.count > 0 && `Based on ${item.priceBands.count ?? 0} ${
                     item.priceBands.source === 'verified_sold' ? 'sold' :
                     item.priceBands.source === 'verified_active' ? 'active' : 'estimated'
                   } comp${item.priceBands.count === 1 ? '' : 's'}`}
