@@ -2651,6 +2651,7 @@ function CollectionDetail({
   const [velocityExpanded, setVelocityExpanded] = useState(false);
   const [ladderExpanded, setLadderExpanded] = useState(false);
   const [popExpanded, setPopExpanded] = useState(false);
+  const [storyExpanded, setStoryExpanded] = useState(false); // Ship #21c
   const [packetModal, setPacketModal] = useState(null); // { channel, packet }
   const [packetDropdownOpen, setPacketDropdownOpen] = useState(false);
   const [packetEditTitle, setPacketEditTitle] = useState("");
@@ -3650,15 +3651,43 @@ function CollectionDetail({
           borderRadius: 8,
         }}>
           {/* Story */}
-          {item.comicVine.description && (
-            <div style={{ marginBottom: item.comicVine.personCredits?.length > 0 || item.comicVine.characterCredits?.length > 0 ? 8 : 0 }}>
-              <div style={{ color: "#888", fontSize: 10, marginBottom: 4, letterSpacing: 0.5, fontWeight: 600 }}>STORY</div>
-              <div style={{ fontSize: 12, lineHeight: 1.4, color: "#ccc" }}>
-                {item.comicVine.description.replace(/<[^>]+>/g, '').substring(0, 200)}
-                {item.comicVine.description.length > 200 && '...'}
+          {item.comicVine.description && (() => {
+            const cleanText = item.comicVine.description.replace(/<[^>]+>/g, '');
+            const needsTruncate = cleanText.length > 150;
+            return (
+              <div style={{ marginBottom: item.comicVine.personCredits?.length > 0 || item.comicVine.characterCredits?.length > 0 ? 8 : 0 }}>
+                <div style={{ color: "#888", fontSize: 10, marginBottom: 4, letterSpacing: 0.5, fontWeight: 600 }}>STORY</div>
+                <div style={{ fontSize: 12, lineHeight: 1.4, color: "#ccc" }}>
+                  {/* Ship #21c: 3-line truncate + expand/collapse control per Rule 21-0 */}
+                  <div style={{
+                    ...(!storyExpanded && needsTruncate ? {
+                      display: '-webkit-box',
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden'
+                    } : {})
+                  }}>
+                    {cleanText}
+                  </div>
+                  {needsTruncate && (
+                    <span
+                      onClick={() => setStoryExpanded(!storyExpanded)}
+                      style={{
+                        fontSize: 11,
+                        color: '#3b82f6',
+                        cursor: 'pointer',
+                        marginTop: 4,
+                        display: 'inline-block',
+                        fontWeight: 500
+                      }}
+                    >
+                      {storyExpanded ? '…less' : '…more'}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           {/* Creators */}
           {item.comicVine.personCredits && item.comicVine.personCredits.length > 0 && (
             <div style={{ marginBottom: item.comicVine.characterCredits?.length > 0 ? 8 : 0 }}>
