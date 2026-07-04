@@ -10,6 +10,67 @@
 // Ship #28a observes only (logs conflicts, stores on out.conflicts).
 
 /**
+ * Q44 A2 — Normalize title for conflict checking (strip cosmetic variants).
+ *
+ * Leading article normalization: "The Mighty Thor" → "Mighty Thor"
+ * Adjective prefix normalization: "Amazing Spider-Man" → "Spider-Man"
+ * Imprint prefix normalization: "Dark Horse Presents" → "Presents"
+ *
+ * Prevents false CRITICAL conflicts when Vision says "The Mighty Thor"
+ * and eBay says "Thor" — same book, cosmetic title variant.
+ *
+ * @param {string} title - Raw title string
+ * @returns {string} Normalized title for conflict comparison
+ */
+const normalizeTitleForConflict = (title) => {
+  if (!title) return '';
+
+  let normalized = String(title).toLowerCase().trim();
+
+  // Strip leading articles (the, a, an) — must be word-boundary anchored
+  normalized = normalized.replace(/^(the|a|an)\s+/i, '');
+
+  // Q44: Adjective prefix map — common descriptive prefixes that are cosmetic
+  // variants of the same series. "Amazing Spider-Man" vs "Spider-Man" should
+  // NOT conflict. Map: adjective → canonical (when prefix + canonical match).
+  const ADJECTIVE_PREFIX_MAP = [
+    'mighty', 'amazing', 'astonishing', 'uncanny', 'incredible',
+    'invincible', 'immortal', 'sensational', 'spectacular', 'ultimate',
+    'all-new', 'all new', 'new',
+  ];
+
+  // Q44: Imprint prefix map — publisher/imprint names that prefix series titles
+  // in some scans but not others. "Dark Horse Presents" vs "Presents",
+  // "Marvel Team-Up" vs "Team-Up" should NOT conflict when both share core tokens.
+  const IMPRINT_PREFIX_MAP = [
+    'marvel', 'dc', 'dark horse', 'image', 'idw',
+    'vertigo', 'wildstorm', 'max',
+  ];
+
+  // Try stripping adjective prefix (only if result retains ≥3 chars)
+  for (const adj of ADJECTIVE_PREFIX_MAP) {
+    const pattern = new RegExp(`^${adj}\\s+`, 'i');
+    const stripped = normalized.replace(pattern, '');
+    if (stripped.length >= 3) {
+      normalized = stripped;
+      break; // first match wins
+    }
+  }
+
+  // Try stripping imprint prefix (only if result retains ≥3 chars)
+  for (const imp of IMPRINT_PREFIX_MAP) {
+    const pattern = new RegExp(`^${imp}\\s+`, 'i');
+    const stripped = normalized.replace(pattern, '');
+    if (stripped.length >= 3) {
+      normalized = stripped;
+      break; // first match wins
+    }
+  }
+
+  return normalized.trim();
+};
+
+/**
  * Detect identity conflicts across data sources.
  *
  * @param {object} vision - Vision scan result (title, issue, year, publisher)
@@ -25,8 +86,12 @@ export const detectIdentityConflicts = (vision, ebay, comicVine, priceCharting) 
 
   // CONFLICT 1: Title family mismatch (Vision vs eBay)
   if (ebay?.title && ebay.agreement >= 0.7) {
-    const visionTokens = tokenize(vision.title || '');
-    const ebayTokens = tokenize(ebay.title);
+    // Q44 A2: Normalize BOTH titles before tokenizing to strip cosmetic variants
+    const visionNorm = normalizeTitleForConflict(vision.title || '');
+    const ebayNorm = normalizeTitleForConflict(ebay.title);
+
+    const visionTokens = tokenize(visionNorm);
+    const ebayTokens = tokenize(ebayNorm);
     const overlap = visionTokens.filter(t => ebayTokens.includes(t)).length;
     const overlapRatio = visionTokens.length > 0 ? overlap / visionTokens.length : 0;
 
@@ -37,7 +102,7 @@ export const detectIdentityConflicts = (vision, ebay, comicVine, priceCharting) 
       conflicts.push({
         type: 'TITLE_FAMILY_MISMATCH',
         severity: 'CRITICAL',
-        detail: `Vision "${vision.title}" vs eBay "${ebay.title}" (${Math.round(overlapRatio * 100)}% overlap)`,
+        detail: `Vision "${vision.title}" vs eBay "${ebay.title}" (${Math.round(overlapRatio * 100)}% overlap after normalization)`,
         sources: {
           vision: vision.title,
           ebay: ebay.title,
@@ -99,15 +164,38 @@ export const detectIdentityConflicts = (vision, ebay, comicVine, priceCharting) 
   if (vision.publisher && comicVine?.publisher) {
     const vPub = String(vision.publisher).toLowerCase().trim();
     const cvPub = String(comicVine.publisher).toLowerCase().trim();
-    const match = vPub.includes(cvPub) || cvPub.includes(vPub) ||
-                  (vPub === 'dc' && cvPub.includes('dc comics')) ||
-                  (vPub === 'marvel' && cvPub.includes('marvel'));
+
+    // Q44 A2: Expand imprint normalization map
+    // Imprints: Vertigo/Wildstorm/Max → parent DC/Marvel
+    // Colloquial: "dc" matches "dc comics", "marvel" matches "marvel comics"
+    const IMPRINT_PARENTS = {
+      'vertigo': 'dc',
+      'wildstorm': 'dc',
+      'max': 'marvel',
+      'marvel max': 'marvel',
+      'icon': 'marvel',
+      'marvel knights': 'marvel',
+      'ultimate marvel': 'marvel',
+    };
+
+    // Normalize to parent publisher if imprint detected
+    const vNorm = IMPRINT_PARENTS[vPub] || vPub;
+    const cvNorm = IMPRINT_PARENTS[cvPub] || cvPub;
+
+    const match = vNorm.includes(cvNorm) || cvNorm.includes(vNorm) ||
+                  (vNorm === 'dc' && cvNorm.includes('dc comics')) ||
+                  (vNorm === 'marvel' && cvNorm.includes('marvel')) ||
+                  (cvNorm === 'dc' && vNorm.includes('dc comics')) ||
+                  (cvNorm === 'marvel' && vNorm.includes('marvel'));
 
     if (!match) {
+      // Q44 A2: Downgrade severity from MEDIUM → INFO for cosmetic variants
+      // "The Mighty Thor" / "Thor" title variance + "Marvel" / "Marvel Comics"
+      // publisher variance should NOT escalate to HIGH severity conflict.
       conflicts.push({
         type: 'PUBLISHER_MISMATCH',
-        severity: 'MEDIUM',
-        detail: `Vision "${vision.publisher}" vs CV "${comicVine.publisher}"`,
+        severity: 'INFO',
+        detail: `Vision "${vision.publisher}" vs CV "${comicVine.publisher}" (cosmetic variant)`,
         sources: {
           vision: vision.publisher,
           comicVine: comicVine.publisher,
