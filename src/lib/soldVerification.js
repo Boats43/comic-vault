@@ -292,6 +292,16 @@ export const verifySoldComps = (rawRows, ctx) => {
   const rows = Array.isArray(rawRows) ? rawRows : [];
   const rawCount = rows.length;
 
+  // Q52: Thor #235 investigation — log entry conditions
+  if (ctx.title && ctx.issue) {
+    const bookKey = `${ctx.title} #${ctx.issue}`;
+    if (rawCount === 0) {
+      console.log(`[Q52-investigate] ${bookKey}: zero sold rows from PriceCharting`);
+    } else {
+      console.log(`[Q52-investigate] ${bookKey}: ${rawCount} raw sold rows entering filter chain`);
+    }
+  }
+
   if (rawCount === 0) {
     return {
       verified: [],
@@ -749,6 +759,24 @@ export const verifySoldComps = (rawRows, ctx) => {
     } else {
       console.log('[sold-verify] variant fallback insufficient —',
         fallbackPool.length, 'comps (need ≥1), falling through');
+    }
+  }
+
+  // Q52: Thor #235 investigation — log exit conditions
+  if (ctx.title && ctx.issue) {
+    const bookKey = `${ctx.title} #${ctx.issue}`;
+    const verifiedCount = working.length;
+    const rejectedCount = rawCount - verifiedCount;
+    if (verifiedCount === 0 && rawCount > 0) {
+      const topReasons = Object.entries(reasons)
+        .filter(([_, count]) => count > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([reason, count]) => `${reason}:${count}`)
+        .join(', ');
+      console.log(`[Q52-investigate] ${bookKey}: 100% rejected (${rejectedCount} total) — top reasons: ${topReasons}`);
+    } else if (verifiedCount > 0) {
+      console.log(`[Q52-investigate] ${bookKey}: ${verifiedCount}/${rawCount} verified (${rejectedCount} rejected)`);
     }
   }
 
