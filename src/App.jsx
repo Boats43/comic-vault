@@ -4467,7 +4467,7 @@ function CollectionDetail({
                     // Ship #20a.6 — when raw count > verified, show "V of R verified".
                     // Ship #20a.6.1 — chip is clickable; expands rejected-samples drawer.
                     const diag = item.soldCompDiagnostics;
-                    const hasRejected = diag && Array.isArray(diag.rejectedSamples) && diag.rejectedSamples.length > 0;
+                    const hasRejected = diag && diag.rejectedCount > 0; // Ship #21d: check rejectedCount, not just samples
                     const showVerifiedRatio = diag && diag.rawCount > diag.verifiedCount && diag.verifiedCount > 0;
                     const verifiedStr = showVerifiedRatio
                       ? `${diag.verifiedCount} of ${diag.rawCount} sold verified`
@@ -4530,36 +4530,71 @@ function CollectionDetail({
                     <div key={i} style={rowStyle}>{inner}</div>
                   );
                 })}
-                {soldDrawerOpen && Array.isArray(item.soldCompDiagnostics?.rejectedSamples) && item.soldCompDiagnostics.rejectedSamples.length > 0 && (
+                {/* Ship #21d: Show rejected breakdown when drawer open, Rule 21-0 NO-DATA state when 0 rejected */}
+                {soldDrawerOpen && item.soldCompDiagnostics && (item.soldCompDiagnostics.rejectedCount > 0 ? (
                   <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(224,86,86,0.06)", border: "1px solid rgba(224,86,86,0.2)" }}>
-                    <div className="muted small" style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e05656" }}>
-                      Rejected ({item.soldCompDiagnostics.rejectedCount} total — top {item.soldCompDiagnostics.rejectedSamples.length})
+                    {/* Ship #21d: Show ALL rejection types with counts + samples (Rule 21-0: DATA state with source tags) */}
+                    <div className="muted small" style={{ marginBottom: 6, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e05656" }}>
+                      Rejected ({item.soldCompDiagnostics.rejectedCount} total)
                     </div>
-                    {item.soldCompDiagnostics.rejectedSamples.map((rej, i) => (
-                      <div key={i} style={{ padding: "4px 0", fontSize: 12, borderTop: i > 0 ? "1px solid rgba(224,86,86,0.15)" : "none" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+
+                    {/* Rejection breakdown by type */}
+                    {item.soldCompDiagnostics.reasons && Object.entries(item.soldCompDiagnostics.reasons)
+                      .filter(([_, count]) => count > 0)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([reason, count], i) => (
+                        <div key={i} style={{ fontSize: 11, color: "#bbb", marginBottom: 3 }}>
                           <span style={{
                             fontSize: 10, padding: "1px 6px", borderRadius: 3,
                             background: "rgba(224,86,86,0.15)", color: "#e05656",
-                            whiteSpace: "nowrap", letterSpacing: 0.3,
+                            marginRight: 6, letterSpacing: 0.3
                           }}>
-                            {humanizeSoldReason(rej.reason)}
+                            {humanizeSoldReason(reason)}
                           </span>
-                          {rej.price != null && (
-                            <span style={{ color: "#888", fontSize: 11 }}>
-                              {fmtPrice(rej.price)}
-                            </span>
-                          )}
+                          <span style={{ color: "#888" }}>×{count}</span>
                         </div>
-                        {rej.title && (
-                          <div style={{ fontSize: 11, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
-                            {rej.title}
+                      ))
+                    }
+
+                    {/* Sample listings (top 3 preserved by backend) */}
+                    {Array.isArray(item.soldCompDiagnostics.rejectedSamples) && item.soldCompDiagnostics.rejectedSamples.length > 0 && (
+                      <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(224,86,86,0.15)" }}>
+                        <div style={{ fontSize: 10, color: "#888", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                          Sample listings
+                        </div>
+                        {item.soldCompDiagnostics.rejectedSamples.map((rej, i) => (
+                          <div key={i} style={{ padding: "4px 0", fontSize: 12, borderTop: i > 0 ? "1px solid rgba(224,86,86,0.1)" : "none" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                              <span style={{
+                                fontSize: 10, padding: "1px 6px", borderRadius: 3,
+                                background: "rgba(224,86,86,0.15)", color: "#e05656",
+                                whiteSpace: "nowrap", letterSpacing: 0.3,
+                              }}>
+                                {humanizeSoldReason(rej.reason)}
+                              </span>
+                              {rej.price != null && (
+                                <span style={{ color: "#888", fontSize: 11 }}>
+                                  {fmtPrice(rej.price)}
+                                </span>
+                              )}
+                            </div>
+                            {rej.title && (
+                              <div style={{ fontSize: 11, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                                {rej.title}
+                              </div>
+                            )}
                           </div>
-                        )}
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
-                )}
+                ) : (
+                  <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)" }}>
+                    <div style={{ fontSize: 11, color: "#22c55e" }}>
+                      ✓ All comps verified (0 rejected)
+                    </div>
+                  </div>
+                ))}
                 <div style={{ borderTop: "1px solid rgba(212,175,55,0.25)", margin: "8px 0" }} />
               </div>
             )}
