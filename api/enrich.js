@@ -2273,8 +2273,6 @@ export default async function handler(req, res) {
 
     // Publisher autofill from ComicVine: when publisher=null but CV volume has it, backfill.
     // Unblocks Pacific Silver Star and similar cases where Vision didn't extract publisher.
-    // Q29 DIAGNOSTIC — Temporary log for live-verify confirmation
-    console.log(`[q29-trace] confirmedPublisher="${confirmedPublisher || '(null)'}" cvPublisher="${comicVine?.volume?.publisher?.name || '(null)'}"`);
     if (!confirmedPublisher && comicVine?.volume?.publisher?.name) {
       confirmedPublisher = comicVine.volume.publisher.name;
       out.publisherBackfilledFromCV = true;
