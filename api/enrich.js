@@ -3233,14 +3233,19 @@ export default async function handler(req, res) {
       out.priceLow = fmtUsd(priceBandsRaw.quick);
       out.priceHigh = fmtUsd(priceBandsRaw.stretch);
       out.gradeMultiplier = gradeMultiplier;
-      // FIX 2: Add explicit case for verified_sold_active_blend source
-      out.pricingSource = priceBandsRaw.source === 'verified_sold'
-        ? 'verified_sold'
-        : priceBandsRaw.source === 'verified_active'
-        ? 'verified_active'
-        : priceBandsRaw.source === 'verified_sold_active_blend'
-        ? 'verified_sold_active_blend'
-        : 'pc_estimate';
+      // #20b-FIX1: Map tier sources to display labels
+      const tierSourceMap = {
+        'tier1_recency_weighted': 'verified_sold_recency',
+        'tier2_blend_70_30': 'sold_active_blend_30',
+        'tier2_sold_only': 'verified_sold',
+        'tier3_active_discounted': 'active_ask_derived',
+        'tier4_pc_estimate': 'pc_estimate',
+        // Legacy sources (pre-tier)
+        'verified_sold': 'verified_sold',
+        'verified_active': 'verified_active',
+        'verified_sold_active_blend': 'verified_sold_active_blend',
+      };
+      out.pricingSource = tierSourceMap[priceBandsRaw.source] || 'pc_estimate';
 
       // Ship #24 — source-specific comp count. priceBandsRaw.count reflects
       // the pool that calculatePriceBands() received (sold comps when source
@@ -3580,12 +3585,21 @@ export default async function handler(req, res) {
     //      is null but `compsFromEbay.lowest` still holds the pre-verify
     //      contaminated lowest — same untrusted data the sanity block skips.
     isMegaKeyForFloor = !!getMegaKeyEntry(title, confirmedIssue, confirmedPublisher, confirmedYear || year);
+
+    // #20b-FIX2 [P0]: Gate legacy ask-floor when tier path active.
+    // Tier pricing owns floor enforcement (priceBands.quick = verified-sold low).
+    // Legacy rawComps.lowest (ask-based) was overwriting tier market prices.
+    // Evidence: Batman #222 tier=1 market=$122 → legacy floor=$173 (ask-derived).
+    const tierPathActive = priceBandsRaw && priceBandsRaw.tier != null;
+
     if (isPolybagPricing) {
       console.log('[floor] skipped — polybag pricing active');
     } else if (isMegaKeyForFloor) {
       console.log('[floor] skipped — mega-key uses floor map');
     } else if (compsExhausted) {
       console.log('[floor] skipped — all comps rejected by AI verify');
+    } else if (tierPathActive) {
+      console.log(`[floor] skipped — tier ${priceBandsRaw.tier} owns floor enforcement (verified-sold low only)`);
     } else {
       const finalNum = parseFloat(
         String(out.price || '0').replace(/[$,]/g, '')
