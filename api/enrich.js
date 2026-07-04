@@ -2010,15 +2010,10 @@ export default async function handler(req, res) {
       );
     }
 
-    // Ship 3B.3 — Issue resolution now in identityCore.js
-    const ebayIssue = (alignment.overrodeVision && visualResult?.items)
-      ? extractIssueFromEbayResults(visualResult.items)
-      : null;
-    const correctedIssue = resolveIssue(
-      issueNum,
-      visualResult?.issueSource === "ebay_visual" ? visualResult.issue : null,
-      ebayIssue
-    );
+    // Q49: Deleted redundant confirmedIssue = resolveIssue(...) shadowing.
+    // confirmedIssue already set correctly at Phase 1 line 1724 from resolveIdentity().
+    // Second assignment here was stale (Vision+eBay only, no PC/CV corrections) causing
+    // FF #133 / TMNT #8 sold-verify 100% reject (verified #133, compared vs #120).
 
     // Ship #20a.6.7b.2 — Image search consensus title extraction. Extract
     // consensus title (≥2 matching titles) from visual result when Vision
@@ -2098,7 +2093,7 @@ export default async function handler(req, res) {
         console.log(`[pc-requery] consensus "${imageConsensusTitle}" differs from Vision "${pcInitialTitle}" — re-querying PC with "${pcRequeryTitle}" (gated: ${gateSource} accepted)`);
         priceCharting = await lookupPriceCharting({
           title: pcRequeryTitle,
-          issue: correctedIssue,
+          issue: confirmedIssue,
           year
         }).catch(() => null);
         mark('pc_requery_complete');
@@ -2371,7 +2366,7 @@ export default async function handler(req, res) {
           })()
         : process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? (async () => {
-            const activeKey = `${confirmedTitle}|${correctedIssue}`;
+            const activeKey = `${confirmedTitle}|${confirmedIssue}`;
             // CACHE-BUST: skipCache flag bypasses poisoned cache entries
             const skipCache = req.body?.skipCache === true;
             const cached = !skipCache ? await kvGet(`ac:${activeKey}`) : null;
@@ -2388,7 +2383,7 @@ export default async function handler(req, res) {
               // Previously used original req.body.title, bypassing title-family correction.
               // Catwoman/Gotham War: confirmedTitle resolved to Gotham War, but comps queried Catwoman Uncovered.
               title: confirmedTitle,
-              issue: correctedIssue,
+              issue: confirmedIssue,
               grade,
               isGraded,
               numericGrade,
@@ -2443,7 +2438,7 @@ export default async function handler(req, res) {
       // Returns [] gracefully. Kept in the pipeline so a future scope
       // approval lights it up without re-wiring. Ship #20a sources sold
       // data from PriceCharting instead (pcSalesResult below).
-      fetchSold({ title, issue: correctedIssue, year: confirmedYear }).catch(() => []),
+      fetchSold({ title, issue: confirmedIssue, year: confirmedYear }).catch(() => []),
       // Q25 FIX — GoCollect removed (100% timeout, 4.5s tax, zero returns).
       // Return null immediately instead of waiting 4.5s per scan.
       Promise.resolve(null),
@@ -2689,7 +2684,7 @@ export default async function handler(req, res) {
         : 'raw';
     const soldVerifyResult = verifySoldComps(rawSoldRows, {
       title: confirmedTitle,
-      issue: correctedIssue,
+      issue: confirmedIssue,
       variant: req.body?.variant || null,
       publisher,
       bookYear: confirmedYear || year,
@@ -2776,7 +2771,7 @@ export default async function handler(req, res) {
       pcBase,
       gradeMultiplier,
       title: confirmedTitle,
-      issue: correctedIssue,
+      issue: confirmedIssue,
       variant: req.body?.variant || null,
       variantAdjusted: soldVerifyResult.variantAdjusted || false,
       // FIX 1: Pass blendedAvg so price-bands can use it as market value
@@ -3014,9 +3009,9 @@ export default async function handler(req, res) {
           );
 
           // Override title with edition-aware label.
-          // Uses confirmedTitle (cleanest source) + correctedIssue + edition.
+          // Uses confirmedTitle (cleanest source) + confirmedIssue + edition.
           const baseTitle = confirmedTitle || title || '';
-          const issueStr = correctedIssue ? ` #${correctedIssue}` : '';
+          const issueStr = confirmedIssue ? ` #${confirmedIssue}` : '';
           out.title = `${baseTitle}${issueStr} ${editionLabel}`;
           out.originalTitle = baseTitle;
           out.polybagEditionLabel = editionLabel;
@@ -3109,7 +3104,7 @@ export default async function handler(req, res) {
     }
 
     // Ship #20a.6.4 — identity gate. Runs AFTER phase 1 (so PC/CV year-heal
-    // chain has applied → confirmedYear; visual issue correction → correctedIssue;
+    // chain has applied → confirmedYear; visual issue correction → confirmedIssue;
     // publisher cleanup → publisher) and BEFORE the pricing block. When
     // identity-critical fields can't be cleanly extracted, refuses to price
     // entirely. Vision's price/priceLow/priceHigh are NOT used as a fallback —
@@ -3121,7 +3116,7 @@ export default async function handler(req, res) {
     // literal issue value. Real Golden Age key in same shape would be 10× wrong.
     const sanitizedIdentity = sanitizeIdentityFields({
       title: confirmedTitle,
-      issue: correctedIssue,
+      issue: confirmedIssue,
       year: confirmedYear,
       publisher: confirmedPublisher,
       visionConfidence: confidence,
@@ -3278,7 +3273,7 @@ export default async function handler(req, res) {
       //      don't trust — using either lets wrong-book prices win.
       //
       // When skipped, PC × grade multiplier remains as `out.price`.
-      const isMegaKeyBook = !!getMegaKeyEntry(title, correctedIssue, confirmedPublisher, confirmedYear || year);
+      const isMegaKeyBook = !!getMegaKeyEntry(title, confirmedIssue, confirmedPublisher, confirmedYear || year);
       if (isMegaKeyBook) {
         console.log('[sanity] skipped — mega-key uses floor map');
       } else if (compsExhausted) {
@@ -3496,7 +3491,7 @@ export default async function handler(req, res) {
     //   2. compsExhausted: AI verify rejected 100% of comps. `rawComps.lowest`
     //      is null but `compsFromEbay.lowest` still holds the pre-verify
     //      contaminated lowest — same untrusted data the sanity block skips.
-    isMegaKeyForFloor = !!getMegaKeyEntry(title, correctedIssue, confirmedPublisher, confirmedYear || year);
+    isMegaKeyForFloor = !!getMegaKeyEntry(title, confirmedIssue, confirmedPublisher, confirmedYear || year);
     if (isPolybagPricing) {
       console.log('[floor] skipped — polybag pricing active');
     } else if (isMegaKeyForFloor) {
@@ -3651,16 +3646,16 @@ export default async function handler(req, res) {
             // adding entries to TEST_MARKET_KEYS + TEST_MARKET_VARIANTS.
             if (key in TEST_MARKET_KEYS) {
               const variantType = TEST_MARKET_KEYS[key];
-              if (!isTestMarketVariant(title, correctedIssue, variantType)) {
+              if (!isTestMarketVariant(title, confirmedIssue, variantType)) {
                 console.log(
                   `[variant] ${variantType} allowlist miss — skipping mult`,
-                  `title="${normalizeTitle(title)}" issue=${correctedIssue}`
+                  `title="${normalizeTitle(title)}" issue=${confirmedIssue}`
                 );
                 continue;
               }
               console.log(
                 `[variant] ${variantType} test-market match`,
-                `title="${normalizeTitle(title)}" issue=${correctedIssue}`
+                `title="${normalizeTitle(title)}" issue=${confirmedIssue}`
               );
             }
             vMult = mult;
@@ -3856,7 +3851,7 @@ export default async function handler(req, res) {
     // Schema version stamped on response for K2 rules-version tracking.
     out.megaKeysSchemaVersion = MEGA_KEYS_SCHEMA_VERSION;
     {
-      const megaKeyEntry = getMegaKeyEntry(title, correctedIssue, confirmedPublisher, confirmedYear || year);
+      const megaKeyEntry = getMegaKeyEntry(title, confirmedIssue, confirmedPublisher, confirmedYear || year);
       // Ship 1.3.1 — mega-key floor must yield to edition warning.
       // Reprints/facsimiles/later-prints of mega-keys (e.g., B&B #28
       // Loot Crate polybag) must NOT receive 1st-print floor pricing.
@@ -3870,7 +3865,7 @@ export default async function handler(req, res) {
         out.megaKeyFloorSkipReason = 'edition-warning';
         console.log('[mega-key-floor] SKIPPED — reprint/later-print detected',
           `(signals: ${editionWarning.signals.join(', ')})`,
-          `${title} #${correctedIssue}`);
+          `${title} #${confirmedIssue}`);
       } else if (megaKeyEntry) {
         if (megaKeyEntry.type === 'MANUAL') {
           out.manualReviewRequired = true;
@@ -3878,10 +3873,10 @@ export default async function handler(req, res) {
             'Mega-key with price dispersion too wide for automated floor';
           out.priceNote = (out.priceNote || '') + ' · manual review required';
           console.log('[mega-key-floor] MANUAL REVIEW:',
-            `${title} #${correctedIssue}`, '— no floor applied');
+            `${title} #${confirmedIssue}`, '— no floor applied');
         } else {
           const floorResult = getMegaKeyFloor(
-            title, correctedIssue, confirmedPublisher, confirmedYear || year, grade, numericGrade
+            title, confirmedIssue, confirmedPublisher, confirmedYear || year, grade, numericGrade
           );
           if (floorResult.exceedsMap) {
             // Distinct from type=MANUAL: the map simply doesn't cover
@@ -3896,7 +3891,7 @@ export default async function handler(req, res) {
               'Grade exceeds floor map coverage — manual review required';
             out.priceNote = (out.priceNote || '') + ' · grade exceeds floor map';
             console.log('[mega-key-floor] EXCEEDS MAP:',
-              `${title} #${correctedIssue} grade=${grade}`, '— manual review');
+              `${title} #${confirmedIssue} grade=${grade}`, '— manual review');
           } else if (floorResult.floor) {
             const currentPriceNum = parseFloat(
               String(out.price || '0').replace(/[$,]/g, '')
@@ -3913,7 +3908,7 @@ export default async function handler(req, res) {
               out.megaKeyFloorNote = megaKeyEntry.volatilityNote;
               out.priceNote = (out.priceNote || '') + ' · mega-key floor';
               console.log('[mega-key-floor] enforced:',
-                `${title} #${correctedIssue} grade=${grade} bucket=${floorResult.bucket}`,
+                `${title} #${confirmedIssue} grade=${grade} bucket=${floorResult.bucket}`,
                 `${out.preFloorPrice} → $${floorResult.floor}`,
                 megaKeyEntry.verified ? 'VERIFIED' : 'ESTIMATED');
             }
@@ -4008,7 +4003,7 @@ export default async function handler(req, res) {
           : [];
       const mc = computeMatchConfidence(compTitlesForScore, {
         title: req.body.title || title,
-        issue: correctedIssue,
+        issue: confirmedIssue,
         year: confirmedYear,
         variant: confirmedVariant,  // Ship #20a.6.18: uses confirmed variant
         creator: req.body.creator || null,
@@ -4320,7 +4315,7 @@ export default async function handler(req, res) {
       ? String(confirmedTitle).replace(issueMatch[0], "").trim()
       : confirmedTitle;
     console.log(
-      `[verify] ${seriesTitle} #${correctedIssue || "?"} | ` +
+      `[verify] ${seriesTitle} #${confirmedIssue || "?"} | ` +
       `grade: ${grade || "unknown"} | ` +
       `comps: ${verifiedCount} verified / ${rawComps?.prices?.length || 0} checked | ` +
       `sold: ${soldCount} found | ` +
@@ -4507,7 +4502,7 @@ export default async function handler(req, res) {
     // "dc batman house of mystery 161 dial for hero read description", rawComps=0,
     // web search fired spending 20s + tokens on Sonnet query guaranteed to fail.
     // New gate: only fire web search when identity is COMPLETE and CLEAN.
-    const identityComplete = !!(confirmedTitle && correctedIssue && confirmedYear);
+    const identityComplete = !!(confirmedTitle && confirmedIssue && confirmedYear);
 
     const shouldTriggerWebSearch =
       isZeroComp &&
@@ -4534,7 +4529,7 @@ export default async function handler(req, res) {
 
     const claudeCheckData = {
       title: confirmedTitle,
-      issue: correctedIssue,
+      issue: confirmedIssue,
       year: confirmedYear || year,
       publisher: confirmedPublisher,
       variant: req.body?.variant || null,
@@ -5029,10 +5024,11 @@ export default async function handler(req, res) {
     out.isPolybagPricing = isPolybagPricing;
 
     // Ship #26 v0-B.1 — Normalize critical identity fields for decision engine.
-    // correctedIssue / confirmedYear / confirmedPublisher drive pricing and comps,
+    // confirmedIssue / confirmedYear / confirmedPublisher drive pricing and comps,
     // but decisionEngine reads out.issue / out.year / out.publisher directly.
+    // Q49: Simplified confirmedIssue || confirmedIssue → confirmedIssue (duplicate from global replace)
     if (!out.issue) {
-      out.issue = correctedIssue || confirmedIssue || issueNum || null;
+      out.issue = confirmedIssue || issueNum || null;
     }
 
     if (!out.year) {
