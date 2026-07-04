@@ -222,14 +222,15 @@ export const parseListingGrade = (title) => {
   const t2 = t.replace(/#\s*\d+/g, ' ')
                .replace(/\bno\.?\s*\d+/gi, ' ')
                .replace(/\bissue\s*\d+/gi, ' ');
-  // Decimal-format ONLY: "6.0", "8.5", "9.4" (grades in listings use decimal; bare integers are years/issues).
-  // Pattern \b(\d\.\d)\b requires exactly ONE digit before AND after decimal (rejects "10.0", matches "6.0").
-  // Edge case 10.0 handled by label fallback ("Gem Mint" unlikely in raw listings, CGC branch catches slabs).
-  const decimalToken = t2.match(/\b(\d\.\d)\b/);
-  if (decimalToken) {
-    const val = parseFloat(decimalToken[1]);
-    // Sanity: grade range 0.5–10.0 (decimal pattern already enforces this, kept for defensive coding)
-    if (val >= 0.5 && val <= 10.0) return val;
+  // Q50b: matchAll numeric tokens, prefer decimal format, range 0.5–10.0
+  // Pattern: \b(\d{1,2}\.\d)\b matches "6.0", "9.4", "10.0" (1-2 digits before decimal, 1 digit after)
+  const numericTokens = [...t2.matchAll(/\b(\d{1,2}\.\d)\b/g)].map(m => parseFloat(m[1]));
+  const validGrades = numericTokens.filter(val => val >= 0.5 && val <= 10.0);
+
+  if (validGrades.length > 0) {
+    // Q50b: Decimal preference — if multiple matches, prefer highest (likely the grade, not year/issue)
+    // Grades cluster 0.5-10.0; years/issues are 1900+ or single-digit, filtered out by range check
+    return Math.max(...validGrades);
   }
   // Label midpoint fallback: "FN", "VF+", "nm/mt" → canonical grade
   const gradeMap = [
