@@ -4992,6 +4992,13 @@ export default async function handler(req, res) {
       out.storySuppressedReason = out.comicVine.storySuppressedReason;
     }
 
+    // Q35: Clear comicVine when suppressed (publisher-mismatch / title-weak-match).
+    // Bug: out.storySuppressedReason flag set but out.comicVine fields retained →
+    // UI displayed "Editorial Novaro (1954)" on Batman #222 (wrong publisher).
+    if (out.storySuppressedReason) {
+      out.comicVine = null;
+    }
+
     // 3b. contentVerified: universal flag computed by ComicAdapter.verifyStory
     // False when story suppressed OR story metadata suspicious
     if (out.storySuppressedReason) {
