@@ -942,7 +942,6 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
       // Fall through to weighted-consensus path
     } else {
       const issueMatch = item0Issue && visionIssue && String(item0Issue) === String(visionIssue);
-      const hasEnoughTokens = item0Tokens.length >= 5;
       const familyWeightOk = item0Family.weightSum >= 5;
 
       // Vision-overlap: require ≥1 shared token between item0 and Vision
@@ -984,7 +983,12 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
         const strongestCompetitor = competingFamilies[0]; // already sorted by weight descending
         const competingFamilyTooStrong = strongestCompetitor && strongestCompetitor.weightSum >= (item0Family.weightSum * 3);
 
-        if (issueMatch && hasEnoughTokens && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong) {
+        // GREENLIGHT: Drop hasEnoughTokens from gate chain.
+        // Token count anti-correlates with quality (clean titles: 1-3 tokens,
+        // junk listings: 5-10+ tokens). Overlap guards (50%/40%) + LOT_RE
+        // already reject junk. Removing token threshold unblocks clean canonical
+        // titles (Batman, Avengers, The Mighty Thor) from top-rank-protection.
+        if (issueMatch && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong) {
           // A1.a: Route through sanitizeSeriesTitle to remove creator names,
           // cover descriptors, condition words, embedded years, seller noise.
           // Then apply post-selection boilerplate sanitization.
