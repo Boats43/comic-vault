@@ -921,10 +921,20 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       const overlap = queryTokens.filter(qt => volTokens.includes(qt)).length;
       const overlapRatio = queryTokens.length > 0 ? overlap / queryTokens.length : 0;
 
-      // Ship #21i: Foreign edition check (Q35 pattern — metadata gate, NOT pricing logic)
+      // Ship #21i-b: Foreign edition check (Q35 pattern — metadata gate, NOT pricing logic)
       // Detect translation/foreign volumes from description or name metadata
+      // Widened pattern: "Translates"/"Reprints"/"Vertaling" at start of story text OR
+      // foreign-imprint publisher (Panini, etc.)
+      const FOREIGN_IMPRINT_PUBLISHERS = [
+        'panini', 'planeta', 'planeta deagostini', 'semic', 'editora abril',
+        'editorial novaro', 'vertaling', 'glenat', 'dargaud'
+      ];
+      const volPubLower = String(volDetail?.publisher?.name || '').toLowerCase().trim();
+      const isForeignImprint = FOREIGN_IMPRINT_PUBLISHERS.some(pub => volPubLower.includes(pub));
+
       const isForeignEdition = (volDetail?.description && /translat(e|ion)|foreign|edition\s+\w+\s+language/i.test(volDetail.description)) ||
-                               (description && /translat(e|ion):/i.test(description));
+                               (description && /^(translates|reprints|vertaling)\b/i.test(description)) ||
+                               isForeignImprint;
 
       // Borderline conditions
       const isBorderline = nameScore < 75 || publisherScore === 0 || overlapRatio < 0.6;
