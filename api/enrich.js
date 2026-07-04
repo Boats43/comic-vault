@@ -91,6 +91,8 @@ import { getAdapter } from "../src/adapters/adapterRegistry.js";
 import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforceFloorFromBands } from "../src/lib/priceBands.js";
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
+// C5 — parseListingGrade for lone-sold anchor.
+import { parseListingGrade } from "../src/lib/compHygiene.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -3273,7 +3275,34 @@ export default async function handler(req, res) {
       // tracks US market only. Foreign editions (UK pence variants,
       // Canadian editions, foreign publisher reprints) have different
       // pricing vs US originals. Require edition-matched comps instead.
+
+      // C5: pc_estimate lone-sold anchor — when soldPool≥1 but verifiedCount=0,
+      // anchor to highest rejected sold within grade tolerance (not PC base).
+      // Evidence: Action #610 — $5.99 sold rejected → anchored to $1.44 PC base.
       let pc = priceCharting.price;
+      const hadSoldData = Array.isArray(rawSoldRows) && rawSoldRows.length > 0;
+      const verifiedCount = soldVerifyResult?.diagnostics?.verifiedCount || 0;
+
+      if (hadSoldData && verifiedCount === 0 && numericGrade != null) {
+        // All solds rejected — find highest within ±1.5 grade tolerance
+        const targetGrade = numericGrade;
+        const tolerance = 1.5;
+        const gradeTolerantSolds = rawSoldRows.filter(row => {
+          if (!row.price || row.price <= 0) return false;
+          // Parse grade from sold row title (if available)
+          const rowGrade = parseListingGrade(row.title || '');
+          if (rowGrade == null) return true; // no grade → include (conservative)
+          return Math.abs(rowGrade - targetGrade) <= tolerance;
+        });
+
+        if (gradeTolerantSolds.length > 0) {
+          const highestRejectedSold = Math.max(...gradeTolerantSolds.map(r => r.price));
+          if (highestRejectedSold > pc) {
+            console.log(`[C5-lone-sold-anchor] ${gradeTolerantSolds.length} rejected solds within ±1.5 grade → anchor to highest $${highestRejectedSold.toFixed(2)} (PC base was $${pc.toFixed(2)})`);
+            pc = highestRejectedSold;
+          }
+        }
+      }
       // Era-aware multipliers use confirmedYear (healed via PC/CV crosscheck)
       // when available; falls back to user year; then vintage default.
       const eraYear = confirmedYear || year;
