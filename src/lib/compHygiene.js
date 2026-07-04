@@ -213,8 +213,18 @@ export const hasSufficientTitleOverlap = (listingTitle, searchTokens, threshold 
 // mismatch).
 export const parseListingGrade = (title) => {
   const t = String(title || '');
+  // Q50: Numeric token extraction FIRST (prevents "FN 6.0" → 6.0 label-midpoint skew).
+  // CGC prefix (highest priority): "CGC 9.4" → 9.4
   const cgc = t.match(/CGC\s*([\d.]+)/i);
   if (cgc) return parseFloat(cgc[1]);
+  // Bare numeric tokens: "6.0", "FN 6.0", "raw 7.5" → extract digit, not label
+  const numericToken = t.match(/\b(\d+(?:\.\d+)?)\b/);
+  if (numericToken) {
+    const val = parseFloat(numericToken[1]);
+    // Sanity: grade range 0.5–10.0 (rejects year-like "1985", issue "#133")
+    if (val >= 0.5 && val <= 10.0) return val;
+  }
+  // Label midpoint fallback: "FN", "VF+", "nm/mt" → canonical grade
   const gradeMap = [
     ['nm/mt', 9.8], ['nm+', 9.6], ['nm-', 9.2],
     ['nm', 9.4], ['vf/nm', 9.0], ['vf+', 8.5],
