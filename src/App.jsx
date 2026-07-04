@@ -8519,17 +8519,28 @@ export default function App() {
     const CONCURRENCY = 3;
     const startTime = Date.now();
     let completed = 0;
+    // P0 HOTFIX: shared Set to prevent duplicate races (workers check before grade)
+    const inFlightKeys = new Set();
 
     // Worker function: process one file (compress → grade → save → fire enrich)
     const processFile = async (file, index) => {
       console.log('[bulk] processing file:', file.name);
       try {
+        // P0 HOTFIX: restore b64 definition (deleted in dc2e164)
+        const rawB64 = await fileToBase64(file);
+        const b64 = await makeThumbnail(rawB64, 1200, 0.85);
+
         const res = await fetch("/api/grade", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ images: [b64] }),
         });
         const data = await res.json();
+
+        // P0 HOTFIX: increment progress on ALL paths (error/skip/duplicate/success)
+        completed++;
+        setBulkProgress({ current: completed, total: files.length, title: data.title || file.name });
+
         if (!res.ok) {
           const msg = data.error || `HTTP ${res.status}`;
           console.warn('[bulk] grade error for', file.name, msg);
@@ -8569,6 +8580,15 @@ export default function App() {
 
         const bulkIssue = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
 
+        // P0 HOTFIX: duplicate race — check in-flight Set before grading
+        // (workers now share inFlightKeys to prevent concurrent duplicates)
+        const dupKey = `${titleLower}|${bulkIssue}|${data.year || ''}`;
+        if (inFlightKeys.has(dupKey)) {
+          console.log('[bulk] duplicate in-flight, skipping:', data.title, '#' + bulkIssue);
+          errors.push(`${file.name}: duplicate in-flight (${data.title} #${bulkIssue})`);
+          return;
+        }
+
         // Duplicate detection (mirrors gradeBlob :3859-3863)
         const isDuplicate = catalogue.some(c =>
           c.title?.toLowerCase() === titleLower &&
@@ -8581,9 +8601,8 @@ export default function App() {
           return;
         }
 
-        // Update progress counter (thread-safe via closure)
-        completed++;
-        setBulkProgress({ current: completed, total: files.length, title: data.title || "" });
+        // Mark as in-flight to prevent concurrent workers from processing same book
+        inFlightKeys.add(dupKey);
 
         const savedId = await addToCatalogue({ ...data, issue: bulkIssue }, b64);
         if (savedId) {
