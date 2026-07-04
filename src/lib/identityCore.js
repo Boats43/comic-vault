@@ -188,13 +188,21 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
       console.log(`[title-family] OVERRIDE: family="${family.selectedTitle}" vs consensus="${ebay.title}"`);
     }
 
-    confirmedTitle = family.selectedTitle;
+    // Q40: Sanitize family.selectedTitle before storage to prevent RAW eBay listing
+    // contamination ("avengers henry pym last stand egghead she thor disney" etc.)
+    const rawFamilyTitle = family.selectedTitle;
+    const sanitizedFamilyTitle = sanitizeSeriesTitle(rawFamilyTitle);
+
+    confirmedTitle = sanitizedFamilyTitle;
     // Q12c FIX: Backfill issue/year/publisher from eBay consensus when available
     confirmedIssue = ebay?.issue || vision.issue;
     confirmedYear = ebay?.year || vision.year;
     confirmedPublisher = ebay?.publisher || vision.publisher;
     identitySource = 'title-family-' + family.decision;
     console.log(`[phase1] family candidate OVERRIDE: using "${confirmedTitle}" (source: ${identitySource})`);
+    if (rawFamilyTitle !== sanitizedFamilyTitle) {
+      console.log(`[q40] family title sanitized: "${rawFamilyTitle}" → "${sanitizedFamilyTitle}"`);
+    }
     if (ebay?.issue) {
       console.log(`[q12c-fix] family override preserved eBay issue="${ebay.issue}" (not Vision "${vision.issue}")`);
     }
