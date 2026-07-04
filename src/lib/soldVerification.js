@@ -555,28 +555,16 @@ export const verifySoldComps = (rawRows, ctx) => {
   //      "already at-grade" (false for sold pool). Fix: reject solds outside
   //      ±1.5 grades from user's book, same as active chain does.
   //
-  //      Also reject slabbed solds (SLAB_RE) for raw scans — active chain
-  //      does this at comps.js:1173-1190; sold chain had no equivalent.
+  //      Slab filtering already handled by filter 9 (lines 520-528). This
+  //      block ONLY handles grade proximity.
   if (userGradeKey) {
     const beforeProximity = working.length;
-    // Q47-FIX2: Extract numeric grade from userGradeKey (format may vary:
-    // "6.0", "VF 8.0", "CGC 9.4"). GRADE_MAP lookup risks format mismatch.
-    // Use regex extraction instead.
+    // Q47-FIX2: Extract numeric grade from userGradeKey (format: "6.0" / "9.4" / "raw").
     const gradeMatch = String(userGradeKey).match(/(\d+(?:\.\d+)?)/);
     const numericTarget = gradeMatch ? parseFloat(gradeMatch[1]) : null;
 
     if (numericTarget != null && !isNaN(numericTarget)) {
       working = working.filter((r) => {
-        // Slab filter for raw scans (same as active comps)
-        if (!userGradeKey.includes('CGC') && !userGradeKey.includes('CBCS')) {
-          if (SLAB_RE.test(String(r.title || ''))) {
-            console.log('[sold-reject] slab (raw scan) |', r.title?.slice(0, 60));
-            reasons.slabMismatch++;
-            pushSample(r, 'slabMismatch');
-            return false;
-          }
-        }
-
         // Grade proximity ±1.5
         const listingGrade = parseListingGrade(r.title);
 

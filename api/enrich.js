@@ -4582,20 +4582,26 @@ export default async function handler(req, res) {
     const isRefresh = req.body?.skipClaudeCheck === true || req.body?.claudeCheckCached != null;
     mark('claude_check_start');
     let claudeCheck;
+    // Q44-B: Count only CRITICAL-severity conflicts before AI gate.
+    // INFO conflicts (adjective/article normalization) are cosmetic — AI escalation
+    // fires false alarms on "The Mighty Thor" vs "Thor" when deterministic layer
+    // normalized and passed. Filter to CRITICAL only for escalation decision.
+    const criticalConflicts = (out.conflicts || []).filter(c => c.severity === 'CRITICAL');
     if (isPolybagPricing) {
       claudeCheck = null;
     } else if (isRefresh && req.body?.claudeCheckCached) {
       // Use cached result from initial scan — zero AI calls on refresh
       claudeCheck = req.body.claudeCheckCached;
       console.log('[claude-check] using cached result — skip AI call (refresh)');
-    } else if (!isRefresh && out.conflicts && out.conflicts.length > 0) {
-      // Ship #28b FIX 1: Only fire AI when conflicts exist
+    } else if (!isRefresh && criticalConflicts.length > 0) {
+      // Ship #28b FIX 1 + Q44-B: Only fire AI when CRITICAL conflicts exist
       claudeCheck = await runClaudeCheck(claudeCheckData);
-      console.log('[claude-check] conflicts detected — AI call fired');
-    } else if (!isRefresh && (!out.conflicts || out.conflicts.length === 0)) {
-      // Ship #28b: Zero conflicts = deterministic pricing, skip AI
-      claudeCheck = { verified: true, skipReason: 'no_conflicts' };
-      console.log('[claude-check] zero conflicts — skip AI call (deterministic)');
+      console.log(`[claude-check] ${criticalConflicts.length} CRITICAL conflicts detected — AI call fired`);
+    } else if (!isRefresh && criticalConflicts.length === 0) {
+      // Ship #28b + Q44-B: Zero CRITICAL conflicts = deterministic pricing, skip AI
+      claudeCheck = { verified: true, skipReason: 'no_critical_conflicts' };
+      const infoCount = (out.conflicts || []).filter(c => c.severity === 'INFO').length;
+      console.log(`[claude-check] zero CRITICAL conflicts${infoCount > 0 ? ` (${infoCount} INFO)` : ''} — skip AI call (deterministic)`);
     } else {
       // Refresh but no cached result available — skip entirely
       claudeCheck = null;
