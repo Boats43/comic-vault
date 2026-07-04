@@ -2694,6 +2694,7 @@ export default async function handler(req, res) {
       publisher,
       bookYear: confirmedYear || year,
       userGradeKey: userGradeKeyForSold,
+      assessedGrade: grade, // Q47-FIX4: Vision/AI grade for raw scans (e.g. "FN 6.0")
     });
     const filteredSold = soldVerifyResult.verified;
     if (rawSoldRows.length > 0) {

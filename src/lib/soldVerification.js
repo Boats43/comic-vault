@@ -259,6 +259,7 @@ const isStaleForBookYear = (daysAgo, bookYear) => {
  * @param {string} [ctx.publisher]   — our book's publisher (informational)
  * @param {number|string} [ctx.bookYear] — our book's year (drives staleness)
  * @param {string} [ctx.userGradeKey] — "9.4" / "raw" / null (PC tab key)
+ * @param {string} [ctx.assessedGrade] — Vision/AI grade string ("FN 6.0") for raw scans
  * @returns {{ verified: Array, diagnostics: Object }}
  */
 export const verifySoldComps = (rawRows, ctx) => {
@@ -310,6 +311,7 @@ export const verifySoldComps = (rawRows, ctx) => {
     variant = null,
     bookYear = null,
     userGradeKey = null,
+    assessedGrade = null,
   } = ctx || {};
 
   const ourTokens = tokenizeTitle(title);
@@ -557,11 +559,25 @@ export const verifySoldComps = (rawRows, ctx) => {
   //
   //      Slab filtering already handled by filter 9 (lines 520-528). This
   //      block ONLY handles grade proximity.
+  //
+  //      Q47-FIX4: Raw scans need grade-proximity filter too. When userGradeKey='raw',
+  //      'raw'.match(/\d+/) returns null → filter skipped → high-grade solds contaminate
+  //      low-grade pricing. FIX: derive numericTarget from assessedGrade (Vision/AI
+  //      grade string "FN 6.0") via parseListingGrade when userGradeKey='raw'.
   if (userGradeKey) {
     const beforeProximity = working.length;
-    // Q47-FIX2: Extract numeric grade from userGradeKey (format: "6.0" / "9.4" / "raw").
+    // Extract numeric grade from userGradeKey (CGC scans: "6.0" / "9.4")
+    let numericTarget = null;
     const gradeMatch = String(userGradeKey).match(/(\d+(?:\.\d+)?)/);
-    const numericTarget = gradeMatch ? parseFloat(gradeMatch[1]) : null;
+    if (gradeMatch) {
+      numericTarget = parseFloat(gradeMatch[1]);
+    } else if (userGradeKey === 'raw' && assessedGrade) {
+      // Raw scans: derive from Vision/AI assessed grade via parseListingGrade
+      numericTarget = parseListingGrade(assessedGrade);
+      if (numericTarget != null) {
+        console.log(`[sold-verify] raw scan grade-proximity: derived ${numericTarget} from assessedGrade="${assessedGrade}"`);
+      }
+    }
 
     if (numericTarget != null && !isNaN(numericTarget)) {
       working = working.filter((r) => {
