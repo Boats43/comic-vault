@@ -112,8 +112,25 @@ const getDisplayPrice = (item) => {
   // must not produce one. Default-true on missing field protects
   // existing catalog entries (no field → not gated).
   if (item.identityConfident === false) return 0;
+
+  // Q41: When priceOverridden flag is set, use item.price (manual edit).
+  // Otherwise prefer priceBands.market (market-band price from decision engine).
+  if (item.priceOverridden) {
+    const p = parseFloat(String(item.price || "0").replace(/[$,]/g, ""));
+    return p > 0 ? p : 0;
+  }
+
+  // Prefer priceBands.market (decision engine's market recommendation)
+  if (item.priceBands?.market) {
+    const marketPrice = parseFloat(String(item.priceBands.market).replace(/[$,]/g, ""));
+    if (marketPrice > 0) return marketPrice;
+  }
+
+  // Fallback to item.price (legacy books without priceBands)
   const p = parseFloat(String(item.price || "0").replace(/[$,]/g, ""));
   if (p > 0) return p;
+
+  // Final fallback: comps average + 15%
   if (item.comps?.averageNum)
     return Math.round(item.comps.averageNum * 1.15);
   return 0;
@@ -5605,11 +5622,12 @@ function CollectionDetail({
                 onChange={(e) => {
                   const newPrice = e.target.value;
                   setListPrice(newPrice);
-                  // Mark as manual edit and persist flag to catalogue
+                  // Q41: Mark as manual edit and persist flag to catalogue
                   const updated = {
                     ...item,
                     listPrice: parseFloat(newPrice) || 0,
-                    listPriceManual: true
+                    listPriceManual: true,
+                    priceOverridden: true  // Q41: canonical flag for getDisplayPrice
                   };
                   putComic(updated).catch(() => {});
                   setCatalogue((prev) => prev.map((x) => x.id === item.id ? updated : x));
