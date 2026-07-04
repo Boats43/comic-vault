@@ -413,6 +413,16 @@ export default async function handler(req, res) {
     return;
   }
 
+  // SPEED BUILD 3 — Timing instrumentation (parallel to enrich.js pattern)
+  const startTime = Date.now();
+  const t = {};
+  const mark = (label) => {
+    const ms = Date.now() - startTime;
+    t[label] = ms;
+    console.log(`[grade-timing] ${label}: ${ms}ms`);
+  };
+  mark('handler_entry');
+
   try {
     const body = req.body || {};
 
@@ -470,15 +480,19 @@ export default async function handler(req, res) {
 
     // Ship #EBAY-FIRST: Try eBay image search for identity, fallback to Vision if needed
     console.log('[grade] attempting eBay-first identification...');
+    mark('ebay_image_start');
     const ebayResult = await lookupEbayIdentity(images[0]);
+    mark('ebay_image_complete');
 
     if (ebayResult && ebayResult.consensus && ebayResult.consensus.confidence >= 0.3) {
       // eBay consensus successful — use Sonnet for grade-only
       console.log(`[grade] eBay consensus: ${ebayResult.consensus.title} #${ebayResult.consensus.issue} (${ebayResult.consensus.confidence} confidence)`);
       console.log('[grade] using Sonnet for grade-only assessment...');
 
+      mark('vision_start');
       const gradePrompt = buildGradeOnlyPrompt(ebayResult.consensus);
       const { parsed: gradeResult } = await callModel("claude-haiku-4-5-20251001", imageContent, gradePrompt);
+      mark('vision_complete');
 
       // Merge eBay identity + Sonnet grade
       const result = {
@@ -517,6 +531,7 @@ export default async function handler(req, res) {
       if (noImage) result.noImage = true;
 
       console.log('[grade] eBay-first path succeeded');
+      mark('response_sent');
       res.status(200).json(ensureAssetType(result));
       return;
     }
@@ -525,7 +540,9 @@ export default async function handler(req, res) {
     console.log('[grade] eBay-first failed or low confidence — falling back to Vision full identification');
 
     // Session 4B — Initial scan to detect asset type
+    mark('vision_start');
     const { parsed: initialScan } = await callModel("claude-sonnet-4-5-20250929", imageContent, STANDARD_PROMPT);
+    mark('vision_complete');
     const isBook = detectBookSignals(initialScan);
 
     let userPrompt = STANDARD_PROMPT;
@@ -554,6 +571,7 @@ export default async function handler(req, res) {
     finalParsed.editionWarning = detectEditionWarning(finalParsed.reason);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
+    mark('response_sent');
     res.status(200).json(ensureAssetType(finalParsed, initialScan));
   } catch (err) {
     console.error('[FATAL /api/grade]', err?.message || err);
