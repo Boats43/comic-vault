@@ -82,7 +82,7 @@ import {
 // Ship v0-B — Decision Engine integration. Computes accountable decision
 // (LIST_NOW, RESEARCH, ID_REQUIRED, etc.) after full enrich object assembled.
 import { computeDecision } from "../src/lib/decisionEngine.js";
-import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate } from "../src/lib/imageSearchIdentity.js";
+import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate, inferAssetTypeFromCategories } from "../src/lib/imageSearchIdentity.js";
 // Session 4A — Universal category filter (pre-clustering)
 import { filterByCategory } from "../src/lib/categoryClassifier.js";
 // Session 4B — Adapter registry (per-asset routing config)
@@ -1813,6 +1813,29 @@ export default async function handler(req, res) {
       }
     }
 
+    // Q32 — Merchandise detection via eBay category tree (fraud risk gate).
+    // Runs AFTER book detection so book-category hits take precedence.
+    // Only fires when parsedVisualRows available (image-search path only).
+    // Barcode/title-search paths skip this gate (no leafCategoryIds).
+    if (out.assetType === 'comic' && parsedVisualRows?.length > 0) {
+      const categoryVotes = parsedVisualRows
+        .map(r => inferAssetTypeFromCategories(r.leafCategoryIds))
+        .filter(Boolean); // null when no category data on a row
+
+      if (categoryVotes.length > 0) {
+        const merchandiseVotes = categoryVotes.filter(v => v === 'merchandise').length;
+        const merchandiseRatio = merchandiseVotes / categoryVotes.length;
+
+        if (merchandiseRatio >= 0.5) {
+          out.assetType = 'merchandise';
+          out.merchandiseDetected = true;
+          console.log(`[Q32] MERCHANDISE detected: ${merchandiseVotes}/${categoryVotes.length} eBay results outside comics category tree (ratio=${(merchandiseRatio*100).toFixed(0)}%)`);
+        } else {
+          console.log(`[Q32] merchandise vote: ${merchandiseVotes}/${categoryVotes.length} (ratio=${(merchandiseRatio*100).toFixed(0)}%) — threshold not met, keeping assetType=comic`);
+        }
+      }
+    }
+
     // Session 4B — Derive author for books server-side when missing from client.
     // MUST run BEFORE phase2 comp fetch so buildBookQuery has author param.
     // Same pattern as assetType: don't trust handoff, derive from data we have.
@@ -3064,6 +3087,26 @@ export default async function handler(req, res) {
           };
         }
       }
+    }
+
+    // Q32 — Merchandise hard gate (fraud risk). Runs BEFORE identity gate so
+    // assetType=merchandise blocks pricing pipeline entirely. Forces RESEARCH
+    // decision with clear blocker message.
+    if (out.assetType === 'merchandise') {
+      out.identityComplete = false;
+      out.decision = {
+        action: 'DO_NOT_LIST',
+        confidence: 'HIGH',
+        blockers: ['Non-comic asset detected — verify item type before listing'],
+        warnings: [],
+        nextSteps: [
+          'Confirm this is a comic book, not merchandise/collectible',
+          'Re-scan if item was misidentified',
+          'Check eBay visual results for category contamination'
+        ],
+      };
+      console.log('[Q32] MERCHANDISE HARD BLOCK — refusing to price, decision=DO_NOT_LIST');
+      return res.json(out); // STOP — no pricing, return early
     }
 
     // Ship #20a.6.4 — identity gate. Runs AFTER phase 1 (so PC/CV year-heal

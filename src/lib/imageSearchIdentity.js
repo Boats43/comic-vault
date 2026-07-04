@@ -299,6 +299,47 @@ export const extractIdentityFromImageSearch = (items) => {
   return results;
 };
 
+// ═════════════════════════════════════════════════════════════════════════
+// Q32 — Non-comic asset gating (merchandise detection via eBay category tree)
+// ═════════════════════════════════════════════════════════════════════════
+//
+// eBay comics category tree (authoritative allowlist):
+//   259104 — Comic Books & Graphic Novels (parent)
+//   63     — Comic Books, Modern Age (1992-Now)
+//   64     — Comic Books, Copper Age (1984-1991)
+//   65     — Comic Books, Bronze Age (1970-83)
+//   66     — Comic Books, Silver Age (1956-69)
+//   67     — Comic Books, Golden Age (1938-55)
+//   259111 — Graphic Novels, TPBs
+//
+// Items outside this tree (e.g., metal signs category 31587) are flagged
+// as merchandise. Majority-vote consensus (≥50%) forces assetType=merchandise,
+// which hard-blocks pricing pipeline and sets RESEARCH forced decision.
+
+const COMICS_CATEGORY_TREE = new Set([
+  '259104', // Comic Books & Graphic Novels (parent)
+  '63',     // Modern Age
+  '64',     // Copper Age
+  '65',     // Bronze Age
+  '66',     // Silver Age
+  '67',     // Golden Age
+  '259111', // Graphic Novels, TPBs
+]);
+
+/**
+ * Infer assetType from eBay leafCategoryIds.
+ *
+ * @param {string[]} leafCategoryIds - eBay Browse API category IDs
+ * @returns {'comic' | 'merchandise' | null} - assetType or null when no inference possible
+ */
+export const inferAssetTypeFromCategories = (leafCategoryIds) => {
+  if (!Array.isArray(leafCategoryIds) || leafCategoryIds.length === 0) {
+    return null; // no inference possible — missing category data
+  }
+  const hasComicCategory = leafCategoryIds.some(id => COMICS_CATEGORY_TREE.has(String(id)));
+  return hasComicCategory ? 'comic' : 'merchandise';
+};
+
 // Ship #EBAY-FIRST — consensus extraction from eBay image search results.
 // Takes parsed identity rows and returns majority-vote consensus for each field.
 //
