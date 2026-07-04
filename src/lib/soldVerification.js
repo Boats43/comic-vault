@@ -553,15 +553,11 @@ export const verifySoldComps = (rawRows, ctx) => {
   //      does this at comps.js:1173-1190; sold chain had no equivalent.
   if (userGradeKey) {
     const beforeProximity = working.length;
-    // Import GRADE_TO_NUMERIC from gradeUtils or inline minimal map
-    const GRADE_MAP = {
-      '0.5': 0.5, '1.0': 1.0, '1.5': 1.5, '1.8': 1.8, '2.0': 2.0,
-      '2.5': 2.5, '3.0': 3.0, '3.5': 3.5, '4.0': 4.0, '4.5': 4.5,
-      '5.0': 5.0, '5.5': 5.5, '6.0': 6.0, '6.5': 6.5, '7.0': 7.0,
-      '7.5': 7.5, '8.0': 8.0, '8.5': 8.5, '9.0': 9.0, '9.2': 9.2,
-      '9.4': 9.4, '9.6': 9.6, '9.8': 9.8, '9.9': 9.9, '10.0': 10.0,
-    };
-    const numericTarget = GRADE_MAP[userGradeKey];
+    // Q47-FIX2: Extract numeric grade from userGradeKey (format may vary:
+    // "6.0", "VF 8.0", "CGC 9.4"). GRADE_MAP lookup risks format mismatch.
+    // Use regex extraction instead.
+    const gradeMatch = String(userGradeKey).match(/(\d+(?:\.\d+)?)/);
+    const numericTarget = gradeMatch ? parseFloat(gradeMatch[1]) : null;
 
     if (numericTarget != null && !isNaN(numericTarget)) {
       working = working.filter((r) => {
