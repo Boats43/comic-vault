@@ -3212,6 +3212,41 @@ function CollectionDetail({
         );
       })()}
 
+      {/* Ship #21h: Data freshness line (Rule 21-0: render when timestamps available) */}
+      {(() => {
+        const compsAge = item.compsCachedAt
+          ? Math.floor((Date.now() - item.compsCachedAt) / 3600000)
+          : null;
+        const soldRecency = item.soldComps?.[0]?.daysAgo;
+
+        if (compsAge === null && soldRecency === null) {
+          return (
+            <div style={{
+              fontSize: 10,
+              color: '#888',
+              marginBottom: 8,
+              opacity: 0.6
+            }}>
+              📅 Cache age unavailable
+            </div>
+          );
+        }
+
+        return (
+          <div style={{
+            fontSize: 10,
+            color: '#888',
+            marginBottom: 8,
+            opacity: 0.7
+          }}>
+            📅
+            {compsAge !== null && ` Comps: ${compsAge}h`}
+            {soldRecency !== null && ` · Sold data: ${soldRecency}d recency`}
+            {compsAge === null && soldRecency !== null && ` Sold data: ${soldRecency}d recency`}
+          </div>
+        );
+      })()}
+
       {/* 2a. DECISION CARD — Decision-first layout */}
       {item.decision?.action && (() => {
         const colors = getActionColor(item.decision);
