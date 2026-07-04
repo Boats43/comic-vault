@@ -698,6 +698,9 @@ export const buildTitleFamilies = (itemsOrTitles) => {
       const sim = jaccard(entry.tokens, family.tokens);
       if (sim >= JACCARD_THRESHOLD) {
         family.indices.push(entry.idx);
+        // Q45: Accumulate all member token sets for consensus title construction
+        family.memberTokens = family.memberTokens || [family.tokens];
+        family.memberTokens.push(entry.tokens);
         assigned = true;
         break;
       }
@@ -705,11 +708,57 @@ export const buildTitleFamilies = (itemsOrTitles) => {
     if (!assigned) {
       // Start new family
       families.push({
-        title: entry.tokens.join(' '), // normalized canonical
+        title: entry.tokens.join(' '), // temporary, will be replaced with consensus
         tokens: entry.tokens,
         indices: [entry.idx],
+        memberTokens: [entry.tokens], // Q45: track all members for consensus
       });
     }
+  }
+
+  // Q45: Build consensus title from tokens present in ≥60% of family members.
+  // Prevents month names, "no.", "vol", years from first member bleeding into
+  // canonical title. Evidence: "the eternals no april" regression (Eternals
+  // #10 kept 10→4/30, price $5.89→$3.63).
+  for (const family of families) {
+    const memberCount = family.memberTokens.length;
+    const tokenFreq = {};
+
+    // Count token occurrences across all members
+    for (const memberTokens of family.memberTokens) {
+      for (const token of memberTokens) {
+        tokenFreq[token] = (tokenFreq[token] || 0) + 1;
+      }
+    }
+
+    // Keep tokens present in ≥60% of members
+    const threshold = memberCount * 0.6;
+    const consensusTokens = Object.entries(tokenFreq)
+      .filter(([_, count]) => count >= threshold)
+      .map(([token]) => token);
+
+    // Q45: Strip month names, "no", "vol", standalone years from consensus
+    const NOISE_TOKENS = new Set([
+      'jan', 'january', 'feb', 'february', 'mar', 'march', 'apr', 'april',
+      'may', 'jun', 'june', 'jul', 'july', 'aug', 'august', 'sep', 'sept',
+      'september', 'oct', 'october', 'nov', 'november', 'dec', 'december',
+      'no', 'vol', 'volume',
+    ]);
+
+    const cleaned = consensusTokens.filter(t => {
+      // Remove month names, "no", "vol"
+      if (NOISE_TOKENS.has(t.toLowerCase())) return false;
+      // Remove standalone 4-digit years (1900-2099)
+      if (/^\d{4}$/.test(t)) {
+        const y = parseInt(t, 10);
+        if (y >= 1900 && y <= 2099) return false;
+      }
+      return true;
+    });
+
+    // Rebuild family title and tokens from consensus
+    family.title = cleaned.join(' ');
+    family.tokens = cleaned;
   }
 
   return families;
