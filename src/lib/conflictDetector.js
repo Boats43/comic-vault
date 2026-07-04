@@ -320,9 +320,32 @@ export const detectCompsConflicts = (comps, leafCategories) => {
 // Helper: Tokenize title for overlap comparison
 const tokenize = (title) => {
   if (!title) return [];
+
+  // Q42 A3: Abbreviation expansion map — apply BEFORE tokenization
+  // Prevents issueMismatch on "TMNT Archie #4" (Vision: "Teenage Mutant Ninja Turtles")
+  // vs comps "TMNT Adventures #4" where tokens "teenage", "mutant", "ninja", "turtles"
+  // never match "tmnt" abbreviation.
+  const ABBREV_MAP = {
+    'tmnt': 'teenage mutant ninja turtles',
+    'asm': 'amazing spider man',
+    'ff': 'fantastic four',
+    'jla': 'justice league',
+    'mwom': 'mighty world of marvel',
+    'gsx': 'giant size x men',
+    'dd': 'daredevil',
+    'xm': 'x men',
+  };
+
+  let normalized = String(title).toLowerCase();
+
+  // Expand abbreviations (word-boundary anchored to avoid false matches)
+  for (const [abbrev, expanded] of Object.entries(ABBREV_MAP)) {
+    const pattern = new RegExp(`\\b${abbrev}\\b`, 'gi');
+    normalized = normalized.replace(pattern, expanded);
+  }
+
   const STOP_WORDS = ['the', 'a', 'an', 'of', 'and', 'in', 'on', 'at', 'to', 'for', 'with'];
-  return String(title)
-    .toLowerCase()
+  return normalized
     .replace(/[^a-z0-9]+/g, ' ')
     .split(/\s+/)
     .filter(t => t.length >= 2 && !STOP_WORDS.includes(t) && !/^\d+$/.test(t));
