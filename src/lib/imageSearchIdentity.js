@@ -22,6 +22,9 @@
 // in src/lib/, imported by api/enrich.js. Vercel bundles transitively.
 // Function count stays at 12/12.
 
+// Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
+import { sanitizeSeriesTitle } from './identityCore.js';
+
 // ─────────────────────────── token catalogs ───────────────────────────
 //
 // Each entry is `{ re, token }`. `re` is matched against the listing title;
@@ -917,40 +920,87 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   // Tokenize Vision title for overlap check
   const visionTokens = tokenizeTitleFamily(visionTitle || '');
 
-  // FIX A1: Top-rank protection check - stricter threshold to prevent weight inversion.
-  // Find which family contains items[0] and check if it should override top-weighted family.
+  // Q43 A1: Top-rank-protection identity guard — three-layer filter prevents
+  // lot/run/collection listings, subtitle junk, and low-overlap contamination
+  // from becoming the identity source.
+  //
+  // Evidence: Batman #423 stored "batman 125 lot huge run", Venom #1 stored
+  // "venom the madness lot last dance men 97 juggernaut mcu", Avengers #63
+  // stored "the avengers hawkeye becomes new goliath" — Vision had correct
+  // canonical titles on ALL. Top-rank must not override when consensus is junk.
   const item0Family = scored.find(f => f.indices?.includes(0));
 
   if (item0Family) {
-    const issueMatch = item0Issue && visionIssue && String(item0Issue) === String(visionIssue);
-    const hasEnoughTokens = item0Tokens.length >= 5;
-    const familyWeightOk = item0Family.weightSum >= 5;
+    // A1.c: LOT_RE guard — never accept listings containing lot/run/collection
+    // tokens as identity source. Catches bulk-listing class contamination.
+    const LOT_RE = /\b(?:lot|bundle|complete\s*set|full\s*run|comic\s*library|comic\s*collection|huge\s*run)\b|\bset\s*of\s*\d+\b|\b\d+\s*(?:book|issue|comic)s?\s*(?:lot|set)\b/i;
+    const item0RawTitle = item0Family.rawTitle || '';
+    const isLotListing = LOT_RE.test(item0RawTitle);
 
-    // Vision-overlap: require ≥1 shared token between item0 and Vision
-    const sharedTokens = item0Tokens.filter(t => visionTokens.includes(t));
-    const hasVisionOverlap = sharedTokens.length >= 1;
+    if (isLotListing) {
+      console.log(`[top-rank-guard] LOT/RUN listing REJECTED as identity source: "${item0RawTitle}"`);
+      // Fall through to weighted-consensus path
+    } else {
+      const issueMatch = item0Issue && visionIssue && String(item0Issue) === String(visionIssue);
+      const hasEnoughTokens = item0Tokens.length >= 5;
+      const familyWeightOk = item0Family.weightSum >= 5;
 
-    // FIX A1: Stricter competing family threshold (3x instead of 2x) to prevent
-    // top-ranked correct result from being overridden by high-volume wrong family.
-    // Black Panther #1 case: item[0] weight 5.0 (correct) vs competing weight 6.5 (wrong).
-    // Old threshold (2x): 6.5 >= 10.0? NO → protection fires → wrong answer.
-    // New threshold (3x): 6.5 >= 15.0? NO → protection fires → correct.
-    const competingFamilies = scored.filter(f => f !== item0Family);
-    const strongestCompetitor = competingFamilies[0]; // already sorted by weight descending
-    const competingFamilyTooStrong = strongestCompetitor && strongestCompetitor.weightSum >= (item0Family.weightSum * 3);
+      // Vision-overlap: require ≥1 shared token between item0 and Vision
+      const sharedTokens = item0Tokens.filter(t => visionTokens.includes(t));
+      const hasVisionOverlap = sharedTokens.length >= 1;
 
-    if (issueMatch && hasEnoughTokens && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong) {
-      // FIX A4: Post-selection boilerplate sanitization
-      const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(item0Family.title, visionIssue));
-      return {
-        decision: 'top-rank-protection',
-        selectedTitle: sanitizedTitle,
-        rawTitle: item0Family.rawTitle,
-        reason: `Top-ranked result protected (${item0Tokens.length} tokens, weight ${item0Family.weightSum.toFixed(1)}, ${sharedTokens.length} Vision overlap)`,
-        topFamily: item0Family,
-        runnerUp: strongestCompetitor,
-        families: scored,
-      };
+      // A1.b: Bidirectional overlap guards — prevent both thin-Vision and
+      // subtitle-junk contamination.
+      //
+      // Forward ratio: sharedTokens / visionTokens — protects against
+      // top-rank having FEWER overlapping tokens than Vision expects
+      // (Vision "batman" vs top-rank "batman 125 lot" → 1/1 = 100% forward,
+      // but junk still caught by LOT_RE).
+      //
+      // Reverse ratio: sharedTokens / item0Tokens — protects against
+      // subtitle-junk class where top-rank has MANY non-overlapping tokens
+      // that Vision doesn't recognize. Example: "the avengers hawkeye becomes
+      // new goliath" (6 tokens) vs Vision "avengers" (1 token) → 1/6 = 17%
+      // reverse overlap → REJECT, preserve Vision.
+      const forwardRatio = visionTokens.length > 0 ? sharedTokens.length / visionTokens.length : 0;
+      const reverseRatio = item0Tokens.length > 0 ? sharedTokens.length / item0Tokens.length : 0;
+
+      const sufficientForward = forwardRatio >= 0.5;  // ≥50% of Vision tokens matched
+      const sufficientReverse = reverseRatio >= 0.4;  // ≥40% of top-rank tokens matched
+
+      if (!sufficientForward) {
+        console.log(`[top-rank-guard] insufficient forward overlap (${sharedTokens.length}/${visionTokens.length} = ${Math.round(forwardRatio * 100)}% < 50%) — fallback to Vision`);
+        // Fall through to weighted-consensus path
+      } else if (!sufficientReverse) {
+        console.log(`[top-rank-guard] subtitle-junk detected (${sharedTokens.length}/${item0Tokens.length} = ${Math.round(reverseRatio * 100)}% < 40%) — fallback to Vision`);
+        // Fall through to weighted-consensus path
+      } else {
+        // FIX A1: Stricter competing family threshold (3x instead of 2x) to prevent
+        // top-ranked correct result from being overridden by high-volume wrong family.
+        // Black Panther #1 case: item[0] weight 5.0 (correct) vs competing weight 6.5 (wrong).
+        // Old threshold (2x): 6.5 >= 10.0? NO → protection fires → wrong answer.
+        // New threshold (3x): 6.5 >= 15.0? NO → protection fires → correct.
+        const competingFamilies = scored.filter(f => f !== item0Family);
+        const strongestCompetitor = competingFamilies[0]; // already sorted by weight descending
+        const competingFamilyTooStrong = strongestCompetitor && strongestCompetitor.weightSum >= (item0Family.weightSum * 3);
+
+        if (issueMatch && hasEnoughTokens && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong) {
+          // A1.a: Route through sanitizeSeriesTitle to remove creator names,
+          // cover descriptors, condition words, embedded years, seller noise.
+          // Then apply post-selection boilerplate sanitization.
+          const cleaned = sanitizeSeriesTitle(item0Family.title);
+          const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(cleaned, visionIssue));
+          return {
+            decision: 'top-rank-protection',
+            selectedTitle: sanitizedTitle,
+            rawTitle: item0Family.rawTitle,
+            reason: `Top-ranked result protected (${item0Tokens.length} tokens, weight ${item0Family.weightSum.toFixed(1)}, forward ${Math.round(forwardRatio * 100)}% / reverse ${Math.round(reverseRatio * 100)}%)`,
+            topFamily: item0Family,
+            runnerUp: strongestCompetitor,
+            families: scored,
+          };
+        }
+      }
     }
   }
 
@@ -965,8 +1015,10 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
 
   // Q38: Require ≥3 members for weighted-consensus override
   if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD) {
-    // FIX A4: Post-selection boilerplate sanitization
-    const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(topFamily.title, visionIssue));
+    // Q43 A1.a: Apply same sanitizeSeriesTitle treatment as top-rank-protection
+    // for consistency — removes creator names, descriptors, noise before final title.
+    const cleaned = sanitizeSeriesTitle(topFamily.title);
+    const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(cleaned, visionIssue));
     return {
       decision: 'weighted-consensus',
       selectedTitle: sanitizedTitle,
