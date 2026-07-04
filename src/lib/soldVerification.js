@@ -650,7 +650,10 @@ export const verifySoldComps = (rawRows, ctx) => {
     const beforeOutlierFallback = fallbackPool.length;
     fallbackPool = applyPriceSanity(fallbackPool);
 
-    if (fallbackPool.length >= 2) {
+    // Q34 Part 1: Relax threshold ≥2 → ≥1 (thin-market variants need anchor).
+    // FF Artgerm Invisible Woman: 0 exact-variant matches, fallback gets 1 comp
+    // → previously rejected, now accepted with variantAdjusted flag.
+    if (fallbackPool.length >= 1) {
       console.log('[sold-verify] variant fallback —', fallbackPool.length,
         'any-variant grade-matched comps (was 0 exact-variant)');
       return {
@@ -666,7 +669,7 @@ export const verifySoldComps = (rawRows, ctx) => {
       };
     } else {
       console.log('[sold-verify] variant fallback insufficient —',
-        fallbackPool.length, 'comps (need ≥2), falling through');
+        fallbackPool.length, 'comps (need ≥1), falling through');
     }
   }
 
