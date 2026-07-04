@@ -3449,29 +3449,53 @@ function CollectionDetail({
             <span>{ladderExpanded ? '▼' : '▶'}</span>
             <span>PRICE LADDER ({Object.keys(item.priceLadder).length} grades)</span>
           </div>
-          {ladderExpanded && (
-            <div style={{
-              marginTop: 6,
-              padding: '8px 10px',
-              background: 'rgba(255,255,255,0.04)',
-              borderRadius: 6,
-              fontSize: 12,
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: 6
-            }}>
-              {Object.entries(item.priceLadder)
-                .sort((a, b) => parseFloat(b[0]) - parseFloat(a[0]))
-                .map(([grade, price]) => (
-                  <div key={grade}>
-                    <span style={{ color: '#888' }}>{grade}</span>
-                    <span style={{ marginLeft: 6, fontWeight: 600 }}>
-                      {formatCurrency(price)}
-                    </span>
-                  </div>
-                ))}
-            </div>
-          )}
+          {ladderExpanded && (() => {
+            // Ship #21g: Detect price ladder inversions (Rule 21-0: only render when detected)
+            const entries = Object.entries(item.priceLadder)
+              .map(([grade, price]) => ({ grade: parseFloat(grade), price: parseFloat(price) }))
+              .sort((a, b) => a.grade - b.grade); // ascending for inversion check
+
+            const inversions = new Set();
+            for (let i = 1; i < entries.length; i++) {
+              if (entries[i].price < entries[i-1].price) {
+                inversions.add(entries[i].grade);
+              }
+            }
+
+            return (
+              <div style={{
+                marginTop: 6,
+                padding: '8px 10px',
+                background: 'rgba(255,255,255,0.04)',
+                borderRadius: 6,
+                fontSize: 12,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: 6
+              }}>
+                {entries
+                  .sort((a, b) => b.grade - a.grade) // descending for display
+                  .map(({ grade, price }) => (
+                    <div key={grade}>
+                      <span style={{ color: '#888' }}>{grade}</span>
+                      <span style={{ marginLeft: 6, fontWeight: 600 }}>
+                        {formatCurrency(price)}
+                      </span>
+                      {inversions.has(grade) && (
+                        <span style={{
+                          marginLeft: 4,
+                          fontSize: 10,
+                          color: '#f59e0b',
+                          opacity: 0.8
+                        }}>
+                          ⚠ thin data
+                        </span>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            );
+          })()}
         </div>
       )}
 
