@@ -8946,18 +8946,20 @@ export default function App() {
         // Mark as in-flight to prevent concurrent workers from processing same book
         inFlightKeys.add(dupKey);
 
-        const savedId = await addToCatalogue({ ...data, issue: bulkIssue }, b64);
-        if (savedId) {
-          added++;
-          console.log('[bulk] added to catalogue:', data.title, bulkIssue);
-        } else {
-          console.warn('[bulk] addToCatalogue returned null for', file.name);
-          errors.push(`${file.name}: failed to save`);
-          return;
-        }
-        // Fire-and-forget enrichment — tracked via bulkEnrichProgress.
-        bumpEnrichFired();
-        fetch("/api/enrich", {
+        // C6: Wrap save/enrich in try-finally to ensure inFlightKeys.delete on error
+        try {
+          const savedId = await addToCatalogue({ ...data, issue: bulkIssue }, b64);
+          if (savedId) {
+            added++;
+            console.log('[bulk] added to catalogue:', data.title, bulkIssue);
+          } else {
+            console.warn('[bulk] addToCatalogue returned null for', file.name);
+            errors.push(`${file.name}: failed to save`);
+            return;
+          }
+          // Fire-and-forget enrichment — tracked via bulkEnrichProgress.
+          bumpEnrichFired();
+          fetch("/api/enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -9100,6 +9102,10 @@ export default function App() {
           })
           .catch(() => {})
           .finally(bumpEnrichSettled);
+        } finally {
+          // C6: Delete key from inFlightKeys on success OR error (prevent key leaks)
+          inFlightKeys.delete(dupKey);
+        }
       } catch (err) {
         console.warn('[bulk] unexpected error for', file.name, err);
         errors.push(`${file.name}: ${err.message || 'unexpected error'}`);
