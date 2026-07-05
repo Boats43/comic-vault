@@ -177,17 +177,30 @@ export const tokenizeTitle = (title) => {
   let normalized = String(title || "").toLowerCase();
 
   // Q54: Compound whitelist check FIRST (before abbreviation expansion).
-  // When title exactly matches a protected compound (case-insensitive, after
-  // stripping issue# + non-alphanumerics), return the canonical split form
-  // immediately. X-Men #44 → ["x", "men"] (preserved), not ["men"] (collapsed).
-  const bareTitle = normalized
+  // When title matches a protected compound (prefix or exact), return the
+  // canonical split form to preserve single-letter tokens.
+  // X-Men #44 → ["x", "men"], The X-Men #44 Angel → ["x", "men"] (trailing stripped).
+  let bareTitle = normalized
     .replace(/#\s*\d+/g, " ")
     .replace(/[^a-z0-9\s-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  if (COMPOUND_WHITELIST.has(bareTitle)) {
-    // Return canonical split (hyphens → spaces, split on whitespace)
-    return bareTitle.replace(/-/g, " ").split(/\s+/).filter(Boolean);
+
+  // Q54-FIX: Strip leading articles (the/a/an) before whitelist check.
+  // "The X-Men" → "x-men" to match whitelist entry.
+  bareTitle = bareTitle.replace(/^(?:the|a|an)\s+/i, '');
+
+  // Q54-FIX: Prefix matching instead of exact match. "x-men angel red raven"
+  // starts with "x-men " → match. Protects compound, allows trailing strip.
+  const hit = Array.from(COMPOUND_WHITELIST).find(entry =>
+    bareTitle === entry || bareTitle.startsWith(entry + ' ')
+  );
+
+  if (hit) {
+    // Return canonical split of MATCHED compound only (trailing words stripped)
+    const protected = hit.replace(/-/g, " ").split(/\s+/).filter(Boolean);
+    console.log(`[Q54] compound-protected="${hit}" → [${protected.join(', ')}]`);
+    return protected;
   }
 
   // C-A3: Expand abbreviations (word-boundary anchored)
