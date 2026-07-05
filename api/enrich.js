@@ -1682,6 +1682,13 @@ export default async function handler(req, res) {
     // Must run BEFORE resolveIdentity (line 1736) so confirmedIssue gets backfilled value.
     let issueBackfilledFromVisual = false;
     let issueBackfillProvenance = null;
+
+    // Q58 3rd attempt TRACE: Check if block is reached
+    console.log(
+      `[Q58-trace] ENTRY: issueNum="${issueNum || ''}" ` +
+      `parsedVisualRows.length=${parsedVisualRows?.length || 0}`
+    );
+
     if (!issueNum && parsedVisualRows && parsedVisualRows.length > 0) {
       const issuePattern = /#\s*(\d+)/;
       const issueCounts = {};
@@ -1698,14 +1705,27 @@ export default async function handler(req, res) {
       if (consensusEntry) {
         const [issueBackfill, count] = consensusEntry;
         const ratio = count / totalVisual;
+        console.log(
+          `[Q58-trace] consensus found: issue=${issueBackfill} ` +
+          `ratio=${(ratio * 100).toFixed(0)}% (${count}/${totalVisual})`
+        );
         if (ratio >= 0.70) {
           // Overwrite issueNum for resolveIdentity (line 1737)
           issueNum = issueBackfill;
           issueBackfilledFromVisual = true;
           issueBackfillProvenance = `${count}/${totalVisual} visual consensus`;
           console.log(`[Q58] backfilled issue=${issueBackfill} from ${(ratio * 100).toFixed(0)}% visual consensus (${count}/${totalVisual})`);
+        } else {
+          console.log(`[Q58-trace] SKIP: ratio ${(ratio * 100).toFixed(0)}% < 70% threshold`);
         }
+      } else {
+        console.log('[Q58-trace] no consensus entry found (all issues different?)');
       }
+    } else {
+      console.log(
+        `[Q58-trace] block SKIPPED: issueNum=${!!issueNum} ` +
+        `parsedVisualRows=${parsedVisualRows?.length || 0}`
+      );
     }
 
     // Ship 26.2 — Title-family clustering for rank-weighted identity resolution.
