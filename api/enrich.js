@@ -1676,6 +1676,50 @@ export default async function handler(req, res) {
       console.log(`[phase1] eBay consensus: "${visualConsensus.title}" #${visualConsensus.issue} (confidence ${(visualConsensus.confidence * 100).toFixed(0)}%)`);
     }
 
+    // Ship #22a: Era lock from visual comp year histogram (Phase 1)
+    // Extract year histogram from parsedVisualRows → consensus decade → lock ±10y
+    // Threshold: ≥50% agreement. Below → era-unlocked flag, no guard.
+    // E1/E2 protection: ASM #1 (1963) locks 1960s → PC "Divided We Stand" (2016) rejected.
+    let eraLock = null;
+    let eraUnlocked = false;
+    if (parsedVisualRows && parsedVisualRows.length >= 3) {
+      const yearHistogram = {};
+      parsedVisualRows.forEach(r => {
+        const yearMatch = (r.title || '').match(/\b(19\d{2}|20\d{2})\b/);
+        if (yearMatch) {
+          const year = parseInt(yearMatch[1]);
+          const decade = Math.floor(year / 10) * 10;
+          yearHistogram[decade] = (yearHistogram[decade] || 0) + 1;
+        }
+      });
+
+      const totalWithYear = Object.values(yearHistogram).reduce((sum, count) => sum + count, 0);
+      if (totalWithYear >= 3) {
+        const consensusEntry = Object.entries(yearHistogram)
+          .sort((a, b) => b[1] - a[1])[0];
+
+        if (consensusEntry) {
+          const [decadeStr, count] = consensusEntry;
+          const decade = parseInt(decadeStr);
+          const ratio = count / totalWithYear;
+
+          if (ratio >= 0.50) {
+            eraLock = {
+              decade,
+              minYear: decade - 10,
+              maxYear: decade + 19,
+              confidence: ratio,
+              source: 'visual_consensus'
+            };
+            console.log(`[22a] era-locked=${decade} consensus=${(ratio * 100).toFixed(0)}% (${count}/${totalWithYear})`);
+          } else {
+            eraUnlocked = true;
+            console.log(`[22a] era-unlocked: consensus=${(ratio * 100).toFixed(0)}% < 50% threshold`);
+          }
+        }
+      }
+    }
+
     // Q58: Issue consensus backfill from VISUAL pool (eBay image search results).
     // When Vision missed issue (issueNum=null) AND ≥70% of visual search results
     // agree on single issue number, backfill issueNum/effectiveIssue and continue.
