@@ -169,6 +169,31 @@ export const tokenizeTitle = (title) => {
     normalized = normalized.replace(pattern, expanded);
   }
 
+  // Q55+55-B: Strip artist/signature/ordinal-key tokens BEFORE tokenization
+  // to prevent "Amazing Spider-Man #1 Signed McFarlane" → family=["mcfarlane"]
+  // matching "Spawn #1 McFarlane" (different series). Artist names, signature
+  // markers, and ordinal-key phrases are VARIANT/CONDITION metadata, not series
+  // identity. Symbiote Spider-Man #1 class: artist tokens contaminated family.
+  //
+  // Artist patterns: single-word artist last names from ARTIST_PATTERNS
+  // (lim, dekal, spears, mcfarlane, ross, adams, etc. — 60+ entries).
+  const artistWords = new Set([
+    'skan', 'rapoza', 'quash', 'momoko', 'ross', 'adams', 'kirkham', 'bean',
+    'andolfo', 'browne', 'forstner', 'howard', 'corona', 'stegman', 'ottley',
+    'jimenez', 'mcfarlane', 'campbell', 'artgerm', 'nakayama', 'hughes', 'byrne',
+    'perez', 'kirby', 'ditko', 'mele', 'albuquerque', 'hama', 'fabok', 'ejikure',
+    'gleason', 'quah', 'parrillo', 'maer', 'lim', 'chew', 'ngu', 'sanders',
+  ]);
+  // Signature markers: signed, sig, auto, autographed (do NOT strip "ss" —
+  // false positive risk: "Secret Six", "Space Squadron", etc.)
+  const signatureWords = new Set(['signed', 'sig', 'auto', 'autographed']);
+  // Ordinal-key phrases: 1st, 2nd, first, second, appearance, origin, key, intro
+  const ordinalKeyWords = new Set([
+    '1st', '2nd', '3rd', 'first', 'second', 'third',
+    'appearance', 'origin', 'key', 'intro', 'debut',
+  ]);
+  const stripSet = new Set([...artistWords, ...signatureWords, ...ordinalKeyWords]);
+
   const words = normalized
     .replace(/-/g, "")  // Q22: strip hyphens before tokenization (spider-man → spiderman)
     .replace(/#\s*\d+/g, " ")
@@ -177,7 +202,8 @@ export const tokenizeTitle = (title) => {
     .filter((w) =>
       w.length >= MIN_TOKEN_LEN &&
       !STOP_WORDS.has(w) &&
-      !/^\d+$/.test(w)
+      !/^\d+$/.test(w) &&
+      !stripSet.has(w)  // Q55+55-B: strip artist/signature/ordinal tokens
     );
   return words;
 };
