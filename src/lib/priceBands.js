@@ -180,12 +180,27 @@ export function buildVerifiedSoldPool(soldComps, { title, issue, variant }) {
  * Returns array of verified active comp prices.
  */
 export function buildVerifiedActivePool(comps, { title, issue }) {
-  if (!comps || !comps.prices || comps.prices.length === 0) return [];
+  // Q53 3rd attempt TRACE: Diagnose why activePool=0 in tier selection
+  console.log(
+    `[Q53-buildActive] ENTRY: comps=${!!comps} ` +
+    `comps.prices=${comps?.prices?.length || 0} ` +
+    `comps.count=${comps?.count || 0}`
+  );
+
+  if (!comps || !comps.prices || comps.prices.length === 0) {
+    console.log('[Q53-buildActive] early-exit: no comps.prices');
+    return [];
+  }
 
   // Active comps don't have individual titles in prices array,
   // but filter was already applied in fetchComps.
   // This is a sanity check that we have actual prices.
-  return comps.prices.filter(p => p != null && p > 0);
+  const filtered = comps.prices.filter(p => p != null && p > 0);
+  console.log(
+    `[Q53-buildActive] EXIT: filtered.length=${filtered.length} ` +
+    `(from ${comps.prices.length} input)`
+  );
+  return filtered;
 }
 
 /**
