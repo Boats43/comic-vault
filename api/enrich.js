@@ -1848,6 +1848,7 @@ export default async function handler(req, res) {
       // Ship #22e: Assembly integrity check (Q54 compounds survive final title)
       // E3 class protection: "The X-Men #44 Angel" → Q54 protects ["x", "men"]
       // → assembly drops "x" → integrity check FAILS → force Vision title.
+      console.log(`[22e] checking integrity: vision="${effectiveTitle}" assembled="${confirmedTitle}"`);
       const integrityCheck = checkAssemblyIntegrity(effectiveTitle, confirmedTitle);
       if (integrityCheck.shouldFallback) {
         console.log(`[ship22e] assembly integrity failed, forcing Vision title: "${effectiveTitle}"`);
