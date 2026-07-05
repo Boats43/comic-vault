@@ -13,6 +13,11 @@
 // annual-N / special-N / king-size-N / giant-size-N for sold-comp
 // format-asymmetry filtering. ARTIST_PATTERNS extended with jeehyung lee /
 // alex ross / kaare andrews / fabok for sold-comp variant-artist match.
+//
+// Ship #22f: Artist/publisher/signature strip extracted to titleHygiene.js
+// (single normalize helper for all identity layers).
+
+import { stripMetadataTokens, stripArtistWords } from './titleHygiene.js';
 
 // ────────────────────────────── REGEXES ──────────────────────────────
 
