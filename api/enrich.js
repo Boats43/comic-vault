@@ -1675,6 +1675,39 @@ export default async function handler(req, res) {
       console.log(`[phase1] eBay consensus: "${visualConsensus.title}" #${visualConsensus.issue} (confidence ${(visualConsensus.confidence * 100).toFixed(0)}%)`);
     }
 
+    // Q58: Issue consensus backfill from VISUAL pool (eBay image search results).
+    // When Vision missed issue (issueNum=null) AND ≥70% of visual search results
+    // agree on single issue number, backfill issueNum/effectiveIssue and continue.
+    // Cavewoman class: Vision "Cavewoman" no issue → visual pool 18/20 "#1".
+    // Must run BEFORE resolveIdentity (line 1736) so confirmedIssue gets backfilled value.
+    let issueBackfilledFromVisual = false;
+    let issueBackfillProvenance = null;
+    if (!issueNum && parsedVisualRows && parsedVisualRows.length > 0) {
+      const issuePattern = /#\s*(\d+)/;
+      const issueCounts = {};
+      parsedVisualRows.forEach(r => {
+        const match = (r.title || '').match(issuePattern);
+        if (match) {
+          const num = match[1];
+          issueCounts[num] = (issueCounts[num] || 0) + 1;
+        }
+      });
+      const totalVisual = parsedVisualRows.length;
+      const consensusEntry = Object.entries(issueCounts)
+        .sort((a, b) => b[1] - a[1])[0];
+      if (consensusEntry) {
+        const [issueBackfill, count] = consensusEntry;
+        const ratio = count / totalVisual;
+        if (ratio >= 0.70) {
+          // Overwrite issueNum for resolveIdentity (line 1737)
+          issueNum = issueBackfill;
+          issueBackfilledFromVisual = true;
+          issueBackfillProvenance = `${count}/${totalVisual} visual consensus`;
+          console.log(`[Q58] backfilled issue=${issueBackfill} from ${(ratio * 100).toFixed(0)}% visual consensus (${count}/${totalVisual})`);
+        }
+      }
+    }
+
     // Ship 26.2 — Title-family clustering for rank-weighted identity resolution.
     // Runs after extractConsensus to detect wrong-family pricing (Catwoman/Gotham
     // War class bugs where exact-frequency voting picks larger unrelated family
@@ -2012,6 +2045,15 @@ export default async function handler(req, res) {
       console.log(
         `[identity] OVERRIDE: Vision="${alignment.visionWas}" → eBay="${confirmedTitle}"`
       );
+    }
+
+    // Q58: Surface issue backfill metadata
+    if (issueBackfilledFromVisual) {
+      out.issueBackfilledFromVisual = true;
+      out.issueBackfillProvenance = issueBackfillProvenance;
+      out.identityConfident = false;
+      out.identityReasons = out.identityReasons || [];
+      out.identityReasons.push('issue backfilled from visual consensus — verify manually');
     }
 
     // Ship #20a.6.7c — Instrumentation: log image search titles for Option B
@@ -2547,37 +2589,9 @@ export default async function handler(req, res) {
     // boolean array. Silent fallback: any failure leaves comps unchanged.
     let rawComps = compsFromEbay;
 
-    // Q58: Issue consensus backfill. When issue=null AND ≥70% of comp titles
-    // agree on a single issue number, backfill confirmedIssue and continue
-    // pricing (but keep NEEDS_REVIEW flag for manual verification).
-    // Cavewoman class: Vision missed issue but eBay comps consensus on #1.
-    if (!confirmedIssue && rawComps?.prices && rawComps.prices.length > 0) {
-      const issuePattern = /#\s*(\d+)/;
-      const issueCounts = {};
-      rawComps.prices.forEach(p => {
-        const match = (p.title || '').match(issuePattern);
-        if (match) {
-          const num = match[1];
-          issueCounts[num] = (issueCounts[num] || 0) + 1;
-        }
-      });
-      const totalComps = rawComps.prices.length;
-      const consensusEntry = Object.entries(issueCounts)
-        .sort((a, b) => b[1] - a[1])[0];
-      if (consensusEntry) {
-        const [issue, count] = consensusEntry;
-        const ratio = count / totalComps;
-        if (ratio >= 0.70) {
-          confirmedIssue = issue;
-          out.issueBackfilledFromComps = true;
-          out.issueBackfillProvenance = `${count}/${totalComps} comps consensus`;
-          out.identityConfident = false;  // Keep NEEDS_REVIEW flag
-          out.identityReasons = out.identityReasons || [];
-          out.identityReasons.push('issue backfilled from comp consensus — verify manually');
-          console.log(`[Q58-issue-consensus] backfilled issue=${issue} from ${count}/${totalComps} comps (${(ratio * 100).toFixed(0)}%)`);
-        }
-      }
-    }
+    // Q58: Issue consensus backfill moved to line 1677 (BEFORE resolveIdentity).
+    // Extracts issue from visual pool (parsedVisualRows) instead of comp titles
+    // (rawComps.prices) so backfill fires even when comp fetch skips due to missing issue.
 
     // Tracks the "AI verify nuked everything" case so the sanity
     // check downstream can skip rather than read compsFromEbay.average
