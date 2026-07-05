@@ -8250,6 +8250,9 @@ export default function App() {
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
                 soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
+                // P0-B — Persist tier-based pricing metadata
+                priceBands: enrich.priceBands || cur.priceBands || {},
+                demandSignals: enrich.demandSignals || cur.demandSignals || {},
                 // Book-level comps cache fields
                 compsCachedAt: enrich.compsCachedAt || cur.compsCachedAt || null,
                 activeCached: enrich.activeCached || cur.activeCached || null,
@@ -9039,6 +9042,9 @@ export default function App() {
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
                 soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
+                // P0-B — Persist tier-based pricing metadata
+                priceBands: enrich.priceBands || cur.priceBands || {},
+                demandSignals: enrich.demandSignals || cur.demandSignals || {},
                 // Book-level comps cache fields
                 compsCachedAt: enrich.compsCachedAt || cur.compsCachedAt || null,
                 activeCached: enrich.activeCached || cur.activeCached || null,
@@ -9499,6 +9505,9 @@ export default function App() {
       soldComps: enrich.soldComps || item.soldComps || [],
       soldCompsRaw: enrich.soldCompsRaw || item.soldCompsRaw || [],
       soldCompDiagnostics: enrich.soldCompDiagnostics || item.soldCompDiagnostics || null,
+      // P0-B — Persist tier-based pricing metadata
+      priceBands: enrich.priceBands || item.priceBands || {},
+      demandSignals: enrich.demandSignals || item.demandSignals || {},
       imageSearchResults: enrich.imageSearchResults || item.imageSearchResults || null,
       salesByGrade: enrich.salesByGrade || item.salesByGrade || null,
       priceLadder: enrich.priceLadder || item.priceLadder || null,
