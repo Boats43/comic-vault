@@ -3258,8 +3258,8 @@ function CollectionDetail({
           }}>
             📅
             {compsAge !== null && ` Comps: ${compsAge}h`}
-            {soldRecency !== null && ` · Sold data: ${soldRecency}d recency`}
-            {compsAge === null && soldRecency !== null && ` Sold data: ${soldRecency}d recency`}
+            {soldRecency != null && ` · Sold data: ${soldRecency}d recency`}
+            {compsAge === null && soldRecency != null && ` Sold data: ${soldRecency}d recency`}
           </div>
         );
       })()}
