@@ -11,7 +11,11 @@
  * - Issue resolution chain
  * - Comp consensus backfill
  * - Title sanitization (remove descriptive noise from Vision titles)
+ *
+ * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
+
+import { COMPOUND_WHITELIST } from './compHygiene.js';
 
 /**
  * Sanitize Vision descriptive title to canonical series name.
@@ -121,6 +125,66 @@ export const sanitizeSeriesTitle = (rawTitle) => {
   if (!clean || clean.length < 3) return rawTitle;
 
   return clean;
+};
+
+/**
+ * Check if Q54-protected compound tokens survive in final assembled title.
+ *
+ * Ship #22e: Assembly integrity check. E3 class protection.
+ * When Q54 protects ["x", "men"] during tokenization but final assembly
+ * drops "x" → "men timeless", this detects the failure and forces Vision
+ * title fallback.
+ *
+ * @param {string} visionTitle - Original Vision title (most likely to preserve compound)
+ * @param {string} assembledTitle - Final confirmedTitle after source assembly
+ * @returns {Object} { intact, missing, shouldFallback }
+ */
+export const checkAssemblyIntegrity = (visionTitle, assembledTitle) => {
+  if (!visionTitle || !assembledTitle) {
+    return { intact: true, missing: [], shouldFallback: false };
+  }
+
+  // Check if visionTitle matches a Q54 compound
+  const visionNorm = String(visionTitle).toLowerCase()
+    .replace(/#\s*\d+/g, ' ')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(?:the|a|an)\s+/i, '');
+
+  const protectedCompound = Array.from(COMPOUND_WHITELIST).find(entry =>
+    visionNorm === entry || visionNorm.startsWith(entry + ' ')
+  );
+
+  if (!protectedCompound) {
+    // No compound protection needed
+    return { intact: true, missing: [], shouldFallback: false };
+  }
+
+  // Extract protected tokens (e.g., "x-men" → ["x", "men"])
+  const protectedTokens = protectedCompound.replace(/-/g, ' ').split(/\s+/).filter(Boolean);
+
+  // Check if ALL protected tokens survive in assembled title
+  const assembledNorm = String(assembledTitle).toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const assembledTokens = assembledNorm.split(/\s+/);
+
+  const missing = protectedTokens.filter(t => !assembledTokens.includes(t));
+
+  if (missing.length > 0) {
+    console.log(
+      `[assembly-integrity] FAIL: compound="${protectedCompound}" ` +
+      `protected=[${protectedTokens.join(',')}] ` +
+      `final=[${assembledTokens.join(',')}] ` +
+      `missing=[${missing.join(',')}]`
+    );
+    return { intact: false, missing, shouldFallback: true };
+  }
+
+  console.log(`[assembly-integrity] PASS: compound="${protectedCompound}" intact`);
+  return { intact: true, missing: [], shouldFallback: false };
 };
 
 /**

@@ -34,6 +34,7 @@ import {
   resolveIssue,
   backfillFromComps,
   resolveYear,
+  checkAssemblyIntegrity,
 } from "../src/lib/identityCore.js";
 import {
   verifyStory,
@@ -1777,6 +1778,17 @@ export default async function handler(req, res) {
       confirmedYear = identity.confirmedYear;
       confirmedPublisher = identity.confirmedPublisher;
       identitySource = identity.identitySource;
+
+      // Ship #22e: Assembly integrity check (Q54 compounds survive final title)
+      // E3 class protection: "The X-Men #44 Angel" → Q54 protects ["x", "men"]
+      // → assembly drops "x" → integrity check FAILS → force Vision title.
+      const integrityCheck = checkAssemblyIntegrity(effectiveTitle, confirmedTitle);
+      if (integrityCheck.shouldFallback) {
+        console.log(`[ship22e] assembly integrity failed, forcing Vision title: "${effectiveTitle}"`);
+        confirmedTitle = effectiveTitle;
+        out.assemblyIntegrityFailed = true;
+        out.assemblyIntegrityMissing = integrityCheck.missing;
+      }
     }
 
     mark('phase1_complete');
