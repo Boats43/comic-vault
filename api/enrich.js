@@ -2066,6 +2066,56 @@ export default async function handler(req, res) {
 
     mark('phase2_complete');
 
+    // Ship #22b: PC Guard — era-gate filtering (PC/CV as verifiers, not originators)
+    // When eraLock present AND PC/CV year vs locked era >10y → reject, persist for card.
+    // E1/E2 protection: ASM #1 locked to 1963 → PC "Divided We Stand" 2016 rejected.
+    const eraRejections = [];
+
+    // Declare priceCharting here (reassignable for era-gate + requeries below)
+    let priceCharting = priceChartingInitial;
+
+    if (eraLock && priceCharting?.year) {
+      const pcYear = parseInt(priceCharting.year);
+      if (Number.isFinite(pcYear)) {
+        if (pcYear < eraLock.minYear || pcYear > eraLock.maxYear) {
+          console.log(
+            `[era-gate] rejected PC "${priceCharting.productName}" (${pcYear}) ` +
+            `vs locked era ${eraLock.decade}s (${eraLock.minYear}-${eraLock.maxYear})`
+          );
+          eraRejections.push({
+            source: 'PriceCharting',
+            productName: priceCharting.productName,
+            year: pcYear,
+            reason: `era-mismatch (${pcYear} outside ${eraLock.decade}s lock)`
+          });
+          priceCharting = null; // REJECT
+        }
+      }
+    }
+
+    if (eraLock && comicVine?.volume?.startYear) {
+      const cvYear = parseInt(comicVine.volume.startYear);
+      if (Number.isFinite(cvYear)) {
+        if (cvYear < eraLock.minYear || cvYear > eraLock.maxYear) {
+          console.log(
+            `[era-gate] rejected CV "${comicVine.volume.name}" (${cvYear}) ` +
+            `vs locked era ${eraLock.decade}s (${eraLock.minYear}-${eraLock.maxYear})`
+          );
+          eraRejections.push({
+            source: 'ComicVine',
+            volumeName: comicVine.volume.name,
+            year: cvYear,
+            reason: `era-mismatch (${cvYear} outside ${eraLock.decade}s lock)`
+          });
+          // Note: Do NOT null comicVine here — publisher fallback still needed
+        }
+      }
+    }
+
+    if (eraRejections.length > 0) {
+      out.eraRejections = eraRejections;
+    }
+
     // Publisher fallback from ComicVine when eBay/Vision didn't provide it
     confirmedPublisher = confirmedPublisher || comicVine?.volume?.publisher?.name || publisher;
 
@@ -2203,7 +2253,7 @@ export default async function handler(req, res) {
     // from Vision title AND the initial PC product might be wrong (main-token check),
     // re-query PC with consensus title. Re-query only fires ~20% of scans, adds
     // ~300-600ms when it does. Net savings: ~600-900ms per scan.
-    let priceCharting = priceChartingInitial;
+    // Ship #22b: priceCharting already declared above for era-gate (line 2071)
     if (imageConsensusTitle && imageConsensusTitle !== pcInitialTitle) {
       // Check if initial PC product passes main-token validation.
       // If PC returned null or the product name lacks the main Vision token,
