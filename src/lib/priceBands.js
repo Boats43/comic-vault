@@ -180,7 +180,7 @@ export function buildVerifiedSoldPool(soldComps, { title, issue, variant }) {
  * Returns array of verified active comp prices.
  */
 export function buildVerifiedActivePool(comps, { title, issue }) {
-  // Q53 3rd attempt TRACE: Diagnose why activePool=0 in tier selection
+  // Q53-FIX TRACE: Print filter predicate + sample row to identify rejection
   console.log(
     `[Q53-buildActive] ENTRY: comps=${!!comps} ` +
     `comps.prices=${comps?.prices?.length || 0} ` +
@@ -190,6 +190,29 @@ export function buildVerifiedActivePool(comps, { title, issue }) {
   if (!comps || !comps.prices || comps.prices.length === 0) {
     console.log('[Q53-buildActive] early-exit: no comps.prices');
     return [];
+  }
+
+  // Q53-FIX: Print first 3 rows to see actual structure
+  console.log('[Q53-buildActive] SAMPLE ROWS (first 3):');
+  comps.prices.slice(0, 3).forEach((p, i) => {
+    console.log(
+      `  [${i}] type=${typeof p} ` +
+      `value=${JSON.stringify(p)?.slice(0, 120)}`
+    );
+  });
+
+  // Q53-FIX: Test each condition separately on first row
+  if (comps.prices.length > 0) {
+    const sample = comps.prices[0];
+    console.log('[Q53-buildActive] PREDICATE TEST on sample:');
+    console.log(`  p != null: ${sample != null}`);
+    console.log(`  p > 0: ${sample > 0}`);
+    console.log(`  typeof p === 'number': ${typeof sample === 'number'}`);
+    console.log(`  typeof p === 'object': ${typeof sample === 'object'}`);
+    if (typeof sample === 'object') {
+      console.log(`  sample.price: ${sample?.price}`);
+      console.log(`  sample.price > 0: ${sample?.price > 0}`);
+    }
   }
 
   // Active comps don't have individual titles in prices array,
