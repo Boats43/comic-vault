@@ -291,7 +291,18 @@ export function computePriceBands({
   // Build verified pools
   const verifiedSolds = buildVerifiedSoldPool(soldComps, { title, issue, variant });
   const soldPrices = verifiedSolds.map(s => s.price);
+
+  // Q53 3rd attempt TRACE: Diagnose why activePool=0 in tier selection
+  console.log(
+    `[Q53-tier-trace] BEFORE buildVerifiedActivePool: ` +
+    `activeComps.length=${activeComps?.length || 0} ` +
+    `title="${title}" issue="${issue}"`
+  );
   const verifiedActive = buildVerifiedActivePool(activeComps, { title, issue });
+  console.log(
+    `[Q53-tier-trace] AFTER buildVerifiedActivePool: ` +
+    `verifiedActive.length=${verifiedActive.length}`
+  );
 
   // Extract recency band counts from LIVE soldVerifyResult
   let freshCount = 0;
