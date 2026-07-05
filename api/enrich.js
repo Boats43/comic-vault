@@ -3924,6 +3924,33 @@ export default async function handler(req, res) {
       }
     }
 
+    // Q59: Rebuild priceBands + recommended from finalPrice. Corrections
+    // (sanity/thin-pool/floor re-enforcement) modify out.price at 3268-3925
+    // but priceBands built at 2897 reads priceBandsRaw (pre-correction).
+    // Symbiote Spider-Man #1 class: thin-pool anchored $8.30 but bands
+    // still showed $472.50. Rebuild when any correction fired.
+    if (priceBandsRaw && (out.floorReEnforced || out.thinPoolAnchored || sanityFired)) {
+      const currentPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
+      const currentLow = parseFloat(String(out.priceLow || '0').replace(/[$,]/g, ''));
+      const currentHigh = parseFloat(String(out.priceHigh || '0').replace(/[$,]/g, ''));
+
+      out.priceBands = {
+        quick: fmtUsd(currentLow),
+        market: fmtUsd(currentPrice),
+        stretch: fmtUsd(currentHigh),
+        source: out.priceBands.source,
+        count: out.priceBands.count,
+        tier: out.priceBands.tier,
+        variantAdjusted: out.priceBands.variantAdjusted || false,
+      };
+
+      console.log(
+        `[price-bands] rebuilt-from=finalPrice=$${currentPrice.toFixed(2)} ` +
+        `(was market=$${priceBandsRaw.market.toFixed(2)}) ` +
+        `quick=$${currentLow.toFixed(2)} stretch=$${currentHigh.toFixed(2)}`
+      );
+    }
+
     // Ship #13.1: relocated to run AFTER all pricing adjustments
     // (variant mult, key mult, thin-pool anchor, mega-key floor) so
     // `finalPrice` reflects the actual returned value. `afterMult` stays
@@ -4299,11 +4326,14 @@ export default async function handler(req, res) {
       out.yearOverrideRejected = true;
     }
 
-    // Recommended price
+    // Recommended price — Q59: read from finalPrice (post-correction) instead
+    // of rawComps.average (pre-sanity/thin-pool/floor). When pricing chain
+    // modified out.price, recommended should match corrected value.
+    const finalPriceNum = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
     const recommendedPrice =
-      rawComps?.average != null
-        ? Math.round(rawComps.average * 1.15)
-        : null;
+      finalPriceNum > 0
+        ? finalPriceNum
+        : (rawComps?.average != null ? Math.round(rawComps.average * 1.15) : null);
 
     // [verify] log line
     const seriesTitle = issueMatch
