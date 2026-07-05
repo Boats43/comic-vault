@@ -4034,7 +4034,13 @@ export default async function handler(req, res) {
       // "no comps" banners. Only tier 4 (pc_estimate fallback) permits estimate banner.
       const verifiedCount = soldVerifyResult?.diagnostics?.verifiedCount ?? null;
       const hadSoldComps = Array.isArray(rawSoldRows) && rawSoldRows.length > 0;
-      const activeCount = rawComps?.count || 0;
+      // Q53: Wire tier's verified activePool to match-conf. Tier-3 uses priceBandsRaw.count
+      // (buildVerifiedActivePool result, stricter than rawComps.count). Tier 1/2/4 fall back
+      // to rawComps.count. T4-CAP (94df50e) sanity check uses verifiedActive.length through
+      // this same wire — Q53 revives it for match-conf tier detection (Symbiote #1 class).
+      const activeCount = (priceBandsRaw?.tier === 3 && priceBandsRaw.count != null)
+        ? priceBandsRaw.count
+        : (rawComps?.count || 0);
       const tierPathActive = priceBandsRaw && priceBandsRaw.tier != null;
       const tier = priceBandsRaw?.tier;
 
