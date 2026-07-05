@@ -3221,14 +3221,19 @@ export default async function handler(req, res) {
     // gate fires, this whole block is skipped. Comps/sold/pop reference data
     // (already populated above) still surfaces on the response so the user
     // can see what eBay/PC found, but no price recommendation is produced.
-    if (idCheck.confident) {
-    // Ship #20b — Use price bands as primary pricing source
-    // Ship 6 — skip price-bands assignment when polybag pricing active.
-    // Polybag block at line ~2127 already set out.price using polybag
-    // comp pool ($9 from $12 ask × 0.75 haircut). Without this guard,
-    // priceBandsRaw.market ($422.83 from contaminated 1960 first-print
-    // sold comps) overwrites the polybag price.
-    if (priceBandsRaw && !isPolybagPricing) {
+    // P0-A — Skip entire pricing block when polybag pricing active. Polybag path
+    // (line ~2994) already set out.price/pricingSource. Without this guard, code
+    // falls through all `!isPolybagPricing`-gated pricing branches and hits final
+    // `else` which overwrites pricingSource='ebay-polybag-active' with 'refused'.
+    if (idCheck.confident && !isPolybagPricing) {
+    // P0-A — Kill browse_api legacy paths. All pricing routes through tier engine.
+    // When priceBandsRaw truthy (tier 1-4 with data), use it. When null (tier-4
+    // no-data: no PC, <2 verified comps), refuse-to-price instead of falling through
+    // to legacy PC/browse_api escape hatches which bypass tier selection.
+    // Evidence: 3/21 production records pricingSource=browse_api (Punisher #1
+    // $39.85 LIST_NOW vs $20.98 tier-3 gate). Legacy paths killed below.
+    if (priceBandsRaw) {
+      // Ship #20b — Use price bands as primary pricing source (tier 1-4 with data).
       out.price = fmtUsd(priceBandsRaw.market);
       out.priceLow = fmtUsd(priceBandsRaw.quick);
       out.priceHigh = fmtUsd(priceBandsRaw.stretch);
@@ -3279,193 +3284,34 @@ export default async function handler(req, res) {
         `gradeMult=${gradeMultiplier}` +
         (priceBandsRaw.variantAdjusted ? ' VARIANT-ADJUSTED' : '')
       );
-    } else if (priceCharting && !isPolybagPricing && !req.body.foreignEdition) {
-      // Ship 6 — skip priceCharting fallback when polybag pricing active.
-      // priceBands block above is guarded with !isPolybagPricing, but
-      // its else-if branch still fires and overwrites polybag price
-      // ($9.71 → $622.63) without this guard.
-      // Q27 FIX — Block pc_estimate for foreign editions. PriceCharting
-      // tracks US market only. Foreign editions (UK pence variants,
-      // Canadian editions, foreign publisher reprints) have different
-      // pricing vs US originals. Require edition-matched comps instead.
-
-      // C5: pc_estimate lone-sold anchor — when soldPool≥1 but verifiedCount=0,
-      // anchor to highest rejected sold within grade tolerance (not PC base).
-      // Evidence: Action #610 — $5.99 sold rejected → anchored to $1.44 PC base.
-      let pc = priceCharting.price;
-      const hadSoldData = Array.isArray(rawSoldRows) && rawSoldRows.length > 0;
-      const verifiedCount = soldVerifyResult?.diagnostics?.verifiedCount || 0;
-
-      if (hadSoldData && verifiedCount === 0 && numericGrade != null) {
-        // All solds rejected — find highest within ±1.5 grade tolerance
-        const targetGrade = numericGrade;
-        const tolerance = 1.5;
-        const gradeTolerantSolds = rawSoldRows.filter(row => {
-          if (!row.price || row.price <= 0) return false;
-          // Parse grade from sold row title (if available)
-          const rowGrade = parseListingGrade(row.title || '');
-          if (rowGrade == null) return true; // no grade → include (conservative)
-          return Math.abs(rowGrade - targetGrade) <= tolerance;
-        });
-
-        if (gradeTolerantSolds.length > 0) {
-          const highestRejectedSold = Math.max(...gradeTolerantSolds.map(r => r.price));
-          if (highestRejectedSold > pc) {
-            console.log(`[C5-lone-sold-anchor] ${gradeTolerantSolds.length} rejected solds within ±1.5 grade → anchor to highest $${highestRejectedSold.toFixed(2)} (PC base was $${pc.toFixed(2)})`);
-            pc = highestRejectedSold;
-          }
-        }
-      }
-      // Era-aware multipliers use confirmedYear (healed via PC/CV crosscheck)
-      // when available; falls back to user year; then vintage default.
-      const eraYear = confirmedYear || year;
-      if (isGraded === true && numericGrade != null) {
-        const gradeInfo = getGradeMultiplier(numericGrade, eraYear);
-        if (gradeInfo) {
-          const adjusted = pc * gradeInfo.multiplier;
-          out.price = fmtUsd(adjusted);
-          out.priceLow = fmtUsd(adjusted * 0.85);
-          out.priceHigh = fmtUsd(adjusted * 1.15);
-          out.gradeMultiplier = gradeInfo.multiplier;
-          out.priceNote = `CGC ${numericGrade} estimate`;
-          console.log(
-            `[enrich] pricecharting base=$${pc} × ${gradeInfo.multiplier} (CGC ${numericGrade}, era=${gradeInfo.era}) = $${adjusted.toFixed(2)}`
-          );
-        }
-      } else {
-        // Raw comic: apply grade multiplier from grade string.
-        const rawInfo = getRawGradeMultiplier(grade, eraYear);
-        const adjusted = pc * rawInfo.multiplier;
-        out.price = fmtUsd(adjusted);
-        out.priceLow = fmtUsd(adjusted * 0.75);
-        out.priceHigh = fmtUsd(adjusted * 1.25);
-        out.gradeMultiplier = rawInfo.multiplier;
-        out.priceNote = `${rawInfo.label} estimate`;
-        console.log(
-          `[enrich] pricecharting base=$${pc} × ${rawInfo.multiplier} (${rawInfo.label}, era=${rawInfo.era}) = $${adjusted.toFixed(2)}`
-        );
-      }
-      out.pricingSource = "pricecharting";
-
-      // Ship #24 Q5b — Comp count display for pc_estimate path. When PC pricing
-      // is used but eBay comps exist (used for sanity check), surface comp count.
-      if (rawComps?.count > 0) {
-        out.priceNote += ` (${rawComps.count} comps for reference)`;
-      }
-
-      // Sanity check: compare PC price against blended/eBay comps average.
-      // Two skip conditions, both close upstream-of-floor leaks:
-      //   1. Mega-keys (MEGA or MANUAL): the floor map is the source
-      //      of truth for these books. eBay comps for Golden/Silver
-      //      mega-keys are dominated by reprints, facsimiles, and
-      //      wrong-book entries (the real books trade at Heritage).
-      //      The floor block downstream handles the price decision.
-      //   2. compsExhausted: AI verify rejected 100% of comps. Their
-      //      median (and `compsFromEbay.average`, which still holds
-      //      the pre-verify contaminated mean) is exactly what we
-      //      don't trust — using either lets wrong-book prices win.
-      //
-      // When skipped, PC × grade multiplier remains as `out.price`.
-      const isMegaKeyBook = !!getMegaKeyEntry(title, confirmedIssue, confirmedPublisher, confirmedYear || year);
-      if (isMegaKeyBook) {
-        console.log('[sanity] skipped — mega-key uses floor map');
-      } else if (compsExhausted) {
-        console.log('[sanity] skipped — all comps rejected by AI verify');
-      } else {
-      // When comps fell back to mixed reprints/variants, OR when AI verify
-      // rejected every checked listing, the mean is meaningless — use
-      // the median of raw comp prices instead.
-      const isMixedFallback = !!(
-        rawComps?.reprintFallback ||
-        rawComps?.variantFallback ||
-        rawComps?.aiVerifyFallback
+    } else if (rawComps && rawComps.count > 0) {
+      // P0-A — LEGACY PATH (DEPRECATED). This path fires when tier-4 returned null
+      // (no PC match) but rawComps exist (1-2 verified active comps, below tier-3
+      // threshold of 3). Tier-based pricing should handle this with adaptive threshold.
+      // Kept temporarily with diagnostic logging; will be deleted after confirming
+      // tier-3 adaptive threshold covers this edge case. If you see this log in
+      // production, the tier-3 threshold should be lowered from 3 to 1.
+      console.warn(
+        '[P0-A-LEGACY-PATH] browse_api fallback fired — tier-4 null, rawComps exist.',
+        'rawComps.count:', rawComps.count,
+        'title:', title,
+        'issue:', confirmedIssue
       );
-      const fallbackMedian = isMixedFallback && Array.isArray(rawComps?.prices)
-        ? median(rawComps.prices.map((p) => p.price).filter((p) => p > 0))
-        : null;
-      if (fallbackMedian) {
-        console.log('[sanity] mixed fallback — using median',
-          fallbackMedian.toFixed(2), 'instead of mean',
-          (blendedAvg || compsFromEbay?.average || 0).toFixed(2));
-      }
-      // Ship #14 — delegate threshold logic to computeSanityFallback.
-      // Pure helper, era-aware. See helper docs for threshold table.
-      // Sanity comparison base: raw compsAvg in EVERY case. eBay listings
-      // already reflect market grade (sellers grade in the title), so
-      // multiplying by out.gradeMultiplier double-counts the grade
-      // adjustment — both pcNum (grade-adjusted PC base) and compsAvg
-      // (at-grade market) are already at the target grade.
-      // CLAUDE.md: "Sanity fallback uses raw compsAvg, not adjAvg."
-      const compsAvg = fallbackMedian || blendedAvg || compsFromEbay?.average;
-      const pcNum = parseFloat(
-        String(out.price || '0').replace(/[$,]/g, '')
+      // P0-A TEMPORARY: refuse-to-price instead of using browse_api average.
+      // This path bypasses tier selection and can leak contaminated comps.
+      out.price = null;
+      out.priceLow = null;
+      out.priceHigh = null;
+      out.pricingSource = 'refused-tier-bypass-detected';
+      out.priceNote = `Insufficient verified comps (${rawComps.count}) — try refresh or edit fields`;
+      out.refusedToPrice = true;
+      out.confidenceLevel = 'LOW';
+      console.log(
+        '[P0-A-refuse] tier-bypass path blocked —',
+        'rawComps.count:', rawComps.count,
+        'priceBands:', !!priceBandsRaw
       );
-      const bookYear = parseInt(year) || 0;
-      const lowCompsCount = (rawComps?.count || 0) < 3;
-      const sanityResult = computeSanityFallback(pcNum, compsAvg, {
-        bookYear,
-        lowCompsCount,
-        isMixedFallback,
-      });
-      if (sanityResult && !isPolybagPricing) {
-        sanityFired = sanityResult.shouldFire;
-        out.price = fmtUsd(sanityResult.fallbackPrice);
-        out.priceLow = fmtUsd(sanityResult.fallbackPriceLow);
-        out.priceHigh = fmtUsd(sanityResult.fallbackPriceHigh);
-        out.pricingSource = "browse_api";
-        out.priceNote = sanityResult.priceNote;
-        console.log('[sanity]', sanityResult.shouldFire,
-          '— pcNum', pcNum,
-          sanityResult.shouldFire === 'high' ? '>' : '<',
-          'threshold', sanityResult.threshold.toFixed(2),
-          `(×${sanityResult.thresholdMult})`,
-          '→ fallback compsAvg', compsAvg.toFixed(2));
-      }
-      }
-
-      // If sanity check switched to browse_api but comps are actually empty,
-      // the priceNote is misleading — clear it.
-      if (out.pricingSource === "browse_api" && !(compsFromEbay?.average > 0)) {
-        out.priceNote = null;
-      }
-
-      // Annotate when the comps set contained only reprints, only variants,
-      // or was wiped by AI verify — signals that the avg is imperfect.
-      if (out.pricingSource === "browse_api") {
-        if (rawComps?.reprintFallback) {
-          out.priceNote = "eBay avg (mixed prints)";
-        } else if (rawComps?.variantFallback) {
-          out.priceNote = "eBay avg (mixed variants)";
-        } else if (rawComps?.aiVerifyFallback) {
-          out.priceNote = "eBay median (no verified comps)";
-        }
-      }
-      if (rawComps?.reprintFallback) out.reprintFallback = true;
-      if (rawComps?.variantFallback) out.variantFallback = true;
-      if (rawComps?.aiVerifyFallback) out.aiVerifyFallback = true;
-      if (rawComps?.artistFallback) {
-        out.artistFallback = true;
-        out.compBasis = rawComps.compBasis || 'generic-variant-fallback';
-      }
-      if (rawComps?.reprintFiltered) out.reprintFiltered = true;
-
-      // Defect penalty: reduce price if Claude detected a significant defect.
-      // Ship 6 — skip when polybag pricing active.
-      if (req.body.defectPenalty && !isPolybagPricing) {
-        const pen = parseFloat(req.body.defectPenalty);
-        if (pen > 0 && pen < 1) {
-          const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
-          out.price = fmtUsd(curPrice * pen);
-          out.priceLow = fmtUsd(parseFloat(String(out.priceLow || '0').replace(/[$,]/g, '')) * pen);
-          out.priceHigh = fmtUsd(parseFloat(String(out.priceHigh || '0').replace(/[$,]/g, '')) * pen);
-          out.defectPenalty = pen;
-          out.priceNote = (out.priceNote || '') + ' · defect adj';
-          console.log(`[enrich] defect penalty ×${pen} applied`);
-        }
-      }
-      // Session 4B — Diagnostic: what does the pricing gate see?
-      console.log('[pricing-gate] rawComps.count=', rawComps?.count ?? 0, 'type=', typeof rawComps?.count, 'isPolybagPricing=', isPolybagPricing, 'assetType=', out.assetType);
-    } else if (rawComps && rawComps.count > 0 && !isPolybagPricing) {
+    } else if (false) {  // P0-A DEAD CODE MARKER — legacy PC path, delete after deploy confirmation
       // Ship 6 — skip browse_api fallback when polybag pricing active.
       // Third in chained if/priceBands/else-if/priceCharting/else-if/browse_api.
       // All three branches now respect polybag price set at line ~2168.
