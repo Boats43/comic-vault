@@ -2546,6 +2546,39 @@ export default async function handler(req, res) {
     // same order as recentSales) and filters recentSales by the returned
     // boolean array. Silent fallback: any failure leaves comps unchanged.
     let rawComps = compsFromEbay;
+
+    // Q58: Issue consensus backfill. When issue=null AND ≥70% of comp titles
+    // agree on a single issue number, backfill confirmedIssue and continue
+    // pricing (but keep NEEDS_REVIEW flag for manual verification).
+    // Cavewoman class: Vision missed issue but eBay comps consensus on #1.
+    if (!confirmedIssue && rawComps?.prices && rawComps.prices.length > 0) {
+      const issuePattern = /#\s*(\d+)/;
+      const issueCounts = {};
+      rawComps.prices.forEach(p => {
+        const match = (p.title || '').match(issuePattern);
+        if (match) {
+          const num = match[1];
+          issueCounts[num] = (issueCounts[num] || 0) + 1;
+        }
+      });
+      const totalComps = rawComps.prices.length;
+      const consensusEntry = Object.entries(issueCounts)
+        .sort((a, b) => b[1] - a[1])[0];
+      if (consensusEntry) {
+        const [issue, count] = consensusEntry;
+        const ratio = count / totalComps;
+        if (ratio >= 0.70) {
+          confirmedIssue = issue;
+          out.issueBackfilledFromComps = true;
+          out.issueBackfillProvenance = `${count}/${totalComps} comps consensus`;
+          out.identityConfident = false;  // Keep NEEDS_REVIEW flag
+          out.identityReasons = out.identityReasons || [];
+          out.identityReasons.push('issue backfilled from comp consensus — verify manually');
+          console.log(`[Q58-issue-consensus] backfilled issue=${issue} from ${count}/${totalComps} comps (${(ratio * 100).toFixed(0)}%)`);
+        }
+      }
+    }
+
     // Tracks the "AI verify nuked everything" case so the sanity
     // check downstream can skip rather than read compsFromEbay.average
     // (which still holds the contaminated pre-verify mean).
