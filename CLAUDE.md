@@ -75,6 +75,31 @@ Optional: `GOCOLLECT_API` (CGC FMV — live as of 2026-05-19)
 
 ## Rules
 
+### Log Statement Discipline (P0 PROTOCOL — standing)
+**Log statements are code.** Every `console.log()` referencing a variable must reference a DECLARED identifier. Trace/log additions get the same review as logic changes.
+
+**Evidence:**
+- **f707f5b outage** (2026-07-05): `const protected` (reserved word) → SyntaxError at module load → all API endpoints dead. ESM parse enforcement added.
+- **Q62 regression** (3c0e6f9): `console.log(\`"${raw}"\`)` where `raw` undefined → ReferenceError → tokenization crash → 100% comp pool loss → tier-4 NO DATA.
+
+**Rule:** Before committing any log statement:
+1. Verify EVERY referenced variable is declared in scope
+2. Test log statements trigger (add temporary throw after log to force execution)
+3. ESM-parse verification catches reserved words, NOT undefined references
+
+**Pattern:** Capture values BEFORE operations that might transform them:
+```javascript
+const beforeStrip = normalized;
+normalized = stripMetadataTokens(normalized);
+console.log(`[22f] metadata-stripped: "${beforeStrip}" → "${normalized}"`);
+```
+
+NOT:
+```javascript
+normalized = stripMetadataTokens(normalized);
+console.log(`[22f] metadata-stripped: "${raw}" → "${normalized}"`); // WRONG: raw undefined
+```
+
 ### Architecture (top priority)
 - **Vercel function cap is 12** (Hobby plan). Every `.js` file in `api/` becomes its own serverless function endpoint, regardless of whether it has a default-exported HTTP handler. Current count: 12/12 — adding a new file in `api/` will fail deploy.
   - Pure UI helpers belong in `src/lib/` (no HTTP handler). `App.jsx` imports relatively.
