@@ -4003,6 +4003,19 @@ export default async function handler(req, res) {
     // Falls back to {0, LOW} when comps is empty so the client can render
     // an "AI estimate" badge without special-casing nulls.
     {
+      // Q53: Declare activeCount + tier metadata BEFORE computeMatchConfidence
+      // so thin-data cap logic (line 4115) reads tier-3's verified activePool
+      // (priceBandsRaw.count) instead of relaxed AI-verified pool (rawComps.count).
+      // Symbiote Spider-Man #1 class: tier-3 selected (3 verified active) but
+      // match-conf saw rawComps.count=1 → thin-data cap fired → MEDIUM tier.
+      const verifiedCount = soldVerifyResult?.diagnostics?.verifiedCount ?? null;
+      const hadSoldComps = Array.isArray(rawSoldRows) && rawSoldRows.length > 0;
+      const activeCount = (priceBandsRaw?.tier === 3 && priceBandsRaw.count != null)
+        ? priceBandsRaw.count
+        : (rawComps?.count || 0);
+      const tierPathActive = priceBandsRaw && priceBandsRaw.tier != null;
+      const tier = priceBandsRaw?.tier;
+
       const compTitlesForScore =
         Array.isArray(rawComps?.recentSales) && rawComps.recentSales.length > 0
           ? rawComps.recentSales
@@ -4092,18 +4105,9 @@ export default async function handler(req, res) {
       // Ship #21l: Fix D (Phase 2) — zero-verified-sold-comps + thin-active-pool confidence cap.
       // 21l-b [P1]: Gate on tier-path. Tier 1/2/3 has verified market data, suppress
       // "no comps" banners. Only tier 4 (pc_estimate fallback) permits estimate banner.
-      const verifiedCount = soldVerifyResult?.diagnostics?.verifiedCount ?? null;
-      const hadSoldComps = Array.isArray(rawSoldRows) && rawSoldRows.length > 0;
-      // Q53: Wire tier's verified activePool to match-conf. Tier-3 uses priceBandsRaw.count
-      // (buildVerifiedActivePool result, stricter than rawComps.count). Tier 1/2/4 fall back
-      // to rawComps.count. T4-CAP (94df50e) sanity check uses verifiedActive.length through
-      // this same wire — Q53 revives it for match-conf tier detection (Symbiote #1 class).
-      const activeCount = (priceBandsRaw?.tier === 3 && priceBandsRaw.count != null)
-        ? priceBandsRaw.count
-        : (rawComps?.count || 0);
-      const tierPathActive = priceBandsRaw && priceBandsRaw.tier != null;
-      const tier = priceBandsRaw?.tier;
-
+      // Q53: verifiedCount/hadSoldComps/activeCount/tier declared ABOVE (line 4006-4015)
+      // so thin-data cap logic reads tier-3's verified activePool instead of relaxed pool.
+      //
       // Tier 1/2 has verified solds, tier 3 has verified actives → suppress thin-data caps
       const hasVerifiedSoldComps = verifiedCount != null && verifiedCount > 0;
       const tierHasMarketData = tier === 1 || tier === 2 || tier === 3;
@@ -4136,7 +4140,13 @@ export default async function handler(req, res) {
       }
 
       out.matchConfidence = finalMc;
-      console.log(`[match-conf] score=${finalMc.score} tier=${finalMc.tier} comps=${compTitlesForScore.length} vision=${visionConfidence}${finalMc.visionCapped ? ' CAPPED' : ''}${finalMc.eraFilterBypassed ? ' ERA-BYPASSED' : ''}`);
+      console.log(
+        `[match-conf] score=${finalMc.score} tier=${finalMc.tier} comps=${compTitlesForScore.length} ` +
+        `vision=${visionConfidence}${finalMc.visionCapped ? ' CAPPED' : ''}` +
+        `${finalMc.eraFilterBypassed ? ' ERA-BYPASSED' : ''}`
+      );
+      // Q53: Log activePool wire to verify tier-3 verified pool propagates
+      console.log(`[price-trace] activePool=${activeCount} tier=${tier || 'none'} verifiedSold=${verifiedCount}`);
     }
 
     // Sold comps — Ship #20a: now populated from PriceCharting sales-history
