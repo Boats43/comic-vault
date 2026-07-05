@@ -367,10 +367,14 @@ export function computePriceBands({
     // Sanity ceiling: warn if soldAvg > activeLow
     let sanityCeilingWarning = null;
     if (verifiedActive.length > 0) {
-      const activeLow = Math.min(...verifiedActive);
-      if (recencyWeighted > activeLow) {
-        sanityCeilingWarning = `sold $${recencyWeighted.toFixed(2)} > activeLow $${activeLow.toFixed(2)}`;
-        console.log(`[tier-1-sanity] ${sanityCeilingWarning}`);
+      // Q61: Extract price from object rows
+      const activePrices = verifiedActive.map(v => typeof v === 'number' ? v : v?.price).filter(p => p > 0);
+      if (activePrices.length > 0) {
+        const activeLow = Math.min(...activePrices);
+        if (recencyWeighted > activeLow) {
+          sanityCeilingWarning = `sold $${recencyWeighted.toFixed(2)} > activeLow $${activeLow.toFixed(2)}`;
+          console.log(`[tier-1-sanity] ${sanityCeilingWarning}`);
+        }
       }
     }
 
@@ -392,8 +396,10 @@ export function computePriceBands({
   // TIER 2: 70/30 blend (soldAvg × 0.7 + activeAvg × 0.3)
   if (tier === 2) {
     const soldAvg = soldPrices.reduce((a, b) => a + b, 0) / soldPrices.length;
-    const activeAvg = verifiedActive.length > 0
-      ? verifiedActive.reduce((a, b) => a + b, 0) / verifiedActive.length
+    // Q61: Extract price from object rows (Q53 fix made verifiedActive contain objects)
+    const activePrices = verifiedActive.map(v => typeof v === 'number' ? v : v?.price).filter(p => p > 0);
+    const activeAvg = activePrices.length > 0
+      ? activePrices.reduce((a, b) => a + b, 0) / activePrices.length
       : 0;
 
     let market;
@@ -422,9 +428,11 @@ export function computePriceBands({
 
   // TIER 3: Active-only × 0.85 discount
   if (tier === 3) {
-    const activeAvg = verifiedActive.reduce((a, b) => a + b, 0) / verifiedActive.length;
+    // Q61: Extract price from object rows (Q53 fix made verifiedActive contain objects)
+    const activePrices = verifiedActive.map(v => typeof v === 'number' ? v : v?.price).filter(p => p > 0);
+    const activeAvg = activePrices.reduce((a, b) => a + b, 0) / activePrices.length;
     const discounted = activeAvg * 0.85;
-    const activeLow = Math.min(...verifiedActive);
+    const activeLow = Math.min(...activePrices);
 
     const result = {
       quick: Math.round(activeLow * 0.85 * 100) / 100,
@@ -449,11 +457,15 @@ export function computePriceBands({
     // When verified comps exist (even if <2 for tier pricing), cap PC at compsAvg.
     let sanityCapped = false;
     if (verifiedActive.length > 0) {
-      const compsAvg = verifiedActive.reduce((a, b) => a + b, 0) / verifiedActive.length;
-      if (basePrice > compsAvg * 1.5) {
-        console.log(`[tier-4-sanity] pc_estimate $${basePrice.toFixed(2)} > compsAvg×1.5 ($${(compsAvg * 1.5).toFixed(2)}) → capped to compsAvg $${compsAvg.toFixed(2)}`);
-        basePrice = compsAvg;
-        sanityCapped = true;
+      // Q61: Extract price from object rows
+      const activePrices = verifiedActive.map(v => typeof v === 'number' ? v : v?.price).filter(p => p > 0);
+      if (activePrices.length > 0) {
+        const compsAvg = activePrices.reduce((a, b) => a + b, 0) / activePrices.length;
+        if (basePrice > compsAvg * 1.5) {
+          console.log(`[tier-4-sanity] pc_estimate $${basePrice.toFixed(2)} > compsAvg×1.5 ($${(compsAvg * 1.5).toFixed(2)}) → capped to compsAvg $${compsAvg.toFixed(2)}`);
+          basePrice = compsAvg;
+          sanityCapped = true;
+        }
       }
     }
 
