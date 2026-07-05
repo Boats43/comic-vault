@@ -5861,14 +5861,28 @@ function CollectionDetail({
                 <button
                   className="reset-btn primary"
                   onClick={handleList}
-                  disabled={listing || !(parseFloat(listPrice) > 0)}
+                  disabled={
+                    listing ||
+                    !(parseFloat(listPrice) > 0) ||
+                    // Q57: Tier-0 list lock. When match confidence is LOW AND
+                    // verification is insufficient (sold+active <threshold),
+                    // hard-disable list button until user manually reviews.
+                    // ASM #1 class: LOW tier + thin-market → requires manual
+                    // verification before listing. Prevents unverified thin-pool
+                    // books from reaching eBay with inflated prices.
+                    (item.matchConfidence?.tier === 'LOW' &&
+                     (item.soldComps?.length || 0) + (item.comps?.count || 0) < 3)
+                  }
                   style={{ width: "100%" }}
                 >
                   {listing
                     ? "Listing on eBay..."
-                    : listPrice
-                      ? `📋 List on eBay — $${Number(listPrice).toFixed(2)}`
-                      : `📋 List on eBay — No price available`}
+                    : (item.matchConfidence?.tier === 'LOW' &&
+                       (item.soldComps?.length || 0) + (item.comps?.count || 0) < 3)
+                      ? `🔒 List locked — verify data quality first`
+                      : listPrice
+                        ? `📋 List on eBay — $${Number(listPrice).toFixed(2)}`
+                        : `📋 List on eBay — No price available`}
                 </button>
               );
             })()}
