@@ -220,8 +220,9 @@ export const tokenizeTitle = (title) => {
   // Q55+55-B+Q55-C+Q55-D: Strip artist/signature/ordinal-key tokens BEFORE tokenization
   // to prevent "Amazing Spider-Man #1 Signed McFarlane" → family=["mcfarlane"]
   // matching "Spawn #1 McFarlane" (different series). E4/E5 class protection.
+  const beforeStrip = normalized;
   normalized = stripMetadataTokens(normalized);
-  console.log(`[22f] metadata-stripped: "${raw}" → "${normalized}"`);
+  console.log(`[22f] metadata-stripped: "${beforeStrip}" → "${normalized}"`);
 
   // Q55-C: Full sync with ARTIST_PATTERNS single-word entries (lines 117-123).
   // Extracts single-word last names from both multi-word patterns (kirkham from
