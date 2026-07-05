@@ -196,12 +196,25 @@ export const tokenizeTitle = (title) => {
     normalized = normalized.replace(pattern, expanded);
   }
 
-  // Q55+55-B+Q55-C: Strip artist/signature/ordinal-key tokens BEFORE tokenization
+  // Q55+55-B+Q55-C+Q55-D: Strip artist/signature/ordinal-key tokens BEFORE tokenization
   // to prevent "Amazing Spider-Man #1 Signed McFarlane" → family=["mcfarlane"]
   // matching "Spawn #1 McFarlane" (different series). Artist names, signature
   // markers, and ordinal-key phrases are VARIANT/CONDITION metadata, not series
   // identity. Symbiote Spider-Man #1 class: artist tokens contaminated family.
   //
+  // Q55-D: Bigram strip for famous artist pairs (stan lee, jack kirby, steve ditko).
+  // "The Amazing Spider-Man #1 Stan Lee" → remove "stan" + "lee" BEFORE tokenization
+  // so family = ["the", "amazing", "spider", "man"] clean. ASM #1 class.
+  const artistBigrams = [
+    'stan lee', 'jack kirby', 'steve ditko', 'john byrne', 'frank miller',
+    'jim lee', 'todd mcfarlane', 'alex ross', 'neal adams', 'george perez'
+  ];
+  // Strip bigrams BEFORE word-level tokenization
+  for (const bigram of artistBigrams) {
+    const pattern = new RegExp(`\\b${bigram}\\b`, 'gi');
+    normalized = normalized.replace(pattern, ' ');
+  }
+
   // Q55-C: Full sync with ARTIST_PATTERNS single-word entries (lines 117-123).
   // Extracts single-word last names from both multi-word patterns (kirkham from
   // /tyler kirkham/, lee from /jim lee/, etc.) AND single-word patterns.
