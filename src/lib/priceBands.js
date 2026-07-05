@@ -180,49 +180,44 @@ export function buildVerifiedSoldPool(soldComps, { title, issue, variant }) {
  * Returns array of verified active comp prices.
  */
 export function buildVerifiedActivePool(comps, { title, issue }) {
-  // Q53-FIX TRACE: Print filter predicate + sample row to identify rejection
-  console.log(
-    `[Q53-buildActive] ENTRY: comps=${!!comps} ` +
-    `comps.prices=${comps?.prices?.length || 0} ` +
-    `comps.count=${comps?.count || 0}`
-  );
-
   if (!comps || !comps.prices || comps.prices.length === 0) {
-    console.log('[Q53-buildActive] early-exit: no comps.prices');
     return [];
   }
 
-  // Q53-FIX: Print first 3 rows to see actual structure
-  console.log('[Q53-buildActive] SAMPLE ROWS (first 3):');
-  comps.prices.slice(0, 3).forEach((p, i) => {
-    console.log(
-      `  [${i}] type=${typeof p} ` +
-      `value=${JSON.stringify(p)?.slice(0, 120)}`
-    );
+  // Q53-FIX: Evidence-locked from Howard #11 trace. Rows are OBJECTS
+  // {price, title, url}, not bare numbers. Predicate `p > 0` on object = false
+  // → 100% rejection. Extract price from object OR use number directly.
+  // Add title-overlap + lot-exclusion for object rows.
+  const titleLower = String(title || '').toLowerCase();
+  const lotRe = /\b(lot|bundle|complete set|full run|comic library|comic collection)\b/i;
+
+  const filtered = comps.prices.filter(p => {
+    // Extract price (handle both number and object)
+    const price = typeof p === 'number' ? p : p?.price;
+    if (!price || price <= 0) return false;
+
+    // For object rows: verify title overlap + exclude lots
+    if (typeof p === 'object' && p.title) {
+      const t = String(p.title).toLowerCase();
+
+      // Exclude lot/bundle listings
+      if (lotRe.test(t)) return false;
+
+      // Require title overlap (our title substring in listing)
+      if (titleLower && !t.includes(titleLower)) {
+        // Fallback: check if ≥50% of our words appear
+        const ourWords = titleLower.split(/\s+/).filter(w => w.length >= 3);
+        const matchCount = ourWords.filter(w => t.includes(w)).length;
+        if (ourWords.length === 0 || matchCount / ourWords.length < 0.5) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   });
 
-  // Q53-FIX: Test each condition separately on first row
-  if (comps.prices.length > 0) {
-    const sample = comps.prices[0];
-    console.log('[Q53-buildActive] PREDICATE TEST on sample:');
-    console.log(`  p != null: ${sample != null}`);
-    console.log(`  p > 0: ${sample > 0}`);
-    console.log(`  typeof p === 'number': ${typeof sample === 'number'}`);
-    console.log(`  typeof p === 'object': ${typeof sample === 'object'}`);
-    if (typeof sample === 'object') {
-      console.log(`  sample.price: ${sample?.price}`);
-      console.log(`  sample.price > 0: ${sample?.price > 0}`);
-    }
-  }
-
-  // Active comps don't have individual titles in prices array,
-  // but filter was already applied in fetchComps.
-  // This is a sanity check that we have actual prices.
-  const filtered = comps.prices.filter(p => p != null && p > 0);
-  console.log(
-    `[Q53-buildActive] EXIT: filtered.length=${filtered.length} ` +
-    `(from ${comps.prices.length} input)`
-  );
+  console.log(`[Q53-buildActive] filtered ${filtered.length}/${comps.prices.length} active comps`);
   return filtered;
 }
 
@@ -329,18 +324,7 @@ export function computePriceBands({
   // Build verified pools
   const verifiedSolds = buildVerifiedSoldPool(soldComps, { title, issue, variant });
   const soldPrices = verifiedSolds.map(s => s.price);
-
-  // Q53 3rd attempt TRACE: Diagnose why activePool=0 in tier selection
-  console.log(
-    `[Q53-tier-trace] BEFORE buildVerifiedActivePool: ` +
-    `activeComps.length=${activeComps?.length || 0} ` +
-    `title="${title}" issue="${issue}"`
-  );
   const verifiedActive = buildVerifiedActivePool(activeComps, { title, issue });
-  console.log(
-    `[Q53-tier-trace] AFTER buildVerifiedActivePool: ` +
-    `verifiedActive.length=${verifiedActive.length}`
-  );
 
   // Extract recency band counts from LIVE soldVerifyResult
   let freshCount = 0;
