@@ -4012,6 +4012,15 @@ export default async function handler(req, res) {
           : Array.isArray(rawComps?.prices)
           ? rawComps.prices
           : [];
+
+      // Q60 TRACE: Diagnose match-conf regression (score=0 on books with 17-21 solds)
+      console.log(
+        `[Q60-trace] compTitlesForScore.length=${compTitlesForScore.length} ` +
+        `rawComps.recentSales=${rawComps?.recentSales?.length || 0} ` +
+        `rawComps.prices=${rawComps?.prices?.length || 0} ` +
+        `rawComps.count=${rawComps?.count || 0}`
+      );
+
       const mc = computeMatchConfidence(compTitlesForScore, {
         title: req.body.title || title,
         issue: confirmedIssue,
