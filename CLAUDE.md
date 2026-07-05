@@ -12,10 +12,19 @@ Comic Vault — a progressive web app for grading, pricing, and managing comic b
 ## Build & Deploy
 ```bash
 npm run build           # always run before commit; zero errors required
+                        # ESM-mode parse enforced (--input-type=module)
+                        # catches reserved words (protected, interface, etc.)
 git push origin main    # production deploy (auto, primary protocol)
 git revert <hash> && git push   # single-step rollback
 npx vercel --prod       # uncommitted-tree fallback only
 ```
+
+**STANDING RULE — ESM Parse Enforcement (P0, evidence: 2026-07-05 outage):**
+Build verification (`npm run build`) MUST use ESM-mode syntax check for all `api/*.js` and `src/lib/*.js` files:
+```bash
+node --input-type=module --check < FILE
+```
+Plain `node --check FILE` parses as CommonJS (sloppy mode) and MISSES ESM-only reserved word errors (`const protected`, `let interface`, etc.). Vercel runtime uses ESM → strict mode → reserved words throw SyntaxError at module load → all API endpoints dead. The 2026-07-05 outage (commit dc08a6d used `const protected`) proved `node --check` is insufficient.
 
 ## Key Files
 
