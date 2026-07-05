@@ -3358,34 +3358,10 @@ export default async function handler(req, res) {
         'rawComps.count:', rawComps.count,
         'priceBands:', !!priceBandsRaw
       );
-    } else if (false) {  // P0-A DEAD CODE MARKER — legacy PC path, delete after deploy confirmation
-      // Ship 6 — skip browse_api fallback when polybag pricing active.
-      // Third in chained if/priceBands/else-if/priceCharting/else-if/browse_api.
-      // All three branches now respect polybag price set at line ~2168.
-      // eBay listings already reflect market grade — do not multiply again.
-      const browseBase = rawComps.average || 0;
-      let browsePrice = browseBase;
-
-      // Still record gradeMultiplier for downstream (floor guard, etc.)
-      // but do NOT apply it to the browse price.
-      const eraYear = confirmedYear || year;
-      if (isGraded === true && numericGrade != null) {
-        const gInfo = getGradeMultiplier(numericGrade, eraYear);
-        if (gInfo) {
-          out.gradeMultiplier = gInfo.multiplier;
-          out.priceNote = `CGC ${numericGrade} estimate`;
-        }
-      } else if (grade) {
-        const rawInfo = getRawGradeMultiplier(grade, eraYear);
-        out.gradeMultiplier = rawInfo.multiplier;
-        out.priceNote = `${rawInfo.label} estimate`;
-      }
-
-      out.price = fmtUsd(browsePrice);
-      out.priceLow = fmtUsd(browsePrice * 0.75);
-      out.priceHigh = fmtUsd(browsePrice * 1.25);
-      out.pricingSource = "browse_api";
     } else {
+      // P0-A: Deleted dead code block (lines 3361-3387, else-if-false browse_api path).
+      // 48h monitor waived — block already refused to price via tier-bypass guard above.
+      // PC path below is final fallback after tier engine.
       // Ship 21 — Silent-empty refusal with diagnostic.
       //
       // The pricing chain has three branches: priceBands, priceCharting,
