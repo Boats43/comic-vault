@@ -1680,16 +1680,38 @@ export default async function handler(req, res) {
     // Extract year histogram from parsedVisualRows → consensus decade → lock ±10y
     // Threshold: ≥50% agreement. Below → era-unlocked flag, no guard.
     // E1/E2 protection: ASM #1 (1963) locks 1960s → PC "Divided We Stand" (2016) rejected.
+    // Q63 FIX: Parse COVER years from comp titles (4-digit adjacent to issue tokens),
+    // NOT listing/sale dates. Cavewoman (2000) must lock ~2000s, not 2020s (listing year).
     let eraLock = null;
     let eraUnlocked = false;
     if (parsedVisualRows && parsedVisualRows.length >= 3) {
       const yearHistogram = {};
       parsedVisualRows.forEach(r => {
-        const yearMatch = (r.title || '').match(/\b(19\d{2}|20\d{2})\b/);
+        // Q63: Extract year tokens adjacent to issue numbers (#1 1998, 1998 #1, etc.)
+        // or standalone cover years. Prefer years NEAR issue tokens (cover years),
+        // ignore years far from title core (listing metadata).
+        const titleLower = (r.title || '').toLowerCase();
+
+        // Pattern 1: year near issue marker (#1 1998, #1 (1998), 1998 #1)
+        const nearIssue = titleLower.match(/#\s*\d+[^\d]*(19\d{2}|20\d{2})|(\b19\d{2}|20\d{2})[^\d]*#\s*\d+/);
+        if (nearIssue) {
+          const year = parseInt(nearIssue[1] || nearIssue[2]);
+          if (year >= 1900 && year <= 2030) {
+            const decade = Math.floor(year / 10) * 10;
+            yearHistogram[decade] = (yearHistogram[decade] || 0) + 1;
+            return; // Found cover year, skip fallback
+          }
+        }
+
+        // Pattern 2: Fallback - any 4-digit year in first half of title (likely cover year)
+        const firstHalf = titleLower.slice(0, Math.floor(titleLower.length / 2));
+        const yearMatch = firstHalf.match(/\b(19\d{2}|20\d{2})\b/);
         if (yearMatch) {
           const year = parseInt(yearMatch[1]);
-          const decade = Math.floor(year / 10) * 10;
-          yearHistogram[decade] = (yearHistogram[decade] || 0) + 1;
+          if (year >= 1900 && year <= 2030) {
+            const decade = Math.floor(year / 10) * 10;
+            yearHistogram[decade] = (yearHistogram[decade] || 0) + 1;
+          }
         }
       });
 
