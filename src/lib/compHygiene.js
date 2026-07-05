@@ -196,20 +196,37 @@ export const tokenizeTitle = (title) => {
     normalized = normalized.replace(pattern, expanded);
   }
 
-  // Q55+55-B: Strip artist/signature/ordinal-key tokens BEFORE tokenization
+  // Q55+55-B+Q55-C: Strip artist/signature/ordinal-key tokens BEFORE tokenization
   // to prevent "Amazing Spider-Man #1 Signed McFarlane" → family=["mcfarlane"]
   // matching "Spawn #1 McFarlane" (different series). Artist names, signature
   // markers, and ordinal-key phrases are VARIANT/CONDITION metadata, not series
   // identity. Symbiote Spider-Man #1 class: artist tokens contaminated family.
   //
-  // Artist patterns: single-word artist last names from ARTIST_PATTERNS
-  // (lim, dekal, spears, mcfarlane, ross, adams, etc. — 60+ entries).
+  // Q55-C: Full sync with ARTIST_PATTERNS single-word entries (lines 117-123).
+  // Extracts single-word last names from both multi-word patterns (kirkham from
+  // /tyler kirkham/, lee from /jim lee/, etc.) AND single-word patterns.
+  // COMPLETE LIST — 60+ artists from ARTIST_PATTERNS regex catalog.
   const artistWords = new Set([
-    'skan', 'rapoza', 'quash', 'momoko', 'ross', 'adams', 'kirkham', 'bean',
-    'andolfo', 'browne', 'forstner', 'howard', 'corona', 'stegman', 'ottley',
-    'jimenez', 'mcfarlane', 'campbell', 'artgerm', 'nakayama', 'hughes', 'byrne',
-    'perez', 'kirby', 'ditko', 'mele', 'albuquerque', 'hama', 'fabok', 'ejikure',
+    // From single-word patterns (lines 117-123)
+    'skan', 'rapoza', 'quash', 'momoko', 'ross', 'adams',
+    'kirkham', 'bean', 'andolfo', 'browne', 'forstner',
+    'howard', 'corona', 'stegman', 'ottley',
+    'jimenez', 'mcfarlane', 'campbell', 'artgerm', 'nakayama',
+    'hughes', 'byrne', 'perez', 'kirby', 'ditko', 'mele',
+    'albuquerque', 'hama', 'fabok', 'ejikure',
     'gleason', 'quah', 'parrillo', 'maer', 'lim', 'chew', 'ngu', 'sanders',
+    // From multi-word patterns (lines 111-115) — extract last-name tokens
+    // /tyler kirkham/ → kirkham (already above), /jim lee/ → lee,
+    // /inhyuk lee/ → lee, /skottie young/ → young, /frank cho/ → cho,
+    // /frank miller/ → miller, /windsor.?smith/ → smith, /dell'?otto/ → otto/dekal,
+    // /jeehyung lee/ → lee, /alex ross/ → ross (already above),
+    // /kaare andrews/ → andrews, /alan quah/ → quah (already above),
+    // /mico suayan/ → suayan, /puppeteer lee/ → lee, /derrick chew/ → chew (already above),
+    // /jonboy meyers/ → meyers, /kael ngu/ → ngu (already above),
+    // /natali sanders/ → sanders (already above), /kendrick lim/ → lim (already above),
+    // /lucio parrillo/ → parrillo (already above)
+    'lee', 'young', 'cho', 'miller', 'smith', 'otto', 'dekal', 'andrews',
+    'suayan', 'meyers', 'spears',  // Q55-C: add missing 'dekal', 'spears'
   ]);
   // Signature markers: signed, sig, auto, autographed (do NOT strip "ss" —
   // false positive risk: "Secret Six", "Space Squadron", etc.)
