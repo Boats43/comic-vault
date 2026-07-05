@@ -137,6 +137,19 @@ export const STOP_WORDS = new Set([
 ]);
 export const MIN_TOKEN_LEN = 2;
 
+// Q54: Compound whitelist + single-letter guard. Certain hyphenated titles
+// (X-Men, Marvel Tales/Age/Premiere/Team-Up/Two-in-One/Spotlight/Feature/Fanfare,
+// TaleSpin, Walt Disney) reduce to single-letter or stop-word tokens after
+// normalization. Preserve them as canonical forms BEFORE tokenization splits.
+// X-Men #44 class: "x-men" → ["x", "men"] → "x" stripped by MIN_TOKEN_LEN=2
+// → ["men"] → cross-series contamination (Men of War, X-Men Adventures).
+export const COMPOUND_WHITELIST = new Set([
+  'x-men', 'x-force', 'x-factor',  // single-letter lead
+  'marvel tales', 'marvel age', 'marvel premiere', 'marvel team-up',
+  'marvel two-in-one', 'marvel spotlight', 'marvel feature', 'marvel fanfare',
+  'talespin', 'walt disney',  // thin-token titles
+]);
+
 // Q42 C-A3: Abbreviation expansion map (single source of truth).
 // Applied BEFORE tokenization in comp verification path (compHygiene →
 // soldVerification issueMismatch) AND conflict detection (conflictDetector).
@@ -162,6 +175,20 @@ export const ABBREV_MAP = {
 // Q42 C-A3 — Expand abbreviations BEFORE tokenization (TMNT → teenage mutant ninja turtles)
 export const tokenizeTitle = (title) => {
   let normalized = String(title || "").toLowerCase();
+
+  // Q54: Compound whitelist check FIRST (before abbreviation expansion).
+  // When title exactly matches a protected compound (case-insensitive, after
+  // stripping issue# + non-alphanumerics), return the canonical split form
+  // immediately. X-Men #44 → ["x", "men"] (preserved), not ["men"] (collapsed).
+  const bareTitle = normalized
+    .replace(/#\s*\d+/g, " ")
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (COMPOUND_WHITELIST.has(bareTitle)) {
+    // Return canonical split (hyphens → spaces, split on whitespace)
+    return bareTitle.replace(/-/g, " ").split(/\s+/).filter(Boolean);
+  }
 
   // C-A3: Expand abbreviations (word-boundary anchored)
   for (const [abbrev, expanded] of Object.entries(ABBREV_MAP)) {
