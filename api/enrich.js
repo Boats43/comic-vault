@@ -3387,6 +3387,24 @@ export default async function handler(req, res) {
     const adapter = getAdapter(out.assetType);
     const idCheck = assessIdentityConfidence(sanitizedIdentity, identitySource, adapter.identityFields, out.pcProductId);
     console.log(`[identity-gate] assetType=${out.assetType} fields=${JSON.stringify(adapter.identityFields)} missing=${JSON.stringify(idCheck.missingFields)}`);
+
+    // B4: Enhanced diagnostic logging for identity-gate refusals
+    if (!idCheck.confident) {
+      console.log(
+        '[B4-DIAGNOSTIC] identity-gate BLOCK:',
+        `title="${confirmedTitle}"`,
+        `issue="${confirmedIssue}"`,
+        `year="${confirmedYear}"`,
+        `publisher="${confirmedPublisher}"`,
+        `confidence="${confidence}"`,
+        `source="${identitySource}"`,
+        `pcProductId="${out.pcProductId || 'null'}"`,
+        `sanitized=${JSON.stringify(sanitizedIdentity)}`,
+        `missing=[${idCheck.missingFields.join(',')}]`,
+        `reasons=[${idCheck.reasons.join('; ')}]`
+      );
+    }
+
     out.identityConfident = idCheck.confident;
     if (!idCheck.confident) {
       out.identityMissingFields = idCheck.missingFields;
