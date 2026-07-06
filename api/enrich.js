@@ -3240,16 +3240,30 @@ export default async function handler(req, res) {
         const reprintRatio = reprintItems.length / itemsWithPrice.length;
 
         if (reprintRatio >= 0.6) {
-          const askPrices = reprintItems.map((i) => i.price).sort((a, b) => a - b);
+          // Q67: Outlier-trim >3× median, cap poolAvg×1.5
+          const rawPrices = reprintItems.map((i) => i.price).sort((a, b) => a - b);
+          const rawMedian = rawPrices[Math.floor(rawPrices.length / 2)];
+
+          // Trim outliers >3× median (B&B #28 Loot Crate class)
+          const trimmed = rawPrices.filter(p => p <= rawMedian * 3);
+          const askPrices = trimmed.length >= 3 ? trimmed : rawPrices; // Keep original if trim leaves <3
+
           const askMedian = askPrices[Math.floor(askPrices.length / 2)];
-          const polybagPrice = askMedian * 0.75;
+          const askAvg = askPrices.reduce((a, b) => a + b, 0) / askPrices.length;
+
+          // Q67: Base on median, cap at poolAvg×1.5
+          const uncapped = askMedian * 0.75;
+          const cap = askAvg * 1.5;
+          const polybagPrice = Math.min(uncapped, cap);
           const polybagLow = askPrices[0] * 0.75;
-          const polybagHigh = askPrices[askPrices.length - 1] * 0.75;
+          const polybagHigh = Math.min(askPrices[askPrices.length - 1] * 0.75, cap);
 
           console.log(
             `[polybag-pool] detected: ${reprintItems.length}/${itemsWithPrice.length} ` +
             `(${(reprintRatio * 100).toFixed(0)}%) reprint titles · ` +
-            `ask median=$${askMedian.toFixed(2)} · haircut=0.75 → $${polybagPrice.toFixed(2)}`
+            `trimmed ${rawPrices.length - askPrices.length} outliers · ` +
+            `ask median=$${askMedian.toFixed(2)} · haircut=0.75 → $${uncapped.toFixed(2)} ` +
+            `capped at poolAvg×1.5=$${cap.toFixed(2)} → $${polybagPrice.toFixed(2)}`
           );
 
           out.price = fmtUsd(polybagPrice);

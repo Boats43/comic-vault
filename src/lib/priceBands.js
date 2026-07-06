@@ -342,10 +342,12 @@ export function computePriceBands({
 
   // TIER SELECTION
   // Q64: Added tier 2.5 — soldPool ≥5 all-stale → staleAvg×0.85, LIST_LOW cap
+  // Q69 FIX 1: Broadened condition from 100%-stale to soldPool≥5 AND fresh=0
+  // (recent-only pools still get tier-2.5 treatment — sold data outranks active asks)
   let tier = 4; // default: no data
   if (freshCount >= 5) tier = 1;
   else if (freshCount >= 1 && freshCount <= 4) tier = 2;
-  else if (freshCount === 0 && soldPrices.length >= 5 && staleCount === soldPrices.length) tier = 2.5;
+  else if (freshCount === 0 && soldPrices.length >= 5) tier = 2.5;
   else if (freshCount === 0 && verifiedActive.length >= 3) tier = 3;
 
   console.log(`[price-trace] tier=${tier} fresh=${freshCount} recent=${recentCount} stale=${staleCount} soldPool=${soldPrices.length} activePool=${verifiedActive.length}`);
@@ -480,8 +482,10 @@ export function computePriceBands({
     // T4-CAP [P2]: Sanity cap tier-4 pc_estimate at compsAvg when comps exist.
     // Evidence: FF Invisible Woman $17.08 vs compsAvg $5.69.
     // When verified comps exist (even if <2 for tier pricing), cap PC at compsAvg.
+    // Q69 FIX 2: Skip when soldPrices≥5 — verified solds outrank active asks as anchor.
+    // Action #33: 15 stale solds $300-565 should NOT be capped by 2 junk actives $18.
     let sanityCapped = false;
-    if (verifiedActive.length > 0) {
+    if (verifiedActive.length > 0 && soldPrices.length < 5) {
       // Q61: Extract price from object rows
       const activePrices = verifiedActive.map(v => typeof v === 'number' ? v : v?.price).filter(p => p > 0);
       if (activePrices.length > 0) {
