@@ -1848,13 +1848,19 @@ export default async function handler(req, res) {
       // Ship #22e: Assembly integrity check (Q54 compounds survive final title)
       // E3 class protection: "The X-Men #44 Angel" → Q54 protects ["x", "men"]
       // → assembly drops "x" → integrity check FAILS → force Vision title.
+      // B1 (22e-LOSS): Phase 1 check (missing Vision tokens only; comp-consensus
+      // check runs post-fetch in Phase 2).
       console.log(`[22e] checking integrity: vision="${effectiveTitle}" assembled="${confirmedTitle}"`);
-      const integrityCheck = checkAssemblyIntegrity(effectiveTitle, confirmedTitle);
+      const integrityCheck = checkAssemblyIntegrity(effectiveTitle, confirmedTitle, []);
       if (integrityCheck.shouldFallback) {
-        console.log(`[ship22e] assembly integrity failed, forcing Vision title: "${effectiveTitle}"`);
+        console.log(
+          `[22e] FORCED vision="${effectiveTitle}" rejected="${confirmedTitle}" ` +
+          `reason=${integrityCheck.reason} missing=[${integrityCheck.missing.join(',')}]`
+        );
         confirmedTitle = effectiveTitle;
         out.assemblyIntegrityFailed = true;
         out.assemblyIntegrityMissing = integrityCheck.missing;
+        out.assemblyIntegrityReason = integrityCheck.reason;
       }
     }
 
@@ -2881,6 +2887,23 @@ export default async function handler(req, res) {
       }
     }
 
+    // B1 (22e-LOSS): Phase 2 integrity check — token-addition rule (comp-consensus).
+    // Runs AFTER comps fetched so we can validate if added tokens appear in ≥60% of comps.
+    // Only applies when Phase 1 didn't already force fallback AND we have comp data.
+    if (!out.assemblyIntegrityFailed && rawComps?.prices?.length >= 3 && identitySource !== 'vision') {
+      const compTitles = rawComps.prices.map(p => p?.title).filter(Boolean);
+      const phase2Check = checkAssemblyIntegrity(effectiveTitle, confirmedTitle, compTitles);
+      if (phase2Check.shouldFallback && phase2Check.reason === 'excess-non-consensus-tokens') {
+        console.log(
+          `[22e-LOSS] Phase 2 FORCED vision="${effectiveTitle}" rejected="${confirmedTitle}" ` +
+          `non-consensus=[${phase2Check.added.join(',')}]`
+        );
+        confirmedTitle = effectiveTitle;
+        out.assemblyIntegrityFailed = true;
+        out.assemblyIntegrityAdded = phase2Check.added;
+        out.assemblyIntegrityReason = phase2Check.reason;
+      }
+    }
 
     // Ship #20a — sold comp source. Prefer PriceCharting sales-history
     // (real eBay + Heritage completed sales) when populated; fall back to

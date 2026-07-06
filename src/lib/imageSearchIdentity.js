@@ -1100,8 +1100,13 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   const overlapRatio = shorterTokenCount > 0 ? topFamilyOverlap.length / shorterTokenCount : 0;
   const OVERLAP_THRESHOLD = 0.4; // 40% of shorter token set
 
+  // B2 (LOT-CONSENSUS): LOT_RE guard on weighted-consensus path (same pattern as top-rank).
+  // Evidence: "spawn lot and" #6 → family construction included LOT listing in consensus pool.
+  const LOT_RE = /\b(?:lot|bundle|complete\s*set|full\s*run|comic\s*library|comic\s*collection|huge\s*run)\b|\bset\s*of\s*\d+\b|\b\d+\s*(?:book|issue|comic)s?\s*(?:lot|set)\b/i;
+  const isLotFamily = LOT_RE.test(topFamily.rawTitle || '');
+
   // Q38: Require ≥3 members for weighted-consensus override
-  if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD) {
+  if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily) {
     // Q43 A1.a: Apply same sanitizeSeriesTitle treatment as top-rank-protection
     // for consistency — removes creator names, descriptors, noise before final title.
     const cleaned = sanitizeSeriesTitle(topFamily.title);
@@ -1115,6 +1120,11 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
       runnerUp,
       families: scored,
     };
+  }
+
+  // B2 (LOT-CONSENSUS): When LOT_RE blocks weighted-consensus, log and fall through
+  if (isLotFamily && topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD) {
+    console.log(`[lot-consensus] LOT/RUN family REJECTED from weighted-consensus: "${topFamily.rawTitle}"`);
   }
 
   // Q38: 1-2 member case with sufficient overlap → fallback-vision (insufficient consensus)

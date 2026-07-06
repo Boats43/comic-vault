@@ -135,56 +135,116 @@ export const sanitizeSeriesTitle = (rawTitle) => {
  * drops "x" → "men timeless", this detects the failure and forces Vision
  * title fallback.
  *
+ * B1 (22e-LOSS): Combined rule — checks BOTH missing Vision tokens AND
+ * excessive token additions from eBay consensus. Evidence: "x men" #2 →
+ * assembled="men" (missing "x"); Spawn #6 → "spawn lot and" (2 added tokens
+ * not in comps). Forces Vision when (a) ANY Vision token missing OR (b) ≥2
+ * tokens added that don't appear in ≥60% of comp titles.
+ *
  * @param {string} visionTitle - Original Vision title (most likely to preserve compound)
  * @param {string} assembledTitle - Final confirmedTitle after source assembly
- * @returns {Object} { intact, missing, shouldFallback }
+ * @param {Array<string>} compTitles - Array of comp titles for consensus check (optional)
+ * @returns {Object} { intact, missing, added, shouldFallback, reason }
  */
-export const checkAssemblyIntegrity = (visionTitle, assembledTitle) => {
+export const checkAssemblyIntegrity = (visionTitle, assembledTitle, compTitles = []) => {
   if (!visionTitle || !assembledTitle) {
-    return { intact: true, missing: [], shouldFallback: false };
+    return { intact: true, missing: [], added: [], shouldFallback: false, reason: null };
   }
 
-  // Check if visionTitle matches a Q54 compound
-  const visionNorm = String(visionTitle).toLowerCase()
+  const normalizeForIntegrity = (str) => String(str || '').toLowerCase()
     .replace(/#\s*\d+/g, ' ')
     .replace(/[^a-z0-9\s-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^(?:the|a|an)\s+/i, '');
 
+  const visionNorm = normalizeForIntegrity(visionTitle);
+  const assembledNorm = normalizeForIntegrity(assembledTitle);
+
+  const visionTokens = visionNorm.split(/\s+/).filter(Boolean);
+  const assembledTokens = assembledNorm.split(/\s+/).filter(Boolean);
+
+  // Rule 1: Check for missing Vision tokens (original 22e logic)
+  const missing = visionTokens.filter(t => !assembledTokens.includes(t));
+
+  if (missing.length > 0) {
+    console.log(
+      `[22e-LOSS] FAIL: missing Vision tokens — ` +
+      `vision=[${visionTokens.join(',')}] ` +
+      `assembled=[${assembledTokens.join(',')}] ` +
+      `missing=[${missing.join(',')}]`
+    );
+    return { intact: false, missing, added: [], shouldFallback: true, reason: 'missing-vision-tokens' };
+  }
+
+  // Rule 2: Check for excessive token additions (B1 new logic)
+  // Only run when comp titles available for consensus validation
+  if (compTitles.length >= 3) {
+    const added = assembledTokens.filter(t => !visionTokens.includes(t));
+
+    if (added.length >= 2) {
+      // Check if added tokens appear in ≥60% of comp titles
+      const compConsensusMap = new Map();
+      compTitles.forEach(ct => {
+        const ctTokens = normalizeForIntegrity(ct).split(/\s+/).filter(Boolean);
+        added.forEach(token => {
+          if (ctTokens.includes(token)) {
+            compConsensusMap.set(token, (compConsensusMap.get(token) || 0) + 1);
+          }
+        });
+      });
+
+      const nonConsensusTokens = added.filter(token => {
+        const count = compConsensusMap.get(token) || 0;
+        const ratio = count / compTitles.length;
+        return ratio < 0.60; // Not in ≥60% of comps
+      });
+
+      if (nonConsensusTokens.length >= 2) {
+        console.log(
+          `[22e-LOSS] FAIL: excess non-consensus tokens — ` +
+          `vision="${visionTitle}" assembled="${assembledTitle}" ` +
+          `added=[${added.join(',')}] non-consensus=[${nonConsensusTokens.join(',')}]`
+        );
+        return {
+          intact: false,
+          missing: [],
+          added: nonConsensusTokens,
+          shouldFallback: true,
+          reason: 'excess-non-consensus-tokens'
+        };
+      }
+    }
+  }
+
+  // Original compound whitelist protection (preserved for backward compat)
   const protectedCompound = Array.from(COMPOUND_WHITELIST).find(entry =>
     visionNorm === entry || visionNorm.startsWith(entry + ' ')
   );
 
-  if (!protectedCompound) {
-    // No compound protection needed
-    return { intact: true, missing: [], shouldFallback: false };
+  if (protectedCompound) {
+    const protectedTokens = protectedCompound.replace(/-/g, ' ').split(/\s+/).filter(Boolean);
+    const compoundMissing = protectedTokens.filter(t => !assembledTokens.includes(t));
+
+    if (compoundMissing.length > 0) {
+      console.log(
+        `[assembly-integrity] FAIL: compound="${protectedCompound}" ` +
+        `protected=[${protectedTokens.join(',')}] ` +
+        `final=[${assembledTokens.join(',')}] ` +
+        `missing=[${compoundMissing.join(',')}]`
+      );
+      return {
+        intact: false,
+        missing: compoundMissing,
+        added: [],
+        shouldFallback: true,
+        reason: 'compound-protection'
+      };
+    }
+    console.log(`[assembly-integrity] PASS: compound="${protectedCompound}" intact`);
   }
 
-  // Extract protected tokens (e.g., "x-men" → ["x", "men"])
-  const protectedTokens = protectedCompound.replace(/-/g, ' ').split(/\s+/).filter(Boolean);
-
-  // Check if ALL protected tokens survive in assembled title
-  const assembledNorm = String(assembledTitle).toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const assembledTokens = assembledNorm.split(/\s+/);
-
-  const missing = protectedTokens.filter(t => !assembledTokens.includes(t));
-
-  if (missing.length > 0) {
-    console.log(
-      `[assembly-integrity] FAIL: compound="${protectedCompound}" ` +
-      `protected=[${protectedTokens.join(',')}] ` +
-      `final=[${assembledTokens.join(',')}] ` +
-      `missing=[${missing.join(',')}]`
-    );
-    return { intact: false, missing, shouldFallback: true };
-  }
-
-  console.log(`[assembly-integrity] PASS: compound="${protectedCompound}" intact`);
-  return { intact: true, missing: [], shouldFallback: false };
+  return { intact: true, missing: [], added: [], shouldFallback: false, reason: null };
 };
 
 /**
