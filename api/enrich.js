@@ -2095,6 +2095,68 @@ export default async function handler(req, res) {
 
     mark('phase2_complete');
 
+    // Ship #22c: AXIS VOTING convergence score
+    // Computes identity confidence from multi-source voting per axis.
+    // Sources: eBay (visualConsensus), Vision (original), PC (priceCharting), CV (comicVine)
+    // Era histogram extracted from visual year distribution (eraLock.decade)
+    const { computeConvergenceScore } = await import('../src/lib/convergenceScore.js');
+
+    // Build sources object from Phase 1+2 data (PC/CV now available)
+    const convergenceSources = {
+      title: {
+        ebay: visualConsensus?.title || null,
+        vision: effectiveTitle,
+        pc: priceChartingInitial?.title || null,
+        cv: comicVine?.name || null,
+      },
+      issue: {
+        ebay: visualConsensus?.issue || null,
+        vision: effectiveIssue,
+        pc: priceChartingInitial?.issue || null,
+        cv: comicVine?.issue || null,
+      },
+      era: {
+        histogram: eraLock?.decade ? `${eraLock.decade}s` : null,  // "1960s", "1970s", etc.
+        vision: effectiveYear ? (parseInt(effectiveYear) >= 1985 ? 'modern' : 'vintage') : null,
+        pc: priceChartingInitial?.year ? (parseInt(priceChartingInitial.year) >= 1985 ? 'modern' : 'vintage') : null,
+        cv: comicVine?.volume?.startYear ? (parseInt(comicVine.volume.startYear) >= 1985 ? 'modern' : 'vintage') : null,
+      },
+      publisher: {
+        ebay: visualConsensus?.publisher || null,
+        vision: effectivePublisher,
+        pc: priceChartingInitial?.publisher || null,
+        cv: comicVine?.volume?.publisher?.name || null,
+      },
+      grade: {
+        // E7: Vision issue does NOT auto-win; issue axis votes independently.
+        // Grade axis is Vision-only (no eBay/PC/CV grade extraction).
+        vision: req.body?.grade || null,
+      },
+    };
+
+    // Compute convergence from confirmed identity
+    const convergenceIdentity = {
+      title: confirmedTitle,
+      issue: confirmedIssue,
+      era: confirmedYear ? (parseInt(confirmedYear) >= 1985 ? 'modern' : 'vintage') : null,
+      publisher: confirmedPublisher,
+      grade: req.body?.grade || null,
+    };
+
+    const convergence = computeConvergenceScore(convergenceIdentity, convergenceSources);
+    out.convergence = convergence;
+    console.log(`[22c] convergence=${convergence.convergenceScore} tier=${convergence.tier}`);
+
+    // Log per-axis rejections for debugging
+    Object.entries(convergence.axes).forEach(([axis, result]) => {
+      if (result.rejections.length > 0) {
+        console.log(
+          `[22c] ${axis} rejections:`,
+          result.rejections.map(r => `${r.source}="${r.got}" (expected "${r.expected}")`).join(', ')
+        );
+      }
+    });
+
     // Ship #22b: PC Guard — era-gate filtering (PC/CV as verifiers, not originators)
     // When eraLock present AND PC/CV year vs locked era >10y → reject, persist for card.
     // E1/E2 protection: ASM #1 locked to 1963 → PC "Divided We Stand" 2016 rejected.
