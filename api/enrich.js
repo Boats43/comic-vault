@@ -4120,6 +4120,34 @@ export default async function handler(req, res) {
       }
     }
 
+    // Ship #22d: Tier-0 convergence lock
+    // When mega-key detected AND convergence score <70 (LOW tier), hard-block
+    // listing with identity verification blocker. Prevents wrong-era/wrong-
+    // publisher/wrong-issue mega-key matches from shipping at tier-0 floors.
+    // E1 gate: ASM #1 (1963) with PC "Divided We Stand" (2016) mismatch →
+    // convergence <70 → DO_NOT_LIST blocker surfaces to user.
+    if ((out.manualReviewRequired || out.gradeExceedsMap) &&
+        out.convergence?.convergenceScore != null &&
+        out.convergence.convergenceScore < 70) {
+      out.tier0Locked = true;
+      out.decision = {
+        action: 'DO_NOT_LIST',
+        confidence: 'LOW',
+        blockers: ['MEGA-KEY: verify identity before listing (convergence < 70)'],
+        warnings: [],
+        nextSteps: [
+          'Verify title/issue/year/publisher match expected book',
+          'Check convergence card for source disagreements',
+          'Confirm this is the correct printing/era'
+        ],
+      };
+      console.log(
+        `[22d] tier0-locked: "${confirmedTitle}" #${confirmedIssue} ` +
+        `convergence=${out.convergence.convergenceScore} ` +
+        `(${out.manualReviewRequired ? 'MANUAL' : 'EXCEEDS_MAP'})`
+      );
+    }
+
     } // end if (idCheck.confident) — Ship #20a.6.4 identity-gate wrap
 
     // FIX: Final floor re-enforcement AFTER all adjustments.
