@@ -428,19 +428,25 @@ export function computeDecision(item, context = {}) {
                                   rawSoldCount > 0 &&
                                   activeCount < 3;
 
-  // Escalate to RESEARCH if critical warnings
+  // Q72 — RESEARCH escalation = PRICE-EVIDENCE flags only (not content/photo flags)
+  // Content-unverified/photo-needed flags stay LIST_LOW/BUNDLE with PHOTOS NEEDED badge.
+  // Only escalate when pricing math is uncertain (sold-active mismatch, zero-verified,
+  // self-flag >100% drift, polybag/reprint warnings).
   const criticalWarnings = [
-    'sold-active-mismatch-extreme',
-    'era-risk-vintage-thin',
-    'active-avg-far-below',
-    'ai-verify-rejected-all',
-    'verification-failed-claude',
-    'verification-failed-no-data',
-    'verification-failed-visual-fallback',
-    'verification-failed-reprint-thin',
-    'claude-check-high-severity',  // HIGH severity from claude-gate
-    'web-search-pricing'  // Ship #26: web search fallback (verify before listing)
+    'sold-active-mismatch-extreme',    // Price evidence: sold vs active divergence
+    'era-risk-vintage-thin',           // Price evidence: thin Golden Age pool
+    'active-avg-far-below',            // Price evidence: recommended far above asks
+    'zero-verified-comps',             // Price evidence: no verified sold data
+    'ai-verify-rejected-all',          // Price evidence: 100% comp rejection
+    'verification-failed-claude',      // Price evidence: Claude gate rejected
+    'verification-failed-no-data',     // Price evidence: zero comp data
+    'verification-failed-visual-fallback',  // Price evidence: fallback to visual pool
+    'verification-failed-reprint-thin',     // Price evidence: reprint thin pool
+    'claude-check-high-severity',      // Price evidence: HIGH severity flag
+    'web-search-pricing',              // Price evidence: web search fallback
+    'reprint-polybag-detected',        // Price evidence: edition pricing uncertainty
   ];
+  // Removed: 'content-unverified' (not a price flag — stays LIST_LOW/BUNDLE)
 
   const hasCriticalWarning = decision.warnings.some(w => criticalWarnings.includes(w)) || isZeroVerifiedCritical;
 

@@ -3267,7 +3267,15 @@ export default async function handler(req, res) {
         const reprintRatio = reprintItems.length / itemsWithPrice.length;
 
         if (reprintRatio >= 0.6) {
-          // Q67: Outlier-trim >3× median, cap poolAvg×1.5
+          // Q67-C FIX: Polybag cap binding
+          // ROOT CAUSE: askMedian computed from TRIMMED pool, but when ONE high outlier
+          // exists ($1200+), trimming removes it → askMedian = trimmed median ($800+).
+          // Then uncapped = $800 × 0.75 = $600+, but cap = poolAvg × 1.5 = $15.
+          // Math.min($600, $15) SHOULD bind to $15, but production shipped $626.
+          //
+          // ACTUAL BUG: 0.75 haircut applied to WRONG median. Should use LOW end of
+          // trimmed pool (min or P10), not median, for polybag floor pricing.
+          // Polybag = reprint stock, sellers race to bottom → floor matters, not median.
           const rawPrices = reprintItems.map((i) => i.price).sort((a, b) => a - b);
           const rawMedian = rawPrices[Math.floor(rawPrices.length / 2)];
 
@@ -3275,11 +3283,11 @@ export default async function handler(req, res) {
           const trimmed = rawPrices.filter(p => p <= rawMedian * 3);
           const askPrices = trimmed.length >= 3 ? trimmed : rawPrices; // Keep original if trim leaves <3
 
-          const askMedian = askPrices[Math.floor(askPrices.length / 2)];
+          const askLow = askPrices[0];  // Q67-C: Use LOW end, not median
           const askAvg = askPrices.reduce((a, b) => a + b, 0) / askPrices.length;
 
-          // Q67: Base on median, cap at poolAvg×1.5
-          const uncapped = askMedian * 0.75;
+          // Q67-C: Base on LOW ask × 0.75, cap at poolAvg × 1.5
+          const uncapped = askLow * 0.75;
           const cap = askAvg * 1.5;
           const polybagPrice = Math.min(uncapped, cap);
           const polybagLow = askPrices[0] * 0.75;
@@ -3289,8 +3297,9 @@ export default async function handler(req, res) {
             `[polybag-pool] detected: ${reprintItems.length}/${itemsWithPrice.length} ` +
             `(${(reprintRatio * 100).toFixed(0)}%) reprint titles · ` +
             `trimmed ${rawPrices.length - askPrices.length} outliers · ` +
-            `ask median=$${askMedian.toFixed(2)} · haircut=0.75 → $${uncapped.toFixed(2)} ` +
-            `capped at poolAvg×1.5=$${cap.toFixed(2)} → $${polybagPrice.toFixed(2)}`
+            `askLow=$${askLow.toFixed(2)} askAvg=$${askAvg.toFixed(2)} · ` +
+            `haircut=0.75 → uncapped=$${uncapped.toFixed(2)} · ` +
+            `capped at poolAvg×1.5=$${cap.toFixed(2)} → final=$${polybagPrice.toFixed(2)}`
           );
 
           out.price = fmtUsd(polybagPrice);
