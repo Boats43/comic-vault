@@ -56,7 +56,9 @@ function computeBestChannel(decision, item) {
   }
 
   // Rule 2: Bundle (LIST_LOW or low value)
-  if (decision.action === 'LIST_LOW' || price < 10) {
+  // ROUTING RULE [P2]: Books ≥$100 never route BUNDLE (MWOM #198 $201 key class)
+  // High-value books warrant individual listings even when decision=LIST_LOW
+  if (price < 100 && (decision.action === 'LIST_LOW' || price < 10)) {
     return 'bundle';
   }
 

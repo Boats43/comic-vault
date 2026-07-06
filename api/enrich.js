@@ -3563,6 +3563,7 @@ export default async function handler(req, res) {
         'tier1_recency_weighted': 'verified_sold_recency',
         'tier2_blend_70_30': 'sold_active_blend_30',
         'tier2_sold_only': 'verified_sold',
+        'verified_sold_stale': 'verified_sold_stale',  // Q71: tier-2.5 stale-sold source
         'tier3_active_discounted': 'active_ask_derived',
         'tier4_pc_estimate': 'pc_estimate',
         // Legacy sources (pre-tier)
