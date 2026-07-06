@@ -341,9 +341,11 @@ export function computePriceBands({
   }
 
   // TIER SELECTION
+  // Q64: Added tier 2.5 — soldPool ≥5 all-stale → staleAvg×0.85, LIST_LOW cap
   let tier = 4; // default: no data
   if (freshCount >= 5) tier = 1;
   else if (freshCount >= 1 && freshCount <= 4) tier = 2;
+  else if (freshCount === 0 && soldPrices.length >= 5 && staleCount === soldPrices.length) tier = 2.5;
   else if (freshCount === 0 && verifiedActive.length >= 3) tier = 3;
 
   console.log(`[price-trace] tier=${tier} fresh=${freshCount} recent=${recentCount} stale=${staleCount} soldPool=${soldPrices.length} activePool=${verifiedActive.length}`);
@@ -423,6 +425,29 @@ export function computePriceBands({
     };
 
     console.log(`[tier-2] soldAvg=$${soldAvg.toFixed(2)} activeAvg=$${activeAvg.toFixed(2)} blend=$${market.toFixed(2)}`);
+    return result;
+  }
+
+  // TIER 2.5: All-stale sold pool (≥5 comps, 100% stale >90d) — Q64
+  // Apply 0.85 discount to stale average (market staleness penalty).
+  // Cap decision action to LIST_LOW (not LIST_NOW) due to data staleness.
+  if (tier === 2.5) {
+    const staleAvg = soldPrices.reduce((a, b) => a + b, 0) / soldPrices.length;
+    const discounted = staleAvg * 0.85;
+    const staleLow = Math.min(...soldPrices);
+
+    const result = {
+      quick: Math.round(staleLow * 0.85 * 100) / 100,
+      market: Math.round(discounted * 100) / 100,
+      stretch: Math.round(discounted * 1.15 * 100) / 100,
+      source: 'verified_sold_stale',
+      count: soldPrices.length,
+      tier: 2.5,
+      staleWarning: 'All sold comps >90 days old — verify current market before listing',
+      variantAdjusted: variantAdjusted || false,
+    };
+
+    console.log(`[tier-2.5] staleAvg=$${staleAvg.toFixed(2)} discounted=$${discounted.toFixed(2)} (all ${staleCount} stale)`);
     return result;
   }
 

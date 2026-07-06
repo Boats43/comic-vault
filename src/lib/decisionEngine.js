@@ -406,6 +406,17 @@ export function computeDecision(item, context = {}) {
     };
   }
 
+  // Warning: Q64 Tier-2.5 (all-stale sold pool)
+  // When pricingSource='verified_sold_stale', all sold comps are >90d old.
+  // Caps action to LIST_LOW (never LIST_NOW) due to market staleness.
+  if (item.pricingSource === 'verified_sold_stale') {
+    decision.warnings.push('all-sold-comps-stale');
+    decision.evidence.allSoldStale = {
+      message: 'All sold comps >90 days old — verify current market',
+      tier: 2.5
+    };
+  }
+
   // PHASE 3: CRITICAL WARNING ESCALATION
 
   // Escalate zero-verified-comps to critical if thin active pool (v1-C)
