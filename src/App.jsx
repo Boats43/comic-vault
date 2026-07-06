@@ -28,6 +28,10 @@ function normalizeItem(item) {
     demandSignals: item.demandSignals || {},
     comicVine: item.comicVine || {},
     goCollect: item.goCollect || {},
+    convergence: item.convergence ? {
+      axes: {},
+      ...item.convergence,
+    } : null,
     // CRITICAL: Provide nested array defaults to prevent .recentSales.map() crashes
     comps: item.comps ? {
       recentSales: [],
@@ -3840,6 +3844,93 @@ function CollectionDetail({
               <div style={{ fontSize: 12, color: "#ccc" }}>
                 {item.comicVine.characterCredits.slice(0, 5).join(', ')}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Ship #22g: CONVERGENCE CARD (per-axis votes, three-state render, era-gate rejections) */}
+      {item.convergence && (
+        <div style={{
+          marginTop: 8,
+          padding: "10px 12px",
+          background: item.convergence.tier === 'HIGH' ? "rgba(34,197,94,0.08)"
+                   : item.convergence.tier === 'MEDIUM' ? "rgba(251,191,36,0.08)"
+                   : "rgba(239,68,68,0.08)",
+          border: `1px solid ${item.convergence.tier === 'HIGH' ? "rgba(34,197,94,0.2)"
+                              : item.convergence.tier === 'MEDIUM' ? "rgba(251,191,36,0.2)"
+                              : "rgba(239,68,68,0.2)"}`,
+          borderRadius: 8,
+        }}>
+          <div style={{
+            fontSize: 11,
+            fontWeight: 600,
+            marginBottom: 8,
+            color: item.convergence.tier === 'HIGH' ? "#22c55e"
+                 : item.convergence.tier === 'MEDIUM' ? "#fbbf24"
+                 : "#ef4444"
+          }}>
+            CONVERGENCE: {item.convergence.convergenceScore}% ({item.convergence.tier})
+          </div>
+          {Object.entries(item.convergence.axes || {}).map(([axis, result]) => (
+            <div key={axis} style={{
+              fontSize: 10,
+              marginBottom: 6,
+              paddingBottom: 6,
+              borderBottom: "1px solid rgba(255,255,255,0.05)"
+            }}>
+              <div style={{
+                fontWeight: 500,
+                textTransform: 'uppercase',
+                color: "#aaa",
+                marginBottom: 3
+              }}>
+                {axis}
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {result.votes?.map((vote, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      background: vote.agrees ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                      border: `1px solid ${vote.agrees ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                      fontSize: 9,
+                      color: vote.agrees ? "#22c55e" : "#ef4444"
+                    }}
+                  >
+                    {vote.source.toUpperCase()}: {String(vote.value || '—').substring(0, 20)}
+                    {vote.agrees ? ' ✓' : ' ✗'}
+                  </div>
+                ))}
+              </div>
+              {result.rejections?.length > 0 && (
+                <div style={{
+                  marginTop: 4,
+                  fontSize: 9,
+                  color: "#ef4444",
+                  fontStyle: 'italic'
+                }}>
+                  Rejected: {result.rejections.map(r =>
+                    `${r.source}="${String(r.got).substring(0, 15)}"`
+                  ).join(', ')}
+                </div>
+              )}
+            </div>
+          ))}
+          {item.tier0Locked && (
+            <div style={{
+              marginTop: 8,
+              padding: "6px 8px",
+              background: "rgba(239,68,68,0.2)",
+              border: "1px solid rgba(239,68,68,0.4)",
+              borderRadius: 4,
+              fontSize: 10,
+              color: "#ef4444",
+              fontWeight: 600
+            }}>
+              ⚠️ TIER-0 LOCKED — Verify identity before listing
             </div>
           )}
         </div>
