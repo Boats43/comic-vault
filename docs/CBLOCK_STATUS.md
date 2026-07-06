@@ -126,6 +126,30 @@
 
 ---
 
+### C7 [P3]: TREASURY-CLASS format-aware comp query
+
+**Issue:** Superman/Spider-Man 1976 treasury edition — format detection works
+(14 format rejections logged), but comps fallback pulled regular-size similars
+($7.99-15 vs real treasury market $150-400). TPB pipeline (Ship #20a Arrow 1+2)
+handles trade paperbacks, but treasury editions (10"×13" oversize) need separate
+comp query pattern.
+
+**Spec:**
+- When format=treasury detected (via TPB_MARKER_RE or size extraction from Vision):
+  - Append "treasury" or "treasury edition" to eBay query
+  - Filter comps by size marker ("10x13", "oversized", "treasury")
+  - Fall back to generic title+issue only if treasury-specific query returns <3 comps
+- Location: api/comps.js query construction (lines ~550-700)
+
+**Evidence:** Superman/Spider-Man 1976 treasury:
+- Format detection: 14 rejections (correct — filtered out regular-size comps)
+- Comp pool: $7.99-15 (wrong — matched regular Amazing Spider-Man/Superman issues)
+- Real market: $150-400 (treasury editions)
+
+**Priority:** P3 (rare format, manual override available)
+
+---
+
 ## QUEUE AFTER C-BLOCK
 
 ### docs/SOLD_BLEND_DESIGN.md (#20b)

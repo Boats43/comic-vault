@@ -5948,6 +5948,40 @@ function CollectionDetail({
                 );
               }
 
+              // Q73: Incomplete enrich state → explicit disabled button + refresh prompt
+              // GSX #1 class: enrich returned null everything (no price/decision/year/bands)
+              // but button rendered "No price available" ACTIVE. Rule 21-0: incomplete
+              // enrich → honest incomplete state, list button DISABLED, never phantom-rendered.
+              const isIncompleteEnrich = !item.price && !item.decision && !item.year;
+
+              if (isIncompleteEnrich) {
+                return (
+                  <>
+                    <div style={{
+                      padding: "10px 12px",
+                      marginBottom: 8,
+                      background: "rgba(239,68,68,0.10)",
+                      border: "1px solid #da3633",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: "#fca5a5",
+                    }}>
+                      ⚠️ SCAN INCOMPLETE — refresh market data
+                      <div style={{ marginTop: 4, fontSize: 11, color: "#888" }}>
+                        Enrich did not complete. Tap "Refresh Market Data" to retry.
+                      </div>
+                    </div>
+                    <button
+                      className="reset-btn"
+                      disabled={true}
+                      style={{ width: "100%", opacity: 0.5 }}
+                    >
+                      📋 Listing Disabled — Incomplete
+                    </button>
+                  </>
+                );
+              }
+
               return (
                 <button
                   className="reset-btn primary"
