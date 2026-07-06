@@ -904,6 +904,9 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
     // for borderline matches to prevent wrong-volume story contamination.
     // KEEP the ComicVine match (volume, characters, credits, etc.) — suppress
     // story fields only when match quality is questionable.
+    //
+    // CV-VOLUME — Era-gate: suppress story when abs(confirmedYear - cvYear) > 10y.
+    // X-Men #25 case: 1966 book pulled 2010 vol.3 story (44y drift).
     let description = match.description;
     let deck = match.deck;
     let storySuppressedReason = null;
@@ -924,6 +927,21 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       const overlap = queryTokens.filter(qt => volTokens.includes(qt)).length;
       const overlapRatio = queryTokens.length > 0 ? overlap / queryTokens.length : 0;
 
+      // CV-VOLUME — Era-gate CV story when year drift >10y (wrong volume indicator)
+      const cvStartYear = volDetail?.start_year ? parseInt(volDetail.start_year, 10) : null;
+      const confirmedYearInt = comicYear ? parseInt(comicYear, 10) : null;
+      const yearDrift = cvStartYear && confirmedYearInt ? Math.abs(confirmedYearInt - cvStartYear) : 0;
+
+      if (yearDrift > 10) {
+        description = null;
+        deck = null;
+        storySuppressedReason = 'era-gate-year-drift';
+        console.log(
+          `[cv-era-gate] suppressed story: confirmedYear=${confirmedYearInt} cvYear=${cvStartYear} drift=${yearDrift}y ` +
+          `volume="${volDetail.name}"`
+        );
+      }
+
       // Ship #21i-b: Foreign edition check (Q35 pattern — metadata gate, NOT pricing logic)
       // Detect translation/foreign volumes from description or name metadata
       // Widened pattern: "Translates"/"Reprints"/"Vertaling" at start of story text OR
@@ -943,19 +961,21 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       const isBorderline = nameScore < 75 || publisherScore === 0 || overlapRatio < 0.6;
 
       if (isBorderline || isForeignEdition) {
-        // Suppress story fields
-        description = null;
-        deck = null;
+        // Suppress story fields (unless already suppressed by era-gate above)
+        if (!storySuppressedReason) {
+          description = null;
+          deck = null;
 
-        // Determine reason
-        if (isForeignEdition) {
-          storySuppressedReason = 'foreign-edition';
-        } else if (nameScore < 75) {
-          storySuppressedReason = 'title-weak-match';
-        } else if (overlapRatio < 0.6) {
-          storySuppressedReason = 'title-token-mismatch';
-        } else if (publisherScore === 0) {
-          storySuppressedReason = 'publisher-mismatch';
+          // Determine reason
+          if (isForeignEdition) {
+            storySuppressedReason = 'foreign-edition';
+          } else if (nameScore < 75) {
+            storySuppressedReason = 'title-weak-match';
+          } else if (overlapRatio < 0.6) {
+            storySuppressedReason = 'title-token-mismatch';
+          } else if (publisherScore === 0) {
+            storySuppressedReason = 'publisher-mismatch';
+          }
         }
 
         console.log(
