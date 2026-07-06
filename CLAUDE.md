@@ -75,6 +75,15 @@ Optional: `GOCOLLECT_API` (CGC FMV — live as of 2026-05-19)
 
 ## Rules
 
+### Customer-Grade Standard (P0 PROTOCOL — standing)
+**PRODUCTION RULE:** No card ships a price that contradicts its own evidence panel. Self-flagged mismatches (>100% drift over own pool avg, tier-4 NO DATA, refuse states) must be coherent:
+- **Self-flagged drift:** Auto-RESEARCH decision (never LIST_NOW/LIST_LOW when engine flags >100% over comps)
+- **Refused states:** Render $0 everywhere OR render nothing (blank/null). Zero bands + single "REFUSED" banner (Q68).
+- **NO DATA tier-4:** "Estimated comps" label under Verified badge (P3).
+- **Evidence consistency:** Match confidence, decision action, and displayed price must align. A LOW-confidence $300 book with 2 comps averaging $18 fails customer-grade.
+
+**Enforcement:** Pre-ship validation checks decision.action vs match confidence tier vs price deviation. Cards violating coherence are blocked from LIST actions until fixed.
+
 ### Log Statement Discipline (P0 PROTOCOL — standing)
 **Log statements are code.** Every `console.log()` referencing a variable must reference a DECLARED identifier. Trace/log additions get the same review as logic changes.
 
