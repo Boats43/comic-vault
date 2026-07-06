@@ -27,11 +27,36 @@ import { COMPOUND_WHITELIST } from './compHygiene.js';
  * Strip: creator names, cover descriptors, condition words, edition markers, embedded years
  * Keep: series name, volume indicators
  *
+ * Q70 FIX — Route through Q54 COMPOUND_WHITELIST FIRST before regex stripping.
+ * Vision path was bypassing compound protection, causing "X-Men" → "Men" / "Uncanny X-Men" → "Uncanny Men".
+ *
  * @param {string} rawTitle - Vision title with descriptive additions
  * @returns {string} Canonical series name for comp matching
  */
 export const sanitizeSeriesTitle = (rawTitle) => {
   if (!rawTitle) return rawTitle;
+
+  // Q70 — Strip leading articles BEFORE compound whitelist check
+  const rawLower = rawTitle.toLowerCase().trim();
+  const bareTitle = rawLower.replace(/^(?:the|a|an)\s+/i, '');
+
+  // Q70 — Q54 COMPOUND_WHITELIST protection FIRST (before regex stripping)
+  // Prevents "X-Men" → "Men", "Marvel Tales" → "Tales" when regex strips "x" or "marvel"
+  // Prefix matching: "x-men angel" starts with "x-men " → return "X-Men" verbatim
+  const protectedHit = Array.from(COMPOUND_WHITELIST).find(entry =>
+    bareTitle === entry || bareTitle.startsWith(entry + ' ')
+  );
+
+  if (protectedHit) {
+    // Q70 — Extract ONLY the protected compound from the title, drop trailing noise
+    // "The X-Men Angel Red Raven #44" → "X-Men" (strips "Angel Red Raven")
+    const protectedPortion = rawTitle.slice(
+      rawTitle.toLowerCase().indexOf(protectedHit),
+      rawTitle.toLowerCase().indexOf(protectedHit) + protectedHit.length
+    );
+    console.log(`[Q70] compound-protected: "${rawTitle}" → "${protectedPortion}" (matched "${protectedHit}")`);
+    return protectedPortion;
+  }
 
   // Ship #24 FIX #12 — preserve numeric tokens that are part of the actual title
   // (e.g., "Spider-Man 2099", "X-Men 2099", "2099 Unlimited"). Only protect years
@@ -71,7 +96,6 @@ export const sanitizeSeriesTitle = (rawTitle) => {
     'tales of marvel', 'age of marvel', 'age of dc',
   ];
 
-  const rawLower = rawTitle.toLowerCase();
   const isCompoundTitle = COMPOUND_TITLE_WHITELIST.some(w => rawLower.includes(w));
 
   const NOISE_PATTERNS = [
