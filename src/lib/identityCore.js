@@ -485,37 +485,83 @@ export const resolveIssue = (visionIssue, ebayIssue, visualIssue, titleContext =
 };
 
 /**
- * Backfill year and publisher from comp consensus when primary sources return null.
- * Requires ≥70% of comp titles to fuzzy-match confirmedTitle (sanity gate).
+ * Backfill title, year, and publisher from comp consensus when primary sources return null.
+ * Q58-TITLE: Title backfill requires ≥4 comps with ≥80% consensus on series name.
+ * Year backfill runs always (≥50% consensus).
+ * Publisher backfill requires ≥70% title-match gate (≥50% pattern consensus).
  *
- * @param {string} confirmedTitle - Current confirmed title
+ * @param {string|null} confirmedTitle - Current confirmed title (null triggers title backfill)
  * @param {string|null} confirmedYear - Current confirmed year
  * @param {string|null} confirmedPublisher - Current confirmed publisher
  * @param {Array} compItems - eBay visual search results
- * @returns {Object} { year, publisher, yearBackfilled, publisherBackfilled, yearBackfillRatio, publisherBackfillSource }
+ * @returns {Object} { title, year, publisher, titleBackfilled, yearBackfilled, publisherBackfilled, titleBackfillRatio, yearBackfillRatio, publisherBackfillSource }
  */
 export const backfillFromComps = (confirmedTitle, confirmedYear, confirmedPublisher, compItems) => {
   const result = {
+    title: confirmedTitle,
     year: confirmedYear,
     publisher: confirmedPublisher,
+    titleBackfilled: false,
     yearBackfilled: false,
     publisherBackfilled: false,
+    titleBackfillRatio: 0,
     yearBackfillRatio: 0,
     publisherBackfillSource: null
   };
 
   // Debug diagnostic for FIX 1
-  console.log('[year-backfill-debug] compItems available:', compItems?.length || 0,
+  console.log('[backfill-debug] compItems:', compItems?.length || 0,
+    'confirmedTitle:', confirmedTitle || '(null)',
     'confirmedYear:', confirmedYear || '(null)',
-    'needsBackfill:', !confirmedYear);
+    'confirmedPublisher:', confirmedPublisher || '(null)');
 
-  if ((!confirmedYear || !confirmedPublisher) && compItems?.length >= 5) {
+  if ((!confirmedTitle || !confirmedYear || !confirmedPublisher) && compItems?.length >= 4) {
     const compTitles = compItems
       .map(i => String(i?.rawTitle || i?.title || ''))
       .filter(Boolean);
 
+    // Q58-TITLE — Title backfill from comp series-name consensus (≥4 comps, ≥80% consensus)
+    if (!confirmedTitle && compTitles.length >= 4) {
+      // Extract series name from each comp title (strip issue#, publisher, year, grade)
+      const extractSeriesName = (rawTitle) => {
+        let cleaned = String(rawTitle || '')
+          .replace(/#\s*\d+/g, ' ')                    // strip issue number
+          .replace(/\b(19[3-9]\d|20[0-2]\d)\b/g, ' ')  // strip years
+          .replace(/\b(cgc|cbcs|pgx|graded)\s*[\d.]+/gi, ' ')  // strip slab grades
+          .replace(/\b(nm|vf|fn|vg|gd|fr|pr)\b/gi, ' ')  // strip raw grades
+          .replace(/\b(marvel|dc|image|dark horse|idw|boom|dynamite|valiant|archie)\s*comics?\b/gi, ' ')  // strip publishers
+          .replace(/[()[\]{}]/g, ' ')                  // strip brackets
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        // Take first 2-4 meaningful tokens (series name is usually 1-3 words)
+        const tokens = cleaned.toLowerCase().split(/\s+/)
+          .filter(t => t.length >= 3 && !/^(the|and|of|a|with|for|from)$/i.test(t));
+        return tokens.slice(0, 4).join(' ');
+      };
+
+      const seriesNames = compTitles.map(t => extractSeriesName(t)).filter(Boolean);
+      const seriesCounts = {};
+      seriesNames.forEach(s => { seriesCounts[s] = (seriesCounts[s] || 0) + 1; });
+      const sortedSeries = Object.entries(seriesCounts).sort((a, b) => b[1] - a[1]);
+
+      if (sortedSeries.length > 0) {
+        const [topSeries, topCount] = sortedSeries[0];
+        const seriesRatio = topCount / seriesNames.length;
+        if (seriesRatio >= 0.80 && topSeries.length >= 3) {
+          // Sanitize through sanitizeSeriesTitle for canonical form
+          const sanitized = sanitizeSeriesTitle(topSeries);
+          result.title = sanitized;
+          result.titleBackfilled = true;
+          result.titleBackfillRatio = seriesRatio;
+          console.log(`[Q58-title-backfill] "${sanitized}" from eBay comp consensus (${topCount}/${seriesNames.length}=${(seriesRatio*100).toFixed(0)}%)`);
+        }
+      }
+    }
+
     // Title sanity: how many comp titles share core tokens with confirmedTitle?
-    const coreTokens = String(confirmedTitle || '')
+    // (used for publisher backfill gate below)
+    const coreTokens = String(result.title || '')
       .toLowerCase()
       .replace(/[#:,'"\.\-\(\)]/g, ' ')
       .split(/\s+/)

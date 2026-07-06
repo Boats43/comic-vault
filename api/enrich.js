@@ -2540,6 +2540,13 @@ export default async function handler(req, res) {
       visualResult?.items
     );
 
+    // Q58-TITLE — Title backfill from comp consensus
+    if (backfill.titleBackfilled) {
+      confirmedTitle = backfill.title;
+      out.titleBackfilledFromComps = true;
+      out.titleBackfillRatio = backfill.titleBackfillRatio;
+    }
+
     if (backfill.yearBackfilled) {
       confirmedYear = backfill.year;
       out.yearBackfilledFromComps = true;
