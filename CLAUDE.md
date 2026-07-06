@@ -366,13 +366,13 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 
 | Hash | Ship | Summary |
 |------|------|---------|
-| ccc7936 | fix | Web search timeout log fix (was correct 20s, log said 8s) |
-| a8fae30 | debug | Web search fire/skip diagnostic logging |
-| 6549578 | feat | Aggressive caching: CV/PC 24h, GoCollect 24h, active 1h |
-| 55c4e16 | fix | Gate AI comp verify on refresh (closes token drain) |
-| 4ebd6c0 | fix | Story-only mismatch clears story, never nulls price |
-| dabc281 | fix | Gate claudeCheck to initial scan only (90%+ savings) |
-| b1b2750 | feat | Data quality write-back guard + AI estimate fallback |
+| 46fada1 | fix | CV-VOLUME [P2]: Era-gate CV story fetch (>10y drift suppression) |
+| 1b2097f | feat | Q58-TITLE [P2]: Title backfill from comp consensus (≥80%, ≥4 comps) |
+| f907aa1 | fix | Q70 [P0]: Route Vision sanitizer through Q54 whitelist (X-Men class) |
+| 84c249c | fix | Q68 + P3 + CUSTOMER-GRADE STANDARD [P0] (refuse-state coherence) |
+| 383975a | fix | Q69 [P0] + Q67 [P0]: tier-2.5 fix + polybag cap |
+| 4b40610 | feat | Ship #22g [P1]: convergence card UI |
+| cb90ae6 | feat | Ship #22d [P1]: TIER-0 expansion + convergence lock |
 
 **Session 6/20/26:** Pricing investigation complete (7 commits)  
 - FIX 1: Year backfill from eBay comp consensus (1abac22, a5e1a22)
@@ -392,7 +392,22 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - Diagnostics: AI verify, web search, sold rejection logging (a8fae30, 55c4e16)
 - **Phase 3B correction:** Web search timeout was ALWAYS 20s (line 155), Phase 3B investigation was wrong. Only the error log was incorrect ("8s" hardcoded).
 
+**Session 7/5-7/6:** Convergence + identity hygiene + accuracy fixes (15 commits)  
+- Ship #22c [P1]: AXIS VOTING convergence score (deployed, runs every scan, logs [22c] convergence=N)
+- Ship #22d [P1]: TIER-0 convergence lock (mega-key gate, <70 score blocks listing)
+- Ship #22e [P1]: Assembly integrity check (22e-LOSS fired production 7/5 X-Men class)
+- Ship #22f [P1]: Title hygiene extraction ([22f] metadata-stripped firing production)
+- Ship #22g [P1]: Convergence card UI (live, awaiting mega-key scan trigger)
+- Q70 [P0]: Vision sanitizer Q54 whitelist routing (X-Men "x" preservation)
+- Q68 [P0]: Refuse-state coherence (customer-grade standard)
+- Q69 [P0]: Tier-2.5 $250-330 fix (Action #33 class)
+- Q67 [P0]: Polybag cap $9 (B&B #28 Loot Crate class)
+- Q64 [P1]: Tier-2.5 stale-sold pricing (Jungle Comics #54)
+- Q58-TITLE [P2]: Title backfill from comp consensus (Challengers #65 class)
+- CV-VOLUME [P2]: Era-gate CV story >10y drift (X-Men #25 2010 vol.3 suppression)
+
 **Open items:**
+- **Q65 [P2]:** Invincible #19 ≤$60/REVIEW gate (C4 queue, modern-premium slab filter DEPLOYED + proven removed=2-33 lines production)
 - Variant fallback for thin markets (Batman LOTDK #62 foil: 0/5 kept, need fallback pool)
   - Architecture confirmed: belongs in soldVerification.js (has rawRows + reasons)
   - Pattern: if verified=0 AND variantMismatch>0, re-run WITHOUT variant filters

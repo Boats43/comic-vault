@@ -4,6 +4,12 @@
 **Status:** C1-C3 COMPLETE, C4-C6 queued  
 **Token usage at handoff:** 127k/200k (63%)
 
+**RECORD CORRECTIONS (2026-07-06):**
+- **Q65 slab filter:** DEPLOYED (Ship #20a.6.11 line 38-39) + production-proven (removed=2-33 lines across scans). Open item = Invincible #19 gate scan only, NOT build.
+- **22f title hygiene:** DEPLOYED (cb417a1) + firing production ([22f] metadata-stripped logs live). E2/E4/E5 await scans, NOT builds.
+- **22e assembly integrity:** DEPLOYED (cb417a1) + FORCED FIRE production (X-Men "x men" → "x-men" correction 2026-07-05).
+- **22c convergence scoring:** DEPLOYED (189c81d) + RUNS UNCONDITIONALLY (enrich.js line 2166-2168). Logs `[22c] convergence=N tier=X` every scan. Tier-0 LOCK (line 4170-4190) correctly mega-key-gated. NO spec deviation — already correct.
+
 ---
 
 ## COMPLETED ITEMS (C1-C3)
