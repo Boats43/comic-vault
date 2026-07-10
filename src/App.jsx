@@ -1677,7 +1677,7 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude, onClaudeCardCh
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({ message: query, collection: items, history: [], buyerSessions: getSessionSummary() }),
       });
       const data = await res.json();
@@ -6778,7 +6778,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
     setSending(true);
     fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
         message: "Give me a quick summary of my collection status and top 3 actions I should take right now",
         collection: catalogue,
@@ -6845,7 +6845,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
           message: text.trim(),
           collection: catalogue,
@@ -9007,7 +9007,7 @@ export default function App() {
       // Skip Vision entirely - go straight to enrich with barcode
       const enrichRes = await fetch("/api/enrich", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
           barcode,
           title: "Barcode scan",  // placeholder
@@ -9073,7 +9073,7 @@ export default function App() {
 
         const res = await fetch("/api/grade", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify({ images: [b64] }),
         });
         const data = await res.json();
@@ -9160,7 +9160,7 @@ export default function App() {
           bumpEnrichFired();
           fetch("/api/enrich", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify({
             title: data.title,
             issue: bulkIssue,
@@ -9424,7 +9424,7 @@ export default function App() {
         try {
           const res = await fetch("/api/delist-ebay", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getVaultHeaders() },
             body: JSON.stringify({ ebayItemId: item.ebayItemId }),
           });
           const data = await res.json();
@@ -9458,7 +9458,7 @@ export default function App() {
     const coverPhoto = getComicPhotos(item)[0] || null;
     const res = await fetch("/api/list-ebay", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
         title: item.title,
         publisher: item.publisher,
@@ -9510,7 +9510,7 @@ export default function App() {
     }));
     const res = await fetch("/api/list-ebay", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({ bundle: true, items: payloadItems }),
     });
     const data = await res.json();
@@ -9545,7 +9545,7 @@ export default function App() {
     }
     const res = await fetch("/api/list-ebay", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
         checkStatus: true,
         ebayItemId: item.ebayItemId,
@@ -9832,7 +9832,7 @@ export default function App() {
     // FIX 2: Force regrade bypasses grade lock (user explicitly requested re-identification)
     const gradeRes = await fetch("/api/grade", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
         images: [b64],
         existingGrade: {
@@ -9860,7 +9860,7 @@ export default function App() {
     try {
       const enrichRes = await fetch("/api/enrich", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
           title: gradeData.title,
           issue: issueNum,
@@ -9951,7 +9951,7 @@ export default function App() {
 
     const res = await fetch("/api/grade", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({ images: nextPhotos }),
     });
     const data = await res.json();
@@ -10043,7 +10043,7 @@ export default function App() {
     try {
       const res = await fetch("/api/manage", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({ comics: catalogue }),
       });
       const data = await res.json();
@@ -10377,7 +10377,7 @@ export default function App() {
                         try {
                           const enrichRes = await fetch('/api/enrich', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'application/json', ...getVaultHeaders() },
                             body: JSON.stringify({
                               manualIdentity: true,
                               skipVision: true,
