@@ -516,6 +516,9 @@ const getChannelMetrics = (catalogue) => {
 const getAuthorityPrice = (item) => {
   if (!item) return 0;
 
+  // Q68-C: Refuse-state coherence - return 0 for refused identity
+  if (item.identityConfident === false) return 0;
+
   // Blocked decisions: use system price (may be 0)
   const isBlocked =
     item.decision?.action === 'DO_NOT_LIST' ||
@@ -2715,13 +2718,13 @@ function CollectionDetail({
       setListPrice(authorityPrice);
     } else if (item.listPriceManual === true) {
       // Rule 2: Preserve manual value (only for non-blocked items)
-      setListPrice(item.listPrice != null ? item.listPrice : authorityPrice);
+      setListPrice(item.listPrice != null ? item.listPrice : Math.round(authorityPrice * 100) / 100);
     } else if (item.listPrice != null && (item.listPriceManual === undefined || item.listPriceManual === false)) {
       // Rule 3: Items without manual edit - detect stale data vs authority price
       const deviation = Math.abs(item.listPrice - authorityPrice) / Math.max(authorityPrice, 0.01);
       if (deviation > 0.5) {
         // >50% deviation = stale data, overwrite with authority price
-        setListPrice(authorityPrice);
+        setListPrice(Math.round(authorityPrice * 100) / 100);
       } else {
         // Within 50% = preserve
         setListPrice(item.listPrice);
