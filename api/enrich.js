@@ -1575,6 +1575,11 @@ export default async function handler(req, res) {
   }
 
   try {
+    // A5 INPUT CAP: reject malformed body
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ error: 'Invalid request body' });
+    }
+
     // Phase timing instrumentation — Buyer mode speed measurement.
     // All offsets are ms relative to handler entry. Logged to Vercel
     // function logs and mirrored onto out.timings for client inspection.
@@ -1605,6 +1610,23 @@ export default async function handler(req, res) {
       skipVision,      // FIX 4 — Skip Vision when manual identity provided
       skipImageSearch, // FIX 4 — Skip eBay image search when manual
     } = req.body || {};
+
+    // A5 INPUT CAP: validate images array if present
+    if (images && Array.isArray(images)) {
+      const MAX_IMAGE_SIZE = 8 * 1024 * 1024; // 8MB per image
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        if (typeof img === 'string' && img.startsWith('data:')) {
+          const base64Data = img.split(',')[1] || '';
+          const sizeBytes = (base64Data.length * 3) / 4;
+          if (sizeBytes > MAX_IMAGE_SIZE) {
+            return res.status(413).json({
+              error: `Image ${i+1} exceeds 8MB limit (${(sizeBytes/1024/1024).toFixed(1)}MB)`,
+            });
+          }
+        }
+      }
+    }
 
     // TRACK A: Barcode bypass - lookup identity from ComicVine UPC
     let barcodeIdentity = null;

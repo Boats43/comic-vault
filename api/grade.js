@@ -471,11 +471,12 @@ export default async function handler(req, res) {
       res.status(400).json({ error: "images array required" });
       return;
     }
-    const MAX_IMAGE_SIZE = 1024 * 1024;
+    // A5 INPUT CAP: 8MB per image (was 1MB, updated for launch)
+    const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
     for (const img of images) {
       if (typeof img === "string" && img.length > MAX_IMAGE_SIZE) {
         res.status(413).json({
-          error: "Image too large — please retake with lower resolution",
+          error: "Image too large — 8MB limit exceeded. Please retake with lower resolution",
         });
         return;
       }
