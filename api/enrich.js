@@ -109,6 +109,16 @@ import { kvGet, kvSet, KV_TTL } from "./kv-cache.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// A3 ACCESS GATE: T1 invite mechanism
+function checkAccessGate(req) {
+  const accessCode = process.env.ACCESS_CODE;
+  if (!accessCode) return null; // Gate disabled when env var not set
+  const clientKey = req.headers['x-vault-key'];
+  if (clientKey !== accessCode) {
+    return { error: 'Access denied. Contact the vault administrator for an access code.', status: 401 };
+  }
+  return null;
+}
 
 // Marvel test-market price-variant allowlists. Vision labels any 35¢ /
 // 30¢ price box on a cover as a "test market" variant, but those price
@@ -1539,6 +1549,12 @@ export {
 };
 
 export default async function handler(req, res) {
+  // A3 ACCESS GATE: T1 invite mechanism
+  const gateError = checkAccessGate(req);
+  if (gateError) {
+    return res.status(gateError.status).json({ error: gateError.error });
+  }
+
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
     return;

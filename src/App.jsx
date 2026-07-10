@@ -14,6 +14,16 @@ import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade } from "./lib/dataQualityGuard.js";
 
+// A3 ACCESS GATE: Client-side key helper
+const getVaultHeaders = () => {
+  let key = localStorage.getItem('cv_access_key');
+  if (!key) {
+    key = prompt('Enter your Comic Vault access code:');
+    if (key) localStorage.setItem('cv_access_key', key);
+  }
+  return key ? { 'x-vault-key': key } : {};
+};
+
 // STRUCTURAL FIX: Normalize all items before render to prevent "cannot read property of undefined" crashes
 // Legacy books scanned before Fix 2/3 lack decision/claudeCheck/priceBands objects.
 // This function GUARANTEES all expected parent objects AND nested arrays exist so optional
@@ -7936,7 +7946,7 @@ function WatchMode({ onStop }) {
             const b64 = await fileToBase64(blob);
             const res = await fetch("/api/grade", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...getVaultHeaders() },
               body: JSON.stringify({ images: [b64], source: 'watch', voiceContext: watchContextRef.current || undefined }),
             });
             const data = await res.json();
@@ -7964,7 +7974,7 @@ function WatchMode({ onStop }) {
 
             fetch("/api/enrich", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...getVaultHeaders() },
               body: JSON.stringify({
                 title: data.title,
                 issue: issueNum,
@@ -10467,7 +10477,7 @@ export default function App() {
                         // Fire enrichment for the newly saved copy
                         fetch("/api/enrich", {
                           method: "POST",
-                          headers: { "Content-Type": "application/json" },
+                          headers: { "Content-Type": "application/json", ...getVaultHeaders() },
                           body: JSON.stringify({
                             title: data.title, issue: data.issue, grade: data.grade,
                             isGraded: data.isGraded, numericGrade: data.numericGrade,
