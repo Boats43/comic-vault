@@ -178,8 +178,12 @@ export function buildVerifiedSoldPool(soldComps, { title, issue, variant }) {
 /**
  * Build verified active pool with exact-match filtering.
  * Returns array of verified active comp prices.
+ *
+ * Q75 — Era/variant verification for tier-3/tier-4 active pool:
+ * Prevents modern variant asks (1:100 sketch, timeless, etc.) from
+ * contaminating vintage/standard edition pricing.
  */
-export function buildVerifiedActivePool(comps, { title, issue }) {
+export function buildVerifiedActivePool(comps, { title, issue, year, variant }) {
   if (!comps || !comps.prices || comps.prices.length === 0) {
     return [];
   }
@@ -191,12 +195,18 @@ export function buildVerifiedActivePool(comps, { title, issue }) {
   const titleLower = String(title || '').toLowerCase();
   const lotRe = /\b(lot|bundle|complete set|full run|comic library|comic collection)\b/i;
 
+  // Q75 era/variant filters
+  const confirmedYear = year ? parseInt(year, 10) : null;
+  const scanIsVariant = variant && variant.trim().length > 0;
+  const VARIANT_CONTAM_ACTIVE = /\b(1:25|1:50|1:100|1:500|incentive|sketch|virgin|timeless|ratio|exclusive|convention|sdcc|nycc)\b/i;
+  const YEAR_TOKEN_RE = /\b(19\d{2}|20\d{2})\b/;
+
   const filtered = comps.prices.filter(p => {
     // Extract price (handle both number and object)
     const price = typeof p === 'number' ? p : p?.price;
     if (!price || price <= 0) return false;
 
-    // For object rows: verify title overlap + exclude lots
+    // For object rows: verify title overlap + exclude lots + Q75 era/variant
     if (typeof p === 'object' && p.title) {
       const t = String(p.title).toLowerCase();
 
@@ -211,6 +221,25 @@ export function buildVerifiedActivePool(comps, { title, issue }) {
         if (ourWords.length === 0 || matchCount / ourWords.length < 0.5) {
           return false;
         }
+      }
+
+      // Q75-1: Year token filter (era contamination)
+      if (confirmedYear) {
+        const yearMatch = t.match(YEAR_TOKEN_RE);
+        if (yearMatch) {
+          const listingYear = parseInt(yearMatch[0], 10);
+          const yearDrift = Math.abs(listingYear - confirmedYear);
+          if (yearDrift > 5) {
+            console.log(`[Q75] active rejected: "${p.title?.slice(0, 60)}" reason=era (${listingYear} vs ${confirmedYear})`);
+            return false;
+          }
+        }
+      }
+
+      // Q75-2: Variant contamination filter
+      if (!scanIsVariant && VARIANT_CONTAM_ACTIVE.test(t)) {
+        console.log(`[Q75] active rejected: "${p.title?.slice(0, 60)}" reason=variant`);
+        return false;
       }
     }
 
@@ -324,7 +353,8 @@ export function computePriceBands({
   // Build verified pools
   const verifiedSolds = buildVerifiedSoldPool(soldComps, { title, issue, variant });
   const soldPrices = verifiedSolds.map(s => s.price);
-  const verifiedActive = buildVerifiedActivePool(activeComps, { title, issue });
+  // Q75: Pass year + variant to active pool builder for era/variant filtering
+  const verifiedActive = buildVerifiedActivePool(activeComps, { title, issue, year, variant });
 
   // Extract recency band counts from LIVE soldVerifyResult
   let freshCount = 0;
