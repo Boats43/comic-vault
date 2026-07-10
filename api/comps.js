@@ -1637,7 +1637,7 @@ function checkAccessGate(req) {
 
   // DIAGNOSTIC: Log comparison without exposing full value
   const match = clientKey === accessCode;
-  console.log(`[access] received_len=${clientKey?.length ?? 0} expected_len=${accessCode.length} match=${match}`);
+  console.log(`[access] received_len=${clientKey?.length ?? 0} expected_len=${accessCode?.length ?? 0} match=${match}`);
 
   if (!match) {
     return { error: 'Access denied. Contact the vault administrator for an access code.', status: 401 };
