@@ -62,6 +62,8 @@ export {
   detectSeriesMarkers,
 };
 
+import { checkRateLimit } from "./rate-limit.js";
+
 const FINDING_ENDPOINT =
   "https://svcs.ebay.com/services/search/FindingService/v1";
 const OAUTH_ENDPOINT = "https://api.ebay.com/identity/v1/oauth2/token";
@@ -1643,6 +1645,14 @@ export default async function handler(req, res) {
   const gateError = checkAccessGate(req);
   if (gateError) {
     return res.status(gateError.status).json({ error: gateError.error });
+  }
+
+  // A4 RATE LIMIT: 30 scans / 10 min per key+IP
+  const rateCheck = checkRateLimit(req);
+  res.setHeader('x-ratelimit-remaining', String(rateCheck.remaining));
+  if (!rateCheck.allowed) {
+    res.setHeader('retry-after', String(rateCheck.reset));
+    return res.status(429).json({ error: rateCheck.error, retryAfter: rateCheck.reset });
   }
 
   if (req.method !== "POST") {

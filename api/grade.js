@@ -7,6 +7,7 @@ import {
   extractConsensus
 } from "../src/lib/imageSearchIdentity.js";
 import { getOAuthToken } from "./comps.js";
+import { checkRateLimit } from "./rate-limit.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -418,6 +419,14 @@ export default async function handler(req, res) {
   const gateError = checkAccessGate(req);
   if (gateError) {
     return res.status(gateError.status).json({ error: gateError.error });
+  }
+
+  // A4 RATE LIMIT: 30 scans / 10 min per key+IP
+  const rateCheck = checkRateLimit(req);
+  res.setHeader('x-ratelimit-remaining', String(rateCheck.remaining));
+  if (!rateCheck.allowed) {
+    res.setHeader('retry-after', String(rateCheck.reset));
+    return res.status(429).json({ error: rateCheck.error, retryAfter: rateCheck.reset });
   }
 
   if (req.method !== "POST") {
