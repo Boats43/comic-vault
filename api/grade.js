@@ -415,8 +415,8 @@ const watchPipeline = async (imageContent, voiceContext) => {
 // comps and Ximilar enrichment are handled by /api/enrich and
 // merged into the result card when they return.
 export default async function handler(req, res) {
-  // A6 BUILD-ID: Inject commit hash header
-  const buildId = process.env.CV_BUILD_ID || 'unknown';
+  // A6 BUILD-ID: Inject commit hash header (Vercel auto-injects VERCEL_GIT_COMMIT_SHA)
+  const buildId = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || 'unknown';
   res.setHeader('x-cv-build', buildId);
   console.log(`[boot] Comic Vault build ${buildId}`);
 

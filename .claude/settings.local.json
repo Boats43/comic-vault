@@ -141,7 +141,8 @@
       "Bash(vercel env *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://comic-vault-rouge.vercel.app/api/admin-cache?nocache=$\\(date +%s%N\\)\")",
       "Bash(git commit -m 'fix: Q12c title-family + Q5b pc_estimate comp count *)",
-      "PowerShell(node scripts/q37-dual-number-scan.mjs)"
+      "PowerShell(node scripts/q37-dual-number-scan.mjs)",
+      "Bash(bash scripts/deploy-ping.sh)"
     ]
   }
 }
