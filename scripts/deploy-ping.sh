@@ -9,17 +9,17 @@ LOCAL_HASH=$(git rev-parse --short HEAD)
 echo "[deploy-ping] Local HEAD: $LOCAL_HASH"
 echo "[deploy-ping] Curling $PROD_URL/api/grade..."
 
-# Warm ping to trigger cold start
+# Warm ping to trigger cold start (401 expected if ACCESS_CODE set)
 curl -s -X POST "$PROD_URL/api/grade" \
   -H "Content-Type: application/json" \
   -d '{"warmup": true}' > /dev/null 2>&1
 
 sleep 2
 
-# Fetch build ID from response header
-REMOTE_HASH=$(curl -s -I -X POST "$PROD_URL/api/grade" \
+# Fetch build ID from response header (works even on 401)
+REMOTE_HASH=$(curl -s -i -X POST "$PROD_URL/api/grade" \
   -H "Content-Type: application/json" \
-  -d '{"warmup": true}' | grep -i 'x-cv-build' | awk '{print $2}' | tr -d '\r\n')
+  -d '{"warmup": true}' 2>&1 | grep -i 'x-cv-build:' | awk '{print $2}' | tr -d '\r\n')
 
 echo "[deploy-ping] Remote build: $REMOTE_HASH"
 

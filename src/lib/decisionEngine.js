@@ -675,6 +675,16 @@ export function computeDecision(item, context = {}) {
 
   decision.evidence.clean = true;
   decision.evidence.pricingSource = item.pricingSource;
+
+  // Q74 TIER-AWARE ESCALATION: LOW match confidence + LIST_NOW → RESEARCH
+  // Prevents thin-data books from shipping without manual verification
+  if (item.matchConfidence?.tier === 'LOW' && decision.action === 'LIST_NOW') {
+    decision.action = 'RESEARCH';
+    decision.warnings.push('low-confidence-escalation');
+    decision.reason = 'Match confidence LOW — verify data quality before listing';
+    decision.nextStep = 'Review comp accuracy and identity verification';
+  }
+
   decision.bestChannel = computeBestChannel(decision, item);
 
   return decision;
