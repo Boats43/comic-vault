@@ -346,6 +346,7 @@ export function computePriceBands({
   gradeMultiplier = 1,
   title,
   issue,
+  year,
   variant,
   variantAdjusted = false,
   soldVerifyResult = null,

@@ -3211,6 +3211,7 @@ export default async function handler(req, res) {
       gradeMultiplier,
       title: confirmedTitle,
       issue: confirmedIssue,
+      year: confirmedYear,
       variant: req.body?.variant || null,
       variantAdjusted: soldVerifyResult.variantAdjusted || false,
       soldVerifyResult,
