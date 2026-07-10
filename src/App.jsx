@@ -15,13 +15,14 @@ import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade } from "./lib/dataQualityGuard.js";
 
 // A3 ACCESS GATE: Client-side key helper
+// ACCESS GATE — T1 invite key management (A3 + LAUNCH BLOCKER FIX)
 const getVaultHeaders = () => {
-  let key = localStorage.getItem('cv_access_key');
-  if (!key) {
-    key = prompt('Enter your Comic Vault access code:');
-    if (key) localStorage.setItem('cv_access_key', key);
-  }
+  const key = localStorage.getItem('vault_key');
   return key ? { 'x-vault-key': key } : {};
+};
+
+const clearVaultKey = () => {
+  localStorage.removeItem('vault_key');
 };
 
 // STRUCTURAL FIX: Normalize all items before render to prevent "cannot read property of undefined" crashes
@@ -8172,6 +8173,8 @@ export default function App() {
   const [duplicateWarning, setDuplicateWarning] = useState(null);
   const [pendingDuplicate, setPendingDuplicate] = useState(null);
   const [tradePiles, setTradePiles] = useState(() => getTradePiles());
+  const [showAccessModal, setShowAccessModal] = useState(false);
+  const [accessCodeInput, setAccessCodeInput] = useState('');
   const fileRef = useRef(null);
   const buyerFileRef = useRef(null);
   const bulkRef = useRef(null);
@@ -8199,17 +8202,28 @@ export default function App() {
     saveTradePiles(tradePiles);
   }, [tradePiles]);
 
+  // ACCESS GATE — Check for vault key on mount
+  useEffect(() => {
+    const key = localStorage.getItem('vault_key');
+    if (!key) {
+      setShowAccessModal(true);
+    }
+  }, []);
+
   // Load catalogue, snapshots, and cached analysis from IndexedDB on mount.
   useEffect(() => {
-    // Warm up grade + enrich endpoints silently
+    // Warm up grade + enrich endpoints silently (skip if no key yet)
+    const key = localStorage.getItem('vault_key');
+    if (!key) return;
+
     fetch('/api/grade', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getVaultHeaders() },
       body: JSON.stringify({ warmup: true })
     }).catch(() => {});
     fetch('/api/enrich', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getVaultHeaders() },
       body: JSON.stringify({ warmup: true })
     }).catch(() => {});
 
@@ -8297,7 +8311,7 @@ export default function App() {
         autoRefreshAbortersRef.current.add(controller);
         fetch("/api/enrich", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify({
             title: item.title,
             issue: item.issue || item.title?.match(/#(\d+)/)?.[1] || null,
@@ -8328,7 +8342,15 @@ export default function App() {
           }),
           signal: controller.signal,
         })
-          .then((r) => (r.ok ? r.json() : null))
+          .then((r) => {
+            // Handle 401 unauthorized
+            if (r.status === 401) {
+              clearVaultKey();
+              setShowAccessModal(true);
+              return null;
+            }
+            return r.ok ? r.json() : null;
+          })
           .then((enrich) => {
             if (cancelled || !enrich) return;
             // Gate: when matchConfidence is LOW, auto-refresh must NOT
@@ -8654,10 +8676,18 @@ export default function App() {
           : { images: [b64] };
         const res = await fetch("/api/grade", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify(gradeBody),
         });
         const data = await res.json();
+
+        // Handle 401 unauthorized (wrong/missing access code)
+        if (res.status === 401) {
+          clearVaultKey();
+          setShowAccessModal(true);
+          throw new Error("Access denied. Please enter your access code.");
+        }
+
         if (!res.ok) throw new Error(data.error || "Failed to grade");
 
         // FIX 2: Non-comic rejection
@@ -8728,10 +8758,18 @@ export default function App() {
         if (!buyerMode) enrichBody.images = [b64];
         fetch("/api/enrich", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify(enrichBody),
         })
-          .then((r) => (r.ok ? r.json() : null))
+          .then((r) => {
+            // Handle 401 unauthorized
+            if (r.status === 401) {
+              clearVaultKey();
+              setShowAccessModal(true);
+              return null;
+            }
+            return r.ok ? r.json() : null;
+          })
           .then((enrich) => {
             if (!enrich) return;
             // Explicitly preserve the cover image from the initial grade
@@ -9582,7 +9620,7 @@ export default function App() {
     try {
       res = await fetch("/api/enrich", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
           title: sanitizedTitle,
           issue: item.issue || item.title?.match(/#(\d+)/)?.[1] || null,
@@ -9618,6 +9656,12 @@ export default function App() {
       throw err;
     }
     if (!res.ok) {
+      // Handle 401 unauthorized
+      if (res.status === 401) {
+        clearVaultKey();
+        setShowAccessModal(true);
+        return;
+      }
       const errBody = await res.json().catch(() => ({}));
       throw new Error(errBody.error || "Failed to refresh market data");
     }
@@ -10089,8 +10133,21 @@ export default function App() {
 
           {!loading && !result && !error && !bulkProgress && bulkDone == null && (
             <>
-              {/* Scanner ready indicator - compact, top right */}
-              <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 20px 8px" }}>
+              {/* Scanner ready indicator + access code button */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 20px 8px" }}>
+                <button
+                  onClick={() => setShowAccessModal(true)}
+                  style={{
+                    fontSize: 11,
+                    color: "#666",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "4px 8px",
+                  }}
+                >
+                  🔑 Access code
+                </button>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <div style={{
                     width: 6, height: 6, borderRadius: "50%", background: "#16a34a",
@@ -10763,6 +10820,99 @@ export default function App() {
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* ACCESS GATE MODAL — T1 invite key entry (LAUNCH BLOCKER FIX) */}
+      {showAccessModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.95)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10000,
+            padding: 20,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              // Prevent dismissing by clicking outside if no key stored
+              if (localStorage.getItem('vault_key')) {
+                setShowAccessModal(false);
+              }
+            }
+          }}
+        >
+          <div
+            style={{
+              background: "#1a1a1a",
+              borderRadius: 12,
+              padding: 32,
+              maxWidth: 400,
+              width: "100%",
+              border: "1px solid #333",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 8, color: "#d4af37" }}>
+              🔐 Access Required
+            </div>
+            <div style={{ fontSize: 14, color: "#999", marginBottom: 24 }}>
+              Enter your Comic Vault access code to continue
+            </div>
+            <input
+              type="password"
+              value={accessCodeInput}
+              onChange={(e) => setAccessCodeInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && accessCodeInput.trim()) {
+                  localStorage.setItem('vault_key', accessCodeInput.trim());
+                  setShowAccessModal(false);
+                  setAccessCodeInput('');
+                }
+              }}
+              placeholder="Access code"
+              autoFocus
+              style={{
+                width: "100%",
+                padding: "12px 16px",
+                fontSize: 16,
+                background: "#2a2a2a",
+                border: "1px solid #444",
+                borderRadius: 8,
+                color: "#fff",
+                marginBottom: 16,
+              }}
+            />
+            <button
+              onClick={() => {
+                if (accessCodeInput.trim()) {
+                  localStorage.setItem('vault_key', accessCodeInput.trim());
+                  setShowAccessModal(false);
+                  setAccessCodeInput('');
+                }
+              }}
+              disabled={!accessCodeInput.trim()}
+              style={{
+                width: "100%",
+                padding: "12px 16px",
+                fontSize: 16,
+                fontWeight: 700,
+                background: accessCodeInput.trim() ? "#d4af37" : "#444",
+                color: accessCodeInput.trim() ? "#000" : "#666",
+                border: "none",
+                borderRadius: 8,
+                cursor: accessCodeInput.trim() ? "pointer" : "not-allowed",
+              }}
+            >
+              Continue
+            </button>
+          </div>
         </div>
       )}
     </div>
