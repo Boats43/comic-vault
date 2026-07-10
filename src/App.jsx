@@ -8384,10 +8384,10 @@ export default function App() {
                 : chooseBetterPrice(enrich, cur);
               const gradeGuard = chooseBetterGrade(enrich, cur);
 
-              // P0-C: Sync decision to displayed price. If quality guard keeps old price,
-              // keep old decision too. Decision and price must always match.
+              // P0-C: Sync decision to displayed price. Decision recomputed on every refresh
+              // even if price unchanged (sold/active ratio, warnings can shift verdict).
               const priceChangedAR = priceGuard.price !== cur.price;
-              const syncedDecision = priceChangedAR ? enrich.decision : cur.decision;
+              const syncedDecision = enrich.decision || cur.decision;
 
               const updated = {
                 ...cur,
@@ -8805,7 +8805,8 @@ export default function App() {
                 const priceChanged = priceGuardB.price && priceGuardB.price !== cur.price;
 
                 // P0-C: Sync decision to displayed price (scan path)
-                const syncedDecisionB = priceChanged ? enrich.decision : cur.decision;
+                // Always use new decision when present (verdict can change without price change)
+                const syncedDecisionB = enrich.decision || cur.decision;
 
                 const updated = {
                   ...cur,
