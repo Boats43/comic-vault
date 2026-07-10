@@ -10646,6 +10646,21 @@ export default function App() {
         />
       )}
 
+      {/* A1 LEGAL: Launch footer — pricing disclaimer + eBay attribution */}
+      <div style={{
+        padding: "12px 16px",
+        background: "rgba(20,20,20,0.6)",
+        borderTop: "1px solid rgba(255,255,255,0.08)",
+        fontSize: 11,
+        lineHeight: 1.5,
+        color: "#888",
+        textAlign: "center",
+      }}>
+        Prices are estimates derived from recent eBay sales data — not appraisals or financial advice.
+        <br />
+        eBay and the eBay logo are trademarks of eBay Inc.
+      </div>
+
       <nav className="tab-bar">
         <button
           className={`tab-btn ${tab === "scan" ? "active" : ""}`}
