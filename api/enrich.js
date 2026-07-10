@@ -1863,7 +1863,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // Q58: Backfill when Vision has NO issue
+    // Q58: Backfill when Vision has NO issue (9TH ATTEMPT — entry trace added)
+    console.log(`[Q58-entry] issueNum=${issueNum||'null'} visualPoolCount=${parsedVisualRows?.length||0}`);
     if (!issueNum && parsedVisualRows && parsedVisualRows.length > 0) {
       const issuePattern = /#\s*(\d+)/;
       const issueCounts = {};
@@ -1875,6 +1876,7 @@ export default async function handler(req, res) {
         }
       });
       const totalVisual = parsedVisualRows.length;
+      console.log(`[Q58-entry] guard: !issueNum=${!issueNum}, parsedVisualRows.length=${parsedVisualRows.length}, entering backfill block`);
       const consensusEntry = Object.entries(issueCounts)
         .sort((a, b) => b[1] - a[1])[0];
       if (consensusEntry) {
