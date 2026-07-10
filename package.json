@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/inject-build-id.js",
     "build": "node --input-type=module --check < api/enrich.js && node --input-type=module --check < api/grade.js && node --input-type=module --check < api/comps.js && node --input-type=module --check < src/lib/priceBands.js && node --input-type=module --check < src/lib/compHygiene.js && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

@@ -1550,6 +1550,10 @@ export {
 };
 
 export default async function handler(req, res) {
+  // A6 BUILD-ID: Inject commit hash header
+  const buildId = process.env.CV_BUILD_ID || 'unknown';
+  res.setHeader('x-cv-build', buildId);
+
   // A3 ACCESS GATE: T1 invite mechanism
   const gateError = checkAccessGate(req);
   if (gateError) {
