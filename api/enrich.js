@@ -1814,6 +1814,7 @@ export default async function handler(req, res) {
       }
     }
 
+    // Q78: Issue-axis visual consensus (mismatch detection + backfill)
     // Q58: Issue consensus backfill from VISUAL pool (eBay image search results).
     // When Vision missed issue (issueNum=null) AND ≥70% of visual search results
     // agree on single issue number, backfill issueNum/effectiveIssue and continue.
@@ -1821,6 +1822,48 @@ export default async function handler(req, res) {
     // Must run BEFORE resolveIdentity (line 1736) so confirmedIssue gets backfilled value.
     let issueBackfilledFromVisual = false;
     let issueBackfillProvenance = null;
+    let issueFromConsensus = false;
+    let issueMismatchRatio = 0;
+
+    if (parsedVisualRows && parsedVisualRows.length >= 4) {
+      const issuePattern = /#\s*(\d+)/;
+      const issueCounts = {};
+      parsedVisualRows.forEach(r => {
+        const match = (r.title || '').match(issuePattern);
+        if (match) {
+          const num = match[1];
+          issueCounts[num] = (issueCounts[num] || 0) + 1;
+        }
+      });
+      const totalVisual = parsedVisualRows.length;
+      const consensusEntry = Object.entries(issueCounts)
+        .sort((a, b) => b[1] - a[1])[0];
+
+      if (consensusEntry) {
+        const [visualIssue, count] = consensusEntry;
+        const ratio = count / totalVisual;
+        const visionIssue = String(issueNum || '').trim().replace(/^0+/, '') || '';
+        const visualNorm = String(visualIssue).trim().replace(/^0+/, '') || '';
+
+        // Q78: Mismatch detection when Vision HAS issue but ≥60% visual disagrees
+        if (issueNum && visionIssue && visionIssue !== visualNorm && ratio >= 0.60) {
+          issueMismatchRatio = ratio;
+          console.log(`[Q78-issue] visual=${visualIssue} vision=${visionIssue} mismatch=${(ratio*100).toFixed(0)}% (${count}/${totalVisual})`);
+
+          // ≥80% mismatch → ID_REQUIRED (handled in identity blockers below)
+          if (ratio >= 0.80) {
+            console.log(`[Q78-issue] ≥80% mismatch → will escalate to ID_REQUIRED`);
+          } else {
+            // ≥60% mismatch → adopt visual consensus, flag NEEDS_REVIEW
+            issueNum = visualIssue;
+            issueFromConsensus = true;
+            console.log(`[Q78-issue] adopted visual=${visualIssue}, flagged NEEDS_REVIEW`);
+          }
+        }
+      }
+    }
+
+    // Q58: Backfill when Vision has NO issue
     if (!issueNum && parsedVisualRows && parsedVisualRows.length > 0) {
       const issuePattern = /#\s*(\d+)/;
       const issueCounts = {};
