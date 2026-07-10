@@ -72,7 +72,13 @@ function computeBestChannel(decision, item) {
     return 'cash_sale';
   }
 
-  // Fallback
+  // FIX: LIST_LOW ≥$100 → cash_sale (individual listing, conservative price)
+  // Not research — book has price and clear action
+  if (decision.action === 'LIST_LOW') {
+    return 'cash_sale';
+  }
+
+  // Fallback: research only for unpriced/conflict/unknown states
   return 'research';
 }
 
