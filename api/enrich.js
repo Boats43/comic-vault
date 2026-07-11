@@ -4253,7 +4253,37 @@ export default async function handler(req, res) {
             const currentPriceNum = parseFloat(
               String(out.price || '0').replace(/[$,]/g, '')
             );
-            if (currentPriceNum < floorResult.floor) {
+
+            // XMEN1-RULING [Option 2+]: Contamination detection
+            // When soldAvg exists and is <50% of floor.low, suspect reprint/polybag
+            // contamination in sold pool. Keep estimate displayed (no floor override),
+            // flag for research, hard-lock listing.
+            const contaminationThreshold = floorResult.floor * 0.5;
+            const hasSoldData = soldAvg != null && !isNaN(soldAvg) && soldAvg > 0;
+            const isSuspectContaminated = hasSoldData && soldAvg < contaminationThreshold;
+
+            if (isSuspectContaminated) {
+              // Option 2+: Flag contamination, RESEARCH decision, hard-lock
+              out.floorContaminationSuspect = true;
+              out.floorContaminationReason =
+                `Verified solds ($${soldAvg.toFixed(0)}) far below key floor ($${floorResult.floor.toLocaleString()}) — pool may contain reprints`;
+              out.floorBandLow = fmtUsd(floorResult.floor);
+              out.floorBandHigh = fmtUsd(floorResult.priceHigh);
+              out.decision = {
+                action: 'RESEARCH',
+                confidence: 'LOW',
+                blockers: ['floor-contamination-suspect'],
+                warnings: [],
+                reason: out.floorContaminationReason,
+              };
+              out.listingHardLocked = true;
+              out.listingHardLockReason = 'mega-key-floor-contamination';
+              console.log('[mega-key-floor] CONTAMINATION SUSPECT:',
+                `${title} #${confirmedIssue} soldAvg=$${soldAvg.toFixed(0)}`,
+                `floor=$${floorResult.floor.toLocaleString()}`,
+                `(${((soldAvg / floorResult.floor) * 100).toFixed(0)}% of floor) → RESEARCH + hard-locked`);
+            } else if (currentPriceNum < floorResult.floor) {
+              // Normal floor enforcement path
               out.preFloorPrice = out.price;
               out.preFloorSource = out.pricingSource || 'fallback';
               out.price = fmtUsd(floorResult.floor);
