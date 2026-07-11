@@ -121,6 +121,16 @@ const POP_GRADE_INDEX = [
 
 const getDisplayPrice = (item) => {
   if (!item) return 0;
+
+  // Ship #24a-3 — single writer. When the canonical contract block exists,
+  // it IS the price: header, stats bar, Recommended row, and List button all
+  // resolve here. Legacy chain below survives ONLY for pre-Ship-24 catalogue
+  // entries that have no contract yet (auto-refresh back-fills them).
+  // Q41 manual override still wins — the user's number outranks the engine's.
+  if (item.contract && !item.priceOverridden) {
+    return item.contract.price ?? 0;
+  }
+
   // Ship #20a.6.4 — refuse-to-price gate. When identity is uncertain,
   // suppress both Vision's stored price AND the cached comps fallback.
   // The displayed value is the listing-decision number; gated books
@@ -517,6 +527,16 @@ const getChannelMetrics = (catalogue) => {
 const getAuthorityPrice = (item) => {
   if (!item) return 0;
 
+  // Ship #24a-3 (Amendment A): the contract is the single price authority —
+  // listPrice and the List button read the same number as every other
+  // surface. The v0-H soldAvg override is DELETED as a writer; sold/active
+  // arbitration now happens server-side inside contract assembly.
+  if (item.contract) {
+    return item.contract.price ?? 0;
+  }
+
+  // Legacy chain — pre-Ship-24 catalogue entries only (no contract yet).
+
   // Q68-C: Refuse-state coherence - return 0 for refused identity
   if (item.identityConfident === false) return 0;
 
@@ -530,30 +550,6 @@ const getAuthorityPrice = (item) => {
     return getDisplayPrice(item);
   }
 
-  // Fix v0-H: Floor-enforcement mismatch detection
-  // When decision is RESEARCH or LIST_NOW and the system price (floor-enforced)
-  // differs significantly from sold comp average (verified market value),
-  // use the sold comp average instead of the floor-anchored price.
-  // Prevents garbage active comps from anchoring listPrice below verified sold data.
-  const action = item.decision?.action;
-  if (action === 'RESEARCH' || action === 'LIST_NOW') {
-    const systemPrice = getDisplayPrice(item);
-    const soldAvg = item.soldCompDiagnostics?.soldAvg;
-    const hasVerifiedSold = (item.soldCompDiagnostics?.verifiedCount || 0) > 0;
-
-    if (hasVerifiedSold && soldAvg && systemPrice > 0) {
-      const ratio = soldAvg / systemPrice;
-      // If sold average is >50% different from system price, use sold average
-      if (ratio > 1.5 || ratio < 0.67) {
-        console.log(
-          `[authority-price] floor mismatch: system=$${systemPrice.toFixed(2)} soldAvg=$${soldAvg.toFixed(2)} ` +
-          `ratio=${ratio.toFixed(2)}x — using soldAvg`
-        );
-        return soldAvg;
-      }
-    }
-  }
-
   // Non-blocked decisions with decision.price: use it
   // Includes LIST_NOW, LIST_LOW, RESEARCH, GRADE_CANDIDATE
   if (item.decision?.price != null && item.decision.price > 0) {
@@ -562,6 +558,26 @@ const getAuthorityPrice = (item) => {
 
   // Fallback to system price
   return getDisplayPrice(item);
+};
+
+// Ship #24 Amendment C — client-side drift alarm (dev mode only).
+// Every rendered price surface must show contract.price; a divergence here
+// means a surface bypassed the contract. Warn, never block.
+const CONTRACT_DEV_MODE =
+  typeof import.meta !== 'undefined' && !!import.meta.env?.DEV;
+const assertContractPrice = (item, surface, rendered) => {
+  if (!CONTRACT_DEV_MODE || !item?.contract || item.priceOverridden) return rendered;
+  const cp = item.contract.price ?? 0;
+  const rv =
+    typeof rendered === 'number'
+      ? rendered
+      : parseFloat(String(rendered ?? '0').replace(/[$,]/g, '')) || 0;
+  if (Math.abs(rv - cp) > 0.011) {
+    console.warn(
+      `[contract-drift] ${surface}: rendered ${rv} != contract.price ${cp} (state=${item.contract.state})`
+    );
+  }
+  return rendered;
 };
 
 const marketValueOf = (r) => {
@@ -884,9 +900,26 @@ function ResultCard({ result, enriching }) {
      comps.recentSales.length > 0) ||
     (Array.isArray(result.soldComps) && result.soldComps.length > 0);
   const displayPrice = getDisplayPrice(result);
-  const recommendedLabel = displayPrice > 0
-    ? formatCurrency(displayPrice)
-    : result.price || "—";
+  // Ship #24a-3 — contract items render contract.price ONLY. The legacy
+  // `result.price` string fallback is dead for them: a REFUSED card must
+  // show "—", never a stale writer's price (ruling 3).
+  const recommendedLabel = result.contract
+    ? (result.contract.price != null
+        ? formatCurrency(assertContractPrice(result, 'ResultCard.header', result.contract.price))
+        : "—")
+    : (displayPrice > 0 ? formatCurrency(displayPrice) : result.price || "—");
+  // Contract banner: REFUSED / LOCKED / INCOMPLETE render locks[0].reason
+  // verbatim (Amendment B — wires XMEN1 contamination copy onto the card).
+  const contractBanner =
+    result.contract &&
+    ['REFUSED', 'LOCKED', 'INCOMPLETE'].includes(result.contract.state)
+      ? {
+          state: result.contract.state,
+          reason:
+            result.contract.locks?.[0]?.reason ||
+            'Listing locked — review before listing',
+        }
+      : null;
   // Ship #20a.6.4 — refuse-to-price state. When server returns
   // identityConfident:false, the price area is replaced with a red
   // "Identification Required" panel. Only the title (when it itself
@@ -993,6 +1026,30 @@ function ResultCard({ result, enriching }) {
           )}
           <div className="small" style={{ opacity: 0.85 }}>
             Capture the indicia (inside front cover) or back cover to surface issue # and year, then re-scan.
+          </div>
+        </div>
+      )}
+
+      {!identityGated && contractBanner && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: contractBanner.state === 'REFUSED'
+              ? "1px solid rgba(239,68,68,0.5)"
+              : "1px solid rgba(245,158,11,0.5)",
+            background: contractBanner.state === 'REFUSED'
+              ? "rgba(239,68,68,0.08)"
+              : "rgba(245,158,11,0.08)",
+            color: contractBanner.state === 'REFUSED' ? "#ef4444" : "#f59e0b",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          {contractBanner.state === 'REFUSED' ? '⛔ CANNOT PRICE' : '🔒 LISTING LOCKED'}
+          <div style={{ fontWeight: 400, marginTop: 4, opacity: 0.9 }}>
+            {contractBanner.reason}
           </div>
         </div>
       )}
@@ -1106,9 +1163,13 @@ function ResultCard({ result, enriching }) {
                   // Ship #20a.6.1 — chip is clickable; expands rejected-samples drawer.
                   const diag = result.soldCompDiagnostics;
                   const hasRejected = diag && Array.isArray(diag.rejectedSamples) && diag.rejectedSamples.length > 0;
-                  const showVerifiedRatio = diag && diag.rawCount > diag.verifiedCount && diag.verifiedCount > 0;
+                  // Ship #24a-3 — THE verifiedCount is contract.verifiedCount
+                  // (I6 pins it to soldCompDiagnostics; legacy read only for
+                  // pre-contract entries).
+                  const vCount = result.contract?.verifiedCount ?? diag?.verifiedCount ?? 0;
+                  const showVerifiedRatio = diag && diag.rawCount > vCount && vCount > 0;
                   const verifiedStr = showVerifiedRatio
-                    ? `${diag.verifiedCount} of ${diag.rawCount} sold verified`
+                    ? `${vCount} of ${diag.rawCount} sold verified`
                     : `${result.soldComps.length} sold`;
                   const onClick = hasRejected
                     ? (e) => { e.preventDefault(); e.stopPropagation(); setSoldDrawerOpen((v) => !v); }
@@ -1304,13 +1365,29 @@ function ResultCard({ result, enriching }) {
                 {recommendedLabel}
               </span>
               {(() => {
-                const cc = comps?.count || 0;
-                const sc = Array.isArray(result.soldComps) ? result.soldComps.length : 0;
-                const hasPriceData = result?.pricingSource === "pricecharting";
-                const level = sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW";
+                // Ship #24a-3 (Amendment A): inline chip recomputation
+                // DELETED — the chip renders contract fields only. Legacy
+                // count-based heuristic survives solely for pre-contract
+                // catalogue entries.
+                let level, label;
+                if (result.contract) {
+                  const st = result.contract.state;
+                  if (st === 'ESTIMATED') { level = 'LOW'; label = 'ESTIMATE'; }
+                  else if (st === 'PRICED') {
+                    level = result.contract.decision?.confidence === 'HIGH' ? 'HIGH'
+                      : result.contract.decision?.confidence === 'MEDIUM' ? 'MEDIUM' : 'LOW';
+                    label = level === 'HIGH' ? 'HIGH ✓' : level === 'MEDIUM' ? 'MED ~' : 'LOW';
+                  }
+                  else { level = 'LOW'; label = st; }
+                } else {
+                  const cc = comps?.count || 0;
+                  const sc = Array.isArray(result.soldComps) ? result.soldComps.length : 0;
+                  const hasPriceData = result?.pricingSource === "pricecharting";
+                  level = sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW";
+                  label = level === "HIGH" ? "HIGH ✓" : level === "MEDIUM" ? "MED ~" : "AI EST";
+                }
                 const bg = level === "HIGH" ? "rgba(22,163,106,0.2)" : level === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(245,158,11,0.2)";
                 const fg = level === "HIGH" ? "#16a34a" : level === "MEDIUM" ? "#d4af37" : "#f59e0b";
-                const label = level === "HIGH" ? "HIGH ✓" : level === "MEDIUM" ? "MED ~" : "AI EST";
                 return (
                   <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, fontWeight: 700, background: bg, color: fg }}>
                     {label}
@@ -2778,9 +2855,13 @@ function CollectionDetail({
      item.comps.recentSales.length > 0) ||
     (Array.isArray(item.soldComps) && item.soldComps.length > 0);
   const displayPrice = getDisplayPrice(item);
-  const recommendedLabel = displayPrice > 0
-    ? formatCurrency(displayPrice)
-    : "—";
+  // Ship #24a-3 — contract price renders "—" honestly when null (REFUSED),
+  // never a $0.00 string (ruling 3).
+  const recommendedLabel = item.contract
+    ? (item.contract.price != null
+        ? formatCurrency(assertContractPrice(item, 'CollectionDetail.recommended', item.contract.price))
+        : "—")
+    : (displayPrice > 0 ? formatCurrency(displayPrice) : "—");
 
   // Grade badge: CGC numeric if graded, raw grade if available, else RAW COPY.
   const gradeBadgeText =
@@ -3345,15 +3426,20 @@ function CollectionDetail({
               </div>
             </div>
 
-            {/* Recommended Price */}
-            {(item.decision?.price != null || displayPrice > 0) && (
+            {/* Recommended Price — Ship #24a-3: the hero number IS the
+                contract price. The decision.price/displayPrice divergence
+                (four-sources coherence bug, B3 P3-A) is dead for contract
+                items: header == Recommended row == stats bar == List button. */}
+            {(item.contract ? item.contract.price != null : (item.decision?.price != null || displayPrice > 0)) && (
               <div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: colors.text, marginBottom: 4 }}>
-                  {item.decision?.price != null
-                    ? (typeof item.decision.price === 'number'
-                      ? `$${Number(item.decision.price).toFixed(2)}`
-                      : (String(item.decision.price).startsWith('$') ? item.decision.price : `$${item.decision.price}`))
-                    : `$${Number(displayPrice).toFixed(2)}`}
+                  {item.contract
+                    ? formatCurrency(assertContractPrice(item, 'DecisionPanel.hero', item.contract.price))
+                    : item.decision?.price != null
+                      ? (typeof item.decision.price === 'number'
+                        ? `$${Number(item.decision.price).toFixed(2)}`
+                        : (String(item.decision.price).startsWith('$') ? item.decision.price : `$${item.decision.price}`))
+                      : `$${Number(displayPrice).toFixed(2)}`}
                 </div>
                 {/* P0-D: Show when price was last updated */}
                 {item.priceUpdatedAt && (
@@ -3657,6 +3743,34 @@ function CollectionDetail({
         </div>
       )}
 
+      {/* Ship #24a-3 — contract state banner (Amendment B): REFUSED /
+          LOCKED / INCOMPLETE render locks[0].reason verbatim on the card. */}
+      {item.contract &&
+        ['REFUSED', 'LOCKED', 'INCOMPLETE'].includes(item.contract.state) && (
+        <div
+          style={{
+            marginTop: 8,
+            marginBottom: 4,
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: item.contract.state === 'REFUSED'
+              ? "1px solid rgba(239,68,68,0.5)"
+              : "1px solid rgba(245,158,11,0.5)",
+            background: item.contract.state === 'REFUSED'
+              ? "rgba(239,68,68,0.08)"
+              : "rgba(245,158,11,0.08)",
+            color: item.contract.state === 'REFUSED' ? "#ef4444" : "#f59e0b",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          {item.contract.state === 'REFUSED' ? '⛔ CANNOT PRICE' : '🔒 LISTING LOCKED'}
+          <div style={{ fontWeight: 400, marginTop: 4, opacity: 0.9 }}>
+            {item.contract.locks?.[0]?.reason || 'Review before listing'}
+          </div>
+        </div>
+      )}
+
       {/* 2a. STATS BAR */}
       {(() => {
         const lastSoldPrice = item.soldComps?.[0]?.price || item.comps?.recentSales?.[0]?.price || null;
@@ -3667,7 +3781,7 @@ function CollectionDetail({
         const activeLow = activeLoNum ? '$' + Math.round(activeLoNum) : null;
         const activeHigh = activeHiNum ? '$' + Math.round(activeHiNum) : null;
         const activeRange = activeLow && activeHigh ? activeLow + '\u2013' + activeHigh : (activeAvgNum ? '$' + Math.round(activeAvgNum) : null);
-        const dp = getDisplayPrice(item);
+        const dp = assertContractPrice(item, 'StatsBar', getDisplayPrice(item));
         return (
           <div style={{ fontSize: 12, color: '#888', marginTop: 4, marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <span style={{ background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: 12, color: '#d4af37', fontWeight: 600 }}>{item.grade || 'RAW'}</span>
@@ -4571,13 +4685,18 @@ function CollectionDetail({
               );
             }
             // Default: matchConfidence tier (for non-mega-key books).
+            // Ship #24a-3 (Amendment A): the count-based recomputation is
+            // DELETED for contract items — fallback maps contract.state
+            // instead (conservative: ESTIMATED renders as Estimate).
             const mcTier = item.matchConfidence?.tier;
             const mcScore = item.matchConfidence?.score;
             const cc = item.comps?.count || 0;
             const sc = Array.isArray(item.soldComps) ? item.soldComps.length : 0;
             const hasPriceData = item?.pricingSource === "pricecharting";
             const level = mcTier
-              || (sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW");
+              || (item.contract
+                ? (item.contract.state === 'PRICED' ? "MEDIUM" : "LOW")
+                : (sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW"));
             const bg = level === "HIGH" ? "rgba(22,163,106,0.2)" : level === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(220,38,38,0.2)";
             const fg = level === "HIGH" ? "#16a34a" : level === "MEDIUM" ? "#d4af37" : "#dc2626";
             const label = level === "HIGH"
@@ -4746,9 +4865,11 @@ function CollectionDetail({
                     // Ship #20a.6.1 — chip is clickable; expands rejected-samples drawer.
                     const diag = item.soldCompDiagnostics;
                     const hasRejected = diag && diag.rejectedCount > 0; // Ship #21d: check rejectedCount, not just samples
-                    const showVerifiedRatio = diag && diag.rawCount > diag.verifiedCount && diag.verifiedCount > 0;
+                    // Ship #24a-3 — contract.verifiedCount is the single source
+                    const vCount = item.contract?.verifiedCount ?? diag?.verifiedCount ?? 0;
+                    const showVerifiedRatio = diag && diag.rawCount > vCount && vCount > 0;
                     const verifiedStr = showVerifiedRatio
-                      ? `${diag.verifiedCount} of ${diag.rawCount} sold verified`
+                      ? `${vCount} of ${diag.rawCount} sold verified`
                       : `${item.soldComps.length} sold`;
                     const onClick = hasRejected
                       ? (e) => { e.preventDefault(); e.stopPropagation(); setSoldDrawerOpen((v) => !v); }
@@ -5924,6 +6045,41 @@ function CollectionDetail({
                   </>
                 );
               }
+              // Ship #24a-3 (Amendment B) — contract lock gate. Any lock in
+              // contract.locks[] hard-disables listing and locks[0].reason
+              // renders VERBATIM as the banner. Wires the XMEN1 fields
+              // (listingHardLocked / floorContaminationReason) onto the
+              // card, plus manual-review, refused, tier-0, thin-pool, and
+              // contract-violation locks — one gate for all of them.
+              if (item.contract && (item.contract.locks?.length || 0) > 0) {
+                const lock = item.contract.locks[0];
+                return (
+                  <>
+                    <div style={{
+                      padding: "10px 12px",
+                      marginBottom: 8,
+                      background: "rgba(239,68,68,0.10)",
+                      border: "1px solid #da3633",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: "#fca5a5",
+                    }}>
+                      🔒 LISTING LOCKED — {String(lock.code).replace(/-/g, ' ').toUpperCase()}
+                      <div style={{ marginTop: 4, fontSize: 11, color: "#888" }}>
+                        {lock.reason}
+                      </div>
+                    </div>
+                    <button
+                      className="reset-btn"
+                      disabled={true}
+                      style={{ width: "100%", opacity: 0.5 }}
+                    >
+                      📋 Listing Locked
+                    </button>
+                  </>
+                );
+              }
+
               // Ship #26 v0-D — Decision Engine hard-block gate
               // Block listing when decision.action is ID_REQUIRED or DO_NOT_LIST,
               // or when decision.blockers array has items.
@@ -5996,6 +6152,19 @@ function CollectionDetail({
                 );
               }
 
+              // Ship #24a-3 — contract items: button obeys contract.listable
+              // (locks already returned above, so a lockless !listable here
+              // means the decision action isn't a LIST action). Q57 inline
+              // thin-pool rule survives ONLY for pre-contract entries — the
+              // contract carries it server-side as the low-tier-thin-pool lock.
+              const listLocked = item.contract
+                ? !item.contract.listable
+                : (item.matchConfidence?.tier === 'LOW' &&
+                   (item.soldComps?.length || 0) + (item.comps?.count || 0) < 3);
+              const listLockedLabel = item.contract
+                ? `🔒 List locked — ${item.contract.decision?.action || 'review'} recommended first`
+                : `🔒 List locked — verify data quality first`;
+
               return (
                 <button
                   className="reset-btn primary"
@@ -6003,22 +6172,14 @@ function CollectionDetail({
                   disabled={
                     listing ||
                     !(parseFloat(listPrice) > 0) ||
-                    // Q57: Tier-0 list lock. When match confidence is LOW AND
-                    // verification is insufficient (sold+active <threshold),
-                    // hard-disable list button until user manually reviews.
-                    // ASM #1 class: LOW tier + thin-market → requires manual
-                    // verification before listing. Prevents unverified thin-pool
-                    // books from reaching eBay with inflated prices.
-                    (item.matchConfidence?.tier === 'LOW' &&
-                     (item.soldComps?.length || 0) + (item.comps?.count || 0) < 3)
+                    listLocked
                   }
                   style={{ width: "100%" }}
                 >
                   {listing
                     ? "Listing on eBay..."
-                    : (item.matchConfidence?.tier === 'LOW' &&
-                       (item.soldComps?.length || 0) + (item.comps?.count || 0) < 3)
-                      ? `🔒 List locked — verify data quality first`
+                    : listLocked
+                      ? listLockedLabel
                       : listPrice
                         ? `📋 List on eBay — $${Number(listPrice).toFixed(2)}`
                         : `📋 List on eBay — No price available`}
@@ -8437,6 +8598,12 @@ export default function App() {
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: syncedDecision,
+                // Ship #24a-3 — canonical contract. Follows the same
+                // LOW-match gate as price fields: a LOW-tier refresh must
+                // not swap in a contract that contradicts preserved data.
+                contract: (idGated || !lowMatch)
+                  ? (enrich.contract ?? cur.contract ?? null)
+                  : (cur.contract ?? null),
                 gradeMultiplier: lowMatch ? cur.gradeMultiplier : (enrich.gradeMultiplier || null),
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
                 comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
@@ -8515,6 +8682,8 @@ export default function App() {
                 claudeCheck: enrich.claudeCheck || s.claudeCheck || null,
                 priceBands: enrich.priceBands || s.priceBands || null,
                 demandSignals: enrich.demandSignals || s.demandSignals || null,
+                // Ship #24a-3 — same LOW-match gate as the catalogue merge
+                contract: lowMatch ? (s.contract ?? null) : (enrich.contract ?? s.contract ?? null),
                 manualConfirmed: pc ? false : (s.manualConfirmed || false),
               };
             });
@@ -8881,6 +9050,7 @@ export default function App() {
                   editionConfirmed: cur.editionConfirmed || false,
                   // Ship #26 — Decision Engine v0-B
                   decision: syncedDecisionB,
+                  contract: enrich.contract ?? cur.contract ?? null, // Ship #24a-3
                   // FIX: Persist AI/pricing state to eliminate stale-refresh loop
                   claudeCheck: enrich.claudeCheck || cur.claudeCheck || null,
                   priceBands: enrich.priceBands || cur.priceBands || null,
@@ -8924,6 +9094,7 @@ export default function App() {
                   salesVelocity: enrich.salesVelocity || s.salesVelocity || null,
                   confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || s.matchConfidence || null,
+                  contract: enrich.contract ?? s.contract ?? null, // Ship #24a-3
                   pricingSource: enrich.pricingSource || null,
                   priceNote: enrich.priceNote || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
@@ -9246,6 +9417,7 @@ export default function App() {
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: enrich.decision || cur.decision,
+                contract: enrich.contract ?? cur.contract ?? null, // Ship #24a-3
                 gradeMultiplier: enrich.gradeMultiplier || null,
                 // Preserve manual list price edits
                 listPrice: cur.listPrice,
@@ -9712,6 +9884,7 @@ export default function App() {
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
       matchConfidence: enrich.matchConfidence || item.matchConfidence || null,
       decision: enrich.decision || item.decision,
+      contract: enrich.contract ?? item.contract ?? null, // Ship #24a-3
       pricingSource: enrich.pricingSource ?? null,
       priceNote: enrich.priceNote || null,
       // Preserve manual list price edits
@@ -10557,7 +10730,7 @@ export default function App() {
                             setCatalogue((prev) => {
                               const cur = prev.find((x) => x.id === savedId);
                               if (!cur) return prev;
-                              const updated = { ...cur, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });
