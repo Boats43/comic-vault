@@ -209,6 +209,82 @@ function deriveBands(out, priceNum) {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Ship 24c — Anchor-direction rule (Layer B pricing math, greenlit
+// 2026-07-11 with SHIP24_CONTRACT.md §3 parameters)
+// ─────────────────────────────────────────────────────────────────
+
+const medianOf = (arr) => {
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid];
+};
+
+/**
+ * When sold-active mismatch is EXTREME, the contract price anchors to the
+ * VERIFIED SOLDS side, never to actives (Action #33 exhibit: $291-class
+ * stale solds vs $13–23 junk actives — solds win, RESEARCH stays).
+ *
+ * Fires when ALL of:
+ * - ≥3 verified solds AND soldMedian > activeMedian × 3 (the existing
+ *   isActiveContaminated threshold from priceBands.js)
+ * - the net price landed on the actives side (< soldMedian × 0.5)
+ * - state is PRICED/ESTIMATED, and NOT a mega-key path (X-Men floor
+ *   contamination ruling and verified floors win there)
+ *
+ * Anchor: all-stale sold pool → soldAvg × 0.85 (tier-2.5 staleness
+ * discount, unknown recency counted as stale — conservative); any fresh
+ * solds → soldMedian. Decision forced to RESEARCH — a mismatch this
+ * extreme is never LIST-clean.
+ */
+function applyAnchorDirection(out, contract) {
+  if (contract.price == null) return;
+  if (contract.state !== 'PRICED' && contract.state !== 'ESTIMATED') return;
+  if (out.floorContaminationSuspect || out.listingHardLocked || out.megaKeyFloorApplied) return;
+
+  const soldPrices = (out.soldComps || [])
+    .map((s) => parsePriceNumber(s?.price))
+    .filter((p) => p != null && p > 0);
+  if (soldPrices.length < 3) return;
+
+  const activePrices = (out.rawComps?.prices || [])
+    .map((p) => (typeof p === 'number' ? p : parsePriceNumber(p?.price)))
+    .filter((p) => p != null && p > 0);
+  if (activePrices.length === 0) return;
+
+  const soldMedian = medianOf(soldPrices);
+  const activeMedian = medianOf(activePrices);
+  if (!(soldMedian > activeMedian * 3)) return;
+  if (contract.price >= soldMedian * 0.5) return; // already sold-side
+
+  const allStale = (out.soldComps || []).every(
+    (s) => s?.daysAgo == null || s.daysAgo > 90
+  );
+  const soldAvg = soldPrices.reduce((a, b) => a + b, 0) / soldPrices.length;
+  const soldLow = Math.min(...soldPrices);
+  const anchor = round2(allStale ? soldAvg * 0.85 : soldMedian);
+  const priorPrice = contract.price;
+
+  contract.price = anchor;
+  contract.bands = {
+    quick: round2(allStale ? soldLow * 0.85 : soldLow),
+    market: anchor,
+    stretch: round2(anchor * 1.15),
+  };
+  contract.decision.action = 'RESEARCH';
+  if (!contract.decision.warnings.includes('sold-active-mismatch-extreme')) {
+    contract.decision.warnings.push('sold-active-mismatch-extreme');
+  }
+  contract.bestChannel = 'research';
+  contract.listable = false;
+  contract.soldSideAnchored = true;
+
+  console.log(
+    `[24c] anchor-direction: soldMedian=$${soldMedian.toFixed(2)} (${soldPrices.length} solds${allStale ? ', all stale' : ''}) ` +
+    `activeMedian=$${activeMedian.toFixed(2)} — price $${priorPrice.toFixed(2)} → $${anchor.toFixed(2)} sold-side, RESEARCH forced`
+  );
+}
+
 /**
  * Assemble the canonical contract block from the final `out` object
  * (post-computeDecision). Pure — does not mutate `out`.
@@ -235,8 +311,8 @@ export function assembleContract(out) {
     ? {
         action: d.action || null,
         confidence: d.confidence ? String(d.confidence).toUpperCase() : null,
-        blockers: Array.isArray(d.blockers) ? d.blockers : [],
-        warnings: Array.isArray(d.warnings) ? d.warnings : [],
+        blockers: Array.isArray(d.blockers) ? [...d.blockers] : [],
+        warnings: Array.isArray(d.warnings) ? [...d.warnings] : [],
         nextStep: d.nextStep || '',
       }
     : {
@@ -253,7 +329,7 @@ export function assembleContract(out) {
     typeof decision.action === 'string' &&
     decision.action.startsWith('LIST');
 
-  return {
+  const contract = {
     version: 1,
     state,
     price,
@@ -267,6 +343,11 @@ export function assembleContract(out) {
     locks,
     violations: [],
   };
+
+  // Ship 24c — verified solds outrank junk actives on extreme mismatch
+  applyAnchorDirection(out, contract);
+
+  return contract;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -407,6 +488,16 @@ export function finalizeResponse(out) {
   const contract = assembleContract(out);
   if (out.decision && typeof out.decision === 'object') {
     out.decision.price = contract.price;
+    // Ship 24c — keep the legacy decision object coherent with the
+    // anchored contract (action pill / bestChannel badge read it).
+    if (contract.soldSideAnchored) {
+      out.decision.action = 'RESEARCH';
+      out.decision.bestChannel = 'research';
+      if (Array.isArray(out.decision.warnings) &&
+          !out.decision.warnings.includes('sold-active-mismatch-extreme')) {
+        out.decision.warnings.push('sold-active-mismatch-extreme');
+      }
+    }
   }
   validateContract(contract, out);
   out.contract = contract;

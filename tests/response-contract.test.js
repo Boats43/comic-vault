@@ -536,5 +536,103 @@ test('24b validator never throws on malformed input', () => {
   assert(true, 'no throw');
 });
 
+// ─────────────────────────────────────────────────────────────────
+// Ship 24c — Anchor-direction rule
+// ─────────────────────────────────────────────────────────────────
+
+function action33Out(overrides = {}) {
+  // Action #33 exhibit: 15 stale solds $300–565 vs 2 junk actives $13–23,
+  // net price landed actives-side at $17.
+  const soldPrices = [300, 310, 325, 330, 340, 342, 350, 355, 360, 365, 380, 400, 439, 500, 565];
+  return cleanOut({
+    price: '$17.00', priceLow: '$13.00', priceHigh: '$23.00',
+    priceBands: { quick: 13, market: 17, stretch: 23, tier: 4 },
+    pricingSource: 'pc_estimate',
+    soldComps: soldPrices.map(p => ({ price: p, daysAgo: 200 })),
+    rawComps: { count: 2, prices: [{ price: 13, title: 'junk a' }, { price: 23, title: 'junk b' }], average: 18, lowest: 13, highest: 23 },
+    soldCompDiagnostics: { rawCount: 20, verifiedCount: 15, rejectedCount: 5, reasons: {} },
+    decision: { action: 'LIST_LOW', confidence: 'medium', blockers: [], warnings: [], nextStep: '', bestChannel: 'bundle' },
+    ...overrides,
+  });
+}
+
+test('24c fires - Action #33 class anchors sold-side, RESEARCH forced', () => {
+  const out = action33Out();
+  finalizeResponse(out);
+  const c = out.contract;
+  const expect = Math.round((out.soldComps.reduce((a, b) => a + b.price, 0) / 15) * 0.85 * 100) / 100;
+  assert(c.soldSideAnchored === true, 'anchor must fire');
+  assert(c.price === expect, `all-stale anchor = soldAvg×0.85 = ${expect}, got ${c.price}`);
+  assert(c.price > 250 && c.price < 350, `$291-class price, got ${c.price}`);
+  assert(c.decision.action === 'RESEARCH', `RESEARCH forced, got ${c.decision.action}`);
+  assert(out.decision.action === 'RESEARCH', 'legacy decision synced to RESEARCH');
+  assert(out.decision.price === c.price, 'decision.price synced to anchor (I7)');
+  assert(c.bestChannel === 'research', 'bestChannel research');
+  assert(c.listable === false, 'not listable');
+  assert(c.bands.quick <= c.price && c.price <= c.bands.stretch, 'anchor inside bands (I5)');
+  assert(c.violations.length === 0, `validator clean post-anchor, got: ${c.violations.join(' | ')}`);
+  assert(c.decision.warnings.includes('sold-active-mismatch-extreme'), 'warning appended');
+});
+
+test('24c fresh solds - anchors to soldMedian (no staleness discount)', () => {
+  const out = action33Out({
+    soldComps: [300, 340, 360, 400, 565].map(p => ({ price: p, daysAgo: 10 })),
+  });
+  finalizeResponse(out);
+  assert(out.contract.soldSideAnchored === true, 'fires');
+  assert(out.contract.price === 360, `fresh anchor = soldMedian 360, got ${out.contract.price}`);
+});
+
+test('24c no-fire - fewer than 3 verified solds', () => {
+  const out = action33Out({ soldComps: [{ price: 300, daysAgo: 200 }, { price: 400, daysAgo: 200 }] });
+  finalizeResponse(out);
+  assert(!out.contract.soldSideAnchored, 'must not fire with 2 solds');
+  assert(out.contract.price === 17, 'price untouched');
+});
+
+test('24c no-fire - mismatch not extreme (soldMedian <= 3x activeMedian)', () => {
+  const out = action33Out({
+    rawComps: { count: 2, prices: [{ price: 150 }, { price: 200 }], average: 175, lowest: 150, highest: 200 },
+    price: '$160.00', priceLow: '$150.00', priceHigh: '$200.00',
+    priceBands: { quick: 150, market: 160, stretch: 200, tier: 3 },
+  });
+  finalizeResponse(out);
+  assert(!out.contract.soldSideAnchored, 'x2 mismatch must not fire');
+});
+
+test('24c no-fire - price already sold-side', () => {
+  const out = action33Out({
+    price: '$340.00', priceLow: '$300.00', priceHigh: '$400.00',
+    priceBands: { quick: 300, market: 340, stretch: 400, tier: 2.5 },
+    pricingSource: 'verified_sold_stale',
+  });
+  finalizeResponse(out);
+  assert(!out.contract.soldSideAnchored, 'sold-side price must not re-anchor');
+  assert(out.contract.price === 340, 'price untouched');
+});
+
+test('24c no-fire - mega-key contamination path excluded (XMEN1 wins)', () => {
+  const out = action33Out({
+    listingHardLocked: true,
+    listingHardLockReason: 'mega-key-floor-contamination',
+    floorContaminationSuspect: true,
+    decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: [], nextStep: '' },
+  });
+  finalizeResponse(out);
+  assert(!out.contract.soldSideAnchored, 'mega-key contamination excluded');
+  assert(out.contract.state === 'LOCKED', 'XMEN1 lock state preserved');
+});
+
+test('24c no-fire - refused state untouched', () => {
+  const out = action33Out({
+    price: null, priceBands: null, priceLow: null, priceHigh: null,
+    refusedToPrice: true, pricingSource: 'refused',
+    decision: { action: 'DO_NOT_LIST', confidence: 'low', blockers: ['x'], warnings: [], nextStep: '' },
+  });
+  finalizeResponse(out);
+  assert(!out.contract.soldSideAnchored, 'refused excluded');
+  assert(out.contract.price === null, 'refused stays null');
+});
+
 // Run all tests
 run();
