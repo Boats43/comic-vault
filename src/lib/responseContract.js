@@ -179,12 +179,20 @@ function deriveState(out, locks, priceNum, source) {
 /**
  * Bands as numbers. Preference: priceBands (tier engine) → priceLow/High
  * around the price → degenerate band at the price. null when price null.
+ *
+ * priceBands is only trusted when the final price sits INSIDE it — writers
+ * that run after the band build (mega-key floor, variant/key multipliers)
+ * can legitimately move the price without a band rebuild; the paired
+ * priceLow/High always reflect the LAST writer, so fall through to those.
  */
 function deriveBands(out, priceNum) {
   if (priceNum == null) return null;
 
   const pb = out.priceBands;
-  if (pb && pb.quick != null && pb.market != null && pb.stretch != null) {
+  if (
+    pb && pb.quick != null && pb.market != null && pb.stretch != null &&
+    priceNum >= pb.quick - 0.011 && priceNum <= pb.stretch + 0.011
+  ) {
     return {
       quick: round2(pb.quick),
       market: round2(pb.market),
@@ -261,9 +269,133 @@ export function assembleContract(out) {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Ship 24b — Invariant validator (API boundary)
+// ─────────────────────────────────────────────────────────────────
+
+const CENT = 0.011; // rounding tolerance for band containment
+
 /**
- * Assemble → (validate, Ship 24b) → attach. Call this immediately before
- * res.json() on every substantive response exit. Mutates and returns `out`.
+ * Validate the assembled contract against invariants I1–I10
+ * (docs/SHIP24_CONTRACT.md §2). NEVER throws, never 500s. On violation:
+ * demote state to INCOMPLETE, lock listing, record the invariant, and emit
+ * a greppable [contract-violation] log line. Ship no self-contradicting
+ * card ever again — worst case is an honest INCOMPLETE with a locked button.
+ *
+ * Mutates and returns `contract`.
+ */
+export function validateContract(contract, out) {
+  const violations = [];
+  const fail = (id, detail) => violations.push(`${id}: ${detail}`);
+
+  // I1 / I2 — REFUSED and ID_REQUIRED render nothing priced
+  if (contract.state === 'REFUSED' || contract.state === 'ID_REQUIRED') {
+    if (contract.price !== null) fail('I1', `${contract.state} with price ${contract.price}`);
+    if (contract.bands !== null) fail('I1', `${contract.state} with bands`);
+    if (contract.listable) fail('I2', `${contract.state} marked listable`);
+  }
+
+  // I3 — any lock forbids listing
+  if (contract.locks.length > 0 && contract.listable) {
+    fail('I3', `listable with ${contract.locks.length} lock(s): ${contract.locks.map((l) => l.code).join(',')}`);
+  }
+
+  // I4 — LOCKED must carry at least one lock
+  if (contract.state === 'LOCKED' && contract.locks.length === 0) {
+    fail('I4', 'state LOCKED with empty locks[]');
+  }
+
+  // I5 — a price must sit inside its own bands
+  if (contract.price != null) {
+    if (!contract.bands) {
+      fail('I5', `price ${contract.price} with null bands`);
+    } else if (
+      contract.price < contract.bands.quick - CENT ||
+      contract.price > contract.bands.stretch + CENT
+    ) {
+      fail('I5', `price ${contract.price} outside bands [${contract.bands.quick}, ${contract.bands.stretch}]`);
+    }
+  }
+
+  // I6 — exactly one verifiedCount source
+  const diagCount = out?.soldCompDiagnostics?.verifiedCount ?? 0;
+  if (contract.verifiedCount !== diagCount) {
+    fail('I6', `contract.verifiedCount ${contract.verifiedCount} != soldCompDiagnostics.verifiedCount ${diagCount}`);
+  }
+
+  // I7 — recommended == header == grade-row: decision.price must equal the
+  // contract price (finalizeResponse syncs it; this catches later writers)
+  if (out?.decision && typeof out.decision === 'object') {
+    const dp = parsePriceNumber(out.decision.price);
+    if (dp !== contract.price) {
+      fail('I7', `out.decision.price ${dp} != contract.price ${contract.price}`);
+    }
+  }
+
+  // I8 — source/state coherence
+  if (contract.price != null && (contract.source == null || contract.source === 'refused')) {
+    fail('I8', `price ${contract.price} with source ${contract.source}`);
+  }
+  if (contract.state === 'PRICED' && !PRICED_SOURCES.has(contract.source)) {
+    fail('I8', `state PRICED with non-verified-sold source ${contract.source}`);
+  }
+  if (contract.state === 'ESTIMATED' && PRICED_SOURCES.has(contract.source)) {
+    fail('I8', `state ESTIMATED with verified-sold source ${contract.source}`);
+  }
+
+  // I9 — customer-grade drift: price >100% over its own pool avg must not
+  // ship a LIST action. Pool = the pool that priced the book (sold avg for
+  // verified-sold sources, active avg for ask-derived). Skipped for
+  // estimate-class sources (no pool) and mega-key floors (verified table
+  // legitimately prices above a contaminated pool).
+  if (
+    contract.price != null &&
+    (contract.decision.action === 'LIST_NOW' || contract.decision.action === 'LIST_LOW') &&
+    !out?.megaKeyFloorApplied
+  ) {
+    let poolAvg = null;
+    if (PRICED_SOURCES.has(contract.source)) {
+      poolAvg = parsePriceNumber(out?.soldCompsAvg);
+    } else if (
+      contract.source === 'active_ask_derived' ||
+      contract.source === 'verified_active' ||
+      contract.source === 'ebay-polybag-active'
+    ) {
+      poolAvg = parsePriceNumber(out?.rawComps?.average);
+    }
+    if (poolAvg != null && poolAvg > 0 && contract.price > poolAvg * 2) {
+      fail('I9', `price ${contract.price} >100% over own pool avg ${poolAvg} with action ${contract.decision.action}`);
+    }
+  }
+
+  // I10 — blocked decisions forbid listing
+  if (
+    (contract.decision.action === 'DO_NOT_LIST' ||
+      contract.decision.action === 'ID_REQUIRED' ||
+      contract.decision.blockers.length > 0) &&
+    contract.listable
+  ) {
+    fail('I10', `listable with blocking decision ${contract.decision.action} (${contract.decision.blockers.length} blockers)`);
+  }
+
+  if (violations.length > 0) {
+    violations.forEach((v) => console.log(`[contract-violation] ${v}`));
+    contract.violations = violations;
+    contract.state = 'INCOMPLETE';
+    contract.listable = false;
+    contract.locks.push({
+      code: 'contract-violation',
+      reason: 'Pricing evidence is inconsistent — card demoted pending review',
+      hard: true,
+    });
+  }
+
+  return contract;
+}
+
+/**
+ * Assemble → validate → attach. Call this immediately before res.json()
+ * on every substantive response exit. Mutates and returns `out`.
  *
  * I7 single-number guarantee: out.decision.price is OVERWRITTEN to the
  * contract price so decision panel, stats bar, Recommended row, and List
@@ -273,10 +405,10 @@ export function assembleContract(out) {
  */
 export function finalizeResponse(out) {
   const contract = assembleContract(out);
-  // validateContract(contract, out) — Ship 24b, next commit in sequence
-  out.contract = contract;
   if (out.decision && typeof out.decision === 'object') {
     out.decision.price = contract.price;
   }
+  validateContract(contract, out);
+  out.contract = contract;
   return out;
 }

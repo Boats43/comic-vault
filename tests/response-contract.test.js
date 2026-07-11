@@ -4,6 +4,7 @@ import {
   parsePriceNumber,
   deriveLocks,
   assembleContract,
+  validateContract,
   finalizeResponse,
 } from '../src/lib/responseContract.js';
 
@@ -382,6 +383,157 @@ test('locks ordering - contamination before manual-review before soft', () => {
   assert(codes.indexOf('mega-key-floor-contamination') < codes.indexOf('manual-review'),
     `contamination first, got ${codes.join(',')}`);
   assert(codes.indexOf('low-tier-thin-pool') === codes.length - 1, 'soft lock last');
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Ship 24b — Invariant validator
+// ─────────────────────────────────────────────────────────────────
+
+test('24b clean assembly - zero violations on every state', () => {
+  const scenarios = [
+    cleanOut(),                                                          // PRICED
+    cleanOut({ pricingSource: 'pc_estimate' }),                          // ESTIMATED
+    cleanOut({ price: null, priceBands: null, priceLow: null, priceHigh: null, refusedToPrice: true, pricingSource: 'refused', decision: { action: 'DO_NOT_LIST', confidence: 'low', blockers: ['x'], warnings: [], nextStep: '' } }), // REFUSED
+    cleanOut({ identityConfident: false, price: null, priceBands: null }), // ID_REQUIRED
+    cleanOut({ listingHardLocked: true, listingHardLockReason: 'mega-key-floor-contamination', decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: [], nextStep: '' } }), // LOCKED
+  ];
+  scenarios.forEach((out, i) => {
+    finalizeResponse(out);
+    assert(out.contract.violations.length === 0,
+      `scenario ${i} should be clean, got: ${out.contract.violations.join(' | ')}`);
+    assert(out.contract.state !== 'INCOMPLETE' || i === 99,
+      `scenario ${i} must not demote, got ${out.contract.state}`);
+  });
+});
+
+test('24b I1 - REFUSED with a price demotes to INCOMPLETE + lock', () => {
+  const out = cleanOut();
+  const c = assembleContract(out);
+  c.state = 'REFUSED'; // hand-corrupt: refused but price survived
+  validateContract(c, out);
+  assert(c.violations.some(v => v.startsWith('I1')), `expected I1, got ${c.violations.join(' | ')}`);
+  assert(c.state === 'INCOMPLETE', 'demoted to INCOMPLETE');
+  assert(c.listable === false, 'listing locked');
+  assert(c.locks.some(l => l.code === 'contract-violation'), 'contract-violation lock added');
+});
+
+test('24b I3 - listable with locks demotes', () => {
+  const out = cleanOut();
+  const c = assembleContract(out);
+  c.locks.push({ code: 'manual-review', reason: 'x', hard: true });
+  c.listable = true; // hand-corrupt
+  validateContract(c, out);
+  assert(c.violations.some(v => v.startsWith('I3')), `expected I3, got ${c.violations.join(' | ')}`);
+});
+
+test('24b I4 - LOCKED with empty locks demotes', () => {
+  const out = cleanOut();
+  const c = assembleContract(out);
+  c.state = 'LOCKED';
+  c.locks = [];
+  validateContract(c, out);
+  assert(c.violations.some(v => v.startsWith('I4')), `expected I4, got ${c.violations.join(' | ')}`);
+});
+
+test('24b I5 - price outside its own bands demotes', () => {
+  const out = cleanOut();
+  const c = assembleContract(out);
+  c.price = 500; // hand-corrupt: bands are 98/123.45/142
+  validateContract(c, out);
+  assert(c.violations.some(v => v.startsWith('I5')), `expected I5, got ${c.violations.join(' | ')}`);
+});
+
+test('24b I5 assembly guard - post-band writer (mega-key floor class) gets honest bands, no violation', () => {
+  // priceBands stale at $123 but floor writer moved price to $2,000
+  // with paired priceLow/High — assembly must not trust stale bands.
+  const out = cleanOut({
+    price: '$2,000.00', priceLow: '$2,000.00', priceHigh: '$2,300.00',
+    megaKeyFloorApplied: true,
+  });
+  finalizeResponse(out);
+  assert(out.contract.violations.length === 0,
+    `mega-key floor must not violate, got: ${out.contract.violations.join(' | ')}`);
+  assert(out.contract.bands.quick <= 2000 && out.contract.bands.stretch >= 2000,
+    `bands must contain floor price, got ${JSON.stringify(out.contract.bands)}`);
+});
+
+test('24b I6 - verifiedCount drift demotes', () => {
+  const out = cleanOut();
+  const c = assembleContract(out);
+  c.verifiedCount = 99; // hand-corrupt
+  validateContract(c, out);
+  assert(c.violations.some(v => v.startsWith('I6')), `expected I6, got ${c.violations.join(' | ')}`);
+});
+
+test('24b I7 - decision.price drifting from contract.price demotes', () => {
+  const out = cleanOut();
+  const c = assembleContract(out);
+  out.decision.price = 999; // a later writer touched decision.price
+  validateContract(c, out);
+  assert(c.violations.some(v => v.startsWith('I7')), `expected I7, got ${c.violations.join(' | ')}`);
+});
+
+test('24b I8 - PRICED with estimate source demotes', () => {
+  const out = cleanOut();
+  const c = assembleContract(out);
+  c.source = 'pc_estimate'; // hand-corrupt: state PRICED
+  validateContract(c, out);
+  assert(c.violations.some(v => v.startsWith('I8')), `expected I8, got ${c.violations.join(' | ')}`);
+});
+
+test('24b I9 - LIST action >100% over own sold pool avg demotes (customer-grade)', () => {
+  // The $300 book with comps averaging $18 class
+  const out = cleanOut({
+    price: '$300.00', priceLow: '$280.00', priceHigh: '$320.00',
+    priceBands: { quick: 280, market: 300, stretch: 320, tier: 2 },
+    pricingSource: 'verified_sold',
+    soldCompsAvg: 18,
+  });
+  finalizeResponse(out);
+  assert(out.contract.violations.some(v => v.startsWith('I9')),
+    `expected I9, got: ${out.contract.violations.join(' | ') || '(none)'}`);
+  assert(out.contract.state === 'INCOMPLETE', 'demoted');
+  assert(out.contract.listable === false, 'locked');
+});
+
+test('24b I9 skip - mega-key floor legitimately above pool avg, no violation', () => {
+  const out = cleanOut({
+    price: '$2,000.00', priceLow: '$2,000.00', priceHigh: '$2,300.00',
+    pricingSource: 'verified_sold',
+    soldCompsAvg: 400,
+    megaKeyFloorApplied: true,
+  });
+  finalizeResponse(out);
+  assert(!out.contract.violations.some(v => v.startsWith('I9')),
+    `mega-key floor exempt from I9, got: ${out.contract.violations.join(' | ')}`);
+});
+
+test('24b I9 skip - RESEARCH action over pool avg is coherent, no violation', () => {
+  const out = cleanOut({
+    price: '$291.00', priceLow: '$280.00', priceHigh: '$320.00',
+    priceBands: { quick: 280, market: 291, stretch: 320, tier: 2.5 },
+    pricingSource: 'verified_sold_stale',
+    soldCompsAvg: 18,
+    decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: [], nextStep: '' },
+  });
+  finalizeResponse(out);
+  assert(!out.contract.violations.some(v => v.startsWith('I9')),
+    `RESEARCH exempt from I9 (Action #33 class), got: ${out.contract.violations.join(' | ')}`);
+});
+
+test('24b I10 - listable with DO_NOT_LIST demotes', () => {
+  const out = cleanOut();
+  const c = assembleContract(out);
+  c.decision.action = 'DO_NOT_LIST'; // hand-corrupt
+  validateContract(c, out);
+  assert(c.violations.some(v => v.startsWith('I10')), `expected I10, got ${c.violations.join(' | ')}`);
+});
+
+test('24b validator never throws on malformed input', () => {
+  const c = assembleContract(cleanOut());
+  validateContract(c, {}); // out with nothing on it
+  validateContract(assembleContract({}), undefined);
+  assert(true, 'no throw');
 });
 
 // Run all tests
