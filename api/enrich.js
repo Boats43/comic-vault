@@ -3412,7 +3412,7 @@ export default async function handler(req, res) {
           out.priceNote = 'eBay polybag listings (active asks, 0.75x haircut)';
           out.polybagDetected = true;
           out.polybagComps = reprintItems.length;
-          out.polybagAskMedian = askMedian;
+          out.polybagAskLow = askLow;
           out.polybagReprintRatio = reprintRatio;
           isPolybagPricing = true;
 
@@ -3533,8 +3533,8 @@ export default async function handler(req, res) {
           // sold comps alongside $9.71 polybag price = confusing/dangerous.
           out.comps = {
             count: reprintItems.length,
-            average: fmtUsd(askMedian * 0.75),
-            averageNum: askMedian * 0.75,
+            average: fmtUsd(askAvg * 0.75),
+            averageNum: askAvg * 0.75,
             lowest: fmtUsd(polybagLow),
             lowestNum: polybagLow,
             highest: fmtUsd(polybagHigh),
