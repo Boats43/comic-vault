@@ -36,6 +36,10 @@ import {
   resolveYear,
   checkAssemblyIntegrity,
 } from "../src/lib/identityCore.js";
+// Ship #24 — canonical response contract. finalizeResponse must be the LAST
+// call before res.json() on every substantive exit; nothing writes
+// price/decision fields after it.
+import { finalizeResponse } from "../src/lib/responseContract.js";
 import {
   verifyStory,
   detectKeyValue,
@@ -2760,7 +2764,9 @@ export default async function handler(req, res) {
           families: familyCandidate.families
         } : null
       };
-      return res.status(200).json(refusedOut);
+      // Ship #24a-2: refusedOut retired as a separate SHAPE — same fields
+      // flow, plus the canonical contract block (state=REFUSED, price null).
+      return res.status(200).json(finalizeResponse(refusedOut));
     }
 
     // Book-level comps cache — skip 5-9s eBay fetch on refresh.
@@ -3575,7 +3581,8 @@ export default async function handler(req, res) {
         ],
       };
       console.log('[Q32] MERCHANDISE HARD BLOCK — refusing to price, decision=DO_NOT_LIST');
-      return res.json(out); // STOP — no pricing, return early
+      // Ship #24a-2: contract state=LOCKED via DO_NOT_LIST hard lock
+      return res.json(finalizeResponse(out)); // STOP — no pricing, return early
     }
 
     // Ship #20a.6.4 — identity gate. Runs AFTER phase 1 (so PC/CV year-heal
@@ -5574,7 +5581,9 @@ export default async function handler(req, res) {
     // Previously these were stripped and fetched via separate /api/metadata call (SPEED-2a).
     // Eliminates duplicate CV/PC/GoCollect API calls and second HTTP round-trip.
     mark('response_sent');
-    res.status(200).json(out);
+    // Ship #24a-2: single-writer boundary — contract assembled here, nothing
+    // may write price/decision fields after this call.
+    res.status(200).json(finalizeResponse(out));
   } catch (err) {
     // Ship 6 debug — log full error and stack trace to Vercel logs.
     // Without this, 500s appear in production with no diagnostic info.
