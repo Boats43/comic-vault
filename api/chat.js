@@ -86,7 +86,7 @@ You also have access to the user's Whatnot buying history. Use it to give advice
       ? ` (showing top ${comics.length} by value; ${truncated} more in full collection)`
       : "";
 
-    const systemPrompt = `You are the collection manager AI for Comic Vault. You have complete knowledge of this collector's inventory.
+    const systemPrompt = `You are the collection manager AI for GrailKey. You have complete knowledge of this collector's inventory.
 
 COLLECTION (${allComics.length} comics total${truncNote}, ~$${Math.round(totalValue).toLocaleString()} estimated value):
 ${compactComics}${buyerContext}

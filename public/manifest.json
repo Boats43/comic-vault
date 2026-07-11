@@ -1,7 +1,7 @@
 {
-  "name": "Comic Vault",
-  "short_name": "Vault",
-  "description": "Scan and grade comic books instantly",
+  "name": "GrailKey",
+  "short_name": "GrailKey",
+  "description": "Know what it's worth. Get paid.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",

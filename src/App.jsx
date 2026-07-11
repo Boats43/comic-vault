@@ -2083,7 +2083,7 @@ function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onD
   return (
     <>
       <div style={{ fontSize: 20, fontWeight: 800, color: "#d4af37", textAlign: "center", padding: "8px 0 4px", letterSpacing: 0.5 }}>
-        Comic Vault
+        GrailKey
       </div>
       <div className="stats-row">
         <div className="stat">
@@ -10093,7 +10093,10 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="header">Comic Vault</header>
+      <header className="header">
+        <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5 }}>GrailKey</div>
+        <div style={{ fontSize: 11, color: "#999", marginTop: 2, fontWeight: 400 }}>Know what it's worth. Get paid.</div>
+      </header>
 
       {tab === "scan" && (
         <>
@@ -10766,7 +10769,7 @@ export default function App() {
       {isMobile && !installDismissed && (installPrompt || showSafariBanner) && (
         <div
           role="dialog"
-          aria-label="Install Comic Vault"
+          aria-label="Install GrailKey"
           style={{
             position: "fixed",
             top: 0,
@@ -10785,7 +10788,7 @@ export default function App() {
         >
           <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>
             {installPrompt
-              ? "📲 Add Comic Vault to your home screen"
+              ? "📲 Add GrailKey to your home screen"
               : "📲 Tap Share then Add to Home Screen to install"}
           </span>
           {installPrompt && (
@@ -10864,7 +10867,7 @@ export default function App() {
               🔐 Access Required
             </div>
             <div style={{ fontSize: 14, color: "#999", marginBottom: 24 }}>
-              Enter your Comic Vault access code to continue
+              Enter your GrailKey access code to continue
             </div>
             <input
               type="password"
