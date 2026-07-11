@@ -4420,11 +4420,16 @@ export default async function handler(req, res) {
       const tierPathActive = priceBandsRaw && priceBandsRaw.tier != null;
       const tier = priceBandsRaw?.tier;
 
+      // Q80 FIX: When activePool=0 but verified solds exist, use soldComps for
+      // match-conf scoring (Flash Gordon #22 class: 20+ verified solds, 0 active
+      // → score=0 → RESEARCH over-routing). Prefer active comps, fall back to sold.
       const compTitlesForScore =
         Array.isArray(rawComps?.recentSales) && rawComps.recentSales.length > 0
           ? rawComps.recentSales
-          : Array.isArray(rawComps?.prices)
+          : Array.isArray(rawComps?.prices) && rawComps.prices.length > 0
           ? rawComps.prices
+          : Array.isArray(filteredSold) && filteredSold.length > 0
+          ? filteredSold
           : [];
       const mc = computeMatchConfidence(compTitlesForScore, {
         title: req.body.title || title,
