@@ -98,7 +98,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey } from "../src/lib/compHygiene.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -1360,11 +1360,22 @@ const lookupPriceCharting = async ({ title, issue, year }) => {
 
       // Ship #20a.6.7b.1 — Token overlap validation. Skip when the main
       // query token (first substantive word) is absent from the product name.
+      // Q85: compact-key fallback — "Funnybook" query vs "Funny Book #1
+      // (1971)" product: mainToken "funnybook" is absent at token level
+      // but the compact keys are identical. Strict containment of the
+      // whole compacted series name (≥4 chars) in the compacted product
+      // name rescues compound-spacing variants.
       if (mainToken) {
         const productTokens = tokenize(name);
         if (!productTokens.includes(mainToken)) {
-          console.log(`[pricecharting] skipping "${name}" — main token "${mainToken}" absent`);
-          continue;
+          const seriesKey = compactTitleKey(seriesName);
+          const productKey = compactTitleKey(name);
+          if (seriesKey.length >= 4 && productKey.includes(seriesKey)) {
+            console.log(`[Q85] compact-key rescue: "${seriesName}" ⊂ "${name}"`);
+          } else {
+            console.log(`[pricecharting] skipping "${name}" — main token "${mainToken}" absent`);
+            continue;
+          }
         }
       }
 

@@ -142,6 +142,14 @@ export const ARTIST_PATTERNS = [
   /frison/i,  // Q84 — unambiguous last name (alias policy)
 ];
 
+// Q85 — Compact title key: lowercase, strip everything non-alphanumeric.
+// Equality fallback for compound/spacing/hyphen variants that token-level
+// matching can never reconcile ("Funnybook" vs "Funny Book" vs
+// "Funny-Book" all → "funnybook"). Used by title-family overlap and PC
+// product matching.
+export const compactTitleKey = (s) =>
+  String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 // ───────────────────────── TOKEN-BASED HELPERS ─────────────────────────
 
 // Stop-words excluded from title-similarity tokens. These appear so

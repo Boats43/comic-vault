@@ -24,7 +24,7 @@
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
 import { sanitizeSeriesTitle } from './identityCore.js';
-import { ARTIST_PATTERNS } from './compHygiene.js';
+import { ARTIST_PATTERNS, compactTitleKey } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
 //
@@ -1094,7 +1094,11 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     if (!ebayConsensusTitle || !visionTitle) return false;
     const a = visionTokens.filter((t) => !ARTICLE_TOKENS.has(t));
     const b = tokenizeTitleFamily(ebayConsensusTitle).filter((t) => !ARTICLE_TOKENS.has(t));
-    return a.length > 0 && a.length === b.length && a.every((t) => b.includes(t));
+    if (a.length > 0 && a.length === b.length && a.every((t) => b.includes(t))) return true;
+    // Q85: compact-key equality fallback ("Funnybook" ≡ "Funny Book")
+    const ka = compactTitleKey(a.join(''));
+    const kb = compactTitleKey(b.join(''));
+    return ka.length >= 4 && ka === kb;
   })();
   const poolArtistTokens = dualAxisAgreed ? extractPoolArtistTokens(items) : null;
   const q84Gate = (familyTokens) => {
@@ -1204,8 +1208,24 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   // New logic: 1 shared / 1 Vision token = 100% ≥ 40% → ACCEPT.
   const topFamilyOverlap = topFamily.tokens.filter(t => visionTokens.includes(t));
   const shorterTokenCount = Math.min(topFamily.tokens.length, visionTokens.length);
-  const overlapRatio = shorterTokenCount > 0 ? topFamilyOverlap.length / shorterTokenCount : 0;
+  const rawOverlapRatio = shorterTokenCount > 0 ? topFamilyOverlap.length / shorterTokenCount : 0;
   const OVERLAP_THRESHOLD = 0.4; // 40% of shorter token set
+
+  // Q85: compact-key EQUALITY fallback — "Funnybook" (Vision) vs
+  // "Funny Book" (family) has ZERO token overlap yet names the same book.
+  // Articles + neutral publisher/format tokens are excluded from the key.
+  // Strict equality only ("flash" must never match "flashpoint").
+  const q85VisionKey = compactTitleKey(
+    visionTokens.filter((t) => !ARTICLE_TOKENS.has(t) && !NEUTRAL_ADDITION_TOKENS.has(t)).join('')
+  );
+  const q85FamilyKey = compactTitleKey(
+    topFamily.tokens.filter((t) => !ARTICLE_TOKENS.has(t) && !NEUTRAL_ADDITION_TOKENS.has(t)).join('')
+  );
+  const q85CompactMatch = q85VisionKey.length >= 4 && q85VisionKey === q85FamilyKey;
+  const overlapRatio = q85CompactMatch ? 1 : rawOverlapRatio;
+  if (q85CompactMatch && rawOverlapRatio < OVERLAP_THRESHOLD) {
+    console.log(`[Q85] compact-key match "${q85VisionKey}" — token overlap ${Math.round(rawOverlapRatio * 100)}% treated as 100%`);
+  }
 
   // B2 (LOT-CONSENSUS): LOT_RE guard on weighted-consensus path (same pattern as top-rank).
   // Evidence: "spawn lot and" #6 → family construction included LOT listing in consensus pool.
