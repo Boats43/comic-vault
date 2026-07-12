@@ -209,3 +209,17 @@ export const assessIdentityConfidence = (sanitized, identitySource, identityFiel
 
   return { confident, missingFields, reasons };
 };
+
+// Q87 — ID_REQUIRED enrich cache predicate. A book the gate refused
+// re-enriches only after a user identity edit bumps identityRevision;
+// until then the same fields produce the same refusal and the enrich
+// call is pure waste. q87CheckedRevision is stamped by the client merge
+// paths when an enrich returns identityConfident === false, and cleared
+// when identity becomes confident.
+export const shouldSkipIdRequiredEnrich = (item) => {
+  if (!item) return false;
+  return (
+    item.identityConfident === false &&
+    (item.identityRevision || 0) === (item.q87CheckedRevision ?? -1)
+  );
+};

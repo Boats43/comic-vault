@@ -13,6 +13,7 @@ import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade } from "./lib/dataQualityGuard.js";
+import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 
 // A3 ACCESS GATE: Client-side key helper
 // ACCESS GATE — T1 invite key management (A3 + LAUNCH BLOCKER FIX)
@@ -8734,10 +8735,20 @@ export default function App() {
     //  2. Are >24h old (not recent scans)
     //  3. Are not currently enriching (marketPending !== true)
     // A book WITH a price is never touched — user must manually refresh.
+    // Q87: ID_REQUIRED enrich cache — auto-refresh skips blocked books
+    // until a user identity edit bumps identityRevision.
+    const isQ87Cached = (c) => {
+      const cached = shouldSkipIdRequiredEnrich(c);
+      if (cached) {
+        console.log(`[Q87] skip — ID_REQUIRED unchanged at identityRevision ${c.identityRevision || 0}: "${c.title}"`);
+      }
+      return cached;
+    };
     const missingSource = catalogue.filter(
       (c) =>
         !isRecentlyImported(c) &&
         !isUnverifiedMegaKey(c) &&
+        !isQ87Cached(c) &&
         !c.inTradePile &&
         (!c.pricingSource || !c.comps) &&
         (Date.now() - (c.timestamp || 0) > 86400000) &&  // >24h old
@@ -8865,6 +8876,9 @@ export default function App() {
 
               const updated = {
                 ...cur,
+                // Q87: stamp the revision this ID_REQUIRED verdict was
+                // computed at; cleared when identity becomes confident.
+                q87CheckedRevision: idGated ? (cur.identityRevision || 0) : null,
                 comps: lowMatch ? cur.comps : (enrich.comps || cur.comps),
                 price: priceGuard.price,
                 priceLow: priceGuard.priceLow,
@@ -10081,6 +10095,11 @@ export default function App() {
   // Update a single field on a catalogue entry and persist to IndexedDB.
   const updateComicField = useCallback((item, field, value) => {
     const updated = { ...item, [field]: value };
+    // Q87: identity edits bump identityRevision — unblocks the ID_REQUIRED
+    // enrich cache so the next refresh re-enriches this book.
+    if (['title', 'issue', 'year', 'publisher'].includes(field)) {
+      updated.identityRevision = (item.identityRevision || 0) + 1;
+    }
     // Optimistic UI: update React state immediately so ROI and any other
     // derived views render instantly, then flush to IndexedDB in the
     // background. Users never see the putComic latency.
@@ -10099,6 +10118,13 @@ export default function App() {
   // closed detail, started another refresh) and this response is discarded
   // before it can overwrite the catalogue with stale data for a prior item.
   const refreshMarketData = useCallback(async (item) => {
+    // Q87: ID_REQUIRED enrich cache. A blocked book re-enriches only after
+    // a user identity edit bumps identityRevision — same fields, same
+    // refusal, so the call is pure waste until something changes.
+    if (shouldSkipIdRequiredEnrich(item)) {
+      console.log(`[Q87] skip — ID_REQUIRED unchanged at identityRevision ${item.identityRevision || 0}: "${item.title}"`);
+      return;
+    }
     cardEnrichAbortRef.current?.abort();
     const controller = new AbortController();
     cardEnrichAbortRef.current = controller;
@@ -10184,6 +10210,9 @@ export default function App() {
     const priceChangedRM = newPriceRM !== item.price;
     let updated = {
       ...item,
+      // Q87: stamp the revision this ID_REQUIRED verdict was computed at;
+      // cleared when identity becomes confident.
+      q87CheckedRevision: idGatedRM ? (item.identityRevision || 0) : null,
       title: enrich.title || item.title,
       comps: enrich.comps ?? item.comps,
       price: newPriceRM,
