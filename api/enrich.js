@@ -33,6 +33,7 @@ import {
   resolveIdentity,
   resolveIssue,
   backfillFromComps,
+  extractTitleConsensus,
   resolveYear,
   checkAssemblyIntegrity,
 } from "../src/lib/identityCore.js";
@@ -3703,18 +3704,119 @@ export default async function handler(req, res) {
       );
     }
 
-    out.identityConfident = idCheck.confident;
+    // Q83 — Vision low-confidence is a VOTE, not a VETO.
+    // Superman vs the Amazing Spider-Man #1 (1976 treasury): Vision
+    // hallucinated "not a valid comic title" + self-reported low
+    // confidence, and assessIdentityConfidence's unconditional
+    // visionConfidence==='low' veto outranked 13 verified actives + 3
+    // fresh solds converging on one identity. When the verified pool is
+    // deep (≥10 combined) with ≥1 fresh sold and converges on a single
+    // identity (Q58-TITLE ≥80% title / ≥70% issue), adopt the consensus,
+    // flag identity-from-consensus, keep NEEDS_REVIEW. ID_REQUIRED
+    // remains for the consensus-absent case.
+    let idCheckFinal = idCheck;
     if (!idCheck.confident) {
-      out.identityMissingFields = idCheck.missingFields;
-      out.identityReasons = idCheck.reasons;
+      const activePoolItems = Array.isArray(compsFromEbay?.prices) ? compsFromEbay.prices : [];
+      const soldRows = Array.isArray(filteredSold) ? filteredSold : [];
+      const freshSolds = soldRows.filter((r) => r?.daysAgo != null && r.daysAgo <= 90);
+      const consensusPool = [...activePoolItems, ...soldRows];
+
+      if (consensusPool.length >= 10 && freshSolds.length >= 1) {
+        // Title consensus — prefix-before-# extractor (Q83, ≥80% of ≥10
+        // issue-bearing titles). Robust against format-word variance that
+        // splinters Q58-TITLE's first-N-token join ("Treasury"/"Crossover"
+        // suffixes). Q58-TITLE backfill kept as fallback + for year/
+        // publisher completion.
+        const titleConsensus = extractTitleConsensus(consensusPool, { minCount: 10, minRatio: 0.8 });
+        const rescueBackfill = backfillFromComps(null, confirmedYear, confirmedPublisher, consensusPool);
+
+        // Issue consensus — Q58 issue pattern: dominant #N at ≥70% of
+        // issue-bearing titles. Vision issue (when present) is kept.
+        const issueCounts = {};
+        consensusPool.forEach((it) => {
+          const m = String(it?.rawTitle || it?.title || '').match(/#\s*(\d{1,4})\b/);
+          if (m) issueCounts[m[1]] = (issueCounts[m[1]] || 0) + 1;
+        });
+        const issueRanked = Object.entries(issueCounts).sort((a, b) => b[1] - a[1]);
+        const issueTotal = issueRanked.reduce((sum, [, c]) => sum + c, 0);
+        const issueConsensus =
+          issueRanked.length > 0 && issueTotal > 0 && issueRanked[0][1] / issueTotal >= 0.70
+            ? issueRanked[0][0]
+            : null;
+
+        const consensusTitle =
+          titleConsensus?.title ||
+          (rescueBackfill.titleBackfilled ? rescueBackfill.title : null);
+        const consensusTitleRatio =
+          titleConsensus?.ratio ?? rescueBackfill.titleBackfillRatio ?? 0;
+        const consensusIssue = confirmedIssue || issueConsensus;
+        // Consensus may also complete year/publisher (same extractor family)
+        if (!confirmedYear && rescueBackfill.yearBackfilled) confirmedYear = rescueBackfill.year;
+        if (!confirmedPublisher && rescueBackfill.publisherBackfilled) confirmedPublisher = rescueBackfill.publisher;
+
+        if (consensusTitle && consensusIssue) {
+          const rescuedIdentity = sanitizeIdentityFields({
+            title: consensusTitle,
+            issue: consensusIssue,
+            year: confirmedYear,
+            publisher: confirmedPublisher,
+            // Vision's low confidence TRIGGERED this path; consensus judges
+            // the identity on fields — the low-confidence vote is recorded
+            // via needsReview below, not as a veto.
+            visionConfidence: null,
+            author: out.author || null,
+          });
+          const idCheck2 = assessIdentityConfidence(
+            rescuedIdentity, 'ebay_comp_consensus', adapter.identityFields, out.pcProductId
+          );
+          if (idCheck2.confident) {
+            confirmedTitle = rescuedIdentity.title;
+            confirmedIssue = rescuedIdentity.issue;
+            out.title = rescuedIdentity.title;
+            out.issue = rescuedIdentity.issue;
+            identitySource = 'ebay_comp_consensus';
+            out.identityFromConsensus = true;
+            out.needsReview = true; // NEEDS_REVIEW retained per Q83 ruling
+            out.identityConsensus = {
+              titleRatio: Number(consensusTitleRatio.toFixed(2)),
+              issue: consensusIssue,
+              poolSize: consensusPool.length,
+              freshSolds: freshSolds.length,
+              visionVetoOverridden: true,
+            };
+            idCheckFinal = idCheck2;
+            console.log(
+              `[Q83] identity-from-consensus: "${rescuedIdentity.title}" #${rescuedIdentity.issue} ` +
+              `pool=${consensusPool.length} freshSolds=${freshSolds.length} ` +
+              `titleRatio=${(consensusTitleRatio * 100).toFixed(0)}% — ` +
+              `Vision low-confidence vote overridden by comp consensus`
+            );
+          } else {
+            console.log(
+              `[Q83] consensus rescue incomplete — missing=[${idCheck2.missingFields.join(',')}], ID_REQUIRED stands`
+            );
+          }
+        } else {
+          console.log(
+            `[Q83] no single-identity consensus (title=${consensusTitle || 'none'} ` +
+            `issue=${consensusIssue || 'none'} pool=${consensusPool.length}) — ID_REQUIRED stands`
+          );
+        }
+      }
+    }
+
+    out.identityConfident = idCheckFinal.confident;
+    if (!idCheckFinal.confident) {
+      out.identityMissingFields = idCheckFinal.missingFields;
+      out.identityReasons = idCheckFinal.reasons;
       out.price = null;
       out.priceLow = null;
       out.priceHigh = null;
       out.pricingSource = 'identity-required';
       console.log(
         '[identity-gate] REFUSED to price —',
-        'missing:', idCheck.missingFields.join(',') || '(none)',
-        '· reasons:', idCheck.reasons.join('; ')
+        'missing:', idCheckFinal.missingFields.join(',') || '(none)',
+        '· reasons:', idCheckFinal.reasons.join('; ')
       );
     }
 
@@ -3740,7 +3842,7 @@ export default async function handler(req, res) {
     // (line ~2994) already set out.price/pricingSource. Without this guard, code
     // falls through all `!isPolybagPricing`-gated pricing branches and hits final
     // `else` which overwrites pricingSource='ebay-polybag-active' with 'refused'.
-    if (idCheck.confident && !isPolybagPricing) {
+    if (idCheckFinal.confident && !isPolybagPricing) {
     // P0-A — Kill browse_api legacy paths. All pricing routes through tier engine.
     // When priceBandsRaw truthy (tier 1-4 with data), use it. When null (tier-4
     // no-data: no PC, <2 verified comps), refuse-to-price instead of falling through

@@ -297,6 +297,15 @@ export function computeDecision(item, context = {}) {
     decision.warnings.push('ai-verify-rejected-all');
   }
 
+  // Q83: identity adopted from verified-comp consensus (Vision's
+  // low-confidence vote overridden — vote, not veto). The book prices
+  // normally but carries a review flag: moderate warning → LIST_LOW
+  // ceiling, never silent LIST_NOW.
+  if (item.identityFromConsensus === true) {
+    decision.warnings.push('identity-from-consensus');
+    decision.evidence.identityFromConsensus = item.identityConsensus || true;
+  }
+
   // GL-1 (EX-2): pricing-class refusal keyed off the STATE, not the slug.
   // 'refused-tier-bypass-detected' leaked to LIST_LOW because the slug
   // handlers below never matched it, and any future refused-* slug would

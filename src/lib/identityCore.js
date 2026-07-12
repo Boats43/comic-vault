@@ -696,3 +696,47 @@ export const resolveYear = (visionYear, pcYear, cvYear, ebayYear, opts = {}) => 
     yearSource
   };
 };
+
+// Q83 — Consensus series title from comp/sold listing titles.
+// Robust against format-word variance that splinters the Q58-TITLE
+// first-N-token extractor ("Treasury" / "Crossover" / "Limited Collectors"
+// suffixes): the series name is the text BEFORE the issue marker (#N).
+// Strips years / slab / grade tokens from the prefix, normalizes for
+// counting, returns the dominant prefix when >= minRatio of prefix-bearing
+// titles agree AND at least minCount titles carry an issue marker.
+// Returns { title, ratio, agreeing, total } or null.
+export const extractTitleConsensus = (items, { minCount = 10, minRatio = 0.8 } = {}) => {
+  const counts = new Map();
+  let total = 0;
+  for (const it of items || []) {
+    const raw = String(it?.rawTitle || it?.title || '');
+    const idx = raw.search(/#\s*\d/);
+    if (idx < 3) continue; // no issue marker, or nothing before it
+    const prefix = raw.slice(0, idx)
+      .replace(/\b(19[3-9]\d|20[0-2]\d)\b/g, ' ')
+      .replace(/\b(cgc|cbcs|pgx)\s*[\d.]*\b/gi, ' ')
+      .replace(/\b(nm|vf|fn|vg|gd|fr|pr)[+\-]?\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/[.,:;\-–—\s]+$/, '')
+      .trim();
+    if (prefix.length < 3) continue;
+    const norm = prefix.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!norm) continue;
+    total++;
+    const cur = counts.get(norm) || { count: 0, display: prefix };
+    cur.count += 1;
+    counts.set(norm, cur);
+  }
+  if (total < minCount) return null;
+  let top = null;
+  for (const v of counts.values()) {
+    if (!top || v.count > top.count) top = v;
+  }
+  if (!top || top.count / total < minRatio) return null;
+  return {
+    title: top.display,
+    ratio: top.count / total,
+    agreeing: top.count,
+    total,
+  };
+};
