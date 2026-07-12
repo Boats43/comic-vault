@@ -25,6 +25,7 @@ import {
   VARIANT_CONTAM_RE,
   SIGNED_RE,
   LOT_RE,
+  MERCH_RE,
   HALF_ISSUE_RE,
   TRADING_CARD_RE,
   TPB_MARKER_RE,
@@ -391,6 +392,18 @@ export const verifySoldComps = (rawRows, ctx) => {
     if (TRADING_CARD_RE.test(String(r.title || ''))) {
       reasons.format++;
       pushSample(r, 'format:trading-card');
+      return false;
+    }
+    return true;
+  });
+
+  // 3b2. Merchandise (GL-4, EX-1b) — parity with active Filter 1e2. Prints,
+  //      posters, tin signs, figures pass title/issue checks but are not
+  //      comics ("ACTION COMICS #33 COVER PRINT" class).
+  working = working.filter((r) => {
+    if (MERCH_RE.test(String(r.title || ''))) {
+      reasons.format++;
+      pushSample(r, 'format:merch');
       return false;
     }
     return true;

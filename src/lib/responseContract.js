@@ -444,7 +444,8 @@ export function validateContract(contract, out) {
     } else if (
       contract.source === 'active_ask_derived' ||
       contract.source === 'verified_active' ||
-      contract.source === 'ebay-polybag-active'
+      contract.source === 'ebay-polybag-active' ||
+      contract.source === 'thin_pool_anchor'  // GL-4: anchor output is active-derived
     ) {
       poolAvg = parsePriceNumber(out?.rawComps?.average);
     }

@@ -3270,6 +3270,9 @@ function CollectionDetail({
                item.pricingSource === 'refused-reprint-thin-pool' ? 'reprint (insufficient data)' :
                item.pricingSource === 'identity-required' ? 'identity required' :
                item.pricingSource === 'refused-no-data-sources' ? 'no data available' :
+               item.pricingSource === 'refused-qualified-label' ? 'qualified/restored label — comps not applicable' :
+               item.pricingSource === 'refused-polybag-pc-divergence' ? 'reprint pool conflicts with anchor' :
+               item.pricingSource === 'thin_pool_anchor' ? 'active listings (thin pool, capped)' :
                item.pricingSource === 'refused' ? 'insufficient data' :
                item.pricingSource}
             </strong>

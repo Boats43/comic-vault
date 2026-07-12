@@ -61,7 +61,13 @@ export const median = (arr) => {
  * Conservative guard: suppress anchor when anchorCap < rawComps.lowest.
  */
 export const computeThinPoolAnchor = (currentPrice, rawComps, opts = {}) => {
-  const { isMegaKey, compsExhausted } = opts;
+  const { isMegaKey, compsExhausted, tierPathActive } = opts;
+  // GL-4 (EX-1): tier engine owns pricing when a tier fired — the anchor
+  // caps against the ACTIVE pool and must never override sold-derived tier
+  // output. Action #33: 2 merch actives ($13/$23.45) capped a 10-sold
+  // tier-2.5 price $291.21 → $24.62. Same gate #20b-FIX2 gave the legacy
+  // ask-floor.
+  if (tierPathActive) return null;
   if (isMegaKey || compsExhausted) return null;
   if (!rawComps || typeof rawComps.count !== 'number') return null;
   if (rawComps.count <= 1 || rawComps.count >= 3) return null;

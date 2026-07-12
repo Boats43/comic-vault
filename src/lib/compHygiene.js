@@ -60,6 +60,18 @@ export const TPB_MARKER_RE =
 // letter), this matches Cover B/C/D/E... in listing titles for hard reject.
 export const OTHER_COVER_RE = /\bcover\s*[b-z]\b|\bcvr\s*[b-z]\b/i;
 
+// GL-4 (EX-1b) — Merchandise hard filter. eBay Browse returns non-comic
+// items ("ACTION COMICS #33 COVER PRINT", "Metal Tin Sign") that pass
+// title-overlap (publisher words are stop-words) and issue-number checks —
+// two merch actives averaging $18.23 capped a 10-sold tier-2.5 price at
+// $24.62 (vfjpp-1783797090560). Explicit phrases where a bare word would
+// collide with comic vocabulary: "art/cover print" (never bare \bprint\b —
+// collides with 1st/2nd print), \bpin\b excludes "pin-up" covers.
+// Known residual risk (ruled 2026-07-11): "sticker" (defect descriptions)
+// and "patch" (Wolverine alias) can appear in genuine comic listings.
+export const MERCH_RE =
+  /\b(?:art\s+print|cover\s+print|poster|tin\s+sign|metal\s+sign|plaque|magnet|statue|figur(?:e|ine)s?|funko|t-?shirts?|canvas|postcard|lithograph|keychain|mug|sticker|patch|bookmark)\b|\bpin\b(?!-?up)/i;
+
 // Lot / set / bundle / multi-book markers. Excludes bare issue-number
 // ranges (e.g. "#1-5") which are validated separately by isValidIssueRange
 // to avoid false positives on year ranges ("1961-10 Cents") or grade

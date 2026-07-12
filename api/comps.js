@@ -31,6 +31,7 @@ import {
   TPB_MARKER_RE,
   OTHER_COVER_RE,
   LOT_RE,
+  MERCH_RE,
   HALF_ISSUE_RE,
   COVERLESS_RE,
   TRADING_CARD_RE,
@@ -1104,6 +1105,27 @@ export const fetchComps = async ({
         }
       }
       afterLot = p.length;
+
+      // Filter 1e2 (GL-4, EX-1b): merchandise hard filter. Prints, posters,
+      // tin signs, figures, etc. pass title-overlap and issue checks but are
+      // not comics — 2 merch actives ("COVER PRINT" + "Metal Tin Sign")
+      // formed the entire Action #33 pool and capped a 10-sold tier-2.5
+      // price at $24.62. Hard filter, no fallback: a merch listing is never
+      // a valid comp regardless of pool size.
+      {
+        const before = p.length;
+        p = p.filter((item) => {
+          const t = String(item.title || '');
+          if (MERCH_RE.test(t)) {
+            console.log('[merch-filter] rejected:', t.slice(0, 55));
+            return false;
+          }
+          return true;
+        });
+        if (p.length < before) {
+          console.log(`[comps] merch filter: before=${before} after=${p.length} removed=${before - p.length}`);
+        }
+      }
 
       // Filter 1f: half-issue / ashcan / promo filter. Books like Fathom
       // #1 (1998 Wizard World Chicago Exclusive) were getting Fathom #1/2

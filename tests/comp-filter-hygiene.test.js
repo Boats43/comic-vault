@@ -18,7 +18,7 @@ import {
   SIGNED_RE,
   VARIANT_CONTAM_RE,
 } from '../api/comps.js';
-import { COVERLESS_RE, SLAB_RE, REPRINT_RE, hasCrossSeriesSeparator } from '../src/lib/compHygiene.js';
+import { COVERLESS_RE, SLAB_RE, REPRINT_RE, MERCH_RE, hasCrossSeriesSeparator } from '../src/lib/compHygiene.js';
 import { computeThinPoolAnchor } from '../api/enrich.js';
 
 let passed = 0;
@@ -844,6 +844,48 @@ assertTrue(
   missingFloorResult && missingFloorResult.shouldAnchor === true,
   'floor missing → anchor fires (no floor constraint)'
 );
+
+// ─── GL-4 (EX-1) — tierPathActive gate on thin-pool anchor ─────────
+console.log('\n── GL-4 — tierPathActive gate ──');
+
+// Action #33 replica: tier-2.5 priced $291.21 from 10 stale solds; the 2
+// junk actives ($13/$23.45) must NOT cap it when a tier fired.
+assertEq(
+  computeThinPoolAnchor(291.21, { count: 2, highest: 23.45, lowest: 13 }, { tierPathActive: true }),
+  null,
+  'tierPathActive → anchor suppressed (Action #33 class)'
+);
+
+const noTierResult = computeThinPoolAnchor(291.21, { count: 2, highest: 23.45, lowest: 13 }, { tierPathActive: false });
+assertTrue(
+  noTierResult && Math.abs(noTierResult.anchorCap - 24.6225) < 0.001,
+  'no tier → anchor still fires for legacy paths (cap = highest × 1.05)'
+);
+
+// ─── GL-4 (EX-1b) — MERCH_RE merchandise hard filter ───────────────
+console.log('\n── GL-4 — MERCH_RE ──');
+
+assertTrue(MERCH_RE.test('ACTION COMICS #33 COVER PRINT 11x17'), 'COVER PRINT → merch');
+assertTrue(MERCH_RE.test('Action Comics #33 Superman Metal Tin Sign'), 'Metal Tin Sign → merch');
+assertTrue(MERCH_RE.test('Amazing Spider-Man #300 poster 24x36'), 'poster → merch');
+assertTrue(MERCH_RE.test('X-Men #1 Funko Pop Wolverine'), 'funko → merch');
+assertTrue(MERCH_RE.test('Batman #1 art print signed'), 'art print → merch');
+assertTrue(MERCH_RE.test('Superman lithograph DC'), 'lithograph → merch');
+assertTrue(MERCH_RE.test('Hulk #181 keychain'), 'keychain → merch');
+assertTrue(MERCH_RE.test('Batman coffee mug'), 'mug → merch');
+assertTrue(MERCH_RE.test('X-Men enamel pin Marvel'), 'enamel pin → merch');
+assertTrue(MERCH_RE.test('Spawn #1 statue McFarlane'), 'statue → merch');
+assertTrue(MERCH_RE.test('Spider-Man action figure 6 inch'), 'figure → merch');
+assertTrue(MERCH_RE.test('Venom bookmark set'), 'bookmark → merch');
+assertTrue(MERCH_RE.test('Marvel t-shirt XL'), 't-shirt → merch');
+assertTrue(MERCH_RE.test('Batman postcard 1989'), 'postcard → merch');
+
+assertFalse(MERCH_RE.test('Star Wars #1 35 cent 1st print'), '1st print → NOT merch');
+assertFalse(MERCH_RE.test('ASM #300 2nd print CGC 9.8'), '2nd print → NOT merch');
+assertFalse(MERCH_RE.test('X-Men #1 classic pin-up cover'), 'pin-up cover → NOT merch');
+assertFalse(MERCH_RE.test('Batman #227 newsstand VG'), 'newsstand → NOT merch');
+assertFalse(MERCH_RE.test('Action Comics #33 1941 DC Golden Age'), 'plain comic → NOT merch');
+assertFalse(MERCH_RE.test('Wolverine #1 printing error miscut'), 'printing error → NOT merch');
 
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== RESULTS ===`);

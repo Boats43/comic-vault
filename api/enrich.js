@@ -4220,6 +4220,9 @@ export default async function handler(req, res) {
       const anchorResult = computeThinPoolAnchor(curPrice, rawComps, {
         isMegaKey: isMegaKeyForFloor,
         compsExhausted,
+        // GL-4 (EX-1): tier engine owns pricing — anchor never overrides
+        // sold-derived tier output with active-pool math (#20b-FIX2 parity).
+        tierPathActive,
       });
       if (anchorResult && !isPolybagPricing) {
         console.log(
@@ -4229,7 +4232,15 @@ export default async function handler(req, res) {
         out.priceLow = fmtUsd(anchorResult.anchorCap * 0.85);
         out.priceHigh = fmtUsd(anchorResult.anchorCap * 1.15);
         out.thinPoolAnchored = true;
+        // GL-4: source truth — the returned number is now active-pool
+        // derived; keeping the prior label (EX-1: 'verified_sold_stale')
+        // made [price-trace] lie about where the price came from.
+        out.pricingSource = 'thin_pool_anchor';
         out.priceNote = (out.priceNote || '') + ' · thin-pool anchor';
+      } else if (tierPathActive && rawComps && rawComps.count > 0 && rawComps.count < 3 && !isPolybagPricing) {
+        console.log(
+          `[thin-pool] SKIPPED — tier ${priceBandsRaw.tier} pricing owns the pool (GL-4 EX-1 gate)`
+        );
       }
     }
 
