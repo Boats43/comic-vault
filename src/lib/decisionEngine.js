@@ -297,6 +297,26 @@ export function computeDecision(item, context = {}) {
     decision.warnings.push('ai-verify-rejected-all');
   }
 
+  // GL-1 (EX-2): pricing-class refusal keyed off the STATE, not the slug.
+  // 'refused-tier-bypass-detected' leaked to LIST_LOW because the slug
+  // handlers below never matched it, and any future refused-* slug would
+  // leak the same way. Identity-class refusal (refused-identity-conflict)
+  // is handled as a blocker above and returns ID_REQUIRED before this runs.
+  // The price==null guard keeps priced verification-warning paths (e.g.
+  // claude-gate books that still ship a comp-derived price) out of the
+  // forced-RESEARCH escalation.
+  const isRefusedPricing =
+    item.pricingSource !== 'refused-identity-conflict' &&
+    (item.refusedToPrice === true ||
+      (/^refused/.test(item.pricingSource || '') && item.price == null));
+  if (isRefusedPricing) {
+    decision.warnings.push('refused-to-price');
+    decision.evidence.refusedToPrice = {
+      source: item.pricingSource || 'unknown',
+      note: item.priceNote || 'Engine refused to price — no coherent market data',
+    };
+  }
+
   // Warning: Verification failed (Claude gate)
   if (item.pricingSource === 'refused-claude-gate') {
     decision.warnings.push('verification-failed-claude');
@@ -439,6 +459,7 @@ export function computeDecision(item, context = {}) {
   // Only escalate when pricing math is uncertain (sold-active mismatch, zero-verified,
   // self-flag >100% drift, polybag/reprint warnings).
   const criticalWarnings = [
+    'refused-to-price',                // GL-1: refused state must never reach a LIST action
     'sold-active-mismatch-extreme',    // Price evidence: sold vs active divergence
     'era-risk-vintage-thin',           // Price evidence: thin Golden Age pool
     'active-avg-far-below',            // Price evidence: recommended far above asks

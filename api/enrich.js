@@ -4301,6 +4301,25 @@ export default async function handler(req, res) {
               out.megaKeyFloorSource = megaKeyEntry.source;
               out.megaKeyFloorNote = megaKeyEntry.volatilityNote;
               out.priceNote = (out.priceNote || '') + ' · mega-key floor';
+
+              // GL-1 / D-3 option B: floor override re-anchors the bands —
+              // one price per card. Pre-fix the response carried sold-derived
+              // bands ($22,335 market) beside a $30,000 floor price (X-Men
+              // Q7.0 scan, dh9xr-17838111). Floor IS the single source of
+              // truth when it fires.
+              out.priceBands = {
+                quick: floorResult.floor,
+                market: floorResult.floor,
+                stretch: floorResult.priceHigh ?? floorResult.floor,
+                source: 'mega-key-floor',
+                count: out.priceBands?.count ?? null,
+                tier: out.priceBands?.tier ?? null,
+                variantAdjusted: out.priceBands?.variantAdjusted || false,
+              };
+              console.log(
+                `[price-bands] rebuilt-from=mega-key-floor market=$${floorResult.floor} ` +
+                `stretch=$${floorResult.priceHigh ?? floorResult.floor}`
+              );
               console.log('[mega-key-floor] enforced:',
                 `${title} #${confirmedIssue} grade=${grade} bucket=${floorResult.bucket}`,
                 `${out.preFloorPrice} → $${floorResult.floor}`,
@@ -4370,7 +4389,18 @@ export default async function handler(req, res) {
     // but priceBands built at 2897 reads priceBandsRaw (pre-correction).
     // Symbiote Spider-Man #1 class: thin-pool anchored $8.30 but bands
     // still showed $472.50. Rebuild when any correction fired.
-    if (priceBandsRaw && (out.floorReEnforced || out.thinPoolAnchored || sanityFired)) {
+    // GL-1 (I11 support): rebuild also fires on ANY residual drift between
+    // finalPrice and the published band market — variant/key multipliers
+    // rewrite out.price without setting the three named flags, leaving two
+    // numbers on one card. Mega-key floor excluded: it rebuilds its own
+    // bands (D-3 option B above) and must not be overwritten here.
+    const bandDrift = (() => {
+      if (!priceBandsRaw || !out.price || out.megaKeyFloorApplied) return false;
+      const p = parseFloat(String(out.price).replace(/[$,]/g, ''));
+      return Number.isFinite(p) && Math.abs(p - priceBandsRaw.market) > 0.011;
+    })();
+    if (priceBandsRaw && !out.megaKeyFloorApplied &&
+        (out.floorReEnforced || out.thinPoolAnchored || sanityFired || bandDrift)) {
       const currentPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
       const currentLow = parseFloat(String(out.priceLow || '0').replace(/[$,]/g, ''));
       const currentHigh = parseFloat(String(out.priceHigh || '0').replace(/[$,]/g, ''));
@@ -4786,8 +4816,13 @@ export default async function handler(req, res) {
     // of rawComps.average (pre-sanity/thin-pool/floor). When pricing chain
     // modified out.price, recommended should match corrected value.
     const finalPriceNum = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
-    const recommendedPrice =
-      finalPriceNum > 0
+    // GL-1 (EX-2): refused state suppresses the recommendation entirely.
+    // Pre-fix, price=null fell through to rawComps.average×1.15 and the
+    // [verify] line advertised "$13" for a book the engine refused to price
+    // (Sweethearts #130, z7kwx-1783797060030).
+    const recommendedPrice = out.refusedToPrice
+      ? null
+      : finalPriceNum > 0
         ? finalPriceNum
         : (rawComps?.average != null ? Math.round(rawComps.average * 1.15) : null);
 

@@ -1167,6 +1167,68 @@ test('Price above floor - no floor enforcement', () => {
   assertNotIncludes(decision.warnings, 'recommended-below-floor', 'Should NOT have recommended-below-floor warning');
 });
 
+// TEST 43 (GL-1, EX-2): refused-tier-bypass-detected must force RESEARCH.
+// Production leak: Sweethearts #130 (z7kwx-1783797060030) refused to price
+// but shipped decision LIST_LOW because slug matching missed this slug.
+test('GL-1: refused-tier-bypass-detected forces RESEARCH (EX-2 replica)', () => {
+  const item = {
+    title: "Sweethearts",
+    issue: "130",
+    publisher: "Charlton",
+    year: 1974,
+    price: null,
+    refusedToPrice: true,
+    pricingSource: "refused-tier-bypass-detected",
+    identityConfident: true,
+    rawComps: { average: 11.3, lowest: 8, highest: 15, count: 2 }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'RESEARCH', 'Refused pricing must escalate to RESEARCH');
+  assertIncludes(decision.warnings, 'refused-to-price', 'Should carry refused-to-price warning');
+  assertNotIncludes(['LIST_NOW', 'LIST_LOW', 'GRADE_CANDIDATE'], decision.action, 'Never a list-class action');
+});
+
+// TEST 44 (GL-1): the boolean catches FUTURE refused-* slugs with no handler.
+test('GL-1: unknown future refused-* slug forces RESEARCH via boolean', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: null,
+    refusedToPrice: true,
+    pricingSource: "refused-some-future-slug",
+    identityConfident: true,
+    rawComps: { average: 20, lowest: 10, highest: 30, count: 5 }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'RESEARCH', 'Unknown refused slug must still escalate');
+  assertIncludes(decision.warnings, 'refused-to-price', 'Boolean-keyed warning present');
+});
+
+// TEST 45 (GL-1): identity-class refusal keeps ID_REQUIRED (ratified).
+test('GL-1: refused-identity-conflict stays ID_REQUIRED', () => {
+  const item = {
+    title: "Test Comic",
+    issue: "1",
+    publisher: "Test",
+    year: 2020,
+    price: null,
+    refusedToPrice: true,
+    pricingSource: "refused-identity-conflict",
+    identityConfident: true,
+    rawComps: { count: 0 }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'ID_REQUIRED', 'Identity-class refusal keeps ID_REQUIRED');
+});
+
 // RUN ALL TESTS
 console.log('\n🧪 Decision Engine v0-A Tests\n');
 console.log('='.repeat(60));

@@ -459,6 +459,31 @@ export function validateContract(contract, out) {
     fail('I10', `listable with blocking decision ${contract.decision.action} (${contract.decision.blockers.length} blockers)`);
   }
 
+  // I11 (GL-1, EX-1/D-3 rule a) — the PRE-derivation values must agree:
+  // out.price and out.priceBands.market are what the pipeline PUBLISHED
+  // (deriveBands can silently hide a fork by re-deriving bands around a
+  // price that escaped them — this rule inspects the raw pair instead).
+  // Exception: mega-key floor override (D-3) — floor legitimately outranks
+  // the sold-derived band and rebuilds it as the single source of truth.
+  if (!out?.megaKeyFloorApplied) {
+    const outPrice = parsePriceNumber(out?.price);
+    const outMarket = parsePriceNumber(out?.priceBands?.market);
+    if (outPrice != null && outMarket != null && Math.abs(outPrice - outMarket) > CENT) {
+      fail('I11', `out.price ${outPrice} != out.priceBands.market ${outMarket} (source ${out?.pricingSource})`);
+    }
+  }
+
+  // I12 (GL-1, EX-2 rule b) — a refused price forbids list-class decisions.
+  // RESEARCH/HOLD per ruling; ID_REQUIRED ratified for identity-class;
+  // DO_NOT_LIST allowed as stricter-than-required (existing no-data-sources
+  // blocker behavior preserved).
+  if (contract.state === 'REFUSED' || out?.refusedToPrice === true) {
+    const allowed = new Set(['RESEARCH', 'HOLD', 'ID_REQUIRED', 'DO_NOT_LIST']);
+    if (contract.decision.action && !allowed.has(contract.decision.action)) {
+      fail('I12', `refused price with decision ${contract.decision.action}`);
+    }
+  }
+
   if (violations.length > 0) {
     violations.forEach((v) => console.log(`[contract-violation] ${v}`));
     contract.violations = violations;

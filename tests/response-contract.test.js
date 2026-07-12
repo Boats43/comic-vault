@@ -663,5 +663,86 @@ test('24c no-fire - refused state untouched', () => {
   assert(out.contract.price === null, 'refused stays null');
 });
 
+// ─────────────────────────────────────────────────────────────────
+// GL-1 — I11 (price/bands fork) + I12 (refused decision coherence)
+// ─────────────────────────────────────────────────────────────────
+
+test('I11 fires - out.price forked from out.priceBands.market (EX-1 pre-derivation)', () => {
+  const out = cleanOut({
+    price: '$24.62', priceLow: '$20.93', priceHigh: '$28.31',
+    pricingSource: 'verified_sold_stale',
+    priceBands: { quick: 13, market: 291.21, stretch: 334.89, tier: 2.5, source: 'verified_sold_stale' },
+    decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: [], nextStep: '' },
+  });
+  finalizeResponse(out);
+  assert(out.contract.violations.some((v) => v.startsWith('I11')),
+    `I11 must fire on the fork, got: ${out.contract.violations.join(' | ')}`);
+  assert(out.contract.state === 'INCOMPLETE', 'violation demotes state');
+  assert(out.contract.listable === false, 'violation locks listing');
+});
+
+test('I11 exception - mega-key floor override is single-source (D-3)', () => {
+  const out = cleanOut({
+    price: '$30000.00', priceLow: '$30000.00', priceHigh: '$36000.00',
+    pricingSource: 'verified_sold',
+    priceBands: { quick: 18600, market: 22335.34, stretch: 25000, tier: 2, source: 'verified_sold' },
+    megaKeyFloorApplied: true,
+    decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: [], nextStep: '' },
+  });
+  finalizeResponse(out);
+  assert(!out.contract.violations.some((v) => v.startsWith('I11')),
+    `mega-key exception must hold, got: ${out.contract.violations.join(' | ')}`);
+});
+
+test('I11 clean - price equals band market', () => {
+  const out = cleanOut();
+  finalizeResponse(out);
+  assert(!out.contract.violations.some((v) => v.startsWith('I11')),
+    `no false positive, got: ${out.contract.violations.join(' | ')}`);
+});
+
+test('I12 fires - refused price with LIST_LOW decision (EX-2 replica)', () => {
+  const out = cleanOut({
+    price: null, priceLow: null, priceHigh: null, priceBands: null,
+    refusedToPrice: true,
+    pricingSource: 'refused-tier-bypass-detected',
+    soldComps: [],
+    soldCompDiagnostics: { rawCount: 0, verifiedCount: 0, rejectedCount: 0, reasons: {} },
+    decision: { action: 'LIST_LOW', confidence: 'medium', blockers: [], warnings: [], nextStep: '' },
+  });
+  finalizeResponse(out);
+  assert(out.contract.violations.some((v) => v.startsWith('I12')),
+    `I12 must fire, got: ${out.contract.violations.join(' | ')}`);
+});
+
+test('I12 clean - refused with RESEARCH passes', () => {
+  const out = cleanOut({
+    price: null, priceLow: null, priceHigh: null, priceBands: null,
+    refusedToPrice: true,
+    pricingSource: 'refused-tier-bypass-detected',
+    soldComps: [],
+    soldCompDiagnostics: { rawCount: 0, verifiedCount: 0, rejectedCount: 0, reasons: {} },
+    decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: ['refused-to-price'], nextStep: '' },
+  });
+  finalizeResponse(out);
+  assert(!out.contract.violations.some((v) => v.startsWith('I12')),
+    `RESEARCH allowed, got: ${out.contract.violations.join(' | ')}`);
+  assert(out.contract.state === 'REFUSED', 'state stays REFUSED');
+});
+
+test('I12 clean - refused with DO_NOT_LIST allowed (stricter than required)', () => {
+  const out = cleanOut({
+    price: null, priceLow: null, priceHigh: null, priceBands: null,
+    refusedToPrice: true,
+    pricingSource: 'refused-no-data-sources',
+    soldComps: [],
+    soldCompDiagnostics: { rawCount: 0, verifiedCount: 0, rejectedCount: 0, reasons: {} },
+    decision: { action: 'DO_NOT_LIST', confidence: 'high', blockers: ['no-data-sources'], warnings: [], nextStep: '' },
+  });
+  finalizeResponse(out);
+  assert(!out.contract.violations.some((v) => v.startsWith('I12')),
+    `DO_NOT_LIST allowed, got: ${out.contract.violations.join(' | ')}`);
+});
+
 // Run all tests
 run();
