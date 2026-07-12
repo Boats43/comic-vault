@@ -690,10 +690,24 @@ export const resolveYear = (visionYear, pcYear, cvYear, ebayYear, opts = {}) => 
     console.log(`[year-resolved] ${visionYear} → ${confirmedYear} (source=${yearSource})`);
   }
 
+  // Q86 — year confidence. 'proven' when an independent anchor corroborates
+  // (eBay pool ratio, PC product, CV volume); 'unproven' when the only
+  // source is Vision (which guesses from art style when the cover-read
+  // fails). Consumers treat unproven-year PC mismatches as a rank penalty,
+  // never a rejection.
+  const PROVEN_SOURCES = new Set([
+    'ebay-consensus', 'pc-cv-agreement', 'pricecharting', 'comicvine',
+    'pricecharting-fallback', 'comicvine-fallback',
+  ]);
+  const yearConfidence = confirmedYear && PROVEN_SOURCES.has(yearSource)
+    ? 'proven'
+    : 'unproven';
+
   return {
     confirmedYear,
     yearOverrideRejected,
-    yearSource
+    yearSource,
+    yearConfidence
   };
 };
 

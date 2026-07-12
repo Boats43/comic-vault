@@ -1295,7 +1295,7 @@ export const extractKeyFromComps = (titles) => {
 const PRICECHARTING_EXCLUDE =
   /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix|true believers|marvel tales/i;
 
-const lookupPriceCharting = async ({ title, issue, year }) => {
+const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'proven' }) => {
   if (!issue) {
     console.log("[pt] no issue number — skipping");
     return null;
@@ -1343,18 +1343,29 @@ const lookupPriceCharting = async ({ title, issue, year }) => {
     const queryTokens = tokenize(seriesName);
     const mainToken = queryTokens[0];
 
+    // Q86: unproven-year candidates that fail the year gate are demoted to
+    // a fallback rank instead of rejected — a Vision-guessed year must not
+    // veto the only real product match (Funny Book #1 1971 class).
+    const q86Fallbacks = [];
+
     for (const p of products) {
       const name = p["product-name"] || "";
       if (PRICECHARTING_EXCLUDE.test(name)) continue;
       if (issueRe && !issueRe.test(name)) continue;
 
-      // Year validation: reject products from the wrong era.
+      // Year validation: reject products from the wrong era — unless the
+      // claimed year is UNPROVEN (Q86): then mismatch = rank penalty only.
+      let q86YearMismatch = false;
       if (comicYear) {
         const yearMatch = name.match(/\((\d{4})\)/);
         const productYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
         if (productYear && Math.abs(productYear - comicYear) > 5) {
-          console.log(`[pricecharting] skipping "${name}" — year ${productYear} vs ${comicYear}`);
-          continue;
+          if (yearConfidence === 'unproven') {
+            q86YearMismatch = true; // demote below year-matching candidates
+          } else {
+            console.log(`[pricecharting] skipping "${name}" — year ${productYear} vs ${comicYear}`);
+            continue;
+          }
         }
       }
 
@@ -1385,12 +1396,32 @@ const lookupPriceCharting = async ({ title, issue, year }) => {
       const yearMatch2 = name.match(/\((\d{4})\)/);
       const productYear = yearMatch2 ? parseInt(yearMatch2[1], 10) : null;
       console.log(`[pt] matched: "${name}" year: ${productYear} comic year: ${comicYear}`);
-      // Stricter era check: skip if year gap > 5
+      // Stricter era check: skip if year gap > 5 (Q86: unproven → demote)
       if (comicYear && productYear && Math.abs(productYear - comicYear) > 5) {
-        console.log(`[pt] year mismatch — skipping`);
-        continue;
+        if (yearConfidence === 'unproven') {
+          q86YearMismatch = true;
+        } else {
+          console.log(`[pt] year mismatch — skipping`);
+          continue;
+        }
       }
-      return { price, productName: name, id: p.id, year: productYear, source: "pricecharting" };
+      const candidate = { price, productName: name, id: p.id, year: productYear, source: "pricecharting" };
+      if (q86YearMismatch) {
+        q86Fallbacks.push(candidate);
+        continue; // keep scanning for a year-matching product first
+      }
+      return candidate;
+    }
+    // Q86: no year-matching product — accept the best year-mismatched
+    // candidate when the claimed year was unproven (rank penalty, not
+    // rejection). Product-page year becomes the better anchor downstream.
+    if (q86Fallbacks.length > 0) {
+      const fb = q86Fallbacks[0];
+      console.log(
+        `[Q86] year-mismatch tolerated (unproven year): "${fb.productName}" ` +
+        `product-year=${fb.year} vs claimed=${comicYear}`
+      );
+      return { ...fb, yearMismatchTolerated: true };
     }
     console.log(`[pricecharting] no valid match in ${products.length} results`);
     return null;
@@ -1568,6 +1599,7 @@ export {
   getEra,
   enforceFloor,
   enforceFloorWithCap,
+  lookupPriceCharting,  // Q86 — exported for year-confidence tests
 };
 
 export default async function handler(req, res) {
@@ -2214,7 +2246,10 @@ export default async function handler(req, res) {
 
         // No cache hit — try live query with full title first
         console.log(`[pc-query] trying full title: "${confirmedTitle}"`);
-        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year }).catch(() => null);
+        // Q86: pre-resolution year confidence — proven only when the eBay
+        // pool year ratio corroborates; a lone Vision year is a guess.
+        const q86PreYearConfidence = ebayYearAuthoritative ? 'proven' : 'unproven';
+        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence }).catch(() => null);
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
@@ -2225,7 +2260,7 @@ export default async function handler(req, res) {
         // Full title returned zero results — fallback to subtitle-stripped
         if (hasSubtitle && subtitleStripped !== confirmedTitle) {
           console.log(`[pc-query] full title zero results — fallback to stripped: "${subtitleStripped}"`);
-          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year }).catch(() => null);
+          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence }).catch(() => null);
           if (result) {
             console.log(`[pc-query] stripped title matched: "${result.productName}"`);
             await kvSet(strippedTitleKey, result, KV_TTL.PC);
@@ -2537,7 +2572,9 @@ export default async function handler(req, res) {
         priceCharting = await lookupPriceCharting({
           title: pcRequeryTitle,
           issue: confirmedIssue,
-          year
+          year,
+          // Q86: requery runs pre-resolveYear — same preliminary confidence
+          yearConfidence: ebayYearAuthoritative ? 'proven' : 'unproven',
         }).catch(() => null);
         mark('pc_requery_complete');
         if (priceCharting) {
@@ -2687,6 +2724,16 @@ export default async function handler(req, res) {
 
     confirmedYear = yearResolution.confirmedYear;
     let yearOverrideRejected = yearResolution.yearOverrideRejected;
+
+    // Q86: structured year provenance on the response — {value, source,
+    // confidence}. Scalar out.confirmedYear stays for every existing
+    // consumer; the meta lets the UI and future gates distinguish a
+    // cover-read/anchored year from a Vision guess.
+    out.confirmedYearMeta = {
+      value: confirmedYear || null,
+      source: yearResolution.yearSource,
+      confidence: yearResolution.yearConfidence,
+    };
 
     // Ship 3B.3 — Comp consensus backfill now in identityCore.js
     const backfill = backfillFromComps(
@@ -3212,6 +3259,8 @@ export default async function handler(req, res) {
             title: confirmedTitle,
             issue: confirmedIssue,
             year: confirmedYear || year,
+            // Q86: revote runs post-resolveYear — use resolved confidence
+            yearConfidence: yearResolution?.yearConfidence || 'proven',
           }).catch(() => null);
           if (priceCharting) {
             console.log(`[22c-title-revote] PC re-query matched: "${priceCharting.productName}"`);
