@@ -67,6 +67,15 @@ export const fetchSold = async ({ title, issue, year }) => {
   const cached = CACHE.get(cacheKey);
   if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
 
+  // FIX-1 — Insights kill switch. The in-memory insightsScopeUnavailable
+  // flag does not survive cold starts, so [sold] oauth HTTP 400 fires on
+  // every new instance (dead since launch — API gated for indie devs).
+  // SOLD_INSIGHTS_DISABLED=1 in Vercel env skips the attempt entirely.
+  if (process.env.SOLD_INSIGHTS_DISABLED === '1') {
+    CACHE.set(cacheKey, { ts: Date.now(), data: [] });
+    return [];
+  }
+
   // SPEED-1a — Skip OAuth attempt when insights scope known unavailable
   if (insightsScopeUnavailable) {
     CACHE.set(cacheKey, { ts: Date.now(), data: [] });
