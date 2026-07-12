@@ -824,5 +824,78 @@ test('GL-3: polybag-pc-divergence refusal — REFUSED, hard lock, banner', () =>
   assert(c.violations.length === 0, `clean, got: ${c.violations.join(' | ')}`);
 });
 
+// ─────────────────────────────────────────────────────────────────
+// Q41 — lock taxonomy + acknowledged-override invariant amendment
+// ─────────────────────────────────────────────────────────────────
+
+test('Q41: refused-tier-bypass lock is insufficiency class', () => {
+  const locks = deriveLocks({ refusedToPrice: true, pricingSource: 'refused-tier-bypass-detected' });
+  const lock = locks.find((l) => l.code === 'refused');
+  assert(lock?.class === 'insufficiency', `got ${lock?.class}`);
+});
+
+test('Q41: refused-no-data lock is insufficiency class', () => {
+  const locks = deriveLocks({ refusedToPrice: true, pricingSource: 'refused-no-data-sources' });
+  assert(locks.find((l) => l.code === 'refused')?.class === 'insufficiency', 'insufficiency');
+});
+
+test('Q41: qualified-label card carries ONLY integrity-class locks (X-Men Q7.0 gate)', () => {
+  const locks = deriveLocks({
+    refusedToPrice: true,
+    pricingSource: 'refused-qualified-label',
+    listingHardLocked: true,
+    listingHardLockReason: 'qualified-label',
+    listingHardLockBanner: 'Qualified label — comps not applicable',
+  });
+  assert(locks.length >= 2, 'refused + qualified-label locks present');
+  assert(locks.every((l) => l.class === 'integrity'),
+    `every lock integrity — no acknowledge control may render (got ${locks.map((l) => l.class).join(',')})`);
+});
+
+test('Q41: polybag-pc-divergence and contamination locks are integrity', () => {
+  const a = deriveLocks({ refusedToPrice: true, pricingSource: 'refused-polybag-pc-divergence', listingHardLocked: true, listingHardLockReason: 'polybag-pc-divergence' });
+  const b = deriveLocks({ listingHardLocked: true, listingHardLockReason: 'mega-key-floor-contamination' });
+  assert(a.every((l) => l.class === 'integrity'), 'divergence integrity');
+  assert(b.every((l) => l.class === 'integrity'), 'contamination integrity');
+});
+
+test('Q41 I2/I3: acknowledged insufficiency override passes validation', () => {
+  const out = cleanOut({
+    price: null, priceLow: null, priceHigh: null, priceBands: null,
+    refusedToPrice: true,
+    pricingSource: 'refused-tier-bypass-detected',
+    soldComps: [],
+    soldCompDiagnostics: { rawCount: 0, verifiedCount: 0, rejectedCount: 0, reasons: {} },
+    decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: ['refused-to-price'], nextStep: '' },
+    listingAcknowledged: true,
+    priceOverridden: true,
+  });
+  const c = assembleContract(out);
+  c.listable = true; // client-side flip after acknowledge (Atlas AA #5 path)
+  validateContract(c, out);
+  const hits = (c.violations || []).filter((v) => v.startsWith('I2') || v.startsWith('I3'));
+  assert(hits.length === 0, `no I2/I3 with acknowledged insufficiency, got: ${hits.join(' | ')}`);
+});
+
+test('Q41 I3: integrity lock stays invariant-protected despite acknowledgment', () => {
+  const out = cleanOut({
+    price: null, priceLow: null, priceHigh: null, priceBands: null,
+    refusedToPrice: true,
+    pricingSource: 'refused-qualified-label',
+    listingHardLocked: true,
+    listingHardLockReason: 'qualified-label',
+    soldComps: [],
+    soldCompDiagnostics: { rawCount: 0, verifiedCount: 0, rejectedCount: 0, reasons: {} },
+    decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: [], nextStep: '' },
+    listingAcknowledged: true,
+    priceOverridden: true,
+  });
+  const c = assembleContract(out);
+  c.listable = true; // attempted flip must be caught
+  validateContract(c, out);
+  assert((c.violations || []).some((v) => v.startsWith('I2') || v.startsWith('I3')),
+    'integrity lock must still fail I2/I3');
+});
+
 // Run all tests
 run();

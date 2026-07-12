@@ -2891,7 +2891,15 @@ function CollectionDetail({
       const overridePrice = parseFloat(listPrice);
       const itemToList = overridePrice > 0
         ? { ...item, price: `$${overridePrice.toFixed(2)}` }
-        : item;
+        : { ...item };
+      // Q41: acknowledged-override listings carry the audit payload so
+      // [Q41-override] fires server-side on every acknowledged listing.
+      if (item.q41Ack?.payload && item.contract && !item.contract.listable) {
+        itemToList.q41Override = {
+          ...item.q41Ack.payload,
+          listedPrice: overridePrice > 0 ? overridePrice : getDisplayPrice(item),
+        };
+      }
       await onList(itemToList);
     } catch (err) {
       setListError(err.message || "Failed to list");
@@ -6055,32 +6063,93 @@ function CollectionDetail({
               // card, plus manual-review, refused, tier-0, thin-pool, and
               // contract-violation locks — one gate for all of them.
               if (item.contract && (item.contract.locks?.length || 0) > 0) {
-                const lock = item.contract.locks[0];
-                return (
-                  <>
-                    <div style={{
-                      padding: "10px 12px",
-                      marginBottom: 8,
-                      background: "rgba(239,68,68,0.10)",
-                      border: "1px solid #da3633",
-                      borderRadius: 6,
-                      fontSize: 12,
-                      color: "#fca5a5",
-                    }}>
-                      🔒 LISTING LOCKED — {String(lock.code).replace(/-/g, ' ').toUpperCase()}
-                      <div style={{ marginTop: 4, fontSize: 11, color: "#888" }}>
-                        {lock.reason}
+                const locks = item.contract.locks;
+                const lock = locks[0];
+                // Q41 (ruled 2026-07-12): lock taxonomy. Insufficiency-class
+                // locks (engine lacks data) are acknowledgeable WHEN the user
+                // sets a manual price and takes responsibility. Integrity
+                // locks (book/identity/evidence suspect) render NO control.
+                const allInsufficiency = locks.every((l) => l.class === 'insufficiency');
+                const manualPriceNum = parseFloat(listPrice) || 0;
+                const q41AckValid =
+                  item.q41Ack != null &&
+                  Math.abs((item.q41Ack.price ?? -1) - manualPriceNum) < 0.011;
+
+                if (allInsufficiency && item.priceOverridden && q41AckValid) {
+                  // Acknowledged insufficiency override — fall through to the
+                  // List button below (I2/I3 amendment path).
+                } else if (allInsufficiency) {
+                  const canAck = item.priceOverridden && manualPriceNum > 0;
+                  return (
+                    <>
+                      <div style={{
+                        padding: "10px 12px",
+                        marginBottom: 8,
+                        background: "rgba(251,191,36,0.10)",
+                        border: "1px solid rgba(212,175,55,0.6)",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        color: "#fde68a",
+                      }}>
+                        🔒 {String(lock.code).replace(/-/g, ' ').toUpperCase()} — {lock.reason}
+                        <div style={{ marginTop: 4, fontSize: 11, color: "#888" }}>
+                          {canAck
+                            ? "Acknowledge below to list at your own price."
+                            : "Set a manual list price above to enable acknowledgment."}
+                        </div>
                       </div>
-                    </div>
-                    <button
-                      className="reset-btn"
-                      disabled={true}
-                      style={{ width: "100%", opacity: 0.5 }}
-                    >
-                      📋 Listing Locked
-                    </button>
-                  </>
-                );
+                      <button
+                        className="reset-btn"
+                        disabled={!canAck}
+                        onClick={() => {
+                          const payload = {
+                            title: item.title,
+                            issue: item.issue || null,
+                            state: item.contract?.state || null,
+                            decision: item.contract?.decision?.action || null,
+                            manualPrice: manualPriceNum,
+                            priceOverridden: true,
+                            lockClassAcknowledged: 'insufficiency',
+                            locks: locks.map((l) => l.code),
+                          };
+                          console.log('[Q41-override] acknowledged', JSON.stringify(payload));
+                          onUpdateField(item, 'q41Ack', { price: manualPriceNum, at: Date.now(), payload });
+                        }}
+                        style={{ width: "100%", background: canAck ? "#b45309" : undefined, color: canAck ? "white" : undefined, opacity: canAck ? 1 : 0.5 }}
+                      >
+                        Engine could not verify a price. I've set and verified this price myself.
+                      </button>
+                    </>
+                  );
+                } else {
+                  // Integrity lock — hard, never acknowledgeable (X-Men Q7.0
+                  // qualified-label gate: NO acknowledge control exists).
+                  return (
+                    <>
+                      <div style={{
+                        padding: "10px 12px",
+                        marginBottom: 8,
+                        background: "rgba(239,68,68,0.10)",
+                        border: "1px solid #da3633",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        color: "#fca5a5",
+                      }}>
+                        🔒 LISTING LOCKED — {String(lock.code).replace(/-/g, ' ').toUpperCase()}
+                        <div style={{ marginTop: 4, fontSize: 11, color: "#888" }}>
+                          {lock.reason}
+                        </div>
+                      </div>
+                      <button
+                        className="reset-btn"
+                        disabled={true}
+                        style={{ width: "100%", opacity: 0.5 }}
+                      >
+                        📋 Listing Locked
+                      </button>
+                    </>
+                  );
+                }
               }
 
               // Ship #26 v0-D — Decision Engine hard-block gate
@@ -6160,8 +6229,69 @@ function CollectionDetail({
               // means the decision action isn't a LIST action). Q57 inline
               // thin-pool rule survives ONLY for pre-contract entries — the
               // contract carries it server-side as the low-tier-thin-pool lock.
+              // Q41: acknowledged-override unlock. Two paths reach here
+              // unlisted: (a) insufficiency locks acknowledged above (fall
+              // through), (b) RESEARCH/!listable lockless cards acknowledged
+              // via the mega-key-gate pattern below. Ack is price-bound —
+              // a changed price invalidates it and re-gates.
+              const q41Locks = item.contract?.locks || [];
+              const q41ManualNum = parseFloat(listPrice) || 0;
+              const q41EffectivePrice = q41ManualNum > 0 ? q41ManualNum : getDisplayPrice(item);
+              const q41AckPriceValid =
+                item.q41Ack != null &&
+                Math.abs((item.q41Ack.price ?? -1) - q41EffectivePrice) < 0.011;
+              const q41Unlocked =
+                q41AckPriceValid &&
+                (q41Locks.length === 0 ||
+                  (q41Locks.every((l) => l.class === 'insufficiency') && item.priceOverridden));
+
+              const researchAckNeeded =
+                item.contract && !item.contract.listable &&
+                q41Locks.length === 0 && !q41AckPriceValid;
+
+              if (researchAckNeeded) {
+                const act = item.contract.decision?.action || 'REVIEW';
+                return (
+                  <>
+                    <div style={{
+                      padding: "8px 10px",
+                      marginBottom: 8,
+                      background: "rgba(251,191,36,0.10)",
+                      border: "1px solid rgba(212,175,55,0.6)",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: "#fde68a",
+                    }}>
+                      🔍 {act} recommended — review the evidence, then acknowledge to list
+                      {q41EffectivePrice > 0 ? ` at $${q41EffectivePrice.toFixed(2)}` : ''}.
+                    </div>
+                    <button
+                      className="reset-btn"
+                      disabled={!(q41EffectivePrice > 0)}
+                      onClick={() => {
+                        const payload = {
+                          title: item.title,
+                          issue: item.issue || null,
+                          state: item.contract?.state || null,
+                          decision: act,
+                          manualPrice: q41EffectivePrice,
+                          priceOverridden: !!item.priceOverridden,
+                          lockClassAcknowledged: 'research-not-listable',
+                          locks: [],
+                        };
+                        console.log('[Q41-override] acknowledged', JSON.stringify(payload));
+                        onUpdateField(item, 'q41Ack', { price: q41EffectivePrice, at: Date.now(), payload });
+                      }}
+                      style={{ width: "100%", background: "#b45309", color: "white" }}
+                    >
+                      Acknowledge and Enable Listing
+                    </button>
+                  </>
+                );
+              }
+
               const listLocked = item.contract
-                ? !item.contract.listable
+                ? (!item.contract.listable && !q41Unlocked)
                 : (item.matchConfidence?.tier === 'LOW' &&
                    (item.soldComps?.length || 0) + (item.comps?.count || 0) < 3);
               const listLockedLabel = item.contract
@@ -9642,10 +9772,17 @@ export default function App() {
 
   const listOnEbay = useCallback(async (item) => {
     const coverPhoto = getComicPhotos(item)[0] || null;
+    // Q41: acknowledged-override listings carry their audit payload to the
+    // server so [Q41-override] appears in Vercel logs (client console does
+    // not reach log capture).
+    if (item.q41Override) {
+      console.log('[Q41-override]', JSON.stringify(item.q41Override));
+    }
     const res = await fetch("/api/list-ebay", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
+        q41Override: item.q41Override || null,
         title: item.title,
         publisher: item.publisher,
         year: item.year,

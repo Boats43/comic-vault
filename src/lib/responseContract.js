@@ -64,6 +64,22 @@ function normalizeSource(pricingSource) {
  * `hard: true` locks also drive state=LOCKED; soft locks only gate the
  * List button (listable=false) without changing state.
  */
+// Q41 lock taxonomy (ruled 2026-07-12): every lock carries a class.
+//   'integrity'     — the book/identity/evidence itself is suspect
+//                     (qualified/restored label, floor contamination,
+//                     polybag divergence, tier-0, manual review, blocked
+//                     decisions). HARD, never acknowledgeable.
+//   'insufficiency' — the engine simply lacks data to verify a price
+//                     (tier-bypass, no-data-sources, bare refused, thin
+//                     pool). Acknowledgeable WHEN the user sets a manual
+//                     price (priceOverridden) and takes responsibility.
+// Unlisted/unknown codes default to 'integrity' (conservative).
+const INSUFFICIENCY_REFUSAL_SLUGS = new Set([
+  'refused-tier-bypass-detected',
+  'refused-no-data-sources',
+  'refused',
+]);
+
 export function deriveLocks(out) {
   const locks = [];
 
@@ -73,6 +89,7 @@ export function deriveLocks(out) {
       reason: out.identityReasons?.[0]
         || 'Identification incomplete — verify title, issue, and publisher before listing',
       hard: true,
+      class: 'integrity',
     });
   }
 
@@ -81,6 +98,12 @@ export function deriveLocks(out) {
       code: 'refused',
       reason: out.priceNote || 'Cannot price — no verified market data for this book',
       hard: true,
+      // Q41: class from the refusal slug — data insufficiency is
+      // acknowledgeable, integrity refusals (qualified-label,
+      // polybag-pc-divergence, identity-conflict, reprint) are not.
+      class: INSUFFICIENCY_REFUSAL_SLUGS.has(out.pricingSource)
+        ? 'insufficiency'
+        : 'integrity',
     });
   }
 
@@ -94,6 +117,7 @@ export function deriveLocks(out) {
         || out.floorContaminationReason
         || 'Verified solds far below key floor — pool may contain reprints',
       hard: true,
+      class: 'integrity',
     });
   }
 
@@ -102,6 +126,7 @@ export function deriveLocks(out) {
       code: 'tier0-convergence',
       reason: 'Mega-key identity convergence below 70 — verify this is the correct book before listing',
       hard: true,
+      class: 'integrity',
     });
   }
 
@@ -110,6 +135,7 @@ export function deriveLocks(out) {
       code: 'manual-review',
       reason: out.manualReviewReason || 'Mega-key requires expert appraisal before listing',
       hard: true,
+      class: 'integrity',
     });
   }
 
@@ -118,6 +144,7 @@ export function deriveLocks(out) {
       code: 'grade-exceeds-map',
       reason: out.gradeExceedsMapReason || 'Grade exceeds the verified floor map — manual pricing required',
       hard: true,
+      class: 'integrity',
     });
   }
 
@@ -128,6 +155,7 @@ export function deriveLocks(out) {
         ? out.claudeCheckBlocker
         : 'Verification flagged a critical mismatch — review before listing',
       hard: true,
+      class: 'integrity',
     });
   }
 
@@ -138,6 +166,7 @@ export function deriveLocks(out) {
         code: 'decision-blocked',
         reason: out.decision?.blockers?.[0] || 'Decision engine blocked listing',
         hard: true,
+        class: 'integrity',
       });
     }
   }
@@ -151,6 +180,7 @@ export function deriveLocks(out) {
       code: 'low-tier-thin-pool',
       reason: 'Match confidence LOW with under 3 comps — verify before listing',
       hard: false,
+      class: 'insufficiency',
     });
   }
 
@@ -373,15 +403,28 @@ export function validateContract(contract, out) {
   const violations = [];
   const fail = (id, detail) => violations.push(`${id}: ${detail}`);
 
+  // Q41 (ruled 2026-07-12) — acknowledged-override exception for I2/I3.
+  // listable may be true despite locks ONLY when every lock is
+  // insufficiency-class AND the user acknowledged with a manual price
+  // (priceOverridden). Server assembly never sets these fields — the flip
+  // happens client-side on the card — so server-side validation still
+  // fails any listable+locked contract it produces itself. Integrity
+  // locks remain invariant-protected unconditionally.
+  const ackOverrideValid =
+    out?.listingAcknowledged === true &&
+    out?.priceOverridden === true &&
+    contract.locks.length > 0 &&
+    contract.locks.every((l) => l.class === 'insufficiency');
+
   // I1 / I2 — REFUSED and ID_REQUIRED render nothing priced
   if (contract.state === 'REFUSED' || contract.state === 'ID_REQUIRED') {
     if (contract.price !== null) fail('I1', `${contract.state} with price ${contract.price}`);
     if (contract.bands !== null) fail('I1', `${contract.state} with bands`);
-    if (contract.listable) fail('I2', `${contract.state} marked listable`);
+    if (contract.listable && !ackOverrideValid) fail('I2', `${contract.state} marked listable`);
   }
 
-  // I3 — any lock forbids listing
-  if (contract.locks.length > 0 && contract.listable) {
+  // I3 — any lock forbids listing (Q41: unless acknowledged insufficiency)
+  if (contract.locks.length > 0 && contract.listable && !ackOverrideValid) {
     fail('I3', `listable with ${contract.locks.length} lock(s): ${contract.locks.map((l) => l.code).join(',')}`);
   }
 

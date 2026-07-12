@@ -657,6 +657,13 @@ export default async function handler(req, res) {
   try {
     const item = req.body || {};
 
+    // Q41 (ruled 2026-07-12): acknowledged-override listings log their
+    // audit payload server-side so [Q41-override] shows in the CLI log
+    // capture (book, engine state, manual price, lock class acknowledged).
+    if (item.q41Override) {
+      console.log('[Q41-override]', JSON.stringify(item.q41Override));
+    }
+
     const ebayHeaders = {
       "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT_LEVEL,
       "X-EBAY-API-DEV-NAME": EBAY_DEV_ID,
