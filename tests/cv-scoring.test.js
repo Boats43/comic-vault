@@ -203,6 +203,44 @@ const vintage = computeTotal(50, 2, 0, 0);  // same year
 assert(vintage > modern, 'T5.3: Vintage (year match) beats modern (30y gap)');
 assert(vintage - modern === 7, 'T5.4: Year gap penalty = 7 pts (2 - (-5))');
 
+// ─── FIX-3 — convergence rejection verdict that gates CV display ────
+// GSX case: card rendered Giant-Size ASTONISHING X-Men (2008) blurb
+// while [22c] rejected cv="Gone". enrich.js keys its display suppression
+// on rejections with source==='cv' on the title/issue/publisher axes —
+// these tests pin that verdict shape.
+console.log('\n── FIX-3 — cv rejection verdict shape ──');
+
+const { computeConvergenceScore } = await import('../src/lib/convergenceScore.js');
+
+const gsxResult = computeConvergenceScore(
+  { title: 'Giant-Size X-Men', issue: '1', era: 'vintage', publisher: 'Marvel', grade: null },
+  {
+    title: { vision: 'Giant-Size X-Men', cv: 'Gone' },
+    issue: { vision: '1', cv: '1' },
+    era: { vision: 'vintage' },
+    publisher: { vision: 'Marvel', cv: 'Marvel' },
+  }
+);
+const titleRejects = gsxResult.axes.title?.rejections || [];
+assert(
+  titleRejects.some((r) => r.source === 'cv'),
+  'F3.1: wrong CV title ("Gone") → rejection with source=cv on title axis'
+);
+
+const cleanResult = computeConvergenceScore(
+  { title: 'Giant-Size X-Men', issue: '1', era: 'vintage', publisher: 'Marvel', grade: null },
+  {
+    title: { vision: 'Giant-Size X-Men', cv: 'Giant-Size X-Men' },
+    issue: { vision: '1', cv: '1' },
+    era: { vision: 'vintage' },
+    publisher: { vision: 'Marvel', cv: 'Marvel' },
+  }
+);
+const cleanCvRejected = ['title', 'issue', 'publisher'].some((axis) =>
+  (cleanResult.axes[axis]?.rejections || []).some((r) => r.source === 'cv')
+);
+assert(!cleanCvRejected, 'F3.2: agreeing CV → no cv rejection on identity axes');
+
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== RESULTS ===`);
 console.log(`Passed: ${passed}`);

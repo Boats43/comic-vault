@@ -2285,6 +2285,17 @@ export default async function handler(req, res) {
       }
     });
 
+    // FIX-3: convergence rejection gates DISPLAY fields, not only pricing
+    // inputs. GSX card rendered the Giant-Size ASTONISHING X-Men (2008)
+    // story blurb while [22c] had rejected cv="Gone" — the verdict never
+    // reached out.comicVine. Verdict computed here; the actual out.comicVine
+    // assignment (~line 3290) consults it. Identity axes only (title/issue/
+    // publisher — era excluded, cover-date drift is normal).
+    const CV_IDENTITY_AXES = ['title', 'issue', 'publisher'];
+    const cvConvergenceRejectedAxes = CV_IDENTITY_AXES.filter((axis) =>
+      (convergence.axes[axis]?.rejections || []).some((r) => r.source === 'cv')
+    );
+
     // Ship #22b: PC Guard — era-gate filtering (PC/CV as verifiers, not originators)
     // When eraLock present AND PC/CV year vs locked era >10y → reject, persist for card.
     // E1/E2 protection: ASM #1 locked to 1963 → PC "Divided We Stand" 2016 rejected.
@@ -3243,7 +3254,16 @@ export default async function handler(req, res) {
       out.publisher = confirmedPublisher;
     }
 
-    if (comicVine) {
+    if (comicVine && cvConvergenceRejectedAxes.length > 0) {
+      // FIX-3: convergence rejected CV on an identity axis — the volume is
+      // the wrong book. Suppress from the card entirely (same pattern as
+      // Q35 + polybag-cv-suppress; original preserved for debug).
+      out.originalComicVine = comicVine;
+      out.storySuppressedReason = `convergence-rejected:${cvConvergenceRejectedAxes.join(',')}`;
+      console.log(
+        `[22c] cv display suppressed — rejected on axes: ${cvConvergenceRejectedAxes.join(', ')}`
+      );
+    } else if (comicVine) {
       out.comicVine = comicVine;
       // TRACK B.1: Extract character_credits
       out.cvCharacterCredits = Array.isArray(comicVine.character_credits)
