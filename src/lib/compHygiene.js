@@ -273,7 +273,14 @@ export const tokenizeTitle = (title) => {
   const stripSet = new Set([...artistWords, ...signatureWords, ...ordinalKeyWords]);
 
   const words = normalized
-    .replace(/-/g, "")  // Q22: strip hyphens before tokenization (spider-man → spiderman)
+    // FIX-2 (jrcrp-17838110): hyphen family → SPACE on both sides, replacing
+    // Q22's strip-to-join. Enrich passes pre-normalized titles ("Giant Size
+    // X Men" → [giant,size,men]) while comp rows tokenized raw hyphens
+    // ("Giant-Size X-Men" → [giantsize,xmen]) → overlap 0.00, 17 sold rows
+    // rejected on-grade. Space-split makes both forms canonical. The Q22
+    // compact-form case ("Spiderman") is preserved by the bigram-join check
+    // in hasSufficientTitleOverlap below. Covers -, ‐, ‑, ‒, –, —, ―.
+    .replace(/[-‐-―]/g, " ")
     .replace(/#\s*\d+/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .split(/\s+/)
@@ -296,15 +303,32 @@ export const tokenizeTitle = (title) => {
 // The Prophecy class bugs). Thin titles have higher false-positive risk.
 export const hasSufficientTitleOverlap = (listingTitle, searchTokens, threshold = 0.5) => {
   if (!searchTokens || searchTokens.length === 0) return true;
-  const listingSet = new Set(tokenizeTitle(listingTitle));
+  const listingArr = tokenizeTitle(listingTitle);
+  const listingSet = new Set(listingArr);
   if (listingSet.size === 0) return false;
+
+  // FIX-2: bigram-join set — with hyphens now splitting to spaces, compact
+  // seller spellings ("Spiderman") must still match split forms ("spider",
+  // "man") in BOTH directions.
+  const joinedSet = new Set();
+  for (let i = 0; i < listingArr.length - 1; i++) {
+    joinedSet.add(listingArr[i] + listingArr[i + 1]);
+  }
 
   // Q31: Adaptive threshold for thin titles (≤2 tokens after sanitization)
   const adaptiveThreshold = searchTokens.length <= 2 ? 0.75 : threshold;
 
   let matches = 0;
-  for (const t of searchTokens) {
-    if (listingSet.has(t)) matches++;
+  for (let i = 0; i < searchTokens.length; i++) {
+    const t = searchTokens[i];
+    if (listingSet.has(t)) { matches++; continue; }
+    // our compact token ↔ listing split pair ("spiderman" vs "spider man")
+    if (joinedSet.has(t)) { matches++; continue; }
+    // our split pair ↔ listing compact token ("spider","man" vs "spiderman")
+    if (i + 1 < searchTokens.length && listingSet.has(t + searchTokens[i + 1])) {
+      matches += 2;
+      i++;
+    }
   }
   return matches / searchTokens.length >= adaptiveThreshold;
 };

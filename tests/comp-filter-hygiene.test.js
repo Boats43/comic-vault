@@ -887,6 +887,42 @@ assertFalse(MERCH_RE.test('Batman #227 newsstand VG'), 'newsstand → NOT merch'
 assertFalse(MERCH_RE.test('Action Comics #33 1941 DC Golden Age'), 'plain comic → NOT merch');
 assertFalse(MERCH_RE.test('Wolverine #1 printing error miscut'), 'printing error → NOT merch');
 
+// ─── FIX-2 (jrcrp-17838110) — hyphen normalizer + bigram join ──────
+console.log('\n── FIX-2 — hyphen → space + bigram join ──');
+
+import { tokenizeTitle as tok, hasSufficientTitleOverlap as overlap } from '../src/lib/compHygiene.js';
+
+// GSX replica: enrich passes pre-normalized "Giant Size X Men"; comp rows
+// carry raw hyphens. Pre-fix: [giant,size,men] vs [giantsize,xmen] → 0.00,
+// 17 on-grade sold rows rejected.
+assertTrue(
+  overlap('Giant-Size X-Men #1 CGC 3.0 1975 Marvel', tok('Giant Size X Men')),
+  'pre-normalized our-title matches hyphenated comp (GSX replica)'
+);
+assertTrue(
+  overlap('GIANT SIZE X-MEN 1 CGC 3.0', tok('Giant-Size X-Men')),
+  'hyphenated our-title matches spaced comp'
+);
+assertEq(
+  JSON.stringify(tok('Giant-Size X-Men')),
+  JSON.stringify(tok('Giant Size X Men')),
+  'hyphen and space forms tokenize identically'
+);
+
+// Q22 preservation via bigram join — compact seller spellings still match
+assertTrue(
+  overlap('Amazing Spiderman 300 CGC', tok('Amazing Spider-Man')),
+  'compact "Spiderman" comp still matches (Q22 preserved)'
+);
+assertTrue(
+  overlap('Amazing Spider-Man #300 CGC 9.8', tok('Amazing Spiderman')),
+  'compact our-title matches split comp (reverse direction)'
+);
+assertFalse(
+  overlap('Spawn #1 McFarlane 1992', tok('Amazing Spider-Man')),
+  'wrong series still rejected'
+);
+
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== RESULTS ===`);
 console.log(`Passed: ${passed}`);
