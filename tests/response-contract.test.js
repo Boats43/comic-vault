@@ -623,6 +623,35 @@ test('24c no-fire - mega-key contamination path excluded (XMEN1 wins)', () => {
   assert(out.contract.state === 'LOCKED', 'XMEN1 lock state preserved');
 });
 
+// GL-0 (2026-07-11) — EX-1 silence root cause: enrich.js built out.rawComps
+// as a summary {average,lowest,highest,count} with NO prices[], so the
+// activePrices guard returned early on EVERY production scan. These two
+// tests pin the shape contract from both sides.
+test('24c GL-0 regression - no-fire when rawComps.prices missing (pre-GL-0 enrich shape)', () => {
+  const out = action33Out({
+    rawComps: { count: 2, average: 18.23, lowest: 13, highest: 23.45 },
+  });
+  finalizeResponse(out);
+  assert(!out.contract.soldSideAnchored,
+    'without prices[] the guard returns early — this documented the EX-1 silence');
+});
+
+test('24c GL-0 - fires with enrich-emitted shape ({price,title} objects, null titles ok)', () => {
+  const out = action33Out({
+    rawComps: {
+      count: 2,
+      prices: [
+        { price: 13, title: null },
+        { price: 23.45, title: 'ACTION COMICS #33 COVER PRINT' },
+      ],
+      average: 18.23, lowest: 13, highest: 23.45,
+    },
+  });
+  finalizeResponse(out);
+  assert(out.contract.soldSideAnchored === true, 'must fire with GL-0 enrich shape');
+  assert(out.contract.decision.action === 'RESEARCH', 'RESEARCH forced');
+});
+
 test('24c no-fire - refused state untouched', () => {
   const out = action33Out({
     price: null, priceBands: null, priceLow: null, priceHigh: null,

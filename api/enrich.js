@@ -5460,7 +5460,18 @@ export default async function handler(req, res) {
       average: rawComps.average,
       lowest: rawComps.lowest,
       highest: rawComps.highest,
-      count: rawComps.count
+      count: rawComps.count,
+      // GL-0: applyAnchorDirection (responseContract.js) reads
+      // out.rawComps.prices to compute the active median. Without this
+      // array the ≥1-active guard returns early and 24c can never fire
+      // (EX-1 silence on dpl_43c65g9 / build 2b19171). Minimal shape —
+      // price for the median, title for contamination debugging.
+      prices: Array.isArray(rawComps.prices)
+        ? rawComps.prices.map((p) => ({
+            price: typeof p === 'number' ? p : (p?.price ?? null),
+            title: p?.title || null,
+          }))
+        : [],
     } : { count: 0 };
 
     // 2. compPoolContaminated: universal flag for variant/reprint fallback
