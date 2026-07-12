@@ -1911,7 +1911,12 @@ export default async function handler(req, res) {
     // Ship 3A: Pass year for era-aware overlap gate (pre-1970 requires 1 token, modern 2).
     mark('family_candidate_start');
     const familyCandidate = (visualResult?.items?.length >= 5)
-      ? selectTitleFamilyCandidate(visualResult.items, title, issueNum, year)
+      // Q84-AMENDED: pass the eBay image consensus title so the dual-axis
+      // token-class gate can detect Vision+eBay agreement (Flash #75:
+      // both said "the flash", arc family "flash year one" overrode both).
+      ? selectTitleFamilyCandidate(visualResult.items, title, issueNum, year, {
+          ebayConsensusTitle: visualConsensus?.title || null,
+        })
       : null;
     mark('family_candidate_complete');
 
@@ -3161,6 +3166,51 @@ export default async function handler(req, res) {
           .join(', ') +
         ')'
       );
+    }
+
+    // Q84-AMENDED [22c-title-revote]: unanimous title-axis rejection alone
+    // is NOT the trigger (Wonder Woman #75 had unanimous rejection and was
+    // RIGHT). Trigger = unanimous non-vision rejection AND PC no-match AND
+    // verified pool <3 — downstream failure confirms the identity is bad.
+    // Then: revote confirmedTitle to the majority axis value and re-query
+    // PC once. Comps are NOT re-fetched (single re-query per ruling).
+    {
+      const titleAxis = out.convergence?.axes?.title;
+      const nonVisionVotes = (titleAxis?.votes || []).filter((v) => v.source !== 'vision');
+      const unanimousRejection =
+        nonVisionVotes.length >= 2 && nonVisionVotes.every((v) => v.agrees === false);
+      const pcNoMatch = !(priceCharting && priceCharting.id);
+      const verifiedPool = (rawComps?.count || 0) + (filteredSold?.length || 0);
+
+      if (unanimousRejection && pcNoMatch && verifiedPool < 3) {
+        // Majority axis value: the most common `got` among rejecting sources
+        const gotCounts = {};
+        (titleAxis.rejections || []).forEach((r) => {
+          const g = String(r.got || '').trim();
+          if (g) gotCounts[g] = (gotCounts[g] || 0) + 1;
+        });
+        const majority = Object.entries(gotCounts).sort((a, b) => b[1] - a[1])[0];
+        if (majority && majority[0] && majority[0].toLowerCase() !== String(confirmedTitle || '').toLowerCase()) {
+          const oldTitle = confirmedTitle;
+          confirmedTitle = majority[0];
+          out.titleRevotedFrom22c = true;
+          out.needsReview = true;
+          console.log(`[22c-title-revote] old="${oldTitle}" new="${confirmedTitle}" (unanimous rejection + PC no-match + pool=${verifiedPool})`);
+          // Re-query PC once with the revoted title
+          priceCharting = await lookupPriceCharting({
+            title: confirmedTitle,
+            issue: confirmedIssue,
+            year: confirmedYear || year,
+          }).catch(() => null);
+          if (priceCharting) {
+            console.log(`[22c-title-revote] PC re-query matched: "${priceCharting.productName}"`);
+            out.pcProductId = priceCharting.id || null;
+            out.pcProductName = priceCharting.productName || null;
+          } else {
+            console.log('[22c-title-revote] PC re-query: no match — revoted title kept, pricing proceeds on pool');
+          }
+        }
+      }
     }
 
     // BUILD 3: Recency-weighted pricing for sold comps

@@ -130,6 +130,7 @@ export const ARTIST_PATTERNS = [
   /jeehyung lee/i, /alex ross/i, /kaare andrews/i, /alan quah/i,
   /mico suayan/i, /puppeteer lee/i, /derrick chew/i, /jonboy meyers/i,
   /kael ngu/i, /natali sanders/i, /kendrick lim/i, /lucio parrillo/i,
+  /jenny frison/i,  // Q84 — WW #75 cover artist (unambiguous, alias policy)
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
   /skan/i, /rapoza/i, /quash/i, /momoko/i, /ross/i, /adams/i,
   /kirkham/i, /bean/i, /andolfo/i, /browne/i, /forstner/i,
@@ -138,6 +139,7 @@ export const ARTIST_PATTERNS = [
   /hughes/i, /byrne/i, /perez/i, /kirby/i, /ditko/i, /mele/i,
   /albuquerque/i, /hama/i, /fabok/i, /ejikure/i,
   /gleason/i, /quah/i, /parrillo/i, /maer/i, /lim/i, /chew/i, /ngu/i, /sanders/i,
+  /frison/i,  // Q84 — unambiguous last name (alias policy)
 ];
 
 // ───────────────────────── TOKEN-BASED HELPERS ─────────────────────────

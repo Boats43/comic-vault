@@ -24,6 +24,7 @@
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
 import { sanitizeSeriesTitle } from './identityCore.js';
+import { ARTIST_PATTERNS } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
 //
@@ -844,8 +845,12 @@ export const scoreTitleFamilies = (families, itemsOrTitles) => {
     };
   });
 
-  // Sort by weightSum descending
-  scored.sort((a, b) => b.weightSum - a.weightSum);
+  // Sort by weightSum descending.
+  // Q84-AMENDED TIEBREAK: equal weight → MORE members wins. The stable
+  // sort previously kept discovery order on ties, letting a 3-member arc
+  // family ("flash year one") beat a 7-member series family ("the flash")
+  // at equal weightSum (Flash #75, 02:17:19.953).
+  scored.sort((a, b) => (b.weightSum - a.weightSum) || (b.count - a.count));
 
   return scored;
 };
@@ -922,6 +927,84 @@ const sanitizeSelectedTitle = (title) => {
     .trim();
 };
 
+// ═════════════════════════════════════════════════════════════════════════
+// Q84-AMENDED (2026-07-12) — Dual-axis token-class gate
+// ═════════════════════════════════════════════════════════════════════════
+//
+// Flash #75 (2019): Vision="the flash" AND eBay consensus="the flash" (63%)
+// agreed, yet the family override fired "flash year one" (3-member story-ARC
+// cluster) and PC + comps queried the arc name → starved → refused a $5 book.
+// Wonder Woman #75 counter-case: the SAME override correctly selected
+// "wonder woman jenny frison" (creator-variant family) — a blanket dual-axis
+// lock would have broken it. Resolution: when the two independent axes agree,
+// the family may only ADD tokens that are CREATOR-class (validated against
+// the pool's artist consensus, same extraction class as [variant-identity]).
+// Arc-class additions are contents, not titles (22f metadata class).
+
+export const ARC_RE =
+  /\b(?:year\s+one|year\s+of\s+the\s+villain|knightfall|finale|part\s+\d+|tie[\s-]?in|the\s+offer|age\s+of|war\s+of|rebirth)\b/i;
+
+const ARTICLE_TOKENS = new Set(['the', 'a', 'an']);
+
+// Q84 — neutral additions: publisher and format tokens that survive
+// tokenizeTitleFamily (deliberately, for "DC Pride"-class identities) but
+// do not change WHICH book a family names. Ignored by the token-class
+// gate on both sides — they are neither identity-changing nor creator.
+const NEUTRAL_ADDITION_TOKENS = new Set([
+  'dc', 'marvel', 'comics', 'comic', 'image', 'idw', 'boom', 'dynamite',
+  'valiant', 'archie', 'dark', 'horse', 'variant', 'cover', 'edition',
+  'print', 'first', '1st',
+]);
+
+// Pool artist consensus: creator names matching ARTIST_PATTERNS in ≥2 pool
+// titles. Returns a Set of lowercase word tokens for creator-class checks.
+export const extractPoolArtistTokens = (items) => {
+  const counts = {};
+  for (const it of items || []) {
+    const raw = String(typeof it === 'string' ? it : (it?.rawTitle || it?.title || ''));
+    for (const pattern of ARTIST_PATTERNS) {
+      const m = raw.match(pattern);
+      if (m) {
+        const key = m[0].toLowerCase();
+        counts[key] = (counts[key] || 0) + 1;
+        break; // multi-word patterns ordered first; one artist per title
+      }
+    }
+  }
+  const tokens = new Set();
+  for (const [name, c] of Object.entries(counts)) {
+    if (c >= 2) name.split(/\s+/).forEach((w) => { if (w) tokens.add(w); });
+  }
+  return tokens;
+};
+
+// Token-class gate. familyTokens/agreedTokens are tokenizeTitleFamily
+// output; articles are ignored on both sides ("the flash" ≡ "flash").
+// Returns { allowed, reason }.
+export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens) => {
+  const drop = (t) => ARTICLE_TOKENS.has(t) || NEUTRAL_ADDITION_TOKENS.has(t);
+  const fam = (familyTokens || []).filter((t) => !drop(t));
+  const agreed = (agreedTokens || []).filter((t) => !drop(t));
+  if (agreed.length === 0) return { allowed: true, reason: 'no agreed tokens to protect' };
+
+  const missing = agreed.filter((t) => !fam.includes(t));
+  if (missing.length > 0) {
+    return { allowed: false, reason: `family drops agreed tokens [${missing.join(',')}]` };
+  }
+  const added = fam.filter((t) => !agreed.includes(t));
+  if (added.length === 0) return { allowed: true, reason: 'same title, nothing added' };
+
+  const addedStr = added.join(' ');
+  if (ARC_RE.test(addedStr)) {
+    return { allowed: false, reason: `arc-token "${addedStr}"` };
+  }
+  const nonCreator = added.filter((t) => !(poolArtistTokens && poolArtistTokens.has(t)));
+  if (nonCreator.length > 0) {
+    return { allowed: false, reason: `non-creator additions [${nonCreator.join(',')}]` };
+  }
+  return { allowed: true, reason: `creator-tokens [${addedStr}]` };
+};
+
 /**
  * Ship 26.1 — Select title-family candidate.
  *
@@ -949,7 +1032,7 @@ const sanitizeSelectedTitle = (title) => {
  * @param {string|number} visionYear - Vision-identified year (optional, for era-aware gates)
  * @returns {{decision: string, selectedTitle: string|null, rawTitle: string|null, reason: string, topFamily: object|null, runnerUp: object|null, families: array}}
  */
-export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visionYear = null) => {
+export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visionYear = null, opts = {}) => {
   // Guard clauses
   if (!Array.isArray(items) || items.length === 0) {
     return {
@@ -1002,6 +1085,28 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
 
   // Tokenize Vision title for overlap check
   const visionTokens = tokenizeTitleFamily(visionTitle || '');
+
+  // Q84-AMENDED — dual-axis agreement detection: sanitized Vision title
+  // equals the eBay image consensus title (articles ignored). When true,
+  // family overrides pass through the token-class gate.
+  const ebayConsensusTitle = opts.ebayConsensusTitle || null;
+  const dualAxisAgreed = (() => {
+    if (!ebayConsensusTitle || !visionTitle) return false;
+    const a = visionTokens.filter((t) => !ARTICLE_TOKENS.has(t));
+    const b = tokenizeTitleFamily(ebayConsensusTitle).filter((t) => !ARTICLE_TOKENS.has(t));
+    return a.length > 0 && a.length === b.length && a.every((t) => b.includes(t));
+  })();
+  const poolArtistTokens = dualAxisAgreed ? extractPoolArtistTokens(items) : null;
+  const q84Gate = (familyTokens) => {
+    if (!dualAxisAgreed) return { allowed: true, reason: 'no dual-axis agreement' };
+    const gate = applyDualAxisGate(familyTokens, visionTokens, poolArtistTokens);
+    if (gate.allowed) {
+      console.log(`[Q84] override-allowed reason=${gate.reason}`);
+    } else {
+      console.log(`[Q84] override-blocked reason=${gate.reason} — agreed title stands: "${visionTitle}"`);
+    }
+    return gate;
+  };
 
   // Q43 A1: Top-rank-protection identity guard — three-layer filter prevents
   // lot/run/collection listings, subtitle junk, and low-overlap contamination
@@ -1071,7 +1176,9 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
         // junk listings: 5-10+ tokens). Overlap guards (50%/40%) + LOT_RE
         // already reject junk. Removing token threshold unblocks clean canonical
         // titles (Batman, Avengers, The Mighty Thor) from top-rank-protection.
-        if (issueMatch && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong) {
+        // Q84-AMENDED: dual-axis token-class gate on top-rank-protection.
+        const q84TopRank = q84Gate(item0Family.tokens);
+        if (issueMatch && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong && q84TopRank.allowed) {
           // A1.a: Route through sanitizeSeriesTitle to remove creator names,
           // cover descriptors, condition words, embedded years, seller noise.
           // Then apply post-selection boilerplate sanitization.
@@ -1104,6 +1211,23 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   // Evidence: "spawn lot and" #6 → family construction included LOT listing in consensus pool.
   const LOT_RE = /\b(?:lot|bundle|complete\s*set|full\s*run|comic\s*library|comic\s*collection|huge\s*run)\b|\bset\s*of\s*\d+\b|\b\d+\s*(?:book|issue|comic)s?\s*(?:lot|set)\b/i;
   const isLotFamily = LOT_RE.test(topFamily.rawTitle || '');
+
+  // Q84-AMENDED: dual-axis token-class gate on weighted-consensus. A
+  // blocked override returns fallback-vision — the agreed title stands.
+  const q84Consensus = (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily)
+    ? q84Gate(topFamily.tokens)
+    : { allowed: true, reason: 'gate not reached' };
+  if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily && !q84Consensus.allowed) {
+    return {
+      decision: 'fallback-vision',
+      selectedTitle: null,
+      rawTitle: null,
+      reason: `[Q84-dual-axis] ${q84Consensus.reason} — Vision+eBay agree, family override blocked`,
+      topFamily,
+      runnerUp,
+      families: scored,
+    };
+  }
 
   // Q38: Require ≥3 members for weighted-consensus override
   if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily) {
