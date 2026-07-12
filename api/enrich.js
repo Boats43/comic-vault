@@ -1295,7 +1295,7 @@ export const extractKeyFromComps = (titles) => {
 const PRICECHARTING_EXCLUDE =
   /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix|true believers|marvel tales/i;
 
-const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'proven' }) => {
+const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'proven', eraHint = null }) => {
   if (!issue) {
     console.log("[pt] no issue number — skipping");
     return null;
@@ -1347,6 +1347,9 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
     // a fallback rank instead of rejected — a Vision-guessed year must not
     // veto the only real product match (Funny Book #1 1971 class).
     const q86Fallbacks = [];
+    // Q88(a): below-quorum era is ADVISORY — out-of-era candidates are
+    // demoted (rank penalty), never rejected. Any in-era product wins first.
+    const eraFallbacks = [];
 
     for (const p of products) {
       const name = p["product-name"] || "";
@@ -1410,16 +1413,54 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         q86Fallbacks.push(candidate);
         continue; // keep scanning for a year-matching product first
       }
+      // Q88(a): advisory-era rank penalty — a year-passing candidate outside
+      // the advisory era is demoted, preferring any in-era product.
+      if (eraHint && productYear && (productYear < eraHint.minYear || productYear > eraHint.maxYear)) {
+        eraFallbacks.push(candidate);
+        continue;
+      }
       return candidate;
+    }
+    // Q88(a): no in-era product — accept the best out-of-era candidate.
+    // Advisory era (below quorum) is a rank penalty, never a rejection.
+    if (eraFallbacks.length > 0) {
+      const fb = eraFallbacks[0];
+      console.log(
+        `[22a] era-advisory demotion tolerated: "${fb.productName}" (${fb.year}) ` +
+        `outside advisory ${eraHint.decade}s — no in-era product`
+      );
+      return { ...fb, eraAdvisoryConflict: true };
     }
     // Q86: no year-matching product — accept the best year-mismatched
     // candidate when the claimed year was unproven (rank penalty, not
     // rejection). Product-page year becomes the better anchor downstream.
     if (q86Fallbacks.length > 0) {
       const fb = q86Fallbacks[0];
+      // Q86-B: BOUND the tolerance. A 38y-gap DIFFERENT book slipped through
+      // (CA Special 1984 → Winter Soldier Special 2022). Tolerance requires
+      // compact-title containment BOTH directions — the claimed series key
+      // must equal the product's core key (issue/paren stripped, articles
+      // dropped) — AND a year gap ≤15y. Else no-match stands.
+      const q86bGap = (comicYear && fb.year) ? Math.abs(fb.year - comicYear) : null;
+      const q86bCoreKey = (s) => compactTitleKey(
+        String(s || '').toLowerCase().replace(/\b(?:the|a|an)\b/g, ' ')
+      );
+      const productCore = String(fb.productName || '')
+        .replace(/#\s*[\d.]+.*$/, ' ')
+        .replace(/\([^)]*\)/g, ' ');
+      const claimedKey = q86bCoreKey(seriesName);
+      const productKey = q86bCoreKey(productCore);
+      const coreEquivalent = claimedKey.length >= 4 && claimedKey === productKey;
+      if (!coreEquivalent || q86bGap == null || q86bGap > 15) {
+        console.log(
+          `[Q86-B] tolerance rejected: "${fb.productName}" gap=${q86bGap}y ` +
+          `claimedKey="${claimedKey}" productKey="${productKey}" — no-match stands`
+        );
+        return null;
+      }
       console.log(
         `[Q86] year-mismatch tolerated (unproven year): "${fb.productName}" ` +
-        `product-year=${fb.year} vs claimed=${comicYear}`
+        `product-year=${fb.year} vs claimed=${comicYear} (Q86-B: core-equivalent, gap=${q86bGap}y)`
       );
       return { ...fb, yearMismatchTolerated: true };
     }
@@ -1810,6 +1851,7 @@ export default async function handler(req, res) {
     // Q63 FIX: Parse COVER years from comp titles (4-digit adjacent to issue tokens),
     // NOT listing/sale dates. Cavewoman (2000) must lock ~2000s, not 2020s (listing year).
     let eraLock = null;
+    let eraAdvisory = null; // Q88(a): below-quorum era — rank penalty only, never rejects
     let eraUnlocked = false;
     if (parsedVisualRows && parsedVisualRows.length >= 3) {
       const yearHistogram = {};
@@ -1853,14 +1895,38 @@ export default async function handler(req, res) {
           const ratio = count / totalWithYear;
 
           if (ratio >= 0.50) {
-            eraLock = {
-              decade,
-              minYear: decade - 10,
-              maxYear: decade + 19,
-              confidence: ratio,
-              source: 'visual_consensus'
-            };
-            console.log(`[22a] era-locked=${decade} consensus=${(ratio * 100).toFixed(0)}% (${count}/${totalWithYear})`);
+            // Q88(a): era HARD-lock requires quorum — ≥6 year-bearing items,
+            // or ≥50% of the pool once the pool is ≥12 (below that, a tiny
+            // year sample dominates: Funnybook's 3-of-4 hit 75% agreement and
+            // hard-locked 1940, then [era-gate] rejected the PC match Q86 had
+            // tolerated — two gates fighting, book starved, 2026-07-12 06:53).
+            const eraPoolSize = parsedVisualRows.length;
+            const eraQuorumMet = totalWithYear >= 6 ||
+              (eraPoolSize >= 12 && totalWithYear >= eraPoolSize * 0.5);
+            if (eraQuorumMet) {
+              eraLock = {
+                decade,
+                minYear: decade - 10,
+                maxYear: decade + 19,
+                confidence: ratio,
+                source: 'visual_consensus'
+              };
+              console.log(`[22a] era-locked=${decade} consensus=${(ratio * 100).toFixed(0)}% (${count}/${totalWithYear})`);
+            } else {
+              eraAdvisory = {
+                decade,
+                minYear: decade - 10,
+                maxYear: decade + 19,
+                confidence: ratio,
+                yearBearing: totalWithYear,
+                poolSize: eraPoolSize,
+                source: 'visual_consensus_advisory'
+              };
+              console.log(
+                `[22a] era-advisory decade=${decade} consensus=${(ratio * 100).toFixed(0)}% ` +
+                `yearBearing=${totalWithYear}/${eraPoolSize} — below quorum (need ≥6 year-bearing), rank penalty only`
+              );
+            }
           } else {
             eraUnlocked = true;
             console.log(`[22a] era-unlocked: consensus=${(ratio * 100).toFixed(0)}% < 50% threshold`);
@@ -2249,7 +2315,7 @@ export default async function handler(req, res) {
         // Q86: pre-resolution year confidence — proven only when the eBay
         // pool year ratio corroborates; a lone Vision year is a guess.
         const q86PreYearConfidence = ebayYearAuthoritative ? 'proven' : 'unproven';
-        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence }).catch(() => null);
+        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory }).catch(() => null);
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
@@ -2260,7 +2326,7 @@ export default async function handler(req, res) {
         // Full title returned zero results — fallback to subtitle-stripped
         if (hasSubtitle && subtitleStripped !== confirmedTitle) {
           console.log(`[pc-query] full title zero results — fallback to stripped: "${subtitleStripped}"`);
-          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence }).catch(() => null);
+          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory }).catch(() => null);
           if (result) {
             console.log(`[pc-query] stripped title matched: "${result.productName}"`);
             await kvSet(strippedTitleKey, result, KV_TTL.PC);
@@ -2398,6 +2464,31 @@ export default async function handler(req, res) {
       out.eraRejections = eraRejections;
     }
 
+    // Q88(b): ADVISORY era (below quorum) never rejects. When the surviving
+    // PC match conflicts with the advisory era, the match STANDS; if it only
+    // survived via Q86 year-mismatch tolerance (yearConfidence=unproven),
+    // surface NEEDS_REVIEW + era-conflict instead of starving the book.
+    // Mixed-era pools (1942 vs 1971 same-name books) become review, not refusal.
+    if (eraAdvisory && priceCharting?.year) {
+      const pcYearAdv = parseInt(priceCharting.year);
+      if (Number.isFinite(pcYearAdv) && (pcYearAdv < eraAdvisory.minYear || pcYearAdv > eraAdvisory.maxYear)) {
+        console.log(
+          `[22a] era-advisory conflict: PC "${priceCharting.productName}" (${pcYearAdv}) ` +
+          `vs advisory ${eraAdvisory.decade}s — match STANDS`
+        );
+        out.eraConflict = {
+          source: 'PriceCharting',
+          productYear: pcYearAdv,
+          advisoryDecade: eraAdvisory.decade,
+          advisoryYearBearing: eraAdvisory.yearBearing,
+          yearMismatchTolerated: !!priceCharting.yearMismatchTolerated,
+        };
+        if (priceCharting.yearMismatchTolerated) {
+          out.needsReview = true;
+        }
+      }
+    }
+
     // Publisher fallback from ComicVine when eBay/Vision didn't provide it
     confirmedPublisher = confirmedPublisher || comicVine?.volume?.publisher?.name || publisher;
 
@@ -2501,6 +2592,14 @@ export default async function handler(req, res) {
         .filter(w => canonicalWords.includes(w.toLowerCase()))
         .join(' ');
 
+      // Q88-P3: min-length guard — the <60% floor can strip a compound title
+      // down to a junk token ("Funny Book …" → "Book"). A stripped result
+      // this short carries no identity; keep the original consensus title.
+      if (strippedTitle && strippedTitle !== consensusTitle && strippedTitle.length < 5) {
+        console.log(`[C4-arc-strip] guard: "${strippedTitle}" too short (<5 chars) — keeping "${consensusTitle}"`);
+        return consensusTitle;
+      }
+
       if (strippedTitle !== consensusTitle) {
         console.log(`[C4-arc-strip] "${consensusTitle}" → "${strippedTitle}" (removed <60% words)`);
       }
@@ -2575,6 +2674,7 @@ export default async function handler(req, res) {
           year,
           // Q86: requery runs pre-resolveYear — same preliminary confidence
           yearConfidence: ebayYearAuthoritative ? 'proven' : 'unproven',
+          eraHint: eraAdvisory,
         }).catch(() => null);
         mark('pc_requery_complete');
         if (priceCharting) {
@@ -3261,6 +3361,7 @@ export default async function handler(req, res) {
             year: confirmedYear || year,
             // Q86: revote runs post-resolveYear — use resolved confidence
             yearConfidence: yearResolution?.yearConfidence || 'proven',
+            eraHint: eraAdvisory,
           }).catch(() => null);
           if (priceCharting) {
             console.log(`[22c-title-revote] PC re-query matched: "${priceCharting.productName}"`);

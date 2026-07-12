@@ -1222,8 +1222,32 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     topFamily.tokens.filter((t) => !ARTICLE_TOKENS.has(t) && !NEUTRAL_ADDITION_TOKENS.has(t)).join('')
   );
   const q85CompactMatch = q85VisionKey.length >= 4 && q85VisionKey === q85FamilyKey;
-  const overlapRatio = q85CompactMatch ? 1 : rawOverlapRatio;
-  if (q85CompactMatch && rawOverlapRatio < OVERLAP_THRESHOLD) {
+
+  // Q85-B: FAMILY-SIDE adjacent-bigram compact join. Whole-key equality
+  // above fails when the family carries ANY extra token ("funny book comix"
+  // → "funnybookcomix" ≠ "funnybook"), and per-token overlap can never
+  // reconcile "funny"+"book" against Vision "funnybook" (06:53 2026-07-12:
+  // family overlap 0/1 → refused-identity-conflict → phase2 skipped, while
+  // [Q85] had already fired on the PC path). Test each single family token
+  // and each adjacent-bigram join against the compact Vision key.
+  let q85BigramMatch = false;
+  if (!q85CompactMatch && q85VisionKey.length >= 4) {
+    const famToks = topFamily.tokens.filter(
+      (t) => !ARTICLE_TOKENS.has(t) && !NEUTRAL_ADDITION_TOKENS.has(t)
+    );
+    for (let i = 0; i < famToks.length && !q85BigramMatch; i++) {
+      if (compactTitleKey(famToks[i]) === q85VisionKey) {
+        q85BigramMatch = true;
+        console.log(`[Q85-B] family token "${famToks[i]}" equals compact Vision key "${q85VisionKey}"`);
+      } else if (i + 1 < famToks.length && compactTitleKey(famToks[i] + famToks[i + 1]) === q85VisionKey) {
+        q85BigramMatch = true;
+        console.log(`[Q85-B] family bigram "${famToks[i]} ${famToks[i + 1]}" compact-joins to Vision key "${q85VisionKey}"`);
+      }
+    }
+  }
+
+  const overlapRatio = (q85CompactMatch || q85BigramMatch) ? 1 : rawOverlapRatio;
+  if ((q85CompactMatch || q85BigramMatch) && rawOverlapRatio < OVERLAP_THRESHOLD) {
     console.log(`[Q85] compact-key match "${q85VisionKey}" — token overlap ${Math.round(rawOverlapRatio * 100)}% treated as 100%`);
   }
 
@@ -1254,7 +1278,15 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     // Q43 A1.a: Apply same sanitizeSeriesTitle treatment as top-rank-protection
     // for consistency — removes creator names, descriptors, noise before final title.
     const cleaned = sanitizeSeriesTitle(topFamily.title);
-    const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(cleaned, visionIssue));
+    let sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(cleaned, visionIssue));
+    // Q85-B: compact-key acceptance means family ≡ Vision — prefer Vision's
+    // compact spelling. The generic sanitizer treats "book" as noise and
+    // mangles compound-spaced families ("funny book" → "funny"), which would
+    // poison downstream PC/comp queries with a junk token.
+    if ((q85CompactMatch || q85BigramMatch) && visionTitle && String(visionTitle).trim()) {
+      sanitizedTitle = String(visionTitle).trim();
+      console.log(`[Q85-B] compact-key acceptance — selectedTitle uses Vision spelling "${sanitizedTitle}"`);
+    }
     return {
       decision: 'weighted-consensus',
       selectedTitle: sanitizedTitle,

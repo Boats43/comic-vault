@@ -66,11 +66,19 @@ export const OTHER_COVER_RE = /\bcover\s*[b-z]\b|\bcvr\s*[b-z]\b/i;
 // two merch actives averaging $18.23 capped a 10-sold tier-2.5 price at
 // $24.62 (vfjpp-1783797090560). Explicit phrases where a bare word would
 // collide with comic vocabulary: "art/cover print" (never bare \bprint\b —
-// collides with 1st/2nd print), \bpin\b excludes "pin-up" covers.
-// Known residual risk (ruled 2026-07-11): "sticker" (defect descriptions)
-// and "patch" (Wolverine alias) can appear in genuine comic listings.
+// collides with 1st/2nd print).
+//
+// Q89 (2026-07-12): short merch tokens with compound comic-vocabulary
+// collisions get context guards. \bpin\b's (?!-?up) lookahead missed the
+// SPACE-separated forms — "pin up cover"/"pin ups" matched and rejected
+// 4 real Evil Ernie #1 comps (pool starved → tier-4 $234.49 on an $8
+// book). Audit of the same class: "mug" collides with "mug shot" covers;
+// "sticker" collides with defect descriptions ("price sticker", "sticker
+// residue"). "patch" is a homonym (Wolverine alias), not a compound —
+// no adjacent-word guard can separate it; residual risk stands per the
+// 2026-07-11 ruling.
 export const MERCH_RE =
-  /\b(?:art\s+print|cover\s+print|poster|tin\s+sign|metal\s+sign|plaque|magnet|statue|figur(?:e|ine)s?|funko|t-?shirts?|canvas|postcard|lithograph|keychain|mug|sticker|patch|bookmark)\b|\bpin\b(?!-?up)/i;
+  /\b(?:art\s+print|cover\s+print|poster|tin\s+sign|metal\s+sign|plaque|magnet|statue|figur(?:e|ine)s?|funko|t-?shirts?|canvas|postcard|lithograph|keychain|patch|bookmark)\b|\bmugs?\b(?!\s*shot)|(?<!price\s)\bstickers?\b(?!\s*(?:residue|damage))|\bpins?\b(?!\s*-?\s*ups?\b)/i;
 
 // Lot / set / bundle / multi-book markers. Excludes bare issue-number
 // ranges (e.g. "#1-5") which are validated separately by isValidIssueRange
