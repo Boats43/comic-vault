@@ -47,11 +47,11 @@ Plain `node --check FILE` parses as CommonJS (sloppy mode) and MISSES ESM-only r
 - `api/comps.js` — eBay Browse API comp fetching (Ship #20a.8: all state variables scoped outside try/catch + if/else branches)
 - `api/sold.js` — eBay completed/sold listings (legacy, dormant — Ship #20a routes via PC scrape)
 - `api/cgc-lookup.js` — CGC cert number verification
-- `api/gocollect.js` — GoCollect CGC FMV lookup (requires GOCOLLECT_API, returns null without it)
+- `api/gocollect.js` — GoCollect CGC FMV lookup (DORMANT — Q25 removed the call from enrich; file kept on disk, counts toward function cap)
 - `api/manage.js` — collection analysis via Claude
 - `api/list-ebay.js` — eBay listing creation
 - `api/delist-ebay.js` — eBay listing removal
-- `api/mega-keys.js` — mega-key floor map (29 entries, publisher+year strict)
+- `api/mega-keys.js` — mega-key floor map (43 entries: 41 MEGA / 2 MANUAL, publisher+year strict, schema 2.0.0)
 - `api/pricecharting-pop.js` — PC pop + sales-history + price ladder + velocity scrape
 
 ### Shared Libraries
@@ -69,9 +69,10 @@ Plain `node --check FILE` parses as CommonJS (sloppy mode) and MISSES ESM-only r
 - **Live**: comic-vault-rouge.vercel.app
 
 ## Environment Variables
-Nine keys required (all set in Vercel), one optional:
+Nine keys required (all set in Vercel), plus:
 `ANTHROPIC_API_KEY`, `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DEV_ID`, `EBAY_AUTH_TOKEN`, `EBAY_SANDBOX`, `COMICVINE_API_KEY`, `XIMILAR_API_TOKEN`, `PRICECHARTING_TOKEN`
-Optional: `GOCOLLECT_API` (CGC FMV — live as of 2026-05-19)
+- `SOLD_INSIGHTS_DISABLED=1` (set in production, FIX-1 2026-07-11) — skips the dead eBay Marketplace Insights OAuth attempt in api/sold.js entirely.
+- `GOCOLLECT_API` — **integration NOT live.** Removed from enrich Promise.all by Q25 (100% timeout, 4.5s tax, zero returns); enrich passes `Promise.resolve(null)`. Key #019483 still pending. api/gocollect.js remains on disk (counts toward the 12-function cap) but is never called.
 
 ## Rules
 
@@ -237,7 +238,7 @@ Skipped by default. `USE_FINDING = process.env.EBAY_USE_FINDING === 'true'`. eBa
 
 `out.confirmedYear` + `out.yearCorrected` surfaced. App.jsx enrich callbacks heal `item.year` when `yearCorrected === true`.
 
-### Mega-keys (`api/mega-keys.js`, 29 entries)
+### Mega-keys (`api/mega-keys.js`, 43 entries)
 - 10 Golden / 15 Silver / 2 Bronze / 2 Modern.
 - Two types: MEGA (has `grades` bucket map) and MANUAL (Action #1, Superman #1; null grades, manual review only).
 - Strict canonical match: `getMegaKeyEntry(title, issue, publisher, year)`. Pre-1962 entries `yearTolerance: 2`; post-1962 `yearTolerance: 1`. `normalizePublisher` collapses Timely/Atlas → marvel.
@@ -323,7 +324,7 @@ Non-comic rejection, duplicate detection (title+issue+year case-insensitive), pu
 Title includes variant (newsstand, gold, 2nd print, etc.) between issue and grade. Filtered by `NO_TITLE_VARIANTS` (corner box, masterpieces, design variant, cover a/b/c/d, headshot).
 
 ### GoCollect CGC FMV
-Runs in enrich Promise.all, returns null without API key. Purple panel in CollectionDetail with FMV at 9.8/9.6/9.4. Submit recommendation: `fmv98 > rawEquiv + $50 && gap >= 2x`. Manual override `item.userFmv98` persisted. CGC submission profit scenarios for raw books — gradingCost $35 + pressCost $20 = $55 against `getDisplayPrice`.
+**NOT live (Q25, 2026):** the enrich Promise.all slot passes `Promise.resolve(null)` — 100% timeout rate made the real call a 4.5s tax with zero returns. UI paths below remain wired for a future re-enable. Purple panel in CollectionDetail with FMV at 9.8/9.6/9.4. Submit recommendation: `fmv98 > rawEquiv + $50 && gap >= 2x`. Manual override `item.userFmv98` persisted. CGC submission profit scenarios for raw books — gradingCost $35 + pressCost $20 = $55 against `getDisplayPrice`.
 
 ### Misc
 - Publisher cleanup: `cleanPublisher(p)` strips `()` `[]` `{}` `"` `'` `/` `\` `&` `?` → space. Applied at handler entry.
@@ -340,20 +341,27 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 - **Decision recommendations**: BUY/SELL/HOLD/WAIT badges on comic detail cards with blocking reasons. Gates listing actions when decision=WAIT.
 
-## Current State (as of 2026-07-10)
+## Current State (as of 2026-07-11)
 
-**Latest commit:** 26def9b — A6 BUILD-ID header + deploy-ping  
 **Build:** ✅ CLEAN (prebuild hook active)  
 **Vercel functions:** 12/12 (at cap)  
-**Test count:** 48/48 title-sanitization tests passing  
-**Launch status:** BLOCK A complete (7/7 commits), awaiting final deployment
+**Launch status:** Certification cycle — GL-0..GL-4 + FIX-1/2/3 shipped, awaiting 10-scan rerun
 
-**AssetCore Extraction:** ✅ Complete
-- enrich.js: 4,642 → 3,938 lines (-15%)
+**File sizes (2026-07-11 actual):** enrich.js ~5,770 lines, App.jsx ~11,100 lines.
+(The "AssetCore extraction: 4,642 → 3,938" figure below is the historical
+Session-3B delta; enrich has grown since — do not treat old line counts as current.)
+
+**AssetCore Extraction:** ✅ Complete (Session 3B historical)
 - ComicAdapter.js: 312 lines (4/4 functions)
 - identityCore.js: 5 universal resolvers
 - pricingEngine.js: 9 universal helpers
-- Zero regressions
+
+**Known stale test suites (pre-existing failures, baselined 2026-07-11 on 2b19171 —
+NOT caused by the certification-cycle commits):** decision-engine (7),
+comp-filter-hygiene (4, Bug 1/2 helpers), sold-verification (5, variant filters),
+batch1-fixes, identity-gate, image-search-extraction, mega-keys,
+pattern-k-dedupe-issue, priceBands, ship26-integration. Reconcile stale
+expectations vs code in a dedicated pass.
 
 **Performance:**
 - Average scan time: 2.5s (66% improvement from 7.5s baseline)
@@ -365,6 +373,15 @@ Runs in enrich Promise.all, returns null without API key. Purple panel in Collec
 
 **Open items:**
 - Q65 [P2]: Invincible #19 ≤$60/REVIEW gate (C4 queue)
+- **Q-SS [P2, queued 2026-07-11]: SS yellow-label incoherence** — a Signature
+  Series scanned book prices against pools where `[signed-filter]` strips all
+  signed comps, so an SS book is priced off non-SS data. GL-2 deliberately does
+  NOT suppress yellow labels (SS books legitimately carry premiums); needs its
+  own design: SS-labeled book ⇒ SS comp pool or advisory banner.
+- FIX-4 floor re-verify: worksheet at `docs/FLOOR_REVERIFY_2026-07-11.md`
+  (445 bucket rows / 43 entries) — manual Heritage/eBay pulls, GoCollect NOT
+  live. Known-stale: X-Men #1 bucket-7 $30K vs $22.3K own market (EX-5/D-3).
+  Floor VALUE changes are pricing math — per-entry greenlight required.
 - Variant fallback for thin markets (architecture confirmed, awaiting greenlight)
 - Future: Vercel KV for cross-instance rate limit persistence
 
