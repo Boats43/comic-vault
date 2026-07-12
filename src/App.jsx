@@ -656,6 +656,166 @@ const getComicPhotos = (comic) => {
   return [];
 };
 
+// ─── Ship #26 — NO-DEAD-END CARDS (display-only, no pricing math) ───
+// Every card must offer: market reference points (when the engine
+// refused/flagged), an exit-strategy row, and a next-action line.
+
+// Block 1 — Market references on REFUSED / ID_REQUIRED / RESEARCH cards.
+// Reference points only, never a recommendation — the data already rides
+// the response (comps, soldComps, PC anchors).
+const MarketReferences = ({ item }) => {
+  const state = item.contract?.state;
+  const action = item.contract?.decision?.action || item.decision?.action;
+  const show = state === 'REFUSED' || state === 'ID_REQUIRED' || action === 'RESEARCH';
+  if (!show) return null;
+
+  const rows = [];
+  const comps = item.comps || {};
+  const compCount = comps.count || 0;
+  if (compCount > 0 && (comps.lowestNum != null || comps.highestNum != null)) {
+    rows.push(
+      `Active asks ${formatCurrency(comps.lowestNum)}–${formatCurrency(comps.highestNum)} · ` +
+      `${compCount} listing${compCount === 1 ? '' : 's'} (live)`
+    );
+  }
+  const solds = Array.isArray(item.soldComps)
+    ? item.soldComps.filter((s) => s && s.price != null)
+    : [];
+  if (solds.length > 0) {
+    const avg = item.soldCompsAvg != null
+      ? item.soldCompsAvg
+      : solds.reduce((a, s) => a + (parseFloat(String(s.price).replace(/[$,]/g, '')) || 0), 0) / solds.length;
+    const ages = solds.map((s) => s.daysAgo).filter((d) => d != null);
+    const freshest = ages.length ? Math.min(...ages) : null;
+    rows.push(
+      `Sold avg ${formatCurrency(avg)} · ${solds.length} sale${solds.length === 1 ? '' : 's'}` +
+      (freshest != null ? ` · freshest ${freshest}d ago` : ' · age unknown')
+    );
+  }
+  const pcAnchor = item.isGraded
+    ? (item.pcGradedPrice ?? item.pcLoosePrice)
+    : (item.pcLoosePrice ?? item.pcGradedPrice);
+  if (pcAnchor != null && parseFloat(pcAnchor) > 0) {
+    rows.push(`PriceCharting anchor ${formatCurrency(pcAnchor)} (${item.isGraded ? 'graded' : 'raw'})`);
+  }
+
+  return (
+    <div style={{
+      padding: '10px 12px', marginBottom: 10,
+      background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.3)',
+      borderRadius: 6, fontSize: 12,
+    }}>
+      <div style={{ fontWeight: 700, color: '#93c5fd', marginBottom: 4 }}>📊 Market references</div>
+      {rows.length > 0 ? (
+        rows.map((r, i) => (
+          <div key={i} style={{ color: '#cbd5e1', lineHeight: 1.7 }}>{r}</div>
+        ))
+      ) : (
+        <div style={{ color: '#888' }}>No reference data yet — search the live market below.</div>
+      )}
+      <div style={{ color: '#64748b', fontSize: 10, marginTop: 4 }}>
+        Reference points only — not a verified price.
+      </div>
+    </div>
+  );
+};
+
+// Block 2 — Exit strategy row: the 5 KeyRoute paths as chips, recommended
+// one highlighted from bestChannel; Sell/Bundle greyed under integrity locks.
+const EXIT_PATHS = [
+  { key: 'cash_sale', icon: '💵', label: 'Sell' },
+  { key: 'bundle', icon: '📦', label: 'Bundle' },
+  { key: 'grade', icon: '🏆', label: 'Grade' },
+  { key: 'barter', icon: '🔄', label: 'Trade' },
+  { key: 'research', icon: '🔍', label: 'Research' },
+];
+const ExitStrategyRow = ({ item }) => {
+  const best = item.contract?.bestChannel || item.decision?.bestChannel || null;
+  const locks = item.contract?.locks || [];
+  const integrityLocks = locks.filter((l) => l.class === 'integrity');
+  const lockReason = integrityLocks[0]?.reason || '';
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ color: '#888', fontSize: 11, marginBottom: 4 }}>Exit strategy</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {EXIT_PATHS.map((p) => {
+          const isBest = best === p.key;
+          const greyed = integrityLocks.length > 0 && (p.key === 'cash_sale' || p.key === 'bundle');
+          return (
+            <span
+              key={p.key}
+              title={greyed ? lockReason : ''}
+              style={{
+                padding: '3px 10px', borderRadius: 12, fontSize: 11,
+                border: isBest ? '1px solid #d4af37' : '1px solid rgba(255,255,255,0.15)',
+                background: isBest ? 'rgba(212,175,55,0.18)' : 'rgba(255,255,255,0.05)',
+                color: greyed ? '#555' : isBest ? '#fde68a' : '#aaa',
+                textDecoration: greyed ? 'line-through' : 'none',
+                fontWeight: isBest ? 700 : 400,
+              }}
+            >
+              {p.icon} {p.label}{isBest ? ' ★' : ''}
+            </span>
+          );
+        })}
+      </div>
+      {integrityLocks.length > 0 && (
+        <div style={{ color: '#64748b', fontSize: 10, marginTop: 4 }}>
+          Sell/Bundle locked: {lockReason}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Block 3 — Next action line: state-machine driven, one line, always
+// present, maps 1:1 to contract.state.
+const computeNextAction = (item) => {
+  const c = item.contract;
+  if (!c) return { icon: '🔄', text: 'Refresh market data to build evidence' };
+  const locks = c.locks || [];
+  const allInsufficiency = locks.length > 0 && locks.every((l) => l.class === 'insufficiency');
+  const action = c.decision?.action || item.decision?.action;
+  const price = getDisplayPrice(item);
+
+  if (c.state === 'ID_REQUIRED') {
+    return { icon: '🔍', text: 'Retake the photo or edit title / issue / year fields' };
+  }
+  if (c.state === 'REFUSED') {
+    return allInsufficiency
+      ? { icon: '✍️', text: 'Set your price + Acknowledge to list' }
+      : { icon: '🔒', text: locks[0]?.reason || 'Listing locked — see banner above' };
+  }
+  if (c.state === 'LOCKED') {
+    return { icon: '🔒', text: locks[0]?.reason || 'Listing locked — review required' };
+  }
+  if (action === 'RESEARCH' || !c.listable) {
+    return price > 0
+      ? { icon: '🔍', text: `Acknowledge to list at ${formatCurrency(price)} — or search the live market for new solds` }
+      : { icon: '🔍', text: 'Search the live market for new solds' };
+  }
+  const readiness = getReadinessStatus(item);
+  if (readiness.badge === 'PHOTOS NEEDED') {
+    const missing = Math.max(1, 4 - (getComicPhotos(item)?.length || 0));
+    return { icon: '📷', text: `Add ${missing} photo${missing === 1 ? '' : 's'} to finish the listing packet` };
+  }
+  return price > 0
+    ? { icon: '📋', text: `Ready — list at ${formatCurrency(price)}` }
+    : { icon: '🔄', text: 'Refresh market data for a price' };
+};
+const NextActionLine = ({ item }) => {
+  const na = computeNextAction(item);
+  return (
+    <div style={{
+      padding: '8px 12px', marginBottom: 12,
+      background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.3)',
+      borderRadius: 6, fontSize: 12, color: '#fde68a', fontWeight: 600,
+    }}>
+      {na.icon} Next: {na.text}
+    </div>
+  );
+};
+
 // Keyword set used to flag condition-concern sentences in Claude's reason
 // field. Deliberately loose — matches "wear", "creases", "tanning", etc.
 const CONDITION_KEYWORDS =
@@ -5459,6 +5619,10 @@ function CollectionDetail({
               />
               Refreshing…
             </>
+          ) : item.refusedToPrice || item.contract?.state === 'REFUSED' ? (
+            // Ship #26 REFRESH-AS-SEARCH: same call, customer framing —
+            // a refused card invites a search, not a retry.
+            "🔍 Search live market"
           ) : (
             "🔄 Refresh Market Data"
           )}
@@ -5856,6 +6020,11 @@ function CollectionDetail({
               </div>
             )}
 
+            {/* Ship #26 — NO-DEAD-END CARDS: references + exit chips + next action */}
+            <MarketReferences item={item} />
+            <ExitStrategyRow item={item} />
+            <NextActionLine item={item} />
+
             {/* 3. PRIMARY ACTION — List Price Input */}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               <span style={{ color: "#aaa", fontSize: 13 }}>List price</span>
@@ -5865,15 +6034,22 @@ function CollectionDetail({
                 onChange={(e) => {
                   const newPrice = e.target.value;
                   setListPrice(newPrice);
-                  // Q41: Mark as manual edit and persist flag to catalogue
-                  const updated = {
-                    ...item,
-                    listPrice: parseFloat(newPrice) || 0,
-                    listPriceManual: true,
-                    priceOverridden: true  // Q41: canonical flag for getDisplayPrice
-                  };
-                  putComic(updated).catch(() => {});
-                  setCatalogue((prev) => prev.map((x) => x.id === item.id ? updated : x));
+                  // Q41-FIX (P0): setCatalogue is NOT in CollectionDetail
+                  // scope — this handler threw ReferenceError on every
+                  // keystroke (after setListPrice, so the input LOOKED
+                  // functional) and priceOverridden never persisted. The
+                  // original Q41 flag has been dead since ship. Route
+                  // through onUpdateField, which owns catalogue +
+                  // selectedItem state and the IndexedDB write.
+                  onUpdateField(
+                    {
+                      ...item,
+                      listPrice: parseFloat(newPrice) || 0,
+                      listPriceManual: true,
+                    },
+                    'priceOverridden',
+                    true
+                  );
                 }}
                 style={{
                   background: "rgba(255,255,255,0.08)",
