@@ -613,6 +613,20 @@ export const backfillFromComps = (confirmedTitle, confirmedYear, confirmedPublis
           { re: /\b(?:dynamite\s+entertainment|dynamite)\b/i, name: 'Dynamite Entertainment' },
           { re: /\b(?:valiant\s+(?:comics?|entertainment))\b/i, name: 'Valiant Entertainment' },
           { re: /\b(?:archie\s+comics?)\b/i, name: 'Archie Comics' },
+          // WARP-FIX (2026-07-12) — indie/underground publishers. Warp #9
+          // (First Comics 1983): publisher unrecognized by every backfill
+          // source → identityComplete=false → ID_REQUIRED → BLOCKED.
+          // Phrase-anchored where the bare word collides with comic
+          // vocabulary ("first print", "pacific"); bare eclipse/warren
+          // acceptable under the ≥50% consensus gate.
+          { re: /\b(?:first\s+comics?)\b/i, name: 'First Comics' },
+          { re: /\b(?:eclipse\s+comics?|eclipse)\b/i, name: 'Eclipse Comics' },
+          { re: /\b(?:pacific\s+comics?)\b/i, name: 'Pacific Comics' },
+          { re: /\b(?:kitchen\s+sink)\b/i, name: 'Kitchen Sink Press' },
+          { re: /\b(?:warren\s+(?:publishing|magazines?)|warren)\b/i, name: 'Warren Publishing' },
+          { re: /\b(?:fantagraphics)\b/i, name: 'Fantagraphics' },
+          { re: /\b(?:last\s+gasp)\b/i, name: 'Last Gasp' },
+          { re: /\b(?:apex\s+novelt(?:y|ies))\b/i, name: 'Apex Novelties' },
         ];
 
         for (const { re, name } of pubPatterns) {

@@ -8814,9 +8814,20 @@ export default function App() {
     setRefreshingPrices(stale.length);
     const queue = stale.slice();
     let active = 0;
-    const MAX_CONCURRENT = 3;
+    // Q91-B: was 3 concurrent with no spacing — the burst starved PC-sales
+    // and CAUSED the dropouts Q91's retention heals. 2 concurrent, ≥300ms
+    // between launches (matches the server-side pc-html queue).
+    const MAX_CONCURRENT = 2;
+    const LAUNCH_SPACING_MS = 300;
+    let lastLaunchAt = 0;
     const next = () => {
       while (active < MAX_CONCURRENT && queue.length > 0 && !cancelled) {
+        const spacingWait = lastLaunchAt + LAUNCH_SPACING_MS - Date.now();
+        if (spacingWait > 0) {
+          setTimeout(next, spacingWait);
+          return;
+        }
+        lastLaunchAt = Date.now();
         const item = queue.shift();
         active++;
         const controller = new AbortController();
@@ -10222,6 +10233,8 @@ export default function App() {
           // cache activation: compsCachedAt/activeCached deliberately not
           // sent on manual refresh (fresh fetch stays forced).
           soldCompsRawCached: item.soldCompsRawCached || [],
+          // Q91-B — stamped comp-filter version travels with the pool
+          compFilterVersion: item.compFilterVersion || null,
           // FIX: Skip image search on refresh to prevent identity re-resolution.
           // Batman #222 bug: refresh triggered eBay visual search → title-family
           // clustering → identity refusal → Phase 2 skipped → comps=null returned

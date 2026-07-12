@@ -24,11 +24,39 @@ import { kvGet, kvSet, KV_TTL } from './kv-cache.js';
 
 // ───────────────────────── shared HTML fetch + cache ─────────────────────────
 
+// Q91-B — PC fetch throttle. A bulk refresh bursts concurrent product-page
+// fetches at PriceCharting; the burst gets requests dropped/starved, the
+// sales extractor returns 0 rows, and tiers demote (the dropouts Q91's
+// retention heals). Queue: max 2 concurrent, ≥300ms between launches.
+// Module-level state throttles all callers sharing a warm Lambda; KV
+// cache hits bypass the queue entirely.
+const PC_MAX_CONCURRENT = 2;
+const PC_LAUNCH_SPACING_MS = 300;
+let pcActiveFetches = 0;
+let pcNextSlotAt = 0;
+const pcWaiters = [];
+const pcAcquire = async () => {
+  while (pcActiveFetches >= PC_MAX_CONCURRENT) {
+    await new Promise((resolve) => pcWaiters.push(resolve));
+  }
+  pcActiveFetches++;
+  const now = Date.now();
+  const wait = Math.max(0, pcNextSlotAt - now);
+  pcNextSlotAt = Math.max(now, pcNextSlotAt) + PC_LAUNCH_SPACING_MS;
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+};
+const pcRelease = () => {
+  pcActiveFetches--;
+  const nextWaiter = pcWaiters.shift();
+  if (nextWaiter) nextWaiter();
+};
+
 const fetchPCProductHtml = async (productId) => {
   if (!productId) return null;
   // FIX 3 — KV cache returns HTML directly (no wrapper object)
   const cached = await kvGet(`ph:${productId}`);
   if (cached) return cached;
+  await pcAcquire(); // Q91-B: throttle only actual network fetches
   try {
     const url = `https://www.pricecharting.com/game/${productId}`;
     const res = await fetch(url, { redirect: "follow" });
@@ -42,6 +70,8 @@ const fetchPCProductHtml = async (productId) => {
   } catch (err) {
     console.error(`[pc-html] fetch error id=${productId}: ${err?.message || err}`);
     return null;
+  } finally {
+    pcRelease();
   }
 };
 

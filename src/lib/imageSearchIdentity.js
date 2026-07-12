@@ -542,6 +542,16 @@ export const extractConsensus = (parsedRows) => {
     { re: /\bchapterhouse\b/i, name: 'Chapterhouse' },
     { re: /\bstrange\s*academy\b/i, name: 'Strange Academy' },
     { re: /\bredacted\b/i, name: 'Redacted Comics' },
+    // WARP-FIX (2026-07-12) — indie/underground publishers (First Comics
+    // era + undergrounds). "first"/"pacific" phrase-anchored: bare tokens
+    // collide with "first print" / splash text. kitchen sink +
+    // fantagraphics already present above.
+    { re: /\bfirst\s+comics?\b/i, name: 'First Comics' },
+    { re: /\beclipse\b/i, name: 'Eclipse Comics' },
+    { re: /\bpacific\s+comics?\b/i, name: 'Pacific Comics' },
+    { re: /\bwarren\b/i, name: 'Warren Publishing' },
+    { re: /\blast\s+gasp\b/i, name: 'Last Gasp' },
+    { re: /\bapex\s+novelt(?:y|ies)\b/i, name: 'Apex Novelties' },
   ];
 
   const publisherCounts = {};
