@@ -87,7 +87,11 @@ export function deriveLocks(out) {
   if (out.listingHardLocked) {
     locks.push({
       code: out.listingHardLockReason || 'listing-hard-locked',
-      reason: out.floorContaminationReason
+      // GL-2: generic banner support — the contamination copy was baked in
+      // as the only fallback, which mislabels non-floor locks (qualified/
+      // restored label). Banner beats contamination reason beats legacy copy.
+      reason: out.listingHardLockBanner
+        || out.floorContaminationReason
         || 'Verified solds far below key floor — pool may contain reprints',
       hard: true,
     });

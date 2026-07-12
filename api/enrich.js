@@ -1617,6 +1617,8 @@ export default async function handler(req, res) {
       year,
       publisher: rawPublisher,
       certNumber,
+      labelType,   // GL-2 (EX-5) — Vision slab label type (qualified/restored/...)
+      labelNotes,  // GL-2 (EX-5) — verbatim slab label notes ("PAGE 12 MISSING")
       assetType,
       author,  // Session 4B — book identity field from BOOK_PROMPT
       barcode,  // TRACK A — UPC/barcode scan
@@ -3353,6 +3355,31 @@ export default async function handler(req, res) {
     // Ship 6 retry — Polybag pricing flag. Set true by polybag detection
     // block below. When true, ALL downstream pricing blocks skip so
     // polybag price stands as final answer.
+    // GL-2 (EX-5): Qualified/Restored/Conserved label detection.
+    // Two channels: Vision labelType (req.body, new in GL-2) and the CGC
+    // cert lookup (cgcResult.labelType — defense-in-depth when the cert
+    // number is readable; was previously display-only as out.cgcLabel).
+    // A green QUALIFIED or purple RESTORED label trades at a fraction of
+    // blue-label Universal, and every comp source in this pipeline is
+    // Universal — so pricing is not applicable at all.
+    const IMPAIRED_LABEL_RE = /qualified|restored|conserved/i;
+    const visionLabelType = String(labelType || '').toLowerCase();
+    const certLabelType = String(cgcResult?.labelType || '');
+    const isImpairedLabel =
+      IMPAIRED_LABEL_RE.test(visionLabelType) || IMPAIRED_LABEL_RE.test(certLabelType);
+    const impairedLabelClass =
+      /restored/i.test(visionLabelType) || /restored/i.test(certLabelType)
+        ? 'restored'
+        : 'qualified';
+    if (visionLabelType) out.labelType = visionLabelType;
+    if (labelNotes) out.labelNotes = labelNotes;
+    if (isImpairedLabel) {
+      console.log(
+        `[label-gate] impaired label detected: vision=${visionLabelType || 'null'} ` +
+        `cgc=${certLabelType || 'null'} class=${impairedLabelClass}`
+      );
+    }
+
     let isPolybagPricing = false;
 
     // Ship 6 retry — Polybag comp pool from eBay image-search items.
@@ -4224,6 +4251,15 @@ export default async function handler(req, res) {
         out.megaKeyFloorSkipped = true;
         out.megaKeyFloorSkipReason = 'polybag-pricing';
         console.log('[mega-key-floor] SKIPPED — polybag pricing active');
+      } else if (megaKeyEntry && isImpairedLabel) {
+        // GL-2 (EX-5): floor map holds blue-label Universal floors. A
+        // Qualified/Restored copy must never receive them (X-Men #1
+        // QUALIFIED 7.0 was floored to $30,000, dh9xr-17838111).
+        out.megaKeyFloorSkipped = true;
+        out.megaKeyFloorSkipReason = `${impairedLabelClass}-label`;
+        console.log(
+          `[mega-key-floor] SKIPPED — ${impairedLabelClass} label (Universal floor not applicable)`
+        );
       } else if (megaKeyEntry && editionWarning?.detected) {
         out.megaKeyFloorSkipped = true;
         out.megaKeyFloorSkipReason = 'edition-warning';
@@ -4359,6 +4395,41 @@ export default async function handler(req, res) {
     }
 
     } // end if (idCheck.confident) — Ship #20a.6.4 identity-gate wrap
+
+    // GL-2 (EX-5): Qualified/Restored label — refuse to price + hard-lock.
+    // Every pricing source in this pipeline (sold comps, active comps, PC,
+    // mega-key floors) is blue-label Universal data. A green QUALIFIED or
+    // purple RESTORED copy trades at a fraction of that, so no number this
+    // engine can produce is honest. X-Men #1 CGC QUALIFIED 7.0 "PAGE 12
+    // MISSING" (dh9xr-17838111) shipped $30,000 off 16 Universal solds +
+    // the mega-key floor. Structural, not advisory (22d pattern).
+    if (isImpairedLabel && !out.refusedToPrice) {
+      const labelWord = impairedLabelClass === 'restored' ? 'Restored' : 'Qualified';
+      out.price = null;
+      out.priceLow = null;
+      out.priceHigh = null;
+      out.priceBands = null;
+      out.pricingSource = 'refused-qualified-label';
+      out.refusedToPrice = true;
+      out.confidenceLevel = 'LOW';
+      out.priceNote = `${labelWord} label — comps not applicable`;
+      out.listingHardLocked = true;
+      out.listingHardLockReason =
+        impairedLabelClass === 'restored' ? 'restored-label' : 'qualified-label';
+      out.listingHardLockBanner = `${labelWord} label — comps not applicable`;
+      // Neutralize downstream band writers: floor re-enforcement and the
+      // Q59 drift rebuild key off these flags and would resurrect a price
+      // (or crash on the nulled priceBands) for a refused card.
+      out.thinPoolAnchored = false;
+      out.floorReEnforced = false;
+      floorFired = false;
+      sanityFired = false;
+      console.log(
+        `[label-gate] REFUSED — ${labelWord} label` +
+        (labelNotes ? ` notes="${labelNotes}"` : '') +
+        ` — Universal comps suppressed, listing hard-locked`
+      );
+    }
 
     // FIX: Final floor re-enforcement AFTER all adjustments.
     // BUG: Floor was enforced at line 3434 (floorFired=true, note added), but

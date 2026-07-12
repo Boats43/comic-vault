@@ -1229,6 +1229,31 @@ test('GL-1: refused-identity-conflict stays ID_REQUIRED', () => {
   assertEqual(decision.action, 'ID_REQUIRED', 'Identity-class refusal keeps ID_REQUIRED');
 });
 
+// TEST 46 (GL-2, EX-5): refused-qualified-label forces RESEARCH.
+// X-Men #1 CGC QUALIFIED 7.0 "PAGE 12 MISSING" priced $30,000 off
+// Universal comps (dh9xr-17838111) — label suppression refuses, decision
+// engine must escalate.
+test('GL-2: refused-qualified-label forces RESEARCH', () => {
+  const item = {
+    title: "X-Men",
+    issue: "1",
+    publisher: "Marvel",
+    year: 1963,
+    price: null,
+    refusedToPrice: true,
+    pricingSource: "refused-qualified-label",
+    labelType: "qualified",
+    labelNotes: "PAGE 12 MISSING",
+    identityConfident: true,
+    rawComps: { average: 20000, lowest: 18600, highest: 21600, count: 16 }
+  };
+
+  const decision = computeDecision(item);
+
+  assertEqual(decision.action, 'RESEARCH', 'Qualified-label refusal must be RESEARCH');
+  assertIncludes(decision.warnings, 'refused-to-price', 'Boolean-keyed warning present');
+});
+
 // RUN ALL TESTS
 console.log('\n🧪 Decision Engine v0-A Tests\n');
 console.log('='.repeat(60));

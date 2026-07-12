@@ -744,5 +744,56 @@ test('I12 clean - refused with DO_NOT_LIST allowed (stricter than required)', ()
     `DO_NOT_LIST allowed, got: ${out.contract.violations.join(' | ')}`);
 });
 
+// ─────────────────────────────────────────────────────────────────
+// GL-2 — Qualified/Restored label suppression (EX-5)
+// ─────────────────────────────────────────────────────────────────
+
+test('GL-2: qualified-label refusal — REFUSED state, hard lock, verbatim banner', () => {
+  const out = cleanOut({
+    price: null, priceLow: null, priceHigh: null, priceBands: null,
+    refusedToPrice: true,
+    pricingSource: 'refused-qualified-label',
+    priceNote: 'Qualified label — comps not applicable',
+    listingHardLocked: true,
+    listingHardLockReason: 'qualified-label',
+    listingHardLockBanner: 'Qualified label — comps not applicable',
+    labelType: 'qualified',
+    labelNotes: 'PAGE 12 MISSING',
+    soldComps: [],
+    soldCompDiagnostics: { rawCount: 16, verifiedCount: 0, rejectedCount: 16, reasons: {} },
+    decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: ['refused-to-price'], nextStep: '' },
+  });
+  finalizeResponse(out);
+  const c = out.contract;
+  assert(c.state === 'REFUSED', `REFUSED state, got ${c.state}`);
+  assert(c.price === null, 'price null');
+  assert(c.bands === null, 'bands null');
+  assert(c.listable === false, 'listing locked');
+  const lock = c.locks.find((l) => l.code === 'qualified-label');
+  assert(lock && lock.hard === true, 'hard qualified-label lock present');
+  assert(lock.reason === 'Qualified label — comps not applicable', `banner verbatim, got "${lock?.reason}"`);
+  assert(c.violations.length === 0, `clean contract, got: ${c.violations.join(' | ')}`);
+});
+
+test('GL-2: listingHardLockBanner beats legacy contamination copy in deriveLocks', () => {
+  const locks = deriveLocks({
+    listingHardLocked: true,
+    listingHardLockReason: 'restored-label',
+    listingHardLockBanner: 'Restored label — comps not applicable',
+  });
+  const lock = locks.find((l) => l.code === 'restored-label');
+  assert(lock.reason === 'Restored label — comps not applicable', 'banner wins');
+});
+
+test('GL-2: contamination lock keeps its own reason (no banner set)', () => {
+  const locks = deriveLocks({
+    listingHardLocked: true,
+    listingHardLockReason: 'mega-key-floor-contamination',
+    floorContaminationReason: 'Verified solds ($22335) far below key floor ($30000) — pool may contain reprints',
+  });
+  const lock = locks.find((l) => l.code === 'mega-key-floor-contamination');
+  assert(lock.reason.includes('far below key floor'), 'contamination copy preserved');
+});
+
 // Run all tests
 run();

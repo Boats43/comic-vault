@@ -8150,6 +8150,8 @@ function WatchMode({ onStop }) {
                 publisher: data.publisher,
                 variant: data.variant || null,
                 keyIssue: data.keyIssue || null,
+                labelType: data.labelType || null,
+                labelNotes: data.labelNotes || null,
                 images: [b64],
               }),
             })
@@ -8484,6 +8486,8 @@ export default function App() {
             confidence: item.confidence,
             variant: item.variant || null,
             keyIssue: item.keyIssue || null,
+            labelType: item.labelType || null,
+            labelNotes: item.labelNotes || null,
             // Ship 10.2 — Pass Vision condition report to enrich.
             reason: item.reason || null,
             images: item.images?.[0] ? [item.images[0]] : [],  // Ship #20a.6.19: pass stored image for variant identity
@@ -8607,7 +8611,7 @@ export default function App() {
                 gradeMultiplier: lowMatch ? cur.gradeMultiplier : (enrich.gradeMultiplier || null),
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
                 comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
-                certNumber: enrich.certNumber || cur.certNumber || null,
+                certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
                 goCollect: enrich.goCollect || cur.goCollect || null,
@@ -8674,7 +8678,7 @@ export default function App() {
               return {
                 ...s, ...enrich,
                 comicVine: enrich.comicVine || s.comicVine || null,
-                certNumber: enrich.certNumber || s.certNumber || null,
+                certNumber: enrich.certNumber || s.certNumber || null, labelType: enrich.labelType || s.labelType || null, labelNotes: enrich.labelNotes || s.labelNotes || null,
                 cgcVerified: enrich.cgcVerified || s.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || s.cgcLabel || null,
                 goCollect: enrich.goCollect || s.goCollect || null,
@@ -8795,6 +8799,8 @@ export default function App() {
       variant: data.variant || null,
       variantMultiplier: data.variantMultiplier || null,
       certNumber: data.certNumber || null,
+      labelType: data.labelType || null,
+      labelNotes: data.labelNotes || null,
       cgcVerified: data.cgcVerified || false,
       cgcLabel: data.cgcLabel || null,
       purchasePrice: data.purchasePrice != null ? parseFloat(data.purchasePrice) || null : null,
@@ -8914,6 +8920,8 @@ export default function App() {
           confidence: data.confidence,
           defectPenalty: data.defectPenalty || null,
           certNumber: data.certNumber || null,
+          labelType: data.labelType || null,
+          labelNotes: data.labelNotes || null,
           variant: data.variant || null,
           keyIssue: data.keyIssue || null,
           creator: data.creator || null,
@@ -9012,7 +9020,7 @@ export default function App() {
                   // Clear pending flag when enrich completes
                   marketPending: false,
                   comicVine: enrich.comicVine || cur.comicVine || null,
-                  certNumber: enrich.certNumber || cur.certNumber || null,
+                  certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null,
                   cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                   cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
                   variant: enrich.variantNote || cur.variant || null,
@@ -9105,7 +9113,7 @@ export default function App() {
                   marketPending: false,
                   defectPenalty: enrich.defectPenalty || s.defectPenalty || null,
                   comicVine: enrich.comicVine || s.comicVine || null,
-                  certNumber: enrich.certNumber || s.certNumber || null,
+                  certNumber: enrich.certNumber || s.certNumber || null, labelType: enrich.labelType || s.labelType || null, labelNotes: enrich.labelNotes || s.labelNotes || null,
                   cgcVerified: enrich.cgcVerified || s.cgcVerified || false,
                   cgcLabel: enrich.cgcLabel || s.cgcLabel || null,
                   goCollect: enrich.goCollect || s.goCollect || null,
@@ -9345,6 +9353,8 @@ export default function App() {
             defectPenalty: data.defectPenalty || null,
             variant: data.variant || null,
             keyIssue: data.keyIssue || null,
+            labelType: data.labelType || null,
+            labelNotes: data.labelNotes || null,
             // Ship 10.2 — Pass Vision condition report to enrich.
             reason: data.reason || null,
             images: [b64],
@@ -9426,7 +9436,7 @@ export default function App() {
                 marketPending: false,
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
                 comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
-                certNumber: enrich.certNumber || cur.certNumber || null,
+                certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
                 goCollect: enrich.goCollect || cur.goCollect || null,
@@ -9805,6 +9815,8 @@ export default function App() {
           confidence: item.confidence,
           variant: item.variant || null,
           keyIssue: item.keyIssue || null,
+          labelType: item.labelType || null,
+          labelNotes: item.labelNotes || null,
           // Ship 10.2 — Pass Vision condition report to enrich.
           reason: item.reason || null,
           images: item.images?.[0] ? [item.images[0]] : [],  // Ship #20a.6.19: pass stored image for variant identity
@@ -9896,6 +9908,8 @@ export default function App() {
       defectPenalty: enrich.defectPenalty || item.defectPenalty || null,
       comicVine: enrich.comicVine || item.comicVine || null,
       certNumber: enrich.certNumber || item.certNumber || null,
+      labelType: enrich.labelType || item.labelType || null,
+      labelNotes: enrich.labelNotes || item.labelNotes || null,
       cgcVerified: enrich.cgcVerified || item.cgcVerified || false,
       cgcLabel: enrich.cgcLabel || item.cgcLabel || null,
       goCollect: enrich.goCollect || item.goCollect || null,
@@ -10047,6 +10061,8 @@ export default function App() {
           variant: gradeData.variant || null,
           keyIssue: gradeData.keyIssue || null,
           certNumber: gradeData.certNumber || null,
+      labelType: gradeData.labelType || null,
+      labelNotes: gradeData.labelNotes || null,
           defectPenalty: gradeData.defectPenalty || null,
           // Ship 10.2 — Pass Vision condition report to enrich.
           reason: gradeData.reason || null,
@@ -10088,6 +10104,8 @@ export default function App() {
       cgcPenaltyFlags: gradeData.cgcPenaltyFlags || null,
       editionWarning: gradeData.editionWarning || null,
       certNumber: gradeData.certNumber || null,
+      labelType: gradeData.labelType || null,
+      labelNotes: gradeData.labelNotes || null,
       cgcVerified: gradeData.cgcVerified || false,
       cgcLabel: gradeData.cgcLabel || null,
       enrichFailed,
@@ -10720,7 +10738,7 @@ export default function App() {
                             isGraded: data.isGraded, numericGrade: data.numericGrade,
                             year: data.year, publisher: data.publisher,
                             confidence: data.confidence, defectPenalty: data.defectPenalty || null,
-                            certNumber: data.certNumber || null, variant: data.variant || null,
+                            certNumber: data.certNumber || null, labelType: data.labelType || null, labelNotes: data.labelNotes || null, variant: data.variant || null,
                             keyIssue: data.keyIssue || null, images: [b64],
                           }),
                         })
@@ -10730,7 +10748,7 @@ export default function App() {
                             setCatalogue((prev) => {
                               const cur = prev.find((x) => x.id === savedId);
                               if (!cur) return prev;
-                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });
