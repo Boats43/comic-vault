@@ -795,5 +795,34 @@ test('GL-2: contamination lock keeps its own reason (no banner set)', () => {
   assert(lock.reason.includes('far below key floor'), 'contamination copy preserved');
 });
 
+// ─────────────────────────────────────────────────────────────────
+// GL-3 — polybag >10x PC-divergence hard-abort (downstream wiring)
+// ─────────────────────────────────────────────────────────────────
+
+test('GL-3: polybag-pc-divergence refusal — REFUSED, hard lock, banner', () => {
+  const out = cleanOut({
+    price: null, priceLow: null, priceHigh: null, priceBands: null,
+    refusedToPrice: true,
+    pricingSource: 'refused-polybag-pc-divergence',
+    priceNote: 'Reprint pool conflicts with PriceCharting anchor — verify edition before pricing',
+    listingHardLocked: true,
+    listingHardLockReason: 'polybag-pc-divergence',
+    listingHardLockBanner: 'Reprint pool conflicts with PriceCharting anchor — verify edition',
+    polybagDetected: true,
+    polybagReprintRatio: 0.62,
+    soldComps: [],
+    soldCompDiagnostics: { rawCount: 0, verifiedCount: 0, rejectedCount: 0, reasons: {} },
+    decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: ['refused-to-price'], nextStep: '' },
+  });
+  finalizeResponse(out);
+  const c = out.contract;
+  assert(c.state === 'REFUSED', `REFUSED, got ${c.state}`);
+  assert(c.price === null && c.bands === null, 'nothing priced');
+  assert(c.listable === false, 'listing locked');
+  const lock = c.locks.find((l) => l.code === 'polybag-pc-divergence');
+  assert(lock && lock.hard === true, 'hard divergence lock present');
+  assert(c.violations.length === 0, `clean, got: ${c.violations.join(' | ')}`);
+});
+
 // Run all tests
 run();

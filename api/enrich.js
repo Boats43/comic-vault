@@ -3422,6 +3422,34 @@ export default async function handler(req, res) {
           const askLow = askPrices[0];  // Q67-C: Use LOW end, not median
           const askAvg = askPrices.reduce((a, b) => a + b, 0) / askPrices.length;
 
+          // GL-3 (INV-3, ruled): >10x PC-anchor divergence hard-abort.
+          // When PC's first-print anchor sits more than 10x above the
+          // reprint ask pool, the reprint CLASSIFICATION itself is suspect
+          // (EX-3 class: 62% reprint pool priced a possibly-\$4.7K book at
+          // \$11.24 — PC \$4,758.51 vs asks ~\$26). Pricing the cheap side of
+          // that ambiguity is the worst failure direction: refuse instead.
+          const pcAnchor = priceCharting?.price || null;
+          if (pcAnchor && askAvg > 0 && pcAnchor / askAvg > 10) {
+            out.price = null;
+            out.priceLow = null;
+            out.priceHigh = null;
+            out.priceBands = null;
+            out.pricingSource = 'refused-polybag-pc-divergence';
+            out.refusedToPrice = true;
+            out.confidenceLevel = 'LOW';
+            out.priceNote = 'Reprint pool conflicts with PriceCharting anchor — verify edition before pricing';
+            out.listingHardLocked = true;
+            out.listingHardLockReason = 'polybag-pc-divergence';
+            out.listingHardLockBanner = 'Reprint pool conflicts with PriceCharting anchor — verify edition';
+            out.polybagDetected = true;
+            out.polybagReprintRatio = reprintRatio;
+            isPolybagPricing = true; // skip ALL downstream pricing blocks
+            console.log(
+              `[polybag-abort] PC=$${pcAnchor.toFixed(2)} poolAvg=$${askAvg.toFixed(2)} ` +
+              `ratio=${(pcAnchor / askAvg).toFixed(0)}x > 10 — hard abort, refused to price`
+            );
+          } else {
+
           // Q67-C: Base on LOW ask × 0.75, cap at poolAvg × 1.5
           const uncapped = askLow * 0.75;
           const cap = askAvg * 1.5;
@@ -3587,6 +3615,7 @@ export default async function handler(req, res) {
             verifiedByAI: false,
             verificationRemoved: 0,
           };
+          } // GL-3 — end else: polybag pricing committed (no PC divergence abort)
         }
       }
     }
