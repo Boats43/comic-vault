@@ -150,6 +150,15 @@ export const ARTIST_PATTERNS = [
   /frison/i,  // Q84 — unambiguous last name (alias policy)
 ];
 
+// Q89-CACHE — Comp-filter version. Bump whenever a comp-admission filter
+// (MERCH_RE, LOT_RE, SLAB_RE, …) changes behavior: cached ACTIVE pools are
+// FILTERED results, and a fix must not replay pools built by the old
+// regex (Evil Ernie #1: pre-Q89 MERCH_RE rejected 4 real comps; the
+// starved pool sat in ac:/book-record caches). Salts the ac: KV key and
+// gates the book-record cache in api/enrich.js.
+// v2 = Q89 MERCH_RE pin/mug/sticker guards (2026-07-12).
+export const COMP_FILTER_VERSION = 2;
+
 // Q85 — Compact title key: lowercase, strip everything non-alphanumeric.
 // Equality fallback for compound/spacing/hyphen variants that token-level
 // matching can never reconcile ("Funnybook" vs "Funny Book" vs

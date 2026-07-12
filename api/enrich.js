@@ -98,7 +98,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade, compactTitleKey } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION } from "../src/lib/compHygiene.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -2835,6 +2835,24 @@ export default async function handler(req, res) {
       confidence: yearResolution.yearConfidence,
     };
 
+    // P3 (Funnybook metadata): a Q86-tolerated PC product year outranks an
+    // UNPROVEN claimed year. Funny Book (1971) stored year=2024 from
+    // wrong-source noise; resolveYear keeps the claimed year when PC is
+    // >2y away, so the tolerated product-page year never landed. Adopt it
+    // — out.yearCorrected (derived below from confirmedYear ≠ sent year)
+    // then heals the catalogue item through the existing merge paths.
+    if (priceCharting?.yearMismatchTolerated && pcYear &&
+        yearResolution.yearConfidence === 'unproven' &&
+        String(confirmedYear || '') !== String(pcYear)) {
+      console.log(`[Q86] year backfill from tolerated PC product: ${confirmedYear || 'null'} → ${pcYear}`);
+      confirmedYear = String(pcYear);
+      out.confirmedYearMeta = {
+        value: confirmedYear,
+        source: 'pc-product-tolerated',
+        confidence: yearResolution.yearConfidence,
+      };
+    }
+
     // Ship 3B.3 — Comp consensus backfill now in identityCore.js
     const backfill = backfillFromComps(
       confirmedTitle,
@@ -2952,10 +2970,15 @@ export default async function handler(req, res) {
     const COMPS_BOOK_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
     const bookCompsCachedAt = req.body?.compsCachedAt || null;
     const bookCompsAge = bookCompsCachedAt ? now - bookCompsCachedAt : null;
+    // Q89-CACHE: the cached active pool is a FILTERED result — a comp-filter
+    // fix (MERCH_RE etc.) must invalidate it. Book cache is only trusted
+    // when the record was built with the current filter version; old
+    // records (no version) refetch once and get stamped.
     const useBookCompsCache = bookCompsCachedAt &&
                                 bookCompsAge < COMPS_BOOK_CACHE_TTL &&
                                 req.body?.activeCached &&
-                                req.body?.soldCompsRawCached;
+                                req.body?.soldCompsRawCached &&
+                                req.body?.compFilterVersion === COMP_FILTER_VERSION;
 
     const compsPromise =
       useBookCompsCache
@@ -2965,7 +2988,9 @@ export default async function handler(req, res) {
           })()
         : process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID
         ? (async () => {
-            const activeKey = `${confirmedTitle}|${confirmedIssue}`;
+            // Q89-CACHE: version-salted — a filter fix (MERCH_RE) must not
+            // replay pools filtered by the old regex (Evil Ernie class).
+            const activeKey = `v${COMP_FILTER_VERSION}:${confirmedTitle}|${confirmedIssue}`;
             // CACHE-BUST: skipCache flag bypasses poisoned cache entries
             const skipCache = req.body?.skipCache === true;
             const cached = !skipCache ? await kvGet(`ac:${activeKey}`) : null;
@@ -3294,9 +3319,30 @@ export default async function handler(req, res) {
     // pcSales = null because PriceCharting flow short-circuited when
     // polybag pricing fired. Crash here was the hidden 500 that
     // followed `[polybag-pool] detected:` log without warning.
-    const rawSoldRows = (pcSales?.soldComps?.length || 0) > 0
+    let rawSoldRows = (pcSales?.soldComps?.length || 0) > 0
       ? pcSales.soldComps
       : (Array.isArray(soldResult) ? soldResult : []);
+    // Q91: sold-retention — a pc-sales dropout (KV MISS + fetch fail → 0
+    // rows) must not demote tier and RAISE price. ASM #112: tier-1
+    // (26 solds, $29.50) → tier-3 (0 solds, $47.44) across refreshes.
+    // When the fresh fetch returns nothing but the book record carried a
+    // prior raw sold pool (≥5 rows), retain it with a stale flag; the
+    // verify chain re-runs on the retained rows so the verified pool is
+    // reproduced, and recency weighting naturally decays old dates.
+    let q91SoldRetention = false;
+    if (rawSoldRows.length === 0) {
+      const priorRawSold = Array.isArray(req.body?.soldCompsRawCached)
+        ? req.body.soldCompsRawCached
+        : [];
+      if (priorRawSold.length >= 5) {
+        rawSoldRows = priorRawSold;
+        q91SoldRetention = true;
+        console.log(
+          `[Q91] sold-retention: fresh fetch returned 0 solds — ` +
+          `retained ${priorRawSold.length} prior raw rows (stale)`
+        );
+      }
+    }
     const userGradeKeyForSold =
       isGraded === true && numericGrade != null
         ? (Number.isInteger(numericGrade)
@@ -4678,6 +4724,24 @@ export default async function handler(req, res) {
             const hasSoldData = soldAvg != null && !isNaN(soldAvg) && soldAvg > 0;
             const isSuspectContaminated = hasSoldData && soldAvg < contaminationThreshold;
 
+            // Q90: mega-key floor must NEVER re-anchor a verified-sold-
+            // derived slab price. GSX 3.0 (20:11:28 2026-07-12): a sold-pool
+            // dropout degraded the tier price below the $1,200 bucket and
+            // this branch re-anchored a book whose own slab-grade-matched
+            // market was $1,387.64. RULE: floor applies only when
+            // price < floor.low AND the pool is NOT slab-grade-matched.
+            // A slab scan's verified solds passed the gradeMismatch filter,
+            // so a sold-derived source == slab-grade-matched pool. The floor
+            // band is still surfaced as a reference display.
+            const SOLD_DERIVED_SOURCES = new Set([
+              'verified_sold_recency', 'verified_sold', 'sold_active_blend_30',
+              'verified_sold_active_blend', 'verified_sold_stale',
+            ]);
+            const slabGradeMatchedSold =
+              isGraded === true && numericGrade != null &&
+              SOLD_DERIVED_SOURCES.has(out.pricingSource) &&
+              (filteredSold?.length || 0) >= 2;
+
             if (isSuspectContaminated) {
               // Option 2+: Flag contamination, RESEARCH decision, hard-lock
               out.floorContaminationSuspect = true;
@@ -4698,6 +4762,22 @@ export default async function handler(req, res) {
                 `${title} #${confirmedIssue} soldAvg=$${soldAvg.toFixed(0)}`,
                 `floor=$${floorResult.floor.toLocaleString()}`,
                 `(${((soldAvg / floorResult.floor) * 100).toFixed(0)}% of floor) → RESEARCH + hard-locked`);
+            } else if (slabGradeMatchedSold) {
+              // Q90: sold-derived slab price stands; floor band retained as
+              // reference display only (never re-anchors price or bands).
+              out.megaKeyFloorSuppressed = true;
+              out.megaKeyFloorBand = {
+                low: floorResult.floor,
+                high: floorResult.priceHigh,
+                bucket: floorResult.bucket,
+                reason: 'slab-grade-matched-sold-pool',
+              };
+              out.floorBandLow = fmtUsd(floorResult.floor);
+              out.floorBandHigh = fmtUsd(floorResult.priceHigh);
+              console.log('[Q90] mega-key floor SUPPRESSED:',
+                `${title} #${confirmedIssue} grade=${grade} bucket=${floorResult.bucket}`,
+                `price=${out.price} (${out.pricingSource}, ${filteredSold.length} slab-grade solds)`,
+                `— floor band $${floorResult.floor}–$${floorResult.priceHigh} retained as reference`);
             } else if (currentPriceNum < floorResult.floor) {
               // Normal floor enforcement path
               out.preFloorPrice = out.price;
@@ -5100,6 +5180,14 @@ export default async function handler(req, res) {
       out.compsCachedAt = useBookCompsCache ? bookCompsCachedAt : now;
       out.activeCached = compsFromEbay;
       out.soldCompsRawCached = capRawSoldRows(rawSoldRows);
+      // Q89-CACHE: stamp the comp-filter version the active pool was built
+      // with — book cache is only trusted when versions match (see gate).
+      out.compFilterVersion = COMP_FILTER_VERSION;
+      // Q91: surface sold-retention so the card can label the pool stale.
+      if (q91SoldRetention) {
+        out.soldRetentionStale = true;
+        out.priceNote = (out.priceNote || '') + ' · sold pool retained (stale fetch)';
+      }
     }
     // Ship 6 — skip PriceCharting per-grade arrays when polybag pricing active.
     // salesByGrade / priceLadder / salesVelocity all hold first-print PC data

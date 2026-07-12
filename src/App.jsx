@@ -5000,6 +5000,35 @@ function CollectionDetail({
           </div>
         )}
 
+        {/* Q90 — floor suppressed: sold-derived slab price stands, floor
+            band shown as reference only (never re-anchors the price) */}
+        {item.megaKeyFloorSuppressed && item.megaKeyFloorBand && !item.megaKeyFloorApplied &&
+          !item.manualReviewRequired && !item.gradeExceedsMap && (
+          <div style={{
+            marginTop: 10,
+            padding: "12px 14px",
+            border: "1px solid #388bfd",
+            borderRadius: 8,
+            background: "rgba(56,139,253,0.08)",
+            color: "#a5d6ff",
+            fontSize: 13,
+            lineHeight: 1.45,
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 4, color: "#388bfd" }}>
+              🔑 Mega-key floor band (reference)
+            </div>
+            <div>
+              Floor band: <strong>${Number(item.megaKeyFloorBand.low).toLocaleString()}</strong>
+              {item.megaKeyFloorBand.high ? <> – ${Number(item.megaKeyFloorBand.high).toLocaleString()}</> : null}
+              {item.megaKeyFloorBand.bucket != null && <> (grade bucket {item.megaKeyFloorBand.bucket})</>}
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12 }}>
+              Priced from slab-grade-matched verified solds — floor shown for context only.
+              {item.soldRetentionStale && " Sold pool retained from prior fetch (stale)."}
+            </div>
+          </div>
+        )}
+
         {item.compEraFilterBypassed && (
           <div style={{
             marginTop: 10,
@@ -8818,6 +8847,8 @@ export default function App() {
             compsCachedAt: item.compsCachedAt || null,
             activeCached: item.activeCached || null,
             soldCompsRawCached: item.soldCompsRawCached || [],
+            // Q89-CACHE — backend trusts book cache only on version match
+            compFilterVersion: item.compFilterVersion || null,
             // FIX: Skip image search on auto-refresh (same as manual refreshMarketData).
             // Auto-refresh updates PRICING for existing books (identity already confirmed).
             // Ambush Bug flicker + "prices change on card open" root cause: auto-refresh
@@ -8919,6 +8950,8 @@ export default function App() {
                 compsCachedAt: enrich.compsCachedAt || cur.compsCachedAt || null,
                 activeCached: enrich.activeCached || cur.activeCached || null,
                 soldCompsRawCached: enrich.soldCompsRawCached || cur.soldCompsRawCached || [],
+                // Q89-CACHE — comp-filter version the cached pool was built with
+                compFilterVersion: enrich.compFilterVersion || cur.compFilterVersion || null,
                 imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
@@ -8945,6 +8978,11 @@ export default function App() {
                   : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
                 // Mega-key floor flags — flow even under lowMatch (they're identity, not price)
                 megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
+                // Q90 — floor suppressed for slab-grade-matched sold pools;
+                // band retained as reference display
+                megaKeyFloorSuppressed: enrich.megaKeyFloorSuppressed === true,
+                megaKeyFloorBand: enrich.megaKeyFloorBand || null,
+                soldRetentionStale: enrich.soldRetentionStale === true,
                 megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
                 megaKeyFloorSource: enrich.megaKeyFloorSource || null,
                 megaKeyFloorNote: enrich.megaKeyFloorNote || null,
@@ -9353,6 +9391,10 @@ export default function App() {
                     : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
                   // Mega-key floor flags (Tier 0 hotfix — persist from enrich)
                   megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
+                  // Q90 — floor suppressed for slab-grade-matched sold pools
+                  megaKeyFloorSuppressed: enrich.megaKeyFloorSuppressed === true,
+                  megaKeyFloorBand: enrich.megaKeyFloorBand || null,
+                  soldRetentionStale: enrich.soldRetentionStale === true,
                   megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
                   megaKeyFloorSource: enrich.megaKeyFloorSource || null,
                   megaKeyFloorNote: enrich.megaKeyFloorNote || null,
@@ -9444,6 +9486,10 @@ export default function App() {
                   variantMultiplier: enrich.variantMultiplier || s.variantMultiplier || null,
                   // Mega-key floor flags
                   megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
+                  // Q90 — floor suppressed for slab-grade-matched sold pools
+                  megaKeyFloorSuppressed: enrich.megaKeyFloorSuppressed === true,
+                  megaKeyFloorBand: enrich.megaKeyFloorBand || null,
+                  soldRetentionStale: enrich.soldRetentionStale === true,
                   megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
                   megaKeyFloorSource: enrich.megaKeyFloorSource || null,
                   megaKeyFloorNote: enrich.megaKeyFloorNote || null,
@@ -9744,6 +9790,8 @@ export default function App() {
                 compsCachedAt: enrich.compsCachedAt || cur.compsCachedAt || null,
                 activeCached: enrich.activeCached || cur.activeCached || null,
                 soldCompsRawCached: enrich.soldCompsRawCached || cur.soldCompsRawCached || [],
+                // Q89-CACHE — comp-filter version the cached pool was built with
+                compFilterVersion: enrich.compFilterVersion || cur.compFilterVersion || null,
                 imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
@@ -9770,6 +9818,11 @@ export default function App() {
                   : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
                 // Mega-key floor flags
                 megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
+                // Q90 — floor suppressed for slab-grade-matched sold pools;
+                // band retained as reference display
+                megaKeyFloorSuppressed: enrich.megaKeyFloorSuppressed === true,
+                megaKeyFloorBand: enrich.megaKeyFloorBand || null,
+                soldRetentionStale: enrich.soldRetentionStale === true,
                 megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
                 megaKeyFloorSource: enrich.megaKeyFloorSource || null,
                 megaKeyFloorNote: enrich.megaKeyFloorNote || null,
@@ -10165,6 +10218,10 @@ export default function App() {
           // P0 CRITICAL — Pass cached claudeCheck to skip AI on refresh
           skipClaudeCheck: true,
           claudeCheckCached: item.claudeCheck || null,
+          // Q91 — prior sold pool for retention on fetch dropout. NOT a
+          // cache activation: compsCachedAt/activeCached deliberately not
+          // sent on manual refresh (fresh fetch stays forced).
+          soldCompsRawCached: item.soldCompsRawCached || [],
           // FIX: Skip image search on refresh to prevent identity re-resolution.
           // Batman #222 bug: refresh triggered eBay visual search → title-family
           // clustering → identity refusal → Phase 2 skipped → comps=null returned
@@ -10265,6 +10322,10 @@ export default function App() {
         : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : item.year),
       // Mega-key floor flags
       megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
+      // Q90 — floor suppressed for slab-grade-matched sold pools
+      megaKeyFloorSuppressed: enrich.megaKeyFloorSuppressed === true,
+      megaKeyFloorBand: enrich.megaKeyFloorBand || null,
+      soldRetentionStale: enrich.soldRetentionStale === true,
       megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
       megaKeyFloorSource: enrich.megaKeyFloorSource || null,
       megaKeyFloorNote: enrich.megaKeyFloorNote || null,
@@ -10299,6 +10360,8 @@ export default function App() {
       activeCached: enrich.activeCached || item.activeCached || null,
       compsCachedAt: enrich.compsCachedAt || item.compsCachedAt || null,
       soldCompsRawCached: enrich.soldCompsRawCached || item.soldCompsRawCached || [],
+      // Q89-CACHE — comp-filter version the cached pool was built with
+      compFilterVersion: enrich.compFilterVersion || item.compFilterVersion || null,
     };
 
     // Ship #20a.6.22 — Apply autofix engine
