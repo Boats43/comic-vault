@@ -443,6 +443,20 @@ export function computeDecision(item, context = {}) {
     };
   }
 
+  // P0 2026-07-13 (XMEN1 coexistence): the mega-key contamination lock
+  // sets RESEARCH inline in enrich's floor branch, but this function
+  // recomputes the final decision and knew nothing about the flag — a
+  // hard-LOCKED card could still carry a LIST badge. Surface as a
+  // price-evidence critical warning so the final decision lands RESEARCH.
+  if (item.floorContaminationSuspect === true) {
+    decision.warnings.push('floor-contamination-suspect');
+    decision.evidence.floorContamination = {
+      message: item.floorContaminationReason ||
+        'Verified solds far below mega-key floor — pool may contain reprints',
+      source: 'mega-key-floor',
+    };
+  }
+
   // Warning: Q64 Tier-2.5 (all-stale sold pool)
   // When pricingSource='verified_sold_stale', all sold comps are >90d old.
   // Caps action to LIST_LOW (never LIST_NOW) due to market staleness.
@@ -481,6 +495,7 @@ export function computeDecision(item, context = {}) {
     'claude-check-high-severity',      // Price evidence: HIGH severity flag
     'web-search-pricing',              // Price evidence: web search fallback
     'reprint-polybag-detected',        // Price evidence: edition pricing uncertainty
+    'floor-contamination-suspect',     // Price evidence: solds far below mega-key floor (XMEN1)
   ];
   // Removed: 'content-unverified' (not a price flag — stays LIST_LOW/BUNDLE)
 

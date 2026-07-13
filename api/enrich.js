@@ -4781,12 +4781,29 @@ export default async function handler(req, res) {
             );
 
             // XMEN1-RULING [Option 2+]: Contamination detection
-            // When soldAvg exists and is <50% of floor.low, suspect reprint/polybag
-            // contamination in sold pool. Keep estimate displayed (no floor override),
-            // flag for research, hard-lock listing.
-            const contaminationThreshold = floorResult.floor * 0.5;
+            // When the sold-derived basis is <50% of floor.low, suspect
+            // reprint/polybag contamination in sold pool. Keep estimate
+            // displayed (no floor override), flag for research, hard-lock.
+            //
+            // P0 2026-07-13 (X-Men #1 CGC 4.0 shipped $4,672 LIST vs
+            // $14,000 floor.low): an undated verified-sold pool leaves
+            // soldAvg null (computeRecencyWeightedPrice skips dateless
+            // rows) while pricingSource is still sold-derived — the
+            // contamination check was blind and Q90 suppressed the floor.
+            // Basis now falls back to the current sold-derived price when
+            // soldAvg is unavailable.
+            const SOLD_DERIVED_SOURCES = new Set([
+              'verified_sold_recency', 'verified_sold', 'sold_active_blend_30',
+              'verified_sold_active_blend', 'verified_sold_stale',
+            ]);
+            const soldDerivedSource = SOLD_DERIVED_SOURCES.has(out.pricingSource);
             const hasSoldData = soldAvg != null && !isNaN(soldAvg) && soldAvg > 0;
-            const isSuspectContaminated = hasSoldData && soldAvg < contaminationThreshold;
+            const soldBasis = hasSoldData
+              ? soldAvg
+              : (soldDerivedSource && currentPriceNum > 0 ? currentPriceNum : null);
+            const contaminationThreshold = floorResult.floor * 0.5;
+            const isSuspectContaminated =
+              soldBasis != null && soldBasis < contaminationThreshold;
 
             // Q90: mega-key floor must NEVER re-anchor a verified-sold-
             // derived slab price. GSX 3.0 (20:11:28 2026-07-12): a sold-pool
@@ -4797,20 +4814,28 @@ export default async function handler(req, res) {
             // A slab scan's verified solds passed the gradeMismatch filter,
             // so a sold-derived source == slab-grade-matched pool. The floor
             // band is still surfaced as a reference display.
-            const SOLD_DERIVED_SOURCES = new Set([
-              'verified_sold_recency', 'verified_sold', 'sold_active_blend_30',
-              'verified_sold_active_blend', 'verified_sold_stale',
-            ]);
+            //
+            // P0 2026-07-13 coexistence amendment: Q90 protects GOOD sold
+            // prices from a stale floor; a basis far below floor is the
+            // contamination signal XMEN1 exists to catch. Suppression now
+            // additionally requires the sold basis above or reasonably
+            // near floor.low (≥80%). The rules partition:
+            //   basis < 50% of floor  → XMEN1 lock (contamination)
+            //   50–80%                → normal floor enforcement
+            //   ≥ 80% (incl. above)   → Q90 suppression (GSX 3.0: 116%)
+            const NEAR_FLOOR_RATIO = 0.8;
             const slabGradeMatchedSold =
               isGraded === true && numericGrade != null &&
-              SOLD_DERIVED_SOURCES.has(out.pricingSource) &&
-              (filteredSold?.length || 0) >= 2;
+              soldDerivedSource &&
+              (filteredSold?.length || 0) >= 2 &&
+              soldBasis != null &&
+              soldBasis >= floorResult.floor * NEAR_FLOOR_RATIO;
 
             if (isSuspectContaminated) {
               // Option 2+: Flag contamination, RESEARCH decision, hard-lock
               out.floorContaminationSuspect = true;
               out.floorContaminationReason =
-                `Verified solds ($${soldAvg.toFixed(0)}) far below key floor ($${floorResult.floor.toLocaleString()}) — pool may contain reprints`;
+                `Verified solds ($${soldBasis.toFixed(0)}) far below key floor ($${floorResult.floor.toLocaleString()}) — pool may contain reprints`;
               out.floorBandLow = fmtUsd(floorResult.floor);
               out.floorBandHigh = fmtUsd(floorResult.priceHigh);
               out.decision = {
@@ -4823,9 +4848,10 @@ export default async function handler(req, res) {
               out.listingHardLocked = true;
               out.listingHardLockReason = 'mega-key-floor-contamination';
               console.log('[mega-key-floor] CONTAMINATION SUSPECT:',
-                `${title} #${confirmedIssue} soldAvg=$${soldAvg.toFixed(0)}`,
+                `${title} #${confirmedIssue} basis=$${soldBasis.toFixed(0)}`,
+                `(${hasSoldData ? 'soldAvg' : 'sold-derived price, soldAvg unavailable'})`,
                 `floor=$${floorResult.floor.toLocaleString()}`,
-                `(${((soldAvg / floorResult.floor) * 100).toFixed(0)}% of floor) → RESEARCH + hard-locked`);
+                `(${((soldBasis / floorResult.floor) * 100).toFixed(0)}% of floor) → RESEARCH + hard-locked`);
             } else if (slabGradeMatchedSold) {
               // Q90: sold-derived slab price stands; floor band retained as
               // reference display only (never re-anchors price or bands).
