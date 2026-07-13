@@ -3688,6 +3688,22 @@ export default async function handler(req, res) {
         const reprintRatio = reprintItems.length / itemsWithPrice.length;
 
         if (reprintRatio >= 0.6) {
+          // Q98 (ruled 2026-07-13): image-search reprint ratio is a
+          // facsimile-LIKELIHOOD signal, never a pricing veto by itself.
+          // Facsimiles reproduce iconic cover art exactly, so a cover-image
+          // search on a famous key (X-Men #1, GSX #1) always comes back
+          // facsimile-dominated regardless of what the user is actually
+          // holding. Comparing PC's anchor against THIS pool's average
+          // false-positived on both books: image-pool avg $26.13 / $17.86
+          // vs their real comps.js pools (post reprint/sequel/era/slab
+          // filters) of $11,329.50 / $1,674.91, both HIGH confidence.
+          // Surfaced non-blocking so the UI can still show it as context.
+          out.imagePoolFacsimileRatio = reprintRatio;
+          console.log(
+            `[image-pool] facsimile signal: ${reprintItems.length}/${itemsWithPrice.length} ` +
+            `(${(reprintRatio * 100).toFixed(0)}%) reprint titles in cover-image matches — informational only`
+          );
+
           // Q67-C FIX: Polybag cap binding
           // ROOT CAUSE: askMedian computed from TRIMMED pool, but when ONE high outlier
           // exists ($1200+), trimming removes it → askMedian = trimmed median ($800+).
@@ -3707,14 +3723,46 @@ export default async function handler(req, res) {
           const askLow = askPrices[0];  // Q67-C: Use LOW end, not median
           const askAvg = askPrices.reduce((a, b) => a + b, 0) / askPrices.length;
 
-          // GL-3 (INV-3, ruled): >10x PC-anchor divergence hard-abort.
-          // When PC's first-print anchor sits more than 10x above the
-          // reprint ask pool, the reprint CLASSIFICATION itself is suspect
-          // (EX-3 class: 62% reprint pool priced a possibly-\$4.7K book at
-          // \$11.24 — PC \$4,758.51 vs asks ~\$26). Pricing the cheap side of
-          // that ambiguity is the worst failure direction: refuse instead.
+          // GL-3 (INV-3, ruled) + Q98 (ruled): >10x PC-anchor divergence
+          // hard-abort — measured against the REAL filtered pricing pool
+          // (out.price, already set by the comps/sold/tier pipeline above),
+          // not the raw image-search pool. Falls back to the image-pool ask
+          // average only when the real pipeline found no usable price at
+          // all (genuine no-comp-data polybag/facsimile scan — Q67-C's
+          // original target case).
           const pcAnchor = priceCharting?.price || null;
-          if (pcAnchor && askAvg > 0 && pcAnchor / askAvg > 10) {
+          const realPoolPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, '')) || 0;
+
+          if (realPoolPrice > 0 && pcAnchor && pcAnchor / realPoolPrice > 10) {
+            out.price = null;
+            out.priceLow = null;
+            out.priceHigh = null;
+            out.priceBands = null;
+            out.pricingSource = 'refused-polybag-pc-divergence';
+            out.refusedToPrice = true;
+            out.confidenceLevel = 'LOW';
+            out.priceNote = 'Real comp pool conflicts with PriceCharting anchor — verify edition before pricing';
+            out.listingHardLocked = true;
+            out.listingHardLockReason = 'polybag-pc-divergence';
+            out.listingHardLockBanner = 'Comp pool conflicts with PriceCharting anchor — verify edition';
+            out.polybagDetected = true;
+            out.polybagReprintRatio = reprintRatio;
+            isPolybagPricing = true; // skip ALL downstream pricing blocks
+            console.log(
+              `[polybag-abort] PC=$${pcAnchor.toFixed(2)} realPoolPrice=$${realPoolPrice.toFixed(2)} ` +
+              `ratio=${(pcAnchor / realPoolPrice).toFixed(0)}x > 10 — hard abort (real pool), refused to price`
+            );
+          } else if (realPoolPrice > 0) {
+            // Real filtered pool (comps.js) is coherent vs PC, or PC has no
+            // match to compare — it stands untouched. Image-pool facsimile
+            // ratio above was informational only; no pricing override.
+            console.log(
+              `[polybag-check] real pool $${realPoolPrice.toFixed(2)} coherent vs PC ` +
+              `${pcAnchor ? '$' + pcAnchor.toFixed(2) : 'n/a'} — INV-3 does not fire ` +
+              `(image-pool ${(reprintRatio * 100).toFixed(0)}% facsimile signal stays informational)`
+            );
+          } else if (pcAnchor && askAvg > 0 && pcAnchor / askAvg > 10) {
+            // No real pool price at all — original image-pool fallback.
             out.price = null;
             out.priceLow = null;
             out.priceHigh = null;
@@ -3731,7 +3779,7 @@ export default async function handler(req, res) {
             isPolybagPricing = true; // skip ALL downstream pricing blocks
             console.log(
               `[polybag-abort] PC=$${pcAnchor.toFixed(2)} poolAvg=$${askAvg.toFixed(2)} ` +
-              `ratio=${(pcAnchor / askAvg).toFixed(0)}x > 10 — hard abort, refused to price`
+              `ratio=${(pcAnchor / askAvg).toFixed(0)}x > 10 — hard abort (no real pool price), refused to price`
             );
           } else {
 
