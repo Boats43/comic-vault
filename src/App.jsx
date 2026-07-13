@@ -8810,6 +8810,10 @@ export default function App() {
 
     const stale = [...missingSource, ...dupStale];
     if (stale.length === 0) return;
+    // Q92-B: never launch the queue without a vault key — every request
+    // would bounce off the access gate as a 401 burst (the warmup effect
+    // already guards this way; the access modal is what the user needs).
+    if (!localStorage.getItem('vault_key')) return;
     let cancelled = false;
     setRefreshingPrices(stale.length);
     const queue = stale.slice();
@@ -8874,6 +8878,12 @@ export default function App() {
             if (r.status === 401) {
               clearVaultKey();
               setShowAccessModal(true);
+              // Q92-B: stop the queue. getVaultHeaders() is empty after
+              // clearVaultKey(), so every remaining launch would fire
+              // keyless and 401 — the 12x-401 cascade. Drain instead.
+              cancelled = true;
+              queue.length = 0;
+              setRefreshingPrices(0);
               return null;
             }
             return r.ok ? r.json() : null;

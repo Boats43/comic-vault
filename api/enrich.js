@@ -2996,7 +2996,12 @@ export default async function handler(req, res) {
             const cached = !skipCache ? await kvGet(`ac:${activeKey}`) : null;
             if (cached) {
               console.log(`[active-cache] HIT: ${activeKey}`);
-              return cached.data;
+              // Q92: kvSet stores the fetchComps result DIRECTLY — the
+              // `{ data, expires }` wrapper died with the in-memory cache
+              // (dfbb959). `cached.data` was undefined on every KV HIT →
+              // active pool 0/0 → refused-no-data-sources on any refresh
+              // within the 1h TTL of a successful scan.
+              return cached;
             }
             if (skipCache) {
               console.log(`[active-cache] SKIP: ${activeKey} — skipCache=true`);
