@@ -484,6 +484,64 @@ export const resolveIssue = (visionIssue, ebayIssue, visualIssue, titleContext =
   return visionIssue;
 };
 
+// Publisher consensus pattern table — shared by backfillFromComps (eBay
+// visual pool) and backfillPublisherFromTitles (Q94 active-comp second path).
+export const PUBLISHER_CONSENSUS_PATTERNS = [
+  { re: /\b(?:dc\s+comics?|dc\s+universe|dcu)\b/i, name: 'DC Comics' },
+  { re: /\b(?:marvel\s+comics?|marvel\s+universe)\b/i, name: 'Marvel Comics' },
+  { re: /\b(?:image\s+comics?)\b/i, name: 'Image Comics' },
+  { re: /\b(?:dark\s+horse)\b/i, name: 'Dark Horse Comics' },
+  { re: /\b(?:idw\s+publishing|idw)\b/i, name: 'IDW Publishing' },
+  { re: /\b(?:boom!?\s+studios)\b/i, name: 'BOOM! Studios' },
+  { re: /\b(?:dynamite\s+entertainment|dynamite)\b/i, name: 'Dynamite Entertainment' },
+  { re: /\b(?:valiant\s+(?:comics?|entertainment))\b/i, name: 'Valiant Entertainment' },
+  { re: /\b(?:archie\s+comics?)\b/i, name: 'Archie Comics' },
+  // WARP-FIX (2026-07-12) — indie/underground publishers. Warp #9
+  // (First Comics 1983): publisher unrecognized by every backfill
+  // source → identityComplete=false → ID_REQUIRED → BLOCKED.
+  // Phrase-anchored where the bare word collides with comic
+  // vocabulary ("first print", "pacific"); bare eclipse/warren
+  // acceptable under the ≥50% consensus gate.
+  { re: /\b(?:first\s+comics?)\b/i, name: 'First Comics' },
+  { re: /\b(?:eclipse\s+comics?|eclipse)\b/i, name: 'Eclipse Comics' },
+  { re: /\b(?:pacific\s+comics?)\b/i, name: 'Pacific Comics' },
+  { re: /\b(?:kitchen\s+sink)\b/i, name: 'Kitchen Sink Press' },
+  { re: /\b(?:warren\s+(?:publishing|magazines?)|warren)\b/i, name: 'Warren Publishing' },
+  { re: /\b(?:fantagraphics)\b/i, name: 'Fantagraphics' },
+  { re: /\b(?:last\s+gasp)\b/i, name: 'Last Gasp' },
+  { re: /\b(?:apex\s+novelt(?:y|ies))\b/i, name: 'Apex Novelties' },
+];
+
+/**
+ * Q94 — Publisher backfill from an arbitrary title pool (second path).
+ *
+ * backfillFromComps runs the pattern table against the eBay VISUAL pool
+ * only; when that pool is empty/thin the publisher stays null even when
+ * the Phase-2 ACTIVE comp pool overwhelmingly names one (Warp #9: 0 visual
+ * results, 35 active comps naming "First Comics"). This helper runs the
+ * same table + same ≥50% consensus gate against any list of titles.
+ *
+ * No title-match gate: active/sold comps have already passed the comps.js
+ * filter chain against OUR title, unlike raw visual-search rows.
+ *
+ * @param {Array<string>} titles - comp listing titles
+ * @param {Object} opts - { minTitles = 4, minRatio = 0.5 }
+ * @returns {Object|null} { publisher, hitCount, total, ratio } or null
+ */
+export const backfillPublisherFromTitles = (titles, { minTitles = 4, minRatio = 0.5 } = {}) => {
+  const pool = (titles || []).map((t) => String(t || '')).filter(Boolean);
+  if (pool.length < minTitles) return null;
+
+  for (const { re, name } of PUBLISHER_CONSENSUS_PATTERNS) {
+    const hitCount = pool.filter((t) => re.test(t)).length;
+    const ratio = hitCount / pool.length;
+    if (ratio >= minRatio) {
+      return { publisher: name, hitCount, total: pool.length, ratio };
+    }
+  }
+  return null;
+};
+
 /**
  * Backfill title, year, and publisher from comp consensus when primary sources return null.
  * Q58-TITLE: Title backfill requires ≥4 comps with ≥80% consensus on series name.
@@ -603,33 +661,7 @@ export const backfillFromComps = (confirmedTitle, confirmedYear, confirmedPublis
     if (titleMatchRatio >= 0.7) {
       // Publisher backfill — pattern-match common publisher tokens (requires title match)
       if (!confirmedPublisher) {
-        const pubPatterns = [
-          { re: /\b(?:dc\s+comics?|dc\s+universe|dcu)\b/i, name: 'DC Comics' },
-          { re: /\b(?:marvel\s+comics?|marvel\s+universe)\b/i, name: 'Marvel Comics' },
-          { re: /\b(?:image\s+comics?)\b/i, name: 'Image Comics' },
-          { re: /\b(?:dark\s+horse)\b/i, name: 'Dark Horse Comics' },
-          { re: /\b(?:idw\s+publishing|idw)\b/i, name: 'IDW Publishing' },
-          { re: /\b(?:boom!?\s+studios)\b/i, name: 'BOOM! Studios' },
-          { re: /\b(?:dynamite\s+entertainment|dynamite)\b/i, name: 'Dynamite Entertainment' },
-          { re: /\b(?:valiant\s+(?:comics?|entertainment))\b/i, name: 'Valiant Entertainment' },
-          { re: /\b(?:archie\s+comics?)\b/i, name: 'Archie Comics' },
-          // WARP-FIX (2026-07-12) — indie/underground publishers. Warp #9
-          // (First Comics 1983): publisher unrecognized by every backfill
-          // source → identityComplete=false → ID_REQUIRED → BLOCKED.
-          // Phrase-anchored where the bare word collides with comic
-          // vocabulary ("first print", "pacific"); bare eclipse/warren
-          // acceptable under the ≥50% consensus gate.
-          { re: /\b(?:first\s+comics?)\b/i, name: 'First Comics' },
-          { re: /\b(?:eclipse\s+comics?|eclipse)\b/i, name: 'Eclipse Comics' },
-          { re: /\b(?:pacific\s+comics?)\b/i, name: 'Pacific Comics' },
-          { re: /\b(?:kitchen\s+sink)\b/i, name: 'Kitchen Sink Press' },
-          { re: /\b(?:warren\s+(?:publishing|magazines?)|warren)\b/i, name: 'Warren Publishing' },
-          { re: /\b(?:fantagraphics)\b/i, name: 'Fantagraphics' },
-          { re: /\b(?:last\s+gasp)\b/i, name: 'Last Gasp' },
-          { re: /\b(?:apex\s+novelt(?:y|ies))\b/i, name: 'Apex Novelties' },
-        ];
-
-        for (const { re, name } of pubPatterns) {
+        for (const { re, name } of PUBLISHER_CONSENSUS_PATTERNS) {
           const hitCount = compTitles.filter(t => re.test(t)).length;
           const hitRatio = hitCount / compTitles.length;
           if (hitRatio >= 0.5) {

@@ -18,7 +18,14 @@
 // Patterns indicating Vision returned uncertainty rather than a value.
 // Case-insensitive. Substring match — "could not determine" matches because
 // "cannot\s+determine" is the pinned phrasing in current Vision output.
-const UNCERTAINTY_PATTERNS = [
+//
+// Q93 — split into two classes. HARD phrases never occur inside real series
+// titles ("cannot determine", "not visible", …). WORD markers CAN — "unknown"
+// is part of real series names (From Beyond the Unknown, Omega the Unknown,
+// Challengers of the Unknown, Unknown Soldier). Issue/year/publisher/author
+// still treat both classes as uncertainty (combined list); only the TITLE
+// field gets the residue check below.
+const HARD_UNCERTAINTY_PATTERNS = [
   /cannot\s+determine/i,
   /could\s+not\s+determine/i,
   /unable\s+to\s+(?:determine|read|identify)/i,
@@ -27,8 +34,16 @@ const UNCERTAINTY_PATTERNS = [
   /\billegible\b/i,
   /\bapproximately\b/i,
   /\bcirca\b/i,
-  /\bunknown\b/i,
   /\bn\/a\b/i,
+];
+
+const WORD_UNCERTAINTY_PATTERNS = [
+  /\bunknown\b/i,
+];
+
+const UNCERTAINTY_PATTERNS = [
+  ...HARD_UNCERTAINTY_PATTERNS,
+  ...WORD_UNCERTAINTY_PATTERNS,
 ];
 
 const isUncertaintyString = (s) => {
@@ -38,6 +53,34 @@ const isUncertaintyString = (s) => {
   if (/^\?+$/.test(trimmed)) return true;
   if (/^-+$/.test(trimmed)) return true;
   return UNCERTAINTY_PATTERNS.some((re) => re.test(trimmed));
+};
+
+// Q93 — title-specific uncertainty check. A word-class marker only nulls
+// the title when nothing meaningful remains after removing it (and generic
+// filler): "Unknown" / "Unknown Comic" → null (Vision failure preserved),
+// "From Beyond the Unknown" #20 → residue "From Beyond" → real title kept.
+// Floor: residue <5 chars → uncertainty (same floor as the C4 arc-strip
+// guard, Q88-P3).
+const TITLE_RESIDUE_FILLER_RE = /\b(?:comics?|comic\s+book|title|book|series|the|a|an|of)\b/gi;
+
+const isTitleUncertaintyString = (s) => {
+  if (typeof s !== 'string') return false;
+  const trimmed = s.trim();
+  if (!trimmed) return false;
+  if (/^\?+$/.test(trimmed)) return true;
+  if (/^-+$/.test(trimmed)) return true;
+  if (HARD_UNCERTAINTY_PATTERNS.some((re) => re.test(trimmed))) return true;
+  if (!WORD_UNCERTAINTY_PATTERNS.some((re) => re.test(trimmed))) return false;
+
+  let residue = trimmed;
+  for (const re of WORD_UNCERTAINTY_PATTERNS) {
+    residue = residue.replace(new RegExp(re.source, 'gi'), ' ');
+  }
+  residue = residue
+    .replace(TITLE_RESIDUE_FILLER_RE, ' ')
+    .replace(/[^a-z0-9]+/gi, ' ')
+    .trim();
+  return residue.length < 5;
 };
 
 // Strict 4-digit year, 1900-2100 inclusive. Rejects ranges, decades,
@@ -68,10 +111,11 @@ export const sanitizeIdentityFields = (input) => {
   const out = { title: null, issue: null, year: null, publisher: null, author: null, visionConfidence: null };
   if (!input || typeof input !== 'object') return out;
 
-  // title
+  // title — Q93: word-class markers ("unknown") only null the title when
+  // no meaningful residue remains; real series containing the word survive.
   if (typeof input.title === 'string') {
     const t = input.title.trim();
-    if (t && !isUncertaintyString(t)) out.title = t;
+    if (t && !isTitleUncertaintyString(t)) out.title = t;
   }
 
   // issue — accept number or numeric string

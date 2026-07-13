@@ -33,6 +33,7 @@ import {
   resolveIdentity,
   resolveIssue,
   backfillFromComps,
+  backfillPublisherFromTitles,
   extractTitleConsensus,
   resolveYear,
   checkAssemblyIntegrity,
@@ -3922,6 +3923,35 @@ export default async function handler(req, res) {
       console.log('[Q32] MERCHANDISE HARD BLOCK — refusing to price, decision=DO_NOT_LIST');
       // Ship #24a-2: contract state=LOCKED via DO_NOT_LIST hard lock
       return res.json(finalizeResponse(out)); // STOP — no pricing, return early
+    }
+
+    // Q94 — Publisher backfill from ACTIVE-comp title consensus (second path).
+    // The WARP-FIX pattern table runs against the eBay VISUAL pool only
+    // (backfillFromComps at line ~2857); when that pool is empty/thin (<4
+    // items) the publisher stays null even when the Phase-2 active pool
+    // overwhelmingly names an indie publisher, and CV's correct match gets
+    // rejected in a circular publisher-mismatch loop (Warp #9: 0 visual
+    // results, 35 active comps naming "First Comics"). Runs BEFORE the
+    // identity gate so the backfilled publisher completes identity.
+    if (!confirmedPublisher && (visualResult?.items?.length || 0) < 4) {
+      const activeCompTitles = [
+        ...(Array.isArray(compsFromEbay?.prices) ? compsFromEbay.prices : []),
+        ...(Array.isArray(filteredSold) ? filteredSold : []),
+      ].map((r) => String(r?.rawTitle || r?.title || '')).filter(Boolean);
+
+      const pubConsensus = backfillPublisherFromTitles(activeCompTitles);
+      if (pubConsensus) {
+        confirmedPublisher = pubConsensus.publisher;
+        out.publisher = confirmedPublisher;
+        out.publisherBackfilledFromComps = true;
+        out.publisherBackfillRatio = pubConsensus.ratio;
+        out.publisherBackfillSource = 'active-comp-consensus';
+        console.log(
+          `[Q94] publisher backfilled from ACTIVE comps: ${pubConsensus.publisher} ` +
+          `(${pubConsensus.hitCount}/${pubConsensus.total}=${Math.round(pubConsensus.ratio * 100)}%, ` +
+          `visual pool=${visualResult?.items?.length || 0})`
+        );
+      }
     }
 
     // Ship #20a.6.4 — identity gate. Runs AFTER phase 1 (so PC/CV year-heal
