@@ -704,7 +704,8 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
     const REPRINT_PUBLISHERS = [
       'marvel uk', 'panini', 'dynapubs', 'revolutionary',
       'sergio bonelli', 'dennis förlag', 'condor', 'titan books',
-      'grupo editorial', 'vid', 'novedades'  // Mexican reprint publishers
+      'grupo editorial', 'vid', 'novedades',  // Mexican reprint publishers
+      'ediciones vertice', 'editorial novaro', // Q99 — Spanish/Mexican reprint licensees
     ];
     const reprintFiltered = candidates.filter((r) => {
       const vol = volDetails[r?.volume?.id];
@@ -720,6 +721,23 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
     if (reprintFiltered.length > 0) {
       candidates.splice(0, candidates.length, ...reprintFiltered);
       console.log(`[cv-reprint-gate] ${beforeReprint} → ${candidates.length} volumes`);
+    } else if (beforeReprint > 0) {
+      // Q99 (ruled): unlike the token/pub gates below (fuzzy scoring, where
+      // "keep original set" guards against nuking a legitimate near-miss),
+      // reprint-publisher rejection is a deterministic blocklist match —
+      // there is no case where resurrecting a KNOWN foreign reprint is
+      // correct just because it's the only candidate. UXM #141: CV's
+      // search returned only 3 Panini Brasil/Verlag volumes (no 1981
+      // Marvel US volume in the result set at all); the old silent
+      // fallback let Panini Brasil win by default, anchoring
+      // confirmedYear=2002 and era-rejecting every genuine 1981 comp.
+      // Committing to zero here makes comicVine() return null instead —
+      // confirmedYear then correctly falls through to backfillFromComps'
+      // eBay-comp-consensus year extraction (identityCore.js), which
+      // resolves the real year from "(1981)"-style tokens already present
+      // in the genuine market listings.
+      candidates.length = 0;
+      console.log(`[cv-reprint-gate] ${beforeReprint} → 0 volumes (all candidates were known foreign reprints — no fallback)`);
     }
 
     // Ship 26.3C-2 Patch C2-B — Token gate: require volume name to overlap ≥50%
@@ -1036,14 +1054,32 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       }
     }
 
+    // Q99 (ruled) — defense-in-depth: a foreign-reprint-publisher volume
+    // should never survive to `match` now that cv-reprint-gate commits to
+    // zero candidates instead of resurrecting them (above), but if some
+    // other path ever lets one through (e.g. it legitimately outscores a
+    // domestic candidate on title tokens), its start_year must never
+    // anchor confirmedYear — that's exactly how UXM #141 got year=2002
+    // instead of 1981. Suppressing startYear here forces the same safe
+    // fallback: resolveYear/backfillFromComps pick up the real year from
+    // eBay comp consensus instead of trusting a reprint edition's year.
+    const resolvedCvPublisher = volDetail?.publisher?.name || match.volume?.publisher?.name || null;
+    const cvIsForeignReprint = resolvedCvPublisher
+      ? REPRINT_PUBLISHERS.some(rp => String(resolvedCvPublisher).toLowerCase().includes(rp))
+      : false;
+    if (cvIsForeignReprint) {
+      console.log(`[cv-year-suppress] foreign reprint publisher "${resolvedCvPublisher}" — start_year withheld from year resolution`);
+    }
+
     return {
       id: match.id,
       name: match.name,
       issueNumber: match.issue_number,
       volume: match.volume?.name,
       volumeId: vid,
-      publisher: volDetail?.publisher?.name || match.volume?.publisher?.name || null,
-      startYear: volDetail?.start_year || null,
+      publisher: resolvedCvPublisher,
+      startYear: cvIsForeignReprint ? null : (volDetail?.start_year || null),
+      foreignReprintPublisher: cvIsForeignReprint,
       description,
       deck,
       storySuppressedReason,
