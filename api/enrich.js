@@ -3724,14 +3724,21 @@ export default async function handler(req, res) {
           const askAvg = askPrices.reduce((a, b) => a + b, 0) / askPrices.length;
 
           // GL-3 (INV-3, ruled) + Q98 (ruled): >10x PC-anchor divergence
-          // hard-abort — measured against the REAL filtered pricing pool
-          // (out.price, already set by the comps/sold/tier pipeline above),
-          // not the raw image-search pool. Falls back to the image-pool ask
-          // average only when the real pipeline found no usable price at
-          // all (genuine no-comp-data polybag/facsimile scan — Q67-C's
-          // original target case).
+          // hard-abort — measured against the REAL filtered pricing pool,
+          // not the raw image-search pool. Q98-BUG: out.price is NOT yet
+          // assigned at this point in the handler — the tier-1 pipeline's
+          // result only lands in out.price at line ~4223, well after this
+          // block runs. The already-in-scope value is priceBandsRaw.market
+          // (computed at line ~3491 by computePriceBandsFromSold, logged
+          // one line later) — that's the real number to compare. Falls
+          // back to the image-pool ask average only when the real pipeline
+          // found no usable price at all (genuine no-comp-data polybag/
+          // facsimile scan — Q67-C's original target case).
           const pcAnchor = priceCharting?.price || null;
-          const realPoolPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, '')) || 0;
+          const realPoolPrice =
+            typeof priceBandsRaw?.market === 'number' && priceBandsRaw.market > 0
+              ? priceBandsRaw.market
+              : 0;
 
           if (realPoolPrice > 0 && pcAnchor && pcAnchor / realPoolPrice > 10) {
             out.price = null;
