@@ -496,6 +496,10 @@ export const PUBLISHER_CONSENSUS_PATTERNS = [
   { re: /\b(?:dynamite\s+entertainment|dynamite)\b/i, name: 'Dynamite Entertainment' },
   { re: /\b(?:valiant\s+(?:comics?|entertainment))\b/i, name: 'Valiant Entertainment' },
   { re: /\b(?:archie\s+comics?)\b/i, name: 'Archie Comics' },
+  // Q96 — Charlton was missing from the WARP-FIX vintage-indie additions;
+  // one of the most common vintage indies (Flash Gordon #13 1969 class).
+  // Bare word is distinctive enough under the consensus gate.
+  { re: /\b(?:charlton\s+comics?|charlton)\b/i, name: 'Charlton Comics' },
   // WARP-FIX (2026-07-12) — indie/underground publishers. Warp #9
   // (First Comics 1983): publisher unrecognized by every backfill
   // source → identityComplete=false → ID_REQUIRED → BLOCKED.
@@ -511,6 +515,30 @@ export const PUBLISHER_CONSENSUS_PATTERNS = [
   { re: /\b(?:last\s+gasp)\b/i, name: 'Last Gasp' },
   { re: /\b(?:apex\s+novelt(?:y|ies))\b/i, name: 'Apex Novelties' },
 ];
+
+// Q96 — Normalize a publisher string to a comparison key so "DC" ≡
+// "DC Comics", "Dark Horse" ≡ "Dark Horse Comics", "BOOM! Studios" ≡
+// "Boom". Strips corporate/format suffix words, takes the first remaining
+// token, then collapses known imprints/lineage to the parent key (same
+// families as conflictDetector IMPRINT_PARENTS + mega-keys Timely/Atlas).
+const PUBLISHER_KEY_PARENTS = {
+  timely: 'marvel',
+  atlas: 'marvel',
+  max: 'marvel',
+  vertigo: 'dc',
+  wildstorm: 'dc',
+};
+
+export const normalizePublisherKey = (p) => {
+  const cleaned = String(p || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\b(?:comics?|comic\s+book|publishing|publications?|entertainment|studios?|press|group|inc|llc|the)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const key = cleaned.split(' ')[0] || '';
+  return PUBLISHER_KEY_PARENTS[key] || key;
+};
 
 /**
  * Q94 — Publisher backfill from an arbitrary title pool (second path).

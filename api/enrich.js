@@ -34,6 +34,7 @@ import {
   resolveIssue,
   backfillFromComps,
   backfillPublisherFromTitles,
+  normalizePublisherKey,
   extractTitleConsensus,
   resolveYear,
   checkAssemblyIntegrity,
@@ -3933,24 +3934,52 @@ export default async function handler(req, res) {
     // rejected in a circular publisher-mismatch loop (Warp #9: 0 visual
     // results, 35 active comps naming "First Comics"). Runs BEFORE the
     // identity gate so the backfilled publisher completes identity.
-    if (!confirmedPublisher && (visualResult?.items?.length || 0) < 4) {
+    {
       const activeCompTitles = [
         ...(Array.isArray(compsFromEbay?.prices) ? compsFromEbay.prices : []),
         ...(Array.isArray(filteredSold) ? filteredSold : []),
       ].map((r) => String(r?.rawTitle || r?.title || '')).filter(Boolean);
 
-      const pubConsensus = backfillPublisherFromTitles(activeCompTitles);
-      if (pubConsensus) {
-        confirmedPublisher = pubConsensus.publisher;
-        out.publisher = confirmedPublisher;
-        out.publisherBackfilledFromComps = true;
-        out.publisherBackfillRatio = pubConsensus.ratio;
-        out.publisherBackfillSource = 'active-comp-consensus';
-        console.log(
-          `[Q94] publisher backfilled from ACTIVE comps: ${pubConsensus.publisher} ` +
-          `(${pubConsensus.hitCount}/${pubConsensus.total}=${Math.round(pubConsensus.ratio * 100)}%, ` +
-          `visual pool=${visualResult?.items?.length || 0})`
-        );
+      if (!confirmedPublisher) {
+        if ((visualResult?.items?.length || 0) < 4) {
+          const pubConsensus = backfillPublisherFromTitles(activeCompTitles);
+          if (pubConsensus) {
+            confirmedPublisher = pubConsensus.publisher;
+            out.publisher = confirmedPublisher;
+            out.publisherBackfilledFromComps = true;
+            out.publisherBackfillRatio = pubConsensus.ratio;
+            out.publisherBackfillSource = 'active-comp-consensus';
+            console.log(
+              `[Q94] publisher backfilled from ACTIVE comps: ${pubConsensus.publisher} ` +
+              `(${pubConsensus.hitCount}/${pubConsensus.total}=${Math.round(pubConsensus.ratio * 100)}%, ` +
+              `visual pool=${visualResult?.items?.length || 0})`
+            );
+          }
+        }
+      } else {
+        // Q96 — publisher CORRECTION path. Q94 only fills a null publisher;
+        // a WRONG non-null value (Flash Gordon #13: "Image" on a 1969
+        // Charlton book) persisted across rescans because the active-comp
+        // consensus was never consulted once a string existed. Higher bar
+        // than backfill: ≥80% of active+sold comp titles must name a
+        // DIFFERENT publisher (key-normalized so "DC" ≡ "DC Comics" and
+        // imprints don't self-conflict).
+        const pubConsensus = backfillPublisherFromTitles(activeCompTitles, { minRatio: 0.8 });
+        if (
+          pubConsensus &&
+          normalizePublisherKey(pubConsensus.publisher) !== normalizePublisherKey(confirmedPublisher)
+        ) {
+          console.log(
+            `[Q96] publisher-conflict-corrected old=${confirmedPublisher} new=${pubConsensus.publisher} ` +
+            `(${pubConsensus.hitCount}/${pubConsensus.total}=${Math.round(pubConsensus.ratio * 100)}%)`
+          );
+          out.publisherBeforeCorrection = confirmedPublisher;
+          confirmedPublisher = pubConsensus.publisher;
+          out.publisher = confirmedPublisher;
+          out.publisherConflictCorrected = true;
+          out.publisherBackfillRatio = pubConsensus.ratio;
+          out.publisherBackfillSource = 'active-comp-consensus-correction';
+        }
       }
     }
 

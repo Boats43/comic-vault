@@ -171,10 +171,26 @@ export const detectIdentityConflicts = (vision, ebay, comicVine, priceCharting) 
     const spread = maxYear - minYear;
 
     if (spread > 5) {
+      // P3 — CV volume start_year vs issue cover-year ALWAYS "drifts" on
+      // long-running ongoing series (ASM vol. start 1963 vs a 1971 issue),
+      // even when the match is correct. When the cv-era-gate has already
+      // suppressed the volume story for this drift AND ComicVine is the
+      // only outlier (spread without CV is within tolerance), the conflict
+      // is informational — pricing already ignores the volume.
+      const nonCvYears = [vision.year, ebay?.year, priceCharting?.year]
+        .map(y => parseInt(y, 10))
+        .filter(y => !isNaN(y) && y > 1900 && y < 2100);
+      const nonCvSpread = nonCvYears.length >= 2
+        ? Math.max(...nonCvYears) - Math.min(...nonCvYears)
+        : 0;
+      const cvEraGated = comicVine?.storySuppressedReason === 'era-gate-year-drift';
+      const downgraded = cvEraGated && nonCvSpread <= 5;
+
       conflicts.push({
         type: 'YEAR_DRIFT',
-        severity: 'HIGH',
-        detail: `Year spread ${minYear}-${maxYear} (${spread}y gap)`,
+        severity: downgraded ? 'INFO' : 'HIGH',
+        detail: `Year spread ${minYear}-${maxYear} (${spread}y gap)` +
+          (downgraded ? ' — CV volume start-year outlier, story already era-gated' : ''),
         sources: {
           vision: vision.year,
           ebay: ebay?.year,
