@@ -3593,7 +3593,7 @@ export default async function handler(req, res) {
     const soldVerifyResult = verifySoldComps(rawSoldRows, {
       title: confirmedTitle,
       issue: confirmedIssue,
-      variant: req.body?.variant || null,
+      variant: confirmedVariant,
       publisher,
       bookYear: confirmedYear || year,
       userGradeKey: userGradeKeyForSold,
