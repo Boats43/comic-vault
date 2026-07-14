@@ -135,8 +135,14 @@ console.log('\nTest 3: High confidence modern book — confidence gate closes');
   assertNull(result, 'result is null (confidence gate closes)');
 }
 
-// Test 4: No variant detected by Vision
-console.log('\nTest 4: No variant detected by Vision — variant gate closes');
+// Test 4: No variant detected by Vision, and no eBay consensus either
+// Q109 Class A note: prior to the backfill path, a null visionVariant hit a
+// hard Gate 2 early-return regardless of what visualItems contained. Now it
+// routes into the backfill path and still returns null here — but because
+// this fixture's pool has no consensus signal (single generic non-variant
+// title), not because of a gate closure. See Test 12 for the case where a
+// null visionVariant DOES have real eBay consensus to backfill from.
+console.log('\nTest 4: No variant detected by Vision, no eBay consensus — stays null');
 {
   const visualItems = [
     {
@@ -149,7 +155,7 @@ console.log('\nTest 4: No variant detected by Vision — variant gate closes');
   ];
 
   const result = extractConfirmedVariant(visualItems, null, 2024, 'medium');
-  assertNull(result, 'result is null (variant gate closes)');
+  assertNull(result, 'result is null (no consensus to backfill)');
 }
 
 // Test 5: Fanexpo Alan Quah exclusive
@@ -309,6 +315,89 @@ console.log('\nTest 11: Multiple conventions — picks most frequent');
   const result = extractConfirmedVariant(visualItems, 'exclusive', 2024, 'medium');
   assertTruthy(result, 'result is truthy');
   assertEq(result?.consensus?.convention, 'c2e2', 'consensus convention is c2e2 (appears 2×)');
+}
+
+// Test 12 (Q109 Class A) — Captain America #25 class: Vision's cover-only
+// read found no explicit variant text (visionVariant=null), but the eBay
+// visual pool independently and repeatedly names "Skottie Young" — this is
+// the exact production casualty (EX-A/EX-I follow-up investigation) the
+// backfill path was greenlit to fix.
+console.log('\nTest 12: Captain America #25 class — backfill fires from null Vision variant');
+{
+  const visualItems = [
+    {
+      rawTitle: 'Captain America #25 Skottie Young Variant CGC 9.8',
+      title: 'Captain America',
+      issue: '25',
+      year: '2019',
+      variantTokens: [],
+    },
+    {
+      rawTitle: 'CAPTAIN AMERICA #25 SKOTTIE YOUNG VARIANT COVER',
+      title: 'Captain America',
+      issue: '25',
+      year: '2019',
+      variantTokens: [],
+    },
+  ];
+
+  const result = extractConfirmedVariant(visualItems, null, 2019, 'high');
+  assertTruthy(result, 'result is truthy (backfill fires despite null Vision variant)');
+  assertContains(result?.confirmedVariant?.toLowerCase(), 'skottie young', 'confirmed variant contains skottie young');
+  assertEq(result?.source, 'ebay_image_consensus_backfill', 'source is ebay_image_consensus_backfill');
+  assertNull(result?.overriddenVision, 'overriddenVision is null — nothing to override, this is a backfill');
+}
+
+// Test 13 (Q109 Class A) — backfill path is NOT blocked by high confidence.
+// Unlike the override path (Test 3), there is no Vision variant call to
+// distrust on the backfill path, so Gate 4 (confidence != high) must not
+// apply. Test 12 already uses confidence='high' and passes — this test
+// isolates that specifically against the override-path behavior in Test 3
+// to make the asymmetry explicit and regression-proof.
+console.log('\nTest 13: Backfill path ignores confidence gate (override path Test 3 does not)');
+{
+  const visualItems = [
+    {
+      rawTitle: 'Absolute Batman #1 SDCC exclusive Mico Suayan virgin',
+      title: 'Absolute Batman',
+      issue: '1',
+      year: '2024',
+      variantTokens: ['sdcc', 'exclusive', 'virgin'],
+    },
+    {
+      rawTitle: 'Absolute Batman #1 SDCC exclusive Mico Suayan virgin cover',
+      title: 'Absolute Batman',
+      issue: '1',
+      year: '2024',
+      variantTokens: ['sdcc', 'exclusive', 'virgin'],
+    },
+  ];
+
+  // Same fixture shape as Test 3, but visionVariant=null (backfill) instead
+  // of 'SDCC exclusive' (override) — Test 3 returns null at HIGH confidence;
+  // this must NOT.
+  const result = extractConfirmedVariant(visualItems, null, 2024, 'high');
+  assertTruthy(result, 'result is truthy — backfill runs even at HIGH confidence');
+  assertEq(result?.source, 'ebay_image_consensus_backfill', 'source is ebay_image_consensus_backfill');
+}
+
+// Test 14 (Q109 Class A) — backfill path still requires real consensus
+// (≥2 agree, same mechanism as override). A single matching listing must
+// not backfill off one data point.
+console.log('\nTest 14: Backfill path still requires ≥2 consensus — single listing stays null');
+{
+  const visualItems = [
+    {
+      rawTitle: 'Edge of Spider-Verse #1 Skottie Young Baby Variant CGC 9.8',
+      title: 'Edge of Spider-Verse',
+      issue: '1',
+      year: '2023',
+      variantTokens: [],
+    },
+  ];
+
+  const result = extractConfirmedVariant(visualItems, null, 2023, 'medium');
+  assertNull(result, 'result is null (single listing, no consensus, nothing to backfill)');
 }
 
 // Summary

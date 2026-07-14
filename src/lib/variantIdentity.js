@@ -59,21 +59,50 @@ const extractArtist = (title) => {
 // results. Returns null when gates fail or no consensus. Returns an object
 // with confirmed variant string + metadata when consensus fires.
 //
-// Gates (all must pass):
+// Q109 Class A (greenlit) — TWO paths through the same consensus mechanism:
+//
+//   OVERRIDE path (visionVariant present): Vision detected a variant but may
+//   have gotten the specific wording wrong or missed a more specific eBay
+//   signal — this is the original, unchanged Ship #20a.6.18 behavior.
+//     Gates: 1, 3, 4 (all must pass)
+//
+//   BACKFILL path (visionVariant null): Vision's cover-only variant read
+//   (api/grade.js STANDARD_PROMPT: "Only populate variant field when you can
+//   see EXPLICIT visual evidence... Do NOT infer variant status from art
+//   style or artist recognition alone") is deliberately conservative and
+//   frequently returns null even when the eBay visual pool's own listing
+//   titles independently and repeatedly name a specific variant (e.g.
+//   Captain America #25 "Skottie Young Variant" — never printed on the
+//   physical cover, but present in the seller-title consensus). Previously
+//   nothing backfilled this the way title/year already do via
+//   backfillFromComps() (identityCore.js) — variant just stayed null
+//   forever. This path fills that gap using the EXACT SAME consensus
+//   mechanism below (mode + ≥2-agree per token type), not a separate
+//   ratio-based reimplementation — there's nothing here to second-guess
+//   (Vision made no variant call at all), so Gate 4's confidence check
+//   doesn't apply; only Gates 1 and 3 gate the backfill path.
+//     Gates: 1, 3 (Gate 4 skipped — no Vision variant call to distrust)
+//
+// Gates:
 //   1. visualItems exists and is non-empty array
-//   2. visionVariant exists (Vision detected a variant)
-//   3. bookYear >= 2000 (modern era only)
-//   4. visionConfidence is NOT 'high' (uncertainty signal)
+//   2. (override path only) visionVariant exists (Vision detected a variant)
+//   3. bookYear must be parseable (any era — see Q109 note: despite this
+//      function's original "modern era only" framing, the code has never
+//      actually enforced bookYear >= 2000, only that it parses)
+//   4. (override path only) visionConfidence is NOT 'high' (uncertainty signal)
 //
 // When gates pass:
 //   1. Extract variant tokens from each eBay rawTitle
 //   2. Find consensus on convention, artist, exclusive, limitation (≥2 agree)
 //   3. Build confirmed variant string from consensus tokens
 //   4. Return { confirmedVariant, consensus, overriddenVision, source }
+//      (source is 'ebay_image_consensus' for override,
+//      'ebay_image_consensus_backfill' for backfill; overriddenVision is
+//      null on the backfill path — there was nothing to override)
 //
 // Fallback:
-//   - No consensus (< threshold) → return null → keep Vision variant
-//   - Any gate fails → return null → keep Vision variant
+//   - No consensus (< threshold) → return null → keep Vision variant (null)
+//   - Any gate fails → return null → keep Vision variant (null)
 export const extractConfirmedVariant = (
   visualItems,
   visionVariant,
@@ -85,24 +114,27 @@ export const extractConfirmedVariant = (
     return null;
   }
 
-  // Gate 2: visionVariant must exist (Vision detected a variant)
-  if (!visionVariant) {
-    return null;
-  }
-
   // Gate 3: bookYear must exist (any era)
   const y = parseInt(bookYear, 10);
   if (!y) {
     return null;
   }
 
-  // Gate 4: Vision confidence must NOT be HIGH (uncertainty signal)
-  const conf = String(visionConfidence || 'medium').toLowerCase().trim();
-  if (conf === 'high') {
-    return null;
+  const isBackfill = !visionVariant;
+
+  // Gate 2/4 (override path only): visionVariant must exist, and when it
+  // does, Vision confidence must NOT be HIGH (uncertainty signal — only
+  // second-guess Vision's own variant call when Vision itself signals low
+  // confidence). Neither applies to the backfill path: there is no Vision
+  // variant call to distrust, only a gap to fill.
+  if (!isBackfill) {
+    const conf = String(visionConfidence || 'medium').toLowerCase().trim();
+    if (conf === 'high') {
+      return null;
+    }
   }
 
-  console.log(`[variant-identity] gates passed: year=${y}, variant="${visionVariant}", confidence=${conf}`);
+  console.log(`[variant-identity] gates passed: year=${y}, variant="${visionVariant || '(null)'}", mode=${isBackfill ? 'backfill' : 'override'}`);
 
   // Extract variant tokens from each eBay rawTitle
   const allConventions = [];
@@ -184,9 +216,10 @@ export const extractConfirmedVariant = (
     consensus.limitation = topLimitation;
   }
 
-  // If no consensus on ANY token, return null (keep Vision variant)
+  // If no consensus on ANY token, return null (keep Vision variant — null
+  // stays null on the backfill path, nothing to fill in)
   if (Object.keys(consensus).length === 0) {
-    console.log(`[variant-identity] no consensus — keeping Vision variant`);
+    console.log(`[variant-identity] no consensus — ${isBackfill ? 'nothing to backfill, variant stays null' : 'keeping Vision variant'}`);
     return null;
   }
 
@@ -230,13 +263,13 @@ export const extractConfirmedVariant = (
 
   const confirmedVariant = parts.join(' ');
 
-  console.log(`[variant-identity] confirmed: "${confirmedVariant}" (Vision was: "${visionVariant}")`);
+  console.log(`[variant-identity] confirmed: "${confirmedVariant}" (${isBackfill ? 'backfilled — Vision had no variant call' : `Vision was: "${visionVariant}"`})`);
 
   return {
     confirmedVariant,
     consensus,
-    overriddenVision: visionVariant,
-    source: 'ebay_image_consensus',
+    overriddenVision: isBackfill ? null : visionVariant,
+    source: isBackfill ? 'ebay_image_consensus_backfill' : 'ebay_image_consensus',
     variantYear,
     variantYearRatio,
   };
