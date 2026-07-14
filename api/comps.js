@@ -1348,7 +1348,7 @@ export const fetchComps = async ({
           gradeFilteredPrices = [];
         }
       } else {
-        console.log(`[comps] grade-proximity filter skipped (no numeric grade: numericTarget=${numericTarget})`);
+        console.log(`[comps] grade-proximity filter skipped (${p.length === 0 ? 'pool empty before filter' : isNaN(numericTarget) ? 'no numeric grade' : 'unknown'}: numericTarget=${numericTarget})`);
       }
 
       // Filter 3b (creator-aware soft preference, moved from 1b-creator):
