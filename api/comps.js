@@ -602,10 +602,25 @@ export const fetchComps = async ({
   // authoritative for signature status, not free text. When the book IS
   // graded and the label is NOT signature, strip auth tokens before they
   // reach the query — a Universal-label book must never search for "signed".
-  const AUTH_STRIP = /\b(signed|autograph(?:ed)?|cgc\s*ss|signature\s*series)\b/gi;
+  // Q111 [Item 1] — convention tokens (NYCC/SDCC/C2E2/etc.) leak into the
+  // query the same way "signed" did: Vision's free-text variant field can
+  // carry a con-exclusive descriptor that has nothing to do with what makes
+  // the book sellable/searchable on eBay's standard market — a Universal-
+  // label book scanned as a con exclusive shouldn't search for "nycc" any
+  // more than it should search for "signed". Same gate as the auth strip.
+  const AUTH_STRIP = /\b(signed|autograph(?:ed)?|cgc\s*ss|signature\s*series|nycc|sdcc|c2e2|megacon|fan\s*expo|eccc)\b/gi;
+  const CONVENTION_TOKEN_RE = /\b(nycc|sdcc|c2e2|megacon|fan\s*expo|eccc)\b/i;
   const fullVariant = variant
     ? (isGraded && labelType !== 'signature'
-        ? String(variant).trim().replace(AUTH_STRIP, '').replace(/\s+/g, ' ').trim()
+        ? (() => {
+            const raw = String(variant).trim();
+            const matches = raw.match(AUTH_STRIP) || [];
+            matches.forEach((m) => {
+              const kind = CONVENTION_TOKEN_RE.test(m) ? 'convention' : 'auth';
+              console.log(`[variant-strip] removed ${kind} token "${m.toLowerCase()}" from variant field (labelType=${labelType || 'null'})`);
+            });
+            return raw.replace(AUTH_STRIP, '').replace(/\s+/g, ' ').trim();
+          })()
         : String(variant).trim())
     : "";
 
