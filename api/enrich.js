@@ -2961,6 +2961,27 @@ export default async function handler(req, res) {
       variantIdentitySource = 'ebay_image_consensus';
       variantConsensus = variantCheck.consensus;
       variantOverriddenVision = variantCheck.overriddenVision;
+
+      // Q99-B: an artist-facsimile's own listings (Skottie Young 2023, etc.)
+      // are more authoritative on publication year than CV's volume
+      // start_year or the undifferentiated comp-pool consensus — both of
+      // those mix original-print and facsimile listings under the same
+      // nominal title/issue. Override confirmedYear so era-filter keeps the
+      // facsimile's real comps instead of the original print's.
+      if (variantCheck.variantYear) {
+        console.log(
+          `[variant-year] overriding confirmedYear ${confirmedYear || 'null'} → ` +
+          `${variantCheck.variantYear} from ${variantConsensus.artist} pool`
+        );
+        confirmedYear = String(variantCheck.variantYear);
+        out.confirmedYearMeta = {
+          value: confirmedYear,
+          source: 'variant-pool',
+          confidence: 'proven',
+        };
+        out.yearResolvedFromVariantPool = true;
+        out.yearResolvedFromVariantPoolRatio = variantCheck.variantYearRatio;
+      }
     }
 
     // Step 2b: year-dependent lookups using confirmedYear.

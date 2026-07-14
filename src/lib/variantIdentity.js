@@ -109,6 +109,13 @@ export const extractConfirmedVariant = (
   const allArtists = [];
   const allExclusives = [];
   const allLimitations = [];
+  // Q99-B: retain per-item artist + years so an artist-facsimile pool's own
+  // publication year can be resolved separately from the generic comp pool
+  // (a Skottie Young 2023 facsimile mixed in the same nominal-title pool as
+  // 1981 originals must not inherit either CV's or the undifferentiated
+  // pool's year — its own listings carry the true year).
+  const itemRecords = [];
+  const YEAR_RE = /\b(19[3-9]\d|20[0-3]\d)\b/g;
 
   for (const item of visualItems) {
     const rawTitle = item?.rawTitle || '';
@@ -139,6 +146,9 @@ export const extractConfirmedVariant = (
     // Artist extraction (from rawTitle using ARTIST_PATTERNS)
     const artist = extractArtist(rawTitle);
     if (artist) allArtists.push(artist);
+
+    const years = [...new Set((rawTitle.match(YEAR_RE) || []).map((y2) => parseInt(y2, 10)))];
+    itemRecords.push({ artist: artist ? artist.toLowerCase() : null, years });
   }
 
   console.log(`[variant-identity] extracted tokens: conventions=${JSON.stringify(allConventions)}, artists=${JSON.stringify(allArtists)}, exclusives=${allExclusives.length}, limitations=${allLimitations.length}`);
@@ -182,6 +192,34 @@ export const extractConfirmedVariant = (
 
   console.log(`[variant-identity] consensus:`, JSON.stringify(consensus));
 
+  // Q99-B: when an artist consensus fires (artist facsimile / signed
+  // exclusive), resolve publication year from THAT artist's own listings
+  // only — not the generic pool, which mixes original-print and facsimile
+  // comps under the same nominal title/issue. Requires ≥50% of the
+  // artist-matching listings to agree on a single year.
+  let variantYear = null;
+  let variantYearRatio = 0;
+  if (consensus.artist) {
+    const artistItems = itemRecords.filter((r) => r.artist === topArtistLower);
+    const yearCounts = {};
+    artistItems.forEach((r) => {
+      r.years.forEach((yr) => { yearCounts[yr] = (yearCounts[yr] || 0) + 1; });
+    });
+    const sortedYears = Object.entries(yearCounts).sort((a, b) => b[1] - a[1]);
+    if (sortedYears.length > 0 && artistItems.length > 0) {
+      const [topYear, topCount] = sortedYears[0];
+      const ratio = topCount / artistItems.length;
+      if (ratio >= 0.5) {
+        variantYear = parseInt(topYear, 10);
+        variantYearRatio = ratio;
+        console.log(
+          `[variant-year] resolved ${topYear} from ${consensus.artist} pool ` +
+          `(${topCount}/${artistItems.length}=${Math.round(ratio * 100)}%)`
+        );
+      }
+    }
+  }
+
   // Build confirmed variant string from consensus tokens
   // Order: convention → exclusive → artist → limitation
   const parts = [];
@@ -199,5 +237,7 @@ export const extractConfirmedVariant = (
     consensus,
     overriddenVision: visionVariant,
     source: 'ebay_image_consensus',
+    variantYear,
+    variantYearRatio,
   };
 };
