@@ -1859,6 +1859,17 @@ export default async function handler(req, res) {
       visualBase64 = m ? m[2] : firstImg.replace(/^data:[^;]+;base64,/, "");
     }
 
+    // Q106 FIX-1 — cgc-lookup races with the visual pool instead of waiting
+    // behind it. Previous behavior: lookupCGC ran inside the Phase 2
+    // Promise.all (after Phase 1's visual-pool vote had already locked
+    // identity), then its result was applied to out.title/out.issue at the
+    // very end of the handler — after comps/PC/CV had already queried the
+    // wrong (visual-pool) identity. CGC's own cert-verification page is
+    // authoritative for a slabbed book, so it must not wait on the pool.
+    const cgcLookupPromise = (isGraded === true && certNumber)
+      ? lookupCGC(certNumber).catch(() => null)
+      : Promise.resolve(null);
+
     // Run eBay visual search alone to determine correct identity
     // FIX 4: Skip image search when manual identity provided
     const visualResult = (visualBase64 && !skipImageSearch)
@@ -1880,6 +1891,60 @@ export default async function handler(req, res) {
     console.log(`[phase1] eBay visual: ${visualResult?.items?.length || 0} results, consensus=${visualConsensus ? 'YES' : 'NO'}`);
     if (visualConsensus) {
       console.log(`[phase1] eBay consensus: "${visualConsensus.title}" #${visualConsensus.issue} (confidence ${(visualConsensus.confidence * 100).toFixed(0)}%)`);
+    }
+
+    // Q106 FIX-1 — await the racing cgc-lookup BEFORE the title-family vote
+    // (selectTitleFamilyCandidate, below) or the issue-consensus vote can
+    // fire. When a usable CGC identity comes back, it wins outright — the
+    // visual pool is demoted to zero weight for identity/comp-query purposes
+    // (visualPoolWeight=0) and is used ONLY for the REPRINT_RE polybag/
+    // facsimile-ratio check later (~3737-3745), unchanged.
+    const cgcResult = await cgcLookupPromise;
+    const cgcIdentityConfirmed = !!(cgcResult && cgcResult.title && cgcResult.issue);
+    if (isGraded === true && certNumber && !cgcIdentityConfirmed) {
+      console.log('[cgc-identity] cert lookup failed — falling back to visual pool');
+    }
+    // CGC's own labelType vocabulary ("Universal", "Signature Series", ...)
+    // differs in case/wording from the lowercase tokens Vision returns
+    // ("universal", "signature", ...) that the rest of the pipeline (e.g.
+    // the Q100 FIX-A auth-token gate in api/comps.js) expects.
+    const normalizeCgcLabelType = (raw) => {
+      const s = String(raw || '').toLowerCase().trim();
+      if (!s) return null;
+      if (s.includes('signature')) return 'signature';
+      if (s.includes('restored')) return 'restored';
+      if (s.includes('qualified')) return 'qualified';
+      if (s.includes('conserved')) return 'conserved';
+      if (s.includes('universal')) return 'universal';
+      return s;
+    };
+
+    // Q104 FIX-3 — Crossover/co-title detection, run BEFORE the title-family
+    // vote (selectTitleFamilyCandidate, below) so the co-title requirement is
+    // already known before any clustering/sanitization pass gets a chance to
+    // silently collapse a two-character crossover title down to one name
+    // (Deadpool/Batman class). Detection only here; preservation happens
+    // after title sanitization, once confirmedTitle is otherwise final.
+    const CO_TITLE_RE = /\b(?:featuring|vs\.?)\s+([A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,2})/i;
+    const CROSSOVER_RE = /\bcrossover\b/i;
+    const detectCoTitle = (str) => {
+      const m = String(str || '').match(CO_TITLE_RE);
+      return (m && m[1]) ? m[1].trim() : null;
+    };
+    let coTitleToken = detectCoTitle(title);
+    let coTitleSource = coTitleToken ? 'vision' : null;
+    let coTitleIsCrossover = CROSSOVER_RE.test(String(title || ''));
+    if (!coTitleToken && Array.isArray(visualResult?.items)) {
+      for (const item of visualResult.items.slice(0, 3)) {
+        const t = detectCoTitle(item?.rawTitle);
+        if (t) { coTitleToken = t; coTitleSource = 'visual_pool_top3'; break; }
+        if (CROSSOVER_RE.test(String(item?.rawTitle || ''))) coTitleIsCrossover = true;
+      }
+    }
+    if (coTitleToken) {
+      console.log(`[co-title] detected "${coTitleToken}" source=${coTitleSource} crossover=${coTitleIsCrossover}`);
+    } else if (coTitleIsCrossover) {
+      console.log(`[co-title] "crossover" marker seen but no extractable co-title name (featuring/vs pattern required)`);
     }
 
     // Ship #22a: Era lock from visual comp year histogram (Phase 1)
@@ -2057,7 +2122,12 @@ export default async function handler(req, res) {
     // over correct top-ranked result).
     // Ship 3A: Pass year for era-aware overlap gate (pre-1970 requires 1 token, modern 2).
     mark('family_candidate_start');
-    const familyCandidate = (visualResult?.items?.length >= 5)
+    // Q106 FIX-1 — visualPoolWeight=0 on a confirmed-CGC-identity path: skip
+    // the title-family vote entirely rather than compute and then ignore it.
+    // familyCandidate=null routes into the same "small pool" fallback paths
+    // already exercised whenever the visual pool has <5 items — no new
+    // branch, just reuses tested code that already handles a null candidate.
+    const familyCandidate = (!cgcIdentityConfirmed && visualResult?.items?.length >= 5)
       // Q84-AMENDED: pass the eBay image consensus title so the dual-axis
       // token-class gate can detect Vision+eBay agreement (Flash #75:
       // both said "the flash", arc family "flash year one" overrode both).
@@ -2094,7 +2164,7 @@ export default async function handler(req, res) {
     // Ship 3B.3 — Identity resolution now in identityCore.js
     // TRACK A: Skip identity resolution for barcode scans (100% certain)
     // FIX 4: Also skip for manual identity (user typed, no camera)
-    let identity, confirmedTitle, confirmedIssue, confirmedYear, confirmedPublisher, identitySource;
+    let identity, confirmedTitle, confirmedIssue, confirmedYear, confirmedPublisher, identitySource, confirmedGrade, confirmedLabelType;
 
     if (barcodeIdentity) {
       // Barcode provides authoritative identity
@@ -2112,6 +2182,21 @@ export default async function handler(req, res) {
       confirmedPublisher = effectivePublisher;
       identitySource = 'manual';
       console.log('[manual] identity locked:', confirmedTitle, '#' + confirmedIssue, confirmedYear || 'no-year');
+    } else if (cgcIdentityConfirmed) {
+      // Q106 FIX-1 — CGC cert-verification data is authoritative for a
+      // slabbed book. Bypasses resolveIdentity/the visual-pool vote entirely.
+      confirmedTitle = cgcResult.title;
+      confirmedIssue = cgcResult.issue;
+      confirmedYear = cgcResult.year || effectiveYear;
+      confirmedPublisher = effectivePublisher;
+      confirmedGrade = cgcResult.grade;
+      confirmedLabelType = normalizeCgcLabelType(cgcResult.labelType) || (labelType || null);
+      identitySource = 'cgc_cert';
+      out.cgcVerified = true;
+      out.cgcLabel = confirmedLabelType;
+      out.certNumber = cgcResult.certNumber;
+      if (confirmedGrade != null) out.grade = confirmedGrade;
+      console.log(`[cgc-identity] confirmed from cert title="${confirmedTitle}" issue="${confirmedIssue}" grade="${confirmedGrade}" label="${confirmedLabelType}"`);
     } else {
       // Standard Vision-based identity resolution
       identity = resolveIdentity(
@@ -2144,6 +2229,11 @@ export default async function handler(req, res) {
         out.assemblyIntegrityReason = integrityCheck.reason;
       }
     }
+
+    // Q106 FIX-1 — non-CGC paths never set confirmedLabelType above; default
+    // it to Vision's raw labelType so the fetchComps call site (Phase 2) has
+    // a consistent value to pass regardless of which identity path fired.
+    if (confirmedLabelType === undefined) confirmedLabelType = labelType || null;
 
     mark('phase1_complete');
 
@@ -2184,6 +2274,23 @@ export default async function handler(req, res) {
         confirmedTitle = sanitized;
         titleSanitized = true;
       }
+    }
+
+    // Q104 FIX-3 — preserve the crossover co-title as a required token.
+    // Runs AFTER title contamination/sanitization so a re-check catches the
+    // case where those passes stripped it back out. Feeds confirmedTitle
+    // forward into the initial PC lookup, any PC requery, and the comp
+    // query (fetchComps) — all three consume confirmedTitle downstream, so
+    // fixing it once here means the pc-requery suppression gate (below,
+    // gated on visualConsensus/familyCandidate acceptance) never gets a
+    // chance to drop a co-title that came from the visual pool's top-3,
+    // because the token is already baked into confirmedTitle before that
+    // gate runs.
+    if (coTitleToken && confirmedTitle && !confirmedTitle.toLowerCase().includes(coTitleToken.toLowerCase())) {
+      console.log(`[co-title] preserving "${coTitleToken}" (source=${coTitleSource}) — appending to confirmedTitle "${confirmedTitle}"`);
+      confirmedTitle = `${confirmedTitle} ${coTitleToken}`;
+      out.coTitlePreserved = coTitleToken;
+      out.coTitleSource = coTitleSource;
     }
 
     // eBay year authority — requires year-specific agreement ≥70%
@@ -2318,7 +2425,9 @@ export default async function handler(req, res) {
     const pcKey = `${subtitleStripped}|${confirmedIssue}|${year || ''}`;
     const now = Date.now();
 
-    const [comicVine, priceChartingInitial, cgcResult] = await Promise.all([
+    // Q106 FIX-1 — cgcResult already fetched in Phase 1 (races the visual
+    // pool); no longer re-fetched here.
+    const [comicVine, priceChartingInitial] = await Promise.all([
       // FIX 3 — ComicVine KV cache (persistent across cold starts)
       (async () => {
         const kvKey = `cv:${cvKey}`;
@@ -2373,7 +2482,6 @@ export default async function handler(req, res) {
 
         return result;
       })(),
-      certNumber ? lookupCGC(certNumber).catch(() => null) : Promise.resolve(null),
     ]);
     const ximilar = null; // Ximilar lookup disabled
 
@@ -2828,6 +2936,12 @@ export default async function handler(req, res) {
       }
     }
 
+    // Q106 FIX-1 — visual pool must not seed the comp-query "image-search"
+    // attempt when CGC cert data already confirmed identity.
+    if (cgcIdentityConfirmed) {
+      imageSearchTitle = null;
+    }
+
     // Ship 3B.3 — Year resolution core now in identityCore.js
     // TODO-016: Era-specific detection moved to ComicAdapter in Phase 3
     // Stub remains for Phase 3 extraction — currently unused
@@ -2892,12 +3006,17 @@ export default async function handler(req, res) {
     }
 
     // Ship 3B.3 — Comp consensus backfill now in identityCore.js
-    const backfill = backfillFromComps(
-      confirmedTitle,
-      confirmedYear,
-      confirmedPublisher,
-      visualResult?.items
-    );
+    // Q106 FIX-1 — skip entirely on the CGC-identity path: the visual pool
+    // must not backfill/override a title, year, or publisher that CGC's
+    // own cert page already confirmed.
+    const backfill = cgcIdentityConfirmed
+      ? { titleBackfilled: false, yearBackfilled: false, publisherBackfilled: false }
+      : backfillFromComps(
+          confirmedTitle,
+          confirmedYear,
+          confirmedPublisher,
+          visualResult?.items
+        );
 
     // Q58-TITLE — Title backfill from comp consensus
     if (backfill.titleBackfilled) {
@@ -2938,6 +3057,17 @@ export default async function handler(req, res) {
     let variantIdentitySource = 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
+
+    // Q106 FIX-1 Step 3 — on the CGC-identity path, variant resolution never
+    // touches the visual pool. Prefer cgc-lookup's own variant text (when the
+    // scraper parses one — not yet implemented, see Q106 report) else fall
+    // back to Vision's variant field. The Q100 FIX-A auth-token strip is
+    // applied downstream in fetchComps/api/comps.js using confirmedLabelType.
+    if (cgcIdentityConfirmed) {
+      confirmedVariant = cgcResult.variant || req.body.variant || null;
+      variantIdentitySource = cgcResult.variant ? 'cgc_cert' : 'vision';
+      console.log(`[cgc-variant] source=${cgcResult.variant ? 'cgc' : 'vision'} value="${confirmedVariant || ''}"`);
+    } else {
 
     // Ship 26.3B — Restrict variant extraction to selected title family when
     // family candidate fires. Prevents wrong-family variant contamination.
@@ -2983,6 +3113,7 @@ export default async function handler(req, res) {
         out.yearResolvedFromVariantPoolRatio = variantCheck.variantYearRatio;
       }
     }
+    } // end Q106 FIX-1 else (non-CGC-identity variant resolution)
 
     // Step 2b: year-dependent lookups using confirmedYear.
     mark('phase2_start');
@@ -3077,7 +3208,7 @@ export default async function handler(req, res) {
               numericGrade,
               year: confirmedYear,
               variant: confirmedVariant,  // Ship #20a.6.18: uses confirmed variant (eBay consensus when gate fires, Vision otherwise)
-              labelType: labelType || null,  // Q100 FIX-A — gates auth tokens out of fullVariant when label isn't signature
+              labelType: confirmedLabelType,  // Q100 FIX-A — gates auth tokens; Q106 FIX-1 — CGC-confirmed label when available
               creator: req.body.creator || null,
               publisher: publisher || null,
               imageSearchTitle,
@@ -5644,15 +5775,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // CGC cert verification override — authoritative data.
-    if (cgcResult) {
-      if (cgcResult.title) out.title = cgcResult.title;
-      if (cgcResult.issue) out.issue = cgcResult.issue;
-      if (cgcResult.grade != null) out.grade = cgcResult.grade;
-      out.cgcVerified = true;
-      out.cgcLabel = cgcResult.labelType || null;
-      out.certNumber = cgcResult.certNumber;
-    }
+    // CGC identity override removed — cgcResult now applied in Phase 1
+    // before comp queries run. See Fix-1 (Q106) commit for context.
 
     // GoCollect CGC FMV data (null when API key not set)
     if (goCollectResult) {

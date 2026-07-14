@@ -384,6 +384,13 @@ expectations vs code in a dedicated pass.
   Floor VALUE changes are pricing math — per-entry greenlight required.
 - Variant fallback for thin markets (architecture confirmed, awaiting greenlight)
 - Future: Vercel KV for cross-instance rate limit persistence
+- **Q106 [P0, shipped 2026-07-13] certNumber OCR risk:** cgc-lookup identity
+  (Fix-1) is gated on `certNumber`, which is Vision's own unverified OCR read
+  of the slab (not independently validated before the CGC cert-lookup call).
+  If Vision misreads the cert number, `lookupCGC` 404s/returns null and the
+  scan falls back to visual-pool identity — this is graceful degradation, not
+  silent wrong-pricing. Known risk; no mitigation planned until cert OCR
+  accuracy data is available from the production corpus.
 
 ## Roadmap
 
