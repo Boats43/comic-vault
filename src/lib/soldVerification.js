@@ -40,6 +40,7 @@ import {
   applyPriceSanity,
   extractArtist,
 } from "./compHygiene.js";
+import { PREMIUM_CREATORS } from "./premiumCreators.js";
 
 // Stale recency thresholds (tiered by era):
 //   Modern (bookYear >= 2000): reject rows older than 90 days.
@@ -154,14 +155,65 @@ const printingMatch = (rowTitle, ourVariant) => {
   return rowIsNthPrint ? 'mismatch' : (matchesAnyPrintMarker(t) ? 'unknown' : 'unknown');
 };
 
-// Variant-artist mismatch. When our variant names a known artist (per
-// ARTIST_PATTERNS), reject sold rows whose title names a DIFFERENT known
-// artist. Keep rows that name no artist at all (we can't prove mismatch).
-const variantArtistMismatch = (rowTitle, ourArtist) => {
-  if (!ourArtist) return false;
+// Q109 (greenlit) — bare-surname corroboration check. A surname counts as
+// fully trusted (not just "partial") when premiumCreators.js has ALREADY
+// registered it as an unambiguous alias for the matching creator (e.g.
+// Momoko, Parrillo) — same registry, same ambiguity judgment the rest of
+// the codebase already relies on. Does NOT resolve new ambiguity calls
+// (e.g. "is bare 'young' safe") — those stay unregistered and fall through
+// to the 'partial' outcome below, exactly as scoped.
+const isUnambiguousSurnameAlias = (ourArtist, surname) => {
+  const entry = PREMIUM_CREATORS.find((c) =>
+    c.canonical.toLowerCase() === ourArtist ||
+    c.aliases.some((a) => a.toLowerCase() === ourArtist)
+  );
+  if (!entry) return false;
+  return entry.aliases.some((a) => a.toLowerCase() === surname);
+};
+
+// Q109 (greenlit) — three-outcome variant-artist classification, replacing
+// the binary variantArtistMismatch. The old version's `if (!rowArtist)
+// return false` silently trusted ANY comp whose artist wasn't in the
+// curated ARTIST_PATTERNS registry, even when OUR artist was confidently
+// known — e.g. a Chad Hardin/Hardin sold comp priced a Skottie Young book
+// at full trust, no fallback tag, no Tier cap, no divergence check (Edge
+// of Spider-Verse #1 casualty). This closes that gap without resolving any
+// new registry-ambiguity questions:
+//
+//   'match'     — full curated ARTIST_PATTERNS match (unchanged), or a
+//                 bare-surname match ALREADY registered unambiguous in
+//                 premiumCreators.js. Full trust, unchanged from today.
+//   'partial'   — bare surname (or the artist's own name text) present in
+//                 the comp title, but not a curated/registered match
+//                 either way (e.g. "Young" alone — Skottie Young's
+//                 registry entry has no bare-surname alias, ambiguous or
+//                 not is undetermined). Kept, but demoted — caller sets
+//                 variantVerified:false, routing into the same low-trust
+//                 tier the fallback path already produces (Tier-2 cap,
+//                 divergence cap, Class B self-consistency all already
+//                 apply there).
+//   'mismatch'  — comp names a DIFFERENT known artist. Reject (unchanged).
+//   'no-signal' — our artist is known and the comp corroborates NOTHING,
+//                 not even a bare surname. Reject (NEW).
+const classifyArtistMatch = (rowTitle, ourArtist) => {
+  if (!ourArtist) return 'match'; // nothing to check against — unchanged behavior
   const rowArtist = extractArtist(rowTitle);
-  if (!rowArtist) return false;
-  return rowArtist !== ourArtist;
+  if (rowArtist) {
+    return rowArtist === ourArtist ? 'match' : 'mismatch';
+  }
+  // Row's artist unrecognized by the curated registry — fall back to raw
+  // substring corroboration on our artist's surname (last word; the
+  // literal full-name case is already covered by extractArtist above,
+  // since every multi-word ARTIST_PATTERNS entry is itself a literal
+  // substring match).
+  const words = ourArtist.split(/\s+/);
+  const surname = words[words.length - 1];
+  const escaped = surname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const surnameRe = new RegExp(`\\b${escaped}\\b`, 'i');
+  if (surnameRe.test(String(rowTitle || ''))) {
+    return isUnambiguousSurnameAlias(ourArtist, surname) ? 'match' : 'partial';
+  }
+  return 'no-signal';
 };
 
 // Extract variant tokens from string. Returns array of normalized tokens.
@@ -485,11 +537,23 @@ export const verifySoldComps = (rawRows, ctx) => {
   });
 
   // 7. Variant-artist mismatch (when our variant names a known artist).
+  // Q109 (greenlit) — three-outcome classification. 'partial' rows are
+  // KEPT but demoted to variantVerified:false in place (same object the
+  // rest of the chain continues to filter/transform).
   working = working.filter((r) => {
-    if (variantArtistMismatch(r.title, ourArtist)) {
+    const outcome = classifyArtistMatch(r.title, ourArtist);
+    if (outcome === 'mismatch') {
       reasons.variantMismatch++;
       pushSample(r, 'variantMismatch:artist');
       return false;
+    }
+    if (outcome === 'no-signal') {
+      reasons.variantMismatch++;
+      pushSample(r, 'variantMismatch:artist-unverifiable');
+      return false;
+    }
+    if (outcome === 'partial') {
+      r.variantVerified = false;
     }
     return true;
   });
