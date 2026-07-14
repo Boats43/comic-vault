@@ -30,6 +30,7 @@ import {
   SIGNED_RE,
   TPB_MARKER_RE,
   OTHER_COVER_RE,
+  OTHER_VARIANT_DESCRIPTOR_RE,
   LOT_RE,
   MERCH_RE,
   HALF_ISSUE_RE,
@@ -1058,10 +1059,17 @@ export const fetchComps = async ({
 
         if (isCoverAorStandard) {
           // OTHER_COVER_RE imported from src/lib/compHygiene.js (Ship #20a.6).
+          // Q108 CHANGE 3 — OTHER_VARIANT_DESCRIPTOR_RE catches named
+          // non-letter variants (card stock, foil/sketch/virgin cover, trade
+          // dress) that OTHER_COVER_RE's letter-only pattern misses.
           p = p.filter((item) => {
-            if (OTHER_COVER_RE.test(String(item.title || ''))) {
-              console.log('[other-cover] rejected:',
-                String(item.title || '').slice(0, 50));
+            const itemTitle = String(item.title || '');
+            if (OTHER_COVER_RE.test(itemTitle)) {
+              console.log('[other-cover] rejected:', itemTitle.slice(0, 50));
+              return false;
+            }
+            if (OTHER_VARIANT_DESCRIPTOR_RE.test(itemTitle)) {
+              console.log('[other-variant-descriptor] rejected:', itemTitle.slice(0, 50));
               return false;
             }
             return true;

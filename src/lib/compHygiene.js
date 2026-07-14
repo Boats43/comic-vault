@@ -60,6 +60,21 @@ export const TPB_MARKER_RE =
 // letter), this matches Cover B/C/D/E... in listing titles for hard reject.
 export const OTHER_COVER_RE = /\bcover\s*[b-z]\b|\bcvr\s*[b-z]\b/i;
 
+// Q108 CHANGE 3 — named non-letter variant descriptors. OTHER_COVER_RE only
+// catches LETTERED covers (Cover B/C/D); many modern variants (card stock,
+// foil, sketch, virgin, trade dress, or a named artist's card-stock cover)
+// carry no letter at all and slip straight through it (Wonder Woman #75 /
+// Flash #75 class: Frison/Manapul card-stock listings priced against a
+// Cover A scan). Applied the same way as OTHER_COVER_RE — hard reject when
+// our own confirmedVariant is null/Cover-A/1st-print.
+//
+// STOPGAP, not a permanent design: artist names ("frison") can't live in a
+// static regex forever — new named variants ship every week. Extend this
+// list as new patterns emerge in production (see CLAUDE.md); the long-term
+// fix is a variant-type classifier, not a name list.
+export const OTHER_VARIANT_DESCRIPTOR_RE =
+  /\bcard\s*stock\b|\bcardstock\b|\bfrison\b|\bfoil\s*cover\b|\bsketch\s*cover\b|\bvirgin\s*cover\b|\btrade\s*dress\b|\bblank\s*cover\b/i;
+
 // GL-4 (EX-1b) — Merchandise hard filter. eBay Browse returns non-comic
 // items ("ACTION COMICS #33 COVER PRINT", "Metal Tin Sign") that pass
 // title-overlap (publisher words are stop-words) and issue-number checks —

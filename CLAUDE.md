@@ -189,6 +189,15 @@ Filters run INSIDE the attempt loop; loop only breaks on `parsed.length > 0` (po
 
 ### Cover-letter matching (Filter 1d)
 Cover A, B, C, D are separate books with separate prices. When variant is empty / "Cover A" / "1st print": drop listings with Cover B/C/D+ in title. When variant is "Cover B/C/...": keep ONLY that letter (fall back to all if zero match).
+- **OTHER_VARIANT_DESCRIPTOR_RE** (Q108, `src/lib/compHygiene.js`): OTHER_COVER_RE only
+  catches lettered covers (Cover B/C/D). Named non-letter variants (card stock, foil/
+  sketch/virgin cover, trade dress) slip through it — Wonder Woman #75 / Flash #75
+  class, Frison/Manapul card-stock listings priced against a Cover A scan. Applied
+  alongside OTHER_COVER_RE in the same `isCoverAorStandard` branch. **STOPGAP, not
+  permanent** — it's a static name/phrase list (currently: card stock, cardstock,
+  frison, foil cover, sketch cover, virgin cover, trade dress, blank cover). Artist
+  names can't live in a regex forever; extend this list as new named-variant patterns
+  emerge in production. Long-term fix is a variant-type classifier, not a name list.
 
 ### TPB pipeline
 1. ARROW 1: when title matches TPB_MARKER_RE, `attempts.unshift` `tpb-aware` query with NO `#issue` (strips eBay floppy-bias).

@@ -1330,10 +1330,16 @@ export const extractKeyFromComps = (titles) => {
   };
 };
 
+// Q108 CHANGE 1 — added card stock/foil/sketch/blank/virgin/trade-dress
+// descriptors. These are always variant-qualifier words in a PC product
+// name — a base/plain entry never carries them — so it's safe to exclude
+// globally regardless of whether our own variant is confirmed or null
+// (Wonder Woman #75 class: PC anchored to "[Card Stock]" on a Cover A scan
+// because none of the prior tokens matched that product name).
 const PRICECHARTING_EXCLUDE =
-  /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix|true believers|marvel tales/i;
+  /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix|true believers|marvel tales|card stock|cardstock|foil cover|sketch cover|blank cover|trade dress|virgin cover|gold foil|silver foil/i;
 
-const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'proven', eraHint = null }) => {
+const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'proven', eraHint = null, variant = null }) => {
   if (!issue) {
     console.log("[pt] no issue number — skipping");
     return null;
@@ -1388,6 +1394,16 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
     // Q88(a): below-quorum era is ADVISORY — out-of-era candidates are
     // demoted (rank penalty), never rejected. Any in-era product wins first.
     const eraFallbacks = [];
+    // Q108 CHANGE 2 — when no variant is confirmed, a PC product carrying a
+    // named-variant descriptor (bracket, or a paren group that isn't just
+    // the bare year) is demoted below any plain base entry. Lowest-priority
+    // fallback tier — only consulted once era/year fallbacks are exhausted.
+    const variantFallbacks = [];
+    const hasVariantDescriptor = (name) => {
+      if (/\[[^\]]+\]/.test(name)) return true;
+      const parenGroups = name.match(/\(([^)]*)\)/g) || [];
+      return parenGroups.some((g) => !/^\(\s*\d{4}\s*\)$/.test(g));
+    };
 
     for (const p of products) {
       const name = p["product-name"] || "";
@@ -1447,6 +1463,13 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         }
       }
       const candidate = { price, productName: name, id: p.id, year: productYear, source: "pricecharting" };
+      // Q108 CHANGE 2 — no confirmed variant + this product name carries a
+      // variant descriptor → deprioritize, keep scanning for a base entry.
+      if (!variant && hasVariantDescriptor(name)) {
+        console.log(`[pc-anchor] deprioritized "${name}" — variant descriptor present, confirmedVariant=null`);
+        variantFallbacks.push(candidate);
+        continue;
+      }
       if (q86YearMismatch) {
         q86Fallbacks.push(candidate);
         continue; // keep scanning for a year-matching product first
@@ -1456,6 +1479,9 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
       if (eraHint && productYear && (productYear < eraHint.minYear || productYear > eraHint.maxYear)) {
         eraFallbacks.push(candidate);
         continue;
+      }
+      if (variantFallbacks.length > 0) {
+        console.log(`[pc-anchor] base-preferred over variant entry when confirmedVariant=null`);
       }
       return candidate;
     }
@@ -1501,6 +1527,14 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         `product-year=${fb.year} vs claimed=${comicYear} (Q86-B: core-equivalent, gap=${q86bGap}y)`
       );
       return { ...fb, yearMismatchTolerated: true };
+    }
+    // Q108 CHANGE 2 — no base entry survived at all; the only usable data
+    // is a named-variant product. Deprioritized, not excluded — fall back
+    // to it rather than refuse a price outright.
+    if (variantFallbacks.length > 0) {
+      const fb = variantFallbacks[0];
+      console.log(`[pc-anchor] no base entry found — falling back to variant entry "${fb.productName}"`);
+      return { ...fb, variantFallback: true };
     }
     console.log(`[pricecharting] no valid match in ${products.length} results`);
     return null;
@@ -2462,7 +2496,11 @@ export default async function handler(req, res) {
         // Q86: pre-resolution year confidence — proven only when the eBay
         // pool year ratio corroborates; a lone Vision year is a guess.
         const q86PreYearConfidence = ebayYearAuthoritative ? 'proven' : 'unproven';
-        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory }).catch(() => null);
+        // Q108 CHANGE 2 — confirmedVariant isn't resolved yet at this point
+        // in the handler (that runs later, ~line 3090); req.body.variant is
+        // the same value it would default to absent an eBay-consensus
+        // override, so it's the correct proxy signal here.
+        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null }).catch(() => null);
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
@@ -2473,7 +2511,7 @@ export default async function handler(req, res) {
         // Full title returned zero results — fallback to subtitle-stripped
         if (hasSubtitle && subtitleStripped !== confirmedTitle) {
           console.log(`[pc-query] full title zero results — fallback to stripped: "${subtitleStripped}"`);
-          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory }).catch(() => null);
+          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null }).catch(() => null);
           if (result) {
             console.log(`[pc-query] stripped title matched: "${result.productName}"`);
             await kvSet(strippedTitleKey, result, KV_TTL.PC);
@@ -2821,6 +2859,9 @@ export default async function handler(req, res) {
           // Q86: requery runs pre-resolveYear — same preliminary confidence
           yearConfidence: ebayYearAuthoritative ? 'proven' : 'unproven',
           eraHint: eraAdvisory,
+          // Q108 CHANGE 2 — confirmedVariant not yet resolved here either;
+          // req.body.variant is the correct proxy (see note at initial PC lookup).
+          variant: req.body.variant || null,
         }).catch(() => null);
         mark('pc_requery_complete');
         if (priceCharting) {
@@ -3604,6 +3645,7 @@ export default async function handler(req, res) {
             // Q86: revote runs post-resolveYear — use resolved confidence
             yearConfidence: yearResolution?.yearConfidence || 'proven',
             eraHint: eraAdvisory,
+            variant: confirmedVariant,  // Q108 CHANGE 2 — resolved by this point in the handler
           }).catch(() => null);
           if (priceCharting) {
             console.log(`[22c-title-revote] PC re-query matched: "${priceCharting.productName}"`);
