@@ -3077,6 +3077,7 @@ export default async function handler(req, res) {
               numericGrade,
               year: confirmedYear,
               variant: confirmedVariant,  // Ship #20a.6.18: uses confirmed variant (eBay consensus when gate fires, Vision otherwise)
+              labelType: labelType || null,  // Q100 FIX-A — gates auth tokens out of fullVariant when label isn't signature
               creator: req.body.creator || null,
               publisher: publisher || null,
               imageSearchTitle,

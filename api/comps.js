@@ -493,6 +493,7 @@ export const fetchComps = async ({
   numericGrade,
   year,
   variant,
+  labelType,   // Q100 FIX-A — Vision slab label type, used to strip auth tokens from variant
   creator,
   publisher,
   imageSearchTitle,
@@ -593,7 +594,19 @@ export const fetchComps = async ({
   }
 
   // Full variant string for most-specific attempt (not just the short keyword).
-  const fullVariant = variant ? String(variant).trim() : "";
+  // Q100 FIX-A — Vision's free-text `variant` field can carry authentication
+  // language ("signed", "CGC SS", "signature series") that has nothing to do
+  // with the physical slab: an illustrated/printed artist signature in the
+  // cover art gets misread as an autograph. The slab's actual label color is
+  // authoritative for signature status, not free text. When the book IS
+  // graded and the label is NOT signature, strip auth tokens before they
+  // reach the query — a Universal-label book must never search for "signed".
+  const AUTH_STRIP = /\b(signed|autograph(?:ed)?|cgc\s*ss|signature\s*series)\b/gi;
+  const fullVariant = variant
+    ? (isGraded && labelType !== 'signature'
+        ? String(variant).trim().replace(AUTH_STRIP, '').replace(/\s+/g, ' ').trim()
+        : String(variant).trim())
+    : "";
 
   // Build ordered list of query attempts — most specific to least.
   const attempts = [];
