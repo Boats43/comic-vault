@@ -112,7 +112,7 @@ import { detectEditionWarning } from "./grade.js";
 // Session 4B — Import book signal detection from shared classifier
 import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map caches)
-import { kvGet, kvSet, KV_TTL } from "./kv-cache.js";
+import { kvGet, kvSet, KV_TTL, PC_FILTER_VERSION } from "./kv-cache.js";
 import { checkRateLimit } from "./rate-limit.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -2474,8 +2474,12 @@ export default async function handler(req, res) {
       // FIX 3 — PriceCharting KV cache (persistent across cold starts)
       // Crow: Dead Time fix — try full title FIRST, fallback to stripped only if zero results
       (async () => {
-        const fullTitleKey = `pc:${confirmedTitle}|${confirmedIssue}|${year || ''}`;
-        const strippedTitleKey = `pc:${pcKey}`;
+        // Q108-B — version-salted the same way the active-comps cache
+        // already is (COMP_FILTER_VERSION): a lookupPriceCharting logic
+        // change must invalidate old cached entries, not have them served
+        // untouched for up to 24h (Wonder Woman #75 class).
+        const fullTitleKey = `pc:v${PC_FILTER_VERSION}:${confirmedTitle}|${confirmedIssue}|${year || ''}`;
+        const strippedTitleKey = `pc:v${PC_FILTER_VERSION}:${pcKey}`;
 
         // Try cache for full title first
         const cachedFull = await kvGet(fullTitleKey);

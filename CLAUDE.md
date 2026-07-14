@@ -396,10 +396,11 @@ expectations vs code in a dedicated pass.
 - **Q106 [P0, shipped 2026-07-13] certNumber OCR risk:** cgc-lookup identity
   (Fix-1) is gated on `certNumber`, which is Vision's own unverified OCR read
   of the slab (not independently validated before the CGC cert-lookup call).
-  If Vision misreads the cert number, `lookupCGC` 404s/returns null and the
-  scan falls back to visual-pool identity — this is graceful degradation, not
-  silent wrong-pricing. Known risk; no mitigation planned until cert OCR
-  accuracy data is available from the production corpus.
+  Currently moot in practice — see "CGC certlookup endpoint" under Open
+  Blockers > External: the endpoint itself is dormant (WAF 403s all
+  serverless requests), so every graded scan falls back to visual-pool
+  identity regardless of OCR accuracy. Revisit this risk once the endpoint
+  is reachable again.
 
 ## Roadmap
 
@@ -468,6 +469,18 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
 - **GoCollect API key #019483** — pending since 2026-04-15.
 - **eBay Marketplace Insights API** — gated for indie devs (DEAD).
 - **eBay Finding API** — rate-limited 100% as of late April 2026, bypassed.
+- **CGC certlookup endpoint (`cgccomics.com/certlookup/`)** — DORMANT as of
+  2026-07-13. Returns HTTP 403 on all serverless requests, confirmed via
+  direct fetch on a real cert, the bare path, and an arbitrary fake cert
+  number (identical 403 on all three) — this is WAF/bot protection on that
+  specific path, not a per-cert validity signal, and not simply an in-session
+  rate limit (fires on the very first request). `lookupCGC()` in
+  `api/cgc-lookup.js` returns null on any non-200; Q106's cgc-identity path
+  degrades gracefully to visual-pool identity on every scan as a result — no
+  code change needed to reactivate if/when CGC's WAF stops blocking
+  serverless traffic. Known risk from the original Q106 note (Vision's own
+  unverified `certNumber` OCR read) still applies whenever the endpoint does
+  respond.
 
 ### Workaround Active
 - PriceCharting sales-history scrape (Ship #20a foundation data layer).

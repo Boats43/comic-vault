@@ -111,3 +111,15 @@ export const KV_TTL = {
   BROWSE: 21600,    // 6 hours — Browse comps
   PC_HTML: 604800,  // 7 days — PriceCharting HTML (very stable)
 };
+
+/**
+ * Q108-B — PC cache version salt. Same pattern as COMP_FILTER_VERSION
+ * (src/lib/compHygiene.js): PC's 24h TTL is long enough that a
+ * lookupPriceCharting logic change can ship and then get silently masked by
+ * a still-live cached result computed under the OLD logic (Wonder Woman #75
+ * class: Q108's PRICECHARTING_EXCLUDE extension + variant-descriptor scoring
+ * never ran because a pre-fix cache entry served untouched). Bump this
+ * whenever lookupPriceCharting's matching/scoring logic changes so old
+ * entries stop being reachable under the new key.
+ */
+export const PC_FILTER_VERSION = 1;
