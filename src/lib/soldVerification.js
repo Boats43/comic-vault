@@ -337,6 +337,10 @@ export const verifySoldComps = (rawRows, ctx) => {
   let working = rows.map((r) => ({
     ...r,
     recencyBand: recencyBandFor(r?.daysAgo),
+    // EX-A (Q109 greenlight): rows surviving the normal chain (incl. filters
+    // 7-8 variant-artist/variant-token below) are genuinely variant-verified.
+    // Fallback-admitted rows below are stamped false — see per-row marker there.
+    variantVerified: true,
   }));
 
   // 1. Issue number — must contain `#issue`. Also catches lot listings
@@ -699,6 +703,11 @@ export const verifySoldComps = (rawRows, ctx) => {
     let fallbackPool = rows.map((r) => ({
       ...r,
       recencyBand: recencyBandFor(r?.daysAgo),
+      // EX-A (Q109 greenlight): per-row marker (not just the whole-result
+      // `variantAdjusted` flag) so downstream tier selection (priceBands.js)
+      // can exclude these wrong-variant-admitted rows from fresh/recent
+      // tier-threshold counts instead of trusting them at full weight.
+      variantVerified: false,
     }));
 
     // Apply filters 1-6 (issue, lot, format, title, printing) — no variant filters

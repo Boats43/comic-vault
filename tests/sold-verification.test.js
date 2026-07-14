@@ -706,6 +706,72 @@ console.log('\nVariant token mismatch:');
   assertEq(r.diagnostics.reasons.variantMismatch, 0, 'variantMismatch = 0');
 }
 
+// ─── EX-A (Q109 greenlight) — variantVerified per-row tagging ───────
+// Row shapes below are drawn from a REAL production variant-fallback
+// casualty captured in comic-vault-log-export-2026-07-14T18-53-55.csv,
+// requestId 65bqn-1784055155870-a678e4c14ad1: an "Invincible #1" (foil
+// variant) scan where PriceCharting returned 30 raw sold rows, all 30
+// hit variantMismatch:user_has_comp_none (comp titles carry no "foil"
+// token while our variant does), the fallback fired ("[sold-verify]
+// variant fallback triggered — variantMismatch rejected all 30 comps"),
+// and re-admitted 10 rows ("kept 10/30 (rejected 20: issueMismatch=1,
+// annualMismatch=1, variantMismatch=28)"). Titles below are copied
+// verbatim from the [sold-reject] lines for that request.
+console.log('\n=== EX-A — variantVerified per-row tagging (Q109) ===\n');
+
+const INVINCIBLE_FOIL_TITLES = [
+  'Invincible #1 CGC Graded 9.0 (2003) First Full Appearance 1st Print Image Comics',
+  'Image INVINCIBLE #1 CGC 9.0 White Pages 2003 1st Print First Full Appearance 2003',
+  'Invincible #1 Cory Walker Cover / Art CGC 9.0 2003',
+  'INVINCIBLE #1 CGC 9.0 WHITE PAGES // IMAGE COMICS 2003',
+  'Invincible #1 Image Comics 2023 1st Appearance Omni-Man Invincible PSA 9.0',
+  'Invincible #1 CGC 9.0 1st Print High Grade! 1st Invincible Omni Man 2003 Image 2003',
+  'Invincible 1 Cgc 9.0 Image 2004 1st Print First Prt 2004 #1',
+  'INVINCIBLE #1 (2003) CGC 9.0 WHITE PAGES ROBERT KIRKMAN STORY 1ST INVINCIBLE 2003',
+  'INVINCIBLE #1 | CGC 9.0 | First Print White Pages | 2003 | 2003',
+  'invincible # 1 CGC 9.0 Graded First Printing 2003 2003',
+];
+
+// Case (a) — 100% variantMismatch: every fallback-admitted row must be
+// tagged variantVerified: false, individually (not just the whole-result
+// variantAdjusted flag).
+{
+  const rows = INVINCIBLE_FOIL_TITLES.map((title, i) => ({
+    price: 1900 + i * 50, // no title carries a "foil" token → all reject on filters 7/8
+    title,
+    daysAgo: 10 + i * 3,  // all within 90d → all 'fresh' under old code
+    grade: '9.0',
+    year: '2003',
+  }));
+  const r = verifySoldComps(rows, {
+    title: 'invincible', issue: '1', variant: 'foil', bookYear: '2003', userGradeKey: '9.0',
+  });
+  assertTrue(r.variantAdjusted, 'EX-A(a): 100% variantMismatch → variantAdjusted true');
+  assertTrue(r.verified.length > 0, 'EX-A(a): fallback re-admits rows');
+  assertTrue(
+    r.verified.every((row) => row.variantVerified === false),
+    'EX-A(a): every fallback-admitted row individually tagged variantVerified:false'
+  );
+}
+
+// Control — a normal (non-fallback) verify run tags every surviving row
+// variantVerified: true (the flip side of case (a), and the input Case
+// (d) in priceBands.test.js relies on).
+{
+  const rows = [
+    { price: 90, title: 'Wolverine #1 CGC 9.8 regular cover', daysAgo: 10, grade: '9.8' },
+    { price: 95, title: 'Wolverine #1 CGC 9.8 regular cover', daysAgo: 20, grade: '9.8' },
+  ];
+  const r = verifySoldComps(rows, {
+    title: 'Wolverine', issue: '1', variant: null, bookYear: 2022, userGradeKey: '9.8',
+  });
+  assertFalse(r.variantAdjusted, 'EX-A control: normal pool → variantAdjusted false/undefined');
+  assertTrue(
+    r.verified.every((row) => row.variantVerified === true),
+    'EX-A control: normal-path rows individually tagged variantVerified:true'
+  );
+}
+
 // ─── Summary ────────────────────────────────────────────────────────
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

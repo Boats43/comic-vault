@@ -321,6 +321,47 @@ export function applyGradeMultiplierToBands(bands, gradeMultiplier) {
 }
 
 /**
+ * EX-A (Q109 greenlight) — I9-style divergence cap for variant-fallback
+ * sold pools. contract-validator's I9 invariant (src/lib/responseContract.js)
+ * already rejects a shipped price >100% over its own pool avg for LIST_NOW/
+ * LIST_LOW actions — but only AFTER the full response is assembled, so the
+ * card still displayed the inflated recommended price with only the List
+ * button locked (Spider-Versity #1: $19.34 rec vs $5.67 real pool avg).
+ *
+ * This applies the same threshold (price > poolAvg × 2) here, before the
+ * price ever reaches the response, using the variant-CORRECT active pool
+ * as the trustworthy anchor (the sold pool is the untrusted side — it's
+ * only reachable when `variantAdjusted` is true, i.e. every sold row was
+ * re-admitted by the soldVerification.js variant fallback). No-ops when
+ * the sold pool wasn't fallback-derived, or when there's no active pool
+ * to validate against.
+ */
+function applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted) {
+  if (!result || !variantAdjusted) return result;
+
+  const activePrices = (verifiedActive || [])
+    .map(v => (typeof v === 'number' ? v : v?.price))
+    .filter(p => p > 0);
+  if (activePrices.length === 0) return result; // no trustworthy anchor to check against
+
+  const activeAvg = activePrices.reduce((a, b) => a + b, 0) / activePrices.length;
+  if (!(activeAvg > 0) || !(result.market > activeAvg * 2)) return result;
+
+  console.log(`[variant-fallback-cap] market $${result.market.toFixed(2)} > activeAvg×2 ($${(activeAvg * 2).toFixed(2)}) — capping to active-anchored price (I9-style)`);
+
+  return {
+    ...result,
+    quick: Math.round(Math.min(result.quick, activeAvg * 0.85) * 100) / 100,
+    market: Math.round(activeAvg * 100) / 100,
+    stretch: Math.round(activeAvg * 1.15 * 100) / 100,
+    source: 'variant_fallback_capped',
+    tier: Math.max(result.tier, 3),
+    variantFallbackCapped: true,
+    variantFallbackCapReason: `sold-fallback market $${result.market.toFixed(2)} exceeded active-avg×2 ($${(activeAvg * 2).toFixed(2)})`,
+  };
+}
+
+/**
  * Main price bands engine — Ship #20b Tier Architecture.
  *
  * TIER 1 (soldCount ≥5 fresh): recency-weighted sold avg
@@ -357,13 +398,23 @@ export function computePriceBands({
   // Q75: Pass year + variant to active pool builder for era/variant filtering
   const verifiedActive = buildVerifiedActivePool(activeComps, { title, issue, year, variant });
 
-  // Extract recency band counts from LIVE soldVerifyResult
+  // Extract recency band counts from LIVE soldVerifyResult.
+  // EX-A (Q109 greenlight): rows re-admitted by the soldVerification.js
+  // variant fallback (variantVerified === false — wrong-variant sales kept
+  // only because variantMismatch rejected 100% of the real pool) are
+  // excluded from fresh/recent tier-threshold counting. A pool built
+  // entirely from wrong-variant sales must not earn Tier-1 confidence.
   let freshCount = 0;
   let recentCount = 0;
   let staleCount = 0;
+  let variantFallbackRowCount = 0;
 
   if (soldVerifyResult?.verified && Array.isArray(soldVerifyResult.verified)) {
     soldVerifyResult.verified.forEach(s => {
+      if (s.variantVerified === false) {
+        variantFallbackRowCount++;
+        return; // excluded from tier-threshold math
+      }
       const band = s.recencyBand;
       if (band === 'fresh') freshCount++;
       else if (band === 'recent') recentCount++;
@@ -371,33 +422,52 @@ export function computePriceBands({
     });
   }
 
+  const soldPoolIsAllVariantFallback =
+    soldVerifyResult?.verified?.length > 0 &&
+    variantFallbackRowCount === soldVerifyResult.verified.length;
+
   // TIER SELECTION
   // Q64: Added tier 2.5 — soldPool ≥5 all-stale → staleAvg×0.85, LIST_LOW cap
   // Q69 FIX 1: Broadened condition from 100%-stale to soldPool≥5 AND fresh=0
   // (recent-only pools still get tier-2.5 treatment — sold data outranks active asks)
   let tier = 4; // default: no data
-  if (freshCount >= 5) tier = 1;
+  if (soldPoolIsAllVariantFallback) {
+    // EX-A: fallback pool never earns Tier 1/2.5 (both trust sold data at
+    // full weight with no active grounding) — cap at Tier 2, which forces
+    // the 70/30 active blend, or fall through to active-only/PC-estimate
+    // tiers when no sold rows even survived the fallback.
+    tier = soldPrices.length >= 1 ? 2 : (verifiedActive.length >= 3 ? 3 : 4);
+  }
+  else if (freshCount >= 5) tier = 1;
   else if (freshCount >= 1 && freshCount <= 4) tier = 2;
   else if (freshCount === 0 && soldPrices.length >= 5) tier = 2.5;
   else if (freshCount === 0 && verifiedActive.length >= 3) tier = 3;
 
-  console.log(`[price-trace] tier=${tier} fresh=${freshCount} recent=${recentCount} stale=${staleCount} soldPool=${soldPrices.length} activePool=${verifiedActive.length}`);
+  console.log(`[price-trace] tier=${tier} fresh=${freshCount} recent=${recentCount} stale=${staleCount} soldPool=${soldPrices.length} activePool=${verifiedActive.length}${soldPoolIsAllVariantFallback ? ' variantFallbackPool=true' : ''}`);
 
   // TIER 1: Recency-weighted sold avg
   if (tier === 1) {
     const weights = { fresh: 1.0, recent: 0.6, stale: 0.25 };
     let weightedSum = 0;
     let weightSum = 0;
+    const tier1Prices = [];
 
     soldVerifyResult.verified.forEach(s => {
+      // EX-A (Q109 greenlight): tier selection above already excludes
+      // fallback-tagged rows from the freshCount that earns Tier 1 — but a
+      // MIXED pool (some real, some variantVerified:false fallback rows)
+      // can still land on tier===1 via the real rows alone. Don't let the
+      // fallback rows leak into the weighted price itself once here.
+      if (s.variantVerified === false) return;
       const band = s.recencyBand;
       const weight = weights[band] || 0.25;
       weightedSum += s.price * weight;
       weightSum += weight;
+      tier1Prices.push(s.price);
     });
 
     const recencyWeighted = weightSum > 0 ? weightedSum / weightSum : 0;
-    const soldLow = Math.min(...soldPrices);
+    const soldLow = tier1Prices.length > 0 ? Math.min(...tier1Prices) : Math.min(...soldPrices);
 
     // Sanity ceiling: warn if soldAvg > activeLow
     let sanityCeilingWarning = null;
@@ -418,14 +488,14 @@ export function computePriceBands({
       market: Math.round(recencyWeighted * 100) / 100,
       stretch: Math.round(recencyWeighted * 1.15 * 100) / 100,
       source: 'tier1_recency_weighted',
-      count: soldPrices.length,
+      count: tier1Prices.length,
       tier: 1,
       sanityCeilingWarning,
       variantAdjusted: variantAdjusted || false,
     };
 
     console.log(`[tier-1] recencyWeighted=$${recencyWeighted.toFixed(2)} soldLow=$${soldLow.toFixed(2)}`);
-    return result;
+    return applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted);
   }
 
   // TIER 2: 70/30 blend (soldAvg × 0.7 + activeAvg × 0.3)
@@ -458,7 +528,7 @@ export function computePriceBands({
     };
 
     console.log(`[tier-2] soldAvg=$${soldAvg.toFixed(2)} activeAvg=$${activeAvg.toFixed(2)} blend=$${market.toFixed(2)}`);
-    return result;
+    return applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted);
   }
 
   // TIER 2.5: All-stale sold pool (≥5 comps, 100% stale >90d) — Q64
@@ -481,7 +551,7 @@ export function computePriceBands({
     };
 
     console.log(`[tier-2.5] staleAvg=$${staleAvg.toFixed(2)} discounted=$${discounted.toFixed(2)} (all ${staleCount} stale)`);
-    return result;
+    return applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted);
   }
 
   // TIER 3: Active-only × 0.85 discount
