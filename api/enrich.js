@@ -3856,6 +3856,43 @@ export default async function handler(req, res) {
 
     let isPolybagPricing = false;
 
+    // Q107 FIX-2 — Vision-confirmed reprint/facsimile is a hard abort
+    // trigger, independent of the image-pool reprint-ratio signal below.
+    // Q98 ruled that ratio a facsimile-LIKELIHOOD signal only (confounded —
+    // facsimiles reproduce famous cover art exactly, so a cover-image search
+    // on a famous key comes back facsimile-dominated regardless of what the
+    // user actually holds). But when Vision itself, looking at the physical
+    // book in hand, read explicit reprint/facsimile text/markings (not
+    // cover-art inference), that is direct evidence and must abort
+    // regardless of the PC-anchor divergence ratio checks below.
+    const visionEditionType = String(req.body?.editionType || '').toLowerCase();
+    const visionConfirmedReprint =
+      req.body?.isReprint === true ||
+      visionEditionType === 'reprint' ||
+      visionEditionType === 'facsimile';
+
+    if (visionConfirmedReprint) {
+      out.price = null;
+      out.priceLow = null;
+      out.priceHigh = null;
+      out.priceBands = null;
+      out.pricingSource = 'refused-vision-confirmed-reprint';
+      out.refusedToPrice = true;
+      out.confidenceLevel = 'LOW';
+      out.priceNote = 'Vision-confirmed reprint/facsimile — verify edition before pricing';
+      out.listingHardLocked = true;
+      out.listingHardLockReason = 'vision-confirmed-reprint';
+      out.listingHardLockBanner = 'Vision confirmed this is a reprint/facsimile edition — refused to price';
+      out.polybagDetected = true;
+      out.visionConfirmedReprint = true;
+      out.visionEditionType = req.body?.editionType || null;
+      isPolybagPricing = true; // skip ALL downstream pricing blocks
+      console.log(
+        `[polybag-abort] Vision-confirmed reprint: isReprint=${req.body?.isReprint} ` +
+        `editionType="${req.body?.editionType}" — hard abort, regardless of PC ratio`
+      );
+    }
+
     // Ship 6 retry — Polybag comp pool from eBay image-search items.
     // When ≥60% of visualResult.items rawTitles match REPRINT_RE AND
     // ≥5 items have valid prices, use those active-listing prices as
@@ -3866,7 +3903,7 @@ export default async function handler(req, res) {
     // declaration causing ReferenceError: Cannot access 'out' before
     // initialization. Now placed after metadata population, before
     // identity gate.
-    if (visualResult?.items?.length >= 5) {
+    if (!isPolybagPricing && visualResult?.items?.length >= 5) {
       const itemsWithPrice = visualResult.items.filter(
         (i) => typeof i?.price === 'number' && i.price > 0
       );
