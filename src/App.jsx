@@ -2891,6 +2891,7 @@ function CollectionDetail({
   onList,
   onRefreshMarket,
   onReIdentify,
+  onSetGradedOverride,
   onAbortEnrich,
   onAddPhoto,
   onUpdateField,
@@ -2905,6 +2906,8 @@ function CollectionDetail({
   const [refreshError, setRefreshError] = useState(null);
   const [reIdentifying, setReIdentifying] = useState(false);
   const [reIdentifyError, setReIdentifyError] = useState(null);
+  const [gradedOverridePending, setGradedOverridePending] = useState(false);
+  const [gradedOverrideError, setGradedOverrideError] = useState(null);
   const [addingPhoto, setAddingPhoto] = useState(false);
   const [addPhotoError, setAddPhotoError] = useState(null);
   const [syncing, setSyncing] = useState(false);
@@ -3128,6 +3131,25 @@ function CollectionDetail({
       setReIdentifyError(err.message || "Re-identify failed");
     } finally {
       setReIdentifying(false);
+    }
+  };
+
+  const handleToggleGraded = async () => {
+    if (!onSetGradedOverride) return;
+    const newValue = !item.isGraded;
+    const label = newValue ? "graded" : "raw";
+    const confirmed = window.confirm(
+      `Mark this book as ${label}? This corrects the grading classification and recalculates pricing accordingly.`
+    );
+    if (!confirmed) return;
+    setGradedOverridePending(true);
+    setGradedOverrideError(null);
+    try {
+      await onSetGradedOverride(item, newValue);
+    } catch (err) {
+      setGradedOverrideError(err.message || "Failed to update grading status");
+    } finally {
+      setGradedOverridePending(false);
     }
   };
 
@@ -5696,6 +5718,46 @@ function CollectionDetail({
             {reIdentifyError && (
               <div className="error-text small" style={{ marginTop: 6 }}>
                 {reIdentifyError}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Q109 Ruling 3 — manual isGraded correction toggle */}
+        {onSetGradedOverride && (
+          <>
+            <button
+              className="btn-secondary"
+              onClick={handleToggleGraded}
+              disabled={gradedOverridePending || refreshing || reIdentifying}
+              style={{ marginTop: 8, width: "100%" }}
+            >
+              {gradedOverridePending ? (
+                <>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 14,
+                      height: 14,
+                      border: "2px solid rgba(212,175,55,0.3)",
+                      borderTopColor: "#d4af37",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                      marginRight: 8,
+                      verticalAlign: "middle",
+                    }}
+                  />
+                  Updating…
+                </>
+              ) : item.isGraded ? (
+                "📗 Mark as Raw"
+              ) : (
+                "🏷️ Mark as Graded"
+              )}
+            </button>
+            {gradedOverrideError && (
+              <div className="error-text small" style={{ marginTop: 6 }}>
+                {gradedOverrideError}
               </div>
             )}
           </>
@@ -10437,6 +10499,25 @@ export default function App() {
     // Metadata now bundled in enrich response (no separate fetch)
   }, []);
 
+  // Q109 Ruling 3 — manual isGraded correction. Vision's slab-detection can
+  // misclassify a raw book as graded (bag+board mistaken for a CGC slab);
+  // once wrong, nothing except reIdentifyBook (same photo, may reproduce
+  // the same misread) could correct it. This gives the user a direct
+  // override, then reuses refreshMarketData's exact recalculation path so
+  // price/comps recompute against the corrected flag instead of just
+  // flipping a display label.
+  const setGradedOverride = useCallback(async (item, newIsGraded) => {
+    const patched = {
+      ...item,
+      isGraded: newIsGraded,
+      isGradedManualOverride: true,
+      // A book manually marked raw was never actually slabbed — its
+      // slab-only fields no longer apply.
+      ...(newIsGraded === false ? { certNumber: null, labelType: null, labelNotes: null } : {}),
+    };
+    await refreshMarketData(patched);
+  }, [refreshMarketData]);
+
   // Ship #20a.6.19 — Re-identify book (re-grade + re-enrich with stored image).
   // Differs from refreshMarketData: refreshes Vision identity (title/variant/
   // grade) not just pricing. Used when stored image exists but identity is
@@ -11279,6 +11360,7 @@ export default function App() {
             onSyncEbay={syncEbayStatus}
             onRefreshMarket={refreshMarketData}
             onReIdentify={reIdentifyBook}
+            onSetGradedOverride={setGradedOverride}
             onAbortEnrich={() => {
               if (cardEnrichAbortRef.current) {
                 console.log("[enrich] card unmount/change — aborting in-flight");
