@@ -761,6 +761,52 @@ export const verifySoldComps = (rawRows, ctx) => {
     const beforeOutlierFallback = fallbackPool.length;
     fallbackPool = applyPriceSanity(fallbackPool);
 
+    // Q109 Class B (greenlit) — self-consistency check on the fallback pool.
+    // Skipping filters 7-8 above admits ANY variant-mismatched row,
+    // including rows that structurally conflict with EACH OTHER (not just
+    // with our variant) — e.g. Camuncoli 1:50 Virgin ($2-10) blended with
+    // Skottie Young Baby Variant ($20-55) as if fungible. This distinguishes
+    // "no exact match, but the fallback pool agrees with itself" (safe to
+    // blend — existing EX-A Tier-2 cap still applies downstream) from "the
+    // fallback pool doesn't even agree with itself" (refuse — averaging two
+    // different named products produces a number that describes neither).
+    //
+    // Reuses extractArtist + extractVariantTokens — the same primitives
+    // filters 7-8 already use — no new registries. A row's "identity" is
+    // its recognized artist name, or (when no artist is recognized) its
+    // recognized generic variant-token set (foil/virgin/ratio/etc). Rows
+    // where NEITHER primitive recognizes anything are individually
+    // uncertain and are NOT merged into one shared "undetected" bucket
+    // (Option 2) — that would let an arbitrary number of different but
+    // unrecognized-artist variants hide behind a single false consistency
+    // signal. They simply don't count toward the recognized-distinct tally
+    // either way — refusal is driven only by CONFIRMED disagreement.
+    const identitySignatures = fallbackPool.map((r) => {
+      const rowArtist = extractArtist(r.title);
+      if (rowArtist) return rowArtist;
+      const tokens = extractVariantTokens(String(r.title || '').toLowerCase());
+      return tokens.length > 0 ? tokens.slice().sort().join(',') : null; // null = undetected, uncounted
+    });
+    const recognizedDistinct = new Set(identitySignatures.filter(Boolean));
+
+    if (recognizedDistinct.size >= 2) {
+      console.log('[sold-verify] variant fallback INCOHERENT —', recognizedDistinct.size,
+        'distinct recognized variant identities in fallback pool:', [...recognizedDistinct].join(' | '),
+        '— refusing to blend, falling through to next pricing tier');
+      return {
+        verified: [],
+        diagnostics: {
+          rawCount,
+          verifiedCount: 0,
+          rejectedCount: rawCount,
+          reasons,
+          rejectedSamples,
+        },
+        variantAdjusted: true,
+        variantFallbackIncoherent: true,
+      };
+    }
+
     // Q34 Part 1: Relax threshold ≥2 → ≥1 (thin-market variants need anchor).
     // FF Artgerm Invisible Woman: 0 exact-variant matches, fallback gets 1 comp
     // → previously rejected, now accepted with variantAdjusted flag.
