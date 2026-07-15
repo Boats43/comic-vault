@@ -1920,7 +1920,9 @@ export default async function handler(req, res) {
     // Extract consensus from eBay image search results
     // visualResult.items already contains parsed rows from lookupEbayVisual
     const parsedVisualRows = visualResult?.items || [];
-    const visualConsensus = extractConsensus(parsedVisualRows);
+    // P0 (Q-VISION-ZERO-SUPPORT) — pass Vision's own (pre-backfill) issue
+    // read so extractConsensus can tally agreement.visionIssueCount.
+    const visualConsensus = extractConsensus(parsedVisualRows, issueNum);
 
     console.log(`[phase1] eBay visual: ${visualResult?.items?.length || 0} results, consensus=${visualConsensus ? 'YES' : 'NO'}`);
     if (visualConsensus) {
@@ -2237,13 +2239,25 @@ export default async function handler(req, res) {
         { title: effectiveTitle, issue: issueNum, year: effectiveYear, publisher },
         visualConsensus,
         familyCandidate,
-        { ebayResultCount: visualResult?.items?.length || 0, overlapThreshold: 0.2 }
+        { ebayResultCount: visualResult?.items?.length || 0, overlapThreshold: 0.2, isGraded: isGraded === true }
       );
       confirmedTitle = identity.confirmedTitle;
       confirmedIssue = identity.confirmedIssue;
       confirmedYear = identity.confirmedYear;
       confirmedPublisher = identity.confirmedPublisher;
       identitySource = identity.identitySource;
+
+      // P0 (Q-VISION-ZERO-SUPPORT) — surface the loud override/escalate
+      // note for the card UI + one-tier match-confidence demotion below.
+      if (identity.visionZeroSupport) {
+        out.visionZeroSupport = {
+          ...identity.visionZeroSupport,
+          note: identity.visionZeroSupport.mode === 'override'
+            ? `Vision read issue #${identity.visionZeroSupport.visionIssue}, but the comp pool shows zero support for that number — corrected to #${identity.visionZeroSupport.adoptedIssue}. Please verify.`
+            : `Vision read issue #${identity.visionZeroSupport.visionIssue}, but the comp pool shows zero support and no adoptable alternate — identity requires manual verification.`,
+        };
+      }
+      out.matchConfidenceDemote = identity.matchConfidenceDemote === true;
 
       // Ship #22e: Assembly integrity check (Q54 compounds survive final title)
       // E3 class protection: "The X-Men #44 Angel" → Q54 protects ["x", "men"]
@@ -5479,6 +5493,29 @@ export default async function handler(req, res) {
         }
       } else if (visionConfidence === 'medium' && finalMc.tier === 'HIGH') {
         finalMc.visionModerate = true;
+      }
+
+      // P0 (Q-VISION-ZERO-SUPPORT) — one-tier confidence demotion when
+      // Vision's issue had zero pool support and was overridden/escalated
+      // by resolveIdentity. Card-visible verify note is out.visionZeroSupport
+      // (set at Phase 1, same call site as the identity resolution).
+      if (out.matchConfidenceDemote) {
+        if (finalMc.tier === 'HIGH') {
+          const originalScore = finalMc.score;
+          finalMc.tier = 'MEDIUM';
+          finalMc.score = Math.min(finalMc.score, 75);
+          finalMc.displayMessage = out.visionZeroSupport?.note || 'Identity corrected from comp pool — verify before listing';
+          finalMc.visionZeroSupportCapped = true;
+          finalMc.originalScore = originalScore;
+        } else if (finalMc.tier === 'MEDIUM') {
+          const originalScore = finalMc.score;
+          finalMc.tier = 'LOW';
+          finalMc.score = Math.min(finalMc.score, 60);
+          finalMc.displayMessage = out.visionZeroSupport?.note || 'Identity corrected from comp pool — verify before listing';
+          finalMc.visionZeroSupportCapped = true;
+          finalMc.originalScore = originalScore;
+        }
+        console.log(`[vision-zero-support] match-confidence demoted one tier (capped=${finalMc.visionZeroSupportCapped === true})`);
       }
 
       // Fix D — Phase 1: Zero-verified-comps cap. When sold comps exist but

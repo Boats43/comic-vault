@@ -307,7 +307,7 @@ export const calculateTitleOverlap = (a, b) => {
  * @returns {Object} { confirmedTitle, confirmedIssue, confirmedYear, confirmedPublisher, identitySource }
  */
 export const resolveIdentity = (vision, ebay, family, opts = {}) => {
-  const { ebayResultCount = 0, overlapThreshold = 0.2 } = opts;
+  const { ebayResultCount = 0, overlapThreshold = 0.2, isGraded = false } = opts;
 
   let confirmedTitle = vision.title;
   let confirmedIssue = vision.issue;
@@ -389,6 +389,54 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     console.log(`[phase1] eBay visual insufficient (${ebayResultCount} results), using Vision title`);
   }
 
+  // P0 (Q-VISION-ZERO-SUPPORT) — Vision "confidently wrong" issue override.
+  // None of the branches above cross-check Vision's own ISSUE against the
+  // pool when title already agrees (or the pool is <10 items) —
+  // confirmedIssue silently keeps Vision's initial value in those paths,
+  // with no check against the pool at all. Runs uniformly AFTER title
+  // resolution, regardless of which branch fired above, so it composes
+  // with every title-decision path instead of patching each one.
+  //
+  // Slabs excluded: Q106 established the visual pool is a confirmed-
+  // unreliable witness for graded books (CGC cert page is authoritative
+  // there, not the image-search pool) — isGraded books never reach here.
+  let identityEscalation = null;
+  let matchConfidenceDemote = false;
+  let visionZeroSupport = null;
+  if (!isGraded && vision.issue != null && ebay?.agreement?.visionIssueCount === 0) {
+    if (ebay.issue != null) {
+      // Coherent alternate issue exists in the pool — adopt it, loudly.
+      confirmedIssue = ebay.issue;
+      identitySource = `${identitySource}+vision_zero_support_override`;
+      matchConfidenceDemote = true;
+      visionZeroSupport = {
+        mode: 'override',
+        visionIssue: vision.issue,
+        adoptedIssue: ebay.issue,
+        poolTotal: ebay.agreement.total,
+      };
+      console.log(`[vision-zero-support] OVERRIDE: Vision issue="${vision.issue}" has 0/${ebay.agreement.total} pool support — adopting pool #${ebay.issue}`);
+    } else if (ebay.noIssueConsensus) {
+      // Vision's issue is unsupported AND the pool doesn't converge on any
+      // replacement — Q78's resurrected intent: escalate to ID_REQUIRED
+      // rather than silently keeping Vision's unsupported number. Nulling
+      // confirmedIssue routes through the existing identity-gate
+      // (assessIdentityConfidence sees issue missing) and Q83 rescue
+      // (tries the active/sold comp pool before standing on ID_REQUIRED) —
+      // no new blocking mechanism needed.
+      confirmedIssue = null;
+      identitySource = `${identitySource}+vision_zero_support_escalate`;
+      identityEscalation = 'ID_REQUIRED';
+      matchConfidenceDemote = true;
+      visionZeroSupport = {
+        mode: 'escalate',
+        visionIssue: vision.issue,
+        poolTotal: ebay.agreement.total,
+      };
+      console.log(`[vision-zero-support] ESCALATE: Vision issue="${vision.issue}" has 0/${ebay.agreement.total} pool support and no adoptable alternate — forcing ID_REQUIRED`);
+    }
+  }
+
   // Sanitize confirmedTitle to canonical series name for comp matching
   const sanitizedTitle = sanitizeSeriesTitle(confirmedTitle);
 
@@ -399,6 +447,9 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     confirmedPublisher,
     identitySource,
     displayTitle: confirmedTitle,  // Keep original for display
+    identityEscalation,
+    matchConfidenceDemote,
+    visionZeroSupport,
   };
 };
 

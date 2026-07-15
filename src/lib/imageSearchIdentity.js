@@ -367,7 +367,7 @@ export const inferAssetTypeFromCategories = (leafCategoryIds) => {
 // Confidence calculation: average agreement across title+issue+year fields.
 // Only fields with ≥50% agreement are returned (null otherwise).
 // Minimum 5 listings required for consensus (returns null if < 5).
-export const extractConsensus = (parsedRows) => {
+export const extractConsensus = (parsedRows, visionIssue = null) => {
   if (!Array.isArray(parsedRows) || parsedRows.length < 5) {
     return null;
   }
@@ -506,7 +506,26 @@ export const extractConsensus = (parsedRows) => {
   const issueOk = issueResult.count / total >= 0.5;
   const yearOk = yearResult.count / total >= 0.5;
 
-  if (!titleOk || !issueOk) {
+  // P0 (Q-VISION-ZERO-SUPPORT) — tally how many pool rows explicitly name
+  // Vision's own issue number (same zero-strip normalization Q78 uses in
+  // enrich.js). null when no visionIssue supplied — existing callers that
+  // don't pass one see identical behavior to before this change.
+  const normIssue = (v) => String(v ?? '').trim().replace(/^0+(?=\d)/, '');
+  const visionIssueNorm = visionIssue != null ? normIssue(visionIssue) : null;
+  const visionIssueCount = visionIssueNorm
+    ? issues.filter((i) => normIssue(i) === visionIssueNorm).length
+    : null;
+
+  // Escalation carve-out (Q78's resurrected intent): title consensus IS
+  // coherent (>=30%) but no single issue reaches the >=50% adoption bar —
+  // normally that's "not enough information," discard everything. When
+  // Vision's own issue ALSO has zero occurrences anywhere in the pool,
+  // that's not a lack of information — it's an unsupported claim with
+  // nothing to adopt in its place. Surface it instead of silently
+  // discarding so the caller can escalate rather than default to Vision.
+  const zeroSupportNoAdoption = titleOk && !issueOk && visionIssueNorm != null && visionIssueCount === 0;
+
+  if (!titleOk || (!issueOk && !zeroSupportNoAdoption)) {
     // Can't establish consensus on basic identity
     return null;
   }
@@ -588,7 +607,7 @@ export const extractConsensus = (parsedRows) => {
 
   return {
     title: titleResult.value,
-    issue: issueResult.value,
+    issue: issueOk ? issueResult.value : null,
     year: yearOk ? yearResult.value : null,
     publisher,
     variant,
@@ -598,7 +617,11 @@ export const extractConsensus = (parsedRows) => {
       issue: issueResult.count,
       year: yearResult.count,
       total,
+      visionIssueCount,
     },
+    // true only in the Q-VISION-ZERO-SUPPORT escalation carve-out above —
+    // title agreed, but no single issue reached the adoption bar.
+    noIssueConsensus: !issueOk,
     source: 'ebay_image_search',
   };
 };

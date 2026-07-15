@@ -142,7 +142,25 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://comic-vault-rouge.vercel.app/api/admin-cache?nocache=$\\(date +%s%N\\)\")",
       "Bash(git commit -m 'fix: Q12c title-family + Q5b pc_estimate comp count *)",
       "PowerShell(node scripts/q37-dual-number-scan.mjs)",
-      "Bash(bash scripts/deploy-ping.sh)"
+      "Bash(bash scripts/deploy-ping.sh)",
+      "PowerShell(npx vercel ls comic-vault --prod 2>$null | Out-String)",
+      "PowerShell($paths = @\\(\"$env:USERPROFILE\\\\AppData\\\\Roaming\\\\com.vercel.cli\\\\auth.json\", \"$env:USERPROFILE\\\\.vercel\\\\auth.json\", \"$env:LOCALAPPDATA\\\\com.vercel.cli\\\\auth.json\"\\); foreach \\($p in $paths\\) { if \\(Test-Path $p\\) { Write-Output \"FOUND: $p\" } })",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell($auth = Get-Content \"$env:USERPROFILE\\\\AppData\\\\Roaming\\\\com.vercel.cli\\\\Data\\\\auth.json\" | ConvertFrom-Json; $tok = $auth.token; $r = Invoke-RestMethod -Uri \"https://api.vercel.com/v6/deployments?projectId=prj_2tECtpKowmM7oFT7CYOQFZTssP72&teamId=team_qEx0TMOh3Wv0ugpc8mstYN0a&limit=30&target=production\" -Headers @{ Authorization = \"Bearer $tok\" }; $r.deployments | ForEach-Object { $created = [DateTimeOffset]::FromUnixTimeMilliseconds\\($_.created\\).UtcDateTime.ToString\\('yyyy-MM-dd HH:mm:ss'\\); \"$\\($_.uid\\)  $created UTC  state=$\\($_.state\\)  sha=$\\($_.meta.githubCommitSha\\)  msg=$\\(\\($_.meta.githubCommitMessage -split \"`n\"\\)[0]\\)\" })",
+      "Bash(npx eslint *)",
+      "Bash(npx -y vercel ls comic-vault)",
+      "Bash(npx *)",
+      "Bash(mkdir -p /c/Users/matam/AppData/Local/Temp/claude/C--Users-matam-OneDrive-Desktop-comic-vault/d870ccef-7812-4c51-b504-a142d215e708/scratchpad)",
+      "Bash(git diff *)",
+      "Read(//c/Users/matam/AppData/Local/Temp/claude/C--Users-matam-OneDrive-Desktop-comic-vault/d870ccef-7812-4c51-b504-a142d215e708/scratchpad/**)",
+      "Bash(cp api/enrich.js /c/Users/matam/AppData/Local/Temp/claude/C--Users-matam-OneDrive-Desktop-comic-vault/d870ccef-7812-4c51-b504-a142d215e708/scratchpad/enrich_final.js)",
+      "Bash(cp CLAUDE.md /c/Users/matam/AppData/Local/Temp/claude/C--Users-matam-OneDrive-Desktop-comic-vault/d870ccef-7812-4c51-b504-a142d215e708/scratchpad/claude_final.md)",
+      "Bash(cp api/comps.js /c/Users/matam/AppData/Local/Temp/claude/C--Users-matam-OneDrive-Desktop-comic-vault/d870ccef-7812-4c51-b504-a142d215e708/scratchpad/comps_final.js)",
+      "Bash(cp api/grade.js /c/Users/matam/AppData/Local/Temp/claude/C--Users-matam-OneDrive-Desktop-comic-vault/d870ccef-7812-4c51-b504-a142d215e708/scratchpad/grade_final.js)",
+      "Bash(cp src/lib/compHygiene.js /c/Users/matam/AppData/Local/Temp/claude/C--Users-matam-OneDrive-Desktop-comic-vault/d870ccef-7812-4c51-b504-a142d215e708/scratchpad/compHygiene_final.js)",
+      "WebFetch(domain:www.cgccomics.com)",
+      "Read(//c/Users/matam/Downloads/**)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }
