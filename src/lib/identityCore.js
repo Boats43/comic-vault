@@ -15,7 +15,38 @@
  * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
 
-import { COMPOUND_WHITELIST } from './compHygiene.js';
+import { COMPOUND_WHITELIST, REPRINT_RE } from './compHygiene.js';
+
+/**
+ * EX-7 — reprint/facsimile dominance in the eBay visual (image-search) pool.
+ *
+ * Same ratio + threshold Q98 already established for the polybag facsimile
+ * signal (api/enrich.js ~line 3966: itemsWithPrice filtered from the raw
+ * image-search pool, REPRINT_RE tested against rawTitle, >=0.6 = dominant).
+ * Q98 ruled that ratio "informational only, never a pricing veto" for
+ * famous-cover confounds (a cover-image search on Giant-Size X-Men #1 /
+ * X-Men #1 always comes back facsimile-dominated regardless of what the
+ * user is actually holding). The same confound applies to identity: a
+ * reprint-dominant pool can carry a DIFFERENT marketing issue number than
+ * the original (True Believers reprints always renumber to #1 regardless
+ * of source issue) — so it must not be trusted to arbitrate Vision's issue
+ * either. Reused (not reinvented) here so the zero-support override can
+ * defer to it.
+ *
+ * @param {Array} items - raw eBay image-search pool (rawTitle, price fields)
+ * @param {Object} opts - { minItems = 5 }
+ * @returns {number|null} ratio in [0,1], or null when pool is too thin to judge (<minItems priced items)
+ */
+export const computeReprintDominanceRatio = (items, { minItems = 5 } = {}) => {
+  if (!Array.isArray(items)) return null;
+  const itemsWithPrice = items.filter((i) => typeof i?.price === 'number' && i.price > 0);
+  if (itemsWithPrice.length < minItems) return null;
+  const reprintCount = itemsWithPrice.filter((i) => REPRINT_RE.test(String(i?.rawTitle || ''))).length;
+  return reprintCount / itemsWithPrice.length;
+};
+
+// Same threshold Q98 established for the polybag facsimile signal.
+export const REPRINT_DOMINANCE_THRESHOLD = 0.6;
 
 /**
  * Sanitize Vision descriptive title to canonical series name.
@@ -403,7 +434,16 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   let identityEscalation = null;
   let matchConfidenceDemote = false;
   let visionZeroSupport = null;
-  if (!isGraded && vision.issue != null && ebay?.agreement?.visionIssueCount === 0) {
+  const reprintRatio = computeReprintDominanceRatio(opts.visualItems);
+  const poolReprintDominant = reprintRatio != null && reprintRatio >= REPRINT_DOMINANCE_THRESHOLD;
+  if (poolReprintDominant) {
+    // EX-7 — pool is not an eligible witness (facsimile/reprint dominance
+    // confound). Vision's value stands untouched; if Vision itself lacks
+    // confidence, the existing identity-gate / Q83 rescue chain (which
+    // reads visionConfidence independently of this function) still
+    // escalates to ID_REQUIRED on its own — no new code needed here.
+    console.log(`[vision-zero-support] SKIPPED — pool is reprint/facsimile-dominant (ratio=${reprintRatio.toFixed(2)} >= ${REPRINT_DOMINANCE_THRESHOLD}), Vision's issue stands`);
+  } else if (!isGraded && vision.issue != null && ebay?.agreement?.visionIssueCount === 0) {
     if (ebay.issue != null) {
       // Coherent alternate issue exists in the pool — adopt it, loudly.
       confirmedIssue = ebay.issue;

@@ -27,7 +27,7 @@
 // Exit code: 0 on all-pass, 1 on any failure.
 
 import { extractConsensus } from '../src/lib/imageSearchIdentity.js';
-import { resolveIdentity } from '../src/lib/identityCore.js';
+import { resolveIdentity, computeReprintDominanceRatio } from '../src/lib/identityCore.js';
 import { sanitizeIdentityFields, assessIdentityConfidence } from '../src/lib/identityGate.js';
 
 let passed = 0;
@@ -219,6 +219,80 @@ console.log('\nTest 5: Slab fixture (isGraded=true) — coherent wrong pool, zer
   assertEq(identity.confirmedIssue, '1', 'confirmedIssue UNCHANGED — isGraded exclusion holds despite coherent wrong pool');
   assertNotContains(identity.identitySource, 'vision_zero_support', 'identitySource carries NO zero-support tag on a slab');
   assertEq(identity.matchConfidenceDemote, false, 'matchConfidenceDemote is false on a slab');
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+console.log('\nTest 6: GSX facsimile (15/20 reprint titles, correct 1975 original in pool) — override does NOT fire, Vision stands');
+{
+  // Both the facsimile reprints AND the correct original carry "#1" (Giant-
+  // Size X-Men has always been issue #1), so this fixture's issue axis
+  // doesn't itself hit the zero-support condition — it proves the
+  // reprint-dominance ratio computes correctly on a named production shape
+  // and that resolveIdentity leaves the identity alone when it's dominant.
+  // Test 7 (below) proves the gate has real teeth on a case where the
+  // override WOULD otherwise fire.
+  const facsimileItems = buildRows('Giant-Size X-Men #1 Facsimile Edition (2020) Marvel', '1', '2020', 15)
+    .map((r, i) => ({ ...r, price: 15 + i })); // priced, so they count toward the ratio
+  const originalItems = buildRows('Giant-Size X-Men #1 (1975) CGC 9.0', '1', '1975', 5)
+    .map((r, i) => ({ ...r, price: 9000 + i * 100 }));
+  const visualItems = [...facsimileItems, ...originalItems];
+  const visionIssue = '1';
+
+  const ratio = computeReprintDominanceRatio(visualItems);
+  assertEq(ratio, 0.75, 'reprint-dominance ratio computes 15/20 = 0.75');
+  assertTruthy(ratio >= 0.6, 'ratio clears the Q98 dominance threshold');
+
+  const visualConsensus = extractConsensus(visualItems, visionIssue);
+  const identity = resolveIdentity(
+    { title: 'Giant-Size X-Men', issue: visionIssue, year: '1975', publisher: 'Marvel' },
+    visualConsensus,
+    null,
+    { ebayResultCount: 20, overlapThreshold: 0.2, isGraded: false, visualItems }
+  );
+
+  assertEq(identity.confirmedIssue, '1', 'confirmedIssue unchanged — Vision\'s identity stands');
+  assertNotContains(identity.identitySource, 'vision_zero_support', 'identitySource carries NO zero-support tag (gate skipped the check)');
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+console.log('\nTest 7: True Believers renumbering — reprint-dominant pool WOULD wrongly flip issue without the EX-7 gate');
+{
+  // True Believers facsimile reprints always renumber to "#1" regardless of
+  // the original source issue (REPRINT_RE matches "true believers"
+  // directly). Vision correctly reads the original as #300; an all-
+  // facsimile pool unanimously (and wrongly, for identity purposes) says
+  // #1. Without the EX-7 gate this is a textbook zero-support override:
+  // visionIssueCount("300") === 0, ebay.issue === "1" -> would adopt "1".
+  const visualItems = buildRows('True Believers: Venom #1 (2018) Marvel', '1', '2018', 20)
+    .map((r, i) => ({ ...r, price: 5 + i }));
+  const visionIssue = '300';
+
+  const ratio = computeReprintDominanceRatio(visualItems);
+  assertEq(ratio, 1, 'reprint-dominance ratio is 1.0 (all 20 are True Believers facsimiles)');
+
+  const visualConsensus = extractConsensus(visualItems, visionIssue);
+  assertEq(visualConsensus?.agreement?.visionIssueCount, 0, 'visionIssueCount is 0 — without the gate this is a live override candidate');
+  assertEq(visualConsensus?.issue, '1', 'pool has an adoptable (but WRONG) alternate — the exact override-eligible shape');
+
+  const identityWithGate = resolveIdentity(
+    { title: 'Venom', issue: visionIssue, year: '2018', publisher: 'Marvel' },
+    visualConsensus,
+    null,
+    { ebayResultCount: 20, overlapThreshold: 0.2, isGraded: false, visualItems }
+  );
+  assertEq(identityWithGate.confirmedIssue, '300', 'WITH the gate: confirmedIssue stays "300" — no wrong flip to the reprint\'s "1"');
+  assertNotContains(identityWithGate.identitySource, 'vision_zero_support', 'identitySource carries NO zero-support tag — gate suppressed it');
+
+  // Sanity check: prove the gate is actually load-bearing here (not
+  // vacuously passing) by confirming the override WOULD have fired without
+  // it, using the same visualConsensus/vision inputs but no visualItems.
+  const identityWithoutGateData = resolveIdentity(
+    { title: 'Venom', issue: visionIssue, year: '2018', publisher: 'Marvel' },
+    visualConsensus,
+    null,
+    { ebayResultCount: 20, overlapThreshold: 0.2, isGraded: false } // no visualItems -> ratio is null -> gate can't engage
+  );
+  assertEq(identityWithoutGateData.confirmedIssue, '1', 'CONTROL: without pool data for the gate, the override DOES fire and wrongly adopts "1" — proves Test 7 is load-bearing, not vacuous');
 }
 
 // ─────────────────────────────────────────────────────────────────────────

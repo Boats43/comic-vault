@@ -2239,7 +2239,14 @@ export default async function handler(req, res) {
         { title: effectiveTitle, issue: issueNum, year: effectiveYear, publisher },
         visualConsensus,
         familyCandidate,
-        { ebayResultCount: visualResult?.items?.length || 0, overlapThreshold: 0.2, isGraded: isGraded === true }
+        {
+          ebayResultCount: visualResult?.items?.length || 0,
+          overlapThreshold: 0.2,
+          isGraded: isGraded === true,
+          // EX-7 fold-in — same pool resolveIdentity uses to compute
+          // agreement.visionIssueCount, reused for reprint-dominance gating.
+          visualItems: parsedVisualRows,
+        }
       );
       confirmedTitle = identity.confirmedTitle;
       confirmedIssue = identity.confirmedIssue;
