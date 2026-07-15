@@ -6,10 +6,13 @@
 // Input: salesVelocity object from PC (per-grade sale frequency)
 // Output: trend classification + pricing adjustment + market timing signals
 //
-// Velocity data format (from pricecharting-pop.js):
+// Velocity data format (from pricecharting-pop.js's formatGradeKey — "9.8"
+// / "9.0" / "raw", NOT "cgc98"/"cgc94"; a prior version of this comment and
+// of getUserGradeVelocity's key construction documented/used the wrong
+// shape, which made hasData silently false for every graded book):
 // {
-//   "cgc98": { label: "2.3 per week", perDay: 0.33 },
-//   "cgc94": { label: "1.1 per month", perDay: 0.037 },
+//   "9.8": { label: "2.3 per week", perDay: 0.33 },
+//   "9.4": { label: "1.1 per month", perDay: 0.037 },
 //   "raw": { label: "0.8 per month", perDay: 0.027 }
 // }
 //
@@ -34,14 +37,14 @@
 export function getUserGradeVelocity(salesVelocity, userGrade) {
   if (!salesVelocity || typeof salesVelocity !== 'object') return null;
 
-  // Normalize user grade to PC key format
+  // Normalize user grade to the same key format pricecharting-pop.js's
+  // formatGradeKey writes onto salesVelocity: "raw", or a numeric grade
+  // string with an explicit ".0" for whole numbers (9.8 → "9.8", 9 → "9.0").
   let key;
   if (userGrade === 'raw') {
     key = 'raw';
-  } else if (typeof userGrade === 'number') {
-    // CGC numeric: 9.8 → "cgc98", 9.4 → "cgc94", etc.
-    const gradeStr = String(userGrade).replace('.', '');
-    key = `cgc${gradeStr}`;
+  } else if (typeof userGrade === 'number' && !isNaN(userGrade)) {
+    key = Number.isInteger(userGrade) ? `${userGrade}.0` : String(userGrade);
   } else {
     return null;
   }

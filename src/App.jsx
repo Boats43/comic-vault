@@ -3036,7 +3036,6 @@ function CollectionDetail({
   const [activeListExpanded, setActiveListExpanded] = useState(false);
   // Collapsible sections for enriched data
   const [creatorsExpanded, setCreatorsExpanded] = useState(false);
-  const [velocityExpanded, setVelocityExpanded] = useState(false);
   const [ladderExpanded, setLadderExpanded] = useState(false);
   const [popExpanded, setPopExpanded] = useState(false);
   const [storyExpanded, setStoryExpanded] = useState(false); // Ship #21c
@@ -3849,49 +3848,6 @@ function CollectionDetail({
                 <div style={{ color: '#888', fontSize: 11, opacity: 0.7 }}>
                   Creator not detected
                 </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Sales Velocity */}
-      {item.salesVelocity && (item.salesVelocity['90d'] > 0 || item.salesVelocity['30d'] > 0 || item.salesVelocity['7d'] > 0) && (
-        <div style={{ marginTop: 8, marginBottom: 4 }}>
-          <div
-            onClick={() => setVelocityExpanded(!velocityExpanded)}
-            style={{
-              cursor: 'pointer',
-              fontSize: 11,
-              color: '#888',
-              fontWeight: 600,
-              letterSpacing: 0.5,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4
-            }}
-          >
-            <span>{velocityExpanded ? '▼' : '▶'}</span>
-            <span>SALES VELOCITY</span>
-          </div>
-          {velocityExpanded && (
-            <div style={{
-              marginTop: 6,
-              padding: '8px 10px',
-              background: 'rgba(255,255,255,0.04)',
-              borderRadius: 6,
-              fontSize: 13,
-              display: 'flex',
-              gap: 12
-            }}>
-              {item.salesVelocity['90d'] != null && (
-                <span><strong>{item.salesVelocity['90d']}</strong> <span style={{ color: '#888' }}>90d</span></span>
-              )}
-              {item.salesVelocity['30d'] != null && (
-                <span><strong>{item.salesVelocity['30d']}</strong> <span style={{ color: '#888' }}>30d</span></span>
-              )}
-              {item.salesVelocity['7d'] != null && (
-                <span><strong>{item.salesVelocity['7d']}</strong> <span style={{ color: '#888' }}>7d</span></span>
               )}
             </div>
           )}
@@ -9167,6 +9123,7 @@ export default function App() {
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
+                velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: syncedDecision,
                 // Ship #24a-3 — canonical contract. Follows the same
@@ -9584,6 +9541,7 @@ export default function App() {
                   salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                   priceLadder: enrich.priceLadder || cur.priceLadder || null,
                   salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
+                  velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                   matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
                   // Preserve manual list price edits
@@ -9676,6 +9634,7 @@ export default function App() {
                   salesByGrade: enrich.salesByGrade || s.salesByGrade || null,
                   priceLadder: enrich.priceLadder || s.priceLadder || null,
                   salesVelocity: enrich.salesVelocity || s.salesVelocity || null,
+                  velocityAnalysis: enrich.velocityAnalysis || s.velocityAnalysis || null,
                   confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || s.matchConfidence || null,
                   contract: enrich.contract ?? s.contract ?? null, // Ship #24a-3
@@ -10007,6 +9966,7 @@ export default function App() {
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
+                velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: enrich.decision || cur.decision,
                 contract: enrich.contract ?? cur.contract ?? null, // Ship #24a-3
@@ -10508,6 +10468,7 @@ export default function App() {
       salesByGrade: enrich.salesByGrade || item.salesByGrade || null,
       priceLadder: enrich.priceLadder || item.priceLadder || null,
       salesVelocity: enrich.salesVelocity || item.salesVelocity || null,
+      velocityAnalysis: enrich.velocityAnalysis || item.velocityAnalysis || null,
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
       matchConfidence: enrich.matchConfidence || item.matchConfidence || null,
       decision: enrich.decision || item.decision,
@@ -11388,7 +11349,7 @@ export default function App() {
                             setCatalogue((prev) => {
                               const cur = prev.find((x) => x.id === savedId);
                               if (!cur) return prev;
-                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });

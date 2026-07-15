@@ -47,9 +47,12 @@ console.log('\n=== SHIP #25 — VELOCITY CURVES + DYNAMIC PRICING ===\n');
 // ─── getUserGradeVelocity ───────────────────────────────────────
 console.log('getUserGradeVelocity:');
 
+// Q-audit COMMIT 3 — keys match pricecharting-pop.js's real formatGradeKey
+// output ("9.8"/"9.4"/"raw"), not the "cgc98"/"cgc94" shape this fixture
+// used before the bug fix (that shape never existed on a real response).
 const mockVelocity = {
-  cgc98: { label: '2.3 per week', perDay: 0.33 },
-  cgc94: { label: '1.1 per month', perDay: 0.037 },
+  '9.8': { label: '2.3 per week', perDay: 0.33 },
+  '9.4': { label: '1.1 per month', perDay: 0.037 },
   raw: { label: '0.8 per month', perDay: 0.027 },
 };
 
@@ -120,7 +123,7 @@ assertEq(unknownRec.multiplier, 1.0, 'UNKNOWN → 1.0 multiplier');
 console.log('\nanalyzeVelocity:');
 
 const hotAnalysis = analyzeVelocity({
-  salesVelocity: { cgc98: { label: '15 per month', perDay: 0.5 } },
+  salesVelocity: { '9.8': { label: '15 per month', perDay: 0.5 } },
   userGrade: 9.8,
   priceBands: { quick: 850, market: 920, stretch: 1050 },
 });
@@ -143,7 +146,7 @@ assertEq(normalAnalysis.recommendation.recommendedBand, 'market', 'NORMAL analys
 assertEq(normalAnalysis.recommendation.recommendedPrice, 60, 'NORMAL analysis → price = market (60)');
 
 const thinAnalysis = analyzeVelocity({
-  salesVelocity: { cgc94: { label: '0.5 per month', perDay: 0.017 } },
+  salesVelocity: { '9.4': { label: '0.5 per month', perDay: 0.017 } },
   userGrade: 9.4,
   priceBands: { quick: 200, market: 250, stretch: 300 },
 });
@@ -178,7 +181,7 @@ console.log('\nEdge Cases:');
 
 // FAST with +5% multiplier
 const fastWithPremium = analyzeVelocity({
-  salesVelocity: { cgc98: { label: '5 per month', perDay: 0.167 } },
+  salesVelocity: { '9.8': { label: '5 per month', perDay: 0.167 } },
   userGrade: 9.8,
   priceBands: { quick: 900, market: 1000, stretch: 1200 },
 });
