@@ -1057,6 +1057,10 @@ function ResultCard({ result, enriching }) {
   // hard-capped at 3 with no way to see the rest of an already-fetched list).
   const [soldListExpanded, setSoldListExpanded] = useState(false);
   const [activeListExpanded, setActiveListExpanded] = useState(false);
+  // Q-audit COMMIT 2 — price ladder defaults OPEN on ResultCard (unlike its
+  // CollectionDetail counterpart, which defaults collapsed): this was the
+  // specific data point the card-redesign request was about.
+  const [ladderExpanded, setLadderExpanded] = useState(true);
 
   const comps = result.comps;
   const hasComps =
@@ -1604,6 +1608,90 @@ function ResultCard({ result, enriching }) {
               : "Source: Browse API — active listings"}
             {Array.isArray(result.soldComps) && result.soldComps.length > 0 && " + eBay sold"}
           </div>
+        </div>
+      )}
+
+      {/* Price Ladder — ported from CollectionDetail (Q-audit COMMIT 2), same
+          rendering, default expanded here: this is the data the redesign
+          request was specifically about. */}
+      {result.priceLadder && Object.keys(result.priceLadder).length > 0 && (
+        <div style={{ marginTop: 8, marginBottom: 4 }}>
+          <div
+            onClick={() => setLadderExpanded(!ladderExpanded)}
+            style={{
+              cursor: 'pointer',
+              fontSize: 11,
+              color: '#888',
+              fontWeight: 600,
+              letterSpacing: 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
+            }}
+          >
+            <span>{ladderExpanded ? '▼' : '▶'}</span>
+            <span>PRICE LADDER ({Object.keys(result.priceLadder).length} grades)</span>
+          </div>
+          {ladderExpanded && (() => {
+            // Ship #21k: Preserve literal grade strings ("raw", "9.8", etc.) — parseFloat("raw") = NaN
+            const entries = Object.entries(result.priceLadder)
+              .map(([gradeStr, price]) => ({
+                gradeStr,
+                gradeNum: parseFloat(gradeStr),
+                price: parseFloat(price)
+              }));
+
+            // Ship #21g: Detect inversions (numeric grades only, skip NaN "raw")
+            const numericEntries = entries
+              .filter(e => !isNaN(e.gradeNum))
+              .sort((a, b) => a.gradeNum - b.gradeNum);
+
+            const inversions = new Set();
+            for (let i = 1; i < numericEntries.length; i++) {
+              if (numericEntries[i].price < numericEntries[i-1].price) {
+                inversions.add(numericEntries[i].gradeNum);
+              }
+            }
+
+            // Sort for display: numeric descending, then "raw" last
+            const sortedEntries = entries.sort((a, b) => {
+              if (isNaN(a.gradeNum)) return 1;  // "raw" to end
+              if (isNaN(b.gradeNum)) return -1;
+              return b.gradeNum - a.gradeNum;   // numeric descending
+            });
+
+            return (
+              <div style={{
+                marginTop: 6,
+                padding: '8px 10px',
+                background: 'rgba(255,255,255,0.04)',
+                borderRadius: 6,
+                fontSize: 12,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: 6
+              }}>
+                {sortedEntries.map(({ gradeStr, gradeNum, price }) => (
+                  <div key={gradeStr}>
+                    <span style={{ color: '#888' }}>{gradeStr}</span>
+                    <span style={{ marginLeft: 6, fontWeight: 600 }}>
+                      {formatCurrency(price)}
+                    </span>
+                    {!isNaN(gradeNum) && inversions.has(gradeNum) && (
+                      <span style={{
+                        marginLeft: 4,
+                        fontSize: 10,
+                        color: '#f59e0b',
+                        opacity: 0.8
+                      }}>
+                        ⚠ thin data
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
 
