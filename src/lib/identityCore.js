@@ -392,6 +392,67 @@ export const titleOverlapsProduct = (confirmedTitle, productName, threshold = 0.
 };
 
 /**
+ * Q-PC-VARIANT-SCORE — how many of confirmedVariant's tokens appear in a
+ * PriceCharting product name (its bracket descriptor or elsewhere)?
+ *
+ * Plain token-count, not a ratio — a two-word variant match ("skottie
+ * young") should outrank a one-word match, so a longer confirmedVariant
+ * that matches more fully scores higher rather than being normalized away.
+ *
+ * @param {string} confirmedVariant - the confirmed variant name (e.g. "SKOTTIE YOUNG")
+ * @param {string} productName - a PC candidate's product name
+ * @returns {number} count of confirmedVariant tokens found in productName (0 = no match)
+ */
+export const variantTokenOverlapScore = (confirmedVariant, productName) => {
+  const tokenize = (s) => String(s || '').toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length > 1);
+  const variantTokens = tokenize(confirmedVariant);
+  if (variantTokens.length === 0) return 0;
+  const productTokens = tokenize(productName);
+  return variantTokens.filter((t) => productTokens.includes(t)).length;
+};
+
+/**
+ * Q-PC-VARIANT-SCORE — pick the best bracket-variant PC candidate.
+ *
+ * When confirmedVariant is populated (Vision's direct read, or Class A's
+ * comp-pool backfill), score every candidate by variantTokenOverlapScore
+ * and return the highest scorer — inverse of Q108's null-variant
+ * preference logic, which instead prefers a plain/unbracketed entry
+ * outright (unchanged, handled entirely upstream of this helper; this
+ * function only ever sees bracket-variant candidates).
+ *
+ * When confirmedVariant is null, returns candidates[0] — IDENTICAL to the
+ * prior "arbitrary, API order" behavior; this helper changes nothing for
+ * that case.
+ *
+ * Ties (including all-zero, i.e. no candidate matches confirmedVariant at
+ * all) keep the first-encountered candidate — same graceful degradation
+ * as today's single-candidate fallback.
+ *
+ * @param {Array<{productName: string}>} candidates - bracket-variant PC candidates, in API order
+ * @param {string|null} confirmedVariant - confirmed variant name, or null
+ * @returns {object|null} the selected candidate, or null if candidates is empty
+ */
+export const selectBestVariantCandidate = (candidates, confirmedVariant) => {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  if (!confirmedVariant) return candidates[0];
+
+  let best = candidates[0];
+  let bestScore = variantTokenOverlapScore(confirmedVariant, candidates[0].productName);
+  for (let i = 1; i < candidates.length; i++) {
+    const score = variantTokenOverlapScore(confirmedVariant, candidates[i].productName);
+    if (score > bestScore) {
+      best = candidates[i];
+      bestScore = score;
+    }
+  }
+  return best;
+};
+
+/**
  * Calculate title overlap percentage between two strings.
  *
  * @param {string} a - First title

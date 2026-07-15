@@ -39,6 +39,7 @@ import {
   resolveYear,
   checkAssemblyIntegrity,
   titleOverlapsProduct,
+  selectBestVariantCandidate,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -1464,10 +1465,24 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         }
       }
       const candidate = { price, productName: name, id: p.id, year: productYear, source: "pricecharting" };
-      // Q108 CHANGE 2 — no confirmed variant + this product name carries a
-      // variant descriptor → deprioritize, keep scanning for a base entry.
-      if (!variant && hasVariantDescriptor(name)) {
-        console.log(`[pc-anchor] deprioritized "${name}" — variant descriptor present, confirmedVariant=null`);
+      // Q108 CHANGE 2 — a product name carrying a variant descriptor is
+      // deferred (not returned immediately) regardless of whether variant
+      // is confirmed — Q-PC-VARIANT-SCORE (below) needs to see the FULL
+      // set of bracket candidates to score them, not just the first one PC
+      // happens to list. Null confirmedVariant: unchanged, a plain/
+      // unbracketed entry still wins outright via the early return below
+      // (Q108's original base-preference, untouched). Populated
+      // confirmedVariant: previously these fell through to an immediate
+      // `return candidate` on whichever bracket PC listed FIRST — the
+      // Captain America [Steranko] #25 (2017) class bug, an unrelated
+      // printing beating the actual [Young] #25 (2020) variant in hand
+      // purely by API ordering. Scored at resolution time instead.
+      if (hasVariantDescriptor(name)) {
+        console.log(
+          variant
+            ? `[pc-anchor] deferred "${name}" for variant-match scoring against "${variant}"`
+            : `[pc-anchor] deprioritized "${name}" — variant descriptor present, confirmedVariant=null`
+        );
         variantFallbacks.push(candidate);
         continue;
       }
@@ -1482,7 +1497,7 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         continue;
       }
       if (variantFallbacks.length > 0) {
-        console.log(`[pc-anchor] base-preferred over variant entry when confirmedVariant=null`);
+        console.log(`[pc-anchor] base entry preferred over ${variantFallbacks.length} deferred variant candidate(s)`);
       }
       return candidate;
     }
@@ -1532,9 +1547,19 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
     // Q108 CHANGE 2 — no base entry survived at all; the only usable data
     // is a named-variant product. Deprioritized, not excluded — fall back
     // to it rather than refuse a price outright.
+    // Q-PC-VARIANT-SCORE — when confirmedVariant is populated, pick the
+    // candidate whose bracket best matches it (Captain America [Young]
+    // #25 (2020) over an unrelated [Steranko] #25 (2017) that merely
+    // happened to rank first in PC's own API order). Null confirmedVariant:
+    // selectBestVariantCandidate returns candidates[0] — identical to the
+    // prior arbitrary/first-encountered behavior, unchanged.
     if (variantFallbacks.length > 0) {
-      const fb = variantFallbacks[0];
-      console.log(`[pc-anchor] no base entry found — falling back to variant entry "${fb.productName}"`);
+      const fb = selectBestVariantCandidate(variantFallbacks, variant);
+      console.log(
+        variant
+          ? `[pc-anchor] variant-scored: "${fb.productName}" best matches confirmedVariant="${variant}" (of ${variantFallbacks.length} candidates)`
+          : `[pc-anchor] no base entry found — falling back to variant entry "${fb.productName}"`
+      );
       return { ...fb, variantFallback: true };
     }
     console.log(`[pricecharting] no valid match in ${products.length} results`);
