@@ -107,6 +107,39 @@ console.log('\nTest 4: Only ONE bracket-variant candidate (no confirmedVariant m
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+console.log('\nTest 5: variant-match candidate wins even when it ALSO looks year-mismatched (documented behavior, not inferred)');
+{
+  // e343a0a's commit note flagged this as a side-effect rather than a
+  // tested assertion — this test makes it explicit. Under the OLD
+  // bracket-detection condition (`!variant && hasVariantDescriptor(name)`),
+  // a bracket candidate with an unproven year mismatch and a CONFIRMED
+  // variant would have been diverted to `q86Fallbacks` in lookupPriceCharting
+  // (never reaching variantFallbacks/this helper at all), and q86Fallbacks
+  // resolves with HIGHER priority than variantFallbacks — so the
+  // year-tolerance pick would have won regardless of variant identity.
+  //
+  // Under the NEW widened condition (`hasVariantDescriptor(name)`,
+  // unconditional), this candidate now reaches variantFallbacks instead —
+  // and selectBestVariantCandidate scores purely on variant-token overlap,
+  // with no awareness of year at all. This test proves that outcome
+  // directly: a variant-name match wins over a same-issue candidate with
+  // no variant match, even though the matching candidate's OWN product
+  // name carries an off year (1995) that would have looked like a q86
+  // year-tolerance case under the old routing.
+  //
+  // Judged correct: a specific confirmed-variant identity match is a
+  // stronger signal than a generic year-proximity heuristic. Documented
+  // here as intended behavior, not left as an unverified side-effect.
+  const candidates = [
+    { id: 501, productName: 'Captain America [Young] #25 (1995)', price: 3.00 },   // variant match, off year
+    { id: 502, productName: 'Captain America [Steranko] #25 (2020)', price: 2.27 }, // right-shaped year, no variant match
+  ];
+
+  const best = selectBestVariantCandidate(candidates, 'SKOTTIE YOUNG');
+  assertEq(best.id, 501, 'variant-match candidate (id=501) wins over a no-match candidate, regardless of year plausibility — specific identity signal outranks generic year-proximity');
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {
   console.log('\nFailures:');
