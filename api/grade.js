@@ -524,9 +524,9 @@ export default async function handler(req, res) {
     mark('ebay_image_complete');
 
     if (ebayResult && ebayResult.consensus && ebayResult.consensus.confidence >= 0.3) {
-      // eBay consensus successful — use Sonnet for grade-only
+      // eBay consensus successful — use Haiku for grade-only
       console.log(`[grade] eBay consensus: ${ebayResult.consensus.title} #${ebayResult.consensus.issue} (${ebayResult.consensus.confidence} confidence)`);
-      console.log('[grade] using Sonnet for grade-only assessment...');
+      console.log('[grade] using Haiku for grade-only assessment...');
 
       mark('vision_start');
       const gradePrompt = buildGradeOnlyPrompt(ebayResult.consensus);
