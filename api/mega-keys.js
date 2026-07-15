@@ -986,6 +986,63 @@ export const normalizePublisher = (pub) => {
   return PUBLISHER_ALIASES[p] || p;
 };
 
+// Q-FLASHGORDON13 — publisher founding years, for a plausibility gate: a
+// publisher cannot have published a comic before it existed (Flash Gordon
+// #13 class: Vision read publisher="Image" on a book correctly dated 1969,
+// 23 years before Image Comics existed in 1992 — nothing validated
+// publisher against year the way title/issue already get cv-year-strict
+// checks). Piggybacks on normalizePublisher's existing table above rather
+// than a second normalization pass — keys here are whatever
+// normalizePublisher(pub) returns, whether an aliased bucket ("marvel",
+// "dc", "image") or the lowercased pass-through for everything else
+// ("charlton comics", "dell", ...).
+//
+// Deliberately narrow and conservative: only publishers with an
+// unambiguous, well-documented founding year are listed. A publisher NOT
+// in this table skips the gate entirely (fails open) rather than risk a
+// false-positive rejection on a guessed date — the whole point is to
+// catch confidently-wrong Vision reads, not to become a second source of
+// them via a bad guess of our own.
+const PUBLISHER_FOUNDING_YEARS = {
+  dc: 1934,
+  marvel: 1939, // Timely 1939 -> Atlas 1951 -> Marvel 1961+; alias table above already collapses all three to "marvel"
+  image: 1992,
+  archie: 1939, // as MLJ Comics, renamed Archie Comics 1946
+  mirage: 1984,
+  idw: 1999,
+  "dark horse": 1986,
+  "dark horse comics": 1986,
+  valiant: 1989,
+  dynamite: 2004,
+  "dynamite entertainment": 2004,
+  "boom studios": 2005,
+  "boom! studios": 2005,
+  charlton: 1944,
+  "charlton comics": 1944,
+  fawcett: 1939,
+  quality: 1937,
+  "quality comics": 1937,
+  dell: 1929,
+  "gold key": 1962,
+  ec: 1944,
+  "ec comics": 1944,
+};
+
+// Reject a publisher/year pairing when the publisher's known founding
+// year postdates the book's confirmed year. Fails OPEN (returns true, i.e.
+// "plausible") when the publisher isn't in PUBLISHER_FOUNDING_YEARS or the
+// year isn't parseable — a missing table entry is evidence of an unlisted
+// publisher, not of implausibility.
+export const isPublisherYearPlausible = (publisher, year) => {
+  const key = normalizePublisher(publisher);
+  if (!key) return true;
+  const founded = PUBLISHER_FOUNDING_YEARS[key];
+  if (founded == null) return true;
+  const y = parseInt(year, 10);
+  if (isNaN(y)) return true;
+  return y >= founded;
+};
+
 // Normalize grade to a CGC-numeric bucket. Prefers explicit numericGrade;
 // falls back to parsing the grade string. Returns null when grade is
 // unparseable or out-of-range.

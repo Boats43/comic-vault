@@ -78,6 +78,7 @@ import {
   getMegaKeyEntry,
   getMegaKeyFloor,
   normalizeTitle,
+  isPublisherYearPlausible,
 } from "./mega-keys.js";
 import { extractCreatorsFromComps } from "../src/lib/premiumCreators.js";
 import { extractIssueFromEbayResults } from "../src/lib/identityAlignment.js";
@@ -2331,6 +2332,44 @@ export default async function handler(req, res) {
     // a consistent value to pass regardless of which identity path fired.
     if (confirmedLabelType === undefined) confirmedLabelType = labelType || null;
 
+    // Q-FLASHGORDON13 — publisher founding-year plausibility gate. Nothing
+    // upstream validates confirmedPublisher against confirmedYear at all
+    // (title/issue get cv-year-strict-style checks; publisher never did).
+    // Real production case: Vision read publisher="Image" on a book
+    // correctly identified as 1969 — Image Comics didn't exist until 1992.
+    // Fallback order: (1) pool consensus from the eBay visual pool via the
+    // same backfillPublisherFromTitles Q94 already uses when publisher is
+    // outright missing (Charlton Comics is already in its pattern table —
+    // Q96 added it for this exact Flash Gordon #13 class); (2) ComicVine's
+    // publisher, tried in STAGE B below once the CV lookup below resolves
+    // (not available yet at this point in the pipeline); (3) null.
+    // Runs BEFORE the ComicVine/PriceCharting lookups below so a corrected
+    // publisher also improves the ComicVine query itself, not just the
+    // final display value.
+    if (!isPublisherYearPlausible(confirmedPublisher, confirmedYear)) {
+      const rejectedPublisher = confirmedPublisher;
+      const poolTitles = parsedVisualRows.map((r) => r.rawTitle).filter(Boolean);
+      const poolBackfill = backfillPublisherFromTitles(poolTitles);
+      if (poolBackfill) {
+        confirmedPublisher = poolBackfill.publisher;
+        out.publisherImplausibleRejected = {
+          rejected: rejectedPublisher,
+          adopted: confirmedPublisher,
+          source: 'pool_consensus',
+          ratio: poolBackfill.ratio,
+        };
+        console.log(`[pub-plausibility] REJECT "${rejectedPublisher}" (postdates year=${confirmedYear}) — pool consensus adopts "${confirmedPublisher}" (${poolBackfill.hitCount}/${poolBackfill.total})`);
+      } else {
+        confirmedPublisher = null;
+        out.publisherImplausibleRejected = {
+          rejected: rejectedPublisher,
+          adopted: null,
+          source: null,
+        };
+        console.log(`[pub-plausibility] REJECT "${rejectedPublisher}" (postdates year=${confirmedYear}) — no pool consensus, deferring to ComicVine fallback`);
+      }
+    }
+
     mark('phase1_complete');
 
     // Ship #28a COMMIT 3: Conflict detection (LOG ONLY)
@@ -2587,6 +2626,32 @@ export default async function handler(req, res) {
         return result;
       })(),
     ]);
+
+    // Q-FLASHGORDON13 STAGE B — the founding-year gate above rejected
+    // Vision's publisher and pool consensus couldn't resolve it either
+    // (confirmedPublisher is still null, flagged via
+    // publisherImplausibleRejected.adopted === null). ComicVine's lookup
+    // has now resolved, so try its publisher as the second fallback step.
+    // "Independently passed its own gates" in practice: comicVine is
+    // non-null here (its own identity match wasn't discarded) and has a
+    // real, non-empty publisher name — nothing further to validate beyond
+    // that, per scope.
+    if (
+      confirmedPublisher == null &&
+      out.publisherImplausibleRejected &&
+      out.publisherImplausibleRejected.adopted === null
+    ) {
+      const cvPublisher = comicVine?.volume?.publisher?.name || null;
+      if (cvPublisher) {
+        confirmedPublisher = cvPublisher;
+        out.publisherImplausibleRejected.adopted = cvPublisher;
+        out.publisherImplausibleRejected.source = 'comicvine';
+        console.log(`[pub-plausibility] ComicVine fallback adopts "${cvPublisher}"`);
+      } else {
+        console.log(`[pub-plausibility] no ComicVine publisher available either — confirmedPublisher stays null`);
+      }
+    }
+
     const ximilar = null; // Ximilar lookup disabled
 
     mark('phase2_complete');
