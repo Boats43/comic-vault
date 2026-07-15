@@ -38,6 +38,7 @@ import {
   extractTitleConsensus,
   resolveYear,
   checkAssemblyIntegrity,
+  titleOverlapsProduct,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -2823,87 +2824,69 @@ export default async function handler(req, res) {
 
     const visionConfidenceLower = String(confidence || 'medium').toLowerCase();
 
-    // Ship 26.0 / 26.2 — Gate PC requery on accepted visual consensus OR
-    // accepted family candidate. Previously, imageConsensusTitle could be
-    // derived from visualResult.items frequency voting even when extractConsensus
-    // rejected the pool (title <30% or issue <50% agreement). This allowed
-    // wrong-family titles like "Catwoman Uncovered" to poison PC queries for
-    // "Batman Catwoman Gotham War" scans.
-    // Fix: only use consensus title when visualConsensus passed validation OR
-    // when family candidate selected via top-rank-protection/weighted-consensus.
+    // Ship 26.0 / 26.2 — imageConsensusTitle retained for logging/diagnostics
+    // and as a requery-title fallback only. It no longer GATES whether PC's
+    // match gets validated (see Q-PC-REQUERY-GATE below) — "the image pool
+    // has no consensus opinion" and "PC's match is still right for our
+    // CURRENT identity" are not the same claim, and conflating them let a
+    // wrong PC match survive whenever the pool consensus was rejected/thin.
     const familyCandidateAccepted = familyCandidate && ['top-rank-protection', 'weighted-consensus'].includes(familyCandidate.decision);
     const imageConsensusTitle = (visualConsensus || familyCandidateAccepted)
       ? (familyCandidate?.selectedTitle || visualConsensus?.title || getImageSearchConsensusTitle(visualResult))
       : null;
 
-    // Diagnostic: log when rejected visual consensus suppresses a requery
-    if (!visualConsensus && visualResult?.items?.length >= 5) {
-      const wouldHaveBeenTitle = getImageSearchConsensusTitle(visualResult);
-      if (wouldHaveBeenTitle && wouldHaveBeenTitle !== pcInitialTitle) {
-        console.log(`[pc-requery] gated: visualConsensus rejected, suppressed requery for "${wouldHaveBeenTitle}"`);
-      }
-    }
+    // Q-PC-REQUERY-GATE — validate PC's initial match against confirmedTitle
+    // UNCONDITIONALLY, regardless of whether the image pool had its own
+    // consensus opinion. Previously this check (and the main-token
+    // heuristic it fed) only ran when imageConsensusTitle was truthy and
+    // differed from pcInitialTitle — when pool consensus was rejected or
+    // absent, NO check ran at all, silently keeping priceChartingInitial's
+    // match no matter what, even if confirmedTitle had already been
+    // corrected (22e, backfill, or otherwise) to something that match no
+    // longer represents (Spider-Versity class: confirmedTitle corrected to
+    // "Amazing Spider Versity", PC's initial match was "Spider-Verse ...
+    // Camuncoli Variant" — a different, real product — kept as-is because
+    // the pool consensus that originally produced the wrong title had
+    // already been rejected by 22e, so the old gate never even looked).
+    //
+    // titleOverlapsProduct (identityCore.js) replaces the old "shares one
+    // token" heuristic (which always passed for same-franchise titles
+    // sharing a lead word, e.g. "spider") with a majority-token-overlap
+    // check between confirmedTitle and PC's productName.
+    const needsRequery = !priceCharting || !titleOverlapsProduct(confirmedTitle, priceCharting.productName);
 
-    // Ship #20a.6.16 Win #2 — PC re-query logic. If image consensus title differs
-    // from Vision title AND the initial PC product might be wrong (main-token check),
-    // re-query PC with consensus title. Re-query only fires ~20% of scans, adds
-    // ~300-600ms when it does. Net savings: ~600-900ms per scan.
-    // Ship #22b: priceCharting already declared above for era-gate (line 2071)
-    if (imageConsensusTitle && imageConsensusTitle !== pcInitialTitle) {
-      // Check if initial PC product passes main-token validation.
-      // If PC returned null or the product name lacks the main Vision token,
-      // re-query with consensus title.
-      const needsRequery = !priceCharting || (() => {
-        const COMMON_TOKENS = new Set([
-          'marvel', 'dc', 'image', 'idw', 'comics', 'comic',
-          'book', 'the', 'a', 'an', 'of', 'and', 'in', 'for',
-          'dark', 'horse', 'boom', 'archie', 'dynamite',
-        ]);
-        const tokenize = (s) =>
-          String(s || '').toLowerCase()
-            .replace(/[^a-z0-9\s]/g, ' ')
-            .split(/\s+/)
-            .filter(t => t.length > 1 && !COMMON_TOKENS.has(t));
-        const visionTokens = tokenize(pcInitialTitle);
-        const mainToken = visionTokens[0];
-        if (!mainToken) return false; // No main token to check
-        const productTokens = tokenize(priceCharting.productName || '');
-        return !productTokens.includes(mainToken);
-      })();
-
-      if (needsRequery) {
-        mark('pc_requery_start');
-        const gateSource = familyCandidateAccepted
-          ? `family-candidate ${familyCandidate.decision}`
-          : 'visualConsensus';
-        // Ship Pattern-J — Use sanitized confirmedTitle for pc-requery instead of
-        // raw imageConsensusTitle to prevent seller inventory codes (mm22, A2, etc.)
-        // from contaminating PriceCharting queries. confirmedTitle has already been
-        // sanitized via detectTitleContamination + sanitizeTitle at line ~1980.
-        const pcRequeryTitle = confirmedTitle || imageConsensusTitle || title;
-        console.log(`[pc-requery] consensus "${imageConsensusTitle}" differs from Vision "${pcInitialTitle}" — re-querying PC with "${pcRequeryTitle}" (gated: ${gateSource} accepted)`);
-        priceCharting = await lookupPriceCharting({
-          title: pcRequeryTitle,
-          issue: confirmedIssue,
-          year,
-          // Q86: requery runs pre-resolveYear — same preliminary confidence
-          yearConfidence: ebayYearAuthoritative ? 'proven' : 'unproven',
-          eraHint: eraAdvisory,
-          // Q108 CHANGE 2 — confirmedVariant not yet resolved here either;
-          // req.body.variant is the correct proxy (see note at initial PC lookup).
-          variant: req.body.variant || null,
-        }).catch(() => null);
-        mark('pc_requery_complete');
-        if (priceCharting) {
-          console.log(`[pc-requery] matched: "${priceCharting.productName}"`);
-        }
-      } else {
-        console.log(`[pc-query] consensus differs but initial PC product passes main-token check — keeping initial result`);
+    if (needsRequery) {
+      mark('pc_requery_start');
+      const gateSource = familyCandidateAccepted
+        ? `family-candidate ${familyCandidate.decision}`
+        : (imageConsensusTitle ? 'visualConsensus' : 'confirmedTitle-vs-pc-match');
+      // Ship Pattern-J — Use sanitized confirmedTitle for pc-requery instead of
+      // raw imageConsensusTitle to prevent seller inventory codes (mm22, A2, etc.)
+      // from contaminating PriceCharting queries. confirmedTitle has already been
+      // sanitized via detectTitleContamination + sanitizeTitle at line ~1980.
+      const pcRequeryTitle = confirmedTitle || imageConsensusTitle || title;
+      console.log(
+        `[pc-requery] confirmedTitle "${pcRequeryTitle}" vs initial PC match ` +
+        `${priceCharting ? `"${priceCharting.productName}"` : '(none)'} — insufficient overlap, ` +
+        `re-querying PC (gated: ${gateSource})`
+      );
+      priceCharting = await lookupPriceCharting({
+        title: pcRequeryTitle,
+        issue: confirmedIssue,
+        year,
+        // Q86: requery runs pre-resolveYear — same preliminary confidence
+        yearConfidence: ebayYearAuthoritative ? 'proven' : 'unproven',
+        eraHint: eraAdvisory,
+        // Q108 CHANGE 2 — confirmedVariant not yet resolved here either;
+        // req.body.variant is the correct proxy (see note at initial PC lookup).
+        variant: req.body.variant || null,
+      }).catch(() => null);
+      mark('pc_requery_complete');
+      if (priceCharting) {
+        console.log(`[pc-requery] matched: "${priceCharting.productName}"`);
       }
-    } else if (imageConsensusTitle) {
-      console.log(`[pc-query] using image consensus title: "${imageConsensusTitle}" (Vision was: "${title}")`);
-    } else if (hasSubtitle && subtitleStripped !== title) {
-      console.log(`[pc-query] subtitle stripped: "${title}" → "${subtitleStripped}"`);
+    } else {
+      console.log(`[pc-query] initial PC match "${priceCharting.productName}" already overlaps confirmedTitle "${confirmedTitle}" sufficiently — keeping initial result`);
     }
 
     // Ship 26.2 / Ship 12 — Canonical search title selection.

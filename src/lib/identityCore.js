@@ -345,6 +345,52 @@ export const checkAssemblyIntegrity = (visionTitle, assembledTitle, compTitles =
   return { intact: true, missing: [], added: [], shouldFallback: false, reason: null };
 };
 
+// Generic publisher/franchise words that pass on nearly every comic and
+// don't discriminate between products — filtered out of the PC-match
+// overlap check below so e.g. "comics"/"the" don't inflate the ratio.
+const PC_MATCH_COMMON_TOKENS = new Set([
+  'marvel', 'dc', 'image', 'idw', 'comics', 'comic',
+  'book', 'the', 'a', 'an', 'of', 'and', 'in', 'for',
+  'dark', 'horse', 'boom', 'archie', 'dynamite',
+]);
+
+/**
+ * Q-PC-REQUERY-GATE — does a PriceCharting product name still adequately
+ * represent our confirmed identity?
+ *
+ * Replaces a prior "shares one token" heuristic that only checked whether
+ * confirmedTitle's FIRST tokenized word appeared anywhere in productName.
+ * Franchise titles sharing a common lead word (Spider-Man / Spider-Verse /
+ * Spider-Versity / Spider-Woman / Spider-Gwen all start with "spider")
+ * always passed that check regardless of which product PC actually
+ * matched — Spider-Versity class: confirmedTitle "Amazing Spider Versity"
+ * vs PC match "Spider-Verse ... Camuncoli Variant" shared "spider" and
+ * wrongly passed. This checks the MAJORITY of confirmedTitle's substantive
+ * tokens, not just the first.
+ *
+ * @param {string} confirmedTitle - our current, fully-resolved identity
+ * @param {string} productName - PriceCharting's matched product name
+ * @param {number} threshold - minimum overlap ratio (default 0.5 — this is
+ *   a single-title-vs-single-product comparison, not pool-internal
+ *   consensus, so it uses the existing top-rank-guard forwardRatio
+ *   convention rather than the stricter 0.6 pool-consensus bar used
+ *   elsewhere in this file)
+ * @returns {boolean} true when productName sufficiently represents confirmedTitle
+ */
+export const titleOverlapsProduct = (confirmedTitle, productName, threshold = 0.5) => {
+  const tokenize = (s) => String(s || '').toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length > 1 && !PC_MATCH_COMMON_TOKENS.has(t));
+
+  const confirmedTokens = tokenize(confirmedTitle);
+  if (confirmedTokens.length === 0) return true; // nothing substantive to check against
+
+  const productTokens = tokenize(productName);
+  const overlapCount = confirmedTokens.filter((t) => productTokens.includes(t)).length;
+  return (overlapCount / confirmedTokens.length) >= threshold;
+};
+
 /**
  * Calculate title overlap percentage between two strings.
  *
