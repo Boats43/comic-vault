@@ -877,23 +877,39 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
         `${s.r.volume?.name}(name=${s.nameScore} yr=${s.yearScore} pub=${s.publisherScore} sub=${s.subtitleScore || 0} total=${s.total} vid=${s.volId})`
       ).join(" | ")}`);
 
-      // PART 2: Publisher tiebreaker when top 2 scores within 10 points
       const topScore = scored[0].total;
-      const closeVols = scored.filter(c => topScore - c.total <= 10);
 
-      if (closeVols.length > 1 && pubLower) {
-        const pubMatch = closeVols.find(c => {
-          const volPub = String(c.volume?.publisher?.name || '').toLowerCase();
-          return volPub.includes(pubLower) || pubLower.includes(volPub);
-        });
-        if (pubMatch) {
-          console.log(`[cv-pub-tiebreaker] ${closeVols.length} within 10pts → publisher match wins: ${pubMatch.volume?.name}`);
-          match = pubMatch.r;
+      // Q-BATMAN222 — scored is sorted descending, so topScore===0 means
+      // EVERY candidate scored <=0 on every axis (name/year/publisher/
+      // subtitle) -- none of them actually matched anything about this
+      // book. Real production case: ComicVine matched "Batman" to a
+      // volume named "Tiger" (all top-3 candidates: name=0 yr=0 pub=0
+      // sub=0 total=0). The tiebreaker below exists to pick between
+      // genuine close contenders, not to manufacture a "winner" out of a
+      // field of complete non-matches -- return no-match instead of
+      // silently adopting whichever volume happens to sort first among
+      // equally-worthless scores.
+      if (topScore === 0) {
+        console.log(`[comicvine] all ${scored.length} candidates score total=0 — no genuine match, returning none instead of tiebreaking`);
+        match = null;
+      } else {
+        // PART 2: Publisher tiebreaker when top 2 scores within 10 points
+        const closeVols = scored.filter(c => topScore - c.total <= 10);
+
+        if (closeVols.length > 1 && pubLower) {
+          const pubMatch = closeVols.find(c => {
+            const volPub = String(c.volume?.publisher?.name || '').toLowerCase();
+            return volPub.includes(pubLower) || pubLower.includes(volPub);
+          });
+          if (pubMatch) {
+            console.log(`[cv-pub-tiebreaker] ${closeVols.length} within 10pts → publisher match wins: ${pubMatch.volume?.name}`);
+            match = pubMatch.r;
+          } else {
+            match = scored[0].r;
+          }
         } else {
           match = scored[0].r;
         }
-      } else {
-        match = scored[0].r;
       }
     }
     // No match — don't fall through to results[0].
