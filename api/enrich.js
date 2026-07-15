@@ -5681,6 +5681,13 @@ export default async function handler(req, res) {
       if (pcSales.salesVelocity && Object.keys(pcSales.salesVelocity).length > 0) {
         out.salesVelocity = pcSales.salesVelocity;
       }
+      // Q-audit COMMIT 5 — month-over-month price trend, same PC HTML.
+      if (
+        pcSales.priceChart &&
+        ((pcSales.priceChart.used?.length || 0) + (pcSales.priceChart.graded?.length || 0)) > 0
+      ) {
+        out.priceChart = pcSales.priceChart;
+      }
     }
 
     // Ship #25 — Velocity analysis + dynamic pricing

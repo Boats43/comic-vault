@@ -56,6 +56,12 @@ function normalizeItem(item) {
     } : { recentSales: [], prices: [] },
     soldComps: Array.isArray(item.soldComps) ? item.soldComps : [],
     pop: item.pop || {},
+    // Q-audit COMMIT 5 — same defensive-default pattern as rawComps above.
+    priceChart: item.priceChart ? {
+      used: [],
+      graded: [],
+      ...item.priceChart,
+    } : { used: [], graded: [] },
   };
 }
 
@@ -111,6 +117,81 @@ const fmtSaleWhen = (iso, daysAgo) => {
   }
   return "—";
 };
+
+// Q-audit COMMIT 5 — month-over-month price-trend chart. Hand-rolled inline
+// SVG polyline rather than a charting library: two series, one shared price
+// axis, no interaction beyond a native <title> tooltip on the endpoints —
+// not enough surface here to justify a new dependency. Colors are the
+// dataviz skill's reference-palette categorical slots 1 (blue) and 4
+// (amber) for the dark surface this app renders on — validated via
+// scripts/validate_palette.js (lightness band, CVD ΔE 27.4, normal-vision
+// ΔE 30.7, contrast all pass); the app's own gold #d4af37 was tried first
+// and failed the lightness-band check against this surface.
+const CHART_COLOR_USED = '#3987e5';
+const CHART_COLOR_GRADED = '#c98500';
+
+function PriceChartSVG({ priceChart }) {
+  const used = Array.isArray(priceChart?.used) ? priceChart.used : [];
+  const graded = Array.isArray(priceChart?.graded) ? priceChart.graded : [];
+  const all = [...used, ...graded];
+  if (all.length < 2) return null;
+
+  const W = 280, H = 100, PAD_L = 38, PAD_R = 8, PAD_T = 8, PAD_B = 16;
+  const xVals = all.map((p) => p.date);
+  const yVals = all.map((p) => p.price);
+  const xMin = Math.min(...xVals), xMax = Math.max(...xVals);
+  const yMin = Math.min(...yVals), yMax = Math.max(...yVals);
+  const xScale = (t) => xMax === xMin ? PAD_L : PAD_L + ((t - xMin) / (xMax - xMin)) * (W - PAD_L - PAD_R);
+  const yScale = (v) => yMax === yMin ? (H - PAD_B) : (H - PAD_B) - ((v - yMin) / (yMax - yMin)) * (H - PAD_T - PAD_B);
+  const toPoints = (series) => series.map((p) => `${xScale(p.date).toFixed(1)},${yScale(p.price).toFixed(1)}`).join(' ');
+  const fmtMonth = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  const last = (series) => series.length > 0 ? series[series.length - 1] : null;
+  const lastUsed = last(used);
+  const lastGraded = last(graded);
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label="Price history chart">
+        {[0, 0.5, 1].map((f) => {
+          const y = PAD_T + f * (H - PAD_T - PAD_B);
+          const v = yMax - f * (yMax - yMin);
+          return (
+            <g key={f}>
+              <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
+              <text x={PAD_L - 4} y={y + 3} textAnchor="end" fontSize="7" fill="#888">{fmtPrice(v)}</text>
+            </g>
+          );
+        })}
+        {used.length >= 2 && (
+          <polyline points={toPoints(used)} fill="none" stroke={CHART_COLOR_USED} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        )}
+        {graded.length >= 2 && (
+          <polyline points={toPoints(graded)} fill="none" stroke={CHART_COLOR_GRADED} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        )}
+        {lastUsed && (
+          <circle cx={xScale(lastUsed.date)} cy={yScale(lastUsed.price)} r="3" fill={CHART_COLOR_USED}>
+            <title>{`Used: ${fmtPrice(lastUsed.price)} (${fmtMonth(lastUsed.date)})`}</title>
+          </circle>
+        )}
+        {lastGraded && (
+          <circle cx={xScale(lastGraded.date)} cy={yScale(lastGraded.price)} r="3" fill={CHART_COLOR_GRADED}>
+            <title>{`Graded: ${fmtPrice(lastGraded.price)} (${fmtMonth(lastGraded.date)})`}</title>
+          </circle>
+        )}
+        <text x={PAD_L} y={H - 3} textAnchor="start" fontSize="7" fill="#888">{fmtMonth(xMin)}</text>
+        <text x={W - PAD_R} y={H - 3} textAnchor="end" fontSize="7" fill="#888">{fmtMonth(xMax)}</text>
+      </svg>
+      <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 11, color: '#999' }}>
+        {used.length > 0 && (
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: CHART_COLOR_USED, marginRight: 4 }} />Ungraded</span>
+        )}
+        {graded.length > 0 && (
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: CHART_COLOR_GRADED, marginRight: 4 }} />Graded</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // Mirror of api/pricecharting-pop.js POP_GRADE_INDEX. Hardcoded
 // client-side so the histogram can label its 14 bars without
@@ -1064,6 +1145,8 @@ function ResultCard({ result, enriching }) {
   // Q-audit COMMIT 4 — full filtered eBay pool (title+price), distinct from
   // the top-5 "Active Listings" already shown from comps.recentSales.
   const [rawLedgerExpanded, setRawLedgerExpanded] = useState(false);
+  // Q-audit COMMIT 5 — month-over-month price trend chart.
+  const [chartExpanded, setChartExpanded] = useState(false);
 
   const comps = result.comps;
   const hasComps =
@@ -1697,6 +1780,43 @@ function ResultCard({ result, enriching }) {
           })()}
         </div>
       )}
+
+      {/* Price History Chart — Q-audit COMMIT 5. Month-over-month trend from
+          PriceCharting's own tracked chart data (used + graded series). */}
+      {(() => {
+        const pointCount = (result.priceChart?.used?.length || 0) + (result.priceChart?.graded?.length || 0);
+        if (pointCount < 2) return null;
+        return (
+          <div style={{ marginTop: 8, marginBottom: 4 }}>
+            <div
+              onClick={() => setChartExpanded(!chartExpanded)}
+              style={{
+                cursor: 'pointer',
+                fontSize: 11,
+                color: '#888',
+                fontWeight: 600,
+                letterSpacing: 0.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+            >
+              <span>{chartExpanded ? '▼' : '▶'}</span>
+              <span>PRICE HISTORY</span>
+            </div>
+            {chartExpanded && (
+              <div style={{
+                marginTop: 6,
+                padding: '8px 10px',
+                background: 'rgba(255,255,255,0.04)',
+                borderRadius: 6,
+              }}>
+                <PriceChartSVG priceChart={result.priceChart} />
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Full eBay Comp Pool — Q-audit COMMIT 4. rawComps.prices is the
           complete filtered survivor pool (every comp that passed the full
@@ -3097,6 +3217,8 @@ function CollectionDetail({
   // Q-audit COMMIT 4 — full filtered eBay pool (title+price), distinct from
   // the top-5 "Active Listings" already shown from item.comps.recentSales.
   const [rawLedgerExpanded, setRawLedgerExpanded] = useState(false);
+  // Q-audit COMMIT 5 — month-over-month price trend chart.
+  const [chartExpanded, setChartExpanded] = useState(false);
   const [popExpanded, setPopExpanded] = useState(false);
   const [storyExpanded, setStoryExpanded] = useState(false); // Ship #21c
   const [derivationExpanded, setDerivationExpanded] = useState(false); // Ship #21e
@@ -3995,6 +4117,43 @@ function CollectionDetail({
           })()}
         </div>
       )}
+
+      {/* Price History Chart — Q-audit COMMIT 5. Month-over-month trend from
+          PriceCharting's own tracked chart data (used + graded series). */}
+      {(() => {
+        const pointCount = (item.priceChart?.used?.length || 0) + (item.priceChart?.graded?.length || 0);
+        if (pointCount < 2) return null;
+        return (
+          <div style={{ marginTop: 8, marginBottom: 4 }}>
+            <div
+              onClick={() => setChartExpanded(!chartExpanded)}
+              style={{
+                cursor: 'pointer',
+                fontSize: 11,
+                color: '#888',
+                fontWeight: 600,
+                letterSpacing: 0.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+            >
+              <span>{chartExpanded ? '▼' : '▶'}</span>
+              <span>PRICE HISTORY</span>
+            </div>
+            {chartExpanded && (
+              <div style={{
+                marginTop: 6,
+                padding: '8px 10px',
+                background: 'rgba(255,255,255,0.04)',
+                borderRadius: 6,
+              }}>
+                <PriceChartSVG priceChart={item.priceChart} />
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Full eBay Comp Pool — Q-audit COMMIT 4. rawComps.prices is the
           complete filtered survivor pool (every comp that passed the full
@@ -9239,6 +9398,7 @@ export default function App() {
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                 rawComps: enrich.rawComps || cur.rawComps || null,
+                priceChart: enrich.priceChart || cur.priceChart || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: syncedDecision,
                 // Ship #24a-3 — canonical contract. Follows the same
@@ -9658,6 +9818,7 @@ export default function App() {
                   salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                   velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                   rawComps: enrich.rawComps || cur.rawComps || null,
+                  priceChart: enrich.priceChart || cur.priceChart || null,
                   matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
                   // Preserve manual list price edits
@@ -9752,6 +9913,7 @@ export default function App() {
                   salesVelocity: enrich.salesVelocity || s.salesVelocity || null,
                   velocityAnalysis: enrich.velocityAnalysis || s.velocityAnalysis || null,
                   rawComps: enrich.rawComps || s.rawComps || null,
+                  priceChart: enrich.priceChart || s.priceChart || null,
                   confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || s.matchConfidence || null,
                   contract: enrich.contract ?? s.contract ?? null, // Ship #24a-3
@@ -10085,6 +10247,7 @@ export default function App() {
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                 rawComps: enrich.rawComps || cur.rawComps || null,
+                priceChart: enrich.priceChart || cur.priceChart || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: enrich.decision || cur.decision,
                 contract: enrich.contract ?? cur.contract ?? null, // Ship #24a-3
@@ -10588,6 +10751,7 @@ export default function App() {
       salesVelocity: enrich.salesVelocity || item.salesVelocity || null,
       velocityAnalysis: enrich.velocityAnalysis || item.velocityAnalysis || null,
       rawComps: enrich.rawComps || item.rawComps || null,
+      priceChart: enrich.priceChart || item.priceChart || null,
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
       matchConfidence: enrich.matchConfidence || item.matchConfidence || null,
       decision: enrich.decision || item.decision,
@@ -11468,7 +11632,7 @@ export default function App() {
                             setCatalogue((prev) => {
                               const cur = prev.find((x) => x.id === savedId);
                               if (!cur) return prev;
-                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });

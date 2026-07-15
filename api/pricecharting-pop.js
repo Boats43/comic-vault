@@ -403,6 +403,50 @@ export const extractPriceLadder = (html) => {
   return ladder;
 };
 
+// ───────────────────────── price chart (Q-audit COMMIT 5) ────────────────────
+//
+// PC product pages embed a month-over-month price-trend chart (Highstock,
+// /js/highstock.js) as a plain JS variable in the SAME HTML this module
+// already fetches for pop/sales/ladder/velocity — zero new requests.
+//
+//   VGPC.chart_data = {"used":[[1751349600000,679],...],"graded":[[...]],
+//                       "new":[...],"cib":[...],"boxonly":[...],"manualonly":[...]}
+//
+// Six series total, but four ("new"/"cib"/"boxonly"/"manualonly") are the
+// same video-game-origin leftover buckets already documented for the
+// completed-auctions tabs above — junk for comics, dropped here rather than
+// passed through. Only "used" (ungraded trend) and "graded" (one blended
+// graded trend — NOT broken out per CGC grade like the ladder) are real.
+// Values are in cents (confirmed against a live ladder: chart's "used"
+// trend and the ladder's Ungraded price landed in the same range once
+// divided by 100). Zero-price points ($0.00 — PC has no data for that
+// month, not a free comic) are dropped, matching extractPriceLadder.
+
+const CHART_DATA_RE = /VGPC\.chart_data\s*=\s*(\{[^;]+\})\s*;/;
+
+export const extractPriceChart = (html) => {
+  if (!html) return null;
+  const m = html.match(CHART_DATA_RE);
+  if (!m) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(m[1]);
+  } catch (err) {
+    console.log(`[pc-chart] JSON parse failed: ${err?.message || err}`);
+    return null;
+  }
+  const toSeries = (arr) =>
+    Array.isArray(arr)
+      ? arr
+          .filter((pt) => Array.isArray(pt) && pt.length === 2 && Number(pt[1]) > 0)
+          .map(([ts, cents]) => ({ date: Number(ts), price: Number(cents) / 100 }))
+      : [];
+  const used = toSeries(parsed?.used);
+  const graded = toSeries(parsed?.graded);
+  if (used.length === 0 && graded.length === 0) return null;
+  return { used, graded };
+};
+
 // ───────────────────────── sales velocity (Ship #20a.5) ──────────────────────
 //
 // Per-grade liquidity lives in <td class="js-show-tab" data-show-tab="...">
@@ -510,6 +554,7 @@ const EMPTY_SALES_RESULT = Object.freeze({
   salesByGrade: {},
   priceLadder: {},
   salesVelocity: {},
+  priceChart: null,
 });
 
 export const fetchPricechartingSales = async (
@@ -553,11 +598,13 @@ export const fetchPricechartingSales = async (
     // tabMap reused (single buildTabGradeMap call serves both extractors).
     const priceLadder = extractPriceLadder(html);
     const salesVelocity = extractSalesVelocity(html, tabMap);
+    // Q-audit COMMIT 5 — same cached HTML, zero new requests.
+    const priceChart = extractPriceChart(html);
 
     console.log(
-      `[pc-sales] id=${productId} grades=${Object.keys(salesByGrade).length} userGrade=${lookupKey} soldComps=${soldComps.length} ladder=${Object.keys(priceLadder).length} velocity=${Object.keys(salesVelocity).length}`
+      `[pc-sales] id=${productId} grades=${Object.keys(salesByGrade).length} userGrade=${lookupKey} soldComps=${soldComps.length} ladder=${Object.keys(priceLadder).length} velocity=${Object.keys(salesVelocity).length} chart=${priceChart ? `${priceChart.used.length}u/${priceChart.graded.length}g` : "none"}`
     );
-    return { soldComps, salesByGrade, priceLadder, salesVelocity };
+    return { soldComps, salesByGrade, priceLadder, salesVelocity, priceChart };
   } catch (err) {
     console.error(`[pc-sales] error id=${productId}: ${err?.message || err}`);
     return { ...EMPTY_SALES_RESULT };
