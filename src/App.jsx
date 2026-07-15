@@ -1053,6 +1053,10 @@ function ResultCard({ result, enriching }) {
   // samples. Toggled by clicking the V/R chip. Per-card state — different
   // cards stay independently expanded.
   const [soldDrawerOpen, setSoldDrawerOpen] = useState(false);
+  // Q-audit COMMIT 1 — full-list toggles for sold/active rows (previously
+  // hard-capped at 3 with no way to see the rest of an already-fetched list).
+  const [soldListExpanded, setSoldListExpanded] = useState(false);
+  const [activeListExpanded, setActiveListExpanded] = useState(false);
 
   const comps = result.comps;
   const hasComps =
@@ -1353,7 +1357,7 @@ function ResultCard({ result, enriching }) {
                   );
                 })()}
               </div>
-              {result.soldComps.slice(0, 3).map((s, i) => {
+              {(soldListExpanded ? result.soldComps : result.soldComps.slice(0, 3)).map((s, i) => {
                 const mpStyle = (mp) => ({
                   marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
                   background: mp === "heritage" ? "rgba(212,175,55,0.15)" : "rgba(22,163,106,0.15)",
@@ -1392,6 +1396,14 @@ function ResultCard({ result, enriching }) {
                   <div key={i} style={rowStyle}>{inner}</div>
                 );
               })}
+              {result.soldComps.length > 3 && (
+                <div
+                  onClick={() => setSoldListExpanded((v) => !v)}
+                  style={{ cursor: "pointer", fontSize: 12, color: "#d4af37", opacity: 0.85, padding: "2px 0 4px" }}
+                >
+                  {soldListExpanded ? "Show less" : `Show all ${result.soldComps.length}`}
+                </div>
+              )}
               {soldDrawerOpen && Array.isArray(result.soldCompDiagnostics?.rejectedSamples) && result.soldCompDiagnostics.rejectedSamples.length > 0 && (
                 <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(224,86,86,0.06)", border: "1px solid rgba(224,86,86,0.2)" }}>
                   <div className="muted small" style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e05656" }}>
@@ -1444,7 +1456,7 @@ function ResultCard({ result, enriching }) {
               >
                 Active Listings
               </div>
-              {comps.recentSales.slice(0, 3).map((s, i) => {
+              {(activeListExpanded ? comps.recentSales : comps.recentSales.slice(0, 3)).map((s, i) => {
                 const row = (
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1485,6 +1497,14 @@ function ResultCard({ result, enriching }) {
                   </div>
                 );
               })}
+              {comps.recentSales.length > 3 && (
+                <div
+                  onClick={() => setActiveListExpanded((v) => !v)}
+                  style={{ cursor: "pointer", fontSize: 12, color: "#d4af37", opacity: 0.85, padding: "2px 0 4px" }}
+                >
+                  {activeListExpanded ? "Show less" : `Show all ${comps.recentSales.length}`}
+                </div>
+              )}
             </div>
           )}
 
@@ -2922,6 +2942,10 @@ function CollectionDetail({
   const [listPriceWarningDismissed, setListPriceWarningDismissed] = useState(false);
   // Ship #20a.6.1 — collapsible drawer for soldCompDiagnostics rejected samples.
   const [soldDrawerOpen, setSoldDrawerOpen] = useState(false);
+  // Q-audit COMMIT 1 — full-list toggles for sold/active rows (previously
+  // hard-capped at 3 with no way to see the rest of an already-fetched list).
+  const [soldListExpanded, setSoldListExpanded] = useState(false);
+  const [activeListExpanded, setActiveListExpanded] = useState(false);
   // Collapsible sections for enriched data
   const [creatorsExpanded, setCreatorsExpanded] = useState(false);
   const [velocityExpanded, setVelocityExpanded] = useState(false);
@@ -5115,7 +5139,7 @@ function CollectionDetail({
                     );
                   })()}
                 </div>
-                {item.soldComps.slice(0, 3).map((s, i) => {
+                {(soldListExpanded ? item.soldComps : item.soldComps.slice(0, 3)).map((s, i) => {
                   const mpStyle = (mp) => ({
                     marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
                     background: mp === "heritage" ? "rgba(212,175,55,0.15)" : "rgba(22,163,106,0.15)",
@@ -5152,6 +5176,14 @@ function CollectionDetail({
                     <div key={i} style={rowStyle}>{inner}</div>
                   );
                 })}
+                {item.soldComps.length > 3 && (
+                  <div
+                    onClick={() => setSoldListExpanded((v) => !v)}
+                    style={{ cursor: "pointer", fontSize: 12, color: "#d4af37", opacity: 0.85, padding: "2px 0 4px" }}
+                  >
+                    {soldListExpanded ? "Show less" : `Show all ${item.soldComps.length}`}
+                  </div>
+                )}
                 {/* Ship #21d: Show rejected breakdown when drawer open, Rule 21-0 NO-DATA state when 0 rejected */}
                 {soldDrawerOpen && item.soldCompDiagnostics && (item.soldCompDiagnostics.rejectedCount > 0 ? (
                   <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(224,86,86,0.06)", border: "1px solid rgba(224,86,86,0.2)" }}>
@@ -5318,7 +5350,7 @@ function CollectionDetail({
             >
               Active Listings
             </div>
-            {(item.comps?.recentSales || []).slice(0, 3).map((s, i) => {
+            {(activeListExpanded ? (item.comps?.recentSales || []) : (item.comps?.recentSales || []).slice(0, 3)).map((s, i) => {
               const rowStyle = { padding: "6px 0", fontSize: 14 };
               const inner = (
                 <div>
@@ -5342,6 +5374,14 @@ function CollectionDetail({
                 <div key={i} style={rowStyle}>{inner}</div>
               );
             })}
+            {(item.comps?.recentSales || []).length > 3 && (
+              <div
+                onClick={() => setActiveListExpanded((v) => !v)}
+                style={{ cursor: "pointer", fontSize: 12, color: "#d4af37", opacity: 0.85, padding: "2px 0 4px" }}
+              >
+                {activeListExpanded ? "Show less" : `Show all ${(item.comps?.recentSales || []).length}`}
+              </div>
+            )}
             <div style={{ borderTop: "1px solid rgba(212,175,55,0.25)", margin: "8px 0" }} />
             <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
               {/* FIX 2: Display sold avg separately from active listings */}
