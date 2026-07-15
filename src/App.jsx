@@ -1850,23 +1850,36 @@ function ResultCard({ result, enriching }) {
               maxHeight: 240,
               overflowY: 'auto',
             }}>
-              {result.rawComps.prices.map((p, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: 10,
-                    padding: '4px 0',
-                    borderTop: i > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none',
-                  }}
-                >
-                  <span style={{ color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.title || '—'}
-                  </span>
-                  <span style={{ fontWeight: 600, flexShrink: 0 }}>{fmtPrice(p.price)}</span>
-                </div>
-              ))}
+              {result.rawComps.prices.map((p, i) => {
+                const rowStyle = {
+                  display: 'block',
+                  padding: '4px 0',
+                  borderTop: i > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                };
+                const inner = (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                      <span style={{ color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {p.title || '—'}
+                        {p.url && <span style={{ marginLeft: 4 }}>→</span>}
+                      </span>
+                      <span style={{ fontWeight: 600, flexShrink: 0 }}>{fmtPrice(p.price)}</span>
+                    </div>
+                    {(p.date || p.condition) && (
+                      <div style={{ fontSize: 10.5, color: '#777', marginTop: 1 }}>
+                        {p.date ? fmtSaleWhen(p.date, null) : ''}{p.date && p.condition ? ' · ' : ''}{p.condition || ''}
+                      </div>
+                    )}
+                  </>
+                );
+                return p.url ? (
+                  <a key={i} href={p.url} target="_blank" rel="noopener noreferrer" style={rowStyle}>{inner}</a>
+                ) : (
+                  <div key={i} style={rowStyle}>{inner}</div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -4187,23 +4200,36 @@ function CollectionDetail({
               maxHeight: 240,
               overflowY: 'auto',
             }}>
-              {item.rawComps.prices.map((p, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: 10,
-                    padding: '4px 0',
-                    borderTop: i > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none',
-                  }}
-                >
-                  <span style={{ color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.title || '—'}
-                  </span>
-                  <span style={{ fontWeight: 600, flexShrink: 0 }}>{fmtPrice(p.price)}</span>
-                </div>
-              ))}
+              {item.rawComps.prices.map((p, i) => {
+                const rowStyle = {
+                  display: 'block',
+                  padding: '4px 0',
+                  borderTop: i > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                };
+                const inner = (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                      <span style={{ color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {p.title || '—'}
+                        {p.url && <span style={{ marginLeft: 4 }}>→</span>}
+                      </span>
+                      <span style={{ fontWeight: 600, flexShrink: 0 }}>{fmtPrice(p.price)}</span>
+                    </div>
+                    {(p.date || p.condition) && (
+                      <div style={{ fontSize: 10.5, color: '#777', marginTop: 1 }}>
+                        {p.date ? fmtSaleWhen(p.date, null) : ''}{p.date && p.condition ? ' · ' : ''}{p.condition || ''}
+                      </div>
+                    )}
+                  </>
+                );
+                return p.url ? (
+                  <a key={i} href={p.url} target="_blank" rel="noopener noreferrer" style={rowStyle}>{inner}</a>
+                ) : (
+                  <div key={i} style={rowStyle}>{inner}</div>
+                );
+              })}
             </div>
           )}
         </div>

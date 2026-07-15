@@ -6505,12 +6505,19 @@ export default async function handler(req, res) {
       // GL-0: applyAnchorDirection (responseContract.js) reads
       // out.rawComps.prices to compute the active median. Without this
       // array the ≥1-active guard returns early and 24c can never fire
-      // (EX-1 silence on dpl_43c65g9 / build 2b19171). Minimal shape —
-      // price for the median, title for contamination debugging.
+      // (EX-1 silence on dpl_43c65g9 / build 2b19171). price/title were the
+      // original minimal shape for that consumer; url/date/condition
+      // (Q-audit COMMIT 6) are additive display fields comps.js already
+      // attaches to every listing during filtering (confirmed they survive
+      // the AI-verify pass unstripped, enrich.js:3479-3481) -- they were
+      // simply discarded at this one reduction step, not lost upstream.
       prices: Array.isArray(rawComps.prices)
         ? rawComps.prices.map((p) => ({
             price: typeof p === 'number' ? p : (p?.price ?? null),
             title: p?.title || null,
+            url: p?.url || null,
+            date: p?.endTime || null,
+            condition: p?.conditionDisplayName || null,
           }))
         : [],
     } : { count: 0 };
