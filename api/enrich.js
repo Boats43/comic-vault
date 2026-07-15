@@ -2271,8 +2271,13 @@ export default async function handler(req, res) {
       // → assembly drops "x" → integrity check FAILS → force Vision title.
       // B1 (22e-LOSS): Phase 1 check (missing Vision tokens only; comp-consensus
       // check runs post-fetch in Phase 2).
+      // Q-TITLE-ZERO-SUPPORT — pass the eBay visual pool's raw titles instead
+      // of []. Same pool already feeding agreement.visionIssueCount (Vision
+      // zero-support fix) — gives checkAssemblyIntegrity's zero-support
+      // carve-out real, EARLY data instead of being permanently inert here.
+      const integrityCompTitles = parsedVisualRows.map((r) => r.rawTitle).filter(Boolean);
       console.log(`[22e] checking integrity: vision="${effectiveTitle}" assembled="${confirmedTitle}"`);
-      const integrityCheck = checkAssemblyIntegrity(effectiveTitle, confirmedTitle, []);
+      const integrityCheck = checkAssemblyIntegrity(effectiveTitle, confirmedTitle, integrityCompTitles);
       if (integrityCheck.shouldFallback) {
         console.log(
           `[22e] FORCED vision="${effectiveTitle}" rejected="${confirmedTitle}" ` +

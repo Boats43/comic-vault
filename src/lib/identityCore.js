@@ -223,13 +223,56 @@ export const checkAssemblyIntegrity = (visionTitle, assembledTitle, compTitles =
   const missing = visionTokens.filter(t => !assembledTokens.includes(t));
 
   if (missing.length > 0) {
-    console.log(
-      `[22e-LOSS] FAIL: missing Vision tokens — ` +
-      `vision=[${visionTokens.join(',')}] ` +
-      `assembled=[${assembledTokens.join(',')}] ` +
-      `missing=[${missing.join(',')}]`
-    );
-    return { intact: false, missing, added: [], shouldFallback: true, reason: 'missing-vision-tokens' };
+    // Q-TITLE-ZERO-SUPPORT — same principle as the issue-number zero-support
+    // fix (resolveIdentity): a missing token forces Vision back UNLESS every
+    // missing token is itself unsupported anywhere in the pool AND the
+    // assembled title is independently pool-corroborated. Distinguishes an
+    // assembly bug dropping a real, pool-attested compound (X-Men #44 Angel
+    // class — "x-men" IS attested in the pool, force Vision as before) from
+    // Vision's own unsupported token being correctly replaced by a coherent
+    // pool consensus (Spider-Versity class — "spider-verse" has ZERO pool
+    // support, defer to pool instead of forcing Vision's wrong read back).
+    let zeroSupportDefer = false;
+    if (compTitles.length >= 3) {
+      const compTokenSets = compTitles.map((ct) =>
+        new Set(normalizeForIntegrity(ct).split(/\s+/).filter(Boolean))
+      );
+      const allMissingZeroSupport = missing.every(
+        (tok) => compTokenSets.filter((set) => set.has(tok)).length === 0
+      );
+
+      if (allMissingZeroSupport) {
+        // Reuse Rule 2's exact consensus bar (>=60% of compTitles) applied
+        // to assembled's OWN substantive tokens — proves assembled isn't a
+        // random artifact, just a title the pool independently backs.
+        const substantiveAssembled = assembledTokens.filter((t) => t.length >= 3);
+        const assembledSupported =
+          substantiveAssembled.length > 0 &&
+          substantiveAssembled.every((tok) => {
+            const count = compTokenSets.filter((set) => set.has(tok)).length;
+            return count / compTitles.length >= 0.60;
+          });
+
+        if (assembledSupported) {
+          zeroSupportDefer = true;
+          console.log(
+            `[22e-ZERO-SUPPORT] missing Vision token(s) [${missing.join(',')}] have ZERO pool support ` +
+            `(${compTitles.length} comps) — assembled="${assembledTitle}" IS pool-corroborated — ` +
+            `deferring to pool, not forcing Vision`
+          );
+        }
+      }
+    }
+
+    if (!zeroSupportDefer) {
+      console.log(
+        `[22e-LOSS] FAIL: missing Vision tokens — ` +
+        `vision=[${visionTokens.join(',')}] ` +
+        `assembled=[${assembledTokens.join(',')}] ` +
+        `missing=[${missing.join(',')}]`
+      );
+      return { intact: false, missing, added: [], shouldFallback: true, reason: 'missing-vision-tokens' };
+    }
   }
 
   // Rule 2: Check for excessive token additions (B1 new logic)
