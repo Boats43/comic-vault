@@ -1061,6 +1061,9 @@ function ResultCard({ result, enriching }) {
   // CollectionDetail counterpart, which defaults collapsed): this was the
   // specific data point the card-redesign request was about.
   const [ladderExpanded, setLadderExpanded] = useState(true);
+  // Q-audit COMMIT 4 — full filtered eBay pool (title+price), distinct from
+  // the top-5 "Active Listings" already shown from comps.recentSales.
+  const [rawLedgerExpanded, setRawLedgerExpanded] = useState(false);
 
   const comps = result.comps;
   const hasComps =
@@ -1692,6 +1695,60 @@ function ResultCard({ result, enriching }) {
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* Full eBay Comp Pool — Q-audit COMMIT 4. rawComps.prices is the
+          complete filtered survivor pool (every comp that passed the full
+          filter chain), title+price only -- distinct from the top-5
+          "Active Listings" pulled from comps.recentSales above. */}
+      {Array.isArray(result.rawComps?.prices) && result.rawComps.prices.length > 0 && (
+        <div style={{ marginTop: 8, marginBottom: 4 }}>
+          <div
+            onClick={() => setRawLedgerExpanded(!rawLedgerExpanded)}
+            style={{
+              cursor: 'pointer',
+              fontSize: 11,
+              color: '#888',
+              fontWeight: 600,
+              letterSpacing: 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
+            }}
+          >
+            <span>{rawLedgerExpanded ? '▼' : '▶'}</span>
+            <span>FULL COMP POOL ({result.rawComps.prices.length} listings)</span>
+          </div>
+          {rawLedgerExpanded && (
+            <div style={{
+              marginTop: 6,
+              padding: '8px 10px',
+              background: 'rgba(255,255,255,0.04)',
+              borderRadius: 6,
+              fontSize: 12,
+              maxHeight: 240,
+              overflowY: 'auto',
+            }}>
+              {result.rawComps.prices.map((p, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    padding: '4px 0',
+                    borderTop: i > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                  }}
+                >
+                  <span style={{ color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.title || '—'}
+                  </span>
+                  <span style={{ fontWeight: 600, flexShrink: 0 }}>{fmtPrice(p.price)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -3037,6 +3094,9 @@ function CollectionDetail({
   // Collapsible sections for enriched data
   const [creatorsExpanded, setCreatorsExpanded] = useState(false);
   const [ladderExpanded, setLadderExpanded] = useState(false);
+  // Q-audit COMMIT 4 — full filtered eBay pool (title+price), distinct from
+  // the top-5 "Active Listings" already shown from item.comps.recentSales.
+  const [rawLedgerExpanded, setRawLedgerExpanded] = useState(false);
   const [popExpanded, setPopExpanded] = useState(false);
   const [storyExpanded, setStoryExpanded] = useState(false); // Ship #21c
   const [derivationExpanded, setDerivationExpanded] = useState(false); // Ship #21e
@@ -3933,6 +3993,60 @@ function CollectionDetail({
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* Full eBay Comp Pool — Q-audit COMMIT 4. rawComps.prices is the
+          complete filtered survivor pool (every comp that passed the full
+          filter chain), title+price only -- distinct from the top-5
+          "Active Listings" pulled from comps.recentSales above. */}
+      {Array.isArray(item.rawComps?.prices) && item.rawComps.prices.length > 0 && (
+        <div style={{ marginTop: 8, marginBottom: 4 }}>
+          <div
+            onClick={() => setRawLedgerExpanded(!rawLedgerExpanded)}
+            style={{
+              cursor: 'pointer',
+              fontSize: 11,
+              color: '#888',
+              fontWeight: 600,
+              letterSpacing: 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
+            }}
+          >
+            <span>{rawLedgerExpanded ? '▼' : '▶'}</span>
+            <span>FULL COMP POOL ({item.rawComps.prices.length} listings)</span>
+          </div>
+          {rawLedgerExpanded && (
+            <div style={{
+              marginTop: 6,
+              padding: '8px 10px',
+              background: 'rgba(255,255,255,0.04)',
+              borderRadius: 6,
+              fontSize: 12,
+              maxHeight: 240,
+              overflowY: 'auto',
+            }}>
+              {item.rawComps.prices.map((p, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    padding: '4px 0',
+                    borderTop: i > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                  }}
+                >
+                  <span style={{ color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.title || '—'}
+                  </span>
+                  <span style={{ fontWeight: 600, flexShrink: 0 }}>{fmtPrice(p.price)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -9124,6 +9238,7 @@ export default function App() {
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
+                rawComps: enrich.rawComps || cur.rawComps || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: syncedDecision,
                 // Ship #24a-3 — canonical contract. Follows the same
@@ -9542,6 +9657,7 @@ export default function App() {
                   priceLadder: enrich.priceLadder || cur.priceLadder || null,
                   salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                   velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
+                  rawComps: enrich.rawComps || cur.rawComps || null,
                   matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
                   // Preserve manual list price edits
@@ -9635,6 +9751,7 @@ export default function App() {
                   priceLadder: enrich.priceLadder || s.priceLadder || null,
                   salesVelocity: enrich.salesVelocity || s.salesVelocity || null,
                   velocityAnalysis: enrich.velocityAnalysis || s.velocityAnalysis || null,
+                  rawComps: enrich.rawComps || s.rawComps || null,
                   confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || s.matchConfidence || null,
                   contract: enrich.contract ?? s.contract ?? null, // Ship #24a-3
@@ -9967,6 +10084,7 @@ export default function App() {
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
+                rawComps: enrich.rawComps || cur.rawComps || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: enrich.decision || cur.decision,
                 contract: enrich.contract ?? cur.contract ?? null, // Ship #24a-3
@@ -10469,6 +10587,7 @@ export default function App() {
       priceLadder: enrich.priceLadder || item.priceLadder || null,
       salesVelocity: enrich.salesVelocity || item.salesVelocity || null,
       velocityAnalysis: enrich.velocityAnalysis || item.velocityAnalysis || null,
+      rawComps: enrich.rawComps || item.rawComps || null,
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
       matchConfidence: enrich.matchConfidence || item.matchConfidence || null,
       decision: enrich.decision || item.decision,
@@ -11349,7 +11468,7 @@ export default function App() {
                             setCatalogue((prev) => {
                               const cur = prev.find((x) => x.id === savedId);
                               if (!cur) return prev;
-                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });
