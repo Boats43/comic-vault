@@ -1147,6 +1147,10 @@ function ResultCard({ result, enriching }) {
   const [rawLedgerExpanded, setRawLedgerExpanded] = useState(false);
   // Q-audit COMMIT 5 — month-over-month price trend chart.
   const [chartExpanded, setChartExpanded] = useState(false);
+  // Q-audit DISPATCH — top-level wrapper for Verified Sold / Ladder /
+  // Price History / Full Comp Pool. Defaults collapsed; the four
+  // sub-sections above keep their own independent expand state.
+  const [evidenceExpanded, setEvidenceExpanded] = useState(false);
 
   const comps = result.comps;
   const hasComps =
@@ -1154,6 +1158,13 @@ function ResultCard({ result, enriching }) {
      Array.isArray(comps.recentSales) &&
      comps.recentSales.length > 0) ||
     (Array.isArray(result.soldComps) && result.soldComps.length > 0);
+  // Q-audit DISPATCH — true when ANY of the four consolidated sub-sections
+  // would have content, so the wrapper never shows with nothing inside.
+  const hasMarketEvidence =
+    (Array.isArray(result.soldComps) && result.soldComps.length > 0) ||
+    (result.priceLadder && Object.keys(result.priceLadder).length > 0) ||
+    (((result.priceChart?.used?.length || 0) + (result.priceChart?.graded?.length || 0)) >= 2) ||
+    (Array.isArray(result.rawComps?.prices) && result.rawComps.prices.length > 0);
   const displayPrice = getDisplayPrice(result);
   // Ship #24a-3 — contract items render contract.price ONLY. The legacy
   // `result.price` string fallback is dead for them: a REFUSED card must
@@ -1403,140 +1414,6 @@ function ResultCard({ result, enriching }) {
             background: "rgba(212,175,55,0.05)",
           }}
         >
-          {/* LAST SOLD section */}
-          {Array.isArray(result.soldComps) && result.soldComps.length > 0 && (
-            <div style={{ marginBottom: 10 }}>
-              <div
-                className="muted small"
-                style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}
-              >
-                Last Sold
-                {(() => {
-                  const newest = result.soldComps[0]?.daysAgo;
-                  const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
-                  // Ship #20a.6 — when raw count > verified, show "V of R verified".
-                  // Ship #20a.6.1 — chip is clickable; expands rejected-samples drawer.
-                  const diag = result.soldCompDiagnostics;
-                  const hasRejected = diag && Array.isArray(diag.rejectedSamples) && diag.rejectedSamples.length > 0;
-                  // Ship #24a-3 — THE verifiedCount is contract.verifiedCount
-                  // (I6 pins it to soldCompDiagnostics; legacy read only for
-                  // pre-contract entries).
-                  const vCount = result.contract?.verifiedCount ?? diag?.verifiedCount ?? 0;
-                  const showVerifiedRatio = diag && diag.rawCount > vCount && vCount > 0;
-                  const verifiedStr = showVerifiedRatio
-                    ? `${vCount} of ${diag.rawCount} sold verified`
-                    : `${result.soldComps.length} sold`;
-                  const onClick = hasRejected
-                    ? (e) => { e.preventDefault(); e.stopPropagation(); setSoldDrawerOpen((v) => !v); }
-                    : undefined;
-                  return (
-                    <span
-                      onClick={onClick}
-                      style={{
-                        marginLeft: 6,
-                        opacity: 0.7,
-                        textTransform: "none",
-                        letterSpacing: 0,
-                        cursor: hasRejected ? "pointer" : "default",
-                        userSelect: "none",
-                      }}
-                      title={hasRejected ? (soldDrawerOpen ? "Hide rejected" : "Show rejected") : undefined}
-                    >
-                      📊 {verifiedStr}{recencyStr ? ` · ${recencyStr}` : ""}{hasRejected ? (soldDrawerOpen ? " ▾" : " ▸") : ""}
-                    </span>
-                  );
-                })()}
-              </div>
-              {(soldListExpanded ? result.soldComps : result.soldComps.slice(0, 3)).map((s, i) => {
-                const mpStyle = (mp) => ({
-                  marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
-                  background: mp === "heritage" ? "rgba(212,175,55,0.15)" : "rgba(22,163,106,0.15)",
-                  color: mp === "heritage" ? "#d4af37" : "#16a34a",
-                  textTransform: "uppercase", letterSpacing: 0.5,
-                });
-                const rowStyle = { padding: "6px 0", fontSize: 14 };
-                const inner = (
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span className="muted small">
-                        {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
-                        {s.marketplace && (
-                          <span style={mpStyle(s.marketplace)}>
-                            {s.marketplace === "heritage" ? "HRT" : "eBay"}
-                          </span>
-                        )}
-                      </span>
-                      <span style={{ fontWeight: 600, color: "#16a34a" }}>
-                        {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
-                        {s.url && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
-                      </span>
-                    </div>
-                    {s.title && (
-                      <div style={{ fontSize: 13, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
-                        {s.title}
-                      </div>
-                    )}
-                  </div>
-                );
-                return s.url ? (
-                  <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>
-                    {inner}
-                  </a>
-                ) : (
-                  <div key={i} style={rowStyle}>{inner}</div>
-                );
-              })}
-              {result.soldComps.length > 3 && (
-                <div
-                  onClick={() => setSoldListExpanded((v) => !v)}
-                  style={{ cursor: "pointer", fontSize: 12, color: "#d4af37", opacity: 0.85, padding: "2px 0 4px" }}
-                >
-                  {soldListExpanded ? "Show less" : `Show all ${result.soldComps.length}`}
-                </div>
-              )}
-              {soldDrawerOpen && Array.isArray(result.soldCompDiagnostics?.rejectedSamples) && result.soldCompDiagnostics.rejectedSamples.length > 0 && (
-                <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(224,86,86,0.06)", border: "1px solid rgba(224,86,86,0.2)" }}>
-                  <div className="muted small" style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e05656" }}>
-                    Rejected ({result.soldCompDiagnostics.rejectedCount} total — top {result.soldCompDiagnostics.rejectedSamples.length})
-                  </div>
-                  {result.soldCompDiagnostics.rejectedSamples.map((rej, i) => (
-                    <div key={i} style={{ padding: "4px 0", fontSize: 12, borderTop: i > 0 ? "1px solid rgba(224,86,86,0.15)" : "none" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                        <span style={{
-                          fontSize: 10, padding: "1px 6px", borderRadius: 3,
-                          background: "rgba(224,86,86,0.15)", color: "#e05656",
-                          whiteSpace: "nowrap", letterSpacing: 0.3,
-                        }}>
-                          {humanizeSoldReason(rej.reason)}
-                        </span>
-                        {rej.price != null && (
-                          <span style={{ color: "#888", fontSize: 11 }}>
-                            {fmtPrice(rej.price)}
-                          </span>
-                        )}
-                      </div>
-                      {rej.title && (
-                        <div style={{ fontSize: 11, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
-                          {rej.title}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {result.soldComps.length >= 2 && (() => {
-                const avg = result.soldComps.reduce((s, c) => s + (c.price || 0), 0) / result.soldComps.length;
-                return (
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 14, borderTop: "1px solid rgba(22,163,106,0.2)", marginTop: 4 }}>
-                    <span className="muted small">Avg sold</span>
-                    <span style={{ fontWeight: 600, color: "#16a34a" }}>{fmtPrice(avg)}</span>
-                  </div>
-                );
-              })()}
-              <div style={{ borderTop: "1px solid rgba(212,175,55,0.25)", margin: "8px 0" }} />
-            </div>
-          )}
-
           {/* ACTIVE LISTINGS section */}
           {Array.isArray(comps.recentSales) && comps.recentSales.length > 0 && (
             <div style={{ marginBottom: 10 }}>
@@ -1696,6 +1573,164 @@ function ResultCard({ result, enriching }) {
           </div>
         </div>
       )}
+
+      {/* MARKET EVIDENCE — Q-audit DISPATCH. Consolidates Verified Sold,
+          Price Ladder, Price History, and Full Comp Pool under one
+          top-level disclosure so the card doesn't carry four separately-
+          scrolling sections. Each sub-section below keeps its own
+          independent expand/collapse state (soldListExpanded /
+          ladderExpanded / chartExpanded / rawLedgerExpanded) -- this
+          wrapper only gates whether the whole group is visible. Display/
+          structure only: every field and every sub-section's own logic
+          is unchanged from Commits 1-6. */}
+      {hasMarketEvidence && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            onClick={() => setEvidenceExpanded(!evidenceExpanded)}
+            style={{
+              cursor: "pointer",
+              fontSize: 12,
+              color: "#d4af37",
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "4px 0",
+            }}
+          >
+            <span>{evidenceExpanded ? "▼" : "▶"}</span>
+            <span>MARKET EVIDENCE</span>
+          </div>
+          {evidenceExpanded && (
+            <div style={{ marginTop: 4 }}>
+              {/* Verified Sold — moved here from the comps-breakdown box above */}
+              {Array.isArray(result.soldComps) && result.soldComps.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <div
+                    className="muted small"
+                    style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}
+                  >
+                    Last Sold
+                    {(() => {
+                      const newest = result.soldComps[0]?.daysAgo;
+                      const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
+                      const diag = result.soldCompDiagnostics;
+                      const hasRejected = diag && Array.isArray(diag.rejectedSamples) && diag.rejectedSamples.length > 0;
+                      const vCount = result.contract?.verifiedCount ?? diag?.verifiedCount ?? 0;
+                      const showVerifiedRatio = diag && diag.rawCount > vCount && vCount > 0;
+                      const verifiedStr = showVerifiedRatio
+                        ? `${vCount} of ${diag.rawCount} sold verified`
+                        : `${result.soldComps.length} sold`;
+                      const onClick = hasRejected
+                        ? (e) => { e.preventDefault(); e.stopPropagation(); setSoldDrawerOpen((v) => !v); }
+                        : undefined;
+                      return (
+                        <span
+                          onClick={onClick}
+                          style={{
+                            marginLeft: 6,
+                            opacity: 0.7,
+                            textTransform: "none",
+                            letterSpacing: 0,
+                            cursor: hasRejected ? "pointer" : "default",
+                            userSelect: "none",
+                          }}
+                          title={hasRejected ? (soldDrawerOpen ? "Hide rejected" : "Show rejected") : undefined}
+                        >
+                          📊 {verifiedStr}{recencyStr ? ` · ${recencyStr}` : ""}{hasRejected ? (soldDrawerOpen ? " ▾" : " ▸") : ""}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  {(soldListExpanded ? result.soldComps : result.soldComps.slice(0, 3)).map((s, i) => {
+                    const mpStyle = (mp) => ({
+                      marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
+                      background: mp === "heritage" ? "rgba(212,175,55,0.15)" : "rgba(22,163,106,0.15)",
+                      color: mp === "heritage" ? "#d4af37" : "#16a34a",
+                      textTransform: "uppercase", letterSpacing: 0.5,
+                    });
+                    const rowStyle = { padding: "6px 0", fontSize: 14 };
+                    const inner = (
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span className="muted small">
+                            {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
+                            {s.marketplace && (
+                              <span style={mpStyle(s.marketplace)}>
+                                {s.marketplace === "heritage" ? "HRT" : "eBay"}
+                              </span>
+                            )}
+                          </span>
+                          <span style={{ fontWeight: 600, color: "#16a34a" }}>
+                            {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
+                            {s.url && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
+                          </span>
+                        </div>
+                        {s.title && (
+                          <div style={{ fontSize: 13, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                            {s.title}
+                          </div>
+                        )}
+                      </div>
+                    );
+                    return s.url ? (
+                      <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>
+                        {inner}
+                      </a>
+                    ) : (
+                      <div key={i} style={rowStyle}>{inner}</div>
+                    );
+                  })}
+                  {result.soldComps.length > 3 && (
+                    <div
+                      onClick={() => setSoldListExpanded((v) => !v)}
+                      style={{ cursor: "pointer", fontSize: 12, color: "#d4af37", opacity: 0.85, padding: "2px 0 4px" }}
+                    >
+                      {soldListExpanded ? "Show less" : `Show all ${result.soldComps.length}`}
+                    </div>
+                  )}
+                  {soldDrawerOpen && Array.isArray(result.soldCompDiagnostics?.rejectedSamples) && result.soldCompDiagnostics.rejectedSamples.length > 0 && (
+                    <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(224,86,86,0.06)", border: "1px solid rgba(224,86,86,0.2)" }}>
+                      <div className="muted small" style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e05656" }}>
+                        Rejected ({result.soldCompDiagnostics.rejectedCount} total — top {result.soldCompDiagnostics.rejectedSamples.length})
+                      </div>
+                      {result.soldCompDiagnostics.rejectedSamples.map((rej, i) => (
+                        <div key={i} style={{ padding: "4px 0", fontSize: 12, borderTop: i > 0 ? "1px solid rgba(224,86,86,0.15)" : "none" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                            <span style={{
+                              fontSize: 10, padding: "1px 6px", borderRadius: 3,
+                              background: "rgba(224,86,86,0.15)", color: "#e05656",
+                              whiteSpace: "nowrap", letterSpacing: 0.3,
+                            }}>
+                              {humanizeSoldReason(rej.reason)}
+                            </span>
+                            {rej.price != null && (
+                              <span style={{ color: "#888", fontSize: 11 }}>
+                                {fmtPrice(rej.price)}
+                              </span>
+                            )}
+                          </div>
+                          {rej.title && (
+                            <div style={{ fontSize: 11, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                              {rej.title}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {result.soldComps.length >= 2 && (() => {
+                    const avg = result.soldComps.reduce((s, c) => s + (c.price || 0), 0) / result.soldComps.length;
+                    return (
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 14, borderTop: "1px solid rgba(22,163,106,0.2)", marginTop: 4 }}>
+                        <span className="muted small">Avg sold</span>
+                        <span style={{ fontWeight: 600, color: "#16a34a" }}>{fmtPrice(avg)}</span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
       {/* Price Ladder — ported from CollectionDetail (Q-audit COMMIT 2), same
           rendering, default expanded here: this is the data the redesign
@@ -1884,7 +1919,10 @@ function ResultCard({ result, enriching }) {
           )}
         </div>
       )}
-
+            </div>
+          )}
+        </div>
+      )}
       {result.cgcVerified === true && (
         <div style={{ background: "#00aa4422", border: "1px solid #00aa44", borderRadius: 6, padding: "6px 12px", marginTop: 8, color: "#00cc55", fontSize: 13 }}>
           ✓ CGC Verified · {result.certNumber} · {result.cgcLabel}
@@ -3232,6 +3270,11 @@ function CollectionDetail({
   const [rawLedgerExpanded, setRawLedgerExpanded] = useState(false);
   // Q-audit COMMIT 5 — month-over-month price trend chart.
   const [chartExpanded, setChartExpanded] = useState(false);
+  // Q-audit DISPATCH — top-level wrapper for Verified Sold / Ladder /
+  // Price History / Market Velocity / Full Comp Pool. Defaults collapsed;
+  // the sub-sections above (plus Market Velocity, which has no toggle of
+  // its own) keep rendering exactly as before once the wrapper is open.
+  const [evidenceExpanded, setEvidenceExpanded] = useState(false);
   const [popExpanded, setPopExpanded] = useState(false);
   const [storyExpanded, setStoryExpanded] = useState(false); // Ship #21c
   const [derivationExpanded, setDerivationExpanded] = useState(false); // Ship #21e
@@ -3324,6 +3367,14 @@ function CollectionDetail({
      Array.isArray(item.comps.recentSales) &&
      item.comps.recentSales.length > 0) ||
     (Array.isArray(item.soldComps) && item.soldComps.length > 0);
+  // Q-audit DISPATCH — true when ANY of the five consolidated sub-sections
+  // would have content, so the wrapper never shows with nothing inside.
+  const hasMarketEvidence =
+    (Array.isArray(item.soldComps) && item.soldComps.length > 0) ||
+    (item.priceLadder && Object.keys(item.priceLadder).length > 0) ||
+    (((item.priceChart?.used?.length || 0) + (item.priceChart?.graded?.length || 0)) >= 2) ||
+    (item.velocityAnalysis && item.velocityAnalysis.hasData) ||
+    (Array.isArray(item.rawComps?.prices) && item.rawComps.prices.length > 0);
   const displayPrice = getDisplayPrice(item);
   // Ship #24a-3 — contract price renders "—" honestly when null (REFUSED),
   // never a $0.00 string (ruling 3).
@@ -4049,6 +4100,181 @@ function CollectionDetail({
         </div>
       )}
 
+      {/* MARKET EVIDENCE — Q-audit DISPATCH. Consolidates Verified Sold,
+          Price Ladder, Price History, Market Velocity, and Full Comp Pool
+          under one top-level disclosure so the card doesn't carry five
+          separately-scrolling sections. Each sub-section below keeps its
+          own independent state where it already had one (soldListExpanded
+          / ladderExpanded / chartExpanded / rawLedgerExpanded); Market
+          Velocity never had its own toggle and still doesn't -- this
+          wrapper only gates whether the whole group is visible. Display/
+          structure only: every field and every sub-section's own logic
+          is unchanged from Commits 1-6. */}
+      {hasMarketEvidence && (
+        <div style={{ marginTop: 8, marginBottom: 4 }}>
+          <div
+            onClick={() => setEvidenceExpanded(!evidenceExpanded)}
+            style={{
+              cursor: "pointer",
+              fontSize: 12,
+              color: "#d4af37",
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "4px 0",
+            }}
+          >
+            <span>{evidenceExpanded ? "▼" : "▶"}</span>
+            <span>MARKET EVIDENCE</span>
+          </div>
+          {evidenceExpanded && (
+            <div style={{ marginTop: 4 }}>
+              {/* Verified Sold — moved here from the comps-breakdown box above */}
+              {Array.isArray(item.soldComps) && item.soldComps.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <div className="muted small" style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+                    Last Sold
+                    {(() => {
+                      const newest = item.soldComps[0]?.daysAgo;
+                      const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
+                      const diag = item.soldCompDiagnostics;
+                      const hasRejected = diag && diag.rejectedCount > 0;
+                      const vCount = item.contract?.verifiedCount ?? diag?.verifiedCount ?? 0;
+                      const showVerifiedRatio = diag && diag.rawCount > vCount && vCount > 0;
+                      const verifiedStr = showVerifiedRatio
+                        ? `${vCount} of ${diag.rawCount} sold verified`
+                        : `${item.soldComps.length} sold`;
+                      const onClick = hasRejected
+                        ? (e) => { e.preventDefault(); e.stopPropagation(); setSoldDrawerOpen((v) => !v); }
+                        : undefined;
+                      return (
+                        <span
+                          onClick={onClick}
+                          style={{
+                            marginLeft: 6,
+                            opacity: 0.7,
+                            textTransform: "none",
+                            letterSpacing: 0,
+                            cursor: hasRejected ? "pointer" : "default",
+                            userSelect: "none",
+                          }}
+                          title={hasRejected ? (soldDrawerOpen ? "Hide rejected" : "Show rejected") : undefined}
+                        >
+                          📊 {verifiedStr}{recencyStr ? ` · ${recencyStr}` : ""}{hasRejected ? (soldDrawerOpen ? " ▾" : " ▸") : ""}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  {(soldListExpanded ? item.soldComps : item.soldComps.slice(0, 3)).map((s, i) => {
+                    const mpStyle = (mp) => ({
+                      marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
+                      background: mp === "heritage" ? "rgba(212,175,55,0.15)" : "rgba(22,163,106,0.15)",
+                      color: mp === "heritage" ? "#d4af37" : "#16a34a",
+                      textTransform: "uppercase", letterSpacing: 0.5,
+                    });
+                    const rowStyle = { padding: "6px 0", fontSize: 14 };
+                    const inner = (
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span className="muted small">
+                            {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
+                            {s.marketplace && (
+                              <span style={mpStyle(s.marketplace)}>
+                                {s.marketplace === "heritage" ? "HRT" : "eBay"}
+                              </span>
+                            )}
+                          </span>
+                          <span style={{ fontWeight: 600, color: "#16a34a" }}>
+                            {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
+                            {s.url && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
+                          </span>
+                        </div>
+                        {s.title && (
+                          <div style={{ fontSize: 13, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                            {s.title}
+                          </div>
+                        )}
+                      </div>
+                    );
+                    return s.url ? (
+                      <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>{inner}</a>
+                    ) : (
+                      <div key={i} style={rowStyle}>{inner}</div>
+                    );
+                  })}
+                  {item.soldComps.length > 3 && (
+                    <div
+                      onClick={() => setSoldListExpanded((v) => !v)}
+                      style={{ cursor: "pointer", fontSize: 12, color: "#d4af37", opacity: 0.85, padding: "2px 0 4px" }}
+                    >
+                      {soldListExpanded ? "Show less" : `Show all ${item.soldComps.length}`}
+                    </div>
+                  )}
+                  {/* Ship #21d: Show rejected breakdown when drawer open, Rule 21-0 NO-DATA state when 0 rejected */}
+                  {soldDrawerOpen && item.soldCompDiagnostics && (item.soldCompDiagnostics.rejectedCount > 0 ? (
+                    <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(224,86,86,0.06)", border: "1px solid rgba(224,86,86,0.2)" }}>
+                      <div className="muted small" style={{ marginBottom: 6, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e05656" }}>
+                        Rejected ({item.soldCompDiagnostics.rejectedCount} total)
+                      </div>
+                      {item.soldCompDiagnostics.reasons && Object.entries(item.soldCompDiagnostics.reasons)
+                        .filter(([_, count]) => count > 0)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([reason, count], i) => (
+                          <div key={i} style={{ fontSize: 11, color: "#bbb", marginBottom: 3 }}>
+                            <span style={{
+                              fontSize: 10, padding: "1px 6px", borderRadius: 3,
+                              background: "rgba(224,86,86,0.15)", color: "#e05656",
+                              marginRight: 6, letterSpacing: 0.3
+                            }}>
+                              {humanizeSoldReason(reason)}
+                            </span>
+                            <span style={{ color: "#888" }}>×{count}</span>
+                          </div>
+                        ))
+                      }
+                      {Array.isArray(item.soldCompDiagnostics.rejectedSamples) && item.soldCompDiagnostics.rejectedSamples.length > 0 && (
+                        <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(224,86,86,0.15)" }}>
+                          <div style={{ fontSize: 10, color: "#888", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                            Sample listings
+                          </div>
+                          {item.soldCompDiagnostics.rejectedSamples.map((rej, i) => (
+                            <div key={i} style={{ padding: "4px 0", fontSize: 12, borderTop: i > 0 ? "1px solid rgba(224,86,86,0.1)" : "none" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                                <span style={{
+                                  fontSize: 10, padding: "1px 6px", borderRadius: 3,
+                                  background: "rgba(224,86,86,0.15)", color: "#e05656",
+                                  whiteSpace: "nowrap", letterSpacing: 0.3,
+                                }}>
+                                  {humanizeSoldReason(rej.reason)}
+                                </span>
+                                {rej.price != null && (
+                                  <span style={{ color: "#888", fontSize: 11 }}>
+                                    {fmtPrice(rej.price)}
+                                  </span>
+                                )}
+                              </div>
+                              {rej.title && (
+                                <div style={{ fontSize: 11, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
+                                  {rej.title}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)" }}>
+                      <div style={{ fontSize: 11, color: "#22c55e" }}>
+                        ✓ All comps verified (0 rejected)
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
       {/* Price Ladder */}
       {item.priceLadder && Object.keys(item.priceLadder).length > 0 && (
         <div style={{ marginTop: 8, marginBottom: 4 }}>
@@ -4168,6 +4394,82 @@ function CollectionDetail({
         );
       })()}
 
+              {/* Ship #25 — Velocity Analysis — moved here from near Price Bands */}
+              {item.velocityAnalysis && item.velocityAnalysis.hasData && (
+                <div style={{
+                  background: (() => {
+                    const tier = item.velocityAnalysis.tier;
+                    if (tier === 'HOT') return 'rgba(220,38,38,0.1)';
+                    if (tier === 'FAST') return 'rgba(234,88,12,0.1)';
+                    if (tier === 'NORMAL') return 'rgba(22,163,74,0.1)';
+                    if (tier === 'SLOW') return 'rgba(202,138,4,0.1)';
+                    return 'rgba(156,163,175,0.1)';
+                  })(),
+                  border: `1px solid ${(() => {
+                    const tier = item.velocityAnalysis.tier;
+                    if (tier === 'HOT') return 'rgba(220,38,38,0.3)';
+                    if (tier === 'FAST') return 'rgba(234,88,12,0.3)';
+                    if (tier === 'NORMAL') return 'rgba(22,163,74,0.3)';
+                    if (tier === 'SLOW') return 'rgba(202,138,4,0.3)';
+                    return 'rgba(156,163,175,0.3)';
+                  })()}`,
+                  borderRadius: 8,
+                  padding: 12,
+                  marginTop: 8,
+                  marginBottom: 4,
+                }}>
+                  <div style={{ color: "#888", fontSize: 11, marginBottom: 8, letterSpacing: 0.5 }}>
+                    MARKET VELOCITY
+                  </div>
+                  <div style={{ fontSize: 13, marginBottom: 8, lineHeight: 1.4 }}>
+                    {item.velocityAnalysis.summary}
+                  </div>
+                  {item.velocityAnalysis.recommendation.recommendedPrice && (
+                    <div style={{
+                      background: 'rgba(255,255,255,0.04)',
+                      borderRadius: 6,
+                      padding: '8px 12px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginTop: 8,
+                    }}>
+                      <span style={{ fontSize: 12, color: '#888' }}>
+                        Recommended ({item.velocityAnalysis.recommendation.recommendedBand}):
+                      </span>
+                      <button
+                        onClick={() => {
+                          setListPrice(item.velocityAnalysis.recommendation.recommendedPrice);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#60a5fa',
+                          fontSize: 15,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          padding: 0,
+                        }}
+                      >
+                        ${item.velocityAnalysis.recommendation.recommendedPrice}
+                      </button>
+                    </div>
+                  )}
+                  {item.velocityAnalysis.saturation?.saturated && (
+                    <div style={{
+                      marginTop: 8,
+                      fontSize: 11,
+                      color: '#fbbf24',
+                      background: 'rgba(251,191,36,0.1)',
+                      padding: '6px 8px',
+                      borderRadius: 4,
+                    }}>
+                      ⚠️ {item.velocityAnalysis.saturation.reason}
+                    </div>
+                  )}
+                </div>
+              )}
+
       {/* Full eBay Comp Pool — Q-audit COMMIT 4. rawComps.prices is the
           complete filtered survivor pool (every comp that passed the full
           filter chain), title+price only -- distinct from the top-5
@@ -4230,6 +4532,10 @@ function CollectionDetail({
                   <div key={i} style={rowStyle}>{inner}</div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
             </div>
           )}
         </div>
@@ -5443,159 +5749,6 @@ function CollectionDetail({
               background: "rgba(212,175,55,0.05)",
             }}
           >
-            {/* LAST SOLD section */}
-            {Array.isArray(item.soldComps) && item.soldComps.length > 0 && (
-              <div style={{ marginBottom: 10 }}>
-                <div className="muted small" style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
-                  Last Sold
-                  {(() => {
-                    const newest = item.soldComps[0]?.daysAgo;
-                    const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
-                    // Ship #20a.6 — when raw count > verified, show "V of R verified".
-                    // Ship #20a.6.1 — chip is clickable; expands rejected-samples drawer.
-                    const diag = item.soldCompDiagnostics;
-                    const hasRejected = diag && diag.rejectedCount > 0; // Ship #21d: check rejectedCount, not just samples
-                    // Ship #24a-3 — contract.verifiedCount is the single source
-                    const vCount = item.contract?.verifiedCount ?? diag?.verifiedCount ?? 0;
-                    const showVerifiedRatio = diag && diag.rawCount > vCount && vCount > 0;
-                    const verifiedStr = showVerifiedRatio
-                      ? `${vCount} of ${diag.rawCount} sold verified`
-                      : `${item.soldComps.length} sold`;
-                    const onClick = hasRejected
-                      ? (e) => { e.preventDefault(); e.stopPropagation(); setSoldDrawerOpen((v) => !v); }
-                      : undefined;
-                    return (
-                      <span
-                        onClick={onClick}
-                        style={{
-                          marginLeft: 6,
-                          opacity: 0.7,
-                          textTransform: "none",
-                          letterSpacing: 0,
-                          cursor: hasRejected ? "pointer" : "default",
-                          userSelect: "none",
-                        }}
-                        title={hasRejected ? (soldDrawerOpen ? "Hide rejected" : "Show rejected") : undefined}
-                      >
-                        📊 {verifiedStr}{recencyStr ? ` · ${recencyStr}` : ""}{hasRejected ? (soldDrawerOpen ? " ▾" : " ▸") : ""}
-                      </span>
-                    );
-                  })()}
-                </div>
-                {(soldListExpanded ? item.soldComps : item.soldComps.slice(0, 3)).map((s, i) => {
-                  const mpStyle = (mp) => ({
-                    marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
-                    background: mp === "heritage" ? "rgba(212,175,55,0.15)" : "rgba(22,163,106,0.15)",
-                    color: mp === "heritage" ? "#d4af37" : "#16a34a",
-                    textTransform: "uppercase", letterSpacing: 0.5,
-                  });
-                  const rowStyle = { padding: "6px 0", fontSize: 14 };
-                  const inner = (
-                    <div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span className="muted small">
-                          {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
-                          {s.marketplace && (
-                            <span style={mpStyle(s.marketplace)}>
-                              {s.marketplace === "heritage" ? "HRT" : "eBay"}
-                            </span>
-                          )}
-                        </span>
-                        <span style={{ fontWeight: 600, color: "#16a34a" }}>
-                          {s.priceFormatted || fmtPrice(s.price)} <span style={{ fontSize: 11, opacity: 0.8 }}>SOLD</span>
-                          {s.url && <span style={{ marginLeft: 4, fontSize: 12 }}>→</span>}
-                        </span>
-                      </div>
-                      {s.title && (
-                        <div style={{ fontSize: 13, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
-                          {s.title}
-                        </div>
-                      )}
-                    </div>
-                  );
-                  return s.url ? (
-                    <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>{inner}</a>
-                  ) : (
-                    <div key={i} style={rowStyle}>{inner}</div>
-                  );
-                })}
-                {item.soldComps.length > 3 && (
-                  <div
-                    onClick={() => setSoldListExpanded((v) => !v)}
-                    style={{ cursor: "pointer", fontSize: 12, color: "#d4af37", opacity: 0.85, padding: "2px 0 4px" }}
-                  >
-                    {soldListExpanded ? "Show less" : `Show all ${item.soldComps.length}`}
-                  </div>
-                )}
-                {/* Ship #21d: Show rejected breakdown when drawer open, Rule 21-0 NO-DATA state when 0 rejected */}
-                {soldDrawerOpen && item.soldCompDiagnostics && (item.soldCompDiagnostics.rejectedCount > 0 ? (
-                  <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(224,86,86,0.06)", border: "1px solid rgba(224,86,86,0.2)" }}>
-                    {/* Ship #21d: Show ALL rejection types with counts + samples (Rule 21-0: DATA state with source tags) */}
-                    <div className="muted small" style={{ marginBottom: 6, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e05656" }}>
-                      Rejected ({item.soldCompDiagnostics.rejectedCount} total)
-                    </div>
-
-                    {/* Rejection breakdown by type */}
-                    {item.soldCompDiagnostics.reasons && Object.entries(item.soldCompDiagnostics.reasons)
-                      .filter(([_, count]) => count > 0)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([reason, count], i) => (
-                        <div key={i} style={{ fontSize: 11, color: "#bbb", marginBottom: 3 }}>
-                          <span style={{
-                            fontSize: 10, padding: "1px 6px", borderRadius: 3,
-                            background: "rgba(224,86,86,0.15)", color: "#e05656",
-                            marginRight: 6, letterSpacing: 0.3
-                          }}>
-                            {humanizeSoldReason(reason)}
-                          </span>
-                          <span style={{ color: "#888" }}>×{count}</span>
-                        </div>
-                      ))
-                    }
-
-                    {/* Sample listings (top 3 preserved by backend) */}
-                    {Array.isArray(item.soldCompDiagnostics.rejectedSamples) && item.soldCompDiagnostics.rejectedSamples.length > 0 && (
-                      <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(224,86,86,0.15)" }}>
-                        <div style={{ fontSize: 10, color: "#888", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                          Sample listings
-                        </div>
-                        {item.soldCompDiagnostics.rejectedSamples.map((rej, i) => (
-                          <div key={i} style={{ padding: "4px 0", fontSize: 12, borderTop: i > 0 ? "1px solid rgba(224,86,86,0.1)" : "none" }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                              <span style={{
-                                fontSize: 10, padding: "1px 6px", borderRadius: 3,
-                                background: "rgba(224,86,86,0.15)", color: "#e05656",
-                                whiteSpace: "nowrap", letterSpacing: 0.3,
-                              }}>
-                                {humanizeSoldReason(rej.reason)}
-                              </span>
-                              {rej.price != null && (
-                                <span style={{ color: "#888", fontSize: 11 }}>
-                                  {fmtPrice(rej.price)}
-                                </span>
-                              )}
-                            </div>
-                            {rej.title && (
-                              <div style={{ fontSize: 11, color: "#999", marginTop: 2, lineHeight: 1.3, wordBreak: "break-word" }}>
-                                {rej.title}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 6, background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)" }}>
-                    <div style={{ fontSize: 11, color: "#22c55e" }}>
-                      ✓ All comps verified (0 rejected)
-                    </div>
-                  </div>
-                ))}
-                <div style={{ borderTop: "1px solid rgba(212,175,55,0.25)", margin: "8px 0" }} />
-              </div>
-            )}
-
             {/* Ship #21e: PRICE DERIVATION trace */}
             {item.price && (
               <div style={{ marginBottom: 10 }}>
@@ -6322,81 +6475,6 @@ function CollectionDetail({
                   } comp${item.priceBands.count === 1 ? '' : 's'}`}
                   {item.priceBands.recencyDays != null && ` · Most recent: ${item.priceBands.recencyDays}d ago`}
                 </div>
-              </div>
-            )}
-
-            {/* Ship #25 — Velocity Analysis */}
-            {item.velocityAnalysis && item.velocityAnalysis.hasData && (
-              <div style={{
-                background: (() => {
-                  const tier = item.velocityAnalysis.tier;
-                  if (tier === 'HOT') return 'rgba(220,38,38,0.1)';
-                  if (tier === 'FAST') return 'rgba(234,88,12,0.1)';
-                  if (tier === 'NORMAL') return 'rgba(22,163,74,0.1)';
-                  if (tier === 'SLOW') return 'rgba(202,138,4,0.1)';
-                  return 'rgba(156,163,175,0.1)';
-                })(),
-                border: `1px solid ${(() => {
-                  const tier = item.velocityAnalysis.tier;
-                  if (tier === 'HOT') return 'rgba(220,38,38,0.3)';
-                  if (tier === 'FAST') return 'rgba(234,88,12,0.3)';
-                  if (tier === 'NORMAL') return 'rgba(22,163,74,0.3)';
-                  if (tier === 'SLOW') return 'rgba(202,138,4,0.3)';
-                  return 'rgba(156,163,175,0.3)';
-                })()}`,
-                borderRadius: 8,
-                padding: 12,
-                marginBottom: 12,
-              }}>
-                <div style={{ color: "#888", fontSize: 11, marginBottom: 8, letterSpacing: 0.5 }}>
-                  MARKET VELOCITY
-                </div>
-                <div style={{ fontSize: 13, marginBottom: 8, lineHeight: 1.4 }}>
-                  {item.velocityAnalysis.summary}
-                </div>
-                {item.velocityAnalysis.recommendation.recommendedPrice && (
-                  <div style={{
-                    background: 'rgba(255,255,255,0.04)',
-                    borderRadius: 6,
-                    padding: '8px 12px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginTop: 8,
-                  }}>
-                    <span style={{ fontSize: 12, color: '#888' }}>
-                      Recommended ({item.velocityAnalysis.recommendation.recommendedBand}):
-                    </span>
-                    <button
-                      onClick={() => {
-                        setListPrice(item.velocityAnalysis.recommendation.recommendedPrice);
-                      }}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#60a5fa',
-                        fontSize: 15,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        padding: 0,
-                      }}
-                    >
-                      ${item.velocityAnalysis.recommendation.recommendedPrice}
-                    </button>
-                  </div>
-                )}
-                {item.velocityAnalysis.saturation?.saturated && (
-                  <div style={{
-                    marginTop: 8,
-                    fontSize: 11,
-                    color: '#fbbf24',
-                    background: 'rgba(251,191,36,0.1)',
-                    padding: '6px 8px',
-                    borderRadius: 4,
-                  }}>
-                    ⚠️ {item.velocityAnalysis.saturation.reason}
-                  </div>
-                )}
               </div>
             )}
 
