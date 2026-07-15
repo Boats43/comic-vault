@@ -5649,6 +5649,36 @@ export default async function handler(req, res) {
         console.log(`[match-conf] zero-verified cap: HIGH→MEDIUM (${originalScore}→${finalMc.score})`);
       }
 
+      // Q-FLASHGORDON13-BADGE — active-pool-exhausted cap. compsExhausted
+      // means verifyCompsTitles (the Haiku ai_verify pass) rejected 100%
+      // of the checked ACTIVE eBay listings -- decisionEngine already
+      // surfaces this as the 'ai-verify-rejected-all' warning. But
+      // compTitlesForScore (above) silently falls through to the SOLD
+      // comps pool once the active pool is emptied by that rejection
+      // (rawComps.recentSales/.prices are rebuilt empty at the 0-kept
+      // branch), and none of the OTHER caps in this chain reference
+      // compsExhausted -- a sold-comp-driven score can still reach HIGH
+      // while a rejection warning fires on the same card. Real production
+      // case: Flash Gordon #13, ai_verify kept 0/5 active listings,
+      // matchConfidence still scored 100/HIGH off 16 independently-
+      // verified sold comps -- "✓ Verified 100" next to a RESEARCH/
+      // low-confidence decision on the same card. Same cap shape as the
+      // sibling check above (HIGH->MEDIUM, score capped at 75); the client
+      // already renders MEDIUM as "~ Similar NN" (App.jsx ~5572) with zero
+      // new UI needed. Only fires the message if the sold-comp cap above
+      // didn't already set one, so the more specific reason wins.
+      if (compsExhausted && finalMc.tier === 'HIGH') {
+        const originalScore = finalMc.score;
+        finalMc.tier = 'MEDIUM';
+        finalMc.score = Math.min(finalMc.score, 75);
+        if (!hasSoldCompsButNoneVerified) {
+          finalMc.displayMessage = 'Active listings all rejected by verification — priced from sold comps only';
+        }
+        finalMc.activeVerifyExhaustedCapped = true;
+        finalMc.originalScore = originalScore;
+        console.log(`[match-conf] active-verify-exhausted cap: HIGH→MEDIUM (${originalScore}→${finalMc.score})`);
+      }
+
       // Ship v0-I — era-filter bypass cap. When vintage book comps were
       // rescued via v0-I guardrail fallback (year missing from listings),
       // cap confidence to LOW. The comp pool passed reprint guardrail but
