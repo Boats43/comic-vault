@@ -1636,10 +1636,21 @@ const BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope";
 const lookupEbayVisual = async ({ imageBase64, claudeIssue }) => {
   // Ship #20a.6.7a — modern gate lifted (was: skip year>=1985), limit
   // raised 5→20 for richer consensus, structured items[] surfaced for
-  // downstream cross-reference + UI inspection. Issue-consensus voting
-  // unchanged: ≥3 matching #N to override Claude. Items always returned
+  // downstream cross-reference + UI inspection. Items always returned
   // (with parsed title / issue / year / variantTokens) so callers can
   // see ALL parsed rows even when consensus didn't fire.
+  //
+  // Q-ADV397 (2026-07-15) — issue-consensus voting now delegates to
+  // extractConsensus (same helper phase1 already uses for title
+  // consensus + the resolveIdentity zero-support check) instead of a
+  // separate ad-hoc freq/maxCount tally. The two implementations used
+  // different denominators: this function's old tally counted only rows
+  // with a parseable issue number (e.g. 18 of 20), while extractConsensus
+  // counts the full pool (20) — a real production case (Adventure Comics
+  // #397, eBay pool split 9/18 for a different issue #401) cleared the
+  // old ad-hoc ">=3 raw hits" bar at 50% but fails extractConsensus's
+  // issueOk>=50%-of-total gate at the correct denominator (9/20=45%).
+  // Same function, one accounting, can't disagree with itself again.
   //
   // Token parsing lives in src/lib/imageSearchIdentity.js (pure helper,
   // bundled transitively per Ship #15 — no new function endpoint).
@@ -1673,52 +1684,51 @@ const lookupEbayVisual = async ({ imageBase64, claudeIssue }) => {
     const parsedRows = extractIdentityFromImageSearch(items);
 
     console.log('[visual] titles:', items.map((r) => r.title));
-    const issueNumbers = parsedRows.map((r) => r.issue).filter(Boolean);
-    console.log('[visual] extracted issues:', issueNumbers);
+    console.log('[visual] extracted issues:', parsedRows.map((r) => r.issue).filter(Boolean));
 
     const claudeStr = claudeIssue ? String(claudeIssue).trim() : null;
     const result = { items: parsedRows };
 
-    if (issueNumbers.length > 0) {
-      const freq = {};
-      for (const n of issueNumbers) freq[n] = (freq[n] || 0) + 1;
-      let mostCommon = null;
-      let maxCount = 0;
-      for (const [num, count] of Object.entries(freq)) {
-        if (count > maxCount) { mostCommon = num; maxCount = count; }
-      }
-      console.log('[visual] winner:', mostCommon, `(${maxCount}/${issueNumbers.length})`);
+    // Q-ADV397 — same consensus function, same denominator, as phase1's
+    // title consensus and resolveIdentity's zero-support check. Requires
+    // parsedRows.length >= 5 (no attempt on a thin pool) and issueOk =
+    // issueResult.count / parsedRows.length >= 0.5 (not >= 0.5 of just the
+    // parseable-issue subset) before `.issue` is populated at all.
+    const consensus = extractConsensus(parsedRows, claudeIssue);
+    const mostCommon = consensus?.issue ?? null;
+    const claudeInResults = consensus ? consensus.agreement.visionIssueCount > 0 : false;
 
-      if (maxCount >= 3) {
-        // Ship 8 — Vision-presence guard. Previous behavior: override
-        // Vision whenever any other issue won frequency vote. This
-        // produced false negatives like Thanos #11 where eBay returned
-        // 4 hits for #11 and 6 hits for #3 (a more popular issue with
-        // similar cover art). Frequency vote picked #3, system priced
-        // wrong book. Fix: only override when Vision's issue is ABSENT
-        // from eBay results entirely (zero hits). When Vision is in
-        // results, even at minority count, trust Vision — it physically
-        // saw the book on the user's desk.
-        const claudeHits = claudeStr ? (freq[claudeStr] || 0) : 0;
-        const claudeInResults = claudeHits > 0;
+    console.log(
+      '[visual] consensus:',
+      consensus
+        ? `issue=${mostCommon ?? 'none'} (${consensus.agreement.issue}/${consensus.agreement.total}) visionIssueCount=${consensus.agreement.visionIssueCount ?? 'n/a'}`
+        : `none — pool=${parsedRows.length}${parsedRows.length < 5 ? ' (<5, no attempt)' : ' (below issueOk>=50% coherence gate)'}`
+    );
 
-        if (mostCommon && claudeStr && mostCommon !== claudeStr && !claudeInResults) {
-          console.log(`[visual] Claude=#${claudeStr} NOT in eBay results — using consensus #${mostCommon} (${maxCount} hits)`);
-          result.issue = mostCommon;
-          result.issueSource = "ebay_visual";
-          result.claudeIssue = claudeStr;
-        } else if (mostCommon && claudeStr && mostCommon !== claudeStr && claudeInResults) {
-          console.log(`[visual] Claude=#${claudeStr} present in eBay results (${claudeHits} hits) — keeping Claude over consensus #${mostCommon}`);
-          result.issue = claudeStr;
-          result.issueSource = "claude_vision_confirmed";
-        } else {
-          console.log(`[visual] Claude=#${claudeStr} matches eBay=#${mostCommon || "none"} — keeping Claude`);
-          result.issue = claudeStr;
-          result.issueSource = "claude_vision";
-        }
-      } else {
-        console.log('[visual] only', maxCount, 'matches — keeping Claude issue:', claudeStr);
-      }
+    if (mostCommon && claudeStr && mostCommon !== claudeStr && !claudeInResults) {
+      // Ship 8 — Vision-presence guard. Previous behavior: override
+      // Vision whenever any other issue won frequency vote. This
+      // produced false negatives like Thanos #11 where eBay returned
+      // 4 hits for #11 and 6 hits for #3 (a more popular issue with
+      // similar cover art). Frequency vote picked #3, system priced
+      // wrong book. Fix: only override when Vision's issue is ABSENT
+      // from eBay results entirely (zero hits). When Vision is in
+      // results, even at minority count, trust Vision — it physically
+      // saw the book on the user's desk.
+      console.log(`[visual] Claude=#${claudeStr} NOT in eBay results — using consensus #${mostCommon} (${consensus.agreement.issue}/${consensus.agreement.total})`);
+      result.issue = mostCommon;
+      result.issueSource = "ebay_visual";
+      result.claudeIssue = claudeStr;
+    } else if (mostCommon && claudeStr && mostCommon !== claudeStr && claudeInResults) {
+      console.log(`[visual] Claude=#${claudeStr} present in eBay results (${consensus.agreement.visionIssueCount} hits) — keeping Claude over consensus #${mostCommon}`);
+      result.issue = claudeStr;
+      result.issueSource = "claude_vision_confirmed";
+    } else if (mostCommon && claudeStr && mostCommon === claudeStr) {
+      console.log(`[visual] Claude=#${claudeStr} matches eBay consensus #${mostCommon} — keeping Claude`);
+      result.issue = claudeStr;
+      result.issueSource = "claude_vision";
+    } else {
+      console.log(`[visual] no coherent consensus — keeping Claude issue as-is:`, claudeStr);
     }
 
     return result;
@@ -5896,9 +5906,21 @@ export default async function handler(req, res) {
       }
       if (visualResult.issueSource) {
         out.issueSource = visualResult.issueSource;
-        if (visualResult.issueSource === "ebay_visual") {
+        // Q-ADV397 — confirmedIssue is null exactly when resolveIdentity's
+        // zero-support check already escalated this scan (Vision's issue
+        // had zero pool support AND no adoptable alternate — see
+        // vision-zero-support ESCALATE above). That decision must not be
+        // silently reachable-around by a later, independent assignment:
+        // out.issue was landing on visualResult's value regardless, while
+        // identityEscalation (the correct signal) was never read again
+        // after resolveIdentity returned it. A real production case
+        // (Adventure Comics #397) shipped decision.action=ID_REQUIRED
+        // alongside out.issue="401" -- confidently wrong, not missing.
+        if (visualResult.issueSource === "ebay_visual" && confirmedIssue != null) {
           out.issue = visualResult.issue;
           out.claudeIssue = visualResult.claudeIssue;
+        } else if (visualResult.issueSource === "ebay_visual") {
+          console.log(`[visual-guard] suppressed out.issue overwrite (visual="${visualResult.issue}") — confirmedIssue already null from identity escalation`);
         }
       }
     }
