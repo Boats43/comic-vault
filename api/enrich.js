@@ -4737,6 +4737,17 @@ export default async function handler(req, res) {
         'tier2_sold_only': 'verified_sold',
         'verified_sold_stale': 'verified_sold_stale',  // Q71: tier-2.5 stale-sold source
         'tier3_active_discounted': 'active_ask_derived',
+        // Q109-DISPATCH-1-B (2026-07-16): missing this entry silently fell
+        // through to the 'pc_estimate' default below — which is IN
+        // VARIANT_MULT_ELIGIBLE_SOURCES, so a Tier-3 active-anchored price
+        // (already variant-confirmed by construction) got re-multiplied by
+        // the newsstand era multiplier as if it were an unverified PC
+        // estimate, double-counting the premium (ASM #300: correct $856.51
+        // silently overwritten to $513.91). Mirrors its sibling exactly —
+        // same reasoning as verified_sold's exclusion above: the pool
+        // backing this source is already variant-restricted, so the
+        // era-multiplier must not run again on top of it.
+        'tier3_active_discounted_over_fallback_sold': 'active_ask_derived',
         'tier4_pc_estimate': 'pc_estimate',
         // Legacy sources (pre-tier)
         'verified_sold': 'verified_sold',
