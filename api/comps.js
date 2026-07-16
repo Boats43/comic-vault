@@ -42,6 +42,7 @@ import {
   tokenizeTitle,
   hasSufficientTitleOverlap,
   parseListingGrade,
+  getQualitativeGradeCeiling,
   applyPriceSanity,
   extractIssueNumber,
   normalizeIssueFormat,  // Q23 FIX
@@ -1320,6 +1321,16 @@ export const fetchComps = async ({
             if (/\b(FR|PR|Fair|Poor)\b/i.test(titleStr)) {
               console.log('[grade-filter] rejected (Fair/Poor label):',
                 titleStr.slice(0, 50));
+              return false;
+            }
+            // Q47-QUAL: qualitative low-grade phrases ("reading copy", "low
+            // grade", "coverless", etc.) — positive evidence only, same
+            // dictionary + ±1.5 tolerance as soldVerification.js. No match
+            // falls through to the unchanged keep-by-default below.
+            const qualCeiling = getQualitativeGradeCeiling(titleStr);
+            if (qualCeiling != null && Math.abs(numericTarget - qualCeiling) > 1.5) {
+              console.log('[grade-filter] rejected (qualitative phrase):',
+                titleStr.slice(0, 50), 'implied ceiling:', qualCeiling, 'vs our:', numericTarget);
               return false;
             }
             return true;

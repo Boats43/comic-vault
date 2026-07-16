@@ -423,6 +423,56 @@ export const parseListingGrade = (title) => {
   return null;
 };
 
+// Q47-QUAL (2026-07-16, ASM #17 "low grade reading copy" class) — the
+// grade-proximity filter's Fair/Poor check (soldVerification.js and
+// comps.js, both call sites below) only recognizes bare "Fair"/"Poor"
+// words when parseListingGrade finds no structured token. It misses the
+// much more common collector shorthand sellers actually write: "reading
+// copy", "coverless", "detached cover", "missing pages", "well worn",
+// "heavily read" — all reliable, unambiguous signals that a listing is
+// well below mid-grade, none of which parseListingGrade's numeric/
+// letter-abbreviation scan can see. A $61 "low grade reading copy" comp
+// with no parseable grade token was passing the null-grade fallback
+// unfiltered and anchoring the low end of a 24-comp pool for a VG 4.0
+// target book (real market $700-1,100, engine landed at $188.36).
+//
+// Positive-evidence dictionary ONLY — deliberately does not attempt to
+// infer anything from the ABSENCE of grade language. A listing that says
+// nothing about condition at all must keep passing through untouched;
+// only an explicit, known low-grade phrase counts as evidence. Same
+// safety property as tonight's newsstand reason-text fallback.
+//
+// Each phrase maps to a conservative ceiling — the highest grade that
+// phrase could plausibly describe. getQualitativeGradeCeiling returns
+// the STRICTEST (lowest) ceiling among every phrase that matches, so a
+// title matching multiple low-grade signals doesn't get diluted toward
+// the weaker one. Callers apply the SAME ±1.5 tolerance already used for
+// parsed numeric grades — no new threshold invented, just a second way
+// to arrive at a comparable number.
+const QUALITATIVE_GRADE_CEILINGS = [
+  ['reading copy', 1.8],
+  ['low grade', 2.0],
+  ['coverless', 1.0],
+  ['detached cover', 1.0],
+  ['cover detached', 1.0],
+  ['missing pages', 1.0],
+  ['well worn', 2.0],
+  ['well-worn', 2.0],
+  ['heavily read', 1.8],
+];
+
+export const getQualitativeGradeCeiling = (title) => {
+  const t = String(title || '').toLowerCase();
+  if (!t) return null;
+  let strictest = null;
+  for (const [phrase, ceiling] of QUALITATIVE_GRADE_CEILINGS) {
+    if (t.includes(phrase) && (strictest === null || ceiling < strictest)) {
+      strictest = ceiling;
+    }
+  }
+  return strictest;
+};
+
 // ─────────────────────── PRICE / OUTLIER HELPERS ───────────────────────
 
 // Drop price outliers: above 3× median or below 25% of median. Requires

@@ -37,6 +37,7 @@ import {
   hasSufficientTitleOverlap,
   tokenizeTitle,
   parseListingGrade,
+  getQualitativeGradeCeiling,
   applyPriceSanity,
   extractArtist,
 } from "./compHygiene.js";
@@ -684,7 +685,18 @@ export const verifySoldComps = (rawRows, ctx) => {
             pushSample(r, 'gradeMismatch');
             return false;
           }
-          return true; // no parseable grade, keep (already passed tab check)
+          // Q47-QUAL: qualitative low-grade phrases ("reading copy", "low
+          // grade", "coverless", etc.) — positive evidence only. No match
+          // falls through to the unchanged keep-by-default below.
+          const qualCeiling = getQualitativeGradeCeiling(titleStr);
+          if (qualCeiling != null && Math.abs(numericTarget - qualCeiling) > 1.5) {
+            console.log('[sold-reject] qualitative grade phrase |', titleStr.slice(0, 60),
+              'implied ceiling:', qualCeiling, 'vs our:', numericTarget);
+            reasons.gradeMismatch++;
+            pushSample(r, 'gradeMismatch');
+            return false;
+          }
+          return true; // no parseable grade, no conflicting phrase, keep (already passed tab check)
         }
 
         const diff = Math.abs(listingGrade - numericTarget);
