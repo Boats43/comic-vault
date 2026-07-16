@@ -4819,13 +4819,29 @@ export default async function handler(req, res) {
     // Evidence: Batman #222 tier=1 market=$122 → legacy floor=$173 (ask-derived).
     const tierPathActive = priceBandsRaw && priceBandsRaw.tier != null;
 
+    // Finding A [P0, 2026-07-16]: narrowed from tierPathActive. The legacy
+    // floor guard should only be suppressed when the tier price is itself
+    // verified-sold derived (tiers 1/2/2.5) — that's the only case where an
+    // inflated ask-based floor could override a real sold price (the
+    // Batman #222 evidence above). Tier 3 (active-only) and tier 4
+    // (pc_estimate, zero sold comps) have no sold price to protect, so the
+    // grade-aware active floor (gradeFilteredLowest — the same value shown
+    // as "Floor" on the card) must still apply. Previously tier != null
+    // blanket-skipped every tier, leaving tier-4 pc_estimate free to fall
+    // below the card's own displayed floor with nothing to catch it (Thor
+    // #163: rec $11.52 < floor $49.91 — pc_estimate read PriceCharting's
+    // ungraded loose-price ($12.80) x vintage 6.5 multiplier (0.9) instead
+    // of reconciling against the one real, correctly-matched active comp).
+    const soldDerivedTierActive = priceBandsRaw &&
+      (priceBandsRaw.tier === 1 || priceBandsRaw.tier === 2 || priceBandsRaw.tier === 2.5);
+
     if (isPolybagPricing) {
       console.log('[floor] skipped — polybag pricing active');
     } else if (isMegaKeyForFloor) {
       console.log('[floor] skipped — mega-key uses floor map');
     } else if (compsExhausted) {
       console.log('[floor] skipped — all comps rejected by AI verify');
-    } else if (tierPathActive) {
+    } else if (soldDerivedTierActive) {
       console.log(`[floor] skipped — tier ${priceBandsRaw.tier} owns floor enforcement (verified-sold low only)`);
     } else {
       const finalNum = parseFloat(
