@@ -4066,9 +4066,13 @@ function CollectionDetail({
             }}
           >
             <span>{creatorsExpanded ? '▼' : '▶'}</span>
-            {/* 21b-fix: Count valid creators only (filter nulls). Hide count when all null (NO-DATA state). */}
+            {/* 21b-fix (corrected 2026-07-16): extractCreatorsFromComps entries are
+                shaped {canonical, tier, hits, sources, role} — never .name. This block
+                checked .name since 2026-07-04 (4acc050b) and always fell through to
+                "Creator not detected" as a result. Count valid creators only (filter
+                nulls). Hide count when all null (NO-DATA state). */}
             {(() => {
-              const validCount = item.creatorFromComps.filter(c => c.name).length;
+              const validCount = item.creatorFromComps.filter(c => c.canonical).length;
               return validCount > 0
                 ? <span>CREATOR CREDITS ({validCount})</span>
                 : <span>CREATOR CREDITS</span>;
@@ -4083,10 +4087,10 @@ function CollectionDetail({
               fontSize: 13
             }}>
               {/* Ship #21b: Filter null names per Rule 21-0 (no blank sections). When all names null, show "Creator not detected". */}
-              {item.creatorFromComps.filter(c => c.name).length > 0 ? (
-                item.creatorFromComps.filter(c => c.name).map((creator, idx) => (
-                  <div key={idx} style={{ marginBottom: idx < item.creatorFromComps.filter(c => c.name).length - 1 ? 4 : 0 }}>
-                    <strong>{creator.name}</strong>
+              {item.creatorFromComps.filter(c => c.canonical).length > 0 ? (
+                item.creatorFromComps.filter(c => c.canonical).map((creator, idx) => (
+                  <div key={idx} style={{ marginBottom: idx < item.creatorFromComps.filter(c => c.canonical).length - 1 ? 4 : 0 }}>
+                    <strong>{creator.canonical}</strong>
                     {creator.role && <span style={{ color: '#888', marginLeft: 6 }}>({creator.role})</span>}
                   </div>
                 ))
