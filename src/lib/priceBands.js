@@ -251,6 +251,35 @@ export function buildVerifiedActivePool(comps, { title, issue, year, variant }) 
 }
 
 /**
+ * Q109-DISPATCH-1-B (2026-07-16, ASM #300 newsstand) — is the ACTIVE pool
+ * genuinely variant-matched, not just "whatever survived because nothing
+ * matched"? api/comps.js Filter 1c narrows the raw active pool down to
+ * listings whose title contains our variant's meaningful words when ≥2
+ * match, but falls back to keeping everything when fewer than 2 match — it
+ * doesn't stamp that outcome onto the pool it returns, so by the time the
+ * pool reaches computePriceBands there's no signal left distinguishing
+ * "confirmed" from "fell back to unfiltered." This re-derives the same
+ * check locally: same word-extraction rule Filter 1c uses, same 0.7
+ * distinguishing ratio Fix A uses for artist consensus (this session's
+ * general threshold for "most of the pool agrees" vs "coincidence") —
+ * requires a minimum of 2 explicit matches (ratio alone is meaningless on
+ * tiny pools, same reasoning as Fix A's MIN_POOL_FOR_RATIO_GATE) AND that
+ * matches cover at least 70% of the pool (a handful of matches inside an
+ * otherwise-unfiltered large pool isn't confirmation, it's coincidence).
+ */
+function isActivePoolVariantConfirmed(verifiedActive, variant) {
+  if (!variant || !Array.isArray(verifiedActive) || verifiedActive.length < 2) return false;
+  const varWords = String(variant).toLowerCase().split(/\s+/)
+    .filter(w => w.length > 3 && !['variant', 'cover', 'print', 'edition'].includes(w));
+  if (varWords.length === 0) return false;
+  const matching = verifiedActive.filter(v => {
+    const t = String(typeof v === 'object' ? (v?.title || '') : '').toLowerCase();
+    return varWords.some(w => t.includes(w));
+  });
+  return matching.length >= 2 && (matching.length / verifiedActive.length) >= 0.7;
+}
+
+/**
  * Calculate price bands from verified comp pool.
  * Returns { quick, market, stretch, source, count, recencyDays }
  */
@@ -431,12 +460,36 @@ export function computePriceBands({
   // Q69 FIX 1: Broadened condition from 100%-stale to soldPool≥5 AND fresh=0
   // (recent-only pools still get tier-2.5 treatment — sold data outranks active asks)
   let tier = 4; // default: no data
+  let activeAnchoredOverFallbackSold = false;
   if (soldPoolIsAllVariantFallback) {
-    // EX-A: fallback pool never earns Tier 1/2.5 (both trust sold data at
-    // full weight with no active grounding) — cap at Tier 2, which forces
-    // the 70/30 active blend, or fall through to active-only/PC-estimate
-    // tiers when no sold rows even survived the fallback.
-    tier = soldPrices.length >= 1 ? 2 : (verifiedActive.length >= 3 ? 3 : 4);
+    // Q109-DISPATCH-1-B (2026-07-16, ASM #300 newsstand): sold is 100%
+    // edition-ambiguous fallback (readmitted only because the real variant
+    // filters rejected every sold comp) — blending it against a CONFIRMED
+    // variant-matched active pool risks landing on a number that's wrong
+    // for both real markets at once (a $540 blend when confirmed-newsstand
+    // actives run $599-1,599 and the edition-unverified solds run
+    // $227-521 — plausible-looking, anchored to neither). When the active
+    // pool is itself confirmed (not also a fallback/unfiltered pool) and
+    // large enough to trust (≥3, matching Tier 3's existing floor), the
+    // active pool is the only side with verified identity — anchor to it
+    // (Tier 3) instead of blending. Does NOT fire when active is ALSO
+    // ambiguous (both sides unverified — current blend is the best
+    // available signal and is unchanged below).
+    if (verifiedActive.length >= 3 && isActivePoolVariantConfirmed(verifiedActive, variant)) {
+      tier = 3;
+      activeAnchoredOverFallbackSold = true;
+      console.log(
+        `[price-trace] sold pool 100% edition-fallback but active pool confirmed ` +
+        `variant-matched (${verifiedActive.length} comps, variant="${variant}") — ` +
+        `anchoring Tier 3 active-only instead of blending`
+      );
+    } else {
+      // EX-A: fallback pool never earns Tier 1/2.5 (both trust sold data at
+      // full weight with no active grounding) — cap at Tier 2, which forces
+      // the 70/30 active blend, or fall through to active-only/PC-estimate
+      // tiers when no sold rows even survived the fallback.
+      tier = soldPrices.length >= 1 ? 2 : (verifiedActive.length >= 3 ? 3 : 4);
+    }
   }
   else if (freshCount >= 5) tier = 1;
   else if (freshCount >= 1 && freshCount <= 4) tier = 2;
@@ -596,13 +649,17 @@ export function computePriceBands({
       quick: Math.round(activeLow * 0.85 * 100) / 100,
       market: Math.round(discounted * 100) / 100,
       stretch: Math.round(discounted * 1.15 * 100) / 100,
-      source: 'tier3_active_discounted',
+      source: activeAnchoredOverFallbackSold ? 'tier3_active_discounted_over_fallback_sold' : 'tier3_active_discounted',
       count: verifiedActive.length,
       tier: 3,
       askDerivedWarning: 'ask-derived pricing — verify before listing',
+      ...(activeAnchoredOverFallbackSold && {
+        activeAnchoredOverFallbackSold: true,
+        activeAnchoredReason: 'sold pool was 100% edition-ambiguous fallback; confirmed variant-matched active pool used as anchor instead of blending',
+      }),
     };
 
-    console.log(`[tier-3] activeAvg=$${activeAvg.toFixed(2)} discounted=$${discounted.toFixed(2)}`);
+    console.log(`[tier-3] activeAvg=$${activeAvg.toFixed(2)} discounted=$${discounted.toFixed(2)}${activeAnchoredOverFallbackSold ? ' (over-fallback-sold anchor)' : ''}`);
     return result;
   }
 
