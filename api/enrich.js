@@ -5393,9 +5393,18 @@ export default async function handler(req, res) {
             //   basis < 50% of floor  → XMEN1 lock (contamination)
             //   50–80%                → normal floor enforcement
             //   ≥ 80% (incl. above)   → Q90 suppression (GSX 3.0: 116%)
+            //
+            // Q90 extension (2026-07-16, ASM #300 VF 8.0): originally gated
+            // on isGraded===true && numericGrade!=null (slab-only). Raw
+            // scans get numericGrade=null by design (api/grade.js prompt:
+            // "otherwise null" when no slab label) — the slab gate silently
+            // excluded every raw-book sold-derived case, so a raw book with
+            // 3 tight fresh solds ($425/$425/$530, basis $429.60 vs a $500
+            // floor — 86% of floor, inside the 80% band) still got floored
+            // upward. Gate dropped; the 0.8 ratio and 2-comp minimum are
+            // reused exactly, unchanged from the original Q90 calibration.
             const NEAR_FLOOR_RATIO = 0.8;
-            const slabGradeMatchedSold =
-              isGraded === true && numericGrade != null &&
+            const soldMatchedFloorGuard =
               soldDerivedSource &&
               (filteredSold?.length || 0) >= 2 &&
               soldBasis != null &&
@@ -5422,21 +5431,22 @@ export default async function handler(req, res) {
                 `(${hasSoldData ? 'soldAvg' : 'sold-derived price, soldAvg unavailable'})`,
                 `floor=$${floorResult.floor.toLocaleString()}`,
                 `(${((soldBasis / floorResult.floor) * 100).toFixed(0)}% of floor) → RESEARCH + hard-locked`);
-            } else if (slabGradeMatchedSold) {
-              // Q90: sold-derived slab price stands; floor band retained as
-              // reference display only (never re-anchors price or bands).
+            } else if (soldMatchedFloorGuard) {
+              // Q90: sold-derived price stands (slab or raw); floor band
+              // retained as reference display only (never re-anchors price
+              // or bands).
               out.megaKeyFloorSuppressed = true;
               out.megaKeyFloorBand = {
                 low: floorResult.floor,
                 high: floorResult.priceHigh,
                 bucket: floorResult.bucket,
-                reason: 'slab-grade-matched-sold-pool',
+                reason: 'sold-pool-matched-near-floor',
               };
               out.floorBandLow = fmtUsd(floorResult.floor);
               out.floorBandHigh = fmtUsd(floorResult.priceHigh);
               console.log('[Q90] mega-key floor SUPPRESSED:',
                 `${title} #${confirmedIssue} grade=${grade} bucket=${floorResult.bucket}`,
-                `price=${out.price} (${out.pricingSource}, ${filteredSold.length} slab-grade solds)`,
+                `price=${out.price} (${out.pricingSource}, ${filteredSold.length} solds, graded=${isGraded === true})`,
                 `— floor band $${floorResult.floor}–$${floorResult.priceHigh} retained as reference`);
             } else if (currentPriceNum < floorResult.floor) {
               // Normal floor enforcement path
