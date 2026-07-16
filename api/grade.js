@@ -161,6 +161,55 @@ export const detectEditionWarning = (reason) => {
   };
 };
 
+// Q-newsstand (2026-07-16) — AI-CROSS-LAYER-DISCONNECT class, newsstand
+// variant. STANDARD_PROMPT requires EXPLICIT visual evidence (barcode/UPC
+// box vs. diamond "Direct Edition" logo) before populating the structured
+// `variant` field with "newsstand" — but Vision sometimes describes that
+// same evidence in free-form `reason` text ("Vinyl UPC box", "newsstand
+// commands 2-4x direct edition") without structuring it. When that
+// happens, two downstream systems both silently starve for a signal
+// Vision already observed: Filter 1b (VARIANT_CONTAM_RE, api/comps.js)
+// treats every newsstand-titled comp as contamination and strips it from
+// the priced pool because `!variant` is true, and the era-aware newsstand
+// multiplier (enrich.js Ship 7) never fires. Mirrors detectEditionWarning's
+// reason-text scan above; only backfills variant when the structured field
+// came back empty, and only on a clear (non-negated) mention.
+const NEWSSTAND_SIGNAL_PATTERNS = [
+  { kind: 'upc-box',      re: /\b(?:vinyl\s+)?upc\s+box\b/i },
+  { kind: 'bar-code-box', re: /\bbar[\s-]?code\s+box\b/i },
+  { kind: 'newsstand',    re: /\bnewsstand\b/i },
+];
+// Excludes explicit denials ("not a newsstand", "no UPC box") and
+// direct-edition confirmations phrased as a contrast ("direct edition,
+// not newsstand") so the fallback doesn't fire on Vision ruling the
+// signal OUT rather than confirming it.
+const NEWSSTAND_NEGATION_RE =
+  /\b(?:not|no|non)[\s-](?:a\s+)?(?:newsstand|upc\s+box)\b|\bnewsstand\b[^.]{0,20}\bnot\b/i;
+
+export const detectNewsstandSignal = (reason) => {
+  if (!reason || typeof reason !== 'string') return null;
+  if (NEWSSTAND_NEGATION_RE.test(reason)) return null;
+  for (const { kind, re } of NEWSSTAND_SIGNAL_PATTERNS) {
+    if (re.test(reason)) {
+      return { detected: true, signal: kind, source: 'vision-condition-report' };
+    }
+  }
+  return null;
+};
+
+// Applies detectNewsstandSignal to a parsed result in-place. Only
+// backfills when the structured `variant` field is empty — never
+// overrides an explicit Vision value (e.g. a lettered cover variant).
+const applyNewsstandFallback = (parsed) => {
+  if (!parsed || parsed.variant) return parsed;
+  const signal = detectNewsstandSignal(parsed.reason);
+  if (signal) {
+    parsed.variant = 'newsstand';
+    parsed.variantSource = 'reason-text-fallback';
+  }
+  return parsed;
+};
+
 // Ship #18 — post-parse pedigree cross-validation.
 // Vision claims a pedigreeName; the registry normalizes alias→canonical
 // (e.g. "Edgar Church" → "Mile High Collection") and flags recognized.
@@ -412,6 +461,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
   const r3 = pass3.parsed;
   enrichPedigree(r3);
   r3.editionWarning = detectEditionWarning(r3.reason);
+  applyNewsstandFallback(r3);
   r3._watchPasses = 3;
   console.log(`[watch] pass1: ${pass1.ms}ms pass2: ${pass2.ms}ms pass3: ${pass3.ms}ms total: ${pass1.ms + pass2.ms + pass3.ms}ms — Opus escalation`);
   console.log(`[watch-stats] pass=3 (opus) conf=${r3?.confidence}`);
@@ -569,6 +619,7 @@ export default async function handler(req, res) {
 
       enrichPedigree(result);
       result.editionWarning = detectEditionWarning(result.reason);
+      applyNewsstandFallback(result);
       if (noImage) result.noImage = true;
 
       console.log('[grade] eBay-first path succeeded');
@@ -610,6 +661,7 @@ export default async function handler(req, res) {
     if (noImage) finalParsed.noImage = true;
     enrichPedigree(finalParsed);
     finalParsed.editionWarning = detectEditionWarning(finalParsed.reason);
+    applyNewsstandFallback(finalParsed);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
     mark('response_sent');
