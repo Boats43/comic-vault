@@ -3819,6 +3819,12 @@ export default async function handler(req, res) {
       bookYear: confirmedYear || year,
       userGradeKey: userGradeKeyForSold,
       assessedGrade: grade, // Q47-FIX4: Vision/AI grade for raw scans (e.g. "FN 6.0")
+      // Q109-LADDER (2026-07-16): PC's own per-grade price ladder, already
+      // fetched and populated on `pcSales` by this point (see out.priceLadder
+      // assignment later in this handler, same underlying data). Lets
+      // verifySoldComps cross-check a raw scan's sold-comp prices against
+      // PC's own grade-value data — independent of title text entirely.
+      priceLadder: pcSales.priceLadder || null,
     });
     const filteredSold = soldVerifyResult.verified;
     if (rawSoldRows.length > 0) {

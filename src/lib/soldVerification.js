@@ -314,6 +314,9 @@ const isStaleForBookYear = (daysAgo, bookYear) => {
  * @param {number|string} [ctx.bookYear] — our book's year (drives staleness)
  * @param {string} [ctx.userGradeKey] — "9.4" / "raw" / null (PC tab key)
  * @param {string} [ctx.assessedGrade] — Vision/AI grade string ("FN 6.0") for raw scans
+ * @param {Object} [ctx.priceLadder] — PC per-grade price ladder ({"4.0": 279.70, ...}).
+ *        Raw scans only: cross-checks sold-comp price against PC's own grade
+ *        value, independent of title text. See Q109-LADDER below.
  * @returns {{ verified: Array, diagnostics: Object }}
  */
 export const verifySoldComps = (rawRows, ctx) => {
@@ -376,6 +379,7 @@ export const verifySoldComps = (rawRows, ctx) => {
     bookYear = null,
     userGradeKey = null,
     assessedGrade = null,
+    priceLadder = null,
   } = ctx || {};
 
   const ourTokens = tokenizeTitle(title);
@@ -672,6 +676,46 @@ export const verifySoldComps = (rawRows, ctx) => {
     }
 
     if (numericTarget != null && !isNaN(numericTarget)) {
+      // Q109-LADDER (2026-07-16, ASM #17 raw-scan class): price-plausibility
+      // cross-check against PriceCharting's own price ladder — independent
+      // of title text entirely. Title-based filters (numeric grade parse,
+      // Fair/Poor, qualitative phrases) only catch contamination a listing
+      // happens to describe in recognizable language; a mislabeled or
+      // scraper-garbled row with no such language still slips through. The
+      // ladder is PC's own data for what THIS book sells for at OUR target
+      // grade — a sold price far below it is evidence independent of
+      // whatever the title does or doesn't say.
+      //
+      // Scope ruling (2026-07-16), narrow first pass:
+      //   - raw scans only (userGradeKey === 'raw') — CGC-graded comps have
+      //     a much stronger signal already (the slab's own certified grade,
+      //     not inferred from title text); this problem is specific to
+      //     text-inferred grade on raw books.
+      //   - asymmetric, low-price only — the class with confirmed real-world
+      //     evidence tonight. A symmetric high-price check is a different
+      //     failure mode (rare variant, bidding war, genuine outlier) with
+      //     different risk characteristics, deliberately out of scope here.
+      //   - deliberately conservative (0.15x): only catches extreme
+      //     divergence, never a legitimate distressed sale at the correct
+      //     grade.
+      //   - graceful no-op when the ladder has no value for this exact grade
+      //     (thin-market books) — absence of ladder data is not evidence of
+      //     anything, same principle as every fallback tonight.
+      const ladderGradeKey = Number.isInteger(numericTarget)
+        ? `${numericTarget}.0`
+        : String(numericTarget);
+      const ladderValueForGrade =
+        userGradeKey === 'raw' && priceLadder && typeof priceLadder === 'object'
+          ? priceLadder[ladderGradeKey]
+          : null;
+      const priceLadderFloor =
+        typeof ladderValueForGrade === 'number' && ladderValueForGrade > 0
+          ? ladderValueForGrade * 0.15
+          : null;
+      if (priceLadderFloor != null) {
+        console.log(`[sold-verify] price-ladder floor active: grade=${ladderGradeKey} ladder=$${ladderValueForGrade} floor=$${priceLadderFloor.toFixed(2)} (15%)`);
+      }
+
       working = working.filter((r) => {
         // Grade proximity ±1.5
         const listingGrade = parseListingGrade(r.title);
@@ -687,7 +731,8 @@ export const verifySoldComps = (rawRows, ctx) => {
           }
           // Q47-QUAL: qualitative low-grade phrases ("reading copy", "low
           // grade", "coverless", etc.) — positive evidence only. No match
-          // falls through to the unchanged keep-by-default below.
+          // falls through to the price-ladder check below, then the
+          // unchanged keep-by-default.
           const qualCeiling = getQualitativeGradeCeiling(titleStr);
           if (qualCeiling != null && Math.abs(numericTarget - qualCeiling) > 1.5) {
             console.log('[sold-reject] qualitative grade phrase |', titleStr.slice(0, 60),
@@ -696,16 +741,31 @@ export const verifySoldComps = (rawRows, ctx) => {
             pushSample(r, 'gradeMismatch');
             return false;
           }
-          return true; // no parseable grade, no conflicting phrase, keep (already passed tab check)
+          // no parseable grade, no conflicting phrase — falls through to the
+          // price-ladder check below, then keep-by-default.
+        } else {
+          const diff = Math.abs(listingGrade - numericTarget);
+          if (diff > 1.5) {
+            console.log('[sold-reject] grade-proximity |', r.title?.slice(0, 60), 'grade:', listingGrade, 'vs our:', numericTarget);
+            reasons.gradeMismatch++;
+            pushSample(r, 'gradeMismatch');
+            return false;
+          }
         }
 
-        const diff = Math.abs(listingGrade - numericTarget);
-        if (diff > 1.5) {
-          console.log('[sold-reject] grade-proximity |', r.title?.slice(0, 60), 'grade:', listingGrade, 'vs our:', numericTarget);
+        // Q109-LADDER: universal price-plausibility check — runs regardless
+        // of whether the title had a parseable/matching grade, since a
+        // contaminated row's price can be implausible even when its title
+        // text passed every other check.
+        if (priceLadderFloor != null && typeof r.price === 'number' && r.price > 0 &&
+            r.price < priceLadderFloor) {
+          console.log('[sold-reject] price-ladder implausible |', r.title?.slice(0, 60),
+            'price:', r.price, '< 15% of ladder $' + ladderValueForGrade, 'for grade', numericTarget);
           reasons.gradeMismatch++;
           pushSample(r, 'gradeMismatch');
           return false;
         }
+
         return true;
       });
       console.log(`[sold-verify] grade-proximity filter: before=${beforeProximity} after=${working.length} removed=${beforeProximity - working.length} (±1.5 from ${numericTarget})`);
