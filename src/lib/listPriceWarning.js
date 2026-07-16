@@ -42,11 +42,25 @@ const TRIGGERS = [
   // Ship #20a.6.12 — sold-first avg. Verified sold comps (real money exchanged)
   // are better anchor than active listings (often contaminated by reprints/
   // promotional editions). Falls back to active avg when no sold data.
+  //
+  // Q109-DISPATCH-1-B-WARNING (2026-07-16, ASM #300): when the engine itself
+  // priced off Option B's active-anchored Tier 3 (priceBands.source ends up
+  // 'tier3_active_discounted_over_fallback_sold' — sold pool was 100%
+  // edition-ambiguous fallback, engine deliberately anchored to the
+  // confirmed-variant active pool instead), soldAvg is the exact data the
+  // engine already rejected as an anchor for this book. Comparing the
+  // engine's own recommendation against it produced a false "118% above
+  // market" warning on a correctly-priced card. Use activeAvg instead in
+  // this one case — every other source string keeps the original
+  // sold-first behavior unchanged.
   { kind: 'avg', label: '30-day average', mult: 1.50, source: (it) => {
+      const activeAvg = Number(it?.comps?.averageNum) || 0;
+      if (it?.priceBands?.source === 'tier3_active_discounted_over_fallback_sold') {
+        return activeAvg;
+      }
       const soldAvg = Array.isArray(it?.soldComps) && it.soldComps.length >= 2
         ? it.soldComps.reduce((sum, s) => sum + (s.price || 0), 0) / it.soldComps.length
         : 0;
-      const activeAvg = Number(it?.comps?.averageNum) || 0;
       return soldAvg > 0 ? soldAvg : activeAvg;
     }
   },
