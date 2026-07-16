@@ -627,6 +627,59 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     }
   }
 
+  // P0 (Q-FIX-B) — same zero-support treatment for publisher as issue
+  // gets above. Every branch that can set confirmedPublisher (title-family
+  // override, eBay overlap-override, or the vision default itself) does a
+  // bare `ebay?.publisher || vision.publisher` — publisher was never
+  // cross-checked against the pool the way issue is. Runs uniformly AFTER
+  // the issue check, same reprint-dominance carve-out (a reprint/
+  // facsimile-contaminated pool isn't a trustworthy publisher witness
+  // either).
+  //
+  // Composes with api/enrich.js's founding-year plausibility gate
+  // (isPublisherYearPlausible, Finding 2) as defense-in-depth rather than
+  // duplicate coverage: this check catches zero-pool-support cases
+  // regardless of chronology; the founding-year gate catches
+  // chronologically-impossible values this check deliberately leaves
+  // alone (nonzero-but-thin Vision-side pool support is NOT "zero
+  // support" here, same conservative posture as the issue check above —
+  // it falls through un-overridden for the founding-year gate to judge on
+  // its own terms).
+  let visionPublisherZeroSupport = null;
+  if (poolReprintDominant) {
+    console.log(`[vision-zero-support] publisher check SKIPPED — pool is reprint/facsimile-dominant (ratio=${reprintRatio.toFixed(2)} >= ${REPRINT_DOMINANCE_THRESHOLD}), Vision's publisher stands`);
+  } else if (!isGraded && vision.publisher != null && ebay?.agreement?.visionPublisherCount === 0) {
+    if (ebay.publisher != null) {
+      // Coherent alternate publisher exists in the pool — adopt it, loudly.
+      confirmedPublisher = ebay.publisher;
+      identitySource = `${identitySource}+vision_publisher_zero_support_override`;
+      matchConfidenceDemote = true;
+      visionPublisherZeroSupport = {
+        mode: 'override',
+        visionPublisher: vision.publisher,
+        adoptedPublisher: ebay.publisher,
+        poolTotal: ebay.agreement.total,
+      };
+      console.log(`[vision-zero-support] PUBLISHER OVERRIDE: Vision publisher="${vision.publisher}" has 0/${ebay.agreement.total} pool support — adopting pool "${ebay.publisher}"`);
+    } else if (ebay.noPublisherConsensus) {
+      // Vision's publisher is unsupported AND the pool doesn't converge on
+      // any replacement either — don't silently keep an unsupported value
+      // via the bare `||` fallback. Clear it and let cde6935's founding-
+      // year plausibility gate / ComicVine backfill (api/enrich.js) act as
+      // the last line of defense, same as a null confirmedPublisher from
+      // any other source.
+      confirmedPublisher = null;
+      identitySource = `${identitySource}+vision_publisher_zero_support_escalate`;
+      matchConfidenceDemote = true;
+      visionPublisherZeroSupport = {
+        mode: 'escalate',
+        visionPublisher: vision.publisher,
+        poolTotal: ebay.agreement.total,
+      };
+      console.log(`[vision-zero-support] PUBLISHER ESCALATE: Vision publisher="${vision.publisher}" has 0/${ebay.agreement.total} pool support and no adoptable alternate — clearing for downstream plausibility/backfill gates`);
+    }
+  }
+
   // Sanitize confirmedTitle to canonical series name for comp matching
   const sanitizedTitle = sanitizeSeriesTitle(confirmedTitle);
 
@@ -640,6 +693,7 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     identityEscalation,
     matchConfidenceDemote,
     visionZeroSupport,
+    visionPublisherZeroSupport,
   };
 };
 

@@ -369,8 +369,8 @@ console.log('\nShip #EBAY-FIRST — extractConsensus:');
     { title: 'Amazing Spider-Man #300 (1988)' },
     { title: 'Amazing Spider-Man #300 1988' },
     { title: 'Amazing Spider-Man #300 Marvel' },
-    { title: 'ASM #300 1988' },
-    { title: 'ASM #300 1988' },
+    { title: 'ASM #300 1988 Marvel' },
+    { title: 'ASM #300 1988 Marvel' },
     { title: 'Amazing Spider-Man #300 (1988)' },
     { title: 'Amazing Spider-Man #300 Marvel 1988' },
     { title: 'Amazing Spider-Man #300' },
@@ -396,6 +396,69 @@ console.log('\nShip #EBAY-FIRST — extractConsensus:');
   assertTrue(consensus.confidence >= 0.75, `confidence ≥0.75 (got ${consensus.confidence})`);
   assertEq(consensus.source, 'ebay_image_search', 'source field');
   assertTrue(consensus.agreement.total === 20, 'total listings = 20');
+}
+
+{
+  // Q-FIX-B — publisher below the 50% adoption bar returns null even
+  // though title/issue/year all clear their own bars comfortably. 8/20
+  // (40%) Marvel mentions is exactly the shape that let a single
+  // coincidental match win pre-fix (Flash Gordon #13's "Stock Image"
+  // false-positive, count=1/20) -- here it's a stronger-but-still-
+  // insufficient minority, confirming the gate holds at a realistic
+  // near-miss, not just the count=1 extreme.
+  const items = [
+    { title: 'Amazing Spider-Man #300 (1988) Marvel CGC 9.8' },
+    { title: 'Amazing Spider-Man 300 Marvel 1988 VF/NM' },
+    { title: 'Amazing Spider-Man #300 (1988)' },
+    { title: 'Amazing Spider-Man #300 1988' },
+    { title: 'Amazing Spider-Man #300 Marvel' },
+    { title: 'ASM #300 1988' },
+    { title: 'ASM #300 1988' },
+    { title: 'Amazing Spider-Man #300 (1988)' },
+    { title: 'Amazing Spider-Man #300 Marvel 1988' },
+    { title: 'Amazing Spider-Man #300' },
+    { title: 'Amazing Spider-Man #300 (1988)' },
+    { title: 'Amazing Spider-Man #300 Marvel' },
+    { title: 'Amazing Spider-Man #300 1988' },
+    { title: 'Amazing Spider-Man #300' },
+    { title: 'Amazing Spider-Man #300 (1988) Marvel' },
+    { title: 'Amazing Spider-Man #300 Marvel 1988' },
+    { title: 'Amazing Spider-Man #300 (1988)' },
+    { title: 'Spider-Man #301 (1988)' },
+    { title: 'ASM #302' },
+    { title: 'Amazing Spider-Man #300 (1988) Marvel' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  const consensus = extractConsensus(rows);
+
+  assertTrue(consensus !== null, 'consensus still returned -- title/issue/year unaffected by publisher gate');
+  assertEq(consensus.issue, '300', 'consensus issue #300 still resolves');
+  assertEq(consensus.year, '1988', 'consensus year 1988 still resolves');
+  assertEq(consensus.publisher, null, 'publisher null -- 8/20 (40%) Marvel mentions does not clear the 50% bar');
+  assertEq(consensus.agreement.publisher, 8, 'agreement.publisher reports the raw winning count (8) even though it did not clear the bar');
+  assertEq(consensus.noPublisherConsensus, true, 'noPublisherConsensus flag set, mirrors noIssueConsensus');
+}
+
+{
+  // Q-FIX-B — visionPublisherCount tallies Vision's own publisher read
+  // against the pool, independent of whether the pool clears its own 50%
+  // adoption bar. Reuses the low-consensus 40% Marvel pool above: Vision
+  // says "Marvel" and the pool DOES have 8/20 support for it (nonzero) --
+  // resolveIdentity's zero-support check must NOT treat this as
+  // zero-support (that's cde6935's founding-year gate's territory, not
+  // this check's).
+  const items = [
+    { title: 'Amazing Spider-Man #300 (1988) Marvel CGC 9.8' },
+    { title: 'Amazing Spider-Man #300 Marvel' },
+    { title: 'Amazing Spider-Man #300 Marvel' },
+    { title: 'Amazing Spider-Man #300 Marvel' },
+    { title: 'Amazing Spider-Man #300 (1988)' },
+    { title: 'Amazing Spider-Man #300 1988' },
+  ];
+  const rows = extractIdentityFromImageSearch(items);
+  const consensus = extractConsensus(rows, null, 'Marvel');
+  assertTrue(consensus !== null, 'consensus returned');
+  assertEq(consensus.agreement.visionPublisherCount, 4, 'visionPublisherCount tallies all 4 "Marvel" pool rows, matching Vision\'s own read');
 }
 
 {

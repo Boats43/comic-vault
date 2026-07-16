@@ -367,7 +367,7 @@ export const inferAssetTypeFromCategories = (leafCategoryIds) => {
 // Confidence calculation: average agreement across title+issue+year fields.
 // Only fields with ≥50% agreement are returned (null otherwise).
 // Minimum 5 listings required for consensus (returns null if < 5).
-export const extractConsensus = (parsedRows, visionIssue = null) => {
+export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher = null) => {
   if (!Array.isArray(parsedRows) || parsedRows.length < 5) {
     return null;
   }
@@ -571,6 +571,21 @@ export const extractConsensus = (parsedRows, visionIssue = null) => {
     { re: /\bwarren\b/i, name: 'Warren Publishing' },
     { re: /\blast\s+gasp\b/i, name: 'Last Gasp' },
     { re: /\bapex\s+novelt(?:y|ies)\b/i, name: 'Apex Novelties' },
+    // Q-FIX-B (2026-07-15) -- Charlton was missing from this file's table
+    // even though identityCore.js's separate PUBLISHER_CONSENSUS_PATTERNS
+    // added it under Q96. Two independently-maintained copies of the same
+    // list -- this collision (every "Charlton" pool mention producing zero
+    // pattern hits, leaving a single "Stock Image" boilerplate false-
+    // positive on the bare \bimage\b pattern above as the sole entry) is
+    // the direct cause of the real Flash Gordon #13 mispublisher bug this
+    // fix addresses. Full reconciliation into one shared constant is still
+    // a follow-up -- this stops the immediate recurrence. Residual note:
+    // because \bimage\b is earlier in this array and matching breaks on
+    // first hit, a title containing BOTH "charlton" and boilerplate "stock
+    // image" still votes for Image, not Charlton, on that one row -- not
+    // fixed here, doesn't block the consensus outcome when Charlton has a
+    // real majority, but worth folding into the same reconciliation pass.
+    { re: /\bcharlton\b/i, name: 'Charlton Comics' },
   ];
 
   const publisherCounts = {};
@@ -592,6 +607,38 @@ export const extractConsensus = (parsedRows, visionIssue = null) => {
       publisher = name;
     }
   }
+
+  // P0 (Q-FIX-B) -- publisher gets the same confidence bar as issue (>=50%
+  // of the pool), not title's lower 30% bar: both issue and publisher are
+  // asked to OVERRIDE Vision, not just corroborate it. Previously a single
+  // coincidental match (count=1, zero competitors) won outright -- exactly
+  // what shipped "Image" for Flash Gordon #13 (1969, Charlton) before this
+  // fix, when Charlton wasn't even in the pattern table above.
+  const publisherOk = total > 0 && maxPubCount / total >= 0.5;
+  if (!publisherOk) {
+    publisher = null;
+  }
+
+  // P0 (Q-FIX-B) -- same zero-support tally as issue's visionIssueCount
+  // above: canonicalize Vision's own publisher string against this same
+  // table so resolveIdentity can check "does Vision's publisher have ANY
+  // pool support at all," independent of whether the pool clears the 50%
+  // adoption bar. null when no visionPublisher supplied -- existing
+  // callers that don't pass one see identical behavior to before this
+  // change.
+  let visionPublisherCanonical = null;
+  if (visionPublisher) {
+    const visionPublisherStr = String(visionPublisher).trim();
+    for (const { re, name } of publisherPatterns) {
+      if (re.test(visionPublisherStr)) {
+        visionPublisherCanonical = name;
+        break;
+      }
+    }
+  }
+  const visionPublisherCount = visionPublisherCanonical != null
+    ? (publisherCounts[visionPublisherCanonical] || 0)
+    : null;
 
   // Extract most common variant token
   const allVariantTokens = parsedRows
@@ -618,10 +665,15 @@ export const extractConsensus = (parsedRows, visionIssue = null) => {
       year: yearResult.count,
       total,
       visionIssueCount,
+      publisher: maxPubCount,
+      visionPublisherCount,
     },
     // true only in the Q-VISION-ZERO-SUPPORT escalation carve-out above —
     // title agreed, but no single issue reached the adoption bar.
     noIssueConsensus: !issueOk,
+    // Q-FIX-B — mirrors noIssueConsensus: true when no publisher pattern
+    // reached the 50% adoption bar (publisher is null as a result).
+    noPublisherConsensus: !publisherOk,
     source: 'ebay_image_search',
   };
 };

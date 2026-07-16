@@ -1975,7 +1975,11 @@ export default async function handler(req, res) {
     const parsedVisualRows = visualResult?.items || [];
     // P0 (Q-VISION-ZERO-SUPPORT) — pass Vision's own (pre-backfill) issue
     // read so extractConsensus can tally agreement.visionIssueCount.
-    const visualConsensus = extractConsensus(parsedVisualRows, issueNum);
+    // Q-FIX-B — also pass Vision's own publisher read (same `publisher`
+    // const resolveIdentity's `vision.publisher` argument uses below) so
+    // extractConsensus can tally agreement.visionPublisherCount the same
+    // way, feeding resolveIdentity's new publisher zero-support check.
+    const visualConsensus = extractConsensus(parsedVisualRows, issueNum, publisher);
 
     console.log(`[phase1] eBay visual: ${visualResult?.items?.length || 0} results, consensus=${visualConsensus ? 'YES' : 'NO'}`);
     if (visualConsensus) {
@@ -2315,6 +2319,16 @@ export default async function handler(req, res) {
           note: identity.visionZeroSupport.mode === 'override'
             ? `Vision read issue #${identity.visionZeroSupport.visionIssue}, but the comp pool shows zero support for that number — corrected to #${identity.visionZeroSupport.adoptedIssue}. Please verify.`
             : `Vision read issue #${identity.visionZeroSupport.visionIssue}, but the comp pool shows zero support and no adoptable alternate — identity requires manual verification.`,
+        };
+      }
+
+      // Q-FIX-B — same surfacing for the new publisher zero-support check.
+      if (identity.visionPublisherZeroSupport) {
+        out.visionPublisherZeroSupport = {
+          ...identity.visionPublisherZeroSupport,
+          note: identity.visionPublisherZeroSupport.mode === 'override'
+            ? `Vision read publisher "${identity.visionPublisherZeroSupport.visionPublisher}", but the comp pool shows zero support for that publisher — corrected to "${identity.visionPublisherZeroSupport.adoptedPublisher}". Please verify.`
+            : `Vision read publisher "${identity.visionPublisherZeroSupport.visionPublisher}", but the comp pool shows zero support and no adoptable alternate — publisher requires verification.`,
         };
       }
       out.matchConfidenceDemote = identity.matchConfidenceDemote === true;
