@@ -148,10 +148,15 @@ export const extractConfirmedVariant = (
   // pool's year — its own listings carry the true year).
   const itemRecords = [];
   const YEAR_RE = /\b(19[3-9]\d|20[0-3]\d)\b/g;
+  // Q109-FIX-A (2026-07-16, ASM #300 McFarlane): denominator for the
+  // artist distinguishing-ratio check below — count of pool items that
+  // actually had a title to extract tokens from.
+  let consideredCount = 0;
 
   for (const item of visualItems) {
     const rawTitle = item?.rawTitle || '';
     if (!rawTitle) continue;
+    consideredCount++;
 
     // Extract tokens using imageSearchIdentity helper
     const tokens = extractVariantTokens(rawTitle);
@@ -195,12 +200,53 @@ export const extractConfirmedVariant = (
 
   // Artist consensus: case-insensitive comparison (artists appear in
   // mixed case: "Mico Suayan", "MICO SUAYAN", "mico suayan").
+  //
+  // Q109-FIX-A (2026-07-16, ASM #300): raw ≥2-agree alone can't tell
+  // "genuine distinguishing variant" (Skottie Young credited on a MINORITY
+  // of a mixed pool of covers) from "this is just who drew the book's one
+  // and only cover" (McFarlane named in nearly every listing, because
+  // sellers cite the famous artist for SEO regardless of edition — not
+  // because a distinguishing subset of comps carries his name). An artist
+  // consensus is only treated as distinguishing when it covers a MINORITY
+  // of the considered pool — 70% is the threshold, matching the general
+  // shape of this session's other consensus gates (issue 50%, title 30%):
+  // above it, "most sellers happen to mention this" has tipped into
+  // "this is the standard cover, not a variant," and using it as a
+  // filtering criterion (classifyArtistMatch / Filter 7 in
+  // soldVerification.js) would reject correct comps for the crime of
+  // omitting a non-distinguishing artist name. Below-threshold artist
+  // mentions are excluded from consensus.artist entirely, so they never
+  // reach confirmedVariant and never gate Filter 7 — no separate flag
+  // needed downstream.
+  //
+  // Floor added after this exact change broke the module's own canonical
+  // test (Crow Dead Time / Mico Suayan, Captain America #25 / Skottie
+  // Young — both 2-item stub pools): with only 2 items, 2/2 agreement is
+  // unavoidably 100% whether or not the artist is genuinely distinguishing
+  // — the ratio carries no information below a minimum sample size. Pools
+  // under MIN_POOL_FOR_RATIO_GATE skip the ratio check entirely and fall
+  // back to the original ≥2-agree behavior, unchanged from before Fix A.
+  const ARTIST_DISTINGUISHING_RATIO = 0.7;
+  const MIN_POOL_FOR_RATIO_GATE = 4;
   const artistsNormalized = allArtists.map((a) => String(a).toLowerCase());
   const topArtistLower = mode(artistsNormalized);
   if (topArtistLower && count(artistsNormalized, topArtistLower) >= 2) {
-    // Find the original-case artist name (prefer first occurrence)
-    const idx = artistsNormalized.indexOf(topArtistLower);
-    consensus.artist = allArtists[idx];
+    const topArtistCount = count(artistsNormalized, topArtistLower);
+    const artistRatio = consideredCount > 0 ? topArtistCount / consideredCount : 0;
+    const ratioGateApplies = consideredCount >= MIN_POOL_FOR_RATIO_GATE;
+    if (!ratioGateApplies || artistRatio < ARTIST_DISTINGUISHING_RATIO) {
+      // Find the original-case artist name (prefer first occurrence)
+      const idx = artistsNormalized.indexOf(topArtistLower);
+      consensus.artist = allArtists[idx];
+    } else {
+      const idx = artistsNormalized.indexOf(topArtistLower);
+      console.log(
+        `[variant-identity] artist "${allArtists[idx]}" appears in ` +
+        `${topArtistCount}/${consideredCount} (${Math.round(artistRatio * 100)}%) of pool — ` +
+        `NOT distinguishing (>= ${Math.round(ARTIST_DISTINGUISHING_RATIO * 100)}% threshold), ` +
+        `informational only, excluded from filtering`
+      );
+    }
   }
 
   // Exclusive: just need ≥2 listings with ANY exclusive marker
@@ -254,8 +300,24 @@ export const extractConfirmedVariant = (
   }
 
   // Build confirmed variant string from consensus tokens
-  // Order: convention → exclusive → artist → limitation
+  // Order: Vision's own variant (override path only) → convention →
+  // exclusive → artist → limitation
+  //
+  // Q109-FIX-B (2026-07-16): the override path used to DISCARD Vision's
+  // own variant call outright, replacing it with whatever consensus
+  // tokens fired. That's correct when consensus is CORRECTING a wrong or
+  // vague Vision read (the mechanism's original purpose), but wrong when
+  // Vision supplied a real signal from a different axis than the
+  // consensus found — e.g. Vision's reason-text newsstand fallback
+  // populates variant="newsstand" (an edition-type signal Vision can only
+  // get from the physical cover), and a same-book artist consensus then
+  // fires on "mcfarlane" (a cover-credit signal from eBay titles) — the
+  // two aren't in conflict, they're both true at once. Appending instead
+  // of replacing preserves Vision's edition-type read while still adding
+  // whatever the eBay pool corroborates. Backfill path (visionVariant
+  // falsy) is unaffected — nothing to prepend, identical to prior output.
   const parts = [];
+  if (!isBackfill && visionVariant) parts.push(String(visionVariant).trim());
   if (consensus.convention) parts.push(consensus.convention);
   if (consensus.exclusive) parts.push(consensus.exclusive);
   if (consensus.artist) parts.push(consensus.artist);
