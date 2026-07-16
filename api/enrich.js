@@ -1358,7 +1358,26 @@ export const extractKeyFromComps = (titles) => {
 const PRICECHARTING_EXCLUDE =
   /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix|true believers|marvel tales|card stock|cardstock|foil cover|sketch cover|blank cover|trade dress|virgin cover|gold foil|silver foil/i;
 
-const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'proven', eraHint = null, variant = null }) => {
+// Token-health visibility (dispatch 2026-07-16). PC gives no dedicated
+// status endpoint — an expired/invalid token surfaces as either a 401/403/410
+// HTTP status or (observed in practice) an HTTP 200 with an error string in
+// the JSON body. Either shape must be logged with an unmistakable marker and
+// distinguished from the ordinary "no results for this obscure book" null
+// return, which is expected behavior, not a system fault.
+const PC_TOKEN_ERROR_RE = /access token has expired|invalid.{0,20}token|token.{0,20}invalid|unauthorized/i;
+const flagPcTokenErrorIfPresent = (status, bodyText, pcDiag) => {
+  const authStatus = status === 401 || status === 403 || status === 410;
+  const bodyFlagsAuth = !!bodyText && PC_TOKEN_ERROR_RE.test(bodyText);
+  if (!authStatus && !bodyFlagsAuth) return false;
+  console.error(
+    `[pricecharting] TOKEN EXPIRED — all PC data unavailable until rotated ` +
+    `(HTTP ${status}${bodyText ? `: ${String(bodyText).slice(0, 200)}` : ""})`
+  );
+  if (pcDiag) pcDiag.pcTokenExpired = true;
+  return true;
+};
+
+const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'proven', eraHint = null, variant = null, pcDiag = null }) => {
   if (!issue) {
     console.log("[pt] no issue number — skipping");
     return null;
@@ -1374,10 +1393,18 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
     console.log(`[pricecharting] query="${query}"`);
     const res = await fetch(url);
     if (!res.ok) {
+      const bodyText = await res.text().catch(() => "");
+      if (flagPcTokenErrorIfPresent(res.status, bodyText, pcDiag)) return null;
       console.error(`[pricecharting] HTTP ${res.status}`);
       return null;
     }
     const json = await res.json();
+    // PC's auth failures aren't always a non-2xx status — the API has been
+    // observed returning HTTP 200 with an error payload for an expired
+    // token. Check the body regardless of res.ok.
+    if (json && typeof json.error === "string" && flagPcTokenErrorIfPresent(res.status, json.error, pcDiag)) {
+      return null;
+    }
     const products = Array.isArray(json?.products) ? json.products : [];
     if (products.length === 0) return null;
 
@@ -2635,7 +2662,7 @@ export default async function handler(req, res) {
         // in the handler (that runs later, ~line 3090); req.body.variant is
         // the same value it would default to absent an eBay-consensus
         // override, so it's the correct proxy signal here.
-        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null }).catch(() => null);
+        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out }).catch(() => null);
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
@@ -2646,7 +2673,7 @@ export default async function handler(req, res) {
         // Full title returned zero results — fallback to subtitle-stripped
         if (hasSubtitle && subtitleStripped !== confirmedTitle) {
           console.log(`[pc-query] full title zero results — fallback to stripped: "${subtitleStripped}"`);
-          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null }).catch(() => null);
+          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out }).catch(() => null);
           if (result) {
             console.log(`[pc-query] stripped title matched: "${result.productName}"`);
             await kvSet(strippedTitleKey, result, KV_TTL.PC);
@@ -3010,6 +3037,7 @@ export default async function handler(req, res) {
         // Q108 CHANGE 2 — confirmedVariant not yet resolved here either;
         // req.body.variant is the correct proxy (see note at initial PC lookup).
         variant: req.body.variant || null,
+        pcDiag: out,
       }).catch(() => null);
       mark('pc_requery_complete');
       if (priceCharting) {
@@ -3319,6 +3347,7 @@ export default async function handler(req, res) {
         publisherBackfilledFromComps: out.publisherBackfilledFromComps || false,
         pricingSource: 'refused-identity-conflict',
         refusedToPrice: true,
+        pcTokenExpired: out.pcTokenExpired || false,
         refusalReason: familyCandidate?.reason || 'Visual pool families lack overlap with Vision',
         message: familyCandidate?.reason || 'Visual identification uncertain',
         price: null,
@@ -3842,6 +3871,7 @@ export default async function handler(req, res) {
             yearConfidence: yearResolution?.yearConfidence || 'proven',
             eraHint: eraAdvisory,
             variant: confirmedVariant,  // Q108 CHANGE 2 — resolved by this point in the handler
+            pcDiag: out,
           }).catch(() => null);
           if (priceCharting) {
             console.log(`[22c-title-revote] PC re-query matched: "${priceCharting.productName}"`);
