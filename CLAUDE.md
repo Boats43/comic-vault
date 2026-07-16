@@ -528,6 +528,17 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
 ### Workaround Active
 - PriceCharting sales-history scrape (Ship #20a foundation data layer).
 
+### Internal — under investigation
+- **GitHub→Vercel auto-deploy not firing (2026-07-16)** — two consecutive
+  pushes to `main` (`58009cb`, `d03d5bf`) produced zero Vercel deployment
+  activity, confirmed via the Vercel API (`list_deployments`,
+  `get_project.latestDeployment`), while `git fetch` independently confirmed
+  both commits genuinely reached `origin/main`. Production was still serving
+  `4c74677` as of this note. Root cause not yet identified — needs a check of
+  GitHub's webhook delivery log (repo Settings → Webhooks → Recent
+  Deliveries) or the Vercel project's Git integration settings, neither of
+  which was reachable from the available tooling at investigation time.
+
 ## Handoff Pointers
 
 - Session history: `docs/archive/` directory
