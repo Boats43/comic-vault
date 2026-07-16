@@ -5739,22 +5739,32 @@ export default async function handler(req, res) {
 
       // Q-FLASHGORDON13-BADGE — active-pool-exhausted cap. compsExhausted
       // means verifyCompsTitles (the Haiku ai_verify pass) rejected 100%
-      // of the checked ACTIVE eBay listings -- decisionEngine already
+      // of the checked ACTIVE eBay listings (still only the <=5-item
+      // recentSales sample post-1f05785 — see Q-pool-truncation above;
+      // compsExhausted intentionally stayed scoped to that checked sample,
+      // not rawComps.prices as a whole, per the 2026-07-16 ruling: a 100%
+      // rejection on the checked sample is real evidence the query itself
+      // is likely contaminated, and any untouched items behind it were
+      // never individually verified either) -- decisionEngine already
       // surfaces this as the 'ai-verify-rejected-all' warning. But
       // compTitlesForScore (above) silently falls through to the SOLD
-      // comps pool once the active pool is emptied by that rejection
-      // (rawComps.recentSales/.prices are rebuilt empty at the 0-kept
-      // branch), and none of the OTHER caps in this chain reference
-      // compsExhausted -- a sold-comp-driven score can still reach HIGH
-      // while a rejection warning fires on the same card. Real production
-      // case: Flash Gordon #13, ai_verify kept 0/5 active listings,
-      // matchConfidence still scored 100/HIGH off 16 independently-
-      // verified sold comps -- "✓ Verified 100" next to a RESEARCH/
-      // low-confidence decision on the same card. Same cap shape as the
-      // sibling check above (HIGH->MEDIUM, score capped at 75); the client
-      // already renders MEDIUM as "~ Similar NN" (App.jsx ~5572) with zero
-      // new UI needed. Only fires the message if the sold-comp cap above
-      // didn't already set one, so the more specific reason wins.
+      // comps pool once the active pool is emptied by that rejection.
+      // NOTE (corrected 2026-07-16): rawComps.recentSales/.prices are NOT
+      // necessarily rebuilt empty at the 0-kept branch anymore — since
+      // 1f05785, untouched items beyond the checked sample survive into
+      // rawComps.prices. This cap still fires on compsExhausted regardless
+      // (see ruling above), so its behavior is unchanged; only this
+      // comment's "rebuilt empty" claim was stale. None of the OTHER caps
+      // in this chain reference compsExhausted -- a sold-comp-driven score
+      // can still reach HIGH while a rejection warning fires on the same
+      // card. Real production case: Flash Gordon #13, ai_verify kept 0/5
+      // active listings, matchConfidence still scored 100/HIGH off 16
+      // independently-verified sold comps -- "✓ Verified 100" next to a
+      // RESEARCH/low-confidence decision on the same card. Same cap shape
+      // as the sibling check above (HIGH->MEDIUM, score capped at 75); the
+      // client already renders MEDIUM as "~ Similar NN" (App.jsx ~5572)
+      // with zero new UI needed. Only fires the message if the sold-comp
+      // cap above didn't already set one, so the more specific reason wins.
       if (compsExhausted && finalMc.tier === 'HIGH') {
         const originalScore = finalMc.score;
         finalMc.tier = 'MEDIUM';
