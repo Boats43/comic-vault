@@ -469,6 +469,42 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
 - **Provisional State Write class** — component writes optimistic state before backend confirmation, persists through merge.
 - **Vision Hallucination class** — Vision infers fields from JSON_SHAPE context when confidence low.
 - **Build-Pass Runtime-Fail class** — code passes build + tests but crashes at runtime (JSX scope errors).
+- **Renumbered-franchise title/issue collision class** (ASM #17, 2026-07-16) —
+  active-comp pool contaminated by a modern relaunch/anthology reprint sharing
+  the exact same title+issue# as a scarce vintage original (Amazing
+  Spider-Man #17 1964 vs. 2015/2025 relaunch "#17"s; also reproduced live for
+  Action Comics #33 vs. its 2014 New 52 "#33"). NOT merch, NOT a category-gate
+  leak — `MERCH_RE` and the `category_ids=259104` restriction work correctly;
+  these are genuine, honestly-priced comics, just the wrong book. Root cause:
+  `api/comps.js` Filter 0c (era-consistency, "FIX B"/Ship #25.1) deliberately
+  accepts any active listing with no year token in its title, to protect
+  genuine vintage sellers who omit the year (World's Finest #139/#149/#159/
+  #163). That escape valve is symmetric — undated modern-relaunch listings
+  pass the identical branch. **Source-level fix investigated and closed
+  2026-07-16, no code path exists:** checked every field the eBay Browse API
+  returns at both `item_summary/search` and `item/{itemId}` (full inventory —
+  `itemCreationDate`/`itemOriginDate` is the *listing* post date, not the
+  comic's publication date; `condition`/`conditionId` and `categoryId`/
+  `leafCategoryIds` are identical across modern and vintage examples; `epid`
+  correlates with lot-vs-single-item, not era) — no publication-date field
+  exists anywhere in the API surface. Tested a price-band heuristic
+  ($3.99-$4.99 = "probably modern") against a non-collision control book
+  (Fantastic Four #187, 1977, no relaunch overlap) — 12/98 real, genuinely
+  dated 1977 comps sat in that exact band, proving the heuristic would mass-
+  reject legitimate non-key vintage back-issue comps. **Do not re-attempt a
+  source-level (admission-time) fix without a genuinely new signal — this
+  was investigated exhaustively, not skipped.** Mitigated at the card level
+  instead: `computePriceBands` Tier 2 (`src/lib/priceBands.js`) flags the
+  active pool as suspect when `activeAvg < soldAvg×0.25` or
+  `activeLow < soldLow×0.25` and falls back to sold-only pricing rather than
+  blending contaminated data in (commit 354d759). The parallel Q75 filter in
+  `buildVerifiedActivePool` (same file) consumes the same eBay-sourced
+  `{price, title}` shape and inherits the identical blind spot — no
+  independent fix needed there; it's covered by the same card-level backstop
+  once sold data reaches tier pricing. Residual gap: this backstop only
+  engages when verified sold comps exist (`soldPool > 0`, i.e. Tier 2); a
+  book with zero sold comps and a contaminated active-only pool (Tier 3/4)
+  has no sold anchor to flag against and remains exposed.
 
 ## Open Blockers
 
