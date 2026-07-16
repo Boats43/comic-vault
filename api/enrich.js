@@ -3581,21 +3581,56 @@ export default async function handler(req, res) {
           verifyCount > 0 &&
           (verifyCount - verifiedCount) / verifyCount < 1.0;
 
+        // Q-pool-truncation [P0, 2026-07-16, Option B]: rawComps.prices is
+        // the FULL pool (30 items for Groo the Wanderer #1's real trace),
+        // but verifyCount/keepFlags only ever cover the ≤5-item
+        // recentSales display sample (documented, deliberate cost
+        // control — see comment above). The old
+        // `rawComps.prices.filter((_, i) => keepFlags[i])` iterated the
+        // full array with a ≤5-length keepFlags, silently dropping every
+        // item past index 4 regardless of whether AI-verify ever saw it —
+        // a 30-item pool collapsed to ≤5 on any scan that triggered
+        // AI-verify at all. Only the first verifyCount items were ever
+        // evaluated; only those should be filtered. Everything after
+        // passes through untouched — it was never suspect, never checked.
+        const verifiedFirstN = rawComps.prices
+          .slice(0, verifyCount)
+          .filter((_, i) => keepFlags[i]);
+        const untouchedRest = rawComps.prices.slice(verifyCount);
         const verifiedPricesArray = Array.isArray(rawComps.prices)
-          ? rawComps.prices.filter((_, i) => keepFlags[i])
+          ? [...verifiedFirstN, ...untouchedRest]
           : [];
+
+        // count/average/lowest/highest must reflect the same full,
+        // corrected pool (verifiedPricesArray), not just the ≤5-item
+        // checked-and-kept sample (verifiedPrices/verifiedCount below,
+        // which stay scoped to "what AI-verify actually evaluated" for
+        // aiVerifyFallback/compsExhausted — unchanged, see below).
+        const fullVerifiedPrices = verifiedPricesArray
+          .map((p) => p.price)
+          .filter(Boolean);
+        const fullVerifiedCount = fullVerifiedPrices.length;
+        const fullVerifiedAvg = fullVerifiedCount
+          ? fullVerifiedPrices.reduce((a, b) => a + b, 0) / fullVerifiedCount
+          : null;
+        const fullVerifiedLow = fullVerifiedCount
+          ? Math.min(...fullVerifiedPrices)
+          : null;
+        const fullVerifiedHigh = fullVerifiedCount
+          ? Math.max(...fullVerifiedPrices)
+          : null;
 
         rawComps = {
           ...rawComps,
           prices: verifiedPricesArray,
           recentSales: verifiedSales,
-          count: verifiedCount,
-          average: verifiedAvg,
-          averageFormatted: fmtUsd(verifiedAvg),
-          lowest: verifiedLow,
-          lowestFormatted: fmtUsd(verifiedLow),
-          highest: verifiedHigh,
-          highestFormatted: fmtUsd(verifiedHigh),
+          count: fullVerifiedCount,
+          average: fullVerifiedAvg,
+          averageFormatted: fmtUsd(fullVerifiedAvg),
+          lowest: fullVerifiedLow,
+          lowestFormatted: fmtUsd(fullVerifiedLow),
+          highest: fullVerifiedHigh,
+          highestFormatted: fmtUsd(fullVerifiedHigh),
           verifiedByAI: true,
           verificationRemoved: removed,
           aiVerifyFallback,
