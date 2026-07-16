@@ -3599,6 +3599,24 @@ export default async function handler(req, res) {
           verifiedByAI: true,
           verificationRemoved: removed,
           aiVerifyFallback,
+          // Q-gradeFilteredLowest-staleness [P1, 2026-07-16]: this spread
+          // otherwise carries .gradeFilteredLowest forward unchanged — a
+          // snapshot taken mid-filter-chain in api/comps.js, BEFORE this
+          // AI-verify pass ever ran. When AI-verify rejects a comp that was
+          // within that grade-proximity snapshot, the stale value can sit
+          // below the freshly-verified .lowest. (NOT the Groo the Wanderer
+          // #1 case cited in earlier investigation notes — that scan's real
+          // verificationRemoved was 0, so it doesn't exercise this branch;
+          // its $4.77-vs-$7.99 discrepancy traced to a separate pool-
+          // truncation issue, not AI-verify rejection. Verified against a
+          // constructed removed=1 case instead — see commit message.) All
+          // four current consumers (Finding A's floor guard,
+          // computeThinPoolAnchor, computeLowGradeFloor, and any future one
+          // following the same pattern) already do
+          // `rawComps.gradeFilteredLowest ?? rawComps.lowest` — null here
+          // routes them onto that existing, already-correct fallback
+          // instead of the stale snapshot.
+          gradeFilteredLowest: removed > 0 ? null : rawComps.gradeFilteredLowest,
         };
         console.log(
           `[enrich] AI verify: kept ${verifiedCount}/${verifyCount} (removed ${removed})`
