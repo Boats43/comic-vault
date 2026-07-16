@@ -3936,6 +3936,11 @@ export default async function handler(req, res) {
       if (priceBandsRaw.askDerivedWarning) {
         out.askDerivedWarning = priceBandsRaw.askDerivedWarning;
       }
+      // ASM #17 [P0, 2026-07-16]: active pool excluded from Tier-2 blend as
+      // implausibly below the verified sold anchor (contamination flag).
+      if (priceBandsRaw.activePoolSuspect) {
+        out.activePoolSuspectWarning = priceBandsRaw.activePoolSuspectReason;
+      }
     }
 
     // Ship #21e: Surface blendedAvg for price derivation trace UI

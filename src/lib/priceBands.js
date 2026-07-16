@@ -506,27 +506,57 @@ export function computePriceBands({
     const activeAvg = activePrices.length > 0
       ? activePrices.reduce((a, b) => a + b, 0) / activePrices.length
       : 0;
+    const activeLow = activePrices.length > 0 ? Math.min(...activePrices) : 0;
+    const soldLow = Math.min(...soldPrices);
+
+    // ASM #17 [P0, 2026-07-16]: active-vs-sold contradiction flag. A
+    // verified sold anchor already exists here — if the active pool sits
+    // implausibly far below it, blending it in at 30% weight still drags
+    // the price down toward contamination (era/volume-collision: modern
+    // relaunch issues, anthology-title reprints, or any future class
+    // sharing the same title+issue# — sold $61-$291 vs active $3.95-$4.99
+    // from 2015/2025 "Amazing Spider-Man #17" relaunch listings; also
+    // reproduced live for Action Comics #33 against its 2014 New 52
+    // relaunch). This is a downstream safety net keyed off the divergence
+    // itself — it does NOT attempt to identify or fix the contamination
+    // source. Generalizes to any franchise with a renumbering history
+    // (X-Men, Fantastic Four, Avengers, etc.).
+    const activePoolSuspect = activeAvg > 0 && soldAvg > 0 && (
+      activeAvg < soldAvg * 0.25 ||
+      (activeLow > 0 && activeLow < soldLow * 0.25)
+    );
 
     let market;
-    if (activeAvg > 0) {
+    if (activePoolSuspect) {
+      // Suspect active data excluded from the blend — sold-only, same as
+      // the no-active-data path below.
+      market = soldAvg;
+    } else if (activeAvg > 0) {
       market = (soldAvg * 0.7) + (activeAvg * 0.3);
     } else {
       // Sold-only: use soldAvg raw (no bump needed — Tier 2 already conservative)
       market = soldAvg;
     }
 
-    const soldLow = Math.min(...soldPrices);
-
     const result = {
       quick: Math.round(soldLow * 100) / 100,
       market: Math.round(market * 100) / 100,
       stretch: Math.round(market * 1.15 * 100) / 100,
-      source: activeAvg > 0 ? 'tier2_blend_70_30' : 'tier2_sold_only',
+      source: activePoolSuspect
+        ? 'tier2_sold_only_active_suspect'
+        : (activeAvg > 0 ? 'tier2_blend_70_30' : 'tier2_sold_only'),
       count: soldPrices.length + verifiedActive.length,
       tier: 2,
       variantAdjusted: variantAdjusted || false,
+      activePoolSuspect: activePoolSuspect || false,
+      activePoolSuspectReason: activePoolSuspect
+        ? `active avg $${activeAvg.toFixed(2)} / low $${activeLow.toFixed(2)} < 25% of sold avg $${soldAvg.toFixed(2)} / low $${soldLow.toFixed(2)}`
+        : null,
     };
 
+    if (activePoolSuspect) {
+      console.log(`[tier-2] ACTIVE POOL SUSPECT — excluded from blend: ${result.activePoolSuspectReason}`);
+    }
     console.log(`[tier-2] soldAvg=$${soldAvg.toFixed(2)} activeAvg=$${activeAvg.toFixed(2)} blend=$${market.toFixed(2)}`);
     return applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted);
   }
