@@ -131,8 +131,17 @@ const CHART_COLOR_USED = '#3987e5';
 const CHART_COLOR_GRADED = '#c98500';
 
 function PriceChartSVG({ priceChart }) {
-  const used = Array.isArray(priceChart?.used) ? priceChart.used : [];
-  const graded = Array.isArray(priceChart?.graded) ? priceChart.graded : [];
+  // Q109 URGENT (2026-07-16) — chartExpanded now defaults true on
+  // ResultCard, so this renders on first paint of a fresh scan result
+  // while priceChart may still be mid-populate, instead of only after a
+  // manual tap on already-settled data (the only way it ever rendered
+  // before). Every other section guards with Array.isArray/typeof; this
+  // one didn't — a malformed entry (null, or missing/non-finite
+  // date/price) threw during .map()/Math.min/Math.max with no error
+  // boundary anywhere in the app, blacking out the whole render.
+  const isValidPoint = (p) => p && Number.isFinite(p.date) && Number.isFinite(p.price);
+  const used = (Array.isArray(priceChart?.used) ? priceChart.used : []).filter(isValidPoint);
+  const graded = (Array.isArray(priceChart?.graded) ? priceChart.graded : []).filter(isValidPoint);
   const all = [...used, ...graded];
   if (all.length < 2) return null;
 
@@ -1884,7 +1893,12 @@ function ResultCard({ result, enriching }) {
               maxHeight: 240,
               overflowY: 'auto',
             }}>
-              {result.rawComps.prices.map((p, i) => {
+              {/* Q109 URGENT (2026-07-16) — rawLedgerExpanded now defaults
+                  true on ResultCard, same newly-exercised-on-fresh-data
+                  risk as PriceChartSVG above: guard against non-object/null
+                  entries (a raw number in this array, e.g., won't throw on
+                  property access, but null/undefined would). */}
+              {result.rawComps.prices.filter((p) => p && typeof p === 'object').map((p, i) => {
                 const rowStyle = {
                   display: 'block',
                   padding: '4px 0',
@@ -4508,7 +4522,9 @@ function CollectionDetail({
               maxHeight: 240,
               overflowY: 'auto',
             }}>
-              {item.rawComps.prices.map((p, i) => {
+              {/* Q109 URGENT (2026-07-16) — same defensive guard as
+                  ResultCard's copy: skip non-object/null entries. */}
+              {item.rawComps.prices.filter((p) => p && typeof p === 'object').map((p, i) => {
                 const rowStyle = {
                   display: 'block',
                   padding: '4px 0',
