@@ -4759,11 +4759,29 @@ export default async function handler(req, res) {
         // backing this source is already variant-restricted, so the
         // era-multiplier must not run again on top of it.
         'tier3_active_discounted_over_fallback_sold': 'active_ask_derived',
+        // Q109-D [2026-07-17]: same fallthrough class as the entry above —
+        // applyVariantFallbackDivergenceCap() (priceBands.js) produces this
+        // source when it caps an inflated variant-fallback sold price back
+        // down to the trustworthy, variant-CORRECT active anchor. Missing
+        // here, it fell through to 'pc_estimate' (eligible) and risked the
+        // same double-count re-multiply on an already-capped, already
+        // active-anchored price. Mapped to its semantic sibling
+        // 'active_ask_derived' — active-anchored by construction, not
+        // eligible for the era/variant multiplier.
+        'variant_fallback_capped': 'active_ask_derived',
         'tier4_pc_estimate': 'pc_estimate',
         // Legacy sources (pre-tier)
         'verified_sold': 'verified_sold',
         'verified_active': 'verified_active',
         'verified_sold_active_blend': 'verified_sold_active_blend',
+        // Q109-D [2026-07-17]: same fallthrough class — the ASM #17-class
+        // franchise-relaunch guard (priceBands.js) excludes a contaminated
+        // active pool and prices sold-only, tagging this source. Missing
+        // here, it also fell through to the eligible 'pc_estimate' default.
+        // Mapped to its semantic sibling 'tier2_sold_only' -> 'verified_sold'
+        // (already sold-verified via the Ship 18 strict variant filter —
+        // explicitly excluded from the multiplier-eligible set above).
+        'tier2_sold_only_active_suspect': 'verified_sold',
       };
       out.pricingSource = tierSourceMap[priceBandsRaw.source] || 'pc_estimate';
 
