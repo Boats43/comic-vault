@@ -400,6 +400,94 @@ console.log('\nTest 14: Backfill path still requires ≥2 consensus — single l
   assertNull(result, 'result is null (single listing, no consensus, nothing to backfill)');
 }
 
+// Test 14: Q109-FIX-C — ASM #17 Ditko backfill suppressed (real production
+// pool, 2026-07-16 outage). Pre-fix: Ditko backfilled at 5/18=28% (under
+// Fix A's 70% ratio gate, which only suppresses majority mentions), fed a
+// false "distinguishing variant" into Filter 1c / classifyArtistMatch,
+// collapsed the comp pool 45→7 active, 30→1 sold. Ditko drew the entire
+// 1964 print run — there is no "Ditko variant" of ASM #17 to distinguish.
+console.log('\nTest 14: Q109-FIX-C — ASM #17 Ditko (1964) backfill suppressed');
+{
+  const visualItems = [
+    { rawTitle: 'The Amazing Spider-Man #17 🕸  Silver Age Marvel - 2nd Green Goblin, Human Torch', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Marvel Comics Amazing Spider-Man #17 Human Torch Green Goblin Key Issue 1964', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Comic Book- Amazing Spider-Man #17 Green Goblin Torch Ditko & Lee 1964', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-man #17, GD+ 2.5, 2nd Appearance Green Goblin; Human Torch', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'The Amazing Spider-man #17 2nd Green Goblin 1964 Featuring The Human Torch', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man (1964) #17 * 2nd appearance of Green Goblin * Ditko/Lee', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man #17 1963 1st Human Torch 2nd GREEN GOBLIN Marvel Comics', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man #17 KEY! 2nd App Green Goblin! CGC 2.0 OW/W 4606852006', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man #17 1964 2nd Green Goblin', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man 17 Mid Grade 2nd Appearance of the Green Goblin - Human Torch', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man #17 - G/VG (3.0)', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: '1964 Amazing Spider-Man 17 HIGHER GRADE - 2ND APPEARANCE OF GREEN GOBLIN', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man #17 FN- 5.5 2nd Appearance Green Goblin Steve Ditko Art!', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: '🕸Amazing Spider-Man🕸#17 2nd GREEN GOBLIN (1964)VINTAGE MARVEL🔥🔥🔥HOT🔥', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man #17- Human Torch and Goblin!', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man #17 GDVG Ditko 2nd Green Goblin Human Torch Flash Thompson', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'Marvel Comics The Amazing Spider-Man #17 1964 Human Torch Green Goblin Key Issue', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+    { rawTitle: 'AMAZING SPIDER-MAN #17 2ND GREEN GOBLIN STAN LEE STORY STEVE DITKO ART 1964', title: 'amazing spider man', issue: '17', year: '1964', variantTokens: [] },
+  ];
+
+  const result = extractConfirmedVariant(visualItems, null, 1964, 'medium');
+  assertNull(result, 'result is null (pre-1990 backfill gate closes, Ditko not treated as distinguishing variant)');
+}
+
+// Test 15: Q109-FIX-C — ASM #300 McFarlane backfill suppressed (real
+// production pool, same outage). Pre-fix: McFarlane backfilled at
+// 6/20=30% of this pool (also under the 70% ratio gate), collapsed the
+// comp pool 68→46 active (32% loss), 30→10 sold. McFarlane drew the
+// entire standard 1988 print run — Newsstand vs. Direct is the real
+// variant axis for this book, handled by a separate mechanism untouched
+// by this gate.
+console.log('\nTest 15: Q109-FIX-C — ASM #300 McFarlane (1988) backfill suppressed');
+{
+  const visualItems = [
+    { rawTitle: 'Marvel Comics, The Amazing Spiderman, #300, 25th Anniversary ', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'The Amazing Spider-Man #300 Todd McFarlane First Venom High Grade', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Marvel Comics Amazing Spider-Man #300 1988 25th Anniversary McFarlane Cover', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man 300 1st Venom  Unread High Grade Marvel Comics', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'The Amazing Spider-Man #300 (Marvel Comics May 1988)', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'The Amazing Spider-Man #300  9.8 NM-M. 1st FULL VENOM.   Marvel Comics May 1988)', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man #300 VF 8.0 1988 1st Full App Venom Todd McFarlane Cover', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Marvel Comics, The Amazing Spiderman, #300, 25th Anniversary ', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man #300 Newsstand Edition, 1st Appearance of Venom!', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'AMAZING SPIDER-MAN # 300 9.4 MCFARLANE-ORIGIN/1ST VENOM-THING ', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Amazing Spiderman #300 1st Venom.  Fine/Very Fine', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Rare Amazing Spider-man 300 1st App Venom 1988 Promo Todd McFarlane 2006 Key B', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-man 300 9.6 Direct Edition', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Marvel The Amazing Spider-Man 300 Comic Book Original Near Mint', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man #300 VF+ 8.5 1st Full Appearance Venom! Marvel 1988', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'AMAZING SPIDER-MAN #300 (1988-05) MARVEL 1st Venom KEY! MID-HIGH GRADE 8.5 VF', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Rare HTF Amazing Spider-Man 300 MX Foil 1000 1st App Venom Classic Foreign C', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: ['foil'] },
+    { rawTitle: 'Amazing Spider-Man #300 Marvel 1988 Origin and 1st Full Appearance Venom !', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'Amazing Spider-Man 300 VHTF Newsstand First Venom 1st App Marvel Comic NM++ 9.8 ', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+    { rawTitle: 'AMAZING SPIDER-MAN # 300 (NM+) -MCFARLANE-ORIGIN/1ST APP VENOM-THING-E. BROCK', title: 'amazing spider man', issue: '300', year: '1988', variantTokens: [] },
+  ];
+
+  const result = extractConfirmedVariant(visualItems, null, 1988, 'medium');
+  assertNull(result, 'result is null (pre-1990 backfill gate closes, McFarlane not treated as distinguishing variant)');
+}
+
+// Test 16: Q109-FIX-C — year boundary. 1989 blocked, 1990 allowed (backfill
+// mechanism itself still works at/above the boundary — this isn't a global
+// backfill kill-switch, only a pre-1990 one). Small 2-item pool stays under
+// MIN_POOL_FOR_RATIO_GATE=4, so Fix A's ratio check doesn't confound this
+// assertion — only the new year gate is under test.
+console.log('\nTest 16: Q109-FIX-C — 1989 blocked, 1990 allowed');
+{
+  const visualItems = [
+    { rawTitle: 'Test Comic #1 John Byrne cover', title: 'Test Comic', issue: '1', year: '1990', variantTokens: [] },
+    { rawTitle: 'Test Comic #1 Byrne variant', title: 'Test Comic', issue: '1', year: '1990', variantTokens: [] },
+  ];
+
+  const blocked = extractConfirmedVariant(visualItems, null, 1989, 'medium');
+  assertNull(blocked, 'result is null at year=1989 (below boundary)');
+
+  const allowed = extractConfirmedVariant(visualItems, null, 1990, 'medium');
+  assertTruthy(allowed, 'result is truthy at year=1990 (at boundary, backfill mechanism still functions)');
+}
+
 // Summary
 console.log(`\n${'='.repeat(60)}`);
 console.log(`Passed: ${passed}`);

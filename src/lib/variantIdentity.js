@@ -122,6 +122,32 @@ export const extractConfirmedVariant = (
 
   const isBackfill = !visionVariant;
 
+  // Q109-FIX-C (2026-07-16, ASM #17 Ditko / ASM #300 McFarlane): the
+  // backfill path exists to catch modern marketed variants Vision's
+  // conservative cover-only read misses (Skottie Young on Captain America
+  // #25 — a real, separately-SKU'd incentive cover). Marketed variant
+  // covers (convention exclusives, numbered/limited editions, artist
+  // incentive covers) are a direct-market-era concept — they don't exist
+  // on books from before the direct market's speculator boom. Below this
+  // boundary, an artist name surfacing in a MINORITY of pool titles isn't
+  // evidence of a distinguishing subset (Fix A's ratio-gate assumption) —
+  // it's just inconsistent seller SEO on a book with exactly one cover.
+  // Production evidence: Ditko backfilled at 5/18=28% of the ASM #17 pool,
+  // McFarlane at 6/20=30% of the ASM #300 pool — both comfortably under
+  // Fix A's 70% threshold despite neither naming a real distinguishing
+  // variant, both collapsing their downstream comp pools by 65-84% via
+  // Filter 1c / classifyArtistMatch. 1990 marks the pre-direct-market /
+  // post-speculator-boom line — comfortably below every genuine modern
+  // variant case (Skottie Young 2019, Mico Suayan 2024-2025) and at/above
+  // both false-positive cases (Ditko 1964, McFarlane 1988). Override path
+  // untouched: Vision already saw a real variant on the physical cover
+  // there, this gate only stops the backfill mechanism from inventing one.
+  const BACKFILL_MIN_YEAR = 1990;
+  if (isBackfill && y < BACKFILL_MIN_YEAR) {
+    console.log(`[variant-identity] backfill skipped: year=${y} < ${BACKFILL_MIN_YEAR} (pre-direct-market — no marketed variant covers to backfill)`);
+    return null;
+  }
+
   // Gate 2/4 (override path only): visionVariant must exist, and when it
   // does, Vision confidence must NOT be HIGH (uncertainty signal — only
   // second-guess Vision's own variant call when Vision itself signals low
