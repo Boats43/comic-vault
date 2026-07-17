@@ -5826,12 +5826,29 @@ function CollectionDetail({
                       </div>
                     )}
 
-                    {item.comps?.average && (
-                      <div style={{ color: '#888', marginTop: 2 }}>
-                        Active avg: <span style={{ color: '#3b82f6' }}>${item.comps.average.toFixed(2)}</span>{' '}
-                        <span style={{ fontSize: 10, opacity: 0.7 }}>({item.comps.count || 0} comps)</span>
-                      </div>
-                    )}
+                    {/* Q109 URGENT (2026-07-16, bulk-scan crash): api/enrich.js
+                        has two inconsistent shapes for comps.average across
+                        different pricing branches — a plain number on some
+                        (rawComps.average passthrough), a formatted STRING
+                        with the real number in the sibling comps.averageNum
+                        on others (fmtUsd(...) / rawComps.averageFormatted).
+                        item.comps.average.toFixed(2) crashed with "toFixed
+                        is not a function" whenever a string-shaped comps
+                        landed here — the `&&` guard only checked truthiness,
+                        not type. Prefer averageNum (always numeric when
+                        present); fall back to average only when IT is
+                        itself numeric, same convention as line ~5927 below. */}
+                    {(() => {
+                      const activeAvgNum = Number.isFinite(item.comps?.averageNum)
+                        ? item.comps.averageNum
+                        : (Number.isFinite(item.comps?.average) ? item.comps.average : null);
+                      return activeAvgNum != null && (
+                        <div style={{ color: '#888', marginTop: 2 }}>
+                          Active avg: <span style={{ color: '#3b82f6' }}>${activeAvgNum.toFixed(2)}</span>{' '}
+                          <span style={{ fontSize: 10, opacity: 0.7 }}>({item.comps.count || 0} comps)</span>
+                        </div>
+                      );
+                    })()}
 
                     {item.blendedAvg && (
                       <div style={{ color: '#888', marginTop: 4 }}>
