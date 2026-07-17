@@ -5420,12 +5420,40 @@ export default async function handler(req, res) {
             // floor — 86% of floor, inside the 80% band) still got floored
             // upward. Gate dropped; the 0.8 ratio and 2-comp minimum are
             // reused exactly, unchanged from the original Q90 calibration.
+            //
+            // Q90 strong-evidence carve-out (2026-07-17, ASM #300 VF 8.0,
+            // three consecutive scans): the 80% line is a deliberate
+            // partition boundary (P0 2026-07-13 ruling above), not fit to
+            // any near-boundary case — GSX 3.0 (116%) and the raw-book
+            // extension's 3-comp case (86%) both cleared it comfortably.
+            // This case sits at 78.8% (basis $394.22 vs floor $500) with
+            // 23 verified comps at 3-day recency — evidence far stronger
+            // than the 50-80% "don't fully trust it" zone was built to
+            // distrust. Both a high comp count AND high recency are
+            // required (either alone is not sufficient) to relax the
+            // ratio to 0.75; thinner or staler pools still need the full
+            // 0.8. Do not adjust 15 / 7 / 0.75 further without new
+            // evidence — reasoning captured in the Q90 dispatch report.
             const NEAR_FLOOR_RATIO = 0.8;
+            const STRONG_EVIDENCE_RATIO = 0.75;
+            const STRONG_EVIDENCE_MIN_COMPS = 15;
+            const STRONG_EVIDENCE_MAX_DAYS = 7;
+            const soldCount = filteredSold?.length || 0;
+            const freshestDaysAgo = (filteredSold || []).reduce((min, s) => {
+              const d = s?.daysAgo;
+              return (d != null && d < min) ? d : min;
+            }, Infinity);
+            const strongEvidence =
+              soldCount >= STRONG_EVIDENCE_MIN_COMPS &&
+              freshestDaysAgo <= STRONG_EVIDENCE_MAX_DAYS;
+            const effectiveNearFloorRatio = strongEvidence
+              ? STRONG_EVIDENCE_RATIO
+              : NEAR_FLOOR_RATIO;
             const soldMatchedFloorGuard =
               soldDerivedSource &&
-              (filteredSold?.length || 0) >= 2 &&
+              soldCount >= 2 &&
               soldBasis != null &&
-              soldBasis >= floorResult.floor * NEAR_FLOOR_RATIO;
+              soldBasis >= floorResult.floor * effectiveNearFloorRatio;
 
             if (isSuspectContaminated) {
               // Option 2+: Flag contamination, RESEARCH decision, hard-lock
@@ -5463,7 +5491,9 @@ export default async function handler(req, res) {
               out.floorBandHigh = fmtUsd(floorResult.priceHigh);
               console.log('[Q90] mega-key floor SUPPRESSED:',
                 `${title} #${confirmedIssue} grade=${grade} bucket=${floorResult.bucket}`,
-                `price=${out.price} (${out.pricingSource}, ${filteredSold.length} solds, graded=${isGraded === true})`,
+                `price=${out.price} (${out.pricingSource}, ${soldCount} solds, graded=${isGraded === true})`,
+                `basis=${soldBasis != null ? '$' + soldBasis.toFixed(2) : 'n/a'} ratio=${effectiveNearFloorRatio}`,
+                `(strongEvidence=${strongEvidence}, freshestDaysAgo=${Number.isFinite(freshestDaysAgo) ? freshestDaysAgo : 'n/a'})`,
                 `— floor band $${floorResult.floor}–$${floorResult.priceHigh} retained as reference`);
             } else if (currentPriceNum < floorResult.floor) {
               // Normal floor enforcement path
