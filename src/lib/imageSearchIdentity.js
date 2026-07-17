@@ -1315,6 +1315,13 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   // family overlap 0/1 → refused-identity-conflict → phase2 skipped, while
   // [Q85] had already fired on the PC path). Test each single family token
   // and each adjacent-bigram join against the compact Vision key.
+  //
+  // Q109-C [2026-07-17]: cap tolerated extra tokens beyond the matched
+  // window at 1 — the exact "comix" precedent above that justified this
+  // override. A family with 2+ tokens left over is carrying real title
+  // content (a co-title/subtitle suffix — "Replacement God AND OTHER
+  // STORIES" class), not disposable seller noise, and must not be
+  // collapsed back to Vision's shorter spelling.
   let q85BigramMatch = false;
   if (!q85CompactMatch && q85VisionKey.length >= 4) {
     const famToks = topFamily.tokens.filter(
@@ -1322,11 +1329,21 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     );
     for (let i = 0; i < famToks.length && !q85BigramMatch; i++) {
       if (compactTitleKey(famToks[i]) === q85VisionKey) {
-        q85BigramMatch = true;
-        console.log(`[Q85-B] family token "${famToks[i]}" equals compact Vision key "${q85VisionKey}"`);
+        const extra = famToks.length - 1;
+        if (extra <= 1) {
+          q85BigramMatch = true;
+          console.log(`[Q85-B] family token "${famToks[i]}" equals compact Vision key "${q85VisionKey}"`);
+        } else {
+          console.log(`[Q85-B] family token "${famToks[i]}" compact-matches but ${extra} extra tokens remain — real content, not noise, override blocked`);
+        }
       } else if (i + 1 < famToks.length && compactTitleKey(famToks[i] + famToks[i + 1]) === q85VisionKey) {
-        q85BigramMatch = true;
-        console.log(`[Q85-B] family bigram "${famToks[i]} ${famToks[i + 1]}" compact-joins to Vision key "${q85VisionKey}"`);
+        const extra = famToks.length - 2;
+        if (extra <= 1) {
+          q85BigramMatch = true;
+          console.log(`[Q85-B] family bigram "${famToks[i]} ${famToks[i + 1]}" compact-joins to Vision key "${q85VisionKey}"`);
+        } else {
+          console.log(`[Q85-B] family bigram "${famToks[i]} ${famToks[i + 1]}" compact-joins but ${extra} extra tokens remain — real content, not noise, override blocked`);
+        }
       }
     }
   }
