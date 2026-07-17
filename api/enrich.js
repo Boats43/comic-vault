@@ -3716,6 +3716,7 @@ export default async function handler(req, res) {
       );
       if (reprintComps.length < 3) {
         out.price = null;
+        out.priceBands = null;
         out.pricingSource = 'refused-reprint-thin-pool';
         out.priceNote = 'Reprint edition detected — insufficient reprint-specific comps';
         out.refusedToPrice = true;
@@ -4007,7 +4008,11 @@ export default async function handler(req, res) {
     }
 
     // Ship #20b — Price bands (Quick/Market/Stretch) from tier-based pricing
-    if (priceBandsRaw) {
+    // Q109-B [2026-07-17]: gated on !out.refusedToPrice — an earlier refusal
+    // (e.g. the reprint edition-gate above) must not be silently overwritten
+    // by this unconditional tier-pricing recompute. Shared checkpoint for
+    // every refusal site that fires before this block, not just this one.
+    if (priceBandsRaw && !out.refusedToPrice) {
       out.priceBands = {
         quick: fmtUsd(priceBandsRaw.quick),
         market: fmtUsd(priceBandsRaw.market),
