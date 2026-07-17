@@ -1138,19 +1138,18 @@ function ResultCard({ result, enriching }) {
   // hard-capped at 3 with no way to see the rest of an already-fetched list).
   const [soldListExpanded, setSoldListExpanded] = useState(false);
   const [activeListExpanded, setActiveListExpanded] = useState(false);
-  // Q-audit COMMIT 2 — price ladder defaults OPEN on ResultCard (unlike its
-  // CollectionDetail counterpart, which defaults collapsed): this was the
-  // specific data point the card-redesign request was about.
+  // Q109 dispatch (2026-07-16) — all collapsible sections default OPEN;
+  // the toggle itself still works, this only flips the initial state.
   const [ladderExpanded, setLadderExpanded] = useState(true);
   // Q-audit COMMIT 4 — full filtered eBay pool (title+price), distinct from
   // the top-5 "Active Listings" already shown from comps.recentSales.
-  const [rawLedgerExpanded, setRawLedgerExpanded] = useState(false);
+  const [rawLedgerExpanded, setRawLedgerExpanded] = useState(true);
   // Q-audit COMMIT 5 — month-over-month price trend chart.
-  const [chartExpanded, setChartExpanded] = useState(false);
+  const [chartExpanded, setChartExpanded] = useState(true);
   // Q-audit DISPATCH — top-level wrapper for Verified Sold / Ladder /
-  // Price History / Full Comp Pool. Defaults collapsed; the four
-  // sub-sections above keep their own independent expand state.
-  const [evidenceExpanded, setEvidenceExpanded] = useState(false);
+  // Price History / Full Comp Pool. Defaults OPEN (Q109 dispatch); the
+  // four sub-sections above keep their own independent expand state.
+  const [evidenceExpanded, setEvidenceExpanded] = useState(true);
 
   const comps = result.comps;
   const hasComps =
@@ -3262,22 +3261,25 @@ function CollectionDetail({
   // hard-capped at 3 with no way to see the rest of an already-fetched list).
   const [soldListExpanded, setSoldListExpanded] = useState(false);
   const [activeListExpanded, setActiveListExpanded] = useState(false);
-  // Collapsible sections for enriched data
-  const [creatorsExpanded, setCreatorsExpanded] = useState(false);
-  const [ladderExpanded, setLadderExpanded] = useState(false);
+  // Collapsible sections for enriched data. Q109 dispatch (2026-07-16) —
+  // all default OPEN; the toggle itself still works, this only flips the
+  // initial state (was useState(false) on every one of these).
+  const [creatorsExpanded, setCreatorsExpanded] = useState(true);
+  const [ladderExpanded, setLadderExpanded] = useState(true);
   // Q-audit COMMIT 4 — full filtered eBay pool (title+price), distinct from
   // the top-5 "Active Listings" already shown from item.comps.recentSales.
-  const [rawLedgerExpanded, setRawLedgerExpanded] = useState(false);
+  const [rawLedgerExpanded, setRawLedgerExpanded] = useState(true);
   // Q-audit COMMIT 5 — month-over-month price trend chart.
-  const [chartExpanded, setChartExpanded] = useState(false);
+  const [chartExpanded, setChartExpanded] = useState(true);
   // Q-audit DISPATCH — top-level wrapper for Verified Sold / Ladder /
-  // Price History / Market Velocity / Full Comp Pool. Defaults collapsed;
-  // the sub-sections above (plus Market Velocity, which has no toggle of
-  // its own) keep rendering exactly as before once the wrapper is open.
-  const [evidenceExpanded, setEvidenceExpanded] = useState(false);
-  const [popExpanded, setPopExpanded] = useState(false);
+  // Price History / Market Velocity / Full Comp Pool. Defaults OPEN
+  // (Q109 dispatch); the sub-sections above (plus Market Velocity, which
+  // has no toggle of its own) keep rendering exactly as before once the
+  // wrapper is open.
+  const [evidenceExpanded, setEvidenceExpanded] = useState(true);
+  const [popExpanded, setPopExpanded] = useState(true);
   const [storyExpanded, setStoryExpanded] = useState(false); // Ship #21c
-  const [derivationExpanded, setDerivationExpanded] = useState(false); // Ship #21e
+  const [derivationExpanded, setDerivationExpanded] = useState(true); // Ship #21e — Q109 dispatch
   const [packetModal, setPacketModal] = useState(null); // { channel, packet }
   const [packetDropdownOpen, setPacketDropdownOpen] = useState(false);
   const [packetEditTitle, setPacketEditTitle] = useState("");
