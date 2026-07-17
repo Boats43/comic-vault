@@ -6429,8 +6429,13 @@ function CollectionDetail({
           </div>
         ) : (
           <>
-            {/* Ship #20b — Price Bands */}
-            {item.priceBands && (
+            {/* Ship #20b — Price Bands. Q109-dispatch (2026-07-17): gated on
+                contract state — a REFUSED contract must render "zero bands +
+                banner" per the Customer-Grade Standard, but item.priceBands
+                is a raw pre-contract field that can survive a refusal
+                (e.g. the reprint/facsimile edition-gate) and was leaking a
+                fully populated ladder alongside the CANNOT PRICE banner. */}
+            {item.priceBands && item.contract?.state !== 'REFUSED' && (
               <div style={{
                 background: "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.1)",
