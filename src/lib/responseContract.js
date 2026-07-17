@@ -542,6 +542,24 @@ export function validateContract(contract, out) {
       reason: 'Pricing evidence is inconsistent — card demoted pending review',
       hard: true,
     });
+
+    // Q109 dispatch Part 1 (2026-07-16, ASM #17 Ditko I9 case): a
+    // self-flagged contract violation (I1-I12) must not ship a LIST-class
+    // decision — the checklist "Decision safe" pill and any consumer that
+    // reads decision.action directly (not contract.listable) would
+    // otherwise still display/treat the card as list-ready. Mirrors
+    // applyAnchorDirection's RESEARCH-cap pattern above exactly.
+    // Conservative-only: never overrides a decision already stricter than
+    // RESEARCH (DO_NOT_LIST, ID_REQUIRED) — only downgrades the LIST_*
+    // action the violation just proved unsafe.
+    if (typeof contract.decision.action === 'string' && contract.decision.action.startsWith('LIST')) {
+      contract.decision.action = 'RESEARCH';
+      contract.bestChannel = 'research';
+      contract.decisionCappedByViolation = true;
+      if (!contract.decision.warnings.includes('contract-violation-decision-capped')) {
+        contract.decision.warnings.push('contract-violation-decision-capped');
+      }
+    }
   }
 
   return contract;
@@ -573,6 +591,18 @@ export function finalizeResponse(out) {
     }
   }
   validateContract(contract, out);
+
+  // Q109 dispatch Part 1: validateContract runs after the soldSideAnchored
+  // mirror above, so a violation-capped decision needs its own sync step
+  // once contract.decision.action has actually been mutated to RESEARCH.
+  if (out.decision && typeof out.decision === 'object' && contract.decisionCappedByViolation) {
+    out.decision.action = 'RESEARCH';
+    if (Array.isArray(out.decision.warnings) &&
+        !out.decision.warnings.includes('contract-violation-decision-capped')) {
+      out.decision.warnings.push('contract-violation-decision-capped');
+    }
+  }
+
   out.contract = contract;
   return out;
 }

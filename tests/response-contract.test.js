@@ -521,6 +521,52 @@ test('24b I9 skip - RESEARCH action over pool avg is coherent, no violation', ()
     `RESEARCH exempt from I9 (Action #33 class), got: ${out.contract.violations.join(' | ')}`);
 });
 
+// Q109 dispatch Part 1 (2026-07-16) — I9 must cap decision.action, not
+// just demote state/listable. Real ASM #17/Ditko production numbers:
+// price $253.98, sold pool avg $91.40, decision LIST_LOW, 0 blockers.
+test('Q109 Part 1 - ASM #17/Ditko real case: I9 caps LIST_LOW to RESEARCH everywhere', () => {
+  const out = cleanOut({
+    price: '$253.98', priceLow: '$91.40', priceHigh: '$316.67',
+    priceBands: { quick: 91.4, market: 253.98, stretch: 316.67, tier: 2 },
+    pricingSource: 'sold_active_blend_30',
+    soldCompsAvg: 91.40000000000002,
+    decision: { action: 'LIST_LOW', confidence: 'medium', blockers: [], warnings: [], nextStep: '', bestChannel: 'ebay' },
+  });
+  finalizeResponse(out);
+  assert(out.contract.violations.some(v => v.startsWith('I9')),
+    `expected I9, got: ${out.contract.violations.join(' | ') || '(none)'}`);
+  assert(out.contract.decision.action === 'RESEARCH', `contract.decision.action should be capped, got ${out.contract.decision.action}`);
+  assert(out.decision.action === 'RESEARCH', `out.decision.action should mirror the cap, got ${out.decision.action}`);
+  assert(out.contract.bestChannel === 'research', 'bestChannel mirrors applyAnchorDirection pattern');
+  assert(out.contract.listable === false, 'still locked (unchanged from prior behavior)');
+  assert(out.decision.warnings.includes('contract-violation-decision-capped'),
+    'out.decision.warnings should carry the cap marker');
+});
+
+test('Q109 Part 1 - I9 cap is conservative-only, never loosens a stricter existing action', () => {
+  // Contrived: DO_NOT_LIST with an I9-triggering drift should stay
+  // DO_NOT_LIST, not get "upgraded" to RESEARCH.
+  const out = cleanOut({
+    price: '$300.00', priceLow: '$280.00', priceHigh: '$320.00',
+    priceBands: { quick: 280, market: 300, stretch: 320, tier: 2 },
+    pricingSource: 'verified_sold',
+    soldCompsAvg: 18,
+    decision: { action: 'DO_NOT_LIST', confidence: 'low', blockers: ['x'], warnings: [], nextStep: '' },
+  });
+  finalizeResponse(out);
+  assert(out.contract.decision.action === 'DO_NOT_LIST',
+    `DO_NOT_LIST must not be touched by the LIST-only cap, got ${out.contract.decision.action}`);
+});
+
+test('Q109 Part 1 - clean LIST_NOW control (Punisher #1 class) unaffected, no cap', () => {
+  const out = cleanOut(); // default fixture: LIST_NOW, no drift
+  finalizeResponse(out);
+  assert(out.contract.violations.length === 0, `expected zero violations, got: ${out.contract.violations.join(' | ')}`);
+  assert(out.contract.decision.action === 'LIST_NOW', 'action must stay LIST_NOW, uncapped');
+  assert(out.decision.action === 'LIST_NOW', 'out.decision.action must stay LIST_NOW, uncapped');
+  assert(!out.contract.decisionCappedByViolation, 'cap flag must not be set');
+});
+
 test('24b I10 - listable with DO_NOT_LIST demotes', () => {
   const out = cleanOut();
   const c = assembleContract(out);

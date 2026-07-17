@@ -7577,6 +7577,19 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   // Ship #26 v0-D — Decision Engine aware filtering for bulk listing.
   // Only include books with listable decision actions and no blockers.
   // Renamed from getHotUnlisted to getListableBooks.
+  // Q109 dispatch Part 2 (2026-07-16): contract.listable is the
+  // authoritative listing gate — the single-card "List on eBay" button
+  // (Ship #24a-3) already routes through it exclusively. decision.action
+  // alone can lag behind a later contract-validation demotion (I1-I12
+  // invariants, e.g. I9's self-flagged >100% pool-avg drift) that never
+  // rewrites decision.action retroactively on older responses that
+  // predate Part 1's cap. Both bulk paths below read decision.action
+  // directly and never checked contract.listable at all — a real bypass
+  // of the same demotion the single-card button already respects. Legacy
+  // items with no contract field (pre-Ship-24 shape) fall back to the
+  // pre-existing decision/blockers-only check, unchanged.
+  const passesContractGate = (c) => (c.contract ? c.contract.listable === true : true);
+
   const getListableBooks = (aiTagsSnapshot) =>
     catalogue.filter(
       (c) =>
@@ -7584,7 +7597,8 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
         getDisplayPrice(c) > 0 &&
         (c.decision?.action === 'LIST_NOW' || c.decision?.action === 'LIST_HIGH') &&
         (c.decision?.blockers?.length || 0) === 0 &&
-        c.identityConfident !== false
+        c.identityConfident !== false &&
+        passesContractGate(c)
     );
 
   const getEligibleForTrade = () =>
@@ -7596,7 +7610,8 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
         c.status !== 'listed' &&
         c.status !== 'sold' &&
         getDisplayPrice(c) > 0 &&
-        c.decision?.bestChannel !== 'research'
+        c.decision?.bestChannel !== 'research' &&
+        passesContractGate(c)
     );
 
   const runPostAll = async (ids) => {
