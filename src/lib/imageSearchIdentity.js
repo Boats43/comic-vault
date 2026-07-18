@@ -24,7 +24,7 @@
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
 import { sanitizeSeriesTitle } from './identityCore.js';
-import { ARTIST_PATTERNS, compactTitleKey } from './compHygiene.js';
+import { ARTIST_PATTERNS, compactTitleKey, IDENTITY_TPB_MARKER_RE } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
 //
@@ -368,7 +368,27 @@ export const inferAssetTypeFromCategories = (leafCategoryIds) => {
 // Only fields with ≥50% agreement are returned (null otherwise).
 // Minimum 5 listings required for consensus (returns null if < 5).
 export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher = null) => {
-  if (!Array.isArray(parsedRows) || parsedRows.length < 5) {
+  if (!Array.isArray(parsedRows)) {
+    return null;
+  }
+
+  // 2026-07-18 (Uncanny X-Men #27 / Ultimate X-Men #1 Momoko class) — TPB/
+  // collected-edition listings must never influence single-issue IDENTITY
+  // consensus (title/issue/year majority vote). A TPB frequently reuses the
+  // same cover art as an issue in the same run, so it visually matches the
+  // same eBay image search and can inflate title/issue agreement toward
+  // whichever single issue the collection reprints, even though it's a
+  // different product entirely. TPB_MARKER_RE already existed and gated the
+  // LATER comp-pricing pool (api/comps.js Filter 1g, src/lib/soldVerification.js)
+  // but was never applied here, at the earlier identity-determination stage
+  // shared by grade.js's eBay-first path, enrich.js's phase1, and
+  // identityAlignment.js. Uses IDENTITY_TPB_MARKER_RE (stricter sibling of
+  // TPB_MARKER_RE, requires the edition suffix on absolute/deluxe/treasury)
+  // — the plain TPB_MARKER_RE false-positived on "Absolute Batman" (a real
+  // DC single-issue title, not a collected edition) when tried here.
+  parsedRows = parsedRows.filter((r) => !IDENTITY_TPB_MARKER_RE.test(String(r?.rawTitle || '')));
+
+  if (parsedRows.length < 5) {
     return null;
   }
 

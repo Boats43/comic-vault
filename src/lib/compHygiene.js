@@ -56,6 +56,21 @@ export const SIGNED_RE = /\b(?:signed|signature\s+series|autographed?|yellow\s*l
 export const TPB_MARKER_RE =
   /\b(?:tpb|trade\s*paperback|hardcover|hc|omnibus|compendium|deluxe(?:\s*edition)?|absolute(?:\s*edition)?|treasury(?:\s*edition)?|collected\s*edition|graphic\s*novel|gn)\b/i;
 
+// 2026-07-18 (Uncanny X-Men #27 / Ultimate X-Men #1 Momoko class) — stricter
+// sibling of TPB_MARKER_RE for use BEFORE a title is known (identity
+// determination), not after (comp-pricing pool). TPB_MARKER_RE's "absolute"/
+// "deluxe"/"treasury" are deliberately bare-word-optional-suffix so a
+// confirmed book's pricing pool catches "Batman Absolute Edition" reprints —
+// safe there because the title is already resolved. Applied to an
+// UNRESOLVED identity pool, that same looseness collides with real ongoing
+// single-issue titles ("Absolute Batman", DC's 2024+ line) and would filter
+// out every genuine comp for that book. Requires the edition suffix on all
+// three ambiguous terms; tpb/trade paperback/hardcover/hc/omnibus/compendium/
+// collected edition/graphic novel/gn have no such collision risk and are
+// unchanged.
+export const IDENTITY_TPB_MARKER_RE =
+  /\b(?:tpb|trade\s*paperback|hardcover|hc|omnibus|compendium|deluxe\s*edition|absolute\s*edition|treasury\s*edition|collected\s*edition|graphic\s*novel|gn)\b/i;
+
 // Premium-variant isolation markers (2026-07-18, Magik #1 / Silk #1 class) —
 // convention-exclusive, retailer-exclusive, virgin, and numbered/limited
 // print runs are a distinct, often significantly more valuable market
