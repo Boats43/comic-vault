@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useRef, useState } from "react";
 import {
   getAllComics,
   putComic,
@@ -1136,6 +1136,115 @@ function BarcodeScanner({ onDetected, onCancel }) {
       </button>
     </div>
   );
+}
+
+// Q109-F [2026-07-17] — card-level error boundary.
+//
+// Last night's black-screen crash (comps.average.toFixed() on a
+// string-shaped value inside PriceChartSVG) unmounted the ENTIRE card
+// tree — React has no built-in recovery from a render-time throw, and
+// this app had zero error boundaries anywhere. That specific field-type
+// bug is fixed (b81eae6), but the structural gap — one bad render takes
+// down the whole screen — is not. This is the standard class-component
+// error boundary pattern (getDerivedStateFromError/componentDidCatch;
+// React has no hooks-based equivalent as of React 19).
+//
+// Scope: wraps ResultCard and CollectionDetail at their render call
+// sites (below), not individual sub-sections — see dispatch note on
+// per-section boundaries as a deferred stretch goal.
+//
+// Reset: callers pass a `key` prop (e.g. the item id) so navigating to a
+// different book/result remounts the boundary fresh, rather than
+// carrying a stale error state onto unrelated data. The in-place
+// "Retry" button below additionally lets the SAME data re-attempt render
+// without a full remount, for transient failures.
+export class CardErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null, reportCopied: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    // Same value as last night's manually-dug-up stack trace, captured
+    // automatically instead of requiring DevTools archaeology.
+    console.error(
+      `[error-boundary] "${this.props.label || "card"}" render crashed:`,
+      error,
+      errorInfo?.componentStack
+    );
+    this.setState({ errorInfo });
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false, error: null, errorInfo: null, reportCopied: false });
+  };
+
+  handleReport = () => {
+    const { error, errorInfo } = this.state;
+    const details =
+      `${this.props.label || "Card"} render error\n` +
+      `${error?.message || String(error)}\n\n` +
+      `${errorInfo?.componentStack || "(no component stack captured)"}`;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(details)
+        .then(() => {
+          this.setState({ reportCopied: true });
+          setTimeout(() => this.setState({ reportCopied: false }), 2000);
+        })
+        .catch(() => {});
+    }
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          style={{
+            padding: "24px 16px",
+            textAlign: "center",
+            background: "rgba(239,68,68,0.06)",
+            border: "1px solid rgba(239,68,68,0.3)",
+            borderRadius: 12,
+            margin: "12px 0",
+          }}
+        >
+          <div style={{ fontSize: 15, fontWeight: 600, color: "#ef4444", marginBottom: 4 }}>
+            {this.props.label || "This section"} couldn't display
+          </div>
+          <div style={{ fontSize: 12.5, color: "#999", marginBottom: 14 }}>
+            Something went wrong rendering this data. The error has been logged to the console.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button
+              onClick={this.handleRetry}
+              style={{
+                padding: "8px 16px", background: "transparent",
+                border: "1px solid rgba(212,175,55,0.5)", borderRadius: 8,
+                color: "#d4af37", fontWeight: 600, fontSize: 13, cursor: "pointer",
+              }}
+            >
+              Retry
+            </button>
+            <button
+              onClick={this.handleReport}
+              style={{
+                padding: "8px 16px", background: "transparent",
+                border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8,
+                color: "#999", fontWeight: 600, fontSize: 13, cursor: "pointer",
+              }}
+            >
+              {this.state.reportCopied ? "Copied ✓" : "Report"}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function ResultCard({ result, enriching }) {
@@ -11831,7 +11940,12 @@ export default function App() {
                   >Save Another Copy</button>
                 </div>
               )}
-              <ResultCard result={result} enriching={enriching} />
+              <CardErrorBoundary
+                label="Result Card"
+                key={`rc-${result?.title || ""}-${result?.issue || ""}-${enriching ? 1 : 0}`}
+              >
+                <ResultCard result={result} enriching={enriching} />
+              </CardErrorBoundary>
               <button className="reset-btn" onClick={reset}>Scan another</button>
             </>
           )}
@@ -11889,7 +12003,12 @@ export default function App() {
                   borderRadius: 8, color: "#d4af37", fontSize: 14, fontWeight: 600, cursor: "pointer",
                 }}
               >Back to stream →</button>
-              <ResultCard result={result} enriching={enriching} />
+              <CardErrorBoundary
+                label="Result Card"
+                key={`rc-buyer-${result?.title || ""}-${result?.issue || ""}-${enriching ? 1 : 0}`}
+              >
+                <ResultCard result={result} enriching={enriching} />
+              </CardErrorBoundary>
               <BidCalculator marketValue={marketValue} detectedPrice={result?.detectedPrice} resultTitle={result?.title} resultGrade={result?.grade} />
               <button className="reset-btn" onClick={reset}>Scan another</button>
             </>
@@ -11902,6 +12021,7 @@ export default function App() {
 
       {tab === "collection" && (
         selectedItem ? (
+          <CardErrorBoundary label="Book Detail" key={selectedItem?.id}>
           <CollectionDetail
             item={selectedItem}
             onBack={() => {
@@ -11942,6 +12062,7 @@ export default function App() {
               if (idx < catalogue.length - 1) { setSelectedItem(catalogue[idx + 1]); window.scrollTo(0, 0); }
             }}
           />
+          </CardErrorBoundary>
         ) : (
           <CollectionList
             items={catalogue}
