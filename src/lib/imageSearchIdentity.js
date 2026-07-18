@@ -736,6 +736,23 @@ export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher
  * Filters tokens <3 chars AFTER splitting to preserve two-letter identity
  * tokens like "dc" (DC Pride) when they appear as series initials.
  *
+ * Q-BC (Black Cat #1 / Skottie Young class, 2026-07-18) — strip
+ * ARTIST_PATTERNS matches BEFORE tokenizing. extractSeriesTitle has no
+ * artist-name awareness, so a variant artist mentioned in nearly every pool
+ * listing (Skottie Young, Artgerm, etc.) was surviving into every member's
+ * token set. That let Jaccard clustering AND the buildTitleFamilies ≥60%-
+ * of-members consensus vote treat the artist name as a core title token,
+ * fusing it into the family string ("black cat young skottie") — which then
+ * failed every downstream comp-title match. Reuses the same registry
+ * api/comps.js already trusts for creator identification (compHygiene.js)
+ * rather than forking a third artist-name list (identityCore.js's
+ * sanitizeSeriesTitle and this file's extractMainTitle each already
+ * maintain their own, independently incomplete, hardcoded list — this is
+ * the token-extraction choke point shared by clustering AND the dual-axis
+ * ebayConsensusTitle comparison, so fixing here closes both). Falls back to
+ * the unstripped tokens if stripping empties the title (defensive — avoids
+ * losing an entry from clustering entirely).
+ *
  * @param {string} title - raw eBay title
  * @returns {string[]} - lowercase token array, filtered, deduped
  */
@@ -746,7 +763,15 @@ export const tokenizeTitleFamily = (title) => {
   const cleaned = extractSeriesTitle(title);
   if (!cleaned) return [];
 
-  const tokens = String(cleaned)
+  let artistStripped = cleaned;
+  for (const pattern of ARTIST_PATTERNS) {
+    const flags = new Set([...pattern.flags, 'g']);
+    artistStripped = artistStripped.replace(new RegExp(pattern.source, [...flags].join('')), ' ');
+  }
+  artistStripped = artistStripped.replace(/\s+/g, ' ').trim();
+  const source = artistStripped.length >= 2 ? artistStripped : cleaned;
+
+  const tokens = String(source)
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)

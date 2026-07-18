@@ -265,6 +265,78 @@ if (wrongFirstResult.decision === 'weighted-consensus') {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// FIXTURE G — Black Cat #1 / Skottie Young (variant-artist token fusion)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Production case, 2026-07-18: Vision correctly read "Black Cat" #1.
+// Nearly every seller in the pool names the variant artist (Skottie Young)
+// in their listing title, so pre-fix, "young"/"skottie" tokens survived
+// extractSeriesTitle, occurred in >=60% of family members, and got fused
+// into the consensus family string ("black cat young skottie"). That
+// corrupted title then failed to title-match all 20 genuinely correct
+// comps, collapsing pricing to a fallback far under Vision's own estimate.
+// Fix: tokenizeTitleFamily strips ARTIST_PATTERNS before clustering, so
+// the artist name never enters the family token set in the first place.
+console.log('\nFixture G: Black Cat #1 Skottie Young (variant-artist token fusion)');
+
+const blackCatItems = [
+  'Black Cat #1 (2019) Skottie Young Variant Marvel Comics NM',
+  'Black Cat #1 Skottie Young Variant 2019 Marvel NM+',
+  'BLACK CAT #1 SKOTTIE YOUNG VARIANT MARVEL 2019',
+  'Black Cat #1 (2019) Marvel Comics Skottie Young Cover NM',
+  'Black Cat #1 Skottie Young Var 2019 Marvel Comics',
+  'Black Cat #1 2019 Skottie Young Variant NM Marvel',
+  'Black Cat #1 Skottie Young Variant Cover Marvel Comics 2019',
+  'Black Cat #1 (2019) Skottie Young Var Marvel NM+',
+  'Black Cat #1 Marvel 2019 Skottie Young Variant NM',
+  'Black Cat #1 Skottie Young Variant (2019) Marvel Comics NM+',
+  'Black Cat #1 2019 Marvel Skottie Young Cover Variant',
+  'Black Cat #1 (2019) Skottie Young Variant NM Marvel Comics',
+  'Black Cat #1 Skottie Young Variant Marvel 2019 NM',
+  'Black Cat #1 Marvel Comics Skottie Young Variant 2019 NM+',
+  'Black Cat #1 (2019) Skottie Young Variant Marvel NM',
+  'Black Cat #1 Skottie Young 2019 Variant Marvel Comics',
+  'Black Cat #1 Skottie Young Variant Marvel Comics (2019) NM+',
+  // A few without the artist name, same book
+  'Black Cat #1 (2019) Marvel Comics NM',
+  'Black Cat #1 2019 Marvel NM',
+  'Black Cat #1 Marvel Comics 2019 Variant NM',
+];
+
+// Sanity: raw tokenization must not carry the artist name into any member's
+// token set (this is the mechanism the Jaccard/consensus vote reads).
+const blackCatMemberTokens = blackCatItems.map(tokenizeTitleFamily);
+const anyMemberHasArtist = blackCatMemberTokens.some(
+  (toks) => toks.includes('skottie') || toks.includes('young')
+);
+assertEq(anyMemberHasArtist, false, 'no family member token set carries "skottie"/"young"');
+
+const blackCatResult = selectTitleFamilyCandidate(
+  blackCatItems,
+  'Black Cat',
+  '1',
+  2019
+);
+
+assertTrue(
+  blackCatResult.decision === 'top-rank-protection' || blackCatResult.decision === 'weighted-consensus',
+  `family override fires (decision=${blackCatResult.decision})`
+);
+assertIncludes(blackCatResult.selectedTitle, 'black cat', 'selectedTitle resolves to "Black Cat"');
+assertNotIncludes(blackCatResult.selectedTitle, 'skottie', 'selectedTitle does NOT include "skottie"');
+assertNotIncludes(blackCatResult.selectedTitle, 'young', 'selectedTitle does NOT include "young"');
+
+// The 20 correct comps must now title-match: every member's cleaned token
+// set must overlap the selected family's tokens above the Jaccard threshold
+// that originally clustered them together (i.e. they all still land in
+// topFamily — none get orphaned by the artist-name strip).
+assertEq(
+  blackCatResult.topFamily.count,
+  blackCatItems.length,
+  `all ${blackCatItems.length} comps cluster into the single Black Cat family (got ${blackCatResult.topFamily?.count})`
+);
+
+// ═══════════════════════════════════════════════════════════════════════
 // SUMMARY
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

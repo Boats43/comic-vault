@@ -557,6 +557,55 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   artist with a highly distinctive, recognizable style across multiple
   titles) should be double-checked against the physical masthead text
   before trusting title/issue.
+- **Variant-artist token fusion class** (Black Cat #1 Skottie Young,
+  2026-07-18) — the title-family weighted-consensus clustering pipeline
+  (`buildTitleFamilies`/`selectTitleFamilyCandidate`, `src/lib/
+  imageSearchIdentity.js`) fused a widely-shared variant-descriptor token
+  into the confirmed series title. Vision correctly read "Black Cat" #1;
+  because nearly every seller in the pool named the variant artist
+  (Skottie Young) in their listing title, "young"/"skottie" co-occurred
+  with "black"/"cat" in the required ≥60%-of-members share, so the Q45
+  consensus-token vote treated them as core title tokens and fused them
+  into the family string ("black cat young skottie"). That corrupted
+  title then failed every downstream comp-title match (0/30 verified on
+  20 genuinely correct comps), collapsing price to a fallback far under
+  Vision's own estimate. Same failure SHAPE as the McFarlane/Ditko
+  backfill-ratio finding the same night (a widely-shared artist name
+  treated as distinguishing when it's common seller phrasing) but a
+  DIFFERENT mechanism — that fix (`BACKFILL_MIN_YEAR` era-gate) only
+  guards the CONFIRMEDVARIANT backfill path; the title-family clustering
+  algorithm itself had zero artist-name awareness at the token-extraction
+  stage (`tokenizeTitleFamily` → `extractSeriesTitle`, whose
+  `NOISE_WORDS_RE`/`CATEGORY_BLOCKS` strip convention/ratio/retailer/
+  exclusive/limitation/authentication/finish tokens but never creator
+  names). Root cause was compounded by drift: TWO other independent,
+  hand-maintained creator-name blocklists already existed downstream
+  (`sanitizeSeriesTitle` in `src/lib/identityCore.js`, and
+  `stripVariantNoise`/`extractMainTitle` in `imageSearchIdentity.js`) and
+  BOTH were also missing Skottie Young — three separate artist-name lists
+  had drifted out of sync with the canonical, comprehensive registry
+  (`ARTIST_PATTERNS` in `src/lib/compHygiene.js`, which already had
+  `/skottie young/i`) that `api/comps.js` soft-match creator filtering
+  already trusts. **Fix:** `tokenizeTitleFamily` now strips
+  `ARTIST_PATTERNS` matches before tokenizing, closing the gap at the
+  single choke point shared by both Jaccard clustering AND the Q84
+  dual-axis `ebayConsensusTitle` comparison (both route through this
+  function), rather than forking a fourth list. Falls back to the
+  unstripped title if stripping would empty it. Verified this does not
+  regress the deliberate "creator-class addition allowed" behavior
+  (Wonder Woman #75 / Jenny Frison, `tests/q84-dual-axis.test.js`) — that
+  gate governs whether the Q84 override may ADD an artist name beyond
+  what Vision+eBay already agreed on; it never depended on artist names
+  surviving the base tokenizer, and the WW#75 fixture still passes
+  unchanged. Regression fixture added: `tests/family-clustering.test.js`
+  Fixture G, reconstructing the 20-listing Black Cat pool — confirms
+  `confirmedTitle` resolves to "Black Cat" (not "black cat young
+  skottie") and all 20 comps now cluster into a single matchable family.
+  The other two drifted blocklists (`sanitizeSeriesTitle`,
+  `stripVariantNoise`) were left as-is (out of scope for this fix — they
+  didn't need to change for this bug's root cause to close, and touching
+  them risks their own independently-tuned behavior); flag for a future
+  pass if either surfaces its own production miss.
 
 ## Open Blockers
 
