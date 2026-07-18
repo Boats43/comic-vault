@@ -505,6 +505,58 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   engages when verified sold comps exist (`soldPool > 0`, i.e. Tier 2); a
   book with zero sold comps and a contaminated active-only pool (Tier 3/4)
   has no sold anchor to flag against and remains exposed.
+- **Distinctive-artist-style confusion class** (Uncanny X-Men #27 /
+  Ultimate X-Men #1, 2026-07-18) — Vision's own direct-image read
+  (`STANDARD_PROMPT`, Sonnet) and eBay's independent reverse-image search
+  both misidentified a Peach Momoko-illustrated cover as a different,
+  unrelated title (Uncanny X-Men #27, 2026, misread as Ultimate X-Men #1,
+  2024) — a title-level, not issue-level, confusion, confirmed on 3
+  independent physical rescans of the same book with identical results.
+  NOT the artist-consensus backfill ratio-gate class (Ditko/ASM #17,
+  McFarlane/ASM #300, same night) — that gate governs whether an artist
+  name in a MINORITY of a mixed pool should be trusted as distinguishing;
+  Vision wasn't null on title here, so that mechanism never engages.
+  Root cause: Vision's title came back wrong BEFORE any eBay signal
+  entered the pipeline — grade.js's own eBay-image-search pre-check
+  independently scored <0.3 confidence (triggering Vision fallback on its
+  own), then Sonnet's `STANDARD_PROMPT` call (no eBay data injected)
+  independently produced "Ultimate X-Men," and enrich.js's own separate
+  reverse-image search (phase1) also converged on "Ultimate X-Men" from
+  the raw photo. Two nominally-independent signals agreed, but on a
+  correlated error — both keying off Momoko's stylistically consistent
+  art across her different Marvel covers — not genuine corroboration,
+  which is exactly what the system's "eBay agrees with Vision → trust it"
+  design principle cannot distinguish from the real thing.
+  **Mitigation investigated and implemented, honestly confirmed
+  insufficient for this specific case:** TPB/collected-edition
+  contamination of the identity-determination pool was a real,
+  independently-discovered, separate gap (`TPB_MARKER_RE` gated the LATER
+  comp-pricing pool only, never the earlier identity-consensus stage) —
+  fixed via `IDENTITY_TPB_MARKER_RE` in `extractConsensus` (commit
+  `2b00db5`). Reconstructed the real 20-listing production pool and
+  confirmed: only 1/20 rows even matched (most sellers write "Paperback"
+  with no "Trade" prefix), and removing it neither flips nor meaningfully
+  moves the outcome — `extractConsensus`'s `issueOk` gate (3/20
+  extractable issue numbers = 0.15, needs ≥0.5) was already correctly
+  returning no-consensus with or without that row, matching production
+  logs verbatim (`[visual] consensus: none — pool=20 (below issueOk>=50%
+  coherence gate)`). With no consensus, the system correctly falls back
+  to trusting Vision's own title — which was wrong from the start,
+  upstream of anything this fix touches. **No further code-level fix
+  identified — do not re-attempt without a genuinely new signal.** No
+  field in Vision's response or eBay's API distinguishes "confidently
+  reading the masthead correctly" from "confidently pattern-matching on a
+  recognized artist's style"; both produce an identical high-confidence
+  shape. A hard-coded "Uncanny ≠ Ultimate X-Men" rule would fix this one
+  pair without generalizing (same caveat as the `OTHER_VARIANT_DESCRIPTOR_RE`
+  stopgap elsewhere). This was investigated with a real, correctly
+  implemented, low-risk, independently-justified mitigation attempt, not
+  skipped or shrugged off — the mitigation shipped on its own merits but
+  did not and could not resolve this case. Flagged for manual
+  verification: any scan attributing a book to Peach Momoko (or any
+  artist with a highly distinctive, recognizable style across multiple
+  titles) should be double-checked against the physical masthead text
+  before trusting title/issue.
 
 ## Open Blockers
 
