@@ -1139,14 +1139,23 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
 // defaults to vintage (safe — prefers over- to under-valuing unknown books).
 export const CGC_MULTIPLIERS = {
   vintage: {
-    10: 12.0, 9.9: 8.0, 9.8: 5.0, 9.6: 3.0, 9.4: 2.2, 9.2: 1.8,
+    // Q109-G [2026-07-17]: 9.5 was the only real gap in this table — CGC
+    // does issue 9.5 as a census grade, but it fell through to
+    // nearest-neighbor resolution (tied 9.4/9.6, tie-break landing on
+    // 9.4, always slightly under). Added as the exact midpoint of the
+    // documented 9.4/9.6 entries (2.2 + 3.0) / 2 = 2.6 — the table isn't
+    // linear across its full range, but 9.5 sits exactly halfway between
+    // these two known, adjacent points regardless, so no extrapolation
+    // or curve-fitting assumption is needed.
+    10: 12.0, 9.9: 8.0, 9.8: 5.0, 9.6: 3.0, 9.5: 2.6, 9.4: 2.2, 9.2: 1.8,
     9.0: 1.5, 8.5: 1.3, 8.0: 1.15, 7.5: 1.05, 7.0: 1.0, 6.5: 0.9,
     6.0: 0.85, 5.5: 0.8, 5.0: 0.75, 4.5: 0.7, 4.0: 0.65, 3.5: 0.6,
     3.0: 0.55, 2.5: 0.5, 2.0: 0.45, 1.8: 0.4, 1.5: 0.35, 1.0: 0.3,
     0.5: 0.2,
   },
   modern: {
-    10: 3.0, 9.9: 2.6, 9.8: 2.2, 9.6: 1.6, 9.4: 1.35, 9.2: 1.2,
+    // Q109-G — same fix, modern table: (1.35 + 1.6) / 2 = 1.475.
+    10: 3.0, 9.9: 2.6, 9.8: 2.2, 9.6: 1.6, 9.5: 1.475, 9.4: 1.35, 9.2: 1.2,
     9.0: 1.1, 8.5: 1.05, 8.0: 1.0, 7.5: 0.95, 7.0: 0.9, 6.5: 0.85,
     6.0: 0.8, 5.5: 0.7, 5.0: 0.65, 4.5: 0.6, 4.0: 0.55, 3.5: 0.5,
     3.0: 0.45, 2.5: 0.4, 2.0: 0.38, 1.8: 0.35, 1.5: 0.32, 1.0: 0.28,
@@ -1189,14 +1198,17 @@ export const getGradeMultiplier = (grade, year = null) => {
   if (isNaN(g)) return null;
   const era = getEra(year);
   const table = CGC_MULTIPLIERS[era];
-  if (table[g] != null) return { multiplier: table[g], grade: g, era };
+  if (table[g] != null) return { multiplier: table[g], grade: g, era, gradeFallback: false };
   let closest = CGC_GRADES[0];
   let minDist = Math.abs(g - closest);
   for (const k of CGC_GRADES) {
     const d = Math.abs(g - k);
     if (d < minDist) { closest = k; minDist = d; }
   }
-  return { multiplier: table[closest], grade: closest, era };
+  // Q109-G — explicit signal (not left for callers to re-derive by diffing
+  // grade vs. the requested value) so a future table gap surfaces on the
+  // card instead of silently resolving to a neighboring grade's price.
+  return { multiplier: table[closest], grade: closest, era, gradeFallback: true };
 };
 
 // Parse a raw grade string like "VG 4.0" or "FR 1.0" into a multiplier.
@@ -3993,6 +4005,13 @@ export default async function handler(req, res) {
       if (gradeInfo) {
         gradeMultiplier = gradeInfo.multiplier;
         gradeLabel = `CGC ${numericGrade}`;
+        // Q109-G — transparency: the multiplier table has no exact entry
+        // for this grade, so the price reflects the nearest table grade's
+        // multiplier instead. Surfaced on the card rather than left silent.
+        if (gradeInfo.gradeFallback) {
+          out.gradeMultiplierInterpolated = true;
+          out.gradeMultiplierInterpolatedFrom = gradeInfo.grade;
+        }
       }
     } else if (grade) {
       const rawInfo = getRawGradeMultiplier(grade, eraYear);
@@ -4857,6 +4876,12 @@ export default async function handler(req, res) {
       // Variant fallback warning — user should verify variant premium manually
       if (priceBandsRaw.variantAdjusted) {
         priceNoteBase += ' · variant-adjusted (verify premium)';
+      }
+
+      // Q109-G — grade multiplier resolved via nearest-neighbor fallback
+      // (no exact table entry for this grade), not a documented value.
+      if (out.gradeMultiplierInterpolated) {
+        priceNoteBase += ` · grade multiplier estimated (nearest: CGC ${out.gradeMultiplierInterpolatedFrom})`;
       }
 
       out.priceNote = priceNoteBase;
