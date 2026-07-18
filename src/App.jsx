@@ -9452,6 +9452,10 @@ export default function App() {
             // sent stored image → title-family clustering → identity changed/refused →
             // comps=null → overwrote real data. Creates infinite loop for price=null books.
             skipImageSearch: true,
+            // Q109-E — same principle as skipImageSearch above, applied to
+            // PriceCharting: anchor to the previously-resolved product id
+            // instead of re-running fuzzy q= search on every auto-refresh.
+            pcProductId: item.pcProductId || null,
           }),
           signal: controller.signal,
         })
@@ -9513,6 +9517,10 @@ export default function App() {
                 // Q87: stamp the revision this ID_REQUIRED verdict was
                 // computed at; cleared when identity becomes confident.
                 q87CheckedRevision: idGated ? (cur.identityRevision || 0) : null,
+                // Q109-E — persist the resolved PriceCharting product id so
+                // the NEXT auto-refresh can anchor to it via id= instead of
+                // re-running q= search.
+                pcProductId: enrich.pcProductId || cur.pcProductId || null,
                 comps: lowMatch ? cur.comps : (enrich.comps || cur.comps),
                 price: priceGuard.price,
                 priceLow: priceGuard.priceLow,
@@ -10846,6 +10854,13 @@ export default function App() {
           // real comps existing. Refresh should only update PRICING, not re-run
           // identity resolution.
           skipImageSearch: true,
+          // Q109-E — same principle as skipImageSearch above, applied to
+          // PriceCharting. A previously-resolved product id anchors the
+          // lookup to PC's direct id= endpoint instead of re-running the
+          // fuzzy q= text search on every refresh, preventing drift to a
+          // different product that merely scores higher on THIS request's
+          // text match (Captain America #25 Steranko-vs-Young class).
+          pcProductId: item.pcProductId || null,
         }),
         signal: controller.signal,
       });
@@ -10905,6 +10920,9 @@ export default function App() {
       soldComps: enrich.soldComps || item.soldComps || [],
       soldCompsRaw: enrich.soldCompsRaw || item.soldCompsRaw || [],
       soldCompDiagnostics: enrich.soldCompDiagnostics || item.soldCompDiagnostics || null,
+      // Q109-E — persist the resolved PriceCharting product id so the NEXT
+      // refresh can anchor to it via id= instead of re-running q= search.
+      pcProductId: enrich.pcProductId || item.pcProductId || null,
       // P0-B — Persist tier-based pricing metadata
       priceBands: enrich.priceBands || item.priceBands || {},
       demandSignals: enrich.demandSignals || item.demandSignals || {},
@@ -11141,6 +11159,13 @@ export default function App() {
       confidence: gradeData.confidence,
       variant: gradeData.variant || null,
       keyIssue: enrichData?.keyIssue || gradeData.keyIssue || null,
+      // Q109-E — explicit, NOT the `...item` spread's implicit carry-
+      // forward: re-identification may have corrected title/issue/year to
+      // a genuinely different book, so the OLD PriceCharting product id
+      // must not survive onto it. Forces a fresh q= resolution (the
+      // request above never sends pcProductId); this stores whatever that
+      // fresh resolution found, or null if it found nothing / enrich failed.
+      pcProductId: enrichData?.pcProductId ?? null,
       price: enrichData?.price || null,
       priceLow: enrichData?.priceLow || null,
       priceHigh: enrichData?.priceHigh || null,

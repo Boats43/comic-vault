@@ -1377,13 +1377,63 @@ const flagPcTokenErrorIfPresent = (status, bodyText, pcDiag) => {
   return true;
 };
 
-const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'proven', eraHint = null, variant = null, pcDiag = null }) => {
+const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'proven', eraHint = null, variant = null, pcDiag = null, pcProductId = null }) => {
   if (!issue) {
     console.log("[pt] no issue number — skipping");
     return null;
   }
   const token = process.env.PRICECHARTING_TOKEN;
   if (!token || !title) return null;
+
+  // Q109-E [2026-07-17] — id-anchored lookup. When a prior successful
+  // resolution's PC product id is known (persisted client-side alongside
+  // the catalogued item), use PC's direct single-product endpoint instead
+  // of the fuzzy q= text search. Prevents re-scan drift to a different
+  // product that merely happens to score higher on THIS request's text
+  // match (Captain America #25 Steranko-vs-Young, Wonder Woman #75
+  // Frison, Spider-Versity Camuncoli class). Falls through to the
+  // existing q= path on ANY failure — deleted/stale id, network error,
+  // unexpected shape — so a bad stored id can never permanently break
+  // pricing for a book. Distinct endpoint, confirmed via PriceCharting's
+  // own published example (docs page itself 403s for automated fetches,
+  // same block noted in docs/PC_API_INVESTIGATION.md): GET /api/product
+  // (singular) ?id=&t= returns a flat single-product object, unlike
+  // /api/products (plural) ?q=&t= which returns { products: [...] }.
+  if (pcProductId) {
+    try {
+      const idUrl =
+        `https://www.pricecharting.com/api/product` +
+        `?id=${encodeURIComponent(pcProductId)}&t=${encodeURIComponent(token)}`;
+      const idRes = await fetch(idUrl);
+      if (idRes.ok) {
+        const idJson = await idRes.json();
+        const idBodyOk = idJson && idJson.status !== 'error' && typeof idJson['product-name'] === 'string';
+        if (idBodyOk) {
+          const cents = idJson['loose-price'];
+          if (cents != null && !isNaN(cents) && cents > 0) {
+            const name = idJson['product-name'];
+            const yearMatch = name.match(/\((\d{4})\)/);
+            const productYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
+            console.log(`[pricecharting] id-anchored hit: id=${pcProductId} "${name}"`);
+            return {
+              price: cents / 100,
+              productName: name,
+              id: idJson.id || pcProductId,
+              year: productYear,
+              source: "pricecharting",
+              idAnchored: true,
+            };
+          }
+        }
+        console.log(`[pricecharting] id-anchored lookup returned unusable data for id=${pcProductId} — falling back to q= search`);
+      } else {
+        console.log(`[pricecharting] id-anchored lookup HTTP ${idRes.status} for id=${pcProductId} — falling back to q= search`);
+      }
+    } catch (err) {
+      console.log(`[pricecharting] id-anchored lookup error for id=${pcProductId}: ${err?.message || err} — falling back to q= search`);
+    }
+  }
+
   try {
     const seriesName = String(title).replace(/#\s*\d+/, "").trim();
     const query = issue ? `${seriesName} ${issue}` : seriesName;
@@ -2662,7 +2712,7 @@ export default async function handler(req, res) {
         // in the handler (that runs later, ~line 3090); req.body.variant is
         // the same value it would default to absent an eBay-consensus
         // override, so it's the correct proxy signal here.
-        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out }).catch(() => null);
+        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out, pcProductId: req.body.pcProductId || null }).catch(() => null);
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
@@ -2673,7 +2723,7 @@ export default async function handler(req, res) {
         // Full title returned zero results — fallback to subtitle-stripped
         if (hasSubtitle && subtitleStripped !== confirmedTitle) {
           console.log(`[pc-query] full title zero results — fallback to stripped: "${subtitleStripped}"`);
-          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out }).catch(() => null);
+          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out, pcProductId: req.body.pcProductId || null }).catch(() => null);
           if (result) {
             console.log(`[pc-query] stripped title matched: "${result.productName}"`);
             await kvSet(strippedTitleKey, result, KV_TTL.PC);
