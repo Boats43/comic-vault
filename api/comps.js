@@ -29,6 +29,7 @@ import {
   VARIANT_CONTAM_RE,
   SIGNED_RE,
   TPB_MARKER_RE,
+  PREMIUM_VARIANT_RE,
   OTHER_COVER_RE,
   OTHER_VARIANT_DESCRIPTOR_RE,
   LOT_RE,
@@ -603,22 +604,29 @@ export const fetchComps = async ({
   // authoritative for signature status, not free text. When the book IS
   // graded and the label is NOT signature, strip auth tokens before they
   // reach the query — a Universal-label book must never search for "signed".
-  // Q111 [Item 1] — convention tokens (NYCC/SDCC/C2E2/etc.) leak into the
-  // query the same way "signed" did: Vision's free-text variant field can
-  // carry a con-exclusive descriptor that has nothing to do with what makes
-  // the book sellable/searchable on eBay's standard market — a Universal-
-  // label book scanned as a con exclusive shouldn't search for "nycc" any
-  // more than it should search for "signed". Same gate as the auth strip.
-  const AUTH_STRIP = /\b(signed|autograph(?:ed)?|cgc\s*ss|signature\s*series|nycc|sdcc|c2e2|megacon|fan\s*expo|eccc)\b/gi;
-  const CONVENTION_TOKEN_RE = /\b(nycc|sdcc|c2e2|megacon|fan\s*expo|eccc)\b/i;
+  // Q111 [Item 1, reverted 2026-07-18] — convention tokens (NYCC/SDCC/C2E2/
+  // etc.) were previously stripped alongside auth tokens on the theory that
+  // a con-exclusive descriptor "has nothing to do with what makes the book
+  // sellable" on a Universal-label slab. That conflates two unrelated
+  // signals: CGC label color reflects signature/authentication status only
+  // — it says nothing about whether the book is a genuine numbered/
+  // convention-exclusive print run, which is a physical fact about the book
+  // independent of grading. Stripping "nycc"/"sdcc" from the query actively
+  // prevented finding the comps that would correctly price a con-exclusive
+  // (Magik #1 / Silk #1 class, 2026-07-18) — removed from AUTH_STRIP so
+  // convention tokens survive into the search query same as any other
+  // variant descriptor. Auth-token stripping (signed/autograph/CGC SS/
+  // signature series) is unchanged — that one guards against Vision
+  // misreading an illustrated cover signature as a real autograph, which
+  // has no analogue for convention-exclusive status.
+  const AUTH_STRIP = /\b(signed|autograph(?:ed)?|cgc\s*ss|signature\s*series)\b/gi;
   const fullVariant = variant
     ? (isGraded && labelType !== 'signature'
         ? (() => {
             const raw = String(variant).trim();
             const matches = raw.match(AUTH_STRIP) || [];
             matches.forEach((m) => {
-              const kind = CONVENTION_TOKEN_RE.test(m) ? 'convention' : 'auth';
-              console.log(`[variant-strip] removed ${kind} token "${m.toLowerCase()}" from variant field (labelType=${labelType || 'null'})`);
+              console.log(`[variant-strip] removed auth token "${m.toLowerCase()}" from variant field (labelType=${labelType || 'null'})`);
             });
             return raw.replace(AUTH_STRIP, '').replace(/\s+/g, ' ').trim();
           })()
@@ -787,6 +795,7 @@ export const fetchComps = async ({
   let gradeFilteredPrices = null;  // Fix C: grade-proximity filtered prices for floor calc
   let reprintFallback = false;
   let variantFallback = false;
+  let premiumVariantIsolated = false;
   let fellBack = false;
   let eraFilterBypassed = false;
   let multiIssueRejected = 0;
@@ -810,6 +819,7 @@ export const fetchComps = async ({
       );
       let _reprintFallback = false;
       let _variantFallback = false;
+      let _premiumVariantIsolated = false;
       let _fellBack = false;
       let _eraFilterBypassed = false;
       let _multiIssueRejected = 0;
@@ -1045,9 +1055,23 @@ export const fetchComps = async ({
             const t = String(it.title || '').toLowerCase();
             return varWords.some(w => t.includes(w));
           });
-          if (variantMatches.length >= 2) {
-            console.log(`[comps] variant preference filter: before=${beforeVarPref} after=${variantMatches.length} kept=${variantMatches.length} (match "${variant}")`);
+          // Premium-variant isolation (2026-07-18, Magik #1 / Silk #1 class):
+          // convention-exclusive / retailer-exclusive / virgin / numbered-
+          // limited books are a distinct, more valuable market segment than
+          // a generic variant cover. The default >=2 threshold below starves
+          // on thin pools (2-3 comps, exactly the scenario these books show
+          // up in) and silently falls back to "keep all", blending the
+          // genuine exclusive comps with generic variant comps and
+          // systematically underpricing the book. A thin isolated pool is
+          // already handled gracefully elsewhere (Ship #13.1 thin-pool
+          // anchor), so for premium tokens a single match is enough to
+          // isolate rather than blend.
+          const isPremiumVariant = PREMIUM_VARIANT_RE.test(String(variant));
+          const minMatches = isPremiumVariant ? 1 : 2;
+          if (variantMatches.length >= minMatches) {
+            console.log(`[comps] variant preference filter: before=${beforeVarPref} after=${variantMatches.length} kept=${variantMatches.length} (match "${variant}"${isPremiumVariant ? ', premium-variant isolation' : ''})`);
             p = variantMatches;
+            if (isPremiumVariant) _premiumVariantIsolated = true;
           } else {
             console.log(`[comps] variant preference filter: before=${beforeVarPref} after=${p.length} (only ${variantMatches.length} match — keeping all)`);
           }
@@ -1428,6 +1452,7 @@ export const fetchComps = async ({
         gradeFilteredPrices,  // Fix C: grade-proximity filtered prices for floor calc
         reprintFallback: _reprintFallback,
         variantFallback: _variantFallback,
+        premiumVariantIsolated: _premiumVariantIsolated,
         fellBack: _fellBack,
         eraFilterBypassed: _eraFilterBypassed,
         multiIssueRejected: _multiIssueRejected,
@@ -1489,6 +1514,7 @@ export const fetchComps = async ({
         gradeFilteredPrices = filtered.gradeFilteredPrices;  // Fix C: plumb through
         reprintFallback = filtered.reprintFallback;
         variantFallback = filtered.variantFallback;
+        premiumVariantIsolated = filtered.premiumVariantIsolated;
         fellBack = filtered.fellBack;
         eraFilterBypassed = filtered.eraFilterBypassed;
         multiIssueRejected = filtered.multiIssueRejected;
@@ -1682,6 +1708,7 @@ export const fetchComps = async ({
       fellBack,
       reprintFallback,
       variantFallback,
+      premiumVariantIsolated,
       eraFilterBypassed,
       artistFallback,
       compBasis: artistFallback ? 'generic-variant-fallback' : null,

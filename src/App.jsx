@@ -6062,6 +6062,9 @@ function CollectionDetail({
             {item.variantMultiplier != null && (
               <div style={{ color: "#aaa", fontSize: 11, marginTop: 4 }}>
                 Variant adj: ×{item.variantMultiplier}
+                {item.variantMultiplierEstimated && (
+                  <span style={{ color: "#f59e0b", marginLeft: 6 }}>⚠ estimated — needs re-verification</span>
+                )}
               </div>
             )}
             <div className="muted small" style={{ marginTop: 6, fontStyle: "italic" }}>
@@ -9182,6 +9185,10 @@ function WatchMode({ onStop }) {
                 keyIssue: data.keyIssue || null,
                 labelType: data.labelType || null,
                 labelNotes: data.labelNotes || null,
+                assetTypeConfident: data.assetTypeConfident,
+                foreignEdition: data.foreignEdition,
+                isReprint: data.isReprint,
+                editionType: data.editionType,
                 images: [b64],
               }),
             })
@@ -9545,6 +9552,13 @@ export default function App() {
             labelNotes: item.labelNotes || null,
             // Ship 10.2 — Pass Vision condition report to enrich.
             reason: item.reason || null,
+            // 2026-07-18 — preserve existing asset-type gate on refresh (no
+            // fresh Vision call happens here — must not default back to
+            // true and silently unblock a book Vision already flagged).
+            assetTypeConfident: item.assetTypeConfident,
+            foreignEdition: item.foreignEdition,
+            isReprint: item.isReprint,
+            editionType: item.editionType,
             images: item.images?.[0] ? [item.images[0]] : [],  // Ship #20a.6.19: pass stored image for variant identity
             // P0 CRITICAL — Pass cached claudeCheck to skip AI on refresh
             skipClaudeCheck: true,
@@ -9604,7 +9618,10 @@ export default function App() {
               // Vision's stored guess can't survive the merge default of
               // "enrich.price || cur.price". Default-true on missing
               // identityConfident protects existing catalog entries.
-              const idGated = enrich.identityConfident === false;
+              // 2026-07-18 — also folds in assetTypeConfident:false (Vision
+              // itself reporting the image isn't a comic at all) so it
+              // reuses the exact same price-null / red-banner path.
+              const idGated = enrich.identityConfident === false || enrich.assetTypeConfident === false;
 
               // Quality guard: better data never replaced by worse (Principle 2)
               const priceGuard = idGated || lowMatch
@@ -9639,7 +9656,7 @@ export default function App() {
                 priceUpdatedAt: priceChangedAR ? (enrich.priceUpdatedAt || Date.now()) : (cur.priceUpdatedAt || cur.timestamp),
                 grade: gradeGuard.grade,
                 confidenceLevel: gradeGuard.confidenceLevel,
-                identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
+                identityConfident: idGated ? false : (enrich.identityConfident ?? cur.identityConfident ?? true),
                 identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                 identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
                 // Ship 6.2 — Polybag-aware merge.
@@ -9696,6 +9713,8 @@ export default function App() {
                 goCollect: enrich.goCollect || cur.goCollect || null,
                 variant: enrich.variantNote || cur.variant || null,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
+                premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
                 year: enrich.polybagDetected && enrich.year
                   ? enrich.year
                   : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
@@ -9889,6 +9908,10 @@ export default function App() {
       cgcLabel: data.cgcLabel || null,
       purchasePrice: data.purchasePrice != null ? parseFloat(data.purchasePrice) || null : null,
       timestamp: Date.now(),
+      assetTypeConfident: data.assetTypeConfident !== false,
+      foreignEdition: data.foreignEdition === true,
+      isReprint: data.isReprint === true,
+      editionType: data.editionType || null,
       marketPending: true,  // signal price not ready, enrich in progress
       images: thumb ? [thumb] : [],
     };
@@ -10015,6 +10038,11 @@ export default function App() {
           reason: data.reason || null,
           // Session 4B — Pass assetType from grade.js (book vs comic routing)
           assetType: data.assetType || 'comic',
+          // 2026-07-18 — Vision's own "is this actually a comic" read
+          assetTypeConfident: data.assetTypeConfident,
+          foreignEdition: data.foreignEdition,
+          isReprint: data.isReprint,
+          editionType: data.editionType,
         };
         if (!buyerMode) enrichBody.images = [b64];
         fetch("/api/enrich", {
@@ -10055,7 +10083,8 @@ export default function App() {
                   console.log('[scan] year healed:', cur.year, '→', enrich.confirmedYear);
                 }
                 // Ship #20a.6.4 — see auto-refresh path for full rationale.
-                const idGated = enrich.identityConfident === false;
+                // 2026-07-18 — folds in assetTypeConfident:false too.
+                const idGated = enrich.identityConfident === false || enrich.assetTypeConfident === false;
 
                 // Quality guard: better data never replaced by worse (Principle 2)
                 const priceGuardB = idGated
@@ -10080,7 +10109,7 @@ export default function App() {
                   priceUpdatedAt: priceChanged ? (enrich.priceUpdatedAt || Date.now()) : (cur.priceUpdatedAt || cur.timestamp),
                   grade: gradeGuardB.grade,
                   confidenceLevel: gradeGuardB.confidenceLevel,
-                  identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
+                  identityConfident: idGated ? false : (enrich.identityConfident ?? cur.identityConfident ?? true),
                   identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                   identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
                   keyIssue: enrich.keyIssue || cur.keyIssue,
@@ -10112,6 +10141,8 @@ export default function App() {
                   cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
                   variant: enrich.variantNote || cur.variant || null,
                   variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
+                premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
                   year: enrich.polybagDetected && enrich.year
                     ? enrich.year
                     : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
@@ -10168,14 +10199,15 @@ export default function App() {
                 if (!s || s.id !== savedId) return s;
                 const priceChangedSel = enrich.price && enrich.price !== s.price;
                 // Ship #20a.6.4 — see auto-refresh path for full rationale.
-                const idGatedSel = enrich.identityConfident === false;
+                // 2026-07-18 — folds in assetTypeConfident:false too.
+                const idGatedSel = enrich.identityConfident === false || enrich.assetTypeConfident === false;
                 return {
                   ...s,
                   comps: enrich.comps || s.comps,
                   price: idGatedSel ? null : (enrich.price || s.price),
                   priceLow: idGatedSel ? null : (enrich.priceLow || s.priceLow),
                   priceHigh: idGatedSel ? null : (enrich.priceHigh || s.priceHigh),
-                  identityConfident: enrich.identityConfident ?? s.identityConfident ?? true,
+                  identityConfident: idGatedSel ? false : (enrich.identityConfident ?? s.identityConfident ?? true),
                   identityMissingFields: enrich.identityMissingFields ?? s.identityMissingFields ?? null,
                   identityReasons: enrich.identityReasons ?? s.identityReasons ?? null,
                   keyIssue: enrich.keyIssue || s.keyIssue,
@@ -10213,6 +10245,8 @@ export default function App() {
                   goCollect: enrich.goCollect || s.goCollect || null,
                   variant: enrich.variantNote || s.variant || null,
                   variantMultiplier: enrich.variantMultiplier || s.variantMultiplier || null,
+                  variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || s.variantMultiplierEstimated === true,
+                  premiumVariantIsolated: enrich.premiumVariantIsolated === true || s.premiumVariantIsolated === true,
                   // Mega-key floor flags
                   megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
                   // Q90 — floor suppressed for slab-grade-matched sold pools
@@ -10455,6 +10489,11 @@ export default function App() {
             labelNotes: data.labelNotes || null,
             // Ship 10.2 — Pass Vision condition report to enrich.
             reason: data.reason || null,
+            // 2026-07-18 — Vision's own "is this actually a comic" read
+            assetTypeConfident: data.assetTypeConfident,
+            foreignEdition: data.foreignEdition,
+            isReprint: data.isReprint,
+            editionType: data.editionType,
             images: [b64],
           }),
         })
@@ -10468,7 +10507,8 @@ export default function App() {
                 console.log('[bulk] year healed:', cur.year, '→', enrich.confirmedYear);
               }
               // Ship #20a.6.4 — see auto-refresh path for full rationale.
-              const idGatedBulk = enrich.identityConfident === false;
+              // 2026-07-18 — folds in assetTypeConfident:false too.
+              const idGatedBulk = enrich.identityConfident === false || enrich.assetTypeConfident === false;
 
               // Quality guard: better data never replaced by worse (Principle 2)
               const priceGuardC = idGatedBulk
@@ -10488,7 +10528,7 @@ export default function App() {
                 priceNote: priceGuardC.priceNote,
                 grade: gradeGuardC.grade,
                 confidenceLevel: gradeGuardC.confidenceLevel,
-                identityConfident: enrich.identityConfident ?? cur.identityConfident ?? true,
+                identityConfident: idGatedBulk ? false : (enrich.identityConfident ?? cur.identityConfident ?? true),
                 identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                 identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
                 // Ship 6.2 — Polybag-aware merge.
@@ -10545,6 +10585,8 @@ export default function App() {
                 goCollect: enrich.goCollect || cur.goCollect || null,
                 variant: enrich.variantNote || cur.variant || null,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
+                premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
                 year: enrich.polybagDetected && enrich.year
                   ? enrich.year
                   : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
@@ -10946,6 +10988,12 @@ export default function App() {
           labelNotes: item.labelNotes || null,
           // Ship 10.2 — Pass Vision condition report to enrich.
           reason: item.reason || null,
+          // 2026-07-18 — preserve existing asset-type gate on refresh (no
+          // fresh Vision call happens here).
+          assetTypeConfident: item.assetTypeConfident,
+          foreignEdition: item.foreignEdition,
+          isReprint: item.isReprint,
+          editionType: item.editionType,
           images: item.images?.[0] ? [item.images[0]] : [],  // Ship #20a.6.19: pass stored image for variant identity
           // P0 CRITICAL — Pass cached claudeCheck to skip AI on refresh
           skipClaudeCheck: true,
@@ -11003,7 +11051,8 @@ export default function App() {
       console.log('[refresh] year healed:', item.year, '→', enrich.confirmedYear);
     }
     // Ship #20a.6.4 — see auto-refresh path for full rationale.
-    const idGatedRM = enrich.identityConfident === false;
+    // 2026-07-18 — folds in assetTypeConfident:false too.
+    const idGatedRM = enrich.identityConfident === false || enrich.assetTypeConfident === false;
     const newPriceRM = idGatedRM ? null : (enrich.price ?? item.price);
     const priceChangedRM = newPriceRM !== item.price;
     let updated = {
@@ -11017,7 +11066,7 @@ export default function App() {
       priceLow: idGatedRM ? null : (enrich.priceLow ?? item.priceLow),
       priceHigh: idGatedRM ? null : (enrich.priceHigh ?? item.priceHigh),
       priceUpdatedAt: priceChangedRM ? (enrich.priceUpdatedAt || Date.now()) : (item.priceUpdatedAt || item.timestamp),
-      identityConfident: enrich.identityConfident ?? item.identityConfident ?? true,
+      identityConfident: idGatedRM ? false : (enrich.identityConfident ?? item.identityConfident ?? true),
       identityMissingFields: enrich.identityMissingFields ?? item.identityMissingFields ?? null,
       identityReasons: enrich.identityReasons ?? item.identityReasons ?? null,
       keyIssue: enrich.keyIssue || item.keyIssue,
@@ -11064,6 +11113,8 @@ export default function App() {
       goCollect: enrich.goCollect || item.goCollect || null,
       variant: enrich.variantNote || item.variant || null,
       variantMultiplier: enrich.variantMultiplier || item.variantMultiplier || null,
+      variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || item.variantMultiplierEstimated === true,
+      premiumVariantIsolated: enrich.premiumVariantIsolated === true || item.premiumVariantIsolated === true,
       year: enrich.polybagDetected && enrich.year
         ? enrich.year
         : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : item.year),
@@ -11240,6 +11291,11 @@ export default function App() {
           defectPenalty: gradeData.defectPenalty || null,
           // Ship 10.2 — Pass Vision condition report to enrich.
           reason: gradeData.reason || null,
+          // 2026-07-18 — Vision's own "is this actually a comic" read
+          assetTypeConfident: gradeData.assetTypeConfident,
+          foreignEdition: gradeData.foreignEdition,
+          isReprint: gradeData.isReprint,
+          editionType: gradeData.editionType,
           images: [b64],
         }),
       });
@@ -11289,6 +11345,11 @@ export default function App() {
       labelNotes: gradeData.labelNotes || null,
       cgcVerified: gradeData.cgcVerified || false,
       cgcLabel: gradeData.cgcLabel || null,
+      // 2026-07-18 — re-identification runs a fresh Vision call, so refresh
+      // both gates from the new result rather than carrying forward the
+      // pre-re-identify values via the `...item` spread above.
+      identityConfident: enrichData?.identityConfident ?? item.identityConfident ?? true,
+      assetTypeConfident: enrichData?.assetTypeConfident ?? gradeData.assetTypeConfident ?? true,
       enrichFailed,
       enrichError,
     };
@@ -11921,6 +11982,10 @@ export default function App() {
                             confidence: data.confidence, defectPenalty: data.defectPenalty || null,
                             certNumber: data.certNumber || null, labelType: data.labelType || null, labelNotes: data.labelNotes || null, variant: data.variant || null,
                             keyIssue: data.keyIssue || null, images: [b64],
+                            assetTypeConfident: data.assetTypeConfident,
+                            foreignEdition: data.foreignEdition,
+                            isReprint: data.isReprint,
+                            editionType: data.editionType,
                           }),
                         })
                           .then((r) => r.ok ? r.json() : null)
@@ -11929,7 +11994,10 @@ export default function App() {
                             setCatalogue((prev) => {
                               const cur = prev.find((x) => x.id === savedId);
                               if (!cur) return prev;
-                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: enrich.price || cur.price, priceLow: enrich.priceLow || cur.priceLow, priceHigh: enrich.priceHigh || cur.priceHigh, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              // 2026-07-18 — fold in identity/asset-type gate (was previously
+                              // absent on this duplicate-confirm path).
+                              const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
+                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });

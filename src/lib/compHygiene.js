@@ -56,6 +56,16 @@ export const SIGNED_RE = /\b(?:signed|signature\s+series|autographed?|yellow\s*l
 export const TPB_MARKER_RE =
   /\b(?:tpb|trade\s*paperback|hardcover|hc|omnibus|compendium|deluxe(?:\s*edition)?|absolute(?:\s*edition)?|treasury(?:\s*edition)?|collected\s*edition|graphic\s*novel|gn)\b/i;
 
+// Premium-variant isolation markers (2026-07-18, Magik #1 / Silk #1 class) —
+// convention-exclusive, retailer-exclusive, virgin, and numbered/limited
+// print runs are a distinct, often significantly more valuable market
+// segment than a generic variant cover. Used by comps.js Filter 1c to
+// isolate a thin matching pool rather than blending it with generic
+// variant comps (the app already handles thin pools gracefully elsewhere —
+// Ship #13.1 thin-pool anchor — so isolating is preferred over blending).
+export const PREMIUM_VARIANT_RE =
+  /\b(nycc|sdcc|c2e2|megacon|fan\s*expo|eccc|wondercon|emerald\s*city|exclusive|virgin|limited|numbered|ltd)\b/i;
+
 // Other-cover-letter detector. When our book is Cover A (or has no cover
 // letter), this matches Cover B/C/D/E... in listing titles for hard reject.
 export const OTHER_COVER_RE = /\bcover\s*[b-z]\b|\bcvr\s*[b-z]\b/i;

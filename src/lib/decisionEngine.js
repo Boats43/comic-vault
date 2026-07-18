@@ -123,6 +123,17 @@ export function computeDecision(item, context = {}) {
     decision.blockers.push('identity-not-confident');
   }
 
+  // Blocker: Vision itself determined the image is not a comic book at all
+  // (2026-07-18, anime/manga poster class). This is distinct from
+  // identity-not-confident — Vision can be fully confident about grade/price
+  // while explicitly stating the physical item isn't a comic. Must hard-gate
+  // regardless of how the rest of identity resolved (visual pool matches on
+  // title text can still populate confident-looking fields for a poster
+  // that happens to share a comic's title).
+  if (item.assetTypeConfident === false) {
+    decision.blockers.push('asset-type-mismatch');
+  }
+
   // Blocker: Pricing source refusals
   if (item.pricingSource === 'refused-identity-conflict') {
     decision.blockers.push('refused-identity-conflict');
@@ -206,7 +217,8 @@ export function computeDecision(item, context = {}) {
       'missing-title',
       'identity-incomplete',
       'identity-not-confident',
-      'refused-identity-conflict'
+      'refused-identity-conflict',
+      'asset-type-mismatch'
     ];
     const hasIdentityBlocker = decision.blockers.some(b => identityBlockers.includes(b));
 
@@ -747,6 +759,7 @@ function buildBlockerReason(blockers, item) {
   if (blockers.includes('missing-title')) reasons.push('identity-incomplete: title not resolved');
   if (blockers.includes('identity-incomplete')) reasons.push('identity-incomplete: required fields missing');
   if (blockers.includes('identity-not-confident')) reasons.push('identity uncertain');
+  if (blockers.includes('asset-type-mismatch')) reasons.push('Vision determined this is not a comic book');
   if (blockers.includes('refused-identity-conflict')) reasons.push('identity conflict');
   if (blockers.includes('no-data-sources')) reasons.push('no pricing data available');
   if (blockers.includes('manual-review-required')) reasons.push('manual review required');
@@ -771,6 +784,7 @@ function buildIdentityNextStep(blockers, item) {
   if (blockers.includes('missing-title')) steps.push('Rescan asset for clear title');
   if (blockers.includes('identity-incomplete')) steps.push('Rescan asset for missing identity fields');
   if (blockers.includes('identity-not-confident')) steps.push('Retake photo with better lighting or verify identity manually');
+  if (blockers.includes('asset-type-mismatch')) steps.push('Confirm this is actually a comic book before pricing/listing');
 
   return steps.join('; ') || 'Fix identity fields before listing';
 }

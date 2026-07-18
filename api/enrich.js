@@ -1919,6 +1919,7 @@ export default async function handler(req, res) {
       labelType,   // GL-2 (EX-5) — Vision slab label type (qualified/restored/...)
       labelNotes,  // GL-2 (EX-5) — verbatim slab label notes ("PAGE 12 MISSING")
       assetType,
+      assetTypeConfident,  // 2026-07-18 — Vision's own "is this actually a comic" read
       author,  // Session 4B — book identity field from BOOK_PROMPT
       barcode,  // TRACK A — UPC/barcode scan
       manualIdentity,  // FIX 4 — Manual text search (title/issue/year)
@@ -2006,6 +2007,20 @@ export default async function handler(req, res) {
     // Lesson encoded: variable declarations referenced across a function
     // must be at function top, not deep in execution flow.
     const out = {};
+
+    // 2026-07-18 (anime/manga poster class) — Vision's own structured
+    // assetTypeConfident read. Defaults true when absent (older callers,
+    // eBay-first grade-only path) so nothing pre-existing gets blocked
+    // retroactively; explicit false is the only thing that hard-gates.
+    // Independent of identityConfident/visionConfidence — Vision can be
+    // fully confident about grade/price fields while explicitly stating
+    // the physical item isn't a comic at all, and visual-pool title
+    // matches can still populate confident-looking identity fields for a
+    // poster that happens to share a comic's title.
+    out.assetTypeConfident = assetTypeConfident !== false;
+    if (!out.assetTypeConfident) {
+      console.log('[asset-type-gate] Vision reports this image is NOT a comic book — hard-blocking price/listing');
+    }
 
     // Session 4B — Set assetType early so identityComplete logic can use it.
     // Defaults to 'comic' when not provided (backward compatibility).
@@ -4775,6 +4790,24 @@ export default async function handler(req, res) {
       );
     }
 
+    // 2026-07-18 (anime/manga poster class) — asset-type gate. Independent
+    // of the identity gate above: explicitly null price fields (not just
+    // skip the pricing block) so the client merge ("enrich.price ||
+    // cur.price") replaces rather than preserves a stale/prior price on a
+    // re-scan or refresh of an item Vision now reports isn't a comic at all.
+    if (!out.assetTypeConfident) {
+      out.price = null;
+      out.priceLow = null;
+      out.priceHigh = null;
+      out.pricingSource = 'refused-not-a-comic';
+      // Reuses the existing identityReasons/identityMissingFields display
+      // path (client merge "enrich.identityReasons ?? cur.identityReasons")
+      // so the "Identification Required" banner surfaces this specific
+      // reason with no additional client-side plumbing.
+      out.identityReasons = [...(out.identityReasons || []), 'Vision determined this image is not a comic book'];
+      console.log('[asset-type-gate] REFUSED to price — Vision reports image is not a comic book');
+    }
+
     // Hoisted out of the pricing block so the [price-trace] log below has
     // these in scope when the gate fires (pricing block is skipped entirely).
     let sanityFired = false;
@@ -4797,7 +4830,7 @@ export default async function handler(req, res) {
     // (line ~2994) already set out.price/pricingSource. Without this guard, code
     // falls through all `!isPolybagPricing`-gated pricing branches and hits final
     // `else` which overwrites pricingSource='ebay-polybag-active' with 'refused'.
-    if (idCheckFinal.confident && !isPolybagPricing) {
+    if (idCheckFinal.confident && !isPolybagPricing && out.assetTypeConfident) {
     // P0-A — Kill browse_api legacy paths. All pricing routes through tier engine.
     // When priceBandsRaw truthy (tier 1-4 with data), use it. When null (tier-4
     // no-data: no PC, <2 verified comps), refuse-to-price instead of falling through
@@ -4969,6 +5002,15 @@ export default async function handler(req, res) {
       out.compBasis = rawComps.compBasis || 'generic-variant-fallback';
     }
 
+    // Premium-variant isolation flag (2026-07-18, Magik #1 / Silk #1 class)
+    // — Filter 1c isolated the comp pool to convention-exclusive/virgin/
+    // numbered-limited comps on a single match instead of the usual >=2.
+    // Surfaced so the UI can show the pool is thin-but-isolated rather than
+    // thin-and-blended.
+    if (rawComps?.premiumVariantIsolated) {
+      out.premiumVariantIsolated = true;
+    }
+
     // Filter bypass flag — set in both pricing branches (PC + browse).
     // Universal flag: era filter (comics) or set filter (cards) bypassed.
     if (rawComps?.eraFilterBypassed || out.matchConfidence?.eraFilterBypassed) {
@@ -5124,15 +5166,23 @@ export default async function handler(req, res) {
           'type 1b': 2.0,
           'canadian': 1.8,
           'whitman': 1.8,
+          'virgin': 1.5,
           '2nd print': 1.5,
           'second print': 1.5,
           'pence': 1.5,
           'dc universe logo': 1.5,
+          'exclusive': 1.3,
           // Ship 7 — newsstand removed from flat table; era-aware logic
           // runs BEFORE this table lookup. Pre-1985: 1.0× (default print
           // run, no premium). 1985-1995: 1.2×. 1996-2000: 1.5×. 2001-2013:
           // 2.5×. Post-2013: null (Marvel/DC killed newsstand).
         };
+        // 2026-07-18 (Magik #1 / Silk #1 class) — 'virgin' and 'exclusive'
+        // entries, plus the numbered/limited tiered block below, are
+        // estimates, NOT calibrated against real market data the way the
+        // rest of this table is (per user greenlight: conservative starting
+        // ratios, flagged for re-verification as real scans accumulate).
+        const ESTIMATED_VARIANT_KEYS = new Set(['virgin', 'exclusive']);
         let vMult = null;
 
         // Ship 7 — Era-aware newsstand multiplier (runs BEFORE table lookup).
@@ -5179,9 +5229,41 @@ export default async function handler(req, res) {
           }
         }
 
+        // Numbered/limited print-run tiered multiplier (2026-07-18, Magik
+        // #1 class) — runs BEFORE the flat table lookup, same shape as the
+        // newsstand era block above. Smaller print runs command a larger
+        // premium; tiers and thresholds are estimated starting points (user
+        // greenlight 2026-07-18), not calibrated against real market data —
+        // out.variantMultiplierEstimated flags this for re-verification.
+        const LIMITED_RUN_RE = /\b(?:limited\s*(?:to)?|ltd\.?|le)\D{0,10}(\d{1,6})\b|(\d{1,6})\s*(?:copies|pieces)\b|\b1\s*of\s*(\d{1,6})\b/i;
+        if (vLower.includes('limited') || vLower.includes('numbered')) {
+          const runMatch = variant.match(LIMITED_RUN_RE);
+          const runSize = runMatch
+            ? parseInt(runMatch[1] || runMatch[2] || runMatch[3], 10)
+            : null;
+          let limitedMult;
+          if (runSize > 0) {
+            if (runSize <= 500) limitedMult = 2.0;
+            else if (runSize <= 1500) limitedMult = 1.6;
+            else if (runSize <= 3000) limitedMult = 1.3;
+            else limitedMult = 1.15;
+            out.limitedRunSize = runSize;
+          } else {
+            // Limited/numbered language present but no parseable run size —
+            // most conservative tier rather than skipping entirely.
+            limitedMult = 1.15;
+          }
+          vMult = limitedMult;
+          out.variantMultiplierEstimated = true;
+          console.log(
+            `[variant] numbered/limited run=${runSize || 'unclear'} mult=${limitedMult}× (estimated, needs re-verification)`
+          );
+        }
+
         // Standard variant table lookup. Skipped if Ship 7 newsstand block
-        // already set vMult. Catches non-newsstand variants (price variants,
-        // canadian, whitman, 2nd prints, etc.).
+        // or the numbered/limited block above already set vMult. Catches
+        // non-newsstand variants (price variants, canadian, whitman, 2nd
+        // prints, etc.).
         for (const [key, mult] of Object.entries(variantMultipliers)) {
           if (!vMult && vLower.includes(key)) {
             // Test-market price-variant gate (Ship #9 + #10). Vision
@@ -5207,6 +5289,7 @@ export default async function handler(req, res) {
               );
             }
             vMult = mult;
+            if (ESTIMATED_VARIANT_KEYS.has(key)) out.variantMultiplierEstimated = true;
             break;
           }
         }
