@@ -152,6 +152,62 @@ export const filterItemsByIssue = (items, confirmedIssue) => {
   );
 };
 
+/**
+ * Q127 dispatch (2026-07-19, Catwoman #64 Szerdy-variant class) — a NEW
+ * visual-pool contamination shape, distinct from Q115's Batman #608 class.
+ * There, the wrong-book pool shared a DIFFERENT issue number, so
+ * filterItemsByIssue (above) fixes it at the root by excluding those items
+ * before variant-consensus computation ever sees them. Here, the wrong-book
+ * pool (a 2024 Nathan Szerdy "exclusive/limited" trade-dress variant) shares
+ * the SAME title string AND the SAME issue number as the real 2007 book —
+ * filterItemsByIssue is structurally a no-op against it, since every
+ * contaminating item's `.issue` genuinely matches.
+ *
+ * The only signal that distinguishes the two is YEAR. `poolYearHint`
+ * (api/enrich.js, computed from the same visual pool, independent of
+ * ComicVine) already carries it — in the confirmed production case, 2024
+ * at 100% agreement (6/6 explicit year mentions), against a confirmedYear
+ * of 2007 resolved from PriceCharting. This detects a conflict between the
+ * two and returns a description object, or null when there's no conflict
+ * (including when there's simply no evidence either way — no poolYearHint,
+ * or no confirmedYear yet).
+ *
+ * Deliberately a POOL-LEVEL check, not a per-item filter: only 6/20 of the
+ * real contaminating listings in the confirmed case even mentioned a year
+ * at all — the other 14 ("Nathan Szerdy DC Comics Trade Dress Variant A
+ * /3000 Homage Cover") carry no year and would survive a per-item filter
+ * untouched, still contributing "exclusive"/"limited" tokens. Mirrors the
+ * existing [cv-era-gate] precedent elsewhere in this codebase: suppress
+ * outright on a huge, incontrovertible year drift rather than try to
+ * partially clean an already-contaminated pool.
+ *
+ * Tolerance of 5 years is deliberately looser than the mega-key /
+ * AI-verify ±1-2y conventions (those validate a SPECIFIC candidate against
+ * a known year; this is a coarser "is this pool even plausibly the same
+ * printing/edition" check) but comfortably tighter than genuine
+ * contamination gaps seen in production (17y here, 45y for Batman #608) —
+ * tunable if a genuine near-year case surfaces that needs it loosened.
+ *
+ * @param {{year: number, agreement: number, sampleSize: number}|null} poolYearHint
+ * @param {string|number|null} confirmedYear
+ * @param {number} [tolerance=5]
+ * @returns {{poolYear: number, poolAgreement: number, poolSampleSize: number, confirmedYear: number, drift: number}|null}
+ */
+export const detectVariantPoolYearConflict = (poolYearHint, confirmedYear, tolerance = 5) => {
+  if (!poolYearHint || !confirmedYear) return null;
+  const cy = parseInt(confirmedYear, 10);
+  if (!Number.isFinite(cy)) return null;
+  const drift = Math.abs(poolYearHint.year - cy);
+  if (drift <= tolerance) return null;
+  return {
+    poolYear: poolYearHint.year,
+    poolAgreement: poolYearHint.agreement,
+    poolSampleSize: poolYearHint.sampleSize,
+    confirmedYear: cy,
+    drift,
+  };
+};
+
 export const extractConfirmedVariant = (
   visualItems,
   visionVariant,

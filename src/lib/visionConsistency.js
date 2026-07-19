@@ -53,6 +53,20 @@ const lightTokenize = (s) =>
     .split(/\s+/)
     .filter((w) => w.length > 0 && !LIGHT_STOPWORDS.has(w) && !/^\d+$/.test(w));
 
+// Q118-FIX (2026-07-19, Harley Quinn #62 / Catwoman #64 false-positive class)
+// — find `needle` as a CONTIGUOUS, in-order run inside `haystack`. Returns
+// the start index, or -1 if no contiguous match exists. Order/adjacency
+// matters here in a way plain set-membership doesn't: "extra words exist
+// somewhere in the window" is not the same claim as "the title continues
+// past where the structured field ends."
+const findContiguousIndex = (haystack, needle) => {
+  if (needle.length === 0) return -1;
+  for (let i = 0; i <= haystack.length - needle.length; i++) {
+    if (needle.every((t, j) => haystack[i + j] === t)) return i;
+  }
+  return -1;
+};
+
 /**
  * @param {{reason?: string, title?: string, issue?: string}} params
  * @returns {{id: string, message: string}|null}
@@ -80,8 +94,18 @@ export const checkTitleConsistency = ({ reason, title, issue }) => {
 
     const overlapCount = structuredTokens.filter((t) => windowTokens.includes(t)).length;
     const hasAnyOverlap = overlapCount > 0;
+    // Q118-FIX — truncation means real content continues PAST the matched
+    // title span, not merely that other words exist somewhere in the
+    // window. "This is a raw copy of Catwoman #64" has extra words (is,
+    // raw) but they're narration BEFORE the title match, not a
+    // continuation of it — structured title "catwoman" is complete and
+    // correct. "This copy of Captain Marvel #17" has "marvel" immediately
+    // AFTER the matched "captain" span — that's a genuine continuation,
+    // still correctly flagged below. Adjacency, not just presence, is
+    // what distinguishes the two.
+    const titleMatchIdx = findContiguousIndex(windowTokens, structuredTokens);
     const structuredIsSubsetOfWindow =
-      overlapCount === structuredTokens.length && windowTokens.length > structuredTokens.length;
+      titleMatchIdx !== -1 && titleMatchIdx + structuredTokens.length < windowTokens.length;
 
     if (!hasAnyOverlap) {
       return {

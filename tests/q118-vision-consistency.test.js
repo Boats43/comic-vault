@@ -90,6 +90,43 @@ assertTrue(s1c !== null, 'mismatched issue number (#12 in text vs #17 structured
 assertTrue(/#12/.test(s1c?.message || '') && /#17/.test(s1c?.message || ''), 'issue mismatch message names both numbers');
 
 // ═══════════════════════════════════════════════════════════════════════
+// SCENARIO 1b — Q126 dispatch (2026-07-19, Harley Quinn #62 / Catwoman #64
+// false-positive class): the truncation check must not conflate "extra
+// words exist somewhere in the reason-text window" with "the title
+// continues past where the structured field ends." Short (1-2 token)
+// titles paired with ordinary Vision narration ("This is a raw copy of
+// Catwoman #64...") were flagging as truncated even though the structured
+// title is complete and correct — the extra words are lead-in narration
+// BEFORE the title match, not a continuation of it. Scenario 1 above
+// (Captain Marvel #17) remains the proof this doesn't overcorrect into
+// never firing: "marvel" sits immediately AFTER the matched "captain"
+// span, a genuine continuation, and must still flag.
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\nScenario 1b: Q126 false-positive class — narration before a complete title must not flag\n');
+
+const q126Cases = [
+  { reason: 'This is a raw copy of Catwoman #64 in near mint condition, minor spine wear.', title: 'catwoman', issue: '64', expectFlag: false },
+  { reason: 'The comic shows Catwoman #64 with a glossy cover and sharp corners.', title: 'catwoman', issue: '64', expectFlag: false },
+  { reason: 'This looks like Harley Quinn #62, near mint, no visible defects.', title: 'harley quinn', issue: '62', expectFlag: false },
+  { reason: 'Harley Quinn #62 appears to be in very fine condition with slight foxing.', title: 'harley quinn', issue: '62', expectFlag: false },
+  { reason: 'Catwoman #64, near mint condition.', title: 'catwoman', issue: '64', expectFlag: false },
+];
+for (const c of q126Cases) {
+  const r = checkTitleConsistency(c);
+  assertTrue((r === null) === !c.expectFlag, `"${c.reason}" (title="${c.title}") — expected ${c.expectFlag ? 'flag' : 'no flag'}, got ${r ? `flag: ${r.message}` : 'no flag'}`);
+}
+
+// The genuine-truncation case must still fire after the fix — this is the
+// regression that matters most (confirms no overcorrection into silence).
+const q126Genuine = checkTitleConsistency({
+  reason: 'This copy of Captain Marvel #17 shows light wear.',
+  title: 'Captain',
+  issue: '17',
+});
+assertTrue(q126Genuine !== null, 'genuine truncation (Captain vs Captain Marvel) still flags after the adjacency fix');
+assertTrue(/truncated/.test(q126Genuine?.message || ''), 'still calls it truncation');
+
+// ═══════════════════════════════════════════════════════════════════════
 // SCENARIO 2 — War Is Hell #15 class: grading-status affirmative claim
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\nScenario 2: grading-status — affirmative CGC claim flags, genuine negation does not\n');

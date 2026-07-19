@@ -1092,6 +1092,59 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   the $12-20 blended 1st/2nd-print comps) now work; a thin-pool honest
   refusal case (<3 matching comps); and a control case confirming a normal
   no-printing-signal book is completely unaffected end to end.
+- **Catwoman #64 Szerdy-variant class, same title/same issue#/different
+  year** (Q127 dispatch, 2026-07-19) — a NEW visual-pool contamination
+  shape, distinct from the Batman #608 class (Q115): there, the wrong-book
+  pool shared a DIFFERENT issue number, so `filterItemsByIssue` fixes it at
+  the root. Here, the wrong-book pool (a 2024 Nathan Szerdy "exclusive/
+  limited" trade-dress homage variant) shares the SAME title string AND the
+  SAME issue number as the real 2007 Catwoman #64 — `filterItemsByIssue` is
+  a structural no-op against it (confirmed: 20/20 pool items genuinely
+  extract issue "64"). The only signal distinguishing the two books is
+  YEAR. `poolYearHint` (independently computed per-request from the same
+  visual pool, no ComicVine dependency) already carried it — 2024 at 100%
+  agreement (6/20 explicit mentions) — completely decoupled from
+  `confirmedYear` (2007, resolved later from PriceCharting) and never
+  cross-checked against it. Root mechanism was two-layered: (1) grade.js's
+  own eBay-first path (`extractConsensus`, api/grade.js:353, a SEPARATE
+  request/pool fetch from enrich.js's own) produced the contaminated
+  `variant="exclusive limited signed"` and forwarded it to the client, who
+  sent it back as `req.body.variant`; (2) `extractConfirmedVariant`'s own
+  gates in enrich.js never fired to correct it (Gate 4, confidence=high,
+  silently declined the override), so the contaminated client-forwarded
+  string passed through untouched. Fix: `detectVariantPoolYearConflict`
+  (`src/lib/variantIdentity.js`) — a POOL-LEVEL (not item-level) gate,
+  deliberately: only 6/20 of the real contaminating listings even mentioned
+  a year at all; the other 14 ("Nathan Szerdy DC Comics Trade Dress Variant
+  A /3000 Homage Cover") carry no year and would survive a per-item filter
+  untouched, still contributing exclusive/limited tokens. Mirrors the
+  existing `[cv-era-gate]` precedent (suppress outright on a huge,
+  incontrovertible year drift, rather than partially filter). When
+  `poolYearHint` conflicts with `confirmedYear` by more than 5 years (a
+  tunable tolerance, looser than mega-key/AI-verify ±1-2y conventions —
+  this is a coarser "is this pool even plausibly the same printing"
+  check), `api/enrich.js` suppresses BOTH the client-forwarded
+  `req.body.variant` (nulled, not trusted) AND the `extractConfirmedVariant`
+  recomputation (skipped entirely, never re-derives the same contamination
+  from the same pool) — surfaced via `out.variantPoolYearConflict` per I13
+  (annotate, never silently drop). Deliberately conservative: can suppress
+  a genuine Vision-read variant on the rare chance one coincides with a
+  conflicting `poolYearHint` — accepted per standing doctrine (prefer
+  under-confident over over-confident identification; a missed multiplier
+  is a small miss, a contaminated one is the $13.50-vs-real-price class of
+  bug this gate exists to close).
+  Regression: `tests/q127-variant-pool-year-conflict.test.js` (26
+  assertions) — `detectVariantPoolYearConflict` unit behavior (no-hint,
+  agreement, boundary-at-tolerance, over-tolerance); an end-to-end
+  reconstruction of the real 20-item Catwoman #64 pool confirming
+  `filterItemsByIssue` is genuinely a no-op (0/20 removed) while the new
+  year-gate correctly suppresses both `req.body.variant` and
+  `extractConfirmedVariant`; a regression confirming the Batman #608 class
+  stays inert under this new gate (no poolYearHint → gate never engages,
+  Q115's own fix remains the mechanism that closes it); and a genuine
+  same-year multi-variant case (Captain America #25 / Skottie Young,
+  poolYearHint agreeing with confirmedYear) confirming the gate does not
+  false-positive and the real variant backfill still fires normally.
 
 ## Open Blockers
 

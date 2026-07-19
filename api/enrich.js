@@ -110,7 +110,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
-import { extractConfirmedVariant, filterItemsByIssue } from "../src/lib/variantIdentity.js";
+import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
 // Q118 — internal consistency checker (Vision's free-text reason vs its own structured fields).
@@ -3466,6 +3466,68 @@ export default async function handler(req, res) {
       console.log(`[cv-pub-autofill] ${confirmedPublisher} (from CV volume)`);
     }
 
+    // Q127 dispatch (2026-07-19, Catwoman #64 Szerdy-variant class) — a
+    // NEW contamination shape, distinct from Q115's Batman #608 class:
+    // there, the wrong-book pool had a DIFFERENT issue number, so
+    // filterItemsByIssue (below) fixed it at the root. Here, the wrong-book
+    // pool (a 2024 Nathan Szerdy "exclusive/limited" trade-dress variant)
+    // shares the SAME title string AND the SAME issue number as the real
+    // 2007 book — filterItemsByIssue is structurally a no-op against it.
+    // The only signal that distinguishes them is YEAR, and poolYearHint
+    // (computed earlier, ~line 2329, from this same request's visual pool)
+    // already carries it: 2024 at 100% (6/6) agreement, vs confirmedYear
+    // 2007 resolved from PriceCharting. Mirrors the existing [cv-era-gate]
+    // precedent (suppress outright on a huge, incontrovertible year drift,
+    // rather than partially filter) — an item-level year filter alone
+    // wouldn't have been enough here: 14/20 contaminating listings carry no
+    // year at all and would survive untouched.
+    //
+    // req.body.variant is included in the gate (not just the
+    // extractConfirmedVariant recomputation below) because that's where
+    // THIS bug actually lived: it's grade.js's own eBay-first path
+    // (extractConsensus, api/grade.js:353) that produced
+    // "exclusive limited signed" from an equally-contaminated pool — a
+    // near-identical reverse-image search of the same photo — and
+    // extractConfirmedVariant's gates below never even fired to correct
+    // it (confirmedVariant just kept the client-forwarded value).
+    // Deliberately conservative: this can also suppress a genuine
+    // Vision-read variant on the rare chance one coincides with a
+    // conflicting poolYearHint. That's the intended direction per standing
+    // doctrine (prefer under-confident over over-confident identification)
+    // — dropping a possibly-real variant multiplier is a small miss;
+    // keeping a contaminated one is the $13.50-vs-real-price class of bug
+    // this gate exists to close.
+    const variantPoolYearConflict = detectVariantPoolYearConflict(poolYearHint, confirmedYear);
+    if (variantPoolYearConflict) {
+      console.log(
+        `[variant-year-gate] suppressed: poolYearHint=${variantPoolYearConflict.poolYear} ` +
+        `(${Math.round(variantPoolYearConflict.poolAgreement * 100)}%, ${variantPoolYearConflict.poolSampleSize} mentions) ` +
+        `vs confirmedYear=${variantPoolYearConflict.confirmedYear}, drift=${variantPoolYearConflict.drift}y — ` +
+        `pool likely different edition/relaunch, variant consensus skipped`
+      );
+      // I13 — annotate, never silently drop: the card can surface this as
+      // "variant consensus withheld (pool looks like a different
+      // year/edition)" rather than the suppression being invisible.
+      out.variantPoolYearConflict = variantPoolYearConflict;
+    }
+
+    // Q127 follow-up (same dispatch, found during pre-commit verification
+    // audit) — req.body.variant is read directly, bypassing
+    // confirmedVariant entirely, at several OTHER call sites downstream:
+    // the variant-multiplier application block (the exact source of the
+    // real "[variant] exclusive limited signed x 1.15" contamination seen
+    // in production — confirmedVariant being null does NOT stop this
+    // separate block from re-reading the raw client-forwarded value),
+    // computePriceBandsFromSold's variant param, and the Claude AI-verify
+    // prompt data. All three need the identical suppression
+    // confirmedVariant already gets, or the price-multiplier/AI-verify
+    // stages would still see the contaminated string even after comps/
+    // sold-verify are correctly cleaned up above. Single derived value so
+    // every remaining raw req.body.variant consumer stays in sync with the
+    // same gate rather than drifting into a fourth independently-checked
+    // copy.
+    const safeReqVariant = variantPoolYearConflict ? null : (req.body.variant || null);
+
     // Ship #20a.6.18 — Variant identity check (additive, gated). Only runs
     // on modern books (year >= 2000) with variant detected AND Vision
     // confidence not HIGH AND eBay image search returned results. Extracts
@@ -3473,7 +3535,7 @@ export default async function handler(req, res) {
     // exclusive markers, limitation). Overrides Vision variant for comp
     // query when ≥2 listings agree. Falls back gracefully: no consensus →
     // keeps Vision variant. Old books (pre-2000) skip entirely.
-    let confirmedVariant = req.body.variant || null;
+    let confirmedVariant = safeReqVariant;
     let variantIdentitySource = 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
@@ -3484,7 +3546,7 @@ export default async function handler(req, res) {
     // back to Vision's variant field. The Q100 FIX-A auth-token strip is
     // applied downstream in fetchComps/api/comps.js using confirmedLabelType.
     if (cgcIdentityConfirmed) {
-      confirmedVariant = cgcResult.variant || req.body.variant || null;
+      confirmedVariant = cgcResult.variant || safeReqVariant || null;
       variantIdentitySource = cgcResult.variant ? 'cgc_cert' : 'vision';
       console.log(`[cgc-variant] source=${cgcResult.variant ? 'cgc' : 'vision'} value="${confirmedVariant || ''}"`);
     } else {
@@ -3533,11 +3595,19 @@ export default async function handler(req, res) {
     // they survive this filter untouched. filterItemsByIssue lives in
     // src/lib/variantIdentity.js (single source of truth, directly
     // regression-testable).
-    const variantSourceItems = filterItemsByIssue(variantSourceItemsPreIssueFilter, confirmedIssue);
+    const variantSourceItems = variantPoolYearConflict
+      ? []
+      : filterItemsByIssue(variantSourceItemsPreIssueFilter, confirmedIssue);
 
-    const variantCheck = extractConfirmedVariant(
+    // Q127 — skip recomputation entirely on a year-hint conflict: both the
+    // override AND backfill paths would otherwise recompute the identical
+    // contaminated consensus from the same pool (variantSourceItems is
+    // already forced empty above, but Gate 1's early-return means this
+    // call would just be dead work either way — skipping it outright
+    // keeps the log trail limited to the one [variant-year-gate] line).
+    const variantCheck = variantPoolYearConflict ? null : extractConfirmedVariant(
       variantSourceItems,
-      req.body.variant,
+      safeReqVariant,
       confirmedYear,
       confidence
     );
@@ -4313,7 +4383,7 @@ export default async function handler(req, res) {
       title: confirmedTitle,
       issue: confirmedIssue,
       year: confirmedYear,
-      variant: req.body?.variant || null,
+      variant: safeReqVariant,
       variantAdjusted: soldVerifyResult.variantAdjusted || false,
       soldVerifyResult,
     });
@@ -5417,7 +5487,12 @@ export default async function handler(req, res) {
     // Variant multiplier: adjust price for known variant types.
     // Only apply when PriceCharting is the pricing source — browse_api/ebay_avg
     // already reflect market for this specific variant.
-    const variant = req.body.variant ? String(req.body.variant).trim() : null;
+    // Q127 follow-up — was reading req.body.variant directly, bypassing the
+    // year-hint conflict gate entirely: confirmedVariant could correctly
+    // resolve to null (comps/sold-verify cleaned up) while this block still
+    // applied a spurious multiplier from the same contaminated string
+    // (the real "[variant] exclusive limited signed x 1.15" case).
+    const variant = safeReqVariant ? String(safeReqVariant).trim() : null;
     // Ship 6 — skip variant multiplier when polybag pricing active.
     if (variant && out.price && isFromPC && !isPolybagPricing) {
       const NO_PREMIUM = [
@@ -6840,7 +6915,7 @@ export default async function handler(req, res) {
       issue: confirmedIssue,
       year: confirmedYear || year,
       publisher: confirmedPublisher,
-      variant: req.body?.variant || null,
+      variant: safeReqVariant,
       grade,
       numericGrade,
       conditionSummary: req.body?.reason || null,
