@@ -5376,6 +5376,22 @@ export default async function handler(req, res) {
       out.filterBypassDetected = true;
     }
 
+    // Q129 dispatch (2026-07-19, Harley Quinn #62 Guillem March Cover C
+    // class) — a distinct failure shape from Q115/Q127/Q128: not wrong
+    // data getting IN, but CORRECT variant-specific comps getting excluded
+    // by the era filter for a legitimate reason (a different printing —
+    // in the confirmed case, the ONLY currently-live Guillem March Cover C
+    // listings are a 2026 DC homage-reprint solicitation, correctly
+    // rejected against a confirmedYear of 2019), leaving a priced pool
+    // that carries no named variant descriptor at all (generic Main Cover
+    // comps) silently standing in for the specific variant. I13 —
+    // annotate, never silently substitute one real product's comps for a
+    // different real product's when the correct data genuinely doesn't
+    // exist right now.
+    if (rawComps?.variantCompsExcludedByEra) {
+      out.variantCompsExcludedByEra = rawComps.variantCompsExcludedByEra;
+    }
+
     // Ship 14 — Variant multiplier applies to ALL pricing paths that use
     // unfiltered comp pools. Previously gated to pricingSource ===
     // 'pricecharting' only. Three paths were incorrectly excluded:

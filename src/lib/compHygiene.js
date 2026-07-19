@@ -179,6 +179,11 @@ export const ARTIST_PATTERNS = [
   /mico suayan/i, /puppeteer lee/i, /derrick chew/i, /jonboy meyers/i,
   /kael ngu/i, /natali sanders/i, /kendrick lim/i, /lucio parrillo/i,
   /jenny frison/i,  // Q84 — WW #75 cover artist (unambiguous, alias policy)
+  /guillem march/i,  // Q129 — Harley Quinn #62 cover artist. Multi-word ONLY,
+  // deliberately no bare /march/i single-word fallback below — "March" alone
+  // collides with the calendar month (solicitation dates, "March 2019", the
+  // eBay item's own listing month), unlike the short, distinctive surnames
+  // that get a safe bare fallback elsewhere in this list.
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
   /skan/i, /rapoza/i, /quash/i, /momoko/i, /ross/i, /adams/i,
   /kirkham/i, /bean/i, /andolfo/i, /browne/i, /forstner/i,
@@ -879,4 +884,45 @@ export const evaluateEraYearMatch = (listingYear, confirmedYear, tolerance, cvVo
     return { keep: true, matchedVia: 'volume-label' };
   }
   return { keep: false, matchedVia: null };
+};
+
+// Q129 dispatch (2026-07-19, Harley Quinn #62 Guillem March Cover C class)
+// — detects whether a listing title names a SPECIFIC cover variant
+// (lettered cover, named descriptor like "card stock"/"virgin cover", or a
+// known cover artist), independent of whether OUR confirmedVariant string
+// itself captured that same descriptor. Reuses the three existing
+// detectors already used elsewhere in this file/pipeline (OTHER_COVER_RE,
+// OTHER_VARIANT_DESCRIPTOR_RE, extractArtist) rather than inventing a
+// fourth pattern list. Used to detect a distinct failure shape from
+// Q115/Q127/Q128's contamination classes: not wrong data getting IN, but
+// CORRECT variant-specific comps getting excluded by an upstream filter
+// (era, in the confirmed case) for a legitimate reason, with the survivors
+// silently priced as if they were equivalent to the excluded variant. See
+// Pattern Library.
+export const hasNamedVariantDescriptor = (title) => {
+  const t = String(title || '');
+  if (!t) return false;
+  return OTHER_COVER_RE.test(t) || OTHER_VARIANT_DESCRIPTOR_RE.test(t) || extractArtist(t) != null;
+};
+
+// Q129 dispatch — the final keep/flag decision, extracted as a pure
+// function for direct regression-testability (same precedent as
+// evaluateEraYearMatch above). Only flags when era-excluded listings
+// named a specific variant AND the final priced pool doesn't itself
+// carry one — a final pool that DOES carry a named descriptor still
+// represents a real, specific cover variant (just not necessarily the
+// same one that got excluded), which isn't the silent-substitution shape
+// this exists to catch.
+//
+// @param {number} eraExcludedCount - count of era-rejected listings that
+//   named a specific variant (hasNamedVariantDescriptor === true)
+// @param {string[]} eraExcludedSamples - up to 3 sample titles, for display
+// @param {string[]} finalPoolTitles - titles of the comps that survived
+//   the full filter chain and will actually be priced
+// @returns {{count: number, samples: string[]}|null}
+export const detectVariantCompsExcludedByEra = (eraExcludedCount, eraExcludedSamples, finalPoolTitles) => {
+  if (!eraExcludedCount || eraExcludedCount <= 0) return null;
+  const finalHasDescriptor = (finalPoolTitles || []).some((t) => hasNamedVariantDescriptor(t));
+  if (finalHasDescriptor) return null;
+  return { count: eraExcludedCount, samples: eraExcludedSamples || [] };
 };

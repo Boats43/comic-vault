@@ -56,6 +56,8 @@ import {
   cleanPublisher,
   getEraYearTolerance,
   evaluateEraYearMatch,
+  hasNamedVariantDescriptor,
+  detectVariantCompsExcludedByEra,
 } from "../src/lib/compHygiene.js";
 
 import { classifyVariantTokens } from "../src/lib/imageSearchIdentity.js";
@@ -924,6 +926,7 @@ export const fetchComps = async ({
   let premiumVariantIsolated = false;
   let fellBack = false;
   let eraFilterBypassed = false;
+  let variantCompsExcludedByEra = null;
   let multiIssueRejected = 0;
   let sequelRejected = 0;
   let signedRejected = 0;
@@ -948,6 +951,8 @@ export const fetchComps = async ({
       let _premiumVariantIsolated = false;
       let _fellBack = false;
       let _eraFilterBypassed = false;
+      let _eraExcludedVariantCount = 0;
+      const _eraExcludedVariantSamples = [];
       let _multiIssueRejected = 0;
       let _sequelRejected = 0;
       let _signedRejected = 0;
@@ -1128,6 +1133,20 @@ export const fetchComps = async ({
               console.log('[era-filter] rejected:',
                 titleStr.slice(0, 55),
                 `(year ${ly} vs ${yearNum}, tol ±${tolerance})`);
+              // Q129 dispatch (2026-07-19, Harley Quinn #62 Guillem March
+              // Cover C class) — a distinct failure shape from
+              // Q115/Q127/Q128: not wrong data getting IN, but CORRECT
+              // variant-specific comps getting excluded here for a
+              // legitimate reason (a different printing/year), with no
+              // signal yet as to whether the SURVIVING pool still
+              // represents the same specific cover variant. Track it here;
+              // checked against the final surviving pool below.
+              if (hasNamedVariantDescriptor(titleStr)) {
+                _eraExcludedVariantCount++;
+                if (_eraExcludedVariantSamples.length < 3) {
+                  _eraExcludedVariantSamples.push(titleStr.slice(0, 80));
+                }
+              }
               return false;
             }
             if (matchedVia === 'volume-label') {
@@ -1566,6 +1585,25 @@ export const fetchComps = async ({
       // Session 4B — Survivor trace (diagnose book comp over-filtering)
       console.log(`[comps] survivors: afterTitle=${afterTitle} afterEra=${afterEra} afterReprint=${afterReprint} afterVariant=${afterVariant} afterLot=${afterLot} afterSanity=${afterSanity} final=${p.length}`);
 
+      // Q129 dispatch — detectVariantCompsExcludedByEra (compHygiene.js)
+      // only flags when the final priced pool does NOT itself carry a
+      // named variant descriptor. Checked against the pool as it stands
+      // after every filter, not just post-era, since a later filter could
+      // in principle also thin it further.
+      const _variantCompsExcludedByEra = detectVariantCompsExcludedByEra(
+        _eraExcludedVariantCount,
+        _eraExcludedVariantSamples,
+        p.map((it) => it.title)
+      );
+      if (_variantCompsExcludedByEra) {
+        console.log(
+          `[era-filter] variant-descriptor gap: ${_eraExcludedVariantCount} era-excluded ` +
+          `listing(s) named a specific cover variant, but the final priced pool ` +
+          `(${p.length} comp(s)) does not — price reflects a different, unnamed/generic ` +
+          `printing, not the specific variant those excluded listings described`
+        );
+      }
+
       return {
         parsed: p,
         gradeFilteredPrices,  // Fix C: grade-proximity filtered prices for floor calc
@@ -1574,6 +1612,7 @@ export const fetchComps = async ({
         premiumVariantIsolated: _premiumVariantIsolated,
         fellBack: _fellBack,
         eraFilterBypassed: _eraFilterBypassed,
+        variantCompsExcludedByEra: _variantCompsExcludedByEra,
         multiIssueRejected: _multiIssueRejected,
         sequelRejected: _sequelRejected,
         signedRejected: _signedRejected,
@@ -1636,6 +1675,7 @@ export const fetchComps = async ({
         premiumVariantIsolated = filtered.premiumVariantIsolated;
         fellBack = filtered.fellBack;
         eraFilterBypassed = filtered.eraFilterBypassed;
+        variantCompsExcludedByEra = filtered.variantCompsExcludedByEra;
         multiIssueRejected = filtered.multiIssueRejected;
         sequelRejected = filtered.sequelRejected;
         signedRejected = filtered.signedRejected;
@@ -1829,6 +1869,7 @@ export const fetchComps = async ({
       variantFallback,
       premiumVariantIsolated,
       eraFilterBypassed,
+      variantCompsExcludedByEra,
       artistFallback,
       compBasis: artistFallback ? 'generic-variant-fallback' : null,
       multiIssueRejected,

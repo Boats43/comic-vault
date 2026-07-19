@@ -432,6 +432,22 @@ export function computeDecision(item, context = {}) {
     decision.evidence.internalInconsistency = item.visionConsistency.flags.map((f) => f.message);
   }
 
+  // Q129 dispatch (2026-07-19, Harley Quinn #62 Guillem March Cover C
+  // class) — a distinct failure shape from Q115/Q127/Q128's contamination
+  // classes: not wrong data getting IN, but CORRECT variant-specific comps
+  // getting excluded by the era filter for a legitimate reason (a
+  // different printing/year), leaving a priced pool that carries no named
+  // variant descriptor at all — the price silently reflects a different,
+  // generic printing rather than the specific variant those excluded
+  // listings described. Escalates to RESEARCH (same explicit-ruling
+  // precedent as internal-inconsistency above) rather than staying at
+  // LIST_LOW — this is a price-accuracy gap for THIS specific book, not a
+  // generic content flag.
+  if (item.variantCompsExcludedByEra) {
+    decision.warnings.push('variant-comps-unavailable');
+    decision.evidence.variantCompsExcludedByEra = item.variantCompsExcludedByEra;
+  }
+
   // Warning: Active/sold mismatch
   const soldAvg = item.soldComps?.length >= 2
     ? item.soldComps.reduce((sum, c) => sum + c.price, 0) / item.soldComps.length
@@ -541,6 +557,7 @@ export function computeDecision(item, context = {}) {
     'reprint-polybag-detected',        // Price evidence: edition pricing uncertainty
     'floor-contamination-suspect',     // Price evidence: solds far below mega-key floor (XMEN1)
     'internal-inconsistency',          // Q118: Vision's own reason text contradicts its own structured fields
+    'variant-comps-unavailable',       // Q129: era-excluded comps named a specific cover variant the priced pool doesn't
   ];
   // Removed: 'content-unverified' (not a price flag — stays LIST_LOW/BUNDLE)
 
@@ -930,6 +947,12 @@ export function describeWarning(slug, item) {
     return messages.length > 0
       ? `AI condition report contradicts its own structured fields — ${messages.join('; ')}`
       : 'AI condition report contradicts its own structured fields — review before listing';
+  }
+  if (slug === 'variant-comps-unavailable') {
+    const v = item.variantCompsExcludedByEra;
+    return v?.count
+      ? `no current comps for your specific cover variant — ${v.count} matching listing(s) excluded as a different printing/year; price reflects generic/Main Cover comps only`
+      : 'no current comps for your specific cover variant — price reflects a different printing';
   }
   if (slug === 'identity-from-consensus') {
     const c = item.identityConsensus;

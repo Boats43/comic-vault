@@ -1206,6 +1206,46 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   different-year comp is contamination: check whether the stated year
   matches the confirmed book's own ComicVine volume start year first —
   it may be the more mundane, correct explanation.
+- **Correct-rejection silent-substitution class** (Q129 dispatch,
+  2026-07-19, Harley Quinn #62 Guillem March Cover C) — a fourth same-
+  night instance of the "same title, same issue#, different year meaning"
+  shape (Q115 Batman #608, Q127 Catwoman #64, Q128 Harley Quinn #62's own
+  active-pool tolerance gap), but structurally the FIRST where the correct
+  behavior (era-filter rejecting a different printing) is what CAUSES the
+  downstream problem, rather than a filter failing to reject something.
+  Confirmed real: the physical book is the Guillem March Cover C card-
+  stock variant (confirmedYear 2019). Every currently-live eBay listing
+  matching that exact description is a 2026 DC homage/nostalgia reprint
+  solicitation, correctly rejected by Filter 0c's era check (3 of 14
+  rejections explicitly named "Cover C"/"Guillem March"). With zero
+  genuine 2019 Cover C comps left in the market right now, the variant-
+  preference filter fell back to matching on "1st print" — a token nearly
+  every current listing shares, including the wrong ones — and the
+  surviving pool (generic Main Cover comps) silently produced a price with
+  no signal that the SPECIFIC variant being priced has no current market
+  data. Not fabrication (Vision Hallucination class), not contamination
+  (Q115/Q127/Q128) — a silent substitution of one real product's comps for
+  a different real product's when the correct data genuinely doesn't
+  exist right now. Compounding factor found during investigation: "Guillem
+  March" was entirely absent from `ARTIST_PATTERNS`
+  (`src/lib/compHygiene.js`) — the same drifted/incomplete-registry shape
+  documented multiple times this session, discovered fresh here; added as
+  a multi-word-only pattern (deliberately no bare `/march/i` fallback —
+  collides with the calendar month). Fix: `hasNamedVariantDescriptor` +
+  `detectVariantCompsExcludedByEra` (`src/lib/compHygiene.js`) — reuses
+  three pre-existing detectors (`OTHER_COVER_RE`, `OTHER_VARIANT_DESCRIPTOR_RE`,
+  `extractArtist`) rather than inventing a fourth. `api/comps.js`'s Filter
+  0c tracks era-rejected listings that name a specific cover variant, then
+  flags only when the FINAL priced pool carries no named descriptor at
+  all — a final pool that DOES carry a different-but-still-named variant
+  is still pricing a real, specific product, not the silent-substitution
+  shape this catches. Surfaced via `out.variantCompsExcludedByEra` (I13)
+  and a new `variant-comps-unavailable` decision warning, escalating to
+  RESEARCH. When investigating a "wrong price" report going forward: check
+  whether an upstream filter (era, in this case) correctly rejected the
+  RIGHT comps for a legitimate reason, leaving only wrong-but-permitted
+  comps behind — this is a different failure shape from data getting IN
+  that shouldn't have, and needs a flag, not a filter change.
 
 ## Open Blockers
 
