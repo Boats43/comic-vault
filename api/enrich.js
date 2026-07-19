@@ -37,6 +37,7 @@ import {
   normalizePublisherKey,
   extractTitleConsensus,
   resolveYear,
+  deriveCvYear,
   checkAssemblyIntegrity,
   titleOverlapsProduct,
   selectBestVariantCandidate,
@@ -3238,9 +3239,12 @@ export default async function handler(req, res) {
     const eraSpecific = /silver age|bronze age|king[-\s]?size|giant[-\s]?size|annual|spectacular|first issue/i.test(keyIssueStr);
 
     const pcYear = priceCharting?.year ? parseInt(priceCharting.year, 10) : null;
-    const cvYear = comicVine?.startYear
-      ? parseInt(String(comicVine.startYear), 10)
-      : null;
+    // Q112 dispatch (2026-07-18, Batman #608 class) — deriveCvYear
+    // (src/lib/identityCore.js) uses the issue's own cover_date, never the
+    // volume's start_year (was: comicVine.startYear, the series-launch
+    // year — 1940 for Batman vol. 1 — fed straight into year resolution
+    // for every issue including #608/2002).
+    const cvYear = deriveCvYear(comicVine);
 
     // Ship #28a COMMIT 2: Persist PriceCharting identity anchors
     if (priceCharting) {

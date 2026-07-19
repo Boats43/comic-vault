@@ -237,15 +237,62 @@ Skipped by default. `USE_FINDING = process.env.EBAY_USE_FINDING === 'true'`. eBa
 - `blendedAvg = soldAvg × 0.6 + activeAvg × 0.4`. Sold-only ×1.1 bump.
 - Last Sold UI chip: "📊 V of R sold verified · Xd ago" when `rawCount > verifiedCount`; "📊 N sold" when no gap.
 
-### Year override guard (`api/enrich.js`)
-`confirmedYear` derivation, trust-but-verify:
-- (a) era-specific keyIssue regex (silver age|bronze age|king-size|giant-size|annual|spectacular|first issue) → trust user year.
-- (b) PC and CV agree within ±2y → average.
-- (c) PC within ±2y of user → PC wins.
-- (d) CV within ±2y of user → CV wins.
-- (e) PC/CV both >2y from user → keep user, set `out.yearOverrideRejected = true`.
+### Year override guard (`resolveYear`, `src/lib/identityCore.js`)
+`confirmedYear` derivation, trust-but-verify. Corrected 2026-07-18 (Q112
+dispatch) — this section previously documented logic that doesn't match the
+actual implementation; verified line-by-line against `resolveYear` itself:
+- (a) eBay-consensus year present (`ebayYear`, from `ebayYearAuthoritative`
+  — requires ≥10 pool items and ≥8 year-agreeing) → wins outright,
+  top priority, no gap check against user year at all.
+- (b) PC and CV agree within ±2y of each other → average.
+- (c) PC present AND (**no user year at all** OR PC within ±2y of user) →
+  PC wins.
+- (d) CV present AND (**no user year at all** OR CV within ±2y of user) →
+  CV wins.
+- (e) user year present but PC/CV both disagree by >2y (or are absent) →
+  keep user year, set `yearOverrideRejected = true`.
+- (f) no user year AND no PC/CV match at all → fall through: PC first,
+  then CV, then Vision's raw (possibly null) value; `yearSource` gets a
+  `-fallback` suffix.
+
+**The `(!userYear || …)` clause in (c)/(d) is a real gap, not a typo:**
+when the request carries no Vision/user year at all (manual entry without
+a year, or Vision declining to guess), branches (c)/(d) accept PC/CV's
+year **unconditionally, with zero plausibility check** — (e), the
+documented safeguard, is unreachable in that case. There is no
+issue-number-vs-year plausibility check anywhere in the codebase (e.g.
+"issue #608 of a monthly series can't be the same year the series
+launched") as a last-resort catch. Era-specific keyIssue detection (silver
+age/bronze age/etc., previously documented as branch (a)) does not exist
+in `resolveYear` — dead variable at the `api/enrich.js` call site, marked
+"currently unused" in its own comment (Phase-3 stub).
+
+**`cvYear` itself** (fed into `resolveYear` as the 3rd argument) is
+computed by `deriveCvYear(comicVine)` (`identityCore.js`) from the matched
+issue's own `coverDate` field ("YYYY-MM-DD") — **never** from
+`comicVine.startYear` (the matched ComicVine *volume*'s launch year; fixed
+2026-07-18, Q112 dispatch, Batman #608 class — see Pattern Library). No
+fallback to `startYear` when `coverDate` is missing; `deriveCvYear` returns
+`null` in that case and `resolveYear` falls through to its other sources.
 
 `out.confirmedYear` + `out.yearCorrected` surfaced. App.jsx enrich callbacks heal `item.year` when `yearCorrected === true`.
+
+**Queued follow-up (not yet done, 2026-07-18):** a second, independent
+safety net — the era-gate at `api/enrich.js` ~2893-2909 — was specifically
+built to reject a CV year >10y outside an eBay-visual-pool-derived
+`eraLock`, but reads `comicVine?.volume?.startYear`, a shape that never
+resolves (`comicVine.volume` is a flat string, not an object with a
+`startYear`) — this guard has silently never fired. The identical shape
+bug also breaks the CV convergence-score axes (`title`/`issue`/`era`/
+`publisher` reject checks, ~2811/2817/2823) and CV-based publisher
+backfill (~3332-3335) — three more always-false dead-code paths, all
+sharing this one root cause. Deliberately NOT bundled into the `deriveCvYear`
+fix above: reactivating all three simultaneously has unknown interaction
+effects on cases that have been running without them for however long
+this has been broken, and deserves its own dedicated investigation and
+regression pass rather than a bundled fix. `deriveCvYear` alone fully and
+independently resolves the Batman #608 class — this follow-up is
+additional defense-in-depth, not a dependency.
 
 ### Mega-keys (`api/mega-keys.js`, 43 entries)
 - 10 Golden / 15 Silver / 2 Bronze / 2 Modern.
@@ -786,6 +833,96 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   over-narrowing), and a synthetic AND-match-produces-zero case (confirms
   the fallback fires and is visibly flagged, never silently starves the
   pool to zero).
+- **Batman #608 class, four stacked but independent bugs** (Q112/Q113/Q114
+  dispatch, 2026-07-18) — one card, four internal contradictions, confirmed
+  as four genuinely separate root causes (not one fix covering all four):
+  1. **Year resolution (SHIPPED)** — `cvYear` was derived from
+     `comicVine.startYear` (the matched ComicVine *volume*'s launch year —
+     1940 for Batman vol. 1) instead of the matched *issue*'s own
+     `coverDate` (2002 for #608, Hush). `resolveYear`'s `(!userYear || …)`
+     branches (`src/lib/identityCore.js`) accept PC/CV years unconditionally
+     with zero plausibility check whenever no Vision/user year is present on
+     the request — the documented "keep user, reject override" safeguard is
+     unreachable in that case. Structural: exposes any long-running ongoing
+     series (Detective, Action, Superman, ASM v1, FF v1, X-Men v1, etc.), not
+     Batman-specific. Fix: new `deriveCvYear(comicVine)`
+     (`identityCore.js`) — issue `coverDate` only, no `startYear` fallback.
+     Ruling: core fix only — the dead era-gate at `api/enrich.js` ~2893-2909
+     (built to catch exactly this via an eBay-visual-pool-derived era lock,
+     but reads the wrong `comicVine?.volume?.startYear` shape and has never
+     fired) is a QUEUED FOLLOW-UP, not bundled here — it also touches CV
+     convergence-score axes (~2811/2817/2823) and CV publisher backfill
+     (~3332-3335), three more dead-code paths sharing the same shape bug,
+     with unknown interaction effects once simultaneously reactivated after
+     however long they've been dormant. Regression:
+     `tests/q112-year-resolution.test.js`.
+  2. **Sold-comp verification-count math (SHIPPED)** — card showed "30→20
+     verified (20 variantMismatch, 6 annualMismatch, 3 lot)," summing to
+     ~29 against a rejectedCount of 10. Root cause: `verifySoldComps`'s
+     VARIANT FALLBACK path (`src/lib/soldVerification.js` ~828-1080) is a
+     SECOND, independent filter pass over the full raw pool (fires when the
+     first pass rejects 100% of rows with ≥1 variantMismatch, skipping
+     variant filters on retry) — the returned verifiedCount/rejectedCount
+     came from this second pass, but `reasons` was the abandoned FIRST
+     pass's tally, which (having rejected every row before falling back)
+     always sums to ~rawCount regardless of what the second pass actually
+     excluded. Two different runs' numbers displayed as one set. Fix: the
+     fallback pass now tracks its own `fallbackReasons`/
+     `fallbackRejectedSamples` during construction, mirroring the main
+     chain's exact per-filter reason-key mapping — `sum(reasons)` now
+     reconciles with `rejectedCount` by construction, for any pool shape.
+     Regression: `tests/q113-sold-fallback-reasons.test.js`, a 30-item pool
+     reconstructing the real production shape.
+  3. **Contradictory sold-data claims (SHIPPED, labeling only)** — "Sold
+     data: 16d recency" (3 visible solds) vs Price Derivation's "Based on 0
+     eBay sales in last 30 days" on the same card. NOT a data bug — confirmed
+     these are two genuinely independent sources (`item.soldComps`,
+     PriceCharting sales-history via `soldVerification.js`, vs
+     `item.comps.count`, a separate eBay Browse/Finding API fetch via
+     `api/comps.js`) that can legitimately disagree, presented with no
+     source qualifier so they read as contradictory. Bonus finding: the "in
+     last 30 days" claim is itself unenforced — `api/comps.js`'s
+     `findCompletedItems` has no explicit date-range filter anywhere in the
+     query. Fix: source qualifiers added to both lines (`App.jsx`, "Sold
+     data: Nd recency (PriceCharting)" / "Based on N eBay listings (eBay)"),
+     "in last 30 days" removed since it was never actually true.
+  4. **Over-broad variantMismatch rejection (INVESTIGATED, FIX REVERTED —
+     highest financial impact of the four, still open)** — 20/30 sold comps
+     rejected as `variantMismatch` on a book with multiple genuine first-print
+     Hush Cover A comps visibly sitting in the "Last Sold" pool; price
+     $19.28 vs Vision's own $175-275 estimate. Confirmed NOT the same bug as
+     the same-night Q111 fix (`f705054`) — `soldVerification.js` is untouched
+     by that commit, imports nothing from `imageSearchIdentity.js`, and
+     defines its own separate, cruder local `extractVariantTokens` (flat
+     foil/virgin/newsstand/exclusive/ratio/sketch/altcover/reprint labels,
+     no specific-vs-generic distinction). Root mechanism: Filter 8 case (a)
+     (`compVariantTokens.length > 0 && userVariantTokens.length === 0` →
+     reject) fires on ANY token when our confirmed variant is empty,
+     including incidental marketing language, not just genuine variant
+     declarations. **Attempted fix, reverted after implementation testing
+     (not caught during the investigation/report phase):** classify tokens
+     via `classifyVariantTokens` (same taxonomy as the Q111 fix) into
+     SPECIFIC (convention/ratio/retailer/exclusive/limitation/authentication)
+     vs GENERIC (finish: foil/virgin/sketch), only reject on specific-token
+     presence. Broke a validated, real protection instead — the existing
+     test `"Test Comic #1 virgin variant"` / `"Test Comic #1 foil variant"`
+     (`tests/sold-verification.test.js`, "Variant contamination — our book
+     NOT a variant rejects variant rows") are UNAMBIGUOUS explicit variant
+     labels (the word "variant" is right there), not marketing hype — and
+     CATEGORY_BLOCKS classifies by WORD MEANING (is "foil" a finish
+     descriptor?), not by whether the word appears as part of an actual "X
+     variant"/"X cover" declaration vs standing alone as sales language on
+     an otherwise-standard listing. Those are different questions; the
+     generic/specific split can't answer the second one, and conflating them
+     silently reopened exactly the contamination class Filter 8 case (a)
+     exists to prevent. **A correct fix needs phrase-level context-
+     sensitivity — does the token sit inside an explicit variant-declaring
+     phrase, or stand alone as apparent hype? — which no pattern in this
+     codebase has today.** Reverted cleanly (confirmed `sold-verification.test.js`
+     back to the exact 124-passed/5-failed pre-existing baseline). Do not
+     re-attempt with the same specific/generic heuristic without first
+     designing the phrase-context signal — this was a real, honest attempt
+     that surfaced a genuine gap during testing, not skipped or guessed at.
 
 ## Open Blockers
 

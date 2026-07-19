@@ -574,6 +574,26 @@ export const verifySoldComps = (rawRows, ctx) => {
     const compVariantTokens = extractVariantTokens(String(r.title || '').toLowerCase());
 
     // Case (a): comp has variant tokens, user has none → reject
+    //
+    // Q114 dispatch (2026-07-18, Batman #608 class) — INVESTIGATED, fix
+    // REVERTED after implementation testing exposed a flaw the report
+    // didn't catch. Attempted: classify tokens as SPECIFIC (convention/
+    // ratio/retailer/exclusive/limitation/authentication) vs GENERIC
+    // (finish: foil/virgin/sketch) and only reject on specific-token
+    // presence, on the theory that a comp mentioning "foil"/"virgin" as
+    // marketing language shouldn't reject a no-variant book's comps. Broke
+    // a validated, real protection instead: "Test Comic #1 virgin variant"
+    // and "Test Comic #1 foil variant" are UNAMBIGUOUS explicit variant
+    // labels (the word "variant" is right there), not marketing hype — and
+    // the "generic vs specific" split can't tell those apart from
+    // incidental hype-word usage, because CATEGORY_BLOCKS classifies by
+    // WORD MEANING, not by whether the word appears as part of an actual
+    // "X variant"/"X cover" declaration vs standing alone as sales
+    // language. A correct fix needs that context-sensitivity (does the
+    // token appear adjacent to an explicit variant-declaring phrase?),
+    // which doesn't exist yet in any pattern this codebase has built —
+    // deeper investigation needed before attempting again, not a
+    // same-night follow-up guess. See CLAUDE.md Pattern Library.
     if (compVariantTokens.length > 0 && userVariantTokens.length === 0) {
       console.log('[sold-reject] variantMismatch:comp_has_user_none |', r.title?.slice(0, 80),
         '| userVariant:', variant, '| compTokens:', compVariantTokens.join(','));
@@ -834,6 +854,29 @@ export const verifySoldComps = (rawRows, ctx) => {
     console.log('[sold-verify] variant fallback triggered — variantMismatch rejected all',
       rawCount, 'comps, retrying without variant filters');
 
+    // Q113 dispatch (2026-07-18, Batman #608 class) — this is a SECOND,
+    // independent filter run over the full raw `rows`, not a continuation
+    // of the first pass. It needs its OWN reason tally: the diagnostics
+    // returned below must describe why THIS pool's rejected rows (rawCount
+    // minus fallbackPool.length) were rejected, not reuse `reasons` — which
+    // was built during the ABANDONED first pass and, since that pass
+    // rejected every row before falling back here, sums to ~rawCount
+    // regardless of how many rows this pass actually excludes. Was: "30→20
+    // verified (20 variantMismatch, 6 annualMismatch, 3 lot)" — a
+    // first-pass tally (~30) displayed alongside a second-pass
+    // verified/rejected count (20/10) that don't describe the same run.
+    const fallbackReasons = {
+      titleMismatch: 0, issueMismatch: 0, annualMismatch: 0,
+      printingMismatch: 0, variantMismatch: 0, slabMismatch: 0, signed: 0, lot: 0,
+      format: 0, yearMismatch: 0, gradeMismatch: 0, stale: 0, outlier: 0,
+    };
+    const fallbackRejectedSamples = [];
+    const pushFallbackSample = (row, reason) => {
+      if (fallbackRejectedSamples.length < 3) {
+        fallbackRejectedSamples.push({ title: row.title || null, price: row.price ?? null, reason });
+      }
+    };
+
     // Re-run filters WITHOUT variant checks (filters 7-8).
     // Keep all other filters: issue, lot, printing, slab, signed, grade, year, stale, outlier.
     let fallbackPool = rows.map((r) => ({
@@ -849,38 +892,112 @@ export const verifySoldComps = (rawRows, ctx) => {
     // Apply filters 1-6 (issue, lot, format, title, printing) — no variant filters
     // Q37: Pass series title for adjacency-aware dual-number parsing
     if (issue) {
-      fallbackPool = fallbackPool.filter((r) => hasIssueNumber(r.title, issue, title));
+      fallbackPool = fallbackPool.filter((r) => {
+        if (hasIssueNumber(r.title, issue, title)) return true;
+        fallbackReasons.issueMismatch++;
+        pushFallbackSample(r, 'issueMismatch');
+        return false;
+      });
     }
     if (!ourIsLot) {
       fallbackPool = fallbackPool.filter((r) => {
         const t = String(r.title || '');
-        return !LOT_RE.test(t) && !isValidIssueRange(t) && !hasCrossSeriesSeparator(t);
+        if (LOT_RE.test(t) || isValidIssueRange(t) || hasCrossSeriesSeparator(t)) {
+          fallbackReasons.lot++;
+          pushFallbackSample(r, hasCrossSeriesSeparator(t) ? 'cross-series' : 'lot');
+          return false;
+        }
+        return true;
       });
     }
     if (!ourIsHalf) {
-      fallbackPool = fallbackPool.filter((r) => !HALF_ISSUE_RE.test(String(r.title || '')));
+      fallbackPool = fallbackPool.filter((r) => {
+        if (HALF_ISSUE_RE.test(String(r.title || ''))) {
+          fallbackReasons.lot++; // half-issue counts under lot bucket, same as main chain
+          pushFallbackSample(r, 'lot:half-issue');
+          return false;
+        }
+        return true;
+      });
     }
-    fallbackPool = fallbackPool.filter((r) => !TRADING_CARD_RE.test(String(r.title || '')));
-    fallbackPool = fallbackPool.filter((r) => !TPB_MARKER_RE.test(String(r.title || '')));
-    fallbackPool = fallbackPool.filter((r) => !COVERLESS_RE.test(String(r.title || '')));
     fallbackPool = fallbackPool.filter((r) => {
-      const { mismatch } = hasFormatAsymmetry(r.title, ourMarkers);
-      return !mismatch;
+      if (TRADING_CARD_RE.test(String(r.title || ''))) {
+        fallbackReasons.format++;
+        pushFallbackSample(r, 'format:trading-card');
+        return false;
+      }
+      return true;
     });
-    fallbackPool = fallbackPool.filter((r) => hasSufficientTitleOverlap(r.title, ourTokens));
+    fallbackPool = fallbackPool.filter((r) => {
+      if (TPB_MARKER_RE.test(String(r.title || ''))) {
+        fallbackReasons.format++;
+        pushFallbackSample(r, 'format:tpb');
+        return false;
+      }
+      return true;
+    });
+    fallbackPool = fallbackPool.filter((r) => {
+      if (COVERLESS_RE.test(String(r.title || ''))) {
+        fallbackReasons.format++;
+        pushFallbackSample(r, 'format:coverless');
+        return false;
+      }
+      return true;
+    });
+    fallbackPool = fallbackPool.filter((r) => {
+      const { mismatch, marker } = hasFormatAsymmetry(r.title, ourMarkers);
+      if (mismatch) {
+        fallbackReasons.annualMismatch++;
+        pushFallbackSample(r, `annualMismatch:${marker}`);
+        return false;
+      }
+      return true;
+    });
+    fallbackPool = fallbackPool.filter((r) => {
+      if (hasSufficientTitleOverlap(r.title, ourTokens)) return true;
+      fallbackReasons.titleMismatch++;
+      pushFallbackSample(r, 'titleMismatch');
+      return false;
+    });
     fallbackPool = fallbackPool.filter((r) => {
       const m = printingMatch(r.title, variant);
-      return m !== 'mismatch';
+      if (m === 'mismatch') {
+        fallbackReasons.printingMismatch++;
+        pushFallbackSample(r, 'printingMismatch');
+        return false;
+      }
+      return true;
     });
 
     // SKIP filters 7-8 (variant-artist + variant-token) — this is the fallback
 
     // Apply filters 9-13 (slab, signed, grade, year, stale, outlier)
-    fallbackPool = fallbackPool.filter((r) => !slabMismatch(r.title, userGradeKey));
+    fallbackPool = fallbackPool.filter((r) => {
+      if (slabMismatch(r.title, userGradeKey)) {
+        fallbackReasons.slabMismatch++;
+        pushFallbackSample(r, 'slabMismatch');
+        return false;
+      }
+      return true;
+    });
     if (!ourIsSigned) {
-      fallbackPool = fallbackPool.filter((r) => !SIGNED_RE.test(String(r.title || '')));
+      fallbackPool = fallbackPool.filter((r) => {
+        if (SIGNED_RE.test(String(r.title || ''))) {
+          fallbackReasons.signed++;
+          pushFallbackSample(r, 'signed');
+          return false;
+        }
+        return true;
+      });
     }
-    fallbackPool = fallbackPool.filter((r) => !gradeTabMismatch(r.title, r.grade));
+    fallbackPool = fallbackPool.filter((r) => {
+      if (gradeTabMismatch(r.title, r.grade)) {
+        fallbackReasons.gradeMismatch++;
+        pushFallbackSample(r, 'gradeMismatch');
+        return false;
+      }
+      return true;
+    });
     if (bookYear) {
       fallbackPool = fallbackPool.filter((r) => {
         const rowYear = r.year || null;
@@ -890,12 +1007,29 @@ export const verifySoldComps = (rawRows, ctx) => {
         if (isNaN(ourYear) || isNaN(theirYear)) return true;
         const tolerance =
           ourYear < 1956 ? 5 : ourYear < 1970 ? 5 : ourYear < 1985 ? 3 : 2;
-        return Math.abs(theirYear - ourYear) <= tolerance;
+        if (Math.abs(theirYear - ourYear) > tolerance) {
+          fallbackReasons.yearMismatch++;
+          pushFallbackSample(r, 'yearMismatch');
+          return false;
+        }
+        return true;
       });
     }
-    fallbackPool = fallbackPool.filter((r) => !isStaleForBookYear(r.daysAgo, bookYear));
+    fallbackPool = fallbackPool.filter((r) => {
+      if (isStaleForBookYear(r.daysAgo, bookYear)) {
+        fallbackReasons.stale++;
+        pushFallbackSample(r, 'stale');
+        return false;
+      }
+      return true;
+    });
     const beforeOutlierFallback = fallbackPool.length;
     fallbackPool = applyPriceSanity(fallbackPool);
+    const fallbackOutlierRemoved = beforeOutlierFallback - fallbackPool.length;
+    if (fallbackOutlierRemoved > 0) {
+      fallbackReasons.outlier += fallbackOutlierRemoved;
+      pushFallbackSample({ title: null, price: null }, `outlier×${fallbackOutlierRemoved}`);
+    }
 
     // Q109 Class B (greenlit) — self-consistency check on the fallback pool.
     // Skipping filters 7-8 above admits ANY variant-mismatched row,
@@ -929,14 +1063,23 @@ export const verifySoldComps = (rawRows, ctx) => {
       console.log('[sold-verify] variant fallback INCOHERENT —', recognizedDistinct.size,
         'distinct recognized variant identities in fallback pool:', [...recognizedDistinct].join(' | '),
         '— refusing to blend, falling through to next pricing tier');
+      // Q113: rejectedCount=rawCount here describes the OUTPUT (verified=[]
+      // — refused as a whole-pool quality judgment, not per-row), which
+      // fallbackReasons' per-row tally can't fully itemize on its own (it
+      // only explains why fallbackPool's rows were excluded from
+      // CONSTRUCTION, not why the whole thing was then refused for
+      // incoherence) — variantFallbackIncoherent:true is the actual reason
+      // for this branch. Still uses fallbackReasons/fallbackRejectedSamples
+      // (this pass's own tally) rather than the stale first-pass `reasons`,
+      // which is the fix: no longer displaying a DIFFERENT run's numbers.
       return {
         verified: [],
         diagnostics: {
           rawCount,
           verifiedCount: 0,
           rejectedCount: rawCount,
-          reasons,
-          rejectedSamples,
+          reasons: fallbackReasons,
+          rejectedSamples: fallbackRejectedSamples,
         },
         variantAdjusted: true,
         variantFallbackIncoherent: true,
@@ -955,8 +1098,15 @@ export const verifySoldComps = (rawRows, ctx) => {
           rawCount,
           verifiedCount: fallbackPool.length,
           rejectedCount: rawCount - fallbackPool.length,
-          reasons,
-          rejectedSamples,
+          // Q113 dispatch (2026-07-18, Batman #608 class) — this pass's OWN
+          // tally, not the abandoned first pass's. sum(fallbackReasons) now
+          // reconciles with rejectedCount by construction. Was: reused
+          // `reasons` (first-pass, sums to ~rawCount since that pass
+          // rejected 100% before falling back here) — "30→20 verified (20
+          // variantMismatch, 6 annualMismatch, 3 lot)" summed to ~29
+          // against a rejectedCount of 10.
+          reasons: fallbackReasons,
+          rejectedSamples: fallbackRejectedSamples,
         },
         variantAdjusted: true,
       };

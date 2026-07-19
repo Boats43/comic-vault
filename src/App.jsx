@@ -4034,8 +4034,17 @@ function CollectionDetail({
           }}>
             📅
             {compsAge !== null && ` Comps: ${compsAge}h`}
-            {soldRecency != null && ` · Sold data: ${soldRecency}d recency`}
-            {compsAge === null && soldRecency != null && ` Sold data: ${soldRecency}d recency`}
+            {/* Q114 dispatch (2026-07-18, Batman #608 class) — source
+                qualifier added. This reads item.soldComps (PriceCharting
+                sales-history, verified via soldVerification.js) — a
+                genuinely different, independent source from the eBay
+                comps.count figure below ("Price Derivation" panel), not a
+                disagreeing measurement of the same thing. Without the
+                qualifier the two numbers on one card read as contradictory
+                ("16d recency" vs "0 sales in last 30 days") when they're
+                actually complementary. */}
+            {soldRecency != null && ` · Sold data: ${soldRecency}d recency (PriceCharting)`}
+            {compsAge === null && soldRecency != null && ` Sold data: ${soldRecency}d recency (PriceCharting)`}
           </div>
         );
       })()}
@@ -6077,9 +6086,19 @@ function CollectionDetail({
               {Array.isArray(item.soldComps) && item.soldComps.length > 0 && " + eBay sold"}
             </div>
             <div className="muted small" style={{ fontSize: 11 }}>
+              {/* Q114 dispatch (2026-07-18, Batman #608 class) — "in last 30
+                  days" removed: api/comps.js's eBay fetch (Browse API
+                  active-listings search, or Finding API when enabled) has
+                  no enforced 30-day date-range filter anywhere in the
+                  query — the claim was never actually true, and read as
+                  directly contradicting the independent PriceCharting
+                  "Sold data: Nd recency" line elsewhere on the same card
+                  (a genuinely different source — see that line's comment).
+                  Source qualifier added so the two numbers read as
+                  complementary metrics, not disagreeing ones. */}
               {item.comps.source === "browse_api"
                 ? `Based on ${item.comps.count ?? 0} active eBay listing${item.comps.count !== 1 ? "s" : ""}`
-                : `Based on ${item.comps.count ?? 0} eBay sale${item.comps.count !== 1 ? "s" : ""} in last 30 days`}
+                : `Based on ${item.comps.count ?? 0} eBay listing${item.comps.count !== 1 ? "s" : ""} (eBay)`}
               {item.comps.verifiedByAI ? " · AI verified" : ""}
             </div>
             {item.priceNote && /defect adj/i.test(item.priceNote) && (

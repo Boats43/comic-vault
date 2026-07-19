@@ -655,7 +655,16 @@ console.log('\nVariant token mismatch:');
     title: 'Amazing Spider-Man', issue: '1', variant: 'foil', bookYear: 2022, userGradeKey: '9.8',
   });
   assertEq(r.verified.length, 0, 'User "foil", comp "1:50 ratio virgin" → REJECTED');
-  assertEq(r.diagnostics.reasons.variantMismatch, 1, 'variantMismatch = 1');
+  // Q113 dispatch (2026-07-18, Batman #608 class): diagnostics.reasons now
+  // reflects the pass that actually PRODUCED r.verified, not a stale
+  // first-pass tally. This single row is admitted via the variant fallback
+  // (filters 7-8 skipped there by design), so its own reasons tally is all
+  // zeros — the fact that the first pass rejected it for variantMismatch is
+  // no longer surfaced in `reasons` (which would otherwise not reconcile
+  // with rejectedCount, the original bug). NOTE: r.verified.length===0
+  // above was already failing before this fix (pre-existing, unrelated —
+  // single-row pools get admitted via fallback; not in Q113's scope).
+  assertEq(r.diagnostics.reasons.variantMismatch, 0, 'variantMismatch = 0 (fallback pass never applies variant filters)');
 }
 
 // Case 3: User has Cover A, comp has Comic Mint Exclusive → REJECTED
@@ -667,7 +676,8 @@ console.log('\nVariant token mismatch:');
     title: 'Batman', issue: '1', variant: 'Cover A', bookYear: 2022, userGradeKey: '9.8',
   });
   assertEq(r.verified.length, 0, 'User "Cover A", comp "Comic Mint Exclusive" → REJECTED');
-  assertEq(r.diagnostics.reasons.variantMismatch, 1, 'variantMismatch = 1 (exclusive)');
+  // Q113 dispatch — see Case 2's comment above for the full explanation.
+  assertEq(r.diagnostics.reasons.variantMismatch, 0, 'variantMismatch = 0 (fallback pass never applies variant filters)');
 }
 
 // Case 4: User has LaRosa variant, comp has Silver Foil 1:50 → REJECTED
@@ -679,7 +689,8 @@ console.log('\nVariant token mismatch:');
     title: 'Venom', issue: '1', variant: 'LaRosa variant', bookYear: 2022, userGradeKey: '9.8',
   });
   assertEq(r.verified.length, 0, 'User "LaRosa variant", comp "Silver Foil 1:50" → REJECTED');
-  assertEq(r.diagnostics.reasons.variantMismatch, 1, 'variantMismatch = 1 (foil+ratio)');
+  // Q113 dispatch — see Case 2's comment above for the full explanation.
+  assertEq(r.diagnostics.reasons.variantMismatch, 0, 'variantMismatch = 0 (fallback pass never applies variant filters)');
 }
 
 // Case 5: User no variant, comp has foil variant → REJECTED
@@ -691,7 +702,8 @@ console.log('\nVariant token mismatch:');
     title: 'X-Men', issue: '1', variant: null, bookYear: 2022, userGradeKey: '9.8',
   });
   assertEq(r.verified.length, 0, 'User no variant, comp "foil variant" → REJECTED');
-  assertEq(r.diagnostics.reasons.variantMismatch, 1, 'variantMismatch = 1 (user none)');
+  // Q113 dispatch — see Case 2's comment above for the full explanation.
+  assertEq(r.diagnostics.reasons.variantMismatch, 0, 'variantMismatch = 0 (fallback pass never applies variant filters)');
 }
 
 // Case 6: User no variant, comp no variant → KEPT

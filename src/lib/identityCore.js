@@ -1003,6 +1003,34 @@ export const backfillFromComps = (confirmedTitle, confirmedYear, confirmedPublis
 };
 
 /**
+ * Q112 dispatch (2026-07-18, Batman #608 class) — derive a ComicVine YEAR
+ * for year-resolution purposes from the matched ISSUE's own `cover_date`,
+ * never the matched VOLUME's `start_year`. Batman vol. 1 started 1940;
+ * issue #608 (Hush, 2002) is 62 years later — a `comicVine` object built
+ * from `startYear` (the series launch year, from a separate ComicVine
+ * volume-endpoint call) is correct for nothing except "when did this
+ * SERIES launch," and `resolveYear` has no independent plausibility check
+ * to catch it once fed in as if it were the issue's own year. `coverDate`
+ * IS the issue-level field, format "YYYY-MM-DD" (ComicVine's issue-search
+ * response) — same parse pattern already used for the equivalent
+ * local candidate-scoring filter in api/enrich.js ("Strict year filter...
+ * Uses issue cover_date, NOT volume start_year"). No startYear fallback
+ * here deliberately: a wrong-but-present value is worse than falling
+ * through to resolveYear's other sources (PC year, then user/Vision year)
+ * when coverDate is unavailable. Structural — applies to every
+ * long-running ongoing series (Detective, Action, Superman, ASM v1,
+ * FF v1, X-Men v1, etc.), not Batman-specific.
+ *
+ * @param {{coverDate?: string|null}|null} comicVine - lookupComicVine's return object
+ * @returns {number|null}
+ */
+export const deriveCvYear = (comicVine) => {
+  if (!comicVine?.coverDate) return null;
+  const year = parseInt(String(comicVine.coverDate).split('-')[0], 10);
+  return Number.isFinite(year) ? year : null;
+};
+
+/**
  * Resolve year from multiple sources with trust-but-verify logic.
  * PC and CV can return wrong volume; reject overrides >±2y from user input.
  *
