@@ -113,6 +113,8 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 import { extractConfirmedVariant, filterItemsByIssue } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
+// Q118 — internal consistency checker (Vision's free-text reason vs its own structured fields).
+import { checkVisionConsistency } from "../src/lib/visionConsistency.js";
 // Session 4B — Import book signal detection from shared classifier
 import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map caches)
@@ -1986,6 +1988,33 @@ export default async function handler(req, res) {
     if (editionWarning?.detected) {
       console.log('[edition-gate] detected:', editionWarning.signals.join(', '));
     }
+
+    // Q118 dispatch (2026-07-18) — internal consistency checker. Compares
+    // Vision's own free-text reason against Vision's own RAW structured
+    // fields (req.body.*, as sent by the client from grade.js's response —
+    // deliberately NOT the confirmed*/resolved identity computed below,
+    // which may legitimately differ from Vision's raw guess after eBay/PC/
+    // CV correction; that's not an inconsistency, that's the pipeline
+    // doing its job). Same recompute-at-point-of-use pattern as
+    // editionWarning above, rather than trusting a field threaded through
+    // grade.js's response and 5 client merge paths — avoids the exact
+    // "dead field that silently never reaches the card" class of bug
+    // found and fixed earlier tonight (Q110's compPoolContaminated).
+    // Flag-only — see src/lib/visionConsistency.js for why auto-correction
+    // isn't attempted here.
+    const visionConsistency = checkVisionConsistency({
+      reason: req.body?.reason,
+      title: req.body?.title,
+      issue: req.body?.issue,
+      year: req.body?.year,
+      isGraded: req.body?.isGraded,
+    });
+    if (visionConsistency.hasInconsistency) {
+      console.log('[vision-consistency] flagged:', visionConsistency.flags.map((f) => f.id).join(', '));
+    }
+    // NOTE: assigned onto `out` further down, once `out` exists (const out
+    // declared later) — same deferred-assignment pattern editionWarning
+    // uses below. Do not assign to out here; out is not yet in scope.
 
     const titleLower = (effectiveTitle || "").toLowerCase();
     if (!effectiveTitle || (!barcodeIdentity && (titleLower.includes("not a comic") || titleLower === "unknown"))) {
@@ -5161,6 +5190,11 @@ export default async function handler(req, res) {
     // B&B #28 Loot Crate to lose editionWarning from response, hiding
     // edition warning UI banner. Caught by Ship 0.5 harness 2026-05-06.
     if (editionWarning) out.editionWarning = editionWarning;
+
+    // Q118 — same reach-every-code-path requirement as editionWarning
+    // immediately above (computed early, assigned here once `out` exists
+    // and every branch above has had a chance to run).
+    if (visionConsistency.hasInconsistency) out.visionConsistency = visionConsistency;
 
     // Surface artistFallback / compBasis for browse_api-only books too
     // (the priceCharting branch already sets these, but not the

@@ -285,7 +285,7 @@ const allWarningSlugs = [
   'era-risk-vintage-thin', 'reprint-polybag-detected', 'filter-bypass-detected',
   'claude-check-high-severity', 'floor-contamination-suspect', 'all-sold-comps-stale',
   'bundle-candidate', 'cold-market-velocity', 'zero-velocity', 'hot-market-velocity',
-  'low-confidence-escalation', 'recommended-below-floor',
+  'low-confidence-escalation', 'recommended-below-floor', 'internal-inconsistency',
 ];
 let allDescribed = true;
 for (const slug of allWarningSlugs) {

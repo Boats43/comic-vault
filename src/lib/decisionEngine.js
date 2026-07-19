@@ -420,6 +420,18 @@ export function computeDecision(item, context = {}) {
     decision.evidence.contentUnverified = 'Story metadata suspicious or suppressed';
   }
 
+  // Q118 dispatch (2026-07-18) — Vision self-consistency: reason text vs
+  // Vision's own structured fields disagree (title/issue truncation,
+  // grading-status claim vs isGraded=false, character/era anachronism).
+  // Explicit ruling: escalates to RESEARCH via criticalWarnings below —
+  // a deliberate departure from the Q72 content-flags-stay-LIST_LOW
+  // policy 'content-unverified' follows just above, made knowingly for
+  // this new class rather than inherited by default.
+  if (item.visionConsistency?.hasInconsistency) {
+    decision.warnings.push('internal-inconsistency');
+    decision.evidence.internalInconsistency = item.visionConsistency.flags.map((f) => f.message);
+  }
+
   // Warning: Active/sold mismatch
   const soldAvg = item.soldComps?.length >= 2
     ? item.soldComps.reduce((sum, c) => sum + c.price, 0) / item.soldComps.length
@@ -528,6 +540,7 @@ export function computeDecision(item, context = {}) {
     'web-search-pricing',              // Price evidence: web search fallback
     'reprint-polybag-detected',        // Price evidence: edition pricing uncertainty
     'floor-contamination-suspect',     // Price evidence: solds far below mega-key floor (XMEN1)
+    'internal-inconsistency',          // Q118: Vision's own reason text contradicts its own structured fields
   ];
   // Removed: 'content-unverified' (not a price flag — stays LIST_LOW/BUNDLE)
 
@@ -911,6 +924,12 @@ export function describeWarning(slug, item) {
       || (item.storySuppressedReason?.startsWith('convergence-rejected')
         ? `story metadata rejected — axes disagreed (${item.storySuppressedReason.replace('convergence-rejected:', '')})`
         : 'story metadata suspicious or suppressed');
+  }
+  if (slug === 'internal-inconsistency') {
+    const messages = item.visionConsistency?.flags?.map((f) => f.message) || [];
+    return messages.length > 0
+      ? `AI condition report contradicts its own structured fields — ${messages.join('; ')}`
+      : 'AI condition report contradicts its own structured fields — review before listing';
   }
   if (slug === 'identity-from-consensus') {
     const c = item.identityConsensus;
