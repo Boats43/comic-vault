@@ -320,6 +320,63 @@ function applyAnchorDirection(out, contract) {
 }
 
 /**
+ * Card-displayable fields with explicit provenance — Invariant I13
+ * (Wave 1 Commit 2, Log-Card Fidelity). Each entry is
+ * `{ value, source, logRef }`. `value: null` means "nothing to show" — the
+ * card renders "—" or omits the chip, NEVER a fabricated number synthesized
+ * from a different kind of data (the Harley Quinn #62 class: an active-ask
+ * price rendered as "Last sold $4"). Whenever `value` is non-null, `source`
+ * and `logRef` are REQUIRED — I13 in `validateContract` enforces this
+ * mechanically for every entry present here.
+ *
+ * `logRef` names the actual bracketed console.log tag that emitted the
+ * underlying data (e.g. `'sold-verify'` → `[sold-verify] kept N/M ...`),
+ * greppable in Vercel logs — NOT a file:line, which drifts across edits.
+ *
+ * Scope (Wave 1): the two fields implicated in the Harley Quinn #62 bug
+ * (`lastSold` fabricated from active-listing data) plus the verified-sold
+ * count consumed by the card's "N of M sold verified" copy. Wave 2 extends
+ * this to full rejected-comp preservation (currently `soldCompDiagnostics`
+ * keeps only a 3-sample summary — out of scope here, not silently dropped).
+ */
+export function deriveFields(out) {
+  const fields = {};
+
+  // lastSold — verified sold data ONLY. Never falls back to active/asking
+  // listings (out.comps.recentSales), which is a structurally different
+  // kind of data (an ask, not a sale) and must never be relabeled as one.
+  const sold0 = Array.isArray(out.soldComps) && out.soldComps.length > 0 ? out.soldComps[0] : null;
+  fields.lastSold = {
+    value: sold0 ? parsePriceNumber(sold0.price) : null,
+    source: sold0 ? 'verified_sold' : null,
+    logRef: sold0 ? 'sold-verify' : null,
+  };
+
+  // activeAsking — the active/ask-derived listing range. Rendered under its
+  // own honest label ("Asking"), never blended into a sold-price claim.
+  const activeAvg = parsePriceNumber(out.rawComps?.average ?? out.comps?.averageNum);
+  const activeLow = parsePriceNumber(out.rawComps?.lowest ?? out.comps?.lowestNum);
+  const activeHigh = parsePriceNumber(out.rawComps?.highest ?? out.comps?.highestNum);
+  const hasActive = activeAvg != null || activeLow != null || activeHigh != null;
+  fields.activeAsking = {
+    value: hasActive ? { low: activeLow, high: activeHigh, avg: activeAvg } : null,
+    source: hasActive ? 'active_listings' : null,
+    logRef: hasActive ? 'comps' : null,
+  };
+
+  // verifiedSoldCount — soldCompDiagnostics is already the single source of
+  // truth for this number (I6 enforces it for contract.verifiedCount); this
+  // entry exists so the card's OWN "N of M sold verified" copy cites the
+  // same provenance instead of re-deriving it from soldComps.length.
+  const diag = out.soldCompDiagnostics;
+  fields.verifiedSoldCount = diag
+    ? { value: diag.verifiedCount ?? 0, source: 'sold-verify-diagnostics', logRef: 'sold-verify' }
+    : { value: null, source: null, logRef: null };
+
+  return fields;
+}
+
+/**
  * Assemble the canonical contract block from the final `out` object
  * (post-computeDecision). Pure — does not mutate `out`.
  */
@@ -375,6 +432,7 @@ export function assembleContract(out) {
     bestChannel: d?.bestChannel ?? (listable ? null : 'blocked'),
     listable,
     locks,
+    fields: deriveFields(out), // Wave 1 Commit 2 — per-field provenance (I13)
     violations: [],
   };
 
@@ -529,6 +587,26 @@ export function validateContract(contract, out) {
     const allowed = new Set(['RESEARCH', 'HOLD', 'ID_REQUIRED', 'DO_NOT_LIST']);
     if (contract.decision.action && !allowed.has(contract.decision.action)) {
       fail('I12', `refused price with decision ${contract.decision.action}`);
+    }
+  }
+
+  // I13 (Wave 1 Commit 2, Log-Card Fidelity ruling) — every POPULATED
+  // contract.fields entry must carry a non-null source AND logRef. This is
+  // the mechanically-enforceable half of I13 (checkable from `out` alone).
+  // The other half — every card-rendered value must have a matching
+  // contract.fields entry, i.e. suppression/fabrication at render time is
+  // also forbidden — cannot be verified here (the server never sees the
+  // React tree); it is enforced at render time by the client-side
+  // `assertContractField` dev-mode warning (App.jsx), which is a real but
+  // necessarily partial check: it only covers render sites that have been
+  // migrated to call it, not every pixel on the card. Documented, not
+  // overclaimed.
+  if (contract.fields && typeof contract.fields === 'object') {
+    for (const [key, entry] of Object.entries(contract.fields)) {
+      if (!entry) continue;
+      if (entry.value != null && (entry.source == null || entry.logRef == null)) {
+        fail('I13', `fields.${key} populated (value=${JSON.stringify(entry.value)}) with missing source/logRef`);
+      }
     }
   }
 

@@ -672,6 +672,23 @@ const assertContractPrice = (item, surface, rendered) => {
   return rendered;
 };
 
+// Ship #24 Wave 1 Commit 2 — I13 client-side half: warn (dev-mode only) when
+// a render site shows a card value that has no matching contract.fields
+// entry. Mirrors assertContractPrice's pattern. This is a real but partial
+// check — it only covers render sites migrated to call it, not every value
+// on the card (the server-side I13 check in responseContract.js covers the
+// other half: every populated contract.fields entry must cite its source).
+const assertContractField = (item, surface, fieldKey, rendered) => {
+  if (!CONTRACT_DEV_MODE || !item?.contract) return rendered;
+  const entry = item.contract.fields?.[fieldKey];
+  if (rendered != null && !entry) {
+    console.warn(`[contract-drift] ${surface}: rendered fieldKey "${fieldKey}" (${rendered}) has no matching contract.fields entry (I13)`);
+  } else if (rendered == null && entry?.value != null) {
+    console.warn(`[contract-drift] ${surface}: fieldKey "${fieldKey}" has contract value ${JSON.stringify(entry.value)} but render site shows nothing`);
+  }
+  return rendered;
+};
+
 const marketValueOf = (r) => {
   if (!r) return null;
   const v = getDisplayPrice(r);
@@ -4782,16 +4799,22 @@ function CollectionDetail({
       {/* 2a. STATS BAR */}
       {(() => {
         // Ship #24 Wave 1 Commit 1 (Harley Quinn #62 fix) \u2014 lastSold reads
-        // VERIFIED SOLD data only. It must never fall back to
-        // item.comps.recentSales, which is active/asking-listing data (see
-        // the "Active Listings" labels elsewhere in this file) \u2014 that
-        // fallback was fabricating a "Last sold $X" figure out of an unsold
-        // asking price whenever soldComps was empty.
-        const lastSoldPrice = item.soldComps?.[0]?.price ?? null;
+        // VERIFIED SOLD data only, never item.comps.recentSales (active
+        // listings). Commit 2 wires the contract's own provenance-tagged
+        // field when present (I13); legacy items without a contract still
+        // read soldComps directly, never recentSales.
+        const lastSoldField = item.contract?.fields?.lastSold;
+        const lastSoldPrice = item.contract
+          ? (lastSoldField?.value ?? null)
+          : (item.soldComps?.[0]?.price ?? null);
+        assertContractField(item, 'StatsBar', 'lastSold', lastSoldPrice);
         const lastSoldLabel = lastSoldPrice ? '$' + Math.round(lastSoldPrice) : null;
-        const activeLoNum = item.comps?.lowestNum;
-        const activeHiNum = item.comps?.highestNum;
-        const activeAvgNum = item.comps?.averageNum;
+
+        const activeField = item.contract?.fields?.activeAsking;
+        const activeLoNum = item.contract ? (activeField?.value?.low ?? null) : item.comps?.lowestNum;
+        const activeHiNum = item.contract ? (activeField?.value?.high ?? null) : item.comps?.highestNum;
+        const activeAvgNum = item.contract ? (activeField?.value?.avg ?? null) : item.comps?.averageNum;
+        assertContractField(item, 'StatsBar', 'activeAsking', activeAvgNum);
         const activeLow = activeLoNum ? '$' + Math.round(activeLoNum) : null;
         const activeHigh = activeHiNum ? '$' + Math.round(activeHiNum) : null;
         const activeRange = activeLow && activeHigh ? activeLow + '\u2013' + activeHigh : (activeAvgNum ? '$' + Math.round(activeAvgNum) : null);
