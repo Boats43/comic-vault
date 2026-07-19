@@ -17,6 +17,51 @@
 
 import { COMPOUND_WHITELIST, REPRINT_RE } from './compHygiene.js';
 
+// Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
+// source of truth for "publisher name is legitimately PART of the series
+// title, do not strip it." Promoted from the function-local const that
+// used to live inside sanitizeSeriesTitle below (Q24 fix) — that copy was
+// already the most complete of FOUR independently-drifted duplicates found
+// in one pass tonight, all guarding the exact same fact with different
+// (and differently incomplete) entries:
+//   1. ComicAdapter.js PUBLISHER_IN_TITLE_SERIES — missing Captain Marvel/
+//      Ms. Marvel entirely.
+//   2. This list (previously function-scoped) — most complete, now the
+//      canonical source.
+//   3. identityCore.js's OWN extractSeriesName (inside backfillFromComps,
+//      same file as #2) — no guard at all, naked regex strip.
+//   4. imageSearchIdentity.js's NEUTRAL_ADDITION_TOKENS (Q84/Q85-B family-
+//      override gate) — no guard at all.
+//   5. imageSearchIdentity.js's OWN separate PUBLISHER_IN_TITLE_SERIES
+//      (inside extractMainTitle, a different function in the same file as
+//      #4) — a near-verbatim copy-paste of #1's gaps.
+// Same "one source of truth, multiple consumers" pattern already proven
+// correct twice tonight (ARTIST_PATTERNS consolidation for the Black Cat/
+// Skottie Young class; classifyVariantTokens shared between extractConsensus
+// and Filter 1c for the printing-edition class). Real production case:
+// Captain Marvel #17 (2014, 1st Kamala Khan cover) — Vision's own title
+// field came back "Captain" (missing "Marvel"); the eBay visual pool's
+// title-family consensus correctly found "captain marvel 1st kamala khan"
+// (13/20 members) but the override was blocked because "marvel" was
+// treated as content-free noise by site #4, leaving only "kamala"/"khan"
+// visible to the override-blocking token-class gate — conflating a
+// necessary series-name word with an optional descriptive addition.
+export const COMPOUND_TITLE_WHITELIST = [
+  'captain marvel', 'ms. marvel', 'ms marvel',
+  'marvel team-up', 'marvel team up', 'marvel two-in-one', 'marvel two in one',
+  'marvel presents', 'marvel preview', 'marvel spotlight',
+  'marvel super action', 'marvel super heroes', 'marvel super-heroes',
+  'marvel triple action', 'marvel age', 'marvel chillers', 'marvel feature',
+  'marvel fanfare', 'marvel comics presents', 'marvel saga', 'marvel premiere',
+  'marvel mystery comics', 'marvel tales',
+  'detective comics', 'dc comics presents', 'dc universe presents',
+  'dc retroactive', 'dc special',
+  'image comics presents', 'image united',
+  // Q31: Publisher + "of" compounds
+  'world of marvel', 'mighty world of marvel', 'world of dc',
+  'tales of marvel', 'age of marvel', 'age of dc',
+];
+
 /**
  * EX-7 — reprint/facsimile dominance in the eBay visual (image-search) pool.
  *
@@ -114,19 +159,10 @@ export const sanitizeSeriesTitle = (rawTitle) => {
 
   // Q24 FIX — Publisher-name whitelist for compound character titles.
   // "Captain Marvel" → must NOT strip "Marvel" as publisher noise.
-  // Deterministic list: titles where publisher name is PART of the series name.
-  //
-  // Q31 Part 2: Add "world of" / "age of" / "tales of" compound patterns
-  // to prevent "Mighty World of Marvel" → "mighty world" token-thinning.
-  const COMPOUND_TITLE_WHITELIST = [
-    'captain marvel', 'ms. marvel', 'ms marvel',
-    'marvel team-up', 'marvel team up', 'marvel two-in-one', 'marvel two in one',
-    'marvel presents', 'detective comics', 'dc comics presents',
-    // Q31: Publisher + "of" compounds
-    'world of marvel', 'mighty world of marvel', 'world of dc',
-    'tales of marvel', 'age of marvel', 'age of dc',
-  ];
-
+  // Q119 dispatch (2026-07-18) — now reads the module-level, canonical
+  // COMPOUND_TITLE_WHITELIST (exported above) instead of a function-local
+  // copy — this was itself one of four independently-drifted duplicates,
+  // now the single promoted source the other three sites consult.
   const isCompoundTitle = COMPOUND_TITLE_WHITELIST.some(w => rawLower.includes(w));
 
   const NOISE_PATTERNS = [
@@ -904,16 +940,60 @@ export const backfillFromComps = (confirmedTitle, confirmedYear, confirmedPublis
     // Q58-TITLE — Title backfill from comp series-name consensus (≥4 comps, ≥80% consensus)
     if (!confirmedTitle && compTitles.length >= 4) {
       // Extract series name from each comp title (strip issue#, publisher, year, grade)
+      // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — this was a
+      // naked publisher strip with NO compound-title guard, a separate,
+      // unprotected duplicate of the exact job sanitizeSeriesTitle already
+      // guards two functions away in this same file (Q24 fix). Real
+      // production case: "Captain Marvel Comics #17 CGC 9.6 1977" →
+      // publisher-strip regex matched "Marvel Comics" (word immediately
+      // followed by "comics") → "Captain #17..." — Marvel already gone
+      // before sanitizeSeriesTitle(topSeries) runs on the result below,
+      // too late for its whitelist to recover it. Now masks a matched
+      // COMPOUND_TITLE_WHITELIST phrase BEFORE stripping (rather than
+      // skipping the whole publisher-strip step) — a comp title routinely
+      // carries other genuine noise alongside a compound title ("Captain
+      // Marvel Comics #17 CGC 9.6 1977": the trailing "Comics" IS
+      // boilerplate even though "Captain Marvel" isn't), so blanket-
+      // skipping the strip would leave "Comics" stuck to the result.
+      // Masking protects only the matched phrase itself; everything else
+      // still gets cleaned normally.
       const extractSeriesName = (rawTitle) => {
-        let cleaned = String(rawTitle || '')
+        const str = String(rawTitle || '');
+        const rawLower = str.toLowerCase();
+
+        let masked = str;
+        let restoreToken = null;
+        let restoreOriginal = null;
+        for (const entry of COMPOUND_TITLE_WHITELIST) {
+          const idx = rawLower.indexOf(entry);
+          if (idx === -1) continue;
+          restoreOriginal = str.slice(idx, idx + entry.length);
+          restoreToken = '__CVPROTECT__';
+          masked = masked.slice(0, idx) + restoreToken + masked.slice(idx + entry.length);
+          break; // protect the first match found — compound entries don't meaningfully overlap
+        }
+
+        let cleaned = masked
           .replace(/#\s*\d+/g, ' ')                    // strip issue number
           .replace(/\b(19[3-9]\d|20[0-2]\d)\b/g, ' ')  // strip years
           .replace(/\b(cgc|cbcs|pgx|graded)\s*[\d.]+/gi, ' ')  // strip slab grades
           .replace(/\b(nm|vf|fn|vg|gd|fr|pr)\b/gi, ' ')  // strip raw grades
           .replace(/\b(marvel|dc|image|dark horse|idw|boom|dynamite|valiant|archie)\s*comics?\b/gi, ' ')  // strip publishers
+          // Bare leftover "comics"/"comic" (e.g. the masked-out "Marvel"
+          // in "Marvel Comics" leaves "Comics" orphaned, no longer
+          // preceded by a publisher word for the regex above to catch).
+          // Safe unconditionally — anything meaningful containing "comics"
+          // as part of a real title (Marvel Comics Presents, DC Comics
+          // Presents, Image Comics Presents) is a whitelist entry and
+          // already fully protected inside the placeholder token above.
+          .replace(/\bcomics?\b/gi, ' ')
           .replace(/[()[\]{}]/g, ' ')                  // strip brackets
           .replace(/\s+/g, ' ')
           .trim();
+
+        if (restoreToken) {
+          cleaned = cleaned.replace(restoreToken, restoreOriginal);
+        }
 
         // Take first 2-4 meaningful tokens (series name is usually 1-3 words)
         const tokens = cleaned.toLowerCase().split(/\s+/)

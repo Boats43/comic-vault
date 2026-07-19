@@ -12,6 +12,8 @@
  * Phase 3 implementation: full enrichComic() orchestration.
  */
 
+import { COMPOUND_TITLE_WHITELIST } from '../lib/identityCore.js';
+
 /**
  * Detect key-issue value from keyIssue string.
  * Replaces inline hasKeyIssue logic in decisionEngine.js.
@@ -87,16 +89,15 @@ export function computeEraRisk(year, rawComps) {
 /**
  * Protected series where publisher name is part of canonical title.
  * Example: "Marvel Tales" is the series name, not "Tales" + noise.
+ *
+ * Q119 dispatch (2026-07-18, Captain Marvel #17 class) — was a standalone
+ * local list, missing "Captain Marvel"/"Ms. Marvel" entirely (one of four
+ * independently-drifted duplicates found in one pass tonight). Now an
+ * alias for identityCore.js's COMPOUND_TITLE_WHITELIST, the promoted
+ * canonical source — kept exported under this name for the existing
+ * (currently unused) import in api/enrich.js, not duplicated content.
  */
-export const PUBLISHER_IN_TITLE_SERIES = [
-  'marvel tales', 'marvel presents', 'marvel preview', 'marvel spotlight',
-  'marvel super action', 'marvel super heroes', 'marvel team-up', 'marvel team up',
-  'marvel triple action', 'marvel two-in-one', 'marvel two in one', 'marvel age',
-  'marvel chillers', 'marvel feature', 'marvel fanfare', 'marvel comics presents',
-  'marvel saga', 'marvel premiere', 'marvel mystery comics',
-  'dc universe presents', 'dc retroactive', 'dc comics presents', 'dc special',
-  'image comics presents', 'image united',
-];
+export const PUBLISHER_IN_TITLE_SERIES = COMPOUND_TITLE_WHITELIST;
 
 /**
  * Artist patterns for title cleaning.

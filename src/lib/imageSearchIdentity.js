@@ -23,7 +23,7 @@
 // Function count stays at 12/12.
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
-import { sanitizeSeriesTitle } from './identityCore.js';
+import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST } from './identityCore.js';
 import { ARTIST_PATTERNS, compactTitleKey, IDENTITY_TPB_MARKER_RE } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
@@ -563,38 +563,16 @@ export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher
     // But it also stripped publisher names that are LEGITIMATE PARTS of
     // series titles. Affects every series starting with publisher name.
     //
-    // Whitelist preserves known publisher-in-title series. New series not
-    // on this list will still be incorrectly stripped — extend list as
-    // production data surfaces them.
-    const PUBLISHER_IN_TITLE_SERIES = [
-      'marvel tales',
-      'marvel presents',
-      'marvel preview',
-      'marvel spotlight',
-      'marvel super action',
-      'marvel super heroes',
-      'marvel team-up',
-      'marvel team up',
-      'marvel triple action',
-      'marvel two-in-one',
-      'marvel two in one',
-      'marvel age',
-      'marvel chillers',
-      'marvel feature',
-      'marvel fanfare',
-      'marvel comics presents',
-      'marvel saga',
-      'marvel premiere',
-      'marvel mystery comics',
-      'dc universe presents',
-      'dc retroactive',
-      'dc comics presents',
-      'dc special',
-      'image comics presents',
-      'image united',
-    ];
+    // Whitelist preserves known publisher-in-title series.
+    //
+    // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — this was a
+    // standalone local copy, independently drifted from ComicAdapter.js's
+    // near-identical PUBLISHER_IN_TITLE_SERIES (both missing "Captain
+    // Marvel"/"Ms. Marvel" — one of four independently-drifted duplicates
+    // found in one pass tonight). Now reads identityCore.js's promoted
+    // canonical COMPOUND_TITLE_WHITELIST.
     const titleLower = s.toLowerCase().trim();
-    const isPublisherSeries = PUBLISHER_IN_TITLE_SERIES.some((p) =>
+    const isPublisherSeries = COMPOUND_TITLE_WHITELIST.some((p) =>
       titleLower.startsWith(p)
     );
     if (!isPublisherSeries) {
@@ -1218,6 +1196,41 @@ const NEUTRAL_ADDITION_TOKENS = new Set([
   'print', 'first', '1st',
 ]);
 
+// Q119 dispatch (2026-07-18, Captain Marvel #17 class) — a NEUTRAL_ADDITION
+// token being dropped from BOTH sides of the Q84 comparison (by design,
+// see comment above) means it can never be RECOVERED either, even when
+// it's exactly the correct missing word. Real production case: Vision's
+// own title came back "Captain" (missing "Marvel"); the pool's title-
+// family consensus correctly found "captain marvel 1st kamala khan" (13/20
+// members), but the override was blocked because "kamala"/"khan" are
+// genuine non-creator additions the gate is right to reject — and
+// "marvel," being neutral-dropped from the comparison entirely, had no
+// path back into the final title even though recovering it is safe and
+// correct. This does NOT touch applyDualAxisGate's blocking logic (that
+// protection against genuinely-unrelated additions stays exactly as
+// designed) — it only asks, on a BLOCKED override, whether Vision's title
+// plus ONE neutral-tagged word the family confirms happens to complete a
+// known real title (COMPOUND_TITLE_WHITELIST). "Captain" + family's
+// "marvel" → "captain marvel" matches the whitelist → recovered. "Kamala"/
+// "khan" are never candidates here (not NEUTRAL_ADDITION_TOKENS members)
+// and are never adopted — the completion is strictly narrower than
+// accepting the family's full title.
+const completeCompoundTitle = (visionTitle, visionTokens, familyTokens) => {
+  if (!visionTitle) return null;
+  const visionLower = String(visionTitle).toLowerCase().trim();
+  if (!visionLower) return null;
+  const candidates = (familyTokens || []).filter(
+    (t) => NEUTRAL_ADDITION_TOKENS.has(t) && !(visionTokens || []).includes(t)
+  );
+  for (const candidate of candidates) {
+    const completed = `${visionLower} ${candidate}`;
+    if (COMPOUND_TITLE_WHITELIST.includes(completed)) {
+      return completed.replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+  }
+  return null;
+};
+
 // Pool artist consensus: creator names matching ARTIST_PATTERNS in ≥2 pool
 // titles. Returns a Set of lowercase word tokens for creator-class checks.
 export const extractPoolArtistTokens = (items) => {
@@ -1541,6 +1554,23 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     ? q84Gate(topFamily.tokens)
     : { allowed: true, reason: 'gate not reached' };
   if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily && !q84Consensus.allowed) {
+    // Q119 — before falling all the way back to bare Vision, check whether
+    // Vision's title plus a single family-confirmed neutral word completes
+    // a known real title (see completeCompoundTitle above). Does NOT adopt
+    // any of the tokens that actually triggered the block.
+    const compoundCompletion = completeCompoundTitle(visionTitle, visionTokens, topFamily.tokens);
+    if (compoundCompletion) {
+      console.log(`[Q119] compound-title completion: "${visionTitle}" → "${compoundCompletion}" (blocked additions [${q84Consensus.reason}] still excluded)`);
+      return {
+        decision: 'weighted-consensus',
+        selectedTitle: compoundCompletion,
+        rawTitle: topFamily.rawTitle,
+        reason: `[Q119] compound-title completion from "${visionTitle}" — family confirms "${compoundCompletion}" (blocked additions excluded: ${q84Consensus.reason})`,
+        topFamily,
+        runnerUp,
+        families: scored,
+      };
+    }
     return {
       decision: 'fallback-vision',
       selectedTitle: null,
