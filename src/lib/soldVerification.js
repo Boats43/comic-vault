@@ -40,6 +40,8 @@ import {
   getQualitativeGradeCeiling,
   applyPriceSanity,
   extractArtist,
+  getEraYearTolerance,
+  evaluateEraYearMatch,
 } from "./compHygiene.js";
 import { PREMIUM_CREATORS } from "./premiumCreators.js";
 
@@ -380,6 +382,7 @@ export const verifySoldComps = (rawRows, ctx) => {
     userGradeKey = null,
     assessedGrade = null,
     priceLadder = null,
+    cvVolumeStartYear = null,  // Q128 — ComicVine volume's start_year, for the volume-label-year corroboration check
   } = ctx || {};
 
   const ourTokens = tokenizeTitle(title);
@@ -792,10 +795,14 @@ export const verifySoldComps = (rawRows, ctx) => {
     }
   }
 
-  // 11.5. Era year tolerance (Ship #20a.6.20 parity with active Filter 0c).
-  //       Vintage books: reject sold rows from wrong era (±5y Golden/Silver,
-  //       ±3y Bronze, ±2y Modern). Skips when r.year missing (PC rows often
-  //       lack year; don't reject on missing data).
+  // 11.5. Era year tolerance — Q128 consolidated onto getEraYearTolerance
+  //       (src/lib/compHygiene.js), the single source of truth also used
+  //       by active Filter 0c (api/comps.js). This block previously
+  //       carried its OWN inline copy at a different value (±2 modern vs
+  //       Filter 0c's ±3) while its own comment claimed the two "mirror"
+  //       each other — an already-silently-drifted claim, not actually
+  //       true. Skips when r.year missing (PC rows often lack year; don't
+  //       reject on missing data).
   if (bookYear) {
     working = working.filter((r) => {
       // Extract year from row if present (PC rows may have year in metadata
@@ -807,14 +814,9 @@ export const verifySoldComps = (rawRows, ctx) => {
       const theirYear = parseInt(rowYear, 10);
       if (isNaN(ourYear) || isNaN(theirYear)) return true;
 
-      // Era-based tolerance (mirrors active Filter 0c)
-      const tolerance =
-        ourYear < 1956 ? 5  // Golden Age
-        : ourYear < 1970 ? 5  // Silver Age
-        : ourYear < 1985 ? 3  // Bronze Age
-        : 2;                 // Modern
-
-      if (Math.abs(theirYear - ourYear) > tolerance) {
+      const tolerance = getEraYearTolerance(ourYear);
+      const { keep } = evaluateEraYearMatch(theirYear, ourYear, tolerance, cvVolumeStartYear);
+      if (!keep) {
         reasons.yearMismatch++;
         pushSample(r, 'yearMismatch');
         return false;
@@ -1005,9 +1007,9 @@ export const verifySoldComps = (rawRows, ctx) => {
         const ourYear = parseInt(bookYear, 10);
         const theirYear = parseInt(rowYear, 10);
         if (isNaN(ourYear) || isNaN(theirYear)) return true;
-        const tolerance =
-          ourYear < 1956 ? 5 : ourYear < 1970 ? 5 : ourYear < 1985 ? 3 : 2;
-        if (Math.abs(theirYear - ourYear) > tolerance) {
+        const tolerance = getEraYearTolerance(ourYear); // Q128 — consolidated, was an independent inline copy
+        const { keep } = evaluateEraYearMatch(theirYear, ourYear, tolerance, cvVolumeStartYear);
+        if (!keep) {
           fallbackReasons.yearMismatch++;
           pushFallbackSample(r, 'yearMismatch');
           return false;

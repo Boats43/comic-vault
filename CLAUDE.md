@@ -1145,6 +1145,67 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   same-year multi-variant case (Captain America #25 / Skottie Young,
   poolYearHint agreeing with confirmedYear) confirming the gate does not
   false-positive and the real variant backfill still fires normally.
+- **Drifted-duplicate-constant class, third instance: year-tolerance
+  numbers** (Q128 dispatch, 2026-07-19) — the same "independently-
+  maintained copy silently drifts from its sibling" shape found twice
+  earlier the same night (Q119: five separate `COMPOUND_TITLE_WHITELIST`-
+  equivalent lists, consolidated onto one canonical export; Finding 2/Q127:
+  ~10 separate `req.body.variant` read-sites in `api/enrich.js`, several
+  bypassing the gated `confirmedVariant`) — recurring a third time, this
+  time as a NUMERIC tolerance constant rather than a string list or a
+  variable-read site. `api/comps.js`'s active-listing Filter 0c (±3y for
+  modern books) and `src/lib/soldVerification.js`'s sold-comp
+  `yearMismatch` filter (±2y for modern, in TWO places — a main pass and a
+  fallback pass) had already silently diverged — and `soldVerification.js`'s
+  own comment literally read "Era-based tolerance (mirrors active Filter
+  0c)," a claim that was no longer true by the time it was read. Same
+  lesson as the prior two instances: a comment asserting cross-file
+  consistency is not itself evidence of consistency; only a shared,
+  single-sourced value is. Fix: `getEraYearTolerance` +
+  `evaluateEraYearMatch` (`src/lib/compHygiene.js`, already the
+  established shared-helpers home per this doc's Key Files list) — one
+  function each, reused by `api/comps.js` and both `soldVerification.js`
+  passes. `identityAlignment.js`'s own flat (non-era-banded) ±2y
+  `yearMatch` was deliberately NOT folded in — it serves a different
+  purpose (Vision/CV/PC self-consistency scoring, not comp-pool admission)
+  and was never part of the false "mirrors" claim; consolidating it too
+  risked unrelated collateral effects on identity-confidence scoring for
+  no clear benefit. When auditing for this class going forward: grep for
+  the same VALUE (a regex, a whitelist, a tolerance number, a threshold)
+  appearing in more than one file, not just for files that explicitly cite
+  each other — the citation is exactly the thing that goes stale first.
+- **Back-issue comp listings commonly cite a series' volume-launch year,
+  not the specific issue's own cover date** (Q128 dispatch, 2026-07-19,
+  Harley Quinn #62) — a domain-knowledge fact about how the secondary
+  comics market labels listings, independent of the code-drift finding
+  above; documented here on its own so a future investigation doesn't
+  have to re-derive it. Confirmed via a direct, real ComicVine `/volumes/`
+  API lookup during this dispatch (not inferred): a real production card
+  for Harley Quinn #62 (confirmed via PriceCharting to be cover-dated
+  2019) had an active eBay comp titled "...Harley Quinn #62 (2016)
+  Guillem March 1st Print..." sitting in its comp pool. This looked, on
+  its face, identical to the Batman #608 / Catwoman #64 wrong-volume
+  contamination shape (Q115/Q127) — but querying ComicVine directly for
+  the exact volume this book's issue #62 resolves to (vol_id 92750, per
+  the same production log's own `[comicvine] volDetails fetched: 1/1 —
+  92750:Harley Quinn(2016,DC Comics)` line) returned `start_year: 2016`
+  as ComicVine's own canonical value for that volume — confirming the
+  "(2016)" label is the ongoing series' launch year, not a different,
+  wrong printing. Sellers on eBay (and, per this same lookup, ComicVine/
+  GCD/MyComicShop-style cataloging generally) routinely cite the volume's
+  start year for back issues rather than looking up each individual
+  issue's specific cover date — completely standard practice, not seller
+  error and not contamination. Mechanically encoded as `isVolumeLabelYear`
+  (`src/lib/compHygiene.js`): a comp's stated year is treated as
+  legitimate when it lands within ±1y of the CONFIRMED book's own
+  ComicVine volume start year, even when it falls outside the ordinary
+  confirmedYear era tolerance. Does NOT weaken protection against genuine
+  wrong-volume contamination (Batman #608 class) — a volume-label match
+  only admits a year matching THIS specific book's own resolved volume,
+  never an arbitrary nearby year. Before assuming a same-title/same-issue,
+  different-year comp is contamination: check whether the stated year
+  matches the confirmed book's own ComicVine volume start year first —
+  it may be the more mundane, correct explanation.
 
 ## Open Blockers
 

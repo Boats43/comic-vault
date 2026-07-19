@@ -54,6 +54,8 @@ import {
   isValidIssueRange,
   extractArtist,
   cleanPublisher,
+  getEraYearTolerance,
+  evaluateEraYearMatch,
 } from "../src/lib/compHygiene.js";
 
 import { classifyVariantTokens } from "../src/lib/imageSearchIdentity.js";
@@ -628,6 +630,7 @@ export const fetchComps = async ({
   categoryId,  // Session 4B — eBay category (259104 comics, 267 books)
   assetType,   // Session 4B — 'comic' | 'book' for query builder routing
   author,      // Session 4B — book identity field (for buildBookQuery)
+  cvVolumeStartYear = null,  // Q128 — ComicVine volume's own start_year (lookupComicVine's `.startYear`), used by Filter 0c to corroborate a "volume launch year" label distinct from confirmedYear
 }) => {
   if (!appId || !certId) {
     return emptyComps(null, "missing eBay credentials");
@@ -1056,20 +1059,17 @@ export const fetchComps = async ({
       // the era's tolerance. Catches clean reprint listings that don't
       // match REPRINT_RE (e.g. DC Classics Library issues retaining the
       // original's #issue number without explicit "reprint" token).
-      // Tolerance:
-      //   <1970 (Golden/early Silver): ±5y — volatile cover dating
-      //   1970-1985 (Bronze):          ±3y — tight
-      //   ≥1985 (Modern):              ±3y — deep comp pools, collision risk
+      // Tolerance: getEraYearTolerance (src/lib/compHygiene.js) — single
+      // source of truth, consolidated Q128 (was an inline copy here that
+      // had independently drifted from soldVerification.js's own inline
+      // copy, whose comment falsely claimed to "mirror" this one).
       // Graceful wipe-out fallback: if filter removes every listing, keep
       // all and flag eraFilterBypassed so UI can warn user.
       // Session 4B — Skip for books (book year = edition, spans decades).
       if (year && assetType !== 'book') {
         const yearNum = parseInt(String(year), 10);
         if (!isNaN(yearNum)) {
-          const tolerance =
-            yearNum < 1970 ? 5 :
-            yearNum < 1985 ? 3 :
-            3;
+          const tolerance = getEraYearTolerance(yearNum);
           const extractYear = (t) => {
             const m = String(t || '').match(/\b(19|20)\d{2}\b/);
             return m ? parseInt(m[0], 10) : null;
@@ -1108,12 +1108,32 @@ export const fetchComps = async ({
               return true;
             }
 
-            const diff = Math.abs(ly - yearNum);
-            if (diff > tolerance) {
+            // Q128 dispatch (2026-07-19, Harley Quinn #62 class) —
+            // evaluateEraYearMatch (src/lib/compHygiene.js) checks the
+            // normal confirmedYear tolerance first, then falls back to a
+            // volume-label match before rejecting: comic back-issue
+            // sellers routinely label listings with a series' volume-
+            // launch year rather than the specific issue's cover date
+            // (e.g. "Harley Quinn #62 (2016)" for an issue cover-dated
+            // 2019, because ComicVine vol_id 92750 — the confirmed volume
+            // for this exact book — genuinely launched in 2016, confirmed
+            // directly against ComicVine's own API before this check was
+            // written). Distinct from genuine wrong-volume contamination
+            // (Batman #608 class), which this does NOT protect — a
+            // volume-label match only admits a year matching THIS
+            // specific book's own resolved volume, not any arbitrary
+            // nearby year.
+            const { keep, matchedVia } = evaluateEraYearMatch(ly, yearNum, tolerance, cvVolumeStartYear);
+            if (!keep) {
               console.log('[era-filter] rejected:',
                 titleStr.slice(0, 55),
                 `(year ${ly} vs ${yearNum}, tol ±${tolerance})`);
               return false;
+            }
+            if (matchedVia === 'volume-label') {
+              console.log('[era-filter] kept via volume-label match:',
+                titleStr.slice(0, 55),
+                `(year ${ly} matches CV volume start year ${cvVolumeStartYear}, confirmedYear=${yearNum})`);
             }
             return true;
           });

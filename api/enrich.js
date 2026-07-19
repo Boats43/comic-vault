@@ -3823,6 +3823,7 @@ export default async function handler(req, res) {
               categoryId: getAdapter(out.assetType).ebayCategoryId,
               assetType: out.assetType,
               author: out.author || null,  // book identity field for buildBookQuery
+              cvVolumeStartYear: comicVine?.startYear || null,  // Q128 — volume-label-year corroboration (Harley Quinn #62 class). NOT comicVine?.volume?.startYear — that shape is always undefined (comicVine.volume is a flat string); .startYear is the correct top-level field.
             }).catch((err) => {
               console.error('[enrich] comps error stack:', err?.stack);
               console.error(`[enrich] comps error: ${err?.message || err}`);
@@ -4242,6 +4243,7 @@ export default async function handler(req, res) {
       // verifySoldComps cross-check a raw scan's sold-comp prices against
       // PC's own grade-value data — independent of title text entirely.
       priceLadder: pcSales.priceLadder || null,
+      cvVolumeStartYear: comicVine?.startYear || null,  // Q128 — same volume-label-year corroboration as active Filter 0c
     });
     const filteredSold = soldVerifyResult.verified;
     if (rawSoldRows.length > 0) {

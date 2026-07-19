@@ -797,3 +797,86 @@ export const cleanPublisher = (p) => {
     .replace(/\s+/g, " ")
     .trim();
 };
+
+// ─────────────────────────── ERA/YEAR TOLERANCE ─────────────────────────
+
+// Q128 dispatch (2026-07-19, Harley Quinn #62 systemic-tolerance audit) —
+// single source of truth for the "how many years apart can a listing's
+// year be from our confirmedYear before it's a different book" tolerance.
+// Previously existed as two independently-maintained inline copies:
+// api/comps.js's active-listing Filter 0c (±3 for modern) and
+// soldVerification.js's sold-comp yearMismatch filter (±2 for modern,
+// in TWO places — main pass and fallback pass) — the latter's own comment
+// literally claimed to "mirror active Filter 0c" while actually using a
+// different number, an already-silently-drifted claim. Consolidated here
+// at comps.js's existing ±3 value (NOT tightened to ±2): the investigated
+// case (Harley Quinn #62, a 2016-labeled comp for a confirmedYear=2019
+// book) turned out to be a LEGITIMATE comp once checked against
+// ComicVine — see isVolumeLabelYear below — and the Pattern Library's
+// Renumbered-franchise entry already found, with a real reconstructed
+// test (Fantastic Four #187), that a stricter numeric year tolerance
+// rejects genuinely-legitimate vintage/back-issue comps. Blanket-
+// tightening was considered and deliberately rejected in favor of the
+// corroboration check below.
+export const getEraYearTolerance = (year) => {
+  const y = parseInt(year, 10);
+  if (!Number.isFinite(y)) return 3;
+  if (y < 1970) return 5; // Golden/Silver Age — volatile cover dating
+  if (y < 1985) return 3; // Bronze Age
+  return 3; // Modern — consolidated single source of truth
+};
+
+// Q128 dispatch — corroboration check for the "same book, different year
+// LABEL" class (distinct from genuine wrong-book contamination). Comic
+// back-issue sellers routinely title listings with a series' VOLUME
+// LAUNCH YEAR rather than the specific issue's own cover date (industry-
+// standard convention, matching ComicVine/GCD/MyComicShop cataloging) —
+// e.g. "Harley Quinn #62 (2016)" for an issue actually cover-dated 2019,
+// because the ongoing series (ComicVine vol_id 92750) itself launched in
+// 2016. Confirmed directly against ComicVine's own canonical volume
+// record for this exact case (not assumed) before this function was
+// written. A listing's stated year is treated as legitimate when it's
+// within a tight tolerance of the CONFIRMED book's own ComicVine volume
+// start year, even when it falls outside the normal era tolerance against
+// confirmedYear. Tight tolerance (±1) because this is an exact-label
+// match, not an approximate era band — sellers using this convention
+// state the volume's actual start year, not a fuzzy guess.
+//
+// @param {number|null} listingYear - year extracted from a comp's title
+// @param {number|string|null} cvVolumeStartYear - confirmedBook's
+//   ComicVine volume start year (lookupComicVine's `.startYear` field —
+//   NOT `.volume.startYear`, a different, broken shape documented
+//   elsewhere in this codebase as always-undefined)
+// @returns {boolean}
+export const isVolumeLabelYear = (listingYear, cvVolumeStartYear) => {
+  if (listingYear == null || cvVolumeStartYear == null) return false;
+  const ly = parseInt(listingYear, 10);
+  const vy = parseInt(cvVolumeStartYear, 10);
+  if (!Number.isFinite(ly) || !Number.isFinite(vy)) return false;
+  return Math.abs(ly - vy) <= 1;
+};
+
+// Q128 dispatch — the core keep/reject decision shared by both era-year
+// checks (api/comps.js Filter 0c, src/lib/soldVerification.js's main and
+// fallback passes), extracted as a pure function for direct
+// regression-testability (same precedent as Q111's
+// applyVariantPreferenceFilter). Callers keep their own missing-year
+// pass-through and modern-relaunch-marker checks — this only decides the
+// numeric year-vs-tolerance-vs-volume-label question.
+//
+// @param {number|null} listingYear - year extracted from a comp's title
+// @param {number} confirmedYear - our book's confirmed year
+// @param {number} tolerance - era tolerance, from getEraYearTolerance
+// @param {number|string|null} [cvVolumeStartYear] - confirmed book's
+//   ComicVine volume start year, for the volume-label corroboration check
+// @returns {{keep: boolean, matchedVia: 'confirmed-year'|'volume-label'|null}}
+export const evaluateEraYearMatch = (listingYear, confirmedYear, tolerance, cvVolumeStartYear = null) => {
+  const diff = Math.abs(listingYear - confirmedYear);
+  if (diff <= tolerance) {
+    return { keep: true, matchedVia: 'confirmed-year' };
+  }
+  if (isVolumeLabelYear(listingYear, cvVolumeStartYear)) {
+    return { keep: true, matchedVia: 'volume-label' };
+  }
+  return { keep: false, matchedVia: null };
+};
