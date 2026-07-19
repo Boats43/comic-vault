@@ -611,6 +611,14 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
         : volName.includes(seriesLower) || seriesLower.includes(volName) ? 50
         : 0;
       // Year proximity scoring: prefer volumes from the same era.
+      // Q120 audit (2026-07-19, Captain Marvel #17 class) — confirmed this
+      // coarse path was already correct: yearDiff's 999 sentinel (fires
+      // whenever comicYear or startYear is missing, not just when they
+      // genuinely disagree) only ever maps to yearScore=0 here — there is
+      // no negative branch in this formula. The bug lived exclusively in
+      // scoreWithDetails below, which added a negative-penalty branch on
+      // top of the same sentinel value. Documented here so the two stay
+      // consistent if either is touched again.
       const startYear = r?.volume?.start_year ? parseInt(r.volume.start_year, 10) : null;
       const yearDiff = comicYear && startYear ? Math.abs(startYear - comicYear) : 999;
       const yearScore = yearDiff < 10 ? 2 : yearDiff < 20 ? 1 : 0;
@@ -839,12 +847,29 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       const vol = volDetails[vid];
       if (!vol) return base;
       const startYear = vol.start_year ? parseInt(vol.start_year, 10) : null;
-      const yearDiff = comicYear && startYear ? Math.abs(startYear - comicYear) : 999;
+      // Q120 dispatch (2026-07-19, Captain Marvel #17 class) — hasYearComparison
+      // distinguishes "we have both years and they genuinely disagree" from
+      // "we have no comicYear to compare against at all" — both previously
+      // collapsed to the same yearDiff=999 sentinel, and the negative-
+      // penalty branches below then punished the SECOND case as if it were
+      // the first. Real production case: comicYear was null (no year signal
+      // from Vision or an authoritative eBay consensus); a same-named
+      // "Captain Marvel" volume that correctly had its start_year fetched
+      // (vid=50575, 2012, the real DeConnick-run volume) scored yr=-5 purely
+      // for having data available to compare — while vid=6458, which never
+      // got its volume details fetched at all (capped at 5 unique volume
+      // IDs per request), scored yr=0 by omission and won. Absence of a
+      // year to compare is not evidence of a year mismatch; only apply the
+      // gap-based scoring (positive OR negative) when a genuine comparison
+      // was possible.
+      const hasYearComparison = Boolean(comicYear && startYear);
+      const yearDiff = hasYearComparison ? Math.abs(startYear - comicYear) : 999;
 
-      // PART 3: Year gap penalty for large differences
-      let detailYearScore = yearDiff < 10 ? 2 : yearDiff < 20 ? 1 : 0;
-      if (yearDiff >= 30) detailYearScore = -5;
-      else if (yearDiff > 20) detailYearScore = -2;
+      // PART 3: Year gap penalty for large differences — gated on
+      // hasYearComparison; see comment above.
+      let detailYearScore = hasYearComparison ? (yearDiff < 10 ? 2 : yearDiff < 20 ? 1 : 0) : 0;
+      if (hasYearComparison && yearDiff >= 30) detailYearScore = -5;
+      else if (hasYearComparison && yearDiff > 20) detailYearScore = -2;
 
       const volPub = String(vol.publisher?.name || "").toLowerCase().trim();
       const detailPubScore = pubLower && volPub && volPub.includes(pubLower) ? 2 : 0;

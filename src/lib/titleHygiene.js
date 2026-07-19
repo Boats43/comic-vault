@@ -9,6 +9,8 @@
 // tokens ("kitchen sink") and creator tokens ("mark spears") from
 // contaminating identity. E4/E5 class protection.
 
+import { COMPOUND_TITLE_WHITELIST } from './identityCore.js';
+
 // Publisher names — most specific first (multi-word before single-word)
 const PUBLISHER_NAMES = [
   'kitchen sink', 'dark horse', 'image comics', 'dc comics', 'marvel comics',
@@ -70,6 +72,34 @@ export function stripMetadataTokens(title) {
 
   let clean = String(title).toLowerCase();
 
+  // Q120 dispatch (2026-07-19, Captain Marvel #17 class) — mask a matched
+  // COMPOUND_TITLE_WHITELIST phrase before the publisher-name strip below,
+  // rather than skipping the whole strip step: a title can carry genuine
+  // publisher noise alongside a protected compound ("Captain Marvel Comics
+  // #17" needs "Comics" gone while "Captain Marvel" survives). This was a
+  // sixth independently-drifted copy of the "publisher name may
+  // legitimately be part of a series title" fact Q119 consolidated — this
+  // one missed by that sweep because it lives under a different variable
+  // name (PUBLISHER_NAMES, not PUBLISHER_IN_TITLE_SERIES/
+  // COMPOUND_TITLE_WHITELIST) in a different file, a lesson worth
+  // remembering: check for the underlying FACT being duplicated, not just
+  // grep for known list names. Same masking pattern as identityCore.js's
+  // extractSeriesName fix from the earlier Q119 consolidation. A stray
+  // leftover "comics" (e.g. "Captain Marvel Comics" → "Captain Marvel" +
+  // orphaned "Comics") doesn't need explicit handling here the way it did
+  // in extractSeriesName — this function's only caller (tokenizeTitle)
+  // already treats bare "comics" as a STOP_WORD regardless.
+  let restoreToken = null;
+  let restoreOriginal = null;
+  for (const entry of COMPOUND_TITLE_WHITELIST) {
+    const idx = clean.indexOf(entry);
+    if (idx === -1) continue;
+    restoreOriginal = clean.slice(idx, idx + entry.length);
+    restoreToken = '__CVPROTECT__';
+    clean = clean.slice(0, idx) + restoreToken + clean.slice(idx + entry.length);
+    break; // protect the first match found — compound entries don't meaningfully overlap
+  }
+
   // 1. Strip publisher names (FIRST — most specific, multi-word before single)
   for (const pub of PUBLISHER_NAMES) {
     const pattern = new RegExp(`\\b${pub}\\b`, 'gi');
@@ -96,6 +126,10 @@ export function stripMetadataTokens(title) {
 
   // 5. Collapse whitespace
   clean = clean.replace(/\s+/g, ' ').trim();
+
+  if (restoreToken) {
+    clean = clean.replace(restoreToken, restoreOriginal);
+  }
 
   return clean;
 }

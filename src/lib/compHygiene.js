@@ -227,11 +227,31 @@ export const MIN_TOKEN_LEN = 2;
 // normalization. Preserve them as canonical forms BEFORE tokenization splits.
 // X-Men #44 class: "x-men" → ["x", "men"] → "x" stripped by MIN_TOKEN_LEN=2
 // → ["men"] → cross-series contamination (Men of War, X-Men Adventures).
+//
+// Q120 dispatch (2026-07-19, Captain Marvel #17 class) — was ALSO missing
+// "captain marvel"/"ms. marvel" (a SEVENTH independently-drifted copy of
+// the same underlying fact Q119 consolidated, found under yet another
+// name — this Set predates that sweep and wasn't grepped for since it
+// isn't named PUBLISHER_IN_TITLE_SERIES/COMPOUND_TITLE_WHITELIST/
+// PUBLISHER_NAMES). Entries added here literally rather than imported
+// from identityCore.js's canonical COMPOUND_TITLE_WHITELIST deliberately —
+// identityCore.js already imports COMPOUND_WHITELIST FROM this file, so
+// importing back would create a direct 2-file cycle (tighter than the
+// 3-file cycle titleHygiene.js's stripMetadataTokens fix accepted, which
+// only closes through a function-body reference, not a module-eval-time
+// one). compHygiene.js is intentionally kept dependency-free — it's the
+// foundational module the other two import from. This is real, live
+// architecture debt: a fifth/sixth/seventh copy's worth of the same list,
+// now duplicated for a real, documented reason rather than by oversight.
+// Reconciling all of these onto one true source would need a genuine
+// restructure (e.g. a lower-level shared module beneath all three) — not
+// attempted here, flagged for a future dedicated pass.
 export const COMPOUND_WHITELIST = new Set([
   'x-men', 'x-force', 'x-factor',  // single-letter lead
   'marvel tales', 'marvel age', 'marvel premiere', 'marvel team-up',
   'marvel two-in-one', 'marvel spotlight', 'marvel feature', 'marvel fanfare',
   'talespin', 'walt disney',  // thin-token titles
+  'captain marvel', 'ms. marvel', 'ms marvel',  // Q120
 ]);
 
 // Q42 C-A3: Abbreviation expansion map (single source of truth).
