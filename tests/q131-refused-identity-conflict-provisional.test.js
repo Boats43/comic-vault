@@ -90,7 +90,16 @@ const eternusFamilyCandidate = {
   families: [],
 };
 
-const visionGuess = { title: 'He-Man and the Masters of the Universe', issue: '1', year: null, publisher: null };
+// Q131 follow-up NOTE: the original visionGuess fixture used
+// year:null, publisher:null — which meant the original 24-assertion
+// suite could NOT have caught the confirmedPublisher/confirmedYear bug
+// this follow-up fixes (both `|| null` fallbacks are indistinguishable
+// from `|| vision.X` when vision.X is already null). Fixed here with
+// realistic non-null values matching what the real Vision call actually
+// returns for a "He-Man" guess (a real DC property, so Vision plausibly
+// also guessed publisher="DC Comics", year="2021") — this is what
+// exposes the bug for real.
+const visionGuess = { title: 'He-Man and the Masters of the Universe', issue: '1', year: '2021', publisher: 'DC Comics' };
 
 // ── 1. resolveIdentity — provisional Eternus identity surfaces ──────
 console.log('\n── resolveIdentity: refused-conflict + unanimous topFamily ──');
@@ -104,6 +113,45 @@ console.log('\n── resolveIdentity: refused-conflict + unanimous topFamily �
     `confirmedTitle does NOT confidently assert the disproven Vision guess`);
   check(identity.confirmedIssue === '2',
     `confirmedIssue adopts the pool's own #2, not Vision's #1 (got "${identity.confirmedIssue}")`);
+  // Q131 follow-up (2026-07-19, Eternus #2 / Scout Comics class) — the
+  // real production bug: confirmedPublisher silently stayed "DC Comics"
+  // (Vision's He-Man guess) even after the title correctly resolved to
+  // Eternus. No publisher signal exists in this pool (topFamily carries
+  // only title/rawTitle) — honest null, not the disproven Vision guess.
+  check(identity.confirmedPublisher !== 'DC Comics',
+    `confirmedPublisher does NOT silently keep Vision's disproven "DC Comics" guess (got "${identity.confirmedPublisher}")`);
+  check(identity.confirmedPublisher === null,
+    `confirmedPublisher is honestly null (no signal available), not fabricated (got "${identity.confirmedPublisher}")`);
+  check(identity.confirmedYear !== '2021',
+    `confirmedYear does NOT silently keep Vision's disproven "2021" guess (got "${identity.confirmedYear}")`);
+  check(identity.confirmedYear === null,
+    `confirmedYear is honestly null (no signal available) (got "${identity.confirmedYear}")`);
+}
+
+// ── 1b. resolveIdentity — ebay consensus year/publisher DOES get used ──
+console.log('\n── resolveIdentity: ebay.year/publisher signal still honored when present ──');
+{
+  // When a genuine eBay-consensus year/publisher DOES exist alongside a
+  // refused-identity-conflict decision (rare, but the code path exists —
+  // ebay?.year || null), it must still be used. Confirms the fix is
+  // "don't trust Vision specifically," not "never resolve year/publisher."
+  const ebayWithYearPublisher = { year: '2023', publisher: 'Scout Comics' };
+  const identity = resolveIdentity(visionGuess, ebayWithYearPublisher, eternusFamilyCandidate, { ebayResultCount: 17 });
+  check(identity.confirmedYear === '2023', `ebay.year used when present (got "${identity.confirmedYear}")`);
+  check(identity.confirmedPublisher === 'Scout Comics', `ebay.publisher used when present (got "${identity.confirmedPublisher}")`);
+}
+
+// ── 1c. resolveIdentity — issue fallback also doesn't leak vision.issue ──
+console.log('\n── resolveIdentity: issue fallback (no #N in rawTitle) does not leak vision.issue ──');
+{
+  const noIssueFamily = {
+    ...eternusFamilyCandidate,
+    topFamily: { ...eternusFamilyCandidate.topFamily, rawTitle: 'Eternus NYCC Metal Virgin Variant Cover (no issue number)' },
+  };
+  const identity = resolveIdentity(visionGuess, null, noIssueFamily, { ebayResultCount: 17 });
+  check(identity.confirmedIssue !== '1',
+    `confirmedIssue does NOT fall back to Vision's disproven "#1" when topFamily has no issue# (got "${identity.confirmedIssue}")`);
+  check(identity.confirmedIssue === null, `confirmedIssue is honestly null (got "${identity.confirmedIssue}")`);
 }
 
 // ── 2. Guard: single-listing "family" is not corroboration ──────────

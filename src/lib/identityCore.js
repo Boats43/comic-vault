@@ -627,16 +627,34 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     const sanitizedFamilyTitle = sanitizeSeriesTitle(rawFamilyTitle);
     const familyIssueMatch = rawFamilyTitle.match(/#\s*(\d+)/);
 
+    // Q131 follow-up (2026-07-19, Eternus #2 / Scout Comics class) —
+    // year/publisher/issue must NOT fall back to vision.* here the way the
+    // top-rank-protection/weighted-consensus branch above does. That
+    // branch's vision.* fallback is legitimate because Vision's overall
+    // read WAS trustworthy enough to win the family match there. Here,
+    // Vision has ZERO pool overlap and has already been proven wrong for
+    // this exact identity (that's the definition of this decision) — its
+    // year/publisher/issue guesses come from the same disproven read as
+    // the rejected title, not independent corroboration. Confirmed via
+    // real production log: title correctly resolved to "Eternus #2...",
+    // but confirmedPublisher silently stayed "DC Comics" (Vision's He-Man
+    // guess) because this exact `|| vision.X` pattern was copy-pasted from
+    // the branch above without re-examining whether it still applied.
+    // topFamily carries no publisher signal (only title/rawTitle) and no
+    // other source exists at this stage — honest null (renders "—" per
+    // I13) rather than silently keeping stale, rejected data is the same
+    // principle as the title fix itself, not a new one.
     confirmedTitle = sanitizedFamilyTitle;
-    confirmedIssue = familyIssueMatch ? familyIssueMatch[1] : (ebay?.issue || vision.issue);
-    confirmedYear = ebay?.year || vision.year;
-    confirmedPublisher = ebay?.publisher || vision.publisher;
+    confirmedIssue = familyIssueMatch ? familyIssueMatch[1] : (ebay?.issue || null);
+    confirmedYear = ebay?.year || null;
+    confirmedPublisher = ebay?.publisher || null;
     identitySource = 'title-family-refused-provisional';
     console.log(
       `[phase1] REFUSED-CONFLICT PROVISIONAL: pool's own top family "${rawFamilyTitle}" ` +
       `(weight ${family.topFamily.weightSum?.toFixed?.(1)}, ${family.topFamily.count} members) ` +
       `conflicts with Vision "${vision.title}" (0 token overlap) — surfacing pool signal as ` +
-      `provisional "${confirmedTitle}" #${confirmedIssue}, flagged for verification`
+      `provisional "${confirmedTitle}" #${confirmedIssue}, flagged for verification ` +
+      `(year=${confirmedYear || 'unconfirmed'}, publisher=${confirmedPublisher || 'unconfirmed'})`
     );
   } else if (ebay?.title && ebayResultCount >= 10) {
     const overlap = calculateTitleOverlap(ebay.title, vision.title);

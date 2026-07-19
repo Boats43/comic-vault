@@ -3725,7 +3725,15 @@ export default async function handler(req, res) {
         // Override with backfilled values (if available)
         year: confirmedYear || req.body.year,
         publisher: confirmedPublisher || req.body.publisher,
-        ...(isProvisionalFamilyIdentity ? { title: confirmedTitle, issue: confirmedIssue } : {}),
+        // Q131 follow-up — for the provisional-override path, year/publisher
+        // must NOT fall back to req.body (that's the client-submitted
+        // Vision guess this exact identity already rejected — the same bug
+        // shape the title/issue override two lines below already fixes).
+        // confirmedYear/confirmedPublisher are honestly null here when
+        // unconfirmed (see resolveIdentity), not silently backfilled.
+        ...(isProvisionalFamilyIdentity
+          ? { title: confirmedTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }
+          : {}),
         identitySource: identitySource || 'vision',
         identityProvisional: isProvisionalFamilyIdentity,
         yearBackfilledFromComps: out.yearBackfilledFromComps || false,
