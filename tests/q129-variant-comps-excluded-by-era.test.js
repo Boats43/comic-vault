@@ -43,7 +43,7 @@
 //
 // Invoke: node tests/q129-variant-comps-excluded-by-era.test.js
 
-import { hasNamedVariantDescriptor, detectVariantCompsExcludedByEra } from '../src/lib/compHygiene.js';
+import { hasNamedVariantDescriptor, detectVariantCompsExcludedByEra, COMP_FILTER_VERSION } from '../src/lib/compHygiene.js';
 import { computeDecision, describeWarning } from '../src/lib/decisionEngine.js';
 
 let passed = 0;
@@ -177,6 +177,28 @@ const cleanItem = {
 };
 const cleanDecision = computeDecision(cleanItem);
 assertEq(cleanDecision.warnings.includes('variant-comps-unavailable'), false, 'a clean item with no variantCompsExcludedByEra field does not get the warning');
+
+// ═══════════════════════════════════════════════════════════════════════
+// PART 5 — cache-versioning follow-up (same dispatch): fetchComps' cached
+// return object (api/enrich.js's `ac:v{COMP_FILTER_VERSION}:...` KV entry,
+// stored/replayed verbatim per Q92) now carries variantCompsExcludedByEra
+// alongside the comps themselves. A cache entry written by PRE-Q129 code
+// has no such field to replay — a real, confirmed gap (a rescan hitting a
+// still-live 1-hour-TTL cache entry from before this shipped would show
+// no warning, not because the detector found nothing, but because the
+// cached blob predates the field entirely). COMP_FILTER_VERSION bumped
+// 2 -> 3 so the cache key itself changes, guaranteeing every book's next
+// lookup is a genuine MISS that recomputes (and then correctly caches)
+// this field — the exact same mechanism already used for Q89's MERCH_RE
+// fix and Q108-B's PriceCharting lookup, reused rather than inventing a
+// fourth cache-busting mechanism.
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\nPart 5: comp-filter cache version bump closes the stale-cache-replay gap\n');
+
+assertEq(COMP_FILTER_VERSION, 3, 'COMP_FILTER_VERSION bumped to 3 — Q129 added a new field to the cached fetchComps return shape');
+const oldKey = `v2:harley quinn|62`;
+const newKey = `v${COMP_FILTER_VERSION}:harley quinn|62`;
+assertTrue(oldKey !== newKey, 'the active-comp cache key changes with the version bump — a pre-Q129 v2: entry is unreachable under the new key, forcing a fresh Filter 0c pass');
 
 console.log('\n' + '━'.repeat(59));
 if (failed === 0) {

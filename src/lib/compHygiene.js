@@ -196,13 +196,24 @@ export const ARTIST_PATTERNS = [
 ];
 
 // Q89-CACHE — Comp-filter version. Bump whenever a comp-admission filter
-// (MERCH_RE, LOT_RE, SLAB_RE, …) changes behavior: cached ACTIVE pools are
-// FILTERED results, and a fix must not replay pools built by the old
-// regex (Evil Ernie #1: pre-Q89 MERCH_RE rejected 4 real comps; the
-// starved pool sat in ac:/book-record caches). Salts the ac: KV key and
-// gates the book-record cache in api/enrich.js.
+// (MERCH_RE, LOT_RE, SLAB_RE, …) changes behavior — OR, per Q129, when
+// fetchComps' cached RETURN SHAPE gains a new field a customer-grade
+// I13 annotation depends on: cached ACTIVE pools are the full fetchComps
+// result object, stored and replayed verbatim (Q92), so a stale pool
+// written by pre-change code is missing that field entirely, not just
+// carrying a wrong value for it — a silent I13 omission for up to
+// KV_TTL.ACTIVE (1h), invisible until the cache naturally expires. Salts
+// the ac: KV key and gates the book-record cache in api/enrich.js.
 // v2 = Q89 MERCH_RE pin/mug/sticker guards (2026-07-12).
-export const COMP_FILTER_VERSION = 2;
+// v3 = Q129 (2026-07-19) — variantCompsExcludedByEra added to fetchComps'
+// return object (Harley Quinn #62 Guillem March Cover C class). The
+// admitted comps themselves are unchanged by this fix (same era-filter,
+// same tolerance) — only new diagnostic metadata was added — but a cache
+// entry written before this shipped has no such field to replay, so the
+// warning would silently never appear for any book whose comp pool was
+// cached in the hour before deploy, with no natural way to distinguish
+// that from "the detector correctly found nothing to flag."
+export const COMP_FILTER_VERSION = 3;
 
 // Q85 — Compact title key: lowercase, strip everything non-alphanumeric.
 // Equality fallback for compound/spacing/hyphen variants that token-level
