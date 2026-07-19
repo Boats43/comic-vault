@@ -689,6 +689,33 @@ const assertContractField = (item, surface, fieldKey, rendered) => {
   return rendered;
 };
 
+// Ship #24 Wave 1 Commit 3 — single confidence-tier derivation, shared by
+// every card render site so two badges on one card can no longer disagree
+// (Q122 class: "✓ VERIFIED" next to "identity unconfirmed"). Mirrors
+// deriveState's PRICED/ESTIMATED banding in responseContract.js exactly.
+// Returns null for legacy (no-contract) items OR when the contract itself
+// makes no confidence claim (ID_REQUIRED/REFUSED) — callers fall back
+// accordingly, they never invent a tier contract didn't assert.
+const getContractConfidenceTier = (item) => {
+  if (!item?.contract) return null;
+  const st = item.contract.state;
+  if (st === 'ID_REQUIRED' || st === 'REFUSED') return null;
+  if (st === 'ESTIMATED') return 'LOW';
+  if (st === 'PRICED') {
+    const c = item.contract.decision?.confidence;
+    return c === 'HIGH' ? 'HIGH' : c === 'MEDIUM' ? 'MEDIUM' : 'LOW';
+  }
+  return 'LOW'; // LOCKED / INCOMPLETE — conservative per CLAUDE.md
+};
+
+// Ship #24 Wave 1 Commit 3 — single identity-blocked check, shared by every
+// badge/pill that claims identity is confirmed or unconfirmed. Contract
+// wins once present; identityConfident survives only as the legacy path.
+const isContractIdentityBlocked = (item) =>
+  item?.contract
+    ? (item.contract.state === 'ID_REQUIRED' || item.contract.state === 'REFUSED')
+    : item.identityConfident === false;
+
 const marketValueOf = (r) => {
   if (!r) return null;
   const v = getDisplayPrice(r);
@@ -3859,7 +3886,13 @@ function CollectionDetail({
 
         const verified = check.verified;
         const hasFlags = check.flags && check.flags.length > 0;
-        const lowConfidence = item.identityConfident === false;
+        // Ship #24 Wave 1 Commit 3 (Q122 class) — contract wins once
+        // present. claudeCheck can be stale (passed through unchanged
+        // across refresh cycles) while identityConfident/contract.state
+        // move on; reading identityConfident directly here let this badge
+        // show a green "VERIFIED" next to a contract-driven "ID REQUIRED"
+        // pill elsewhere on the same card.
+        const lowConfidence = isContractIdentityBlocked(item);
 
         const badge = lowConfidence ? {
           icon: '❓',
@@ -5422,7 +5455,13 @@ function CollectionDetail({
                   borderTop: hasAnyAdvisory ? "1px solid rgba(212,175,55,0.2)" : "none",
                 }}
               >
-                {confidenceText && <div>Confidence: {confidenceText}</div>}
+                {/* Ship #24 Wave 1 Commit 3 — relabeled "Condition confidence":
+                    this is Claude's grading/condition-assessment confidence,
+                    a genuinely different concept from identity/pricing
+                    confidence (contract.decision.confidence). Same word,
+                    different claim — disambiguated so the two can't read as
+                    contradictory on the same card. */}
+                {confidenceText && <div>Condition confidence: {confidenceText}</div>}
                 {scannedText && <div>Scanned: {scannedText}</div>}
               </div>
             );
@@ -5464,7 +5503,23 @@ function CollectionDetail({
             {item.identityAlignment.authenticationScore >= 90 ? '🟢' :
              item.identityAlignment.authenticationScore >= 60 ? '🟡' : '🔴'}
             {' '}
-            {item.identityAlignment.confidence} ({item.identityAlignment.authenticationScore}%)
+            {(() => {
+              // Ship #24 Wave 1 Commit 3 (Q122 class) — the free-floating
+              // tier word is consolidated onto the contract when one
+              // exists, so this badge can't assert a confidence claim that
+              // contradicts the contract-driven badges elsewhere on the
+              // same card. authenticationScore/breakdown/conflicts are
+              // untouched real data (I13 — never suppressed), only the
+              // WORD next to the score is unified. When contract says the
+              // identity itself is unresolved (ID_REQUIRED/REFUSED), no
+              // tier word is asserted — the score still renders honestly,
+              // just labeled as subordinate to that unresolved state
+              // rather than echoing a stale independent tier.
+              if (!item.contract) return item.identityAlignment.confidence;
+              return isContractIdentityBlocked(item)
+                ? 'IDENTITY UNRESOLVED'
+                : (getContractConfidenceTier(item) || 'LOW');
+            })()} ({item.identityAlignment.authenticationScore}%)
           </div>
           {item.identityAlignment.breakdown && (
             <div style={{
@@ -5572,7 +5627,8 @@ function CollectionDetail({
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div>
             <div className="muted small">Recommended list price</div>
-            {item.identityConfident === false ? (
+            {/* Ship #24 Wave 1 Commit 3 (Q122 class) — contract wins once present. */}
+            {isContractIdentityBlocked(item) ? (
               <>
                 <div style={{ fontSize: 22, fontWeight: 800, color: "#ef4444", lineHeight: 1.15 }}>
                   Identification Required
@@ -5672,7 +5728,7 @@ function CollectionDetail({
             //   gradeExceedsMap         → 🔑 GRADE EXCEEDS MAP
             //   megaKeyFloorApplied     → 🔑 VERIFIED/ESTIMATED FLOOR
             const pillStyle = { fontSize: 11, padding: "4px 10px", borderRadius: 6, fontWeight: 700, alignSelf: "flex-end", marginBottom: 4 };
-            if (item.identityConfident === false) {
+            if (isContractIdentityBlocked(item)) {
               return (
                 <span
                   className="pill"
@@ -5722,18 +5778,22 @@ function CollectionDetail({
               );
             }
             // Default: matchConfidence tier (for non-mega-key books).
-            // Ship #24a-3 (Amendment A): the count-based recomputation is
-            // DELETED for contract items — fallback maps contract.state
-            // instead (conservative: ESTIMATED renders as Estimate).
+            // Ship #24 Wave 1 Commit 3 (Q122 class) — contract now wins
+            // OUTRIGHT once present (previously mcTier was checked first
+            // even on contract-bearing items, and the contract fallback
+            // only inspected contract.state, never decision.confidence —
+            // a HIGH-confidence PRICED contract under-reported as MEDIUM
+            // here while the ResultCard chip correctly showed HIGH for the
+            // identical contract). getContractConfidenceTier is the single
+            // shared derivation both chips now use.
             const mcTier = item.matchConfidence?.tier;
             const mcScore = item.matchConfidence?.score;
             const cc = item.comps?.count || 0;
             const sc = Array.isArray(item.soldComps) ? item.soldComps.length : 0;
             const hasPriceData = item?.pricingSource === "pricecharting";
-            const level = mcTier
-              || (item.contract
-                ? (item.contract.state === 'PRICED' ? "MEDIUM" : "LOW")
-                : (sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW"));
+            const level = item.contract
+              ? (getContractConfidenceTier(item) || "LOW")
+              : (mcTier || (sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW"));
             const bg = level === "HIGH" ? "rgba(22,163,106,0.2)" : level === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(220,38,38,0.2)";
             const fg = level === "HIGH" ? "#16a34a" : level === "MEDIUM" ? "#d4af37" : "#dc2626";
             const label = level === "HIGH"
@@ -6865,7 +6925,9 @@ function CollectionDetail({
               // User can't acknowledge "we don't know what this book is";
               // they have to fix the data first (edit fields or re-scan).
               // Takes precedence over mega-key ack and edition warning ack.
-              if (item.identityConfident === false) {
+              // Ship #24 Wave 1 Commit 3 (bonus 6th site, same root pattern
+              // as the Q122 badges above) — contract wins once present.
+              if (isContractIdentityBlocked(item)) {
                 return (
                   <div style={{
                     padding: "10px 12px",
