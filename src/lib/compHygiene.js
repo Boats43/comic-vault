@@ -184,6 +184,11 @@ export const ARTIST_PATTERNS = [
   // collides with the calendar month (solicitation dates, "March 2019", the
   // eBay item's own listing month), unlike the short, distinctive surnames
   // that get a safe bare fallback elsewhere in this list.
+  /john giang/i,  // Q130 — One World Under Doom #1 MegaCon Secret Drop artist.
+  // Collision-swept (Q130 dispatch): "giang" is not a substring of any
+  // common English word and doesn't collide with any existing pattern in
+  // this file; bare "john" alone would be unsafe (too common), same reason
+  // every other multi-word entry here leads with the full name.
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
   /skan/i, /rapoza/i, /quash/i, /momoko/i, /ross/i, /adams/i,
   /kirkham/i, /bean/i, /andolfo/i, /browne/i, /forstner/i,
@@ -193,6 +198,7 @@ export const ARTIST_PATTERNS = [
   /albuquerque/i, /hama/i, /fabok/i, /ejikure/i,
   /gleason/i, /quah/i, /parrillo/i, /maer/i, /lim/i, /chew/i, /ngu/i, /sanders/i,
   /frison/i,  // Q84 — unambiguous last name (alias policy)
+  /giang/i,  // Q130 — unambiguous last name, collision-swept (alias policy)
 ];
 
 // Q89-CACHE — Comp-filter version. Bump whenever a comp-admission filter
