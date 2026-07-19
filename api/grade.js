@@ -180,6 +180,37 @@ export const detectEditionWarning = (reason) => {
   };
 };
 
+// Q116 dispatch (2026-07-18, Incredible Hulk #377 class) — map
+// editionWarning.signals to a SPECIFIC printing identity, when one exists,
+// instead of the undifferentiated "any reprint" bucket. Single source of
+// truth used by BOTH consumers so they can't drift: api/enrich.js's
+// edition-gate comp filter (isolates to matching-printing comps) and the
+// confirmedVariant threading (feeds Filter 1c's AND-match / Q111 and the
+// sold-side printingMatch / soldVerification.js with real data). Priority:
+// third > second > facsimile — deliberately narrow to only the kinds that
+// name a SPECIFIC printing; generic signals (reprint/later-printing/
+// not-first-print/not-original/less-valuable) return null on purpose — we
+// don't know WHICH printing then, and a vague token would feed the
+// AND-match machinery exactly the under-specified signal Q111 fixed.
+//
+// @param {string[]|null|undefined} signals - editionWarning.signals
+// @returns {{text: string, label: string, re: RegExp}|null} text is the
+//   short token threaded into confirmedVariant; label is the human-
+//   readable form for UI/priceNote copy.
+export const classifySpecificPrinting = (signals) => {
+  if (!Array.isArray(signals)) return null;
+  if (signals.includes('third-print')) {
+    return { text: '3rd print', label: '3rd printing', re: /3rd\s*p(?:rint|tg)|third\s*print/i };
+  }
+  if (signals.includes('second-print')) {
+    return { text: '2nd print', label: '2nd printing', re: /2nd\s*p(?:rint|tg)|second\s*print/i };
+  }
+  if (signals.includes('facsimile')) {
+    return { text: 'facsimile', label: 'Facsimile edition', re: /facsimile/i };
+  }
+  return null;
+};
+
 // Q-newsstand (2026-07-16) — AI-CROSS-LAYER-DISCONNECT class, newsstand
 // variant. STANDARD_PROMPT requires EXPLICIT visual evidence (barcode/UPC
 // box vs. diamond "Direct Edition" logo) before populating the structured

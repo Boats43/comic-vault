@@ -505,6 +505,14 @@ export const computeMatchConfidence = (comps, opts = {}) => {
  * specific tokens (Silk #1 / Magik #1 class — single-token variants are
  * unaffected by this change).
  *
+ * Q116 dispatch (2026-07-18, Incredible Hulk #377 class) — classifyVariantTokens
+ * (not the raw varWords word-split) is now the primary signal; varWords is
+ * only consulted as a fallback when classifyVariantTokens finds zero
+ * specific tokens. Previously varWords gated the whole function up front,
+ * which silently blocked any multi-word-only specific token whose
+ * component words are all short/stoplisted (e.g. "3rd print" — "3rd" is
+ * length 3, "print" is an explicit stopword) from ever isolating at all.
+ *
  * @param {Array<{title?: string}>} pool - current comp pool
  * @param {string|null} variant - our confirmed variant string
  * @returns {{pool: Array, isolated: boolean, matchMode: string}} isolated
@@ -517,10 +525,6 @@ export const applyVariantPreferenceFilter = (pool, variant) => {
   if (!variant || pool.length === 0) {
     return { pool, isolated: false, matchMode: 'none' };
   }
-  const varWords = String(variant).toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['variant', 'cover', 'print', 'edition'].includes(w));
-  if (varWords.length === 0) {
-    return { pool, isolated: false, matchMode: 'none' };
-  }
 
   const orMatch = (words) => pool.filter(it => {
     const t = String(it.title || '').toLowerCase();
@@ -528,8 +532,27 @@ export const applyVariantPreferenceFilter = (pool, variant) => {
   });
 
   const { specific: specificWords } = classifyVariantTokens(variant);
+
+  // Q116 dispatch (2026-07-18, Incredible Hulk #377 class) — classifyVariantTokens
+  // is now consulted BEFORE the raw varWords gate, not after it. Previously
+  // varWords (a naive length>3 + stopword-excluded word split, stopwords
+  // include the literal word "print") gated the ENTIRE function — any
+  // multi-word-only specific token whose individual words are all short or
+  // stoplisted ("3rd print": "3rd" is length 3, "print" is an explicit
+  // stopword) produced an empty varWords and the function early-returned
+  // matchMode='none' before classifyVariantTokens was ever consulted,
+  // regardless of what it would have found. varWords is now only a
+  // fallback for variant text that classifyVariantTokens can't classify at
+  // all (unrecognized custom text) — unchanged from its original purpose,
+  // just no longer gating a codepath it isn't involved in.
+  const varWords = String(variant).toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['variant', 'cover', 'print', 'edition'].includes(w));
+
+  if (specificWords.length === 0 && varWords.length === 0) {
+    return { pool, isolated: false, matchMode: 'none' };
+  }
+
   let variantMatches;
-  let matchMode = 'any';
+  let matchMode;
   if (specificWords.length > 1) {
     const specificMatches = pool.filter(it => {
       const t = String(it.title || '').toLowerCase();
@@ -543,11 +566,22 @@ export const applyVariantPreferenceFilter = (pool, variant) => {
       // narrow AND-match produced nothing, so fall back to the broader
       // single-token match rather than starving the pool — flagged, not silent.
       console.log(`[comps] variant AND-match on [${specificWords.join(',')}] produced 0 comps — falling back to broader single-token match`);
-      variantMatches = orMatch(varWords);
+      variantMatches = orMatch(specificWords.length > 0 ? specificWords : varWords);
       matchMode = 'any-fallback';
     }
+  } else if (specificWords.length === 1) {
+    // Single classified specific token — isolate directly on it rather
+    // than the raw varWords split (which may not contain it at all, e.g.
+    // "3rd print"). Reduces to identical pre-Q116 behavior whenever the
+    // single specific token IS also a varWords survivor (Silk #1 class).
+    variantMatches = orMatch(specificWords);
+    matchMode = 'any';
   } else {
+    // classifyVariantTokens found nothing at all (generic-only, like
+    // "virgin"/"foil", or genuinely unrecognized text) — fall back to the
+    // raw varWords OR-match, exactly the pre-Q116 behavior for this case.
     variantMatches = orMatch(varWords);
+    matchMode = 'any';
   }
 
   // Premium-variant isolation (2026-07-18, Magik #1 / Silk #1 class):

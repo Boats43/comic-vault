@@ -112,7 +112,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // agree on specific tokens (convention, artist, exclusive, limitation).
 import { extractConfirmedVariant, filterItemsByIssue } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
-import { detectEditionWarning } from "./grade.js";
+import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
 // Session 4B — Import book signal detection from shared classifier
 import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map caches)
@@ -3443,6 +3443,31 @@ export default async function handler(req, res) {
     }
     } // end Q106 FIX-1 else (non-CGC-identity variant resolution)
 
+    // Q116 dispatch (2026-07-18, Incredible Hulk #377 class) — thread
+    // editionWarning's classified SPECIFIC printing kind into
+    // confirmedVariant so the already-correct isolation machinery (Filter
+    // 1c AND-match / Q111, sold-side printingMatch / soldVerification.js)
+    // actually has real data to isolate against. Previously
+    // editionWarning.detected only drove the enrich.js-local reprint-comp
+    // filter (Part 1, above) and the UI list-gate — confirmedVariant
+    // itself never learned the specific printing at all, so nothing
+    // downstream of it (Filter 1c, printingMatch, the active-comp query
+    // string itself) could isolate by printing even when Vision correctly
+    // spotted "3rd printing" in its own reasoning. Generic-only signals
+    // (reprint / facsimile-without-a-number is still specific enough,
+    // handled below / later-printing / not-first-print / not-original /
+    // less-valuable) are deliberately NOT threaded — we don't know WHICH
+    // specific printing then, and injecting a vague "reprint" token into
+    // confirmedVariant would feed Filter 1c's AND-match exactly the kind
+    // of under-specified signal Q111 fixed, not a real one.
+    if (!cgcIdentityConfirmed && editionWarning?.detected) {
+      const specificPrintingForVariant = classifySpecificPrinting(editionWarning.signals);
+      if (specificPrintingForVariant && !String(confirmedVariant || '').toLowerCase().includes(specificPrintingForVariant.text)) {
+        confirmedVariant = confirmedVariant ? `${confirmedVariant} ${specificPrintingForVariant.text}` : specificPrintingForVariant.text;
+        console.log(`[edition-variant] threaded "${specificPrintingForVariant.text}" into confirmedVariant (from Vision's own reasoning) — now "${confirmedVariant}"`);
+      }
+    }
+
     // Step 2b: year-dependent lookups using confirmedYear.
     mark('phase2_start');
 
@@ -3879,16 +3904,40 @@ export default async function handler(req, res) {
     // Session 4B — SKIP for books. Edition warning is comic-specific (facsimile detection).
     if (out.assetType !== 'book' && editionWarning?.detected) {
       console.log(`[edition-gate] reprint/later-print detected — filtering comps`);
+
+      // Q116 dispatch (2026-07-18, Incredible Hulk #377 class) — when
+      // Vision's reason text named a SPECIFIC printing number (or
+      // facsimile), isolate comps to that exact printing rather than an
+      // undifferentiated "any reprint" bucket that mixes 2nd print, 3rd
+      // print, and facsimile comps together — the same "generic signal
+      // used where a specific one already exists" class as tonight's
+      // other fixes (Q111 variant-token collapse). editionWarning.signals
+      // already classifies this (EDITION_WARNING_PATTERNS, api/grade.js);
+      // it was just never consumed for isolation, only for the pass/fail
+      // gate below. Falls back to the original generic match when only a
+      // generic signal fired (reprint/later-printing/not-first-print/
+      // not-original/less-valuable, no specific number) — genuinely
+      // unknown which printing then, generic isolation remains the best
+      // available signal, unchanged from before this fix.
+      const specificPrinting = classifySpecificPrinting(editionWarning.signals);
+      if (specificPrinting) {
+        console.log(`[edition-gate] specific printing kind detected (${specificPrinting.text}) — isolating to matching comps only`);
+      }
+
       const reprintComps = (rawComps?.prices || []).filter((c) =>
-        /reprint|facsimile|2nd\s*print|3rd\s*print|loot.?crate|millennium/i.test(
-          String(c.title || '')
-        )
+        specificPrinting
+          ? specificPrinting.re.test(String(c.title || ''))
+          : /reprint|facsimile|2nd\s*print|3rd\s*print|loot.?crate|millennium/i.test(
+              String(c.title || '')
+            )
       );
       if (reprintComps.length < 3) {
         out.price = null;
         out.priceBands = null;
         out.pricingSource = 'refused-reprint-thin-pool';
-        out.priceNote = 'Reprint edition detected — insufficient reprint-specific comps';
+        out.priceNote = specificPrinting
+          ? `${specificPrinting.label} detected — insufficient printing-specific comps`
+          : 'Reprint edition detected — insufficient reprint-specific comps';
         out.refusedToPrice = true;
         out.confidenceLevel = 'LOW';
         console.log(`[edition-gate] only ${reprintComps.length} reprint comps — refused to price`);

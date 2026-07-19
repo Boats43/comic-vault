@@ -134,6 +134,31 @@ const LIMITATION_PATTERNS = [
   { re: /\b(\d+)\s+copies?\b/i,                    token: 'limited' },   // "150 copies"
 ];
 
+// Q116 dispatch (2026-07-18, Incredible Hulk #377 class) — printing/edition
+// markers (1st/2nd/3rd/.../Nth printing, facsimile). A printing-edition
+// premium is exactly as load-bearing as an SDCC-exclusive or ratio-incentive
+// claim — a 3rd printing and a 1st printing are different products with
+// different market values, same as two different variant covers — so this
+// is a SPECIFIC (distinguishing) category, not generic, matching the
+// dispatch's explicit ruling. Mirrors REPRINT_RE's (compHygiene.js) numeric
+// coverage (1st-5th + spelled-out forms) plus facsimile, which REPRINT_RE
+// already treats as a hard-reject signal but no CATEGORY_BLOCKS entry
+// previously recognized as a token at all. Descending order (5th->1st),
+// matching RATIO_PATTERNS' established convention in this file. A 6th+
+// printing is extremely rare in practice; the trailing generic pattern
+// covers that tail without needing per-number dynamic tokens (this file's
+// token model is static strings, same as LIMITATION_PATTERNS above, which
+// also collapses a captured number into one canonical token).
+const PRINTING_PATTERNS = [
+  { re: /\b5th\s*p(?:rint|tg|rinting)\b|\bfifth\s*print(?:ing)?\b/i,  token: '5th print' },
+  { re: /\b4th\s*p(?:rint|tg|rinting)\b|\bfourth\s*print(?:ing)?\b/i, token: '4th print' },
+  { re: /\b3rd\s*p(?:rint|tg|rinting)\b|\bthird\s*print(?:ing)?\b/i,  token: '3rd print' },
+  { re: /\b2nd\s*p(?:rint|tg|rinting)\b|\bsecond\s*print(?:ing)?\b/i, token: '2nd print' },
+  { re: /\b1st\s*p(?:rint|tg|rinting)\b|\bfirst\s*print(?:ing)?\b/i,  token: '1st print' },
+  { re: /\bfacsimile\b/i,                                            token: 'facsimile' },
+  { re: /\b[6-9]th\s*p(?:rint|tg|rinting)\b|\b\d{2,}(?:st|nd|rd|th)\s*p(?:rint|tg|rinting)\b/i, token: 'nth print' },
+];
+
 const CATEGORY_BLOCKS = [
   { kind: 'convention',     patterns: CONVENTION_PATTERNS },
   { kind: 'ratio',          patterns: RATIO_PATTERNS      },
@@ -141,17 +166,20 @@ const CATEGORY_BLOCKS = [
   { kind: 'exclusive',      patterns: EXCLUSIVE_PATTERNS  },
   { kind: 'limitation',     patterns: LIMITATION_PATTERNS },
   { kind: 'authentication', patterns: AUTH_PATTERNS       },
+  { kind: 'printing',       patterns: PRINTING_PATTERNS   },
   { kind: 'finish',         patterns: FINISH_PATTERNS     },
 ];
 
 // Q111 dispatch (2026-07-18, Venomverse #1 class) — 'finish' is the only
 // category that's inherently generic (foil/virgin/sketch/holographic/etc
-// describe a cover TREATMENT, not a distinguishing PRODUCT). The other six
-// (convention/ratio/retailer/exclusive/limitation/authentication) each
-// name a specific, distinguishing fact about the printing. Single source
-// of truth for "specific vs generic" — used by extractConsensus (below,
-// per-category variant consensus) AND api/comps.js Filter 1c (AND-match on
-// specific tokens) so the two call sites can never drift on the taxonomy.
+// describe a cover TREATMENT, not a distinguishing PRODUCT). The other
+// seven (convention/ratio/retailer/exclusive/limitation/authentication/
+// printing — 'printing' added Q116 dispatch, Incredible Hulk #377 class)
+// each name a specific, distinguishing fact about the printing. Single
+// source of truth for "specific vs generic" — used by extractConsensus
+// (below, per-category variant consensus) AND api/comps.js Filter 1c
+// (AND-match on specific tokens) so the two call sites can never drift on
+// the taxonomy.
 const GENERIC_VARIANT_KINDS = new Set(['finish']);
 
 let _tokenToCategory = null;
@@ -166,6 +194,15 @@ const tokenToVariantCategory = () => {
   return _tokenToCategory;
 };
 
+const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+let _sortedTokens = null;
+const sortedVariantTokens = () => {
+  if (_sortedTokens) return _sortedTokens;
+  _sortedTokens = Object.keys(tokenToVariantCategory()).sort((a, b) => b.length - a.length);
+  return _sortedTokens;
+};
+
 /**
  * Q111 — classify a variant token string (or space-joined multi-token
  * string) into { specific: string[], generic: string[] }, using the same
@@ -176,19 +213,40 @@ const tokenToVariantCategory = () => {
  * not as a match requirement, since there's no registry to confirm they
  * mean what they look like they mean.
  *
+ * Q116 dispatch (2026-07-18, Incredible Hulk #377 class) — rewritten from a
+ * naive whitespace word-split to a longest-token-first substring match
+ * against the full known-token registry (mirrors extractVariantTokens' own
+ * convention). The word-split version silently dropped any token whose
+ * words don't ALSO exist as standalone tokens elsewhere — it worked "by
+ * luck" for "gold foil" (bare "foil" is separately a valid token) and
+ * "convention exclusive" (bare "exclusive" is separately valid), but
+ * totally missed inherently-multi-word-only tokens: "signature series"
+ * classified as { specific: [], generic: [] } even pre-Q116 (confirmed via
+ * direct testing, not a new regression), and the new printing tokens ("3rd
+ * print", "2nd print") have no standalone-word fallback at all ("3rd" and
+ * "print" are not valid tokens on their own). Longest-first + a
+ * skip-if-already-covered-by-a-longer-match guard (mirrors
+ * extractVariantTokens' bare-"foil"-vs-"gold foil" suppression) prevents
+ * double-counting a multi-word token AND its own substring separately.
+ *
  * @param {string} variant - our confirmed variant string, e.g. "sdcc 1:1000 foil"
  * @returns {{specific: string[], generic: string[]}}
  */
 export const classifyVariantTokens = (variant) => {
   const lookup = tokenToVariantCategory();
-  const words = String(variant || '').toLowerCase().split(/\s+/).filter(Boolean);
+  const v = String(variant || '').toLowerCase();
   const specific = [];
   const generic = [];
-  for (const w of words) {
-    const kind = lookup[w];
-    if (!kind) continue;
-    if (GENERIC_VARIANT_KINDS.has(kind)) generic.push(w);
-    else specific.push(w);
+  if (!v) return { specific, generic };
+  const matched = [];
+  for (const token of sortedVariantTokens()) {
+    if (matched.some((m) => m.includes(token))) continue;
+    const re = new RegExp(`\\b${escapeRegExp(token)}\\b`, 'i');
+    if (!re.test(v)) continue;
+    matched.push(token);
+    const kind = lookup[token];
+    if (GENERIC_VARIANT_KINDS.has(kind)) generic.push(token);
+    else specific.push(token);
   }
   return { specific, generic };
 };

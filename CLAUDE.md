@@ -1001,6 +1001,88 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
      unrelated-issue noise; confirms empty and single-item post-filter
      pools fall through gracefully (no crash, no backfill) rather than
      defaulting to something else.
+- **Incredible Hulk #377 class, printing/edition not tracked** (Q116
+  dispatch, 2026-07-18) — printing (1st/2nd/3rd/.../Nth, facsimile) was not
+  a variant category anywhere in the system. Confirmed real: Incredible
+  Hulk #377 (McKeown/McLeod 3rd printing, $100 min raw per Goldin.co) priced
+  at $10.52 by blending 1st/2nd/3rd-print comps together. Investigation via
+  real Vercel production logs found `editionWarning.detected` never fired
+  for that exact scan — Vision's cover-photo-only analysis never captured a
+  printing signal at all, a genuine upstream limitation this dispatch
+  cannot fix (see Part 3 / Option A below). Separately found a real,
+  actionable bug even when the signal DOES fire: `api/enrich.js`'s existing
+  edition-gate (Ship #1.3) grouped ALL reprint-labeled comps into one
+  undifferentiated "any reprint" bucket, discarding
+  `editionWarning.signals`' own specific classification
+  (`'second-print'`/`'third-print'`/`'facsimile'`).
+  **Part 1 fix:** new `classifySpecificPrinting(signals)` (`api/grade.js`)
+  — priority third > second > facsimile, returns `null` on generic-only
+  signals (`'reprint'`/`'later-printing'`/`'not-first-print'`/
+  `'not-original'`/`'less-valuable'` — deliberately not threaded, since a
+  vague "some kind of reprint" signal is exactly the under-specified input
+  Q111 already fixed AND-match against, not real data). `api/enrich.js`'s
+  edition-gate now isolates comps to the specific printing kind when one is
+  classified, falling back to the old undifferentiated regex only when
+  Vision's signal was itself generic.
+  **Part 2 fix:** the classified kind is threaded into `confirmedVariant`
+  (`api/enrich.js`, guarded by `!cgcIdentityConfirmed && editionWarning?.detected`)
+  so it feeds the SAME isolation machinery already built for other variant
+  categories — Q111's AND-match (`applyVariantPreferenceFilter`, Filter 1c)
+  on the active-comp side, and the pre-existing `printingMatch`
+  (`soldVerification.js`) on the sold-comp side. New `PRINTING_PATTERNS`
+  category added to `CATEGORY_BLOCKS` (`imageSearchIdentity.js`), classified
+  SPECIFIC (not generic — a 3rd printing and a 1st printing are different
+  products with different market values, same reasoning as an
+  SDCC-exclusive or ratio-incentive claim).
+  **Compounding bug found and fixed while writing the regression (NOT part
+  of the original ask, surfaced by testing, reported before fixing per
+  standing protocol):** threading `confirmedVariant = "3rd print"` did
+  NOT actually activate Q111's AND-match on the active-comp side.
+  Two stacked root causes in `api/comps.js`'s `applyVariantPreferenceFilter`
+  (Filter 1c), both pre-existing and general, not introduced by Part 1/2:
+  (a) a `varWords` stopword/length filter gated the ENTIRE function before
+  `classifyVariantTokens` was even consulted — `'3rd'` is length 3 (filter
+  requires `>3`), `'print'` is an explicit stopword, so `varWords` came out
+  empty and the function early-returned `matchMode:'none'` for every
+  printing token, unconditionally; (b) `classifyVariantTokens` itself
+  word-split the input and looked up each word individually against the
+  token registry — silently breaks any token that's inherently multi-word
+  with no useful standalone-word remainder. Confirmed this second issue
+  predates Q116 entirely: `classifyVariantTokens('signature series')` was
+  already `{specific:[], generic:[]}` (`'gold foil'`/`'convention
+  exclusive'` happened to survive "by luck," since their second word is
+  separately a valid standalone token — `'3rd print'` has no such luck).
+  **Fix (greenlit separately, same dispatch):** `classifyVariantTokens`
+  rewritten from whitespace word-split to a longest-token-first substring
+  match against the full known-token registry (mirrors
+  `extractVariantTokens`' own convention, with the same
+  skip-if-already-covered-by-a-longer-match guard used there for bare
+  `'foil'` vs `'gold foil'`). `applyVariantPreferenceFilter` no longer lets
+  `varWords` gate the function up front — `classifyVariantTokens` is
+  consulted first; `varWords` is now only a same-purpose fallback for
+  variant text `classifyVariantTokens` can't classify at all. Verified
+  zero regression on the full Q111 suite (27/27, including the Venomverse
+  AND-match, Silk #1, Magik #1, and AND-match-fallback fixtures,
+  byte-identical behavior) plus the `signature series` fix landing as a
+  confirmed side effect, not the reason it shipped.
+  **Part 3 (explicit product decision, not a code fix, recorded for future
+  reference):** cover-only photography cannot see printing-edition indicia
+  for most books — physics, not a bug. Decided: Option A — a manual
+  "Printing" dropdown field (1st/2nd/3rd/Nth/Unknown), same UX pattern as
+  the existing Mark-as-Raw/Mark-as-Graded toggle, feeding directly into
+  `confirmedVariant` to trigger the same isolation machinery built here.
+  Not yet implemented — queued as a future dispatch, not bundled into this
+  one.
+  Regression: `tests/q116-printing-edition.test.js` (39 assertions) —
+  `classifySpecificPrinting` priority/null behavior; `PRINTING_PATTERNS`
+  extraction and SPECIFIC classification; an end-to-end reconstruction
+  (Vision text genuinely triggers `'third-print'`, real Incredible Hulk
+  #377 comp-pool title data reused from the actual production pool) proving
+  both the active-side isolation (14 comps → 2 genuine 3rd-print survivors)
+  and the sold-side `printingMatch` isolation (verified average $105 vs.
+  the $12-20 blended 1st/2nd-print comps) now work; a thin-pool honest
+  refusal case (<3 matching comps); and a control case confirming a normal
+  no-printing-signal book is completely unaffected end to end.
 
 ## Open Blockers
 
