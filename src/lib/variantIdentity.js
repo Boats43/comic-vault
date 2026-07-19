@@ -103,6 +103,55 @@ const extractArtist = (title) => {
 // Fallback:
 //   - No consensus (< threshold) → return null → keep Vision variant (null)
 //   - Any gate fails → return null → keep Vision variant (null)
+
+/**
+ * Q115 dispatch (2026-07-18, Batman #608 pool-contamination class) — filter
+ * a visual-pool item array to only items whose OWN extracted issue number
+ * matches our confirmed issue. Callers MUST apply this before passing items
+ * into extractConfirmedVariant (root-mechanism fix, not a downstream flag):
+ * an artist-name match can structurally never come from a different issue,
+ * so this stops the bad input from ever reaching the artist/exclusive/
+ * limitation/year consensus computation, rather than trying to detect and
+ * flag a corrupted result after the fact.
+ *
+ * Confirmed production case: Batman #608 (2002, Jim Lee, Hush) — a 20-item
+ * eBay reverse-image-search pool where 0 items were actually issue #608 (a
+ * mix of Superman/Batman #657, Absolute Batman #19, Detective Comics #1000,
+ * Batman #1 reprints, even unrelated Marvel listings — eBay's own visual-
+ * similarity confusion around cover artist Dell'Otto's painted style across
+ * his many DIFFERENT DC variant covers, none of them this book). 4/20
+ * mentioned "Dell'Otto" — a MINORITY (20%), which the existing artist-
+ * consensus ratio gate correctly treats as a genuine distinguishing variant
+ * signal when the pool IS the same book (its original, intended purpose —
+ * see the Q109-FIX-A comment above). With no issue-level check, it can't
+ * tell that shape apart from "these are just different books that happen
+ * to share a prolific painter." Backfilled confirmedVariant="exclusive
+ * Dell'Otto limited" and, via the artist-year sub-mechanism below,
+ * overrode confirmedYear 2002 → 1940 — both wrong, on a book Vision had
+ * already correctly identified.
+ *
+ * A facsimile/artist-variant genuinely mixed into a pool for the SAME
+ * issue (the scenario this feature was originally built for — e.g. a
+ * Skottie Young facsimile among Captain America #25 originals) is
+ * unaffected: those listings still carry "#25," so they survive this
+ * filter untouched.
+ *
+ * Items with no extractable issue number of their own (`.issue == null`)
+ * are excluded, not kept — ambiguous is not the same as matching, and an
+ * unlabeled item could just as easily be a different issue.
+ *
+ * @param {Array<{issue?: string|number|null}>} items - parsed visual-pool
+ *   rows (extractIdentityFromImageSearch shape — `.issue` already computed)
+ * @param {string|number|null} confirmedIssue - our confirmed issue number
+ * @returns {Array} filtered items (same shape, subset)
+ */
+export const filterItemsByIssue = (items, confirmedIssue) => {
+  if (!Array.isArray(items)) return items;
+  return items.filter(
+    (item) => item?.issue != null && String(item.issue) === String(confirmedIssue)
+  );
+};
+
 export const extractConfirmedVariant = (
   visualItems,
   visionVariant,

@@ -110,7 +110,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
-import { extractConfirmedVariant } from "../src/lib/variantIdentity.js";
+import { extractConfirmedVariant, filterItemsByIssue } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning } from "./grade.js";
 // Session 4B — Import book signal detection from shared classifier
@@ -3366,12 +3366,47 @@ export default async function handler(req, res) {
     // family candidate fires. Prevents wrong-family variant contamination.
     // Catwoman/Gotham War: previously variant pool was 20 mixed items, electing
     // Artgerm from Catwoman Uncovered family. Now uses Gotham War family subset only.
-    const variantSourceItems = (familyCandidate &&
+    const variantSourceItemsPreIssueFilter = (familyCandidate &&
       ['top-rank-protection', 'weighted-consensus'].includes(familyCandidate.decision) &&
       familyCandidate.topFamily?.indices &&
       Array.isArray(visualResult?.items))
       ? familyCandidate.topFamily.indices.map(i => visualResult.items[i]).filter(Boolean)
       : visualResult?.items;
+
+    // Q115 dispatch (2026-07-18, Batman #608 pool-contamination class) —
+    // an artist-name match can structurally never come from a different
+    // issue, so filter to items whose OWN extracted issue number matches
+    // our confirmed issue BEFORE extractConfirmedVariant computes artist/
+    // exclusive/limitation/year consensus from them. Was: the Ship 26.3B
+    // family-narrowing above only fires for 'top-rank-protection'/
+    // 'weighted-consensus' — when title-family clustering falls back to
+    // Vision (decision='fallback-vision', e.g. a genuinely incoherent
+    // pool), the FULL unfiltered visualResult.items reached this function
+    // untouched. Confirmed production case: Batman #608 (2002, Jim Lee,
+    // Hush) — 0/20 pool items were actually issue #608 (a mix of Superman/
+    // Batman #657, Absolute Batman #19, Detective Comics #1000, Batman #1
+    // reprints, even unrelated Marvel Venomverse listings, sharing only
+    // eBay's own visual-similarity confusion around Dell'Otto's painted-
+    // cover style across his many DIFFERENT DC variant covers). 4/20
+    // mentioned "Dell'Otto" — correctly scored as a MINORITY (20%, under
+    // the 70% distinguishing-ratio threshold) by the existing artist gate,
+    // which is exactly the signal shape this feature treats as a genuine
+    // distinguishing variant subset — except these aren't a variant
+    // subset of OUR book, they're different books entirely. The gate
+    // has no way to tell those apart without knowing whether the items
+    // are even the same issue — this filter gives it that fact directly,
+    // fixing the root mechanism rather than flagging the bad output after
+    // the fact. Each item's `.issue` field is already computed by
+    // extractIdentityFromImageSearch/extractIssueFromTitle — same value
+    // the `[visual] extracted issues: [...]` log line already draws from,
+    // no new extraction logic. A facsimile/artist-variant mixed into a
+    // pool for the SAME issue (the scenario this feature was originally
+    // built for — e.g. a Skottie Young facsimile among Captain America
+    // #25 originals) is unaffected: those listings still say "#25," so
+    // they survive this filter untouched. filterItemsByIssue lives in
+    // src/lib/variantIdentity.js (single source of truth, directly
+    // regression-testable).
+    const variantSourceItems = filterItemsByIssue(variantSourceItemsPreIssueFilter, confirmedIssue);
 
     const variantCheck = extractConfirmedVariant(
       variantSourceItems,

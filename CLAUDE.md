@@ -833,9 +833,11 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   over-narrowing), and a synthetic AND-match-produces-zero case (confirms
   the fallback fires and is visibly flagged, never silently starves the
   pool to zero).
-- **Batman #608 class, four stacked but independent bugs** (Q112/Q113/Q114
-  dispatch, 2026-07-18) — one card, four internal contradictions, confirmed
-  as four genuinely separate root causes (not one fix covering all four):
+- **Batman #608 class, five stacked but independent bugs** (Q112/Q113/Q114/
+  Q115 dispatch, 2026-07-18) — one card, four internal contradictions plus
+  a fifth, deeper root cause discovered via direct production-log
+  reconstruction AFTER Q112 shipped — confirmed as five genuinely separate
+  root causes (not one fix covering all of them):
   1. **Year resolution (SHIPPED)** — `cvYear` was derived from
      `comicVine.startYear` (the matched ComicVine *volume*'s launch year —
      1940 for Batman vol. 1) instead of the matched *issue*'s own
@@ -923,6 +925,82 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
      re-attempt with the same specific/generic heuristic without first
      designing the phrase-context signal — this was a real, honest attempt
      that surfaced a genuine gap during testing, not skipped or guessed at.
+  5. **Visual-pool contamination corrupting variant/year backfill (SHIPPED
+     — the actual primary root cause of the wrong year in this exact card,
+     discovered via direct Vercel production-log reconstruction AFTER #1
+     shipped)** — pulled the real 20-item eBay reverse-image-search pool
+     for this exact scan (searched runtime logs for the distinctive title
+     string, confirmed via `[boot]` build ID it was the authentic pre-fix
+     request). **0 of 20 items were genuinely Batman #608** — a mix of
+     Superman/Batman #657, Absolute Batman #19, Detective Comics #1000,
+     Batman #1 reprints/facsimiles, Batman and Robin #25, and even
+     unrelated Marvel Venomverse listings, sharing only eBay's own visual-
+     similarity confusion around cover artist Dell'Otto's distinctive
+     painted style across his many DIFFERENT DC variant covers (confirmed
+     genuine eBay-search-quality noise, not a category/leaf-filter gap on
+     our side — all correctly categorized `259104`). Title-family
+     clustering correctly detected the incoherence (`decision=fallback-
+     vision`, `[visual] consensus: none`) and correctly avoided the pool
+     for TITLE purposes. **The bug: `extractConfirmedVariant`
+     (`src/lib/variantIdentity.js`) is a SEPARATE consumer of the exact
+     same raw pool that never learns about that determination** — it
+     re-processes the full unfiltered 20 items regardless. 4/20 mentioned
+     "Dell'Otto" — a MINORITY (20%), correctly scored as *not* the
+     standard cover by the existing artist-consensus ratio gate (Q109-FIX-
+     A, `< 70%` = "distinguishing," the exact signal shape this feature
+     treats as a genuine variant subset when the pool IS the same book,
+     its original documented purpose — e.g. a Skottie Young facsimile
+     mixed into a Captain America #25 pool). With no issue-level check,
+     the gate can't distinguish "genuine minority-variant subset of THIS
+     book" from "these are just different books that happen to share a
+     prolific painter." Backfilled `confirmedVariant="exclusive Dell'Otto
+     limited"` and, via the feature's own Q99-B artist-year sub-mechanism,
+     overrode `confirmedYear` 2002 → 1940 — **entirely independent of and
+     downstream from `resolveYear`**, which had already correctly resolved
+     2002 by this point (confirmed directly in the log:
+     `[variant-identity] gates passed: year=2002` immediately followed by
+     `[variant-year] overriding confirmedYear 2002 → 1940`). This
+     corrupted variant then drove the active-comp search query itself
+     (`Batman #608 Dell'Otto 1940 DC Comics`) and rejected all 30 genuine
+     PriceCharting sold comps in Filter 7 (`classifyArtistMatch` — real
+     Batman #608 listings never mention "Dell'Otto," the actual artist is
+     Jim Lee) before Q113's fallback rescued 20 of them at the wrong
+     price. **Confirms Fix #1 (item 1 above) is real and independently
+     worth keeping, but was NOT sufficient alone for this exact production
+     symptom** — the two fixes are complementary defense-in-depth on two
+     structurally separate pathways (ComicVine volume-year leak vs.
+     visual-pool variant/year backfill), not redundant.
+     **Fix, reusing the existing per-item `.issue` field rather than new
+     extraction logic:** new `filterItemsByIssue(items, confirmedIssue)`
+     (`src/lib/variantIdentity.js`) — filters the visual pool to only
+     items whose OWN extracted issue number (already computed by
+     `extractIdentityFromImageSearch`/`extractIssueFromTitle`, the exact
+     value the `[visual] extracted issues: [...]` log line already draws
+     from) matches our confirmed issue, applied in `api/enrich.js`
+     immediately before `extractConfirmedVariant` is called — root-
+     mechanism fix (bad input never reaches the computation), not a
+     downstream flag on bad output. An artist-name match can structurally
+     never come from a different issue once this filter is applied. The
+     pre-existing Ship 26.3B family-narrowing (only fires for
+     `top-rank-protection`/`weighted-consensus` decisions) is unioned with
+     this filter, not replaced by it — Ship 26.3B still narrows to the
+     selected title family first when one was found; this filter then
+     additionally requires genuine issue-number agreement regardless of
+     which branch produced the candidate pool. Confirmed the facsimile/
+     genuine-variant case this feature was originally built for (Captain
+     America #25 / Skottie Young) is unaffected — those listings still
+     carry "#25," so they survive the filter untouched, including when
+     mixed with unrelated-issue noise in the same pool.
+     Regression: `tests/q115-variant-issue-filter.test.js` — reconstructs
+     the real 20-item Batman #608 pool with `.issue` values matching the
+     production log exactly (15 non-null / 5 null, zero "608"), confirms
+     the bug reproduces on the unfiltered pool (fixture fidelity check)
+     and resolves after filtering (`confirmedVariant` stays null,
+     `confirmedYear` stays 2002); confirms Captain America #25 / Skottie
+     Young still backfills correctly standalone AND when mixed with
+     unrelated-issue noise; confirms empty and single-item post-filter
+     pools fall through gracefully (no crash, no backfill) rather than
+     defaulting to something else.
 
 ## Open Blockers
 
