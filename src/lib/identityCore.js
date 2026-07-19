@@ -571,6 +571,40 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     if (ebay?.issue) {
       console.log(`[q12c-fix] family override preserved eBay issue="${ebay.issue}" (not Vision "${vision.issue}")`);
     }
+  } else if (family?.decision === 'refused-identity-conflict' && family?.topFamily?.rawTitle && family.topFamily.count >= 2) {
+    // Q131 (2026-07-19, Eternus #2 / He-Man class) — title-family clustering
+    // already proved Vision's title has ZERO token overlap with the visual
+    // pool AND explicitly refused rather than silently picking a side. The
+    // prior behavior fell through to the generic "insufficient data" branch
+    // below and blindly trusted Vision anyway — discarding a real,
+    // corroborated pool signal (here: 2/2 unanimous "Eternus #2 ... Virgin
+    // Variant Cover" listings, real $150 comps) in favor of a guess the
+    // pipeline's own logic had just disproven. Vision is not infallible
+    // (confirmed on this exact photo: two rescans produced two different
+    // wrong titles) — when the pool is small but UNANIMOUS and Vision has
+    // zero overlap with it, the pool is the stronger signal.
+    //
+    // Provisional, not a silent confidence upgrade: identitySource carries
+    // 'refused-provisional' so every consumer (convergence scoring, card
+    // display, decision engine) can tell this was surfaced under conflict,
+    // not resolved normally. Requires topFamily.count >= 2 — a single
+    // listing is not corroboration, and stays out of this branch (falls
+    // through to the Vision fallback below, same as before).
+    const rawFamilyTitle = family.topFamily.rawTitle;
+    const sanitizedFamilyTitle = sanitizeSeriesTitle(rawFamilyTitle);
+    const familyIssueMatch = rawFamilyTitle.match(/#\s*(\d+)/);
+
+    confirmedTitle = sanitizedFamilyTitle;
+    confirmedIssue = familyIssueMatch ? familyIssueMatch[1] : (ebay?.issue || vision.issue);
+    confirmedYear = ebay?.year || vision.year;
+    confirmedPublisher = ebay?.publisher || vision.publisher;
+    identitySource = 'title-family-refused-provisional';
+    console.log(
+      `[phase1] REFUSED-CONFLICT PROVISIONAL: pool's own top family "${rawFamilyTitle}" ` +
+      `(weight ${family.topFamily.weightSum?.toFixed?.(1)}, ${family.topFamily.count} members) ` +
+      `conflicts with Vision "${vision.title}" (0 token overlap) — surfacing pool signal as ` +
+      `provisional "${confirmedTitle}" #${confirmedIssue}, flagged for verification`
+    );
   } else if (ebay?.title && ebayResultCount >= 10) {
     const overlap = calculateTitleOverlap(ebay.title, vision.title);
     console.log(`[phase1] overlap: ${(overlap * 100).toFixed(0)}% (eBay="${ebay.title}" vs Vision="${vision.title}")`);
@@ -730,6 +764,67 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     matchConfidenceDemote,
     visionZeroSupport,
     visionPublisherZeroSupport,
+  };
+};
+
+/**
+ * Q131 (2026-07-19, Eternus #2 / He-Man class) — Ship 11's identity-refused
+ * fallback price (api/enrich.js) used to blend EVERY raw visual-pool item
+ * together regardless of whether the pool coherently split into families —
+ * an "honest refusal" price built from Eternus $150 comps averaged in with
+ * Lobo #1, Conan, and random art-print listings isn't honest, it's just a
+ * differently-fabricated number with a lower-confidence label. When
+ * familyCandidate.topFamily exists with >=2 members (genuine corroboration,
+ * matches the same threshold Fix 1/resolveIdentity uses), isolate the
+ * fallback pool to just that family's own comps instead of the full mixed
+ * pool. A coherent single-product pool doesn't need the raw pool's >=5
+ * statistical floor — 2 genuine comps for one product beats 17 comps for
+ * six unrelated products.
+ *
+ * Pure function, extracted for direct regression-testability (same
+ * rationale as Q111's applyVariantPreferenceFilter extraction).
+ *
+ * @param {Array<Object>} visualItems - visualResult.items (the same array
+ *   passed to selectTitleFamilyCandidate)
+ * @param {Object|null} familyCandidate - selectTitleFamilyCandidate() result
+ * @returns {{fallbackPrice: number|null, fallbackLow: number|null, fallbackHigh: number|null, fallbackPoolSize: number, isolatedToFamily: boolean, familyTitle: string|null}}
+ */
+export const buildIdentityRefusedFallbackPool = (visualItems, familyCandidate) => {
+  const familyIndices = familyCandidate?.topFamily?.indices;
+  const isolatedPrices = Array.isArray(familyIndices) && familyIndices.length >= 2
+    ? familyIndices
+        .map((idx) => Number(visualItems?.[idx]?.price))
+        .filter((p) => Number.isFinite(p) && p > 0 && p < 10000)
+        .sort((a, b) => a - b)
+    : null;
+
+  const useIsolatedPool = !!(isolatedPrices && isolatedPrices.length >= 2);
+  const poolPrices = useIsolatedPool
+    ? isolatedPrices
+    : (visualItems || [])
+        .map((i) => Number(i?.price))
+        .filter((p) => Number.isFinite(p) && p > 0 && p < 10000)
+        .sort((a, b) => a - b);
+
+  // Isolated family pool is coherent (one product) — a 2-item minimum is
+  // enough for an honest range. The raw mixed-pool path is still noisy and
+  // keeps the original >=5 statistical floor.
+  const threshold = useIsolatedPool ? 2 : 5;
+  if (poolPrices.length < threshold) {
+    return {
+      fallbackPrice: null, fallbackLow: null, fallbackHigh: null,
+      fallbackPoolSize: 0, isolatedToFamily: false, familyTitle: null,
+    };
+  }
+
+  const pct = (arr, p) => arr[Math.min(arr.length - 1, Math.floor(arr.length * p))];
+  return {
+    fallbackPrice: Math.round(pct(poolPrices, 0.5) * 100) / 100,
+    fallbackLow: Math.round(pct(poolPrices, 0.25) * 100) / 100,
+    fallbackHigh: Math.round(pct(poolPrices, 0.75) * 100) / 100,
+    fallbackPoolSize: poolPrices.length,
+    isolatedToFamily: useIsolatedPool,
+    familyTitle: useIsolatedPool ? familyCandidate.topFamily.title : null,
   };
 };
 

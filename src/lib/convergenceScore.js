@@ -137,3 +137,33 @@ export function computeConvergenceScore(identity, sources) {
     tier,
   };
 }
+
+/**
+ * Q131 (2026-07-19, Eternus #2 / He-Man class) — a title-family conflict
+ * already proven by selectTitleFamilyCandidate (zero token overlap between
+ * Vision and the visual pool, explicit 'refused-identity-conflict') must
+ * not be contradicted by a HIGH convergence badge computed moments later
+ * on the same confirmedTitle. Mirrors the existing visionCapped pattern
+ * (api/enrich.js match-confidence demotion) — cap, don't hide: preserve
+ * the pre-demotion score/tier for debugging, flag explicitly, never silent.
+ *
+ * Pure function, extracted for direct regression-testability (same
+ * rationale as Q111's applyVariantPreferenceFilter extraction).
+ *
+ * @param {Object} convergence - result of computeConvergenceScore
+ * @param {string|null|undefined} familyDecision - familyCandidate?.decision
+ * @returns {Object} convergence, demoted when applicable (new object; input untouched)
+ */
+export function applyIdentityConflictDemotion(convergence, familyDecision) {
+  if (familyDecision !== 'refused-identity-conflict' || convergence.tier === 'LOW') {
+    return convergence;
+  }
+  return {
+    ...convergence,
+    preDemotionTier: convergence.tier,
+    preDemotionScore: convergence.convergenceScore,
+    tier: 'LOW',
+    convergenceScore: Math.min(convergence.convergenceScore, 69),
+    identityConflictDemoted: true,
+  };
+}

@@ -41,6 +41,7 @@ import {
   checkAssemblyIntegrity,
   titleOverlapsProduct,
   selectBestVariantCandidate,
+  buildIdentityRefusedFallbackPool,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -2908,7 +2909,7 @@ export default async function handler(req, res) {
     // Computes identity confidence from multi-source voting per axis.
     // Sources: eBay (visualConsensus), Vision (original), PC (priceCharting), CV (comicVine)
     // Era histogram extracted from visual year distribution (eraLock.decade)
-    const { computeConvergenceScore } = await import('../src/lib/convergenceScore.js');
+    const { computeConvergenceScore, applyIdentityConflictDemotion } = await import('../src/lib/convergenceScore.js');
 
     // Build sources object from Phase 1+2 data (PC/CV now available)
     const convergenceSources = {
@@ -2966,7 +2967,15 @@ export default async function handler(req, res) {
       grade: req.body?.grade || null,
     };
 
-    const convergence = computeConvergenceScore(convergenceIdentity, convergenceSources);
+    const rawConvergence = computeConvergenceScore(convergenceIdentity, convergenceSources);
+    // Q131 — see applyIdentityConflictDemotion docstring (convergenceScore.js).
+    const convergence = applyIdentityConflictDemotion(rawConvergence, familyCandidate?.decision);
+    if (convergence.identityConflictDemoted) {
+      console.log(
+        `[22c] DEMOTED ${convergence.preDemotionTier}(${convergence.preDemotionScore}) → LOW — ` +
+        `title-family clustering refused this identity (${familyCandidate.reason})`
+      );
+    }
     out.convergence = convergence;
     console.log(`[22c] convergence=${convergence.convergenceScore} tier=${convergence.tier}`);
 
@@ -3681,23 +3690,26 @@ export default async function handler(req, res) {
       // P75 formula (same threshold: >=10 raw items, >=5 valid prices) so
       // every card reaches at minimum this fallback tier before showing a
       // blank price — no new pricing logic, same tested computation.
-      let fallbackPrice = null, fallbackLow = null, fallbackHigh = null;
-      let fallbackPoolSize = 0;
-      const poolPrices = (visualResult?.items || [])
-        .map((i) => Number(i?.price))
-        .filter((p) => Number.isFinite(p) && p > 0 && p < 10000)
-        .sort((a, b) => a - b);
-      if (poolPrices.length >= 5) {
-        const pct = (arr, p) => arr[Math.min(arr.length - 1, Math.floor(arr.length * p))];
-        fallbackPrice = Math.round(pct(poolPrices, 0.5) * 100) / 100;
-        fallbackLow = Math.round(pct(poolPrices, 0.25) * 100) / 100;
-        fallbackHigh = Math.round(pct(poolPrices, 0.75) * 100) / 100;
-        fallbackPoolSize = poolPrices.length;
+      // Q131 — see buildIdentityRefusedFallbackPool docstring (identityCore.js).
+      const {
+        fallbackPrice, fallbackLow, fallbackHigh, fallbackPoolSize,
+        isolatedToFamily: fallbackIsolatedToFamily,
+      } = buildIdentityRefusedFallbackPool(visualResult?.items, familyCandidate);
+      if (fallbackPrice != null) {
         console.log(
-          `[phase2] identity-refused fallback: ${fallbackPoolSize} visual-pool prices ` +
+          `[phase2] identity-refused fallback: ${fallbackPoolSize} ` +
+          `${fallbackIsolatedToFamily ? `"${familyCandidate.topFamily.title}"-family` : 'visual-pool'} prices ` +
           `→ median=$${fallbackPrice} range=$${fallbackLow}-$${fallbackHigh}`
         );
       }
+
+      // Q131 — when resolveIdentity surfaced the pool's own top family as a
+      // provisional identity (Eternus #2 / He-Man class: pool unanimous,
+      // Vision zero-overlap and proven inconsistent), use IT for the card's
+      // title/issue instead of blindly echoing req.body's Vision guess back.
+      // Still LOCKED/advisory below — this is "show the stronger real
+      // signal, clearly flagged," never a silent confidence upgrade.
+      const isProvisionalFamilyIdentity = identitySource === 'title-family-refused-provisional';
 
       // FIX 1: Include backfilled year/publisher in refused response
       // (backfillFromComps ran at line 1990, may have set confirmedYear/confirmedPublisher)
@@ -3706,6 +3718,9 @@ export default async function handler(req, res) {
         // Override with backfilled values (if available)
         year: confirmedYear || req.body.year,
         publisher: confirmedPublisher || req.body.publisher,
+        ...(isProvisionalFamilyIdentity ? { title: confirmedTitle, issue: confirmedIssue } : {}),
+        identitySource: identitySource || 'vision',
+        identityProvisional: isProvisionalFamilyIdentity,
         yearBackfilledFromComps: out.yearBackfilledFromComps || false,
         yearBackfillRatio: out.yearBackfillRatio || 0,
         yearBackfillSource: out.yearBackfillSource || null,
@@ -3717,6 +3732,12 @@ export default async function handler(req, res) {
         comicVine: null,
         comps: null,
         soldComps: null,
+        // Q131 — explicit, not omitted. [22c] already demoted this to LOW
+        // above; carrying it forward (rather than leaving the key absent,
+        // which a client-side `enrich.X || cur.X` merge could backfill from
+        // a stale prior-scan HIGH value) is what actually closes the "HIGH
+        // badge next to a refused identity" gap end to end.
+        convergence: out.convergence || null,
         familyCandidateDiagnostic: familyCandidate ? {
           decision: familyCandidate.decision,
           topFamily: familyCandidate.topFamily,
@@ -3727,7 +3748,9 @@ export default async function handler(req, res) {
         // whatever price/range was computed above and gates only listing.
         listingHardLocked: true,
         listingHardLockReason: 'identity-unresolved',
-        listingHardLockBanner: familyCandidate?.reason
+        listingHardLockBanner: isProvisionalFamilyIdentity
+          ? `Provisional ID from visual pool: "${confirmedTitle}" #${confirmedIssue} — AI read "${req.body.title}" instead, but the visual pool unanimously disagrees — verify before listing`
+          : familyCandidate?.reason
           ? `Visual identification uncertain — ${familyCandidate.reason} — verify before listing`
           : 'Visual identification uncertain — verify before listing',
         confidenceLevel: 'LOW',
@@ -3736,11 +3759,18 @@ export default async function handler(req, res) {
               price: fmtUsd(fallbackPrice),
               priceLow: fmtUsd(fallbackLow),
               priceHigh: fmtUsd(fallbackHigh),
-              priceBands: { quick: fallbackLow, market: fallbackPrice, stretch: fallbackHigh, source: 'visual_pool_fallback', count: fallbackPoolSize },
-              pricingSource: 'visual_pool_fallback',
-              priceNote: `Estimated from ${fallbackPoolSize} visually similar active listings — identity unconfirmed, verify before listing.`,
+              priceBands: {
+                quick: fallbackLow, market: fallbackPrice, stretch: fallbackHigh,
+                source: fallbackIsolatedToFamily ? 'visual_pool_family_isolated' : 'visual_pool_fallback',
+                count: fallbackPoolSize,
+              },
+              pricingSource: fallbackIsolatedToFamily ? 'visual_pool_family_isolated' : 'visual_pool_fallback',
+              priceNote: fallbackIsolatedToFamily
+                ? `Estimated from ${fallbackPoolSize} listings matching the pool's own "${familyCandidate.topFamily.title}" family — identity unconfirmed, verify before listing.`
+                : `Estimated from ${fallbackPoolSize} visually similar active listings — identity unconfirmed, verify before listing.`,
               visualPoolUsed: true,
               visualPoolSize: fallbackPoolSize,
+              visualPoolIsolatedToFamily: fallbackIsolatedToFamily,
             }
           : {
               // Genuinely nothing to fall back to (thin visual pool too) —
