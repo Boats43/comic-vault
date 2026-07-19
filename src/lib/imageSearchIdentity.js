@@ -144,6 +144,55 @@ const CATEGORY_BLOCKS = [
   { kind: 'finish',         patterns: FINISH_PATTERNS     },
 ];
 
+// Q111 dispatch (2026-07-18, Venomverse #1 class) — 'finish' is the only
+// category that's inherently generic (foil/virgin/sketch/holographic/etc
+// describe a cover TREATMENT, not a distinguishing PRODUCT). The other six
+// (convention/ratio/retailer/exclusive/limitation/authentication) each
+// name a specific, distinguishing fact about the printing. Single source
+// of truth for "specific vs generic" — used by extractConsensus (below,
+// per-category variant consensus) AND api/comps.js Filter 1c (AND-match on
+// specific tokens) so the two call sites can never drift on the taxonomy.
+const GENERIC_VARIANT_KINDS = new Set(['finish']);
+
+let _tokenToCategory = null;
+const tokenToVariantCategory = () => {
+  if (_tokenToCategory) return _tokenToCategory;
+  _tokenToCategory = {};
+  for (const { kind, patterns } of CATEGORY_BLOCKS) {
+    for (const { token } of patterns) {
+      if (!(token in _tokenToCategory)) _tokenToCategory[token] = kind;
+    }
+  }
+  return _tokenToCategory;
+};
+
+/**
+ * Q111 — classify a variant token string (or space-joined multi-token
+ * string) into { specific: string[], generic: string[] }, using the same
+ * CATEGORY_BLOCKS taxonomy extractVariantTokens draws from. Unrecognized
+ * words (not a known variant token at all — e.g. "mcfarlane", an artist
+ * name, or "mexican", a regional descriptor neither has a category yet)
+ * are NOT classified as either — callers should treat them as neutral,
+ * not as a match requirement, since there's no registry to confirm they
+ * mean what they look like they mean.
+ *
+ * @param {string} variant - our confirmed variant string, e.g. "sdcc 1:1000 foil"
+ * @returns {{specific: string[], generic: string[]}}
+ */
+export const classifyVariantTokens = (variant) => {
+  const lookup = tokenToVariantCategory();
+  const words = String(variant || '').toLowerCase().split(/\s+/).filter(Boolean);
+  const specific = [];
+  const generic = [];
+  for (const w of words) {
+    const kind = lookup[w];
+    if (!kind) continue;
+    if (GENERIC_VARIANT_KINDS.has(kind)) generic.push(w);
+    else specific.push(w);
+  }
+  return { specific, generic };
+};
+
 // ───────────────────────── exported helpers ─────────────────────────
 
 // Extract variant tokens from a single title. Returns deduped, lowercase
@@ -660,12 +709,37 @@ export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher
     ? (publisherCounts[visionPublisherCanonical] || 0)
     : null;
 
-  // Extract most common variant token
-  const allVariantTokens = parsedRows
-    .flatMap((r) => r.variantTokens || [])
-    .filter(Boolean);
-  const variantResult = getMostCommon(allVariantTokens);
-  const variant = variantResult.count >= 2 ? variantResult.value : null;
+  // Q111 dispatch (2026-07-18, Venomverse #1 class) — per-category variant
+  // consensus. Was: flatten every category (convention/ratio/retailer/
+  // exclusive/limitation/authentication/finish) into ONE array and pick the
+  // single most-frequent token pool-wide. A generic finish token ("foil")
+  // is the most common category in a foil-heavy pool and always won the
+  // flat vote, discarding co-occurring SPECIFIC tokens ("sdcc", "1:1000")
+  // that `extractVariantTokens` correctly extracted per-listing one line
+  // earlier (Ship #20a.6.7a) — those tokens existed, they just never
+  // reached `variant`. Now: compute the most-common token WITHIN each
+  // category independently (same >=2 adoption threshold as before), join
+  // every category that reaches consensus, in stable CATEGORY_BLOCKS
+  // order. "SDCC ... 1:1000 ... Foil" across the pool now survives as
+  // "sdcc 1:1000 foil", not just "foil".
+  const tokenToCategory = tokenToVariantCategory();
+  const categoryTokenCounts = {}; // kind -> { token -> count }
+  for (const row of parsedRows) {
+    for (const token of row?.variantTokens || []) {
+      const kind = tokenToCategory[token];
+      if (!kind) continue;
+      categoryTokenCounts[kind] = categoryTokenCounts[kind] || {};
+      categoryTokenCounts[kind][token] = (categoryTokenCounts[kind][token] || 0) + 1;
+    }
+  }
+  const winningVariantTokens = [];
+  for (const { kind } of CATEGORY_BLOCKS) {
+    const counts = categoryTokenCounts[kind];
+    if (!counts) continue;
+    const winner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    if (winner && winner[1] >= 2) winningVariantTokens.push(winner[0]);
+  }
+  const variant = winningVariantTokens.length > 0 ? winningVariantTokens.join(' ') : null;
 
   // Calculate confidence: average agreement across title+issue+year
   const confidenceScore = yearOk

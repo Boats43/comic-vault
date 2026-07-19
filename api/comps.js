@@ -56,6 +56,8 @@ import {
   cleanPublisher,
 } from "../src/lib/compHygiene.js";
 
+import { classifyVariantTokens } from "../src/lib/imageSearchIdentity.js";
+
 export {
   VARIANT_CONTAM_RE,
   SIGNED_RE,
@@ -483,6 +485,93 @@ export const computeMatchConfidence = (comps, opts = {}) => {
 
   const tier = avg >= 0.85 ? 'HIGH' : avg >= 0.65 ? 'MEDIUM' : 'LOW';
   return { score: rawScore, tier };
+};
+
+/**
+ * Filter 1c: variant preference. Extracted as a pure, exported function
+ * (2026-07-18, Q111 dispatch, Venomverse #1 class) so it's directly
+ * regression-testable without a live eBay fetch — same pattern as
+ * hasMultipleDistinctIssues/detectSeriesMarkers below.
+ *
+ * When our confirmed `variant` carries multiple SPECIFIC tokens
+ * (convention/ratio/retailer/exclusive/limitation/authentication — e.g.
+ * "sdcc", "1:1000"), require ALL of them (AND-match) rather than any
+ * single token, so a comp matching only a co-occurring GENERIC finish
+ * descriptor ("foil") doesn't count as a real match — "foil" alone can't
+ * distinguish an SDCC 1:1000 exclusive from any other foil printing of the
+ * same book. Falls back to the broader any-token OR-match if the AND-match
+ * produces zero comps (never silently starves the pool), and reduces to
+ * exactly the pre-2026-07-18 OR-match behavior when `variant` has 0 or 1
+ * specific tokens (Silk #1 / Magik #1 class — single-token variants are
+ * unaffected by this change).
+ *
+ * @param {Array<{title?: string}>} pool - current comp pool
+ * @param {string|null} variant - our confirmed variant string
+ * @returns {{pool: Array, isolated: boolean, matchMode: string}} isolated
+ *   pool (or the original pool, unchanged, if the match count didn't clear
+ *   the threshold); isolated=true when Filter 1c narrowed the pool on a
+ *   premium/specific signal (drives out.premiumVariantIsolated downstream).
+ */
+export const applyVariantPreferenceFilter = (pool, variant) => {
+  const before = pool.length;
+  if (!variant || pool.length === 0) {
+    return { pool, isolated: false, matchMode: 'none' };
+  }
+  const varWords = String(variant).toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['variant', 'cover', 'print', 'edition'].includes(w));
+  if (varWords.length === 0) {
+    return { pool, isolated: false, matchMode: 'none' };
+  }
+
+  const orMatch = (words) => pool.filter(it => {
+    const t = String(it.title || '').toLowerCase();
+    return words.some(w => t.includes(w));
+  });
+
+  const { specific: specificWords } = classifyVariantTokens(variant);
+  let variantMatches;
+  let matchMode = 'any';
+  if (specificWords.length > 1) {
+    const specificMatches = pool.filter(it => {
+      const t = String(it.title || '').toLowerCase();
+      return specificWords.every(w => t.includes(w));
+    });
+    if (specificMatches.length > 0) {
+      variantMatches = specificMatches;
+      matchMode = 'all-specific';
+    } else {
+      // Defensive fallback (same pattern as every other fix tonight): the
+      // narrow AND-match produced nothing, so fall back to the broader
+      // single-token match rather than starving the pool — flagged, not silent.
+      console.log(`[comps] variant AND-match on [${specificWords.join(',')}] produced 0 comps — falling back to broader single-token match`);
+      variantMatches = orMatch(varWords);
+      matchMode = 'any-fallback';
+    }
+  } else {
+    variantMatches = orMatch(varWords);
+  }
+
+  // Premium-variant isolation (2026-07-18, Magik #1 / Silk #1 class):
+  // convention-exclusive / retailer-exclusive / virgin / numbered-limited
+  // books are a distinct, more valuable market segment than a generic
+  // variant cover. The default >=2 threshold starves on thin pools (2-3
+  // comps, exactly the scenario these books show up in) and silently falls
+  // back to "keep all", blending genuine exclusive comps with generic
+  // variant comps and systematically underpricing the book. A thin
+  // isolated pool is already handled gracefully elsewhere (Ship #13.1
+  // thin-pool anchor), so for premium tokens a single match is enough to
+  // isolate rather than blend. An AND-matched pool (mode=all-specific) is
+  // already maximally specific — stronger evidence than the premium-keyword
+  // heuristic this threshold approximates — so it gets the same 1-match
+  // bar regardless of PREMIUM_VARIANT_RE.
+  const isPremiumVariant = PREMIUM_VARIANT_RE.test(String(variant));
+  const isolatedOnSpecific = isPremiumVariant || matchMode === 'all-specific';
+  const minMatches = isolatedOnSpecific ? 1 : 2;
+  if (variantMatches.length >= minMatches) {
+    console.log(`[comps] variant preference filter: before=${before} after=${variantMatches.length} kept=${variantMatches.length} (match "${variant}", mode=${matchMode}${isolatedOnSpecific ? ', premium-variant isolation' : ''})`);
+    return { pool: variantMatches, isolated: isolatedOnSpecific, matchMode };
+  }
+  console.log(`[comps] variant preference filter: before=${before} after=${pool.length} (only ${variantMatches.length} match, mode=${matchMode} — keeping all)`);
+  return { pool, isolated: false, matchMode };
 };
 
 // Core fetcher — exported so api/grade.js can reuse it without an HTTP hop.
@@ -1046,36 +1135,12 @@ export const fetchComps = async ({
       }
       afterVariant = p.length;
 
-      // Filter 1c: variant preference.
-      const beforeVarPref = p.length;
-      if (variant && p.length > 0) {
-        const varWords = String(variant).toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['variant', 'cover', 'print', 'edition'].includes(w));
-        if (varWords.length > 0) {
-          const variantMatches = p.filter(it => {
-            const t = String(it.title || '').toLowerCase();
-            return varWords.some(w => t.includes(w));
-          });
-          // Premium-variant isolation (2026-07-18, Magik #1 / Silk #1 class):
-          // convention-exclusive / retailer-exclusive / virgin / numbered-
-          // limited books are a distinct, more valuable market segment than
-          // a generic variant cover. The default >=2 threshold below starves
-          // on thin pools (2-3 comps, exactly the scenario these books show
-          // up in) and silently falls back to "keep all", blending the
-          // genuine exclusive comps with generic variant comps and
-          // systematically underpricing the book. A thin isolated pool is
-          // already handled gracefully elsewhere (Ship #13.1 thin-pool
-          // anchor), so for premium tokens a single match is enough to
-          // isolate rather than blend.
-          const isPremiumVariant = PREMIUM_VARIANT_RE.test(String(variant));
-          const minMatches = isPremiumVariant ? 1 : 2;
-          if (variantMatches.length >= minMatches) {
-            console.log(`[comps] variant preference filter: before=${beforeVarPref} after=${variantMatches.length} kept=${variantMatches.length} (match "${variant}"${isPremiumVariant ? ', premium-variant isolation' : ''})`);
-            p = variantMatches;
-            if (isPremiumVariant) _premiumVariantIsolated = true;
-          } else {
-            console.log(`[comps] variant preference filter: before=${beforeVarPref} after=${p.length} (only ${variantMatches.length} match — keeping all)`);
-          }
-        }
+      // Filter 1c: variant preference (extracted to applyVariantPreferenceFilter
+      // above — Q111 dispatch, 2026-07-18, Venomverse #1 class).
+      {
+        const varPrefResult = applyVariantPreferenceFilter(p, variant);
+        p = varPrefResult.pool;
+        if (varPrefResult.isolated) _premiumVariantIsolated = true;
       }
 
       // Filter 1d: cover-letter matching. Cover A, B, C, D are separate

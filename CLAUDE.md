@@ -708,6 +708,84 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   known warning slug has a specific `describeWarning` branch, so a future
   `push()` with no matching branch can't silently regress back to raw-
   slug display.
+- **Generic-descriptor variant-match class** (Venomverse #1, Q111
+  dispatch, 2026-07-18) — active-comp variant isolation used only the
+  generic finish descriptor ("foil") to require a match, pooling 2-3
+  genuinely different products together (2017 "1:2000 Remastered B&W
+  Variant", 2017 "1:1000 Remastered Incentive Color Variant" — same ratio
+  as the correct book but a different, cheaper 2017 product — and the
+  actual 2025 "SDCC McFarlane 1:1000 Mexican Foil" exclusive) into one
+  averaged price. Confirmed NOT covered by the SAME-DAY Magik #1 / Silk #1
+  fix (commit `1ea15f8`, `PREMIUM_VARIANT_RE` + `minMatches` threshold in
+  `api/comps.js` Filter 1c) — that fix is a pure count/threshold change
+  (2→1 matches required when the variant string contains a premium
+  keyword); it assumes the token list handed to Filter 1c is already
+  correct and never touches which tokens are extracted or how a listing is
+  deemed to match. Two stacked, independent bugs, both real:
+  1. **Upstream (root cause of this specific case):** `extractConsensus`
+     (`src/lib/imageSearchIdentity.js`) built the confirmed `variant`
+     string by flattening every category (convention/ratio/retailer/
+     exclusive/limitation/authentication/finish) into ONE array and
+     picking the single most-frequent token pool-wide via `getMostCommon`.
+     In a foil-heavy pool, "foil" (finish category) is nearly always the
+     most common token and wins outright — "sdcc" (convention) and
+     "1:1000" (ratio), which `extractVariantTokens` correctly extracted
+     per-listing one line earlier, were discarded before `variant` even
+     left this function. Only affects the "Ship #EBAY-FIRST" eBay-first
+     identity path (`api/grade.js:589-639`, the common "cheap path" when
+     image-search confidence ≥0.3, per the Standard scan pipeline docs
+     above) — the STANDARD_PROMPT/Vision-direct path is unaffected since
+     Vision writes its own combined descriptive phrase with no lossy
+     consensus step.
+  2. **Filter 1c itself (independent, compounding, affects both identity
+     paths):** `varWords.some(w => t.includes(w))` — ANY single token
+     match counts as a full "variantMatch," never ALL. Even when `variant`
+     DOES survive as a multi-word string, a listing containing only the
+     generic "foil" (and none of the specific tokens) still isolates into
+     the pool. Made WORSE by the same-day Magik/Silk fix specifically: a
+     `variant` containing "sdcc" trips `PREMIUM_VARIANT_RE`, dropping
+     `minMatches` to 1 — so a pool could "isolate" on a single
+     generic-foil-only match with zero listings actually containing the
+     premium marker, and get logged as validated `premium-variant
+     isolation`.
+  **Fix, reusing the existing taxonomy rather than forking a new one:**
+  new `classifyVariantTokens(variant)` (`imageSearchIdentity.js`) — single
+  source of truth splitting tokens into SPECIFIC (convention/ratio/
+  retailer/exclusive/limitation/authentication) vs GENERIC (finish only:
+  foil/virgin/sketch/holographic/etc — a cover TREATMENT, not a
+  distinguishing PRODUCT) — used by BOTH call sites so they can't drift.
+  (1) `extractConsensus` now computes the most-common token WITHIN each
+  category independently (same pre-existing ≥2 adoption threshold), joins
+  every category that reaches consensus in stable order — "sdcc 1:1000
+  foil", not just "foil". (2) Filter 1c, extracted into a pure exported
+  `applyVariantPreferenceFilter(pool, variant)`
+  (`api/comps.js`) for direct regression-testability (matches the
+  `hasMultipleDistinctIssues`/`detectSeriesMarkers` pattern already used
+  in this file) — when 2+ specific tokens exist, require ALL of them
+  (AND-match) instead of any single token; falls back to the original
+  any-token OR-match if the AND-match produces zero comps (flagged via a
+  `matchMode` field — `'all-specific'` / `'any'` / `'any-fallback'` —
+  never silent). Single-specific-token variants (`"exclusive"` alone,
+  Silk #1 class) and pure-generic variants (`"virgin"` alone — classifies
+  as `finish`, i.e. generic — Magik #1 class) reduce to exactly the
+  pre-Q111 OR-match behavior; only multi-token mixes change, confirmed by
+  regression. Residual, deliberately out of scope: no regional-descriptor
+  category exists anywhere in the codebase (`"mexican"`/`"uk"`/
+  `"canadian"` are invisible to every tokenizer, including this fix) — not
+  load-bearing for this case (`sdcc`+`1:1000` alone already correctly
+  excludes both 2017 products), flagged as a follow-up if a future case
+  needs it.
+  Regression: `tests/q111-variant-token-specificity.test.js` — reconstructs
+  the real Venomverse #1 pool (2017 ×2 wrong-ratio + 2017 wrong-product
+  sharing "1:1000" + 2025 SDCC Mexican foil ×4), confirms `variant` recovers
+  "sdcc 1:1000 foil" (not bare "foil") and Filter 1c isolates to exactly
+  the 4 genuine SDCC listings, excluding BOTH 2017 products including the
+  1:1000-sharing one a naive single-token match would still catch. Also
+  reconstructs Magik #1 and Silk #1 (confirmed byte-for-byte unchanged
+  behavior), a bare-generic-only variant (ANY-match fallback intact, no
+  over-narrowing), and a synthetic AND-match-produces-zero case (confirms
+  the fallback fires and is visibly flagged, never silently starves the
+  pool to zero).
 
 ## Open Blockers
 
