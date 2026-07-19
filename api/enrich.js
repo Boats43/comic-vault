@@ -2802,8 +2802,22 @@ export default async function handler(req, res) {
       title: {
         ebay: visualConsensus?.title || null,
         vision: effectiveTitle,
-        pc: priceChartingInitial?.title || null,
-        cv: comicVine?.name || null,
+        // Q117 dispatch (2026-07-18, Batman #608 "Hush" / #215 "Call Me
+        // Master" / Absolute Batman #1 class) — was comicVine?.name, the
+        // ComicVine ISSUE record's own `name` field, which per ComicVine's
+        // schema is the story/chapter title ("Hush Chapter One: The
+        // Ransom", "Los Apuros del Titere Flash", "Le Zoo" — confirmed via
+        // real production logs across three unrelated books, all with
+        // 100/100 volume-name match scores at the ComicVine lookup stage
+        // moments earlier), NOT the series name. Comparing our confirmed
+        // series title against that field guaranteed a false rejection on
+        // any issue whose CV record has a populated story-arc name — common
+        // specifically on notable, valuable keys (the ones worth naming an
+        // arc for), which is exactly the class this axis should be most
+        // reliable on. comicVine.volume.name is the correct series-name
+        // field — already used correctly elsewhere in this file (era-gate
+        // logging, ~line 2899; UPC-lookup title resolution, ~line 536).
+        cv: comicVine?.volume?.name || null,
       },
       issue: {
         ebay: visualConsensus?.issue || null,
