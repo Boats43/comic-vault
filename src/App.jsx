@@ -4781,7 +4781,13 @@ function CollectionDetail({
 
       {/* 2a. STATS BAR */}
       {(() => {
-        const lastSoldPrice = item.soldComps?.[0]?.price || item.comps?.recentSales?.[0]?.price || null;
+        // Ship #24 Wave 1 Commit 1 (Harley Quinn #62 fix) \u2014 lastSold reads
+        // VERIFIED SOLD data only. It must never fall back to
+        // item.comps.recentSales, which is active/asking-listing data (see
+        // the "Active Listings" labels elsewhere in this file) \u2014 that
+        // fallback was fabricating a "Last sold $X" figure out of an unsold
+        // asking price whenever soldComps was empty.
+        const lastSoldPrice = item.soldComps?.[0]?.price ?? null;
         const lastSoldLabel = lastSoldPrice ? '$' + Math.round(lastSoldPrice) : null;
         const activeLoNum = item.comps?.lowestNum;
         const activeHiNum = item.comps?.highestNum;
