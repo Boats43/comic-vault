@@ -123,21 +123,19 @@ export function computeDecision(item, context = {}) {
     decision.blockers.push('identity-not-confident');
   }
 
-  // Blocker: Vision itself determined the image is not a comic book at all
-  // (2026-07-18, anime/manga poster class). This is distinct from
-  // identity-not-confident — Vision can be fully confident about grade/price
-  // while explicitly stating the physical item isn't a comic. Must hard-gate
-  // regardless of how the rest of identity resolved (visual pool matches on
-  // title text can still populate confident-looking fields for a poster
-  // that happens to share a comic's title).
-  if (item.assetTypeConfident === false) {
-    decision.blockers.push('asset-type-mismatch');
-  }
+  // Q110 dispatch Part 1 (2026-07-18) — assetTypeConfident and
+  // refused-identity-conflict demoted from hard blockers to advisory
+  // warnings (see Phase 2 below). Was: forced ID_REQUIRED even when a real
+  // price/comp pool existed underneath (Walking Dead #109 class) — the
+  // flag alone no longer walls off data already computed. api/enrich.js no
+  // longer nulls price/comps for either condition; the flag stays visible
+  // via listingHardLocked (contract state LOCKED — price shown, listing
+  // gated) rather than REFUSED/ID_REQUIRED (price nulled everywhere).
+  // Genuinely-missing identity (identity-not-confident above, missing
+  // title/fields) is unaffected — that stays a hard blocker, since there is
+  // no usable book to price against at all.
 
   // Blocker: Pricing source refusals
-  if (item.pricingSource === 'refused-identity-conflict') {
-    decision.blockers.push('refused-identity-conflict');
-  }
   if (item.pricingSource === 'refused-no-data-sources') {
     decision.blockers.push('no-data-sources');
   }
@@ -216,9 +214,7 @@ export function computeDecision(item, context = {}) {
     const identityBlockers = [
       'missing-title',
       'identity-incomplete',
-      'identity-not-confident',
-      'refused-identity-conflict',
-      'asset-type-mismatch'
+      'identity-not-confident'
     ];
     const hasIdentityBlocker = decision.blockers.some(b => identityBlockers.includes(b));
 
@@ -240,6 +236,28 @@ export function computeDecision(item, context = {}) {
   }
 
   // PHASE 2: WARNING GATES
+
+  // Q110 dispatch Part 1 — asset-type mismatch, now advisory (was a
+  // blocker above). Still routes to RESEARCH via criticalWarnings below,
+  // so the card shows a price with an explicit caution rather than either
+  // a hard wall or a silent LIST_NOW.
+  if (item.assetTypeConfident === false) {
+    decision.warnings.push('asset-type-uncertain');
+    decision.evidence.assetTypeUncertain = {
+      message: item.listingHardLockBanner
+        || 'This image may be a reference scan or promotional print — verify before listing',
+    };
+  }
+
+  // Q110 dispatch Part 2 — identity-conflict, now advisory (was a
+  // blocker above). api/enrich.js still attempts the visual-similarity
+  // fallback tier before this ever fires, so a price is usually present.
+  if (item.pricingSource === 'refused-identity-conflict' || item.listingHardLockReason === 'identity-unresolved') {
+    decision.warnings.push('identity-conflict-unresolved');
+    decision.evidence.identityConflictUnresolved = {
+      message: item.refusalReason || 'Visual pool could not confirm identity — verify before listing',
+    };
+  }
 
   // Warning: Active floor far below recommended
   const activeLowest = item.rawComps?.lowest;
@@ -494,6 +512,8 @@ export function computeDecision(item, context = {}) {
   // Only escalate when pricing math is uncertain (sold-active mismatch, zero-verified,
   // self-flag >100% drift, polybag/reprint warnings).
   const criticalWarnings = [
+    'asset-type-uncertain',            // Q110 Part 1: possible non-comic image, needs review
+    'identity-conflict-unresolved',    // Q110 Part 2: visual pool identity unconfirmed
     'refused-to-price',                // GL-1: refused state must never reach a LIST action
     'sold-active-mismatch-extreme',    // Price evidence: sold vs active divergence
     'era-risk-vintage-thin',           // Price evidence: thin Golden Age pool
@@ -753,29 +773,164 @@ export function computeDecision(item, context = {}) {
   return decision;
 }
 
+// Q110 dispatch Part 3 (2026-07-18) — per-slug message builders. Split out
+// of buildBlockerReason/buildWarningReason so App.jsx can render a specific
+// reason PER blocker/warning (was: rendering the raw slug array directly,
+// e.g. literally "content-unverified" — decision.reason existed with nicer
+// text but was never wired to the card's per-item badge list). Exported so
+// App.jsx can call these directly; buildBlockerReason/buildWarningReason
+// below are now thin wrappers preserving their existing joined-string
+// callers unchanged.
+export function describeBlocker(slug, item) {
+  if (slug === 'missing-title') return 'title not resolved — retake photo for a clearer title read';
+  if (slug === 'identity-incomplete') return 'required identity fields missing (issue/publisher)';
+  if (slug === 'identity-not-confident') return 'identity uncertain — title/issue/year/publisher not confirmed';
+  if (slug === 'no-data-sources') return 'no pricing data available from any source';
+  if (slug === 'manual-review-required') return 'manual review required';
+  if (slug === 'mega-key-manual-review') return 'mega-key requires expert appraisal';
+  if (slug === 'catastrophic-system-overprice') {
+    const ratio = item.rawComps?.average ? item.price / item.rawComps.average : null;
+    return ratio != null
+      ? `system price $${item.price} is ${ratio.toFixed(1)}x active comps`
+      : 'system price far exceeds active comps';
+  }
+  if (slug === 'catastrophic-reprint-overprice') return 'reprint/polybag detected with extreme overprice';
+  if (slug === 'reprint-no-verified-comps') return 'reprint/polybag detected with no verified comps of any kind';
+  if (slug === 'claude-check-critical') return item.claudeCheckBlocker || 'Claude critical verification failure';
+  return slug;
+}
+
+// Q110 dispatch Part 3 — humanize a soldCompDiagnostics.reasons key
+// ("variantMismatch" → "variant mismatch") for the dominant-cause message.
+const humanizeReasonKey = (key) => String(key).replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+
+const STORY_SUPPRESSED_MESSAGES = {
+  'era-gate-year-drift': 'story metadata year is outside the expected range for this printing',
+  'foreign-edition': 'story metadata matched a foreign edition, not this printing',
+  'title-weak-match': 'story metadata title only weakly matches this book',
+  'title-token-mismatch': 'story metadata title tokens do not match this book',
+  'publisher-mismatch': 'story metadata publisher does not match this book',
+};
+
+export function describeWarning(slug, item) {
+  if (slug === 'asset-type-uncertain') {
+    return item.listingHardLockBanner
+      || 'This image may be a reference scan or promotional print — verify before listing';
+  }
+  if (slug === 'identity-conflict-unresolved') {
+    return item.refusalReason
+      ? `Visual pool identity uncertain — ${item.refusalReason}`
+      : 'Visual pool identity uncertain — verify title/issue before listing';
+  }
+  if (slug === 'sold-active-mismatch-extreme') {
+    const soldSum = item.soldComps?.reduce((sum, c) => sum + c.price, 0) || 0;
+    const soldCount = item.soldComps?.length || 0;
+    const soldAvg = soldCount > 0 ? soldSum / soldCount : null;
+    const activeAvg = item.rawComps?.average;
+    const soldStr = soldAvg != null && !isNaN(soldAvg) ? soldAvg.toFixed(0) : '?';
+    const activeStr = activeAvg != null && !isNaN(activeAvg) ? activeAvg.toFixed(0) : '?';
+    return `sold $${soldStr} vs active $${activeStr} mismatch`;
+  }
+  if (slug === 'era-risk-vintage-thin') return 'vintage era thin pool with sold/active conflict';
+  if (slug === 'active-avg-far-below') return 'recommended price far above active comps';
+  if (slug === 'active-floor-far-below') {
+    const systemPrice = item.price;
+    const activeLowest = item.rawComps?.lowest;
+    return systemPrice && activeLowest
+      ? `recommended price $${Number(systemPrice).toFixed(2)} is ${(systemPrice / activeLowest).toFixed(1)}x the active floor $${Number(activeLowest).toFixed(2)}`
+      : 'recommended price far above the active floor';
+  }
+  if (slug === 'sold-comps-stale') {
+    const days = item.soldComps?.length > 0
+      ? Math.min(...item.soldComps.map((s) => s.daysAgo || 999))
+      : null;
+    return days != null ? `most recent sold comp is ${Math.round(days)} days old` : 'sold comps are stale';
+  }
+  if (slug === 'vision-low-confidence') return "Vision's own identification confidence was low";
+  if (slug === 'web-search-pricing') {
+    return item.webSearchEvidence || 'priced from a web-search fallback — no eBay comp data available';
+  }
+  if (slug === 'low-confidence-escalation') return 'match confidence LOW — verify data quality before listing';
+  if (slug === 'cold-market-velocity') return 'cold market (low velocity, trending down) — bundle or wait';
+  if (slug === 'hot-market-velocity') return 'hot market (high velocity, trending up)';
+  if (slug === 'zero-velocity') return 'no market velocity detected — verify demand before listing';
+  if (slug === 'thin-pool-anchor') {
+    const count = item.rawComps?.count;
+    return count != null ? `only ${count} active listing${count === 1 ? '' : 's'} found — thin comp pool` : 'thin comp pool (limited data)';
+  }
+  if (slug === 'bundle-candidate') return 'low-value, bundle recommended';
+  if (slug === 'story-metadata-suspicious') return 'story metadata needs review';
+  if (slug === 'reprint-polybag-detected') return 'reprint/polybag warning';
+  if (slug === 'verification-failed-claude') return 'Claude verification failed';
+  if (slug === 'verification-failed-no-data') return item.priceNote || 'no verified comps found';
+  if (slug === 'verification-failed-visual-fallback') {
+    return item.visualPoolSize
+      ? `image search fallback — ${item.visualPoolSize} visually similar listings, identity unconfirmed`
+      : 'image search fallback (verify identity)';
+  }
+  if (slug === 'verification-failed-reprint-thin') return 'reprint with thin data — fewer than 3 reprint-specific comps';
+  if (slug === 'filter-bypass-detected') return 'filter criteria missing from comps';
+  if (slug === 'claude-check-high-severity') return item.claudeCheckHighSeverity || 'Claude high-severity verification warning';
+  if (slug === 'zero-verified-comps') {
+    const reasons = item.soldCompDiagnostics?.reasons;
+    if (reasons && typeof reasons === 'object') {
+      const dominant = Object.entries(reasons).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1])[0];
+      if (dominant) {
+        return `${item.soldCompDiagnostics.rawCount || dominant[1]} sold comps found but rejected — mostly ${humanizeReasonKey(dominant[0])}`;
+      }
+    }
+    return 'sold comps exist but none verified';
+  }
+  if (slug === 'recommended-below-floor') {
+    const floor = item.rawComps?.lowest;
+    const floorStr = floor != null && !isNaN(floor) ? floor.toFixed(2) : '?';
+    return `recommended below floor (raised to $${floorStr})`;
+  }
+  if (slug === 'comp-pool-contaminated') {
+    if (item.variantFallback && item.reprintFallback) return 'comp pool used both variant and reprint fallback — verify edition/cover before listing';
+    if (item.variantFallback) return 'comp pool fell back to any-variant comps — variant mismatch dominated the direct match';
+    if (item.reprintFallback) return 'comp pool fell back to reprint-inclusive comps — verify this is the printing you have';
+    return 'comp pool contamination detected';
+  }
+  if (slug === 'ai-verify-rejected-all') {
+    const reasons = item.soldCompDiagnostics?.reasons;
+    const dominant = reasons && typeof reasons === 'object'
+      ? Object.entries(reasons).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1])[0]
+      : null;
+    return dominant
+      ? `AI verification rejected every comp — mostly ${humanizeReasonKey(dominant[0])}`
+      : 'AI verification rejected every comp in the pool';
+  }
+  if (slug === 'uk-weekly-no-comps') {
+    return item.variant
+      ? `UK weekly/pence variant ("${item.variant}") — no eBay comps found, manual research required`
+      : 'UK weekly/pence variant — no eBay comps found, manual research required';
+  }
+  if (slug === 'content-unverified') {
+    return STORY_SUPPRESSED_MESSAGES[item.storySuppressedReason]
+      || (item.storySuppressedReason?.startsWith('convergence-rejected')
+        ? `story metadata rejected — axes disagreed (${item.storySuppressedReason.replace('convergence-rejected:', '')})`
+        : 'story metadata suspicious or suppressed');
+  }
+  if (slug === 'identity-from-consensus') {
+    const c = item.identityConsensus;
+    return c?.poolSize
+      ? `identity adopted from ${c.poolSize}-listing comp consensus (Vision was low-confidence) — review before listing`
+      : 'identity adopted from comp consensus — Vision was low-confidence';
+  }
+  if (slug === 'refused-to-price') {
+    return item.priceNote || 'engine refused to price — no coherent market data';
+  }
+  if (slug === 'floor-contamination-suspect') {
+    return item.floorContaminationReason || 'verified solds far below mega-key floor — pool may contain reprints';
+  }
+  if (slug === 'all-sold-comps-stale') return 'all sold comps >90 days old — verify current market';
+  return slug;
+}
+
+// Thin wrapper preserving the existing joined-string decision.reason shape.
 function buildBlockerReason(blockers, item) {
-  const reasons = [];
-
-  if (blockers.includes('missing-title')) reasons.push('identity-incomplete: title not resolved');
-  if (blockers.includes('identity-incomplete')) reasons.push('identity-incomplete: required fields missing');
-  if (blockers.includes('identity-not-confident')) reasons.push('identity uncertain');
-  if (blockers.includes('asset-type-mismatch')) reasons.push('Vision determined this is not a comic book');
-  if (blockers.includes('refused-identity-conflict')) reasons.push('identity conflict');
-  if (blockers.includes('no-data-sources')) reasons.push('no pricing data available');
-  if (blockers.includes('manual-review-required')) reasons.push('manual review required');
-  if (blockers.includes('mega-key-manual-review')) reasons.push('mega-key requires expert appraisal');
-  if (blockers.includes('catastrophic-system-overprice')) {
-    const ratio = item.price / item.rawComps?.average;
-    reasons.push(`system price $${item.price} is ${ratio.toFixed(1)}x active comps`);
-  }
-  if (blockers.includes('catastrophic-reprint-overprice')) {
-    reasons.push('reprint/polybag detected with extreme overprice');
-  }
-  if (blockers.includes('claude-check-critical')) {
-    reasons.push('Claude critical verification failure');
-  }
-
-  return reasons.join('; ');
+  return blockers.map((b) => describeBlocker(b, item)).join('; ');
 }
 
 function buildIdentityNextStep(blockers, item) {
@@ -784,7 +939,6 @@ function buildIdentityNextStep(blockers, item) {
   if (blockers.includes('missing-title')) steps.push('Rescan asset for clear title');
   if (blockers.includes('identity-incomplete')) steps.push('Rescan asset for missing identity fields');
   if (blockers.includes('identity-not-confident')) steps.push('Retake photo with better lighting or verify identity manually');
-  if (blockers.includes('asset-type-mismatch')) steps.push('Confirm this is actually a comic book before pricing/listing');
 
   return steps.join('; ') || 'Fix identity fields before listing';
 }
@@ -804,62 +958,8 @@ function buildBlockerNextStep(blockers, item) {
   return 'Resolve blockers before listing';
 }
 
+// Thin wrapper preserving the existing joined-string decision.reason shape.
 function buildWarningReason(warnings, item) {
-  const reasons = [];
-
-  if (warnings.includes('sold-active-mismatch-extreme')) {
-    const soldSum = item.soldComps?.reduce((sum, c) => sum + c.price, 0) || 0;
-    const soldCount = item.soldComps?.length || 0;
-    const soldAvg = soldCount > 0 ? soldSum / soldCount : null;
-    const activeAvg = item.rawComps?.average;
-    const soldStr = soldAvg != null && !isNaN(soldAvg) ? soldAvg.toFixed(0) : '?';
-    const activeStr = activeAvg != null && !isNaN(activeAvg) ? activeAvg.toFixed(0) : '?';
-    reasons.push(`sold $${soldStr} vs active $${activeStr} mismatch`);
-  }
-  if (warnings.includes('era-risk-vintage-thin')) {
-    reasons.push('vintage era thin pool with sold/active conflict');
-  }
-  if (warnings.includes('active-avg-far-below')) {
-    reasons.push('recommended price far above active comps');
-  }
-  if (warnings.includes('thin-pool-anchor')) {
-    reasons.push('thin comp pool (limited data)');
-  }
-  if (warnings.includes('bundle-candidate')) {
-    reasons.push('low-value, bundle recommended');
-  }
-  if (warnings.includes('story-metadata-suspicious')) {
-    reasons.push('story metadata needs review');
-  }
-  if (warnings.includes('reprint-polybag-detected')) {
-    reasons.push('reprint/polybag warning');
-  }
-  if (warnings.includes('verification-failed-claude')) {
-    reasons.push('Claude verification failed');
-  }
-  if (warnings.includes('verification-failed-no-data')) {
-    reasons.push('no verified comps found');
-  }
-  if (warnings.includes('verification-failed-visual-fallback')) {
-    reasons.push('image search fallback (verify identity)');
-  }
-  if (warnings.includes('verification-failed-reprint-thin')) {
-    reasons.push('reprint with thin data');
-  }
-  if (warnings.includes('filter-bypass-detected')) {
-    reasons.push('filter criteria missing from comps');
-  }
-  if (warnings.includes('claude-check-high-severity')) {
-    reasons.push('Claude high-severity verification warning');
-  }
-  if (warnings.includes('zero-verified-comps')) {
-    reasons.push('sold comps exist but none verified');
-  }
-  if (warnings.includes('recommended-below-floor')) {
-    const floor = item.rawComps?.lowest;
-    const floorStr = floor != null && !isNaN(floor) ? floor.toFixed(2) : '?';
-    reasons.push(`recommended below floor (raised to $${floorStr})`);
-  }
-
+  const reasons = warnings.map((w) => describeWarning(w, item));
   return reasons.join('; ') || 'Warnings detected, review before listing';
 }

@@ -14,6 +14,7 @@ import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade } from "./lib/dataQualityGuard.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
+import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 
 // A3 ACCESS GATE: Client-side key helper
 // ACCESS GATE — T1 invite key management (A3 + LAUNCH BLOCKER FIX)
@@ -4144,7 +4145,7 @@ function CollectionDetail({
                 marginBottom: 6,
                 fontWeight: 600
               }}>
-                🚫 {item.decision.blockers.map(b => typeof b === 'string' ? b : (b?.message || b?.type || String(b))).join(', ')}
+                🚫 {item.decision.blockers.map(b => typeof b === 'string' ? describeBlocker(b, item) : (b?.message || b?.type || String(b))).join(', ')}
               </div>
             )}
 
@@ -4159,7 +4160,7 @@ function CollectionDetail({
                 marginBottom: 6,
                 fontWeight: 600
               }}>
-                ⚠️ {item.decision.warnings.map(w => typeof w === 'string' ? w : (w?.message || w?.type || String(w))).join(', ')}
+                ⚠️ {item.decision.warnings.map(w => typeof w === 'string' ? describeWarning(w, item) : (w?.message || w?.type || String(w))).join(', ')}
               </div>
             )}
 

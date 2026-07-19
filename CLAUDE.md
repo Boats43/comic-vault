@@ -308,16 +308,20 @@ When `rawComps.count < 3`, cap `out.price` at `rawComps.highest × 1.05`. No `is
 Pure helper `computeDecision(item)` in `src/lib/decisionEngine.js` returns structured decision with action, confidence, blockers, warnings, and next steps.
 
 **Actions:**
-- **ID_REQUIRED:** Identity fields incomplete (missing title/issue/publisher, identity conflict)
-- **DO_NOT_LIST:** Hard blockers present (manual review required, mega-key, catastrophic overprice, reprint with no comps)
-- **RESEARCH:** Critical warnings escalated (sold/active mismatch, thin Golden Age pool, active avg far below)
+- **ID_REQUIRED:** Identity fields genuinely incomplete/uncertain (missing title/issue/publisher, `identity-not-confident`) — i.e. no usable book to price against at all.
+- **DO_NOT_LIST:** Hard blockers present (manual review required, mega-key, catastrophic overprice, reprint with no comps of any kind, no pricing data from any source)
+- **RESEARCH:** Critical warnings escalated (sold/active mismatch, thin Golden Age pool, active avg far below, asset-type-uncertain, identity-conflict-unresolved — see Q110 note below)
 - **GRADE_CANDIDATE:** Grading upside detected (price ladder shows 2x+ uplift)
 - **LIST_LOW:** Moderate warnings present (thin pool, variant contamination, bundle candidate, reprint/polybag)
 - **LIST_NOW:** Clean identification and pricing, ready to list
 
-**Blockers:** missing identity fields, manual review required, grade exceeds map, reprint/polybag with no verified comps, catastrophic overprice.
+**Blockers:** missing identity fields, manual review required, grade exceeds map, reprint/polybag with no verified comps, catastrophic overprice, no pricing data from any source.
+
+**Q110 [2026-07-18] — intake-time non-blocking ruling:** `assetTypeConfident=false`, Vision-confirmed `isReprint`/`editionType`, and title-family-clustering `refused-identity-conflict` are no longer hard blockers (`identityBlockers` no longer includes `asset-type-mismatch`/`refused-identity-conflict`) — they're advisory `criticalWarnings` (`asset-type-uncertain`, `identity-conflict-unresolved`) that escalate to RESEARCH, never a wall. `api/enrich.js` no longer nulls price/comps for these three conditions — it sets `listingHardLocked` (routes `responseContract.js` to contract state `LOCKED`: price/bands stay visible, only the List button gates) instead of `refusedToPrice`/`identityConfident=false`/`decision.action=ID_REQUIRED` (which force state `REFUSED`/`ID_REQUIRED`: price nulled everywhere). Genuinely-missing identity (`identity-not-confident`, no usable title/issue/year/publisher at all) is unchanged and still hard-blocks — there's no book to price against. See Pattern Library "Intake-vs-listing gate class" below.
 
 **Integration:** Called at end of `api/enrich.js`, persisted through all merge paths, gates eBay listing actions (soft gate with user override).
+
+**Per-slug messaging:** `describeBlocker(slug, item)` / `describeWarning(slug, item)` (exported from `decisionEngine.js`) map each blocker/warning slug to a specific, item-grounded sentence (dominant `soldCompDiagnostics.reasons` cause, `storySuppressedReason` enum, `refusalReason`, actual `rawComps.count`, etc.) instead of the raw slug string. `App.jsx`'s two decision-panel render sites (`item.decision.blockers`/`.warnings`) call these per-item; `buildBlockerReason`/`buildWarningReason` (used for `decision.reason`) are thin wrappers over the same functions — one source of truth for both.
 
 ### App.jsx merge paths
 5 client merge paths plumb enrich response fields through IndexedDB: auto-refresh→catalogue, scan→catalogue, scan→selectedItem, bulk-import→catalogue, refreshMarketData. Pattern: `enrich.X || cur.X || defaultValue`.
@@ -606,6 +610,104 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   didn't need to change for this bug's root cause to close, and touching
   them risks their own independently-tuned behavior); flag for a future
   pass if either surfaces its own production miss.
+- **Intake-vs-listing gate class** (Walking Dead #109 / Siege #3 / Edge of
+  Spider-Verse, Q110 dispatch, 2026-07-18) — three independent conditions
+  (`assetTypeConfident=false`, Vision-confirmed `isReprint`/`editionType`,
+  title-family-clustering `refused-identity-conflict`) were each wired as
+  hard blockers that nulled price AND comps even when real, already-
+  computed pricing data existed underneath — a card with a genuine
+  10-listing comp pool (Walking Dead #109) showed a blank "Identification
+  Required" wall instead of a number. Root cause was a FOUR-layer redundant
+  block chain, not one gate: `api/enrich.js` nulled price directly and
+  skipped the entire tier1-4 synthesis block (so the already-fetched
+  comps never got priced); `decisionEngine.js`'s `identityBlockers` list
+  forced `decision.action='ID_REQUIRED'`; `responseContract.js`'s
+  `deriveState()` treated `ID_REQUIRED`/`refusedToPrice` as REFUSED-class
+  and force-nulled `contract.price` regardless of what `out.price` held
+  (enforced by invariant I1); `App.jsx`'s client-side merge separately
+  folded `assetTypeConfident===false` into `idGated`, re-nulling price a
+  third time. Comps were never gated by any of these layers and reached
+  the client fully intact the whole time — hence "10 real listings, blank
+  price." Separately, Siege #3 (a 2010 Marvel event tie-in) hit
+  `identityRefused` — one of only 3 hard `return`s in the entire
+  `api/enrich.js` pricing pipeline — which discarded the already-fetched
+  eBay reverse-image-search pool (`visualResult.items`) entirely before
+  the tier-4 visual-pool fallback (Ship 11, fires on
+  `verifiedCount===0 && soldCount===0 && visualResult.items.length>=10`)
+  ever got a chance to run; a sibling book in the same batch
+  (Transformers Universe #1) correctly hit that same fallback and showed
+  a $30 estimate with a $9.95–$125.99 range. Root-cause hypothesis for why
+  event tie-ins are exposed: `tokenizeTitleFamily`/`buildTitleFamilies`
+  (title-family clustering, see the Variant-artist-token-fusion entry
+  above) has zero event/crossover awareness — a heavily cross-promoted
+  event book's visual pool plausibly fragments across differently-titled
+  tie-ins sharing similar cover branding, landing on a fragmented
+  `fallback-vision` that escalates to `refused-identity-conflict`
+  whenever Vision's own title-read confidence is LOW (plausible when a
+  dominant event banner overwrites the small-print series title).
+  **Ruling (explicit, not inferred):** all three conditions become
+  informational-only at intake — the flag stays visible, but never
+  prevents a computed price from displaying. Reserve hard, unconditional
+  blocking for a later "ready to publish" stage, not intake/scan time.
+  Genuinely-missing identity (no usable title/issue/year/publisher at
+  all — `identity-not-confident`) is explicitly NOT included in this
+  ruling and remains a hard blocker; there is no book to price against in
+  that case, distinct from "identity present but a confidence flag fired."
+  **Fix, reusing existing primitives rather than inventing new state:**
+  `responseContract.js` already had exactly the right mechanism —
+  `listingHardLocked` routes to contract state `LOCKED`, which (per the
+  pre-existing "XMEN1 ruling" comment) keeps price/bands visible and only
+  gates the List button, unlike `REFUSED`/`ID_REQUIRED` which null price
+  everywhere. All three conditions now set `listingHardLocked` +
+  `listingHardLockBanner` (the advisory copy) instead of
+  `refusedToPrice`/`identityConfident=false`/forcing `ID_REQUIRED`, and
+  `api/enrich.js`'s price-synthesis gate no longer short-circuits on
+  `assetTypeConfident`. `isPolybagPricing` is deliberately NOT set true
+  for the Vision-confirmed-reprint case (it was overloaded — also used by
+  two genuinely data-driven, untouched divergence-abort branches and the
+  legitimate reprint-pool pricing formula a few lines below) so control
+  now falls through into that SAME existing reprint-pool pricing formula,
+  or the normal tier engine, rather than a new bespoke path. The
+  `identityRefused` early-return in `api/enrich.js` now computes the
+  identical Ship-11 median/P25/P75 formula from `visualResult.items`
+  inline (duplicated, not refactored, to avoid touching the already-
+  tested Ship-11 code path) before returning, so a card only shows a
+  genuinely blank price when there's truly nothing to fall back to (no
+  visual pool either) — still not a REFUSED wall, an honest INCOMPLETE.
+  Session-adjacent note: the `assetTypeConfident` hard-block itself was
+  added same-day, hours earlier, in commit `1ea15f8` — this ruling is a
+  conscious, explicit reversal of that gate's severity (confirmed with
+  the user before implementing), not an accidental undo.
+  **Messaging (Part 3, same dispatch):** `App.jsx`'s decision-panel
+  render was showing raw blocker/warning slugs verbatim (literally
+  `content-unverified`, `zero-verified-comps`) — `decisionEngine.js`
+  already had nicer text in `buildWarningReason`/`buildBlockerReason` for
+  some slugs, but that function's OUTPUT (`decision.reason`) was never
+  what `App.jsx` rendered per-item. New exported `describeBlocker`/
+  `describeWarning(slug, item)` functions map each slug to a specific,
+  item-grounded sentence — `zero-verified-comps` now names the dominant
+  `soldCompDiagnostics.reasons` rejection cause ("mostly variant
+  mismatch"), `content-unverified` names the specific
+  `storySuppressedReason` (era-gate-year-drift / foreign-edition /
+  title-weak-match / title-token-mismatch / publisher-mismatch),
+  `thin-pool-anchor` names the actual comp count, `identity-conflict-
+  unresolved` surfaces the real `refusalReason` text. Found and fixed a
+  genuinely dead field along the way: `out.compPoolContaminated` could
+  never fire — `api/comps.js` computes and returns
+  `reprintFallback`/`variantFallback` on its result, but `api/enrich.js`'s
+  copy-forward block only ever threaded `artistFallback`/
+  `premiumVariantIsolated` onto `out`, never those two — so "comp pool
+  used a variant/reprint fallback" could never actually surface to a
+  customer despite the check for it existing.
+  Regression: `tests/q110-intake-nonblocking.test.js` — reconstructs
+  Walking Dead #109 (LOCKED, real price visible), Siege #3 (LOCKED,
+  Ship-11-formula fallback visible, range intact), the genuinely-zero-
+  data sibling (honest no-price, still not REFUSED), and Edge of
+  Spider-Verse (no longer the ID_REQUIRED wall, reframed as lowest-
+  confidence RESEARCH tier) — plus a completeness guard asserting every
+  known warning slug has a specific `describeWarning` branch, so a future
+  `push()` with no matching branch can't silently regress back to raw-
+  slug display.
 
 ## Open Blockers
 

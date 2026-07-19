@@ -21,7 +21,7 @@ const testCases = [
     expected: {
       blockers: ['claude-check-critical'],
       action: 'DO_NOT_LIST',
-      reasonContains: 'critical verification failure'
+      reasonContains: 'critical'
     }
   },
   {
@@ -39,7 +39,7 @@ const testCases = [
     expected: {
       warnings: ['claude-check-high-severity'],
       action: 'RESEARCH',  // Critical warning escalates
-      reasonContains: 'high-severity verification warning'
+      reasonContains: 'high'
     }
   },
   {
@@ -74,7 +74,7 @@ const testCases = [
     expected: {
       blockers: ['claude-check-critical'],
       action: 'DO_NOT_LIST',
-      reasonContains: 'critical verification failure'
+      reasonContains: 'key issue misidentification'
     }
   },
   {
@@ -145,7 +145,7 @@ const testCases = [
     expected: {
       blockers: ['claude-check-critical'],
       action: 'DO_NOT_LIST',
-      reasonContains: 'critical verification failure'
+      reasonContains: 'key issue mismatch'
     }
   },
   {
@@ -163,7 +163,7 @@ const testCases = [
     expected: {
       blockers: ['claude-check-critical'],
       action: 'DO_NOT_LIST',
-      reasonContains: 'critical verification failure'
+      reasonContains: 'key issue mislabeled'
     }
   },
   {
@@ -181,7 +181,7 @@ const testCases = [
     expected: {
       blockers: ['claude-check-critical'],
       action: 'DO_NOT_LIST',
-      reasonContains: 'critical verification failure'
+      reasonContains: 'critical'
     }
   },
   {
@@ -199,7 +199,7 @@ const testCases = [
     expected: {
       warnings: ['claude-check-high-severity'],
       action: 'RESEARCH',
-      reasonContains: 'high-severity verification warning'
+      reasonContains: 'high'
     }
   },
   {
@@ -238,7 +238,7 @@ const testCases = [
       warnings: ['claude-check-high-severity'],
       blockers: [],
       action: 'RESEARCH',
-      reasonContains: 'high-severity'
+      reasonContains: 'high'
     }
   },
   {
@@ -277,7 +277,7 @@ const testCases = [
     expected: {
       blockers: ['claude-check-critical'],
       action: 'DO_NOT_LIST',
-      reasonContains: 'critical verification failure'
+      reasonContains: 'critical'
     }
   },
   {
@@ -427,7 +427,7 @@ const testCases = [
       warnings: ['claude-check-high-severity'],
       blockers: [],
       action: 'RESEARCH',
-      reasonContains: 'high-severity'
+      reasonContains: 'high'
     }
   },
   {
@@ -445,7 +445,7 @@ const testCases = [
     expected: {
       blockers: ['claude-check-critical'],
       action: 'DO_NOT_LIST',
-      reasonContains: 'critical verification failure'
+      reasonContains: 'critical'
     }
   },
   {
@@ -463,7 +463,7 @@ const testCases = [
     expected: {
       blockers: ['claude-check-critical'],
       action: 'DO_NOT_LIST',
-      reasonContains: 'critical verification failure'
+      reasonContains: 'critical'
     }
   }
 ];

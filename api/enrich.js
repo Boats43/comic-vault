@@ -3410,7 +3410,34 @@ export default async function handler(req, res) {
     // Ship 26.2 — Gate Phase 2 when identity refused
     if (identityRefused) {
       console.log(`[phase2] SKIPPED — identity refused by title-family clustering`);
-      // Skip to response construction with refusal data
+
+      // Q110 dispatch Part 2 (2026-07-18, Siege #3 class) — was a hard
+      // refusal (price/comps nulled) even when Phase 1 already fetched a
+      // usable visualResult pool. Transformers Universe #1's tier-4 visual-
+      // pool fallback (Ship 11, below) never got a chance to run here
+      // because this early return happens ~2,800 lines earlier and
+      // discarded visualResult entirely. Reuses Ship 11's exact median/P25/
+      // P75 formula (same threshold: >=10 raw items, >=5 valid prices) so
+      // every card reaches at minimum this fallback tier before showing a
+      // blank price — no new pricing logic, same tested computation.
+      let fallbackPrice = null, fallbackLow = null, fallbackHigh = null;
+      let fallbackPoolSize = 0;
+      const poolPrices = (visualResult?.items || [])
+        .map((i) => Number(i?.price))
+        .filter((p) => Number.isFinite(p) && p > 0 && p < 10000)
+        .sort((a, b) => a - b);
+      if (poolPrices.length >= 5) {
+        const pct = (arr, p) => arr[Math.min(arr.length - 1, Math.floor(arr.length * p))];
+        fallbackPrice = Math.round(pct(poolPrices, 0.5) * 100) / 100;
+        fallbackLow = Math.round(pct(poolPrices, 0.25) * 100) / 100;
+        fallbackHigh = Math.round(pct(poolPrices, 0.75) * 100) / 100;
+        fallbackPoolSize = poolPrices.length;
+        console.log(
+          `[phase2] identity-refused fallback: ${fallbackPoolSize} visual-pool prices ` +
+          `→ median=$${fallbackPrice} range=$${fallbackLow}-$${fallbackHigh}`
+        );
+      }
+
       // FIX 1: Include backfilled year/publisher in refused response
       // (backfillFromComps ran at line 1990, may have set confirmedYear/confirmedPublisher)
       const refusedOut = {
@@ -3422,12 +3449,9 @@ export default async function handler(req, res) {
         yearBackfillRatio: out.yearBackfillRatio || 0,
         yearBackfillSource: out.yearBackfillSource || null,
         publisherBackfilledFromComps: out.publisherBackfilledFromComps || false,
-        pricingSource: 'refused-identity-conflict',
-        refusedToPrice: true,
         pcTokenExpired: out.pcTokenExpired || false,
         refusalReason: familyCandidate?.reason || 'Visual pool families lack overlap with Vision',
         message: familyCandidate?.reason || 'Visual identification uncertain',
-        price: null,
         priceCharting: null,
         comicVine: null,
         comps: null,
@@ -3437,10 +3461,40 @@ export default async function handler(req, res) {
           topFamily: familyCandidate.topFamily,
           runnerUp: familyCandidate.runnerUp,
           families: familyCandidate.families
-        } : null
+        } : null,
+        // Advisory, not a wall — LOCKED state (responseContract.js) shows
+        // whatever price/range was computed above and gates only listing.
+        listingHardLocked: true,
+        listingHardLockReason: 'identity-unresolved',
+        listingHardLockBanner: familyCandidate?.reason
+          ? `Visual identification uncertain — ${familyCandidate.reason} — verify before listing`
+          : 'Visual identification uncertain — verify before listing',
+        confidenceLevel: 'LOW',
+        ...(fallbackPrice != null
+          ? {
+              price: fmtUsd(fallbackPrice),
+              priceLow: fmtUsd(fallbackLow),
+              priceHigh: fmtUsd(fallbackHigh),
+              priceBands: { quick: fallbackLow, market: fallbackPrice, stretch: fallbackHigh, source: 'visual_pool_fallback', count: fallbackPoolSize },
+              pricingSource: 'visual_pool_fallback',
+              priceNote: `Estimated from ${fallbackPoolSize} visually similar active listings — identity unconfirmed, verify before listing.`,
+              visualPoolUsed: true,
+              visualPoolSize: fallbackPoolSize,
+            }
+          : {
+              // Genuinely nothing to fall back to (thin visual pool too) —
+              // this is the "truly zero data" case the ruling still reserves
+              // for an honest no-price state, not a refusal wall.
+              price: null,
+              priceLow: null,
+              priceHigh: null,
+              priceBands: null,
+              pricingSource: null,
+              priceNote: 'No comp or visual-similarity data available for this identification.',
+            }),
       };
       // Ship #24a-2: refusedOut retired as a separate SHAPE — same fields
-      // flow, plus the canonical contract block (state=REFUSED, price null).
+      // flow, plus the canonical contract block.
       return res.status(200).json(finalizeResponse(refusedOut));
     }
 
@@ -4240,24 +4294,33 @@ export default async function handler(req, res) {
       visionEditionType === 'facsimile';
 
     if (visionConfirmedReprint) {
-      out.price = null;
-      out.priceLow = null;
-      out.priceHigh = null;
-      out.priceBands = null;
-      out.pricingSource = 'refused-vision-confirmed-reprint';
-      out.refusedToPrice = true;
+      // Q110 dispatch Part 1 (2026-07-18) — Vision-confirmed reprint/
+      // facsimile becomes advisory, not a hard abort. Was: nulled price,
+      // set refusedToPrice + isPolybagPricing=true, which ALSO suppressed
+      // out.comps (the `!isPolybagPricing` gate at the comps-output write)
+      // even though a real comp pool was already fetched. Now: the flag
+      // stays visible via listingHardLocked (routes responseContract.js to
+      // state=LOCKED — price/bands shown, only the List button is gated
+      // pending verification). isPolybagPricing is deliberately NOT set
+      // true here, so control falls through to the existing Ship-6 polybag
+      // comp-pool pricing below (reprintRatio>=0.6 branch) and, failing
+      // that, into the normal tier1-4 synthesis — both already-tested,
+      // data-driven pricing paths, not new logic. The genuinely data-driven
+      // divergence-abort branches further below (PC-anchor >10x conflict)
+      // are untouched — those refuse on real evidence, not on this flag
+      // alone, and stay out of scope per the dispatch's own framing.
       out.confidenceLevel = 'LOW';
       out.priceNote = 'Vision-confirmed reprint/facsimile — verify edition before pricing';
       out.listingHardLocked = true;
-      out.listingHardLockReason = 'vision-confirmed-reprint';
-      out.listingHardLockBanner = 'Vision confirmed this is a reprint/facsimile edition — refused to price';
+      out.listingHardLockReason = out.listingHardLockReason || 'vision-confirmed-reprint';
+      out.listingHardLockBanner = out.listingHardLockBanner
+        || 'Vision detected reprint/facsimile markings — verify edition before listing';
       out.polybagDetected = true;
       out.visionConfirmedReprint = true;
       out.visionEditionType = req.body?.editionType || null;
-      isPolybagPricing = true; // skip ALL downstream pricing blocks
       console.log(
-        `[polybag-abort] Vision-confirmed reprint: isReprint=${req.body?.isReprint} ` +
-        `editionType="${req.body?.editionType}" — hard abort, regardless of PC ratio`
+        `[polybag-advisory] Vision-confirmed reprint: isReprint=${req.body?.isReprint} ` +
+        `editionType="${req.body?.editionType}" — advisory only, pricing proceeds`
       );
     }
 
@@ -4790,22 +4853,23 @@ export default async function handler(req, res) {
       );
     }
 
-    // 2026-07-18 (anime/manga poster class) — asset-type gate. Independent
-    // of the identity gate above: explicitly null price fields (not just
-    // skip the pricing block) so the client merge ("enrich.price ||
-    // cur.price") replaces rather than preserves a stale/prior price on a
-    // re-scan or refresh of an item Vision now reports isn't a comic at all.
+    // Q110 dispatch Part 1 (2026-07-18) — asset-type flag becomes advisory,
+    // never a hard block on data already computed. Was: explicitly nulled
+    // price fields and forced pricingSource='refused-not-a-comic', which
+    // walled off the card even when a real comp pool existed underneath
+    // (Walking Dead #109 class — 10 real listings, blank card). Now: the
+    // flag stays visible via listingHardLocked (routes responseContract.js
+    // to state=LOCKED, which shows price/bands, gates only the List button
+    // — the "genuine listing gate" the ruling reserves for publish-time,
+    // not intake). Pricing below is no longer gated on this flag, so a
+    // real price computes from the same comps and lands inside the LOCKED
+    // card instead of being suppressed.
     if (!out.assetTypeConfident) {
-      out.price = null;
-      out.priceLow = null;
-      out.priceHigh = null;
-      out.pricingSource = 'refused-not-a-comic';
-      // Reuses the existing identityReasons/identityMissingFields display
-      // path (client merge "enrich.identityReasons ?? cur.identityReasons")
-      // so the "Identification Required" banner surfaces this specific
-      // reason with no additional client-side plumbing.
-      out.identityReasons = [...(out.identityReasons || []), 'Vision determined this image is not a comic book'];
-      console.log('[asset-type-gate] REFUSED to price — Vision reports image is not a comic book');
+      out.listingHardLocked = true;
+      out.listingHardLockReason = out.listingHardLockReason || 'asset-type-uncertain';
+      out.listingHardLockBanner = out.listingHardLockBanner
+        || 'This image may be a reference scan or promotional print — verify before listing';
+      console.log('[asset-type-gate] advisory only — pricing proceeds, listing locked pending verification');
     }
 
     // Hoisted out of the pricing block so the [price-trace] log below has
@@ -4830,7 +4894,10 @@ export default async function handler(req, res) {
     // (line ~2994) already set out.price/pricingSource. Without this guard, code
     // falls through all `!isPolybagPricing`-gated pricing branches and hits final
     // `else` which overwrites pricingSource='ebay-polybag-active' with 'refused'.
-    if (idCheckFinal.confident && !isPolybagPricing && out.assetTypeConfident) {
+    // Q110 dispatch Part 1: out.assetTypeConfident no longer gates the
+    // synthesis block — the flag is advisory (listingHardLocked above),
+    // not a pricing-eligibility gate. Real comps still price normally.
+    if (idCheckFinal.confident && !isPolybagPricing) {
     // P0-A — Kill browse_api legacy paths. All pricing routes through tier engine.
     // When priceBandsRaw truthy (tier 1-4 with data), use it. When null (tier-4
     // no-data: no PC, <2 verified comps), refuse-to-price instead of falling through
@@ -7022,6 +7089,12 @@ export default async function handler(req, res) {
     } : { count: 0 };
 
     // 2. compPoolContaminated: universal flag for variant/reprint fallback
+    // Q110 dispatch Part 3 (2026-07-18) — out.variantFallback/reprintFallback
+    // were never copied from rawComps (api/comps.js computes and returns
+    // them, but this file's copy-forward block only ever threaded
+    // artistFallback/premiumVariantIsolated). This warning could never fire.
+    out.variantFallback = out.variantFallback || rawComps?.variantFallback || false;
+    out.reprintFallback = out.reprintFallback || rawComps?.reprintFallback || false;
     if (out.variantFallback || out.reprintFallback) {
       out.compPoolContaminated = true;
     }

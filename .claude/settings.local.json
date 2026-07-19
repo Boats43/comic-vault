@@ -160,7 +160,31 @@
       "Bash(cp src/lib/compHygiene.js /c/Users/matam/AppData/Local/Temp/claude/C--Users-matam-OneDrive-Desktop-comic-vault/d870ccef-7812-4c51-b504-a142d215e708/scratchpad/compHygiene_final.js)",
       "WebFetch(domain:www.cgccomics.com)",
       "Read(//c/Users/matam/Downloads/**)",
-      "Bash(echo \"EXIT:$?\")"
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(python3 *)",
+      "Bash(mkdir -p /c/Users/matam/AppData/Local/Temp/claude/C--Users-matam-OneDrive-Desktop-comic-vault/ad42ca90-0f6c-43e5-a366-d8e7e1e0a0fe/scratchpad)",
+      "Bash(cp /tmp/pc_page.html /c/Users/matam/AppData/Local/Temp/claude/C--Users-matam-OneDrive-Desktop-comic-vault/ad42ca90-0f6c-43e5-a366-d8e7e1e0a0fe/scratchpad/pc_page.html)",
+      "Skill(artifact-design)",
+      "Skill(dataviz)",
+      "Bash(rm -f ./_verify_dispatch.mjs)",
+      "Bash(pkill -f \"vite\")",
+      "Bash(pkill -f \"npm run dev\")",
+      "Bash(read ts *)",
+      "Bash(gh --version)",
+      "Bash(gh api *)",
+      "mcp__plugin_vercel_vercel__list_deployments",
+      "mcp__plugin_vercel_vercel__list_projects",
+      "mcp__plugin_vercel_vercel__search_vercel_documentation",
+      "mcp__plugin_vercel_vercel__get_runtime_logs",
+      "Bash(node tests/identity-gate.test.js)",
+      "Bash(echo \"exit=$?\")",
+      "WebFetch(domain:www.githubstatus.com)",
+      "WebFetch(domain:findapis.com)",
+      "Bash(echo \"---EXIT:$?---\")",
+      "Bash(node tests/ship26-integration.test.js)",
+      "Bash(echo \"baseline exit: $?\")",
+      "Bash(echo \"fixed exit: $?\")",
+      "mcp__plugin_vercel_vercel__get_project"
     ]
   }
 }

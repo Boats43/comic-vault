@@ -1210,23 +1210,29 @@ test('GL-1: unknown future refused-* slug forces RESEARCH via boolean', () => {
   assertIncludes(decision.warnings, 'refused-to-price', 'Boolean-keyed warning present');
 });
 
-// TEST 45 (GL-1): identity-class refusal keeps ID_REQUIRED (ratified).
-test('GL-1: refused-identity-conflict stays ID_REQUIRED', () => {
+// TEST 45 (Q110 dispatch Part 2, 2026-07-18, supersedes GL-1): identity-class
+// refusal demoted from hard ID_REQUIRED blocker to an advisory RESEARCH-tier
+// warning — Siege #3 class. api/enrich.js no longer nulls price/comps for
+// this case (it attempts the visual-pool fallback first); decisionEngine.js
+// must not wall it back off with ID_REQUIRED once real fallback data exists.
+test('Q110: refused-identity-conflict is advisory (RESEARCH, not ID_REQUIRED)', () => {
   const item = {
     title: "Test Comic",
     issue: "1",
     publisher: "Test",
     year: 2020,
-    price: null,
-    refusedToPrice: true,
+    price: 30,
     pricingSource: "refused-identity-conflict",
     identityConfident: true,
+    refusalReason: "Visual pool families lack overlap with Vision",
     rawComps: { count: 0 }
   };
 
   const decision = computeDecision(item);
 
-  assertEqual(decision.action, 'ID_REQUIRED', 'Identity-class refusal keeps ID_REQUIRED');
+  assertEqual(decision.action, 'RESEARCH', 'Identity-conflict is advisory, not a hard wall');
+  assertNotIncludes(decision.blockers, 'refused-identity-conflict', 'No longer a hard blocker');
+  assertIncludes(decision.warnings, 'identity-conflict-unresolved', 'Advisory warning present');
 });
 
 // TEST 46 (GL-2, EX-5): refused-qualified-label forces RESEARCH.
