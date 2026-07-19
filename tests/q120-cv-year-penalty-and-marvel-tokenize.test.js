@@ -125,7 +125,11 @@ console.log(`  (captured: ${topScoresLine})`);
 
 // Parse out vid=50575's score from the captured log line to confirm the
 // -5 penalty is gone.
-const vid50575Match = topScoresLine && topScoresLine.match(/Captain Marvel\(name=(\d+) yr=(-?\d+) pub=(\d+) sub=(\d+) total=(-?\d+) vid=50575\)/);
+// Q121 dispatch note: the [comicvine] top scores log line gained a
+// poolYr= field after this test was written — regex updated to match
+// (not a behavior change; total/yr/pub/sub semantics here are unaffected
+// since this test never passes a poolYearHint, so poolYr is always 0).
+const vid50575Match = topScoresLine && topScoresLine.match(/Captain Marvel\(name=(\d+) yr=(-?\d+) pub=(\d+) sub=(\d+) poolYr=-?\d+ total=(-?\d+) vid=50575\)/);
 assertTrue(!!vid50575Match, 'vid=50575 appears in the top-scores log line (parseable)');
 if (vid50575Match) {
   const yr50575 = parseInt(vid50575Match[2], 10);

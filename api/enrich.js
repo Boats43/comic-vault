@@ -562,7 +562,7 @@ export const lookupComicVineByUPC = async (upc) => {
   }
 };
 
-export const lookupComicVine = async ({ title, issue, year, publisher }) => {
+export const lookupComicVine = async ({ title, issue, year, publisher, poolYearHint = null }) => {
   if (!process.env.COMICVINE_API_KEY || !title) return null;
   try {
     // Prefer explicit issue param, fall back to parsing from title.
@@ -871,6 +871,21 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       if (hasYearComparison && yearDiff >= 30) detailYearScore = -5;
       else if (hasYearComparison && yearDiff > 20) detailYearScore = -2;
 
+      // Q121 dispatch (2026-07-19, Captain Marvel #17 fix #2) — poolYearHint
+      // only ever applies when hasYearComparison is false (no authoritative
+      // comicYear exists at all) — it never competes with or overrides a
+      // real year comparison, only supplements the no-data case Q120
+      // isolated. Deliberately smaller magnitude than the authoritative
+      // scale above (+1/-2 here vs +2/-5 there) — a raw pool-derived modal
+      // year from seller title text is weaker evidence than an authoritative
+      // field and should never dominate name/publisher scoring.
+      let poolYearHintScore = 0;
+      if (!hasYearComparison && poolYearHint?.year && startYear) {
+        const poolYearDiff = Math.abs(startYear - poolYearHint.year);
+        if (poolYearDiff <= 3) poolYearHintScore = 1;
+        else if (poolYearDiff > 15) poolYearHintScore = -2;
+      }
+
       const volPub = String(vol.publisher?.name || "").toLowerCase().trim();
       const detailPubScore = pubLower && volPub && volPub.includes(pubLower) ? 2 : 0;
 
@@ -883,8 +898,8 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
         subtitleScore = hasSubtitle ? 30 : -20;
       }
 
-      const total = base.nameScore + detailYearScore + detailPubScore + subtitleScore;
-      return { ...base, yearScore: detailYearScore, publisherScore: detailPubScore, subtitleScore, total, volume: vol };
+      const total = base.nameScore + detailYearScore + detailPubScore + subtitleScore + poolYearHintScore;
+      return { ...base, yearScore: detailYearScore, publisherScore: detailPubScore, subtitleScore, poolYearHintScore, total, volume: vol };
     };
 
     let match = null;
@@ -902,7 +917,7 @@ export const lookupComicVine = async ({ title, issue, year, publisher }) => {
       const scored = candidates.map(scoreWithDetails);
       scored.sort((a, b) => b.total - a.total || a.volId - b.volId);
       console.log(`[comicvine] top scores: ${scored.slice(0, 3).map((s) =>
-        `${s.r.volume?.name}(name=${s.nameScore} yr=${s.yearScore} pub=${s.publisherScore} sub=${s.subtitleScore || 0} total=${s.total} vid=${s.volId})`
+        `${s.r.volume?.name}(name=${s.nameScore} yr=${s.yearScore} pub=${s.publisherScore} sub=${s.subtitleScore || 0} poolYr=${s.poolYearHintScore || 0} total=${s.total} vid=${s.volId})`
       ).join(" | ")}`);
 
       const topScore = scored[0].total;
@@ -2290,6 +2305,50 @@ export default async function handler(req, res) {
       }
     }
 
+    // Q121 dispatch (2026-07-19, Captain Marvel #17 fix #2) — a separate,
+    // simpler, purpose-built year signal for ComicVine volume
+    // disambiguation ONLY. Built alongside eraLock, from the same
+    // parsedVisualRows, but with looser extraction: any 4-digit
+    // 19xx/20xx token ANYWHERE in the title, no proximity-to-issue-marker
+    // bridging, no first-half-only restriction. Confirmed via direct
+    // testing against the real Captain Marvel #17 pool: eraLock's own
+    // patterns extracted a year from only 1/20 titles (nowhere near its
+    // own >=3 minimum) because sellers commonly put the cover year LATE
+    // in the title, after grade/description text — breaking eraLock's
+    // bridging and first-half heuristics. This looser extraction found
+    // 7/20 titles with a parseable year, unanimous at 2014 — a real
+    // signal eraLock's own logic cannot see on this pool shape.
+    // Deliberately NOT reusing or modifying eraLock — a new, independent
+    // value, zero interaction with eraLock's own decision or consumers.
+    // Only ever consulted by lookupComicVine when comicYear is null
+    // (Q120's hasYearComparison gate), at a much smaller magnitude than
+    // the authoritative-year scale (+1/-2, not +2/-5) — appropriately
+    // conservative for a signal built from raw seller title text with no
+    // exact-year guarantee, unlike eraLock's own stricter quorum (kept
+    // exactly as-is above, untouched).
+    let poolYearHint = null;
+    if (parsedVisualRows && parsedVisualRows.length >= 3) {
+      const poolYearCounts = {};
+      parsedVisualRows.forEach((r) => {
+        const titleLower = (r.title || '').toLowerCase();
+        const yearsInTitle = new Set(
+          [...titleLower.matchAll(/\b(19\d{2}|20\d{2})\b/g)].map((m) => parseInt(m[1], 10))
+        );
+        yearsInTitle.forEach((y) => {
+          if (y >= 1900 && y <= 2030) poolYearCounts[y] = (poolYearCounts[y] || 0) + 1;
+        });
+      });
+      const poolTotalWithYear = Object.values(poolYearCounts).reduce((s, c) => s + c, 0);
+      if (poolTotalWithYear >= 3) {
+        const [topYearStr, topCount] = Object.entries(poolYearCounts).sort((a, b) => b[1] - a[1])[0];
+        const agreement = topCount / poolTotalWithYear;
+        if (agreement >= 0.50) {
+          poolYearHint = { year: parseInt(topYearStr, 10), agreement, sampleSize: poolTotalWithYear };
+          console.log(`[cv-pool-year-hint] year=${poolYearHint.year} agreement=${(agreement * 100).toFixed(0)}% (${topCount}/${poolTotalWithYear})`);
+        }
+      }
+    }
+
     // Q78: Issue-axis visual consensus (mismatch detection + backfill)
     // Q58: Issue consensus backfill from VISUAL pool (eBay image search results).
     // When Vision missed issue (issueNum=null) AND ≥70% of visual search results
@@ -2757,7 +2816,7 @@ export default async function handler(req, res) {
         const kvKey = `cv:${cvKey}`;
         const cached = await kvGet(kvKey);
         if (cached) return cached;
-        const result = await lookupComicVine({ title: cleanedCVTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher }).catch(() => null);
+        const result = await lookupComicVine({ title: cleanedCVTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher, poolYearHint }).catch(() => null);
         await kvSet(kvKey, result, KV_TTL.CV);
         return result;
       })(),
