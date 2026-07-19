@@ -381,6 +381,39 @@ export const checkAssemblyIntegrity = (visionTitle, assembledTitle, compTitles =
   return { intact: true, missing: [], added: [], shouldFallback: false, reason: null };
 };
 
+/**
+ * Q131 follow-up (2026-07-19, Eternus #2 / He-Man class) — checkAssemblyIntegrity's
+ * zero-support carve-out (above) validates the assembled title against the
+ * FULL raw comp pool, which assumes one title dominates the whole pool.
+ * That assumption is false by construction for a refused-identity-conflict
+ * provisional override (resolveIdentity's own
+ * 'title-family-refused-provisional' branch): the pool deliberately
+ * fragments into multiple families, and the surfaced title is only ITS OWN
+ * family's consensus — already validated by resolveIdentity's count>=2
+ * unanimity guard, not by 22e's raw-pool-wide threshold. 22e's job is
+ * catching assembly bugs (a compound token accidentally dropped while
+ * combining sources, e.g. Captain Marvel truncation / X-Men #44 Angel);
+ * this isn't an assembly, it's an intentional, already-justified departure
+ * from a Vision guess that has zero pool support by definition of this
+ * decision.
+ *
+ * Keyed on familyCandidate.decision directly (not identitySource string-
+ * matching) so it stays correct even if resolveIdentity's separate
+ * zero-support issue/publisher logic appends a suffix to identitySource
+ * later in the same call. When resolveIdentity's count>=2 guard didn't
+ * fire (thin/no topFamily), confirmedTitle still equals Vision's own
+ * value, so skipping the check changes nothing there either — this is a
+ * true no-op in every case except the one it's meant to fix.
+ *
+ * Pure predicate, extracted for direct regression-testability (same
+ * rationale as Fix 2/3 above and Q111's applyVariantPreferenceFilter).
+ *
+ * @param {string|null|undefined} familyDecision - familyCandidate?.decision
+ * @returns {boolean} true when the 22e assembly-integrity check should be skipped
+ */
+export const shouldSkipAssemblyIntegrityCheck = (familyDecision) =>
+  familyDecision === 'refused-identity-conflict';
+
 // Generic publisher/franchise words that pass on nearly every comic and
 // don't discriminate between products — filtered out of the PC-match
 // overlap check below so e.g. "comics"/"the" don't inflate the ratio.

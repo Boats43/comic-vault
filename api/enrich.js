@@ -42,6 +42,7 @@ import {
   titleOverlapsProduct,
   selectBestVariantCandidate,
   buildIdentityRefusedFallbackPool,
+  shouldSkipAssemblyIntegrityCheck,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -2561,18 +2562,24 @@ export default async function handler(req, res) {
       // of []. Same pool already feeding agreement.visionIssueCount (Vision
       // zero-support fix) — gives checkAssemblyIntegrity's zero-support
       // carve-out real, EARLY data instead of being permanently inert here.
-      const integrityCompTitles = parsedVisualRows.map((r) => r.rawTitle).filter(Boolean);
       console.log(`[22e] checking integrity: vision="${effectiveTitle}" assembled="${confirmedTitle}"`);
-      const integrityCheck = checkAssemblyIntegrity(effectiveTitle, confirmedTitle, integrityCompTitles);
-      if (integrityCheck.shouldFallback) {
-        console.log(
-          `[22e] FORCED vision="${effectiveTitle}" rejected="${confirmedTitle}" ` +
-          `reason=${integrityCheck.reason} missing=[${integrityCheck.missing.join(',')}]`
-        );
-        confirmedTitle = effectiveTitle;
-        out.assemblyIntegrityFailed = true;
-        out.assemblyIntegrityMissing = integrityCheck.missing;
-        out.assemblyIntegrityReason = integrityCheck.reason;
+      // Q131 follow-up — see shouldSkipAssemblyIntegrityCheck docstring
+      // (identityCore.js) for why refused-identity-conflict is exempt.
+      if (shouldSkipAssemblyIntegrityCheck(familyCandidate?.decision)) {
+        console.log(`[22e] SKIPPED — refused-identity-conflict provisional identity is intentionally divergent from Vision, not an assembly bug`);
+      } else {
+        const integrityCompTitles = parsedVisualRows.map((r) => r.rawTitle).filter(Boolean);
+        const integrityCheck = checkAssemblyIntegrity(effectiveTitle, confirmedTitle, integrityCompTitles);
+        if (integrityCheck.shouldFallback) {
+          console.log(
+            `[22e] FORCED vision="${effectiveTitle}" rejected="${confirmedTitle}" ` +
+            `reason=${integrityCheck.reason} missing=[${integrityCheck.missing.join(',')}]`
+          );
+          confirmedTitle = effectiveTitle;
+          out.assemblyIntegrityFailed = true;
+          out.assemblyIntegrityMissing = integrityCheck.missing;
+          out.assemblyIntegrityReason = integrityCheck.reason;
+        }
       }
     }
 

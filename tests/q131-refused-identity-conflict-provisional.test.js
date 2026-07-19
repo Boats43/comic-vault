@@ -38,9 +38,25 @@
 // applyIdentityConflictDemotion caps convergence, and
 // buildIdentityRefusedFallbackPool isolates the fallback price.
 //
+// FOLLOW-UP (same dispatch family) — a FOURTH consumer surfaced only once
+// this fix went live: Ship #22e's assembly-integrity check
+// (checkAssemblyIntegrity) validates the assembled title against the FULL
+// raw comp pool (>=60% token support required) — an assumption that's
+// false by construction here, since the Eternus family is only 2/17≈12%
+// of the raw pool (100% of its OWN family, 12% of the whole). 22e was
+// reverting Fix 1's correct provisional title straight back to Vision.
+// Fixed by shouldSkipAssemblyIntegrityCheck(familyDecision) — exempts
+// refused-identity-conflict from 22e entirely, since that identity is an
+// intentional departure from Vision, not an assembly bug 22e should catch.
+//
 // Invoke: node tests/q131-refused-identity-conflict-provisional.test.js
 
-import { resolveIdentity, buildIdentityRefusedFallbackPool } from '../src/lib/identityCore.js';
+import {
+  resolveIdentity,
+  buildIdentityRefusedFallbackPool,
+  checkAssemblyIntegrity,
+  shouldSkipAssemblyIntegrityCheck,
+} from '../src/lib/identityCore.js';
 import { applyIdentityConflictDemotion } from '../src/lib/convergenceScore.js';
 
 let passed = 0;
@@ -205,6 +221,106 @@ console.log('\n── buildIdentityRefusedFallbackPool: guards ──');
   const tinyRawPool = [{ price: 5 }, { price: 6 }, { price: 7 }];
   check(buildIdentityRefusedFallbackPool(tinyRawPool, null).fallbackPrice === null,
     'raw-pool path still needs >=5 valid prices (pre-existing threshold, unchanged)');
+}
+
+// Real production comp titles (post category-gate, 17 of the 20 raw
+// results) — same pool used in section 5 above, as rawTitle strings for
+// checkAssemblyIntegrity's compTitles param.
+const eternusRawPoolTitles = [
+  'Eternus #2 - NYCC Metal Virgin Variant Cover',
+  'Eternus #2 - NYCC Virgin Variant Cover',
+  'Anime Video Game Darksiders Ii Gaming Mat Desk 10167',
+  'Conan the Barbarian #9 FOC Deodato Virgin Titan 2024 NM+',
+  'metaphysical Sila djinn male powerful brings wishes',
+  'LOBO #1 COVER E LEE BERMEJO FOIL VARIANT DC NEXT LEVEL 2026',
+  '8x10 Horned Storm Sorcerer With Purple Lightning Art Print',
+  'LOBO #1 - LEE BERMEJO COVER E FOIL VARIANT',
+  'LOBO #1 CVR E BERMEJO FOIL VAR',
+  'metaphysical ELITE MARID DJINN KING dark Egyptian',
+  'LOBO #1 CVR E LEE BERMEJO FOIL VAR IN STOCK 2026',
+  'metaphysical DARK IFRIT EFRIT DJINN JINN GENIE',
+  'Conan The Barbarian #27 Cover E Doug Braithwaite Full Art',
+  'LOBO #1 Cvr E Lee Bermejo FOIL SHIPS 3/18/26',
+  '8x10 Red moon warrior woman at standing stones',
+  'Lobo #1 Cvr E Lee Bermejo Foil Virgin Var (Pre-Order)',
+  'LOBO #1 LEE BERMEJO FOIL VAR 3/18/26 NM',
+];
+
+// ── 7. shouldSkipAssemblyIntegrityCheck — the exemption predicate ───
+console.log('\n── shouldSkipAssemblyIntegrityCheck ──');
+{
+  check(shouldSkipAssemblyIntegrityCheck('refused-identity-conflict') === true,
+    'refused-identity-conflict is skipped');
+  check(shouldSkipAssemblyIntegrityCheck('fallback-vision') === false,
+    'fallback-vision is NOT skipped (unrelated decision)');
+  check(shouldSkipAssemblyIntegrityCheck('top-rank-protection') === false,
+    'top-rank-protection is NOT skipped (normal path, must stay protected)');
+  check(shouldSkipAssemblyIntegrityCheck('weighted-consensus') === false,
+    'weighted-consensus is NOT skipped (normal path, must stay protected)');
+  check(shouldSkipAssemblyIntegrityCheck(undefined) === false,
+    'no familyCandidate (undefined decision) is NOT skipped');
+}
+
+// ── 8. The bug, proven at the function level (why the skip is needed) ──
+console.log('\n── checkAssemblyIntegrity: the Eternus case WOULD revert without the skip ──');
+{
+  const provisionalTitle = 'Eternus #2 - NYCC Metal Virgin Variant';
+  const result = checkAssemblyIntegrity(
+    'He-Man and the Masters of the Universe',
+    provisionalTitle,
+    eternusRawPoolTitles
+  );
+  check(result.shouldFallback === true,
+    `checkAssemblyIntegrity alone WOULD force Vision back (reason=${result.reason}) — ` +
+    `confirms this is a real bug the enrich.js-level skip must prevent, not theoretical`);
+}
+
+// ── 9. Requirement #2 — 22e's original protected case still fires ───
+console.log('\n── checkAssemblyIntegrity: Captain Marvel / X-Men Angel class UNCHANGED ──');
+{
+  // Classic 22e-LOSS case: Q54 protects ["x","men"] but assembly drops "x"
+  // ("The X-Men #44 Angel" -> assembled "men timeless"). "x-men" IS
+  // well-supported in the comp pool (unlike the Eternus case above, where
+  // Vision's tokens have ZERO pool support) — this is exactly the class
+  // 22e must keep reverting. Not touched by this fix (shouldSkipAssembly-
+  // IntegrityCheck only exempts refused-identity-conflict; this scenario's
+  // familyCandidate.decision would be 'top-rank-protection' or
+  // 'weighted-consensus', never refused-identity-conflict).
+  const xmenPoolTitles = [
+    'X-Men #44 Angel NM', 'X-Men #44 Angel VF', 'X-Men #44 Angel FN',
+    'X-Men #44 Angel GD', 'X-Men #44 Angel Marvel Comics',
+  ];
+  const xmenResult = checkAssemblyIntegrity('The X-Men #44 Angel', 'men timeless', xmenPoolTitles);
+  check(xmenResult.shouldFallback === true,
+    `X-Men #44 Angel compound-drop still correctly forces Vision back (reason=${xmenResult.reason})`);
+  check(shouldSkipAssemblyIntegrityCheck('top-rank-protection') === false,
+    'this class runs under a decision the exemption never touches — confirmed not skipped');
+
+  // Spider-Versity class (the carve-out's OWN original purpose): Vision's
+  // token has ZERO pool support AND the assembled title IS pool-corroborated
+  // (>=60%) — must still correctly DEFER to the pool, not force Vision.
+  // Confirms the exemption didn't accidentally break the carve-out itself.
+  const spiderPool = [
+    'Spider-Verse Team-Up #1 NM', 'Spider-Verse Team-Up #1 VF',
+    'Spider-Verse Team-Up #1 FN', 'Spider-Verse Team-Up #1 Marvel',
+  ];
+  const spiderResult = checkAssemblyIntegrity('Spider-Versity', 'Spider-Verse Team-Up', spiderPool);
+  check(spiderResult.shouldFallback === false,
+    `zero-support defer (Spider-Versity class) still works unmodified (reason=${spiderResult.reason || 'intact'})`);
+}
+
+// ── 10. Requirement #3 — thin/no topFamily case is a true no-op ─────
+console.log('\n── thin/no topFamily: exemption changes nothing ──');
+{
+  // When Fix 1's count>=2 guard doesn't fire, resolveIdentity leaves
+  // confirmedTitle === vision.title. checkAssemblyIntegrity on identical
+  // vision/assembled strings has nothing to revert either way.
+  const sameTitle = 'He-Man and the Masters of the Universe';
+  const withoutSkip = checkAssemblyIntegrity(sameTitle, sameTitle, eternusRawPoolTitles);
+  check(withoutSkip.shouldFallback === false,
+    `identical vision/assembled title is already intact regardless of the skip (reason=${withoutSkip.reason || 'intact'})`);
+  check(shouldSkipAssemblyIntegrityCheck('refused-identity-conflict') === true,
+    'skip WOULD still apply for this decision, but changes nothing observable — true no-op confirmed');
 }
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
