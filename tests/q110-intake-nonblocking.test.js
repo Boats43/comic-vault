@@ -286,7 +286,7 @@ const allWarningSlugs = [
   'claude-check-high-severity', 'floor-contamination-suspect', 'all-sold-comps-stale',
   'bundle-candidate', 'cold-market-velocity', 'zero-velocity', 'hot-market-velocity',
   'low-confidence-escalation', 'recommended-below-floor', 'internal-inconsistency',
-  'variant-comps-unavailable', 'variant-pool-year-conflict',
+  'variant-comps-unavailable', 'variant-pool-year-conflict', 'artist-identity-conflict',
 ];
 let allDescribed = true;
 for (const slug of allWarningSlugs) {

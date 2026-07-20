@@ -107,7 +107,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict } from "../src/lib/compHygiene.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -4839,6 +4839,31 @@ export default async function handler(req, res) {
       if (creatorResult.consensus.length > 0) {
         console.log('[creator-from-comps] consensus:',
           creatorResult.consensus.map((e) => `${e.tier}/${e.canonical}×${e.hits}`).join(', '));
+      }
+
+      // Q132 dispatch, Fix 3 (2026-07-20) — surface a disagreement between
+      // this comp-pool creator consensus and whatever artist name Vision's
+      // own free-text condition report (req.body.reason) happens to
+      // mention. Two structurally separate pipelines that never cross-
+      // check each other today (traced: req.body.reason is only consumed
+      // by detectEditionWarning + display pass-through) — a card can show
+      // one artist in its condition report while pricing against a
+      // different artist's variant entirely. Real production case: the
+      // SAME physical book's condition-report artist drifted three
+      // separate ways across three scans ("Iana Nyx" → "Iana Anikyrie" →
+      // "Jimenez") while the comp-pool consensus correctly said "David
+      // Nakayama" all three times. Surfacing only — does not attempt to
+      // resolve which artist is correct.
+      const artistConflict = detectConditionReportArtistConflict(
+        req.body?.reason,
+        creatorResult.consensus.map((e) => e.canonical)
+      );
+      if (artistConflict) {
+        out.artistIdentityConflict = artistConflict;
+        console.log(
+          `[artist-conflict] condition report names "${artistConflict.conditionReportArtist}" but ` +
+          `comp-pool consensus says ${artistConflict.compPoolArtists.join(', ')} — surfacing, not resolving`
+        );
       }
     }
 

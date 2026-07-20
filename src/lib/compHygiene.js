@@ -852,6 +852,141 @@ export const extractArtist = (variantOrTitle) => {
   return null;
 };
 
+// Q132 dispatch, Fix 3 (2026-07-20) — surfaces a mismatch between the two
+// structurally-separate artist signals on a card: the comp-pool/title-
+// family creator consensus (extractCreatorsFromComps, premiumCreators.js —
+// derived from eBay listing titles) and whatever artist name Vision's own
+// free-text condition report (grade.js STANDARD_PROMPT's "reason" field)
+// happens to mention. These two pipelines never cross-check each other
+// today — confirmed by tracing every consumer of req.body.reason in
+// api/enrich.js (detectEditionWarning only, plus pass-through display) —
+// so a card can show one artist in its condition-report text while pricing
+// against a completely different artist's variant, with nothing to catch
+// the contradiction. Real production case: the SAME physical book's
+// condition-report artist name drifted three separate ways across three
+// scans ("Iana Nyx" → "Iana Anikyrie" → "Jimenez") while the comp-pool
+// consensus correctly said "David Nakayama" all three times — Vision's
+// free narration is not grounded to the resolved identity at all.
+//
+// Vision's structured JSON response (grade.js JSON_SHAPE) has no dedicated
+// artist/coverArtist field — an artist name can ONLY appear embedded in
+// the free-text reason narrative, in unpredictable phrasing ("Iana Nyx
+// artwork", "signed by X", "art by X"). ARTIST_PATTERNS/extractArtist
+// alone is insufficient here: it's a closed registry (confirmed
+// real-world names only), so hallucinated non-existent names like "Iana
+// Nyx" — exactly the case this exists to catch — would never match it.
+// Extraction instead looks for a capitalized name-like phrase (1-3 Title
+// Case words) sitting immediately adjacent to a small set of attribution
+// keywords ("artwork", "artist", "cover", "illustrat*", "drawn", "signed",
+// "credit*") — bounded, not exhaustive; a stopgap in the same spirit as
+// this file's other named-descriptor lists (OTHER_VARIANT_DESCRIPTOR_RE),
+// not a permanent NLP solution. GENERIC_CAPS excludes common capitalized
+// format/grade/publisher words that would otherwise false-positive
+// (Cover, Variant, NM, Marvel, etc.).
+//
+// Deliberately does NOT attempt to resolve which artist is correct — pure
+// surfacing, per the standing ruling on this feature. The comp-pool
+// consensus is treated as the comparison baseline (it comes from real
+// seller listings, not free narration) but no confidence claim is made
+// about it being right; a mismatch here means "these two signals
+// disagree," not "the condition report is wrong."
+const ARTIST_ATTRIBUTION_KEYWORDS = new Set([
+  'artist', 'artwork', 'art', 'cover', 'illustrated', 'illustration',
+  'illustrator', 'drawn', 'signed', 'credited', 'credit', 'by',
+]);
+// Includes the attribution keywords themselves (a sentence-initial "Signed
+// by..." must not treat "Signed" as a name candidate) plus common
+// condition-report/format vocabulary that also turns up capitalized at
+// sentence starts ("Standard cover...", "Raw copy...").
+const ARTIST_MENTION_GENERIC_CAPS = new Set([
+  ...ARTIST_ATTRIBUTION_KEYWORDS,
+  'cover', 'variant', 'virgin', 'color', 'block', 'white', 'direct',
+  'edition', 'near', 'mint', 'nm', 'vf', 'fn', 'gd', 'pr', 'signature',
+  'series', 'trade', 'dress', 'exclusive', 'limited', 'incentive',
+  'marvel', 'dc', 'image', 'idw', 'boom', 'dynamite', 'archie', 'valiant',
+  'comics', 'comic', 'the', 'a', 'an', 'this', 'that', 'issue', 'first',
+  'second', 'raw', 'copy', 'standard', 'condition', 'appears', 'features',
+  'detected', 'overall', 'front', 'style', 'distinctive', 'minor', 'edge',
+  'wear', 'no', 'not', 'looks', 'shows', 'book', 'grade', 'graded',
+]);
+
+const capWordClean = (w) => String(w || '').replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, '');
+const isCapWord = (w) => /^[A-Z][a-zA-Z'.-]*$/.test(capWordClean(w));
+// A word is sentence-initial when it's the very first word of the text, or
+// the previous word ends with sentence-terminal punctuation — capitalized
+// purely by English sentence-casing, not evidence of a proper noun. Only
+// matters for single-word candidates: two CONSECUTIVE capitalized words
+// ("Iana Nyx") are strong proper-noun evidence regardless of position,
+// since English doesn't capitalize a common word immediately following a
+// sentence-initial capital.
+const isSentenceInitial = (words, idx) => {
+  if (idx <= 0) return true;
+  return /[.!?]["')\]]*$/.test(words[idx - 1] || '');
+};
+
+// Extracts a candidate artist-name mention from free-text narration. Pure,
+// no registry lookup — returns the raw candidate phrase (original case) or
+// null. Adjacency window is 1 word on either side of an attribution
+// keyword, matching the one concrete phrasing this was built from
+// ("Iana Nyx artwork" — name immediately precedes the keyword).
+export const extractConditionReportArtistMention = (text) => {
+  if (!text) return null;
+  const words = String(text).split(/\s+/);
+  for (let i = 0; i < words.length; i++) {
+    const bare = capWordClean(words[i]).toLowerCase();
+    if (!ARTIST_ATTRIBUTION_KEYWORDS.has(bare)) continue;
+    // Check the word immediately before, then immediately after.
+    for (const j of [i - 1, i + 1]) {
+      if (j < 0 || j >= words.length || j === i) continue;
+      if (!isCapWord(words[j])) continue;
+      const candidateWord = capWordClean(words[j]);
+      if (ARTIST_MENTION_GENERIC_CAPS.has(candidateWord.toLowerCase())) continue;
+      // Try to extend to a 2-word "Firstname Lastname" sequence in the
+      // same direction as the adjacency (before the keyword: look one
+      // further back; after the keyword: look one further forward).
+      const extendIdx = j < i ? j - 1 : j + 1;
+      if (extendIdx >= 0 && extendIdx < words.length && isCapWord(words[extendIdx])) {
+        const extendWord = capWordClean(words[extendIdx]);
+        if (!ARTIST_MENTION_GENERIC_CAPS.has(extendWord.toLowerCase())) {
+          // Two consecutive capitalized words — strong proper-noun
+          // evidence, position-independent.
+          return j < i ? `${extendWord} ${candidateWord}` : `${candidateWord} ${extendWord}`;
+        }
+      }
+      // Single-word candidate — reject if it's only capitalized because
+      // it's sentence-initial (no corroborating second capitalized word).
+      if (isSentenceInitial(words, j)) continue;
+      return candidateWord;
+    }
+  }
+  return null;
+};
+
+// Compares the condition-report artist mention against the comp-pool
+// creator consensus. Returns { conditionReportArtist, compPoolArtists }
+// when they name DIFFERENT people, or null when they agree, either signal
+// is absent, or there's nothing to compare. Comparison is by surname (last
+// word) — "Nakayama" (bare, ARTIST_PATTERNS surname-only match) must equal
+// "David Nakayama" (full canonical name, premiumCreators.js), not conflict
+// with it; only genuinely different people should ever fire this.
+export const detectConditionReportArtistConflict = (conditionReportText, compPoolArtistNames) => {
+  if (!Array.isArray(compPoolArtistNames) || compPoolArtistNames.length === 0) return null;
+  const mention = extractConditionReportArtistMention(conditionReportText);
+  if (!mention) return null;
+  const lastWord = (s) => {
+    const w = String(s || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return w.length ? w[w.length - 1] : null;
+  };
+  const mentionSurname = lastWord(mention);
+  if (!mentionSurname) return null;
+  const compSurnames = compPoolArtistNames.map(lastWord).filter(Boolean);
+  if (compSurnames.includes(mentionSurname)) return null;
+  return {
+    conditionReportArtist: mention,
+    compPoolArtists: compPoolArtistNames,
+  };
+};
+
 // ───────────────────────────── PUBLISHER ───────────────────────────────
 
 // Normalize a publisher string for search queries. Brackets/quotes/

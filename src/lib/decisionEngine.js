@@ -464,6 +464,23 @@ export function computeDecision(item, context = {}) {
     decision.evidence.variantPoolYearConflict = item.variantPoolYearConflict;
   }
 
+  // Q132 dispatch, Fix 3 (2026-07-20) — Vision's free-text condition report
+  // named a different artist than the comp-pool creator consensus
+  // (detectConditionReportArtistConflict, compHygiene.js). Real production
+  // case: the same physical book's condition-report artist drifted three
+  // separate ways across three scans while the comp-pool consensus stayed
+  // consistent — these two signals are never cross-checked anywhere else
+  // in the pipeline. Escalates to RESEARCH (same class as Q118's
+  // internal-inconsistency — Vision's own text disagreeing with a
+  // structured signal) rather than staying at content-unverified's
+  // LIST_LOW ceiling: this can indicate pricing against the wrong
+  // artist's variant, a price-evidence concern, not just a cosmetic flag.
+  // Pure surfacing — no attempt to resolve which artist is correct.
+  if (item.artistIdentityConflict) {
+    decision.warnings.push('artist-identity-conflict');
+    decision.evidence.artistIdentityConflict = item.artistIdentityConflict;
+  }
+
   // Warning: Active/sold mismatch
   const soldAvg = item.soldComps?.length >= 2
     ? item.soldComps.reduce((sum, c) => sum + c.price, 0) / item.soldComps.length
@@ -575,6 +592,7 @@ export function computeDecision(item, context = {}) {
     'internal-inconsistency',          // Q118: Vision's own reason text contradicts its own structured fields
     'variant-comps-unavailable',       // Q129: era-excluded comps named a specific cover variant the priced pool doesn't
     'variant-pool-year-conflict',      // Q132: pool-year drift suppressed a variant/edition signal — possibly the wrong printing
+    'artist-identity-conflict',        // Q132 Fix 3: condition-report artist disagrees with comp-pool creator consensus
   ];
   // Removed: 'content-unverified' (not a price flag — stays LIST_LOW/BUNDLE)
 
@@ -1000,6 +1018,11 @@ export function describeWarning(slug, item) {
     return v.corroboratedByFamily
       ? `${base}; corroborated by a blocked title match ("${v.corroboratedByFamily.topFamilyTitle}", ${v.corroboratedByFamily.count} listings) — verify this is the right book before listing`
       : base;
+  }
+  if (slug === 'artist-identity-conflict') {
+    const a = item.artistIdentityConflict;
+    if (!a) return 'condition report artist disagrees with comp-pool consensus — verify before listing';
+    return `condition report names "${a.conditionReportArtist}" but comp-pool consensus says ${a.compPoolArtists.join(', ')} — verify the correct artist/variant before listing`;
   }
   return slug;
 }
