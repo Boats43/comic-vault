@@ -43,6 +43,7 @@ import {
   selectBestVariantCandidate,
   buildIdentityRefusedFallbackPool,
   shouldSkipAssemblyIntegrityCheck,
+  isProvisionalRefusedIdentity,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -2810,10 +2811,26 @@ export default async function handler(req, res) {
     // artist/variant noise from matching wrong volumes (Catwoman/Gotham War class).
     const cleanedCVTitle = cleanTitleForComicVine(confirmedTitle, req.body.variant);
 
+    // Q131 systemic-audit follow-up (2026-07-19, Eternus #2 class) — the
+    // bare `year` (destructured from req.body at the top of the handler,
+    // line ~1961) is Vision's raw, pre-resolution guess. Every site below
+    // that uses it for a PC cache key or lookup was bypassing
+    // confirmedYear entirely — the exact "PC cache-key still shows
+    // year=2019 eighty milliseconds after the field was correctly nulled"
+    // gap. Scoped narrowly (not a blanket year→confirmedYear swap): only
+    // substitutes confirmedYear when identitySource is the provisional-
+    // override outcome specifically. For every other request — including
+    // the GENERAL (non-provisional) refused-identity-conflict sub-case,
+    // where Vision's title legitimately stands and confirmedYear already
+    // equals vision.year by resolveIdentity's own initial-declaration
+    // fallthrough — this is byte-identical to the pre-existing behavior
+    // (pcQueryYear === year). Zero blast radius on normal identification.
+    const pcQueryYear = isProvisionalRefusedIdentity(identitySource) ? confirmedYear : year;
+
     // Session 6/20/26 — Cache lookups (5-min TTL, same as Anthropic prompt cache)
     // Crow fix — PC cache key MUST include year (year validation makes year-dependent results)
     const cvKey = `${cleanedCVTitle}|${confirmedIssue}|${confirmedPublisher}`;
-    const pcKey = `${subtitleStripped}|${confirmedIssue}|${year || ''}`;
+    const pcKey = `${subtitleStripped}|${confirmedIssue}|${pcQueryYear || ''}`;
     const now = Date.now();
 
     // Q106 FIX-1 — cgcResult already fetched in Phase 1 (races the visual
@@ -2835,7 +2852,7 @@ export default async function handler(req, res) {
         // already is (COMP_FILTER_VERSION): a lookupPriceCharting logic
         // change must invalidate old cached entries, not have them served
         // untouched for up to 24h (Wonder Woman #75 class).
-        const fullTitleKey = `pc:v${PC_FILTER_VERSION}:${confirmedTitle}|${confirmedIssue}|${year || ''}`;
+        const fullTitleKey = `pc:v${PC_FILTER_VERSION}:${confirmedTitle}|${confirmedIssue}|${pcQueryYear || ''}`;
         const strippedTitleKey = `pc:v${PC_FILTER_VERSION}:${pcKey}`;
 
         // Try cache for full title first
@@ -2861,7 +2878,7 @@ export default async function handler(req, res) {
         // in the handler (that runs later, ~line 3090); req.body.variant is
         // the same value it would default to absent an eBay-consensus
         // override, so it's the correct proxy signal here.
-        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out, pcProductId: req.body.pcProductId || null }).catch(() => null);
+        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year: pcQueryYear, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out, pcProductId: req.body.pcProductId || null }).catch(() => null);
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
@@ -2872,7 +2889,7 @@ export default async function handler(req, res) {
         // Full title returned zero results — fallback to subtitle-stripped
         if (hasSubtitle && subtitleStripped !== confirmedTitle) {
           console.log(`[pc-query] full title zero results — fallback to stripped: "${subtitleStripped}"`);
-          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out, pcProductId: req.body.pcProductId || null }).catch(() => null);
+          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: pcQueryYear, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out, pcProductId: req.body.pcProductId || null }).catch(() => null);
           if (result) {
             console.log(`[pc-query] stripped title matched: "${result.productName}"`);
             await kvSet(strippedTitleKey, result, KV_TTL.PC);
@@ -3082,8 +3099,19 @@ export default async function handler(req, res) {
       }
     }
 
-    // Publisher fallback from ComicVine when eBay/Vision didn't provide it
-    confirmedPublisher = confirmedPublisher || comicVine?.volume?.publisher?.name || publisher;
+    // Publisher fallback from ComicVine when eBay/Vision didn't provide it.
+    // Q131 systemic-audit follow-up — the bare `|| publisher` leg is the
+    // SAME raw req.body value resolveIdentity already rejected for the
+    // provisional-override case (identical object reference: `publisher`
+    // is what got passed into resolveIdentity as vision.publisher). Since
+    // confirmedPublisher is null only in that specific outcome (Vision's
+    // own publisher survives untouched in the general refused-conflict
+    // sub-case via resolveIdentity's initial-declaration fallthrough —
+    // unaffected here), scope the exemption the same narrow way as the
+    // PC-year fix above: skip the raw fallback only for the provisional
+    // outcome, unchanged for every other case.
+    confirmedPublisher = confirmedPublisher || comicVine?.volume?.publisher?.name ||
+      (isProvisionalRefusedIdentity(identitySource) ? null : publisher);
 
     // Identity already determined in Phase 1 — construct alignment object
     const alignment = {
@@ -3402,8 +3430,22 @@ export default async function handler(req, res) {
       console.log(`[ship28a] PC anchors: id=${out.pcProductId} name="${out.pcProductName}"`);
     }
 
+    // Q131 systemic-audit follow-up — resolveYear's first argument is its
+    // "user/vision year" input; passing raw `year` here unconditionally
+    // overwrote confirmedYear right back to Vision's rejected guess for
+    // the provisional-override case, regressing the null Fix 1/2 already
+    // set. pcYear/cvYear are independent external signals (PriceCharting's
+    // own year, ComicVine's own issue cover_date) — neither derives from
+    // `year`, so with both absent for a book resolveYear has no source
+    // and correctly returns null, same "honest unconfirmed" outcome as
+    // resolveIdentity's own fix. Scoped identically to the two fixes
+    // above: byte-identical to prior behavior (yearForResolution === year)
+    // for every case except the provisional outcome specifically —
+    // including the general (non-provisional) refused-conflict sub-case,
+    // where confirmedYear already legitimately equals vision.year.
+    const yearForResolution = isProvisionalRefusedIdentity(identitySource) ? confirmedYear : year;
     const yearResolution = resolveYear(
-      year,
+      yearForResolution,
       pcYear,
       cvYear,
       ebayYearAuthoritative,
@@ -3716,7 +3758,7 @@ export default async function handler(req, res) {
       // title/issue instead of blindly echoing req.body's Vision guess back.
       // Still LOCKED/advisory below — this is "show the stronger real
       // signal, clearly flagged," never a silent confidence upgrade.
-      const isProvisionalFamilyIdentity = identitySource === 'title-family-refused-provisional';
+      const isProvisionalFamilyIdentity = isProvisionalRefusedIdentity(identitySource);
 
       // FIX 1: Include backfilled year/publisher in refused response
       // (backfillFromComps ran at line 1990, may have set confirmedYear/confirmedPublisher)

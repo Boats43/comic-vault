@@ -414,6 +414,42 @@ export const checkAssemblyIntegrity = (visionTitle, assembledTitle, compTitles =
 export const shouldSkipAssemblyIntegrityCheck = (familyDecision) =>
   familyDecision === 'refused-identity-conflict';
 
+/**
+ * Q131 systemic-audit follow-up (2026-07-19, Eternus #2 class) — after
+ * shipping the resolveIdentity/convergence/fallback-pricing/22e fixes,
+ * a fresh production rescan showed the PC cache-key still baking in
+ * Vision's rejected year ("2019") and confirmedPublisher still leaking
+ * back to "DC Comics" — NOT because those first fixes were wrong, but
+ * because several OTHER call sites downstream of resolveIdentity
+ * independently re-derive year/publisher from the raw, pre-resolution
+ * req.body values (or the local `year`/`publisher` variables destructured
+ * from it) instead of trusting the already-resolved confirmedYear/
+ * confirmedPublisher: the PC lookup + both PC cache keys (api/enrich.js,
+ * bare `year`), resolveYear's first argument (same bare `year` — an
+ * UNCONDITIONAL confirmedYear overwrite), and the ComicVine-then-raw
+ * publisher fallback chain (bare `publisher`).
+ *
+ * This is the single shared gate for all of them — deliberately keyed on
+ * identitySource (not familyCandidate.decision) because the GENERAL
+ * (non-provisional) refused-identity-conflict sub-case must NOT be
+ * caught by it: there, Vision's title legitimately stands (per
+ * resolveIdentity's own initial-declaration fallthrough), and its year/
+ * publisher/variant remain the correct signal to use — only the
+ * provisional-override outcome specifically produced a deliberately
+ * null/unconfirmed confirmedYear/confirmedPublisher that these raw
+ * fallbacks were undoing.
+ *
+ * Pure predicate, extracted for direct regression-testability (same
+ * rationale as every other Q131 fix).
+ *
+ * @param {string|null|undefined} identitySource - identity.identitySource
+ * @returns {boolean} true when raw req.body/vision fallbacks for year/
+ *   publisher/PC-query should be skipped in favor of the already-resolved
+ *   (possibly null) confirmedYear/confirmedPublisher
+ */
+export const isProvisionalRefusedIdentity = (identitySource) =>
+  identitySource === 'title-family-refused-provisional';
+
 // Generic publisher/franchise words that pass on nearly every comic and
 // don't discriminate between products — filtered out of the PC-match
 // overlap check below so e.g. "comics"/"the" don't inflate the ratio.
