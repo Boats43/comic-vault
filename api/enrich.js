@@ -113,7 +113,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
-import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict } from "../src/lib/variantIdentity.js";
+import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
 // Q118 — internal consistency checker (Vision's free-text reason vs its own structured fields).
@@ -3647,6 +3647,73 @@ export default async function handler(req, res) {
     // confirmed family override — the default/unresolved path (Batman
     // #608, Catwoman #64) is byte-identical to Q127/Fix-1 behavior.
     const suppressVariantForYearConflict = !!variantPoolYearConflict && !yearConflictResolvedByFamily;
+
+    // Q132 dispatch, Layer 4 (2026-07-20, GrailKey / ASM #26 class, PC-
+    // matcher gap) — lookupPriceCharting (called earlier, ~line 2890)
+    // accepts a title/issue-token match with ZERO year check when it ran
+    // with comicYear=null (Vision provided no year) — confirmed empirically
+    // on this exact production request: `[pt] matched: "Amazing Spider-Man
+    // #26 (2001)" year: 2001 comic year: null`. The one re-validation gate
+    // that runs afterward (needsRequery/titleOverlapsProduct, ~line 3271)
+    // is purely textual — no year check there either. Correction from the
+    // investigation: do NOT mirror ComicVine's [cv-year-strict] gate here —
+    // that gate's apparent "success" on this exact request was coincidental
+    // (all 4 CV candidates scored 0 on the NAME axis before year ever
+    // mattered) and it uses the same stale/null comicYear PC does, so it
+    // isn't independently reliable either. This needs new, narrow logic.
+    //
+    // Fires ONLY inside the yearConflictResolvedByFamily branch — a
+    // confirmed family override has independently established poolYearHint
+    // as trustworthy, which is the one signal genuinely unavailable to the
+    // earlier, year-blind PC query. Rejects outright (does not demote to
+    // "nearest fuzzy hit") — matching the hard-reject disposition of every
+    // other confirmed year-conflict gate in this file, not Q86's
+    // unproven-year soft-tolerate path (this isn't an unproven guess
+    // disagreeing with a real match, it's a CONFIRMED identity disagreeing
+    // with PC's own stated product year).
+    //
+    // No new fallback path needed (confirmed by tracing, not assumed):
+    // fetchPricechartingPop/fetchPricechartingSales (~line 4061/4069) are
+    // already gated on `priceCharting?.id`, so nulling priceCharting here
+    // makes both no-op correctly. Tier 3 active-comps-only anchoring is
+    // already proven working in this exact production log once no PC
+    // anchor exists. The out.pc* fields below were already populated
+    // (~line 3430-3439, before this gate had the poolYearHint/family-
+    // override information needed to reject the match) and must be
+    // explicitly cleared here — assigning them earlier in the handler than
+    // this check runs doesn't make them correct.
+    //
+    // Deliberately narrow: gated on yearConflictResolvedByFamily alone, so
+    // every default/unconflicted scan (Batman #608, Catwoman #64, Eternus
+    // #2/He-Man, and every normal non-conflicted scan) never reaches this
+    // block at all — priceCharting acceptance for them is byte-identical
+    // to before this commit.
+    if (yearConflictResolvedByFamily && priceCharting) {
+      const pcYearConflict = pcMatchConflictsWithPoolYear(priceCharting.year, poolYearHint);
+      if (pcYearConflict) {
+        console.log(
+          `[pc-year-gate] rejecting PC match "${priceCharting.productName}" (year=${priceCharting.year}) — ` +
+          `conflicts with confirmed poolYearHint=${poolYearHint.year} ` +
+          `(drift=${Math.abs(parseInt(priceCharting.year, 10) - poolYearHint.year)}y) — ` +
+          `no PC anchor for this book's actual edition; falling through to active-comps-only pricing`
+        );
+        // I13 — annotate the rejection so the card can show WHY there's no
+        // PC data, rather than a silent absence.
+        out.pcMatchRejectedForYearConflict = {
+          rejectedProductName: priceCharting.productName,
+          rejectedProductId: priceCharting.id,
+          rejectedYear: priceCharting.year,
+          poolYearHint: poolYearHint.year,
+        };
+        out.pcProductId = null;
+        out.pcProductName = null;
+        out.pcEbayEpid = null;
+        out.pcLastUpdated = null;
+        out.pcLoosePrice = null;
+        out.pcGradedPrice = null;
+        priceCharting = null;
+      }
+    }
 
     // Q127 follow-up (same dispatch, found during pre-commit verification
     // audit) — req.body.variant is read directly, bypassing
@@ -7699,6 +7766,11 @@ export default async function handler(req, res) {
       source: 'enrich',
       timestamp: Date.now()
     });
+    // TEMP DEBUG (Q132 Layer 4 verification pass, 2026-07-20) — decision
+    // is never otherwise console-logged, so it's invisible in server logs.
+    // Remove after the next live rescan confirms Layer 4 end-to-end.
+    console.log(`[TEMP-DEBUG-decision] ${JSON.stringify(out.decision)}`);
+    console.log(`[TEMP-DEBUG-pc-fields] pcProductId=${out.pcProductId} pcProductName=${out.pcProductName} pcMatchRejectedForYearConflict=${JSON.stringify(out.pcMatchRejectedForYearConflict || null)} price=${out.price} priceNote=${out.priceNote}`);
 
     console.log(
       `[decision] action=${out.decision.action} ` +

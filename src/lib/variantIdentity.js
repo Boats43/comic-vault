@@ -248,6 +248,42 @@ export const detectFamilyOverrideConflict = (familyCandidate) => {
   };
 };
 
+/**
+ * Q132 dispatch, Layer 4 (2026-07-20, GrailKey / ASM #26 class) — PC's own
+ * title-matcher (api/enrich.js lookupPriceCharting) accepts a product on
+ * title/issue token overlap with no year check at all when the query ran
+ * with comicYear=null (Vision provided no year) — confirmed empirically:
+ * the real production case queried with `comic year: null` and accepted
+ * "Amazing Spider-Man #26 (2001)" as the anchor for a book independently
+ * confirmed (Layers 1+2) to be a 2026 printing. The one re-validation gate
+ * that runs afterward (needsRequery/titleOverlapsProduct) is purely
+ * textual — no year involved either.
+ *
+ * This is the missing check: once a confirmed family override has
+ * established poolYearHint as trustworthy (yearConflictResolvedByFamily),
+ * validate the ALREADY-ACCEPTED PC match's own stated year against that
+ * same poolYearHint — the one signal genuinely unavailable to the earlier,
+ * year-blind query. Mirrors detectVariantPoolYearConflict's tolerance
+ * convention (default 5y) for consistency — same class of check, applied
+ * to a different reference value (a PC product's own year, not
+ * confirmedYear).
+ *
+ * Deliberately narrow: this is a pure predicate with no awareness of WHEN
+ * it's valid to call — the caller (api/enrich.js) is responsible for only
+ * invoking it inside the yearConflictResolvedByFamily branch, exactly the
+ * same discipline detectFamilyOverrideConflict's caller already follows.
+ *
+ * @param {number|string|null} priceChartingYear - the PC match's own parsed product year
+ * @param {{year: number}|null} poolYearHint
+ * @param {number} [tolerance=5]
+ * @returns {boolean} true when the PC match's year conflicts with poolYearHint beyond tolerance
+ */
+export const pcMatchConflictsWithPoolYear = (priceChartingYear, poolYearHint, tolerance = 5) => {
+  const py = priceChartingYear != null ? parseInt(priceChartingYear, 10) : null;
+  if (!py || !Number.isFinite(py) || !poolYearHint?.year) return false;
+  return Math.abs(py - poolYearHint.year) > tolerance;
+};
+
 export const extractConfirmedVariant = (
   visualItems,
   visionVariant,
