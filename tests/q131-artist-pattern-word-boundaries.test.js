@@ -18,7 +18,7 @@
 //
 // Invoke: node tests/q131-artist-pattern-word-boundaries.test.js
 
-import { ARTIST_PATTERNS } from '../src/lib/compHygiene.js';
+import { ARTIST_PATTERNS, COMP_FILTER_VERSION } from '../src/lib/compHygiene.js';
 import { extractPoolArtistTokens } from '../src/lib/imageSearchIdentity.js';
 import { extractConfirmedVariant } from '../src/lib/variantIdentity.js';
 
@@ -130,6 +130,49 @@ console.log('\n── extractConfirmedVariant: real pool, backfill mode, post-19
   } else {
     check(false, `extractConfirmedVariant returned no artist consensus at all (result=${JSON.stringify(result)})`);
   }
+}
+
+// ── 6. skipCache live verification + cache-versioning follow-up ─────
+//
+// Real production log (2026-07-19, 01:39:06, build 5506d87 — the
+// word-boundary fix's own first live deploy): the One World Under Doom
+// #1 / John Giang rescan hit `[active-cache] HIT: v3:one world under
+// doom|1` and returned WITHOUT ever calling fetchComps — it replayed the
+// exact pool a PRIOR request (00:40:19, build c3c8353, pre-fix) had
+// fetched and cached under the old, collision-bugged "lim virgin 2025"
+// query ([creator-from-comps] consensus: current/Inhyuk Lee×2, $8.63).
+// The fix was correct but the cache never gave it a chance to run.
+//
+// Verification: replayed the real 20-item eBay pool from that log
+// through extractConfirmedVariant + fetchComps directly (bypassing
+// every cache layer, exactly as req.body.skipCache===true does in
+// api/enrich.js), using live eBay credentials. Result: 18 genuine John
+// Giang comps, $12.99-$150, average $63.85 — confirming the underlying
+// fix chain is genuinely correct once it executes. (Mechanism note: the
+// deciding attempt this run was the Q130 `imageSearchTitle` attempt —
+// which already carries "Giang" as literal text from the title-family
+// rawTitle — not the artist-specific/confirmedVariant path; consensus
+// .artist was excluded this run too, "John Giang" appearing in 15/20
+// pool items = 75%, over the Q109-FIX-A 70% not-distinguishing
+// threshold. The word-boundary fix still closes a real, general
+// collision class — this run just didn't happen to need it as the
+// deciding mechanism.)
+//
+// Same-dispatch systemic fix, matching the exact Q129 precedent
+// (COMP_FILTER_VERSION 2->3 for the variantCompsExcludedByEra field):
+// ARTIST_PATTERNS word-boundary anchoring changes which comps a
+// query/AND-match can admit, so it belongs under the same cache-busting
+// mechanism — bumped 3->4 so no future ARTIST_PATTERNS/variant-matching
+// deploy silently replays a pre-fix pool for up to KV_TTL.ACTIVE (1h).
+console.log('\n── Part 6: comp-filter cache version bump closes the stale-cache-replay gap ──');
+{
+  // >= rather than === so a later dispatch bumping this same shared
+  // constant again doesn't need to come back and edit this assertion too
+  // (the exact friction fixed in tests/q129-...test.js's own Part 5 here).
+  check(COMP_FILTER_VERSION >= 4, `COMP_FILTER_VERSION is >= 4 (got ${COMP_FILTER_VERSION}) — Q131's ARTIST_PATTERNS word-boundary fix changes query/AND-match admission, same class as Q129's MERCH_RE/field-shape bumps`);
+  const oldKey = `v3:one world under doom|1`;
+  const newKey = `v${COMP_FILTER_VERSION}:one world under doom|1`;
+  check(oldKey !== newKey, 'the active-comp cache key changes with the version bump — the real pre-fix v3: entry that masked this fix live is unreachable under the new key, forcing a fresh fetchComps pass');
 }
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);

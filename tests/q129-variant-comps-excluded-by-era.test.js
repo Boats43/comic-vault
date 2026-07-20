@@ -195,7 +195,12 @@ assertEq(cleanDecision.warnings.includes('variant-comps-unavailable'), false, 'a
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\nPart 5: comp-filter cache version bump closes the stale-cache-replay gap\n');
 
-assertEq(COMP_FILTER_VERSION, 3, 'COMP_FILTER_VERSION bumped to 3 — Q129 added a new field to the cached fetchComps return shape');
+// Q131 (2026-07-19) bumped this constant again, 3 -> 4 (see
+// tests/q131-artist-pattern-word-boundaries.test.js Part 6) — this
+// assertion now checks the version is AT LEAST the value Q129 required,
+// not pinned to the exact literal, so this test doesn't need editing
+// every time a later dispatch bumps the same shared constant again.
+assertTrue(COMP_FILTER_VERSION >= 3, `COMP_FILTER_VERSION is >= 3 (got ${COMP_FILTER_VERSION}) — Q129 added a new field to the cached fetchComps return shape, requiring at least this bump`);
 const oldKey = `v2:harley quinn|62`;
 const newKey = `v${COMP_FILTER_VERSION}:harley quinn|62`;
 assertTrue(oldKey !== newKey, 'the active-comp cache key changes with the version bump — a pre-Q129 v2: entry is unreachable under the new key, forcing a fresh Filter 0c pass');

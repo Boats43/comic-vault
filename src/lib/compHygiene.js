@@ -239,7 +239,23 @@ export const ARTIST_PATTERNS = [
 // warning would silently never appear for any book whose comp pool was
 // cached in the hour before deploy, with no natural way to distinguish
 // that from "the detector correctly found nothing to flag."
-export const COMP_FILTER_VERSION = 3;
+// v4 = Q131 (2026-07-19) — ARTIST_PATTERNS word-boundary anchoring
+// (5506d87, "lim" matching inside "limited" class). This changes WHICH
+// comps a query/AND-match can admit (a different artist-specific query,
+// a different Filter 1c token set), not just a diagnostic field — the
+// same class of gap Q89's MERCH_RE bump closed, missed here because
+// this fix landed in ARTIST_PATTERNS without also bumping this constant.
+// Confirmed live: One World Under Doom #1 (John Giang) rescanned on the
+// 5506d87 build and still replayed a pre-fix cache entry (`ac:v3:one
+// world under doom|1`, written by build c3c8353's "lim virgin" query)
+// for the full 1h TTL — the fix was correct but never got a chance to
+// run. A skipCache-bypassed live re-fetch (Q131 verification) confirmed
+// the fix resolves correctly once it actually executes: 18 genuine John
+// Giang comps ($12.99-$150, avg $63.85) vs. the stale cached single
+// Inhyuk Lee comp ($14.99). Every ARTIST_PATTERNS/variant-matching
+// change should bump this constant going forward — it's the general
+// class, not a one-off.
+export const COMP_FILTER_VERSION = 4;
 
 // Q85 — Compact title key: lowercase, strip everything non-alphanumeric.
 // Equality fallback for compound/spacing/hyphen variants that token-level
