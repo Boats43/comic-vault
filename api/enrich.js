@@ -7816,11 +7816,6 @@ export default async function handler(req, res) {
       source: 'enrich',
       timestamp: Date.now()
     });
-    // TEMP DEBUG (Q132 Layer 4 verification pass, 2026-07-20) — decision
-    // is never otherwise console-logged, so it's invisible in server logs.
-    // Remove after the next live rescan confirms Layer 4 end-to-end.
-    console.log(`[TEMP-DEBUG-decision] ${JSON.stringify(out.decision)}`);
-    console.log(`[TEMP-DEBUG-pc-fields] pcProductId=${out.pcProductId} pcProductName=${out.pcProductName} pcMatchRejectedForYearConflict=${JSON.stringify(out.pcMatchRejectedForYearConflict || null)} price=${out.price} priceNote=${out.priceNote}`);
 
     console.log(
       `[decision] action=${out.decision.action} ` +
