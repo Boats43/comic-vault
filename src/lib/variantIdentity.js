@@ -208,6 +208,46 @@ export const detectVariantPoolYearConflict = (poolYearHint, confirmedYear, toler
   };
 };
 
+/**
+ * Q132 dispatch (2026-07-20, GrailKey / ASM #26 "David Nakayama" class) —
+ * detectVariantPoolYearConflict (above) always responds the same way to a
+ * qualifying drift: suppress the variant signal and fall back to trusting
+ * confirmedYear. That's the right call when the conflicting pool signal is
+ * thin/incidental noise (Batman #608, Catwoman #64 — the pool was
+ * genuinely just visual-search confusion). It's the wrong call when a
+ * SECOND, independent signal computed from the very same visual pool —
+ * title-family clustering (imageSearchIdentity.js) — already found a
+ * corroborating dominant cluster and was blocked from adopting it by the
+ * Q84 dual-axis gate. Two independent signals agreeing that the confirmed
+ * identity is wrong is evidence a human should see, not noise to quietly
+ * discard alongside the year conflict.
+ *
+ * Deliberately narrow: `familyCandidate.decision === 'fallback-vision'` is
+ * heavily overloaded in imageSearchIdentity.js — it's also returned for a
+ * pool with <5 items, <3 consensus members, or weak token overlap (none of
+ * which carry any corroborating signal at all). Only the specific
+ * `'[Q84-dual-axis]'`-tagged reason (set exclusively where the dual-axis
+ * gate itself blocks a >=3-member consensus family, see
+ * imageSearchIdentity.js applyDualAxisGate/q84Gate) means "a real
+ * candidate identity was found and rejected," which is the only case this
+ * should fire for.
+ *
+ * @param {{decision: string, reason?: string, topFamily?: {title?: string, rawTitle?: string, count?: number, weightSum?: number}}|null} familyCandidate
+ * @returns {{topFamilyTitle: string|null, count: number, weightSum: number, blockedReason: string}|null}
+ */
+export const detectFamilyOverrideConflict = (familyCandidate) => {
+  if (!familyCandidate || familyCandidate.decision !== 'fallback-vision') return null;
+  if (!/^\[Q84-dual-axis\]/.test(familyCandidate.reason || '')) return null;
+  const tf = familyCandidate.topFamily;
+  if (!tf) return null;
+  return {
+    topFamilyTitle: tf.title || tf.rawTitle || null,
+    count: tf.count,
+    weightSum: tf.weightSum,
+    blockedReason: familyCandidate.reason,
+  };
+};
+
 export const extractConfirmedVariant = (
   visualItems,
   visionVariant,

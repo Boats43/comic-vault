@@ -448,6 +448,22 @@ export function computeDecision(item, context = {}) {
     decision.evidence.variantCompsExcludedByEra = item.variantCompsExcludedByEra;
   }
 
+  // Q132 dispatch (2026-07-20, GrailKey / ASM #26 "David Nakayama" class) —
+  // poolYearHint conflicted with confirmedYear beyond tolerance, so
+  // api/enrich.js suppressed the variant/edition signal it would otherwise
+  // have priced against (detectVariantPoolYearConflict, variantIdentity.js).
+  // Always at least RESEARCH via criticalWarnings below — this is
+  // price-evidence uncertainty (the priced pool may be the wrong edition),
+  // not a content/photo flag. When corroborated by an independently-blocked
+  // title-family cluster (item.variantPoolYearConflict.corroboratedByFamily),
+  // api/enrich.js additionally sets listingHardLocked — that's wired at the
+  // contract layer (responseContract.js), independent of decision.action;
+  // this warning's job is only the RESEARCH floor.
+  if (item.variantPoolYearConflict) {
+    decision.warnings.push('variant-pool-year-conflict');
+    decision.evidence.variantPoolYearConflict = item.variantPoolYearConflict;
+  }
+
   // Warning: Active/sold mismatch
   const soldAvg = item.soldComps?.length >= 2
     ? item.soldComps.reduce((sum, c) => sum + c.price, 0) / item.soldComps.length
@@ -558,6 +574,7 @@ export function computeDecision(item, context = {}) {
     'floor-contamination-suspect',     // Price evidence: solds far below mega-key floor (XMEN1)
     'internal-inconsistency',          // Q118: Vision's own reason text contradicts its own structured fields
     'variant-comps-unavailable',       // Q129: era-excluded comps named a specific cover variant the priced pool doesn't
+    'variant-pool-year-conflict',      // Q132: pool-year drift suppressed a variant/edition signal — possibly the wrong printing
   ];
   // Removed: 'content-unverified' (not a price flag — stays LIST_LOW/BUNDLE)
 
@@ -967,6 +984,14 @@ export function describeWarning(slug, item) {
     return item.floorContaminationReason || 'verified solds far below mega-key floor — pool may contain reprints';
   }
   if (slug === 'all-sold-comps-stale') return 'all sold comps >90 days old — verify current market';
+  if (slug === 'variant-pool-year-conflict') {
+    const v = item.variantPoolYearConflict;
+    if (!v) return 'comp pool year conflicts with confirmed year — variant/edition signal withheld';
+    const base = `comp pool suggests ${v.poolYear} (${Math.round((v.poolAgreement || 0) * 100)}% of ${v.poolSampleSize} listings) vs confirmed ${v.confirmedYear} — variant/edition signal withheld`;
+    return v.corroboratedByFamily
+      ? `${base}; corroborated by a blocked title match ("${v.corroboratedByFamily.topFamilyTitle}", ${v.corroboratedByFamily.count} listings) — verify this is the right book before listing`
+      : base;
+  }
   return slug;
 }
 

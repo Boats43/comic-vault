@@ -113,7 +113,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
-import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict } from "../src/lib/variantIdentity.js";
+import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
 // Q118 — internal consistency checker (Vision's free-text reason vs its own structured fields).
@@ -3576,6 +3576,32 @@ export default async function handler(req, res) {
       // "variant consensus withheld (pool looks like a different
       // year/edition)" rather than the suppression being invisible.
       out.variantPoolYearConflict = variantPoolYearConflict;
+
+      // Q132 dispatch (2026-07-20, GrailKey / ASM #26 class) — corroboration
+      // check: did title-family clustering, independently, ALSO find a
+      // >=3-member consensus family it was blocked from adopting (Q84
+      // dual-axis gate)? See detectFamilyOverrideConflict (variantIdentity.js)
+      // for the exact narrow-match rule that excludes the thin/no-consensus
+      // 'fallback-vision' cases (Batman #608, Catwoman #64 — must NOT
+      // regress). Two agreeing signals escalate past a silent
+      // suppress-and-proceed to a hard listing lock — price/comps stay
+      // visible per the Customer-Grade Standard (XMEN1 ruling), only the
+      // List button gates. A lone/thin signal keeps today's behavior
+      // unchanged.
+      const familyOverrideConflict = detectFamilyOverrideConflict(familyCandidate);
+      if (familyOverrideConflict) {
+        out.variantPoolYearConflict.corroboratedByFamily = familyOverrideConflict;
+        console.log(
+          `[variant-year-gate] corroborated by title-family: blocked cluster "${familyOverrideConflict.topFamilyTitle}" ` +
+          `(${familyOverrideConflict.count} members) independently agrees with the year conflict — escalating to hard lock`
+        );
+        if (!out.listingHardLocked) {
+          out.listingHardLocked = true;
+          out.listingHardLockReason = 'variant-pool-year-conflict-corroborated';
+          out.listingHardLockBanner =
+            `Comp pool suggests a different edition (${variantPoolYearConflict.poolYear} vs confirmed ${variantPoolYearConflict.confirmedYear}), corroborated by an independently-blocked title match ("${familyOverrideConflict.topFamilyTitle}") — verify before listing`;
+        }
+      }
     }
 
     // Q127 follow-up (same dispatch, found during pre-commit verification
