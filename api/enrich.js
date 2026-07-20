@@ -3712,6 +3712,56 @@ export default async function handler(req, res) {
         out.pcLoosePrice = null;
         out.pcGradedPrice = null;
         priceCharting = null;
+
+        // Q132 dispatch, Layer 4b (2026-07-20) — confirmedYear itself was
+        // already derived from this same now-rejected PC match
+        // (resolveYear, ~line 3456, ran BEFORE this gate could reject it —
+        // out.confirmedYearMeta.source was 'pricecharting'). Rejecting
+        // priceCharting alone left confirmedYear, out.confirmedYearMeta,
+        // and the variant-pool-year-conflict banner text all still citing
+        // the discredited year ("vs confirmed 2001" restating a value this
+        // exact gate just rejected as if still authoritative).
+        //
+        // Corrects to poolYearHint.year rather than reverting to null:
+        // getEra(year) (this file, ~line 220) defaults null → 'vintage' —
+        // nulling would silently misroute a book already confirmed modern
+        // into the vintage CGC/RAW multiplier tables. poolYearHint is the
+        // exact same value Layer 2 already trusts for
+        // extractConfirmedVariant's bookYear parameter in this identical
+        // yearConflictResolvedByFamily branch — reusing it here, not
+        // inventing a new source of truth.
+        //
+        // KNOWN LATENT RISK (queued, not fixed here): getEra's single 1985
+        // boundary means this correction only matters when the wrong PC
+        // year and the real year land on OPPOSITE sides of that boundary —
+        // this exact card's case (2001 vs 2026) doesn't, since both are
+        // 'modern' either way (confirmed: CGC_MULTIPLIERS.modern[9.2]=1.2
+        // matches the observed gradeMult=1.2 regardless of which year was
+        // used). A future case where the wrong PC year is pre-1985 and the
+        // real year is post-1985 (or vice versa) WOULD get a wrong-era
+        // multiplier via this same stale-confirmedYear path if this
+        // correction weren't here. Not yet observed on any real case.
+        const correctedYear = poolYearHint.year;
+        console.log(
+          `[pc-year-gate] confirmedYear corrected: ${confirmedYear} → ${correctedYear} ` +
+          `(was derived from the just-rejected PC match, source=${out.confirmedYearMeta?.source || 'unknown'})`
+        );
+        confirmedYear = String(correctedYear);
+        out.confirmedYearMeta = {
+          value: confirmedYear,
+          source: 'family-override-corrected',
+          confidence: 'proven',
+        };
+        // Corrects the SAME object decisionEngine.js's describeWarning
+        // reads for the 'variant-pool-year-conflict' banner text — without
+        // this, the message would keep citing the year this gate just
+        // rejected. originalConfirmedYear preserved so the message can say
+        // "corrected from X to Y" (a catch-and-fix) rather than "vs
+        // confirmed X" (implying X is still current).
+        if (out.variantPoolYearConflict) {
+          out.variantPoolYearConflict.originalConfirmedYear = out.variantPoolYearConflict.confirmedYear;
+          out.variantPoolYearConflict.confirmedYear = correctedYear;
+        }
       }
     }
 

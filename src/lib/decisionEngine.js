@@ -987,6 +987,15 @@ export function describeWarning(slug, item) {
   if (slug === 'variant-pool-year-conflict') {
     const v = item.variantPoolYearConflict;
     if (!v) return 'comp pool year conflicts with confirmed year — variant/edition signal withheld';
+    // Q132 Layer 4b — once a confirmed family override lets the PC anchor
+    // itself be re-validated and rejected for the wrong year,
+    // originalConfirmedYear is set and v.confirmedYear becomes the
+    // corrected value — frame this as a catch-and-fix, not a still-open
+    // conflict ("vs confirmed X" would restate the value this gate just
+    // rejected as if still authoritative).
+    if (v.originalConfirmedYear != null) {
+      return `comp pool year (${v.poolYear}, ${Math.round((v.poolAgreement || 0) * 100)}% of ${v.poolSampleSize} listings) corrected confirmedYear from ${v.originalConfirmedYear} to ${v.confirmedYear} — PriceCharting anchor for the wrong edition was rejected`;
+    }
     const base = `comp pool suggests ${v.poolYear} (${Math.round((v.poolAgreement || 0) * 100)}% of ${v.poolSampleSize} listings) vs confirmed ${v.confirmedYear} — variant/edition signal withheld`;
     return v.corroboratedByFamily
       ? `${base}; corroborated by a blocked title match ("${v.corroboratedByFamily.topFamilyTitle}", ${v.corroboratedByFamily.count} listings) — verify this is the right book before listing`
