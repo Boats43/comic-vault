@@ -190,15 +190,35 @@ export const ARTIST_PATTERNS = [
   // this file; bare "john" alone would be unsafe (too common), same reason
   // every other multi-word entry here leads with the full name.
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
-  /skan/i, /rapoza/i, /quash/i, /momoko/i, /ross/i, /adams/i,
-  /kirkham/i, /bean/i, /andolfo/i, /browne/i, /forstner/i,
-  /howard/i, /corona/i, /stegman/i, /ottley/i,
-  /jimenez/i, /mcfarlane/i, /campbell/i, /artgerm/i, /nakayama/i,
-  /hughes/i, /byrne/i, /perez/i, /kirby/i, /ditko/i, /mele/i,
-  /albuquerque/i, /hama/i, /fabok/i, /ejikure/i,
-  /gleason/i, /quah/i, /parrillo/i, /maer/i, /lim/i, /chew/i, /ngu/i, /sanders/i,
-  /frison/i,  // Q84 — unambiguous last name (alias policy)
-  /giang/i,  // Q130 — unambiguous last name, collision-swept (alias policy)
+  //
+  // Q131 systemic-audit follow-up (2026-07-19, One World Under Doom #1 /
+  // "lim" class) — every single-word entry below is now \b-anchored.
+  // Confirmed real, live bug: bare /lim/i (Kendrick Lim) matched as a
+  // substring inside the ordinary word "limited" — appearing in
+  // confirmedVariant's own classified-token text ("...limited signed
+  // virgin") wherever a listing said "Limited to 500" — and because the
+  // consumer loops (api/comps.js's artist-specific query builder,
+  // variantIdentity.js's extractArtist, imageSearchIdentity.js's
+  // extractPoolArtistTokens) all use first-match-wins-then-break over
+  // this exact array, that false match short-circuited before every
+  // pattern positioned after it — chew, ngu, sanders, frison, giang —
+  // ever got a chance, regardless of whether the real artist's name was
+  // also present in the same string. Same root-cause class as "ngu"
+  // matching inside "penguin" or "ross" matching inside "crossover"/
+  // "embossed" — none of these are hypothetical, all three are real
+  // English/comic-marketing words. Multi-word patterns above are left
+  // unanchored (lower collision risk — a 2-3 word phrase colliding with
+  // unrelated running text is far less likely than a 3-4 letter
+  // fragment), consistent with the narrow scope of this pass.
+  /\bskan\b/i, /\brapoza\b/i, /\bquash\b/i, /\bmomoko\b/i, /\bross\b/i, /\badams\b/i,
+  /\bkirkham\b/i, /\bbean\b/i, /\bandolfo\b/i, /\bbrowne\b/i, /\bforstner\b/i,
+  /\bhoward\b/i, /\bcorona\b/i, /\bstegman\b/i, /\bottley\b/i,
+  /\bjimenez\b/i, /\bmcfarlane\b/i, /\bcampbell\b/i, /\bartgerm\b/i, /\bnakayama\b/i,
+  /\bhughes\b/i, /\bbyrne\b/i, /\bperez\b/i, /\bkirby\b/i, /\bditko\b/i, /\bmele\b/i,
+  /\balbuquerque\b/i, /\bhama\b/i, /\bfabok\b/i, /\bejikure\b/i,
+  /\bgleason\b/i, /\bquah\b/i, /\bparrillo\b/i, /\bmaer\b/i, /\blim\b/i, /\bchew\b/i, /\bngu\b/i, /\bsanders\b/i,
+  /\bfrison\b/i,  // Q84 — unambiguous last name (alias policy)
+  /\bgiang\b/i,  // Q130 — unambiguous last name, collision-swept (alias policy)
 ];
 
 // Q89-CACHE — Comp-filter version. Bump whenever a comp-admission filter
