@@ -1253,10 +1253,60 @@ export const extractPoolArtistTokens = (items) => {
   return tokens;
 };
 
+// Q132 dispatch (2026-07-20, GrailKey / ASM #26 "David Nakayama" class) —
+// bounded creator-pair recovery. tokenizeTitleFamily strips every
+// ARTIST_PATTERNS match out of the token stream BEFORE the family-consensus
+// vote ever runs (see tokenizeTitleFamily above, and the Black Cat/Skottie
+// Young "variant-artist token fusion" class this was built to close) — so a
+// recognized surname like "nakayama" can never survive into familyTokens,
+// even when a first name sitting directly next to it in the RAW listing
+// text (e.g. "David Nakayama") does survive as an unrecognized stray token.
+// applyDualAxisGate's poolArtistTokens check (below) can only ever see the
+// stray first name, never the surname it was paired with, so it always
+// misclassifies it as "non-creator" — this is a structural gap in the
+// classifier, not a missing registry entry (nakayama is already in
+// ARTIST_PATTERNS/artistWords).
+//
+// This checks the ORIGINAL, unstripped raw title text (topFamily.rawTitle —
+// the representative top-ranked member's actual listing title, same field
+// LOT_RE already checks against a few lines below in this file) for a
+// candidate non-creator token immediately PRECEDING a token already present
+// in poolArtistTokens (an ARTIST_PATTERNS surname corroborated by ≥2 pool
+// listings) — i.e. "<candidate> <surname>" word order specifically, not
+// "<surname> <candidate>". Every multi-word ARTIST_PATTERNS entry in this
+// codebase is first-name-then-surname (/jim lee/, /alex ross/, /jenny
+// frison/, /john giang/, ...) and real sellers follow the same convention,
+// so this is a bounded, evidence-grounded direction, not an arbitrary
+// restriction — the opposite direction ("<surname> <candidate>") just as
+// often means a trailing descriptor word ("Nakayama Color Variant" — the
+// real GrailKey case), which is exactly the false-positive this narrower
+// check exists to avoid. Deliberately narrow / bounded, per Q130 policy:
+// this recovers a PAIR only when the adjacency is real in the source text
+// — it never adds a bare first-name pattern to any registry, and a first
+// name with no adjacent recognized surname (or appearing elsewhere in the
+// pool unpaired) is never recovered.
+const recoverAdjacentCreatorTokens = (nonCreatorTokens, poolArtistTokens, familyRawText) => {
+  if (!familyRawText || !poolArtistTokens || poolArtistTokens.size === 0) return [];
+  const words = String(familyRawText)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const recovered = [];
+  for (const t of nonCreatorTokens) {
+    const precedesRecognizedSurname = words.some((w, i) => w === t && words[i + 1] && poolArtistTokens.has(words[i + 1]));
+    if (precedesRecognizedSurname) recovered.push(t);
+  }
+  return recovered;
+};
+
 // Token-class gate. familyTokens/agreedTokens are tokenizeTitleFamily
 // output; articles are ignored on both sides ("the flash" ≡ "flash").
+// familyRawText (Q132) is the family's representative unstripped listing
+// title, used only for the bounded creator-pair recovery above — optional,
+// omitting it simply disables recovery (existing 3-arg callers unaffected).
 // Returns { allowed, reason }.
-export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens) => {
+export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, familyRawText = null) => {
   const drop = (t) => ARTICLE_TOKENS.has(t) || NEUTRAL_ADDITION_TOKENS.has(t);
   const fam = (familyTokens || []).filter((t) => !drop(t));
   const agreed = (agreedTokens || []).filter((t) => !drop(t));
@@ -1275,6 +1325,21 @@ export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens) 
   }
   const nonCreator = added.filter((t) => !(poolArtistTokens && poolArtistTokens.has(t)));
   if (nonCreator.length > 0) {
+    // Q132 — bounded recovery: a non-creator token immediately PRECEDING a
+    // recognized surname in the family's own raw listing text (e.g. "david"
+    // directly before "nakayama") is a stranded first name, not noise. Once
+    // that real, adjacency-confirmed creator pairing is found, the REST of
+    // `added` is treated as that same confirmed variant's own descriptors
+    // (e.g. "color") rather than gated token-by-token — ARC_RE above has
+    // already ruled out story/arc-content additions, so what's left here is
+    // either a creator name or a descriptor of the artist's own variant,
+    // not unrelated noise. Recovering only the paired first name while
+    // still blocking on its own variant's descriptor words would leave the
+    // gate blocking the exact family this recovery exists to unblock.
+    const recovered = recoverAdjacentCreatorTokens(nonCreator, poolArtistTokens, familyRawText);
+    if (recovered.length > 0) {
+      return { allowed: true, reason: `creator-tokens [${addedStr}] (adjacent-pair recovered: [${recovered.join(',')}])` };
+    }
     return { allowed: false, reason: `non-creator additions [${nonCreator.join(',')}]` };
   }
   return { allowed: true, reason: `creator-tokens [${addedStr}]` };
@@ -1376,9 +1441,9 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     return ka.length >= 4 && ka === kb;
   })();
   const poolArtistTokens = dualAxisAgreed ? extractPoolArtistTokens(items) : null;
-  const q84Gate = (familyTokens) => {
+  const q84Gate = (familyTokens, familyRawText = null) => {
     if (!dualAxisAgreed) return { allowed: true, reason: 'no dual-axis agreement' };
-    const gate = applyDualAxisGate(familyTokens, visionTokens, poolArtistTokens);
+    const gate = applyDualAxisGate(familyTokens, visionTokens, poolArtistTokens, familyRawText);
     if (gate.allowed) {
       console.log(`[Q84] override-allowed reason=${gate.reason}`);
     } else {
@@ -1456,7 +1521,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
         // already reject junk. Removing token threshold unblocks clean canonical
         // titles (Batman, Avengers, The Mighty Thor) from top-rank-protection.
         // Q84-AMENDED: dual-axis token-class gate on top-rank-protection.
-        const q84TopRank = q84Gate(item0Family.tokens);
+        const q84TopRank = q84Gate(item0Family.tokens, item0Family.rawTitle);
         if (issueMatch && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong && q84TopRank.allowed) {
           // A1.a: Route through sanitizeSeriesTitle to remove creator names,
           // cover descriptors, condition words, embedded years, seller noise.
@@ -1551,7 +1616,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   // Q84-AMENDED: dual-axis token-class gate on weighted-consensus. A
   // blocked override returns fallback-vision — the agreed title stands.
   const q84Consensus = (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily)
-    ? q84Gate(topFamily.tokens)
+    ? q84Gate(topFamily.tokens, topFamily.rawTitle)
     : { allowed: true, reason: 'gate not reached' };
   if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily && !q84Consensus.allowed) {
     // Q119 — before falling all the way back to bare Vision, check whether

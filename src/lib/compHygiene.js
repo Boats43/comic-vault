@@ -257,6 +257,17 @@ export const ARTIST_PATTERNS = [
 // class, not a one-off.
 export const COMP_FILTER_VERSION = 4;
 
+// Q132 dispatch (2026-07-20) — single source of truth for "the title-family
+// override actually succeeded" (as opposed to 'fallback-vision', returned
+// both when no override was attempted and when Q84 blocked one). Consumed
+// by identityCore.js's resolveIdentity title-override branch and
+// api/enrich.js's variant-source-narrowing (Ship 26.3B) and
+// year-conflict-resolution checks — three independent call sites that
+// each kept their own inline copy of this exact array before this fix,
+// the same "drifted duplicate constant" class this session already found
+// twice elsewhere (Q119 title whitelists, Q128 era-year tolerances).
+export const FAMILY_OVERRIDE_DECISIONS = ['top-rank-protection', 'weighted-consensus'];
+
 // Q85 — Compact title key: lowercase, strip everything non-alphanumeric.
 // Equality fallback for compound/spacing/hyphen variants that token-level
 // matching can never reconcile ("Funnybook" vs "Funny Book" vs

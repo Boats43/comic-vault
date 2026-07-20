@@ -107,7 +107,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS } from "../src/lib/compHygiene.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -3604,6 +3604,50 @@ export default async function handler(req, res) {
       }
     }
 
+    // Q132 dispatch, Layers 1+2 (2026-07-20, GrailKey / ASM #26 class,
+    // follow-up after the Q84 bounded creator-pair recovery fix) — the
+    // suppression above (safeReqVariant/variantSourceItems/variantCheck
+    // below) was unconditional on variantPoolYearConflict alone, with no
+    // awareness of whether title-family clustering had ALREADY
+    // independently confirmed (not blocked — a genuine, successful,
+    // non-'fallback-vision' override) that this pool IS the correct
+    // alternate identity. Once Q84 stops blocking a real artist-named
+    // family (the fix this dispatch made), that confirmed family is
+    // exactly the evidence needed to trust the pool's own variant/year
+    // signal rather than discard it — the ORIGINAL Q127 rationale
+    // ("thin/incidental pool noise, discard it") no longer applies once a
+    // >=3-member consensus family has been independently accepted, not
+    // just found and rejected. FAMILY_OVERRIDE_DECISIONS (compHygiene.js)
+    // is the single shared check for "the override succeeded" — also used
+    // by identityCore.js's resolveIdentity and the Ship 26.3B narrowing
+    // just below, so this can't drift into a fourth independent copy.
+    //
+    // Deliberately narrow: this ONLY changes behavior when
+    // variantPoolYearConflict is truthy AND familyCandidate.decision is a
+    // SUCCESSFUL override. Batman #608 (poolYearHint never fires —
+    // variantPoolYearConflict is null, this code never runs) and Catwoman
+    // #64 (variantPoolYearConflict fires, but no family override occurred
+    // in that production case — familyCandidate.decision is not one of
+    // FAMILY_OVERRIDE_DECISIONS) are both unaffected; suppression stays
+    // unconditional for them, exactly as Q127/Q132-Layer-1 shipped it.
+    const yearConflictResolvedByFamily = !!variantPoolYearConflict &&
+      FAMILY_OVERRIDE_DECISIONS.includes(familyCandidate?.decision);
+    if (yearConflictResolvedByFamily) {
+      out.variantPoolYearConflict.resolvedByFamilyOverride = {
+        decision: familyCandidate.decision,
+        topFamilyTitle: familyCandidate.topFamily?.title || familyCandidate.topFamily?.rawTitle || null,
+      };
+      console.log(
+        `[variant-year-gate] resolved: confirmed family override (${familyCandidate.decision}) ` +
+        `independently agrees with poolYearHint=${variantPoolYearConflict.poolYear} — ` +
+        `suppression lifted, variant/year computation proceeds`
+      );
+    }
+    // Suppression now applies only when the conflict is NOT resolved by a
+    // confirmed family override — the default/unresolved path (Batman
+    // #608, Catwoman #64) is byte-identical to Q127/Fix-1 behavior.
+    const suppressVariantForYearConflict = !!variantPoolYearConflict && !yearConflictResolvedByFamily;
+
     // Q127 follow-up (same dispatch, found during pre-commit verification
     // audit) — req.body.variant is read directly, bypassing
     // confirmedVariant entirely, at several OTHER call sites downstream:
@@ -3619,7 +3663,7 @@ export default async function handler(req, res) {
     // every remaining raw req.body.variant consumer stays in sync with the
     // same gate rather than drifting into a fourth independently-checked
     // copy.
-    const safeReqVariant = variantPoolYearConflict ? null : (req.body.variant || null);
+    const safeReqVariant = suppressVariantForYearConflict ? null : (req.body.variant || null);
 
     // Ship #20a.6.18 — Variant identity check (additive, gated). Only runs
     // on modern books (year >= 2000) with variant detected AND Vision
@@ -3649,7 +3693,7 @@ export default async function handler(req, res) {
     // Catwoman/Gotham War: previously variant pool was 20 mixed items, electing
     // Artgerm from Catwoman Uncovered family. Now uses Gotham War family subset only.
     const variantSourceItemsPreIssueFilter = (familyCandidate &&
-      ['top-rank-protection', 'weighted-consensus'].includes(familyCandidate.decision) &&
+      FAMILY_OVERRIDE_DECISIONS.includes(familyCandidate.decision) &&
       familyCandidate.topFamily?.indices &&
       Array.isArray(visualResult?.items))
       ? familyCandidate.topFamily.indices.map(i => visualResult.items[i]).filter(Boolean)
@@ -3688,20 +3732,44 @@ export default async function handler(req, res) {
     // they survive this filter untouched. filterItemsByIssue lives in
     // src/lib/variantIdentity.js (single source of truth, directly
     // regression-testable).
-    const variantSourceItems = variantPoolYearConflict
+    const variantSourceItems = suppressVariantForYearConflict
       ? []
       : filterItemsByIssue(variantSourceItemsPreIssueFilter, confirmedIssue);
 
-    // Q127 — skip recomputation entirely on a year-hint conflict: both the
-    // override AND backfill paths would otherwise recompute the identical
-    // contaminated consensus from the same pool (variantSourceItems is
-    // already forced empty above, but Gate 1's early-return means this
-    // call would just be dead work either way — skipping it outright
-    // keeps the log trail limited to the one [variant-year-gate] line).
-    const variantCheck = variantPoolYearConflict ? null : extractConfirmedVariant(
+    // Q127 — skip recomputation entirely on an UNRESOLVED year-hint
+    // conflict: both the override AND backfill paths would otherwise
+    // recompute the identical contaminated consensus from the same pool
+    // (variantSourceItems is already forced empty above, but Gate 1's
+    // early-return means this call would just be dead work either way —
+    // skipping it outright keeps the log trail limited to the one
+    // [variant-year-gate] line). When the conflict IS resolved by a
+    // confirmed family override (Q132 Layer 1), this call proceeds.
+    //
+    // Q132 Layer 2 — bookYear: extractConfirmedVariant's own entry gate
+    // (BACKFILL_MIN_YEAR) rejects pre-1990 bookYear outright, before it
+    // ever reaches artist/year consensus. confirmedYear is STILL the
+    // stale, disputed value at this point in the resolved-conflict case
+    // (correcting it is exactly what this call is for) — passing it back
+    // in would fail that gate immediately (empirically confirmed: a real
+    // 13-listing Nakayama pool with bookYear=1965 never got past "backfill
+    // skipped: year=1965 < 1990"). poolYearHint.year is itself an
+    // independently-computed signal from this same visual pool, already
+    // corroborated by the now-successful family override — using it here
+    // only in this narrow branch lets the pool's own evidence reach its
+    // own consensus computation instead of being rejected by a gate keyed
+    // on the very value that evidence disputes. Confined to
+    // extractConfirmedVariant's bookYear PARAMETER only — does not touch
+    // confirmedYear itself, which is only ever reassigned by the existing,
+    // unmodified Q99-B variantYear override a few lines below (computed
+    // from the pool's own per-item year mentions, independent of this
+    // parameter) — so getGradeMultiplier's later `confirmedYear || year`
+    // era-table selection is unaffected except through that same
+    // pre-existing mechanism.
+    const variantBookYear = yearConflictResolvedByFamily ? variantPoolYearConflict.poolYear : confirmedYear;
+    const variantCheck = suppressVariantForYearConflict ? null : extractConfirmedVariant(
       variantSourceItems,
       safeReqVariant,
-      confirmedYear,
+      variantBookYear,
       confidence
     );
     if (variantCheck) {

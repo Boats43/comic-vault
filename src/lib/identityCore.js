@@ -15,7 +15,7 @@
  * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
 
-import { COMPOUND_WHITELIST, REPRINT_RE } from './compHygiene.js';
+import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS } from './compHygiene.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
 // source of truth for "publisher name is legitimately PART of the series
@@ -612,7 +612,7 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // has no issue number, but eBay consensus correctly extracted issue="325".
   // Prior bug: confirmedIssue stayed at Vision's wrong value ("1" from
   // marketing-copy "#1"). Fix: backfill from eBay when available.
-  if (family?.selectedTitle && ['top-rank-protection', 'weighted-consensus'].includes(family.decision)) {
+  if (family?.selectedTitle && FAMILY_OVERRIDE_DECISIONS.includes(family.decision)) {
     const normalizeTitle = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
     const familyNorm = normalizeTitle(family.selectedTitle);
     const consensusNorm = ebay?.title ? normalizeTitle(ebay.title) : null;
