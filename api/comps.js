@@ -119,8 +119,21 @@ const emptyComps = (query, reason) => ({
   source: null,
 });
 
-// Module-scope OAuth token cache, keyed by scope. Tokens are valid ~2h;
-// we refresh when the cache is within 60s of expiry.
+// Module-scope OAuth token cache, keyed by scope — a zero-latency fast
+// path when the instance is genuinely warm. Tokens are valid ~2h; we
+// refresh when the cache is within 60s of expiry.
+//
+// Perf follow-up (2026-07-20): this in-memory layer only helps a warm
+// instance — this app's sparse traffic means most requests hit a cold
+// instance with an empty tokenCache, defeating it and forcing a live
+// OAuth POST on nearly every request (confirmed via production logs: the
+// OAuth POST fired on 6/13 requests in one sample window). Same
+// "in-memory doesn't survive cold starts" class already solved for
+// cv:/pc:/ac: via the persistent Upstash KV store (kv-cache.js) — the KV
+// layer below reuses that exact mechanism rather than inventing a new
+// one. Stores the identical {token, expiresAt} shape used in-memory, so
+// the same 60s-margin freshness check governs both layers — a KV hit
+// can never serve a token the in-memory check would have rejected.
 const tokenCache = {};
 
 export const getOAuthToken = async (appId, certId, scope) => {
@@ -128,6 +141,13 @@ export const getOAuthToken = async (appId, certId, scope) => {
   const cached = tokenCache[scope];
   if (cached && now < cached.expiresAt - 60_000) {
     return cached.token;
+  }
+
+  const kvKey = `oauth:${scope}`;
+  const kvCached = await kvGet(kvKey);
+  if (kvCached && kvCached.token && kvCached.expiresAt && now < kvCached.expiresAt - 60_000) {
+    tokenCache[scope] = kvCached; // hydrate this instance's fast path with the TRUE expiresAt, not an approximation
+    return kvCached.token;
   }
 
   const basic = Buffer.from(`${appId}:${certId}`).toString("base64");
@@ -161,7 +181,14 @@ export const getOAuthToken = async (appId, certId, scope) => {
   if (!json.access_token) throw new Error("eBay OAuth missing access_token");
 
   const ttlMs = (json.expires_in || 7200) * 1000;
-  tokenCache[scope] = { token: json.access_token, expiresAt: now + ttlMs };
+  const entry = { token: json.access_token, expiresAt: now + ttlMs };
+  tokenCache[scope] = entry;
+  // KV TTL set 60s short of the real expiry so Redis's own eviction
+  // enforces the same margin as the in-memory check above — a cold
+  // instance can never read back a KV entry the warm-instance check
+  // would have already refreshed.
+  const kvTtlSeconds = Math.max(60, Math.floor(ttlMs / 1000) - 60);
+  await kvSet(kvKey, entry, kvTtlSeconds);
   return json.access_token;
 };
 

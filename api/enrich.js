@@ -2862,11 +2862,20 @@ export default async function handler(req, res) {
           return cachedFull;
         }
 
-        // Try cache for stripped title
-        const cachedStripped = await kvGet(strippedTitleKey);
-        if (cachedStripped) {
-          console.log('[pc-query] cache hit for stripped title (fallback)');
-          return cachedStripped;
+        // Try cache for stripped title — skipped when identical to
+        // fullTitleKey (true whenever confirmedTitle has no subtitle/colon,
+        // the common case: subtitleStripped === confirmedTitle, so pcKey's
+        // title portion is byte-identical and strippedTitleKey collapses to
+        // the same string already checked above). A second kvGet() for a
+        // key just proven to MISS is pure redundant latency, confirmed live
+        // via production logs showing the identical `[kv-cache] MISS:
+        // pc:v1:...` line twice in a row for the same key.
+        if (strippedTitleKey !== fullTitleKey) {
+          const cachedStripped = await kvGet(strippedTitleKey);
+          if (cachedStripped) {
+            console.log('[pc-query] cache hit for stripped title (fallback)');
+            return cachedStripped;
+          }
         }
 
         // No cache hit — try live query with full title first

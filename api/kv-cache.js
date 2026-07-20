@@ -16,6 +16,7 @@
 //   ac: — Active comps
 //   bc: — Browse comps
 //   ph: — PriceCharting HTML
+//   oauth: — eBay OAuth client-credentials tokens (api/comps.js)
 
 let redis = null;
 let kvUnavailable = false;
