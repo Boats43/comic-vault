@@ -18,7 +18,7 @@
 // src/lib/, imported by api/enrich.js. Vercel bundles transitively. Function
 // count stays at 12/12.
 
-import { extractVariantTokens } from './imageSearchIdentity.js';
+import { extractVariantTokens, tokenizeTitleFamily } from './imageSearchIdentity.js';
 import { ARTIST_PATTERNS } from './compHygiene.js';
 
 // Helper: find the most frequent item in an array. Returns null when array
@@ -282,6 +282,40 @@ export const pcMatchConflictsWithPoolYear = (priceChartingYear, poolYearHint, to
   const py = priceChartingYear != null ? parseInt(priceChartingYear, 10) : null;
   if (!py || !Number.isFinite(py) || !poolYearHint?.year) return false;
   return Math.abs(py - poolYearHint.year) > tolerance;
+};
+
+/**
+ * Q133 dispatch (2026-07-21, Invincible/Pop Kill class, sandbox-validated
+ * follow-up to Q132 Layer 4) — the year axis alone is not sufficient. Real
+ * production evidence (Invincible #1 MegaCon): PC matched "Invincible
+ * Universe: Battle Beast #1 (2025)" — a wholly unrelated Skybound one-shot —
+ * against a pool whose own year-hint was 2026, a 1-year drift comfortably
+ * inside pcMatchConflictsWithPoolYear's tolerance. The two products are
+ * contemporaneous; the divergence is EDITION identity, not time. None of the
+ * pool's 20 rawTitles mention "battle beast" or "universe" anywhere.
+ * Conversely, the real ASM #26/GrailKey case (Q132) textually OVERLAPS
+ * perfectly with its pool ("Amazing Spider-Man #26 ...") — same title/issue,
+ * wrong printing year — so a text-only check would have missed THAT case.
+ * Neither axis alone is sufficient; both are required, independently.
+ *
+ * Sandbox note (harness.mjs, same dispatch): a naive ratio>=0.5 check let
+ * "Alexander Hamilton #1" (Pop Kill Lozano's wrong PC match) pass as
+ * "agreeing" with an unrelated pool purely because both products share the
+ * common word "Alexander" — 1/2 tokens = 50%. A short PC name needs its
+ * tokens FULLY corroborated, not half — hence the >=2-token floor below.
+ *
+ * @param {string|null} pcProductName - the PC match's own product name
+ * @param {Array<string>} poolRawTitles - the visual pool's own rawTitle strings
+ * @returns {boolean} true when the PC product name fails to corroborate against the pool's own titles
+ */
+export const pcMatchConflictsWithPoolName = (pcProductName, poolRawTitles) => {
+  if (!pcProductName || !Array.isArray(poolRawTitles) || poolRawTitles.length === 0) return false;
+  const pcTokens = tokenizeTitleFamily(pcProductName);
+  if (pcTokens.length === 0) return false;
+  const poolTokenSet = new Set(poolRawTitles.flatMap((t) => tokenizeTitleFamily(t)));
+  const overlap = pcTokens.filter((t) => poolTokenSet.has(t));
+  const ratio = overlap.length / pcTokens.length;
+  return ratio < 0.5 || (pcTokens.length >= 2 && overlap.length < 2);
 };
 
 export const extractConfirmedVariant = (

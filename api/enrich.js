@@ -113,7 +113,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
-import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear } from "../src/lib/variantIdentity.js";
+import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear, pcMatchConflictsWithPoolName } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
 // Q118 — internal consistency checker (Vision's free-text reason vs its own structured fields).
@@ -3648,53 +3648,73 @@ export default async function handler(req, res) {
     // #608, Catwoman #64) is byte-identical to Q127/Fix-1 behavior.
     const suppressVariantForYearConflict = !!variantPoolYearConflict && !yearConflictResolvedByFamily;
 
-    // Q132 dispatch, Layer 4 (2026-07-20, GrailKey / ASM #26 class, PC-
-    // matcher gap) — lookupPriceCharting (called earlier, ~line 2890)
-    // accepts a title/issue-token match with ZERO year check when it ran
-    // with comicYear=null (Vision provided no year) — confirmed empirically
-    // on this exact production request: `[pt] matched: "Amazing Spider-Man
-    // #26 (2001)" year: 2001 comic year: null`. The one re-validation gate
-    // that runs afterward (needsRequery/titleOverlapsProduct, ~line 3271)
-    // is purely textual — no year check there either. Correction from the
-    // investigation: do NOT mirror ComicVine's [cv-year-strict] gate here —
-    // that gate's apparent "success" on this exact request was coincidental
+    // Q133 dispatch (2026-07-21, Invincible/Pop Kill class) — generalizes
+    // Q132 Layer 4 from a year-only check gated behind a confirmed family
+    // override into a two-axis check (year OR product-name-vs-pool) that
+    // runs whenever a PC match exists, independent of family decision.
+    //
+    // Investigation + sandbox evidence (Q132/Q133 dispatches) showed Layer
+    // 4's original scope was too narrow in one direction and the year axis
+    // alone is insufficient in another:
+    //
+    // - Too narrow: Layer 4 fired only when `yearConflictResolvedByFamily`
+    //   (a confirmed family override AND a year conflict). Invincible #1
+    //   MegaCon never reaches that branch at all — Vision ("invincible")
+    //   and the pool's own consensus title agree at 100% overlap, so title-
+    //   family clustering never has to override anything; the decision
+    //   falls through to `fallback-vision`, which is not a
+    //   FAMILY_OVERRIDE_DECISIONS entry. PC matched "Invincible Universe:
+    //   Battle Beast #1 (2025)" — a wholly unrelated Skybound one-shot —
+    //   and the old gate could never see it.
+    // - Year axis insufficient: Invincible's wrong PC match (2025) is only
+    //   1 year off the pool's own year-hint (2026) — comfortably inside
+    //   pcMatchConflictsWithPoolYear's tolerance. The two products are
+    //   contemporaneous; the divergence is EDITION identity, not time.
+    //   None of the pool's 20 rawTitles mention "battle beast"/"universe".
+    // - Name axis alone would have been insufficient for the ORIGINAL
+    //   Layer-4 case: PC's "Amazing Spider-Man #26 (2001)" textually
+    //   OVERLAPS its own pool perfectly (same title/issue, wrong printing
+    //   year) — a text-only check would have missed GrailKey/ASM #26.
+    //
+    // Neither axis alone is sufficient; both run, independently, and either
+    // conflicting rejects the match. pcMatchConflictsWithPoolName
+    // (variantIdentity.js) carries its own sandbox-caught false-negative
+    // fix (a >=2-token PC name needs >=2 overlapping tokens, not a bare
+    // ratio — "Alexander Hamilton" was passing as "agreeing" with "Alexander
+    // Lozano" on the shared first name alone).
+    //
+    // Do NOT mirror ComicVine's [cv-year-strict] gate here — that gate's
+    // apparent "success" on the original GrailKey case was coincidental
     // (all 4 CV candidates scored 0 on the NAME axis before year ever
-    // mattered) and it uses the same stale/null comicYear PC does, so it
-    // isn't independently reliable either. This needs new, narrow logic.
+    // mattered) and it uses the same stale/null comicYear PC does.
     //
-    // Fires ONLY inside the yearConflictResolvedByFamily branch — a
-    // confirmed family override has independently established poolYearHint
-    // as trustworthy, which is the one signal genuinely unavailable to the
-    // earlier, year-blind PC query. Rejects outright (does not demote to
-    // "nearest fuzzy hit") — matching the hard-reject disposition of every
-    // other confirmed year-conflict gate in this file, not Q86's
-    // unproven-year soft-tolerate path (this isn't an unproven guess
-    // disagreeing with a real match, it's a CONFIRMED identity disagreeing
-    // with PC's own stated product year).
+    // Rejects outright (does not demote to "nearest fuzzy hit") — matching
+    // the hard-reject disposition of every other confirmed conflict gate in
+    // this file. No new fallback path needed (confirmed by tracing, not
+    // assumed): fetchPricechartingPop/fetchPricechartingSales (~line
+    // 4061/4069) are already gated on `priceCharting?.id`, so nulling
+    // priceCharting here makes both no-op correctly, and Tier 3 active-
+    // comps-only anchoring already works once no PC anchor exists. The
+    // out.pc* fields below were already populated (~line 3430-3439, before
+    // this gate had the pool information needed to reject the match) and
+    // must be explicitly cleared here.
     //
-    // No new fallback path needed (confirmed by tracing, not assumed):
-    // fetchPricechartingPop/fetchPricechartingSales (~line 4061/4069) are
-    // already gated on `priceCharting?.id`, so nulling priceCharting here
-    // makes both no-op correctly. Tier 3 active-comps-only anchoring is
-    // already proven working in this exact production log once no PC
-    // anchor exists. The out.pc* fields below were already populated
-    // (~line 3430-3439, before this gate had the poolYearHint/family-
-    // override information needed to reject the match) and must be
-    // explicitly cleared here — assigning them earlier in the handler than
-    // this check runs doesn't make them correct.
-    //
-    // Deliberately narrow: gated on yearConflictResolvedByFamily alone, so
-    // every default/unconflicted scan (Batman #608, Catwoman #64, Eternus
-    // #2/He-Man, and every normal non-conflicted scan) never reaches this
-    // block at all — priceCharting acceptance for them is byte-identical
-    // to before this commit.
-    if (yearConflictResolvedByFamily && priceCharting) {
+    // Byte-identical for the agreeing case: Poison Ivy #31 (PC year 2025 vs
+    // poolYearHint 2024, 1y — agrees; PC name "Poison Ivy #31" fully
+    // overlaps its own pool) and Catwoman #64 (PC/pool agree on both year
+    // and name) never reject. Batman #608 has no poolYearHint at all and
+    // its PC name fully overlaps its pool, so neither axis ever fires.
+    if (priceCharting) {
+      const poolRawTitlesForPcGate = (visualResult?.items || [])
+        .map((it) => it?.rawTitle)
+        .filter(Boolean);
       const pcYearConflict = pcMatchConflictsWithPoolYear(priceCharting.year, poolYearHint);
-      if (pcYearConflict) {
+      const pcNameConflict = pcMatchConflictsWithPoolName(priceCharting.productName, poolRawTitlesForPcGate);
+      if (pcYearConflict || pcNameConflict) {
+        const axes = [pcYearConflict && 'year', pcNameConflict && 'name'].filter(Boolean).join('+');
         console.log(
-          `[pc-year-gate] rejecting PC match "${priceCharting.productName}" (year=${priceCharting.year}) — ` +
-          `conflicts with confirmed poolYearHint=${poolYearHint.year} ` +
-          `(drift=${Math.abs(parseInt(priceCharting.year, 10) - poolYearHint.year)}y) — ` +
+          `[pc-anchor-gate] rejecting PC match "${priceCharting.productName}" (year=${priceCharting.year}) — ` +
+          `conflicts on ${axes} axis (poolYearHint=${poolYearHint?.year ?? 'n/a'}) — ` +
           `no PC anchor for this book's actual edition; falling through to active-comps-only pricing`
         );
         // I13 — annotate the rejection so the card can show WHY there's no
@@ -3703,7 +3723,8 @@ export default async function handler(req, res) {
           rejectedProductName: priceCharting.productName,
           rejectedProductId: priceCharting.id,
           rejectedYear: priceCharting.year,
-          poolYearHint: poolYearHint.year,
+          poolYearHint: poolYearHint?.year ?? null,
+          conflictAxes: axes,
         };
         out.pcProductId = null;
         out.pcProductName = null;
@@ -3713,54 +3734,35 @@ export default async function handler(req, res) {
         out.pcGradedPrice = null;
         priceCharting = null;
 
-        // Q132 dispatch, Layer 4b (2026-07-20) — confirmedYear itself was
-        // already derived from this same now-rejected PC match
-        // (resolveYear, ~line 3456, ran BEFORE this gate could reject it —
-        // out.confirmedYearMeta.source was 'pricecharting'). Rejecting
-        // priceCharting alone left confirmedYear, out.confirmedYearMeta,
-        // and the variant-pool-year-conflict banner text all still citing
-        // the discredited year ("vs confirmed 2001" restating a value this
-        // exact gate just rejected as if still authoritative).
-        //
-        // Corrects to poolYearHint.year rather than reverting to null:
-        // getEra(year) (this file, ~line 220) defaults null → 'vintage' —
-        // nulling would silently misroute a book already confirmed modern
-        // into the vintage CGC/RAW multiplier tables. poolYearHint is the
-        // exact same value Layer 2 already trusts for
-        // extractConfirmedVariant's bookYear parameter in this identical
-        // yearConflictResolvedByFamily branch — reusing it here, not
-        // inventing a new source of truth.
-        //
-        // KNOWN LATENT RISK (queued, not fixed here): getEra's single 1985
-        // boundary means this correction only matters when the wrong PC
-        // year and the real year land on OPPOSITE sides of that boundary —
-        // this exact card's case (2001 vs 2026) doesn't, since both are
-        // 'modern' either way (confirmed: CGC_MULTIPLIERS.modern[9.2]=1.2
-        // matches the observed gradeMult=1.2 regardless of which year was
-        // used). A future case where the wrong PC year is pre-1985 and the
-        // real year is post-1985 (or vice versa) WOULD get a wrong-era
-        // multiplier via this same stale-confirmedYear path if this
-        // correction weren't here. Not yet observed on any real case.
-        const correctedYear = poolYearHint.year;
-        console.log(
-          `[pc-year-gate] confirmedYear corrected: ${confirmedYear} → ${correctedYear} ` +
-          `(was derived from the just-rejected PC match, source=${out.confirmedYearMeta?.source || 'unknown'})`
-        );
-        confirmedYear = String(correctedYear);
-        out.confirmedYearMeta = {
-          value: confirmedYear,
-          source: 'family-override-corrected',
-          confidence: 'proven',
-        };
-        // Corrects the SAME object decisionEngine.js's describeWarning
-        // reads for the 'variant-pool-year-conflict' banner text — without
-        // this, the message would keep citing the year this gate just
-        // rejected. originalConfirmedYear preserved so the message can say
-        // "corrected from X to Y" (a catch-and-fix) rather than "vs
-        // confirmed X" (implying X is still current).
-        if (out.variantPoolYearConflict) {
-          out.variantPoolYearConflict.originalConfirmedYear = out.variantPoolYearConflict.confirmedYear;
-          out.variantPoolYearConflict.confirmedYear = correctedYear;
+        // Q132/Q133 — confirmedYear correction. Only meaningful when (a)
+        // poolYearHint actually exists (nothing to correct TO otherwise —
+        // e.g. Pop Kill Lozano has no poolYearHint at all) AND (b)
+        // confirmedYear was itself derived from this same now-rejected PC
+        // match (out.confirmedYearMeta.source === 'pricecharting') — a
+        // name-axis-only rejection (Lozano's real confirmedYear came from
+        // ComicVine, not PC) must NOT stomp a perfectly good year sourced
+        // elsewhere. getEra(year) (this file, ~line 220) defaults null →
+        // 'vintage', so correcting to poolYearHint.year (never to null)
+        // matters whenever the wrong PC year and the real year land on
+        // opposite sides of the 1985 boundary.
+        if (poolYearHint?.year != null && out.confirmedYearMeta?.source === 'pricecharting') {
+          const correctedYear = poolYearHint.year;
+          console.log(
+            `[pc-anchor-gate] confirmedYear corrected: ${confirmedYear} → ${correctedYear} ` +
+            `(was derived from the just-rejected PC match)`
+          );
+          confirmedYear = String(correctedYear);
+          out.confirmedYearMeta = {
+            value: confirmedYear,
+            source: 'pc-anchor-rejected-corrected',
+            confidence: 'proven',
+          };
+          // Corrects the SAME object decisionEngine.js's describeWarning
+          // reads for the 'variant-pool-year-conflict' banner text.
+          if (out.variantPoolYearConflict) {
+            out.variantPoolYearConflict.originalConfirmedYear = out.variantPoolYearConflict.confirmedYear;
+            out.variantPoolYearConflict.confirmedYear = correctedYear;
+          }
         }
       }
     }
