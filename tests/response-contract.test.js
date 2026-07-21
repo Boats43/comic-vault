@@ -161,16 +161,51 @@ test('state REFUSED - price nulled even if a writer left a price behind', () => 
 // ─────────────────────────────────────────────────────────────────
 
 test('state ID_REQUIRED - identityConfident false wins over price + locks', () => {
+  // Q133 Slice 2 follow-up (2026-07-21) — decision.action is now the sole
+  // authority when a decision actually ran (see deriveState/deriveLocks).
+  // cleanOut()'s default decision is LIST_NOW; a genuinely-unconfident
+  // identity (missing issue, per identityReasons here) would never
+  // actually co-occur with LIST_NOW under decisionEngine.js's real logic
+  // — this fixture used to rely on that stale, unrealistic combination
+  // implicitly. Overriding decision to what computeDecision would ACTUALLY
+  // produce for this identity gap (identity-not-confident blocker,
+  // neither publisher-only nor pool-provisional) keeps this test's real
+  // purpose (ID_REQUIRED wins over price + other locks) intact against a
+  // realistic input instead of an impossible one.
   const c = assembleContract(cleanOut({
     identityConfident: false,
     identityReasons: ['Vision could not read the issue number'],
     manualReviewRequired: true,
+    decision: {
+      action: 'ID_REQUIRED',
+      confidence: 'high',
+      blockers: ['identity-not-confident'],
+      warnings: [],
+      nextStep: 'Provide issue number',
+    },
   }));
   assert(c.state === 'ID_REQUIRED', `expected ID_REQUIRED, got ${c.state}`);
   assert(c.price === null, 'ID_REQUIRED price must be null');
   assert(c.listable === false, 'ID_REQUIRED never listable');
   assert(c.locks[0].code === 'id-required', 'id-required lock ordered first');
   assert(c.locks[0].reason === 'Vision could not read the issue number', 'lock reason from identityReasons');
+});
+
+test('state ID_REQUIRED - no decision object at all still synthesizes correctly (defensive fallback)', () => {
+  // Q133 Slice 2 follow-up — the OTHER half of the fix: when computeDecision
+  // never ran at all (not "ran and disagreed"), the raw identityConfident
+  // flag is still the only signal available, and must still produce
+  // ID_REQUIRED. This is what distinguishes the real bug (a decision DID
+  // run and correctly said RESEARCH, but got overridden) from this
+  // legitimate case (no decision to defer to in the first place).
+  const c = assembleContract(cleanOut({
+    identityConfident: false,
+    identityReasons: ['Vision could not read the issue number'],
+    manualReviewRequired: true,
+    decision: undefined,
+  }));
+  assert(c.state === 'ID_REQUIRED', `expected ID_REQUIRED (no-decision fallback), got ${c.state}`);
+  assert(c.price === null, 'ID_REQUIRED price must be null');
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -394,7 +429,14 @@ test('24b clean assembly - zero violations on every state', () => {
     cleanOut(),                                                          // PRICED
     cleanOut({ pricingSource: 'pc_estimate' }),                          // ESTIMATED
     cleanOut({ price: null, priceBands: null, priceLow: null, priceHigh: null, refusedToPrice: true, pricingSource: 'refused', decision: { action: 'DO_NOT_LIST', confidence: 'low', blockers: ['x'], warnings: [], nextStep: '' } }), // REFUSED
-    cleanOut({ identityConfident: false, price: null, priceBands: null }), // ID_REQUIRED
+    cleanOut({
+      identityConfident: false, price: null, priceBands: null,
+      // Q133 Slice 2 follow-up — realistic decision override (see the
+      // matching comment on the "identityConfident false wins" test above);
+      // cleanOut()'s default LIST_NOW can no longer legitimately pair with
+      // identityConfident:false.
+      decision: { action: 'ID_REQUIRED', confidence: 'high', blockers: ['identity-not-confident'], warnings: [], nextStep: '' },
+    }), // ID_REQUIRED
     cleanOut({ listingHardLocked: true, listingHardLockReason: 'mega-key-floor-contamination', decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: [], nextStep: '' } }), // LOCKED
   ];
   scenarios.forEach((out, i) => {

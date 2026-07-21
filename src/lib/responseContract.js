@@ -83,7 +83,31 @@ const INSUFFICIENCY_REFUSAL_SLUGS = new Set([
 export function deriveLocks(out) {
   const locks = [];
 
-  if (out.identityConfident === false || out.decision?.action === 'ID_REQUIRED') {
+  // Q133 Slice 2 follow-up (2026-07-21) — this used to also fire on bare
+  // out.identityConfident === false, independent of out.decision?.action.
+  // That was a THIRD independent copy of the same "is this identity
+  // genuinely unconfirmed" judgment decisionEngine.js already makes (the
+  // first two: out.identityComplete in api/enrich.js, fixed Slice 1c; the
+  // identity-not-confident BLOCKER itself in decisionEngine.js, which now
+  // has explicit isPublisherOnlyGap/isPoolProvisionalIdentity exceptions).
+  // Once Slice 1c/2 made identityConfident=false legitimately NOT mean
+  // "hard block" in those two cases, this site's independent OR-clause
+  // silently reopened the wall decisionEngine.js had just closed — a
+  // promoted refused-identity card (Rachta Lin, Lozano) or a publisher-
+  // only-gap card (Invincible) showed decision.action=RESEARCH on the
+  // badge while this exact site forced contract.state=ID_REQUIRED (and
+  // therefore contract.price=null) one section over on the same card.
+  //
+  // decisionEngine.js is the sole authority WHENEVER it actually ran —
+  // checked directly via out.decision?.action, not re-derived. The
+  // narrow exception: `!out.decision` (computeDecision never ran at all —
+  // a genuine early-exit/bypass path, not "ran and disagreed") still
+  // falls back to the raw identityConfident flag as a defensive synthesis
+  // net, exactly as before — this is a real, tested scenario (a response
+  // assembled with no decision object whatsoever must still not silently
+  // read as confident), distinct from the bug above where a decision DID
+  // run and correctly said RESEARCH.
+  if ((!out.decision && out.identityConfident === false) || out.decision?.action === 'ID_REQUIRED') {
     locks.push({
       code: 'id-required',
       reason: out.identityReasons?.[0]
@@ -194,7 +218,11 @@ export function deriveLocks(out) {
  * LOCKED keeps price visible (XMEN1 ruling); REFUSED renders null.
  */
 function deriveState(out, locks, priceNum, source) {
-  if (out.identityConfident === false || out.decision?.action === 'ID_REQUIRED') {
+  // Q133 Slice 2 follow-up — see the matching comment in deriveLocks
+  // above; same fix, same reasoning. decision.action is the sole
+  // authority whenever a decision actually ran; `!out.decision` keeps the
+  // pre-existing defensive fallback for the genuine no-decision-at-all case.
+  if ((!out.decision && out.identityConfident === false) || out.decision?.action === 'ID_REQUIRED') {
     return 'ID_REQUIRED';
   }
   if (out.refusedToPrice === true || source === 'refused') {

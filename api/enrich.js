@@ -7995,7 +7995,19 @@ export default async function handler(req, res) {
       // unresolved warning (and RESEARCH-tier escalation) since Q110.
       out.identityConfident = false;
 
-      if (out.price == null && refusalFallbackForPromoted?.fallbackPrice != null) {
+      // Q133 Slice 2 follow-up (2026-07-21) — narrowed from `out.price ==
+      // null` to literally zero real evidence. The broader check conflated
+      // two different situations: Phase 2 truly finding nothing (0 comps)
+      // vs. Phase 2 finding a genuine but thin result (e.g. Lozano's real
+      // 1-comp match) that the tier engine's own pre-existing >=2-comp
+      // floor (calculatePriceBands, priceBands.js) declines to band,
+      // leaving out.price null for an unrelated reason. The old check
+      // couldn't tell those apart and silently substituted the stale
+      // visual-pool-family median for a genuine thin result. Ruling: real,
+      // book-specific data — even thin — beats a family-median guess; only
+      // fall back when Phase 2 found LITERALLY nothing.
+      const realPhase2EvidenceCount = (out.rawComps?.count || 0) + (out.soldComps?.length || 0);
+      if (realPhase2EvidenceCount === 0 && refusalFallbackForPromoted?.fallbackPrice != null) {
         // Phase 2 genuinely found nothing (0 active comps, 0 sold comps) —
         // real data beats no data, but no data still beats an empty LOCKED
         // card. Falls back to the same visual-pool-median this book would
