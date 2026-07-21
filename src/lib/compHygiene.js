@@ -189,6 +189,11 @@ export const ARTIST_PATTERNS = [
   // common English word and doesn't collide with any existing pattern in
   // this file; bare "john" alone would be unsafe (too common), same reason
   // every other multi-word entry here leads with the full name.
+  /kyuyong eom/i,  // Q133 Slice 1b — Invincible #1 MegaCon exclusive artist.
+  // Collision-swept: "eom"/"kyuyong" aren't substrings of any common
+  // English word or existing pattern in this file. Multi-word form covers
+  // every real pool spelling ("Kyuyong Eom", "Kyu Yong Eom" fails this
+  // exact regex but still hits the bare surname fallback below).
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
   //
   // Q131 systemic-audit follow-up (2026-07-19, One World Under Doom #1 /
@@ -219,6 +224,9 @@ export const ARTIST_PATTERNS = [
   /\bgleason\b/i, /\bquah\b/i, /\bparrillo\b/i, /\bmaer\b/i, /\blim\b/i, /\bchew\b/i, /\bngu\b/i, /\bsanders\b/i,
   /\bfrison\b/i,  // Q84 — unambiguous last name (alias policy)
   /\bgiang\b/i,  // Q130 — unambiguous last name, collision-swept (alias policy)
+  /\beom\b/i,  // Q133 Slice 1b — unambiguous last name, collision-swept (alias policy).
+  // Catches bare "EOM" (no first name) and "Kyu Yong Eom" (3-word spelling
+  // variant the multi-word /kyuyong eom/i pattern above doesn't match).
 ];
 
 // Q89-CACHE — Comp-filter version. Bump whenever a comp-admission filter

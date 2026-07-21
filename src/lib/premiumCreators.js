@@ -123,6 +123,7 @@ export const PREMIUM_CREATORS = [
   { canonical: 'Jeehyung Lee',       aliases: ['jeehyung lee'],     tier: 'current', role: 'artist' },
   { canonical: 'Stanley Artgerm Lau',aliases: [],                   tier: 'current', role: 'cover' },
   { canonical: 'John Giang',         aliases: ['john giang', 'giang'], tier: 'current', role: 'artist' },  // Q130
+  { canonical: 'Kyuyong Eom',        aliases: ['kyuyong eom', 'eom'], tier: 'current', role: 'artist' },  // Q133 Slice 1b
 ];
 
 // Pre-compute case-insensitive search forms once at module load. Each
