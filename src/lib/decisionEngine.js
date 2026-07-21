@@ -119,7 +119,15 @@ export function computeDecision(item, context = {}) {
   }
 
   // Blocker: Identity not confident
-  if (item.identityConfident === false) {
+  // Q133 Slice 1c (2026-07-21) — publisher-only-missing is demoted to a
+  // Phase 2 warning below ('publisher-unresolved'), not a hard blocker.
+  // Title/issue/year unresolved (identityMissingFields containing anything
+  // else) still hard-blocks here exactly as before — there's no book to
+  // price against in that case.
+  const isPublisherOnlyGap = item.identityConfident === false &&
+    item.identityMissingFields?.length === 1 &&
+    item.identityMissingFields[0] === 'publisher';
+  if (item.identityConfident === false && !isPublisherOnlyGap) {
     decision.blockers.push('identity-not-confident');
   }
 
@@ -246,6 +254,29 @@ export function computeDecision(item, context = {}) {
     decision.evidence.assetTypeUncertain = {
       message: item.listingHardLockBanner
         || 'This image may be a reference scan or promotional print — verify before listing',
+    };
+  }
+
+  // Q133 Slice 1c — publisher-only-missing, now advisory (was folded into
+  // the identity-not-confident blocker above). Two honest sub-states per
+  // the design ruling: a Q94 comp-consensus publisher (>=50% of active+sold
+  // titles) is real evidence but not indicia, so it still lands here rather
+  // than silently promoting to LIST_NOW; no consensus at all shows as
+  // honestly unresolved. Either way title/issue/year are solid and a real
+  // price exists — this is the RESEARCH state, never ID_REQUIRED.
+  //
+  // Checked independently of isPublisherOnlyGap: when Q94's consensus
+  // SUCCEEDS, confirmedPublisher is non-null and identityConfident is
+  // TRUE (nothing missing) — isPublisherOnlyGap would never catch that
+  // case, and a comp-consensus publisher would silently reach LIST_NOW
+  // with no marker, which the ruling explicitly rejects.
+  if (isPublisherOnlyGap || item.publisherBackfillSource === 'active-comp-consensus') {
+    decision.warnings.push('publisher-unresolved');
+    decision.evidence.publisherUnresolved = {
+      source: item.publisherBackfillSource || null,
+      ratio: item.publisherBackfillRatio ?? null,
+      message: item.listingHardLockBanner
+        || 'Publisher could not be confirmed — verify before listing',
     };
   }
 
@@ -593,6 +624,7 @@ export function computeDecision(item, context = {}) {
     'variant-comps-unavailable',       // Q129: era-excluded comps named a specific cover variant the priced pool doesn't
     'variant-pool-year-conflict',      // Q132: pool-year drift suppressed a variant/edition signal — possibly the wrong printing
     'artist-identity-conflict',        // Q132 Fix 3: condition-report artist disagrees with comp-pool creator consensus
+    'publisher-unresolved',            // Q133 Slice 1c: publisher missing/comp-consensus-only, price still computed
   ];
   // Removed: 'content-unverified' (not a price flag — stays LIST_LOW/BUNDLE)
 
@@ -886,6 +918,13 @@ export function describeWarning(slug, item) {
     return item.refusalReason
       ? `Visual pool identity uncertain — ${item.refusalReason}`
       : 'Visual pool identity uncertain — verify title/issue before listing';
+  }
+  if (slug === 'publisher-unresolved') {
+    if (item.publisherBackfillSource === 'active-comp-consensus') {
+      const pct = Math.round((item.publisherBackfillRatio || 0) * 100);
+      return `Publisher "${item.publisher}" derived from ${pct}% comp-listing consensus, not confirmed by title/issuer data — verify before listing`;
+    }
+    return item.listingHardLockBanner || 'Publisher could not be confirmed from any source — verify before listing';
   }
   if (slug === 'sold-active-mismatch-extreme') {
     const soldSum = item.soldComps?.reduce((sum, c) => sum + c.price, 0) || 0;

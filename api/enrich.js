@@ -2092,7 +2092,13 @@ export default async function handler(req, res) {
     // poster that happens to share a comic's title.
     out.assetTypeConfident = assetTypeConfident !== false;
     if (!out.assetTypeConfident) {
-      console.log('[asset-type-gate] Vision reports this image is NOT a comic book — hard-blocking price/listing');
+      // Q133 Slice 1c — text fix only: this has been advisory-only since
+      // Q110 (2026-07-18); the real gating behavior is logged accurately
+      // a few hundred lines below ('advisory only — pricing proceeds,
+      // listing locked pending verification'). This line's wording was
+      // never updated when Q110 shipped and was actively misleading anyone
+      // reading logs post-Q110.
+      console.log('[asset-type-gate] Vision reports this image is NOT a comic book — flagged advisory, not hard-blocked');
     }
 
     // Session 4B — Set assetType early so identityComplete logic can use it.
@@ -5261,12 +5267,24 @@ export default async function handler(req, res) {
 
     // Q94 — Publisher backfill from ACTIVE-comp title consensus (second path).
     // The WARP-FIX pattern table runs against the eBay VISUAL pool only
-    // (backfillFromComps at line ~2857); when that pool is empty/thin (<4
-    // items) the publisher stays null even when the Phase-2 active pool
-    // overwhelmingly names an indie publisher, and CV's correct match gets
+    // (backfillFromComps at line ~2857); when that pool doesn't yield a
+    // publisher the confirmedPublisher stays null even when the Phase-2
+    // active pool overwhelmingly names one, and CV's correct match gets
     // rejected in a circular publisher-mismatch loop (Warp #9: 0 visual
     // results, 35 active comps naming "First Comics"). Runs BEFORE the
     // identity gate so the backfilled publisher completes identity.
+    //
+    // Q133 Slice 1c (2026-07-21) — the `< 4` visual-pool-SIZE gate below was
+    // written for the Warp #9 shape (empty visual pool) but had an
+    // unintended side effect: a FULL visual pool that still fails to name a
+    // publisher (Invincible #1 MegaCon — 20 pool items, all seller listings
+    // that never bother writing "Image Comics") blocked this fallback too,
+    // even though the 49-item active comp pool, already fetched, visibly
+    // does contain publisher mentions. Pool SIZE was never the right
+    // condition — `!confirmedPublisher` (already checked one line up) IS
+    // the condition: "did every attempt so far fail to produce one." Warp
+    // #9's own case is unaffected — an empty visual pool still leaves
+    // confirmedPublisher null, so this still fires for it exactly as before.
     {
       const activeCompTitles = [
         ...(Array.isArray(compsFromEbay?.prices) ? compsFromEbay.prices : []),
@@ -5274,7 +5292,7 @@ export default async function handler(req, res) {
       ].map((r) => String(r?.rawTitle || r?.title || '')).filter(Boolean);
 
       if (!confirmedPublisher) {
-        if ((visualResult?.items?.length || 0) < 4) {
+        {
           const pubConsensus = backfillPublisherFromTitles(activeCompTitles);
           if (pubConsensus) {
             confirmedPublisher = pubConsensus.publisher;
@@ -5460,17 +5478,71 @@ export default async function handler(req, res) {
     }
 
     out.identityConfident = idCheckFinal.confident;
+    // Q133 Slice 1c (2026-07-21, Invincible class) — publisher-only-missing
+    // is not the same class as a genuinely unresolved title/issue (that
+    // stays a hard ID_REQUIRED wall — there's no book to price against).
+    // A missing publisher with title/issue/year all present and a real
+    // Tier-3 price already computed underneath is the same "computed-but-
+    // refused" shape Q110 already fixed for assetTypeConfident/reprint/
+    // refused-identity-conflict — reusing that exact mechanism
+    // (listingHardLocked → contract state LOCKED, price/bands visible,
+    // only the List button gates) rather than inventing new state.
+    //
+    // Design ruling (explicit, not inferred): a Q94 comp-consensus
+    // publisher (>=50% of active+sold titles) counts as "found" for gate
+    // purposes but is real evidence, not indicia — the card stays RESEARCH-
+    // tier minimum on this field alone, never silently promoted to
+    // LIST_NOW. When even that consensus doesn't clear 50%, publisher
+    // stays honestly unresolved (out.publisherUnresolved) — still not
+    // ID_REQUIRED, since title/issue/year are otherwise solid and a price
+    // exists to show.
+    const publisherOnlyMissing = !idCheckFinal.confident &&
+      idCheckFinal.missingFields.length === 1 &&
+      idCheckFinal.missingFields[0] === 'publisher';
     if (!idCheckFinal.confident) {
       out.identityMissingFields = idCheckFinal.missingFields;
       out.identityReasons = idCheckFinal.reasons;
-      out.price = null;
-      out.priceLow = null;
-      out.priceHigh = null;
-      out.pricingSource = 'identity-required';
+      if (publisherOnlyMissing) {
+        out.listingHardLocked = true;
+        out.listingHardLockReason = out.listingHardLockReason || 'publisher-unresolved';
+        if (out.publisherBackfillSource === 'active-comp-consensus') {
+          out.listingHardLockBanner = out.listingHardLockBanner ||
+            `Publisher derived from ${Math.round((out.publisherBackfillRatio || 0) * 100)}% comp-listing consensus, not confirmed by title/issuer data — verify before listing`;
+        } else {
+          out.publisherUnresolved = true;
+          out.listingHardLockBanner = out.listingHardLockBanner ||
+            'Publisher could not be confirmed from any source — verify before listing';
+        }
+        console.log(
+          `[identity-gate] publisher-only gap — pricing proceeds (LOCKED), ` +
+          `source=${out.publisherBackfillSource || 'none'}`
+        );
+      } else {
+        out.price = null;
+        out.priceLow = null;
+        out.priceHigh = null;
+        out.pricingSource = 'identity-required';
+        console.log(
+          '[identity-gate] REFUSED to price —',
+          'missing:', idCheckFinal.missingFields.join(',') || '(none)',
+          '· reasons:', idCheckFinal.reasons.join('; ')
+        );
+      }
+    } else if (out.publisherBackfillSource === 'active-comp-consensus') {
+      // Q133 Slice 1c — the OTHER half of the design ruling: when Q94's
+      // consensus SUCCEEDS, confirmedPublisher is non-null and idCheckFinal
+      // reports fully confident (nothing missing) — this branch would
+      // never run and the card would silently reach LIST_NOW with no
+      // marker at all. A comp-consensus publisher is real evidence, not
+      // indicia, so it still gets the same advisory lock as the no-
+      // consensus case, just with the consensus-specific banner.
+      out.listingHardLocked = true;
+      out.listingHardLockReason = out.listingHardLockReason || 'publisher-comp-consensus';
+      out.listingHardLockBanner = out.listingHardLockBanner ||
+        `Publisher derived from ${Math.round((out.publisherBackfillRatio || 0) * 100)}% comp-listing consensus, not confirmed by title/issuer data — verify before listing`;
       console.log(
-        '[identity-gate] REFUSED to price —',
-        'missing:', idCheckFinal.missingFields.join(',') || '(none)',
-        '· reasons:', idCheckFinal.reasons.join('; ')
+        `[identity-gate] publisher resolved via comp-consensus (${Math.round((out.publisherBackfillRatio || 0) * 100)}%) — ` +
+        `RESEARCH-tier marker applied, not silently promoted to LIST_NOW`
       );
     }
 
@@ -5518,7 +5590,10 @@ export default async function handler(req, res) {
     // Q110 dispatch Part 1: out.assetTypeConfident no longer gates the
     // synthesis block — the flag is advisory (listingHardLocked above),
     // not a pricing-eligibility gate. Real comps still price normally.
-    if (idCheckFinal.confident && !isPolybagPricing) {
+    // Q133 Slice 1c: publisherOnlyMissing is the same kind of exception —
+    // title/issue/year are solid, only publisher is advisory-locked above,
+    // so synthesis proceeds instead of the hard identity-required wall.
+    if ((idCheckFinal.confident || publisherOnlyMissing) && !isPolybagPricing) {
     // P0-A — Kill browse_api legacy paths. All pricing routes through tier engine.
     // When priceBandsRaw truthy (tier 1-4 with data), use it. When null (tier-4
     // no-data: no PC, <2 verified comps), refuse-to-price instead of falling through
@@ -7805,25 +7880,25 @@ export default async function handler(req, res) {
     }
 
     // 3d. identityComplete: adapter-aware flag
-    // Comic: issue + publisher required
-    // Book: title + author required
+    // Comic: issue required. Book: title + author required.
     // Computed AFTER fallback assignments so identity fields are populated
     // assetType already set at line 1475 from req.body destructure
-    // Crow Dead Time fix — use same publisher-skip logic as identity gate (pcProductId exists = trust)
-    const publisherRequired = out.assetType === 'comic' && !(
-      (identitySource && (
-        String(identitySource).includes('ebay') ||
-        String(identitySource).includes('title-family') ||
-        String(identitySource) === 'manual'
-      )) ||
-      Boolean(out.pcProductId)
-    );
-
+    //
+    // Q133 Slice 1c (2026-07-21) — this used to carry its OWN copy of the
+    // "Crow Dead Time" publisher-skip logic (identitySource includes ebay/
+    // title-family/manual, OR pcProductId exists), independently from
+    // assessIdentityConfidence's copy of the identical check
+    // (identityGate.js). Same drifted-duplicate-constant shape this
+    // codebase has hit before (Q119's five compound-title whitelists,
+    // Q128's year-tolerance constants) — two independently-maintained
+    // copies of one skip rule, one more place for them to disagree.
+    // Publisher completeness is now solely assessIdentityConfidence's job
+    // (its missing-publisher-only case routes to listingHardLocked/
+    // RESEARCH rather than a hard wall, not to identityComplete=false) —
+    // consolidated here rather than patching both copies in sync forever.
     out.identityComplete = out.assetType === 'book'
       ? !!(out.title && out.author)
-      : publisherRequired
-        ? !!(out.issue && out.publisher)
-        : !!out.issue;
+      : !!out.issue;
 
     if (!out.visionConfidence && out.matchConfidence?.visionConfidence) {
       out.visionConfidence = out.matchConfidence.visionConfidence;
