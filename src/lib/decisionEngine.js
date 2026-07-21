@@ -127,7 +127,16 @@ export function computeDecision(item, context = {}) {
   const isPublisherOnlyGap = item.identityConfident === false &&
     item.identityMissingFields?.length === 1 &&
     item.identityMissingFields[0] === 'publisher';
-  if (item.identityConfident === false && !isPublisherOnlyGap) {
+  // Q133 Slice 2 (C1 promotion, 2026-07-21) — a promoted refused-identity-
+  // conflict card (api/enrich.js forces identityConfident=false explicitly
+  // for these, a structural flag check, not a convention) must not hard-
+  // block here either. It already carries listingHardLockReason===
+  // 'identity-unresolved', which drives the identity-conflict-unresolved
+  // WARNING (Phase 2 below) and RESEARCH-tier escalation via
+  // criticalWarnings — that's the correct gate for "identity Vision and
+  // the pool disagree on, but priced anyway," not a hard ID_REQUIRED wall.
+  const isPoolProvisionalIdentity = item.identityProvisional === true;
+  if (item.identityConfident === false && !isPublisherOnlyGap && !isPoolProvisionalIdentity) {
     decision.blockers.push('identity-not-confident');
   }
 

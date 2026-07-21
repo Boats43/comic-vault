@@ -3955,8 +3955,43 @@ export default async function handler(req, res) {
     mark('phase2_start');
 
     // Ship 26.2 — Gate Phase 2 when identity refused
+    //
+    // Q133 Slice 2 (C1 promotion, 2026-07-21) — this used to be an
+    // unconditional hard wall for EVERY refused-identity-conflict book,
+    // regardless of how strongly the pool itself corroborated its own
+    // provisional identity. Real cases (Pop Kill Rachta Lin: 3-member
+    // family; Pop Kill Lozano: 17-member family) had their title/issue
+    // ALREADY correctly resolved to the pool's own identity (Q131,
+    // resolveIdentity) — but Phase 2 (the real fetchComps/
+    // fetchPricechartingSales calls) never even ran, so the only price
+    // ever shown was buildIdentityRefusedFallbackPool's median of the
+    // 20-item VISUAL pool's own listing prices — a much thinner signal
+    // than a real comps.js query would produce.
+    //
+    // promotionEligible reuses the SAME >=3-member floor
+    // applyDualAxisGate's weighted-consensus path already trusts elsewhere
+    // in this file ("Q38: Require >=3 members for weighted-consensus
+    // override") — not a new, independently-tuned number. Below that floor
+    // (Eternus #2: 2 members) the pool is exactly the "thin/incidental
+    // noise" case Q127's original rationale was built around — stays on
+    // today's early-return path, byte-identical.
+    const identityRefusedTopFamily = familyCandidate?.topFamily;
+    const identityRefusedPromotionEligible = identityRefused && !!identityRefusedTopFamily && identityRefusedTopFamily.count >= 3;
+    // Stashed here (not inside the early-return branch below) so it's still
+    // in scope ~4000 lines later, near computeDecision — used ONLY as a
+    // last-resort if a promoted card's real Phase 2 fetch comes back with
+    // zero comps (out.price stays null): real data beats no data, but no
+    // data still beats an empty LOCKED card.
+    let refusalFallbackForPromoted = null;
+
     if (identityRefused) {
-      console.log(`[phase2] SKIPPED — identity refused by title-family clustering`);
+      // Q131 — when resolveIdentity surfaced the pool's own top family as a
+      // provisional identity (Eternus #2 / He-Man class: pool unanimous,
+      // Vision zero-overlap and proven inconsistent), use IT for the card's
+      // title/issue instead of blindly echoing req.body's Vision guess back.
+      // Still LOCKED/advisory below — this is "show the stronger real
+      // signal, clearly flagged," never a silent confidence upgrade.
+      const isProvisionalFamilyIdentity = isProvisionalRefusedIdentity(identitySource);
 
       // Q110 dispatch Part 2 (2026-07-18, Siege #3 class) — was a hard
       // refusal (price/comps nulled) even when Phase 1 already fetched a
@@ -3980,13 +4015,37 @@ export default async function handler(req, res) {
         );
       }
 
-      // Q131 — when resolveIdentity surfaced the pool's own top family as a
-      // provisional identity (Eternus #2 / He-Man class: pool unanimous,
-      // Vision zero-overlap and proven inconsistent), use IT for the card's
-      // title/issue instead of blindly echoing req.body's Vision guess back.
-      // Still LOCKED/advisory below — this is "show the stronger real
-      // signal, clearly flagged," never a silent confidence upgrade.
-      const isProvisionalFamilyIdentity = isProvisionalRefusedIdentity(identitySource);
+      if (identityRefusedPromotionEligible) {
+        // Q133 Slice 2 — do NOT take the early return. confirmedTitle/
+        // confirmedIssue/confirmedYear/confirmedPublisher are already the
+        // pool's provisional identity (Q131, resolveIdentity ran long
+        // before this point) — let Phase 2 run normally with them, exactly
+        // like any other card, and let computeDecision run at the very end
+        // as usual. Card stays LOCKED/RESEARCH via the SAME
+        // listingHardLocked mechanism Q110 already built, not a new state.
+        console.log(
+          `[phase2] PROMOTED — identity refused but pool family has ` +
+          `${identityRefusedTopFamily.count} members (>=3 floor) — ` +
+          `running Phase 2 with the pool's provisional identity instead of the thin visual-pool-only fallback`
+        );
+        out.identityProvisional = true;
+        out.listingHardLocked = true;
+        out.listingHardLockReason = 'identity-unresolved';
+        // Provisional banner text — overwritten below (near computeDecision)
+        // once we know whether Phase 2 actually found real comps or not;
+        // this is the fallback wording if somehow neither branch fires.
+        out.listingHardLockBanner = isProvisionalFamilyIdentity
+          ? `Provisional ID from visual pool: "${confirmedTitle}" #${confirmedIssue} — AI read "${req.body.title}" instead, but the visual pool unanimously disagrees — verify before listing`
+          : familyCandidate?.reason
+          ? `Visual identification uncertain — ${familyCandidate.reason} — verify before listing`
+          : 'Visual identification uncertain — verify before listing';
+        refusalFallbackForPromoted = fallbackPrice != null
+          ? { fallbackPrice, fallbackLow, fallbackHigh, fallbackPoolSize, fallbackIsolatedToFamily, topFamilyTitle: identityRefusedTopFamily.title }
+          : null;
+        // fall through — Phase 2 runs normally below, NOT skipped.
+      } else {
+
+      console.log(`[phase2] SKIPPED — identity refused by title-family clustering (${identityRefusedTopFamily?.count ?? 0} member(s), below the >=3 promotion floor)`);
 
       // FIX 1: Include backfilled year/publisher in refused response
       // (backfillFromComps ran at line 1990, may have set confirmedYear/confirmedPublisher)
@@ -4072,7 +4131,8 @@ export default async function handler(req, res) {
       // Ship #24a-2: refusedOut retired as a separate SHAPE — same fields
       // flow, plus the canonical contract block.
       return res.status(200).json(finalizeResponse(refusedOut));
-    }
+      } // end else (below-floor: unpromoted, early-return path)
+    } // end if (identityRefused)
 
     // Book-level comps cache — skip 5-9s eBay fetch on refresh.
     // Comps stored on book record with timestamp, 6-hour TTL.
@@ -7911,6 +7971,76 @@ export default async function handler(req, res) {
     }
     if (titleContamination.contaminated) {
       out.titleContamination = titleContamination;
+    }
+
+    // Q133 Slice 2 (C1 promotion) — finalize a promoted refused-identity
+    // card right before computeDecision, once the ENTIRE normal pipeline
+    // (Phase 2 comps/sold fetch, all pricing tiers, the identity-gate
+    // above) has had its chance to run against the pool's provisional
+    // identity.
+    if (out.identityProvisional) {
+      // Structural distinction (explicit, not a convention): title/issue/
+      // year being populated from the pool's OWN provisional identity must
+      // never read as Vision-agreed confidence, even though
+      // assessIdentityConfidence (the identity-gate above) would otherwise
+      // report confident=true here — every required field genuinely IS
+      // present, it's just not an identity Vision and the pool agree on.
+      // Forced here, unconditionally, regardless of what the identity-gate
+      // computed. decisionEngine.js's identity-not-confident BLOCKER gets
+      // an explicit exception for out.identityProvisional (mirroring the
+      // existing isPublisherOnlyGap exception) so this doesn't silently
+      // reopen a hard ID_REQUIRED wall — the card stays reachable via the
+      // SAME listingHardLockReason==='identity-unresolved' mechanism
+      // that's already been driving decisionEngine's identity-conflict-
+      // unresolved warning (and RESEARCH-tier escalation) since Q110.
+      out.identityConfident = false;
+
+      if (out.price == null && refusalFallbackForPromoted?.fallbackPrice != null) {
+        // Phase 2 genuinely found nothing (0 active comps, 0 sold comps) —
+        // real data beats no data, but no data still beats an empty LOCKED
+        // card. Falls back to the same visual-pool-median this book would
+        // have shown before promotion existed — banner stays the ORIGINAL
+        // "provisional ID" wording (set when identityRefused fired above),
+        // since that wording is still accurate for this exact case.
+        const fb = refusalFallbackForPromoted;
+        console.log(
+          `[phase2] promoted card found 0 real comps — falling back to visual-pool-median: ` +
+          `median=$${fb.fallbackPrice} range=$${fb.fallbackLow}-$${fb.fallbackHigh}`
+        );
+        out.price = fmtUsd(fb.fallbackPrice);
+        out.priceLow = fmtUsd(fb.fallbackLow);
+        out.priceHigh = fmtUsd(fb.fallbackHigh);
+        out.priceBands = {
+          quick: fb.fallbackLow, market: fb.fallbackPrice, stretch: fb.fallbackHigh,
+          source: fb.fallbackIsolatedToFamily ? 'visual_pool_family_isolated' : 'visual_pool_fallback',
+          count: fb.fallbackPoolSize,
+        };
+        out.pricingSource = fb.fallbackIsolatedToFamily ? 'visual_pool_family_isolated' : 'visual_pool_fallback';
+        out.priceNote = fb.fallbackIsolatedToFamily
+          ? `Estimated from ${fb.fallbackPoolSize} listings matching the pool's own "${fb.topFamilyTitle}" family — identity unconfirmed, verify before listing.`
+          : `Estimated from ${fb.fallbackPoolSize} visually similar active listings — identity unconfirmed, verify before listing.`;
+        out.visualPoolUsed = true;
+        out.visualPoolSize = fb.fallbackPoolSize;
+        out.visualPoolIsolatedToFamily = fb.fallbackIsolatedToFamily;
+      } else if (out.price != null) {
+        // Real comps.js/sold data priced this card — source-honest banner,
+        // deliberately distinct wording from the visual-pool-only fallback
+        // above. The card must say which evidence class it's showing.
+        const realCompCount = out.rawComps?.count || 0;
+        const realSoldCount = out.soldComps?.length || 0;
+        console.log(
+          `[phase2] promoted card priced from real Phase 2 data — ` +
+          `activeComps=${realCompCount} soldComps=${realSoldCount} price=${out.price}`
+        );
+        out.listingHardLockBanner =
+          `Identity unconfirmed (visual pool disagrees with the AI read) — priced from ` +
+          `${realCompCount} live comp${realCompCount === 1 ? '' : 's'}` +
+          (realSoldCount > 0 ? ` and ${realSoldCount} verified sold record${realSoldCount === 1 ? '' : 's'}` : '') +
+          ` — verify before listing`;
+      }
+      // else: out.price stayed null AND no fallback was available either —
+      // genuinely nothing anywhere. Banner stays the default "Visual
+      // identification uncertain" text set when identityRefused fired.
     }
 
     // Compute decision after full enrich object assembled
