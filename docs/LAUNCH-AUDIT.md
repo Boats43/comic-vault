@@ -79,18 +79,23 @@ Tags: **LAUNCH-BLOCKING** / **LAUNCH-SAFE-BUT-QUEUED** / **COSMETIC**.
 **Build:** `39d7b2f` (see note on `f60c56b` above).
 **Status:** Jimmy's scans have not yet landed in this conversation. Every cell below is `NOT-YET-RUN`. This table will be updated in place, cell by cell with quoted log evidence, the moment the five books' logs are provided — no summary judgments, no cell filled without its citation.
 
+**Cache-verdict rule (standing, applies to every cache-dependent cell — signal 2, and any other signal whose correctness depends on the fetch actually having run fresh):** a `PASS` requires the log to show an explicit `MISS → fresh fetch` line. A cache `HIT` is never counted as a pass by default — it is marked `INCONCLUSIVE (re-scan required)`, because a HIT means the code path under test may not have executed at all this request. This is now permanent (Section 4, invariant 9) — every fill-in below follows it.
+
 | Signal | One World Under Doom (Giang) | Pop Kill #1 (Lozano metal) | Pop Kill #1 (Rachta Lin) | Adventure Time Summer Special (SDCC) | Invincible #1 MegaCon (Eom) |
 |---|---|---|---|---|---|
 | **1. `[boot]` build SHA** | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN |
-| **2. Cache MISS → fresh fetch** | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN |
+| **2. Cache MISS → fresh fetch** (HIT = INCONCLUSIVE, not a pass) | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN |
 | **3. `[signed-consensus]` detected + members/denominator** | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN |
 | **4. Filter mode (isolate-signed / reject / etc.) + counts** | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN |
 | **5. PC/CV anchor disposition** | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN |
 | **6. `[price-bands-pricing]` + finalPrice/source** | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN | NOT-YET-RUN |
+| **7. Q136 Slice A2 check (Rachta Lin only — see note below)** | N/A | N/A | NOT-YET-RUN | N/A | N/A |
+
+**Q136 Slice A2 — no 6th book needed.** Its exact target code path (a promoted-provisional con-exclusive whose pool genuinely cannot supply issue/year — the identity-incomplete blocker exemption) is **already naturally exercised by Pop Kill #1 (Rachta Lin)**, already in the 5-book list — Rachta Lin is the literal fixture Slice A2 was built against ("Pop Kill #1 Megacon con-exclusive... issue/year genuinely can't be read off the pool"). Row 7 above is specific to that book: `PASS` requires the card to show `RESEARCH`/`LOCKED`-with-visible-price despite null issue/year (decision.action and contract.state, read from the log or rendered card) — **not** `ID_REQUIRED`. This is the mechanism's first live observation on record (Section 1 flagged it as shipped-but-unverified) — treat it with the same rigor as Q139, not as an afterthought of the standard 6 signals.
 
 **Known pre-existing signals to watch for per book** (context carried in from this session, not a substitute for reading the actual logs):
 - **One World Under Doom:** the G.O.D.S. PC-anchor mismatch (Q139's primary target) and the year/publisher client-merge gap (Section 2) both apply here directly.
-- **Rachta Lin:** Q136 Slice A2 has no prior live confirmation on record (Section 1) — this is that mechanism's first real observation.
+- **Rachta Lin:** Q136 Slice A2 (row 7 above) has no prior live confirmation on record (Section 1) — this is that mechanism's first real observation.
 - **Adventure Time SDCC / Invincible Returns:** this is the coherent-content-token lane's test case per your explicit ruling — a FAIL here, if it reproduces the known misidentification shape, is the one launch-blocking finding this matrix can surface.
 - **Invincible MegaCon (Eom):** exercises Q133 Slice 1b's Eom registry addition and Q136 Slice A's artist-axis tier, both previously live-verified for this exact book.
 
@@ -115,6 +120,8 @@ Tags: **LAUNCH-BLOCKING** / **LAUNCH-SAFE-BUT-QUEUED** / **COSMETIC**.
 7. **One commit, one rescan.** Every slice ships as its own commit with its own test file, gets pushed, gets its Vercel deployment state confirmed READY via direct API lookup (never assumed from "the push succeeded"), and gets its own live rescan before the next slice starts. Do not batch multiple unverified mechanisms into one rescan — when something fails, you need to know which commit caused it.
 
 8. **Prove deployment truth, don't assert it.** "I pushed it" and "it's live" are different claims. Confirm via `git log`/`git status` that the fix is actually committed (not sitting in the working tree), and via a direct Vercel deployment lookup (`githubCommitSha` matching the pushed SHA, `readyState: READY`) that it's actually serving traffic — before telling anyone to rely on a rescan for verification.
+
+9. **Deploy READY confirms code; it does not confirm cache state — verify MISS→fresh-fetch explicitly before trusting any rescan.** This is a distinct, additional fact from invariant 8, not a restatement of it: a deployment can be genuinely `READY` and serving the new code, and a rescan against it can *still* observe zero of that code's effects, because a persistent cache (the Redis-backed `ac:` KV cache, `KV_TTL.ACTIVE` = 1h) replayed a pre-fix entry instead of invoking the new logic at all. This recurred twice in one session for the same book (Q130/Q131's original v3→v4 incident, then Slice C's v5→v6→v7). The standing rule: for any signal whose correctness depends on fresh code having actually run, a cache `HIT` in the log is never a default pass — it is `INCONCLUSIVE (re-scan required)`, full stop, regardless of what the rest of that log line shows. Only an explicit `MISS → fresh fetch` line earns a `PASS`. Apply this to every future verification pass, not just the one this rule was written for.
 
 ---
 
