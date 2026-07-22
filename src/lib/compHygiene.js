@@ -284,7 +284,13 @@ export const ARTIST_PATTERNS = [
 // shipped) for the full 1h TTL — same failure shape as the v3→v4 incident
 // on this exact book, this time from forgetting the bump rather than the
 // fix itself being wrong.
-export const COMP_FILTER_VERSION = 6;
+// v7 = Slice C follow-up (2026-07-22) — deploying the v6 build alone does
+// NOT clear the Redis-backed `ac:` KV cache; a rescan on the v6 build was
+// due to replay the SAME `ac:v6:one world under doom|1` entry (written
+// ~15:57 UTC, 3600s TTL) that never actually ran the new signed-isolation
+// logic. Bumped again so the next rescan is a genuine `ac:v7:` MISS,
+// forcing a fresh fetchComps pass through the fix rather than a stale hit.
+export const COMP_FILTER_VERSION = 7;
 
 // Q132 dispatch (2026-07-20) — single source of truth for "the title-family
 // override actually succeeded" (as opposed to 'fallback-vision', returned
