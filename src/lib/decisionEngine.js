@@ -108,13 +108,35 @@ export function computeDecision(item, context = {}) {
 
   // PHASE 1: HARD BLOCKERS
 
+  // Q133 Slice 2 (C1 promotion, 2026-07-21) — a promoted refused-identity-
+  // conflict card (api/enrich.js forces identityConfident=false explicitly
+  // for these, a structural flag check, not a convention) must not hard-
+  // block here either. It already carries listingHardLockReason===
+  // 'identity-unresolved', which drives the identity-conflict-unresolved
+  // WARNING (Phase 2 below) and RESEARCH-tier escalation via
+  // criticalWarnings — that's the correct gate for "identity Vision and
+  // the pool disagree on, but priced anyway," not a hard ID_REQUIRED wall.
+  const isPoolProvisionalIdentity = item.identityProvisional === true;
+  // Slice A2 (2026-07-22, Rachta Lin regression) — hoisted above so the
+  // identity-incomplete blocker below can consult it too. A pool-provisional
+  // con-exclusive (Megacon/SDCC-style variant) structurally cannot supply
+  // year/publisher from the pool the way a normal book can — the pool IS
+  // the only identity source and it's already flagged as disagreeing with
+  // Vision. Gate strictly on the promoted case actually having real Phase 2
+  // evidence underneath it (not just the fallback-median guess) — this is
+  // narrower than the identity-not-confident exemption below on purpose,
+  // per explicit ruling: genuinely-unidentified books (Poison Ivy #1 class,
+  // no identityProvisional at all) keep today's ID_REQUIRED byte-identical.
+  const hasRealPhase2Comps = (item.rawComps?.count || 0) > 0 || (item.soldComps?.length || 0) > 0;
+  const isProvisionalWithRealComps = isPoolProvisionalIdentity && hasRealPhase2Comps;
+
   // Blocker: Missing critical identity fields
   if (!item.title || item.title.trim() === '') {
     decision.blockers.push('missing-title');
   }
   // Blocker: Identity incomplete (comic-specific: issue + publisher required)
   // identityComplete flag computed by ComicAdapter
-  if (item.identityComplete === false) {
+  if (item.identityComplete === false && !isProvisionalWithRealComps) {
     decision.blockers.push('identity-incomplete');
   }
 
@@ -127,15 +149,6 @@ export function computeDecision(item, context = {}) {
   const isPublisherOnlyGap = item.identityConfident === false &&
     item.identityMissingFields?.length === 1 &&
     item.identityMissingFields[0] === 'publisher';
-  // Q133 Slice 2 (C1 promotion, 2026-07-21) — a promoted refused-identity-
-  // conflict card (api/enrich.js forces identityConfident=false explicitly
-  // for these, a structural flag check, not a convention) must not hard-
-  // block here either. It already carries listingHardLockReason===
-  // 'identity-unresolved', which drives the identity-conflict-unresolved
-  // WARNING (Phase 2 below) and RESEARCH-tier escalation via
-  // criticalWarnings — that's the correct gate for "identity Vision and
-  // the pool disagree on, but priced anyway," not a hard ID_REQUIRED wall.
-  const isPoolProvisionalIdentity = item.identityProvisional === true;
   if (item.identityConfident === false && !isPublisherOnlyGap && !isPoolProvisionalIdentity) {
     decision.blockers.push('identity-not-confident');
   }
