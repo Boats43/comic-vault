@@ -54,6 +54,7 @@ import {
   isValidIssueRange,
   isEnumeratedIssueList,
   extractArtist,
+  classifyArtistMatch,
   cleanPublisher,
   getEraYearTolerance,
   evaluateEraYearMatch,
@@ -640,6 +641,73 @@ export const applyVariantPreferenceFilter = (pool, variant) => {
   return { pool, isolated: false, matchMode };
 };
 
+/**
+ * Q136 Slice A (2026-07-22, Lozano/Louw sibling class) — artist-preference
+ * narrowing. Layered STRICTLY ON TOP of applyVariantPreferenceFilter's own
+ * result — never replaces it, never runs independently of it. Per the
+ * stability requirements: additive-only, byte-identical when no artist
+ * signal is present.
+ *
+ * Real production case: Pop Kill #1 (Alexander Lozano MegaCon "Naughty"
+ * Metal LTD 100) priced off a Warren Louw virgin sold comp — a real,
+ * different variant by a different artist — because nothing in the
+ * active-comp pipeline ever isolated on artist at all once a variant
+ * string was present (Filter 3b, the only creator-aware active filter,
+ * explicitly requires `!variant`). soldVerification.js has had a working,
+ * proven artist hard-match (classifyArtistMatch, Q109) for SOLD comps for
+ * some time; this ports the exact same mechanism to ACTIVE comps rather
+ * than inventing a parallel one.
+ *
+ * `ourArtist` prefers `artistOverride` (extractArtist(confirmedTitle), from
+ * api/enrich.js — the resolved IDENTITY itself, not gated by
+ * extractConfirmedVariant's own majority-ratio ceiling, which was built to
+ * exclude a common cover artist named on a MINORITY of an otherwise-generic
+ * pool and would incorrectly also exclude an artist named on the MAJORITY
+ * of a pool that already resolved to one coherent family) over
+ * extractArtist(variant) (the pre-existing signal, unaffected for every
+ * call site that doesn't pass artistOverride).
+ *
+ * No-op (returns `result` completely unchanged) when: no artist recognized
+ * in either signal (the overwhelming majority of variant scans — base
+ * books, old books, and any variant that simply doesn't name a specific
+ * artist never reach the filter body at all), or when narrowing wouldn't
+ * clear the floor (falls back to Filter 1c's own already-computed result,
+ * exactly as if this function didn't exist).
+ *
+ * Floor reuses Filter 1c's own existing premium-variant-isolation
+ * convention immediately above (minMatches=1 for a distinguishing signal)
+ * rather than inventing a new number — an artist name is the same class of
+ * distinguishing, premium signal PREMIUM_VARIANT_RE/isolatedOnSpecific
+ * already treats as floor=1-worthy. Flagged for explicit sign-off per the
+ * stability requirements: this reuses an existing constant for a NEW
+ * purpose, which is a judgment call even though it isn't a new number.
+ *
+ * @param {{pool: Array, isolated: boolean, matchMode: string}} result - applyVariantPreferenceFilter's own, already-computed result
+ * @param {string|null} variant - our confirmed variant string
+ * @param {string|null} [artistOverride] - extractArtist(confirmedTitle), preferred over extractArtist(variant) when present
+ * @returns {{pool: Array, isolated: boolean, matchMode: string}}
+ */
+export const applyArtistPreferenceNarrowing = (result, variant, artistOverride = null) => {
+  const ourArtist = artistOverride || extractArtist(variant);
+  if (!ourArtist || !Array.isArray(result?.pool) || result.pool.length === 0) {
+    return result; // no artist signal — byte-identical no-op
+  }
+
+  const before = result.pool.length;
+  const artistMatched = result.pool.filter((it) => {
+    const outcome = classifyArtistMatch(String(it.title || ''), ourArtist);
+    return outcome === 'match' || outcome === 'partial';
+  });
+
+  const ARTIST_NARROWING_FLOOR = 1; // reuses Filter 1c's own premium-isolation floor, see docstring above
+  if (artistMatched.length >= ARTIST_NARROWING_FLOOR) {
+    console.log(`[comps] artist-preference narrowing: before=${before} after=${artistMatched.length} kept=${artistMatched.length} (artist "${ourArtist}")`);
+    return { pool: artistMatched, isolated: true, matchMode: `${result.matchMode}+artist` };
+  }
+  console.log(`[comps] artist-preference narrowing: before=${before} after=${result.pool.length} (0 artist matches — keeping Filter 1c's result unchanged)`);
+  return result;
+};
+
 // Core fetcher — exported so api/grade.js can reuse it without an HTTP hop.
 // Always resolves (never throws): failures return an empty comps object so
 // the grade flow can fall through to the AI estimate path.
@@ -661,6 +729,7 @@ export const fetchComps = async ({
   assetType,   // Session 4B — 'comic' | 'book' for query builder routing
   author,      // Session 4B — book identity field (for buildBookQuery)
   cvVolumeStartYear = null,  // Q128 — ComicVine volume's own start_year (lookupComicVine's `.startYear`), used by Filter 0c to corroborate a "volume launch year" label distinct from confirmedYear
+  artistOverride = null,  // Q136 Slice A — extractArtist(confirmedTitle) from api/enrich.js, when the RESOLVED identity itself names a recognized artist (see applyArtistPreferenceNarrowing below for why this differs from extractArtist(variant))
 }) => {
   if (!appId || !certId) {
     return emptyComps(null, "missing eBay credentials");
@@ -1238,10 +1307,13 @@ export const fetchComps = async ({
 
       // Filter 1c: variant preference (extracted to applyVariantPreferenceFilter
       // above — Q111 dispatch, 2026-07-18, Venomverse #1 class).
+      // Q136 Slice A — applyArtistPreferenceNarrowing layered strictly on
+      // top, never replacing this result (see its docstring above).
       {
         const varPrefResult = applyVariantPreferenceFilter(p, variant);
-        p = varPrefResult.pool;
-        if (varPrefResult.isolated) _premiumVariantIsolated = true;
+        const artistResult = applyArtistPreferenceNarrowing(varPrefResult, variant, artistOverride);
+        p = artistResult.pool;
+        if (artistResult.isolated) _premiumVariantIsolated = true;
       }
 
       // Filter 1d: cover-letter matching. Cover A, B, C, D are separate

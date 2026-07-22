@@ -131,7 +131,19 @@ assertTrue(rachtaLin.count >= 3, 'Rachta Lin: CLEARS the >=3 promotion floor');
 
 const lozano = getTopFamilyCount(LOZANO_POOL, 'Danger Girl', '1', null);
 assertEq(lozano.decision, 'refused-identity-conflict', 'Lozano: real pool still refuses (Vision "Danger Girl" 0-overlap)');
-assertEq(lozano.count, 17, 'Lozano: top family has 17 members — real, computed, matches production log');
+// Q136 Slice A (2026-07-22) — count legitimately dropped 17→11: adding
+// "Alexander Lozano" to ARTIST_PATTERNS (compHygiene.js) means
+// tokenizeTitleFamily (its pre-existing, already-shipped "variant-artist
+// token fusion" stripping — see imageSearchIdentity.js) now correctly
+// strips "lozano"/"alexander lozano" from the clustering token stream
+// before family-building runs, exactly as it already does for every other
+// registered artist (Giang, Eom, etc.). "Lozano" was previously an
+// UNRECOGNIZED token that stayed in the stream and inflated apparent
+// similarity across titles that otherwise differ more than the shared
+// artist name suggested. This is the intended, expected side effect of a
+// registry addition — not a clustering regression — and still clears the
+// promotion floor by a wide margin (11 >= 3).
+assertEq(lozano.count, 11, 'Lozano: top family has 11 members post-Q136 (was 17 pre-registry-fix — see comment)');
 assertTrue(lozano.count >= 3, 'Lozano: CLEARS the >=3 promotion floor');
 
 const eternus = getTopFamilyCount(ETERNUS_POOL, 'He-Man and the Masters of the Universe', '1', null);

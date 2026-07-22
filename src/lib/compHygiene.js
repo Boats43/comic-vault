@@ -2,6 +2,11 @@
 // active-comp filtering (api/comps.js) and sold-comp verification
 // (src/lib/soldVerification.js). Pure functions, no I/O.
 //
+// Q136 Slice A (2026-07-22) — imports PREMIUM_CREATORS for
+// isUnambiguousSurnameAlias (promoted from soldVerification.js below).
+// No circular risk: premiumCreators.js has zero imports of its own.
+import { PREMIUM_CREATORS } from './premiumCreators.js';
+//
 // Location note (per Ship #15 architectural learning): this module has no
 // HTTP handler so it lives in src/lib/, not api/. api/comps.js and
 // api/enrich.js import via `../src/lib/compHygiene.js`. Vercel bundles
@@ -194,6 +199,9 @@ export const ARTIST_PATTERNS = [
   // English word or existing pattern in this file. Multi-word form covers
   // every real pool spelling ("Kyuyong Eom", "Kyu Yong Eom" fails this
   // exact regex but still hits the bare surname fallback below).
+  /alexander lozano/i,  // Q136 Slice A — Pop Kill #1 MegaCon "Naughty" metal
+  // exclusive artist. Collision-swept: "lozano" is not a substring of any
+  // common English word or existing pattern in this file.
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
   //
   // Q131 systemic-audit follow-up (2026-07-19, One World Under Doom #1 /
@@ -227,6 +235,7 @@ export const ARTIST_PATTERNS = [
   /\beom\b/i,  // Q133 Slice 1b — unambiguous last name, collision-swept (alias policy).
   // Catches bare "EOM" (no first name) and "Kyu Yong Eom" (3-word spelling
   // variant the multi-word /kyuyong eom/i pattern above doesn't match).
+  /\blozano\b/i,  // Q136 Slice A — unambiguous last name, collision-swept (alias policy).
 ];
 
 // Q89-CACHE — Comp-filter version. Bump whenever a comp-admission filter
@@ -263,7 +272,9 @@ export const ARTIST_PATTERNS = [
 // Inhyuk Lee comp ($14.99). Every ARTIST_PATTERNS/variant-matching
 // change should bump this constant going forward — it's the general
 // class, not a one-off.
-export const COMP_FILTER_VERSION = 4;
+// v5 = Q136 Slice A (2026-07-22) — Alexander Lozano added to ARTIST_PATTERNS;
+// new artist-preference narrowing tier changes which comps Filter 1c admits.
+export const COMP_FILTER_VERSION = 5;
 
 // Q132 dispatch (2026-07-20) — single source of truth for "the title-family
 // override actually succeeded" (as opposed to 'fallback-vision', returned
@@ -882,6 +893,61 @@ export const extractArtist = (variantOrTitle) => {
     if (m) return m[0].toLowerCase();
   }
   return null;
+};
+
+// Q109 (greenlit, soldVerification.js) — bare-surname corroboration check.
+// A surname counts as fully trusted (not just "partial") when
+// premiumCreators.js has ALREADY registered it as an unambiguous alias for
+// the matching creator (e.g. Momoko, Parrillo) — same registry, same
+// ambiguity judgment the rest of the codebase already relies on.
+//
+// Q136 Slice A (2026-07-22) — promoted here from soldVerification.js
+// (single source of truth, same pattern as classifyVariantTokens/
+// getEraYearTolerance elsewhere in this file) so api/comps.js's new
+// artist-preference narrowing tier and soldVerification.js's existing
+// sold-comp filter share one implementation instead of drifting into two.
+export const isUnambiguousSurnameAlias = (ourArtist, surname) => {
+  const entry = PREMIUM_CREATORS.find((c) =>
+    c.canonical.toLowerCase() === ourArtist ||
+    c.aliases.some((a) => a.toLowerCase() === ourArtist)
+  );
+  if (!entry) return false;
+  return entry.aliases.some((a) => a.toLowerCase() === surname);
+};
+
+// Q109 (greenlit) — three-outcome variant-artist classification.
+//   'match'     — full curated ARTIST_PATTERNS match, or a bare-surname
+//                 match ALREADY registered unambiguous in premiumCreators.js.
+//   'partial'   — bare surname present but not a curated/registered match
+//                 either way (ambiguous or undetermined). Callers should
+//                 keep but demote (lower-trust tier), not reject.
+//   'mismatch'  — comp names a DIFFERENT known artist. Reject.
+//   'no-signal' — our artist is known and the comp corroborates NOTHING,
+//                 not even a bare surname. Reject.
+//
+// Q136 Slice A (2026-07-22) — promoted here from soldVerification.js
+// (see isUnambiguousSurnameAlias above for the reasoning) so the new
+// active-comp artist-preference narrowing tier (api/comps.js) reuses the
+// EXACT proven sold-side mechanism rather than a parallel reimplementation.
+export const classifyArtistMatch = (rowTitle, ourArtist) => {
+  if (!ourArtist) return 'match'; // nothing to check against — unchanged behavior
+  const rowArtist = extractArtist(rowTitle);
+  if (rowArtist) {
+    return rowArtist === ourArtist ? 'match' : 'mismatch';
+  }
+  // Row's artist unrecognized by the curated registry — fall back to raw
+  // substring corroboration on our artist's surname (last word; the
+  // literal full-name case is already covered by extractArtist above,
+  // since every multi-word ARTIST_PATTERNS entry is itself a literal
+  // substring match).
+  const words = ourArtist.split(/\s+/);
+  const surname = words[words.length - 1];
+  const escaped = surname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const surnameRe = new RegExp(`\\b${escaped}\\b`, 'i');
+  if (surnameRe.test(String(rowTitle || ''))) {
+    return isUnambiguousSurnameAlias(ourArtist, surname) ? 'match' : 'partial';
+  }
+  return 'no-signal';
 };
 
 // Q132 dispatch, Fix 3 (2026-07-20) — surfaces a mismatch between the two

@@ -106,7 +106,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist } from "../src/lib/compHygiene.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -4315,6 +4315,7 @@ export default async function handler(req, res) {
               assetType: out.assetType,
               author: out.author || null,  // book identity field for buildBookQuery
               cvVolumeStartYear: comicVine?.startYear || null,  // Q128 — volume-label-year corroboration (Harley Quinn #62 class). NOT comicVine?.volume?.startYear — that shape is always undefined (comicVine.volume is a flat string); .startYear is the correct top-level field.
+              artistOverride: extractArtist(confirmedTitle) || null,  // Q136 Slice A — the RESOLVED identity's own artist (e.g. a provisional pool's confirmedTitle already naming "Alexander Lozano"), independent of extractConfirmedVariant's majority-ratio ceiling.
             }).catch((err) => {
               console.error('[enrich] comps error stack:', err?.stack);
               console.error(`[enrich] comps error: ${err?.message || err}`);
@@ -4735,6 +4736,7 @@ export default async function handler(req, res) {
       // PC's own grade-value data — independent of title text entirely.
       priceLadder: pcSales.priceLadder || null,
       cvVolumeStartYear: comicVine?.startYear || null,  // Q128 — same volume-label-year corroboration as active Filter 0c
+      artistOverride: extractArtist(confirmedTitle) || null,  // Q136 Slice A — see the fetchComps call site above for the full reasoning
     });
     const filteredSold = soldVerifyResult.verified;
     if (rawSoldRows.length > 0) {
