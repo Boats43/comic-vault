@@ -5892,7 +5892,28 @@ export default async function handler(req, res) {
     // as the original identityProvisional gap this pattern was built to
     // close — a promotion that flips the BLOCKER but forgets the
     // PRICING-ELIGIBILITY gate is the same class of half-fix twice now.
-    if ((idCheckFinal.confident || publisherOnlyMissing || visionLowButCorroborated) && !isPolybagPricing) {
+    //
+    // Rachta Lin row-7 gap (2026-07-22, LAUNCH-AUDIT Section 3 dispatch) —
+    // out.identityProvisional itself (Q133 Slice 2, set ~line 4163) was
+    // MISSING from this exact OR-chain — a third instance of the identical
+    // bug shape now, not a new one. decisionEngine.js's identity-incomplete
+    // blocker got its own out.identityProvisional exemption (Slice A2), so
+    // the CARD's decision correctly read RESEARCH — but this gate, upstream
+    // and independent of decisionEngine, still required idCheckFinal.
+    // confident/publisherOnlyMissing/visionLowButCorroborated, none of which
+    // a promoted provisional identity with a missing issue/year (Rachta
+    // Lin's genuine shape — the pool can't supply them) ever satisfies. The
+    // entire tier-engine block below ran skipped; realPhase2EvidenceCount
+    // check at computeDecision time (~line 8279) could be >0 with out.price
+    // still null, and neither of ITS branches fires for that combination
+    // (real evidence exists so the 0-evidence fallback doesn't fire; out.
+    // price is null so the "real data priced this card" branch doesn't
+    // fire either) — a real, already-fetched comp pool showing a blank
+    // price. out.identityProvisional is already narrowly scoped (only set
+    // true inside the >=3-member promotion floor, Q133 Slice 2) — adding it
+    // here is not a new eligibility class, it's completing the one Q133
+    // Slice 2 already established.
+    if ((idCheckFinal.confident || publisherOnlyMissing || visionLowButCorroborated || out.identityProvisional) && !isPolybagPricing) {
     // P0-A — Kill browse_api legacy paths. All pricing routes through tier engine.
     // When priceBandsRaw truthy (tier 1-4 with data), use it. When null (tier-4
     // no-data: no PC, <2 verified comps), refuse-to-price instead of falling through
