@@ -72,8 +72,12 @@ console.log('\n=== Q143 — active_reference_range (Rachta Lin) ===\n');
 console.log('Part 0: source-level gate guards\n');
 {
   assertTrue(
-    /activeReferenceEligible\s*=\s*\n\s*out\.identityProvisional === true &&\s*\n\s*rawComps\.count >= 1 && rawComps\.count <= 2 &&\s*\n\s*\(out\.soldComps\?\.length \|\| 0\) === 0 &&\s*\n\s*!hasUnresolvedActiveVariantConflict/.test(enrichSrc),
-    'activeReferenceEligible carries all four required clauses, in order'
+    /activeReferenceEligible\s*=\s*\n\s*out\.identityProvisional === true &&\s*\n\s*rawComps\.count >= 1 && rawComps\.count <= 2 &&\s*\n\s*refPrices\.length >= 1 &&\s*\n\s*\(out\.soldComps\?\.length \|\| 0\) === 0 &&\s*\n\s*!hasUnresolvedActiveVariantConflict/.test(enrichSrc),
+    'activeReferenceEligible carries all five required clauses, in order (identityProvisional, count 1-2, refPrices.length>=1 defensive guard, zero solds, no variant conflict)'
+  );
+  assertTrue(
+    /const refPrices = \(rawComps\.recentSales \|\| \[\]\)[\s\S]{0,120}filter\(\(p\) => typeof p === 'number' && p > 0\);[\s\S]{0,400}const activeReferenceEligible/.test(enrichSrc),
+    'refPrices is computed BEFORE activeReferenceEligible (so its length can gate eligibility), not after'
   );
   assertTrue(enrichSrc.includes("out.pricingSource = 'active_reference_range';"), 'pricingSource literal present');
   assertTrue(enrichSrc.includes('out.verifiedFMV = false;'), 'verifiedFMV=false set');
@@ -217,6 +221,34 @@ console.log('\nPart 2: required test matrix\n');
   finalizeResponse(item);
   const contract = item.contract;
   assertEq(contract.state, 'REFUSED', 'variant-conflicting 2-comp pool: contract.state is REFUSED');
+}
+
+// 2c-bis. Defensive guard: rawComps.count > 0 but recentSales carries no
+// valid numeric price (malformed/missing .price on every row) — must
+// fall through to P0-A's refusal, never Math.min/max on an empty array.
+{
+  const refPrices = [{ price: null }, { price: undefined }]
+    .map((r) => r?.price)
+    .filter((p) => typeof p === 'number' && p > 0);
+  assertEq(refPrices.length, 0, 'sanity: malformed recentSales rows produce zero valid prices');
+  const item = {
+    title: 'Pop Kill 1 Rachta Lin Megacon Ltd 250 Virgin & 25 Embossed Metals !!',
+    identityProvisional: true,
+    identityConfident: false,
+    identityComplete: false,
+    listingHardLocked: true,
+    listingHardLockReason: 'identity-unresolved',
+    price: null,
+    pricingSource: 'refused-tier-bypass-detected', // what P0-A actually sets when refPrices.length===0 short-circuits eligibility
+    refusedToPrice: true,
+    rawComps: { average: null, lowest: null, highest: null, count: 2 },
+    soldComps: [],
+  };
+  item.decision = computeDecision(item);
+  finalizeResponse(item);
+  const contract = item.contract;
+  assertEq(contract.state, 'REFUSED', 'malformed-price pool: falls through to REFUSED, no Infinity/NaN leaks into price');
+  assertEq(contract.price, null, 'malformed-price pool: price stays null');
 }
 
 // 2d. 3+ verified actives → existing Tier 3 unchanged. priceBands.js was

@@ -6064,16 +6064,23 @@ export default async function handler(req, res) {
       // simply thin, unrelated comps, internally-conflicting comps) —
       // narrowed to fire only when this narrower, better-evidenced path
       // does not apply, never retired.
+      // refPrices computed up front (not inside the eligibility branch)
+      // specifically so its length can gate eligibility itself — a
+      // rawComps.count > 0 pool whose recentSales rows carry no valid
+      // numeric price (malformed/missing .price) must fall through to
+      // the existing P0-A refusal below, not compute Math.min/max on an
+      // empty array (Infinity/-Infinity).
+      const refPrices = (rawComps.recentSales || [])
+        .map((r) => r?.price)
+        .filter((p) => typeof p === 'number' && p > 0);
       const activeReferenceEligible =
         out.identityProvisional === true &&
         rawComps.count >= 1 && rawComps.count <= 2 &&
+        refPrices.length >= 1 &&
         (out.soldComps?.length || 0) === 0 &&
         !hasUnresolvedActiveVariantConflict(rawComps.recentSales);
 
       if (activeReferenceEligible) {
-        const refPrices = (rawComps.recentSales || [])
-          .map((r) => r?.price)
-          .filter((p) => typeof p === 'number' && p > 0);
         const referenceLow = Math.round(Math.min(...refPrices) * 100) / 100;
         const referenceHigh = Math.round(Math.max(...refPrices) * 100) / 100;
         const referenceMid = Math.round((refPrices.reduce((a, b) => a + b, 0) / refPrices.length) * 100) / 100;
