@@ -279,7 +279,27 @@ export function computeDecision(item, context = {}) {
   // TRUE (nothing missing) — isPublisherOnlyGap would never catch that
   // case, and a comp-consensus publisher would silently reach LIST_NOW
   // with no marker, which the ruling explicitly rejects.
-  if (isPublisherOnlyGap || item.publisherBackfillSource === 'active-comp-consensus') {
+  // Q135 dispatch (2026-07-22, Poison Ivy #31 class) — ruling adjustment:
+  // a comp-title-consensus publisher is real evidence but not indicia, per
+  // the Q133 Slice 1c design ruling above — BUT that ruling assumed
+  // comp-consensus was reached because it was genuinely the only source.
+  // Root-cause investigation found a separate bug (api/enrich.js
+  // cv-pub-autofill, ~line 3536) meant ComicVine's OWN confirmed publisher
+  // could never reach confirmedPublisher even when CV had a real, matched
+  // volume — letting the weaker comp-consensus signal win by default
+  // whenever Vision's own read came back null (expected scan-to-scan
+  // Vision variance, not a bug). That root cause is fixed independently;
+  // this is defense-in-depth for any other path that sets
+  // publisherBackfillSource to 'active-comp-consensus' — a comp-consensus
+  // publisher no longer warrants the advisory when ComicVine independently
+  // carries a publisher for the same book (a real, confirmed source, not
+  // comp titles being the ONLY source, which is what this warning exists
+  // to flag).
+  const cvIndependentlyConfirmsPublisher = !!item.comicVine?.publisher;
+  if (
+    isPublisherOnlyGap ||
+    (item.publisherBackfillSource === 'active-comp-consensus' && !cvIndependentlyConfirmsPublisher)
+  ) {
     decision.warnings.push('publisher-unresolved');
     decision.evidence.publisherUnresolved = {
       source: item.publisherBackfillSource || null,

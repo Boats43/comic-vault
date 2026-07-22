@@ -101,3 +101,38 @@ export function chooseBetterGrade(incoming, current) {
     preserved: false
   };
 }
+
+/**
+ * Q135 dispatch (2026-07-22, Lozano/Rachta Lin last-mile) — pool-provisional
+ * identity (title-family-refused-provisional, Q131/Q134) means the server's
+ * resolved title/issue/year/publisher/variant are honest signals — possibly
+ * null when the pool doesn't corroborate a field — that must overwrite the
+ * stored record. Every one of the 5 client merge sites in App.jsx builds its
+ * updated record with `enrich.X || cur.X` (or omits identity fields from the
+ * merge entirely for title/issue/publisher on 2 of the 5) — an OR-fallback
+ * or an omission both treat an honest server-side null identically to "no
+ * new data," silently keeping Vision's stale, already-rejected scan values
+ * on the rendered card. That's true even when api/enrich.js correctly sends
+ * `year: null` / `publisher: null` for a provisional card (confirmed via
+ * unit test in Q134) — the fix never had a way to reach the screen.
+ *
+ * Single source of truth, spread into every merge site AFTER its own
+ * existing field assignments so it wins on key collision (year/variant are
+ * already keys in every merge object; this overrides them only when
+ * provisional). Returns {} — a true no-op — for any non-provisional enrich
+ * response, so every other card's merge stays byte-identical to before.
+ *
+ * @param {object} enrich - enrich API response
+ * @param {object} prior - the existing stored record (cur/s/item, depending on call site)
+ * @returns {object} {} when not provisional, else honest title/issue/year/publisher/variant
+ */
+export function applyProvisionalIdentity(enrich, prior) {
+  if (!enrich?.identityProvisional) return {};
+  return {
+    title: enrich.title ?? enrich.confirmedTitle ?? prior?.title,
+    issue: enrich.issue ?? null,
+    year: enrich.year ?? null,
+    publisher: enrich.publisher ?? null,
+    variant: enrich.variantNote ?? null,
+  };
+}

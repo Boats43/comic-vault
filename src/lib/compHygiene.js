@@ -773,6 +773,30 @@ export const isValidIssueRange = (title) => {
   return false;
 };
 
+// Q135 dispatch (2026-07-22, Invincible #1 MegaCon class) — enumerated
+// print-set detector. LOT_RE requires an explicit "lot"/"set"/"bundle"
+// word; isValidIssueRange catches dash-separated ranges ("#1-11"). Neither
+// catches a listing that spells out a run as bare space-separated issue
+// numbers with no qualifier word at all ("Invincible #1 2 3 4 5 6 7 8 9 10
+// 11") — a real production comp-pool contaminant. Requires a SINGLE "#"
+// followed by 4+ space-separated integers (the initial issue number plus
+// 3+ more) to keep false-positive risk low: an ordinary "title #1 2026"
+// (issue + year) or "title #1 2 2026" never reaches 4 total numbers.
+// Strictly-ascending is also required — an incidental non-monotonic
+// triple ("#9 4 5", a grade fragment) can't false-positive. Each number
+// must stay under 1000 — guards against a year (2024+) appearing in the
+// sequence and being mistaken for part of the enumeration.
+export const isEnumeratedIssueList = (title) => {
+  const m = String(title || '').match(/#\s*(\d+(?:\s+\d+){3,})\b/);
+  if (!m) return false;
+  const nums = m[1].trim().split(/\s+/).map(Number);
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] <= nums[i - 1]) return false;
+    if (nums[i] >= 1000) return false;
+  }
+  return true;
+};
+
 // ──────────────────────── SERIES / FORMAT MARKERS ──────────────────────
 
 // Detect series-extension markers in a title — Roman numerals II-X, Vol

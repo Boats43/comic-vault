@@ -106,7 +106,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE } from "../src/lib/compHygiene.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -3539,12 +3539,35 @@ export default async function handler(req, res) {
       out.publisherBackfillRatio = backfill.yearBackfillRatio;
     }
 
-    // Publisher autofill from ComicVine: when publisher=null but CV volume has it, backfill.
+    // Publisher autofill from ComicVine: when publisher=null but CV has it, backfill.
     // Unblocks Pacific Silver Star and similar cases where Vision didn't extract publisher.
-    if (!confirmedPublisher && comicVine?.volume?.publisher?.name) {
-      confirmedPublisher = comicVine.volume.publisher.name;
+    //
+    // Q135 dispatch (2026-07-22, Poison Ivy #31 class) — this read
+    // `comicVine?.volume?.publisher?.name`, which is ALWAYS undefined: the
+    // object `lookupComicVine` actually returns (this file, ~line 1138)
+    // has `volume` as a flat STRING (`match.volume?.name`, just the volume
+    // title) and the resolved publisher as its OWN top-level `publisher`
+    // field (`resolvedCvPublisher`) — the exact same "comicVine.volume is a
+    // flat string, not an object with nested fields" shape bug CLAUDE.md
+    // already documents for the era-gate (~2893) and convergence-score
+    // axes (~2811/2817/2823); this is a fourth, independent instance of it
+    // in the publisher-autofill path specifically. Confirmed via real
+    // production log: Poison Ivy #31 resolved cvYear=2025 (agreeing with
+    // PC, proving `comicVine` was genuinely non-null with real matched-
+    // issue data) yet confirmedPublisher stayed null all the way to Q94's
+    // active-comp-consensus fallback (api/enrich.js ~5400) — a strictly
+    // weaker signal that only exists because this dead branch could never
+    // fire to begin with, regardless of whether CV actually had the data.
+    // Root cause of WHY Vision's own publisher read was null this scan in
+    // the first place is separate and expected: Vision's OCR of the cover
+    // publisher logo varies scan-to-scan on the same physical book (the
+    // same documented nondeterminism class as the condition-report-artist
+    // drift / Momoko style-confusion entries in the Pattern Library) — not
+    // itself a bug to fix, just the trigger condition that exposes this one.
+    if (!confirmedPublisher && comicVine?.publisher) {
+      confirmedPublisher = comicVine.publisher;
       out.publisherBackfilledFromCV = true;
-      console.log(`[cv-pub-autofill] ${confirmedPublisher} (from CV volume)`);
+      console.log(`[cv-pub-autofill] ${confirmedPublisher} (from CV match)`);
     }
 
     // Q127 dispatch (2026-07-19, Catwoman #64 Szerdy-variant class) — a
@@ -3778,6 +3801,55 @@ export default async function handler(req, res) {
             out.variantPoolYearConflict.confirmedYear = correctedYear;
           }
         }
+      }
+    }
+
+    // Q135 dispatch (2026-07-22, Invincible #1 MegaCon class) — narrow
+    // recovery for ship12's imageSearchTitle selection (computed above,
+    // ~line 3335). Invincible can't reach ship12's branch-2 isVariantScan
+    // fallback today: title-family clustering's decision is
+    // 'fallback-vision' (Q84 blocked the [atom,eve] character-name
+    // override — that gate is deliberately untouched here), and branch-2
+    // of the imageSearchTitle selector nulls it unconditionally the moment
+    // decision === 'fallback-vision', before ever checking isVariantScan.
+    // Real production case: PC anchor rejected (Battle Beast one-shot,
+    // wrong product), pool is MegaCon-exclusive (premium-variant tokens),
+    // but the comps query fell back to a bare "invincible #1 2026" search
+    // that matched Battle Beast print sets + an omnibus instead of the
+    // pool's own 20 real MegaCon-exclusive listings.
+    //
+    // Deliberately narrow, matching the greenlit scope: fires ONLY when
+    // (a) imageSearchTitle is still null (every other branch already
+    // produced a usable seed — this never overrides a working value), (b)
+    // the PC anchor was just rejected on this exact request (a genuine
+    // signal that the "obvious" query text matched the wrong product),
+    // and (c) the pool's own dominant family carries premium-variant
+    // tokens (convention/exclusive/virgin/numbered/ltd — PREMIUM_VARIANT_RE,
+    // the same registry Q111's Filter 1c AND-match already trusts). When
+    // all three hold, seed the query from the pool's own dominant rawTitle
+    // — same mechanism ASM #26/Nakayama already uses via
+    // familyCandidate.rawTitle for an ACCEPTED override; here the override
+    // was blocked, so this reads familyCandidate.topFamily.rawTitle
+    // instead (still populated even when Q84 blocks the top-level decision
+    // — see selectTitleFamilyCandidate's fallback-vision branches,
+    // imageSearchIdentity.js).
+    if (
+      imageSearchTitle == null &&
+      out.pcMatchRejectedForYearConflict &&
+      familyCandidate?.topFamily?.rawTitle
+    ) {
+      const poolVariantText = `${req.body.variant || ''} ${familyCandidate.topFamily.rawTitle}`;
+      if (PREMIUM_VARIANT_RE.test(poolVariantText)) {
+        imageSearchTitle = familyCandidate.topFamily.rawTitle;
+        console.log(
+          `[ship12-anchor-rejected] PC anchor rejected + premium-variant pool — ` +
+          `seeding comps query from pool's dominant rawTitle: "${imageSearchTitle}"`
+        );
+      } else {
+        console.log(
+          `[ship12-anchor-rejected] PC anchor rejected but pool carries no premium-variant ` +
+          `tokens — leaving imageSearchTitle null (narrow trigger not met)`
+        );
       }
     }
 
@@ -5632,7 +5704,7 @@ export default async function handler(req, res) {
           '· reasons:', idCheckFinal.reasons.join('; ')
         );
       }
-    } else if (out.publisherBackfillSource === 'active-comp-consensus') {
+    } else if (out.publisherBackfillSource === 'active-comp-consensus' && !out.comicVine?.publisher) {
       // Q133 Slice 1c — the OTHER half of the design ruling: when Q94's
       // consensus SUCCEEDS, confirmedPublisher is non-null and idCheckFinal
       // reports fully confident (nothing missing) — this branch would
@@ -5640,6 +5712,17 @@ export default async function handler(req, res) {
       // marker at all. A comp-consensus publisher is real evidence, not
       // indicia, so it still gets the same advisory lock as the no-
       // consensus case, just with the consensus-specific banner.
+      //
+      // Q135 dispatch (2026-07-22, Poison Ivy #31 class) — `!out.comicVine
+      // ?.publisher` added: the ruling's premise is comp titles being the
+      // ONLY source, not merely the source that happened to fire first.
+      // ComicVine independently confirming a publisher for this exact book
+      // is a real source, not indicia-grade — this branch should never
+      // have reached active-comp-consensus for such a book at all (root
+      // cause: cv-pub-autofill above was reading a dead field path,
+      // ~line 3536); this guard is defense-in-depth in case some other
+      // path ever sets publisherBackfillSource without CV having had its
+      // turn first.
       out.listingHardLocked = true;
       out.listingHardLockReason = out.listingHardLockReason || 'publisher-comp-consensus';
       out.listingHardLockBanner = out.listingHardLockBanner ||
@@ -7965,16 +8048,47 @@ export default async function handler(req, res) {
     // confirmedIssue / confirmedYear / confirmedPublisher drive pricing and comps,
     // but decisionEngine reads out.issue / out.year / out.publisher directly.
     // Q49: Simplified confirmedIssue || confirmedIssue → confirmedIssue (duplicate from global replace)
+    //
+    // Q135 dispatch (2026-07-22, Lozano/Rachta Lin follow-up) — this is a
+    // FIFTH site sharing the exact "unconditional raw-Vision fallback"
+    // shape Q134 fixed at 4 other call sites (PC query year, publisher
+    // fallback, resolveYear input, banner selector) — missed then because
+    // it lives in the decision-engine normalize block, not the identity-
+    // resolution block those four came from. `issueNum`/`year`/`publisher`
+    // are the SAME raw, pre-resolution local variables Q131/Q134 already
+    // established must not leak back in for a provisional identity — a
+    // card whose confirmedYear/confirmedPublisher are honestly null here
+    // (pool didn't corroborate) would otherwise have this block silently
+    // resurrect Vision's rejected guess into out.year/out.publisher, which
+    // is exactly what the client then displays. confirmedIssue is
+    // included for the same reason even though it's rarely null in
+    // practice — same principle, no exception carved out for it.
     if (!out.issue) {
-      out.issue = confirmedIssue || issueNum || null;
+      out.issue = confirmedIssue || (identityIsProvisionalOverride ? null : issueNum) || null;
     }
 
     if (!out.year) {
-      out.year = confirmedYear || year || null;
+      out.year = confirmedYear || (identityIsProvisionalOverride ? null : year) || null;
     }
 
     if (!out.publisher) {
-      out.publisher = confirmedPublisher || publisher || null;
+      out.publisher = confirmedPublisher || (identityIsProvisionalOverride ? null : publisher) || null;
+    }
+
+    // Q135 dispatch — out.variantNote (the field the client actually
+    // displays as the variant badge, via `enrich.variantNote || cur.variant`)
+    // was ONLY ever assigned inside the PC-multiplier pricing block
+    // (isFromPC-gated, ~line 6037/6229) — never set at all for a
+    // browse_api-priced card (no PC anchor), regardless of whether
+    // confirmedVariant holds a real, honest value. Universal fallback so
+    // every card threads its actual resolved variant through, not just
+    // PC-anchored ones — this is a general fix (any browse_api-priced book
+    // with a real variant had this same silent gap), not Q134/provisional-
+    // specific; the provisional case simply made it visible because
+    // confirmedVariant is honestly null there and the stale client value
+    // never got overwritten.
+    if (out.variantNote === undefined) {
+      out.variantNote = confirmedVariant || null;
     }
 
     // Q27: Surface foreign edition flag from Vision

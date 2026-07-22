@@ -12,7 +12,7 @@ import {
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
-import { chooseBetterPrice, chooseBetterGrade } from "./lib/dataQualityGuard.js";
+import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity } from "./lib/dataQualityGuard.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 
@@ -9884,6 +9884,10 @@ export default function App() {
                 editionConfirmed: cur.editionConfirmed || false,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedAR ? false : (cur.manualConfirmed || false),
+                // Q135 dispatch (2026-07-22) — pool-provisional identity's
+                // honest title/issue/year/publisher/variant override the
+                // fields above; no-op for every non-provisional card.
+                ...applyProvisionalIdentity(enrich, cur),
               };
               putComic(updated).catch(() => {});
               return prev.map((x) => {
@@ -10318,6 +10322,16 @@ export default function App() {
                   demandSignals: enrich.demandSignals || cur.demandSignals || null,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
+                  // Q135 dispatch (2026-07-22, Lozano/Rachta Lin last-mile) —
+                  // this exact merge site never touched title/issue/publisher
+                  // at all (unlike the auto-refresh/bulk-import/refresh-
+                  // market-data paths, which at least attempt `enrich.title
+                  // || cur.title`), and year's own narrow special-case above
+                  // requires a truthy enrich.confirmedYear — structurally
+                  // unreachable for an honest server-side null. Pool-
+                  // provisional identity is a no-op elsewhere; this is the
+                  // single override point for this merge site.
+                  ...applyProvisionalIdentity(enrich, cur),
                 };
                 console.log('[persist] savedId:', savedId,
                   'price:', updated.price,
@@ -10414,6 +10428,10 @@ export default function App() {
                   decision: enrich.decision || s.decision,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChangedSel ? false : (s.manualConfirmed || false),
+                  // Q135 dispatch (2026-07-22) — see the scan→catalogue
+                  // merge above (same function, same rationale) — this
+                  // object never touched title/issue/year/publisher at all.
+                  ...applyProvisionalIdentity(enrich, s),
                 };
               });
               // SPEED-2a: Load deferred metadata asynchronously
@@ -10756,6 +10774,9 @@ export default function App() {
                 editionConfirmed: cur.editionConfirmed || false,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedBulk ? false : (cur.manualConfirmed || false),
+                // Q135 dispatch (2026-07-22) — see auto-refresh path for
+                // full rationale.
+                ...applyProvisionalIdentity(enrich, cur),
               };
               console.log('[persist-bulk] savedId:', savedId,
                 'price:', updated.price,
@@ -11291,6 +11312,8 @@ export default function App() {
       soldCompsRawCached: enrich.soldCompsRawCached || item.soldCompsRawCached || [],
       // Q89-CACHE — comp-filter version the cached pool was built with
       compFilterVersion: enrich.compFilterVersion || item.compFilterVersion || null,
+      // Q135 dispatch (2026-07-22) — see auto-refresh path for full rationale.
+      ...applyProvisionalIdentity(enrich, item),
     };
 
     // Ship #20a.6.22 — Apply autofix engine

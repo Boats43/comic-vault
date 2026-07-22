@@ -52,6 +52,7 @@ import {
   hasCrossSeriesSeparator,
   detectSeriesMarkers,
   isValidIssueRange,
+  isEnumeratedIssueList,
   extractArtist,
   cleanPublisher,
   getEraYearTolerance,
@@ -1316,10 +1317,13 @@ export const fetchComps = async ({
           // LOT_RE + isValidIssueRange + hasCrossSeriesSeparator imported
           // from src/lib/compHygiene.js (Ship #20a.6). Separator check added
           // Ship #20a.6.19 — catches "Brave and Bold #28 + Titans 34" class.
+          // isEnumeratedIssueList added Q135 (2026-07-22, Invincible #1
+          // MegaCon class) — catches a bare enumerated run ("#1 2 3 4 5
+          // ...") with no "lot"/"set"/dash-range qualifier at all.
           const before = p.length;
           p = p.filter((item) => {
             const t = String(item.title || '');
-            if (LOT_RE.test(t) || isValidIssueRange(t) || hasCrossSeriesSeparator(t)) {
+            if (LOT_RE.test(t) || isValidIssueRange(t) || hasCrossSeriesSeparator(t) || isEnumeratedIssueList(t)) {
               console.log('[lot-filter] rejected:', t.slice(0, 55));
               return false;
             }
@@ -1404,6 +1408,24 @@ export const fetchComps = async ({
           p = tpbFiltered;
         } else {
           console.log(`[comps] tpb-format filter: before=${beforeTPB} after=${p.length} (0 TPB matches — keeping all)`);
+        }
+      } else if (assetType !== 'book' && !isTPB && p.length > 0) {
+        // Q135 dispatch (2026-07-22, Invincible #1 MegaCon class) — mirror
+        // image of the branch above, a pre-existing gap: our book is a
+        // single issue, not a collected edition, but nothing ever rejected
+        // an OMNIBUS/HC/collected-edition comp from a single-issue pool —
+        // the require-marker branch above only ever engages when isTPB is
+        // true. Real production case: "invincible #1 2026" matched a
+        // Battle Beast omnibus alongside genuine single-issue comps.
+        // Graceful fallback (same convention as every other filter here):
+        // if EVERY comp happens to be a TPB-marked listing, keep them all
+        // rather than starve the pool to zero.
+        const nonTpbFiltered = p.filter((item) => !TPB_MARKER_RE.test(String(item.title || '')));
+        if (nonTpbFiltered.length > 0) {
+          console.log(`[comps] non-tpb-format filter: before=${beforeTPB} after=${nonTpbFiltered.length} removed=${beforeTPB - nonTpbFiltered.length} (rejecting omnibus/hc/collected-edition for single-issue book)`);
+          p = nonTpbFiltered;
+        } else {
+          console.log(`[comps] non-tpb-format filter: before=${beforeTPB} after=${p.length} (all comps TPB-marked — keeping all, graceful fallback)`);
         }
       } else if (assetType === 'book') {
         console.log('[comps] tpb-format filter skipped (assetType=book)');
