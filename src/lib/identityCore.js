@@ -442,6 +442,22 @@ export const shouldSkipAssemblyIntegrityCheck = (familyDecision) =>
  * Pure predicate, extracted for direct regression-testability (same
  * rationale as every other Q131 fix).
  *
+ * Q134 dispatch (2026-07-21, Lozano/Rachta Lin class) — this exact-string
+ * check is now KNOWN-FRAGILE: resolveIdentity's own zero-support override/
+ * escalate logic (issue and publisher checks, further down this same file)
+ * appends a suffix to identitySource (e.g.
+ * "title-family-refused-provisional+vision_publisher_zero_support_escalate")
+ * on ANY branch, including this one — the moment that happens, this
+ * predicate silently returns false for a genuinely-provisional identity,
+ * re-admitting Vision's rejected year/publisher/PC-query. api/enrich.js no
+ * longer calls this function for that reason — it uses
+ * identity.isProvisionalOverride (a boolean captured at the instant the
+ * branch below fires, immune to later string mutation) instead. Kept here,
+ * unchanged, only because it's still correct for any caller passing an
+ * unmutated identitySource string directly (and for the existing
+ * regression test) — do not wire a NEW call site to this function; use
+ * isProvisionalOverride.
+ *
  * @param {string|null|undefined} identitySource - identity.identitySource
  * @returns {boolean} true when raw req.body/vision fallbacks for year/
  *   publisher/PC-query should be skipped in favor of the already-resolved
@@ -600,6 +616,16 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   let confirmedYear = vision.year;
   let confirmedPublisher = vision.publisher;
   let identitySource = 'vision';
+  // Q134 dispatch (2026-07-21, Lozano/Rachta Lin class) — captured the
+  // instant the provisional branch below fires, BEFORE the zero-support
+  // override/escalate checks further down this same function can append a
+  // suffix to identitySource (e.g. "+vision_publisher_zero_support_escalate").
+  // isProvisionalRefusedIdentity's string-equality check breaks silently
+  // the moment such a suffix lands — this boolean can't, by construction,
+  // since nothing after this point ever reassigns it. Same reasoning
+  // shouldSkipAssemblyIntegrityCheck already documented for keying on
+  // familyCandidate.decision instead of identitySource.
+  let isProvisionalOverride = false;
 
   // Ship 26.2 — Family candidate overrides when top-rank-protection or
   // weighted-consensus selected. Takes precedence over visualConsensus
@@ -685,6 +711,7 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     confirmedYear = ebay?.year || null;
     confirmedPublisher = ebay?.publisher || null;
     identitySource = 'title-family-refused-provisional';
+    isProvisionalOverride = true;
     console.log(
       `[phase1] REFUSED-CONFLICT PROVISIONAL: pool's own top family "${rawFamilyTitle}" ` +
       `(weight ${family.topFamily.weightSum?.toFixed?.(1)}, ${family.topFamily.count} members) ` +
@@ -851,6 +878,7 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     matchConfidenceDemote,
     visionZeroSupport,
     visionPublisherZeroSupport,
+    isProvisionalOverride,
   };
 };
 

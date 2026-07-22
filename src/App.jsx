@@ -5333,6 +5333,26 @@ function CollectionDetail({
           >
             AI Condition Report
           </div>
+          {/* Q134 dispatch (2026-07-21) — item.reason was written at scan
+              time under the AI's original (possibly since-rejected) read;
+              annotate, never rewrite or hide the text itself (I13). Same
+              amber LOCKED-banner styling reused, not a new visual language. */}
+          {item.conditionReportAdvisory && (
+            <div
+              style={{
+                padding: "6px 8px",
+                marginBottom: 8,
+                borderRadius: 6,
+                border: "1px solid rgba(245,158,11,0.4)",
+                background: "rgba(245,158,11,0.08)",
+                color: "#f59e0b",
+                fontSize: 12,
+                fontWeight: 500,
+              }}
+            >
+              ⚠️ {item.conditionReportAdvisory}
+            </div>
+          )}
           {conditionBullets.length > 0 && (
             <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
               {conditionBullets.map((b, i) => (

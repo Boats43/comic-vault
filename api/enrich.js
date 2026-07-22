@@ -43,7 +43,6 @@ import {
   selectBestVariantCandidate,
   buildIdentityRefusedFallbackPool,
   shouldSkipAssemblyIntegrityCheck,
-  isProvisionalRefusedIdentity,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -2485,6 +2484,14 @@ export default async function handler(req, res) {
     // TRACK A: Skip identity resolution for barcode scans (100% certain)
     // FIX 4: Also skip for manual identity (user typed, no camera)
     let identity, confirmedTitle, confirmedIssue, confirmedYear, confirmedPublisher, identitySource, confirmedGrade, confirmedLabelType;
+    // Q134 dispatch (2026-07-21) — captured once, straight from
+    // resolveIdentity's isProvisionalOverride (set at branch-fire time,
+    // before any zero-support suffix can mutate identitySource). Every
+    // later call site that needs to know "did the pool's provisional
+    // identity win" reads THIS, never identitySource string-matching.
+    // Stays false for barcode/manual/cgc-identity paths — none of those
+    // ever go through resolveIdentity's provisional branch.
+    let identityIsProvisionalOverride = false;
 
     if (barcodeIdentity) {
       // Barcode provides authoritative identity
@@ -2537,6 +2544,7 @@ export default async function handler(req, res) {
       confirmedYear = identity.confirmedYear;
       confirmedPublisher = identity.confirmedPublisher;
       identitySource = identity.identitySource;
+      identityIsProvisionalOverride = identity.isProvisionalOverride === true;
 
       // P0 (Q-VISION-ZERO-SUPPORT) — surface the loud override/escalate
       // note for the card UI + one-tier match-confidence demotion below.
@@ -2831,7 +2839,7 @@ export default async function handler(req, res) {
     // equals vision.year by resolveIdentity's own initial-declaration
     // fallthrough — this is byte-identical to the pre-existing behavior
     // (pcQueryYear === year). Zero blast radius on normal identification.
-    const pcQueryYear = isProvisionalRefusedIdentity(identitySource) ? confirmedYear : year;
+    const pcQueryYear = identityIsProvisionalOverride ? confirmedYear : year;
 
     // Session 6/20/26 — Cache lookups (5-min TTL, same as Anthropic prompt cache)
     // Crow fix — PC cache key MUST include year (year validation makes year-dependent results)
@@ -3126,7 +3134,7 @@ export default async function handler(req, res) {
     // PC-year fix above: skip the raw fallback only for the provisional
     // outcome, unchanged for every other case.
     confirmedPublisher = confirmedPublisher || comicVine?.volume?.publisher?.name ||
-      (isProvisionalRefusedIdentity(identitySource) ? null : publisher);
+      (identityIsProvisionalOverride ? null : publisher);
 
     // Identity already determined in Phase 1 — construct alignment object
     const alignment = {
@@ -3458,7 +3466,7 @@ export default async function handler(req, res) {
     // for every case except the provisional outcome specifically —
     // including the general (non-provisional) refused-conflict sub-case,
     // where confirmedYear already legitimately equals vision.year.
-    const yearForResolution = isProvisionalRefusedIdentity(identitySource) ? confirmedYear : year;
+    const yearForResolution = identityIsProvisionalOverride ? confirmedYear : year;
     const yearResolution = resolveYear(
       yearForResolution,
       pcYear,
@@ -3797,7 +3805,19 @@ export default async function handler(req, res) {
     // exclusive markers, limitation). Overrides Vision variant for comp
     // query when ≥2 listings agree. Falls back gracefully: no consensus →
     // keeps Vision variant. Old books (pre-2000) skip entirely.
-    let confirmedVariant = safeReqVariant;
+    // Q134 dispatch (2026-07-21, Rachta Lin class) — confirmedVariant never
+    // got the same honest-null treatment confirmedYear/confirmedPublisher
+    // already get from resolveIdentity's provisional branch. Without this,
+    // Vision's rejected variant read (safeReqVariant, itself the client-
+    // forwarded req.body.variant) survived untouched — displayed as the
+    // variant badge AND fed into fetchComps/computePriceBandsFromSold,
+    // where it could poison variant-preference filtering against genuine
+    // comps that don't mention it. Gated exactly like year/publisher:
+    // provisional branch only — a normal, Vision-agreed identity keeps its
+    // real variant untouched. If extractConfirmedVariant (below) finds a
+    // pool-derived consensus, it overwrites this null with THAT — pool-
+    // derived or honestly-null, never the overruled source.
+    let confirmedVariant = identityIsProvisionalOverride ? null : safeReqVariant;
     let variantIdentitySource = 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
@@ -3991,7 +4011,7 @@ export default async function handler(req, res) {
       // title/issue instead of blindly echoing req.body's Vision guess back.
       // Still LOCKED/advisory below — this is "show the stronger real
       // signal, clearly flagged," never a silent confidence upgrade.
-      const isProvisionalFamilyIdentity = isProvisionalRefusedIdentity(identitySource);
+      const isProvisionalFamilyIdentity = identityIsProvisionalOverride;
 
       // Q110 dispatch Part 2 (2026-07-18, Siege #3 class) — was a hard
       // refusal (price/comps nulled) even when Phase 1 already fetched a
@@ -4039,6 +4059,23 @@ export default async function handler(req, res) {
           : familyCandidate?.reason
           ? `Visual identification uncertain — ${familyCandidate.reason} — verify before listing`
           : 'Visual identification uncertain — verify before listing';
+        // Q134 dispatch (2026-07-21) — the AI condition-report text (item.
+        // reason) was generated at scan time, BEFORE this identity
+        // resolution ever ran — it can and does narrate the AI's original
+        // (now-rejected) read (wrong title/issue/variant mentioned inline).
+        // No code path can rewrite that freeform text after the fact, so
+        // per I13 this is an ANNOTATION only, reusing the same banner
+        // pattern/wording style — never a rewrite or suppression of the
+        // text itself. Gated on isProvisionalFamilyIdentity specifically
+        // (not the broader out.identityProvisional, which also covers the
+        // general non-provisional promoted sub-case where confirmedTitle
+        // still legitimately equals Vision's own read — no mismatch to
+        // warn about there).
+        if (isProvisionalFamilyIdentity) {
+          out.conditionReportAdvisory =
+            'This report was generated under the AI\'s original identification, ' +
+            'which the visual pool disagrees with — details it mentions (title, issue, variant) may not match the confirmed identity above.';
+        }
         refusalFallbackForPromoted = fallbackPrice != null
           ? { fallbackPrice, fallbackLow, fallbackHigh, fallbackPoolSize, fallbackIsolatedToFamily, topFamilyTitle: identityRefusedTopFamily.title }
           : null;
@@ -4065,6 +4102,13 @@ export default async function handler(req, res) {
           : {}),
         identitySource: identitySource || 'vision',
         identityProvisional: isProvisionalFamilyIdentity,
+        // Q134 dispatch — same freeform-text caveat as the promoted branch
+        // above: item.reason was written before this identity resolution
+        // ran and may still narrate the AI's original (rejected) read.
+        conditionReportAdvisory: isProvisionalFamilyIdentity
+          ? 'This report was generated under the AI\'s original identification, ' +
+            'which the visual pool disagrees with — details it mentions (title, issue, variant) may not match the confirmed identity above.'
+          : null,
         yearBackfilledFromComps: out.yearBackfilledFromComps || false,
         yearBackfillRatio: out.yearBackfillRatio || 0,
         yearBackfillSource: out.yearBackfillSource || null,
