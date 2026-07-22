@@ -112,7 +112,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
-import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear, pcMatchConflictsWithPoolName } from "../src/lib/variantIdentity.js";
+import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear, pcMatchConflictsWithPoolName, hasUnresolvedActiveVariantConflict } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
 // Q118 — internal consistency checker (Vision's free-text reason vs its own structured fields).
@@ -5822,6 +5822,22 @@ export default async function handler(req, res) {
         console.log(
           '[identity-gate] vision-low-confidence overridden by pipeline corroboration — pricing proceeds (LOCKED)'
         );
+      } else if (out.identityProvisional) {
+        // Q143 dispatch (2026-07-22) — consistency fix, not the primary
+        // mechanism (that's the tier-engine OR-arm, Q141, and the new
+        // active_reference_range branch a few hundred lines down). This
+        // branch exists ONLY so a promoted provisional identity is never
+        // even transiently nulled/mislabeled here — it does not itself
+        // compute or preserve any point price. Mirrors publisherOnlyMissing/
+        // visionLowButCorroborated's shape (LOCKED, not nulled) but is
+        // deliberately reference-only: whatever price this book ends up
+        // with (a real tier-engine result, the new reference-range tier,
+        // or none at all) is decided entirely downstream of this gate.
+        out.listingHardLocked = true;
+        out.listingHardLockReason = out.listingHardLockReason || 'identity-unresolved';
+        console.log(
+          '[identity-gate] pool-provisional identity — pricing proceeds downstream (LOCKED)'
+        );
       } else {
         out.price = null;
         out.priceLow = null;
@@ -6038,32 +6054,75 @@ export default async function handler(req, res) {
         (priceBandsRaw.variantAdjusted ? ' VARIANT-ADJUSTED' : '')
       );
     } else if (rawComps && rawComps.count > 0) {
-      // P0-A — LEGACY PATH (DEPRECATED). This path fires when tier-4 returned null
-      // (no PC match) but rawComps exist (1-2 verified active comps, below tier-3
-      // threshold of 3). Tier-based pricing should handle this with adaptive threshold.
-      // Kept temporarily with diagnostic logging; will be deleted after confirming
-      // tier-3 adaptive threshold covers this edge case. If you see this log in
-      // production, the tier-3 threshold should be lowered from 3 to 1.
-      console.warn(
-        '[P0-A-LEGACY-PATH] browse_api fallback fired — tier-4 null, rawComps exist.',
-        'rawComps.count:', rawComps.count,
-        'title:', title,
-        'issue:', confirmedIssue
-      );
-      // P0-A TEMPORARY: refuse-to-price instead of using browse_api average.
-      // This path bypasses tier selection and can leak contaminated comps.
-      out.price = null;
-      out.priceLow = null;
-      out.priceHigh = null;
-      out.pricingSource = 'refused-tier-bypass-detected';
-      out.priceNote = `Insufficient verified comps (${rawComps.count}) — try refresh or edit fields`;
-      out.refusedToPrice = true;
-      out.confidenceLevel = 'LOW';
-      console.log(
-        '[P0-A-refuse] tier-bypass path blocked —',
-        'rawComps.count:', rawComps.count,
-        'priceBands:', !!priceBandsRaw
-      );
+      // Q143 dispatch (2026-07-22, Rachta Lin class) — active_reference_range.
+      // A promoted provisional identity (out.identityProvisional, Q133 Slice
+      // 2) whose own family-scoped comp pool found 1-2 real, mutually-
+      // consistent active comps and zero exact solds deserves an honest
+      // "here's the real market range, not a verified FMV" answer instead
+      // of P0-A's blanket refusal below. P0-A remains the safety net for
+      // every OTHER tier-bypass shape (a non-provisional identity that's
+      // simply thin, unrelated comps, internally-conflicting comps) —
+      // narrowed to fire only when this narrower, better-evidenced path
+      // does not apply, never retired.
+      const activeReferenceEligible =
+        out.identityProvisional === true &&
+        rawComps.count >= 1 && rawComps.count <= 2 &&
+        (out.soldComps?.length || 0) === 0 &&
+        !hasUnresolvedActiveVariantConflict(rawComps.recentSales);
+
+      if (activeReferenceEligible) {
+        const refPrices = (rawComps.recentSales || [])
+          .map((r) => r?.price)
+          .filter((p) => typeof p === 'number' && p > 0);
+        const referenceLow = Math.round(Math.min(...refPrices) * 100) / 100;
+        const referenceHigh = Math.round(Math.max(...refPrices) * 100) / 100;
+        const referenceMid = Math.round((refPrices.reduce((a, b) => a + b, 0) / refPrices.length) * 100) / 100;
+        out.price = fmtUsd(referenceMid);
+        out.priceLow = fmtUsd(referenceLow);
+        out.priceHigh = fmtUsd(referenceHigh);
+        out.referenceLow = referenceLow;
+        out.referenceHigh = referenceHigh;
+        out.referenceMid = referenceMid;
+        out.pricingSource = 'active_reference_range';
+        out.verifiedFMV = false;
+        out.refusedToPrice = false;
+        out.listingHardLocked = true;
+        out.listingHardLockReason = out.listingHardLockReason || 'identity-unresolved';
+        out.priceNote = `Reference range from ${rawComps.count} active listing${rawComps.count === 1 ? '' : 's'} — not a verified FMV, identity unconfirmed, verify before listing.`;
+        out.confidenceLevel = 'LOW';
+        console.log(
+          `[active-reference-range] eligible — count=${rawComps.count} ` +
+          `range=$${referenceLow.toFixed(2)}-$${referenceHigh.toFixed(2)} mid=$${referenceMid.toFixed(2)}`
+        );
+      } else {
+        // P0-A — LEGACY PATH (DEPRECATED). This path fires when tier-4 returned null
+        // (no PC match) but rawComps exist (1-2 verified active comps, below tier-3
+        // threshold of 3) AND the narrower active_reference_range path above didn't
+        // apply (not a provisional identity, >2 comps, sold evidence present, or the
+        // comps disagree with each other). Kept as the safety net for every other
+        // tier-bypass shape — no longer the unconditional catch-all it used to be.
+        console.warn(
+          '[P0-A-LEGACY-PATH] browse_api fallback fired — tier-4 null, rawComps exist, active_reference_range not eligible.',
+          'rawComps.count:', rawComps.count,
+          'identityProvisional:', out.identityProvisional === true,
+          'title:', title,
+          'issue:', confirmedIssue
+        );
+        // P0-A TEMPORARY: refuse-to-price instead of using browse_api average.
+        // This path bypasses tier selection and can leak contaminated comps.
+        out.price = null;
+        out.priceLow = null;
+        out.priceHigh = null;
+        out.pricingSource = 'refused-tier-bypass-detected';
+        out.priceNote = `Insufficient verified comps (${rawComps.count}) — try refresh or edit fields`;
+        out.refusedToPrice = true;
+        out.confidenceLevel = 'LOW';
+        console.log(
+          '[P0-A-refuse] tier-bypass path blocked —',
+          'rawComps.count:', rawComps.count,
+          'priceBands:', !!priceBandsRaw
+        );
+      }
     } else {
       // P0-A: Deleted dead code block (lines 3361-3387, else-if-false browse_api path).
       // 48h monitor waived — block already refused to price via tier-bypass guard above.

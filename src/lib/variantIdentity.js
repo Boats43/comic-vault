@@ -18,7 +18,7 @@
 // src/lib/, imported by api/enrich.js. Vercel bundles transitively. Function
 // count stays at 12/12.
 
-import { extractVariantTokens, tokenizeTitleFamily } from './imageSearchIdentity.js';
+import { extractVariantTokens, tokenizeTitleFamily, classifyVariantTokens } from './imageSearchIdentity.js';
 import { ARTIST_PATTERNS, extractAcronymTokens } from './compHygiene.js';
 
 // Helper: find the most frequent item in an array. Returns null when array
@@ -350,6 +350,70 @@ export const pcMatchConflictsWithPoolName = (pcProductName, poolRawTitles) => {
   );
   if (poolConsensusAcronymOrphan) return true;
 
+  return false;
+};
+
+/**
+ * Q143 dispatch (2026-07-22, Rachta Lin active_reference_range class) —
+ * does a thin (1-2 item) active pool disagree with ITSELF on variant/
+ * artist identity? By the time this runs, the pool has already survived
+ * api/comps.js's FULL filter chain (title-similarity, reprint, variant-
+ * contam, cover-letter, lot, slab, signed, grade-proximity, creator-
+ * match, price-sanity) — this is not a re-run of that chain. It's a
+ * narrower, LAST question: do the SURVIVING 1-2 comps agree with EACH
+ * OTHER on what they are? Two comps can each individually clear every
+ * existing filter yet still be two genuinely different sub-products (one
+ * Virgin, one Embossed Metal) that happen to share enough tokens to both
+ * match a thin, ambiguous query — blending them into one reference range
+ * would understate real price variance between two real, different
+ * items. A single comp (fewer than 2 rows) has nothing to conflict with.
+ *
+ * @param {Array<{title?: string, rawTitle?: string}|string>} compRows
+ * @returns {boolean} true when 2+ comps carry mutually-exclusive artist or specific-variant signals
+ */
+export const hasUnresolvedActiveVariantConflict = (compRows) => {
+  const titles = (compRows || [])
+    .map((r) => (typeof r === 'string' ? r : (r?.title || r?.rawTitle || '')))
+    .filter(Boolean);
+  if (titles.length < 2) return false;
+
+  // Artist mismatch: two comps naming two DIFFERENT recognized creators.
+  // Reuses this file's own local extractArtist (above) — lowercased here
+  // since that helper preserves original casing and titles arrive mixed
+  // case (ALL CAPS listings are common).
+  const artists = new Set(titles.map((t) => extractArtist(t)?.toLowerCase()).filter(Boolean));
+  if (artists.size >= 2) return true;
+
+  // Specific-variant-token mismatch (Q111 taxonomy) — two comps that each
+  // carry SPECIFIC tokens (convention/ratio/retailer/exclusive/
+  // limitation/authentication/printing — not a mere finish descriptor)
+  // but disagree on which ones. Generic-only tokens (foil, virgin, etc.)
+  // never trigger this — same reasoning Q111 already established: a
+  // shared cover TREATMENT isn't a distinguishing PRODUCT claim.
+  //
+  // "Disagree" is deliberately NOT "zero overlap" — two SDCC-exclusive
+  // listings both legitimately say "exclusive"/"limited" alongside their
+  // own specific convention token, so a bare any-overlap check would let
+  // "sdcc,exclusive,limited" vs "c2e2,exclusive,limited" through as
+  // compatible even though "sdcc" and "c2e2" are two different, real
+  // conventions. Conflict fires when BOTH sides have at least one token
+  // the OTHER side lacks (a genuine two-way disagreement) — a plain
+  // subset/superset relationship (one comp just states less detail than
+  // the other) is compatible, not a conflict.
+  const specificSets = titles.map((t) => {
+    const { specific } = classifyVariantTokens(extractVariantTokens(t).join(' '));
+    return new Set(specific);
+  });
+  for (let i = 0; i < specificSets.length; i++) {
+    for (let j = i + 1; j < specificSets.length; j++) {
+      const a = specificSets[i];
+      const b = specificSets[j];
+      if (a.size === 0 || b.size === 0) continue; // nothing to disagree about
+      const aOnly = [...a].some((t) => !b.has(t));
+      const bOnly = [...b].some((t) => !a.has(t));
+      if (aOnly && bOnly) return true;
+    }
+  }
   return false;
 };
 
