@@ -1089,6 +1089,10 @@ export const scoreTitleFamilies = (families, itemsOrTitles) => {
       weightSum,
       topRank,
       rawTitle,
+      // Q140 — per-member token arrays, propagated for the coherent-
+      // content-token lane (applyDualAxisGate). Not used by any pre-Q140
+      // consumer of this object.
+      memberTokens: family.memberTokens || null,
     };
   });
 
@@ -1307,13 +1311,38 @@ const recoverAdjacentCreatorTokens = (nonCreatorTokens, poolArtistTokens, family
   return recovered;
 };
 
+// Q140 dispatch (2026-07-22, Adventure Time SDCC / Invincible Returns class)
+// — the coherent-content-token lane. A blocked non-creator addition is
+// scattered/incidental when only 1-2 pool members happen to mention it (a
+// single seller's own phrasing); it is genuine SHARED CONTENT the dominant
+// family itself established when EVERY still-blocked token is independently
+// corroborated by >=3 distinct family members — the same >=3-member floor
+// Q38/Q133-Slice-2 already trust elsewhere in this file as "this family is
+// real, not noise" (not a new, independently-tuned number). Real production
+// case: "Adventure Time Summer Special #1 SDCC Convention Exclusive 2013" —
+// Vision+eBay dual-axis agreed on "Adventure Time," and every one of
+// summer/special/sdcc/convention/exclusive was named by 4+ of a coherent
+// pool (a 4th corroborating listing appeared on rescan, strengthening, not
+// weakening, the signal) — yet the gate blocked the addition wholesale
+// because none of those words are creator names, sending PC/comps
+// downstream on the bare stem and anchoring to an unrelated "Adventure
+// Time" product. Requires per-member token data (familyMemberTokens) —
+// scoreTitleFamilies must have propagated `memberTokens` for this to
+// engage; omitting it (existing <=4-arg callers) simply disables the lane,
+// falling through to the original block, byte-identical.
+const countMemberSupport = (token, familyMemberTokens) =>
+  (familyMemberTokens || []).filter((memberTokens) => (memberTokens || []).includes(token)).length;
+
 // Token-class gate. familyTokens/agreedTokens are tokenizeTitleFamily
 // output; articles are ignored on both sides ("the flash" ≡ "flash").
 // familyRawText (Q132) is the family's representative unstripped listing
 // title, used only for the bounded creator-pair recovery above — optional,
 // omitting it simply disables recovery (existing 3-arg callers unaffected).
+// familyMemberTokens (Q140) is the family's full per-member token arrays
+// (buildTitleFamilies' `memberTokens`), used only for the coherent-content-
+// token lane above — optional, omitting it disables that lane only.
 // Returns { allowed, reason }.
-export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, familyRawText = null) => {
+export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, familyRawText = null, familyMemberTokens = null) => {
   const drop = (t) => ARTICLE_TOKENS.has(t) || NEUTRAL_ADDITION_TOKENS.has(t);
   const fam = (familyTokens || []).filter((t) => !drop(t));
   const agreed = (agreedTokens || []).filter((t) => !drop(t));
@@ -1346,6 +1375,19 @@ export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, 
     const recovered = recoverAdjacentCreatorTokens(nonCreator, poolArtistTokens, familyRawText);
     if (recovered.length > 0) {
       return { allowed: true, reason: `creator-tokens [${addedStr}] (adjacent-pair recovered: [${recovered.join(',')}])` };
+    }
+    // Q140 coherent-content-token lane — see comment above countMemberSupport.
+    // Every still-blocked token must independently clear the >=3-member
+    // floor; a single scattered/single-member token anywhere in the set
+    // keeps the WHOLE addition blocked, byte-identical to pre-Q140 behavior.
+    if (familyMemberTokens && familyMemberTokens.length > 0) {
+      const supportCounts = nonCreator.map((t) => countMemberSupport(t, familyMemberTokens));
+      if (supportCounts.every((c) => c >= 3)) {
+        return {
+          allowed: true,
+          reason: `coherent-content tokens [${nonCreator.join(',')}] (>=3 member support each: [${supportCounts.join(',')}])`,
+        };
+      }
     }
     return { allowed: false, reason: `non-creator additions [${nonCreator.join(',')}]` };
   }
@@ -1448,9 +1490,9 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     return ka.length >= 4 && ka === kb;
   })();
   const poolArtistTokens = dualAxisAgreed ? extractPoolArtistTokens(items) : null;
-  const q84Gate = (familyTokens, familyRawText = null) => {
+  const q84Gate = (familyTokens, familyRawText = null, familyMemberTokens = null) => {
     if (!dualAxisAgreed) return { allowed: true, reason: 'no dual-axis agreement' };
-    const gate = applyDualAxisGate(familyTokens, visionTokens, poolArtistTokens, familyRawText);
+    const gate = applyDualAxisGate(familyTokens, visionTokens, poolArtistTokens, familyRawText, familyMemberTokens);
     if (gate.allowed) {
       console.log(`[Q84] override-allowed reason=${gate.reason}`);
     } else {
@@ -1528,7 +1570,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
         // already reject junk. Removing token threshold unblocks clean canonical
         // titles (Batman, Avengers, The Mighty Thor) from top-rank-protection.
         // Q84-AMENDED: dual-axis token-class gate on top-rank-protection.
-        const q84TopRank = q84Gate(item0Family.tokens, item0Family.rawTitle);
+        const q84TopRank = q84Gate(item0Family.tokens, item0Family.rawTitle, item0Family.memberTokens);
         if (issueMatch && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong && q84TopRank.allowed) {
           // A1.a: Route through sanitizeSeriesTitle to remove creator names,
           // cover descriptors, condition words, embedded years, seller noise.
@@ -1622,27 +1664,54 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
 
   // Q84-AMENDED: dual-axis token-class gate on weighted-consensus. A
   // blocked override returns fallback-vision — the agreed title stands.
-  const q84Consensus = (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily)
+  //
+  // Q140 dispatch (2026-07-22) — evaluated STRICT first (no
+  // familyMemberTokens, coherent-content lane disabled) specifically so
+  // Q119's narrower, whitelist-verified compound completion below keeps
+  // first priority over the broader coherent-content lane. Captain Marvel
+  // #17 class: "kamala"/"khan" clear the coherent-content lane's >=3-member
+  // floor by a wide margin (12+/20), but adopting them into the TITLE is
+  // wrong — they describe story CONTENT (Kamala Khan's first appearance,
+  // true of every copy of this issue, any seller's phrasing), not which
+  // physical PRODUCT this is, and appending them would corrupt the PC/CV
+  // title query for a book whose real product name is just "Captain
+  // Marvel." Q119's compound completion already has the correct, narrow
+  // answer for this shape (whitelist-verified single-word recovery). The
+  // coherent-content lane is retried further below, strictly as a fallback
+  // for when compound completion can't resolve it either (Adventure Time
+  // Summer Special class: "sdcc"/"summer"/"special"/"exclusive" together
+  // are not a 2-word COMPOUND_TITLE_WHITELIST entry, so completion returns
+  // null, and the broader lane is what's actually needed there).
+  const q84ConsensusStrict = (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily)
     ? q84Gate(topFamily.tokens, topFamily.rawTitle)
     : { allowed: true, reason: 'gate not reached' };
-  if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily && !q84Consensus.allowed) {
+  if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily && !q84ConsensusStrict.allowed) {
     // Q119 — before falling all the way back to bare Vision, check whether
     // Vision's title plus a single family-confirmed neutral word completes
     // a known real title (see completeCompoundTitle above). Does NOT adopt
     // any of the tokens that actually triggered the block.
     const compoundCompletion = completeCompoundTitle(visionTitle, visionTokens, topFamily.tokens);
     if (compoundCompletion) {
-      console.log(`[Q119] compound-title completion: "${visionTitle}" → "${compoundCompletion}" (blocked additions [${q84Consensus.reason}] still excluded)`);
+      console.log(`[Q119] compound-title completion: "${visionTitle}" → "${compoundCompletion}" (blocked additions [${q84ConsensusStrict.reason}] still excluded)`);
       return {
         decision: 'weighted-consensus',
         selectedTitle: compoundCompletion,
         rawTitle: topFamily.rawTitle,
-        reason: `[Q119] compound-title completion from "${visionTitle}" — family confirms "${compoundCompletion}" (blocked additions excluded: ${q84Consensus.reason})`,
+        reason: `[Q119] compound-title completion from "${visionTitle}" — family confirms "${compoundCompletion}" (blocked additions excluded: ${q84ConsensusStrict.reason})`,
         topFamily,
         runnerUp,
         families: scored,
       };
     }
+  }
+  // Q140 — retry WITH member-token data now that compound completion has
+  // had its chance and declined. A still-blocked addition that's genuinely
+  // coherent content (not a scattered/single-seller phrase) gets the full
+  // family override instead of falling all the way back to bare Vision.
+  const q84Consensus = (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily && !q84ConsensusStrict.allowed)
+    ? q84Gate(topFamily.tokens, topFamily.rawTitle, topFamily.memberTokens)
+    : q84ConsensusStrict;
+  if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily && !q84Consensus.allowed) {
     return {
       decision: 'fallback-vision',
       selectedTitle: null,

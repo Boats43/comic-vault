@@ -657,8 +657,27 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     const sanitizedFamilyTitle = sanitizeSeriesTitle(rawFamilyTitle);
 
     confirmedTitle = sanitizedFamilyTitle;
-    // Q12c FIX: Backfill issue/year/publisher from eBay consensus when available
-    confirmedIssue = ebay?.issue || vision.issue;
+    // Q140 dispatch (2026-07-22, Adventure Time SDCC / Invincible Returns
+    // class) — family-scoped issue adoption. Reuses the SAME pool-mode
+    // extraction the refused-identity-conflict branch below already uses
+    // (family.topFamily.rawTitle, an explicit "#N" match on the WINNING
+    // family's own representative listing text) instead of always falling
+    // to ebay.issue, the pool-WIDE consensus vote. An ambiguous title stem
+    // ("Adventure Time") can host multiple genuinely different products in
+    // the same visual pool; the pool-wide issue vote can reflect a
+    // DIFFERENT family than the one that just won this override (real
+    // production evidence: PC anchored to a 3rd different wrong "Adventure
+    // Time" product across two rescans of the same book — anchor drift on
+    // an ambiguous stem). The winning family's own raw text is the correct
+    // scope. Falls back to the pre-existing ebay.issue/vision.issue chain
+    // when the family's own rawTitle carries no issue token at all (X-Men
+    // Anniversary Special class, Q12c's original case — a real family
+    // whose own title has no issue number, only the pool-wide consensus
+    // does).
+    const familyOwnIssueMatch = family.topFamily?.rawTitle
+      ? family.topFamily.rawTitle.match(/#\s*(\d+)/)
+      : null;
+    confirmedIssue = familyOwnIssueMatch ? familyOwnIssueMatch[1] : (ebay?.issue || vision.issue);
     confirmedYear = ebay?.year || vision.year;
     confirmedPublisher = ebay?.publisher || vision.publisher;
     identitySource = 'title-family-' + family.decision;
@@ -666,7 +685,9 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     if (rawFamilyTitle !== sanitizedFamilyTitle) {
       console.log(`[q40] family title sanitized: "${rawFamilyTitle}" → "${sanitizedFamilyTitle}"`);
     }
-    if (ebay?.issue) {
+    if (familyOwnIssueMatch) {
+      console.log(`[q140] family-scoped issue: "#${familyOwnIssueMatch[1]}" from winning family's own rawTitle (not pool-wide consensus)`);
+    } else if (ebay?.issue) {
       console.log(`[q12c-fix] family override preserved eBay issue="${ebay.issue}" (not Vision "${vision.issue}")`);
     }
   } else if (family?.decision === 'refused-identity-conflict' && family?.topFamily?.rawTitle && family.topFamily.count >= 2) {
