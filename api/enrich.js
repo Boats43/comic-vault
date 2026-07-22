@@ -2616,7 +2616,36 @@ export default async function handler(req, res) {
       if (shouldSkipAssemblyIntegrityCheck(familyCandidate?.decision)) {
         console.log(`[22e] SKIPPED — refused-identity-conflict provisional identity is intentionally divergent from Vision, not an assembly bug`);
       } else {
-        const integrityCompTitles = parsedVisualRows.map((r) => r.rawTitle).filter(Boolean);
+        // Q142 dispatch (2026-07-22, Adventure Time Summer Special / SDCC
+        // class) — Rule 2 ("excess non-consensus tokens," 22e-LOSS below)
+        // measures whether an added token clears 60% consensus against
+        // compTitles. Before this fix, compTitles was ALWAYS the full,
+        // possibly-ambiguous visual pool (parsedVisualRows) — the exact
+        // same "measuring coherence against the wrong population" bug Q140
+        // fixed at the Q84 gate, reproduced independently at this second,
+        // unrelated choke point downstream of it. A real, ≥3-member family
+        // that Q84 already vetted and let win (summer/special at 5/5=100%
+        // within the family) reads as ~26% "non-consensus" against the
+        // full 19-item pool, which necessarily contains OTHER, different
+        // "Adventure Time" products by construction — forcing a revert of
+        // a correct override back to bare Vision. When the family that won
+        // is a real, accepted override, its OWN members are the correct
+        // population to check consensus against, not the pool it was
+        // extracted from. Falls back to the full pool for every other
+        // path (fallback-vision, refused-identity-conflict already exempt
+        // above, no familyCandidate at all) — byte-identical there.
+        const winningFamilyTitles =
+          familyCandidate?.topFamily?.indices && FAMILY_OVERRIDE_DECISIONS.includes(familyCandidate?.decision)
+            ? familyCandidate.topFamily.indices.map((i) => parsedVisualRows[i]?.rawTitle).filter(Boolean)
+            : null;
+        const integrityCompTitles = winningFamilyTitles && winningFamilyTitles.length > 0
+          ? winningFamilyTitles
+          : parsedVisualRows.map((r) => r.rawTitle).filter(Boolean);
+        console.log(
+          `[22e-population] mode=${winningFamilyTitles && winningFamilyTitles.length > 0 ? 'winning-family' : 'full-pool'} ` +
+          `count=${integrityCompTitles.length}` +
+          (winningFamilyTitles && winningFamilyTitles.length > 0 ? ` (family="${familyCandidate.topFamily.title}")` : '')
+        );
         const integrityCheck = checkAssemblyIntegrity(effectiveTitle, confirmedTitle, integrityCompTitles);
         if (integrityCheck.shouldFallback) {
           console.log(
