@@ -19,7 +19,7 @@
 // count stays at 12/12.
 
 import { extractVariantTokens, tokenizeTitleFamily } from './imageSearchIdentity.js';
-import { ARTIST_PATTERNS } from './compHygiene.js';
+import { ARTIST_PATTERNS, extractAcronymTokens } from './compHygiene.js';
 
 // Helper: find the most frequent item in an array. Returns null when array
 // is empty or all items appear only once (no consensus).
@@ -315,7 +315,42 @@ export const pcMatchConflictsWithPoolName = (pcProductName, poolRawTitles) => {
   const poolTokenSet = new Set(poolRawTitles.flatMap((t) => tokenizeTitleFamily(t)));
   const overlap = pcTokens.filter((t) => poolTokenSet.has(t));
   const ratio = overlap.length / pcTokens.length;
-  return ratio < 0.5 || (pcTokens.length >= 2 && overlap.length < 2);
+  if (ratio < 0.5 || (pcTokens.length >= 2 && overlap.length < 2)) return true;
+
+  // G.O.D.S. dispatch (2026-07-22, One World Under Doom class) — the ratio/
+  // floor check above tolerates ONE unaccounted-for token out of several
+  // (by design, built to catch WHOLLY unrelated products at 0-50% overlap).
+  // It structurally cannot catch "same core title, one extra distinguishing
+  // acronym prefix" — empirically confirmed: PC="G.O.D.S.: One World Under
+  // Doom #1" against the real plain "One World Under Doom" pool scores
+  // ratio=0.83 (4/5 tokens overlap), never dipping below the 0.5 floor.
+  // Two independent, narrow, hard-reject directions (either alone rejects,
+  // neither depends on the ratio above):
+  //
+  // Direction 1 — PC's OWN name carries an acronym token the pool never
+  // mentions anywhere (this book's real shape: PC over-specified).
+  const pcAcronymTokens = extractAcronymTokens(pcProductName);
+  if (pcAcronymTokens.some((t) => !poolTokenSet.has(t))) return true;
+
+  // Direction 2 — the pool's OWN titles carry a consensus acronym token
+  // (>=50% of pool members — a floor against a single stray/mistyped
+  // listing rejecting an otherwise-good match) that PC's name never
+  // mentions at all (the inverse shape: PC under-specified, anchored to
+  // the plain-series product when the book is actually the acronym-
+  // prefixed tie-in).
+  const poolAcronymCounts = {};
+  for (const rawTitle of poolRawTitles) {
+    for (const tok of new Set(extractAcronymTokens(rawTitle))) {
+      poolAcronymCounts[tok] = (poolAcronymCounts[tok] || 0) + 1;
+    }
+  }
+  const pcTokenSet = new Set(pcTokens);
+  const poolConsensusAcronymOrphan = Object.entries(poolAcronymCounts).find(
+    ([tok, count]) => count / poolRawTitles.length >= 0.5 && !pcTokenSet.has(tok)
+  );
+  if (poolConsensusAcronymOrphan) return true;
+
+  return false;
 };
 
 export const extractConfirmedVariant = (

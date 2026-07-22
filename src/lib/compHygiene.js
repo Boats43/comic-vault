@@ -376,13 +376,76 @@ export const ABBREV_MAP = {
   'xm': 'x men',
 };
 
+// G.O.D.S. dispatch (2026-07-22, One World Under Doom class) — every
+// tokenizer in this codebase that strips punctuation to whitespace before
+// a length floor (MIN_TOKEN_LEN or an equivalent local `>= 2`/`> 1`/`> 2`
+// check) shares one structural bug: a punctuated acronym ("G.O.D.S.",
+// "S.W.O.R.D.", "W.E.B.", "A.X.E.") decomposes into isolated single-letter
+// tokens once the punctuation becomes whitespace, and every one of those
+// single-letter tokens then falls below the length floor and is dropped —
+// the acronym contributes ZERO tokens to whatever comparison consumes the
+// tokenized output. Confirmed live: PriceCharting anchored "G.O.D.S.: One
+// World Under Doom #1 (2025)" against a pool that is genuinely the plain
+// "One World Under Doom #1" — pcMatchConflictsWithPoolName never saw
+// "G.O.D.S." at all, only "one world under doom", which fully overlaps
+// the real pool.
+//
+// Fix: collapse a punctuated acronym into ONE joined token BEFORE any
+// consumer's own strip-to-whitespace regex runs, so "G.O.D.S." and its
+// spaced variant "G. O. D. S." both become "GODS" — a real token that
+// survives every existing length floor unchanged. Deliberately NOT a
+// MIN_TOKEN_LEN change (that would let through unrelated single-character
+// noise tokens everywhere else) — this only touches the specific
+// punctuated-letter-run shape.
+//
+// Regex requires >=2 dotted letter units (a MANDATORY first "X." plus at
+// least one MORE "X." unit, each optionally preceded by whitespace) before
+// an OPTIONAL final bare letter (no trailing period — "G.O.D.S" without a
+// closing dot, common when the acronym is immediately followed by a colon
+// or another word). The >=2 floor is deliberate: a single "X." followed by
+// an ordinary word ("A. Smith", "Dr. Strange", "Vol. 2") must NOT collapse
+// — "Dr."/"Vol." aren't even single-letter units (two+ letters before the
+// period), and a lone "A." has nothing after it to join with once the
+// next word fails the dotted-unit test. Verified against both false-
+// positive candidates and genuine short acronyms ("G.I. Joe" → "GI Joe").
+export const normalizeAcronyms = (text) => {
+  if (!text) return text;
+  return String(text).replace(
+    /\b[A-Za-z]\.(?:\s?[A-Za-z]\.){1,}(?:\s?[A-Za-z]\b)?/g,
+    (match) => match.replace(/[.\s]/g, '')
+  );
+};
+
+// G.O.D.S. dispatch — companion to normalizeAcronyms. Recovering the
+// acronym as an ordinary token (above) is necessary but not sufficient:
+// a ratio/floor-based overlap check (pcMatchConflictsWithPoolName, the
+// ComicVine [cv-token-gate]) tolerates ONE unaccounted-for token out of
+// several without ever flagging a conflict — by design, those floors
+// exist to catch WHOLLY unrelated products (0-50% overlap), not "same
+// core title plus one extra distinguishing prefix." Verified empirically
+// against the real G.O.D.S. case: recovering "gods" as a token alone left
+// pcMatchConflictsWithPoolName's ratio at 0.83 (4/5 tokens still overlap),
+// comfortably above its 0.5 floor — the gate's verdict never flipped.
+// Callers use this to identify WHICH tokens came from an acronym
+// specifically (as opposed to an ordinary word that happens to already be
+// short) and apply a narrower, hard "this exact token is entirely absent
+// on the other side" rule — independent of overall ratio.
+export const extractAcronymTokens = (text) => {
+  if (!text) return [];
+  const matches = String(text).match(/\b[A-Za-z]\.(?:\s?[A-Za-z]\.){1,}(?:\s?[A-Za-z]\b)?/g) || [];
+  return matches.map((m) => m.replace(/[.\s]/g, '').toLowerCase());
+};
+
 // Tokenize a title for similarity matching. Lowercases, strips the issue#
 // hash, splits on non-alphanumerics, drops stop-words and pure-digit
 // tokens (years, raw numbers carry no series-name signal).
 // Q22 FIX — Normalize hyphens before tokenization to match "Spider-Man" vs "Spiderman"
 // Q42 C-A3 — Expand abbreviations BEFORE tokenization (TMNT → teenage mutant ninja turtles)
 export const tokenizeTitle = (title) => {
-  let normalized = String(title || "").toLowerCase();
+  // G.O.D.S. dispatch — collapse punctuated acronyms BEFORE anything else
+  // touches the string, so both the compound-whitelist check below and the
+  // main tokenization path see "gods" instead of losing it to punctuation.
+  let normalized = normalizeAcronyms(String(title || "")).toLowerCase();
 
   // Q54: Compound whitelist check FIRST (before abbreviation expansion).
   // When title matches a protected compound (prefix or exact), return the

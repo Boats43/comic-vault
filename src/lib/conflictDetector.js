@@ -10,7 +10,7 @@
 // Ship #28a observes only (logs conflicts, stores on out.conflicts).
 
 // Q42 C-A3: Import abbreviation map (single source of truth from compHygiene)
-import { ABBREV_MAP } from './compHygiene.js';
+import { ABBREV_MAP, normalizeAcronyms } from './compHygiene.js';
 
 /**
  * Q44 A2 — Normalize title for conflict checking (strip cosmetic variants).
@@ -364,7 +364,8 @@ export const detectCompsConflicts = (comps, leafCategories) => {
 const tokenize = (title) => {
   if (!title) return [];
 
-  let normalized = String(title).toLowerCase();
+  // G.O.D.S. dispatch — collapse punctuated acronyms before anything else.
+  let normalized = normalizeAcronyms(String(title)).toLowerCase();
 
   // C-A3: Expand abbreviations (imported from compHygiene.js — single source of truth)
   for (const [abbrev, expanded] of Object.entries(ABBREV_MAP)) {

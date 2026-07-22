@@ -15,7 +15,7 @@
  * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
 
-import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS } from './compHygiene.js';
+import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms } from './compHygiene.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
 // source of truth for "publisher name is legitimately PART of the series
@@ -499,7 +499,8 @@ const PC_MATCH_COMMON_TOKENS = new Set([
  * @returns {boolean} true when productName sufficiently represents confirmedTitle
  */
 export const titleOverlapsProduct = (confirmedTitle, productName, threshold = 0.5) => {
-  const tokenize = (s) => String(s || '').toLowerCase()
+  // G.O.D.S. dispatch — collapse punctuated acronyms before the strip below.
+  const tokenize = (s) => normalizeAcronyms(String(s || '')).toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter((t) => t.length > 1 && !PC_MATCH_COMMON_TOKENS.has(t));
@@ -525,7 +526,8 @@ export const titleOverlapsProduct = (confirmedTitle, productName, threshold = 0.
  * @returns {number} count of confirmedVariant tokens found in productName (0 = no match)
  */
 export const variantTokenOverlapScore = (confirmedVariant, productName) => {
-  const tokenize = (s) => String(s || '').toLowerCase()
+  // G.O.D.S. dispatch — collapse punctuated acronyms before the strip below.
+  const tokenize = (s) => normalizeAcronyms(String(s || '')).toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter((t) => t.length > 1);
@@ -583,7 +585,8 @@ export const selectBestVariantCandidate = (candidates, confirmedVariant) => {
 export const calculateTitleOverlap = (a, b) => {
   const normalizeForOverlap = (str) => {
     if (!str) return '';
-    return String(str)
+    // G.O.D.S. dispatch — collapse punctuated acronyms before the strip below.
+    return normalizeAcronyms(String(str))
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, ' ')
       .replace(/\s+/g, ' ')
@@ -1232,7 +1235,10 @@ export const backfillFromComps = (confirmedTitle, confirmedYear, confirmedPublis
 
     // Title sanity: how many comp titles share core tokens with confirmedTitle?
     // (used for publisher backfill gate below)
-    const coreTokens = String(result.title || '')
+    // G.O.D.S. dispatch — collapse punctuated acronyms before the strip
+    // below, which otherwise fragments "G.O.D.S." into single letters that
+    // this function's own length>=3 floor then drops entirely.
+    const coreTokens = normalizeAcronyms(String(result.title || ''))
       .toLowerCase()
       .replace(/[#:,'"\.\-\(\)]/g, ' ')
       .split(/\s+/)

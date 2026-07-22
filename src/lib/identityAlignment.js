@@ -23,6 +23,7 @@
 // - UNVERIFIED (<60): Major conflicts, block listing
 
 import { extractIdentityFromImageSearch, extractConsensus } from './imageSearchIdentity.js';
+import { normalizeAcronyms } from './compHygiene.js';
 
 export function alignIdentity({
   visionTitle,
@@ -350,7 +351,8 @@ function normalizeTitle(str) {
 
 function tokenize(str) {
   if (!str) return [];
-  return String(str)
+  // G.O.D.S. dispatch — collapse punctuated acronyms before the strip below.
+  return normalizeAcronyms(String(str))
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)

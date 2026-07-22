@@ -3,6 +3,8 @@
 // Pure logic. No LLM. Runs after every enrich and after every Re-identify.
 // Detects common pricing/comp issues and applies automatic corrections.
 
+import { normalizeAcronyms } from './compHygiene.js';
+
 export function runAutoFix(item) {
   const fixes = [];
   let updated = { ...item };
@@ -108,7 +110,8 @@ export function runAutoFix(item) {
 }
 
 function tokenize(str) {
-  return String(str)
+  // G.O.D.S. dispatch — collapse punctuated acronyms before the strip below.
+  return normalizeAcronyms(String(str))
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)

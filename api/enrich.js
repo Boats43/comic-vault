@@ -106,7 +106,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens } from "../src/lib/compHygiene.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -761,7 +761,11 @@ export const lookupComicVine = async ({ title, issue, year, publisher, poolYearH
     // Earth" sci-fi volume) from matching specific series (Batman/Catwoman Gotham War).
     const beforeToken = candidates.length;
     const tokenizeForGate = (str) => {
-      return String(str || '')
+      // G.O.D.S. dispatch — collapse punctuated acronyms before anything
+      // else, so a candidate ComicVine volume literally named "G.O.D.S.:
+      // One World Under Doom" doesn't lose the distinguishing "gods" token
+      // to the [^a-z0-9]+ strip below.
+      return normalizeAcronyms(String(str || ''))
         .toLowerCase()
         .replace(/#\s*\d+/g, ' ')
         .replace(/[^a-z0-9]+/g, ' ')
@@ -771,6 +775,13 @@ export const lookupComicVine = async ({ title, issue, year, publisher, poolYearH
     };
     const queryTokens = tokenizeForGate(seriesName);
     const coreTokens = queryTokens.slice(0, 3); // First 3 significant tokens
+    // G.O.D.S. dispatch — same "ratio/floor tolerates one orphan acronym
+    // token" gap as pcMatchConflictsWithPoolName (variantIdentity.js), same
+    // two-direction fix. queryAcronymTokens computed once here (doesn't
+    // depend on the per-candidate volume), unlike the PC-gate's pool-
+    // consensus direction which needs the full pool — CV compares one
+    // query against one candidate volume name, no pool to aggregate.
+    const queryAcronymTokens = extractAcronymTokens(seriesName);
 
     const tokenFiltered = candidates.filter((r) => {
       const vol = volDetails[r?.volume?.id];
@@ -789,6 +800,27 @@ export const lookupComicVine = async ({ title, issue, year, publisher, poolYearH
       // Soft fail: overlap < 50%
       if (overlapRatio < 0.5) {
         console.log(`[cv-token-gate] REJECT ${vol.name} (${Math.round(overlapRatio * 100)}% overlap < 50%)`);
+        return false;
+      }
+
+      // G.O.D.S. dispatch — Direction 1: this candidate volume's own name
+      // carries an acronym token our query never mentions at all (e.g. a
+      // "G.O.D.S.: One World Under Doom" volume matched against a plain
+      // "One World Under Doom" query).
+      const volAcronymTokens = extractAcronymTokens(vol.name);
+      const orphanVolAcronym = volAcronymTokens.find((t) => !queryTokens.includes(t));
+      if (orphanVolAcronym) {
+        console.log(`[cv-token-gate] REJECT ${vol.name} (acronym token "${orphanVolAcronym}" not present in our own query "${seriesName}")`);
+        return false;
+      }
+
+      // Direction 2 — the inverse: OUR query legitimately carries an
+      // acronym token this candidate volume never mentions (our book
+      // genuinely is the acronym-prefixed tie-in; this candidate is the
+      // plain-series volume).
+      const orphanQueryAcronym = queryAcronymTokens.find((t) => !volTokens.includes(t));
+      if (orphanQueryAcronym) {
+        console.log(`[cv-token-gate] REJECT ${vol.name} (our query's acronym token "${orphanQueryAcronym}" is absent from this candidate volume's name)`);
         return false;
       }
 
@@ -1531,8 +1563,9 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
       'book', 'the', 'a', 'an', 'of', 'and', 'in', 'for',
       'dark', 'horse', 'boom', 'archie', 'dynamite',
     ]);
+    // G.O.D.S. dispatch — collapse punctuated acronyms before the strip below.
     const tokenize = (s) =>
-      String(s || '').toLowerCase()
+      normalizeAcronyms(String(s || '')).toLowerCase()
         .replace(/[^a-z0-9\s]/g, ' ')
         .split(/\s+/)
         .filter(t => t.length > 1 && !COMMON_TOKENS.has(t));

@@ -24,7 +24,7 @@
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
 import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST } from './identityCore.js';
-import { ARTIST_PATTERNS, compactTitleKey, IDENTITY_TPB_MARKER_RE } from './compHygiene.js';
+import { ARTIST_PATTERNS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
 //
@@ -868,9 +868,16 @@ export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher
  */
 export const tokenizeTitleFamily = (title) => {
   if (!title) return [];
+  // G.O.D.S. dispatch — collapse punctuated acronyms BEFORE extractSeriesTitle
+  // runs. extractSeriesTitle itself never touches periods (its own strip
+  // list is `[#:&|/\[]]`), so the acronym would otherwise survive intact
+  // all the way to this function's own final `[^a-z0-9\s]` strip below —
+  // the actual point where "G.O.D.S." fragments into single letters that
+  // then fall below the length>=2 floor a few lines down.
+  const acronymNormalized = normalizeAcronyms(title);
   // extractSeriesTitle strips variant noise, slab markers, years, prices,
   // ratio, noise words. Returns null when result <2 chars.
-  const cleaned = extractSeriesTitle(title);
+  const cleaned = extractSeriesTitle(acronymNormalized);
   if (!cleaned) return [];
 
   let artistStripped = cleaned;
