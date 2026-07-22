@@ -287,6 +287,7 @@ const allWarningSlugs = [
   'bundle-candidate', 'cold-market-velocity', 'zero-velocity', 'hot-market-velocity',
   'low-confidence-escalation', 'recommended-below-floor', 'internal-inconsistency',
   'variant-comps-unavailable', 'variant-pool-year-conflict', 'artist-identity-conflict',
+  'vision-confidence-overridden',
 ];
 let allDescribed = true;
 for (const slug of allWarningSlugs) {

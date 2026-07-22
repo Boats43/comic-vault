@@ -5655,6 +5655,52 @@ export default async function handler(req, res) {
       }
     }
 
+    // Slice A3 (2026-07-22, One World Under Doom / Giang MegaCon Secret Drop
+    // class) — a DIFFERENT trigger from Q83's consensus-rescue above: here
+    // title/issue/year/publisher are ALL already resolved (idCheckFinal.
+    // missingFields is empty) — Vision's own self-reported low confidence is
+    // the ONLY reason idCheckFinal.confident is false. Q83's rescue
+    // re-derives identity from raw pool text and requires >=1 fresh (<=90d)
+    // sold comp; a freshly-dropped con-exclusive variant plausibly has zero
+    // solds yet, so Q83 never enters for this shape at all. This instead
+    // trusts signals the pipeline already computed for the
+    // ALREADY-CONFIRMED identity — out.convergence (PC/CV agreement) and
+    // familyCandidate's own member count (pool coherence) — no
+    // re-derivation, no solds-recency requirement. idCheckFinal.confident
+    // is deliberately left honestly false (same convention as
+    // out.identityProvisional) — exempted downstream via a dedicated flag,
+    // never silently promoted to LIST_NOW. Requires family >=3 AND a real
+    // comp pool AND convergence not LOW — a book where Vision is unsure
+    // AND the pool is thin/scattered still correctly falls through to
+    // ID_REQUIRED, byte-identical to today.
+    let visionLowButCorroborated = false;
+    if (!idCheckFinal.confident && idCheckFinal.missingFields.length === 0) {
+      const activePoolCountForVLC = Array.isArray(compsFromEbay?.prices) ? compsFromEbay.prices.length : 0;
+      const soldPoolCountForVLC = Array.isArray(filteredSold) ? filteredSold.length : 0;
+      const coherentFamilyCount = familyCandidate?.topFamily?.count || 0;
+      const convergenceTierOk = !!convergence?.tier && convergence.tier !== 'LOW';
+
+      if (convergenceTierOk && coherentFamilyCount >= 3 && (activePoolCountForVLC > 0 || soldPoolCountForVLC > 0)) {
+        visionLowButCorroborated = true;
+        out.identityVisionLowButCorroborated = true;
+        out.needsReview = true;
+        out.identityConsensus = out.identityConsensus || {
+          visionConfidence: confidence,
+          convergenceTier: convergence.tier,
+          convergenceScore: convergence.convergenceScore,
+          familyCount: coherentFamilyCount,
+          activePoolCount: activePoolCountForVLC,
+          soldPoolCount: soldPoolCountForVLC,
+          visionVetoOverridden: true,
+        };
+        console.log(
+          `[slice-a3] vision-low-but-corroborated: convergence=${convergence.tier}(${convergence.convergenceScore}) ` +
+          `familyCount=${coherentFamilyCount} activePool=${activePoolCountForVLC} soldPool=${soldPoolCountForVLC} — ` +
+          `Vision's low self-confidence not treated as a veto; identity fields were already fully resolved`
+        );
+      }
+    }
+
     out.identityConfident = idCheckFinal.confident;
     // Q133 Slice 1c (2026-07-21, Invincible class) — publisher-only-missing
     // is not the same class as a genuinely unresolved title/issue (that
@@ -5694,6 +5740,15 @@ export default async function handler(req, res) {
         console.log(
           `[identity-gate] publisher-only gap — pricing proceeds (LOCKED), ` +
           `source=${out.publisherBackfillSource || 'none'}`
+        );
+      } else if (visionLowButCorroborated) {
+        out.listingHardLocked = true;
+        out.listingHardLockReason = out.listingHardLockReason || 'vision-low-confidence-corroborated';
+        out.listingHardLockBanner = out.listingHardLockBanner ||
+          `Vision wasn't confident reading this cover, but PriceCharting/ComicVine and a ` +
+          `${out.identityConsensus?.familyCount ?? 0}-listing comp pool independently agree — verify before listing`;
+        console.log(
+          '[identity-gate] vision-low-confidence overridden by pipeline corroboration — pricing proceeds (LOCKED)'
         );
       } else {
         out.price = null;

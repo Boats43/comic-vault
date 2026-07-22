@@ -149,7 +149,17 @@ export function computeDecision(item, context = {}) {
   const isPublisherOnlyGap = item.identityConfident === false &&
     item.identityMissingFields?.length === 1 &&
     item.identityMissingFields[0] === 'publisher';
-  if (item.identityConfident === false && !isPublisherOnlyGap && !isPoolProvisionalIdentity) {
+  // Slice A3 (2026-07-22, One World Under Doom / Giang MegaCon Secret Drop
+  // class) — a third, structurally distinct trigger for identityConfident
+  // ===false: title/issue/year/publisher all resolved (identityMissingFields
+  // empty), Vision's OWN self-reported low confidence is the sole cause.
+  // api/enrich.js only sets this flag when the pipeline's own corroboration
+  // is strong (convergence not LOW, a >=3-member coherent pool family, and a
+  // real active/sold comp pool) — a book where Vision is unsure AND the pool
+  // is thin/scattered never gets this flag and falls through to ID_REQUIRED
+  // unchanged.
+  const isVisionLowButCorroborated = item.identityVisionLowButCorroborated === true;
+  if (item.identityConfident === false && !isPublisherOnlyGap && !isPoolProvisionalIdentity && !isVisionLowButCorroborated) {
     decision.blockers.push('identity-not-confident');
   }
 
@@ -319,6 +329,20 @@ export function computeDecision(item, context = {}) {
       ratio: item.publisherBackfillRatio ?? null,
       message: item.listingHardLockBanner
         || 'Publisher could not be confirmed — verify before listing',
+    };
+  }
+
+  // Slice A3 — Vision's own low self-confidence overridden by pipeline
+  // corroboration (convergence + coherent pool family + real comps). Same
+  // "never silently promoted to LIST_NOW" principle as publisher-unresolved
+  // above — the card escalates to RESEARCH via criticalWarnings below.
+  if (isVisionLowButCorroborated) {
+    decision.warnings.push('vision-confidence-overridden');
+    decision.evidence.visionConfidenceOverridden = {
+      convergenceTier: item.identityConsensus?.convergenceTier || null,
+      familyCount: item.identityConsensus?.familyCount ?? null,
+      message: item.listingHardLockBanner
+        || "Vision wasn't confident reading this cover, but external data agrees — verify before listing",
     };
   }
 
@@ -665,6 +689,7 @@ export function computeDecision(item, context = {}) {
     'internal-inconsistency',          // Q118: Vision's own reason text contradicts its own structured fields
     'variant-comps-unavailable',       // Q129: era-excluded comps named a specific cover variant the priced pool doesn't
     'variant-pool-year-conflict',      // Q132: pool-year drift suppressed a variant/edition signal — possibly the wrong printing
+    'vision-confidence-overridden',    // Slice A3: Vision's own low self-confidence overridden by pipeline corroboration
     'artist-identity-conflict',        // Q132 Fix 3: condition-report artist disagrees with comp-pool creator consensus
     'publisher-unresolved',            // Q133 Slice 1c: publisher missing/comp-consensus-only, price still computed
   ];
@@ -967,6 +992,14 @@ export function describeWarning(slug, item) {
       return `Publisher "${item.publisher}" derived from ${pct}% comp-listing consensus, not confirmed by title/issuer data — verify before listing`;
     }
     return item.listingHardLockBanner || 'Publisher could not be confirmed from any source — verify before listing';
+  }
+  if (slug === 'vision-confidence-overridden') {
+    const tier = item.identityConsensus?.convergenceTier;
+    const familyCount = item.identityConsensus?.familyCount;
+    if (tier && familyCount != null) {
+      return `Vision self-reported low confidence, but ${tier.toLowerCase()} PriceCharting/ComicVine convergence and a ${familyCount}-listing comp pool independently agree — verify before listing`;
+    }
+    return item.listingHardLockBanner || "Vision wasn't confident reading this cover, but external data agrees — verify before listing";
   }
   if (slug === 'sold-active-mismatch-extreme') {
     const soldSum = item.soldComps?.reduce((sum, c) => sum + c.price, 0) || 0;
