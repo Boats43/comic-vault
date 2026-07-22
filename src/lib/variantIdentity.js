@@ -444,7 +444,7 @@ export const extractConfirmedVariant = (
     itemRecords.push({ artist: artist ? artist.toLowerCase() : null, years });
   }
 
-  console.log(`[variant-identity] extracted tokens: conventions=${JSON.stringify(allConventions)}, artists=${JSON.stringify(allArtists)}, exclusives=${allExclusives.length}, limitations=${allLimitations.length}`);
+  console.log(`[variant-identity] extracted tokens: conventions=${JSON.stringify(allConventions)}, artists=${JSON.stringify(allArtists)}, exclusives=${allExclusives.length}, limitations=${allLimitations.length}, authentications=${allAuthentications.length}`);
 
   // Build consensus: each token type requires ≥2 agree
   const consensus = {};
@@ -530,6 +530,10 @@ export const extractConfirmedVariant = (
   if (allAuthentications.length >= 2) {
     consensus.signed = true;
   }
+  console.log(
+    `[signed-consensus] detected: ${!!consensus.signed}, members=${allAuthentications.length}/${consideredCount}` +
+    (allAuthentications.length > 0 ? ` tokens=${JSON.stringify(allAuthentications)}` : '')
+  );
 
   // If no consensus on ANY token, return null (keep Vision variant — null
   // stays null on the backfill path, nothing to fill in)
