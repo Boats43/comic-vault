@@ -3893,6 +3893,12 @@ export default async function handler(req, res) {
     let variantIdentitySource = 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
+    // Slice C (2026-07-22) — pool-corroborated "the market has signed
+    // copies of this book" signal (Giang MegaCon Secret Drop class, where
+    // Vision's own prompt is deliberately barred from writing signing
+    // status into variant text — see api/grade.js JSON_SHAPE — so the
+    // eBay-pool consensus is the ONLY source for a raw signed book).
+    let confirmedSignedConsensus = false;
 
     // Q106 FIX-1 Step 3 — on the CGC-identity path, variant resolution never
     // touches the visual pool. Prefer cgc-lookup's own variant text (when the
@@ -3994,6 +4000,7 @@ export default async function handler(req, res) {
       variantIdentitySource = 'ebay_image_consensus';
       variantConsensus = variantCheck.consensus;
       variantOverriddenVision = variantCheck.overriddenVision;
+      confirmedSignedConsensus = variantCheck.signedConsensus === true;
 
       // Q99-B: an artist-facsimile's own listings (Skottie Young 2023, etc.)
       // are more authoritative on publication year than CV's volume
@@ -4316,6 +4323,7 @@ export default async function handler(req, res) {
               author: out.author || null,  // book identity field for buildBookQuery
               cvVolumeStartYear: comicVine?.startYear || null,  // Q128 — volume-label-year corroboration (Harley Quinn #62 class). NOT comicVine?.volume?.startYear — that shape is always undefined (comicVine.volume is a flat string); .startYear is the correct top-level field.
               artistOverride: extractArtist(confirmedTitle) || null,  // Q136 Slice A — the RESOLVED identity's own artist (e.g. a provisional pool's confirmedTitle already naming "Alexander Lozano"), independent of extractConfirmedVariant's majority-ratio ceiling.
+              signedConsensus: confirmedSignedConsensus,  // Slice C — pool-corroborated "our book is signed" signal (extractConfirmedVariant), for Filter 2b's isolate-vs-reject branch.
             }).catch((err) => {
               console.error('[enrich] comps error stack:', err?.stack);
               console.error(`[enrich] comps error: ${err?.message || err}`);
@@ -4737,6 +4745,8 @@ export default async function handler(req, res) {
       priceLadder: pcSales.priceLadder || null,
       cvVolumeStartYear: comicVine?.startYear || null,  // Q128 — same volume-label-year corroboration as active Filter 0c
       artistOverride: extractArtist(confirmedTitle) || null,  // Q136 Slice A — see the fetchComps call site above for the full reasoning
+      labelType: confirmedLabelType,  // Slice C — graded-slab signature signal (CGC/CBCS SS yellow label), same field name as the fetchComps call site
+      signedConsensus: confirmedSignedConsensus,  // Slice C — pool-corroborated "our book is signed" signal, same field name as the fetchComps call site
     });
     const filteredSold = soldVerifyResult.verified;
     if (rawSoldRows.length > 0) {
@@ -5837,7 +5847,19 @@ export default async function handler(req, res) {
     // Q133 Slice 1c: publisherOnlyMissing is the same kind of exception —
     // title/issue/year are solid, only publisher is advisory-locked above,
     // so synthesis proceeds instead of the hard identity-required wall.
-    if ((idCheckFinal.confident || publisherOnlyMissing) && !isPolybagPricing) {
+    // Slice A3 (2026-07-22 follow-up) — visionLowButCorroborated is the
+    // same kind of exception again: idCheckFinal.confident is deliberately
+    // left false (Vision's own low self-rating, honestly preserved), but
+    // priceBandsRaw (computePriceBandsFromSold, line ~4883) already ran
+    // UNCONDITIONALLY, upstream of and independent from this gate — without
+    // this OR-arm, a real blended price computed moments earlier in the
+    // same request (One World Under Doom: $10.73) never reached
+    // out.price/out.pricingSource at all, and [price-bands-pricing] never
+    // logged despite priceBandsRaw holding a genuine value. Same bug shape
+    // as the original identityProvisional gap this pattern was built to
+    // close — a promotion that flips the BLOCKER but forgets the
+    // PRICING-ELIGIBILITY gate is the same class of half-fix twice now.
+    if ((idCheckFinal.confident || publisherOnlyMissing || visionLowButCorroborated) && !isPolybagPricing) {
     // P0-A — Kill browse_api legacy paths. All pricing routes through tier engine.
     // When priceBandsRaw truthy (tier 1-4 with data), use it. When null (tier-4
     // no-data: no PC, <2 verified comps), refuse-to-price instead of falling through

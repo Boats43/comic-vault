@@ -382,6 +382,17 @@ export const extractConfirmedVariant = (
   const allArtists = [];
   const allExclusives = [];
   const allLimitations = [];
+  // Slice C (2026-07-22, One World Under Doom / Giang MegaCon Secret Drop
+  // class) — authentication tokens (signed/autographed/COA/remarked).
+  // Bare 'ss' excluded (same false-positive rationale as SIGNED_RE and
+  // imageSearchIdentity.js's own AUTH_PATTERNS comment — collides with
+  // series names like SS-Squadron). Unlike the artist ratio-gate above, no
+  // majority ceiling: a signed sub-listing genuinely IS a distinguishing
+  // purchase option a real subset of the print run has (collectors signing
+  // copies at a con), not an SEO-citation artifact — a MAJORITY of the pool
+  // mentioning "signed" is real information, not noise to discount.
+  const AUTH_TOKENS = ['signature series', 'autographed', 'coa', 'signed', 'certified', 'remark'];
+  const allAuthentications = [];
   // Q99-B: retain per-item artist + years so an artist-facsimile pool's own
   // publication year can be resolved separately from the generic comp pool
   // (a Skottie Young 2023 facsimile mixed in the same nominal-title pool as
@@ -420,6 +431,10 @@ export const extractConfirmedVariant = (
       ['numbered', 'limited'].includes(t)
     );
     if (limitation) allLimitations.push(limitation);
+
+    // Authentication tokens (Slice C)
+    const authentication = tokens.find((t) => AUTH_TOKENS.includes(t));
+    if (authentication) allAuthentications.push(authentication);
 
     // Artist extraction (from rawTitle using ARTIST_PATTERNS)
     const artist = extractArtist(rawTitle);
@@ -503,6 +518,19 @@ export const extractConfirmedVariant = (
     consensus.limitation = topLimitation;
   }
 
+  // Signed/authentication: ≥2 listings with ANY authentication marker —
+  // same threshold as exclusive, matching the "real distinguishing purchase
+  // option" rationale above (Slice C). Not folded into the confirmedVariant
+  // TEXT string below — it drives a separate boolean signal
+  // (signedConsensus) consumed by api/comps.js Filter 2b and
+  // soldVerification.js's signed filter, so it never risks corrupting
+  // title-family clustering or eBay search-query construction the way
+  // fusing a creator name into variant text once did (Black Cat / Skottie
+  // Young class, Q84).
+  if (allAuthentications.length >= 2) {
+    consensus.signed = true;
+  }
+
   // If no consensus on ANY token, return null (keep Vision variant — null
   // stays null on the backfill path, nothing to fill in)
   if (Object.keys(consensus).length === 0) {
@@ -575,5 +603,9 @@ export const extractConfirmedVariant = (
     source: isBackfill ? 'ebay_image_consensus_backfill' : 'ebay_image_consensus',
     variantYear,
     variantYearRatio,
+    // Slice C — pool-corroborated "the market has signed copies of this
+    // book" signal, kept separate from the free-text confirmedVariant so it
+    // never reaches title-family clustering or eBay query construction.
+    signedConsensus: !!consensus.signed,
   };
 };

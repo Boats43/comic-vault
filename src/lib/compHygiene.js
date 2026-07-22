@@ -274,7 +274,17 @@ export const ARTIST_PATTERNS = [
 // class, not a one-off.
 // v5 = Q136 Slice A (2026-07-22) — Alexander Lozano added to ARTIST_PATTERNS;
 // new artist-preference narrowing tier changes which comps Filter 1c admits.
-export const COMP_FILTER_VERSION = 5;
+// v6 = Slice C (2026-07-22) — signed/autographed promoted from a pure reject
+// filter to a match dimension (applySignedPreferenceFilter, Filter 2b) —
+// changes WHICH comps a signed book's pool isolates to, same class of gap
+// as v4/v5 above. Confirmed live: One World Under Doom #1 (John Giang
+// MegaCon Secret Drop) rescanned on the Slice-C build and still replayed
+// the pre-fix `ac:v5:one world under doom|1` cache entry (11-listing signed
+// Giang pool collapsed to the same 1-comp snapshot from before this fix
+// shipped) for the full 1h TTL — same failure shape as the v3→v4 incident
+// on this exact book, this time from forgetting the bump rather than the
+// fix itself being wrong.
+export const COMP_FILTER_VERSION = 6;
 
 // Q132 dispatch (2026-07-20) — single source of truth for "the title-family
 // override actually succeeded" (as opposed to 'fallback-vision', returned

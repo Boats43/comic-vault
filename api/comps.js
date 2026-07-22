@@ -708,6 +708,58 @@ export const applyArtistPreferenceNarrowing = (result, variant, artistOverride =
   return result;
 };
 
+/**
+ * Slice C (2026-07-22, Poison Ivy #31 / Giang MegaCon Secret Drop class) —
+ * signed/autographed as a match DIMENSION, not a pure reject filter. Signed
+ * books command a premium over standard copies of the same print run —
+ * pollutes an unsigned book's pool exactly as much as blending signed and
+ * unsigned comps together poisons a SIGNED book's own pool (Poison Ivy #31:
+ * 4 signed Frison actives blended against an unsigned $3.49 sold comp →
+ * priced below floor).
+ *
+ * Extracted into its own pure function (mirroring applyVariantPreferenceFilter/
+ * applyArtistPreferenceNarrowing above) for direct regression-testability —
+ * fetchComps below is a network-calling async function, not unit-testable
+ * in isolation.
+ *
+ * Our book NOT signed: hard-reject SIGNED_RE matches (unchanged from Ship
+ * #13 Bug 3's original behavior). Our book IS signed: isolate to ONLY
+ * SIGNED_RE-matching listings, falling back to the full pool if zero
+ * survive (same graceful-fallback convention as cover-letter Filter 1d /
+ * variant-preference Filter 1c — prefer a weak comp over no comp).
+ *
+ * @param {Array} pool - candidate comp pool (post earlier filters)
+ * @param {boolean} isOurBookSigned - "Vision or pool" combined signal (labelType==='signature' || signedConsensus || variant-text regex) computed by the caller
+ * @returns {{pool: Array, isolated: boolean, signedRejectedCount: number}}
+ */
+export const applySignedPreferenceFilter = (pool, isOurBookSigned) => {
+  const before = pool.length;
+  if (!isOurBookSigned) {
+    const kept = [];
+    let rejectedCount = 0;
+    for (const it of pool) {
+      if (SIGNED_RE.test(String(it.title || ''))) {
+        rejectedCount++;
+        console.log('[signed-filter] SS listing rejected:', String(it.title || '').slice(0, 55));
+      } else {
+        kept.push(it);
+      }
+    }
+    if (rejectedCount > 0) {
+      console.log(`[comps] signed filter: before=${before} after=${kept.length} removed=${rejectedCount}`);
+    }
+    return { pool: kept, isolated: false, signedRejectedCount: rejectedCount };
+  }
+
+  const signedOnly = pool.filter((it) => SIGNED_RE.test(String(it.title || '')));
+  if (signedOnly.length > 0) {
+    console.log(`[comps] signed filter: before=${before} after=${signedOnly.length} kept=${signedOnly.length} (our book is signed — isolated to signed comps)`);
+    return { pool: signedOnly, isolated: true, signedRejectedCount: 0 };
+  }
+  console.log(`[comps] signed filter: before=${before} after=${pool.length} (our book is signed but no signed comps found — keeping all)`);
+  return { pool, isolated: false, signedRejectedCount: 0 };
+};
+
 // Core fetcher — exported so api/grade.js can reuse it without an HTTP hop.
 // Always resolves (never throws): failures return an empty comps object so
 // the grade flow can fall through to the AI estimate path.
@@ -730,6 +782,7 @@ export const fetchComps = async ({
   author,      // Session 4B — book identity field (for buildBookQuery)
   cvVolumeStartYear = null,  // Q128 — ComicVine volume's own start_year (lookupComicVine's `.startYear`), used by Filter 0c to corroborate a "volume launch year" label distinct from confirmedYear
   artistOverride = null,  // Q136 Slice A — extractArtist(confirmedTitle) from api/enrich.js, when the RESOLVED identity itself names a recognized artist (see applyArtistPreferenceNarrowing below for why this differs from extractArtist(variant))
+  signedConsensus = false,  // Slice C — pool-corroborated "our book is signed" signal (extractConfirmedVariant), for the case where Vision's own variant text can't say so (see Filter 2b below)
 }) => {
   if (!appId || !certId) {
     return emptyComps(null, "missing eBay credentials");
@@ -1533,30 +1586,25 @@ export const fetchComps = async ({
         console.log('[comps] slab filter skipped (assetType=book)');
       }
 
-      // Ship #13 Bug 3 (Filter 2b): signed / autographed / signature-series
-      // exclusion. Signed books command a premium over standard copies —
-      // pollutes both raw pools ("2X signed" seller listings) and graded
-      // pools (CGC SS yellow-label slabs). Gate: skip when our book is
-      // itself a signed variant (detected via variant string).
+      // Ship #13 Bug 3 / Slice C (Filter 2b): signed as a match dimension.
+      // See applySignedPreferenceFilter's docstring above for the full
+      // reasoning. isOurBookSigned checks three independently-sourced
+      // signals — "Vision or pool" per the design ruling: (1)
+      // confirmedLabelType==='signature' (CGC/CBCS SS yellow label, the
+      // graded case), (2) signedConsensus (Slice C — pool-corroborated, the
+      // ONLY source for a raw signed book, since Vision's own comic prompt
+      // is barred from writing signing status into variant text), (3) the
+      // pre-existing regex on variant text (Vision's own free-text call,
+      // when present).
       {
         const ourVariantStr = String(variant || '').toLowerCase();
         const isOurBookSigned =
+          labelType === 'signature' ||
+          signedConsensus === true ||
           /\b(?:signed|signature|autograph(?:ed)?|\bauto\b|remarked?|yellow\s*label|green\s*label)\b/.test(ourVariantStr);
-        if (!isOurBookSigned) {
-          const before = p.length;
-          p = p.filter((it) => {
-            if (SIGNED_RE.test(String(it.title || ''))) {
-              _signedRejected++;
-              console.log('[signed-filter] SS listing rejected:',
-                String(it.title || '').slice(0, 55));
-              return false;
-            }
-            return true;
-          });
-          if (p.length < before) {
-            console.log(`[comps] signed filter: before=${before} after=${p.length} removed=${before - p.length}`);
-          }
-        }
+        const signedResult = applySignedPreferenceFilter(p, isOurBookSigned);
+        p = signedResult.pool;
+        _signedRejected += signedResult.signedRejectedCount;
       }
 
       // Ship #20a.6.11 Filter 2c: coverless / incomplete / no-cover filter.

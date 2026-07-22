@@ -263,6 +263,12 @@ const isStaleForBookYear = (daysAgo, bookYear) => {
  * @param {Object} [ctx.priceLadder] — PC per-grade price ladder ({"4.0": 279.70, ...}).
  *        Raw scans only: cross-checks sold-comp price against PC's own grade
  *        value, independent of title text. See Q109-LADDER below.
+ * @param {string} [ctx.labelType] — Slice C: confirmedLabelType from api/enrich.js
+ *        ("signature" = CGC/CBCS SS yellow label). OR'd into ourIsSigned below.
+ * @param {boolean} [ctx.signedConsensus] — Slice C: pool-corroborated "our book
+ *        is signed" signal (extractConfirmedVariant) — the only source for a
+ *        raw signed book, since Vision's own comic prompt can't write signing
+ *        status into variant text. OR'd into ourIsSigned below.
  * @returns {{ verified: Array, diagnostics: Object }}
  */
 export const verifySoldComps = (rawRows, ctx) => {
@@ -327,6 +333,8 @@ export const verifySoldComps = (rawRows, ctx) => {
     assessedGrade = null,
     priceLadder = null,
     cvVolumeStartYear = null,  // Q128 — ComicVine volume's start_year, for the volume-label-year corroboration check
+    labelType = null,  // Slice C — confirmedLabelType ("signature" = CGC/CBCS SS yellow label)
+    signedConsensus = false,  // Slice C — pool-corroborated "our book is signed" signal
   } = ctx || {};
 
   const ourTokens = tokenizeTitle(title);
@@ -345,7 +353,15 @@ export const verifySoldComps = (rawRows, ctx) => {
   // exact prior expression, unchanged.
   const ourArtist = (ctx && ctx.artistOverride) || extractArtist(variant);
   const ourIsLot = isOurBookALot(variant);
-  const ourIsSigned = isOurBookSigned(variant);
+  // Slice C (2026-07-22, Giang MegaCon Secret Drop class) — "our book is
+  // signed" checked via three independently-sourced signals ("Vision or
+  // pool" per the design ruling): labelType==='signature' (graded slab),
+  // signedConsensus (pool-corroborated — the only source for a raw signed
+  // book, since Vision's own comic prompt can't write signing status into
+  // variant text), or the pre-existing regex on variant text. Strictly
+  // additive: every existing caller (no ctx.labelType/signedConsensus)
+  // falls through to the exact prior expression, unchanged.
+  const ourIsSigned = labelType === 'signature' || signedConsensus === true || isOurBookSigned(variant);
 
   // Filter pass — hard rejects first, soft last. Each row is annotated
   // with `recencyBand` regardless of acceptance so the UI / Ship #20b
@@ -604,7 +620,13 @@ export const verifySoldComps = (rawRows, ctx) => {
     return true;
   });
 
-  // 10. Signed / autographed. Skip when our book is itself signed.
+  // 10. Signed / autographed — a match DIMENSION (Slice C), not a pure
+  // reject filter. Our book NOT signed: hard-reject (unchanged). Our book
+  // IS signed: isolate to ONLY signed rows, falling back to the full
+  // working set if none survive (Poison Ivy #31: 4 signed Frison actives
+  // blended against an unsigned $3.49 sold — the sold side needs the same
+  // isolation as the active side or the blend keeps dragging a signed book
+  // toward an unsigned price).
   if (!ourIsSigned) {
     working = working.filter((r) => {
       if (SIGNED_RE.test(String(r.title || ''))) {
@@ -614,6 +636,14 @@ export const verifySoldComps = (rawRows, ctx) => {
       }
       return true;
     });
+  } else {
+    const signedOnly = working.filter((r) => SIGNED_RE.test(String(r.title || '')));
+    if (signedOnly.length > 0) {
+      working = signedOnly;
+    }
+    // else: no signed rows in the sold pool — keep working as-is (full
+    // pool), same "prefer a weak comp over no comp" convention used
+    // throughout this file and the active-comp side.
   }
 
   // 11. Grade tab vs listing-title consistency.
@@ -947,6 +977,13 @@ export const verifySoldComps = (rawRows, ctx) => {
         }
         return true;
       });
+    } else {
+      // Slice C — same isolate-with-fallback treatment as the main chain
+      // above, applied to the fallback pool too.
+      const signedOnlyFallback = fallbackPool.filter((r) => SIGNED_RE.test(String(r.title || '')));
+      if (signedOnlyFallback.length > 0) {
+        fallbackPool = signedOnlyFallback;
+      }
     }
     fallbackPool = fallbackPool.filter((r) => {
       if (gradeTabMismatch(r.title, r.grade)) {
