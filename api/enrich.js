@@ -112,7 +112,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
-import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear, pcMatchConflictsWithPoolName, hasUnresolvedActiveVariantConflict } from "../src/lib/variantIdentity.js";
+import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear, pcMatchConflictsWithPoolName, pcMatchMissingFamilyDiscriminator, hasUnresolvedActiveVariantConflict } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
 // Q118 — internal consistency checker (Vision's free-text reason vs its own structured fields).
@@ -3809,8 +3809,27 @@ export default async function handler(req, res) {
         .filter(Boolean);
       const pcYearConflict = pcMatchConflictsWithPoolYear(priceCharting.year, poolYearHint);
       const pcNameConflict = pcMatchConflictsWithPoolName(priceCharting.productName, poolRawTitlesForPcGate);
-      if (pcYearConflict || pcNameConflict) {
-        const axes = [pcYearConflict && 'year', pcNameConflict && 'name'].filter(Boolean).join('+');
+      // Q144A dispatch (2026-07-22, Adventure Time Summer Special SDCC
+      // class) — third axis: family-required discriminator. The name axis
+      // above checks against the WHOLE pool (poolRawTitlesForPcGate), which
+      // mixes the winning family with competing wrong families sharing the
+      // same stem ("adventure time") — a plain-series PC anchor passes the
+      // token-overlap ratio even though it misses the WINNING family's own
+      // product-distinguishing marker ("summer special"). This axis checks
+      // the PC candidate against the winning family's OWN member titles
+      // (topFamily.indices mapped back to the visual pool), rejecting when
+      // a >=60%-adopted series-marker phrase is reflected nowhere in the PC
+      // product name. See pcMatchMissingFamilyDiscriminator
+      // (variantIdentity.js) for the Kamala Khan / variant-cover-pool
+      // false-positive guards.
+      const familyMemberTitlesForPcGate = (familyCandidate?.topFamily?.indices || [])
+        .map((idx) => visualResult?.items?.[idx]?.rawTitle)
+        .filter(Boolean);
+      const pcDiscriminatorConflict = pcMatchMissingFamilyDiscriminator(
+        priceCharting.productName, familyMemberTitlesForPcGate
+      );
+      if (pcYearConflict || pcNameConflict || pcDiscriminatorConflict) {
+        const axes = [pcYearConflict && 'year', pcNameConflict && 'name', pcDiscriminatorConflict && 'discriminator'].filter(Boolean).join('+');
         console.log(
           `[pc-anchor-gate] rejecting PC match "${priceCharting.productName}" (year=${priceCharting.year}) — ` +
           `conflicts on ${axes} axis (poolYearHint=${poolYearHint?.year ?? 'n/a'}) — ` +

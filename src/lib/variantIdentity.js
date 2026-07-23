@@ -19,7 +19,7 @@
 // count stays at 12/12.
 
 import { extractVariantTokens, tokenizeTitleFamily, classifyVariantTokens } from './imageSearchIdentity.js';
-import { ARTIST_PATTERNS, extractAcronymTokens } from './compHygiene.js';
+import { ARTIST_PATTERNS, extractAcronymTokens, detectSeriesMarkers } from './compHygiene.js';
 
 // Helper: find the most frequent item in an array. Returns null when array
 // is empty or all items appear only once (no consensus).
@@ -351,6 +351,119 @@ export const pcMatchConflictsWithPoolName = (pcProductName, poolRawTitles) => {
   if (poolConsensusAcronymOrphan) return true;
 
   return false;
+};
+
+/**
+ * Q144A dispatch (2026-07-22, Adventure Time Summer Special SDCC class) —
+ * third PC-anchor axis: the winning family's own REQUIRED discriminator.
+ * Real production evidence: Q140 correctly resolves the winning title
+ * family as "Adventure Time Summer Special #1 SDCC Convention Exclusive
+ * 2013," but PC's own search still anchors to a plain, generic "Adventure
+ * Time Comics #1 (2012)"/"Adventure Time #1 (2016)" (the anchor even
+ * drifts across rescans — unstable, not a one-off). The existing name
+ * axis (pcMatchConflictsWithPoolName, above) checks the PC candidate's
+ * tokens against the WHOLE undifferentiated visual pool — which mixes the
+ * winning SDCC family with the competing plain-series family — and since
+ * both families and the wrong PC candidate all share the stem "adventure
+ * time," the overlap ratio passes. This axis instead asks the question
+ * the name axis structurally can't: does the PC candidate reflect the
+ * product-distinguishing marker the WINNING family's own members agree on?
+ *
+ * Mechanism — 2-gram (adjacent token pair) phrases from the winning
+ * family's own member raw titles, at >=60% member adoption, restricted to
+ * phrases anchored on ALREADY-RECOGNIZED edition/product registries (never
+ * arbitrary majority-shared bigrams):
+ *   - series/edition-structure markers via detectSeriesMarkers
+ *     (compHygiene.js — special/annual/king-size/giant-size/...): these
+ *     name a different PRODUCT LINE ("Summer Special" is a different book
+ *     from "#1," same asymmetry logic detectSeriesMarkers' comp-filter
+ *     callers already enforce). This is the ONLY lane that can reject.
+ *   - specific variant-category tokens via classifyVariantTokens
+ *     (imageSearchIdentity.js — convention/ratio/retailer/exclusive/...,
+ *     Q111 taxonomy, 'finish' generic excluded): these anchor candidacy
+ *     and CORROBORATE on the accept side (a PC product for a con exclusive
+ *     is often named by its convention — "Adventure Time SDCC #1" — rather
+ *     than its "Summer Special" moniker), but never reject alone. A
+ *     variant-cover pool (MegaCon/SDCC exclusive of a regular issue)
+ *     legitimately anchors to the base PC product with the variant
+ *     multiplier machinery layered on top — rejecting on a missing
+ *     convention token would strip the PC anchor from every variant scan
+ *     (the G.O.D.S./One World Under Doom quadrant-(d) control, which must
+ *     stay accepted byte-identically).
+ *
+ * False-positive guard (the Captain Marvel #17 / Kamala Khan class —
+ * verified against the real Q140 pool): "kamala khan" and "1st
+ * appearance" clear the 60% adoption floor trivially, but describe story
+ * CONTENT true of every copy of the issue, not a different product —
+ * neither word is in any edition/convention registry, so the phrase never
+ * becomes a candidate at all. Same mechanical exclusion covers artist
+ * names (not registry tokens — the artist axis is separately handled),
+ * seller boilerplate ("near mint," "with COA" — 'coa' is an
+ * authentication token so the phrase is a candidate, but authentication
+ * describes a physical copy, not a product line, and only series-marker
+ * phrases reject), and printing notes ("2nd print" at 4/6 adoption in the
+ * real Kamala pool — printing candidacy never rejects; PC's plain product
+ * anchor stays accepted, matching Q116's separate printing machinery).
+ *
+ * <3-member floor reuses the established "≥3 members = this family is
+ * real" convention (Q38/Q133-Slice-2/Q140) — a 1-2 listing "family" never
+ * strips a PC anchor on its own say-so.
+ *
+ * @param {string|null} pcProductName - the PC match's own product name
+ * @param {Array<string>} familyMemberRawTitles - the WINNING family's own
+ *   member rawTitle strings (topFamily.indices mapped back to the visual
+ *   pool — NOT the whole undifferentiated pool)
+ * @returns {boolean} true when the family agrees (>=60%) on a series-marker
+ *   phrase the PC product name reflects no part of
+ */
+export const pcMatchMissingFamilyDiscriminator = (pcProductName, familyMemberRawTitles) => {
+  if (!pcProductName || !Array.isArray(familyMemberRawTitles)) return false;
+  const titles = familyMemberRawTitles.filter((t) => typeof t === 'string' && t.trim().length > 0);
+  if (titles.length < 3) return false;
+
+  const tokenize = (s) =>
+    String(s)
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((t) => t.length >= 2);
+
+  const memberBigramSets = titles.map((t) => {
+    const toks = tokenize(t);
+    const set = new Set();
+    for (let i = 0; i < toks.length - 1; i++) set.add(`${toks[i]} ${toks[i + 1]}`);
+    return set;
+  });
+  const bigramCounts = new Map();
+  for (const set of memberBigramSets) {
+    for (const bg of set) bigramCounts.set(bg, (bigramCounts.get(bg) || 0) + 1);
+  }
+
+  const pcTokens = new Set(tokenize(pcProductName));
+  const pcSpecificTokens = new Set(classifyVariantTokens(pcProductName).specific);
+
+  let missingSeriesMarkerPhrase = false;
+  let pcReflectsAnyDiscriminator = false;
+  for (const [bigram, cnt] of bigramCounts) {
+    if (cnt / titles.length < 0.6) continue;
+    const [t1, t2] = bigram.split(' ');
+    const seriesAnchored = detectSeriesMarkers(bigram).length > 0;
+    const variantAnchors = classifyVariantTokens(bigram).specific;
+    // Not anchored on any recognized edition/product registry → arbitrary
+    // majority-shared bigram (kamala khan class) — never a candidate.
+    if (!seriesAnchored && variantAnchors.length === 0) continue;
+    const fullyReflected = pcTokens.has(t1) && pcTokens.has(t2);
+    const seriesMarkerTokens = [t1, t2].filter((tok) => detectSeriesMarkers(tok).length > 0);
+    if (
+      fullyReflected ||
+      variantAnchors.some((tok) => pcSpecificTokens.has(tok)) ||
+      seriesMarkerTokens.some((tok) => pcTokens.has(tok))
+    ) {
+      pcReflectsAnyDiscriminator = true;
+    }
+    if (seriesAnchored && !fullyReflected) missingSeriesMarkerPhrase = true;
+  }
+  return missingSeriesMarkerPhrase && !pcReflectsAnyDiscriminator;
 };
 
 /**
