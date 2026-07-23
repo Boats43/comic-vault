@@ -37,6 +37,14 @@ const GRADE_RANK = {
   undefined: 4
 };
 
+// Shared presence check — a key PRESENT on enrich (even with value null) is
+// a fresh, deliberate server signal; a key ABSENT means that call never
+// attempted to resolve the field at all. Used by both applyProvisionalIdentity
+// and mergeConfirmedIdentity below so the two don't drift into two
+// independently-tuned copies of the same check (Q128's "drifted-duplicate-
+// constant" lesson, applied to a predicate instead of a constant).
+const hasKey = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+
 /**
  * Choose between incoming and current price based on quality rank.
  * Lower rank = better quality. Preserves current if incoming is worse.
@@ -146,9 +154,56 @@ export function applyProvisionalIdentity(enrich, prior) {
   if (!enrich?.identityProvisional) return {};
   return {
     title: enrich.title ?? enrich.confirmedTitle ?? prior?.title,
-    issue: Object.prototype.hasOwnProperty.call(enrich, 'issue') ? enrich.issue : (prior?.issue ?? null),
+    issue: hasKey(enrich, 'issue') ? enrich.issue : (prior?.issue ?? null),
     year: enrich.year ?? null,
     publisher: enrich.publisher ?? null,
     variant: enrich.variantNote ?? null,
+  };
+}
+
+/**
+ * Q144C dispatch, instance 7 (2026-07-22, Adventure Time weighted-consensus
+ * class) — the CONFIRMED-identity counterpart to applyProvisionalIdentity.
+ * That function only fires when enrich.identityProvisional is true; a
+ * confirmed identity (weighted-consensus/top-rank-protection — no
+ * provisional flag) never triggers it. Traced live via a pre/post-
+ * finalizeResponse diagnostic (Jimmy's scan on 4ffe76b): server-side
+ * out.issue="1" survived cleanly through response assembly and
+ * serialization — the loss was 100% client-side, at this exact merge site
+ * (App.jsx, scan-to-catalogue persistence for a saved item). That object's
+ * own field list has never included `title`/`issue`/`publisher` at all
+ * outside the applyProvisionalIdentity spread (Q135's own comment on this
+ * site says so explicitly) — for a CONFIRMED identity, those three fields
+ * only ever fall through the `...cur` spread, i.e. the record never
+ * advances past whatever Vision guessed at grade-time, no matter what the
+ * server later resolved. `year` had a narrow special-case (only trusted
+ * enrich's value when `yearCorrected`/`polybagDetected` was explicitly
+ * flagged) that missed the ordinary "server resolved a year, no special
+ * flag" case; `variant` used `||`, which — like `??` — can't distinguish
+ * an honest server null from "no new data."
+ *
+ * Same presence contract as applyProvisionalIdentity's issue fix, applied
+ * to all five identity fields at once (fixing the site's semantics
+ * wholesale, not field-by-field, since the audit found title/year/
+ * publisher/variant sharing the exact same defect at this one site):
+ * key present (real value or explicit null) -> trust the fresh signal; key
+ * absent -> preserve the prior stored value. Always active, no provisional
+ * gate — callers spread this BEFORE applyProvisionalIdentity so a
+ * provisional response's own honest-null semantics (which additionally
+ * force null even on an OMITTED key, since a provisional pool that didn't
+ * corroborate a field is itself information) still win on key collision
+ * when both apply to the same response.
+ *
+ * @param {object} enrich - enrich API response
+ * @param {object} prior - the existing stored record (cur, at this call site)
+ * @returns {object} title/issue/year/publisher/variant merged by presence
+ */
+export function mergeConfirmedIdentity(enrich, prior) {
+  return {
+    title: hasKey(enrich, 'title') ? enrich.title : prior?.title,
+    issue: hasKey(enrich, 'issue') ? enrich.issue : prior?.issue,
+    year: hasKey(enrich, 'year') ? enrich.year : prior?.year,
+    publisher: hasKey(enrich, 'publisher') ? enrich.publisher : prior?.publisher,
+    variant: hasKey(enrich, 'variantNote') ? enrich.variantNote : prior?.variant,
   };
 }

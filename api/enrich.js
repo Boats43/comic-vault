@@ -8481,20 +8481,9 @@ export default async function handler(req, res) {
     // Previously these were stripped and fetched via separate /api/metadata call (SPEED-2a).
     // Eliminates duplicate CV/PC/GoCollect API calls and second HTTP round-trip.
     mark('response_sent');
-    // TEMPORARY — Q144C trace diagnostic (2026-07-22). Straddles
-    // finalizeResponse (not just placed before it) because finalizeResponse
-    // itself is part of the suspect chain — assembleContract/
-    // validateContract/syncDecisionToContract all mutate `out`. A single
-    // pre-call log would only reconfirm [B4-DIAGNOSTIC] and isolate
-    // nothing. Remove both lines in the same commit as the Q144C fix
-    // itself once the loss point is identified; do not let this linger
-    // past that commit.
-    console.log('[q144c-pre-finalize]', 'hasIssue=' + Object.prototype.hasOwnProperty.call(out, 'issue'), 'issue=' + JSON.stringify(out.issue));
     // Ship #24a-2: single-writer boundary — contract assembled here, nothing
     // may write price/decision fields after this call.
-    finalizeResponse(out);
-    console.log('[q144c-post-finalize]', 'hasIssue=' + Object.prototype.hasOwnProperty.call(out, 'issue'), 'issue=' + JSON.stringify(out.issue));
-    return res.status(200).json(out);
+    res.status(200).json(finalizeResponse(out));
   } catch (err) {
     // Ship 6 debug — log full error and stack trace to Vercel logs.
     // Without this, 500s appear in production with no diagnostic info.

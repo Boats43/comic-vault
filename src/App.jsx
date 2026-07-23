@@ -12,7 +12,7 @@ import {
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
-import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity } from "./lib/dataQualityGuard.js";
+import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity } from "./lib/dataQualityGuard.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 
@@ -10348,13 +10348,9 @@ export default function App() {
                   certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null,
                   cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                   cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
-                  variant: enrich.variantNote || cur.variant || null,
                   variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                 variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
                 premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
-                  year: enrich.polybagDetected && enrich.year
-                    ? enrich.year
-                    : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
                   // Mega-key floor flags (Tier 0 hotfix — persist from enrich)
                   megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
                   // Q90 — floor suppressed for slab-grade-matched sold pools
@@ -10396,15 +10392,20 @@ export default function App() {
                   demandSignals: enrich.demandSignals || cur.demandSignals || null,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
-                  // Q135 dispatch (2026-07-22, Lozano/Rachta Lin last-mile) —
-                  // this exact merge site never touched title/issue/publisher
-                  // at all (unlike the auto-refresh/bulk-import/refresh-
-                  // market-data paths, which at least attempt `enrich.title
-                  // || cur.title`), and year's own narrow special-case above
-                  // requires a truthy enrich.confirmedYear — structurally
-                  // unreachable for an honest server-side null. Pool-
-                  // provisional identity is a no-op elsewhere; this is the
-                  // single override point for this merge site.
+                  // Q144C dispatch, instance 7 (2026-07-22, Adventure Time
+                  // weighted-consensus class) — this exact merge site never
+                  // touched title/issue/publisher at all for a CONFIRMED
+                  // identity (only the provisional path below had an
+                  // override); year's own narrow special-case required an
+                  // explicit yearCorrected/polybagDetected flag and missed
+                  // the ordinary "server resolved a year, no special flag"
+                  // case; variant used `||`, which can't distinguish an
+                  // honest server null from "no new data." Fixed wholesale
+                  // (not field-by-field) via mergeConfirmedIdentity —
+                  // spread BEFORE applyProvisionalIdentity so a provisional
+                  // response's own honest-null semantics still win on key
+                  // collision when both apply.
+                  ...mergeConfirmedIdentity(enrich, cur),
                   ...applyProvisionalIdentity(enrich, cur),
                 };
                 console.log('[persist] savedId:', savedId,
