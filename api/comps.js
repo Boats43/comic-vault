@@ -1181,17 +1181,37 @@ export const fetchComps = async ({
       // Session 4B — SKIP for books. Vol/Book/Part = editions, not sequels.
       if (assetType !== 'book') {
         const ourMarkers = detectSeriesMarkers(title);
+        // Q144B dispatch (2026-07-22, Adventure Time Summer Special #1 SDCC
+        // class) — canonical-target-aware marker allowance. `ourMarkers`
+        // above is computed from the bare title string, which for this book
+        // is "Adventure Time Summer Special" with no issue number embedded
+        // — detectSeriesMarkers resolves that to 'special-?', never
+        // 'special-1'. The real "...Summer Special #1 SDCC..." comps
+        // (theirMarkers = ['special-1']) were being rejected outright as
+        // series asymmetry against a book that genuinely IS a Special — the
+        // asymmetry is an artifact of how ourMarkers was computed here, not
+        // a real mismatch. The canonical target — title + issue together,
+        // the confirmed identity's own full designation — does carry
+        // 'special-1'. A listing marker that agrees with the CANONICAL
+        // target (not just the bare title) is the match, not an asymmetric
+        // sequel/spinoff; falls back to ourMarkers itself when no issue is
+        // available, so every other book's asymmetry check is untouched.
+        const canonicalMarkers = iss ? detectSeriesMarkers(`${title} #${iss}`) : ourMarkers;
         const beforeSeq = p.length;
         let localSequelRejected = 0;
         const sequelFiltered = p.filter((it) => {
           const theirMarkers = detectSeriesMarkers(it.title);
           for (const m of theirMarkers) {
-            if (!ourMarkers.includes(m)) {
-              localSequelRejected++;
-              console.log('[sequel-filter] series asymmetry detected:',
-                String(it.title || '').slice(0, 55), `(marker: ${m})`);
-              return false;
+            if (ourMarkers.includes(m)) continue;
+            if (canonicalMarkers.includes(m)) {
+              console.log('[sequel-filter] canonical-marker-allowed marker=' + m + ':',
+                String(it.title || '').slice(0, 55));
+              continue;
             }
+            localSequelRejected++;
+            console.log('[sequel-filter] series asymmetry detected:',
+              String(it.title || '').slice(0, 55), `(marker: ${m})`);
+            return false;
           }
           return true;
         });
