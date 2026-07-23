@@ -370,7 +370,7 @@ const getListingReadiness = (item) => {
       backPhoto: { status: 'caution', label: 'Back photo', required: false },
       spinePhoto: { status: 'caution', label: 'Spine photo', required: false },
       pagesPhoto: { status: 'caution', label: 'Pages photo', required: false },
-      identityConfirmed: { status: 'fail', label: 'Identity confirmed', required: true },
+      identityConfirmed: { status: 'fail', label: 'Identity unresolved', state: 'UNRESOLVED', required: true },
       priceReady: { status: 'fail', label: 'Price ready', required: true },
       decisionSafe: { status: 'fail', label: 'Decision safe', required: true },
       marketEvidence: { status: 'fail', label: 'Market evidence', required: false }
@@ -408,11 +408,40 @@ const getListingReadiness = (item) => {
       label: 'Pages photo',
       required: false
     },
-    identityConfirmed: {
-      status: decision.action === 'ID_REQUIRED' || (hasBlockers && blockers.includes('identity-not-confident')) ? 'fail' : 'pass',
-      label: 'Identity confirmed',
-      required: true
-    },
+    identityConfirmed: (() => {
+      // Q145 dispatch (2026-07-22) — tri-state: CONFIRMED / PROVISIONAL /
+      // UNRESOLVED, replacing the binary blocked/confirmed collapse that
+      // let a promoted provisional identity (Q133 Slice 2 — Vision
+      // disagreed, the pool corroborated, decision.action never became
+      // ID_REQUIRED by design) render as an unqualified "✓ Identity
+      // confirmed."
+      //
+      // Discovered while implementing this fix, not assumed: out.
+      // identityProvisional and out.listingHardLockReason (the two signals
+      // this fix was specified to use) are NOT present on the client's
+      // catalogue item at all — grepped every merge site in this file,
+      // zero hits for either field name. Using them directly here would
+      // have been a silent no-op, the exact class of bug this whole
+      // session has been auditing. The reliable, already-merged proxy is
+      // item.contract.locks (deriveLocks, responseContract.js, pushes
+      // {code: out.listingHardLockReason || 'listing-hard-locked', ...}
+      // whenever out.listingHardLocked is true) — contract itself IS
+      // merged on every path (see the `contract:` field in each catalogue
+      // merge object). Falls back to the raw fields for a legacy/no-
+      // contract item in case a future merge-path fix adds them.
+      const isUnresolved = decision.action === 'ID_REQUIRED' || (hasBlockers && blockers.includes('identity-not-confident'));
+      const isProvisional = !isUnresolved && (
+        item.identityProvisional === true ||
+        item.listingHardLockReason === 'identity-unresolved' ||
+        (item.contract?.locks || []).some((l) => l.code === 'identity-unresolved')
+      );
+      return {
+        status: isUnresolved ? 'fail' : isProvisional ? 'caution' : 'pass',
+        label: isUnresolved ? 'Identity unresolved' : isProvisional ? 'Identity provisional — verify before listing' : 'Identity confirmed',
+        state: isUnresolved ? 'UNRESOLVED' : isProvisional ? 'PROVISIONAL' : 'CONFIRMED',
+        required: true
+      };
+    })(),
     priceReady: {
       status: price > 0 ? 'pass' : 'fail',
       label: 'Price ready',
@@ -562,6 +591,34 @@ const getCollectionMetrics = (catalogue) => {
   return metrics;
 };
 
+// Q145 dispatch (2026-07-22, Poison Ivy #31 collection-routing class) —
+// single shared channel resolver. Prefers item.contract?.bestChannel
+// (server-synced post any I9/sold-side-anchor demotion, since Q145's
+// server-side fix — src/lib/responseContract.js's syncDecisionToContract)
+// over the legacy item.decision?.bestChannel copy, which a stale
+// catalogue entry (scanned before this fix shipped, never re-enriched)
+// could still carry out of sync with its own stored contract.
+//
+// Defense-in-depth, explicitly secondary to the server-side fix — not
+// equally load-bearing. Also refuses to trust contract.bestChannel
+// blindly: a contract that's LOCKED, REFUSED, ID_REQUIRED, or simply not
+// listable is force-routed to research/blocked regardless of whatever
+// bestChannel value it carries, so a future contract-assembly bug in
+// THAT field specifically still can't misroute a book to Sell/Bundle/
+// Trade/Grade.
+const getAuthoritativeChannel = (item) => {
+  if (!item) return null;
+  const contract = item.contract;
+  const legacy = item.decision?.bestChannel || null;
+  if (!contract) return legacy;
+
+  if (contract.state === 'ID_REQUIRED') return 'blocked';
+  if (contract.state === 'REFUSED' || contract.state === 'LOCKED' || contract.listable === false) {
+    return 'research';
+  }
+  return contract.bestChannel || legacy || null;
+};
+
 // Session 2A: Channel routing metrics
 const getChannelMetrics = (catalogue) => {
   if (!catalogue || !Array.isArray(catalogue) || catalogue.length === 0) {
@@ -585,7 +642,9 @@ const getChannelMetrics = (catalogue) => {
   };
 
   for (const item of catalogue) {
-    if (!item || !item.decision?.bestChannel) continue;
+    if (!item) continue;
+    const channel = getAuthoritativeChannel(item);
+    if (!channel) continue;
 
     try {
       const displayPrice = getDisplayPrice(item);
@@ -594,7 +653,6 @@ const getChannelMetrics = (catalogue) => {
 
       if (isNaN(price) || !isFinite(price)) continue;
 
-      const channel = item.decision.bestChannel;
       if (metrics[channel]) {
         metrics[channel].count++;
         // Only add to value if item has a valid price (not null/undefined)
@@ -3300,10 +3358,10 @@ function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onD
                   })() : ''}
                 </div>
               )}
-              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.status === "sold" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired || item.gradeExceedsMap || item.decision?.bestChannel) && (
+              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.status === "sold" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired || item.gradeExceedsMap || getAuthoritativeChannel(item)) && (
                 <div className="cl-row3">
-                  {item.decision?.bestChannel && (() => {
-                    const ch = item.decision.bestChannel;
+                  {getAuthoritativeChannel(item) && (() => {
+                    const ch = getAuthoritativeChannel(item);
                     const badges = {
                       cash_sale: { emoji: '💵', label: 'LIST', className: 'pill-channel-cash' },
                       bundle: { emoji: '📦', label: 'BUNDLE', className: 'pill-channel-bundle' },
@@ -7893,7 +7951,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
         c.status !== 'listed' &&
         c.status !== 'sold' &&
         getDisplayPrice(c) > 0 &&
-        c.decision?.bestChannel !== 'research' &&
+        getAuthoritativeChannel(c) !== 'research' &&
         passesContractGate(c)
     );
 
@@ -8005,6 +8063,22 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
       setBundleMsg({
         type: "err",
         text: `${blocked.length} book${blocked.length === 1 ? '' : 's'} ha${blocked.length === 1 ? 's' : 've'} decision blockers. Deselect them first.`
+      });
+      return;
+    }
+
+    // Q145 dispatch (2026-07-22) — the check above only ever caught
+    // ID_REQUIRED/DO_NOT_LIST/blockers>0. A contract-violation-capped or
+    // otherwise LOCKED/REFUSED book (RESEARCH action, zero blockers) sailed
+    // through untouched — an actionable workflow gap, not just a display
+    // number (Poison Ivy #31's own shape: decision.action=RESEARCH,
+    // blockers=0, but contract.listable=false). Same gate the single-card
+    // List button and getListableBooks already trust.
+    const notListable = items.filter((c) => !passesContractGate(c));
+    if (notListable.length > 0) {
+      setBundleMsg({
+        type: "err",
+        text: `${notListable.length} book${notListable.length === 1 ? '' : 's'} ${notListable.length === 1 ? 'is' : 'are'} not listable (locked/refused/unpriced). Deselect them first.`
       });
       return;
     }

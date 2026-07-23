@@ -580,6 +580,15 @@ test('Q109 Part 1 - ASM #17/Ditko real case: I9 caps LIST_LOW to RESEARCH everyw
   assert(out.contract.decision.action === 'RESEARCH', `contract.decision.action should be capped, got ${out.contract.decision.action}`);
   assert(out.decision.action === 'RESEARCH', `out.decision.action should mirror the cap, got ${out.decision.action}`);
   assert(out.contract.bestChannel === 'research', 'bestChannel mirrors applyAnchorDirection pattern');
+  // Q145 dispatch (2026-07-22) — this specific assertion was the coverage
+  // gap: the suite checked contract.bestChannel above but never out.
+  // decision.bestChannel, the field actually serialized to the client and
+  // merged verbatim into the catalogue (src/App.jsx's syncedDecision).
+  // Pre-Q145, this was 'ebay' (the fixture's original, pre-violation
+  // value) — the exact stale-field bug that misrouted Poison Ivy #31 to
+  // the collection screen's "💵 LIST" bucket despite this test's own
+  // green checkmark on every OTHER assertion in this block.
+  assert(out.decision.bestChannel === 'research', `out.decision.bestChannel should mirror the cap, got ${out.decision.bestChannel}`);
   assert(out.contract.listable === false, 'still locked (unchanged from prior behavior)');
   assert(out.decision.warnings.includes('contract-violation-decision-capped'),
     'out.decision.warnings should carry the cap marker');

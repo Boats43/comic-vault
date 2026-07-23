@@ -672,43 +672,76 @@ export function validateContract(contract, out) {
 }
 
 /**
- * Assemble → validate → attach. Call this immediately before res.json()
- * on every substantive response exit. Mutates and returns `out`.
+ * Q145 dispatch (2026-07-22, Poison Ivy #31 collection-routing class) —
+ * single, unconditional sync point for every contract-authoritative
+ * decision field. Prior code had two independent PARTIAL sync blocks,
+ * each keyed on a specific demotion flag: the sold-side-anchor block
+ * synced BOTH out.decision.action and out.decision.bestChannel; the I9
+ * contract-violation block (added later, Q109 dispatch Part 1) synced
+ * ONLY .action, forgetting .bestChannel. That asymmetry is exactly what
+ * let a stale out.decision.bestChannel ('cash_sale', frozen inside
+ * computeDecision/computeBestChannel before I9 ever runs) reach the
+ * collection screen (src/App.jsx's getChannelMetrics, the per-row pill —
+ * both read item.decision.bestChannel directly) for an I9-violating
+ * LIST_LOW book, while the detail card (which reads item.contract.*
+ * directly, never item.decision) rendered correctly the whole time.
+ *
+ * Called ONCE, unconditionally, after BOTH assembleContract (handles
+ * sold-side anchoring) and validateContract (handles I9 capping) have
+ * had their chance to mutate `contract` — no per-demotion-flag branching
+ * for the core fields, so a FUTURE contract-driven demotion mechanism
+ * gets this sync for free and cannot reintroduce this exact bug shape by
+ * forgetting one field. Demotion-specific warning strings still branch on
+ * their own flag (different warning text for different causes), but the
+ * action/bestChannel/price sync itself does not.
+ *
+ * Invariant this function guarantees for every finalized response:
+ *   out.decision.action === contract.decision.action
+ *   out.decision.bestChannel === (contract.bestChannel ?? contract.decision?.bestChannel)
+ * Asserted directly in tests/q145-contract-decision-sync.test.js.
+ */
+function syncDecisionToContract(out, contract) {
+  if (!out.decision || typeof out.decision !== 'object') return;
+  out.decision.price = contract.price;
+  out.decision.action = contract.decision.action;
+  out.decision.bestChannel = contract.bestChannel ?? contract.decision?.bestChannel ?? null;
+
+  if (contract.soldSideAnchored &&
+      Array.isArray(out.decision.warnings) &&
+      !out.decision.warnings.includes('sold-active-mismatch-extreme')) {
+    out.decision.warnings.push('sold-active-mismatch-extreme');
+  }
+  if (contract.decisionCappedByViolation &&
+      Array.isArray(out.decision.warnings) &&
+      !out.decision.warnings.includes('contract-violation-decision-capped')) {
+    out.decision.warnings.push('contract-violation-decision-capped');
+  }
+}
+
+/**
+ * Assemble → validate → sync → attach. Call this immediately before
+ * res.json() on every substantive response exit. Mutates and returns `out`.
  *
  * I7 single-number guarantee: out.decision.price is OVERWRITTEN to the
- * contract price so decision panel, stats bar, Recommended row, and List
- * button are definitionally equal. (Also fixes the pre-existing NaN class:
- * computeDecision does arithmetic on fmtUsd strings — "$4.82" * 0.8 → NaN
- * → serialized null.)
+ * contract price BEFORE validateContract runs (I7 itself checks
+ * out.decision.price against contract.price — it must already reflect
+ * assembleContract's own price mutations, e.g. the sold-side anchor,
+ * or I7 would misfire comparing a pre-anchor price against the anchored
+ * one). This also fixes the pre-existing NaN class: computeDecision does
+ * arithmetic on fmtUsd strings — "$4.82" * 0.8 → NaN → serialized null.
+ *
+ * Every OTHER decision field (action, bestChannel, and price again for a
+ * single source of truth) syncs exactly once via syncDecisionToContract,
+ * AFTER validateContract, so it reflects every mutation from both
+ * assembleContract and validateContract — see that function's docstring.
  */
 export function finalizeResponse(out) {
   const contract = assembleContract(out);
   if (out.decision && typeof out.decision === 'object') {
     out.decision.price = contract.price;
-    // Ship 24c — keep the legacy decision object coherent with the
-    // anchored contract (action pill / bestChannel badge read it).
-    if (contract.soldSideAnchored) {
-      out.decision.action = 'RESEARCH';
-      out.decision.bestChannel = 'research';
-      if (Array.isArray(out.decision.warnings) &&
-          !out.decision.warnings.includes('sold-active-mismatch-extreme')) {
-        out.decision.warnings.push('sold-active-mismatch-extreme');
-      }
-    }
   }
   validateContract(contract, out);
-
-  // Q109 dispatch Part 1: validateContract runs after the soldSideAnchored
-  // mirror above, so a violation-capped decision needs its own sync step
-  // once contract.decision.action has actually been mutated to RESEARCH.
-  if (out.decision && typeof out.decision === 'object' && contract.decisionCappedByViolation) {
-    out.decision.action = 'RESEARCH';
-    if (Array.isArray(out.decision.warnings) &&
-        !out.decision.warnings.includes('contract-violation-decision-capped')) {
-      out.decision.warnings.push('contract-violation-decision-capped');
-    }
-  }
-
+  syncDecisionToContract(out, contract);
   out.contract = contract;
   return out;
 }

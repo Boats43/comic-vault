@@ -203,3 +203,33 @@ if ((idCheckFinal.confident || publisherOnlyMissing || visionLowButCorroborated 
 **Regression gate status:** full test suite re-run clean against the documented pre-existing baseline (same 10 files failing, identical to the baseline this document itself cites) — no new failures. `npm run build` clean. ESM-mode parse check clean on every touched file, per the standing P0 protocol. New suites: `tests/q140-coherent-content-token-lane.test.js` (18 assertions — coherent vs. scattered token behavior, the Adventure Time reconstruction, family-scoped issue adoption, and the mandatory regression controls: Captain Marvel #17/Q119, Batman-lot/LOT_RE, Eternus #2 thin-pool), `tests/q141-rachta-lin-pricing-eligibility-gate.test.js` (5 assertions, source-level regression guard on the OR-chain since the enrich.js handler has no pure-function extraction to test directly).
 
 **Not done, and explicitly not claimed:** neither fix has been deployed or live-rescanned. Per invariant 9 (deploy READY ≠ fix exercised) and invariant 7 (one commit, one rescan), both fixes need a real push, a confirmed `READY` deployment, and a fresh live rescan of Adventure Time Summer Special (SDCC) and Pop Kill #1 (Rachta Lin) respectively before either row in Section 3 can be marked closed. The full diff is presented for review before any commit, per this repo's standing diff-before-commit protocol.
+
+---
+
+## SECTION 7 — Q145: Collection/Routing Authority (new P0, ranked above Q144A/B/C)
+
+**Discovered:** collection/routing authority audit, this session, independent of the Q144 sub-issues. Poison Ivy #31 (an I9 contract-violation control case — price >100% over its own pool avg with a LIST_LOW decision) showed **"LISTING LOCKED — CONTRACT VIOLATION" on its own detail card, correctly**, but the **collection screen routed it as "💵 LIST" at its pre-violation $12.25 price** — a misrouted-to-sell-channel bug, not a display-only cosmetic. Ranked above Q144A/B/C because the failure mode is worse: a known-bad price reaching an actionable sell/bundle workflow, not an imprecise-but-honest price.
+
+**Root cause (traced, cited exactly):** `src/lib/responseContract.js`'s `finalizeResponse()` had two independent, asymmetric partial-sync blocks. The sold-side-anchor path synced both `out.decision.action` and `out.decision.bestChannel`; the I9 contract-violation path (added later, Q109 dispatch Part 1) synced only `.action` — `.bestChannel` was left at whatever `computeBestChannel()` froze it to *before* I9 ever ran (`'cash_sale'` for a LIST_LOW book). That stale field reaches the client verbatim (`enrich.decision` merged with no re-derivation, `src/App.jsx`'s `syncedDecision`), and two collection-screen consumers (`getChannelMetrics`, the per-row pill) read `item.decision.bestChannel` directly with no fallback to the correctly-synced `item.contract.bestChannel` — unlike every detail-card consumer, which already preferred `contract.*` and rendered correctly the whole time. A related, differently-shaped gap: `submitBundle` never checked `contract.listable` at all, only `ID_REQUIRED`/`DO_NOT_LIST`/`blockers.length` — an I9-violating book with `action=RESEARCH, blockers=0` could be added to a bundle, an actionable gap, not just a display number.
+
+**Fix, one commit, four parts:**
+1. **`syncDecisionToContract`** (`src/lib/responseContract.js`) — single, unconditional sync point replacing both partial blocks; runs once after both `assembleContract` and `validateContract` have finished mutating `contract`, so a *future* contract-driven demotion mechanism gets the sync for free instead of risking the same one-field omission a third time.
+2. **`getAuthoritativeChannel`** (`src/App.jsx`) — shared client-side resolver, defense-in-depth (explicitly secondary to fix 1), wired into `getChannelMetrics`, the per-row pill, and the previously-redundant-but-not-exploitable trade-eligibility check.
+3. **`submitBundle`** now requires `passesContractGate` (`contract.listable === true`), matching the guard the single-card List button and Post-All-HOT already trust.
+4. **Identity-readiness tri-state** (CONFIRMED / PROVISIONAL / UNRESOLVED) replacing the binary blocked/confirmed collapse in the listing-readiness checklist.
+
+**A genuine discovery made while implementing fix 4, not assumed:** the two fields fix 4 was specified to key off (`out.identityProvisional`, `out.listingHardLockReason`) are **not merged into the client catalogue anywhere in `App.jsx`** — grepped every merge site, zero hits for either field name (a sixth instance of the "field never merged" class this session already found for `publisher`, `year`, and `issue`). Implementing fix 4 against those fields directly would have shipped a silent no-op. Used the reliable, already-merged proxy instead: `item.contract.locks` (`deriveLocks` pushes `{code: out.listingHardLockReason || 'listing-hard-locked', ...}` whenever `out.listingHardLocked` is true, and `contract` is merged on every path) — checks the raw fields too, defensively, in case a future merge-path fix adds them.
+
+**Regression:** `tests/q145-contract-decision-sync.test.js` (41 assertions — the five required fixtures: Poison Ivy #31, Rachta Lin, a safe listable control, Poison Ivy #1 unresolved, sold-side-anchor regression control) plus a strengthened assertion added to the existing `tests/response-contract.test.js` I9 test (it checked `contract.bestChannel` but never `out.decision.bestChannel` — the literal coverage gap that let this ship). Full suite re-run clean against the documented baseline; `npm run build` clean (App.jsx validated via the `vite build` step, not `node --check`, since JSX isn't plain-JS-parseable).
+
+**Not done, not claimed:** not yet committed, deployed, or live-rescanned.
+
+### Remaining count, explicit (per your instruction — not folded into "three items")
+
+**4 items remain before this campaign's launch gate closes:**
+1. **Q145** (this section) — collection/routing authority. Code-complete, tested, **not yet shipped**.
+2. **Q144A** — PC anchor discriminator gate (generic-stem vs. family-supported-discriminator), delegated to Fable 5. Not started — was paused for this P0.
+3. **Q144B** — sequel-filter-removing-"special-1" defect. **Still OPEN**, not investigated yet — explicitly not to be closed without its own direct trace.
+4. **Q144C** — issue client-merge presence-semantics fix (`hasOwnProperty` pattern, not `??`). Not started — was paused for this P0.
+
+Sequence unchanged from before this P0 interrupted it: Q145 ships and rescans first, then Q144A → Q144C (each its own commit/deploy/rescan), then the combined Adventure Time rescan, then Q144B gets its own dedicated trace before anyone calls the campaign closed.
