@@ -10463,7 +10463,6 @@ export default function App() {
                   cgcVerified: enrich.cgcVerified || s.cgcVerified || false,
                   cgcLabel: enrich.cgcLabel || s.cgcLabel || null,
                   goCollect: enrich.goCollect || s.goCollect || null,
-                  variant: enrich.variantNote || s.variant || null,
                   variantMultiplier: enrich.variantMultiplier || s.variantMultiplier || null,
                   variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || s.variantMultiplierEstimated === true,
                   premiumVariantIsolated: enrich.premiumVariantIsolated === true || s.premiumVariantIsolated === true,
@@ -10503,9 +10502,20 @@ export default function App() {
                   decision: enrich.decision || s.decision,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChangedSel ? false : (s.manualConfirmed || false),
-                  // Q135 dispatch (2026-07-22) — see the scan→catalogue
-                  // merge above (same function, same rationale) — this
-                  // object never touched title/issue/year/publisher at all.
+                  // Q144C dispatch, instance 8 (2026-07-22) — site-parity
+                  // fix. The sibling setCatalogue updater above got
+                  // mergeConfirmedIdentity in 3e9eba9; this setSelectedItem
+                  // updater (same function, same enrich response, the OPEN
+                  // detail card's own state) was missed — it still only
+                  // spread applyProvisionalIdentity, which no-ops for a
+                  // confirmed identity, so the open detail card kept
+                  // showing stale title/issue/year/publisher/variant even
+                  // after the collection row (reading from catalogue) had
+                  // already corrected. Same collision order as the
+                  // catalogue site: mergeConfirmedIdentity first, so a
+                  // provisional response's own honest-null semantics still
+                  // win on key collision when both apply.
+                  ...mergeConfirmedIdentity(enrich, s),
                   ...applyProvisionalIdentity(enrich, s),
                 };
               });

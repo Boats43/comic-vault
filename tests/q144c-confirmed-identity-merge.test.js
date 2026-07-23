@@ -171,6 +171,73 @@ console.log('\nPart 4: Rachta Lin standing control — provisional path unaffect
   assertEq(updated.publisher, null, 'Rachta Lin: publisher stays honestly null');
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Part 5 — instance 8 (2026-07-22): site-parity between the two merge
+//      locations. mergeConfirmedIdentity itself was already correct (Parts
+//      1-4) -- the bug was that App.jsx's setSelectedItem updater (the
+//      OPEN detail card's own state) never called it at all, only its
+//      sibling setCatalogue updater (collection row) did, in 3e9eba9. Both
+//      updaters receive the SAME enrich response for the SAME scan event;
+//      this proves they now produce IDENTICAL merged identity fields
+//      instead of diverging (collection row correct, open detail card
+//      stale -- the exact symptom reported).
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\nPart 5: site parity — catalogue (collection row) vs selectedItem (open detail card)\n');
+
+{
+  // The real Adventure Time shape: confirmed (non-provisional) identity,
+  // stale prior record on BOTH the catalogue entry and the open detail
+  // card's own selectedItem state (as would happen if the user had the
+  // detail card open across a rescan).
+  const enrich = {
+    identityProvisional: false,
+    title: 'Adventure Time Summer Special',
+    issue: '1',
+    year: '2013',
+    publisher: 'BOOM! Studios',
+    variantNote: 'SDCC Convention Exclusive',
+  };
+  const staleCatalogueEntry = { title: 'Adventure Time', issue: '5', year: '2016', publisher: null, variant: null };
+  const staleSelectedItem = { title: 'Adventure Time', issue: '5', year: '2016', publisher: null, variant: null };
+
+  // Mirrors App.jsx's exact per-site spread order for both updaters.
+  const catalogueResult = { ...staleCatalogueEntry, ...mergeConfirmedIdentity(enrich, staleCatalogueEntry), ...applyProvisionalIdentity(enrich, staleCatalogueEntry) };
+  const selectedItemResult = { ...staleSelectedItem, ...mergeConfirmedIdentity(enrich, staleSelectedItem), ...applyProvisionalIdentity(enrich, staleSelectedItem) };
+
+  assertEq(selectedItemResult.issue, '1', `open detail card (selectedItem): issue corrects stale "5" → "1" (got "${selectedItemResult.issue}")`);
+  assertEq(selectedItemResult.title, catalogueResult.title, 'title identical across both merge sites');
+  assertEq(selectedItemResult.issue, catalogueResult.issue, 'issue identical across both merge sites — the exact parity this dispatch fixes');
+  assertEq(selectedItemResult.year, catalogueResult.year, 'year identical across both merge sites');
+  assertEq(selectedItemResult.publisher, catalogueResult.publisher, 'publisher identical across both merge sites');
+  assertEq(selectedItemResult.variant, catalogueResult.variant, 'variant identical across both merge sites');
+}
+
+{
+  // Explicit server null clears on the selectedItem site specifically.
+  const enrich = { identityProvisional: false, title: null, issue: null, year: null, publisher: null, variantNote: null };
+  const staleSelectedItem = { title: 'Stale Title', issue: '99', year: '1999', publisher: 'Stale Pub', variant: 'Stale Variant' };
+  const result = mergeConfirmedIdentity(enrich, staleSelectedItem);
+  assertEq(result.issue, null, 'selectedItem site: explicit server null clears stale issue (not just catalogue)');
+  assertEq(result.title, null, 'selectedItem site: explicit server null clears stale title');
+}
+
+{
+  // Omitted field preserves on the selectedItem site specifically.
+  const enrich = { identityProvisional: false }; // no fields present at all
+  const staleSelectedItem = { title: 'Preserved Title', issue: '7', year: '2020', publisher: 'Preserved Pub', variant: 'Preserved Variant' };
+  const result = mergeConfirmedIdentity(enrich, staleSelectedItem);
+  assertEq(result.issue, '7', 'selectedItem site: omitted issue key preserves prior');
+  assertEq(result.title, 'Preserved Title', 'selectedItem site: omitted title key preserves prior');
+}
+
+{
+  // Provisional path unchanged on the selectedItem site: applyProvisionalIdentity
+  // still runs and still no-ops for a non-provisional response, exactly as before.
+  const nonProvisionalEnrich = { identityProvisional: false, title: 'X', issue: '1' };
+  assertEq(Object.keys(applyProvisionalIdentity(nonProvisionalEnrich, {})).length, 0,
+    'selectedItem site: applyProvisionalIdentity still a true no-op for non-provisional responses (unchanged behavior)');
+}
+
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {
   failures.forEach((f) => console.log(f));
