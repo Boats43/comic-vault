@@ -2490,6 +2490,13 @@ export default async function handler(req, res) {
     mark('family_candidate_complete');
 
     let identityRefused = false;
+    // Q142 instance 2 fix (2026-07-22, Adventure Time Summer Special class)
+    // — hoisted to this outer scope so BOTH checkAssemblyIntegrity call
+    // sites (Phase 1 ~line 2604 and Phase 2 ~line 4757) share the exact
+    // SAME winning-family population, computed once, instead of Phase 2
+    // drifting into its own independently-derived (and in this book's
+    // case, diluted) copy. Assigned at Phase 1; read-only at Phase 2.
+    let winningFamilyTitles = null;
 
     if (familyCandidate) {
       console.log(`[title-family] decision=${familyCandidate.decision}`);
@@ -2634,7 +2641,13 @@ export default async function handler(req, res) {
         // extracted from. Falls back to the full pool for every other
         // path (fallback-vision, refused-identity-conflict already exempt
         // above, no familyCandidate at all) — byte-identical there.
-        const winningFamilyTitles =
+        //
+        // Q142 instance 2 fix — assigns the OUTER-scoped winningFamilyTitles
+        // (declared near identityRefused above) rather than a block-local
+        // const, so Phase 2's integrity check (~line 4757) can reuse this
+        // exact same population instead of computing its own, independently
+        // driftable copy.
+        winningFamilyTitles =
           familyCandidate?.topFamily?.indices && FAMILY_OVERRIDE_DECISIONS.includes(familyCandidate?.decision)
             ? familyCandidate.topFamily.indices.map((i) => parsedVisualRows[i]?.rawTitle).filter(Boolean)
             : null;
@@ -4757,9 +4770,32 @@ export default async function handler(req, res) {
     // B1 (22e-LOSS): Phase 2 integrity check — token-addition rule (comp-consensus).
     // Runs AFTER comps fetched so we can validate if added tokens appear in ≥60% of comps.
     // Only applies when Phase 1 didn't already force fallback AND we have comp data.
-    if (!out.assemblyIntegrityFailed && rawComps?.prices?.length >= 3 && identitySource !== 'vision') {
-      const compTitles = rawComps.prices.map(p => p?.title).filter(Boolean);
-      const phase2Check = checkAssemblyIntegrity(effectiveTitle, confirmedTitle, compTitles);
+    //
+    // Q142 instance 2 fix (2026-07-22, Adventure Time Summer Special class)
+    // — this site's defect was its CONSENSUS REFERENCE, not just its
+    // population size: rawComps.prices at this point in the pipeline is
+    // not guaranteed to be the same clean, family-matched set the final
+    // card displays (it can carry broader-query-attempt fallback noise) —
+    // "summer"/"special" scored <60% against it despite being the winning
+    // family's own 100%-overlap canonical tokens. When an accepted family
+    // override exists, the winning family — the SAME population Phase 1
+    // above already established as the correct reference, reused via the
+    // outer-scoped winningFamilyTitles rather than a second, independently
+    // driftable copy — IS the consensus baseline, not rawComps.prices.
+    // This still guards genuine assembly corruption (the check itself,
+    // checkAssemblyIntegrity, is untouched) — it changes what population
+    // it's validated against, not whether it runs. Falls back to
+    // rawComps.prices exactly as before for every non-override path.
+    const phase2UseFamily = winningFamilyTitles && winningFamilyTitles.length >= 3;
+    const phase2CompTitles = phase2UseFamily
+      ? winningFamilyTitles
+      : (rawComps?.prices?.length >= 3 ? rawComps.prices.map(p => p?.title).filter(Boolean) : null);
+    if (!out.assemblyIntegrityFailed && phase2CompTitles && phase2CompTitles.length >= 3 && identitySource !== 'vision') {
+      console.log(
+        `[22e-population] Phase 2 mode=${phase2UseFamily ? 'winning-family' : 'full-pool'} ` +
+        `count=${phase2CompTitles.length}`
+      );
+      const phase2Check = checkAssemblyIntegrity(effectiveTitle, confirmedTitle, phase2CompTitles);
       if (phase2Check.shouldFallback && phase2Check.reason === 'excess-non-consensus-tokens') {
         console.log(
           `[22e-LOSS] Phase 2 FORCED vision="${effectiveTitle}" rejected="${confirmedTitle}" ` +
