@@ -417,11 +417,16 @@ Title includes variant (newsstand, gold, 2nd print, etc.) between issue and grad
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 - **Decision recommendations**: BUY/SELL/HOLD/WAIT badges on comic detail cards with blocking reasons. Gates listing actions when decision=WAIT.
 
-## Current State (as of 2026-07-11)
+## Current State (as of 2026-07-22)
 
 **Build:** ✅ CLEAN (prebuild hook active)  
 **Vercel functions:** 12/12 (at cap)  
-**Launch status:** Certification cycle — GL-0..GL-4 + FIX-1/2/3 shipped, awaiting 10-scan rerun
+**Launch status:** ✅ **GO — identity/pricing pipeline campaign (Q132–Q146) CLOSED, certified live on `5cb121a`, tagged `launch-candidate`.** Full closure record, GO recommendation, and known-limitations-at-launch list: `docs/LAUNCH-AUDIT.md` Section 9. Failure mode across both the old-book path (untouched, previously live-verified) and the variant/exclusive/virgin-cover class (rebuilt and verified end-to-end this campaign, Adventure Time Summer Special/SDCC the adversarial proof case) is uniformly "honest and locked," never "confident and wrong."
+
+**Post-launch roadmap (identity/pricing pipeline), in order:**
+1. **Edition-fingerprint campaign** — design already recorded (`docs/LAUNCH-AUDIT.md` Section 2's DESIGNED-NOT-BUILT entry: family-scoped variant adoption, `event=sdcc` normalization, ≥60%/≥3-unique thresholds, conflict-refusal for mixed events/retailer exclusives/ratios/lettered covers; trigger: an accepted winning family observed disagreeing internally on specific variant signals, not yet seen in production). Also owns: `active_reference_range`'s confirmed-identity gating (Section 9's known-limitations entry — widening requires edition-aware comp separation first, not a standalone eligibility-gate fix), the lettered-cover-variant (`1B`/`1C`) `detectSeriesMarkers` digit-capture gap, and Q144B's marker-type-scoped (not cross-title) exemption boundary.
+2. **Remaining comp-hygiene items** — cover-only listings, foreign-variant/pence-pricing blending, ComicVine wrong-volume-story matching (named, not yet scoped).
+3. **D3-class follow-ups** — the genuinely-unidentified-book control case (Poison Ivy #1) works as intended; any future work here is refinement, not a defect fix.
 
 **File sizes (2026-07-11 actual):** enrich.js ~5,770 lines, App.jsx ~11,100 lines.
 (The "AssetCore extraction: 4,642 → 3,938" figure below is the historical
