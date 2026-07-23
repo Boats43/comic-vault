@@ -140,16 +140,54 @@ const extractArtist = (title) => {
  * are excluded, not kept — ambiguous is not the same as matching, and an
  * unlabeled item could just as easily be a different issue.
  *
- * @param {Array<{issue?: string|number|null}>} items - parsed visual-pool
+ * Q144 Item 1 dispatch (2026-07-22, Adventure Time Summer Special class) —
+ * `familyOverrideAccepted` (optional, defaults to false — every existing
+ * caller omitting it is byte-identical to before) recovers items whose
+ * `.issue` came back null at pool-build time not because they're a
+ * different issue, but because extractIssueFromTitle's Q12c marketing-copy
+ * guard mistook a genuine title word ("Summer Special," "Convention
+ * Exclusive") for hype. Real production case: every "Adventure Time
+ * Summer Special #1 SDCC Convention Exclusive..." listing nulled its own
+ * "#1" this way, emptying this filter's output entirely before
+ * extractConfirmedVariant's own consensus computation ever got a real
+ * family sample to work from.
+ *
+ * Deliberately narrow, final scope (tightened from an earlier canonical-
+ * title-text design): this is CORROBORATION of an already-established
+ * confirmedIssue, not a new inference mechanism, and MARKETING_KEYWORDS_RE
+ * itself is untouched — still fires exactly as before for every caller
+ * that doesn't pass `familyOverrideAccepted`. Recovery requires ALL of:
+ * the caller asserts an accepted family override is active (the caller's
+ * responsibility — every row already belongs to the winning family by
+ * construction, since `variantSourceItemsPreIssueFilter` in api/enrich.js
+ * is only family-scoped when FAMILY_OVERRIDE_DECISIONS.includes(decision)
+ * in the first place), confirmedIssue is present, AND the row's own raw
+ * title literally contains "#<confirmedIssue>" as text — word-bounded so
+ * "#1" does not match "#1B"/"#1C" (lettered cover suffixes) or "#10"/
+ * "#1000" (a longer number sharing the same leading digits). A bare year
+ * ("2013") or a ratio/limitation fraction ("1:25", "1/1000") never
+ * contains a literal "#" immediately before the digits, so neither can
+ * ever satisfy this check regardless of family-override context.
+ *
+ * @param {Array<{issue?: string|number|null, rawTitle?: string}>} items - parsed visual-pool
  *   rows (extractIdentityFromImageSearch shape — `.issue` already computed)
  * @param {string|number|null} confirmedIssue - our confirmed issue number
+ * @param {boolean} [familyOverrideAccepted] - true only when the caller has
+ *   an accepted family-override identity (FAMILY_OVERRIDE_DECISIONS) and
+ *   `items` is already scoped to that winning family
  * @returns {Array} filtered items (same shape, subset)
  */
-export const filterItemsByIssue = (items, confirmedIssue) => {
+export const filterItemsByIssue = (items, confirmedIssue, familyOverrideAccepted = false) => {
   if (!Array.isArray(items)) return items;
-  return items.filter(
-    (item) => item?.issue != null && String(item.issue) === String(confirmedIssue)
-  );
+  return items.filter((item) => {
+    if (item?.issue != null && String(item.issue) === String(confirmedIssue)) return true;
+    if (familyOverrideAccepted && confirmedIssue != null && item?.rawTitle) {
+      const escaped = String(confirmedIssue).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const corroborated = new RegExp(`#\\s*${escaped}(?!\\d)(?![A-Za-z])`).test(item.rawTitle);
+      if (corroborated) return true;
+    }
+    return false;
+  });
 };
 
 /**

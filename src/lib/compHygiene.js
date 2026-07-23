@@ -290,7 +290,13 @@ export const ARTIST_PATTERNS = [
 // ~15:57 UTC, 3600s TTL) that never actually ran the new signed-isolation
 // logic. Bumped again so the next rescan is a genuine `ac:v7:` MISS,
 // forcing a fresh fetchComps pass through the fix rather than a stale hit.
-export const COMP_FILTER_VERSION = 7;
+// v8 = Q144 Item 1 (2026-07-22, Adventure Time Summer Special class) —
+// extractIssueFromTitle's canonical-title exemption + filterItemsByIssue's
+// canonical-title recovery param change comp-relevant behavior (which
+// items reach extractConfirmedVariant's consensus computation). A v7 HIT
+// would replay a pre-fix cached comp pool and be inconclusive per
+// invariant 9 — this bump forces a genuine ac:v8 MISS on the next scan.
+export const COMP_FILTER_VERSION = 8;
 
 // Q132 dispatch (2026-07-20) — single source of truth for "the title-family
 // override actually succeeded" (as opposed to 'fallback-vision', returned

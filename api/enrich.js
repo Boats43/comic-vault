@@ -4036,9 +4036,16 @@ export default async function handler(req, res) {
     // they survive this filter untouched. filterItemsByIssue lives in
     // src/lib/variantIdentity.js (single source of truth, directly
     // regression-testable).
+    //
+    // Q144 Item 1 (final scope) — familyCandidateAccepted passed through so
+    // filterItemsByIssue can corroborate (not infer) a row whose own
+    // `.issue` was falsely nulled by extractIssueFromTitle's marketing-copy
+    // guard, ONLY inside an accepted family override where every row
+    // already belongs to the winning family by construction (see that
+    // function's own doc comment for the exact corroboration conditions).
     const variantSourceItems = suppressVariantForYearConflict
       ? []
-      : filterItemsByIssue(variantSourceItemsPreIssueFilter, confirmedIssue);
+      : filterItemsByIssue(variantSourceItemsPreIssueFilter, confirmedIssue, familyCandidateAccepted);
 
     // Q127 — skip recomputation entirely on an UNRESOLVED year-hint
     // conflict: both the override AND backfill paths would otherwise
