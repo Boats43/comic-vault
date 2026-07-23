@@ -122,6 +122,22 @@ export function chooseBetterGrade(incoming, current) {
  * provisional). Returns {} — a true no-op — for any non-provisional enrich
  * response, so every other card's merge stays byte-identical to before.
  *
+ * Q144C dispatch (2026-07-22, Adventure Time #1→#5→#22→#5 drift) — `issue`
+ * used bare `enrich.issue ?? null`, which collapses two genuinely different
+ * server signals into the same outcome: an EXPLICIT `null` (server resolved
+ * this round and honestly found no issue) and an OMITTED key (server never
+ * attempted issue resolution this round at all) both nulled the field, with
+ * no fallback to the prior stored value either way. On a repeatedly
+ * rescanned provisional card, every fresh call's own transient issue guess
+ * — never checked for actually being new information — overwrote the card
+ * each time, which is what produced the observed drift. Presence-checked via
+ * `hasOwnProperty` instead: key present (even if its value is null) is
+ * trusted as a fresh, deliberate signal (a real value corrects the stale
+ * one; an explicit null clears it) — key absent falls back to the prior
+ * stored value instead of nulling it. title/year/publisher/variant are
+ * unchanged (out of scope for this dispatch; enrich.js always sets those
+ * keys on a provisional response, so no observed bug there).
+ *
  * @param {object} enrich - enrich API response
  * @param {object} prior - the existing stored record (cur/s/item, depending on call site)
  * @returns {object} {} when not provisional, else honest title/issue/year/publisher/variant
@@ -130,7 +146,7 @@ export function applyProvisionalIdentity(enrich, prior) {
   if (!enrich?.identityProvisional) return {};
   return {
     title: enrich.title ?? enrich.confirmedTitle ?? prior?.title,
-    issue: enrich.issue ?? null,
+    issue: Object.prototype.hasOwnProperty.call(enrich, 'issue') ? enrich.issue : (prior?.issue ?? null),
     year: enrich.year ?? null,
     publisher: enrich.publisher ?? null,
     variant: enrich.variantNote ?? null,
