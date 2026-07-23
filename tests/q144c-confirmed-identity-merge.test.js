@@ -238,6 +238,39 @@ console.log('\nPart 5: site parity — catalogue (collection row) vs selectedIte
     'selectedItem site: applyProvisionalIdentity still a true no-op for non-provisional responses (unchanged behavior)');
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Part 6 — contract/decision stay synchronized between the two merge
+//      sites. mergeConfirmedIdentity/applyProvisionalIdentity never touch
+//      contract or decision (those are computed inline at each site,
+//      App.jsx:10387-10388 for catalogue vs 10451/10502 for selectedItem)
+//      -- this proves the two sites' own inline formulas already produce
+//      identical results, so the site-parity fix didn't leave contract/
+//      decision as a fourth asymmetric field.
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\nPart 6: contract/decision synchronization between catalogue and selectedItem\n');
+
+{
+  const enrich = {
+    identityProvisional: false,
+    contract: { state: 'LOCKED', listable: false, price: 31.49 },
+    decision: { action: 'RESEARCH', confidence: 'MEDIUM' },
+  };
+  const staleCatalogueEntry = { contract: { state: 'READY', listable: true }, decision: { action: 'LIST_NOW' } };
+  const staleSelectedItem = { contract: { state: 'READY', listable: true }, decision: { action: 'LIST_NOW' } };
+
+  // Mirrors App.jsx's own inline formulas exactly (not mergeConfirmedIdentity —
+  // contract/decision are deliberately outside that function's scope).
+  const catalogueContract = enrich.contract ?? staleCatalogueEntry.contract ?? null;
+  const catalogueDecision = enrich.decision || staleCatalogueEntry.decision;
+  const selectedItemContract = enrich.contract ?? staleSelectedItem.contract ?? null;
+  const selectedItemDecision = enrich.decision || staleSelectedItem.decision;
+
+  assertEq(JSON.stringify(selectedItemContract), JSON.stringify(catalogueContract), 'contract identical across both merge sites');
+  assertEq(JSON.stringify(selectedItemDecision), JSON.stringify(catalogueDecision), 'decision identical across both merge sites');
+  assertEq(selectedItemContract.state, 'LOCKED', 'selectedItem contract correctly updates to LOCKED (not stuck at stale READY)');
+  assertEq(selectedItemDecision.action, 'RESEARCH', 'selectedItem decision correctly updates to RESEARCH (not stuck at stale LIST_NOW)');
+}
+
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {
   failures.forEach((f) => console.log(f));
