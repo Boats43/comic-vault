@@ -84,16 +84,14 @@ const BROWSE_ENDPOINT =
 const DEFAULT_CATEGORY_ID = "259104"; // Comics > Comic Books > Single Issues (fallback)
 const BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope";
 
-// Log presence + first 20 chars of credentials once per cold start so we
-// can confirm both env vars are actually loaded in this function.
-const _appIdPreview = process.env.EBAY_APP_ID
-  ? `${process.env.EBAY_APP_ID.slice(0, 20)}… (len=${process.env.EBAY_APP_ID.length})`
-  : "MISSING";
-const _certIdPreview = process.env.EBAY_CERT_ID
-  ? `${process.env.EBAY_CERT_ID.slice(0, 20)}… (len=${process.env.EBAY_CERT_ID.length})`
-  : "MISSING";
-console.log(`[comps] env EBAY_APP_ID=${_appIdPreview}`);
-console.log(`[comps] env EBAY_CERT_ID=${_certIdPreview}`);
+// Credential cleanup (2026-07-22) — log presence only, never a value
+// fragment. The prior version logged the first 20 chars of both
+// EBAY_APP_ID/EBAY_CERT_ID plus length on every cold start; enough of a
+// production API secret leaks through 20 characters that this counts as
+// exposure, not diagnostics. configured=true/false is sufficient to
+// confirm both env vars are actually loaded in this function.
+console.log(`[comps] env EBAY_APP_ID configured=${!!process.env.EBAY_APP_ID}`);
+console.log(`[comps] env EBAY_CERT_ID configured=${!!process.env.EBAY_CERT_ID}`);
 
 const formatUsd = (n) =>
   n == null || isNaN(n)
@@ -169,7 +167,7 @@ export const getOAuthToken = async (appId, certId, scope) => {
 
   const text = await res.text();
   const redacted = text.replace(/"access_token":"[^"]+"/, '"access_token":"[REDACTED]"');
-  console.log(`[comps][diag] oauth url=${OAUTH_ENDPOINT} scope=${scope} appId=${appId?.slice(0,10)}... status=${res.status} body=${redacted.slice(0,300)}`);
+  console.log(`[comps][diag] oauth url=${OAUTH_ENDPOINT} scope=${scope} appIdConfigured=${!!appId} status=${res.status} body=${redacted.slice(0,300)}`);
   if (!res.ok) {
     console.error(`[comps] oauth failed body=${text}`);
     throw new Error(`eBay OAuth HTTP ${res.status}`);
