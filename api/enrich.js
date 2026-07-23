@@ -8481,6 +8481,10 @@ export default async function handler(req, res) {
     // Previously these were stripped and fetched via separate /api/metadata call (SPEED-2a).
     // Eliminates duplicate CV/PC/GoCollect API calls and second HTTP round-trip.
     mark('response_sent');
+    // TEMPORARY — Q144C trace diagnostic (2026-07-22). Remove in the same
+    // commit as the Q144C fix itself once the client-side loss point is
+    // identified; do not let this linger past that commit.
+    console.log('[q144c-response]', 'hasIssue=' + Object.prototype.hasOwnProperty.call(out, 'issue'), 'issue=' + JSON.stringify(out.issue));
     // Ship #24a-2: single-writer boundary — contract assembled here, nothing
     // may write price/decision fields after this call.
     res.status(200).json(finalizeResponse(out));
