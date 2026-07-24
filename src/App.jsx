@@ -3255,7 +3255,7 @@ function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onD
             const m = String(txt).match(/#\s*(\d+)/);
             return m ? m[1] : null;
           };
-          const displayIssue = item.issue || extractIssueFromReport(item.conditionReport || item.notes || '');
+          const displayIssue = item.issue ?? null;
           const titleWithIssue = (item.title || "Unknown") + (displayIssue && !/unknown/i.test(String(displayIssue)) && !String(item.title || "").includes('#' + displayIssue) ? ` #${displayIssue}` : '');
           const gradeTxt = item.isGraded === true && item.numericGrade != null
             ? `CGC ${item.numericGrade}`
