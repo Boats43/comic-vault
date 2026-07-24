@@ -315,3 +315,105 @@ Section 4's nine invariants are hereby confirmed as **standing rules**, not camp
 ---
 
 **Campaign closed.** Q132 through Q146 (the coherent-content-token lane, the Q144A/B/C sub-campaign, and both instances of the Q142 assembly-integrity fix) are all shipped, deployed, and — where a live rescan was possible — verified against real production evidence. Next session opens fresh against the `launch-candidate` tag (`5cb121a`), with the post-launch roadmap ordered: edition-fingerprint campaign first (design already recorded above and in Section 2), then the remaining comp-hygiene items, then D3-class follow-ups.
+
+---
+
+## SECTION 10 — Q140 Corrective Dispatch (Commit A) — Status Correction and New Production Blockers (2026-07-24, amended)
+
+**Reconciliation note (added this pass, per explicit instruction):** Section 9's "Campaign closed," GO recommendation, and `launch-candidate` tag (`5cb121a`) describe the Q132–Q146 close-out decision **as of that point in time** — a historical record, not a current-state claim. This section reopens launch certification following production findings discovered after that tag. **Current production tip is `18ed481`, not `5cb121a`.** Section 9 is closed-as-of-`5cb121a`; Section 10 below is the active, unclosed gate as of `18ed481` onward. The document does not claim both "closed" and "blocking" about the same state.
+
+**Commit A** (`18ed481`, post-launch-tag) replaces the original Q140 dispatch's single-representative-rawTitle issue extraction with `resolveFamilyIssueConsensus` — an aggregate vote across every member row of the winning title family — and closes the **terminal fingerprint invariant**: `confirmedIssue` (pre-pricing) and `out.issue` (pre-response) were two independent writer chains in `api/enrich.js`; `out.issue` is now derived from `confirmedIssue` alone, at a single terminal site, with an explicit dual-boundary check. A detected fingerprint violation clears price authority entirely (price/priceLow/priceHigh/priceBands nulled, matchConfidence demoted, `refusedToPrice=true`) and hard-locks the listing, reusing the existing refused-price pattern rather than a new mechanism. `tests/q140-issue-consensus-corrective.test.js`: 124 assertions, zero regressions against the standing 10-file baseline, build clean.
+
+### Status correction (supersedes any prior framing of this as full certification)
+
+**Flash #139 is a LIVE PASS on Commit A's primary branch only** — present-issue + insufficient family consensus → issue retained (the safe-hold/no-op branch). **This is NOT full Commit A certification.** The regression suite's 124 assertions cover five required fixtures, each exercising a structurally distinct branch of `resolveFamilyIssueConsensus`:
+
+| Fixture | Branch exercised | Live status |
+|---|---|---|
+| Flash #139 | present issue + insufficient family consensus → retained | **LIVE PASS** (this dispatch) |
+| Flash #128 | coherent-family non-regression control | NOT YET certified live |
+| Adventure Time Summer Special #1 | missing issue → adoption (≥3 unique rows, ≥60% agreement, clear lead) | NOT YET certified live |
+| Immortal Hulk #44 | present issue + aggregate agrees → corroborate only, never replace | NOT YET certified live |
+| Wonder Woman #1 (2nd print) | modern edition, aggregate-vote-not-single-row | NOT YET certified live |
+
+Four of five fixtures remain outstanding. Per this document's own invariant 2 (Section 4/9, "production log citation before any done"), test-green is not a substitute for a live-rescan citation — Commit A is **test-verified, one-fifth live-verified**, not certified.
+
+### New production findings, 23-book collection export — recorded LAUNCH-BLOCKING
+
+**BLOCKER 4 — Captain Marvel #1 year/volume divergence still routes LIST_NOW/high.** Card displays 2017; the underlying evidence is the 2019 Artgerm Walmart-exclusive printing. The existing ±3-year era tolerance treats the two years as close enough to merge, producing a confident price across what are genuinely two different products. Same defect *class* as Commit A's terminal-fingerprint fix (single writer chain, no silent divergence) — reproduced here on the `year`/`volume` axis rather than `issue`. Confirms Section 2's already-logged risk ("modern relaunches must never merge separate #1 volumes under a ±3y tolerance") is live, not hypothetical.
+
+**BLOCKER 5 — "Acknowledge and Enable Listing" bypasses HARD_LOCK-shaped RESEARCH cards.** Nine hard-locked RESEARCH cards in this export carry a single-click "Acknowledge and Enable Listing" control that clears the automated listing block and enables List — including ASM #678, locked at $2,702.97, itself derived from a single $18,000 outlier ask. The research state today is one undifferentiated tier with one universal acknowledge affordance; there is no distinction between "advisory, proceed if you understand the caveat" (SOFT_REVIEW) and "this requires correction/re-identification before automated listing authority can exist at all" (HARD_LOCK, redefined below). One click currently defeats every upstream safety mechanism this audit documents (two-axis anchor agreement, honest-null, pool-authority, I13 annotation) at once.
+
+**BLOCKER 6 — Collection totals count untrusted numbers as owned value.** The reported "$4,754 Liquid Value" resolves to roughly $236 actionable (listable) value plus roughly $4,518 in research-tier estimates presented with equal weight; two questionable-price books account for 76% of the total. The dashboard's BLOCKED counter reads 0 while 7+ records in the same export are contract-locked. Two separate aggregation paths — Review ($4,518) and Research ($4,342) — computed over what should be the same underlying set disagree by $176. Same "two independent reducers, one truth" class Section 7 (Q145) already found and fixed for collection *routing*; this is the equivalent defect, unfixed, on collection *valuation*.
+
+### HARD_LOCK / SOFT_REVIEW, redefined (corrected this pass)
+
+**HARD_LOCK blocks GrailKey's own AUTOMATED pricing and listing authority only — it never blocks user agency.** Every hard-locked card must expose cause-specific resolution actions, at minimum: view accepted/rejected evidence, edit identity, select edition, re-identify, add photos, enter a manual price. A manual price entry creates a **new, separate manual-authority record** — it can never reactivate the rejected automated price, price bands, anchor, verified status, portfolio authority, or an automatic LIST recommendation. Those stay rejected regardless of what the user manually enters; the user is never blocked from acting on their own book, only from GrailKey silently vouching for a number it can't stand behind.
+
+**HARD_LOCK triggers, corrected:**
+- issue/year/volume conflict (Commit A + Step 3 fingerprint violation)
+- printing/variant unresolved — **only when materially identity- or value-changing**; a cosmetically-irrelevant unresolved detail does not lock
+- rejected anchor — **only if the rejected anchor was actually used/contaminating a computed value, or no alternative exact-tier authority exists**; a cleanly rejected anchor with a good replacement already in place is not itself a lock condition
+- **zero exact evidence of any kind** (corrected from "zero exact comps" — valid exact ACTIVE evidence with no sold history is SOFT_REVIEW, not HARD_LOCK)
+- extreme sold/active divergence
+- **outlier-owned price — deterministic definition (AND of two conditions, both required):** (a) the anomalous row/source is proven to **materially control the result** — either it carries ≥50% of the computed value's weight, **OR** removing it (leave-one-out) swings the result by more than a materiality threshold (proposed: >25%) — **AND** (b) the premium **lacks independent exact-edition-matched support** (no ≥2 corroborating data points at the same edition/printing/variant tier confirm that premium level exists in the broader market). **`>2x deviation from the pool's own median` is explicitly NOT part of this definition and must never, alone or combined, independently trigger HARD_LOCK** — a legitimate scarce key or ratio variant can sit multiples above a broader (non-edition-matched) median while having full independent support within its own edition tier, and is not outlier-owned. *(Flag: the 50%/25% thresholds are a proposed starting definition for this new gate, not a previously-calibrated constant — confirm/tune during Step 2A implementation against real fixtures, same as any other new numeric gate in this codebase.)*
+- asset-type uncertain
+- fingerprint violation (Commit A's mechanism, extended in Step 3)
+
+**SOFT_REVIEW:** acknowledgment/proceed remains available — the advisory tier, structurally distinct from HARD_LOCK above, not a lesser version of the same control.
+
+### Remediation plan — execution order fixed, do not batch
+
+**STEP 1 — Certify the remaining four Commit A fixtures** (Flash #128, Adventure Time Summer Special #1, Immortal Hulk #44, Wonder Woman #1 2nd print) against real scan logs, per Section 3's standing checklist (cache-verdict rule and 6-signal matrix apply unchanged). **Status: BLOCKED — awaiting Jimmy's four scans, not yet received in this conversation. No cell fillable yet.**
+
+**STEP 2A — Typed review/lock/override contract.** New typed contract, explicit:
+```
+{ reviewState, lockCodes, allowedActions, overridePolicy, automatedListingAllowed }
+```
+The UI renders FROM this contract only — it never independently decides whether to show an override/acknowledge control, same discipline as the Q145 routing-authority fix: one authoritative source, not a second consumer improvising. `reviewState` ∈ {SOFT_REVIEW, HARD_LOCK}. `lockCodes` names every trigger condition present (enumerated above). `allowedActions` is cause-specific (view evidence, edit identity, select edition, re-identify, add photos, manual price — never a blanket "acknowledge"). `overridePolicy` governs manual-override behavior. `automatedListingAllowed` is the single boolean every consumer (detail card, collection screen, bundle submission, channel metrics) reads, replacing today's single-tier acknowledge-defeats-everything shape. Every existing site that renders an acknowledge/override control must be enumerated (invariant 1, "consumer enumeration before any signal fix") before any one of them changes.
+
+**`valuationAuthority=manual` requires canonical identity to be sufficiently resolved first.** If issue, volume, material edition, or asset type remains unresolved at the time of manual entry, a user-entered amount is **private-reference-only**: it cannot contribute to portfolio value and cannot authorize a listing, regardless of `automatedListingAllowed`'s other conditions. Only once identity is sufficiently resolved (via edit-identity/select-edition/re-identify — the cause-specific actions above) does a manual entry qualify for `valuationAuthority=manual` proper.
+
+Manual overrides recorded, auditable, never silent: `pricingSource=manual-user-entry`, `valuationAuthority=manual`, `automatedPriceRejected=true`, `originalLockCodes`, `reason`, `timestamp`.
+
+Own report, own diff, own commit, own deploy, own certification package — separate from 2B and 2C.
+
+**STEP 2B — Authority-aware collection aggregator.** One aggregator, sourced exclusively from `contract.state` + `contract.listable` + valuation authority — extends Q145's "contract as sole routing authority" invariant from routing to valuation. Headline becomes "Ready to sell: $X / Research estimates: $Y / Unpriced: N," never a single blended "Liquid Value." Must resolve BLOCKED:0 and the Review-vs-Research $176 discrepancy as one fix, one truth.
+
+Own report, own diff, own commit, own deploy, own certification package — separate from 2A and 2C.
+
+**STEP 2C — Structured condition-AI contract.** Schema-first condition output — the schema itself contains no price/key-importance/velocity/ROI fields at all:
+```
+{ assessedGrade, gradeConfidence, visibleDefects, positiveObservations, imageLimitations, requestedPhotos }
+```
+Plus a server-side sanitizer as defense in depth (strips/rejects market-commentary language that slips through regardless of prompt discipline) — not a prompt-only control. (Reproduced concretely, the motivating case: the Flash card shows Recommended $212.24 beside an unrelated AI-authored $800 opinion in the same report.)
+
+Own report, own diff, own commit, own deploy, own certification package — separate from 2A and 2B.
+
+**STEP 3 — Extend the terminal fingerprint (Commit A), split in two:**
+- `baseIssueFingerprint`: `{series, volumeStartYear, issue, publisher}` — extends Commit A's existing terminal-fingerprint mechanism directly.
+- `editionFingerprint`: `{publicationYear, editionYear, printing, coverArtist, variantName, material, ratio, territory, language, retailerOrEvent}`.
+
+Known material fields must agree across display/pricing/contract layers. **Unknown/unresolved material fields block automated edition-specific pricing** (routes to HARD_LOCK per the corrected trigger list above), rather than silently averaging across editions. Canonical-year definition (volume-start vs. cover-date vs. copyright vs. reprint vs. edition-specific date) to be reported before any code is written for this step — feeds `baseIssueFingerprint.volumeStartYear` vs. `editionFingerprint.publicationYear`/`editionYear` as two distinct, separately-tracked fields rather than one overloaded "year." Captain Marvel #1 (Blocker 4) is the production fixture this step must close.
+
+**STEP 4 — Commit B, source-specific anchor trust.** Not one overall trust field — separate, independent trust states per source, each ∈ {exact, compatible, rejected, unresolved}:
+- `priceChartingAnchorTrust`
+- `comicVineAnchorTrust`
+- `ebaySoldEvidenceTrust`
+- `ebayActiveEvidenceTrust`
+- plus an overall `valuationAuthority` derived from (not overwriting) the four above.
+
+PriceCharting can be rejected while ComicVine story/key-issue metadata stays exact, and vice versa — each source populates only the fields it is authorized to support; a rejected PC anchor must not silently drag down an independently-exact CV story claim, and a locked card must never render a different, unrelated product's complete market profile underneath its own lock. Required before open beta.
+
+### Launch classification, corrected
+
+- **Now:** internal/owner use, demos, real-image testing only.
+- **After Step 2 (2A+2B+2C):** closed alpha (~5 users), listing execution disabled, manual review required, no "liquid value" claim anywhere in UI copy.
+- **After Steps 3+4:** **Safety-eligible for open beta after Steps 3+4, subject to a separate operational launch checklist** (auth, per-user data isolation, image-storage ownership, rate limiting/quotas, global spend limits, monitoring, privacy/terms, account/data deletion, API-license compliance) — closing the identity/pricing safety gate does not by itself clear that separate checklist.
+- **Autonomous LIST:** remains paused throughout every stage above.
+
+**Estimate:** 3-5 focused implementation days plus certification/regression time — no calendar date committed pending a full writer-chain trace ("Commit A looked small too").
+
+**Standing objective, this phase:** no untrusted number may become a portfolio asset, a recommended price, or a listable action.
+
+**Sequencing, explicit:** report before code on each step; one commit per step; **one relevant production certification package per commit** (corrected from "one rescan per commit" — a portfolio-reducer or UI-consumer change needs more than a single-card rescan to certify). **Currently at STEP 1, blocked on Jimmy's four scan logs (Flash #128, Adventure Time Summer Special #1, Immortal Hulk #44, Wonder Woman #1 2nd print) — not yet provided in this conversation. No code has been written for Step 2 (2A/2B/2C) or Steps 3-4.**
