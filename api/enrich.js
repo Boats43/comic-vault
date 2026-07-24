@@ -43,6 +43,7 @@ import {
   selectBestVariantCandidate,
   buildIdentityRefusedFallbackPool,
   shouldSkipAssemblyIntegrityCheck,
+  detectVisualIssueDivergence,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -2532,6 +2533,19 @@ export default async function handler(req, res) {
     // Stays false for barcode/manual/cgc-identity paths — none of those
     // ever go through resolveIdentity's provisional branch.
     let identityIsProvisionalOverride = false;
+    // Q140 corrective dispatch (2026-07-23, review fix) — pre-pricing
+    // fingerprint checkpoint. Captured at the end of EACH identity branch
+    // below (barcode/manual/cgc/resolveIdentity), so it reflects exactly
+    // the confirmedIssue value in scope the moment identity resolution
+    // finishes — the same value that flows, unmodified, into the
+    // fetchComps({ issue: confirmedIssue, ... }) call that actually drives
+    // the active-comp search (api/enrich.js, ~line 4410). Compared against
+    // confirmedIssue again at the terminal out.issue write, far below —
+    // together the two checkpoints prove confirmedIssue never silently
+    // drifts between "what pricing was computed against" and "what the
+    // card renders," not merely that out.issue mirrors whatever
+    // confirmedIssue last happened to be.
+    let pricingIssue = null;
 
     if (barcodeIdentity) {
       // Barcode provides authoritative identity
@@ -2540,6 +2554,7 @@ export default async function handler(req, res) {
       confirmedYear = barcodeIdentity.year;
       confirmedPublisher = barcodeIdentity.publisher;
       identitySource = 'barcode';
+      pricingIssue = confirmedIssue;
       console.log('[barcode] identity locked:', confirmedTitle, '#' + confirmedIssue);
     } else if (manualIdentity) {
       // FIX 4: Manual identity (user typed title/issue/year)
@@ -2548,6 +2563,7 @@ export default async function handler(req, res) {
       confirmedYear = effectiveYear;
       confirmedPublisher = effectivePublisher;
       identitySource = 'manual';
+      pricingIssue = confirmedIssue;
       console.log('[manual] identity locked:', confirmedTitle, '#' + confirmedIssue, confirmedYear || 'no-year');
     } else if (cgcIdentityConfirmed) {
       // Q106 FIX-1 — CGC cert-verification data is authoritative for a
@@ -2563,6 +2579,7 @@ export default async function handler(req, res) {
       out.cgcLabel = confirmedLabelType;
       out.certNumber = cgcResult.certNumber;
       if (confirmedGrade != null) out.grade = confirmedGrade;
+      pricingIssue = confirmedIssue;
       console.log(`[cgc-identity] confirmed from cert title="${confirmedTitle}" issue="${confirmedIssue}" grade="${confirmedGrade}" label="${confirmedLabelType}"`);
     } else {
       // Standard Vision-based identity resolution
@@ -2585,6 +2602,35 @@ export default async function handler(req, res) {
       confirmedPublisher = identity.confirmedPublisher;
       identitySource = identity.identitySource;
       identityIsProvisionalOverride = identity.isProvisionalOverride === true;
+      pricingIssue = confirmedIssue;
+
+      // Q140 corrective dispatch (2026-07-23, review fix) — surface the
+      // FAMILY-vs-prior issue conflict (resolveFamilyIssueConsensus's
+      // 'conflict-locked' mode — e.g. Vision/prior #139 vs a genuine,
+      // adoption-bar-clearing family consensus of #170) to the response
+      // and decision engine with full structured metadata. Previously this
+      // was computed correctly inside resolveIdentity but only
+      // console-logged — invisible to out, to computeDecision, and to the
+      // card. currentIssue/consensusIssue/currentSource name the actual
+      // conflict; support/population/ratio are the raw vote (never a bare
+      // boolean); decision:'locked' records that confirmedIssue was never
+      // overwritten.
+      if (identity.familyIssueConsensus?.mode === 'conflict-locked') {
+        const fic = identity.familyIssueConsensus;
+        out.issueConsensusConflict = {
+          currentIssue: String(confirmedIssue),
+          consensusIssue: String(fic.winner),
+          currentSource: identitySource,
+          support: fic.support,
+          population: fic.uniqueRows,
+          ratio: Number(fic.ratio.toFixed(2)),
+          decision: 'locked',
+        };
+        console.log(
+          `[q140-terminal] issueConsensusConflict surfaced: current=#${confirmedIssue} (${identitySource}) ` +
+          `vs family consensus=#${fic.winner} (${fic.support}/${fic.uniqueRows} = ${(fic.ratio * 100).toFixed(0)}%) — locked, never overwritten`
+        );
+      }
 
       // P0 (Q-VISION-ZERO-SUPPORT) — surface the loud override/escalate
       // note for the card UI + one-tier match-confidence demotion below.
@@ -5757,7 +5803,10 @@ export default async function handler(req, res) {
             confirmedTitle = rescuedIdentity.title;
             confirmedIssue = rescuedIdentity.issue;
             out.title = rescuedIdentity.title;
-            out.issue = rescuedIdentity.issue;
+            // Q140 terminal fingerprint invariant — out.issue is no longer
+            // written here directly. confirmedIssue (just set above) is the
+            // single source of truth; the terminal write further down
+            // derives out.issue from it exactly once.
             identitySource = 'ebay_comp_consensus';
             out.identityFromConsensus = true;
             out.needsReview = true; // NEEDS_REVIEW retained per Q83 ruling
@@ -7659,9 +7708,51 @@ export default async function handler(req, res) {
         // after resolveIdentity returned it. A real production case
         // (Adventure Comics #397) shipped decision.action=ID_REQUIRED
         // alongside out.issue="401" -- confidently wrong, not missing.
+        //
+        // Q140 terminal fingerprint invariant (2026-07-23) — the other half
+        // of the same class of bug: this used to unconditionally overwrite
+        // out.issue with visualResult.issue whenever confirmedIssue was
+        // non-null, with no check that the two agreed. confirmedIssue has
+        // already driven comp search and pricing by this point in the
+        // pipeline — a disagreeing visualResult.issue landing in out.issue
+        // here would make the card display a DIFFERENT issue than the one
+        // its own price was computed against. out.issue is no longer
+        // written from visualResult here at all; confirmedIssue is the sole
+        // source of truth for it (the single terminal write, further
+        // down). A disagreement is surfaced as an annotation instead of a
+        // silent divergence (I13 — never suppress, never fabricate).
+        out.claudeIssue = visualResult.claudeIssue;
         if (visualResult.issueSource === "ebay_visual" && confirmedIssue != null) {
-          out.issue = visualResult.issue;
-          out.claudeIssue = visualResult.claudeIssue;
+          const divergence = detectVisualIssueDivergence(confirmedIssue, visualResult.issue);
+          // Q140 corrective dispatch (2026-07-23, review fix) — do not
+          // clobber a richer conflict already surfaced by resolveIdentity's
+          // family-consensus check above (out.issueConsensusConflict may
+          // already be set with real support/population/ratio metadata).
+          // This is a separate, later, coarser signal (visualResult.issue
+          // is itself a pool-WIDE eBay consensus value, exactly the kind of
+          // possibly-wrong-family signal Q140 exists to distrust) — it
+          // fills the gap for identity sources that never ran family
+          // consensus at all (manual/barcode/CGC), but never overrides the
+          // more authoritative family-scoped conflict when one exists.
+          if (divergence && !out.issueConsensusConflict) {
+            // support/population/ratio are honestly null — this is a bare
+            // two-value comparison against an already-aggregated eBay
+            // value, not a fresh per-row vote (I13: never fabricate).
+            out.issueConsensusConflict = {
+              currentIssue: divergence.confirmedIssue,
+              consensusIssue: divergence.visualIssue,
+              currentSource: identitySource,
+              support: null,
+              population: null,
+              ratio: null,
+              decision: 'locked',
+            };
+            console.log(
+              `[q140-terminal] visual-pool issue diverges from confirmedIssue ` +
+              `(confirmed=#${divergence.confirmedIssue}, visual=#${divergence.visualIssue}) — ` +
+              `confirmedIssue wins, out.issue never overwritten`
+            );
+          }
         } else if (visualResult.issueSource === "ebay_visual") {
           console.log(`[visual-guard] suppressed out.issue overwrite (visual="${visualResult.issue}") — confirmedIssue already null from identity escalation`);
         }
@@ -8353,8 +8444,117 @@ export default async function handler(req, res) {
     // is exactly what the client then displays. confirmedIssue is
     // included for the same reason even though it's rarely null in
     // practice — same principle, no exception carved out for it.
+    //
+    // Q140 terminal fingerprint invariant (2026-07-23, review fix —
+    // BLOCKER 2) — this is now the ONLY site in the request lifecycle that
+    // writes out.issue, and it reads EXACTLY ONE variable: confirmedIssue.
+    // The previous form (`confirmedIssue || (identityIsProvisionalOverride
+    // ? null : issueNum) || null`) was one assignment STATEMENT but two
+    // authority SOURCES — when confirmedIssue was deliberately nulled by
+    // resolveIdentity (vision-zero-support escalate, refused-identity-
+    // conflict with no adoptable issue, etc.) for a NON-provisional
+    // identity, this fallback silently rehydrated the raw, pre-resolution
+    // issueNum anyway — undoing that deliberate null and shipping a
+    // "confidently wrong" issue on a card the server had already decided
+    // NOT to assert an issue for (the Immortal Hulk class: server
+    // issue=null, card rendered #1). If issueNum is ever a legitimate
+    // fallback for some case, that decision belongs INSIDE canonical
+    // resolution (resolveIdentity / the branch that sets confirmedIssue),
+    // before pricing runs — never reintroduced here, where it bypasses the
+    // entire consensus rewrite. confirmedIssue is now the single authority
+    // for out.issue, full stop.
     if (!out.issue) {
-      out.issue = confirmedIssue || (identityIsProvisionalOverride ? null : issueNum) || null;
+      out.issue = confirmedIssue ?? null;
+    } else {
+      console.log(`[q140-terminal] INVARIANT VIOLATION: out.issue was already set to "${out.issue}" before the terminal write — a new upstream writer bypassed confirmedIssue`);
+    }
+
+    // Q140 corrective dispatch (2026-07-23, review fix) — explicit dual-
+    // boundary fingerprint check, not just a single-writer projection.
+    // Boundary 1 (pre-pricing): pricingIssue was captured the instant
+    // identity resolution finished, in every branch (barcode/manual/cgc/
+    // resolveIdentity) — the exact value that flowed unmodified into
+    // fetchComps({ issue: confirmedIssue, ... }), the call that actually
+    // decided which comps got searched/priced. If it differs from
+    // confirmedIssue here, only one legitimate cause exists: the Q83
+    // ebay_comp_consensus rescue corrected a null identity using the
+    // comps that were ALREADY fetched under that null issue (it does not
+    // re-query) — out.identityFromConsensus is the signal for that,
+    // logged as a correction, not a violation. Any other divergence is
+    // the exact silent-drift bug this dispatch closes.
+    const pricingBoundaryOk = pricingIssue === confirmedIssue || out.identityFromConsensus === true;
+    // Boundary 2 (pre-response): with the BLOCKER-2 fix above, out.issue
+    // is derived from confirmedIssue alone — this is now a direct equality
+    // check, no fallback-chain special case needed.
+    const responseBoundaryOk = out.issue === (confirmedIssue ?? null);
+    console.log(
+      `[q140-terminal] fingerprint invariant — pre-pricing: pricingIssue="${pricingIssue}" ` +
+      `confirmedIssue="${confirmedIssue}" ${pricingBoundaryOk ? 'OK' : 'VIOLATION'}` +
+      `${out.identityFromConsensus ? ' (corrected via Q83 rescue)' : ''}; ` +
+      `pre-response: out.issue="${out.issue}" confirmedIssue="${confirmedIssue}" ${responseBoundaryOk ? 'OK' : 'VIOLATION'}`
+    );
+    // Q140 corrective dispatch (2026-07-23, review round 3 — price
+    // authority) — the VIOLATION path now clears PRICE authority itself,
+    // not just routing/listing. A locked card that still displayed
+    // "Recommended: $10.77" (calculated against issue #170) while showing
+    // "The Flash #139" would still be misleading even though it couldn't
+    // be listed — price/recommendedPrice/priceBands are separate fields
+    // with separate authority from decision.action/bestChannel/listable.
+    //
+    // Ordering, cited honestly: this check runs at the very END of the
+    // request lifecycle (the terminal out.issue write, just above) —
+    // AFTER the entire pricing pipeline (tier1-4 synthesis, comps fetch,
+    // sold verification) has already run and already set out.price/
+    // out.priceBands/out.matchConfidence using whatever confirmedIssue was
+    // in scope at fetch time (pricingIssue). It is structurally impossible
+    // to prevent the price from being calculated before this point — the
+    // violation can only be detected once out.issue is FINAL, which by
+    // definition is the last write. What this block does instead is
+    // retroactively clear that already-computed price the instant the
+    // violation is detected, before the response ever leaves the server —
+    // out.decision = computeDecision(out, {...}) (~line 8707) and the
+    // client response finalization both run AFTER this block, so they see
+    // the cleared state, never the stale $10.77.
+    //
+    // Reuses the EXISTING, established refused-price pattern byte-for-byte
+    // (see the polybag-pc-divergence branches above, e.g. ~line 5385-5399)
+    // rather than inventing a new mechanism: out.price/priceLow/priceHigh/
+    // priceBands nulled, pricingSource relabeled 'refused-*', refusedToPrice
+    // set true (routes responseContract.js's deriveState to 'REFUSED',
+    // which nulls contract.price/contract.bands too — the Customer-Grade
+    // Standard P0 rule: "Refused states: Render $0 everywhere OR render
+    // nothing"), confidenceLevel demoted to LOW, matchConfidence demoted
+    // to LOW/0 (the live "is this price trustworthy" signal in this
+    // codebase — GoCollect CGC FMV is dormant, not a real field to clear).
+    // Plus the listingHardLocked trio and the issueFingerprintViolation
+    // diagnostic object already wired to decisionEngine.js's criticalWarnings
+    // (action/bestChannel/listable lock — proven separately).
+    if (!pricingBoundaryOk || !responseBoundaryOk) {
+      console.log(
+        `[q140-terminal] INVARIANT VIOLATION${!pricingBoundaryOk ? ' (pre-pricing boundary)' : ''}` +
+        `${!responseBoundaryOk ? ' (pre-response boundary)' : ''}: pricingIssue="${pricingIssue}" ` +
+        `confirmedIssue="${confirmedIssue}" out.issue="${out.issue}" — clearing price authority, locking listing, forcing RESEARCH`
+      );
+      out.issueFingerprintViolation = {
+        pricingIssue: pricingIssue != null ? String(pricingIssue) : null,
+        confirmedIssue: confirmedIssue != null ? String(confirmedIssue) : null,
+        outIssue: out.issue != null ? String(out.issue) : null,
+        pricingBoundaryOk,
+        responseBoundaryOk,
+      };
+      out.price = null;
+      out.priceLow = null;
+      out.priceHigh = null;
+      out.priceBands = null;
+      out.pricingSource = 'refused-issue-fingerprint-violation';
+      out.refusedToPrice = true;
+      out.confidenceLevel = 'LOW';
+      out.priceNote = 'Pricing was computed against a different issue than the confirmed identity — price withheld pending review.';
+      out.matchConfidence = { score: 0, tier: 'LOW' };
+      out.listingHardLocked = true;
+      out.listingHardLockReason = out.listingHardLockReason || 'issue-fingerprint-violation';
+      out.listingHardLockBanner = out.listingHardLockBanner
+        || 'Internal consistency check failed on issue identification — listing blocked pending review.';
     }
 
     if (!out.year) {

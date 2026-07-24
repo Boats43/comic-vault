@@ -146,15 +146,21 @@ assertEq(atResult.topFamily?.rawTitle, 'Adventure Time Summer Special #1 SDCC Co
 // Family-scoped issue adoption (Part 2 of the fix) — simulate the
 // pool-wide ebay.issue vote reflecting the WRONG (KaBOOM) family, as the
 // real anchor-drift evidence suggests happens on this ambiguous stem.
+// Q140 corrective dispatch (2026-07-23) — opts.visualItems must be passed
+// (the real ADVENTURE_TIME_POOL, matching production's call shape where
+// resolveIdentity always receives opts.visualItems: parsedVisualRows) so
+// the aggregate consensus can actually read the winning family's member
+// rows. The single-row topFamily.rawTitle shortcut this test originally
+// exercised no longer exists — see resolveFamilyIssueConsensus.
 const atIdentity = resolveIdentity(
   { title: 'Adventure Time', issue: null, year: null, publisher: null },
   { title: 'Adventure Time', issue: '5', year: 2016, publisher: null }, // wrong pool-wide anchor
   atResult,
-  {}
+  { visualItems: ADVENTURE_TIME_POOL }
 );
 assertTrue(/summer/i.test(atIdentity.confirmedTitle) && /special/i.test(atIdentity.confirmedTitle),
   `resolveIdentity title carries the SDCC family's own identity (got "${atIdentity.confirmedTitle}")`);
-assertEq(atIdentity.confirmedIssue, '1', `family-scoped issue adoption: "#1" from the WINNING family's own rawTitle, not the wrong pool-wide vote "5" (got "${atIdentity.confirmedIssue}")`);
+assertEq(atIdentity.confirmedIssue, '1', `family-scoped issue adoption: "#1" from aggregate consensus across the WINNING family's own 5 rows, not the wrong pool-wide vote "5" (got "${atIdentity.confirmedIssue}")`);
 
 // ═══════════════════════════════════════════════════════════════════════
 // Part 3 — family-scoped issue adoption: X-Men Anniversary Special

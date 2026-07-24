@@ -104,15 +104,31 @@ const visionGuess = { title: 'He-Man and the Masters of the Universe', issue: '1
 // ── 1. resolveIdentity — provisional Eternus identity surfaces ──────
 console.log('\n── resolveIdentity: refused-conflict + unanimous topFamily ──');
 {
-  const identity = resolveIdentity(visionGuess, null, eternusFamilyCandidate, { ebayResultCount: 17 });
+  // Q140 corrective dispatch (2026-07-23) — this test previously called
+  // resolveIdentity WITHOUT opts.visualItems, so confirmedIssue could only
+  // ever come from reading "#2" straight off topFamily.rawTitle, the
+  // single-representative-row mechanism the corrective dispatch explicitly
+  // prohibits ("a single representative rawTitle can never, by itself,
+  // establish an issue"). Passing the real 2-item pool (indices [0,1],
+  // matching eternusFamilyCandidate.topFamily.indices) makes this an
+  // honest test of the actual new contract: 2 unique rows is below the
+  // >=3-row adoption floor, even at 2/2 (100%) internal agreement — so
+  // confirmedIssue now correctly stays null (flagged for verification,
+  // same as this whole branch already does for title/year/publisher)
+  // rather than confidently asserting "#2" from too little evidence.
+  const eternusVisualItems = [
+    'Eternus #2 - NYCC Metal Virgin Variant Cover A',
+    'Eternus #2 - NYCC Metal Virgin Variant Cover B',
+  ];
+  const identity = resolveIdentity(visionGuess, null, eternusFamilyCandidate, { ebayResultCount: 17, visualItems: eternusVisualItems });
   check(identity.identitySource === 'title-family-refused-provisional',
     `identitySource flags provisional (got "${identity.identitySource}")`);
   check(/eternus/i.test(identity.confirmedTitle),
     `confirmedTitle surfaces "Eternus", not "He-Man" (got "${identity.confirmedTitle}")`);
   check(!/he-?man/i.test(identity.confirmedTitle),
     `confirmedTitle does NOT confidently assert the disproven Vision guess`);
-  check(identity.confirmedIssue === '2',
-    `confirmedIssue adopts the pool's own #2, not Vision's #1 (got "${identity.confirmedIssue}")`);
+  check(identity.confirmedIssue === null,
+    `confirmedIssue stays null — 2 unique rows is below the >=3-row adoption floor even at 100% agreement (got "${identity.confirmedIssue}"), never Vision's disproven "#1" either`);
   // Q131 follow-up (2026-07-19, Eternus #2 / Scout Comics class) — the
   // real production bug: confirmedPublisher silently stayed "DC Comics"
   // (Vision's He-Man guess) even after the title correctly resolved to

@@ -603,6 +603,204 @@ export const calculateTitleOverlap = (a, b) => {
 };
 
 /**
+ * Q140 corrective dispatch (2026-07-23, Flash #139/#128, Adventure Time,
+ * Immortal Hulk #44, Wonder Woman #1 class) — issue-consensus contract.
+ *
+ * The original Q140 dispatch (2026-07-22) fixed the pool-wide-vote leak by
+ * reading "#N" off the winning family's OWN topFamily.rawTitle instead of
+ * ebay.issue — but that single representative row is still just one
+ * listing's text. A single row can misprint, can be a different
+ * printing/anniversary reissue sharing the same family, or can simply be
+ * the one row eBay happened to rank first. This replaces the single-row
+ * read with an aggregate vote across every member row of the winning
+ * family, and adds an explicit contract for what "confirmed" means:
+ *
+ *   - missing issue + >=3 unique family rows + >=60% explicit agreement +
+ *     a clear lead over the runner-up -> ADOPT the winner.
+ *   - present issue + the family's own aggregate agrees -> CORROBORATE
+ *     only (issue is unchanged; agreement is annotated, never treated as
+ *     a fresh assignment). "Agrees" means the SAME adoption bar
+ *     (>=3-row / >=60% / clear-lead) — a single matching row out of five
+ *     is not corroboration, it's noise that happens to match; labeling it
+ *     'corroborated' would silently bypass the exact bar this rewrite
+ *     exists to enforce. A weak match reports 'no-consensus' (the prior
+ *     issue is still preserved — this only affects the CONFIDENCE LABEL
+ *     surfaced to callers, never the value).
+ *   - present issue + the family's own aggregate disagrees -> NEVER
+ *     overwrite. Lock the conflict (issue is unchanged; the disagreement
+ *     is annotated so callers can decide whether to escalate).
+ *   - a single representative rawTitle can never, by itself, establish an
+ *     issue — every candidate must come from a >=3-row aggregate.
+ *   - a "disagreement" that itself never clears the adoption bar (a
+ *     scattered handful of stray, non-consensus mentions) is NOT a
+ *     conflict. Locking requires a genuine COMPETING consensus — the
+ *     disagreeing candidate must independently pass the exact same
+ *     >=3-row / >=60% / clear-lead bar adoption would require. Otherwise
+ *     noise in an inconclusive family could manufacture a conflict flag
+ *     against a perfectly good prior issue.
+ *
+ * Denominator note (2026-07-23 review correction): ratio is computed
+ * against ALL unique family rows (uniqueRows), including rows with no
+ * extractable "#N" token at all — never just the subset of rows where an
+ * issue happened to parse. Matches the established codebase precedent in
+ * imageSearchIdentity.js's extractConsensus (Q-ADV397, 2026-07-15): "this
+ * function's old tally counted only rows with a parseable issue number...
+ * extractConsensus counts the full pool — a real production case cleared
+ * the old ad-hoc bar at the wrong denominator." Same lesson, applied here.
+ *
+ * Dedup note: rows are deduplicated by, in preference order, eBay itemId,
+ * legacyItemId, normalized itemWebUrl (query/tracking params stripped —
+ * more stable than the raw URL, which can vary by tracking params on
+ * otherwise-identical listings), then exact rawTitle text as the final
+ * fallback (e.g. hand-built test fixtures with no URL at all). itemId/
+ * legacyItemId are not present anywhere in the current pipeline's parsed-
+ * row shape (extractIdentityFromImageSearch only preserves itemWebUrl) —
+ * checked first anyway so a future field addition is picked up
+ * automatically with no change here. Prevents the same listing
+ * re-appearing under re-scraped/re-paginated title text from being counted
+ * as two independent corroborating rows, and — the more common real case —
+ * prevents two rows that happen to share identical title text but are
+ * genuinely different listings from being collapsed into one.
+ *
+ * Tie note: when multiple candidates share the top count (e.g. a 3-3
+ * split), `winner` is null and `tiedCandidates` lists every tied
+ * candidate with its count — never an arbitrary `ranked[0]` pick, which
+ * would misleadingly look like a real winner when it's just an accident
+ * of object-key insertion order.
+ *
+ * A fifth, distinct outcome — `mode: 'no-data'` — covers the case where no
+ * per-row family data was even available to consult at all (no indices, no
+ * visualItems, or none of the referenced rows carried usable text). This is
+ * NOT "the family disagrees" (there's no family signal to disagree WITH) —
+ * it returns `issue: null` unconditionally so the caller falls through to
+ * its own pre-existing fallback chain (e.g. ebay.issue / vision.issue) —
+ * the exact, already-correct behavior for a family whose own text simply
+ * carries no issue token at all (X-Men Anniversary Special class, Q12c's
+ * original case). Conflating this with "disagreement" would silently lock
+ * out a real, independent signal (eBay's separately-computed pool-wide
+ * consensus) that was never part of the single-row-extraction problem this
+ * dispatch closes.
+ *
+ * Pure function, no console/log side effects — callers decide what to log.
+ *
+ * @param {string|null} priorIssue - issue already resolved before this
+ *   family was consulted (e.g. vision.issue, or null when Vision has none)
+ * @param {Array<Object|string>} visualItems - full visual pool (opts.visualItems)
+ * @param {Array<number>} indices - family.topFamily.indices
+ * @returns {{issue: string|null, mode: 'adopted'|'corroborated'|'conflict-locked'|'no-consensus'|'no-data', winner: string|null, support: number, ratio: number, uniqueRows: number, runnerUp: string|null, runnerUpSupport: number, tiedCandidates: Array<{issue: string, count: number}>}}
+ */
+export const resolveFamilyIssueConsensus = (priorIssue, visualItems, indices) => {
+  const rows = Array.isArray(indices) ? indices : [];
+  const seenKeys = new Set();
+  const counts = {};
+  let uniqueRows = 0;
+
+  const normalizeUrl = (u) => {
+    const s = String(u);
+    const qIdx = s.indexOf('?');
+    return qIdx === -1 ? s : s.slice(0, qIdx);
+  };
+
+  for (const idx of rows) {
+    const item = visualItems?.[idx];
+    const raw = String(typeof item === 'string' ? item : (item?.rawTitle || item?.title || '')).trim();
+    if (!raw) continue;
+    // Dedup key preference: itemId -> legacyItemId -> normalized
+    // itemWebUrl -> rawTitle text. See doc comment above.
+    let dedupKey;
+    if (typeof item !== 'string' && item?.itemId) {
+      dedupKey = `id:${item.itemId}`;
+    } else if (typeof item !== 'string' && item?.legacyItemId) {
+      dedupKey = `legacy:${item.legacyItemId}`;
+    } else if (typeof item !== 'string' && item?.itemWebUrl) {
+      dedupKey = `url:${normalizeUrl(item.itemWebUrl)}`;
+    } else {
+      dedupKey = `title:${raw}`;
+    }
+    if (seenKeys.has(dedupKey)) continue; // same listing (or identical text) — not a second "row"
+    seenKeys.add(dedupKey);
+    uniqueRows += 1;
+    const m = raw.match(/#\s*(\d{1,4})\b/);
+    if (m) counts[m[1]] = (counts[m[1]] || 0) + 1;
+  }
+
+  if (uniqueRows === 0) {
+    return { issue: null, mode: 'no-data', winner: null, support: 0, ratio: 0, uniqueRows: 0, runnerUp: null, runnerUpSupport: 0, tiedCandidates: [] };
+  }
+
+  const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const topCount = ranked[0]?.[1] ?? 0;
+  // How many distinct candidates share the top count — >1 means a genuine
+  // tie (e.g. 3-3). `ranked`'s stable sort preserves insertion order among
+  // ties, so `ranked[0]` would otherwise arbitrarily "win" a tie purely by
+  // which row happened to be processed first — not a real signal. A tie
+  // must never be treated as a winner for either corroboration OR
+  // conflict-locking, regardless of which side it coincidentally matches.
+  const tiedEntries = ranked.filter(([, c]) => c === topCount);
+  const tiedForTop = tiedEntries.length;
+  const winner = tiedForTop === 1 ? (ranked[0]?.[0] ?? null) : null;
+  const winnerCount = tiedForTop === 1 ? topCount : 0;
+  const tiedCandidates = tiedForTop > 1 ? tiedEntries.map(([issue, count]) => ({ issue, count })) : [];
+  const runnerUp = tiedForTop === 1 ? (ranked[1]?.[0] ?? null) : null;
+  const runnerUpCount = tiedForTop === 1 ? (ranked[1]?.[1] ?? 0) : 0;
+  // Denominator = ALL unique family rows, not just issue-bearing ones.
+  const ratio = uniqueRows > 0 ? winnerCount / uniqueRows : 0;
+  // Strictly greater — a tie (including a 3-3 tie) never clears the bar.
+  const clearLead = winner != null && winnerCount > runnerUpCount;
+  const meetsAdoptionBar = uniqueRows >= 3 && ratio >= 0.6 && clearLead;
+
+  if (priorIssue != null) {
+    if (winner == null || !meetsAdoptionBar) {
+      // No usable candidate, a genuine tie, or a real-but-weak match/
+      // disagreement that never clears the adoption bar (BLOCKER 1 fix,
+      // 2026-07-23 review: a single matching row out of five used to be
+      // labeled 'corroborated' just because it happened to equal
+      // priorIssue, checked BEFORE the adoption bar — silently bypassing
+      // the exact bar this whole rewrite exists to enforce). None of
+      // these is a real signal either way — the prior issue is still
+      // preserved (this only affects the CONFIDENCE LABEL, never the
+      // value), reported honestly as 'no-consensus'.
+      return { issue: priorIssue, mode: 'no-consensus', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+    }
+    if (String(winner) === String(priorIssue)) {
+      return { issue: priorIssue, mode: 'corroborated', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+    }
+    // Disagreement that DOES clear the adoption bar — a genuine competing
+    // consensus. Locked, never overwritten.
+    return { issue: priorIssue, mode: 'conflict-locked', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+  }
+
+  if (meetsAdoptionBar) {
+    return { issue: winner, mode: 'adopted', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+  }
+  return { issue: null, mode: 'no-consensus', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+};
+
+/**
+ * Q140 corrective dispatch (2026-07-23) — terminal fingerprint invariant.
+ *
+ * confirmedIssue (resolved above, pre-pricing — drives comp search and
+ * pricing math) and out.issue (pre-response — the field the card actually
+ * renders) are two independent writer chains in api/enrich.js. A
+ * downstream, pre-response read of the raw visual pool's own issueSource
+ * (visualResult.issue) used to be allowed to overwrite out.issue directly,
+ * with no check against confirmedIssue — so a card could silently ship an
+ * issue number that disagreed with the one its own price was computed
+ * against. This makes that disagreement a visible, non-blocking
+ * annotation instead of a silent divergence: confirmedIssue always wins:
+ * the terminal out.issue write is the single source of truth.
+ *
+ * @param {string|null} confirmedIssue - the pre-pricing resolved issue
+ * @param {string|null} visualIssue - a separately-sourced pre-response read
+ * @returns {{confirmedIssue: string, visualIssue: string}|null} non-null only when both are present and disagree
+ */
+export const detectVisualIssueDivergence = (confirmedIssue, visualIssue) => {
+  if (confirmedIssue == null || visualIssue == null) return null;
+  if (String(confirmedIssue) === String(visualIssue)) return null;
+  return { confirmedIssue: String(confirmedIssue), visualIssue: String(visualIssue) };
+};
+
+/**
  * Resolve identity from multiple sources (Vision, eBay, title-family).
  *
  * @param {Object} vision - Vision result { title, issue, year, publisher }
@@ -629,6 +827,15 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // shouldSkipAssemblyIntegrityCheck already documented for keying on
   // familyCandidate.decision instead of identitySource.
   let isProvisionalOverride = false;
+  // Q140 corrective dispatch (2026-07-23, review fix) — hoisted so the
+  // family-vs-prior issue-consensus result (adopted/corroborated/
+  // conflict-locked/no-consensus/no-data) can be returned to the caller,
+  // not just console-logged. Without this, api/enrich.js had no way to
+  // surface a genuine family-vs-Vision issue conflict (e.g. Flash #139 vs
+  // a #170-leaning family) to out.issueConsensusConflict or the decision
+  // engine at all — the conflict was real and correctly computed, but
+  // structurally invisible outside this function.
+  let familyIssueConsensusResult = null;
 
   // Ship 26.2 — Family candidate overrides when top-rank-protection or
   // weighted-consensus selected. Takes precedence over visualConsensus
@@ -657,27 +864,29 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     const sanitizedFamilyTitle = sanitizeSeriesTitle(rawFamilyTitle);
 
     confirmedTitle = sanitizedFamilyTitle;
-    // Q140 dispatch (2026-07-22, Adventure Time SDCC / Invincible Returns
-    // class) — family-scoped issue adoption. Reuses the SAME pool-mode
-    // extraction the refused-identity-conflict branch below already uses
-    // (family.topFamily.rawTitle, an explicit "#N" match on the WINNING
-    // family's own representative listing text) instead of always falling
-    // to ebay.issue, the pool-WIDE consensus vote. An ambiguous title stem
-    // ("Adventure Time") can host multiple genuinely different products in
-    // the same visual pool; the pool-wide issue vote can reflect a
-    // DIFFERENT family than the one that just won this override (real
-    // production evidence: PC anchored to a 3rd different wrong "Adventure
-    // Time" product across two rescans of the same book — anchor drift on
-    // an ambiguous stem). The winning family's own raw text is the correct
-    // scope. Falls back to the pre-existing ebay.issue/vision.issue chain
-    // when the family's own rawTitle carries no issue token at all (X-Men
+    // Q140 corrective dispatch (2026-07-23, Flash #139/#128, Adventure Time,
+    // Immortal Hulk #44, Wonder Woman #1 class) — family-scoped issue
+    // adoption, aggregated across every member row of the winning family
+    // (resolveFamilyIssueConsensus), never a single representative
+    // rawTitle. Supersedes the 2026-07-22 Q140 dispatch's single-row
+    // topFamily.rawTitle read, which was itself a real improvement over the
+    // pool-wide ebay.issue vote but still vulnerable to one mis-scanned or
+    // differently-printed row. vision.issue is the only legitimate "prior"
+    // here — ebay.issue (pool-wide) is a weaker, potentially-wrong-family
+    // signal, the exact thing this whole chain exists to stop leaking in.
+    // When the family aggregate has NO per-row data to consult at all
+    // (mode 'no-data' — no indices, no visualItems, or nothing readable),
+    // resolveFamilyIssueConsensus returns null and this falls through to
+    // the pre-existing ebay.issue/vision.issue chain, ebay first (X-Men
     // Anniversary Special class, Q12c's original case — a real family
-    // whose own title has no issue number, only the pool-wide consensus
-    // does).
-    const familyOwnIssueMatch = family.topFamily?.rawTitle
-      ? family.topFamily.rawTitle.match(/#\s*(\d+)/)
-      : null;
-    confirmedIssue = familyOwnIssueMatch ? familyOwnIssueMatch[1] : (ebay?.issue || vision.issue);
+    // whose own rows carry no issue number at all, only the pool-wide
+    // consensus does). That fallback is untouched by this dispatch — only
+    // the single-row extraction it used to sit behind was removed.
+    const familyIssueConsensus = resolveFamilyIssueConsensus(
+      vision.issue ?? null, opts.visualItems, family.topFamily?.indices
+    );
+    familyIssueConsensusResult = familyIssueConsensus;
+    confirmedIssue = familyIssueConsensus.issue ?? (ebay?.issue || vision.issue || null);
     confirmedYear = ebay?.year || vision.year;
     confirmedPublisher = ebay?.publisher || vision.publisher;
     identitySource = 'title-family-' + family.decision;
@@ -685,10 +894,19 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     if (rawFamilyTitle !== sanitizedFamilyTitle) {
       console.log(`[q40] family title sanitized: "${rawFamilyTitle}" → "${sanitizedFamilyTitle}"`);
     }
-    if (familyOwnIssueMatch) {
-      console.log(`[q140] family-scoped issue: "#${familyOwnIssueMatch[1]}" from winning family's own rawTitle (not pool-wide consensus)`);
-    } else if (ebay?.issue) {
-      console.log(`[q12c-fix] family override preserved eBay issue="${ebay.issue}" (not Vision "${vision.issue}")`);
+    console.log(
+      `[q140] family issue consensus: mode=${familyIssueConsensus.mode} winner=${familyIssueConsensus.winner ?? 'none'} ` +
+      `ratio=${familyIssueConsensus.ratio.toFixed(2)} uniqueRows=${familyIssueConsensus.uniqueRows} ` +
+      `runnerUp=${familyIssueConsensus.runnerUp ?? 'none'} -> issue=#${confirmedIssue ?? 'null'}`
+    );
+    if (familyIssueConsensus.mode === 'conflict-locked') {
+      console.log(
+        `[q140] ISSUE CONFLICT LOCKED: vision="#${vision.issue}" vs family consensus="#${familyIssueConsensus.winner}" ` +
+        `(ratio=${familyIssueConsensus.ratio.toFixed(2)}, uniqueRows=${familyIssueConsensus.uniqueRows}) ` +
+        `— keeping vision's issue, never silently overwritten`
+      );
+    } else if (familyIssueConsensus.mode === 'no-consensus' && !familyIssueConsensus.issue && ebay?.issue) {
+      console.log(`[q12c-fix] family had no issue-token consensus — fell back to pool-wide eBay issue="${ebay.issue}"`);
     }
   } else if (family?.decision === 'refused-identity-conflict' && family?.topFamily?.rawTitle && family.topFamily.count >= 2) {
     // Q131 (2026-07-19, Eternus #2 / He-Man class) — title-family clustering
@@ -711,7 +929,15 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     // through to the Vision fallback below, same as before).
     const rawFamilyTitle = family.topFamily.rawTitle;
     const sanitizedFamilyTitle = sanitizeSeriesTitle(rawFamilyTitle);
-    const familyIssueMatch = rawFamilyTitle.match(/#\s*(\d+)/);
+    // Q140 corrective dispatch (2026-07-23) — aggregate across every member
+    // row of the winning family, never the single rawTitle regex match.
+    // priorIssue is always null here (not vision.issue) — Vision has zero
+    // pool overlap and is disproven for this identity, same reasoning the
+    // Q131 follow-up below already applies to year/publisher.
+    const familyIssueConsensus = resolveFamilyIssueConsensus(
+      null, opts.visualItems, family.topFamily?.indices
+    );
+    familyIssueConsensusResult = familyIssueConsensus;
 
     // Q131 follow-up (2026-07-19, Eternus #2 / Scout Comics class) —
     // year/publisher/issue must NOT fall back to vision.* here the way the
@@ -731,7 +957,7 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     // I13) rather than silently keeping stale, rejected data is the same
     // principle as the title fix itself, not a new one.
     confirmedTitle = sanitizedFamilyTitle;
-    confirmedIssue = familyIssueMatch ? familyIssueMatch[1] : (ebay?.issue || null);
+    confirmedIssue = familyIssueConsensus.issue ?? (ebay?.issue || null);
     confirmedYear = ebay?.year || null;
     confirmedPublisher = ebay?.publisher || null;
     identitySource = 'title-family-refused-provisional';
@@ -742,6 +968,11 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
       `conflicts with Vision "${vision.title}" (0 token overlap) — surfacing pool signal as ` +
       `provisional "${confirmedTitle}" #${confirmedIssue}, flagged for verification ` +
       `(year=${confirmedYear || 'unconfirmed'}, publisher=${confirmedPublisher || 'unconfirmed'})`
+    );
+    console.log(
+      `[q140] refused-conflict issue consensus: mode=${familyIssueConsensus.mode} ` +
+      `winner=${familyIssueConsensus.winner ?? 'none'} ratio=${familyIssueConsensus.ratio.toFixed(2)} ` +
+      `uniqueRows=${familyIssueConsensus.uniqueRows} -> issue=#${confirmedIssue ?? 'null'}`
     );
   } else if (ebay?.title && ebayResultCount >= 10) {
     const overlap = calculateTitleOverlap(ebay.title, vision.title);
@@ -903,6 +1134,7 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     visionZeroSupport,
     visionPublisherZeroSupport,
     isProvisionalOverride,
+    familyIssueConsensus: familyIssueConsensusResult,
   };
 };
 

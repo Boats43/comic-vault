@@ -356,6 +356,31 @@ export function computeDecision(item, context = {}) {
     };
   }
 
+  // Q140 corrective dispatch (2026-07-23) — the visual pool's own issue
+  // read disagreed with confirmedIssue (the value pricing/comps were
+  // actually computed against). The terminal fingerprint invariant in
+  // api/enrich.js already guarantees confirmedIssue wins in out.issue —
+  // this is advisory-only, surfacing that a disagreement was seen and
+  // locked, not a claim that anything is wrong with the displayed number.
+  if (item.issueConsensusConflict) {
+    decision.warnings.push('issue-consensus-conflict');
+    decision.evidence.issueConsensusConflict = item.issueConsensusConflict;
+  }
+
+  // Q140 corrective dispatch (2026-07-23, review fix — BLOCKER teeth) — a
+  // genuine pre-pricing/pre-response fingerprint mismatch (an upstream
+  // writer bypassed confirmedIssue). Unlike issue-consensus-conflict
+  // (a normal, expected disagreement the pipeline correctly locked), this
+  // signals an internal consistency failure — real teeth required: forces
+  // RESEARCH via criticalWarnings below (same structural ceiling), which
+  // also makes computeBestChannel's Rule 4 return 'research'. Combined
+  // with out.listingHardLocked (set alongside this in api/enrich.js),
+  // action/bestChannel/listable all lock together.
+  if (item.issueFingerprintViolation) {
+    decision.warnings.push('issue-fingerprint-violation');
+    decision.evidence.issueFingerprintViolation = item.issueFingerprintViolation;
+  }
+
   // Warning: Active floor far below recommended
   const activeLowest = item.rawComps?.lowest;
   if (systemPrice && activeLowest && systemPrice > activeLowest * 3) {
@@ -692,6 +717,8 @@ export function computeDecision(item, context = {}) {
     'vision-confidence-overridden',    // Slice A3: Vision's own low self-confidence overridden by pipeline corroboration
     'artist-identity-conflict',        // Q132 Fix 3: condition-report artist disagrees with comp-pool creator consensus
     'publisher-unresolved',            // Q133 Slice 1c: publisher missing/comp-consensus-only, price still computed
+    'issue-consensus-conflict',        // Q140 corrective dispatch: visual-pool issue disagreed with confirmedIssue, locked not overwritten
+    'issue-fingerprint-violation',     // Q140 corrective dispatch: pre-pricing/pre-response mismatch — internal consistency failure
   ];
   // Removed: 'content-unverified' (not a price flag — stays LIST_LOW/BUNDLE)
 
@@ -985,6 +1012,20 @@ export function describeWarning(slug, item) {
     return item.refusalReason
       ? `Visual pool identity uncertain — ${item.refusalReason}`
       : 'Visual pool identity uncertain — verify title/issue before listing';
+  }
+  if (slug === 'issue-consensus-conflict') {
+    const c = item.issueConsensusConflict;
+    if (!c) return 'Visual pool issue read disagreed with the confirmed issue — verify before listing';
+    const supportText = c.support != null && c.population != null
+      ? ` (${c.support}/${c.population} listings, ${Math.round((c.ratio || 0) * 100)}%)`
+      : '';
+    return `Visual pool leans toward issue #${c.consensusIssue}${supportText}, but this card is priced against confirmed issue #${c.currentIssue} — verify before listing`;
+  }
+  if (slug === 'issue-fingerprint-violation') {
+    const v = item.issueFingerprintViolation;
+    return v
+      ? `Internal consistency check failed on issue identification (pricing computed against "#${v.pricingIssue ?? v.confirmedIssue}", card would have shown "#${v.outIssue}") — listing blocked pending review`
+      : 'Internal consistency check failed on issue identification — listing blocked pending review';
   }
   if (slug === 'publisher-unresolved') {
     if (item.publisherBackfillSource === 'active-comp-consensus') {
