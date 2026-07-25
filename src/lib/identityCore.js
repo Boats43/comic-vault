@@ -1025,6 +1025,33 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   let visionZeroSupport = null;
   const reprintRatio = computeReprintDominanceRatio(opts.visualItems);
   const poolReprintDominant = reprintRatio != null && reprintRatio >= REPRINT_DOMINANCE_THRESHOLD;
+
+  // Q140-AT dispatch (2026-07-24, Adventure Time Summer Special #1 class) —
+  // the raw-pool visionIssueCount tally this block checks below is computed
+  // BEFORE title-family clustering runs (imageSearchIdentity.js's
+  // extractConsensus, fed by each row's own extractIssueFromTitle) and can
+  // be independently poisoned by the Q12c marketing-keyword guard (nulls
+  // "#1" near words like "Special"/"Exclusive" at pool-BUILD time) even
+  // when the winning family's own membership — resolveFamilyIssueConsensus,
+  // scoped to family.topFamily.indices, computed above — is in full
+  // agreement. familyIssueConsensusResult is only ever set inside the two
+  // family-override branches above (never carried over between calls), so
+  // checking it non-null already proves the authority is FROM THE CURRENT
+  // family selection, not a stale/previous one — re-checked explicitly here
+  // anyway against family.decision so a future refactor that starts
+  // reusing this variable across branches can't silently widen the skip.
+  const familyAuthorityCurrent = familyIssueConsensusResult != null
+    && (FAMILY_OVERRIDE_DECISIONS.includes(family?.decision) || family?.decision === 'refused-identity-conflict');
+  // Only a genuine ADOPTED/CORROBORATED result for the SAME issue the check
+  // below is about to evaluate counts as authority — 'conflict-locked' and
+  // 'no-consensus'/'no-data' must still reach the raw-pool check unshortcut
+  // (a real family-vs-Vision conflict, or a family with nothing to say, is
+  // not a reason to skip the pool's own independent zero-support signal).
+  const familyAuthoritySkip = familyAuthorityCurrent
+    && (familyIssueConsensusResult.mode === 'adopted' || familyIssueConsensusResult.mode === 'corroborated')
+    && familyIssueConsensusResult.issue != null
+    && String(familyIssueConsensusResult.issue) === String(confirmedIssue);
+
   if (poolReprintDominant) {
     // EX-7 — pool is not an eligible witness (facsimile/reprint dominance
     // confound). Vision's value stands untouched; if Vision itself lacks
@@ -1032,6 +1059,13 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     // reads visionConfidence independently of this function) still
     // escalates to ID_REQUIRED on its own — no new code needed here.
     console.log(`[vision-zero-support] SKIPPED — pool is reprint/facsimile-dominant (ratio=${reprintRatio.toFixed(2)} >= ${REPRINT_DOMINANCE_THRESHOLD}), Vision's issue stands`);
+  } else if (familyAuthoritySkip) {
+    console.log(
+      `[vision-zero-support] SKIPPED reason=winning-family-authority ` +
+      `mode=${familyIssueConsensusResult.mode} issue=${familyIssueConsensusResult.issue} ` +
+      `population=${familyIssueConsensusResult.uniqueRows} support=${familyIssueConsensusResult.support} ` +
+      `ratio=${familyIssueConsensusResult.ratio.toFixed(2)} rawPoolVisionSupport=${ebay?.agreement?.visionIssueCount ?? 'null'}`
+    );
   } else if (!isGraded && vision.issue != null && ebay?.agreement?.visionIssueCount === 0) {
     if (ebay.issue != null) {
       // Coherent alternate issue exists in the pool — adopt it, loudly.
@@ -1084,6 +1118,16 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // support" here, same conservative posture as the issue check above —
   // it falls through un-overridden for the founding-year gate to judge on
   // its own terms).
+  //
+  // AUDIT NOTE (Q140-AT dispatch, 2026-07-24) — this block shares the
+  // identical wrong-population defect the issue check above was just fixed
+  // for (visionPublisherCount is tallied from the same raw, unclustered
+  // pool, pre-family-clustering) and is deliberately left untouched here.
+  // Per instruction: do not suppress by issue-authority; the eventual fix
+  // is a family-scoped re-tally of visionPublisherCount itself (mirroring
+  // resolveFamilyIssueConsensus's own scoping to family.topFamily.indices),
+  // not a second copy of the familyAuthoritySkip gate above. Queued, not
+  // implemented this pass.
   let visionPublisherZeroSupport = null;
   if (poolReprintDominant) {
     console.log(`[vision-zero-support] publisher check SKIPPED — pool is reprint/facsimile-dominant (ratio=${reprintRatio.toFixed(2)} >= ${REPRINT_DOMINANCE_THRESHOLD}), Vision's publisher stands`);
