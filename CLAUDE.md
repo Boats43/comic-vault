@@ -417,11 +417,11 @@ Title includes variant (newsstand, gold, 2nd print, etc.) between issue and grad
 - **CGC submission scenarios**: per-grade `fmv → net` with pass/fail. Verdict from lowest profitable grade.
 - **Decision recommendations**: BUY/SELL/HOLD/WAIT badges on comic detail cards with blocking reasons. Gates listing actions when decision=WAIT.
 
-## Current State (as of 2026-07-22)
+## Current State (as of 2026-07-24)
 
 **Build:** ✅ CLEAN (prebuild hook active)  
 **Vercel functions:** 12/12 (at cap)  
-**Launch status:** ✅ **GO — identity/pricing pipeline campaign (Q132–Q146) CLOSED, certified live on `5cb121a`, tagged `launch-candidate`.** Full closure record, GO recommendation, and known-limitations-at-launch list: `docs/LAUNCH-AUDIT.md` Section 9. Failure mode across both the old-book path (untouched, previously live-verified) and the variant/exclusive/virgin-cover class (rebuilt and verified end-to-end this campaign, Adventure Time Summer Special/SDCC the adversarial proof case) is uniformly "honest and locked," never "confident and wrong."
+**Launch status:** ⛔ **Prior GO is void. `launch-candidate` withdrawn** — post-tag production findings (Q140 corrective dispatch, `18ed481` onward) reopened launch certification after the `5cb121a` close-out. The `launch-candidate` tag has been deleted from origin, not repointed — no tag by that name currently exists. Section 9 of `docs/LAUNCH-AUDIT.md` remains an accurate historical record of the `5cb121a`-era decision; it does not describe current state. Active, unclosed gate: `docs/LAUNCH-AUDIT.md` Section 10. A Step 1 closure (Commit A fixtures certified) earns a narrower `commit-a-certified` tag only — `launch-candidate` is reserved for a full launch-gate decision (Section 10's blockers resolved, Steps 2A/2B/2C closed).
 
 **Post-launch roadmap (identity/pricing pipeline), in order:**
 1. **Edition-fingerprint campaign** — design already recorded (`docs/LAUNCH-AUDIT.md` Section 2's DESIGNED-NOT-BUILT entry: family-scoped variant adoption, `event=sdcc` normalization, ≥60%/≥3-unique thresholds, conflict-refusal for mixed events/retailer exclusives/ratios/lettered covers; trigger: an accepted winning family observed disagreeing internally on specific variant signals, not yet seen in production). Also owns: `active_reference_range`'s confirmed-identity gating (Section 9's known-limitations entry — widening requires edition-aware comp separation first, not a standalone eligibility-gate fix), the lettered-cover-variant (`1B`/`1C`) `detectSeriesMarkers` digit-capture gap, and Q144B's marker-type-scoped (not cross-title) exemption boundary.
