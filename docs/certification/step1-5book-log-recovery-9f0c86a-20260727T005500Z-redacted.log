@@ -34,7 +34,7 @@ Timestamp: 01:00:54 UTC | HTTP: 200
 [q140-terminal] fingerprint invariant — pre-pricing: pricingIssue="null" confirmedIssue="null" OK; pre-response: out.issue="null" confirmedIssue="null" OK
 [decision] action=ID_REQUIRED confidence=high blockers=2 warnings=0
 -- extract ends: full response reached, no gap --
--- note: "#750" originates from Vision's own phase1 read (line 2 above), not from any client-side or merge process; every downstream authority (visual consensus, q140, vision-zero-support, identity, terminal) independently rejects it and resolves to null. --
+-- note: The unsupported "#750" observation originates from Vision's phase-1 read. Every downstream structured authority shown here rejects it and resolves the issue to null. The separate reason the rejected observation continues to appear as the canonical UI title remains open under A2 and may involve persistence, merge, title projection, or rendering. --
 
 ================================================================
 FIXTURE: Adventure Time Summer Special #1
