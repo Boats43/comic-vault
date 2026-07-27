@@ -502,3 +502,70 @@ PriceCharting can be rejected while ComicVine story/key-issue metadata stays exa
 **Superseded:** the Remediation Plan's Step 1 status line above ("BLOCKED — awaiting Jimmy's four scans, not yet received in this conversation. No cell fillable yet.") is superseded by this section — the scans have now been received and processed; see this section for current status.
 
 **Not done this pass:** A2 (Wonder Woman full writer/merge trace), A3 (Immortal Hulk cross-cover sold-filter trace), A4 (Adventure Time derivation-panel trace), A6 (Flash log-tail root cause) — queued as separate report-only dispatches per the locked execution order.
+
+---
+
+## SECTION 12 — A2/A3/A4/A6 dispatch outcome (2026-07-26, report-only, no code)
+
+**19-book batch commit: deferred.** Independent re-pull of the 2026-07-25 23:30–23:50 UTC window did surface real material matching the batch (Love and Rockets #1, Batman: The Killing Joke, Gobbledygook #1, New Mutants #98, Bone #1, a "teenage mutant ninja turtles #1" fixture — several genuine edition-capture/reprint-dominant findings visible on first pass), but attempting to build the minimal redacted extract surfaced apparent interleaved/duplicate concurrent request logging in this window (a "Love and Rockets" block whose visible log began mid-pipeline with no `[boot]`/`phase1` header, immediately followed by a second, separately-headed "Love and Rockets" block with a full `phase1` section). Attributing specific figures to the wrong request would repeat exactly the error this document's custody rule exists to prevent. Per instruction, holding for Jimmy's original export CSV (`comic-vault-log-export-2026-07-25T23-47-28.csv`) rather than resolving the ambiguity by inference.
+
+### A2 — Wonder Woman full writer/merge/render trace
+
+**Persisted collection record: not reachable this pass** (no export/Drive backup/file provided) — trace completed from code plus the A1 raw response, per the stated fallback branch.
+
+**Server side, complete enumeration (invariant 1):** `api/enrich.js` writes `out.title` at exactly 4 sites, all checked against the A1 Wonder Woman log:
+1. `enrich.js:5533` (polybag/edition bake-in) — confirmed not entered. Its outer gate requires `reprintRatio >= 0.6`; all four mutually-exclusive branches under that gate (`[polybag-abort]` ×2, `[polybag-check]`, `[polybag-pool]`) log unconditionally as their first action, and none appear anywhere in the fully-captured request. Stronger than the prior "precursor line absent" framing — the whole outer gate, not just this one branch, never fired.
+2. `enrich.js:5805` (`ebay_comp_consensus` rescue) — gated on `consensusPool.length >= 10 && freshSolds.length >= 1`. The A1 log's own `[verify]` line reads `sold: 0 found`; `freshSolds.length >= 1` is false. Confirmed not entered.
+3. `enrich.js:7666` (Ximilar override) — `const ximilar = null; // Ximilar lookup disabled` (`enrich.js:3072`). Dead code globally, not Wonder-Woman-specific.
+4. `enrich.js:8339` (Ship 26.3B fallback, `if (!out.title) out.title = confirmedTitle`) — the only site that can fire, and does: `out.title = "Wonder Woman"`, clean.
+
+**Conclusion: `out.title` is provably `"Wonder Woman"` server-side, no code path to `"#750"` exists in this response.** This supersedes the prior "final out.title from other writers: unverified" note — it is now verified, not open.
+
+**Client side, merge-site enumeration (5 sites found, not the 2 originally named):**
+| Site | Line(s) | Calls `mergeConfirmedIdentity`? | Calls `applyProvisionalIdentity`? |
+|---|---|---|---|
+| scan→selectedItem | `App.jsx:10404-10409` | Yes | Yes (spread after, no-op unless `identityProvisional`) |
+| scan→catalogue | `App.jsx:10515-10519` | Yes | Yes (same order) |
+| auto-refresh | `App.jsx:9964` | **No** | Yes only |
+| bulk-import | `App.jsx:10864` | **No** | Yes only |
+| Refresh Market Data | `App.jsx:11401` | **No** | Yes only |
+
+`mergeConfirmedIdentity` (`src/lib/dataQualityGuard.js:201`) has no provisional gate — `hasKey(enrich,'title') ? enrich.title : prior?.title`. Since `out.title` is present and clean, **the two sites a fresh scan actually uses (scan→catalogue, scan→selectedItem) would correctly overwrite any stale `"#750"` with `"Wonder Woman"` on this exact response.** The three sites that skip `mergeConfirmedIdentity` (auto-refresh, bulk-import, Refresh Market Data) fall through to `...cur`/`...item` for title/issue/publisher/variant unless `identityProvisional` is true — Wonder Woman's `out.identityProvisional` is false here (that flag is set only inside the `identityRefused`/pool-promotion path at `enrich.js:4277`, a TITLE-level Vision-vs-pool conflict; Wonder Woman's title resolved cleanly via `weighted-consensus`, only the ISSUE was escalated-null — a different mechanism that never sets this flag).
+
+**Newly discovered, not previously documented:** a sixth instance of this session's own repeatedly-found "site-parity gap" class (Q144C instance 8, Q145, etc.) — three merge sites (auto-refresh, bulk-import, Refresh Market Data) never gained the `mergeConfirmedIdentity` fix that scan→catalogue and scan→selectedItem received in `3e9eba9`/`8187be5`. Render sites checked (`App.jsx:3259`, `:4072`, `:8830`) all display `item.title` verbatim with no independent re-derivation — the render layer is not the source.
+
+**Working hypothesis, not confirmed (no persisted-record access):** if Wonder Woman's card carries a stale `"#750"`-containing title from before these merge fixes existed, or from a scan whose only subsequent touch was Refresh Market Data / auto-refresh (not a fresh re-scan through the two fixed sites), the title would never get corrected — those three sites are a real, live gap. Cannot confirm this is what actually happened without the persisted record or a fresh live rescan.
+
+### A3 — Immortal Hulk cross-cover sold-filter trace (root cause found)
+
+**Root cause: Michael Cho is missing from `ARTIST_PATTERNS`.** `soldVerification.js:519-539`'s variant-artist-mismatch filter (Filter 7) computes `ourArtist = ctx.artistOverride || extractArtist(variant)`; `enrich.js:4917` correctly wires `artistOverride: extractArtist(confirmedTitle) || null` (the Q136 Slice A mechanism, working as designed). `extractArtist` (`compHygiene.js:973`) does a straight regex scan of `ARTIST_PATTERNS`. That list contains `/frank cho/i` — **a different artist** — and no bare `/cho/i` or `/michael cho/i` pattern. `extractArtist("immortal hulk cho michael")` therefore returns `null`. `classifyArtistMatch` (`compHygiene.js:1017`) has an explicit early return: `if (!ourArtist) return 'match';` — confirmed by design ("nothing to check against — unchanged behavior"), not a bug in that function. Net effect: Filter 7 becomes a complete no-op for this book, letting every sold row through regardless of cover artist — confirmed by the actual rejection breakdown (`annualMismatch=2, lot=1, gradeMismatch=4, stale=11` = 18, zero `variantMismatch` entries) despite the pool containing at least one "Alex Ross Main Cover" listing alongside the Cho Two-Tone comps.
+
+Same class as this session's repeated drifted-artist-registry finding (Giang, Eom, Lozano, Frison, Guillem March, Skottie Young) — a new instance, not a new bug shape. No fix implemented this pass.
+
+### A4 — Adventure Time derivation trace (root cause found)
+
+**The displayed "Grade adj ×1.35" is decorative for this pricing path — never applied in the actual formula.** `priceBands.js:640-662` (Tier 3, `tier3_active_discounted`): `market = activeAvg × 0.85` (a flat 15% ask-to-realized discount) — the returned result object (`quick`, `market`, `stretch`, `source`, `count`, `tier`, `askDerivedWarning`) contains no `gradeMult` field and the formula never references one. `gradeMult=1.35` (visible in both the `[price-bands]` and `[price-trace]` log lines) is computed elsewhere in `enrich.js` (the generic era-aware grade-multiplier lookup that runs for every book) and attached to the log/response object for display, but Tier 3's own math — confirmed directly from the log: `$10.76 × 0.85 = $9.15` — never multiplies by it. A book landing in `tier3_active_discounted`/`active_ask_derived` will always show a grade-multiplier badge that had no effect on the number beside it. Not unique to Adventure Time — this is a property of the pricing tier itself, reproducible on any book that lands in Tier 3. No fix implemented this pass.
+
+### A6 — Flash log-tail truncation mechanism (investigation, evidence favors hypothesis B)
+
+Measured `[22f]` line density and total captured-line count across all 5 fixtures (same raw pull, exact line ranges):
+
+| Fixture | `[22f]` lines | Total captured lines | Truncated? |
+|---|---|---|---|
+| Immortal Hulk #44 | 70 | 286 | No |
+| Adventure Time SS #1 | 15 | 297 | No |
+| Wonder Woman #1 (2nd print) | 100 | 318 | No |
+| Flash #128 | 113 | 333 (before cutoff) | **Yes** |
+| Flash #139 | 137 | 333 (before cutoff) | **Yes** |
+
+The user's original "largest comp pool" hypothesis does not hold on direct inspection — Wonder Woman's raw active pool (99 items, 44 kept) is larger than either Flash book's raw active pool (60 and 94 respectively) yet captured cleanly. What actually distinguishes Flash #128/#139: both already have more total captured lines AND higher `[22f]` duplicate-log density than any of the other three fixtures' **complete** logs, before either one even reaches its own ending — and both still have their entire sold-verify duplicate-logging block left to run at the point of cutoff, meaning their true uncut total would be higher still.
+
+**Testing the mechanisms:** a narrow, single-request-scoped re-fetch (tightened to a 10-20s window around each Flash timestamp) reproduced the **identical** cutoff line both times — ruling out hypothesis A/D (a multi-request aggregate export/pagination limit) for this specific case, since isolating the query to one request changed nothing. This favors **hypothesis B (per-invocation logging byte/line cap)**: something in Vercel's log-capture pipeline appears to cap output per Lambda invocation somewhere between ~320 and ~334 lines (or an equivalent byte count), and Flash #128/#139 are the only two fixtures whose emitted volume crosses that threshold before completing.
+
+**Not folded into this conclusion:** the 19-book pull's separate anomaly (a request missing its own `[boot]`/`phase1` opening rather than its ending) doesn't fit hypothesis B's "tail gets cut" shape at all — flagged as a distinct, unexplained observation, not evidence against B for the Flash case specifically.
+
+**Proposal (no implementation), in the instructed preference order — hypothesis is NOT a byte-cap-excluded case, so option 3 is off the table:**
+1. **Durable structured certification record at response finalization** — `requestId`, build, title, `confirmedIssue`, family mode/winner/ratio, both invariant boundary results, decision, blockers, warnings — written to an audit sink or returned as a structured response field, so certification stops depending on console output surviving whatever this cap turns out to be. Recommended primary fix, and explicitly the same shape as the Step 2A typed contract — should be designed once, not twice.
+2. **Aggregate the noisy per-comp diagnostics behind a debug flag** (`[22f-summary] rows=N changed=N ...`), retaining today's terminal lines untouched. This directly attacks the actual largest contributor to volume in every fixture (70-137+ duplicate lines per request just from the metadata-strip step logging each comp title twice) and would likely pull every fixture well clear of whatever the real threshold is, independent of whether option 1 ships first.
+
+Neither implemented this pass. Both fix scopes (Wonder Woman merge-site parity, certification observability) held for joint review before any code, per instruction.
