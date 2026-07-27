@@ -125,6 +125,7 @@ import { kvGet, kvSet, KV_TTL, PC_FILTER_VERSION } from "./kv-cache.js";
 import { checkRateLimit } from "./rate-limit.js";
 import { randomUUID } from "node:crypto";
 import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
+import { resetTitleStripStats, logTitleStripSummary } from "../src/lib/titleStripStats.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1952,6 +1953,10 @@ export default async function handler(req, res) {
   // uses to reject an older async response overwriting a newer one.
   const pipelineTraceId = randomUUID();
   const pipelineIdentityRevision = Date.now();
+  // A6 dispatch, Scope 2 Option 2 — reset the per-request [22f] tokenizer
+  // stats accumulator (src/lib/titleStripStats.js). Known bounded
+  // concurrency caveat documented in that file.
+  resetTitleStripStats();
 
   // A3 ACCESS GATE: T1 invite mechanism
   const gateError = checkAccessGate(req);
@@ -4417,6 +4422,7 @@ export default async function handler(req, res) {
       // finalizeResponse's syncDecisionToContract no-ops when out.decision
       // was never set, which is exactly the case here (this path never
       // calls computeDecision).
+      logTitleStripSummary();
       refusedOut.pipelineAudit = buildPipelineAudit({
         traceId: pipelineTraceId,
         buildSha: buildId,
@@ -5655,6 +5661,7 @@ export default async function handler(req, res) {
       // out.issue was never written (the terminal write at the main path
       // hasn't run yet) — honestly null, not fabricated. decision reuses
       // the exact object just set two lines above, not recomputed.
+      logTitleStripSummary();
       out.pipelineAudit = buildPipelineAudit({
         traceId: pipelineTraceId,
         buildSha: buildId,
@@ -8772,6 +8779,7 @@ export default async function handler(req, res) {
     // pricingBoundaryOk/responseBoundaryOk booleans the terminal invariant
     // already computed above (~line 8534-8538) — not recomputed — plus
     // out.decision, now populated by computeDecision above.
+    logTitleStripSummary();
     out.pipelineAudit = buildPipelineAudit({
       traceId: pipelineTraceId,
       buildSha: buildId,

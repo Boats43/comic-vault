@@ -23,6 +23,7 @@ import { PREMIUM_CREATORS } from './premiumCreators.js';
 // (single normalize helper for all identity layers).
 
 import { stripMetadataTokens, stripArtistWords } from './titleHygiene.js';
+import { TITLE_STRIP_DEBUG, recordTitleStrip } from './titleStripStats.js';
 
 // ────────────────────────────── REGEXES ──────────────────────────────
 
@@ -494,7 +495,15 @@ export const tokenizeTitle = (title) => {
   // matching "Spawn #1 McFarlane" (different series). E4/E5 class protection.
   const beforeStrip = normalized;
   normalized = stripMetadataTokens(normalized);
-  console.log(`[22f] metadata-stripped: "${beforeStrip}" → "${normalized}"`);
+  // A6 dispatch (2026-07-26) — per-row log replaced by a per-request
+  // [22f-summary] aggregate (src/lib/titleStripStats.js) on the default
+  // path; this was the single largest log-volume contributor measured
+  // across the certification fixtures. Full per-row detail is opt-in via
+  // a server-controlled env var only, never user/request-controlled.
+  recordTitleStrip(beforeStrip, normalized);
+  if (TITLE_STRIP_DEBUG) {
+    console.log(`[22f] metadata-stripped: "${beforeStrip}" → "${normalized}"`);
+  }
 
   // Q55-C: Full sync with ARTIST_PATTERNS single-word entries (lines 117-123).
   // Extracts single-word last names from both multi-word patterns (kirkham from
