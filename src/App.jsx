@@ -12,7 +12,7 @@ import {
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
-import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity } from "./lib/dataQualityGuard.js";
+import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit } from "./lib/dataQualityGuard.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 
@@ -9972,6 +9972,9 @@ export default function App() {
                 // semantics still win on key collision when both apply.
                 ...mergeConfirmedIdentity(enrich, cur),
                 ...applyProvisionalIdentity(enrich, cur),
+                // A6 dispatch — response-embedded pipelineAudit, same
+                // parity requirement as the identity fields above.
+                pipelineAudit: mergePipelineAudit(enrich, cur),
               };
               putComic(updated).catch(() => {});
               return prev.map((x) => {
@@ -10417,6 +10420,9 @@ export default function App() {
                   // collision when both apply.
                   ...mergeConfirmedIdentity(enrich, cur),
                   ...applyProvisionalIdentity(enrich, cur),
+                  // A6 dispatch — response-embedded pipelineAudit, same
+                  // parity requirement as the identity fields above.
+                  pipelineAudit: mergePipelineAudit(enrich, cur),
                 };
                 console.log('[persist] savedId:', savedId,
                   'price:', updated.price,
@@ -10527,6 +10533,9 @@ export default function App() {
                   // win on key collision when both apply.
                   ...mergeConfirmedIdentity(enrich, s),
                   ...applyProvisionalIdentity(enrich, s),
+                  // A6 dispatch — response-embedded pipelineAudit, same
+                  // parity requirement as the identity fields above.
+                  pipelineAudit: mergePipelineAudit(enrich, s),
                 };
               });
               // SPEED-2a: Load deferred metadata asynchronously
@@ -10875,6 +10884,9 @@ export default function App() {
                 // full rationale; same gap, same fix.
                 ...mergeConfirmedIdentity(enrich, cur),
                 ...applyProvisionalIdentity(enrich, cur),
+                // A6 dispatch — response-embedded pipelineAudit, same
+                // parity requirement as the identity fields above.
+                pipelineAudit: mergePipelineAudit(enrich, cur),
               };
               console.log('[persist-bulk] savedId:', savedId,
                 'price:', updated.price,
@@ -11415,6 +11427,9 @@ export default function App() {
       // rationale; same gap, same fix.
       ...mergeConfirmedIdentity(enrich, item),
       ...applyProvisionalIdentity(enrich, item),
+      // A6 dispatch — response-embedded pipelineAudit, same parity
+      // requirement as the identity fields above.
+      pipelineAudit: mergePipelineAudit(enrich, item),
     };
 
     // Ship #20a.6.22 — Apply autofix engine

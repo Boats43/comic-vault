@@ -569,3 +569,44 @@ The user's original "largest comp pool" hypothesis does not hold on direct inspe
 2. **Aggregate the noisy per-comp diagnostics behind a debug flag** (`[22f-summary] rows=N changed=N ...`), retaining today's terminal lines untouched. This directly attacks the actual largest contributor to volume in every fixture (70-137+ duplicate lines per request just from the metadata-strip step logging each comp title twice) and would likely pull every fixture well clear of whatever the real threshold is, independent of whether option 1 ships first.
 
 Neither implemented this pass. Both fix scopes (Wonder Woman merge-site parity, certification observability) held for joint review before any code, per instruction.
+
+---
+
+## SECTION 13 — Scope 1 + Scope 2 implementation (2026-07-26)
+
+**Scope 1 — merge-site parity, shipped `7c37af5`.** Verified scan→catalogue and scan→selectedItem already called `mergeConfirmedIdentity` correctly (no change needed). Added the same call, same collision order (before `applyProvisionalIdentity`), to the three sites that didn't: auto-refresh, bulk-import, Refresh Market Data (`App.jsx:9973`/`10421`/`11419` post-edit). `tests/merge-site-parity.test.js` (26 assertions) proves all five sites now repair a stale `"Wonder Woman #750"`-shaped persisted record identically. Re-ran both pre-existing Q144C suites clean (44 + 8 passed).
+
+**Scope 2, Option 1 — `pipelineAudit`, response-embedded pipeline trace.**
+
+**Field name is `pipelineAudit`, not `certificationRecord`** — "certification" overclaims to end users; this is diagnostic evidence, not a guarantee. **Explicitly response-embedded structured evidence, not a tamper-proof custody record** — it travels with one HTTP response, is visible to and reproducible by whatever client received it, and proves nothing about server-side log integrity on its own. A durable, server-owned audit sink (independent of any single response, resistant to a client never receiving or persisting the field) remains **queued, not built** — `pipelineAudit` closes the "console output was the sole certification authority" gap for future scans; it does not retroactively recover the two Flash logs already lost, and it is not itself a persistence guarantee if the client drops the response.
+
+**Lifecycle rule, recorded per instruction:** `pipelineAudit` is a historical, immutable snapshot of one enrich response. It is a genuinely separate thing from the future Step 2A `reviewContract` (`{reviewState, lockCodes, allowedActions, overridePolicy, automatedListingAllowed}`) — that will be a **live, top-level object representing current operational authority** (what the UI may do right now), continuously re-derivable, not a point-in-time trace. Step 2A may later embed an immutable `contractSnapshot` inside a `pipelineAudit` for evidentiary purposes, but a historical trace must never be read as, or promoted into, the current contract — a snapshot from three scans ago saying `automatedListingAllowed` was true then says nothing about whether it's true now.
+
+**Shape (v1):**
+```
+{
+  v: 1, traceId, buildSha, generatedAt, identityRevision,
+  familyIssueAuthority: { mode, winner, support, ratio, uniqueRows, familyKey },
+  terminalInvariant: {
+    prePricing:  { pricingIssue, confirmedIssue, ok },
+    preResponse: { outIssue, confirmedIssue, ok }
+  },
+  decision: { action, confidence, blockerCodes, warningCodes }
+}
+```
+`traceId` is `crypto.randomUUID()` (`node:crypto`) — public-safe by construction, never an eBay/PriceCharting/ComicVine request ID. `identityRevision` is `Date.now()` captured once per request, used purely as a monotonic ordering key for client-side merge (not a timestamp claim about anything else). `blockerCodes`/`warningCodes` are normalized (`UPPER_SNAKE_CASE`, non-alphanumeric runs collapsed to `_`) from whatever `decision.blockers`/`.warnings` slugs the response already carried — a transform, not a new taxonomy.
+
+**Server wiring (`api/enrich.js`), all three successful-response exit points, built from `buildPipelineAudit` (`src/lib/pipelineAudit.js`, pure function, no side effects):**
+1. **Main terminal path** (~line 8778's `res.status(200).json(finalizeResponse(out))`) — reuses `pricingBoundaryOk`/`responseBoundaryOk` (the exact booleans the `[q140-terminal]` log line already computed a few lines above) and `identity?.familyIssueConsensus`, `out.decision` (now populated by `computeDecision`). No recomputation.
+2. **`identityRefused` early return** (`refusedOut`, below the >=3-member promotion floor) — `familyIssueConsensus: null` (this branch never runs family-scoped consensus at all — honestly `mode:'none'`, not fabricated), `decision: null` (this exit never calls `computeDecision`; `finalizeResponse`'s `syncDecisionToContract` itself no-ops when `out.decision` is absent, confirmed by direct read — an honest null, not a gap).
+3. **Q32 merchandise hard block** (`DO_NOT_LIST`) — `out.issue` genuinely has never been written at this point in the handler (`out` starts as `{}` at line 2126; the single `out.issue =` write site is the main-path terminal invariant, which this branch returns before reaching) — `outIssue: null` is the true state of the object being serialized, not an approximation. `decision` reuses the literal object this branch sets two lines above, unchanged.
+
+**Client propagation, explicit (not assumed):** `mergePipelineAudit` (`src/lib/dataQualityGuard.js`) wired into all five App.jsx merge sites alongside `mergeConfirmedIdentity`. Rules: key absent or falsy → preserve whatever was stored (never actively clear real evidence because one response omitted it); key present and truthy → adopt **unless** the already-stored trace has a strictly newer `identityRevision` (rejects a slow, older async response arriving after a faster one already landed — the exact race two overlapping scans/refreshes of the same item can produce); equal revision → incoming wins.
+
+**Tests:**
+- `tests/pipeline-audit.test.js` (38 assertions) — trace present and correctly shaped on both a LIST-shaped and an ID_REQUIRED-shaped response; `terminalInvariant` boundary snapshots are exact, caller-supplied projections (never recomputed inside the builder); `preResponse.outIssue` is a faithful string projection including on a genuine violation; a no-family-consensus-ever-ran response reports `familyIssueAuthority.mode: 'none'` with every other field honestly null, never a fabricated 0 or an invented mode.
+- `tests/pipeline-audit-merge.test.js` (17 assertions) — newest trace replaces old; an older async response cannot overwrite a newer `identityRevision` (including an equal-revision tie-break); a trace whose identity fields are honestly null (the Wonder Woman shape) still survives the merge intact, never dropped for "looking empty"; absent/falsy incoming values preserve the stored trace; site parity confirmed identically across all five call shapes.
+
+Full re-run of both pre-existing Q144C suites and the Scope 1 `merge-site-parity` suite stayed clean (44 + 8 + 26 passed, 0 failed). Build clean (ESM-mode parse check on every touched file, per the standing P0 protocol).
+
+**Not done:** Option 2 (diagnostic aggregation, `[22f-summary]`) — separate commit, same dispatch, immediately following. The server-owned audit sink remains queued, unscoped.

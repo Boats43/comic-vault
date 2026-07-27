@@ -207,3 +207,43 @@ export function mergeConfirmedIdentity(enrich, prior) {
     variant: hasKey(enrich, 'variantNote') ? enrich.variantNote : prior?.variant,
   };
 }
+
+/**
+ * A6 dispatch (2026-07-26) — merges the server's response-embedded
+ * pipelineAudit trace (src/lib/pipelineAudit.js) across a client merge.
+ * Same site-parity concern as mergeConfirmedIdentity: every merge path
+ * must propagate this field identically, not just the two sites a fresh
+ * scan happens to use.
+ *
+ * Rules, in order:
+ * 1. Key genuinely absent from the response (not just falsy) — nothing to
+ *    merge, preserve whatever was already stored. Never actively clears
+ *    evidence that was never re-sent.
+ * 2. Present but falsy (null/undefined value) — same as absent. A real
+ *    pipelineAudit is never null by construction server-side; treating an
+ *    unexpected falsy value as "no new evidence" is the safe default
+ *    rather than regressing a stored trace to nothing.
+ * 3. Present and truthy — adopt it, UNLESS the currently stored trace has
+ *    a strictly newer identityRevision (an older, slower async response
+ *    arriving after a fresher one already landed must not overwrite it).
+ *    Equal or newer incoming revision wins ties in favor of the response
+ *    that just arrived.
+ *
+ * @param {object} enrich - enrich API response
+ * @param {object} prior - the existing stored record (cur/s/item, at this call site)
+ * @returns {object|null} the pipelineAudit trace to store
+ */
+export function mergePipelineAudit(enrich, prior) {
+  const existing = prior?.pipelineAudit ?? null;
+  if (!hasKey(enrich, 'pipelineAudit') || !enrich.pipelineAudit) return existing;
+  const incoming = enrich.pipelineAudit;
+  if (
+    existing &&
+    typeof existing.identityRevision === 'number' &&
+    typeof incoming.identityRevision === 'number' &&
+    existing.identityRevision > incoming.identityRevision
+  ) {
+    return existing;
+  }
+  return incoming;
+}

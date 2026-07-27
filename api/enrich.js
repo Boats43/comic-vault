@@ -123,6 +123,8 @@ import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map caches)
 import { kvGet, kvSet, KV_TTL, PC_FILTER_VERSION } from "./kv-cache.js";
 import { checkRateLimit } from "./rate-limit.js";
+import { randomUUID } from "node:crypto";
+import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1941,6 +1943,15 @@ export default async function handler(req, res) {
   const buildId = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || 'unknown';
   res.setHeader('x-cv-build', buildId);
   console.log(`[boot] Comic Vault build ${buildId}`);
+
+  // A6 dispatch (2026-07-26) — Option 1: response-embedded pipelineAudit.
+  // traceId/identityRevision are per-request, generated once here so every
+  // exit point (early-refused, hard-blocked, main path) uses the same
+  // values. traceId is public-safe (randomUUID, never a provider request
+  // ID). identityRevision is a monotonic per-request timestamp the client
+  // uses to reject an older async response overwriting a newer one.
+  const pipelineTraceId = randomUUID();
+  const pipelineIdentityRevision = Date.now();
 
   // A3 ACCESS GATE: T1 invite mechanism
   const gateError = checkAccessGate(req);
@@ -4398,6 +4409,27 @@ export default async function handler(req, res) {
               priceNote: 'No comp or visual-similarity data available for this identification.',
             }),
       };
+      // A6 dispatch — pipelineAudit on the refused exit. This branch never
+      // ran the main terminal invariant check (it returns before Phase 2's
+      // pricing/decision code), and title-family clustering never reached
+      // adoption (below the >=3 promotion floor) — familyIssueConsensus is
+      // honestly null, not fabricated. decision is genuinely null too:
+      // finalizeResponse's syncDecisionToContract no-ops when out.decision
+      // was never set, which is exactly the case here (this path never
+      // calls computeDecision).
+      refusedOut.pipelineAudit = buildPipelineAudit({
+        traceId: pipelineTraceId,
+        buildSha: buildId,
+        identityRevision: pipelineIdentityRevision,
+        familyIssueConsensus: null,
+        familyKey: null,
+        pricingIssue,
+        confirmedIssue,
+        outIssue: refusedOut.issue ?? null,
+        prePricingOk: pricingIssue === confirmedIssue,
+        preResponseOk: (refusedOut.issue ?? null) === (confirmedIssue ?? null),
+        decision: null,
+      });
       // Ship #24a-2: refusedOut retired as a separate SHAPE — same fields
       // flow, plus the canonical contract block.
       return res.status(200).json(finalizeResponse(refusedOut));
@@ -5619,6 +5651,23 @@ export default async function handler(req, res) {
         ],
       };
       console.log('[Q32] MERCHANDISE HARD BLOCK — refusing to price, decision=DO_NOT_LIST');
+      // A6 dispatch — pipelineAudit on the merchandise hard-block exit.
+      // out.issue was never written (the terminal write at the main path
+      // hasn't run yet) — honestly null, not fabricated. decision reuses
+      // the exact object just set two lines above, not recomputed.
+      out.pipelineAudit = buildPipelineAudit({
+        traceId: pipelineTraceId,
+        buildSha: buildId,
+        identityRevision: pipelineIdentityRevision,
+        familyIssueConsensus: identity?.familyIssueConsensus || null,
+        familyKey: confirmedTitle ?? null,
+        pricingIssue,
+        confirmedIssue,
+        outIssue: out.issue ?? null,
+        prePricingOk: pricingIssue === confirmedIssue,
+        preResponseOk: (out.issue ?? null) === (confirmedIssue ?? null),
+        decision: out.decision,
+      });
       // Ship #24a-2: contract state=LOCKED via DO_NOT_LIST hard lock
       return res.json(finalizeResponse(out)); // STOP — no pricing, return early
     }
@@ -8718,6 +8767,24 @@ export default async function handler(req, res) {
 
     // P0-D: Add timestamp so UI can show "Updated X ago"
     out.priceUpdatedAt = Date.now();
+
+    // A6 dispatch — pipelineAudit on the main path. Reuses the exact
+    // pricingBoundaryOk/responseBoundaryOk booleans the terminal invariant
+    // already computed above (~line 8534-8538) — not recomputed — plus
+    // out.decision, now populated by computeDecision above.
+    out.pipelineAudit = buildPipelineAudit({
+      traceId: pipelineTraceId,
+      buildSha: buildId,
+      identityRevision: pipelineIdentityRevision,
+      familyIssueConsensus: identity?.familyIssueConsensus || null,
+      familyKey: confirmedTitle ?? null,
+      pricingIssue,
+      confirmedIssue,
+      outIssue: out.issue ?? null,
+      prePricingOk: pricingBoundaryOk,
+      preResponseOk: responseBoundaryOk,
+      decision: out.decision,
+    });
 
     // FIX 1 PHASE 2 — api/metadata.js merged into enrich.
     // Return full enrichment including display-only fields (story, creators, pop, goCollect).
