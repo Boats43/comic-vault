@@ -9961,6 +9961,16 @@ export default function App() {
                 // Q135 dispatch (2026-07-22) — pool-provisional identity's
                 // honest title/issue/year/publisher/variant override the
                 // fields above; no-op for every non-provisional card.
+                // Site-parity fix (2026-07-26) — this path never called
+                // mergeConfirmedIdentity, so a CONFIRMED identity's
+                // server-corrected title/issue/year/publisher/variant could
+                // never repair a stale value auto-refresh encountered on an
+                // existing catalogue record; only the provisional promotion
+                // path (above) ever overrode anything. Same collision order
+                // as the scan→catalogue/scan→selectedItem sites: merge
+                // first, so a provisional response's own honest-null
+                // semantics still win on key collision when both apply.
+                ...mergeConfirmedIdentity(enrich, cur),
                 ...applyProvisionalIdentity(enrich, cur),
               };
               putComic(updated).catch(() => {});
@@ -10861,6 +10871,9 @@ export default function App() {
                 manualConfirmed: priceChangedBulk ? false : (cur.manualConfirmed || false),
                 // Q135 dispatch (2026-07-22) — see auto-refresh path for
                 // full rationale.
+                // Site-parity fix (2026-07-26) — see auto-refresh path for
+                // full rationale; same gap, same fix.
+                ...mergeConfirmedIdentity(enrich, cur),
                 ...applyProvisionalIdentity(enrich, cur),
               };
               console.log('[persist-bulk] savedId:', savedId,
@@ -11398,6 +11411,9 @@ export default function App() {
       // Q89-CACHE — comp-filter version the cached pool was built with
       compFilterVersion: enrich.compFilterVersion || item.compFilterVersion || null,
       // Q135 dispatch (2026-07-22) — see auto-refresh path for full rationale.
+      // Site-parity fix (2026-07-26) — see auto-refresh path for full
+      // rationale; same gap, same fix.
+      ...mergeConfirmedIdentity(enrich, item),
       ...applyProvisionalIdentity(enrich, item),
     };
 
