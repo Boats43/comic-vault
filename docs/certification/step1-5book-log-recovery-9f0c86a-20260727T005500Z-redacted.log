@@ -1,0 +1,77 @@
+Comic Vault — Step 1 Commit A certification, redacted log extract
+Build: 9f0c86a | Environment: production | Route: POST /api/enrich
+Source window: 2026-07-27T00:55:00Z - 2026-07-27T01:15:00Z
+Redacted from raw Vercel runtime-log export per the evidence-custody
+standing rule. Removed: eBay item IDs/image URLs/seller usernames/
+postal codes/OAuth+cache keys/request bodies/full comp-title dumps/
+provider metadata. Kept only the lines each certification claim below
+cites, verbatim, in original order.
+
+================================================================
+FIXTURE: Immortal Hulk #44
+Timestamp: 01:12:58 UTC | HTTP: 200
+================================================================
+[boot] Comic Vault build 9f0c86a
+[phase1] identity determination: Vision="immortal hulk" #44
+[visual] consensus: issue=44 (17/20) visionIssueCount=17
+[q140] family issue consensus: mode=corroborated winner=44 ratio=1.00 uniqueRows=12 runnerUp=none -> issue=#44
+[vision-zero-support] SKIPPED reason=winning-family-authority mode=corroborated issue=44 population=12 support=12 ratio=1.00 rawPoolVisionSupport=17
+[identity] confirmed="immortal hulk cho michael" #44 source=title-family-top-rank-protection overrode=false
+[q140-terminal] fingerprint invariant — pre-pricing: pricingIssue="44" confirmedIssue="44" OK; pre-response: out.issue="44" confirmedIssue="44" OK
+[decision] action=LIST_LOW confidence=medium blockers=0 warnings=1
+-- extract ends: full response reached, no gap --
+
+================================================================
+FIXTURE: Wonder Woman #1 (2nd printing)
+Timestamp: 01:00:54 UTC | HTTP: 200
+================================================================
+[boot] Comic Vault build 9f0c86a
+[phase1] identity determination: Vision="Wonder Woman" #750
+[visual] consensus: issue=none (3/20) visionIssueCount=0
+[q140] family issue consensus: mode=no-consensus winner=none ratio=0.00 uniqueRows=10 runnerUp=none -> issue=#750
+[vision-zero-support] ESCALATE: Vision issue="750" has 0/17 pool support and no adoptable alternate — forcing ID_REQUIRED
+[identity] confirmed="Wonder Woman" #null source=title-family-weighted-consensus+vision_zero_support_escalate overrode=false
+[q140-terminal] fingerprint invariant — pre-pricing: pricingIssue="null" confirmedIssue="null" OK; pre-response: out.issue="null" confirmedIssue="null" OK
+[decision] action=ID_REQUIRED confidence=high blockers=2 warnings=0
+-- extract ends: full response reached, no gap --
+-- note: "#750" originates from Vision's own phase1 read (line 2 above), not from any client-side or merge process; every downstream authority (visual consensus, q140, vision-zero-support, identity, terminal) independently rejects it and resolves to null. --
+
+================================================================
+FIXTURE: Adventure Time Summer Special #1
+Timestamp: 00:58:33 UTC | HTTP: 200
+================================================================
+[boot] Comic Vault build 9f0c86a
+[phase1] identity determination: Vision="Adventure Time" #1
+[visual] consensus: none — pool=20 (below issueOk>=50% coherence gate)
+[visual] no coherent consensus — keeping Claude issue as-is: 1
+[q140] family issue consensus: mode=corroborated winner=1 ratio=1.00 uniqueRows=4 runnerUp=none -> issue=#1
+[vision-zero-support] SKIPPED reason=winning-family-authority mode=corroborated issue=1 population=4 support=4 ratio=1.00 rawPoolVisionSupport=null
+[identity] confirmed="adventure time summer special" #1 source=title-family-weighted-consensus overrode=false
+[q140-terminal] fingerprint invariant — pre-pricing: pricingIssue="1" confirmedIssue="1" OK; pre-response: out.issue="1" confirmedIssue="1" OK
+[decision] action=LIST_LOW confidence=medium blockers=0 warnings=1
+-- extract ends: full response reached, no gap --
+-- scope note: this fixture certifies the Commit A issue-consensus and terminal-projection mechanism only. Exact-edition discrimination (skull-cover vs. SDCC/Cover A/RI 1:25 population), valuation authority, and the displayed x1.35 grade-adjustment figure are separate, open questions (Steps 3/4; A4). --
+
+================================================================
+FIXTURE: Flash #128
+Timestamp: 01:11:57 UTC | HTTP: 200
+================================================================
+[boot] Comic Vault build 9f0c86a
+[phase1] identity determination: Vision="The Flash" #128
+[visual] consensus: none — pool=20 (below issueOk>=50% coherence gate)
+[visual] no coherent consensus — keeping Claude issue as-is: 128
+[title-family] decision=fallback-vision
+-- extract ends here: [q140], [vision-zero-support], [identity], [q140-terminal], and [decision] lines are NOT present in the retrieved log for this request. Confirmed on two independent fetches (one full-window pull, one narrow per-book re-fetch) that the returned log stops at the same point both times — not a query-filter artifact. Root cause not yet determined (see A6). This fixture's title-family path took the non-override "fallback-vision" branch (same shape Section 10 attributes to Flash #139's safe-hold branch) — whether the terminal invariant fired correctly downstream of this point cannot be confirmed from available evidence. --
+
+================================================================
+FIXTURE: Flash #139
+Timestamp: 01:02:48 UTC | HTTP: 200
+================================================================
+[boot] Comic Vault build 9f0c86a
+[phase1] identity determination: Vision="The Flash" #139
+[visual] consensus: none — pool=20 (below issueOk>=50% coherence gate)
+[visual] no coherent consensus — keeping Claude issue as-is: 139
+[title-family] decision=fallback-vision
+[vision-zero-support] SKIPPED — pool is reprint/facsimile-dominant (ratio=0.80 >= 0.6), Vision's issue stands
+[identity] confirmed="The Flash" #139 source=vision overrode=false
+-- extract ends here: [q140-terminal] and [decision] lines are NOT present in the retrieved log for this request. Confirmed on two independent fetches, identical stopping point both times — not a query-filter artifact. Root cause not yet determined (see A6). --
