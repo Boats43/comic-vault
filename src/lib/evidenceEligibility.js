@@ -506,18 +506,28 @@ export const isPricingMathEligible = (classification) =>
 // expected to change under the current one.
 //
 // contributesToReadyValue is always false and automatedListingAllowed is
-// always false — this is display-only. It must never populate Quick/
-// Market/Stretch bands (a separate, unrelated mechanism — tier 4's
-// existing pc_estimate pricing, computePriceBands in priceBands.js, is
-// untouched by this function and continues to set out.price exactly as it
-// did before Commit E) and must never itself enable a listing action (Step
-// 2A's review-contract gate governs that, regardless of source).
+// always false — this is display-only. This pure function never touches
+// price/bands itself (it only classifies and returns a reference object);
+// the CALLER (api/enrich.js) is responsible for actually nulling
+// out.price/priceLow/priceHigh/priceBands and setting refusedToPrice=true
+// when this fires — Commit E1 made that mandatory (Commit E originally
+// left tier 4's pc_estimate price standing alongside the reference, which
+// defeated the "reference, not a recommendation" purpose entirely: the
+// same underlying pcBase×gradeMultiplier data would otherwise present as
+// BOTH an inert reference AND an actionable recommended price
+// simultaneously). See api/enrich.js's own comment at its
+// assessCatalogLadderReference call site (positioned immediately before
+// out.decision = computeDecision(...), same strategic spot as the Q140
+// issue-fingerprint-violation clearing block) for the actual override.
+// Listing enablement is never this function's concern either way — Step
+// 2A's review-contract gate governs that, regardless of source.
 export const assessCatalogLadderReference = ({
   rawPricingPoolEmpty,
   gradedReferencesEmpty,
   pcAnchorAccepted,
   priceLadder,
   gradeKey,
+  gradeBasis,
 } = {}) => {
   if (!rawPricingPoolEmpty || !gradedReferencesEmpty) return null;
   if (!pcAnchorAccepted) return null;
@@ -535,7 +545,78 @@ export const assessCatalogLadderReference = ({
     rungProvenance: 'unknown',
     rungGrade: gradeKey,
     rungValue,
+    // Commit E1 — grade authority the rung is being shown against. A
+    // SINGLE_PHOTO_PROVISIONAL/UNKNOWN basis must never be presented as a
+    // confirmed grade match (the UI consumer labels this explicitly,
+    // "Reference at provisional AI grade <X>" — never "confirmed").
+    gradeBasis: gradeBasis || 'UNKNOWN',
   };
+};
+
+// Commit E1 (2026-07-28) — pcAnchorTrust. isFromPC (api/enrich.js) is a
+// variant-multiplier double-count guard (VARIANT_MULT_ELIGIBLE_SOURCES) --
+// it answers "should this pricing source also receive the newsstand/
+// variant multiplier," not "is this PriceCharting product genuinely the
+// SAME edition as the confirmed book." Conflating the two let Commit E's
+// original wiring accept a merely-plausible PC match as if it were an
+// exact-edition confirmation. Three states, not a boolean, because
+// "rejected outright" and "accepted but not exact" are different things a
+// caller needs to react to differently (V1 catalog-ladder-reference
+// requires EXACT_EDITION specifically; COMPATIBLE_REFERENCE must never
+// fire it).
+//
+// Grounded in two EXISTING, already-computed signals rather than a new
+// classifier from scratch:
+//   - pcMatchRejectedForYearConflict (src/lib/variantIdentity.js's
+//     pcMatchConflictsWithPoolYear, ±5y tolerance, already gates whether
+//     api/enrich.js keeps out.pcProductId/out.pcLoosePrice at all).
+//   - identityConflictCount (api/enrich.js's [ship28b-conflicts] tally --
+//     detectIdentityConflicts/detectCompsConflicts, src/lib/conflictDetector.js
+//     -- title/issue/year/publisher mismatch detection already running
+//     well before tier pricing).
+// A tighter year-drift band (0-1y) than the ±5y admission gate is required
+// for EXACT_EDITION specifically -- cover-date-vs-publication-date drift
+// of 1-2y is normal even for the genuinely correct edition (documented
+// elsewhere in this codebase's AI-verify tolerance), but a 2-5y drift is
+// exactly the zone this campaign's own "Renumbered-franchise" and
+// "Batman #608" pattern-library classes were built around -- plausible,
+// not exact.
+export const assessPcAnchorTrust = ({
+  pcPrice,
+  pcYear,
+  confirmedYear,
+  pcMatchRejectedForYearConflict,
+  identityConflictCount,
+} = {}) => {
+  if (!pcPrice || pcMatchRejectedForYearConflict) return 'REJECTED';
+  const py = pcYear != null ? parseInt(pcYear, 10) : null;
+  const cy = confirmedYear != null ? parseInt(confirmedYear, 10) : null;
+  if (py == null || cy == null || !Number.isFinite(py) || !Number.isFinite(cy)) {
+    // Can't verify a tight year match either way -- never claim EXACT
+    // without evidence to back it.
+    return 'COMPATIBLE_REFERENCE';
+  }
+  if ((identityConflictCount || 0) > 0) return 'COMPATIBLE_REFERENCE';
+  const drift = Math.abs(py - cy);
+  if (drift > 5) return 'REJECTED';
+  if (drift <= 1) return 'EXACT_EDITION';
+  return 'COMPATIBLE_REFERENCE';
+};
+
+// Commit E1 — gradeBasis. Grounded in the two grade-authority signals
+// actually available in api/enrich.js: isGraded/numericGrade (a CGC slab
+// number -- an objective third-party fact, not a subjective AI visual
+// estimate) vs. a raw scan's AI-assessed condition string, further split
+// by how many photos backed that assessment (images.length -- though
+// api/enrich.js today only ever consumes images[0] for its own visual-
+// pool search, the count itself is a legitimate signal of how much visual
+// evidence the assessment had, independent of what enrich.js does with
+// the rest of the array).
+export const assessGradeBasis = ({ isGraded, grade, numericGrade, imagesCount } = {}) => {
+  if (isGraded === true && numericGrade != null) return 'USER_CONFIRMED';
+  if (!grade) return 'UNKNOWN';
+  if (imagesCount != null && imagesCount > 1) return 'MULTI_PHOTO_ASSESSED';
+  return 'SINGLE_PHOTO_PROVISIONAL';
 };
 
 export { STANDARD_REJECTION_CODES };

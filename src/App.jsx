@@ -6821,6 +6821,47 @@ function CollectionDetail({
               </div>
             )}
 
+            {/* Commit E1 — catalog ladder reference. Fires only when there is
+                zero comp-based evidence at all; item.price/priceBands are
+                already null (api/enrich.js clears them via the same
+                refused-price pattern used elsewhere) so this NEVER renders
+                alongside the PRICE BANDS block above. Deliberately does not
+                populate the normal recommended-price component — same
+                visual idiom as the Q90 mega-key floor-band reference block
+                (parenthetical "(reference)" label + explicit "not a ..."
+                sentence), not the amber lock-banner styling used for
+                blocking-state warnings elsewhere on this card. */}
+            {item.catalogLadderReference && (
+              <div style={{
+                marginTop: 10, marginBottom: 12, padding: "12px 14px",
+                border: "1px solid #388bfd", borderRadius: 8,
+                background: "rgba(56,139,253,0.08)", color: "#a5d6ff",
+                fontSize: 13, lineHeight: 1.45,
+              }}>
+                <div style={{ fontWeight: 700, marginBottom: 4, color: "#388bfd" }}>
+                  📖 Catalog grade reference
+                </div>
+                <div>
+                  <strong>${Number(item.catalogLadderReference.rungValue).toLocaleString()}</strong>
+                  {' '}at grade <strong>{item.catalogLadderReference.rungGrade}</strong>
+                  {item.catalogLadderReference.gradeBasis === 'SINGLE_PHOTO_PROVISIONAL' && (
+                    <> (reference at provisional AI grade — not a confirmed condition)</>
+                  )}
+                  {item.catalogLadderReference.gradeBasis === 'MULTI_PHOTO_ASSESSED' && (
+                    <> (reference at AI-assessed grade, multiple photos)</>
+                  )}
+                  {item.catalogLadderReference.gradeBasis === 'UNKNOWN' && (
+                    <> (grade authority unknown)</>
+                  )}
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12 }}>
+                  Provenance: {item.catalogLadderReference.rungProvenance}. Reference only —
+                  not a verified sale, appraisal, listing price, or portfolio value.
+                  No comps or sales exist to price this book — verify manually before listing.
+                </div>
+              </div>
+            )}
+
             {/* Ship #21 — Decision Path UI */}
             {item.claudeCheck && item.claudeCheck.recommendation && (
               <div style={{

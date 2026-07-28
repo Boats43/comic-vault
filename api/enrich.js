@@ -114,7 +114,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
 import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens, buildSanitizedComicSearchTitle } from "../src/lib/compHygiene.js";
-import { assessCatalogLadderReference } from "../src/lib/evidenceEligibility.js";
+import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } from "../src/lib/evidenceEligibility.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -6537,59 +6537,6 @@ export default async function handler(req, res) {
     ]);
     const isFromPC = !!(priceCharting?.price) && !sanityFired && VARIANT_MULT_ELIGIBLE_SOURCES.has(out.pricingSource);
 
-    // Commit E — catalog ladder reference. Fires only when there is
-    // otherwise ZERO comp-based evidence at all (both rawPricingPool AND
-    // gradedPricingReferences empty, active AND sold sides — post D1/D1.1
-    // classification, read directly off rawComps.count/evidence and
-    // soldVerifyResult.verified/evidence rather than out.activeEvidence/
-    // out.soldEvidence, which aren't assigned until later in this handler).
-    // Display-only (src/lib/evidenceEligibility.js's assessCatalogLadderReference
-    // doc comment has the full contract) — does not touch out.price/
-    // priceBands, which continue to come from tier 4's existing
-    // pc_estimate path exactly as before this commit.
-    {
-      const activeRawEmpty = (rawComps?.count || 0) === 0;
-      const activeGradedEmpty = (rawComps?.evidence?.gradedPricingReferences?.length || 0) === 0;
-      const soldRawEmpty = (soldVerifyResult?.verified?.length || 0) === 0;
-      const soldGradedEmpty = (soldVerifyResult?.evidence?.gradedPricingReferences?.length || 0) === 0;
-
-      // Grade key must exactly match extractPriceLadder's own key format
-      // (api/pricecharting-pop.js's formatGradeKey — integer grades get a
-      // ".0" suffix, half-grades pass through as-is). Graded books: reuse
-      // userGradeKeyForSold verbatim (already in this exact format).
-      // Raw books: mirror the Q109-LADDER derivation in
-      // soldVerification.js — AI-assessed grade string -> numeric
-      // CGC-equivalent via parseListingGrade -> same ".0"-suffix rule.
-      // No fallback to the bare "raw"/"Ungraded" ladder bucket: that
-      // bucket represents PC's single blended raw-condition price, not a
-      // rung for this book's SPECIFIC assessed condition.
-      let catalogLadderGradeKey = null;
-      if (isGraded === true && numericGrade != null) {
-        catalogLadderGradeKey = Number.isInteger(numericGrade) ? `${numericGrade}.0` : String(numericGrade);
-      } else {
-        const rawNumericTarget = parseListingGrade(grade);
-        if (rawNumericTarget != null) {
-          catalogLadderGradeKey = Number.isInteger(rawNumericTarget) ? `${rawNumericTarget}.0` : String(rawNumericTarget);
-        }
-      }
-
-      const catalogLadderReference = assessCatalogLadderReference({
-        rawPricingPoolEmpty: activeRawEmpty && soldRawEmpty,
-        gradedReferencesEmpty: activeGradedEmpty && soldGradedEmpty,
-        pcAnchorAccepted: isFromPC,
-        priceLadder: pcSales?.priceLadder || null,
-        gradeKey: catalogLadderGradeKey,
-      });
-      if (catalogLadderReference) {
-        out.catalogLadderReference = catalogLadderReference;
-        console.log(
-          `[catalog-ladder-reference] fired: grade=${catalogLadderReference.rungGrade} ` +
-          `value=$${catalogLadderReference.rungValue} provenance=${catalogLadderReference.rungProvenance} ` +
-          `(reference-only, contributesToReadyValue=false)`
-        );
-      }
-    }
-
     // Floor guard: never price below the lowest eBay comp.
     // eBay comps already reflect market grade — no grade multiplier on floor.
     // Floor is capped at compsAvg to prevent exceeding market.
@@ -8825,6 +8772,104 @@ export default async function handler(req, res) {
       out.listingHardLockReason = out.listingHardLockReason || 'issue-fingerprint-violation';
       out.listingHardLockBanner = out.listingHardLockBanner
         || 'Internal consistency check failed on issue identification — listing blocked pending review.';
+    }
+
+    // Commit E1 (2026-07-28) — catalog ladder reference, made authoritative
+    // as reference-ONLY. Positioned at this exact strategic point (same as
+    // the Q140 issue-fingerprint-violation block just above, for the same
+    // reason: this is the last point in the pipeline before
+    // out.decision = computeDecision(...) below, so nothing downstream --
+    // floor guard, variant/key multipliers, mega-key floor, thin-pool
+    // anchor, all of which already ran earlier in this handler -- can
+    // silently re-touch out.price after this clears it. Guarded on
+    // `!out.refusedToPrice` so this never layers onto an already-refused
+    // card (e.g. the Q140 violation above) -- one refusal reason per card,
+    // never two competing ones.
+    //
+    // pcAnchorTrust (not isFromPC -- see assessPcAnchorTrust's own doc
+    // comment for why they're different questions) must be EXACT_EDITION
+    // for V1. rawComps/soldVerifyResult/out.conflicts/
+    // out.pcMatchRejectedForYearConflict are all already resolved by this
+    // point (comps fetch ~line 4730, sold verify ~5059, ship28b-conflicts
+    // ~4715, pc-anchor-gate ~3953 -- all well before this line).
+    if (!out.refusedToPrice) {
+      const activeRawEmpty = (rawComps?.count || 0) === 0;
+      const activeGradedEmpty = (rawComps?.evidence?.gradedPricingReferences?.length || 0) === 0;
+      const soldRawEmpty = (soldVerifyResult?.verified?.length || 0) === 0;
+      const soldGradedEmpty = (soldVerifyResult?.evidence?.gradedPricingReferences?.length || 0) === 0;
+
+      const pcAnchorTrust = assessPcAnchorTrust({
+        pcPrice: priceCharting?.price || null,
+        pcYear: priceCharting?.year || null,
+        confirmedYear: confirmedYear || year || null,
+        pcMatchRejectedForYearConflict: out.pcMatchRejectedForYearConflict === true,
+        identityConflictCount: out.conflicts?.length || 0,
+      });
+
+      // Same grade-key derivation as before (matches
+      // api/pricecharting-pop.js's formatGradeKey exactly): graded books
+      // reuse userGradeKeyForSold's ".0"-suffix format verbatim; raw books
+      // mirror the Q109-LADDER derivation in soldVerification.js (AI-
+      // assessed grade string -> numeric CGC-equivalent via
+      // parseListingGrade -> same ".0"-suffix rule). No fallback to the
+      // bare "raw"/"Ungraded" ladder bucket for a specific numeric grade.
+      let catalogLadderGradeKey = null;
+      if (isGraded === true && numericGrade != null) {
+        catalogLadderGradeKey = Number.isInteger(numericGrade) ? `${numericGrade}.0` : String(numericGrade);
+      } else {
+        const rawNumericTarget = parseListingGrade(grade);
+        if (rawNumericTarget != null) {
+          catalogLadderGradeKey = Number.isInteger(rawNumericTarget) ? `${rawNumericTarget}.0` : String(rawNumericTarget);
+        }
+      }
+
+      const gradeBasis = assessGradeBasis({
+        isGraded,
+        grade,
+        numericGrade,
+        imagesCount: Array.isArray(images) ? images.length : null,
+      });
+
+      const catalogLadderReference = assessCatalogLadderReference({
+        rawPricingPoolEmpty: activeRawEmpty && soldRawEmpty,
+        gradedReferencesEmpty: activeGradedEmpty && soldGradedEmpty,
+        pcAnchorAccepted: pcAnchorTrust === 'EXACT_EDITION',
+        priceLadder: pcSales?.priceLadder || null,
+        gradeKey: catalogLadderGradeKey,
+        gradeBasis,
+      });
+
+      if (catalogLadderReference) {
+        console.log(
+          `[catalog-ladder-reference] fired: grade=${catalogLadderReference.rungGrade} ` +
+          `value=$${catalogLadderReference.rungValue} provenance=${catalogLadderReference.rungProvenance} ` +
+          `gradeBasis=${gradeBasis} pcAnchorTrust=${pcAnchorTrust} — ` +
+          `clearing all actionable price fields, reference-only`
+        );
+        out.catalogLadderReference = catalogLadderReference;
+        out.pcAnchorTrust = pcAnchorTrust;
+        // Reuses the EXISTING refused-price pattern byte-for-byte (same as
+        // the Q140 block just above) rather than inventing a second
+        // mechanism -- routes responseContract.js's deriveState to
+        // 'REFUSED' (price/bands null everywhere) and forces decisionEngine's
+        // RESEARCH action via the 'refused-to-price' criticalWarnings entry
+        // (never DO_NOT_LIST -- that only fires from the separate hard-
+        // blockers array, which this deliberately does not touch: a
+        // catalog reference is a real, if non-actionable, data point, not
+        // "no data sources at all").
+        out.price = null;
+        out.priceLow = null;
+        out.priceHigh = null;
+        out.priceBands = null;
+        out.pricingSource = 'catalog_ladder_reference';
+        out.refusedToPrice = true;
+        out.confidenceLevel = 'LOW';
+        out.priceNote = 'No comp-based evidence available — showing a PriceCharting catalog reference only, not a recommended price.';
+        out.matchConfidence = { score: 0, tier: 'LOW' };
+        out.listingHardLocked = true;
+        out.listingHardLockReason = 'catalog-ladder-reference-only';
+        out.listingHardLockBanner = 'No verified comps or sales exist for this book — a catalog reference value is shown for context only. Listing is blocked pending real market evidence.';
+      }
     }
 
     if (!out.year) {
