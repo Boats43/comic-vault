@@ -44,6 +44,7 @@ import {
   evaluateEraYearMatch,
   classifyArtistMatch,
 } from "./compHygiene.js";
+import { buildEvidencePopulations, classifyEvidenceRow, isPricingMathEligible } from "./evidenceEligibility.js";
 
 // Stale recency thresholds (tiered by era):
 //   Modern (bookYear >= 2000): reject rows older than 90 days.
@@ -362,6 +363,51 @@ export const verifySoldComps = (rawRows, ctx) => {
   // additive: every existing caller (no ctx.labelType/signedConsensus)
   // falls through to the exact prior expression, unchanged.
   const ourIsSigned = labelType === 'signature' || signedConsensus === true || isOurBookSigned(variant);
+
+  // D1 — evidence-eligibility classification (Commit D1). Classifies the
+  // FULL raw pool up front, before any destructive filtering — every row
+  // gets a target-relative eligibility verdict + rejectionCodes. __evIdx
+  // is stamped directly onto each raw row object (mutating `rows` in
+  // place, once) so it survives every downstream `{...r, ...}` spread
+  // this file makes (the main chain's `working` init just below, and the
+  // independent variant-fallback second pass's own pool) without needing
+  // to thread a parallel array through the 3 separate return sites below —
+  // spread always copies own enumerable properties forward, including a
+  // stamped one.
+  rows.forEach((r, i) => { r.__evIdx = i; });
+  const evidenceTarget = {
+    issue,
+    seriesTitle: title,
+    confirmedYear: bookYear != null ? parseInt(bookYear, 10) : null,
+    cvVolumeStartYear,
+    variant,
+    isGraded: userGradeKey != null && userGradeKey !== 'raw',
+    userGradeKey,
+    assetType: 'comic',
+    isSignedTarget: ourIsSigned,
+  };
+  const evidencePopulations = buildEvidencePopulations(rows, evidenceTarget);
+  console.log(
+    `[evidence-eligibility-sold] soldInput=${rows.length} ` +
+    `rawPricingEligible=${evidencePopulations.rawPricingPool.length} ` +
+    `incompleteReferences=${evidencePopulations.incompleteReferences.length} ` +
+    `otherReferences=${evidencePopulations.gradedPricingReferences.length + evidencePopulations.incompatibleEditionReferences.length + evidencePopulations.rejectedEvidence.length}`
+  );
+  // Narrower than evidencePopulations.rawPricingPool — see
+  // PRICING_GATE_CODES doc comment (evidenceEligibility.js) for why the
+  // pricing-math gate deliberately checks fewer codes than the full
+  // classification used for the display/reference buckets above.
+  const rawPricingIdxSet = new Set(
+    rows.filter((r) => isPricingMathEligible(classifyEvidenceRow(r, evidenceTarget))).map((r) => r.__evIdx)
+  );
+  const gateToRawPricingEligible = (list, label) => {
+    const before = list.length;
+    const gated = list.filter((r) => rawPricingIdxSet.has(r.__evIdx));
+    if (gated.length < before) {
+      console.log(`[evidence-eligibility] sold${label ? ':' + label : ''}: chain-survivors=${before} classification-eligible=${gated.length} removed=${before - gated.length}`);
+    }
+    return gated;
+  };
 
   // Filter pass — hard rejects first, soft last. Each row is annotated
   // with `recencyBand` regardless of acceptance so the UI / Ship #20b
@@ -1078,6 +1124,7 @@ export const verifySoldComps = (rawRows, ctx) => {
         },
         variantAdjusted: true,
         variantFallbackIncoherent: true,
+        evidence: evidencePopulations,
       };
     }
 
@@ -1087,12 +1134,17 @@ export const verifySoldComps = (rawRows, ctx) => {
     if (fallbackPool.length >= 1) {
       console.log('[sold-verify] variant fallback —', fallbackPool.length,
         'any-variant grade-matched comps (was 0 exact-variant)');
+      // D1 — same evidence-eligibility gate as the main path. An
+      // emergency/fallback pool may never re-admit a row classification
+      // already excluded (Commit D: "A rejected or reference-only row may
+      // never re-enter through... emergency fallback").
+      const gatedFallbackPool = gateToRawPricingEligible(fallbackPool, 'variant-fallback');
       return {
-        verified: fallbackPool,
+        verified: gatedFallbackPool,
         diagnostics: {
           rawCount,
-          verifiedCount: fallbackPool.length,
-          rejectedCount: rawCount - fallbackPool.length,
+          verifiedCount: gatedFallbackPool.length,
+          rejectedCount: rawCount - gatedFallbackPool.length,
           // Q113 dispatch (2026-07-18, Batman #608 class) — this pass's OWN
           // tally, not the abandoned first pass's. sum(fallbackReasons) now
           // reconciles with rejectedCount by construction. Was: reused
@@ -1104,12 +1156,21 @@ export const verifySoldComps = (rawRows, ctx) => {
           rejectedSamples: fallbackRejectedSamples,
         },
         variantAdjusted: true,
+        evidence: evidencePopulations,
       };
     } else {
       console.log('[sold-verify] variant fallback insufficient —',
         fallbackPool.length, 'comps (need ≥1), falling through');
     }
   }
+
+  // D1 — same evidence-eligibility gate applied to the main-chain
+  // survivors, after the fallback-trigger decision above (which must see
+  // the EXISTING chain's own unmodified `working` so a classification-
+  // caused emptiness — e.g. an all-incomplete-copy pool — never spuriously
+  // triggers the variant-fallback path meant only for genuine
+  // variantMismatch-caused emptiness).
+  working = gateToRawPricingEligible(working, 'main');
 
   // Q52: Thor #235 investigation — log exit conditions
   if (ctx.title && ctx.issue) {
@@ -1138,6 +1199,7 @@ export const verifySoldComps = (rawRows, ctx) => {
       reasons,
       rejectedSamples,
     },
+    evidence: evidencePopulations,
   };
 };
 

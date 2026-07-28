@@ -64,6 +64,7 @@ import {
 } from "../src/lib/compHygiene.js";
 
 import { classifyVariantTokens } from "../src/lib/imageSearchIdentity.js";
+import { buildEvidencePopulations, classifyEvidenceRow, isPricingMathEligible } from "../src/lib/evidenceEligibility.js";
 
 export {
   VARIANT_CONTAM_RE,
@@ -2019,6 +2020,62 @@ export const fetchComps = async ({
       return { ...emptyComps(query, "no sales after filters"), attemptUsed: 0 };
     }
 
+    // D1 — evidence-eligibility classification (Commit D1). Independent,
+    // additional gate downstream of the ENTIRE existing filter/fallback
+    // chain — `parsed` here is whatever the formal per-attempt path OR
+    // the v0-I emergency fallback produced, so this single insertion
+    // point covers both without separate wiring (Commit D Fixture 4: a
+    // slab admitted by v0-I still can't re-enter here). Catches what
+    // neither has a detector for at all (incomplete-copy, restored-copy)
+    // and re-derives raw-vs-graded eligibility via GRADED_RE (broader,
+    // order-independent) rather than SLAB_RE (misses "2.5 Cgc ..."
+    // orderings — Commit D Fixture 2). Never widens `parsed` — only
+    // narrows it further; a row already excluded upstream never reappears.
+    const evidenceTarget = {
+      issue: issueNum,
+      seriesTitle: title,
+      confirmedYear: year ? parseInt(year, 10) : null,
+      cvVolumeStartYear,
+      variant,
+      isGraded: gradedOnly === true,
+      userGradeKey: rawOnly ? 'raw' : (gradedOnly ? 'graded' : null),
+      assetType: isTPB ? 'tpb' : 'comic',
+      isSignedTarget: SIGNED_RE.test(String(variant || '')),
+    };
+    const evidenceRows = parsed.map((it) => ({ ...it, marketState: 'active' }));
+    // Full classification — powers the display/reference buckets below
+    // (evidence.gradedPricingReferences/incompleteReferences/
+    // incompatibleEditionReferences/rejectedEvidence). Every mismatch
+    // category gets annotated (I13), regardless of whether it additionally
+    // excludes the row from pricing math (narrower — see below).
+    const evidencePopulations = buildEvidencePopulations(evidenceRows, evidenceTarget);
+    // Pricing-math gate — narrower than evidencePopulations.rawPricingPool.
+    // `parsed` here already survived the ENTIRE formal filter chain (era/
+    // reprint/variant/lot/tpb/slab/signed/grade-proximity/price-sanity/
+    // dedup) or the thinner v0-I emergency chain — re-checking
+    // identity/variant/printing/lot with a second, less nuanced classifier
+    // on top of that risks double-jeopardy false rejects the same way it
+    // did in soldVerification.js (see PRICING_GATE_CODES doc comment,
+    // evidenceEligibility.js). Only the codes with no prior detector at
+    // all, or a proven gap in one, may additionally narrow `parsed`.
+    const rawPricingEligibleRows = evidenceRows.filter((it) => isPricingMathEligible(classifyEvidenceRow(it, evidenceTarget)));
+    if (rawPricingEligibleRows.length === 0) {
+      console.log(
+        `[evidence-eligibility] active: classification eliminated all ` +
+        `${parsed.length} pre-classification survivor(s) — returning empty ` +
+        `(never re-admitting rejected/reference-only evidence)`
+      );
+      return { ...emptyComps(query, "no pricing-eligible comps after evidence classification"), attemptUsed: 0 };
+    }
+    console.log(
+      `[evidence-eligibility] activeInput=${parsed.length} ` +
+      `rawPricingEligible=${rawPricingEligibleRows.length} ` +
+      `gradedReferences=${evidencePopulations.gradedPricingReferences.length} ` +
+      `incompleteReferences=${evidencePopulations.incompleteReferences.length} ` +
+      `rejected=${evidencePopulations.incompatibleEditionReferences.length + evidencePopulations.rejectedEvidence.length}`
+    );
+    parsed = rawPricingEligibleRows;
+
     const priceNums = parsed.map((p) => p.price);
     const sum = priceNums.reduce((a, b) => a + b, 0);
     const average = sum / priceNums.length;
@@ -2086,6 +2143,15 @@ export const fetchComps = async ({
       attemptUsed,
       attemptLabel,
       source,
+      // D1 — sanitized reference groups (never the pricing-eligible pool
+      // itself, which is `prices`/`count`/`average`/`lowest`/`highest`
+      // above, already narrowed to rawPricingPool). Display-only, I13.
+      evidence: {
+        gradedPricingReferences: evidencePopulations.gradedPricingReferences,
+        incompleteReferences: evidencePopulations.incompleteReferences,
+        incompatibleEditionReferences: evidencePopulations.incompatibleEditionReferences,
+        rejectedEvidence: evidencePopulations.rejectedEvidence,
+      },
     };
   } catch (err) {
     console.error(`[comps] error: ${err?.message || err}`);

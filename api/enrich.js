@@ -7621,10 +7621,15 @@ export default async function handler(req, res) {
       out.soldCompsRaw = [];
       out.soldCompDiagnostics = { kept: 0, rejected: 0, reasons: {} };
       out.soldCompsAvg = null;  // FIX 2: Surface sold-only average
+      out.soldEvidence = null;
     } else {
       out.soldComps = filteredSold;
       out.soldCompsRaw = capRawSoldRows(rawSoldRows);
       out.soldCompDiagnostics = soldVerifyResult.diagnostics;
+      // D1 — sanitized reference groups (Commit D1). Display-only, never
+      // the pricing-eligible pool itself (that's out.soldComps above,
+      // already gated to rawPricingPool by verifySoldComps).
+      out.soldEvidence = soldVerifyResult.evidence || null;
       // FIX 2: Surface sold-only average (computed at line 2354-2356)
       out.soldCompsAvg = soldAvg;
       // Book-level comps cache — surface timestamp and comps for persistence
@@ -8563,6 +8568,15 @@ export default async function handler(req, res) {
     if (out.variantFallback || out.reprintFallback) {
       out.compPoolContaminated = true;
     }
+
+    // D1 — sanitized active-pool reference groups (Commit D1). Same
+    // copy-forward gap class as variantFallback/reprintFallback just
+    // above: api/comps.js computes and returns this, but without an
+    // explicit thread-through it would never reach the card either.
+    // Display-only — never the pricing-eligible pool itself (that's
+    // out.rawComps.prices above, already gated to rawPricingPool by
+    // fetchComps).
+    out.activeEvidence = rawComps?.evidence || null;
 
     // 3. storySuppressedReason: normalize from nested comicVine
     if (out.comicVine?.storySuppressedReason) {
