@@ -1,0 +1,90 @@
+Comic Vault — Step 1 Commit A certification, FINAL redacted log extract
+Build: cb29941 | Environment: production | Route: POST /api/enrich
+Source window: 2026-07-27T21:20:00Z - 2026-07-27T21:55:00Z
+Pulled directly via Vercel runtime-logs API against project
+prj_2tECtpKowmM7oFT7CYOQFZTssP72, deployment dpl_HvK4fSb6MCjeDY6J2Re8rhU6iFFR
+(readyState=READY, target=production, githubCommitSha=cb299415b795b9540
+dbe555ee149368ceec96be2 — matches local HEAD). Redacted from the raw
+export per the evidence-custody standing rule (Section 11). Removed:
+eBay item IDs/image URLs/seller usernames/postal codes/OAuth+cache keys/
+request bodies/full comp-title dumps/provider metadata. Kept only the
+lines each certification claim below cites, verbatim, in original order.
+
+================================================================
+FIXTURE: Adventure Time Summer Special #1
+Timestamp: 21:37:19 UTC | HTTP: 200
+================================================================
+[boot] Comic Vault build cb29941
+[phase1] identity determination: Vision="Adventure Time" #1
+[visual] consensus: none — pool=20 (below issueOk>=50% coherence gate)
+[visual] no coherent consensus — keeping Claude issue as-is: 1
+[q140] family issue consensus: mode=corroborated winner=1 ratio=1.00 uniqueRows=4 runnerUp=none -> issue=#1
+[vision-zero-support] SKIPPED reason=winning-family-authority mode=corroborated issue=1 population=4 support=4 ratio=1.00 rawPoolVisionSupport=null
+[identity] confirmed="adventure time summer special" #1 source=title-family-weighted-consensus overrode=false
+[q140-terminal] fingerprint invariant — pre-pricing: pricingIssue="1" confirmedIssue="1" OK; pre-response: out.issue="1" confirmedIssue="1" OK
+[decision] action=LIST_LOW confidence=medium blockers=0 warnings=1
+-- extract ends: full response reached, no gap --
+-- note: rawPoolVisionSupport=null (not 0) — third consecutive live pull showing this exact shape. Diagnostic-precision item only, not a pass-bar condition; family authority (population=4, support=4, ratio=1.00) is what the decision is actually gated on. --
+-- scope note: this fixture certifies the Commit A issue-consensus and terminal-projection mechanism only. Exact-edition discrimination, valuation authority, and the displayed grade-adjustment figure are separate, open questions (Steps 3/4; A4). --
+
+================================================================
+FIXTURE: Wonder Woman #1 (2nd printing)
+Timestamp: 21:37:12 UTC | HTTP: 200
+================================================================
+[boot] Comic Vault build cb29941
+[phase1] identity determination: Vision="Wonder Woman" #750
+[visual] consensus: issue=none (3/20) visionIssueCount=0
+[q140] family issue consensus: mode=no-consensus winner=none ratio=0.00 uniqueRows=10 runnerUp=none -> issue=#750
+[vision-zero-support] ESCALATE: Vision issue="750" has 0/17 pool support and no adoptable alternate — forcing ID_REQUIRED
+[identity] confirmed="Wonder Woman" #null source=title-family-weighted-consensus+vision_zero_support_escalate overrode=false
+[q140-terminal] fingerprint invariant — pre-pricing: pricingIssue="null" confirmedIssue="null" OK; pre-response: out.issue="null" confirmedIssue="null" OK
+[decision] action=ID_REQUIRED confidence=high blockers=2 warnings=0
+-- extract ends: full response reached, no gap --
+-- note: server-side clean, consistent with A2's prior code-trace conclusion that out.title is provably "Wonder Woman" with no path to "#750" in this response, and with Scope 1 (7c37af5) closing the three merge-site gaps (auto-refresh/bulk-import/Refresh Market Data) A2 identified as the likely cause of a stale display. Client-side card/collection-row display was checked by screenshot per the certification package this extract accompanies — that check is not reproducible from server logs and is recorded here as attested, not independently re-verified in this pass. Detail-reopen/Refresh/Re-identify paths share the same merge-site fix but were not separately screenshot-checked. --
+
+================================================================
+FIXTURE: Flash #128
+Timestamp: 21:37:10 UTC | HTTP: 200
+================================================================
+[boot] Comic Vault build cb29941
+[phase1] identity determination: Vision="The Flash" #128
+[visual] consensus: none — pool=20 (below issueOk>=50% coherence gate)
+[visual] no coherent consensus — keeping Claude issue as-is: 128
+[title-family] decision=fallback-vision
+[identity] confirmed="The Flash" #128 source=vision overrode=false
+[q140-terminal] fingerprint invariant — pre-pricing: pricingIssue="128" confirmedIssue="128" OK; pre-response: out.issue="128" confirmedIssue="128" OK
+[decision] action=LIST_NOW confidence=high blockers=0 warnings=0
+-- extract ends: full response reached, no gap. This is the A6 fix confirmed live: the prior cb29941-predecessor pull (9f0c86a, see step1-5book-log-recovery-...) stopped at "[title-family] decision=fallback-vision" for this exact fixture with the terminal/decision lines missing; this pull reaches both cleanly. --
+-- note: no [q140] or [vision-zero-support] line fired for this fixture — expected, not a gap. Both mechanisms are conditioned on the raw pool lacking genuine support for Vision's issue or on a family override having run; neither condition applies here (issue #128 has direct, non-facsimile support in the raw pool, and title-family took the non-override fallback-vision branch). The terminal fingerprint check runs unconditionally regardless of which branch produced confirmedIssue, per Commit A's design, and is what this extract certifies. --
+
+================================================================
+FIXTURE: Flash #139
+Timestamp: 21:37:09 UTC | HTTP: 200
+================================================================
+[boot] Comic Vault build cb29941
+[phase1] identity determination: Vision="The Flash" #139
+[visual] consensus: none — pool=20 (below issueOk>=50% coherence gate)
+[visual] no coherent consensus — keeping Claude issue as-is: 139
+[title-family] decision=fallback-vision
+[vision-zero-support] SKIPPED — pool is reprint/facsimile-dominant (ratio=0.80 >= 0.6), Vision's issue stands
+[identity] confirmed="The Flash" #139 source=vision overrode=false
+[q140-terminal] fingerprint invariant — pre-pricing: pricingIssue="139" confirmedIssue="139" OK; pre-response: out.issue="139" confirmedIssue="139" OK
+[decision] action=LIST_NOW confidence=high blockers=0 warnings=0
+-- extract ends: full response reached, no gap. Same A6-fix confirmation as Flash #128 — the 9f0c86a pull stopped after "[identity] confirmed=..." for this fixture with the terminal/decision lines missing; this pull reaches both cleanly. --
+-- note: reprint-dominant bypass fired (facsimile/reprint ratio=0.80 >= 0.6 threshold) — third observed live instance of this queued finding (image-pool facsimile-signal path, informational-only per the existing polybag-check gate). Does not affect this certification: the bypass is a deliberate, existing, tested branch (Vision's issue stands when the raw image pool is reprint-dominated), and the terminal fingerprint/decision lines confirm it resolved and priced correctly (LIST_NOW, $205.04, sold-verified tier 1, 23/31 comps). --
+-- caveat, evidence-custody: this fixture's raw log block was concurrently interleaved with a second in-flight request in the raw Vercel export (a duplicate [boot]/[phase1] pair for the same title/issue appeared mid-block, consistent with Fluid Compute instance reuse under concurrent load, not a different book — see Section 12's prior note on this exact interleaving risk). The lines cited above were cross-checked against issue number, PC anchor id (2390629), and the unique price-trace/decision figures to confirm they belong to this one Flash #139 request and not a co-mingled second call. --
+
+================================================================
+FIXTURE: Immortal Hulk #44
+Timestamp: 21:37:02 UTC | HTTP: 200
+================================================================
+[boot] Comic Vault build cb29941
+[phase1] identity determination: Vision="immortal hulk" #44
+[visual] consensus: issue=44 (18/20) visionIssueCount=18
+[q140] family issue consensus: mode=corroborated winner=44 ratio=1.00 uniqueRows=12 runnerUp=none -> issue=#44
+[vision-zero-support] SKIPPED reason=winning-family-authority mode=corroborated issue=44 population=12 support=12 ratio=1.00 rawPoolVisionSupport=18
+[identity] confirmed="immortal hulk cho michael" #44 source=title-family-top-rank-protection overrode=false
+[q140-terminal] fingerprint invariant — pre-pricing: pricingIssue="44" confirmedIssue="44" OK; pre-response: out.issue="44" confirmedIssue="44" OK
+[decision] action=LIST_LOW confidence=medium blockers=0 warnings=1
+-- extract ends: full response reached, no gap --
+-- note: consistent with the prior (9f0c86a) pull — same mode, winner, ratio, population/support, terminal result, and decision shape (rawPoolVisionSupport differs, 18 vs the prior pull's 17, an expected pool-composition delta between two independent live eBay searches, not a regression). --
