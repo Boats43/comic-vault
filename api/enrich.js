@@ -5277,6 +5277,14 @@ export default async function handler(req, res) {
         tier: priceBandsRaw.tier,
         variantAdjusted: priceBandsRaw.variantAdjusted || false,
       };
+      // D2 (Commit D2) — shared structured derivation trace, built once
+      // inside computePriceBands (src/lib/priceBands.js) by whichever
+      // tier actually fired. Surfaced verbatim, never recomputed here —
+      // this IS the mathematically truthful record of how out.price was
+      // derived, replacing the pcBase/multiplier/afterMult log line below
+      // (which conflated an unrelated tier-1/2/2.5/3 result with a
+      // pcBase×multiplier product that was never actually computed).
+      out.priceDerivationTrace = priceBandsRaw.derivationTrace || null;
 
       // Tier-specific warnings
       if (priceBandsRaw.sanityCeilingWarning) {
@@ -7336,13 +7344,23 @@ export default async function handler(req, res) {
 
     // Ship #13.1: relocated to run AFTER all pricing adjustments
     // (variant mult, key mult, thin-pool anchor, mega-key floor) so
-    // `finalPrice` reflects the actual returned value. `afterMult` stays
-    // the post-floor/pre-multiplier snapshot (priceAfterFloor) so the
-    // trace still shows the compute chain's intermediate state.
+    // `finalPrice` reflects the actual returned value.
+    //
+    // D2 (Commit D2) — `postFloorPreMultSnapshot` (was labeled `afterMult`)
+    // is a snapshot of out.price taken after floor enforcement, before
+    // variant/key multipliers — it is NOT pcBase×gradeMultiplier's
+    // product, and never was: for any tier-1/2/2.5/3 result (sold- or
+    // active-comp-derived — the common case whenever comps exist at all),
+    // this value is the tier's own recency-weighted/blended/discounted
+    // output, computed independently of pcBase entirely. `pcBase`/
+    // `gradeMultiplier` below are logged for reference only — see
+    // out.priceDerivationTrace for the actual, mathematically verified
+    // calculation chain (src/lib/priceBands.js's computePriceBands, only
+    // Tier 4 ever multiplies pcBase by gradeMultiplier as a real step).
     console.log('[price-trace]',
-      'pcBase:', priceCharting?.price,
-      'multiplier:', out.gradeMultiplier,
-      'afterMult:', priceAfterFloor,
+      'pcBase(reference-only):', priceCharting?.price,
+      'gradeMultiplier(reference-only):', out.gradeMultiplier,
+      'postFloorPreMultSnapshot:', priceAfterFloor,
       'compsAvg:', compsFromEbay?.average,
       'rawFloor:', rawComps?.lowest || 0,
       'floor:', floorNum,
@@ -7354,6 +7372,15 @@ export default async function handler(req, res) {
       'thinPoolAnchored:', out.thinPoolAnchored === true,
       'lowGradeFloorApplied:', out.lowGradeFloorApplied === true
     );
+    if (out.priceDerivationTrace) {
+      const t = out.priceDerivationTrace;
+      const finalOp = t.operations?.[t.operations.length - 1];
+      console.log(
+        `[price-derivation] source=${t.pricingSource} ` +
+        `steps=${(t.operations || []).map((o) => o.step).join('->')} ` +
+        `finalOperation.outputValue=${finalOp?.outputValue} trace.finalPrice=${t.finalPrice}`
+      );
+    }
 
     // Ship 6 — skip first-print comps overwrite when polybag pricing active.
     // Polybag block at line ~2168 already populated out.comps with polybag

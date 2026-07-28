@@ -327,6 +327,28 @@ export function calculatePriceBands(verifiedPool, source, recencyData = null) {
 }
 
 /**
+ * D2 (Commit D2) — shared structured derivation trace. One builder, used
+ * identically by every tier branch below (1, 2, 2.5, 3, 4) — no per-tier
+ * display logic. Each operation: {step, inputValue, operation, factor,
+ * outputValue, applied, source}. Reference values (PriceCharting raw /
+ * grade multiplier) are recorded separately and never enter `operations`
+ * unless they actually controlled the final price (only Tier 4 does) —
+ * closes the "pcBase: 150 multiplier: 0.65 afterMult: 205.04" defect
+ * (150×0.65=97.50, not 205.04 — afterMult was actually a snapshot of the
+ * tier-1 recency-weighted result, an unrelated calculation, mislabeled as
+ * if it were pcBase's product).
+ */
+const roundCurrency = (n) => Math.round(n * 100) / 100;
+
+function buildTraceStep(step, inputValue, operation, factor, outputValue, applied, source) {
+  return { step, inputValue, operation, factor, outputValue, applied, source };
+}
+
+function buildDerivationTrace(pricingSource, referenceValues, operations, finalPrice) {
+  return { pricingSource, referenceValues, operations, finalPrice };
+}
+
+/**
  * Detect contaminated active listings.
  * Active contaminated when soldMedian > activeMedian × 3
  */
@@ -378,15 +400,34 @@ function applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjust
 
   console.log(`[variant-fallback-cap] market $${result.market.toFixed(2)} > activeAvg×2 ($${(activeAvg * 2).toFixed(2)}) — capping to active-anchored price (I9-style)`);
 
+  const cappedMarket = roundCurrency(activeAvg);
+  // D2 — this cap overrides whatever the tier's own trace concluded with;
+  // append a step so the trace's finalOperation.outputValue still equals
+  // the ACTUAL finalPrice, rather than going stale against a market value
+  // that no longer matches.
+  const priorTrace = result.derivationTrace;
+  const cappedTrace = priorTrace
+    ? buildDerivationTrace(
+        'variant_fallback_capped',
+        priorTrace.referenceValues,
+        [
+          ...priorTrace.operations,
+          buildTraceStep('variant_fallback_cap', priorTrace.finalPrice, 'cap', null, cappedMarket, true, 'eligible_active'),
+        ],
+        cappedMarket
+      )
+    : undefined;
+
   return {
     ...result,
     quick: Math.round(Math.min(result.quick, activeAvg * 0.85) * 100) / 100,
-    market: Math.round(activeAvg * 100) / 100,
+    market: cappedMarket,
     stretch: Math.round(activeAvg * 1.15 * 100) / 100,
     source: 'variant_fallback_capped',
     tier: Math.max(result.tier, 3),
     variantFallbackCapped: true,
     variantFallbackCapReason: `sold-fallback market $${result.market.toFixed(2)} exceeded active-avg×2 ($${(activeAvg * 2).toFixed(2)})`,
+    ...(cappedTrace && { derivationTrace: cappedTrace }),
   };
 }
 
@@ -536,15 +577,28 @@ export function computePriceBands({
       }
     }
 
+    const tier1Market = roundCurrency(recencyWeighted);
     const result = {
       quick: Math.round(soldLow * 100) / 100,
-      market: Math.round(recencyWeighted * 100) / 100,
+      market: tier1Market,
       stretch: Math.round(recencyWeighted * 1.15 * 100) / 100,
       source: 'tier1_recency_weighted',
       count: tier1Prices.length,
       tier: 1,
       sanityCeilingWarning,
       variantAdjusted: variantAdjusted || false,
+      // D2 — pcBase/gradeMultiplier are reference-only here: recency-
+      // weighted sold data controls this tier's price entirely, never a
+      // PriceCharting product. They must never be displayed as this
+      // tier's calculation base (the defect this commit closes).
+      derivationTrace: buildDerivationTrace(
+        'verified_sold_recency',
+        { priceChartingRaw: pcBase ?? null, gradeMultiplier: gradeMultiplier ?? null },
+        [
+          buildTraceStep('recency_weighted_sold', tier1Prices, 'weighted_average', null, tier1Market, true, 'eligible_verified_sold'),
+        ],
+        tier1Market
+      ),
     };
 
     console.log(`[tier-1] recencyWeighted=$${recencyWeighted.toFixed(2)} soldLow=$${soldLow.toFixed(2)}`);
@@ -579,6 +633,7 @@ export function computePriceBands({
       (activeLow > 0 && activeLow < soldLow * 0.25)
     );
 
+    const blendApplies = !activePoolSuspect && activeAvg > 0;
     let market;
     if (activePoolSuspect) {
       // Suspect active data excluded from the blend — sold-only, same as
@@ -590,10 +645,11 @@ export function computePriceBands({
       // Sold-only: use soldAvg raw (no bump needed — Tier 2 already conservative)
       market = soldAvg;
     }
+    const tier2Market = roundCurrency(market);
 
     const result = {
       quick: Math.round(soldLow * 100) / 100,
-      market: Math.round(market * 100) / 100,
+      market: tier2Market,
       stretch: Math.round(market * 1.15 * 100) / 100,
       source: activePoolSuspect
         ? 'tier2_sold_only_active_suspect'
@@ -605,6 +661,20 @@ export function computePriceBands({
       activePoolSuspectReason: activePoolSuspect
         ? `active avg $${activeAvg.toFixed(2)} / low $${activeLow.toFixed(2)} < 25% of sold avg $${soldAvg.toFixed(2)} / low $${soldLow.toFixed(2)}`
         : null,
+      // D2 — reference-only pcBase/gradeMultiplier; sold/active averages
+      // control this tier entirely.
+      derivationTrace: buildDerivationTrace(
+        activePoolSuspect ? 'tier2_sold_only_active_suspect' : (activeAvg > 0 ? 'tier2_blend_70_30' : 'tier2_sold_only'),
+        { priceChartingRaw: pcBase ?? null, gradeMultiplier: gradeMultiplier ?? null },
+        [
+          buildTraceStep('sold_average', soldPrices, 'average', null, roundCurrency(soldAvg), true, 'eligible_verified_sold'),
+          buildTraceStep('active_average', activePrices, 'average', null, activePrices.length > 0 ? roundCurrency(activeAvg) : null, blendApplies, 'eligible_active'),
+          blendApplies
+            ? buildTraceStep('blend_70_30', [roundCurrency(soldAvg), roundCurrency(activeAvg)], 'weighted_blend', { sold: 0.7, active: 0.3 }, tier2Market, true, 'computed')
+            : buildTraceStep('sold_only', roundCurrency(soldAvg), 'identity', null, tier2Market, true, 'computed'),
+        ],
+        tier2Market
+      ),
     };
 
     if (activePoolSuspect) {
@@ -621,16 +691,28 @@ export function computePriceBands({
     const staleAvg = soldPrices.reduce((a, b) => a + b, 0) / soldPrices.length;
     const discounted = staleAvg * 0.85;
     const staleLow = Math.min(...soldPrices);
+    const tier25Market = roundCurrency(discounted);
 
     const result = {
       quick: Math.round(staleLow * 0.85 * 100) / 100,
-      market: Math.round(discounted * 100) / 100,
+      market: tier25Market,
       stretch: Math.round(discounted * 1.15 * 100) / 100,
       source: 'verified_sold_stale',
       count: soldPrices.length,
       tier: 2.5,
       staleWarning: 'All sold comps >90 days old — verify current market before listing',
       variantAdjusted: variantAdjusted || false,
+      // D2 — reference-only pcBase/gradeMultiplier; stale sold average
+      // (discounted for staleness) controls this tier entirely.
+      derivationTrace: buildDerivationTrace(
+        'verified_sold_stale',
+        { priceChartingRaw: pcBase ?? null, gradeMultiplier: gradeMultiplier ?? null },
+        [
+          buildTraceStep('stale_sold_average', soldPrices, 'average', null, staleAvg, true, 'eligible_verified_sold'),
+          buildTraceStep('staleness_discount', staleAvg, 'multiply', 0.85, tier25Market, true, 'computed'),
+        ],
+        tier25Market
+      ),
     };
 
     console.log(`[tier-2.5] staleAvg=$${staleAvg.toFixed(2)} discounted=$${discounted.toFixed(2)} (all ${staleCount} stale)`);
@@ -644,12 +726,14 @@ export function computePriceBands({
     const activeAvg = activePrices.reduce((a, b) => a + b, 0) / activePrices.length;
     const discounted = activeAvg * 0.85;
     const activeLow = Math.min(...activePrices);
+    const tier3Market = roundCurrency(discounted);
+    const tier3Source = activeAnchoredOverFallbackSold ? 'tier3_active_discounted_over_fallback_sold' : 'tier3_active_discounted';
 
     const result = {
       quick: Math.round(activeLow * 0.85 * 100) / 100,
-      market: Math.round(discounted * 100) / 100,
+      market: tier3Market,
       stretch: Math.round(discounted * 1.15 * 100) / 100,
-      source: activeAnchoredOverFallbackSold ? 'tier3_active_discounted_over_fallback_sold' : 'tier3_active_discounted',
+      source: tier3Source,
       count: verifiedActive.length,
       tier: 3,
       askDerivedWarning: 'ask-derived pricing — verify before listing',
@@ -657,6 +741,17 @@ export function computePriceBands({
         activeAnchoredOverFallbackSold: true,
         activeAnchoredReason: 'sold pool was 100% edition-ambiguous fallback; confirmed variant-matched active pool used as anchor instead of blending',
       }),
+      // D2 — reference-only pcBase/gradeMultiplier; active-ask average
+      // (discounted for ask-vs-realized gap) controls this tier entirely.
+      derivationTrace: buildDerivationTrace(
+        tier3Source,
+        { priceChartingRaw: pcBase ?? null, gradeMultiplier: gradeMultiplier ?? null },
+        [
+          buildTraceStep('active_average', activePrices, 'average', null, activeAvg, true, 'eligible_active'),
+          buildTraceStep('active_ask_discount', activeAvg, 'multiply', 0.85, tier3Market, true, 'computed'),
+        ],
+        tier3Market
+      ),
     };
 
     console.log(`[tier-3] activeAvg=$${activeAvg.toFixed(2)} discounted=$${discounted.toFixed(2)}${activeAnchoredOverFallbackSold ? ' (over-fallback-sold anchor)' : ''}`);
@@ -665,7 +760,16 @@ export function computePriceBands({
 
   // TIER 4: PC estimate (last resort)
   if (pcBase && pcBase > 0) {
-    let basePrice = pcBase * gradeMultiplier;
+    const afterGradeMult = pcBase * gradeMultiplier;
+    let basePrice = afterGradeMult;
+
+    // D2 — pcBase DOES control this tier's price (unlike tiers 1/2/2.5/3,
+    // where it's reference-only). Traced as a real operation, not a
+    // reference value, from the start.
+    const traceOps = [
+      buildTraceStep('pricecharting_raw', pcBase, 'identity', null, pcBase, true, 'pricecharting_api'),
+      buildTraceStep('grade_multiplier', pcBase, 'multiply', gradeMultiplier, roundCurrency(afterGradeMult), true, 'computed'),
+    ];
 
     // T4-CAP [P2]: Sanity cap tier-4 pc_estimate at compsAvg when comps exist.
     // Evidence: FF Invisible Woman $17.08 vs compsAvg $5.69.
@@ -680,20 +784,28 @@ export function computePriceBands({
         const compsAvg = activePrices.reduce((a, b) => a + b, 0) / activePrices.length;
         if (basePrice > compsAvg * 1.5) {
           console.log(`[tier-4-sanity] pc_estimate $${basePrice.toFixed(2)} > compsAvg×1.5 ($${(compsAvg * 1.5).toFixed(2)}) → capped to compsAvg $${compsAvg.toFixed(2)}`);
+          traceOps.push(buildTraceStep('active_sanity_cap', basePrice, 'cap', null, roundCurrency(compsAvg), true, 'eligible_active'));
           basePrice = compsAvg;
           sanityCapped = true;
         }
       }
     }
+    const tier4Market = roundCurrency(basePrice);
 
     const result = {
       quick: Math.round(basePrice * 0.8 * 100) / 100,
-      market: Math.round(basePrice * 100) / 100,
+      market: tier4Market,
       stretch: Math.round(basePrice * 1.2 * 100) / 100,
       source: 'tier4_pc_estimate',
       count: 0,
       tier: 4,
       sanityCapped,
+      derivationTrace: buildDerivationTrace(
+        'tier4_pc_estimate',
+        { priceChartingRaw: pcBase, gradeMultiplier },
+        traceOps,
+        tier4Market
+      ),
     };
 
     console.log(`[tier-4] pc_estimate=$${basePrice.toFixed(2)}${sanityCapped ? ' (sanity-capped)' : ''}`);
