@@ -114,6 +114,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
 import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens, buildSanitizedComicSearchTitle } from "../src/lib/compHygiene.js";
+import { assessCatalogLadderReference } from "../src/lib/evidenceEligibility.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -6535,6 +6536,59 @@ export default async function handler(req, res) {
       'browse_api',
     ]);
     const isFromPC = !!(priceCharting?.price) && !sanityFired && VARIANT_MULT_ELIGIBLE_SOURCES.has(out.pricingSource);
+
+    // Commit E — catalog ladder reference. Fires only when there is
+    // otherwise ZERO comp-based evidence at all (both rawPricingPool AND
+    // gradedPricingReferences empty, active AND sold sides — post D1/D1.1
+    // classification, read directly off rawComps.count/evidence and
+    // soldVerifyResult.verified/evidence rather than out.activeEvidence/
+    // out.soldEvidence, which aren't assigned until later in this handler).
+    // Display-only (src/lib/evidenceEligibility.js's assessCatalogLadderReference
+    // doc comment has the full contract) — does not touch out.price/
+    // priceBands, which continue to come from tier 4's existing
+    // pc_estimate path exactly as before this commit.
+    {
+      const activeRawEmpty = (rawComps?.count || 0) === 0;
+      const activeGradedEmpty = (rawComps?.evidence?.gradedPricingReferences?.length || 0) === 0;
+      const soldRawEmpty = (soldVerifyResult?.verified?.length || 0) === 0;
+      const soldGradedEmpty = (soldVerifyResult?.evidence?.gradedPricingReferences?.length || 0) === 0;
+
+      // Grade key must exactly match extractPriceLadder's own key format
+      // (api/pricecharting-pop.js's formatGradeKey — integer grades get a
+      // ".0" suffix, half-grades pass through as-is). Graded books: reuse
+      // userGradeKeyForSold verbatim (already in this exact format).
+      // Raw books: mirror the Q109-LADDER derivation in
+      // soldVerification.js — AI-assessed grade string -> numeric
+      // CGC-equivalent via parseListingGrade -> same ".0"-suffix rule.
+      // No fallback to the bare "raw"/"Ungraded" ladder bucket: that
+      // bucket represents PC's single blended raw-condition price, not a
+      // rung for this book's SPECIFIC assessed condition.
+      let catalogLadderGradeKey = null;
+      if (isGraded === true && numericGrade != null) {
+        catalogLadderGradeKey = Number.isInteger(numericGrade) ? `${numericGrade}.0` : String(numericGrade);
+      } else {
+        const rawNumericTarget = parseListingGrade(grade);
+        if (rawNumericTarget != null) {
+          catalogLadderGradeKey = Number.isInteger(rawNumericTarget) ? `${rawNumericTarget}.0` : String(rawNumericTarget);
+        }
+      }
+
+      const catalogLadderReference = assessCatalogLadderReference({
+        rawPricingPoolEmpty: activeRawEmpty && soldRawEmpty,
+        gradedReferencesEmpty: activeGradedEmpty && soldGradedEmpty,
+        pcAnchorAccepted: isFromPC,
+        priceLadder: pcSales?.priceLadder || null,
+        gradeKey: catalogLadderGradeKey,
+      });
+      if (catalogLadderReference) {
+        out.catalogLadderReference = catalogLadderReference;
+        console.log(
+          `[catalog-ladder-reference] fired: grade=${catalogLadderReference.rungGrade} ` +
+          `value=$${catalogLadderReference.rungValue} provenance=${catalogLadderReference.rungProvenance} ` +
+          `(reference-only, contributesToReadyValue=false)`
+        );
+      }
+    }
 
     // Floor guard: never price below the lowest eBay comp.
     // eBay comps already reflect market grade — no grade multiplier on floor.

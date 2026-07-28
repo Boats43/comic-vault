@@ -471,4 +471,71 @@ export const PRICING_GATE_CODES = ['INCOMPLETE_COPY', 'RESTORED_COPY', 'FORMAT_M
 export const isPricingMathEligible = (classification) =>
   !classification.rejectionCodes.some((c) => PRICING_GATE_CODES.includes(c));
 
+// Commit E (2026-07-28) — catalog ladder reference. Same family as the
+// buildEvidencePopulations buckets above (rawPricingPool/
+// gradedPricingReferences/incompleteReferences/unconfirmedEditionReferences/
+// rejectedEvidence), but structurally different: those are per-row
+// classifications of comps; this is a single aggregate reference object
+// sourced from PriceCharting's own per-grade price ladder (`priceLadder`,
+// api/pricecharting-pop.js's extractPriceLadder — a flat {gradeKey: price}
+// object scraped from the product page), surfaced ONLY when there is
+// otherwise zero comp-based evidence to price from at all.
+//
+// Trigger (all four required):
+//   1. rawPricingPool is empty (POST-classification, both active and sold
+//      sides — not a pre-classification raw count).
+//   2. gradedPricingReferences is empty (POST-classification, both sides).
+//   3. An exact PriceCharting product anchor was accepted for this book.
+//   4. The ladder has a value at the EXACT confirmed-grade key.
+//
+// Deliberately does NOT trigger on PC population/census count — population
+// is scarcity (how many copies CGC has graded), not sale-sample depth; the
+// two were explicitly ruled non-equivalent earlier in this campaign.
+//
+// V1 does not interpolate between rungs: this function does a single exact-
+// key lookup. If the confirmed grade has no exact rung, this returns null —
+// no synthesized/interpolated value, no nearest-neighbor substitution.
+//
+// rungProvenance is always "unknown" with the current data source:
+// PriceCharting's scraped HTML carries no field distinguishing a rung PC
+// itself directly observed from one it interpolated/estimated between two
+// real data points (confirmed by direct source inspection of
+// extractPriceLadder and its regex — no such signal exists to read). The
+// type union `"unknown" | "direct" | "interpolated"` is kept open for a
+// future data source that DOES expose this, not because "unknown" is
+// expected to change under the current one.
+//
+// contributesToReadyValue is always false and automatedListingAllowed is
+// always false — this is display-only. It must never populate Quick/
+// Market/Stretch bands (a separate, unrelated mechanism — tier 4's
+// existing pc_estimate pricing, computePriceBands in priceBands.js, is
+// untouched by this function and continues to set out.price exactly as it
+// did before Commit E) and must never itself enable a listing action (Step
+// 2A's review-contract gate governs that, regardless of source).
+export const assessCatalogLadderReference = ({
+  rawPricingPoolEmpty,
+  gradedReferencesEmpty,
+  pcAnchorAccepted,
+  priceLadder,
+  gradeKey,
+} = {}) => {
+  if (!rawPricingPoolEmpty || !gradedReferencesEmpty) return null;
+  if (!pcAnchorAccepted) return null;
+  if (!priceLadder || typeof priceLadder !== 'object') return null;
+  if (!gradeKey) return null;
+
+  const rungValue = priceLadder[gradeKey];
+  if (typeof rungValue !== 'number' || !(rungValue > 0)) return null;
+
+  return {
+    pricingSource: 'catalog_ladder_reference',
+    valuationAuthority: 'compatible-reference',
+    automatedListingAllowed: false,
+    contributesToReadyValue: false,
+    rungProvenance: 'unknown',
+    rungGrade: gradeKey,
+    rungValue,
+  };
+};
+
 export { STANDARD_REJECTION_CODES };
