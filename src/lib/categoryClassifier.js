@@ -55,13 +55,23 @@ const CARD_PATTERN = /\b(psa|bgs|sgc)\s*\d+|\b(rookie|rc|auto|autograph|patch|re
  */
 const BOOK_PATTERN = /\b(isbn|978-\d{10}|novel|paperback|hardcover|kindle|ebook|first\s+edition|revised\s+edition|trade\s+paperback)\b/i;
 
+/**
+ * Merchandise signals — novelty/decor items printed with cover art, not
+ * the comic itself (magnets, metal/tin signs). Batman #15 production case:
+ * "Batman #15 FRIDGE MAGNET comic book" and "...Refrigerator Magnet Free
+ * Shipping" both survived the pre-existing patterns (no dimension pair, no
+ * poster/canvas word) and reached title-family clustering as real pool
+ * members.
+ */
+const MERCHANDISE_PATTERN = /\b(magnet|refrigerator\s*magnet|fridge\s*magnet|metal\s*sign|tin\s*sign|wall\s*sign)\b/i;
+
 // ─────────────────────────── CLASSIFICATION ───────────────────────────
 
 /**
  * Classify a title into a category.
  *
  * @param {string} title - eBay listing title
- * @returns {string} - 'COMIC' | 'PRINT' | 'COLLECTIBLE' | 'CARD' | 'BOOK' | 'UNKNOWN'
+ * @returns {string} - 'COMIC' | 'PRINT' | 'COLLECTIBLE' | 'CARD' | 'BOOK' | 'MERCHANDISE' | 'UNKNOWN'
  */
 export const classifyTitle = (title) => {
   if (!title || typeof title !== 'string') return 'UNKNOWN';
@@ -80,6 +90,9 @@ export const classifyTitle = (title) => {
   }
   if (BOOK_PATTERN.test(title)) {
     return 'BOOK';
+  }
+  if (MERCHANDISE_PATTERN.test(title)) {
+    return 'MERCHANDISE';
   }
 
   // Comic signals (issue number, CGC/CBCS grading, cover variants)
