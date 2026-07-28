@@ -11,7 +11,7 @@
 //
 // Invoke: node tests/q-commitD1.1-collision-aware-eligibility.test.js
 
-import { classifyEvidenceRow, buildEvidencePopulations, assessCollisionRisk } from '../src/lib/evidenceEligibility.js';
+import { classifyEvidenceRow, buildEvidencePopulations, assessCollisionRisk, isPricingMathEligible, PRICING_GATE_CODES } from '../src/lib/evidenceEligibility.js';
 
 let passed = 0;
 let failed = 0;
@@ -201,6 +201,54 @@ console.log('\nFixture: Flash #139 graded row (deterministic, recorded regardles
   const pops = buildEvidencePopulations([row], target);
   assertEq(pops.rawPricingPool.length, 0, 'excluded from raw active pool');
   assertEq(pops.gradedPricingReferences.length, 1, 'still retained in gradedPricingReferences (bucket priority: format mismatch wins over unconfirmed-edition for display)');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Compatibility-bridge invariant (dispatch correction, follow-up review) —
+// isPricingMathEligible/PRICING_GATE_CODES is a compatibility bridge around
+// the EXISTING, more mature api/comps.js/soldVerification.js filter chains,
+// not the final unified eligibility authority. It is safe TODAY only because
+// its one real call site (api/comps.js, immediately before
+// buildEvidencePopulations) operates on `parsed` -- a pool that has already
+// survived the entire formal filter chain, so none of the legacy-overlapping
+// codes below can realistically appear on a row reaching that point. This
+// test protects against future drift: if that call site is ever refactored
+// to classify RAW rows before the legacy chain runs, PRICING_GATE_CODES
+// accidentally including a legacy-overlapping code would silently
+// reintroduce the exact regression class D1's own implementation hit and
+// reverted (11 previously-passing sold-verification.test.js assertions).
+// ══════════════════════════════════════════════════════════════════════════════
+console.log('\nCompatibility-bridge invariant — PRICING_GATE_CODES never independently duplicates a legacy-chain check\n');
+{
+  // Every code the EXISTING formal filter chains (api/comps.js Filters
+  // 0a-5, soldVerification.js's main pass) already handle with edge-case
+  // nuance this classifier doesn't replicate (artist partial-match,
+  // unparseable-grade grace, format-asymmetry markers, annual/half-issue
+  // distinctions). COVERLESS_COPY included: both pipelines already run an
+  // independent coverless filter (comps.js Filter 2c, soldVerification.js's
+  // format:coverless check).
+  const LEGACY_OVERLAPPING_CODES = [
+    'WRONG_ISSUE', 'WRONG_YEAR', 'WRONG_PRINTING', 'WRONG_VARIANT',
+    'LOT_OR_BUNDLE', 'SIGNED_MISMATCH', 'COLLECTED_EDITION_MISMATCH',
+    'FORMAT_MISMATCH_GRADED_VS_RAW', 'COVERLESS_COPY',
+  ];
+  for (const code of LEGACY_OVERLAPPING_CODES) {
+    assertFalse(PRICING_GATE_CODES.includes(code), `PRICING_GATE_CODES does not include legacy-overlapping code "${code}"`);
+  }
+  // Direct behavioral proof, not just a static list check: a row that
+  // fails ONLY a legacy code (a shape that should never reach this point
+  // in production, since the formal chain already excludes it upstream --
+  // but proving the NARROW gate itself would not act on it independently
+  // even if it somehow did) must report isPricingMathEligible=true.
+  for (const code of LEGACY_OVERLAPPING_CODES) {
+    const legacyOnlyClassification = { rejectionCodes: [code] };
+    assertTrue(isPricingMathEligible(legacyOnlyClassification), `a row failing ONLY "${code}" is isPricingMathEligible=true — the narrow gate defers entirely to the existing chains for this category`);
+  }
+  // Confirm the gate DOES still act on every code it's actually meant to.
+  for (const code of PRICING_GATE_CODES) {
+    const gatedOnlyClassification = { rejectionCodes: [code] };
+    assertFalse(isPricingMathEligible(gatedOnlyClassification), `a row failing "${code}" (a real PRICING_GATE_CODES entry) is isPricingMathEligible=false`);
+  }
 }
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
