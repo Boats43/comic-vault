@@ -47,6 +47,7 @@ import {
   buildIdentityRefusedFallbackPool,
   shouldSkipAssemblyIntegrityCheck,
   detectVisualIssueDivergence,
+  enforceQueryIssueAuthority,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -4589,8 +4590,25 @@ export default async function handler(req, res) {
             // Q89-CACHE: version-salted — a filter fix (MERCH_RE) must not
             // replay pools filtered by the old regex (Evil Ernie class).
             const activeKey = `v${COMP_FILTER_VERSION}:${confirmedTitle}|${confirmedIssue}`;
+            // Commit B.1 (Strange Tales dispatch) — no `title|null` keys in
+            // the exact-pricing `ac:` cache namespace. A null confirmedIssue
+            // means genuinely unresolved identity — a key built from that
+            // would be a title-only bucket any future request for the same
+            // title could collide on, regardless of which (or whether any)
+            // issue that later request actually resolves to. Reads AND
+            // writes are both skipped entirely when confirmedIssue is null
+            // — this pool is fetched fresh every time, never cached under
+            // this namespace. (A separate similar-title research
+            // namespace, e.g. `similar:v1:<title>|<approximateEra>`, may
+            // exist for informational/UI purposes per item B.1's own
+            // wording — but it is never read from here, and never feeds
+            // this exact-pricing path.)
+            const exactPricingCacheEligible = confirmedIssue != null;
+            if (!exactPricingCacheEligible) {
+              console.log(`[active-cache] SKIP: confirmedIssue is null — no title|null key in the ac: namespace (Commit B.1)`);
+            }
             // CACHE-BUST: skipCache flag bypasses poisoned cache entries
-            const skipCache = req.body?.skipCache === true;
+            const skipCache = req.body?.skipCache === true || !exactPricingCacheEligible;
             const cached = !skipCache ? await kvGet(`ac:${activeKey}`) : null;
             if (cached) {
               console.log(`[active-cache] HIT: ${activeKey}`);
@@ -4605,6 +4623,25 @@ export default async function handler(req, res) {
               console.log(`[active-cache] SKIP: ${activeKey} — skipCache=true`);
             }
             console.log(`[comps-cache] MISS — fetching from eBay`);
+            // Commit A.1/A.3 (Strange Tales dispatch) — terminal
+            // single-writer guard: confirmedIssue is the ONLY authority
+            // for whether this query may carry an issue term. No upstream
+            // branch (family-candidate rebuild, fallback-vision, variant-
+            // scan reselect, the Pattern-J rawTitle-issue-mismatch guard)
+            // is trusted to have already correctly nulled/synced
+            // imageSearchTitle — this is the one terminal check,
+            // positioned immediately at the actual query-construction call
+            // site so a future upstream branch can't bypass it. See
+            // enforceQueryIssueAuthority's own doc comment
+            // (identityCore.js) for the full root-cause trace.
+            const preAuthorityImageSearchTitle = imageSearchTitle;
+            imageSearchTitle = enforceQueryIssueAuthority(imageSearchTitle, confirmedIssue);
+            if (preAuthorityImageSearchTitle && imageSearchTitle !== preAuthorityImageSearchTitle) {
+              console.log(
+                `[commitA-terminal] discarded stale/conflicting imageSearchTitle ` +
+                `"${preAuthorityImageSearchTitle}" (confirmedIssue="${confirmedIssue}") before comps fetch`
+              );
+            }
             const result = await fetchComps({
               // Ship 26.3A — propagate confirmedTitle (Ship 26.2 override) into comps query.
               // Previously used original req.body.title, bypassing title-family correction.
@@ -4637,9 +4674,11 @@ export default async function handler(req, res) {
             // FIX: Never cache empty/null active-comps results (prevents cache poisoning)
             // Amazing Adventures #3: bad empty value cached → replayed on every request
             // → blocked FIX 1 blend-override from ever having real data.
-            if (result && result.count > 0) {
+            if (result && result.count > 0 && exactPricingCacheEligible) {
               await kvSet(`ac:${activeKey}`, result, KV_TTL.ACTIVE);
               console.log(`[active-cache] MISS: ${activeKey} — cached ${result.count} comps`);
+            } else if (!exactPricingCacheEligible) {
+              console.log(`[active-cache] MISS: ${activeKey} — NOT caching (confirmedIssue null, Commit B.1)`);
             } else {
               console.log(`[active-cache] MISS: ${activeKey} — NOT caching (empty result)`);
             }
@@ -8772,6 +8811,66 @@ export default async function handler(req, res) {
       out.listingHardLockReason = out.listingHardLockReason || 'issue-fingerprint-violation';
       out.listingHardLockBanner = out.listingHardLockBanner
         || 'Internal consistency check failed on issue identification — listing blocked pending review.';
+    }
+
+    // Commit B (Strange Tales dispatch, 2026-07-28) — market-evidence
+    // authority. Same strategic terminal position as the Q140/E1 blocks —
+    // runs immediately before out.decision = computeDecision(...), so
+    // nothing downstream can re-touch these fields. Sequenced BEFORE the
+    // E1 block below: both use the refused-price pattern and both guard
+    // on `!out.refusedToPrice`, so whichever fires first correctly
+    // prevents the other from double-firing — an unresolved issue is a
+    // more fundamental problem than "zero evidence with an exact PC
+    // anchor," so it takes priority when both could apply.
+    if (!out.refusedToPrice) {
+      // Commit A.2 already forces rawPricingPool=[] for every row when
+      // confirmedIssue is null (evidenceEligibility.js) — these counts
+      // reflect that directly rather than re-deriving it, so the two
+      // mechanisms can't drift apart.
+      const activeExactCount = confirmedIssue != null ? (rawComps?.count || 0) : 0;
+      const soldExactCount = confirmedIssue != null ? (soldVerifyResult?.verified?.length || 0) : 0;
+      const exactMarketEvidenceCount = activeExactCount + soldExactCount;
+      const marketEvidenceReady = exactMarketEvidenceCount > 0;
+
+      out.exactMarketEvidenceCount = exactMarketEvidenceCount;
+      out.marketEvidenceReady = marketEvidenceReady;
+
+      if (confirmedIssue == null && out.price != null) {
+        // Item B.4 — a price is present despite genuinely unresolved
+        // issue identity. Tier 4's pc_estimate path doesn't require any
+        // comps at all (just a PriceCharting title-only match), so it can
+        // still fire and set out.price even when confirmedIssue is null —
+        // exactly the "recommended: $41" shape this item exists to close.
+        // Relabeled, never silently nulled-and-hidden (I13: annotate,
+        // don't vanish) — then structurally demoted the same way E1
+        // demotes a catalog-ladder value, reusing the same established
+        // refused-price pattern.
+        console.log(
+          `[commitB-market-evidence] confirmedIssue null but out.price=${out.price} was set ` +
+          `(source=${out.pricingSource}) — relabeled hypotheticalReferenceEstimate, price/bands ` +
+          `cleared, never presented as "recommended"`
+        );
+        out.hypotheticalReferenceEstimate = out.price;
+        out.authoritativeRecommendation = null;
+        out.price = null;
+        out.priceLow = null;
+        out.priceHigh = null;
+        out.priceBands = null;
+        out.pricingSource = 'hypothetical-reference-issue-unresolved';
+        out.refusedToPrice = true;
+        out.confidenceLevel = 'LOW';
+        out.matchConfidence = { score: 0, tier: 'LOW' };
+        out.listingHardLocked = true;
+        out.listingHardLockReason = 'target-issue-unresolved';
+        out.listingHardLockBanner = 'The specific issue number could not be confirmed for this book — similar-title references are shown for context only. Listing is blocked pending identification.';
+      } else {
+        // authoritativeRecommendation mirrors out.price only when real
+        // market evidence backs it — never a bare passthrough. When
+        // marketEvidenceReady is false (including every confirmedIssue-
+        // null case that didn't hit the branch above because out.price
+        // was already honestly null), this is null too.
+        out.authoritativeRecommendation = marketEvidenceReady ? out.price : null;
+      }
     }
 
     // Commit E1 (2026-07-28) — catalog ladder reference, made authoritative

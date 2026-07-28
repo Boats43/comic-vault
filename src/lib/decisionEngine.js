@@ -975,7 +975,24 @@ export function computeDecision(item, context = {}) {
 export function describeBlocker(slug, item) {
   if (slug === 'missing-title') return 'title not resolved — retake photo for a clearer title read';
   if (slug === 'identity-incomplete') return 'required identity fields missing (issue/publisher)';
-  if (slug === 'identity-not-confident') return 'identity uncertain — title/issue/year/publisher not confirmed';
+  if (slug === 'identity-not-confident') {
+    // Commit D.1 (Strange Tales dispatch, 2026-07-28) — consumes
+    // item.identityMissingFields (out.identityMissingFields, api/enrich.js,
+    // sourced from assessIdentityConfidence's own idCheckFinal.missingFields
+    // — src/lib/identityGate.js, confirmed correct: each field is evaluated
+    // independently, publisher is never bundled in merely because issue is
+    // missing) directly, rather than the prior hardcoded "title/issue/
+    // year/publisher" sentence that named every field unconditionally
+    // regardless of which ones were actually missing. A request with
+    // missing=["issue"] now says exactly that, not "publisher not
+    // confirmed" alongside it.
+    const missing = Array.isArray(item?.identityMissingFields) ? item.identityMissingFields : [];
+    if (missing.length > 0) {
+      const fieldNames = missing.map((f) => (f === 'issue' ? 'issue number' : f));
+      return `identity uncertain — ${fieldNames.join('/')} not confirmed`;
+    }
+    return 'identity uncertain — one or more identity fields not confirmed';
+  }
   if (slug === 'no-data-sources') return 'no pricing data available from any source';
   if (slug === 'manual-review-required') return 'manual review required';
   if (slug === 'mega-key-manual-review') return 'mega-key requires expert appraisal';

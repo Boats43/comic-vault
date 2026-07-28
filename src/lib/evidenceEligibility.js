@@ -75,6 +75,47 @@ export const RESTORED_TITLE_RE =
 // only when the TARGET is itself a later printing (Commit D Fixture 5).
 const FIRST_PRINT_EXPLICIT_RE = /\b(?:1st|first)\s*print(?:ing)?\b/i;
 
+// Commit C.2 (Strange Tales dispatch, 2026-07-28) — year-evidence
+// semantics. extractYearFromTitle (imageSearchIdentity.js) extracts a bare
+// 4-digit year with zero awareness of WHAT that year describes — "Strange
+// Tales #142 (1951-76 1st Series) Marvel" extracts "1951" identically to a
+// genuine single-issue cover date, even though #142 (and #76, same
+// pattern) were both plausibly published well into the 1960s/1970s by
+// this pool's own internal series-pace evidence. That misclassified
+// "1951" then passed straight into evaluateEraYearMatch as if it were
+// this SPECIFIC issue's own publication year, letting badly wrong-era
+// comps survive era filtering. Only an ISSUE_PUBLICATION_YEAR classification
+// may satisfy an exact issue-year comparison — SERIES_START_YEAR and
+// SERIES_RANGE are treated as "no year evidence" (same as a genuinely
+// undated listing), which correctly routes into the SAME
+// publicationIdentity/UNCONFIRMED_EDITION path Commit D1.1 already built,
+// rather than being silently accepted as if it were a match.
+//
+// Range checked FIRST (more specific evidence than a bare series-start
+// phrase) — "(1951-76 1st Series)" carries both an explicit range AND the
+// words "1st Series"; the range alone is sufficient to disqualify this as
+// issue-specific evidence regardless of what else is nearby.
+const SERIES_RANGE_YEAR_RE = /\b(19\d{2}|20\d{2})\s*[-–—]\s*(?:'?\d{2}|\d{4})\b/;
+const SERIES_START_YEAR_RE = /\b(19\d{2}|20\d{2})\s*(?:series|1st\s*series|first\s*series)\b|\bsince\s*(19\d{2}|20\d{2})\b/i;
+
+export const classifyYearEvidence = (title) => {
+  const t = String(title || '');
+  if (!t) return { class: 'SELLER_CONTEXT_UNKNOWN', year: null };
+
+  const rangeMatch = t.match(SERIES_RANGE_YEAR_RE);
+  if (rangeMatch) return { class: 'SERIES_RANGE', year: rangeMatch[1] };
+
+  const seriesStartMatch = t.match(SERIES_START_YEAR_RE);
+  if (seriesStartMatch) {
+    return { class: 'SERIES_START_YEAR', year: seriesStartMatch[1] || seriesStartMatch[2] };
+  }
+
+  const y = extractYearFromTitle(t);
+  if (y) return { class: 'ISSUE_PUBLICATION_YEAR', year: y };
+
+  return { class: 'SELLER_CONTEXT_UNKNOWN', year: null };
+};
+
 const STANDARD_REJECTION_CODES = [
   'FORMAT_MISMATCH_RAW_VS_SLAB',
   'FORMAT_MISMATCH_GRADED_VS_RAW',
@@ -89,6 +130,7 @@ const STANDARD_REJECTION_CODES = [
   'SIGNED_MISMATCH',
   'COLLECTED_EDITION_MISMATCH',
   'UNCONFIRMED_EDITION',
+  'TARGET_ISSUE_UNRESOLVED',
 ];
 
 // Commit D1.1 (2026-07-28) — collision-aware positive-compatibility gate.
@@ -198,8 +240,26 @@ export const classifyEvidenceRow = (row, target = {}) => {
   // lot/bundle), independent of format/condition/edition eligibility.
   let identityEligible = true;
 
-  if (target.issue != null && String(target.issue).length > 0 &&
-      !hasIssueNumber(title, target.issue, target.seriesTitle || null)) {
+  // Commit A.2 (Strange Tales dispatch, 2026-07-28) — the base D1 model
+  // is negative-only: no explicit check means a row passes by default.
+  // That's correct when target.issue is a real, resolved number (the
+  // WRONG_ISSUE check below governs it) but is a genuine blind spot when
+  // the issue is UNRESOLVED (target.issue == null, a real "identity
+  // genuinely unknown" state, not "not yet computed") — every row
+  // silently passed the issue axis unconditionally, exactly the gap that
+  // let a "Strange Tales #1"-textured query and its resulting comps price
+  // a book whose own confirmedIssue was null. Absence of a target issue
+  // is not a reason to skip the check; it's a reason every row fails it.
+  // Same class of fix as D1.1's UNCONFIRMED_EDITION (closing the "missing
+  // evidence silently treated as compatible" blind spot) — here for the
+  // issue axis, unconditionally, on every target, not gated by collision
+  // risk (an unresolved issue is unresolved regardless of publisher/era).
+  let comparabilityStatus = null;
+  if (target.issue == null || String(target.issue).length === 0) {
+    rejectionCodes.push('TARGET_ISSUE_UNRESOLVED');
+    identityEligible = false;
+    comparabilityStatus = 'SIMILAR_TITLE_REFERENCE';
+  } else if (!hasIssueNumber(title, target.issue, target.seriesTitle || null)) {
     rejectionCodes.push('WRONG_ISSUE');
     identityEligible = false;
   }
@@ -212,12 +272,22 @@ export const classifyEvidenceRow = (row, target = {}) => {
   let unconfirmedEdition = false;
 
   if (target.confirmedYear != null) {
-    const rowYear = row.year != null
-      ? parseInt(row.year, 10)
-      : (() => {
-          const y = extractYearFromTitle(title);
-          return y ? parseInt(y, 10) : null;
-        })();
+    // Commit C.2 — a structured row.year field (e.g. from PriceCharting
+    // sold data) is already a clean single year, never a range/series-
+    // start text string, so it's trusted directly. Title-text extraction
+    // goes through classifyYearEvidence first: only an
+    // ISSUE_PUBLICATION_YEAR classification may supply rowYear for the
+    // exact-match check below — SERIES_START_YEAR/SERIES_RANGE/
+    // SELLER_CONTEXT_UNKNOWN all fall through as "no year evidence."
+    let rowYear = null;
+    if (row.year != null) {
+      rowYear = parseInt(row.year, 10);
+    } else {
+      const yearEvidence = classifyYearEvidence(title);
+      if (yearEvidence.class === 'ISSUE_PUBLICATION_YEAR' && yearEvidence.year) {
+        rowYear = parseInt(yearEvidence.year, 10);
+      }
+    }
     if (rowYear != null && Number.isFinite(rowYear)) {
       const tolerance = getEraYearTolerance(target.confirmedYear);
       const yearEval = evaluateEraYearMatch(rowYear, target.confirmedYear, tolerance, target.cvVolumeStartYear ?? null);
@@ -359,6 +429,11 @@ export const classifyEvidenceRow = (row, target = {}) => {
     floorEligible,
     referenceOnly,
     rejectionCodes,
+    // Commit A.4 — null except for the TARGET_ISSUE_UNRESOLVED case, where
+    // it's always 'SIMILAR_TITLE_REFERENCE': this row is a plausible
+    // same-title reference, never mislabeled as "incompatible" (it made no
+    // false claim — OUR side's identity is what's unresolved).
+    comparabilityStatus,
   };
 };
 
@@ -399,6 +474,7 @@ export const buildEvidencePopulations = (rows, target = {}) => {
     incompleteReferences: [],
     incompatibleEditionReferences: [],
     unconfirmedEditionReferences: [],
+    similarTitleReferences: [],
     rejectedEvidence: [],
     // Commit D1.1 — bounded (fixed code enum, one increment per row) count
     // of every rejection code actually fired across the pool, so a live
@@ -423,6 +499,12 @@ export const buildEvidencePopulations = (rows, target = {}) => {
       populations.gradedPricingReferences.push(sanitized);
     } else if (codes.includes('INCOMPLETE_COPY') || codes.includes('COVERLESS_COPY') || codes.includes('RESTORED_COPY')) {
       populations.incompleteReferences.push(sanitized);
+    } else if (codes.includes('TARGET_ISSUE_UNRESOLVED')) {
+      // Commit A.4 — a dedicated bucket, deliberately separate from
+      // incompatibleEditionReferences: this row made no false claim, OUR
+      // side's identity is what's unresolved. Display label: "Similar-
+      // title references — target issue unresolved" (Commit B.3).
+      populations.similarTitleReferences.push({ ...sanitized, comparabilityStatus: classification.comparabilityStatus });
     } else if (
       codes.includes('WRONG_ISSUE') || codes.includes('WRONG_YEAR') ||
       codes.includes('WRONG_PRINTING') || codes.includes('WRONG_VARIANT') ||
@@ -617,6 +699,41 @@ export const assessGradeBasis = ({ isGraded, grade, numericGrade, imagesCount } 
   if (!grade) return 'UNKNOWN';
   if (imagesCount != null && imagesCount > 1) return 'MULTI_PHOTO_ASSESSED';
   return 'SINGLE_PHOTO_PROVISIONAL';
+};
+
+// Commit C.3 (Strange Tales dispatch, 2026-07-28) — reference/catalog-
+// image detection. No mechanism anywhere in this codebase currently flags
+// a listing photo as a reused catalog/reference/stock image rather than a
+// genuine seller photo of their own copy (confirmed by direct source
+// search before writing this — zero hits for "stock image"/"reference
+// image"/"GPAnalysis"/etc. as a detection signal anywhere; "stock image"
+// only appears as marketplace-boilerplate text stripped during title
+// cleanup, src/lib/titleHygiene.js). This codebase has no image-pixel
+// analysis available at all — Vision only ever returns text descriptions,
+// never a structured "is this a stock photo" signal — so this is
+// necessarily a title/description TEXT heuristic, not true image
+// forensics. Deliberately conservative: only fires on explicit seller
+// language admitting the photo isn't of their actual item ("stock photo,"
+// "for reference only," "actual item may vary," etc.), never inferred
+// from image content itself, which this codebase cannot see.
+//
+// A detected reference image can still legitimately corroborate WHICH
+// book this is (identityPhotoEligible stays true — the cover art itself
+// is genuine even if the specific photo is reused) but must not be
+// trusted for anything about THIS SPECIFIC COPY: its condition, its
+// completeness, whether the seller's hands are actually on it, or its
+// individual grade.
+const REFERENCE_IMAGE_RE =
+  /\bstock\s*photo\b|\bstock\s*image\b|\breference\s*photo\b|\breference\s*image\b|\bfor\s*reference\s*only\b|\bnot\s*(?:the\s*)?actual\s*item\b|\bphoto\s*not\s*of\s*(?:the\s*)?actual\b|\bgeneric\s*image\b|\bactual\s*item\s*may\s*vary\b|\bcover\s*image\s*only\b|\bsample\s*image\b|\bgrading\s*reference\b/i;
+
+export const assessPhotoAuthority = (title) => {
+  const isReferenceImage = REFERENCE_IMAGE_RE.test(String(title || ''));
+  return {
+    identityPhotoEligible: true,
+    conditionPhotoEligible: !isReferenceImage,
+    listingPhotoEligible: !isReferenceImage,
+    ownershipEvidence: !isReferenceImage,
+  };
 };
 
 export { STANDARD_REJECTION_CODES };

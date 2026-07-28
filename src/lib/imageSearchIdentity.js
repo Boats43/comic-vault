@@ -24,7 +24,7 @@
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
 import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate } from './identityCore.js';
-import { ARTIST_PATTERNS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms } from './compHygiene.js';
+import { ARTIST_PATTERNS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms, NON_GENUINE_COPY_RE } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
 //
@@ -913,7 +913,15 @@ export const buildTitleFamilies = (itemsOrTitles) => {
       : (item?.rawTitle || item?.title || '');
     const tokens = tokenizeTitleFamily(title);
     return { idx, title, tokens };
-  }).filter(e => e.tokens.length > 0);
+  }).filter(e => e.tokens.length > 0)
+    // Commit C.1 (Strange Tales dispatch) — a photocopy/USB/digital-
+    // archive/scan-disc listing must never enter identity clustering at
+    // all (rank weighting, title-family membership, Jaccard similarity) —
+    // it's not a genuine physical copy of any printing, and has no
+    // business voting on what book this is. Excluded here, before Jaccard
+    // clustering runs, not merely token-stripped (which would still let
+    // it join a family on its surviving series-name tokens).
+    .filter(e => !NON_GENUINE_COPY_RE.test(e.title));
 
   if (entries.length === 0) return [];
 

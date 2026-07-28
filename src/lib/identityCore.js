@@ -15,7 +15,7 @@
  * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
 
-import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms } from './compHygiene.js';
+import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE } from './compHygiene.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
 // source of truth for "publisher name is legitimately PART of the series
@@ -968,6 +968,13 @@ export const resolveFamilyIssueConsensus = (priorIssue, visualItems, indices) =>
     const item = visualItems?.[idx];
     const raw = String(typeof item === 'string' ? item : (item?.rawTitle || item?.title || '')).trim();
     if (!raw) continue;
+    // Commit C.1 (Strange Tales dispatch) — a photocopy/USB/digital-
+    // archive/scan-disc row must never count toward uniqueRows (the Q140
+    // denominator) or cast an issue-candidate vote — same reasoning as
+    // buildTitleFamilies' identical exclusion (imageSearchIdentity.js):
+    // it's not a genuine physical copy of anything, and has no standing
+    // to vote on what issue this family agrees on.
+    if (NON_GENUINE_COPY_RE.test(raw)) continue;
     // Dedup key preference: itemId -> legacyItemId -> normalized
     // itemWebUrl -> rawTitle text. See doc comment above.
     let dedupKey;
@@ -1060,6 +1067,54 @@ export const resolveFamilyIssueConsensus = (priorIssue, visualItems, indices) =>
     return { issue: winner, mode: 'adopted', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
   }
   return { issue: null, mode: 'no-consensus', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+};
+
+/**
+ * Commit A.1/A.3 (Strange Tales dispatch, 2026-07-28) — terminal
+ * query-issue authority. Same single-writer philosophy as
+ * detectVisualIssueDivergence just below (Q140), applied one step
+ * earlier: a market-request query's own embedded "#N" text must agree
+ * with confirmedIssue, or the request must not fire with an issue term
+ * at all.
+ *
+ * Root cause this closes: `imageSearchTitle` (api/enrich.js) defaults to
+ * a raw, PRE-identity-resolution eBay pool title
+ * (`visualResult?.items?.[0]?.rawTitle`) that can read "Strange Tales #1
+ * ..." regardless of what identity resolution later concludes. It's only
+ * rebuilt/nulled inside three specific branches (family-candidate
+ * accepted, fallback-vision, variant-scan) — there was no unconditional,
+ * terminal check that re-syncs it to the FINAL confirmedIssue once
+ * resolveIdentity has actually run, so a genuinely-unresolved
+ * (confirmedIssue === null) scan could still fire a comps search
+ * attempt embedding a stale "#1" from Vision's original, since-
+ * superseded guess. This is called ONCE, at the actual query-construction
+ * call site, immediately before fetchComps — not inside any of those
+ * three upstream branches — so it can't be bypassed by a fourth branch
+ * this dispatch didn't anticipate.
+ *
+ * Handles both directions: confirmedIssue null -> any embedded issue
+ * term is stripped (the request fires with no issue term at all, per
+ * item 3's exact wording); confirmedIssue present -> an embedded term
+ * that DISAGREES is stripped too (defensive — catches any future class
+ * of drift between the query text and the authoritative confirmedIssue,
+ * not just the null case this dispatch was filed for). A query with no
+ * embedded issue term at all, or one that already agrees, passes through
+ * unchanged.
+ *
+ * @param {string|null} candidateQueryText
+ * @param {string|number|null} confirmedIssue
+ * @returns {string|null}
+ */
+export const enforceQueryIssueAuthority = (candidateQueryText, confirmedIssue) => {
+  if (!candidateQueryText) return candidateQueryText;
+  const m = String(candidateQueryText).match(/#\s*(\d+)/);
+  if (confirmedIssue == null) {
+    return m ? null : candidateQueryText;
+  }
+  if (m && m[1] !== String(confirmedIssue)) {
+    return null;
+  }
+  return candidateQueryText;
 };
 
 /**

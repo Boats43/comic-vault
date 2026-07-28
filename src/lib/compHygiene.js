@@ -1262,6 +1262,27 @@ export const cleanPublisher = (p) => {
 // rejects genuinely-legitimate vintage/back-issue comps. Blanket-
 // tightening was considered and deliberately rejected in favor of the
 // corroboration check below.
+// Strange Tales dispatch (Commit C.1, 2026-07-28) — non-genuine-copy
+// detector. REPRINT_RE already catches "reproduction" but has zero
+// awareness of photocopy/USB/digital-archive/scan-disc listings — a real
+// production title, "Strange Tales #7 Photocopy Comic Book," sailed
+// through identity clustering (buildTitleFamilies/tokenizeTitleFamily,
+// imageSearchIdentity.js; resolveFamilyIssueConsensus's Q140 denominator,
+// identityCore.js) with ZERO reprint/reproduction awareness at all — those
+// two functions never referenced REPRINT_RE, unlike the comp-pricing
+// filter chains which do. This is a HARD row-exclusion for identity
+// clustering specifically (rank weighting, title family, issue/year/
+// publisher voting, the Q140 denominator) — a photocopy/digital-scan
+// listing must never count as a "unique row" casting a vote for what book
+// this is, the same way a lot/bundle listing never should. Deliberately a
+// separate, narrower regex from REPRINT_RE rather than folding into it —
+// REPRINT_RE is heavily tuned and tested across comp-pricing filter chains
+// already (100+ existing tests); this only needs the specific "not even a
+// genuine physical printed copy" vocabulary REPRINT_RE was never built to
+// cover, applied at a new choke point REPRINT_RE has never touched.
+export const NON_GENUINE_COPY_RE =
+  /\bphotocop(?:y|ied|ies)\b|\breproduction\b|\bUSB\b|\bdigital\s*archive\b|\bscan\s*disc\b/i;
+
 export const getEraYearTolerance = (year) => {
   const y = parseInt(year, 10);
   if (!Number.isFinite(y)) return 3;

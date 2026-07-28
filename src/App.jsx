@@ -108,8 +108,14 @@ const fmtSaleWhen = (iso, daysAgo) => {
       }
     }
   }
-  if (daysAgo === 1) return "yesterday";
-  if (daysAgo != null) return `${daysAgo} days ago`;
+  // Commit D.4 (Strange Tales dispatch) — clamp: a stale cached fetchedAt
+  // or a clock skew can otherwise produce a negative daysAgo, rendering
+  // literally as "-1 days ago". Never display negative recency. Preserves
+  // every prior non-negative behavior unchanged (no new "today" case
+  // added — scoped strictly to the clamp).
+  const clampedDaysAgo = daysAgo != null ? Math.max(0, daysAgo) : daysAgo;
+  if (clampedDaysAgo === 1) return "yesterday";
+  if (clampedDaysAgo != null) return `${clampedDaysAgo} days ago`;
   if (iso) {
     const d = new Date(iso);
     if (!isNaN(d.getTime())) {
@@ -455,7 +461,23 @@ const getListingReadiness = (item) => {
       required: true
     },
     marketEvidence: {
-      status: soldComps.length > 0 || activeCount > 0 ? 'pass' :
+      // Commit B.2 (Strange Tales dispatch) — must reflect ZERO exact
+      // evidence, not just raw comp-pool population. A pool population
+      // from an unrelated/misidentified search (e.g. a null-confirmedIssue
+      // scan whose active pool matched on title alone) used to still show
+      // "pass" here — the checkmark could stay satisfied even when the
+      // underlying identity was genuinely unresolved. item.marketEvidenceReady
+      // (out.marketEvidenceReady, api/enrich.js) is the authoritative
+      // field, already zeroed whenever confirmedIssue is null (Commit A.2
+      // forces rawPricingPool=[] for every row in that case, which is
+      // exactly what marketEvidenceReady counts). Falls back to the prior
+      // raw-population check only for items scanned before this field
+      // existed (item.marketEvidenceReady === undefined, not false) —
+      // backward compatibility for already-cached catalogue entries, not a
+      // loophole for new scans.
+      status: item.marketEvidenceReady === false ? 'fail' :
+              item.marketEvidenceReady === true ? 'pass' :
+              soldComps.length > 0 || activeCount > 0 ? 'pass' :
               item.pricingSource === 'pricecharting' ? 'caution' :
               'fail',
       label: 'Market evidence',
@@ -1061,6 +1083,10 @@ const showKeyIssue = (k) => {
 // When reprint/polybag detected, prepend "Reprint of" to key issue label.
 // Prevents misleading users that a modern reprint is an original first appearance.
 const displayKeyIssue = (item) => {
+  // Commit D.3 (Strange Tales dispatch) — same suppression as the
+  // catalogue-row KEY pill: a specific bibliographic claim requires a
+  // confirmed issue number underneath it.
+  if (item.issue == null) return null;
   if (!showKeyIssue(item.keyIssue)) return null;
 
   const isReprint = item.editionWarning?.detected === true || item.polybagDetected === true;
@@ -1834,7 +1860,9 @@ function ResultCard({ result, enriching }) {
                     Last Sold
                     {(() => {
                       const newest = result.soldComps[0]?.daysAgo;
-                      const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
+                      // Commit D.4 (Strange Tales dispatch) — clamped, never negative
+                      const clampedNewest = newest == null ? null : Math.max(0, newest);
+                      const recencyStr = clampedNewest == null ? null : clampedNewest === 0 ? "today" : clampedNewest === 1 ? "1d ago" : `${clampedNewest}d ago`;
                       const diag = result.soldCompDiagnostics;
                       const hasRejected = diag && Array.isArray(diag.rejectedSamples) && diag.rejectedSamples.length > 0;
                       const vCount = result.contract?.verifiedCount ?? diag?.verifiedCount ?? 0;
@@ -1875,7 +1903,8 @@ function ResultCard({ result, enriching }) {
                       <div>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <span className="muted small">
-                            {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
+                            {/* Commit D.4 (Strange Tales dispatch) — clamped, never negative */}
+                            {s.daysAgo != null ? (Math.max(0, s.daysAgo) === 0 ? "today" : Math.max(0, s.daysAgo) === 1 ? "yesterday" : `${Math.max(0, s.daysAgo)} days ago`) : s.date || "—"}
                             {s.marketplace && (
                               <span style={mpStyle(s.marketplace)}>
                                 {s.marketplace === "heritage" ? "HRT" : "eBay"}
@@ -3383,7 +3412,13 @@ function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onD
                       🔁 IN TRADE
                     </span>
                   )}
-                  {showKeyIssue(item.keyIssue) && <span className="pill pill-key">KEY</span>}
+                  {/* Commit D.3 (Strange Tales dispatch) — a key-issue badge
+                      claims specific bibliographic significance ("1st
+                      appearance," "death of...") that only makes sense once
+                      WHICH issue this is has actually been confirmed.
+                      Suppressed (not just relabeled) whenever the issue
+                      number itself is unresolved. */}
+                  {item.issue != null && showKeyIssue(item.keyIssue) && <span className="pill pill-key">KEY</span>}
                   {item.manualReviewRequired && (
                     <span
                       className="pill pill-manual-review"
@@ -4385,7 +4420,9 @@ function CollectionDetail({
                     Last Sold
                     {(() => {
                       const newest = item.soldComps[0]?.daysAgo;
-                      const recencyStr = newest == null ? null : newest === 0 ? "today" : newest === 1 ? "1d ago" : `${newest}d ago`;
+                      // Commit D.4 (Strange Tales dispatch) — clamped, never negative
+                      const clampedNewest = newest == null ? null : Math.max(0, newest);
+                      const recencyStr = clampedNewest == null ? null : clampedNewest === 0 ? "today" : clampedNewest === 1 ? "1d ago" : `${clampedNewest}d ago`;
                       const diag = item.soldCompDiagnostics;
                       const hasRejected = diag && diag.rejectedCount > 0;
                       const vCount = item.contract?.verifiedCount ?? diag?.verifiedCount ?? 0;
@@ -4426,7 +4463,8 @@ function CollectionDetail({
                       <div>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <span className="muted small">
-                            {s.daysAgo != null ? (s.daysAgo === 0 ? "today" : s.daysAgo === 1 ? "yesterday" : `${s.daysAgo} days ago`) : s.date || "—"}
+                            {/* Commit D.4 (Strange Tales dispatch) — clamped, never negative */}
+                            {s.daysAgo != null ? (Math.max(0, s.daysAgo) === 0 ? "today" : Math.max(0, s.daysAgo) === 1 ? "yesterday" : `${Math.max(0, s.daysAgo)} days ago`) : s.date || "—"}
                             {s.marketplace && (
                               <span style={mpStyle(s.marketplace)}>
                                 {s.marketplace === "heritage" ? "HRT" : "eBay"}
@@ -6107,7 +6145,8 @@ function CollectionDetail({
                       <div style={{ color: '#888', marginTop: 6 }}>
                         Sold avg: <span style={{ color: '#22c55e' }}>${item.soldCompsAvg.toFixed(2)}</span>{' '}
                         <span style={{ fontSize: 10, opacity: 0.7 }}>
-                          ({item.soldCompDiagnostics?.verifiedCount || 0} verified, {item.soldComps?.[0]?.daysAgo || '?'}d recency)
+                          {/* Commit D.4 (Strange Tales dispatch) — clamped, never negative */}
+                          ({item.soldCompDiagnostics?.verifiedCount || 0} verified, {item.soldComps?.[0]?.daysAgo != null ? Math.max(0, item.soldComps[0].daysAgo) : '?'}d recency)
                         </span>
                       </div>
                     )}
@@ -6861,6 +6900,52 @@ function CollectionDetail({
                 </div>
               </div>
             )}
+
+            {/* Commit B.3 (Strange Tales dispatch) — "Similar-title
+                references — target issue unresolved." Renamed/separated
+                from any "verified comp"/active-average/floor language:
+                these rows made no false claim (Commit A.2/A.4 —
+                TARGET_ISSUE_UNRESOLVED, comparabilityStatus:
+                'SIMILAR_TITLE_REFERENCE'), they simply can't be priced
+                against because OUR side's issue identity is unresolved.
+                Never rendered alongside PRICE BANDS (item.priceBands is
+                null whenever this fires — same refused-price mechanism as
+                the catalog-ladder-reference block above). */}
+            {(() => {
+              const similarActive = item.activeEvidence?.similarTitleReferences || [];
+              const similarSold = item.soldEvidence?.similarTitleReferences || [];
+              const similarAll = [...similarActive, ...similarSold];
+              if (similarAll.length === 0) return null;
+              return (
+                <div style={{
+                  marginTop: 10, marginBottom: 12, padding: "12px 14px",
+                  border: "1px solid #388bfd", borderRadius: 8,
+                  background: "rgba(56,139,253,0.08)", color: "#a5d6ff",
+                  fontSize: 13, lineHeight: 1.45,
+                }}>
+                  <div style={{ fontWeight: 700, marginBottom: 4, color: "#388bfd" }}>
+                    📋 Similar-title references — target issue unresolved
+                  </div>
+                  <div style={{ fontSize: 12, marginBottom: 6 }}>
+                    The specific issue number could not be confirmed for this book.
+                    These {similarAll.length} listing{similarAll.length === 1 ? '' : 's'} share
+                    the title but are not verified comps — no active average, floor,
+                    exact range, or price bands are derived from them.
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 160, overflowY: "auto" }}>
+                    {similarAll.slice(0, 10).map((r, i) => (
+                      <div key={i} style={{ fontSize: 11, opacity: 0.85, display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</span>
+                        {r.price != null && <span style={{ flexShrink: 0 }}>${r.price}</span>}
+                      </div>
+                    ))}
+                    {similarAll.length > 10 && (
+                      <div style={{ fontSize: 11, opacity: 0.6 }}>+ {similarAll.length - 10} more</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Ship #21 — Decision Path UI */}
             {item.claudeCheck && item.claudeCheck.recommendation && (
