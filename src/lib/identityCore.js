@@ -514,6 +514,62 @@ export const titleOverlapsProduct = (confirmedTitle, productName, threshold = 0.
 };
 
 /**
+ * Q141-A — canonical catalog-title projection from a trusted anchor's own
+ * product name (e.g. PriceCharting's `productName`, "Batman #15 (1943)").
+ *
+ * Field-level, not a full-label copy: strips only the trailing issue-number
+ * and/or parenthetical-year tokens a catalog anchor name conventionally
+ * carries, keeping everything else verbatim as the canonical series/special
+ * title — no stopword list, no length heuristic. Works identically for a
+ * base ongoing series ("Batman #15 (1943)" -> "Batman") and a one-shot/
+ * special whose own official title has no issue number at all
+ * ("Adventure Time: The Bubbline College Special (2025)" -> "Adventure
+ * Time: The Bubbline College Special") — the anchor's name IS the catalog
+ * title in both cases; this only removes the two structural suffix tokens
+ * every anchor name appends around it.
+ *
+ * Deliberately does NOT touch confirmedIssue/confirmedYear — by the time an
+ * anchor is queried it was already looked up WITH the resolved issue/year,
+ * so those fields are anchor-consistent by construction; only confirmedTitle
+ * itself was vulnerable to absorbing extra assembled text (cover/edition
+ * descriptors like "machine gun cover" from title-family clustering) that
+ * the anchor's own name never carried.
+ *
+ * @param {string} anchorProductName - trusted anchor's own product/volume name
+ * @returns {string|null} canonical title, or null if nothing usable remains
+ */
+export const projectCanonicalTitleFromAnchor = (anchorProductName) => {
+  let t = String(anchorProductName || '').trim();
+  if (!t) return null;
+  t = t.replace(/\(\d{4}\)\s*$/, '').trim();       // trailing "(YYYY)"
+  t = t.replace(/#\s*[\w.]+\s*$/, '').trim();       // trailing "#N" / "#N.N" / "#NA"
+  return t || null;
+};
+
+/**
+ * Q141-A — diagnostic-only companion to projectCanonicalTitleFromAnchor:
+ * whatever extra text an assembled (family-clustering / vision) title
+ * contributed beyond the projected canonical title. Never fed back into
+ * confirmedTitle or pricing — informational only (I13: annotate, don't
+ * drop), a home for cover/edition descriptor words a future variant-
+ * detection pass can consume without them ever having been allowed to
+ * pollute the canonical title itself.
+ *
+ * @param {string} assembledTitle - the pre-projection title (e.g. family-cluster string)
+ * @param {string} canonicalTitle - the post-projection canonical title
+ * @returns {string|null} extra tokens present in assembledTitle but not canonicalTitle, or null if none
+ */
+export const diffEditionDescriptorCandidate = (assembledTitle, canonicalTitle) => {
+  const assembled = String(assembledTitle || '').toLowerCase();
+  const canonical = String(canonicalTitle || '').toLowerCase();
+  if (!assembled) return null;
+  const canonicalTokens = new Set(canonical.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean));
+  const extra = assembled.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+    .filter((t) => t.length > 1 && !canonicalTokens.has(t));
+  return extra.length > 0 ? extra.join(' ') : null;
+};
+
+/**
  * Q-PC-VARIANT-SCORE — how many of confirmedVariant's tokens appear in a
  * PriceCharting product name (its bracket descriptor or elsewhere)?
  *

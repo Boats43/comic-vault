@@ -334,7 +334,18 @@ export const ARTIST_PATTERNS = [
 // items reach extractConfirmedVariant's consensus computation). A v7 HIT
 // would replay a pre-fix cached comp pool and be inconclusive per
 // invariant 9 — this bump forces a genuine ac:v8 MISS on the next scan.
-export const COMP_FILTER_VERSION = 8;
+// v9 = Commit A (2026-07-28, Batman #15 CGC-machine-gun-title class) —
+// api/enrich.js now projects confirmedTitle from an accepted PC anchor's
+// own clean product name (projectCanonicalTitleFromAnchor, identityCore.js)
+// instead of leaving it as whatever title-family clustering assembled. The
+// active-comps cache key (`ac:v${COMP_FILTER_VERSION}:${confirmedTitle}|...`)
+// is keyed on this exact string — a pre-v9 entry keyed on the OLD polluted
+// title ("batman machine gun|15") is naturally orphaned by the new key
+// ("Batman|15") for any PC-anchor-matched book scanned again, but the
+// version bump is still applied per this codebase's standing invariant 9
+// (fresh-MISS before any cache-dependent verdict) rather than relying on
+// the key-string difference alone to guarantee it in every case.
+export const COMP_FILTER_VERSION = 9;
 
 // Q132 dispatch (2026-07-20) — single source of truth for "the title-family
 // override actually succeeded" (as opposed to 'fallback-vision', returned

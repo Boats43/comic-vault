@@ -40,6 +40,8 @@ import {
   deriveCvYear,
   checkAssemblyIntegrity,
   titleOverlapsProduct,
+  projectCanonicalTitleFromAnchor,
+  diffEditionDescriptorCandidate,
   selectBestVariantCandidate,
   buildIdentityRefusedFallbackPool,
   shouldSkipAssemblyIntegrityCheck,
@@ -3987,6 +3989,44 @@ export default async function handler(req, res) {
             out.variantPoolYearConflict.originalConfirmedYear = out.variantPoolYearConflict.confirmedYear;
             out.variantPoolYearConflict.confirmedYear = correctedYear;
           }
+        }
+      }
+    }
+
+    // Q141-A — canonical catalog-title projection. priceCharting surviving
+    // to this point means it passed BOTH gates: titleOverlapsProduct
+    // (~line 3422, the initial title-overlap accept) and pc-anchor-gate
+    // immediately above (year/name/discriminator conflict checks) — the
+    // "exact trusted anchor" condition. Below this point, confirmedTitle
+    // is projected from the anchor's own clean product name rather than
+    // whatever title-family clustering assembled, which can carry cover/
+    // edition descriptor text the anchor's own name never had (Batman #15
+    // production case: family clustering assembled "batman machine gun",
+    // while the accepted PC anchor's own name was plain "Batman #15
+    // (1943)" — every downstream consumer below this line, from here on,
+    // used the polluted string instead of the anchor's clean one).
+    //
+    // Scope, explicit: only fires from an ACCEPTED PC anchor — no
+    // ComicVine-anchor equivalent yet (no real production case has
+    // motivated one; deferred rather than built speculatively, matching
+    // this codebase's standing "don't fix without a real signal"
+    // discipline). When no PC anchor is accepted, confirmedTitle is
+    // untouched — whatever the pre-existing resolution chain (title-family
+    // consensus, vision, etc.) already produced stays authoritative,
+    // unchanged from before this commit.
+    if (priceCharting?.productName) {
+      const canonicalTitle = projectCanonicalTitleFromAnchor(priceCharting.productName);
+      if (canonicalTitle && canonicalTitle !== confirmedTitle) {
+        const editionDescriptorCandidate = diffEditionDescriptorCandidate(confirmedTitle, canonicalTitle);
+        console.log(
+          `[q141-a] canonical projection: confirmedTitle "${confirmedTitle}" -> "${canonicalTitle}" ` +
+          `(anchor="${priceCharting.productName}")` +
+          (editionDescriptorCandidate ? ` editionDescriptorCandidate="${editionDescriptorCandidate}"` : '')
+        );
+        confirmedTitle = canonicalTitle;
+        out.confirmedTitle = canonicalTitle;
+        if (editionDescriptorCandidate) {
+          out.editionDescriptorCandidate = editionDescriptorCandidate;
         }
       }
     }
