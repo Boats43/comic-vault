@@ -658,6 +658,127 @@ export const calculateTitleOverlap = (a, b) => {
   return matches.length / Math.max(aTokens.length, 1);
 };
 
+// Ship #24 Q12c — Marketing-copy discriminator, moved here from
+// imageSearchIdentity.js so extractIssueCandidate's single implementation
+// owns it directly rather than importing back into the module that used
+// to define it (identityCore.js has no import of imageSearchIdentity.js —
+// keeping the constant here avoids introducing that cycle). Excludes "#1"
+// when it appears near marketing keywords (Anniversary Issue #1, Special
+// Issue #1, etc.) — unchanged behavior from the original.
+export const MARKETING_KEYWORDS_RE = /\b(anniversary|special|collector|limited|exclusive|variant)\b/i;
+
+/**
+ * Commit B (2026-07-28) — shared issue-number extractor. Single
+ * implementation for both the raw-pool tally (imageSearchIdentity.js's
+ * extractIssueFromTitle, which now delegates here) and the family-scoped
+ * consensus vote (resolveFamilyIssueConsensus below) — closes the
+ * long-queued "Defect B: parser unification" item from the Adventure Time
+ * investigation. Patching Q140's own inline regex in isolation would have
+ * recreated the exact divergence Defect B named: two independently-evolved
+ * extractors, each missing a guard or a signal the other had. Neither
+ * previous implementation supported a bare (no "#") issue number at all —
+ * confirmed via the real Batman #15 production pool, where 2 of the
+ * winning family's 3 members write the issue as bare "Batman 15" (no "#"),
+ * so resolveFamilyIssueConsensus's old #-only regex only ever counted 1/3
+ * (`[q140] ... ratio=0.33 ... mode=no-consensus`) when all three genuinely
+ * name issue 15.
+ *
+ * Two extraction paths, evaluated in order:
+ *  - hash-prefixed "#N" (1-4 digits, capped at 999): always a candidate.
+ *    The existing Q12c guard (suspect "#1" near a marketing keyword) is
+ *    preserved verbatim.
+ *  - bare number, no "#": only a candidate when ALL of the following hold
+ *    (this is the literal "Adoption" gate the caller applies when no prior
+ *    issue exists — this function supplies the per-row candidate either
+ *    way; the corroboration/adoption *consensus* decision itself stays in
+ *    the caller, e.g. resolveFamilyIssueConsensus's existing >=3-row/
+ *    >=60%/clear-lead bar):
+ *      - title-adjacent: a real word (3+ letters) sits within 20 chars
+ *        immediately before the number — a proxy for "this number sits
+ *        inside actual title text," not an isolated digit token.
+ *      - not a 4-digit year (1900-2099).
+ *      - not decimal-grade syntax — not immediately preceded or followed
+ *        by a "." (excludes "4.5", "0.5" grade fragments).
+ *      - not immediately following a CGC/CBCS/PGX grading-service token
+ *        within the preceding ~15 chars.
+ *      - not lot/quantity/page/volume syntax — no lot/set/bundle/volume/
+ *        vol/qty/quantity/page/pg/book/issue/comic vocabulary within the
+ *        surrounding ~20 chars on either side ("Lot of 15 comics", "Vol 15",
+ *        "15 books", "pg 15").
+ *
+ * Pure function, no console/log side effects — callers decide what to log.
+ *
+ * @param {string} title
+ * @returns {{issue: string, matchType: 'hash'|'bare'}|null}
+ */
+const ISSUE_CANDIDATE_YEAR_RE = /^(19|20)\d{2}$/;
+const ISSUE_CANDIDATE_GRADING_RE = /\b(cgc|cbcs|pgx)\b/i;
+// Directional and anchored, not a wide unanchored window: "lot of 15",
+// "vol 15" precede the number; "15 comics", "15 books", "3 issues", "pg 15"
+// follow it (or precede for "pg"/"pgs"). An earlier unanchored version of
+// this check falsely rejected "D.C. Comics Batman 15" — "Comics" (the
+// publisher name) sitting anywhere in a wide before-window matched
+// "comics?" even though it has nothing to do with a quantity phrase next
+// to the number. Anchoring to immediately-before/-after closes that.
+const ISSUE_CANDIDATE_LOT_BEFORE_RE = /\b(lot|set|bundle|volume|vol\.?|qty|quantity|pg\.?|pgs?)\s*(of\s+)?$/i;
+const ISSUE_CANDIDATE_LOT_AFTER_RE = /^\s*(comics?|books?|issues?|pages?|pgs?|pg\.?)\b/i;
+const ISSUE_CANDIDATE_WORD_NEARBY_RE = /[a-z]{3,}/i;
+
+export const extractIssueCandidate = (title) => {
+  const titleStr = String(title || '');
+  if (!titleStr) return null;
+
+  // Trailing (?!\d), not \b: a lettered sub-issue ("#5C", "#1B") has no
+  // word-boundary between the digit and the following letter (both are
+  // \w), so a \b-anchored regex silently fails to match at all — a real
+  // divergence the two pre-Commit-B implementations had (imageSearchIdentity
+  // used (?!\d) and handled "#5C" correctly; identityCore's own inline
+  // regex used \b and did not) — unified onto the correct behavior.
+  const hashMatch = titleStr.match(/#\s*(\d{1,4})(?!\d)/);
+  if (hashMatch && parseInt(hashMatch[1], 10) <= 999) {
+    const issueNum = hashMatch[1];
+    if (issueNum === '1') {
+      const idx = hashMatch.index;
+      const window = titleStr.slice(Math.max(0, idx - 30), idx) + titleStr.slice(idx, idx + 30);
+      if (MARKETING_KEYWORDS_RE.test(window)) return null;
+    }
+    return { issue: issueNum, matchType: 'hash' };
+  }
+
+  const bareMatches = [...titleStr.matchAll(/\b(\d{1,4})(?!\d)/g)];
+  for (const bm of bareMatches) {
+    const numStr = bm[1];
+    const idx = bm.index;
+    const n = parseInt(numStr, 10);
+    if (n === 0 || n > 999) continue;
+    if (ISSUE_CANDIDATE_YEAR_RE.test(numStr)) continue;
+
+    const charBefore = titleStr[idx - 1];
+    const charAfter = titleStr[idx + numStr.length];
+    if (charBefore === '.' || charAfter === '.') continue; // decimal-grade syntax
+
+    const before = titleStr.slice(Math.max(0, idx - 20), idx);
+    const after = titleStr.slice(idx + numStr.length, idx + numStr.length + 20);
+    const gradingWindow = titleStr.slice(Math.max(0, idx - 15), idx);
+
+    // Dimension syntax ("2X3", "11x17", "16x24 inch") — the leading number
+    // of a WxH product-size pair is not an issue number. Found via a real
+    // Flash #139 pool title, "FLASH COMIC BOOK COVER *2X3 FRIDGE MAGNET*":
+    // "2" cleared every other guard (title-adjacent to "FLASH", not a year,
+    // not decimal, not CGC/lot) and was wrongly adopted. Checks both
+    // directions ("2x3" and "3x2" read from the trailing side).
+    if (/^\s*[x×]\s*\d/i.test(after) || /\d\s*[x×]\s*$/i.test(before)) continue;
+
+    if (ISSUE_CANDIDATE_GRADING_RE.test(gradingWindow)) continue;
+    if (ISSUE_CANDIDATE_LOT_BEFORE_RE.test(before) || ISSUE_CANDIDATE_LOT_AFTER_RE.test(after)) continue;
+    if (!ISSUE_CANDIDATE_WORD_NEARBY_RE.test(before)) continue; // title-adjacent
+
+    return { issue: numStr, matchType: 'bare' };
+  }
+
+  return null;
+};
+
 /**
  * Q140 corrective dispatch (2026-07-23, Flash #139/#128, Adventure Time,
  * Immortal Hulk #44, Wonder Woman #1 class) — issue-consensus contract.
@@ -776,8 +897,14 @@ export const resolveFamilyIssueConsensus = (priorIssue, visualItems, indices) =>
     if (seenKeys.has(dedupKey)) continue; // same listing (or identical text) — not a second "row"
     seenKeys.add(dedupKey);
     uniqueRows += 1;
-    const m = raw.match(/#\s*(\d{1,4})\b/);
-    if (m) counts[m[1]] = (counts[m[1]] || 0) + 1;
+    // Commit B — shared extractor (extractIssueCandidate), no longer this
+    // function's own inline #-only regex. Now also counts a bare (no "#")
+    // issue-adjacent number when it clears the guard list (not a year, not
+    // decimal-grade syntax, not a grading-service token, not lot/volume/
+    // page vocabulary) — the real gap this dispatch closes (Batman #15:
+    // 2 of 3 winning-family rows write the issue as bare "Batman 15").
+    const candidate = extractIssueCandidate(raw);
+    if (candidate) counts[candidate.issue] = (counts[candidate.issue] || 0) + 1;
   }
 
   if (uniqueRows === 0) {

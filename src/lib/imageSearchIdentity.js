@@ -23,7 +23,7 @@
 // Function count stays at 12/12.
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
-import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST } from './identityCore.js';
+import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate } from './identityCore.js';
 import { ARTIST_PATTERNS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
@@ -281,39 +281,21 @@ export const extractVariantTokens = (title) => {
   return tokens;
 };
 
-// Extract issue # from a title. Re-uses the existing /#(\d{1,3})(?!\d)/
-// pattern from api/enrich.js lookupEbayVisual so behavior is identical
-// — issue # in 1-999 only, no trailing digits.
-const ISSUE_RE = /#\s*(\d{1,3})(?!\d)/;
-
-// Ship #24 Q12c — Marketing-copy discriminator for title-family path.
-// Same logic as Q12b (identityAlignment.js), applied to title-family
-// weighted-consensus issue extraction. Excludes "#1" when it appears
-// near marketing keywords (Anniversary Issue #1, Special Issue #1, etc.)
-const MARKETING_KEYWORDS_RE = /\b(anniversary|special|collector|limited|exclusive|variant)\b/i;
-
+// Commit B (2026-07-28) — delegates to the shared extractIssueCandidate
+// (identityCore.js) instead of this module's own independent #-only regex.
+// Defect B ("parser unification"): this function and
+// resolveFamilyIssueConsensus's inline regex had drifted into two
+// independent implementations, each missing what the other had — this one
+// never supported a bare (no "#") issue number at all, the same real gap
+// the Batman #15 production pool exposed for the other one. Kept as a
+// named export (not inlined at call sites) since callers below and in
+// api/enrich.js already import it by this name — a signature-compatible
+// wrapper, not a behavior change to its own public contract (still
+// returns a bare issue-number string or null, not the {issue, matchType}
+// shape extractIssueCandidate itself returns).
 export const extractIssueFromTitle = (title) => {
-  const titleStr = String(title || '');
-  const m = titleStr.match(ISSUE_RE);
-  if (!m) return null;
-
-  const issueNum = m[1];
-  const n = parseInt(issueNum, 10);
-  if (n > 999) return null;
-
-  // Q12c discriminator: flag "#1" as suspect when near marketing keywords
-  if (issueNum === '1') {
-    const matchIndex = m.index;
-    const beforeMatch = titleStr.slice(Math.max(0, matchIndex - 30), matchIndex);
-    const afterMatch = titleStr.slice(matchIndex, matchIndex + 30);
-    const window = beforeMatch + afterMatch;
-
-    if (MARKETING_KEYWORDS_RE.test(window)) {
-      return null; // Exclude marketing-copy "#1" from title-family issue extraction
-    }
-  }
-
-  return issueNum;
+  const candidate = extractIssueCandidate(title);
+  return candidate ? candidate.issue : null;
 };
 
 // Extract a 4-digit year from a title. Range: 1900-2099. Prefers a
