@@ -107,7 +107,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens, buildSanitizedComicSearchTitle } from "../src/lib/compHygiene.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -3509,9 +3509,40 @@ export default async function handler(req, res) {
             console.log(`[rawTitle-guard] fallback unavailable — skipping rawTitle`);
           }
         } else {
-          // Use family candidate's rawTitle (from top-ranked family member)
-          imageSearchTitle = familyCandidate.rawTitle;
-          console.log(`[ship12] using title-family rawTitle: ${imageSearchTitle}`);
+          // Q141: a family candidate's rawTitle is a verbatim eBay listing
+          // title and can carry a grading-service fragment (e.g. "CGC 0.5")
+          // baked in from whichever pool member won the family vote — that
+          // fragment then rides into the comps search query text itself,
+          // biasing results toward slabbed listings for a raw-copy scan
+          // (Batman #15 production case: query text contained "CGC 0.5",
+          // collapsed every formal attempt to 0 post-filter survivors).
+          // Never search on the raw listing title — construct from
+          // confirmed identity fields only, same convention as the
+          // rawTitle-issue-mismatch fallback above.
+          const sanitizedTitleBase = String(
+            (typeof confirmedTitle !== 'undefined' && confirmedTitle) ||
+            (typeof title !== 'undefined' && title) ||
+            (out && out.confirmedTitle) ||
+            ''
+          ).trim();
+          const sanitizedIssue = String(
+            (typeof confirmedIssue !== 'undefined' && confirmedIssue) ||
+            (typeof issue !== 'undefined' && issue) ||
+            (out && out.issue) ||
+            ''
+          ).trim();
+          const sanitizedYear = String(
+            (typeof confirmedYear !== 'undefined' && confirmedYear) ||
+            (out && out.confirmedYear) ||
+            ''
+          ).trim();
+
+          imageSearchTitle = buildSanitizedComicSearchTitle(sanitizedTitleBase, sanitizedIssue, sanitizedYear);
+          if (imageSearchTitle) {
+            console.log(`[ship12] title-family override — sanitized query (title+issue+year, no raw listing text): ${imageSearchTitle}`);
+          } else {
+            console.log('[ship12] title-family override — no confirmed title available, skipping rawTitle');
+          }
         }
       } catch (err) {
         console.error('[rawTitle-guard] failed:', err.message, err.stack);

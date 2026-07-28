@@ -26,6 +26,7 @@ import {
   REPRINT_RE,
   SLAB_RE,
   GRADED_RE,
+  applyRawGradedSeparationFilter,
   VARIANT_CONTAM_RE,
   SIGNED_RE,
   TPB_MARKER_RE,
@@ -1915,6 +1916,26 @@ export const fetchComps = async ({
         if (guardedPool.length === 0) {
           console.log('[v0-I] guardrail rejected all — returning empty');
           return { ...emptyComps(bestCandidate.attempt.q, "no sales after filters"), attemptUsed: 0 };
+        }
+
+        // Q141: raw-vs-graded title separation — same Filter 2 rule every
+        // formal attempt already applies (SLAB_RE for a raw copy, GRADED_RE
+        // for a graded copy), never previously applied inside this fallback
+        // chain. Without it a slabbed listing that survives the guardrail
+        // can become the pool's sole comp and set the price/floor for a raw
+        // book (Batman #15 production case: the only active comp reaching
+        // pricing was a "CGC 0.5" slab priced against a raw GD 2.0 scan).
+        {
+          const beforeV0ISlab = guardedPool.length;
+          guardedPool = applyRawGradedSeparationFilter(guardedPool, { rawOnly, gradedOnly, assetType });
+          if (guardedPool.length < beforeV0ISlab) {
+            console.log(`[v0-I] slab filter: before=${beforeV0ISlab} after=${guardedPool.length} removed=${beforeV0ISlab - guardedPool.length}`);
+          }
+
+          if (guardedPool.length === 0) {
+            console.log('[v0-I] slab filter rejected all — returning empty');
+            return { ...emptyComps(bestCandidate.attempt.q, "no sales after filters"), attemptUsed: 0 };
+          }
         }
 
         // Title token match: require sufficient overlap with search title

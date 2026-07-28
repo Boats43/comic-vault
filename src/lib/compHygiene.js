@@ -47,6 +47,43 @@ export const SLAB_RE = /\b(?:cgc|cbcs|pgx|psa|egs|hga|slab|graded|universal|sign
 // Graded-only requirement — title MUST mention CGC or CBCS.
 export const GRADED_RE = /\bCGC\b|\bCBCS\b/i;
 
+// Q141 — raw-vs-graded title separation, single shared implementation.
+// Previously inlined only inside api/comps.js's formal per-attempt filter
+// chain (Filter 2); the v0-I emergency fallback chain (era-filter fallback
+// for vintage books, guardrail -> title-match -> issue-match -> year-conflict)
+// never applied it, so a slabbed listing that survived v0-I's other checks
+// could become the pool's sole comp for a raw-copy price (Batman #15
+// production case: the only active comp reaching pricing was a "CGC 0.5"
+// slab priced against a raw GD 2.0 scan). Extracted here so both call sites
+// share one implementation rather than risk drifting copies.
+// Q141 — sanitized comps-search query text for the title-family-override
+// path (api/enrich.js). A family candidate's rawTitle is a verbatim eBay
+// listing title and can carry a grading-service fragment (e.g. "CGC 0.5")
+// baked in from whichever pool member won the family vote; that fragment
+// then rides straight into the eBay search query text, biasing results
+// toward slabbed listings even when pricing a raw copy (Batman #15
+// production case). Never search on raw listing text for this path --
+// construct from confirmed identity fields only.
+export const buildSanitizedComicSearchTitle = (titleBase, issueNum, year) => {
+  const t = String(titleBase || '').trim();
+  if (!t) return null;
+  const iss = String(issueNum || '').trim();
+  const yr = String(year || '').trim();
+  return [t, iss ? `#${iss}` : '', yr].filter(Boolean).join(' ');
+};
+
+export const applyRawGradedSeparationFilter = (items, { rawOnly, gradedOnly, assetType } = {}) => {
+  if (!Array.isArray(items) || items.length === 0) return items;
+  if (assetType === 'book') return items;
+  if (rawOnly) {
+    return items.filter((it) => !SLAB_RE.test(String(it?.title || '')));
+  }
+  if (gradedOnly) {
+    return items.filter((it) => GRADED_RE.test(String(it?.title || '')));
+  }
+  return items;
+};
+
 // Variant contamination markers — variant/virgin/foil/ratio/incentive/etc.
 // Hard-reject when our book is NOT a variant. Used both as standalone
 // filter and as a guard inside creator/artist match.
