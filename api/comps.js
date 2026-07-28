@@ -2037,6 +2037,7 @@ export const fetchComps = async ({
       confirmedYear: year ? parseInt(year, 10) : null,
       cvVolumeStartYear,
       variant,
+      publisher,  // Commit D1.1 — collision-risk assessment (assessCollisionRisk)
       isGraded: gradedOnly === true,
       userGradeKey: rawOnly ? 'raw' : (gradedOnly ? 'graded' : null),
       assetType: isTPB ? 'tpb' : 'comic',
@@ -2072,7 +2073,9 @@ export const fetchComps = async ({
       `rawPricingEligible=${rawPricingEligibleRows.length} ` +
       `gradedReferences=${evidencePopulations.gradedPricingReferences.length} ` +
       `incompleteReferences=${evidencePopulations.incompleteReferences.length} ` +
-      `rejected=${evidencePopulations.incompatibleEditionReferences.length + evidencePopulations.rejectedEvidence.length}`
+      `unconfirmedEditionReferences=${evidencePopulations.unconfirmedEditionReferences.length} ` +
+      `rejected=${evidencePopulations.incompatibleEditionReferences.length + evidencePopulations.rejectedEvidence.length} ` +
+      `codes=${JSON.stringify(evidencePopulations.rejectionCodeCounts)}`
     );
     parsed = rawPricingEligibleRows;
 
@@ -2150,6 +2153,12 @@ export const fetchComps = async ({
         gradedPricingReferences: evidencePopulations.gradedPricingReferences,
         incompleteReferences: evidencePopulations.incompleteReferences,
         incompatibleEditionReferences: evidencePopulations.incompatibleEditionReferences,
+        // Commit D1.1 — "Unconfirmed same-title/issue references": rows
+        // with no affirmative mismatch but insufficient positive evidence
+        // on a collision-prone axis. Never merged into
+        // incompatibleEditionReferences (that bucket implies an
+        // affirmative false claim; these rows made none).
+        unconfirmedEditionReferences: evidencePopulations.unconfirmedEditionReferences,
         rejectedEvidence: evidencePopulations.rejectedEvidence,
       },
     };

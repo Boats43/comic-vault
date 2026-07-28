@@ -44,7 +44,7 @@ import {
   evaluateEraYearMatch,
   classifyArtistMatch,
 } from "./compHygiene.js";
-import { buildEvidencePopulations, classifyEvidenceRow, isPricingMathEligible } from "./evidenceEligibility.js";
+import { buildEvidencePopulations, classifyEvidenceRow, isPricingMathEligible, PRICING_GATE_CODES } from "./evidenceEligibility.js";
 
 // Stale recency thresholds (tiered by era):
 //   Modern (bookYear >= 2000): reject rows older than 90 days.
@@ -329,6 +329,7 @@ export const verifySoldComps = (rawRows, ctx) => {
     title = '',
     issue = null,
     variant = null,
+    publisher = null,  // Commit D1.1 — collision-risk assessment (assessCollisionRisk)
     bookYear = null,
     userGradeKey = null,
     assessedGrade = null,
@@ -381,6 +382,7 @@ export const verifySoldComps = (rawRows, ctx) => {
     confirmedYear: bookYear != null ? parseInt(bookYear, 10) : null,
     cvVolumeStartYear,
     variant,
+    publisher,  // Commit D1.1 — collision-risk assessment
     isGraded: userGradeKey != null && userGradeKey !== 'raw',
     userGradeKey,
     assetType: 'comic',
@@ -391,7 +393,9 @@ export const verifySoldComps = (rawRows, ctx) => {
     `[evidence-eligibility-sold] soldInput=${rows.length} ` +
     `rawPricingEligible=${evidencePopulations.rawPricingPool.length} ` +
     `incompleteReferences=${evidencePopulations.incompleteReferences.length} ` +
-    `otherReferences=${evidencePopulations.gradedPricingReferences.length + evidencePopulations.incompatibleEditionReferences.length + evidencePopulations.rejectedEvidence.length}`
+    `unconfirmedEditionReferences=${evidencePopulations.unconfirmedEditionReferences.length} ` +
+    `otherReferences=${evidencePopulations.gradedPricingReferences.length + evidencePopulations.incompatibleEditionReferences.length + evidencePopulations.rejectedEvidence.length} ` +
+    `codes=${JSON.stringify(evidencePopulations.rejectionCodeCounts)}`
   );
   // Narrower than evidencePopulations.rawPricingPool — see
   // PRICING_GATE_CODES doc comment (evidenceEligibility.js) for why the
@@ -404,7 +408,17 @@ export const verifySoldComps = (rawRows, ctx) => {
     const before = list.length;
     const gated = list.filter((r) => rawPricingIdxSet.has(r.__evIdx));
     if (gated.length < before) {
-      console.log(`[evidence-eligibility] sold${label ? ':' + label : ''}: chain-survivors=${before} classification-eligible=${gated.length} removed=${before - gated.length}`);
+      // Commit D1.1 — bounded breakdown of exactly which PRICING_GATE_CODES
+      // classification produced each removed row, so "chain-survivors=17
+      // -> classification-eligible=15" isn't the only evidence a live
+      // trace can show for the reduction.
+      const removedCodeCounts = {};
+      for (const r of list) {
+        if (rawPricingIdxSet.has(r.__evIdx)) continue;
+        const codes = classifyEvidenceRow(r, evidenceTarget).rejectionCodes.filter((c) => PRICING_GATE_CODES.includes(c));
+        for (const code of codes) removedCodeCounts[code] = (removedCodeCounts[code] || 0) + 1;
+      }
+      console.log(`[evidence-eligibility] sold${label ? ':' + label : ''}: chain-survivors=${before} classification-eligible=${gated.length} removed=${before - gated.length} removedCodes=${JSON.stringify(removedCodeCounts)}`);
     }
     return gated;
   };

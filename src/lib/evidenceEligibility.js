@@ -88,7 +88,87 @@ const STANDARD_REJECTION_CODES = [
   'LOT_OR_BUNDLE',
   'SIGNED_MISMATCH',
   'COLLECTED_EDITION_MISMATCH',
+  'UNCONFIRMED_EDITION',
 ];
+
+// Commit D1.1 (2026-07-28) — collision-aware positive-compatibility gate.
+// The base classifier above is a NEGATIVE model: a row is eligible unless
+// it affirmatively fails a check. Confirmed live-broken for collision-
+// prone identities (Batman #15, 1943): 5 generic active listings with NO
+// distinguishing edition information ("BATMAN #15", $2.99-$9.79) triggered
+// zero of the negative checks above (no wrong issue, no wrong year — they
+// simply have no year token at all — no lot/variant/format signal) and
+// sailed through as rawPricingEligible=true, contaminating the active
+// average/floor/market-high warning with listings that could just as
+// easily be the 1943 original, a 2013 New 52 relaunch, or a 2017 Rebirth
+// relaunch #15 — DC has renumbered Batman's ongoing series repeatedly,
+// each restart reusing low issue numbers.
+//
+// assessCollisionRisk derives which comparison axes actually need
+// POSITIVE confirmation for a given target, rather than a blanket
+// "missing year = reject" rule (which would incorrectly punish unambiguous,
+// non-collision titles — a 2020 creator-owned one-shot's #1 has no
+// competing volume to be confused with). Deliberately title-text-free —
+// uses only confirmedYear + publisher, both passed as separate structured
+// fields, never the raw confirmedTitle string (which can itself be
+// contaminated by an unrelated open bug — the A3 canonical-title issue
+// flagged in this same dispatch, "batman ww2 machine gun" — this function
+// must not inherit that bug by depending on title text).
+//
+// Heuristic: a vintage (pre-1985, matching this codebase's own
+// getEra()/COMP_FILTER era-boundary convention) DC or Marvel title is
+// high collision-risk — both publishers have decades of legacy-numbering
+// relaunch history (Batman, Detective Comics, Action Comics, Superman,
+// Amazing Spider-Man, Fantastic Four, X-Men, Avengers, etc. have all been
+// renumbered at least once, reusing low issue numbers). A non-vintage or
+// non-major-publisher target defaults to low collision risk — missing
+// year alone does not disqualify a row there, unchanged from pre-D1.1
+// behavior (the existing WRONG_YEAR check already only fires when a row
+// DOES carry a conflicting year; this only adds a requirement when
+// collision risk is genuinely high).
+const MAJOR_LEGACY_PUBLISHER_RE = /\b(dc|d\.c\.|marvel)\b/i;
+const VINTAGE_YEAR_CUTOFF = 1985; // matches getEra(year) in api/enrich.js
+
+export const assessCollisionRisk = (target = {}) => {
+  const year = target.confirmedYear != null ? parseInt(target.confirmedYear, 10) : null;
+  const isVintage = Number.isFinite(year) && year < VINTAGE_YEAR_CUTOFF;
+  const isMajorLegacyPublisher = MAJOR_LEGACY_PUBLISHER_RE.test(String(target.publisher || ''));
+
+  const requiredAxes = ['series', 'issue'];
+  const collisionReasons = [];
+  let collisionRisk = 'low';
+
+  if (isVintage && isMajorLegacyPublisher) {
+    collisionRisk = 'high';
+    requiredAxes.push('publicationIdentity');
+    collisionReasons.push(
+      'same normalized series and issue exists across multiple eras/volumes ' +
+      '(vintage DC/Marvel ongoing series — legacy-numbering relaunch history)'
+    );
+  }
+  // If the target has a confirmed printing (Nth print / facsimile) or a
+  // confirmed material/variant, those axes are already required by the
+  // existing WRONG_PRINTING/WRONG_VARIANT checks below — surfaced here
+  // for completeness of the identity-requirements record, not yet given
+  // an "unconfirmed" (vs. "incompatible") treatment of their own: no
+  // fixture has demonstrated that gap the way Batman #15 demonstrated the
+  // publicationIdentity one. Flagged for a future pass if one does.
+  if (REPRINT_RE.test(String(target.variant || ''))) {
+    requiredAxes.push('printing');
+  }
+  if (target.variant && !REPRINT_RE.test(String(target.variant))) {
+    requiredAxes.push('materialVariant');
+  }
+
+  return {
+    baseTitle: target.seriesTitleBase || null,
+    issue: target.issue ?? null,
+    confirmedYear: year,
+    requiredAxes,
+    collisionRisk,
+    collisionReasons,
+  };
+};
 
 /**
  * Classify one market row (active listing or sold row) against the
@@ -124,6 +204,13 @@ export const classifyEvidenceRow = (row, target = {}) => {
     identityEligible = false;
   }
 
+  // Commit D1.1 — collision-aware. requiredAxes is derived purely from
+  // confirmedYear/publisher (never confirmedTitle text — see
+  // assessCollisionRisk's own doc comment for why).
+  const collisionAssessment = assessCollisionRisk(target);
+  const publicationIdentityRequired = collisionAssessment.requiredAxes.includes('publicationIdentity');
+  let unconfirmedEdition = false;
+
   if (target.confirmedYear != null) {
     const rowYear = row.year != null
       ? parseInt(row.year, 10)
@@ -135,9 +222,26 @@ export const classifyEvidenceRow = (row, target = {}) => {
       const tolerance = getEraYearTolerance(target.confirmedYear);
       const yearEval = evaluateEraYearMatch(rowYear, target.confirmedYear, tolerance, target.cvVolumeStartYear ?? null);
       if (!yearEval.keep) {
+        // Affirmatively conflicting year — the row DOES claim a year, and
+        // it's outside tolerance. A genuine, stated mismatch.
         rejectionCodes.push('WRONG_YEAR');
         identityEligible = false;
       }
+    } else if (publicationIdentityRequired) {
+      // Commit D1.1 — the fix. No year token at all, but this target is
+      // collision-prone (vintage DC/Marvel — the same title+issue exists
+      // across multiple eras/volumes). Absence of evidence is NOT
+      // evidence of a wrong book — this row never claimed an incorrect
+      // year, it simply provided none. UNCONFIRMED_EDITION, not
+      // WRONG_YEAR: identityEligible stays true (we are not asserting
+      // this is a different book), but the row cannot enter pricing math
+      // until it clears the collision on some other positive signal
+      // (this classifier only evaluates the year axis — cover-image
+      // match, ePID, and other provider-backed discriminators named in
+      // the D1.1 dispatch are not evaluable from title-only market rows
+      // in this codebase's current data shape).
+      unconfirmedEdition = true;
+      rejectionCodes.push('UNCONFIRMED_EDITION');
     }
   }
 
@@ -222,12 +326,20 @@ export const classifyEvidenceRow = (row, target = {}) => {
     wrongPrinting || wrongVariant || collectedEditionMismatch || signedMismatch;
 
   const rawPricingEligible =
-    identityEligible && !formatMismatch && !conditionOrEditionDisqualified;
+    identityEligible && !formatMismatch && !conditionOrEditionDisqualified && !unconfirmedEdition;
 
   // A legitimate graded copy of the same book — target-relative display
   // eligibility, independent of whether the CURRENT target is raw or
   // graded (Commit D Fixture 2: gradedPricingEligible=true for a CGC 2.5
   // row even while scanning a raw VG 4.0 target).
+  // Not gated by unconfirmedEdition (Commit D1.1 fixture requirement:
+  // "Flash #139 2.5 Cgc Menace Of The Reverse Flash" carries no year token
+  // either — Flash 1963/DC is itself a high collision-risk target — but
+  // must still report gradedPricingEligible=true. gradedPricingEligible is
+  // a weaker "plausible reference for the same book" signal for display
+  // purposes, not a pricing gate; unconfirmedEdition's job is specifically
+  // to keep an under-evidenced row OUT of pricing math (rawPricingEligible/
+  // floorEligible), not to erase it as a reference candidate too.
   const gradedPricingEligible =
     identityEligible && !conditionOrEditionDisqualified && rowIsGraded;
 
@@ -263,14 +375,22 @@ const sanitizeForDisplay = (row, classification) => ({
 
 /**
  * Classify a full pool of raw rows against a target and split into the
- * five required populations. Every row lands in exactly one bucket —
- * never silently discarded down to a bare counter.
+ * required populations. Every row lands in exactly one bucket — never
+ * silently discarded down to a bare counter.
+ *
+ * unconfirmedEditionReferences (Commit D1.1) is deliberately separate from
+ * incompatibleEditionReferences: the latter holds rows that AFFIRMATIVELY
+ * claim a mismatching year/printing/issue; the former holds rows that
+ * simply provide no evidence either way on a collision-prone axis. Display
+ * label: "Unconfirmed same-title/issue references" — never merged with
+ * "incompatible," which would mislabel an under-evidenced row as if it had
+ * made a false claim.
  *
  * @param {Array} rows
  * @param {Object} target - see classifyEvidenceRow
  * @returns {{rawPricingPool: Array, gradedPricingReferences: Array,
  *   incompleteReferences: Array, incompatibleEditionReferences: Array,
- *   rejectedEvidence: Array}}
+ *   unconfirmedEditionReferences: Array, rejectedEvidence: Array}}
  */
 export const buildEvidencePopulations = (rows, target = {}) => {
   const populations = {
@@ -278,7 +398,14 @@ export const buildEvidencePopulations = (rows, target = {}) => {
     gradedPricingReferences: [],
     incompleteReferences: [],
     incompatibleEditionReferences: [],
+    unconfirmedEditionReferences: [],
     rejectedEvidence: [],
+    // Commit D1.1 — bounded (fixed code enum, one increment per row) count
+    // of every rejection code actually fired across the pool, so a live
+    // trace can show WHICH classifications produced a given reduction
+    // (e.g. "chain-survivors=17 -> classification-eligible=15") instead of
+    // only the aggregate before/after counts.
+    rejectionCodeCounts: {},
   };
 
   for (const row of (rows || [])) {
@@ -286,6 +413,9 @@ export const buildEvidencePopulations = (rows, target = {}) => {
     if (classification.rawPricingEligible) {
       populations.rawPricingPool.push(row);
       continue;
+    }
+    for (const code of classification.rejectionCodes) {
+      populations.rejectionCodeCounts[code] = (populations.rejectionCodeCounts[code] || 0) + 1;
     }
     const sanitized = sanitizeForDisplay(row, classification);
     const codes = classification.rejectionCodes;
@@ -299,6 +429,8 @@ export const buildEvidencePopulations = (rows, target = {}) => {
       codes.includes('COLLECTED_EDITION_MISMATCH') || codes.includes('LOT_OR_BUNDLE')
     ) {
       populations.incompatibleEditionReferences.push(sanitized);
+    } else if (codes.includes('UNCONFIRMED_EDITION')) {
+      populations.unconfirmedEditionReferences.push(sanitized);
     } else {
       populations.rejectedEvidence.push(sanitized);
     }
@@ -327,7 +459,15 @@ export const buildEvidencePopulations = (rows, target = {}) => {
 // its display/reference buckets — every mismatch category still gets
 // annotated (I13), only the subset that may additionally EXCLUDE a row
 // from pricing math is narrower here.
-export const PRICING_GATE_CODES = ['INCOMPLETE_COPY', 'RESTORED_COPY', 'FORMAT_MISMATCH_RAW_VS_SLAB'];
+// Commit D1.1 adds UNCONFIRMED_EDITION — the live-confirmed active-pool
+// defect this dispatch fixes. Narrow and safe to gate: it only fires when
+// collisionRisk="high" (vintage DC/Marvel target) AND the row has zero
+// year evidence — a condition that could not have overlapped any of the
+// existing test fixtures this codebase already had passing (none of them
+// combine a vintage-DC/Marvel target with an undated comp row expected to
+// survive), confirmed by the full-suite regression run in this commit's
+// own test delivery.
+export const PRICING_GATE_CODES = ['INCOMPLETE_COPY', 'RESTORED_COPY', 'FORMAT_MISMATCH_RAW_VS_SLAB', 'UNCONFIRMED_EDITION'];
 export const isPricingMathEligible = (classification) =>
   !classification.rejectionCodes.some((c) => PRICING_GATE_CODES.includes(c));
 
