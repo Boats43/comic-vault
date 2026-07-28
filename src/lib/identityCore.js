@@ -528,6 +528,20 @@ export const titleOverlapsProduct = (confirmedTitle, productName, threshold = 0.
  * title in both cases; this only removes the two structural suffix tokens
  * every anchor name appends around it.
  *
+ * Commit A2 (2026-07-28, URGENT regression repair) — a modern-relaunch
+ * anchor name (e.g. "Absolute Batman [Nick Dragotta Virgin Foil] #1
+ * (2024)") carries a THIRD structural pattern the original version never
+ * accounted for: a bracketed variant/edition descriptor block, which can
+ * sit anywhere in the string, not just trailing. Un-tested against this
+ * shape, the original shipped with the bracket content surviving straight
+ * into confirmedTitle ("Absolute Batman [Nick Dragotta Virgin Foil]") —
+ * exactly the class of contamination this function exists to prevent,
+ * just from a bracket instead of an assembled family-cluster string.
+ * Bracket content is stripped from the title unconditionally (never
+ * enters confirmedTitle under any circumstance) and separately recovered
+ * by extractAnchorBracketDescriptor below for the caller to route into an
+ * edition-descriptor field instead.
+ *
  * Deliberately does NOT touch confirmedIssue/confirmedYear — by the time an
  * anchor is queried it was already looked up WITH the resolved issue/year,
  * so those fields are anchor-consistent by construction; only confirmedTitle
@@ -541,9 +555,28 @@ export const titleOverlapsProduct = (confirmedTitle, productName, threshold = 0.
 export const projectCanonicalTitleFromAnchor = (anchorProductName) => {
   let t = String(anchorProductName || '').trim();
   if (!t) return null;
+  t = t.replace(/\[[^\]]*\]/g, ' ');                // bracketed descriptor block(s), anywhere — never survives into the title
+  t = t.replace(/\s+/g, ' ').trim();
   t = t.replace(/\(\d{4}\)\s*$/, '').trim();       // trailing "(YYYY)"
   t = t.replace(/#\s*[\w.]+\s*$/, '').trim();       // trailing "#N" / "#N.N" / "#NA"
   return t || null;
+};
+
+/**
+ * Q141-A2 — companion to projectCanonicalTitleFromAnchor: recovers a
+ * bracketed descriptor block's own content ("Absolute Batman [Nick
+ * Dragotta Virgin Foil] #1 (2024)" -> "Nick Dragotta Virgin Foil") for the
+ * caller to route into an edition-descriptor field, per the same I13
+ * annotate-don't-drop principle diffEditionDescriptorCandidate already
+ * follows below — the content is real signal (printing/variant/material/
+ * cover information), just not title signal.
+ *
+ * @param {string} anchorProductName
+ * @returns {string|null} bracket content, or null if no bracket present
+ */
+export const extractAnchorBracketDescriptor = (anchorProductName) => {
+  const m = String(anchorProductName || '').match(/\[([^\]]+)\]/);
+  return m ? m[1].trim() || null : null;
 };
 
 /**
@@ -706,10 +739,46 @@ export const MARKETING_KEYWORDS_RE = /\b(anniversary|special|collector|limited|e
  *        surrounding ~20 chars on either side ("Lot of 15 comics", "Vol 15",
  *        "15 books", "pg 15").
  *
+ * Commit B2 (2026-07-28, URGENT regression repair) — Commit B shipped with
+ * the Q12c marketing-keyword check as a HARD, unconditional exclusion
+ * inside the extractor itself, same as every other guard. That was wrong:
+ * it broke the real, already-certified Adventure Time Summer Special #1
+ * fixture in production (build 9c802fb) — all 4 real winning-family
+ * members write the issue as "...Special #1...", and 3 of 4 also carry
+ * "Exclusive"/"Variant" nearby, so every single one hit the marketing-
+ * keyword window and the family-scoped vote saw ZERO candidates
+ * (mode=no-consensus, winner=null) instead of the correct unanimous
+ * adopt (this book's own OFFICIAL title genuinely contains "Special" —
+ * exactly the shape Q12c's global/raw-pool guard was built to distrust,
+ * but the FAMILY-SCOPED consensus vote (>=3-row/>=60%/clear-lead) is
+ * already sufficient protection against a stray marketing-copy "#1" on
+ * its own, and doesn't need — and must not carry — the same suppression).
+ *
+ * Fix: extraction (raw observation) and suppression (policy) are now
+ * separate. This function never returns null purely because of nearby
+ * marketing language — it reports `marketingContext: true` on the
+ * candidate and lets the caller decide:
+ *   - RAW/GLOBAL pool (extractIssueFromTitle, feeding extractConsensus's
+ *     pool-wide tally): suppresses on marketingContext, exactly the
+ *     pre-Commit-B behavior (single-row, no corroborating structure).
+ *   - FAMILY-SCOPED (resolveFamilyIssueConsensus below): does NOT
+ *     suppress on marketingContext — counts the candidate, trusting its
+ *     own adoption bar.
+ *
+ * ordinalContext ("2nd Print") and ratioContext ("1:25") are a different
+ * kind of signal, not context-dependent policy — a print-ordinal or a
+ * ratio numerator is NEVER an issue number, in any caller, in any
+ * context (unlike a marketing-adjacent "#1", which genuinely IS the
+ * issue number in the Adventure Time case). Both remain hard exclusions
+ * inside the extractor itself, same tier as year/decimal-grade/CGC/lot/
+ * dimension. Added this pass after direct testing surfaced two more real
+ * false positives: "Absolute Batman 2nd Print" -> "2", "Wonder Woman
+ * 1:25 Foil Variant" -> "1".
+ *
  * Pure function, no console/log side effects — callers decide what to log.
  *
  * @param {string} title
- * @returns {{issue: string, matchType: 'hash'|'bare'}|null}
+ * @returns {{issue: string, matchType: 'hash'|'bare', marketingContext: boolean, ordinalContext: boolean, ratioContext: boolean, titleAdjacency: boolean}|null}
  */
 const ISSUE_CANDIDATE_YEAR_RE = /^(19|20)\d{2}$/;
 const ISSUE_CANDIDATE_GRADING_RE = /\b(cgc|cbcs|pgx)\b/i;
@@ -723,6 +792,18 @@ const ISSUE_CANDIDATE_GRADING_RE = /\b(cgc|cbcs|pgx)\b/i;
 const ISSUE_CANDIDATE_LOT_BEFORE_RE = /\b(lot|set|bundle|volume|vol\.?|qty|quantity|pg\.?|pgs?)\s*(of\s+)?$/i;
 const ISSUE_CANDIDATE_LOT_AFTER_RE = /^\s*(comics?|books?|issues?|pages?|pgs?|pg\.?)\b/i;
 const ISSUE_CANDIDATE_WORD_NEARBY_RE = /[a-z]{3,}/i;
+// Commit B2 — ordinal print/edition suffix immediately after the number
+// ("2nd Print", "3rd Printing", "4th Edition") and the spelled-out form
+// immediately before it ("Second Printing 2" — rare, included for
+// symmetry). Never an issue number regardless of caller.
+const ISSUE_CANDIDATE_ORDINAL_AFTER_RE = /^(st|nd|rd|th)\b/i;
+const ISSUE_CANDIDATE_PRINT_EDITION_AFTER_RE = /^\s*(print|printing|edition|ed\.?)\b/i;
+const ISSUE_CANDIDATE_PRINT_EDITION_BEFORE_RE = /\b(print|printing|edition)\s*$/i;
+
+const hasMarketingContext = (titleStr, idx, matchLen) => {
+  const window = titleStr.slice(Math.max(0, idx - 30), idx) + titleStr.slice(idx, idx + matchLen + 30);
+  return MARKETING_KEYWORDS_RE.test(window);
+};
 
 export const extractIssueCandidate = (title) => {
   const titleStr = String(title || '');
@@ -737,12 +818,9 @@ export const extractIssueCandidate = (title) => {
   const hashMatch = titleStr.match(/#\s*(\d{1,4})(?!\d)/);
   if (hashMatch && parseInt(hashMatch[1], 10) <= 999) {
     const issueNum = hashMatch[1];
-    if (issueNum === '1') {
-      const idx = hashMatch.index;
-      const window = titleStr.slice(Math.max(0, idx - 30), idx) + titleStr.slice(idx, idx + 30);
-      if (MARKETING_KEYWORDS_RE.test(window)) return null;
-    }
-    return { issue: issueNum, matchType: 'hash' };
+    const idx = hashMatch.index;
+    const marketingContext = issueNum === '1' && hasMarketingContext(titleStr, idx, hashMatch[0].length);
+    return { issue: issueNum, matchType: 'hash', marketingContext, ordinalContext: false, ratioContext: false, titleAdjacency: true };
   }
 
   const bareMatches = [...titleStr.matchAll(/\b(\d{1,4})(?!\d)/g)];
@@ -756,6 +834,7 @@ export const extractIssueCandidate = (title) => {
     const charBefore = titleStr[idx - 1];
     const charAfter = titleStr[idx + numStr.length];
     if (charBefore === '.' || charAfter === '.') continue; // decimal-grade syntax
+    if (charBefore === ':' || charAfter === ':') continue; // ratio syntax ("1:25", "25:1")
 
     const before = titleStr.slice(Math.max(0, idx - 20), idx);
     const after = titleStr.slice(idx + numStr.length, idx + numStr.length + 20);
@@ -769,11 +848,18 @@ export const extractIssueCandidate = (title) => {
     // directions ("2x3" and "3x2" read from the trailing side).
     if (/^\s*[x×]\s*\d/i.test(after) || /\d\s*[x×]\s*$/i.test(before)) continue;
 
+    // Ordinal print/edition suffix ("2nd Print", "3rd Printing") — never
+    // an issue number. Found via direct testing: "Absolute Batman 2nd
+    // Print" -> "2" survived every pre-existing guard.
+    if (ISSUE_CANDIDATE_ORDINAL_AFTER_RE.test(after)) continue;
+    if (ISSUE_CANDIDATE_PRINT_EDITION_AFTER_RE.test(after) || ISSUE_CANDIDATE_PRINT_EDITION_BEFORE_RE.test(before)) continue;
+
     if (ISSUE_CANDIDATE_GRADING_RE.test(gradingWindow)) continue;
     if (ISSUE_CANDIDATE_LOT_BEFORE_RE.test(before) || ISSUE_CANDIDATE_LOT_AFTER_RE.test(after)) continue;
     if (!ISSUE_CANDIDATE_WORD_NEARBY_RE.test(before)) continue; // title-adjacent
 
-    return { issue: numStr, matchType: 'bare' };
+    const marketingContext = numStr === '1' && hasMarketingContext(titleStr, idx, numStr.length);
+    return { issue: numStr, matchType: 'bare', marketingContext, ordinalContext: false, ratioContext: false, titleAdjacency: true };
   }
 
   return null;
@@ -903,6 +989,23 @@ export const resolveFamilyIssueConsensus = (priorIssue, visualItems, indices) =>
     // decimal-grade syntax, not a grading-service token, not lot/volume/
     // page vocabulary) — the real gap this dispatch closes (Batman #15:
     // 2 of 3 winning-family rows write the issue as bare "Batman 15").
+    //
+    // Commit B2 — deliberately does NOT check candidate.marketingContext.
+    // The real, already-certified Adventure Time Summer Special #1 fixture
+    // writes the issue as "...Special #1..." on every one of its 4
+    // winning-family members, 3 of which also carry "Exclusive"/"Variant"
+    // nearby — every one is marketingContext:true, and this book's own
+    // OFFICIAL title genuinely contains "Special." Q12c's suppression
+    // exists to protect the RAW/GLOBAL single-row pool tally (see
+    // extractIssueFromTitle, imageSearchIdentity.js, which DOES apply it)
+    // from a lone marketing-copy "#1" with nothing corroborating it. A
+    // family-scoped vote is a different situation by construction: it
+    // already requires >=3 unique rows, >=60% agreement, and a clear lead
+    // before adopting anything (the exact bar below) — that bar is
+    // itself the protection against marketing fluff, and applying Q12c's
+    // suppression ON TOP of it (as Commit B briefly did, unintentionally)
+    // doesn't add safety, it just breaks unanimous real agreement on a
+    // book whose own official title happens to say "Special."
     const candidate = extractIssueCandidate(raw);
     if (candidate) counts[candidate.issue] = (counts[candidate.issue] || 0) + 1;
   }

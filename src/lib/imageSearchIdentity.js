@@ -291,11 +291,21 @@ export const extractVariantTokens = (title) => {
 // named export (not inlined at call sites) since callers below and in
 // api/enrich.js already import it by this name — a signature-compatible
 // wrapper, not a behavior change to its own public contract (still
-// returns a bare issue-number string or null, not the {issue, matchType}
-// shape extractIssueCandidate itself returns).
+// returns a bare issue-number string or null, not the {issue, matchType,
+// ...context flags} shape extractIssueCandidate itself returns).
+//
+// Commit B2 (2026-07-28, URGENT regression repair) — this is the RAW/
+// GLOBAL pool consumer (feeds extractConsensus's pool-wide tally, a
+// single-row read with no corroborating structure), so it applies the
+// marketingContext suppression itself — exactly the pre-Commit-B
+// behavior. resolveFamilyIssueConsensus (identityCore.js) is the OTHER
+// consumer of extractIssueCandidate and deliberately does NOT apply this
+// suppression — see that function's own doc comment for why (its own
+// >=3-row/>=60%/clear-lead bar is the authority there instead).
 export const extractIssueFromTitle = (title) => {
   const candidate = extractIssueCandidate(title);
-  return candidate ? candidate.issue : null;
+  if (!candidate || candidate.marketingContext) return null;
+  return candidate.issue;
 };
 
 // Extract a 4-digit year from a title. Range: 1900-2099. Prefers a

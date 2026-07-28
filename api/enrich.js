@@ -41,6 +41,7 @@ import {
   checkAssemblyIntegrity,
   titleOverlapsProduct,
   projectCanonicalTitleFromAnchor,
+  extractAnchorBracketDescriptor,
   diffEditionDescriptorCandidate,
   selectBestVariantCandidate,
   buildIdentityRefusedFallbackPool,
@@ -4016,8 +4017,22 @@ export default async function handler(req, res) {
     // unchanged from before this commit.
     if (priceCharting?.productName) {
       const canonicalTitle = projectCanonicalTitleFromAnchor(priceCharting.productName);
+      // Q141-A2 — a bracketed descriptor block ("[Nick Dragotta Virgin
+      // Foil]") is anchor-sourced signal, independent of whether the title
+      // itself needed correcting this request — capture it whenever
+      // present, not only inside the title-changed branch below (a request
+      // where confirmedTitle already happened to equal the projected
+      // canonical title would otherwise silently drop this).
+      const anchorBracketDescriptor = extractAnchorBracketDescriptor(priceCharting.productName);
+      if (anchorBracketDescriptor && !out.editionDescriptorCandidate) {
+        out.editionDescriptorCandidate = anchorBracketDescriptor;
+        console.log(`[q141-a2] anchor bracket descriptor captured: "${anchorBracketDescriptor}" (anchor="${priceCharting.productName}")`);
+      }
       if (canonicalTitle && canonicalTitle !== confirmedTitle) {
-        const editionDescriptorCandidate = diffEditionDescriptorCandidate(confirmedTitle, canonicalTitle);
+        // Anchor-sourced bracket content is preferred over the
+        // family-cluster-diff heuristic when both are available — it's a
+        // direct read of the anchor's own descriptor, not an inference.
+        const editionDescriptorCandidate = anchorBracketDescriptor || diffEditionDescriptorCandidate(confirmedTitle, canonicalTitle);
         console.log(
           `[q141-a] canonical projection: confirmedTitle "${confirmedTitle}" -> "${canonicalTitle}" ` +
           `(anchor="${priceCharting.productName}")` +

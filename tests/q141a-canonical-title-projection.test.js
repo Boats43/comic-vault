@@ -17,9 +17,19 @@
 // identically whether the anchor's own official title has an issue number
 // (ongoing series) or not (a special/one-shot whose own title has no #N).
 //
+// COMMIT A2 (2026-07-28, URGENT regression repair) — the original version
+// above had zero test coverage for a bracketed-descriptor anchor name
+// ("Absolute Batman [Nick Dragotta Virgin Foil] #1 (2024)", a real modern-
+// relaunch shape) — that gap is exactly why it shipped with the bracket
+// content surviving straight into confirmedTitle. Part 3 below adds that
+// coverage directly against the exact anchor string named in the repair
+// dispatch, plus extractAnchorBracketDescriptor (the new companion
+// function recovering the bracket's own content for an edition-descriptor
+// field instead of discarding it).
+//
 // Invoke: node tests/q141a-canonical-title-projection.test.js
 
-import { projectCanonicalTitleFromAnchor, diffEditionDescriptorCandidate } from '../src/lib/identityCore.js';
+import { projectCanonicalTitleFromAnchor, diffEditionDescriptorCandidate, extractAnchorBracketDescriptor } from '../src/lib/identityCore.js';
 
 let passed = 0;
 let failed = 0;
@@ -118,6 +128,64 @@ assertEq(
 );
 assertEq(diffEditionDescriptorCandidate('', 'Batman'), null, 'empty assembled title -> null, no crash');
 assertEq(diffEditionDescriptorCandidate(null, null), null, 'both null -> null, no crash');
+
+// ═══════════════════════════════════════════════════════════════════════
+// PART 3 — Commit A2, bracketed-descriptor anchors (URGENT regression
+// repair, 2026-07-28). Exact anchor string from the repair dispatch.
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\nPart 3: Commit A2 — bracketed-descriptor anchors\n');
+
+const ABSOLUTE_BATMAN_ANCHOR = 'Absolute Batman [Nick Dragotta Virgin Foil] #1 (2024)';
+assertEq(
+  projectCanonicalTitleFromAnchor(ABSOLUTE_BATMAN_ANCHOR),
+  'Absolute Batman',
+  'exact required case: bracket content never enters confirmedTitle, under any circumstance'
+);
+assertEq(
+  extractAnchorBracketDescriptor(ABSOLUTE_BATMAN_ANCHOR),
+  'Nick Dragotta Virgin Foil',
+  'exact required case: editionDescriptorCandidate recovers the bracket content exactly, not silently dropped (I13)'
+);
+assertEq(
+  projectCanonicalTitleFromAnchor('Absolute Batman #1 [Nick Dragotta Virgin Foil] (2024)'),
+  'Absolute Batman',
+  'bracket in a different position (between issue and year, not before issue) — still stripped correctly, order-independent'
+);
+assertEq(
+  extractAnchorBracketDescriptor('Absolute Batman #1 [Nick Dragotta Virgin Foil] (2024)'),
+  'Nick Dragotta Virgin Foil',
+  'bracket content recovered regardless of position'
+);
+assertEq(
+  projectCanonicalTitleFromAnchor('Batman #15 (1943)'),
+  'Batman',
+  'no-bracket case (the original Commit A defect) unaffected by the bracket fix'
+);
+assertEq(
+  extractAnchorBracketDescriptor('Batman #15 (1943)'),
+  null,
+  'no bracket present -> null, no false positive'
+);
+assertEq(
+  extractAnchorBracketDescriptor(''),
+  null,
+  'empty string -> null, no crash'
+);
+assertEq(
+  extractAnchorBracketDescriptor(null),
+  null,
+  'null -> null, no crash'
+);
+assertEq(
+  projectCanonicalTitleFromAnchor('Batman [] #15 (1943)'),
+  'Batman',
+  'empty brackets -> stripped cleanly, no leftover artifact'
+);
+assertEq(
+  extractAnchorBracketDescriptor('Batman [] #15 (1943)'),
+  null,
+  'empty brackets -> no descriptor content, null not empty string'
+);
 
 console.log('\n' + '━'.repeat(59));
 if (failed === 0) {

@@ -51,7 +51,7 @@
 //
 // Invoke: node tests/q141b-shared-issue-extractor.test.js
 
-import { extractIssueCandidate, resolveFamilyIssueConsensus } from '../src/lib/identityCore.js';
+import { extractIssueCandidate, resolveFamilyIssueConsensus, projectCanonicalTitleFromAnchor, extractAnchorBracketDescriptor } from '../src/lib/identityCore.js';
 import { extractIssueFromTitle, extractConsensus } from '../src/lib/imageSearchIdentity.js';
 import { filterByCategory } from '../src/lib/categoryClassifier.js';
 
@@ -76,6 +76,13 @@ const buildPool = (titles) => {
   return filtered.map((it) => ({ rawTitle: it.rawTitle, title: it.title, issue: extractIssueFromTitle(it.rawTitle) }));
 };
 
+// Commit B2 — extractIssueCandidate's return shape grew context flags
+// (marketingContext/ordinalContext/ratioContext/titleAdjacency); this
+// builds the full expected object so assertions stay readable.
+const cand = (issue, matchType, overrides = {}) => ({
+  issue, matchType, marketingContext: false, ordinalContext: false, ratioContext: false, titleAdjacency: true, ...overrides,
+});
+
 console.log('\n=== COMMIT B — shared issue-number extractor ===\n');
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -83,9 +90,9 @@ console.log('\n=== COMMIT B — shared issue-number extractor ===\n');
 // ═══════════════════════════════════════════════════════════════════════
 console.log('Part 1: exact spec test case\n');
 
-assertEq(extractIssueCandidate('Batman #15'), { issue: '15', matchType: 'hash' }, '"Batman #15" -> issue 15 (hash)');
-assertEq(extractIssueCandidate('D.C. Comics Batman 15'), { issue: '15', matchType: 'bare' }, '"D.C. Comics Batman 15" -> issue 15 (bare, adopted)');
-assertEq(extractIssueCandidate('1943 D.C. Comics Batman 15'), { issue: '15', matchType: 'bare' }, '"1943 D.C. Comics Batman 15" -> issue 15 (bare, year correctly excluded, adopted)');
+assertEq(extractIssueCandidate('Batman #15'), cand('15', 'hash'), '"Batman #15" -> issue 15 (hash)');
+assertEq(extractIssueCandidate('D.C. Comics Batman 15'), cand('15', 'bare'), '"D.C. Comics Batman 15" -> issue 15 (bare, adopted)');
+assertEq(extractIssueCandidate('1943 D.C. Comics Batman 15'), cand('15', 'bare'), '"1943 D.C. Comics Batman 15" -> issue 15 (bare, year correctly excluded, adopted)');
 
 // ═══════════════════════════════════════════════════════════════════════
 // PART 2 — negative cases (spec: years, grades, lots, volumes must NOT adopt)
@@ -95,7 +102,7 @@ console.log('\nPart 2: negative cases\n');
 assertEq(extractIssueCandidate('Batman 1943 DC Comics VF'), null, 'bare 4-digit year alone -> not adopted');
 assertEq(extractIssueCandidate('Flash 1966 DC Comics'), null, 'another bare year -> not adopted');
 assertEq(extractIssueCandidate('Batman CGC 4.5'), null, 'decimal-grade syntax after CGC -> not adopted');
-assertEq(extractIssueCandidate('1943 D.C. Comics Batman 15 CGC 4.5. WW2 Machine Gun Cover.'), { issue: '15', matchType: 'bare' }, 'real title with year + decimal grade both present -> only the genuine bare issue 15 survives, year and grade both correctly excluded');
+assertEq(extractIssueCandidate('1943 D.C. Comics Batman 15 CGC 4.5. WW2 Machine Gun Cover.'), cand('15', 'bare'), 'real title with year + decimal grade both present -> only the genuine bare issue 15 survives, year and grade both correctly excluded');
 assertEq(extractIssueCandidate('Batman Lot of 15 comics'), null, '"Lot of N comics" -> not adopted');
 assertEq(extractIssueCandidate('Batman Vol 15'), null, '"Vol N" -> not adopted');
 assertEq(extractIssueCandidate('Batman pg 15'), null, '"pg N" -> not adopted');
@@ -109,17 +116,29 @@ assertEq(extractIssueCandidate('1943'), null, 'bare year with no title text at a
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\nPart 3: lettered sub-issue (regression found + fixed this dispatch)\n');
 
-assertEq(extractIssueCandidate('Adventure Time #5C VF/NM; Boom!'), { issue: '5', matchType: 'hash' }, 'real Adventure Time pool title — "#5C" lettered sub-issue -> "5" (an intermediate \\b-anchored version of this fix briefly broke this; (?!\\d) restores it)');
-assertEq(extractIssueCandidate('Batman #15A (1943)'), { issue: '15', matchType: 'hash' }, '"#15A" lettered sub-issue -> "15"');
-assertEq(extractIssueCandidate('Wonder Woman #1B'), { issue: '1', matchType: 'hash' }, '"#1B" lettered sub-issue, issue "1" specifically -> Q12c marketing-keyword guard still correctly does not fire (no marketing keyword nearby)');
+assertEq(extractIssueCandidate('Adventure Time #5C VF/NM; Boom!'), cand('5', 'hash'), 'real Adventure Time pool title — "#5C" lettered sub-issue -> "5" (an intermediate \\b-anchored version of this fix briefly broke this; (?!\\d) restores it)');
+assertEq(extractIssueCandidate('Batman #15A (1943)'), cand('15', 'hash'), '"#15A" lettered sub-issue -> "15"');
+assertEq(extractIssueCandidate('Wonder Woman #1B'), cand('1', 'hash'), '"#1B" lettered sub-issue, issue "1" specifically -> marketingContext:false (no marketing keyword nearby)');
 
 // ═══════════════════════════════════════════════════════════════════════
-// PART 4 — Q12c marketing-keyword guard preserved (pre-existing behavior)
+// PART 4 — Q12c marketing-keyword guard: now caller policy, not a hard
+// exclusion inside the extractor (Commit B2, URGENT regression repair —
+// see Part 7 for the real Adventure Time regression this fixes).
+// extractIssueCandidate itself never suppresses on marketing context
+// anymore — it reports marketingContext:true and returns the candidate.
+// extractIssueFromTitle (the RAW/GLOBAL pool consumer) is what applies
+// the suppression, exactly matching the original pre-Commit-B behavior.
 // ═══════════════════════════════════════════════════════════════════════
-console.log('\nPart 4: Q12c marketing-keyword guard, preserved verbatim\n');
+console.log('\nPart 4: Q12c marketing-keyword — extractIssueCandidate reports context, does not suppress\n');
 
-assertEq(extractIssueCandidate('X-Men Anniversary Special #1'), null, 'suspect "#1" near "Anniversary"/"Special" -> still excluded (Q12c, unchanged)');
-assertEq(extractIssueCandidate('Amazing Spider-Man #1'), { issue: '1', matchType: 'hash' }, 'genuine standalone "#1", no marketing keyword nearby -> still recovered');
+assertEq(
+  extractIssueCandidate('X-Men Anniversary Special #1'),
+  cand('1', 'hash', { marketingContext: true }),
+  'suspect "#1" near "Anniversary"/"Special" -> candidate returned WITH marketingContext:true, not suppressed at this layer'
+);
+assertEq(extractIssueCandidate('Amazing Spider-Man #1'), cand('1', 'hash'), 'genuine standalone "#1", no marketing keyword nearby -> marketingContext:false, still recovered');
+assertEq(extractIssueFromTitle('X-Men Anniversary Special #1'), null, 'RAW/GLOBAL policy (extractIssueFromTitle): suspect "#1" near marketing keywords -> still excluded, byte-identical to pre-Commit-B behavior');
+assertEq(extractIssueFromTitle('Amazing Spider-Man #1'), '1', 'RAW/GLOBAL policy: genuine standalone "#1" -> still recovered');
 
 // ═══════════════════════════════════════════════════════════════════════
 // PART 5 — resolveFamilyIssueConsensus: the real Batman #15 defect, fixed
@@ -225,6 +244,77 @@ const wwResult = extractConsensus(buildPool(WONDER_WOMAN_POOL), '750');
 assertEq(wwResult.issue, null, 'Wonder Woman #1 2nd print: issue stays null');
 assertEq(wwResult.confidence, 0.41, 'Wonder Woman: confidence 0.41 (41%) — byte-identical to real production (`[phase1] eBay consensus: "wonder woman" #null (confidence 41%)`), zero drift from the bare-number widening (797/11/4/25/10/22/12 never reach the 50% adoption bar either way)');
 assertEq(wwResult.noIssueConsensus, true, 'Wonder Woman: noIssueConsensus still true — the real vision-zero-support ESCALATE path this fixture is certified for is unaffected');
+
+// ═══════════════════════════════════════════════════════════════════════
+// PART 7 — Commit B2 + A2, URGENT regression repair (2026-07-28)
+//
+// Commit B shipped (deployed to production as 9c802fb) with the Q12c
+// marketing-keyword check as a hard, unconditional exclusion inside
+// extractIssueCandidate itself. That broke the real, already-certified
+// Adventure Time Summer Special #1 fixture live in production: all 4
+// winning-family members write "...Special #1...", 3 of 4 also carry
+// "Exclusive"/"Variant" nearby — every one hit the marketing-keyword
+// window, so resolveFamilyIssueConsensus saw zero candidates instead of
+// unanimous agreement. Root cause: extraction and suppression-policy
+// were not separated, and the ONE suppression rule Commit B carried
+// forward doesn't actually apply the same way to a family-scoped vote
+// (which has its own, already-sufficient >=3-row/>=60%/clear-lead bar)
+// as it does to a single, uncorroborated raw-pool row.
+//
+// Separately, direct testing (not assumed) against a real modern-
+// relaunch anchor name surfaced Commit A's own bracket-descriptor gap
+// the same pass: "Absolute Batman [Nick Dragotta Virgin Foil] #1
+// (2024)" left the bracket content inside confirmedTitle — exactly the
+// contamination class Commit A exists to prevent, just from a bracket
+// instead of an assembled family-cluster string.
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\nPart 7: Commit B2 + A2 — mandatory regression cases, run for real\n');
+
+// --- B2: the exact real Adventure Time family, mandatory test ---
+const REAL_ADVENTURE_TIME_FAMILY = [
+  { itemId: '1', rawTitle: 'ADVENTURE TIME SUMMER Special #1, NM, Con edition, SDCC, Variant, 2013' },
+  { itemId: '2a', rawTitle: 'ADVENTURE TIME SUMMER Special #1 NM SDCC Convention Exclusive Variant 2013 NEW' },
+  { itemId: '2b', rawTitle: 'ADVENTURE TIME SUMMER Special #1 NM SDCC Convention Exclusive Variant 2013 NEW' },
+  { itemId: '3', rawTitle: 'Adventure Time 2013 Summer Special #1 Boom! PX SDCC Exclusive Variant *' },
+];
+const advTimeConsensus = resolveFamilyIssueConsensus(null, REAL_ADVENTURE_TIME_FAMILY, [0, 1, 2, 3]);
+assertEq(advTimeConsensus.mode, 'adopted', 'real Adventure Time family: mode "adopted" (was "no-consensus" in the shipped 9c802fb regression)');
+assertEq(advTimeConsensus.winner, '1', 'real Adventure Time family: winner "1"');
+assertEq(advTimeConsensus.support, 4, 'real Adventure Time family: support 4 (was 0 in the shipped regression)');
+assertEq(advTimeConsensus.ratio, 1, 'real Adventure Time family: ratio 1.00 (was 0 in the shipped regression)');
+
+// Confirm each individual member now reports the candidate WITH
+// marketingContext:true rather than being silently dropped.
+REAL_ADVENTURE_TIME_FAMILY.forEach((m) => {
+  const c = extractIssueCandidate(m.rawTitle);
+  assertEq(c?.issue, '1', `real Adventure Time member "${m.rawTitle.slice(0, 40)}..." -> candidate issue "1" recovered (matchType=${c?.matchType})`);
+  assertEq(c?.marketingContext, true, `same member correctly flagged marketingContext:true (genuinely near "Special"/"Exclusive"/"Variant")`);
+});
+
+// --- B2: ordinal / ratio hard guards, mandatory test ---
+assertEq(extractIssueCandidate('Absolute Batman 2nd Print'), null, 'ordinal print syntax "2nd Print" -> null (found live during this dispatch)');
+assertEq(extractIssueCandidate('Wonder Woman 1:25 Foil Variant'), null, 'ratio syntax "1:25" -> null (found live during this dispatch)');
+assertEq(extractIssueCandidate('Batman #3 3rd Printing'), cand('3', 'hash'), 'genuine "#3" hash match survives even with "3rd Printing" elsewhere in the same title — the ordinal guard only excludes the BARE-path candidate it is directly adjacent to, not an unrelated hash match');
+assertEq(extractIssueCandidate('Amazing Spider-Man 2nd Printing 300'), null, 'printing-vocabulary guard also fires by proximity, not just direct ordinal-suffix adjacency — "300" sits within the same before-window as "Printing" and is correctly excluded too (verified by direct execution, not assumed)');
+
+// --- B2: Batman #15 bare-digit fix (Commit B's original defect) must
+// still pass unchanged after B2's rework ---
+assertEq(extractIssueCandidate('D.C. Comics Batman 15'), cand('15', 'bare'), 'Batman #15 bare-digit fix still works unchanged after B2');
+const batmanFamilyB2Check = resolveFamilyIssueConsensus('15', [
+  { itemId: '1', rawTitle: 'Batman #15 (1943) CGC 0.5, WWII Machine Gun Cover' },
+  { itemId: '2', rawTitle: '1943 D.C. Comics Batman 15 CGC 4.5. WW2 Machine Gun Cover.' },
+  { itemId: '3', rawTitle: '1943 D.C. Comics Batman 15 CGC .5. WW2 Machine Gun Cover' },
+], [0, 1, 2]);
+assertEq(batmanFamilyB2Check.mode, 'corroborated', 'Batman #15 real family consensus still corroborated (ratio 1.00) after B2 rework');
+assertEq(batmanFamilyB2Check.ratio, 1, 'Batman #15 real family ratio still 1.00 after B2 rework');
+
+// --- A2: exact required Absolute Batman anchor string ---
+const ABSOLUTE_BATMAN_ANCHOR = 'Absolute Batman [Nick Dragotta Virgin Foil] #1 (2024)';
+assertEq(projectCanonicalTitleFromAnchor(ABSOLUTE_BATMAN_ANCHOR), 'Absolute Batman', 'bracketed anchor: canonicalTitle "Absolute Batman" (bracket content never enters the title)');
+assertEq(extractAnchorBracketDescriptor(ABSOLUTE_BATMAN_ANCHOR), 'Nick Dragotta Virgin Foil', 'bracketed anchor: editionDescriptorCandidate recovers the bracket content exactly');
+assertEq(projectCanonicalTitleFromAnchor('Batman #15 (1943)'), 'Batman', 'Commit A original Batman #15 case unaffected by the bracket fix');
+assertEq(extractAnchorBracketDescriptor('Batman #15 (1943)'), null, 'no bracket present -> null, no false positive');
+assertEq(projectCanonicalTitleFromAnchor('Adventure Time: The Bubbline College Special (2025)'), 'Adventure Time: The Bubbline College Special', 'Commit A special/one-shot case (no issue number, no bracket) unaffected');
 
 console.log('\n' + '━'.repeat(59));
 if (failed === 0) {
