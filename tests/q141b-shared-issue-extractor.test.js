@@ -196,7 +196,15 @@ const FLASH_139_POOL = [
 ];
 const flash139Result = extractConsensus(buildPool(FLASH_139_POOL), '139');
 assertEq(flash139Result.issue, '123', 'Flash #139: issue "123" — byte-identical to the real production log (`[phase1] eBay consensus: "flash" #123 (confidence 67%)`)');
-assertEq(flash139Result.confidence, 0.67, 'Flash #139: confidence 0.67 (67%) — exact match to real production, confirms the "2X3"/dimension-guard fix (part 2) did not leave a residual false-positive in this pool');
+// Superseded by Commit C (2026-07-28): buildPool's filterByCategory now
+// also removes real magnets/book rows this pool carries (bug #1 fix),
+// which correctly shrinks the denominator and moves confidence from 0.67
+// to 0.75 — verified directly against the post-Commit-C function, not
+// left asserting the pre-fix number. The conclusion above (issue="123")
+// is what this dispatch's own regression evidence is actually about, and
+// it is unchanged. See tests/q141c-marketplace-category-rejection.test.js
+// Test H for the full explanation and confirmation this shift is expected.
+assertEq(flash139Result.confidence, 0.75, 'Flash #139: confidence is now 0.75 (75%) post-Commit-C, not the pre-Commit-C 0.67 — the "2X3"/dimension-guard fix (part 2) still holds (no dimension-number false-positive), and the denominator shift is a correct, expected consequence of fixing filterByCategory\'s missing MERCHANDISE/BOOK removal (Commit C), not a regression');
 
 const IMMORTAL_HULK_44_POOL = [
   'Immortal Hulk #44 (Marvel) Cho Variant','Marvel Comics THE IMMORTAL HULK #44 Michael Cho Variant - 2021',
@@ -242,7 +250,11 @@ const WONDER_WOMAN_POOL = [
 ];
 const wwResult = extractConsensus(buildPool(WONDER_WOMAN_POOL), '750');
 assertEq(wwResult.issue, null, 'Wonder Woman #1 2nd print: issue stays null');
-assertEq(wwResult.confidence, 0.41, 'Wonder Woman: confidence 0.41 (41%) — byte-identical to real production (`[phase1] eBay consensus: "wonder woman" #null (confidence 41%)`), zero drift from the bare-number widening (797/11/4/25/10/22/12 never reach the 50% adoption bar either way)');
+// Superseded by Commit C: buildPool's filterByCategory now also removes
+// this pool's real magnet row ("WONDER WOMAN (SWORD & SHIELD) DC FRIDGE
+// MAGNET" — bug #1 fix), correctly moving confidence from 0.41 to 0.54.
+// See tests/q141c-marketplace-category-rejection.test.js Test H.
+assertEq(wwResult.confidence, 0.54, 'Wonder Woman: confidence is now 0.54 (54%) post-Commit-C, not the pre-Commit-C 0.41 — zero drift from the bare-number widening still holds (797/11/4/25/10/22/12 never reach the 50% adoption bar either way); the denominator shift is the real magnet row finally being excluded');
 assertEq(wwResult.noIssueConsensus, true, 'Wonder Woman: noIssueConsensus still true — the real vision-zero-support ESCALATE path this fixture is certified for is unaffected');
 
 // ═══════════════════════════════════════════════════════════════════════

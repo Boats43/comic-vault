@@ -102,7 +102,10 @@ import {
 import { computeDecision } from "../src/lib/decisionEngine.js";
 import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate, inferAssetTypeFromCategories } from "../src/lib/imageSearchIdentity.js";
 // Session 4A — Universal category filter (pre-clustering)
-import { filterByCategory } from "../src/lib/categoryClassifier.js";
+// Commit C — filterVisualIdentityPool is the primary entry point now (runs
+// inside lookupEbayVisual, before extraction/consensus); filterByCategory
+// is kept for any other/future caller wanting just the filtered array.
+import { filterByCategory, filterVisualIdentityPool } from "../src/lib/categoryClassifier.js";
 // Session 4B — Adapter registry (per-asset routing config)
 import { getAdapter } from "../src/adapters/adapterRegistry.js";
 // Ship #20b — price bands engine (verified sold-first pricing).
@@ -1867,8 +1870,24 @@ const lookupEbayVisual = async ({ imageBase64, claudeIssue }) => {
       return null;
     }
     const json = await res.json();
-    const items = Array.isArray(json?.itemSummaries) ? json.itemSummaries : [];
-    if (items.length === 0) return null;
+    const rawItems = Array.isArray(json?.itemSummaries) ? json.itemSummaries : [];
+    if (rawItems.length === 0) return null;
+
+    // Commit C (2026-07-28) — marketplace-category + title-pattern
+    // eligibility filter runs HERE, on the RAW eBay items (which still
+    // carry leafCategoryIds + the full categories[] array with names),
+    // before extractIdentityFromImageSearch ever parses them. Confirmed
+    // via direct execution + real production logs that every downstream
+    // consumer this dispatch is required to protect — extractIdentity's
+    // own issue tally, this function's own internal consensus check a
+    // few lines below, title-family clustering, family issue consensus,
+    // year/publisher consensus, Q32's merchandise-vote denominator — all
+    // read from this same `items`/`parsedRows`-derived pool (or a later
+    // alias of it, `parsedVisualRows`, in the caller). Filtering at the
+    // true origin point, before a single row of this pool is ever parsed
+    // or tallied, means every one of those consumers is protected by
+    // construction — no need to separately patch each call site.
+    const { eligible: items, rejectedVisualEvidence } = filterVisualIdentityPool(rawItems);
 
     // Build structured identity rows once. Same parsed issue values feed
     // both the consensus voter below AND the surfaced items[] payload.
@@ -1878,7 +1897,7 @@ const lookupEbayVisual = async ({ imageBase64, claudeIssue }) => {
     console.log('[visual] extracted issues:', parsedRows.map((r) => r.issue).filter(Boolean));
 
     const claudeStr = claudeIssue ? String(claudeIssue).trim() : null;
-    const result = { items: parsedRows };
+    const result = { items: parsedRows, rejectedVisualEvidence };
 
     // Q-ADV397 — same consensus function, same denominator, as phase1's
     // title consensus and resolveIdentity's zero-support check. Requires
@@ -2198,11 +2217,14 @@ export default async function handler(req, res) {
       ? await lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null)
       : null;
 
-    // Session 4A — Category filter removes non-comic results (posters, prints,
-    // collectibles) before clustering. Gracefully falls back to original pool
-    // if filtering would drop below minimum threshold (5 results).
-    if (visualResult?.items?.length) {
-      visualResult.items = filterByCategory(visualResult.items, 'COMIC');
+    // Commit C — the category-eligibility filter now runs INSIDE
+    // lookupEbayVisual, before this pool is ever parsed (see that
+    // function's own comment). visualResult.items already reflects the
+    // eligible-only pool by the time it reaches here — no second filter
+    // pass needed. I13: rejected rows are preserved for diagnostics only,
+    // never fed back into identity/pricing.
+    if (visualResult?.rejectedVisualEvidence?.length) {
+      out.rejectedVisualEvidence = visualResult.rejectedVisualEvidence;
     }
 
     // Extract consensus from eBay image search results
@@ -2494,6 +2516,17 @@ export default async function handler(req, res) {
     // over correct top-ranked result).
     // Ship 3A: Pass year for era-aware overlap gate (pre-1970 requires 1 token, modern 2).
     mark('family_candidate_start');
+    // Commit C — confirms, at the exact point title-family clustering
+    // consumes the pool, that the eligibility filter already ran upstream
+    // (inside lookupEbayVisual) and this pool's denominator excludes
+    // whatever was hard-rejected. Only logs when something was actually
+    // rejected, matching this dispatch's bounded-logging requirement.
+    if (visualResult?.rejectedVisualEvidence?.length) {
+      console.log(
+        `[visual-identity-filter-family] eligibleRows=${visualResult.items?.length || 0} ` +
+        `rejectedRowsExcludedFromDenominator=${visualResult.rejectedVisualEvidence.length}`
+      );
+    }
     // Q106 FIX-1 — visualPoolWeight=0 on a confirmed-CGC-identity path: skip
     // the title-family vote entirely rather than compute and then ignore it.
     // familyCandidate=null routes into the same "small pool" fallback paths

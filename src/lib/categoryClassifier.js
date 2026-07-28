@@ -65,6 +65,123 @@ const BOOK_PATTERN = /\b(isbn|978-\d{10}|novel|paperback|hardcover|kindle|ebook|
  */
 const MERCHANDISE_PATTERN = /\b(magnet|refrigerator\s*magnet|fridge\s*magnet|metal\s*sign|tin\s*sign|wall\s*sign)\b/i;
 
+// ────────────────────── MARKETPLACE CATEGORY METADATA ──────────────────────
+//
+// Commit C (2026-07-28) — marketplace category metadata takes precedence
+// over title wording. Confirmed via direct execution against real
+// production data (Batman #15, build e22e600): classifyTitle() correctly
+// returns MERCHANDISE for "Batman #15 FRIDGE MAGNET comic book", but
+// filterByCategory() — the actual live call site (api/enrich.js:2205) —
+// had its own separate, hardcoded pattern list that never checked
+// MERCHANDISE_PATTERN at all. classifyTitle() and filterByCategory() were
+// genuinely disconnected; the earlier merchandise-pattern commit verified
+// the classifier in isolation and never verified the function that acts
+// on it (see the standing rule this dispatch adds, below).
+//
+// Only ONE leaf category/ID pair is independently confirmed from a real
+// captured production payload: a genuine magnet listing in the Flash #139
+// pool carried `leafCategoryIds: ['476']` and
+// `categories: [{categoryId:'476', categoryName:'Refrigerator Magnets'}, ...]`.
+// Every other entry here is eBay's own public category taxonomy, matched
+// by NAME (not a guessed ID) for exactly that reason — name matching is
+// the primary signal; the one confirmed ID is a secondary belt-and-
+// suspenders check, not the sole mechanism.
+//
+// eBay's `categories[]` array is LEAF-FIRST in the confirmed real payload
+// (categories[0] matched leafCategoryIds[0] in both the genuine-comic and
+// genuine-magnet real items captured this session) — getLeafCategoryInfo
+// below trusts leafCategoryIds as authoritative and cross-references
+// categories[] only to recover that specific entry's name, rather than
+// assuming array position.
+//
+// Deliberately does NOT hard-reject on a generic PARENT category alone
+// ("Collectibles", "Comic Books & Memorabilia" both appear on genuine
+// comic listings too, confirmed in the same real payloads) — only the
+// resolved LEAF category is checked.
+const HARD_NON_COMIC_LEAF_CATEGORY_IDS = new Map([
+  ['476', { classification: 'MERCHANDISE', rejectionCode: 'MARKETPLACE_MAGNET_CATEGORY' }], // Refrigerator Magnets — confirmed via real production log (Flash #139, build e22e600)
+]);
+
+// Ordered rules, first match wins. Each tests a leaf category NAME.
+const HARD_NON_COMIC_LEAF_CATEGORY_NAME_RULES = [
+  { test: /refrigerator\s*magnets?|\bmagnets?\b/i, classification: 'MERCHANDISE', rejectionCode: 'MARKETPLACE_MAGNET_CATEGORY' },
+  { test: /metal\s*signs?|tin\s*signs?|\bsigns?\b/i, classification: 'MERCHANDISE', rejectionCode: 'MARKETPLACE_SIGN_CATEGORY' },
+  { test: /posters?\s*(&|and)?\s*prints?|\bposters?\b|\bprints?\b/i, classification: 'PRINT', rejectionCode: 'MARKETPLACE_POSTER_CATEGORY' },
+  { test: /wall\s*art|home\s*d[ée]cor/i, classification: 'PRINT', rejectionCode: 'MARKETPLACE_WALL_ART_CATEGORY' },
+  { test: /trading\s*cards?/i, classification: 'CARD', rejectionCode: 'MARKETPLACE_CARD_CATEGORY' },
+  // Negative lookbehind excludes "Comic Books"/"Comic Book" — a genuine
+  // comic leaf category must never hard-reject itself. Real captured leaf
+  // category name for a genuine comic was "Comics & Graphic Novels", which
+  // this pattern does not match at all (no bare "book(s)" token in it).
+  { test: /(?<!comic\s)(?<!comics\s)\bbooks?\b/i, classification: 'BOOK', rejectionCode: 'MARKETPLACE_BOOK_CATEGORY' },
+];
+
+/**
+ * Resolve an eBay Browse API item's own leaf category id + name.
+ * Returns null when no leafCategoryIds are present (title-pattern fallback
+ * territory, not a marketplace-category hard-reject candidate).
+ *
+ * @param {Object} item
+ * @returns {{categoryId: string, categoryName: string|null}|null}
+ */
+export const getLeafCategoryInfo = (item) => {
+  const leafIds = Array.isArray(item?.leafCategoryIds) ? item.leafCategoryIds.map(String) : [];
+  if (leafIds.length === 0) return null;
+  const categories = Array.isArray(item?.categories) ? item.categories : [];
+  const leafId = leafIds[0];
+  const match = categories.find((c) => String(c?.categoryId) === leafId);
+  return { categoryId: leafId, categoryName: match?.categoryName || null };
+};
+
+/**
+ * Commit C — classify a single eBay visual-market row for identity-pool
+ * eligibility. Marketplace category metadata takes precedence over title
+ * wording (item 2 of the dispatch): an explicit non-comic leaf category is
+ * a hard rejection even when the title contains "comic book" (the exact
+ * real production case: "Batman #15 FRIDGE MAGNET comic book", leaf
+ * category "Refrigerator Magnets"). Title-pattern classification
+ * (classifyTitle) remains the fallback when marketplace category metadata
+ * is absent or the leaf doesn't match a known non-comic rule.
+ *
+ * @param {Object} item - eBay Browse API item shape (title/rawTitle, leafCategoryIds, categories)
+ * @returns {{eligibleForComicIdentity: boolean, classification: string, authority: 'marketplace-category'|'title-pattern'|'ambiguous', rejectionCode: string|null}}
+ */
+export const classifyVisualMarketRow = (item) => {
+  const title = item?.title || item?.rawTitle || '';
+  const leaf = getLeafCategoryInfo(item);
+
+  if (leaf) {
+    const idRule = HARD_NON_COMIC_LEAF_CATEGORY_IDS.get(leaf.categoryId);
+    const nameRule = leaf.categoryName
+      ? HARD_NON_COMIC_LEAF_CATEGORY_NAME_RULES.find((r) => r.test.test(leaf.categoryName))
+      : null;
+    const rule = idRule || nameRule;
+    if (rule) {
+      return {
+        eligibleForComicIdentity: false,
+        classification: rule.classification,
+        authority: 'marketplace-category',
+        rejectionCode: rule.rejectionCode,
+      };
+    }
+  }
+
+  // Fallback: title-pattern classification (existing classifyTitle, unchanged).
+  const titleClass = classifyTitle(title);
+  if (titleClass === 'COMIC') {
+    return { eligibleForComicIdentity: true, classification: 'COMIC', authority: 'title-pattern', rejectionCode: null };
+  }
+  if (titleClass === 'UNKNOWN') {
+    return { eligibleForComicIdentity: true, classification: 'UNKNOWN', authority: 'ambiguous', rejectionCode: null };
+  }
+  return {
+    eligibleForComicIdentity: false,
+    classification: titleClass,
+    authority: 'title-pattern',
+    rejectionCode: `TITLE_PATTERN_${titleClass}`,
+  };
+};
+
 // ─────────────────────────── CLASSIFICATION ───────────────────────────
 
 /**
@@ -143,15 +260,90 @@ export const logCategoryDistribution = (original, filtered) => {
 
 // ─────────────────────────── FILTERING ───────────────────────────────
 
+// Bound on how much of a rejected row's title is retained for diagnostics
+// (item 8: bounded logging, no full dumps; item 7: never retain seller
+// username/item ID/URL/postal code/full marketplace object — the title
+// text itself is the only field kept, truncated defensively).
+const REJECTED_EVIDENCE_TITLE_MAX_LEN = 100;
+
+/**
+ * Commit C — classify every row, separate hard-rejected from eligible,
+ * and NEVER let the thin-pool safety path restore a hard-rejected row.
+ *
+ * Confirmed via direct execution as a second, independent bug from the
+ * missing MERCHANDISE check: the old filterByCategory's safety gate
+ * (`filtered.length < 5 && items.length >= 5`) returned the ENTIRE
+ * UNFILTERED original pool — undoing even the pre-existing, correctly-
+ * working PRINT/COLLECTIBLE/POSTER/CANVAS exclusions, not just the
+ * missing MERCHANDISE one. It fired hardest exactly when a pool was most
+ * contaminated (the fewer genuine comic rows survive filtering, the more
+ * likely the count drops below 5) — the case it should protect hardest,
+ * not abandon.
+ *
+ * New behavior: when the eligible pool is thin (<5), it is reported
+ * honestly and returned as-is — eligible COMIC/UNKNOWN rows only, never
+ * padded back out with known magnets/signs/posters/books/cards. When
+ * zero rows are eligible, an empty array is returned; callers (see
+ * api/enrich.js) already treat an empty/thin visual pool as "no coherent
+ * consensus, keep Vision as provisional" — the correct behavior, not a
+ * new code path this function needs to special-case.
+ *
+ * @param {Array} items - eBay result items (with title or rawTitle fields, ideally leafCategoryIds/categories)
+ * @returns {{eligible: Array, rejectedVisualEvidence: Array<{classification: string, rejectionCode: string, sanitizedTitle: string}>}}
+ */
+export const filterVisualIdentityPool = (items) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return { eligible: items || [], rejectedVisualEvidence: [] };
+  }
+
+  const eligible = [];
+  const rejectedVisualEvidence = [];
+  const reasons = {};
+
+  for (const item of items) {
+    const result = classifyVisualMarketRow(item);
+    if (result.eligibleForComicIdentity) {
+      eligible.push(item);
+      continue;
+    }
+    const code = result.rejectionCode || 'UNKNOWN_REJECTION';
+    reasons[code] = (reasons[code] || 0) + 1;
+    const rawTitle = String(item?.title || item?.rawTitle || '');
+    rejectedVisualEvidence.push({
+      classification: result.classification,
+      rejectionCode: code,
+      sanitizedTitle: rawTitle.length > REJECTED_EVIDENCE_TITLE_MAX_LEN
+        ? `${rawTitle.slice(0, REJECTED_EVIDENCE_TITLE_MAX_LEN)}…`
+        : rawTitle,
+    });
+  }
+
+  if (rejectedVisualEvidence.length > 0) {
+    console.log(
+      `[visual-identity-filter] input=${items.length} eligible=${eligible.length} ` +
+      `hardRejected=${rejectedVisualEvidence.length} softRejected=0 reasons=${JSON.stringify(reasons)}`
+    );
+  }
+
+  return { eligible, rejectedVisualEvidence };
+};
+
 /**
  * Filter eBay image search results by expected category.
  *
- * Exclusion-based: drop items with non-comic signals, keep everything else.
- * Safety: returns original array if filtering would drop pool below 5.
+ * Commit C — thin wrapper over filterVisualIdentityPool, kept for
+ * backward-compatible callers that only want the filtered array (existing
+ * public API surface). Ensures MERCHANDISE/PRINT/CARD/BOOK/COLLECTIBLE are
+ * all actually removed when expectedCategory='COMIC' — the core fix for
+ * the confirmed bug where this function's own separate, hardcoded pattern
+ * list never checked MERCHANDISE_PATTERN and consequently never removed
+ * a MERCHANDISE-classified row (confirmed via direct execution: a real
+ * "FRIDGE MAGNET" title classified MERCHANDISE by classifyTitle survived
+ * this function unfiltered).
  *
  * @param {Array} items - eBay result items (with title or rawTitle fields)
  * @param {string} expectedCategory - 'COMIC' | 'PRINT' | 'COLLECTIBLE' | 'CARD' | 'BOOK'
- * @returns {Array} - Filtered items (never empty if input was non-empty)
+ * @returns {Array} - Filtered items (may be empty — the old "never empty" safety-net behavior is exactly the bug this dispatch closes)
  */
 export const filterByCategory = (items, expectedCategory = 'COMIC') => {
   if (!Array.isArray(items) || items.length === 0) {
@@ -164,35 +356,7 @@ export const filterByCategory = (items, expectedCategory = 'COMIC') => {
     return items;
   }
 
-  const filtered = items.filter(item => {
-    const title = item?.title || item?.rawTitle || '';
-    if (!title) return true; // Keep items without titles (handled downstream)
-
-    // Drop if matches any non-comic pattern
-    if (DIMENSION_PATTERN.test(title)) return false;
-    if (PRINT_FORMAT_PATTERN.test(title)) return false;
-    if (COLLECTIBLE_PATTERN.test(title)) return false;
-    if (POSTER_PATTERN.test(title)) return false;
-    if (CANVAS_PATTERN.test(title)) return false;
-
-    // Keep everything else (comic signals OR ambiguous)
-    return true;
-  });
-
-  // Safety gate: if filtered pool drops below minimum threshold, use original
-  if (filtered.length < 5 && items.length >= 5) {
-    console.log(
-      `[category-gate] pool too small after filter (${filtered.length} < 5) — using original pool (${items.length})`
-    );
-    return items;
-  }
-
-  // Log distribution for observability
-  if (filtered.length < items.length) {
-    logCategoryDistribution(items, filtered);
-  }
-
-  return filtered;
+  return filterVisualIdentityPool(items).eligible;
 };
 
 // ─────────────────────────── ASSET TYPE DETECTION ───────────────────────────
