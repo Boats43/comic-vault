@@ -743,3 +743,146 @@ unchanged — 11 failing files, byte-identical outcomes before/after
 (including `sold-verification.test.js` itself, the file whose production
 code this commit touches: 124 passed/5 failed, same failing assertion,
 confirmed via `git stash` A/B).
+
+**Commit 2** — wires `classifyYearEvidence` into `api/comps.js` Filter 0c,
+replacing the bare `/\b(19|20)\d{2}\b/` regex extraction. Only an
+`ISSUE_PUBLICATION_YEAR` classification satisfies an exact issue-year
+comparison; `SERIES_RANGE`/`SERIES_START_YEAR`/`SELLER_CONTEXT_UNKNOWN`
+fall through to the pre-existing no-evidence-keep branch (FIX B's "no
+evidence, no rejection" philosophy) — a series-range title like "Strange
+Tales #142 (1951-76 1st Series)" is no longer treated as if it claimed a
+specific 1951 publication year. Extracted into an exported, pure
+`applyEraConsistencyFilter(pool, yearNum, assetType, cvVolumeStartYear)`,
+same pattern as `applyVariantPreferenceFilter` (Q111). Dead local
+`extractYear` helper removed; `MODERN_RELAUNCH_RE` hoisted to module
+scope. Six precisely-labeled fixtures (correcting a mislabel from the
+prior planning round, where a "genuine 1951 control" example was actually
+a 1966 book): Strange Tales #3 (1951) and #142 (1966) genuine controls,
+the series-range row (kept), a modern-relaunch-marker collision row, a
+modern "Pick Your Cover" row (rejected on year drift alone, no relaunch
+marker), and a missing-year control.
+
+**Consumer-audit correction (before this commit shipped, not after):**
+the plan's own evidence packet for the extraction-only version of this
+commit surfaced the pre-existing "wipe-out bypass" (restore the FULL
+unfiltered pool when era filtering rejects every row in an attempt) as
+unresolved. Audited before staging, per instruction: every downstream
+consumer of `eraFilterBypassed` (`decisionEngine.js`'s
+`filter-bypass-detected` warning, `api/enrich.js`'s matchConfidence
+LOW-cap) is a SOFT cap — neither nulls price/bands/floor/average nor
+gates collection/liquid value; both only cap a confidence/decision
+ceiling. The `refused-tier-bypass-detected` pricingSource
+(`api/enrich.js` ~6457) that had been offered as evidence of containment
+turned out to be a naming coincidence — a structurally unrelated
+"tier-selection-bypass" mechanism gated purely on `priceBandsRaw`/
+`rawComps.count`, with no dependency on `eraFilterBypassed` at all; its
+apparent containment on a real Strange Tales #9 card is far more likely
+attributable to Commit 1's `TARGET_ISSUE_UNRESOLVED` gate (a null
+confirmed issue zeroing the pricing-eligible pool for an unrelated
+reason) than to any era-bypass-specific protection. Worse, the restored
+pool satisfied the attempts loop's `filtered.parsed.length > 0` break
+condition immediately, silently preventing both broader-query
+fallthrough AND Ship v0-I's own, independently-guarded era fallback
+(reprint/slab/title/issue/±20y checks) from ever running — a genuine,
+structural leak, not a hypothetical one, and one Commit 2's own
+stricter year-evidence classification would trigger more often.
+
+**Fix:** `applyEraConsistencyFilter`'s `pool` is now the actual surviving
+rows — an empty array when every row in an attempt genuinely fails, never
+a restoration. Rejected rows are preserved separately in
+`rejectedReferenceRows` (`{title, price, reason}`, the same shape
+`soldVerification.js`'s `pushSample` already uses) for research/display
+(I13), threaded through to `fetchComps`'s `evidence.eraRejectedReferenceRows`.
+`bypassed` remains a pure informational flag driving the pre-existing
+warning/confidence-cap copy — it no longer changes what `pool` contains.
+
+**Founding negative test, through the real production consumer**
+(`fetchComps`, `global.fetch` mocked — same convention as
+`tests/q141-v0i-slab-exclusion.test.js`): a vintage (1964) target with a
+100%-contaminated pool (a modern-relaunch-marker row, a modern "Pick Your
+Cover" row with an explicit far-off year but no relaunch marker, and a
+third wrong-exact-year row — none genuinely matching, all sharing the
+same title+issue tokens so nothing else in the filter chain would catch
+them) returns `count: 0`, `average/lowest/highest: null`, `prices`/
+`recentSales` both empty. Structured custody assertions (not string
+search) confirm: none of the contaminated prices are present in any
+pricing field or pricing-eligible population; all three are preserved
+solely in `evidence.eraRejectedReferenceRows` (or, for this exact
+fixture's specific return shape, at the `applyEraConsistencyFilter` unit
+level — see architectural note below) with explicit rejection reasons
+(`modern-relaunch-marker` for the relaunch row, `era-year-mismatch:2015-
+vs-1964` / `era-year-mismatch:2018-vs-1964` for the other two), and
+prices exactly `[25, 28, 30]` order-normalized. The production log for
+this exact fixture confirms the mechanism end-to-end: every attempt's
+`applyEraConsistencyFilter` correctly empties the pool (`final=0`), then
+Ship v0-I's own fallback — previously unreachable for this scenario,
+since the old inline bypass always restored a non-empty pool on attempt
+1 and broke out of the loop before v0-I's `parsed.length === 0` trigger
+could ever be true — runs for the first time and correctly re-rejects all
+three rows via its own `>20y` conflicting-year check (`[v0-I]
+year-conflict rejected all — returning empty`). Fixing the leak also
+reactivated a well-designed, previously dead-for-this-case safety
+mechanism, not just closed a gap. Mixed-pool control (one genuine 1964
+row alongside the same three contaminated rows) confirms no
+over-rejection: pricing count===1 with only the genuine $450 row
+eligible, all three contaminated rows present solely in
+`evidence.eraRejectedReferenceRows`, `eraFilterBypassed === false`.
+Series-range-only control (a pool of only a contextual, no-year-evidence
+row) confirms an all-contextual pool is never treated as an all-wrong
+pool: `count: 1`, `eraFilterBypassed: false`, no restoration-or-refusal
+mechanism engages at all.
+
+**Architectural finding, surfaced while writing the founding test (not a
+Commit 2 regression — a pre-existing fact of `fetchComps`):** the founding
+fixture's exact all-contaminated pool, at a vintage year, triggers Ship
+v0-I's own fallback, which — like every early-return path in
+`fetchComps` (missing-credentials, missing-title, v0-I's own internal
+guardrail/slab/title/issue/year-conflict rejects, and the post-attempts-
+loop "no sales after filters" check) — returns via `emptyComps()`, which
+carries no `evidence` field at all, for ANY rejection bucket, not unique
+to `eraRejectedReferenceRows`. The ONLY return that carries
+`evidence.eraRejectedReferenceRows` is the normal success path. Split the
+founding-negative proof accordingly: the detailed
+rejectedReferenceRows/reasons/prices shape is proven at the
+`applyEraConsistencyFilter` unit level (still the real, exported
+production function, not a mirror) on the identical 3-row fixture; the
+integration-level `fetchComps` test proves the honest-empty pricing
+fields (`count`/`average`/`lowest`/`highest`/`prices`/`recentSales`) that
+DO reliably reach the caller on this return shape. The mixed-pool control
+proves `evidence.eraRejectedReferenceRows` on a scenario that reaches the
+normal success path. Not fixed further in this commit — extending every
+`emptyComps()` early-return site to also carry `evidence` would be a
+materially larger change than the approved Step 2B scope; queued as a
+future finding, not silently dropped.
+
+**Lesson recorded (custody-assertion correction, this pass):** the
+initial founding-test draft asserted contamination absence via
+`JSON.stringify(result).includes('"25"')`. Demonstrated by direct
+execution to be **vacuously true regardless of whether contamination is
+present** — a numeric `price: 25` field serializes as `25`, never `"25"`,
+so the quoted-string search this assertion looked for cannot occur for a
+number field under any circumstance; confirmed live by constructing a
+result object that DOES contain the contaminated row and observing the
+check still reports "clean." Replaced with structured checks that inspect
+the actual `prices`/`recentSales`/`eraRejectedReferenceRows` arrays
+directly. Each new custody assertion was then proven to have teeth by a
+one-time, non-committed demonstration: deliberately injecting one
+contaminated row into a clone of the pricing population and confirming
+the assertion catches it (fails as expected), before reverting the
+injection. An assertion that cannot fail certifies nothing.
+
+Tests: `tests/q-trackB-commit2-era-classification.test.js` — 63/63
+passing (six fixtures + combined pool + two pre-existing-behavior
+controls + a founding-negative unit-level block +
+the three-scenario founding negative integration test via the real
+`fetchComps`, all with structured custody assertions). Adjacent suites
+re-verified clean: `q141-v0i-slab-exclusion` 19/19, `ship25-era-filter`
+21/21, `q128-era-tolerance-consolidation` 27/27,
+`q129-variant-comps-excluded-by-era` 27/27, `q-strangeTales-containment`
+80/80, `q-commitD1.1-collision-aware-eligibility` 86/86,
+`q-commitD1-evidence-eligibility` 38/38,
+`q-trackB-commit1.1-verification-hardening` 22/22, `ship23-consistency`
+29/29, `q141-rachta-lin-pricing-eligibility-gate` 5/5. Full-suite baseline
+unchanged — 11 failing files, byte-identical outcomes before/after
+(spot-verified `comp-filter-hygiene.test.js` and `ship26-integration.test.js`,
+the two files closest to this commit's own touched code, via `git stash` A/B).

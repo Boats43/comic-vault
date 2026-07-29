@@ -64,7 +64,7 @@ import {
 } from "../src/lib/compHygiene.js";
 
 import { classifyVariantTokens } from "../src/lib/imageSearchIdentity.js";
-import { buildEvidencePopulations, buildPricingEligibleRows } from "../src/lib/evidenceEligibility.js";
+import { buildEvidencePopulations, buildPricingEligibleRows, classifyYearEvidence } from "../src/lib/evidenceEligibility.js";
 
 export {
   VARIANT_CONTAM_RE,
@@ -641,6 +641,170 @@ export const applyVariantPreferenceFilter = (pool, variant) => {
   return { pool, isolated: false, matchMode };
 };
 
+// FIX B: Expanded modern relaunch marker detection. Reject listings with
+// explicit modern relaunch markers when our book is pre-2000. Catches New
+// 52, Rebirth, vol/volume numbering, etc. Module-level (Track B Phase 0
+// Commit 2 hoist) so applyEraConsistencyFilter below can reference it —
+// previously declared inline inside the block it's now extracted from.
+const MODERN_RELAUNCH_RE = /\b(n52|new\s*52|rebirth|infinite\s*frontier|legacy|prime\s*earth|vol\.?\s*[2-9]|volume\s*[2-9]|v[2-9]\b|all[\s-]?new|now!)\b/i;
+
+/**
+ * Filter 0c: era consistency (F2). Extracted as a pure, exported function
+ * (Track B Phase 0, Commit 2, 2026-07-29) — same "extract for direct
+ * regression-testability" pattern as applyVariantPreferenceFilter above
+ * (CLAUDE.md Pattern Library, Q111 dispatch: "extracted into a pure
+ * exported function... matches the hasMultipleDistinctIssues/
+ * detectSeriesMarkers pattern already used in this file").
+ *
+ * Rejects listings whose year differs from our confirmedYear by more than
+ * the era's tolerance. Catches clean reprint listings that don't match
+ * REPRINT_RE (e.g. DC Classics Library issues retaining the original's
+ * #issue number without an explicit "reprint" token).
+ *
+ * Commit C.2 (Strange Tales dispatch, 2026-07-28) / Track B Phase 0 Commit
+ * 2 — replaces the bare `/\b(19|20)\d{2}\b/` regex extraction with
+ * classifyYearEvidence (src/lib/evidenceEligibility.js): only an
+ * ISSUE_PUBLICATION_YEAR classification satisfies an exact issue-year
+ * comparison. A SERIES_RANGE ("1951-76 1st Series") or SERIES_START_YEAR
+ * ("1951 series") classification falls through to the SAME no-evidence-
+ * keep branch as a genuinely undated listing — "Strange Tales #142
+ * (1951-76 1st Series)" no longer gets treated as if it were a specific
+ * issue's own 1951 publication year.
+ *
+ * Tolerance: getEraYearTolerance (src/lib/compHygiene.js) — single source
+ * of truth, consolidated Q128 (was an inline copy here that had
+ * independently drifted from soldVerification.js's own inline copy, whose
+ * comment falsely claimed to "mirror" this one).
+ *
+ * Track B Phase 0, Commit 2 CONSUMER-AUDIT CORRECTION (2026-07-29): the
+ * pre-existing "wipe-out bypass" (restore the FULL unfiltered pool when
+ * era filtering rejects every row in an attempt) was audited before this
+ * commit shipped and found to leak. Consumers of the resulting
+ * `eraFilterBypassed` flag (`decisionEngine.js`'s `filter-bypass-detected`
+ * warning, `api/enrich.js`'s matchConfidence LOW-cap) are SOFT — they cap
+ * confidence/decision ceiling but never null price/bands/floor/average,
+ * and never gate collection/liquid value. Worse: because the attempts
+ * loop (`fetchComps`) only breaks on `filtered.parsed.length > 0`, a
+ * restored-to-full pool from an EARLY, narrow attempt satisfied that
+ * condition immediately — silently preventing the loop from trying
+ * broader queries, AND preventing Ship v0-I's own, much better-guarded
+ * era-fallback (reprint/slab/title/issue/±20y checks) from ever running,
+ * since v0-I only fires when `parsed.length === 0` after the ENTIRE
+ * attempts loop, which the inline restore prevented from ever being true.
+ * A modern relaunch/wrong-year pool that passes every non-era filter
+ * (the exact Renumbered-franchise-title/issue-collision class — ASM #17
+ * 1964 vs. a 2015 relaunch "#17" sharing the same title+issue tokens)
+ * could therefore reach pricing fully intact, contaminating recommendation/
+ * bands/floor/average with zero hard block — the "confidently wrong"
+ * failure mode this whole campaign exists to prevent, not a "fails honest"
+ * one. Fixed here: the returned `pool` is now the ACTUAL surviving rows
+ * (empty array when every row genuinely fails), never a restoration.
+ * Rejected rows are preserved separately in `rejectedReferenceRows` (same
+ * `{title, price, reason}` shape `soldVerification.js`'s `pushSample`
+ * already uses) for research/display — I13 (never silently vaporize a
+ * rejected row) — rather than being smuggled back into the priced pool.
+ * `bypassed` is retained as a pure informational flag (still drives the
+ * existing warning/confidence-cap copy) — it no longer changes what
+ * `pool` contains. This also means an attempt that fails 100% on era
+ * grounds now correctly falls through to the next, broader attempt (or to
+ * Ship v0-I's own guardrail, which reactivates for the vintage-book case
+ * it was built for) instead of a single narrow attempt's restored pool
+ * short-circuiting both.
+ *
+ * @param {Array<{title?: string}>} pool - current comp pool
+ * @param {number} yearNum - our confirmed year, already parsed
+ * @param {string} assetType - 'comic' | 'tpb' | 'book'; books skip entirely
+ *   (book year = edition, spans decades — Session 4B)
+ * @param {number|null} [cvVolumeStartYear] - ComicVine volume start year,
+ *   for the Q128 volume-label corroboration check inside evaluateEraYearMatch
+ * @returns {{pool: Array, bypassed: boolean, excludedVariantCount: number,
+ *   excludedVariantSamples: string[], rejectedReferenceRows: Array<{title, price, reason}>}}
+ */
+export const applyEraConsistencyFilter = (pool, yearNum, assetType, cvVolumeStartYear) => {
+  if (!yearNum || !Number.isFinite(yearNum) || assetType === 'book') {
+    return { pool, bypassed: false, excludedVariantCount: 0, excludedVariantSamples: [], rejectedReferenceRows: [] };
+  }
+
+  const tolerance = getEraYearTolerance(yearNum);
+  const beforeEra = pool.length;
+  let excludedVariantCount = 0;
+  const excludedVariantSamples = [];
+  const rejectedReferenceRows = [];
+
+  const eraFiltered = pool.filter((it) => {
+    const titleStr = String(it.title || '');
+
+    // Reject modern relaunches for pre-2000 books.
+    if (yearNum < 2000 && MODERN_RELAUNCH_RE.test(titleStr)) {
+      console.log('[era-filter] rejected (modern relaunch marker):', titleStr.slice(0, 55));
+      rejectedReferenceRows.push({ title: it.title ?? null, price: it.price ?? null, reason: 'modern-relaunch-marker' });
+      return false;
+    }
+
+    // Only ISSUE_PUBLICATION_YEAR is exact-issue-year evidence.
+    // SERIES_RANGE/SERIES_START_YEAR/SELLER_CONTEXT_UNKNOWN fall through to
+    // the no-evidence-keep branch below, same as a genuinely undated row.
+    const yearEvidence = classifyYearEvidence(titleStr);
+    const ly = yearEvidence.class === 'ISSUE_PUBLICATION_YEAR' && yearEvidence.year
+      ? parseInt(yearEvidence.year, 10)
+      : null;
+
+    // FIX B: no year evidence — ACCEPT (insufficient evidence to reject).
+    // World's Finest #139/#149/#159/#163 all hit final=0 comps under the
+    // old all-listings-must-have-a-year gate; eBay sellers frequently omit
+    // year entirely on vintage listings. Modern relaunch contamination is
+    // mitigated by the MODERN_RELAUNCH_RE check above instead.
+    if (ly == null) {
+      return true;
+    }
+
+    // Q128 dispatch (2026-07-19, Harley Quinn #62 class) — evaluateEraYearMatch
+    // checks the normal confirmedYear tolerance first, then falls back to a
+    // volume-label match before rejecting: comic back-issue sellers
+    // routinely label listings with a series' volume-launch year rather
+    // than the specific issue's cover date. Distinct from genuine
+    // wrong-volume contamination (Batman #608 class), which this does NOT
+    // protect — a volume-label match only admits a year matching THIS
+    // specific book's own resolved volume, not any arbitrary nearby year.
+    const { keep, matchedVia } = evaluateEraYearMatch(ly, yearNum, tolerance, cvVolumeStartYear);
+    if (!keep) {
+      console.log('[era-filter] rejected:',
+        titleStr.slice(0, 55),
+        `(year ${ly} vs ${yearNum}, tol ±${tolerance})`);
+      // Q129 dispatch (2026-07-19, Harley Quinn #62 Guillem March Cover C
+      // class) — track era-excluded rows that name a specific variant
+      // descriptor; checked against the final surviving pool by the caller
+      // (variant-comps-unavailable warning).
+      if (hasNamedVariantDescriptor(titleStr)) {
+        excludedVariantCount++;
+        if (excludedVariantSamples.length < 3) {
+          excludedVariantSamples.push(titleStr.slice(0, 80));
+        }
+      }
+      rejectedReferenceRows.push({ title: it.title ?? null, price: it.price ?? null, reason: `era-year-mismatch:${ly}-vs-${yearNum}` });
+      return false;
+    }
+    if (matchedVia === 'volume-label') {
+      console.log('[era-filter] kept via volume-label match:',
+        titleStr.slice(0, 55),
+        `(year ${ly} matches CV volume start year ${cvVolumeStartYear}, confirmedYear=${yearNum})`);
+    }
+    return true;
+  });
+
+  const bypassed = eraFiltered.length === 0 && beforeEra > 0;
+  if (bypassed) {
+    console.log(
+      `[era-filter] all ${beforeEra} comp(s) failed era consistency — pool is now empty ` +
+      `(structural fix, Track B Phase 0 Commit 2: no longer restored); bypassed=true retained ` +
+      `for warning/confidence-cap copy only, rejected rows preserved as rejectedReferenceRows`
+    );
+  } else if (eraFiltered.length < beforeEra) {
+    console.log(`[comps] era filter removed ${beforeEra - eraFiltered.length}`);
+  }
+  return { pool: eraFiltered, bypassed, excludedVariantCount, excludedVariantSamples, rejectedReferenceRows };
+};
+
 /**
  * Q136 Slice A (2026-07-22, Lozano/Louw sibling class) — artist-preference
  * narrowing. Layered STRICTLY ON TOP of applyVariantPreferenceFilter's own
@@ -1076,6 +1240,7 @@ export const fetchComps = async ({
   let premiumVariantIsolated = false;
   let fellBack = false;
   let eraFilterBypassed = false;
+  let eraRejectedReferenceRows = [];  // Track B Phase 0, Commit 2 — I13 reference bucket for era-rejected rows
   let variantCompsExcludedByEra = null;
   let multiIssueRejected = 0;
   let sequelRejected = 0;
@@ -1103,6 +1268,7 @@ export const fetchComps = async ({
       let _eraFilterBypassed = false;
       let _eraExcludedVariantCount = 0;
       const _eraExcludedVariantSamples = [];
+      const _eraRejectedReferenceRows = [];
       let _multiIssueRejected = 0;
       let _sequelRejected = 0;
       let _signedRejected = 0;
@@ -1229,113 +1395,27 @@ export const fetchComps = async ({
         console.log('[comps] sequel filter skipped (assetType=book)');
       }
 
-      // Filter 0c: era consistency (F2). Reject listings whose year
-      // differs from our confirmedYear (passed in as `year`) by more than
-      // the era's tolerance. Catches clean reprint listings that don't
-      // match REPRINT_RE (e.g. DC Classics Library issues retaining the
-      // original's #issue number without explicit "reprint" token).
-      // Tolerance: getEraYearTolerance (src/lib/compHygiene.js) — single
-      // source of truth, consolidated Q128 (was an inline copy here that
-      // had independently drifted from soldVerification.js's own inline
-      // copy, whose comment falsely claimed to "mirror" this one).
-      // Graceful wipe-out fallback: if filter removes every listing, keep
-      // all and flag eraFilterBypassed so UI can warn user.
-      // Session 4B — Skip for books (book year = edition, spans decades).
+      // Filter 0c: era consistency (F2). Track B Phase 0, Commit 2 — calls
+      // the extracted, exported applyEraConsistencyFilter (module scope,
+      // above) instead of the previous inline block, so production and
+      // this function's test invoke the identical composition (invariant
+      // 10). See that function's own doc comment for the full rationale
+      // (classifyYearEvidence wiring, tolerance source, volume-label
+      // fallback, and the Commit-2 consumer-audit correction to the
+      // wipe-out bypass — pool is no longer restored on all-rejected).
+      // Session 4B — skip for books (book year = edition, spans decades),
+      // enforced inside the extracted function.
       if (year && assetType !== 'book') {
         const yearNum = parseInt(String(year), 10);
         if (!isNaN(yearNum)) {
-          const tolerance = getEraYearTolerance(yearNum);
-          const extractYear = (t) => {
-            const m = String(t || '').match(/\b(19|20)\d{2}\b/);
-            return m ? parseInt(m[0], 10) : null;
-          };
-          // FIX B: Expanded modern relaunch marker detection.
-          // Reject listings with explicit modern relaunch markers when user's book
-          // is pre-2000. Catches New 52, Rebirth, vol/volume numbering, etc.
-          // World's Finest #139-#163 fix: accept missing-year listings (vintage
-          // sellers often omit year), reject only when CONFLICTING year/marker present.
-          const MODERN_RELAUNCH_RE = /\b(n52|new\s*52|rebirth|infinite\s*frontier|legacy|prime\s*earth|vol\.?\s*[2-9]|volume\s*[2-9]|v[2-9]\b|all[\s-]?new|now!)\b/i;
-
-          const beforeEra = p.length;
-          const eraFiltered = p.filter((it) => {
-            const titleStr = String(it.title || '');
-
-            // Reject modern relaunches for pre-2000 books
-            if (yearNum < 2000 && MODERN_RELAUNCH_RE.test(titleStr)) {
-              console.log('[era-filter] rejected (modern relaunch marker):',
-                titleStr.slice(0, 55));
-              return false;
-            }
-
-            const ly = extractYear(titleStr);
-
-            // FIX B: Removed year-missing rejection (Ship #25.1 over-strict gate).
-            // Old logic rejected ALL no-year listings for pre-1970 books, throwing away
-            // legitimate vintage comps. World's Finest #139/#149/#159/#163 all hit
-            // final=0 comps because eBay sellers frequently title as "World's Finest
-            // #139 VG" without explicit year.
-            //
-            // New logic: ACCEPT missing-year listings (can't determine era conflict).
-            // REJECT only when year is PRESENT and WRONG (tolerance check below).
-            // Modern relaunch contamination mitigated by MODERN_RELAUNCH_RE filter above.
-            if (ly == null) {
-              // No year in listing title - ACCEPT (insufficient evidence to reject)
-              return true;
-            }
-
-            // Q128 dispatch (2026-07-19, Harley Quinn #62 class) —
-            // evaluateEraYearMatch (src/lib/compHygiene.js) checks the
-            // normal confirmedYear tolerance first, then falls back to a
-            // volume-label match before rejecting: comic back-issue
-            // sellers routinely label listings with a series' volume-
-            // launch year rather than the specific issue's cover date
-            // (e.g. "Harley Quinn #62 (2016)" for an issue cover-dated
-            // 2019, because ComicVine vol_id 92750 — the confirmed volume
-            // for this exact book — genuinely launched in 2016, confirmed
-            // directly against ComicVine's own API before this check was
-            // written). Distinct from genuine wrong-volume contamination
-            // (Batman #608 class), which this does NOT protect — a
-            // volume-label match only admits a year matching THIS
-            // specific book's own resolved volume, not any arbitrary
-            // nearby year.
-            const { keep, matchedVia } = evaluateEraYearMatch(ly, yearNum, tolerance, cvVolumeStartYear);
-            if (!keep) {
-              console.log('[era-filter] rejected:',
-                titleStr.slice(0, 55),
-                `(year ${ly} vs ${yearNum}, tol ±${tolerance})`);
-              // Q129 dispatch (2026-07-19, Harley Quinn #62 Guillem March
-              // Cover C class) — a distinct failure shape from
-              // Q115/Q127/Q128: not wrong data getting IN, but CORRECT
-              // variant-specific comps getting excluded here for a
-              // legitimate reason (a different printing/year), with no
-              // signal yet as to whether the SURVIVING pool still
-              // represents the same specific cover variant. Track it here;
-              // checked against the final surviving pool below.
-              if (hasNamedVariantDescriptor(titleStr)) {
-                _eraExcludedVariantCount++;
-                if (_eraExcludedVariantSamples.length < 3) {
-                  _eraExcludedVariantSamples.push(titleStr.slice(0, 80));
-                }
-              }
-              return false;
-            }
-            if (matchedVia === 'volume-label') {
-              console.log('[era-filter] kept via volume-label match:',
-                titleStr.slice(0, 55),
-                `(year ${ly} matches CV volume start year ${cvVolumeStartYear}, confirmedYear=${yearNum})`);
-            }
-            return true;
-          });
-          if (eraFiltered.length === 0 && beforeEra > 0) {
-            console.log('[era-filter] bypassed — all', beforeEra,
-              'comps failed, keeping all');
-            _eraFilterBypassed = true;
-          } else {
-            p = eraFiltered;
-            if (p.length < beforeEra) {
-              console.log(`[comps] era filter removed ${beforeEra - p.length}`);
-            }
+          const eraResult = applyEraConsistencyFilter(p, yearNum, assetType, cvVolumeStartYear);
+          p = eraResult.pool;
+          if (eraResult.bypassed) _eraFilterBypassed = true;
+          _eraExcludedVariantCount += eraResult.excludedVariantCount;
+          for (const s of eraResult.excludedVariantSamples) {
+            if (_eraExcludedVariantSamples.length < 3) _eraExcludedVariantSamples.push(s);
           }
+          _eraRejectedReferenceRows.push(...eraResult.rejectedReferenceRows);
         }
       }
       afterEra = p.length;
@@ -1801,6 +1881,7 @@ export const fetchComps = async ({
         premiumVariantIsolated: _premiumVariantIsolated,
         fellBack: _fellBack,
         eraFilterBypassed: _eraFilterBypassed,
+        eraRejectedReferenceRows: _eraRejectedReferenceRows,
         variantCompsExcludedByEra: _variantCompsExcludedByEra,
         multiIssueRejected: _multiIssueRejected,
         sequelRejected: _sequelRejected,
@@ -1864,6 +1945,7 @@ export const fetchComps = async ({
         premiumVariantIsolated = filtered.premiumVariantIsolated;
         fellBack = filtered.fellBack;
         eraFilterBypassed = filtered.eraFilterBypassed;
+        eraRejectedReferenceRows = filtered.eraRejectedReferenceRows || [];
         variantCompsExcludedByEra = filtered.variantCompsExcludedByEra;
         multiIssueRejected = filtered.multiIssueRejected;
         sequelRejected = filtered.sequelRejected;
@@ -2164,6 +2246,11 @@ export const fetchComps = async ({
         // affirmative false claim; these rows made none).
         unconfirmedEditionReferences: evidencePopulations.unconfirmedEditionReferences,
         rejectedEvidence: evidencePopulations.rejectedEvidence,
+        // Track B Phase 0, Commit 2 (consumer-audit correction) — rows the
+        // era-consistency filter rejected (modern relaunch marker or a
+        // genuine year mismatch), preserved here instead of being restored
+        // into the priced pool the way the pre-Commit-2 wipe-out bypass did.
+        eraRejectedReferenceRows,
       },
     };
   } catch (err) {
