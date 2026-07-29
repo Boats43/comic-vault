@@ -116,6 +116,10 @@ import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
 import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens, buildSanitizedComicSearchTitle } from "../src/lib/compHygiene.js";
 import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } from "../src/lib/evidenceEligibility.js";
+// Track B Phase 0, Commit 3 — manual identity correction: server-side
+// authority validation (allow-list + normalization), never trusting the
+// client's correctedFields claim alone.
+import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -1963,6 +1967,20 @@ export {
   lookupPriceCharting,  // Q86 — exported for year-confidence tests
 };
 
+// Q89-CACHE / Commit B.1 (Strange Tales dispatch) — the exact-pricing `ac:`
+// active-comp cache key. Version-salted (a filter fix must not replay pools
+// filtered by an old regex — Evil Ernie class) and NEVER built from a null
+// confirmedIssue (a `title|null` key would be a title-only bucket any
+// future request for the same title could collide on, regardless of which,
+// or whether any, issue that later request resolves to — the historical
+// failure class this exact template exists to prevent). Extracted as its
+// own exported pure function — Track B Phase 0, Commit 3, Safeguard 2
+// amendment — so the real call site (below, inside the handler) and this
+// feature's tests build the IDENTICAL key, per invariant 10, rather than a
+// test-local mirror of the template string.
+export const buildActiveCompCacheKey = (filterVersion, confirmedTitle, confirmedIssue) =>
+  `v${filterVersion}:${confirmedTitle}|${confirmedIssue}`;
+
 export default async function handler(req, res) {
   // A6 BUILD-ID: Inject commit hash header (Vercel auto-injects VERCEL_GIT_COMMIT_SHA)
   const buildId = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || 'unknown';
@@ -2044,7 +2062,40 @@ export default async function handler(req, res) {
       manualIdentity,  // FIX 4 — Manual text search (title/issue/year)
       skipVision,      // FIX 4 — Skip Vision when manual identity provided
       skipImageSearch, // FIX 4 — Skip eBay image search when manual
+      manualAuthority, // Track B Phase 0, Commit 3 — { correctedBy, correctedFields }, present only on a card-correction request
+      priorIdentity,   // Track B Phase 0, Commit 3 — { title, issue, year, publisher, issueAuthority } snapshot of the card BEFORE correction, client-supplied (server has no other way to know the prior state)
     } = req.body || {};
+
+    // Track B Phase 0, Commit 3 — Safeguards 1+2. prepareManualCorrectionRequest
+    // enforces the EXACT four-condition manual-authority request contract
+    // (manualIdentity===true, skipVision===true, skipImageSearch===true,
+    // identitySource==='manual' — checking manualIdentity alone is not
+    // sufficient, and a request that carries manualAuthority without the
+    // other three is rejected outright, before any identity resolution,
+    // external lookup, or mutation), THEN validates manualAuthority.correctedFields
+    // against MANUAL_CORRECTION_ALLOWED_FIELDS (title/issue/year/publisher
+    // only — price/contract/decision/etc. can never become user-authoritative
+    // regardless of what a client requests), THEN normalizes all four
+    // identity fields into `workingIdentity` — the values that actually
+    // drive effectiveTitle/Issue/Year/Publisher below, not the raw request
+    // fields (Safeguard 2: a raw " #3 " must become "3" everywhere
+    // downstream — cache-key construction, PC/CV lookup, comp-query
+    // construction, terminal out.* writes — never just in the display
+    // layer).
+    let manualCorrectionRequest = null;
+    if (manualAuthority) {
+      manualCorrectionRequest = prepareManualCorrectionRequest(req.body, new Date().getUTCFullYear());
+      if (!manualCorrectionRequest.valid) {
+        return res.status(400).json({
+          error: manualCorrectionRequest.contractOk === false
+            ? 'Invalid manual-authority request contract'
+            : 'No valid corrections supplied',
+          contractOk: manualCorrectionRequest.contractOk,
+          rejectedFields: manualCorrectionRequest.validation?.rejectedFields || [],
+          emptyFields: manualCorrectionRequest.validation?.emptyFields || [],
+        });
+      }
+    }
 
     // A5 INPUT CAP: validate images array if present
     if (images && Array.isArray(images)) {
@@ -2087,10 +2138,24 @@ export default async function handler(req, res) {
 
     // Use barcode identity if available, manual if flagged, otherwise Vision data
     // FIX B: Manual entry now passes publisher (was hardcoded null)
-    const effectiveTitle = barcodeIdentity?.title || (manualIdentity ? title : title);
-    const effectiveIssue = barcodeIdentity?.issue || (manualIdentity ? issue : issue);
-    const effectiveYear = barcodeIdentity?.year || (manualIdentity ? year : year);
-    const effectivePublisher = barcodeIdentity?.publisher || (manualIdentity ? rawPublisher : rawPublisher);
+    //
+    // Track B Phase 0, Commit 3, Safeguard 2 — when this request is a
+    // validated manual correction, `manualCorrectionRequest.workingIdentity`
+    // (the NORMALIZED title/issue/year/publisher — e.g. raw " #3 " already
+    // reduced to bare "3") is the authoritative working identity, not the
+    // raw request fields. This is the first identity-dependent consumer of
+    // those fields (cache-key construction, PC/CV lookup, and comp-query
+    // construction all read effectiveTitle/effectiveIssue/effectiveYear/
+    // effectivePublisher, directly or via confirmedTitle/confirmedIssue/
+    // confirmedYear/confirmedPublisher downstream) — every later consumer
+    // inherits the normalized form through these four variables, never the
+    // raw one. Unaffected for every other path (barcode, fresh Scan-tab
+    // manual entry with no manualAuthority, Vision/resolveIdentity) — this
+    // only engages when manualCorrectionRequest is present AND valid.
+    const effectiveTitle = barcodeIdentity?.title || (manualCorrectionRequest?.valid ? manualCorrectionRequest.workingIdentity.title : title);
+    const effectiveIssue = barcodeIdentity?.issue || (manualCorrectionRequest?.valid ? manualCorrectionRequest.workingIdentity.issue : issue);
+    const effectiveYear = barcodeIdentity?.year || (manualCorrectionRequest?.valid ? manualCorrectionRequest.workingIdentity.year : year);
+    const effectivePublisher = barcodeIdentity?.publisher || (manualCorrectionRequest?.valid ? manualCorrectionRequest.workingIdentity.publisher : rawPublisher);
 
     // Strip brackets/quotes/slashes before anything downstream sees the
     // publisher — parens in "Hollywood Comics (Walt Disney)" break eBay's
@@ -4589,7 +4654,16 @@ export default async function handler(req, res) {
         ? (async () => {
             // Q89-CACHE: version-salted — a filter fix (MERCH_RE) must not
             // replay pools filtered by the old regex (Evil Ernie class).
-            const activeKey = `v${COMP_FILTER_VERSION}:${confirmedTitle}|${confirmedIssue}`;
+            // Track B Phase 0, Commit 3, Safeguard 2 amendment — calls the
+            // extracted, exported buildActiveCompCacheKey (below in this
+            // file) instead of an inline template string, so this real
+            // production call site and this feature's tests build the
+            // IDENTICAL key (invariant 10). Closes the gap where Safeguard
+            // 2's normalization chain (workingIdentity -> effectiveTitle/
+            // effectiveIssue -> confirmedTitle/confirmedIssue) was proven
+            // up to confirmedIssue but never exercised through to the
+            // actual cache key a corrected request would read/write under.
+            const activeKey = buildActiveCompCacheKey(COMP_FILTER_VERSION, confirmedTitle, confirmedIssue);
             // Commit B.1 (Strange Tales dispatch) — no `title|null` keys in
             // the exact-pricing `ac:` cache namespace. A null confirmedIssue
             // means genuinely unresolved identity — a key built from that
@@ -8977,6 +9051,25 @@ export default async function handler(req, res) {
 
     if (!out.publisher) {
       out.publisher = confirmedPublisher || (identityIsProvisionalOverride ? null : publisher) || null;
+    }
+
+    // Track B Phase 0, Commit 3 — manual-correction provenance. Calls the
+    // extracted, exported buildManualCorrectionProvenance
+    // (src/lib/manualCorrection.js) so this call site and this feature's
+    // tests invoke the identical construction (invariant 10). Only
+    // populated when this request passed manual-authority validation above
+    // (manualCorrectionRequest.valid === true, Safeguards 1+2) — never
+    // inherited/guessed for older cards with no manualAuthority at all
+    // (honest-null over fabricated provenance). priorIdentity is
+    // client-supplied (Safeguard 3) — buildManualCorrectionProvenance tags
+    // every prior-value/prior-source record it produces with
+    // `provenanceTrust: 'client-reported'`.
+    if (manualCorrectionRequest?.valid) {
+      const provenance = buildManualCorrectionProvenance(manualCorrectionRequest.validation, priorIdentity);
+      out.manualCorrection = provenance.manualCorrection;
+      if (provenance.issueAuthority) {
+        out.issueAuthority = provenance.issueAuthority;
+      }
     }
 
     // Q135 dispatch — out.variantNote (the field the client actually

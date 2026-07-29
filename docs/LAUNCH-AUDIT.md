@@ -886,3 +886,193 @@ re-verified clean: `q141-v0i-slab-exclusion` 19/19, `ship25-era-filter`
 unchanged — 11 failing files, byte-identical outcomes before/after
 (spot-verified `comp-filter-hygiene.test.js` and `ship26-integration.test.js`,
 the two files closest to this commit's own touched code, via `git stash` A/B).
+
+**Commit 3** — manual identity correction (fixes a card whose title/issue/
+year/publisher is wrong, e.g. a marketplace-adopted #9 that's actually
+#3), the same union-field render, per-card state, authoritative
+pre-consensus merge, same-request lock, provenance, and update-in-place
+design approved earlier, plus a required consumer-audit-class addition
+folded in before implementation: explicit clear-list/preserve-list field
+enumeration, contract/decision recomputation, server-side manual-authority
+validation, and three tests (A/B/C) — closing the same stale-merge class
+as the Wonder Woman #750 persistence bug (Scope 1, `mergeConfirmedIdentity`)
+on the correction path specifically, where a blessed-but-stale corrected
+card would be strictly worse than the original wrong one.
+
+**Design finding, recorded rather than silently built around:** the
+"same-request lock" requirement (corrected fields must not be overwritten
+by automatic evidence resolution within the same request) is already
+satisfied structurally by the pre-existing `manualIdentity: true` contract
+(the Scan tab's existing manual-entry flow, `api/enrich.js`) — traced the
+actual four-way identity branch (barcode / manual / cgc_cert /
+`resolveIdentity()`, a plain `else if` chain) and confirmed no automatic
+resolution runs at all on this path, for any of title/issue/year/
+publisher. This commit does not build a parallel per-field lock mechanism
+mirroring `resolveYear`'s branch (e) — it would duplicate protection that
+already exists. What this commit adds on top is genuinely new: authority
+VALIDATION (the server must not trust a client's `correctedFields` claim
+blindly) and PROVENANCE (recording what changed, from what, per field).
+
+**New `src/lib/manualCorrection.js`:**
+- `MANUAL_CORRECTION_ALLOWED_FIELDS` — exactly `['title', 'issue', 'year', 'publisher']`. Price, contract, decision, and every other pipeline-computed field can never become user-authoritative, regardless of what a client requests.
+- `validateManualAuthority(manualAuthority, fieldValues, currentYear)` — server-side validation: intersects the client's `correctedFields` claim against the allow-list AND against whether a valid, non-empty, normalized value was actually supplied for each. Returns `{acceptedFields, rejectedFields, emptyFields, normalizedValues, valid, error}` — never trusts the client alone. `normalizeManualIssue` reuses the existing `normalizeIssueFormat` (`compHygiene.js`) rather than a second issue parser; `normalizeManualYear` rejects non-numeric input and implausible years (pre-1930, more than one year past the current calendar year).
+- `IDENTITY_DEPENDENT_FIELDS_TO_CLEAR` — **229 explicit, named fields**, grouped into 12 reviewable sub-arrays matching the dispatch's own categories (PC/ComicVine/GoCollect IDs, comp pools, evidence populations, averages/floor/high/last-sold, ladder/history, recommendation+bands, pricing source/derivation, velocity/demand/trend, story metadata, variant/printing determinations, prior-identity warnings, contract/decision/listing state), flattened into one deduplicated export. Derived from a full enumeration of every `out.X =` assignment in `api/enrich.js` as of Commit 2 (`eda3e42`) — not inferred "everything except" logic. Includes `decision` and `contract` specifically, so a stale READY/REFUSED/LOCKED/price-ready state can never survive under a corrected identity.
+- `IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE` — **30 explicit fields**: collection ownership/disposition (`id`, `timestamp`, `status`, `ebayUrl`, `ebayItemId`, `bundleId`, `soldPrice`, `purchasePrice`, `listPrice`, `listPriceManual`, `userFmv98`), photos (`images`), and photo-derived condition/grade/slab data unaffected by a text-only correction (`grade`, `isGraded`, `numericGrade`, `confidence`, `variant`, `certNumber`, `cgcLabel`, `cgcVerified`, `labelType`, `labelNotes`, `defectPenalty`, `cgcPenaltyFlags`, `restoration`, `isReprint`, `editionType`, `assetType`, `assetTypeConfident`, `gradeLocked`). Confirmed against actual `App.jsx` catalogue-item field usage rather than assumed — this app has no generic per-item "notes" field (only an unrelated trade-pile-modal `notes` state), so none was fabricated for this list. Zero overlap with the clear-list (tested).
+- `buildCorrectedCatalogueItem(oldItem, enrichData)` — clears every clear-list field on the old item, merges the enrich response on top, re-asserts the preserve-list from the old item (defensive), pins `id`. A field the new response doesn't populate ends up `null`, never the stale old value.
+
+**`api/enrich.js` wiring:** `manualAuthority`/`priorIdentity` destructured from the request body alongside the existing `manualIdentity`/`skipVision`/`skipImageSearch` flags. When `manualAuthority` is present, `validateManualAuthority` runs immediately (before any external API call) — an invalid correction (empty, or every requested field rejected) returns `400` with the rejected/empty field lists, no mutation. On success, `out.manualCorrection` (correctedFields, rejectedFields, per-field `{newValue, newSource, priorValue, priorSource}`) and `out.issueAuthority` (`{source:'user', status:'confirmed', confidence:'high', reasons:['user-correction'], priorObservations}`, only when `issue` was actually corrected) are set after the four terminal identity writes (`out.title`/`out.issue`/`out.year`/`out.publisher`) and before decision computation — first introduction of the structured `issueAuthority` shape this campaign's plan has referenced since Commit 3 was first drafted; later commits reuse it.
+
+**`src/App.jsx` wiring:** new `submitManualCorrection` (mirrors `reIdentifyBook`'s placement and `putComic`/`setCatalogue`/`setSelectedItem` update-in-place pattern, but posts the manual-entry contract + `manualAuthority` + a client-supplied `priorIdentity` snapshot, and merges the response via `buildCorrectedCatalogueItem` instead of a `...item` spread), wired as a new `onManualCorrect` prop. New inline correction form in `CollectionDetail`, rendered whenever `getCorrectableFields(item)` (`src/lib/manualCorrection.js` — the union of `identityMissingFields ∪ identityProvisionalFields`, allow-listed, extracted as its own exported function so the render site and this feature's tests call the identical logic, per invariant 10) yields a non-empty field set — deliberately independent of the `isContractIdentityBlocked` ternary above it, so it covers both the `ID_REQUIRED` case and the not-yet-live provisional-adopted case (`identityProvisionalFields` doesn't exist until Commit 4; the union is a safe no-op until then). Per-card `useState` (resets per selected item via the existing `key={selectedItem?.id}` wrapper). Client-side pre-check (mirrors, doesn't replace, the server's own validation) only submits fields whose value actually changed from the item's current one.
+
+**Blocker text checked fresh, confirmed not stale, no change made:**
+`describeBlocker('identity-not-confident', item)` (`src/lib/decisionEngine.js:978-995`) reads "identity uncertain — {fields} not confirmed" — neutral, names exactly the missing fields, makes no claim that remediation is impossible. `buildIdentityNextStep` (line 1212) already says "verify identity manually," consistent with (not contradicted by) this commit's new inline-correction capability. No refusal-card text instructs a remediation the UI can't now perform. Left unchanged — updating working, accurate text would have been a gratuitous diff.
+
+**Two functions extracted for testability** (same "extract for direct regression-testability" pattern this campaign uses throughout — `applyVariantPreferenceFilter`, `applyEraConsistencyFilter`, etc.), added to `src/lib/manualCorrection.js` alongside the original four exports:
+- `getCorrectableFields(item)` — the union-and-allow-list computation, called by both the `App.jsx` render site and this feature's Test D (below), not duplicated between them.
+- `buildManualCorrectionProvenance(validation, priorIdentity)` — the `manualCorrection`/`issueAuthority` object construction, called by both `api/enrich.js` (replacing what was originally an inline block) and this feature's Test F.
+
+**Tests** (`tests/q-trackB-commit3-manual-correction.test.js`, 342/342 passing):
+- **Test A** — a synthetic wrong-#9 card with every one of the 229 clear-list fields populated with the same recognizable stale sentinel, corrected to #3. Asserts the same collection ID survives, then **iterates `IDENTITY_DEPENDENT_FIELDS_TO_CLEAR` programmatically** (not a hand-picked subset) confirming zero of 229 fields retain the stale sentinel and each instead reflects the corrected response (or honest `null` when the response didn't set it) — a newly-added clear-list field automatically gets swept into this test's coverage, forcing the "conscious decision about which list it joins" the dispatch asked for. Also iterates all 30 preserve-list fields, confirming each survives unchanged.
+- **Test B** — `correctedFields:['issue','price','contract']` → only `issue` is accepted; `price`/`contract` rejected outright, `normalizedValues` never contains a `price` key even though one was supplied alongside a legitimate correction. Additionally probes 8 individual disallowed fields (`price`, `contract`, `decision`, `rawComps`, `soldComps`, `pricingSource`, `id`, `images`) one at a time, confirming each is never accepted alone.
+- **Test C** — whitespace-only value, empty `correctedFields`, and a null `manualAuthority` altogether all reject with the explicit `no-valid-corrections` error code, never a silent pass-through. `buildCorrectedCatalogueItem` confirmed to never mutate its inputs (`Object.freeze`d fixtures survive the call).
+- **Test D** — `getCorrectableFields` (the real render-site function) returns `['issue']` for BOTH an `identityMissingFields=['issue']` item and an `identityMissingFields=[], identityProvisionalFields=['issue']` item — the mandatory union rule. Both then flow through `buildCorrectedCatalogueItem` to the same collection ID. Control: a fully-resolved card (both arrays empty) offers no correction fields.
+- **Test E** — the real `resolveFamilyIssueConsensus` (`identityCore.js`) called with `priorIssue='3'` against a 4-row pool unanimously voting `#9` (clearing the adoption bar: `uniqueRows=4, ratio=1.0`) returns `{issue:'3', mode:'conflict-locked', winner:'9'}` — the corrected value survives, the disagreement is reported as raw vote data, never silently applied. An agreeing pool returns `mode:'corroborated'`, same survival. Documented as defense-in-depth: the structural bypass (`manualIdentity:true` never calls this function at all, see the design finding above) is the primary protection; this proves the underlying consensus function's own logic would refuse to overwrite even if it were ever in the loop.
+- **Test F** — `buildManualCorrectionProvenance`'s output carries both old and new value/source (`corrections.issue = {newValue:'3', newSource:'user', priorValue:'9', priorSource:'marketplace'}`) when the prior card had a `issueAuthority`, and honest-`null` prior source/status (never fabricated `'vision'`) when it didn't. A year-only correction produces no `issueAuthority` at all — no fabricated no-op claim.
+- Plus normalizer edge cases (`normalizeManualIssue`/`normalizeManualYear`: format-marker reuse, non-numeric rejection, year-range bounds).
+
+Full-suite baseline unchanged — 11 failing files, byte-identical outcomes
+before/after (spot-verified `identity-gate.test.js`, the closest adjacent
+identity suite, via `git stash` A/B — its one pre-existing failure is
+unrelated, an `author` field mismatch). Adjacent suites re-verified clean:
+`q110-intake-nonblocking` 38/38, `q133-slice2-identityrefused-promotion`
+28/28, `q136-slice-a2-identity-incomplete-provisional` 10/10,
+`response-contract` 73/73, `q145-contract-decision-sync` 41/41.
+
+**FIVE SAFEGUARDS (review round, folded in before staging — the 342/342
+packet above proved the surrounding utilities but not that the
+authoritative normalized correction actually controls the server
+pipeline, and left the request-authority boundary open):**
+
+**Safeguard 1 — the exact manual-authority request contract.**
+`isValidManualAuthorityRequestContract(body)` requires ALL FOUR:
+`manualIdentity === true`, `skipVision === true`, `skipImageSearch ===
+true`, `identitySource === 'manual'` — checking `manualIdentity` alone (the
+original wiring) was not sufficient. A request with `manualAuthority`
+present but any one of the four missing is rejected with `400` before any
+identity resolution, external lookup, or mutation. Closes the spoof case
+explicitly: a normal automatic (Vision-driven) request that happens to
+carry a `manualAuthority` block can never mint a user-confirmed
+`issueAuthority` — it fails the contract gate before validation even runs
+(`validation: null` on the rejected result).
+
+**Safeguard 2 — normalized values are the working pipeline identity.**
+New `prepareManualCorrectionRequest(body, currentYear)` (Safeguards 1+2
+combined into one exported, production-used function) returns
+`workingIdentity` — title/issue/year/publisher ALL normalized (not just
+the field actually corrected this request), via the same normalizers
+`validateManualAuthority` uses. `api/enrich.js`'s `effectiveTitle`/
+`effectiveIssue`/`effectiveYear`/`effectivePublisher` — the FIRST
+identity-dependent consumers or every value downstream reads through
+(cache-key construction at `activeKey = \`v${COMP_FILTER_VERSION}:
+${confirmedTitle}|${confirmedIssue}\``, ~line 4623; PC/CV lookup;
+comp-query construction via `fetchComps({issue: confirmedIssue, ...})`;
+the terminal `out.title`/`out.issue`/`out.year`/`out.publisher` writes) —
+now read `manualCorrectionRequest.workingIdentity` instead of the raw
+request fields when a validated correction is present. **A real
+normalization gap was found and fixed while building this**: raw issue
+`" #3 "` normalized to `"#3"` (the leading hash survived), not `"3"` —
+`normalizeIssueFormat`'s own "unrecognized format, return as-is" fallback
+only strips `#` inside its Annual/Special/Giant-Size/King-Size regexes,
+not for a bare `"#3"`. `normalizeManualIssue` now strips a leading `#`
+(with surrounding whitespace) explicitly after calling
+`normalizeIssueFormat`, confirmed against `'3'`, `' #3 '`, `'# 3'`, and
+`'Annual #14'` (unaffected).
+
+**Safeguard 3 — client-supplied prior history marked honestly.**
+`buildManualCorrectionProvenance` now tags every `corrections[field]`
+entry and every `issueAuthority.priorObservations` entry with
+`provenanceTrust: 'client-reported'` — `priorIdentity` is browser-supplied
+(the client's own snapshot of the card before correction), never
+something the server independently loaded or verified, and nothing
+downstream can now mistake it for a server-verified fact.
+
+**Safeguard 4 — preserve-list disputes resolved explicitly, per field:**
+- **Moved to the clear-list** (were previously preserved; reclassified because they're identity-dependent DETERMINATIONS, not photo-condition facts independent of which book this is): `variant`, `isReprint`, `editionType` — "is #9 a reprint / what variant is #9" says nothing valid about #3. `ebayUrl`, `ebayItemId` — the direct identifier/page of a specific eBay listing that, under the old identity, titles and describes itself as the wrong book; cleared unconditionally (no historical-fact carve-out, unlike the group below — a listing page for the wrong title has no legitimate reading under the corrected card at all). `listPrice`, `listPriceManual` — a system/user-derived list price computed against the OLD valuation; the override flag is cleared alongside the price it refers to, rather than surviving as a stale flag over nothing.
+- **New conditional-on-sold-status group** (`CONDITIONALLY_PRESERVED_ON_SOLD_STATUS = ['status', 'soldPrice', 'bundleId']`, in neither the clear-list nor the preserve-list): preserved from the old item **only when `oldItem.status === 'sold'`** — a completed, historical sale is a genuine fact independent of which specific issue we now believe the book to be. Cleared to `null` otherwise — an active `status: 'listed'` entry (or a `bundleId` grouping it into an active bundle) describes a listing tied to the wrong identity and must not auto-survive, exactly like ebayUrl/ebayItemId above.
+- **Confirmed unchanged, with rationale restated**: `assetType`/`assetTypeConfident` stay preserved — physical-format classification (comic vs. book vs. card), orthogonal to which specific title/issue this is, and no new photo is submitted to reassess it. `certNumber`/`cgcLabel`/`cgcVerified`/`labelType`/`labelNotes`/`defectPenalty`/`cgcPenaltyFlags`/`restoration` stay preserved — these describe the CGC slab/grading-service record and physical condition of the object itself, distinct from `variant`/`isReprint`/`editionType` (which describe WHICH printing/edition/variant it is).
+- Final composition: 236 clear-list fields (was 229 + 7 moved in), 20 preserve-list fields (was 30 − 7 moved to clear − 3 moved to the conditional group), 3 conditional fields. Zero overlap between all three lists (tested). `buildCorrectedCatalogueItem` applies the conditional group before AND after the `enrichData` merge (matching the existing defensive-reassertion pattern the preserve-list already used).
+
+**Safeguard 5 — the real client payload and collection-replacement
+integrity, tested directly.** Three new extracted, production-used
+functions: `buildManualCorrectionPayload(item, correctedValues,
+correctedFields)` (the exact `/api/enrich` request body `App.jsx`'s
+`submitManualCorrection` now constructs, replacing an inline object
+literal the tests previously would have had to mirror by hand),
+`replaceCatalogueItemById(catalogue, correctedItem)` (pure array
+replacement — `App.jsx`'s `setCatalogue` call now uses this instead of an
+inline `.map`), and `applyManualCorrectionResult(catalogue, oldItem,
+enrichData)` (unifies the merge + replace steps into one call for direct
+testability). Tested for BOTH panel cases (`identityMissingFields=
+['issue']` and `identityMissingFields=[], identityProvisionalFields=
+['issue']`): the constructed payload satisfies the real Safeguard 1
+contract check, `manualAuthority.correctedFields === ['issue']`,
+`priorIdentity` carries the item's actual pre-correction values, the
+payload chains correctly through `prepareManualCorrectionRequest` (proving
+Safeguard 2) and `buildManualCorrectionProvenance` (proving Safeguard 3),
+and collection-replacement integrity holds: `before.length ===
+after.length`, exactly one item with the corrected ID (no duplicate
+append), the corrected issue replaces the old issue on that exact item,
+and unrelated collection entries are untouched.
+
+**Teeth-proofs.** Each safeguard's key assertion was proven capable of
+failing. Four via a permanent naive-vs-real comparison embedded in the
+suite (Safeguard 1: a naive `manualIdentity`-only check wrongly accepts a
+spoof the real four-condition check correctly rejects; Safeguard 2: an
+un-normalized `" #3 "` working-identity value fails the `=== '3'` check
+the real normalized value passes; Safeguard 3: a provenance record with
+the marker manually stripped fails the same check the real assertions
+use; Safeguard 5: a naive append-instead-of-replace merge wrongly grows
+the collection length where the real `replaceCatalogueItemById` does
+not) — arguably stronger than a one-time revert, since these run on every
+future execution of the suite, not just once during development. For
+Safeguard 4 specifically, a genuine temporary injection into the REAL
+`buildCorrectedCatalogueItem` was also performed (the naive
+"always-preserve" implementation the conditional group replaces,
+sed-injected directly into `src/lib/manualCorrection.js`, matching this
+campaign's established practice from Commit 2): confirmed 4 real test
+failures (`✗ active listing: status reset to null...`, `✗ active listing:
+bundleId cleared...`, `✗ never-listed item: status stays null...`, `✗
+TEETH-PROOF: the REAL conditional merge does not...`), then reverted;
+confirmed the file returns to a byte-identical, fully-passing state
+afterward.
+
+Tests: `tests/q-trackB-commit3-manual-correction.test.js` — **452/452
+passing** (up from 342 — added Safeguards 1-5, each with dedicated
+assertions plus a teeth-proof). Full-suite baseline unchanged — 11 failing
+files, no new failures relative to the documented baseline (re-verified
+after all five safeguards landed).
+
+**Narrow amendment — Safeguard 2's missing executable cache-key proof.**
+The packet above documented the normalization chain (`workingIdentity` ->
+`effectiveTitle`/`effectiveIssue` -> `confirmedTitle`/`confirmedIssue`) but
+never exercised the actual `ac:` active-comp cache-key composition it
+feeds — the exact site (`api/enrich.js` ~line 4666,
+`` `v${COMP_FILTER_VERSION}:${confirmedTitle}|${confirmedIssue}` ``) that
+Commit B.1 (Strange Tales dispatch) built the `title|null` guard around.
+New exported `buildActiveCompCacheKey(filterVersion, confirmedTitle,
+confirmedIssue)` (`api/enrich.js`, alongside the file's existing
+test-compatibility re-exports) reproduces that exact template
+byte-for-byte; the real call site now calls it instead of the inline
+string, so production and this feature's test build the identical key
+(invariant 10). Test: a correction request with raw issue `" #3 "` run
+through the real `prepareManualCorrectionRequest`, its `workingIdentity`
+fed into the real `buildActiveCompCacheKey`, asserts the resulting key
+contains `Strange Tales|3` and contains none of `Strange Tales|#3`,
+`Strange Tales|9` (the prior issue), `Strange Tales|null` (the confirmed
+historical failure class), or the raw whitespace form. Teeth-proof:
+reconstructing the historical bad-key shapes (prior issue `9`; `null`
+confirmedIssue) through the SAME real export produces exactly
+`v9:Strange Tales|9` and `v9:Strange Tales|null` — confirming the
+assertions above genuinely reject both, not a hypothetical. Tests:
+**465/465 passing** (up from 452 — 13 new cache-key assertions). Full-suite
+baseline unchanged — 11 failing files, no new failures.

@@ -13,6 +13,7 @@ import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit } from "./lib/dataQualityGuard.js";
+import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 
@@ -3487,6 +3488,7 @@ function CollectionDetail({
   onList,
   onRefreshMarket,
   onReIdentify,
+  onManualCorrect,
   onSetGradedOverride,
   onAbortEnrich,
   onAddPhoto,
@@ -3516,6 +3518,13 @@ function CollectionDetail({
   const [showEngineRec, setShowEngineRec] = useState(false);
   const [expandedKeyIdx, setExpandedKeyIdx] = useState(null);
   const [listPriceWarningDismissed, setListPriceWarningDismissed] = useState(false);
+  // Track B Phase 0, Commit 3 — per-card local state for the inline
+  // identity-correction form (scoped to this component instance, which
+  // remounts per selected item via the `key={selectedItem?.id}` wrapper at
+  // the CollectionDetail render site — never shared across cards).
+  const [correctionValues, setCorrectionValues] = useState({});
+  const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
+  const [correctionError, setCorrectionError] = useState(null);
   // Ship #20a.6.1 — collapsible drawer for soldCompDiagnostics rejected samples.
   const [soldDrawerOpen, setSoldDrawerOpen] = useState(false);
   // Q-audit COMMIT 1 — full-list toggles for sold/active rows (previously
@@ -5837,6 +5846,92 @@ function CollectionDetail({
               </>
             )}
           </div>
+          {(() => {
+            // Track B Phase 0, Commit 3 — inline identity-correction form.
+            // Deliberately independent of isContractIdentityBlocked/the
+            // ternary above: renders whenever there's a correctable field,
+            // covering BOTH the ID_REQUIRED case (identityMissingFields
+            // non-empty) AND the provisional-adopted case
+            // (identityMissingFields=[] but identityProvisionalFields
+            // non-empty, e.g. mode:'adopted' from a null prior, Track B
+            // Phase 0 Commit 4) — identityProvisionalFields doesn't exist
+            // in production yet (Commit 4 populates it), so this union is
+            // a safe no-op addition until then, not a behavior change today
+            // beyond the ID_REQUIRED case. Only title/issue/year/publisher
+            // are ever offered — getCorrectableFields (src/lib/manualCorrection.js)
+            // is the single source of truth this render site and this
+            // feature's own tests both call directly (invariant 10).
+            const correctableFields = getCorrectableFields(item);
+
+            if (correctableFields.length === 0 || !onManualCorrect) return null;
+
+            const fieldLabel = { title: 'Title', issue: 'Issue #', year: 'Year', publisher: 'Publisher' };
+
+            return (
+              <div style={{ marginTop: 10, padding: 10, background: "rgba(255,255,255,0.03)", border: "1px solid #333", borderRadius: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#ddd", marginBottom: 6 }}>
+                  Correct identity
+                </div>
+                {correctableFields.map((field) => (
+                  <input
+                    key={field}
+                    type="text"
+                    placeholder={fieldLabel[field] || field}
+                    value={correctionValues[field] ?? (item[field] ?? '')}
+                    onChange={(e) => setCorrectionValues((prev) => ({ ...prev, [field]: e.target.value }))}
+                    style={{
+                      display: "block", width: "100%", marginBottom: 6, padding: "6px 8px",
+                      background: "#1a1a1a", border: "1px solid #444", borderRadius: 4,
+                      color: "#eee", fontSize: 13, boxSizing: "border-box",
+                    }}
+                  />
+                ))}
+                {correctionError && (
+                  <div style={{ fontSize: 11, color: "#fca5a5", marginBottom: 6 }}>{correctionError}</div>
+                )}
+                <button
+                  disabled={correctionSubmitting}
+                  onClick={async () => {
+                    setCorrectionSubmitting(true);
+                    setCorrectionError(null);
+                    try {
+                      // Client-side pre-check mirrors (does not replace) the
+                      // server's own validateManualAuthority — only fields
+                      // whose value genuinely changed from the item's
+                      // current value are submitted as corrections.
+                      const correctedFields = correctableFields.filter((f) => {
+                        const v = correctionValues[f];
+                        if (v == null) return false;
+                        const trimmed = String(v).trim();
+                        if (trimmed === '') return false;
+                        return trimmed !== String(item[f] ?? '').trim();
+                      });
+                      if (correctedFields.length === 0) {
+                        setCorrectionError('Enter a new value for at least one field.');
+                        return;
+                      }
+                      const correctedValues = {};
+                      for (const f of correctedFields) correctedValues[f] = correctionValues[f];
+                      await onManualCorrect(item, correctedValues, correctedFields);
+                      setCorrectionValues({});
+                    } catch (err) {
+                      setCorrectionError(err.message || 'Correction failed');
+                    } finally {
+                      setCorrectionSubmitting(false);
+                    }
+                  }}
+                  style={{
+                    fontSize: 12, padding: "6px 12px", background: "#d4af37", color: "#111",
+                    border: "none", borderRadius: 4, fontWeight: 700,
+                    cursor: correctionSubmitting ? "default" : "pointer",
+                    opacity: correctionSubmitting ? 0.6 : 1,
+                  }}
+                >
+                  {correctionSubmitting ? "Correcting…" : "Submit correction"}
+                </button>
+              </div>
+            );
+          })()}
           {(() => {
             // Pill precedence (highest to lowest):
             //   identityConfident:false → 🔍 ID REQUIRED (red, Ship #20a.6.4)
@@ -11767,6 +11862,53 @@ export default function App() {
     return finalUpdated;
   }, []);
 
+  // Track B Phase 0, Commit 3 — manual identity correction (fixes a card
+  // whose title/issue/year/publisher is wrong, e.g. a marketplace-adopted
+  // #9 that's actually #3), distinct from reIdentifyBook (which re-runs
+  // Vision on the stored photo). This is text-only: no new photo, no
+  // automatic re-resolution — the server's existing manualIdentity contract
+  // already bypasses resolveIdentity()/resolveFamilyIssueConsensus()
+  // entirely for this request, so nothing can silently re-adopt the old
+  // wrong value within the same request. Uses the explicit clear-list/
+  // preserve-list merge (buildCorrectedCatalogueItem,
+  // src/lib/manualCorrection.js) instead of reIdentifyBook's `...item`
+  // spread pattern above — every identity-dependent field (price, comps,
+  // bands, decision, contract, etc.) is guaranteed cleared before the
+  // corrected response is merged in, closing the same stale-merge class as
+  // the Wonder Woman #750 persistence bug (Scope 1, mergeConfirmedIdentity),
+  // this time on the correction path — a blessed-but-stale corrected card
+  // would be strictly worse than the original wrong one.
+  const submitManualCorrection = useCallback(async (item, correctedValues, correctedFields) => {
+    // Track B Phase 0, Commit 3, Safeguard 5 — buildManualCorrectionPayload
+    // (src/lib/manualCorrection.js) constructs the exact request body,
+    // including the real four-condition manual-entry contract (Safeguard 1)
+    // and the client-supplied priorIdentity snapshot (Safeguard 3) — the
+    // same function this feature's tests call directly, rather than a
+    // hand-built payload the tests only mirror.
+    const payload = buildManualCorrectionPayload(item, correctedValues, correctedFields);
+
+    const enrichRes = await fetch("/api/enrich", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getVaultHeaders() },
+      body: JSON.stringify(payload),
+    });
+    if (!enrichRes.ok) {
+      const errBody = await enrichRes.json().catch(() => ({}));
+      throw new Error(errBody.error || `Correction failed: ${enrichRes.status}`);
+    }
+    const enrichData = await enrichRes.json();
+
+    const finalUpdated = buildCorrectedCatalogueItem(item, enrichData);
+
+    await putComic(finalUpdated);
+    // replaceCatalogueItemById (src/lib/manualCorrection.js) — pure
+    // array-replacement, same collection length, no duplicate append.
+    setCatalogue((prev) => replaceCatalogueItemById(prev, normalizeItem(finalUpdated)));
+    setSelectedItem(finalUpdated);
+
+    return finalUpdated;
+  }, []);
+
   // Append a new photo to an existing comic and re-run /api/grade with
   // ALL photos so the identification benefits from multi-angle coverage.
   // Updates the stored entry with fresh grade fields + new images array.
@@ -12504,6 +12646,7 @@ export default function App() {
             onSyncEbay={syncEbayStatus}
             onRefreshMarket={refreshMarketData}
             onReIdentify={reIdentifyBook}
+            onManualCorrect={submitManualCorrection}
             onSetGradedOverride={setGradedOverride}
             onAbortEnrich={() => {
               if (cardEnrichAbortRef.current) {
