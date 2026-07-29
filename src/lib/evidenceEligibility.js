@@ -75,6 +75,18 @@ export const RESTORED_TITLE_RE =
 // only when the TARGET is itself a later printing (Commit D Fixture 5).
 const FIRST_PRINT_EXPLICIT_RE = /\b(?:1st|first)\s*print(?:ing)?\b/i;
 
+// Track B Phase 0, Commit 1.1 (2026-07-29) — asset types with no issue axis
+// at all. TPBs/books/collected editions are legitimately issue-less; a null
+// target.issue on one of these is NOT the "genuinely unresolved" state
+// TARGET_ISSUE_UNRESOLVED exists to catch (Commit A.2/A.4's Strange Tales
+// class, a single-issue comic whose identity resolution genuinely failed) —
+// it's the correct, permanent shape of that book. Confirmed by direct
+// source check: api/comps.js and soldVerification.js only ever pass
+// assetType 'tpb' or 'comic' today (never 'book') — 'book'/'collected' are
+// included here anyway, forward-safe for the not-yet-built BookAdapter
+// (CLAUDE.md's Session 4A), not because a live caller needs them yet.
+const NO_ISSUE_AXIS_ASSET_TYPES = ['tpb', 'book', 'collected'];
+
 // Commit C.2 (Strange Tales dispatch, 2026-07-28) — year-evidence
 // semantics. extractYearFromTitle (imageSearchIdentity.js) extracts a bare
 // 4-digit year with zero awareness of WHAT that year describes — "Strange
@@ -255,7 +267,15 @@ export const classifyEvidenceRow = (row, target = {}) => {
   // issue axis, unconditionally, on every target, not gated by collision
   // risk (an unresolved issue is unresolved regardless of publisher/era).
   let comparabilityStatus = null;
-  if (target.issue == null || String(target.issue).length === 0) {
+  // Track B Phase 0, Commit 1.1 — TPB/book/collected targets have no issue
+  // axis at all; skip both issue-axis checks entirely for them (a null
+  // target.issue there is a legitimate permanent state, not an unresolved
+  // one, and WRONG_ISSUE is equally inapplicable — there is no issue number
+  // to be wrong about).
+  const targetHasIssueAxis = !NO_ISSUE_AXIS_ASSET_TYPES.includes(String(target.assetType || '').toLowerCase());
+  if (!targetHasIssueAxis) {
+    // no-op — issue axis does not apply to this target's asset type
+  } else if (target.issue == null || String(target.issue).length === 0) {
     rejectionCodes.push('TARGET_ISSUE_UNRESOLVED');
     identityEligible = false;
     comparabilityStatus = 'SIMILAR_TITLE_REFERENCE';
@@ -579,8 +599,27 @@ export const isPricingMathEligible = (classification) =>
 // campaign has hit three times already — Commit D1's own writeup,
 // classifyYearEvidence shipping with zero call sites, and this gate
 // itself before this extraction).
-export const buildPricingEligibleRows = (rows, target = {}) =>
-  (rows || []).filter((row) => isPricingMathEligible(classifyEvidenceRow(row, target)));
+//
+// Track B Phase 0, Commit 1.1 (2026-07-29) — null/undefined `rows` (an
+// upstream population genuinely missing, not merely empty) is deliberately
+// swallowed to an empty array rather than thrown: a pricing endpoint
+// returning "no eligible comps" on a malformed upstream call is recoverable
+// (honest no-price, same as a genuinely empty pool); a 500 is not. This is
+// a real, documented behavior decision, not an accidental side effect of
+// `|| []` — the loud console.log below exists specifically so this path is
+// never silent: a caller passing null/undefined by mistake is visible in
+// production logs even though the function itself doesn't throw.
+export const buildPricingEligibleRows = (rows, target = {}) => {
+  if (rows == null) {
+    console.log(
+      '[evidence-eligibility] buildPricingEligibleRows: upstream population ' +
+      'missing (rows was null/undefined, not an empty array) — returning ' +
+      'empty pool rather than throwing.'
+    );
+    return [];
+  }
+  return rows.filter((row) => isPricingMathEligible(classifyEvidenceRow(row, target)));
+};
 
 // Commit E (2026-07-28) — catalog ladder reference. Same family as the
 // buildEvidencePopulations buckets above (rawPricingPool/

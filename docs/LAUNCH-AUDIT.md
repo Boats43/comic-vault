@@ -697,3 +697,49 @@ are excluded when `target.issue` is null, plus a control confirming a
 resolved-issue pool is unaffected. `tests/q-commitD1.1-...`'s existing
 `LEGACY_OVERLAPPING_CODES`/`PRICING_GATE_CODES` loop automatically picked
 up coverage for the new entry with no test-file edit needed there.
+
+**Commit 1.1** — Commit 1 verification hardening, inserted before Commit 2
+(does not rewrite or revert `5dd59f4`). Four items:
+1. `src/lib/soldVerification.js`'s own `isPricingMathEligible(classifyEvidenceRow(...))`
+   inline composition (a second instance of the exact pattern invariant 10
+   targets, predating the rule) converged onto the shared
+   `buildPricingEligibleRows` export — the gate already fired correctly
+   there via the shared `PRICING_GATE_CODES` array; this is convergence to
+   one call site, not a behavior fix. `__evIdx` mechanics preserved
+   unchanged (the export returns row objects, not classifications).
+2. Real-consumer proof one layer above that converged line:
+   `verifySoldComps` itself (not a mirror) proves a null-issue target
+   yields zero verified sold rows, with the removedCodes breakdown
+   (`evidence.rejectionCodeCounts.TARGET_ISSUE_UNRESOLVED`) showing the
+   cause.
+3. TPB/book/collected targets are exempt from `TARGET_ISSUE_UNRESOLVED` —
+   these asset types have no issue axis at all, so a null `target.issue`
+   is a legitimate permanent state, not an unresolved one. New
+   `NO_ISSUE_AXIS_ASSET_TYPES` guard in `classifyEvidenceRow`. Comic
+   targets stay gated, unchanged from Commit 1. Both controls tested,
+   plus a forward-safety spot check for `book`/`collected` (not yet live
+   callers — production only ever passes `tpb`/`comic` today).
+4. `buildPricingEligibleRows`'s `(rows || [])` null-guard — a real,
+   documented behavior decision (an upstream population genuinely missing
+   returns an empty pool rather than throwing; a pricing endpoint 500ing
+   on an upstream defect is worse than an honest empty result), now with a
+   loud `console.log` and an explicit test that captures `console.log` to
+   prove the diagnostic actually fires for null/undefined and stays silent
+   for a genuinely empty array — per this codebase's own Log Statement
+   Discipline rule (verify a log statement triggers, don't just read the
+   source).
+
+**Provenance:** Commit 1.1 originated from external review of Commit 1's
+evidence packet, not from a live production finding — the TPB null-issue
+case specifically was caught by that review before any user-visible ship.
+Recorded per this document's own standing practice: review catches get
+logged the same as fixes, not silently folded in as if no gap existed.
+
+Tests: `tests/q-trackB-commit1.1-verification-hardening.test.js` (new),
+22/22 passing. Adjacent evidence-eligibility suites re-verified clean:
+`q-strangeTales-containment` 80/80, `q-commitD1.1-collision-aware-eligibility`
+86/86, `q-commitD1-evidence-eligibility` 38/38. Full-suite baseline
+unchanged — 11 failing files, byte-identical outcomes before/after
+(including `sold-verification.test.js` itself, the file whose production
+code this commit touches: 124 passed/5 failed, same failing assertion,
+confirmed via `git stash` A/B).

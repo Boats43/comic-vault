@@ -44,7 +44,7 @@ import {
   evaluateEraYearMatch,
   classifyArtistMatch,
 } from "./compHygiene.js";
-import { buildEvidencePopulations, classifyEvidenceRow, isPricingMathEligible, PRICING_GATE_CODES } from "./evidenceEligibility.js";
+import { buildEvidencePopulations, classifyEvidenceRow, buildPricingEligibleRows, PRICING_GATE_CODES } from "./evidenceEligibility.js";
 
 // Stale recency thresholds (tiered by era):
 //   Modern (bookYear >= 2000): reject rows older than 90 days.
@@ -401,8 +401,19 @@ export const verifySoldComps = (rawRows, ctx) => {
   // PRICING_GATE_CODES doc comment (evidenceEligibility.js) for why the
   // pricing-math gate deliberately checks fewer codes than the full
   // classification used for the display/reference buckets above.
+  // Track B Phase 0, Commit 1.1 — converges onto the same exported
+  // buildPricingEligibleRows the active-comp side (api/comps.js) calls,
+  // instead of an independent inline mirror of the identical composition
+  // (`rows.filter((r) => isPricingMathEligible(classifyEvidenceRow(r, evidenceTarget)))`)
+  // that predates Commit 1's own drift-prevention rule. buildPricingEligibleRows
+  // returns the filtered ROW OBJECTS themselves (not classifications), so
+  // the __evIdx stamped onto each row above (line 378) survives untouched —
+  // .map((r) => r.__evIdx) below is unchanged mechanics, just sourced from
+  // the shared export. Confirmed by direct execution before this change:
+  // the gate already fired correctly here via the shared PRICING_GATE_CODES
+  // array — this is convergence onto one call site, not a behavior fix.
   const rawPricingIdxSet = new Set(
-    rows.filter((r) => isPricingMathEligible(classifyEvidenceRow(r, evidenceTarget))).map((r) => r.__evIdx)
+    buildPricingEligibleRows(rows, evidenceTarget).map((r) => r.__evIdx)
   );
   const gateToRawPricingEligible = (list, label) => {
     const before = list.length;
