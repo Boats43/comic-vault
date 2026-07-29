@@ -187,6 +187,8 @@ if ((idCheckFinal.confident || publisherOnlyMissing || visionLowButCorroborated 
 
 9. **Deploy READY confirms code; it does not confirm cache state — verify MISS→fresh-fetch explicitly before trusting any rescan.** This is a distinct, additional fact from invariant 8, not a restatement of it: a deployment can be genuinely `READY` and serving the new code, and a rescan against it can *still* observe zero of that code's effects, because a persistent cache (the Redis-backed `ac:` KV cache, `KV_TTL.ACTIVE` = 1h) replayed a pre-fix entry instead of invoking the new logic at all. This recurred twice in one session for the same book (Q130/Q131's original v3→v4 incident, then Slice C's v5→v6→v7). The standing rule: for any signal whose correctness depends on fresh code having actually run, a cache `HIT` in the log is never a default pass — it is `INCONCLUSIVE (re-scan required)`, full stop, regardless of what the rest of that log line shows. Only an explicit `MISS → fresh fetch` line earns a `PASS`. Apply this to every future verification pass, not just the one this rule was written for.
 
+10. **New detectors need a live consumer-behavior assertion, not just a label check.** Every new rejectionCode/classifier/detector must ship with a test exercising its REAL exported call site end-to-end — proving it changes actual filtering/pricing/display behavior, not just that the classifier returns the expected label in isolation. Confirmed as a recurring gap: Section 15's own Commit D1 writeup flagged exactly this ("a genuine integration test... is queued as future work, not required now"), and `PRICING_GATE_CODES`/`isPricingMathEligible` had a pre-existing test verifying the gate in isolation but nothing invoking the real `api/comps.js:2062` composition until Track B Phase 0 Commit 1 extracted and exported `buildPricingEligibleRows` specifically to close that gap. Fourth confirmed instance of this drift class.
+
 ---
 
 ## SECTION 5 — Launch Recommendation
@@ -312,6 +314,7 @@ Section 4's nine invariants are hereby confirmed as **standing rules**, not camp
 4. **One commit, one rescan** (invariant 7). Every fix ships as its own commit with its own test file, gets its deployment confirmed `READY` via direct API lookup, and gets its own live rescan before the next fix starts.
 5. **Contract as sole routing authority** (Q145's own lesson). Every consumer of listing-eligibility/routing state — collection screen, detail card, bundle submission, channel metrics — must read from `contract.*`/`decision.*` as the single source of truth, never a stale or independently-recomputed local field. When adding a new consumer, grep for every existing one first.
 6. **Separate deployments via branches or push-per-commit, never "commit now, push later" on a shared branch** (invariant 8's branch-discipline corollary, confirmed live via the Q144B+C bundling incident). An unpushed local commit sitting under a later commit on `main` is a bundling hazard, not a safe holding pattern — `git push` sends the whole unpushed chain.
+7. **New detectors need a live consumer-behavior assertion, not just a label check** (invariant 10). Every new rejectionCode/classifier/detector ships with a test exercising its REAL exported call site end-to-end, not a test-local mirror of that call site's composition.
 
 ---
 
@@ -664,3 +667,33 @@ Full re-run of both pre-existing Q144C suites and the Scope 1 `merge-site-parity
 **Two doc-only follow-ups, queued, no urgency (not fixed in this pass):**
 1. UI string "Price derivation unavailable (identity incomplete)" mislabels the actual cause on an empty-active-pool card — confirmed this exact scan had `identity-gate missing=[]` (identity was complete; the pool was simply empty post-classification). String-only fix, no logic change.
 2. Add a `codes={...}` breakdown to the active-side elimination log line (`[evidence-eligibility] active: classification eliminated all N pre-classification survivor(s)...`), matching the sold-side `removedCodes={...}` format already shipped, for symmetry.
+
+---
+
+## SECTION 16 — Track B Phase 0 (2026-07-29 onward)
+
+Seven-commit Phase 0 containment plan, approved per the plan on disk
+(`~\.claude\plans\peppy-wondering-petal.md`), executed one commit at a
+time with manual approval at diff→commit and commit→push for each.
+
+**Commit 1** — `PRICING_GATE_CODES` full audit + add `TARGET_ISSUE_UNRESOLVED`.
+Audited all 14 `STANDARD_REJECTION_CODES`; verdict was ADD
+`TARGET_ISSUE_UNRESOLVED` only (real, live gap — neither `api/comps.js`'s
+Filter 0a nor `soldVerification.js`'s issue filter rejects anything on
+this axis when the target issue is unresolved; the other 9 candidate
+codes stay out per the existing `LEGACY_OVERLAPPING_CODES` regression).
+Also extracted and exported `buildPricingEligibleRows(rows, target)`
+from `src/lib/evidenceEligibility.js`, replacing the inline composition
+at `api/comps.js:2062` (`evidenceRows.filter((it) =>
+isPricingMathEligible(classifyEvidenceRow(it, evidenceTarget)))`) with a
+call to it — closes the "mirrored composition passes while the real call
+site drifts" gap invariant 10 (Section 4) names, and is itself the fourth
+confirmed instance of that exact drift class. New invariant 10 added to
+Section 4 (mirrored as item 7 in Section 9's operating-invariants list).
+Test: `tests/q-strangeTales-containment.test.js` extended — asserts
+`PRICING_GATE_CODES` includes the new code, and confirms via the real
+`buildPricingEligibleRows` export (not a test-local mirror) that all rows
+are excluded when `target.issue` is null, plus a control confirming a
+resolved-issue pool is unaffected. `tests/q-commitD1.1-...`'s existing
+`LEGACY_OVERLAPPING_CODES`/`PRICING_GATE_CODES` loop automatically picked
+up coverage for the new entry with no test-file edit needed there.

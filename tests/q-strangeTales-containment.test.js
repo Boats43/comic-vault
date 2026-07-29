@@ -14,6 +14,7 @@
 
 import {
   classifyEvidenceRow, buildEvidencePopulations, classifyYearEvidence, assessPhotoAuthority,
+  buildPricingEligibleRows, isPricingMathEligible, PRICING_GATE_CODES,
 } from '../src/lib/evidenceEligibility.js';
 import { enforceQueryIssueAuthority, resolveFamilyIssueConsensus } from '../src/lib/identityCore.js';
 import { buildTitleFamilies } from '../src/lib/imageSearchIdentity.js';
@@ -236,6 +237,47 @@ console.log('\nCommit D.1: identity-not-confident blocker text uses the real mis
 
   const noField = describeBlocker('identity-not-confident', {});
   assertTrue(noField.length > 0, 'no identityMissingFields at all -> graceful fallback text, no throw');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TRACK B PHASE 0, COMMIT 1 — PRICING_GATE_CODES gains TARGET_ISSUE_UNRESOLVED,
+// verified via the REAL exported composition (buildPricingEligibleRows),
+// not a test-local mirror of api/comps.js:2062's inline filter
+// ══════════════════════════════════════════════════════════════════════════════
+console.log('\nTrack B Phase 0 Commit 1: TARGET_ISSUE_UNRESOLVED now gates pricing math\n');
+{
+  assertTrue(PRICING_GATE_CODES.includes('TARGET_ISSUE_UNRESOLVED'), 'PRICING_GATE_CODES includes TARGET_ISSUE_UNRESOLVED');
+
+  const target = { issue: null, seriesTitle: 'Strange Tales', confirmedYear: 1965, publisher: 'Marvel', isGraded: false, userGradeKey: 'raw', assetType: 'comic' };
+  const rows = [
+    { title: 'Strange Tales #1 Marvel 1963 VF', price: 200, marketState: 'active' },
+    { title: 'Strange Tales Annual Marvel', price: 50, marketState: 'sold' },
+    { title: 'Strange Tales #142 Marvel', price: 30, marketState: 'active' },
+  ];
+
+  rows.forEach((row, i) => {
+    const c = classifyEvidenceRow(row, target);
+    assertTrue(c.rejectionCodes.includes('TARGET_ISSUE_UNRESOLVED'), `row ${i + 1}: still classified TARGET_ISSUE_UNRESOLVED`);
+    assertFalse(isPricingMathEligible(c), `row ${i + 1}: isPricingMathEligible=false now that the code is gated (previously true before this commit)`);
+  });
+
+  // The real exported composition production calls at api/comps.js:2062 —
+  // not a mirrored filter written in this test file. Closes the exact
+  // "mirrored composition passes while the real call site drifts" gap
+  // this commit's own dispatch named.
+  const eligible = buildPricingEligibleRows(rows, target);
+  assertEq(eligible.length, 0, 'buildPricingEligibleRows (the real production export) excludes all 3 rows when target.issue is null');
+}
+
+// Control: target.issue resolved and matching — confirms this commit does
+// not over-narrow a normal, healthy pool.
+{
+  const target = { issue: '139', seriesTitle: 'The Flash', confirmedYear: 1963, publisher: 'DC Comics', isGraded: false, userGradeKey: 'raw', assetType: 'comic' };
+  const rows = [
+    { title: 'The Flash #139 1963 VF', price: 200, year: 1963, marketState: 'active' },
+  ];
+  const eligible = buildPricingEligibleRows(rows, target);
+  assertEq(eligible.length, 1, 'control: resolved issue + matching row -> buildPricingEligibleRows keeps it (unaffected by this commit)');
 }
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);

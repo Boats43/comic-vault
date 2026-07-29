@@ -549,9 +549,38 @@ export const buildEvidencePopulations = (rows, target = {}) => {
 // combine a vintage-DC/Marvel target with an undated comp row expected to
 // survive), confirmed by the full-suite regression run in this commit's
 // own test delivery.
-export const PRICING_GATE_CODES = ['INCOMPLETE_COPY', 'RESTORED_COPY', 'FORMAT_MISMATCH_RAW_VS_SLAB', 'UNCONFIRMED_EDITION'];
+//
+// Track B Phase 0, Commit 1 (2026-07-29) — full audit of every code in
+// STANDARD_REJECTION_CODES not already in this list. Verdict: ADD
+// TARGET_ISSUE_UNRESOLVED only. Live-confirmed gap: `api/comps.js`'s
+// Filter 0a and `soldVerification.js`'s issue filter both SKIP entirely
+// when the target issue is null — neither legacy chain rejects anything
+// on this axis when unresolved, so a row carrying only
+// TARGET_ISSUE_UNRESOLVED passed this gate even though classifyEvidenceRow
+// itself already correctly flags it identityEligible=false. The other 9
+// codes (WRONG_ISSUE/WRONG_YEAR/WRONG_PRINTING/WRONG_VARIANT/
+// LOT_OR_BUNDLE/SIGNED_MISMATCH/COLLECTED_EDITION_MISMATCH/
+// FORMAT_MISMATCH_GRADED_VS_RAW/COVERLESS_COPY) stay OUT — already locked
+// in by tests/q-commitD1.1-collision-aware-eligibility.test.js's
+// LEGACY_OVERLAPPING_CODES assertion (the existing, more nuanced
+// api/comps.js/soldVerification.js filter chains already enforce these
+// with edge-case handling this narrower classifier doesn't replicate;
+// widening this gate to them previously regressed 11 passing
+// sold-verification.test.js assertions).
+export const PRICING_GATE_CODES = ['INCOMPLETE_COPY', 'RESTORED_COPY', 'FORMAT_MISMATCH_RAW_VS_SLAB', 'UNCONFIRMED_EDITION', 'TARGET_ISSUE_UNRESOLVED'];
 export const isPricingMathEligible = (classification) =>
   !classification.rejectionCodes.some((c) => PRICING_GATE_CODES.includes(c));
+
+// Track B Phase 0, Commit 1 — the exact composition api/comps.js:2062
+// applies inline (`rows.filter((it) => isPricingMathEligible(classifyEvidenceRow(it, target)))`),
+// extracted and exported so both production and its test invoke the
+// IDENTICAL function rather than a test-local mirror that can drift from
+// the real call site independently (the exact failure class this
+// campaign has hit three times already — Commit D1's own writeup,
+// classifyYearEvidence shipping with zero call sites, and this gate
+// itself before this extraction).
+export const buildPricingEligibleRows = (rows, target = {}) =>
+  (rows || []).filter((row) => isPricingMathEligible(classifyEvidenceRow(row, target)));
 
 // Commit E (2026-07-28) — catalog ladder reference. Same family as the
 // buildEvidencePopulations buckets above (rawPricingPool/

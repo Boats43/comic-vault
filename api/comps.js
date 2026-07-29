@@ -64,7 +64,7 @@ import {
 } from "../src/lib/compHygiene.js";
 
 import { classifyVariantTokens } from "../src/lib/imageSearchIdentity.js";
-import { buildEvidencePopulations, classifyEvidenceRow, isPricingMathEligible } from "../src/lib/evidenceEligibility.js";
+import { buildEvidencePopulations, buildPricingEligibleRows } from "../src/lib/evidenceEligibility.js";
 
 export {
   VARIANT_CONTAM_RE,
@@ -2059,7 +2059,11 @@ export const fetchComps = async ({
     // did in soldVerification.js (see PRICING_GATE_CODES doc comment,
     // evidenceEligibility.js). Only the codes with no prior detector at
     // all, or a proven gap in one, may additionally narrow `parsed`.
-    const rawPricingEligibleRows = evidenceRows.filter((it) => isPricingMathEligible(classifyEvidenceRow(it, evidenceTarget)));
+    // Track B Phase 0, Commit 1 — calls the exported buildPricingEligibleRows
+    // directly (was an inline `evidenceRows.filter((it) =>
+    // isPricingMathEligible(classifyEvidenceRow(it, evidenceTarget)))`),
+    // so this call site and its test invoke the identical composition.
+    const rawPricingEligibleRows = buildPricingEligibleRows(evidenceRows, evidenceTarget);
     if (rawPricingEligibleRows.length === 0) {
       console.log(
         `[evidence-eligibility] active: classification eliminated all ` +
