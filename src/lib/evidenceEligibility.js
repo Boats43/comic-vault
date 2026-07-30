@@ -279,6 +279,49 @@ export const classifyEvidenceRow = (row, target = {}) => {
     rejectionCodes.push('TARGET_ISSUE_UNRESOLVED');
     identityEligible = false;
     comparabilityStatus = 'SIMILAR_TITLE_REFERENCE';
+  } else if (target.issueAuthorityPresent === true && target.issueAuthorityStatus !== 'confirmed') {
+    // Track B Phase 0, Commit 4 (2026-07-29) — target.issue is populated
+    // (unlike the branch above) but its ONLY authority is a marketplace-
+    // only adoption (issueAuthority.status, src/lib/issueAuthority.js)
+    // that has not been corroborated by anything outside the marketplace
+    // pool itself. Every row is demoted to reference-only regardless of
+    // whether ITS OWN title happens to match target.issue — a row
+    // matching an unconfirmed number is not evidence the number is
+    // correct, it's just more of the same un-corroborated marketplace
+    // signal that produced the adoption in the first place. Same
+    // "absence of evidence is not evidence of correctness" reasoning as
+    // TARGET_ISSUE_UNRESOLVED just above, one authority tier up.
+    //
+    // Fail-closed (review round), not fail-open: an earlier version checked
+    // `=== 'provisional' || === 'conflicted'` — an ALLOWLIST inversion bug
+    // in disguise, since it let ANY unrecognized future status value fall
+    // through as if confirmed. A later version fixed that but checked ONLY
+    // `target.issueAuthorityStatus != null` — which, one layer up
+    // (api/enrich.js's call sites), was fed by a bare
+    // `out.issueAuthority?.status || null` that COLLAPSES two genuinely
+    // different upstream states into the identical `null`: (a) no
+    // issueAuthority object exists at all (legacy, safe — no tracking ever
+    // happened), and (b) an issueAuthority object exists but its own
+    // `.status` field is itself null/undefined (a malformed PRESENT
+    // record — something tried to track authority here and produced an
+    // unreadable result, which is exactly the kind of uncertain shape this
+    // gate exists to catch, not wave through as if it were the safe case).
+    // Presence-threading correction: `target.issueAuthorityPresent`
+    // (boolean, threaded as its own primitive from api/enrich.js's real
+    // call sites, never derived from the status value) now answers "does
+    // an authority object exist at all" independently of what its status
+    // reads. This branch only ever fires when an authority object
+    // genuinely exists (`issueAuthorityPresent === true`) and its status
+    // isn't the one explicitly-safe value (`'confirmed'`) — covering
+    // `'provisional'`/`'conflicted'`/any future value/AND a present-but-
+    // statusless record, all correctly gated. `issueAuthorityPresent`
+    // false or absent (the ordinary, pre-campaign case, or any caller that
+    // never threads it) skips this branch entirely regardless of whatever
+    // stray `issueAuthorityStatus` value might otherwise be present —
+    // presence is the gate, not status alone.
+    rejectionCodes.push('TARGET_ISSUE_PROVISIONAL_AUTHORITY');
+    identityEligible = false;
+    comparabilityStatus = 'PROVISIONAL_ISSUE_REFERENCE';
   } else if (!hasIssueNumber(title, target.issue, target.seriesTitle || null)) {
     rejectionCodes.push('WRONG_ISSUE');
     identityEligible = false;
@@ -485,7 +528,8 @@ const sanitizeForDisplay = (row, classification) => ({
  * @param {Object} target - see classifyEvidenceRow
  * @returns {{rawPricingPool: Array, gradedPricingReferences: Array,
  *   incompleteReferences: Array, incompatibleEditionReferences: Array,
- *   unconfirmedEditionReferences: Array, rejectedEvidence: Array}}
+ *   unconfirmedEditionReferences: Array, similarTitleReferences: Array,
+ *   provisionalAuthorityReferences: Array, rejectedEvidence: Array}}
  */
 export const buildEvidencePopulations = (rows, target = {}) => {
   const populations = {
@@ -495,6 +539,15 @@ export const buildEvidencePopulations = (rows, target = {}) => {
     incompatibleEditionReferences: [],
     unconfirmedEditionReferences: [],
     similarTitleReferences: [],
+    // Track B Phase 0, Commit 4 — reference-only custody for rows priced
+    // against a marketplace-only-adopted (provisional/conflicted) target
+    // issue. Deliberately separate from similarTitleReferences
+    // (TARGET_ISSUE_UNRESOLVED — no issue guess at all) and from
+    // unconfirmedEditionReferences (a resolved, confirmed issue with a
+    // thin year signal) — this bucket holds rows for a target that HAS a
+    // specific issue guess, but one whose only authority is the
+    // marketplace pool itself, not yet corroborated.
+    provisionalAuthorityReferences: [],
     rejectedEvidence: [],
     // Commit D1.1 — bounded (fixed code enum, one increment per row) count
     // of every rejection code actually fired across the pool, so a live
@@ -525,6 +578,12 @@ export const buildEvidencePopulations = (rows, target = {}) => {
       // side's identity is what's unresolved. Display label: "Similar-
       // title references — target issue unresolved" (Commit B.3).
       populations.similarTitleReferences.push({ ...sanitized, comparabilityStatus: classification.comparabilityStatus });
+    } else if (codes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY')) {
+      // Track B Phase 0, Commit 4 — I13 custody: this row is not deleted,
+      // not silently folded into a generic "rejected" bucket — it's
+      // labeled with its own comparabilityStatus and the specific
+      // rejection code (source/reason) that kept it out of pricing math.
+      populations.provisionalAuthorityReferences.push({ ...sanitized, comparabilityStatus: classification.comparabilityStatus });
     } else if (
       codes.includes('WRONG_ISSUE') || codes.includes('WRONG_YEAR') ||
       codes.includes('WRONG_PRINTING') || codes.includes('WRONG_VARIANT') ||
@@ -540,6 +599,60 @@ export const buildEvidencePopulations = (rows, target = {}) => {
 
   return populations;
 };
+
+// Track B Phase 0, Commit 4 (review-round structural upgrade) — the
+// complete, ordered list of display/reference bucket keys a fully-
+// assembled evidence response carries. Exported so buildEvidenceForResponse
+// below, BOTH api/comps.js response-construction sites, and this feature's
+// test all enumerate the IDENTICAL set — a hand-maintained partial object
+// literal at each call site is the exact defect class that omitted
+// provisionalAuthorityReferences (and, longer-standing,
+// similarTitleReferences) from api/comps.js's response shape; an exported
+// enumeration prevents the CLASS, not just the one instance already found.
+// Same pattern as Commit 3's IDENTITY_DEPENDENT_FIELDS_TO_CLEAR /
+// IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE (manualCorrection.js) — explicit,
+// named, exported lists, never inferred "everything except" logic.
+export const EVIDENCE_RESPONSE_BUCKETS = [
+  'similarTitleReferences',
+  'provisionalAuthorityReferences',
+  'gradedPricingReferences',
+  'incompleteReferences',
+  'incompatibleEditionReferences',
+  'unconfirmedEditionReferences',
+  'rejectedEvidence',
+  'eraRejectedReferenceRows',
+];
+
+/**
+ * Assembles the complete display/reference evidence object api/comps.js
+ * attaches to its response (out.activeEvidence, api/enrich.js:8799) — every
+ * bucket in EVIDENCE_RESPONSE_BUCKETS, always present as an array (empty
+ * when a bucket has no rows), never a hand-picked subset.
+ *
+ * eraRejectedReferenceRows is NOT one of buildEvidencePopulations' own
+ * fields — it's computed separately, by api/comps.js's own era-consistency
+ * filter, BEFORE evidence classification even runs (a different pipeline
+ * stage entirely) — so it's accepted as a second argument here rather than
+ * requiring buildEvidencePopulations itself to know about an upstream
+ * filter stage, or being silently dropped.
+ *
+ * src/lib/soldVerification.js's real call site does not use this function —
+ * it returns `evidencePopulations` directly (the full object
+ * buildEvidencePopulations already produces, which already carries every
+ * bucket in this list except eraRejectedReferenceRows — sold comps have no
+ * equivalent era-consistency pre-filter stage) — confirmed complete by
+ * direct reading, not assumed; this feature's response-shape test asserts
+ * both shapes.
+ */
+export function buildEvidenceForResponse(evidencePopulations, eraRejectedReferenceRows = []) {
+  const evidence = {};
+  for (const bucket of EVIDENCE_RESPONSE_BUCKETS) {
+    evidence[bucket] = bucket === 'eraRejectedReferenceRows'
+      ? (eraRejectedReferenceRows || [])
+      : (evidencePopulations?.[bucket] || []);
+  }
+  return evidence;
+}
 
 // Codes this codebase had NO prior detector for at all (INCOMPLETE_COPY,
 // RESTORED_COPY) or a proven, narrow gap in an existing detector
@@ -587,7 +700,14 @@ export const buildEvidencePopulations = (rows, target = {}) => {
 // with edge-case handling this narrower classifier doesn't replicate;
 // widening this gate to them previously regressed 11 passing
 // sold-verification.test.js assertions).
-export const PRICING_GATE_CODES = ['INCOMPLETE_COPY', 'RESTORED_COPY', 'FORMAT_MISMATCH_RAW_VS_SLAB', 'UNCONFIRMED_EDITION', 'TARGET_ISSUE_UNRESOLVED'];
+// Track B Phase 0, Commit 4 (2026-07-29) — adds TARGET_ISSUE_PROVISIONAL_AUTHORITY.
+// Same reasoning as TARGET_ISSUE_UNRESOLVED's original Commit 1 addition:
+// classifyEvidenceRow already correctly flags identityEligible=false for a
+// marketplace-only-adopted target issue, but neither api/comps.js's
+// legacy filter chain nor soldVerification.js's issue filter has any
+// concept of "issue present but unconfirmed" — both would otherwise admit
+// these rows into pricing math on target.issue's bare presence alone.
+export const PRICING_GATE_CODES = ['INCOMPLETE_COPY', 'RESTORED_COPY', 'FORMAT_MISMATCH_RAW_VS_SLAB', 'UNCONFIRMED_EDITION', 'TARGET_ISSUE_UNRESOLVED', 'TARGET_ISSUE_PROVISIONAL_AUTHORITY'];
 export const isPricingMathEligible = (classification) =>
   !classification.rejectionCodes.some((c) => PRICING_GATE_CODES.includes(c));
 

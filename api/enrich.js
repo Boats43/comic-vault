@@ -120,6 +120,7 @@ import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } f
 // authority validation (allow-list + normalization), never trusting the
 // client's correctedFields claim alone.
 import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
+import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache } from "../src/lib/issueAuthority.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -2749,6 +2750,27 @@ export default async function handler(req, res) {
           `[q140-terminal] issueConsensusConflict surfaced: current=#${confirmedIssue} (${identitySource}) ` +
           `vs family consensus=#${fic.winner} (${fic.support}/${fic.uniqueRows} = ${(fic.ratio * 100).toFixed(0)}%) — locked, never overwritten`
         );
+      } else if (identity.familyIssueConsensus?.mode === 'adopted') {
+        // Track B Phase 0, Commit 4 (2026-07-29) — a marketplace/pool-only
+        // adoption (resolveFamilyIssueConsensus's 'adopted' mode is only
+        // reachable when priorIssue was null — no Vision/user issue existed
+        // to corroborate or conflict with) is ALWAYS provisional, never
+        // silently promoted to a confirmed value just because nothing
+        // contradicted it. Absence of contradiction is not corroboration.
+        // Real call site for the extracted, exported
+        // deriveIssueAuthorityFromAdoption (src/lib/issueAuthority.js) —
+        // see that file's doc comment for the full invariant and the
+        // documented, deliberate absence of a "no contradiction still
+        // confirmed" carve-out.
+        const fic = identity.familyIssueConsensus;
+        const derived = deriveIssueAuthorityFromAdoption(fic);
+        out.issueAuthority = derived.issueAuthority;
+        out.identityProvisionalFields = derived.identityProvisionalFields;
+        console.log(
+          `[commit4] issueAuthority=provisional (marketplace-only-adoption): ` +
+          `issue=#${fic.winner} support=${fic.support}/${fic.uniqueRows}=${(fic.ratio * 100).toFixed(0)}% — ` +
+          `no prior Vision/user issue existed to corroborate against`
+        );
       }
 
       // P0 (Q-VISION-ZERO-SUPPORT) — surface the loud override/escalate
@@ -4677,9 +4699,25 @@ export default async function handler(req, res) {
             // exist for informational/UI purposes per item B.1's own
             // wording — but it is never read from here, and never feeds
             // this exact-pricing path.)
-            const exactPricingCacheEligible = confirmedIssue != null;
+            // Track B Phase 0, Commit 4 (2026-07-29) — extends the same
+            // Commit B.1 containment surface: an issue whose ONLY authority
+            // is a marketplace-only adoption (out.issueAuthority.status
+            // 'provisional'/'conflicted', set above) is not yet trustworthy
+            // enough to cache under. Caching it would let a genuinely-wrong
+            // pool-adopted issue number poison the ac: namespace for every
+            // future request against this title|issue pair for the TTL
+            // window, including ones that arrive with real Vision/user
+            // corroboration — same poisoning risk Commit B.1 already
+            // guards against for the null-issue case, just one authority
+            // tier up. Real call site for the extracted, exported
+            // canUseExactIssuePricingCache (src/lib/issueAuthority.js).
+            const exactPricingCacheEligible = canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority);
             if (!exactPricingCacheEligible) {
-              console.log(`[active-cache] SKIP: confirmedIssue is null — no title|null key in the ac: namespace (Commit B.1)`);
+              console.log(
+                confirmedIssue == null
+                  ? `[active-cache] SKIP: confirmedIssue is null — no title|null key in the ac: namespace (Commit B.1)`
+                  : `[active-cache] SKIP: issueAuthority.status="${out.issueAuthority?.status}" — marketplace-only-adopted issue not cached (Commit 4)`
+              );
             }
             // CACHE-BUST: skipCache flag bypasses poisoned cache entries
             const skipCache = req.body?.skipCache === true || !exactPricingCacheEligible;
@@ -4740,6 +4778,20 @@ export default async function handler(req, res) {
               cvVolumeStartYear: comicVine?.startYear || null,  // Q128 — volume-label-year corroboration (Harley Quinn #62 class). NOT comicVine?.volume?.startYear — that shape is always undefined (comicVine.volume is a flat string); .startYear is the correct top-level field.
               artistOverride: extractArtist(confirmedTitle) || null,  // Q136 Slice A — the RESOLVED identity's own artist (e.g. a provisional pool's confirmedTitle already naming "Alexander Lozano"), independent of extractConfirmedVariant's majority-ratio ceiling.
               signedConsensus: confirmedSignedConsensus,  // Slice C — pool-corroborated "our book is signed" signal (extractConfirmedVariant), for Filter 2b's isolate-vs-reject branch.
+              // Track B Phase 0, Commit 4 (presence-threading correction) —
+              // two primitives, not one collapsed scalar: issueAuthorityPresent
+              // (does an authority object exist at all?) is threaded
+              // SEPARATELY from issueAuthorityStatus (its .status value, if
+              // present). A bare `out.issueAuthority?.status || null` collapses
+              // "no issueAuthority object at all" (legacy, safe) and "an
+              // issueAuthority object exists but .status is somehow null/
+              // undefined" (a malformed present record) into the identical
+              // `null` value once it crosses into evidenceTarget — the
+              // classifier could no longer tell them apart. See
+              // classifyEvidenceRow's gate (evidenceEligibility.js) for how
+              // both primitives are actually used together.
+              issueAuthorityPresent: out.issueAuthority != null,
+              issueAuthorityStatus: out.issueAuthority?.status ?? null,  // Track B Phase 0, Commit 4 — TARGET_ISSUE_PROVISIONAL_AUTHORITY gate (evidenceEligibility.js)
             }).catch((err) => {
               console.error('[enrich] comps error stack:', err?.stack);
               console.error(`[enrich] comps error: ${err?.message || err}`);
@@ -4752,7 +4804,11 @@ export default async function handler(req, res) {
               await kvSet(`ac:${activeKey}`, result, KV_TTL.ACTIVE);
               console.log(`[active-cache] MISS: ${activeKey} — cached ${result.count} comps`);
             } else if (!exactPricingCacheEligible) {
-              console.log(`[active-cache] MISS: ${activeKey} — NOT caching (confirmedIssue null, Commit B.1)`);
+              console.log(
+                confirmedIssue == null
+                  ? `[active-cache] MISS: ${activeKey} — NOT caching (confirmedIssue null, Commit B.1)`
+                  : `[active-cache] MISS: ${activeKey} — NOT caching (issueAuthority.status="${out.issueAuthority?.status}", Commit 4)`
+              );
             } else {
               console.log(`[active-cache] MISS: ${activeKey} — NOT caching (empty result)`);
             }
@@ -5188,6 +5244,13 @@ export default async function handler(req, res) {
       artistOverride: extractArtist(confirmedTitle) || null,  // Q136 Slice A — see the fetchComps call site above for the full reasoning
       labelType: confirmedLabelType,  // Slice C — graded-slab signature signal (CGC/CBCS SS yellow label), same field name as the fetchComps call site
       signedConsensus: confirmedSignedConsensus,  // Slice C — pool-corroborated "our book is signed" signal, same field name as the fetchComps call site
+      // Track B Phase 0, Commit 4 (presence-threading correction) — same
+      // two-primitive threading as the fetchComps call site above (see its
+      // comment for the full reasoning): presence and status threaded
+      // separately, never collapsed to one scalar before reaching
+      // evidenceTarget.
+      issueAuthorityPresent: out.issueAuthority != null,
+      issueAuthorityStatus: out.issueAuthority?.status ?? null,  // Track B Phase 0, Commit 4 — TARGET_ISSUE_PROVISIONAL_AUTHORITY gate (evidenceEligibility.js), same field name as the fetchComps call site
     });
     const filteredSold = soldVerifyResult.verified;
     if (rawSoldRows.length > 0) {
@@ -8080,6 +8143,41 @@ export default async function handler(req, res) {
       }
     }
 
+    // Track B Phase 0, Commit 4 (2026-07-29) — contradiction escalation. A
+    // marketplace-only-adopted issue (out.issueAuthority.status ===
+    // 'provisional', set above at resolveIdentity time from
+    // resolveFamilyIssueConsensus's 'adopted' mode) that a LATER
+    // marketplace population disagrees with escalates to 'conflicted',
+    // preserving every existing reason and appending the new one — never
+    // silently dropped, never silently re-confirmed. out.issueConsensusConflict
+    // can only have been set here (by the divergence check immediately
+    // above) when the family-consensus check upstream did NOT already fire
+    // 'conflict-locked' — which resolveFamilyIssueConsensus guarantees is
+    // disjoint from 'adopted' (exactly one mode per call) — so a conflict
+    // object present at this point, on a provisional-from-adoption card, is
+    // a genuine SECOND, differently-scoped marketplace signal (the
+    // family-scoped adoption vote vs. this pool-wide eBay visual
+    // consensus), not a re-check of the same evidence that produced
+    // 'adopted' in the first place. NOT independent corroboration in the
+    // sense that could ever promote status toward 'confirmed' — both
+    // signals are marketplace/pool evidence, same source class; genuine
+    // independence (Vision, physical indicia/fingerprint, or an explicit
+    // user correction — Commit 3) is required for that, and escalation
+    // here only ever moves toward MORE uncertainty ('conflicted'), never
+    // less. Real call site for the extracted, exported
+    // escalateIssueAuthorityOnConflict (src/lib/issueAuthority.js).
+    {
+      const escalated = escalateIssueAuthorityOnConflict(out.issueAuthority, out.issueConsensusConflict);
+      if (escalated !== out.issueAuthority) {
+        out.issueAuthority = escalated;
+        console.log(
+          `[commit4] issueAuthority escalated provisional -> conflicted: ` +
+          `visual-pool divergence detected against marketplace-adopted issue #${out.issueConsensusConflict.currentIssue} ` +
+          `(pool suggests #${out.issueConsensusConflict.consensusIssue})`
+        );
+      }
+    }
+
     // Ship #24 — Identity authentication score (0-100 cross-source validation)
     if (alignment) {
       out.identityAlignment = {
@@ -9208,6 +9306,32 @@ export default async function handler(req, res) {
       // else: out.price stayed null AND no fallback was available either —
       // genuinely nothing anywhere. Banner stays the default "Visual
       // identification uncertain" text set when identityRefused fired.
+    }
+
+    // Track B Phase 0, Commit 4 (2026-07-29) — explicit server-side
+    // contract transition for a marketplace-only-adopted issue
+    // (out.issueAuthority.status === 'provisional' or escalated to
+    // 'conflicted', above). Positioned as the LAST terminal block before
+    // out.decision = computeDecision(...) — same strategic slot as the
+    // Q140/Commit-B/E1 blocks above — so nothing downstream can re-touch
+    // out.price after this clears it, including the Q133 Slice 2
+    // promoted-card fallback immediately above, whose price this must
+    // still be able to null. Real call site for the extracted, exported
+    // computeIssueAuthorityContractPatch (src/lib/issueAuthority.js) —
+    // see that file's doc comment for the full mechanism (why
+    // identityConfident=false alone is sufficient to route through
+    // decisionEngine's real ID_REQUIRED path) and the documented,
+    // deliberate absence of a "no contradiction still confirmed"
+    // carve-out anywhere in this commit's diff.
+    {
+      const authorityPatch = computeIssueAuthorityContractPatch(out.issueAuthority, out);
+      if (authorityPatch) {
+        console.log(
+          `[commit4-terminal] issueAuthority.status="${out.issueAuthority.status}" — forcing ID_REQUIRED-class ` +
+          `contract state, clearing price authority, locking listing (reasons=[${(out.issueAuthority.reasons || []).join(', ')}])`
+        );
+        Object.assign(out, authorityPatch);
+      }
     }
 
     // Compute decision after full enrich object assembled

@@ -337,6 +337,13 @@ export const verifySoldComps = (rawRows, ctx) => {
     cvVolumeStartYear = null,  // Q128 — ComicVine volume's start_year, for the volume-label-year corroboration check
     labelType = null,  // Slice C — confirmedLabelType ("signature" = CGC/CBCS SS yellow label)
     signedConsensus = false,  // Slice C — pool-corroborated "our book is signed" signal
+    // Track B Phase 0, Commit 4 (presence-threading correction, confirmed
+    // this sold path actually receives and forwards both fields — this
+    // file's "no change needed" status from the prior packet was about
+    // response SHAPE only (evidence: evidencePopulations already carries
+    // every bucket); it never applied to THIS threading, which is new here.
+    issueAuthorityPresent = false,
+    issueAuthorityStatus = null,  // Track B Phase 0, Commit 4 — out.issueAuthority?.status, threaded into evidenceTarget below for the TARGET_ISSUE_PROVISIONAL_AUTHORITY gate
   } = ctx || {};
 
   const ourTokens = tokenizeTitle(title);
@@ -387,6 +394,8 @@ export const verifySoldComps = (rawRows, ctx) => {
     userGradeKey,
     assetType: 'comic',
     isSignedTarget: ourIsSigned,
+    issueAuthorityPresent,  // Track B Phase 0, Commit 4 (presence-threading correction) — TARGET_ISSUE_PROVISIONAL_AUTHORITY gate
+    issueAuthorityStatus,  // Track B Phase 0, Commit 4 — TARGET_ISSUE_PROVISIONAL_AUTHORITY gate
   };
   const evidencePopulations = buildEvidencePopulations(rows, evidenceTarget);
   console.log(

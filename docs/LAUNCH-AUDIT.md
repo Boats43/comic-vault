@@ -1076,3 +1076,480 @@ confirmedIssue) through the SAME real export produces exactly
 assertions above genuinely reject both, not a hypothetical. Tests:
 **465/465 passing** (up from 452 — 13 new cache-key assertions). Full-suite
 baseline unchanged — 11 failing files, no new failures.
+
+**Commit 4** — adoption-from-null ALWAYS provisional + explicit
+server-side contract transition + pricing/cache custody. Corrected
+invariant: when `resolveFamilyIssueConsensus`'s `mode:'adopted'` fires —
+structurally only reachable when `priorIssue` was null, i.e. no
+Vision/user issue existed to corroborate or conflict with — the resulting
+issue number is now ALWAYS provisional, never silently promoted to a
+confirmed value just because nothing contradicted it. Absence of
+contradiction is not corroboration. An earlier draft of this plan
+considered a control where "no contradiction detected" would let a
+marketplace-only-adopted issue display as confirmed — that control was
+never implemented in shipped code, and this commit's diff contains no
+equivalent of it anywhere.
+
+**Review-round amendment (folded in before staging, four items plus a
+wording fix):** the first packet satisfied only the contract-transition
+mechanism and a confidence-type nit. Review found four real gaps against
+the original dispatch — an un-exported cache-guard composition, no proof
+the adopting rows are actually excluded from PRICING (only that the final
+price was null), status-only (not full-result) determinism, and no
+anti-overcorrection controls proving already-confirmed identities are
+never touched. All four closed below, plus a same-source-vs-independent
+wording correction on the escalation mechanism.
+
+**New `src/lib/issueAuthority.js`** — five pure functions, extracted for
+testability per this campaign's standing pattern (`buildActiveCompCacheKey`,
+`applyVariantPreferenceFilter`, etc. — production and tests call the
+identical implementation, invariant 10):
+- `mapConfidenceRatioToTier(ratio)` — Commit 3's shipped
+  `issueAuthority.confidence` is a STRING tier (`'high'`,
+  `manualCorrection.js:602`); this maps the raw adoption ratio to the same
+  vocabulary (`>=0.8` 'high', `>=0.6` 'medium', else 'low' — 'low' is
+  structurally unreachable via the real `'adopted'` path given the 0.6
+  adoption bar, kept as an honest defensive default). Boundary-tested
+  across its full domain (0/0.59/0.6/0.79/0.8/1.0).
+- `deriveIssueAuthorityFromAdoption(familyIssueConsensus)` — builds the
+  initial `issueAuthority` object (Commit 3's exact shape and types —
+  `confidence` is the string tier, never a bare number; the raw ratio
+  survives separately as `supportRatio`, no information lost) the moment
+  identity resolution runs. Returns `{issueAuthority: null,
+  identityProvisionalFields: null}` for every mode other than `'adopted'`
+  — inert for `'corroborated'`/`'conflict-locked'`/`'no-consensus'`/
+  `'no-data'`, all on their pre-existing, untouched mechanisms.
+- `escalateIssueAuthorityOnConflict(issueAuthority, issueConsensusConflict)`
+  — escalates `'provisional'` (reached via marketplace-only-adoption
+  specifically) to `'conflicted'` when a LATER, differently-scoped
+  marketplace population disagrees — `out.issueConsensusConflict`, only
+  set here when the family-consensus check upstream did NOT already fire
+  `'conflict-locked'` (structurally disjoint from `'adopted'`), so this is
+  a genuine second signal, not a re-check of the same evidence. **Wording
+  correction (review round):** the doc comment and the `api/enrich.js`
+  call-site comment originally called this an "independent signal" — a
+  mischaracterization. Both the family-scoped adoption vote and the later
+  pool-wide eBay visual consensus are the SAME marketplace/pool evidence
+  class, just differently-scoped populations — same-source disagreement,
+  not independent corroboration. Genuine independence (the kind that could
+  ever justify promoting status toward `'confirmed'`) means a
+  non-marketplace source: Vision, physical indicia/fingerprint, or an
+  explicit user correction (Commit 3). The mechanism was always correct
+  (escalate only, never promote) — only the prose was wrong; corrected in
+  both files, mechanism untouched. Pure: returns a NEW object on
+  escalation, the SAME reference (referential no-op) otherwise. Preserves
+  every existing reason, appends the new one.
+- `computeIssueAuthorityContractPatch(issueAuthority, priorOut)` — the
+  explicit server-side contract transition. Returns `null` when
+  `issueAuthority.status` isn't `'provisional'`/`'conflicted'`, or when a
+  more fundamental refusal already fired (`priorOut.refusedToPrice ===
+  true`). Otherwise returns a patch that reuses decisionEngine's OWN
+  pre-existing `'identity-not-confident'` blocker (no new blocker slug) via
+  `identityConfident: false` — with none of that blocker's exemption flags
+  set, `computeDecision` deterministically sets `decision.action=
+  'ID_REQUIRED'`, which `responseContract.js`'s `deriveState()` resolves to
+  contract state `'ID_REQUIRED'` at its FIRST precedence check — the same
+  contract-state class already used for REFUSED/ID_REQUIRED, never the
+  Q110 LOCKED class. `refusedToPrice: true` set too as a redundant second
+  signal. I13 custody: never touches `rawComps`/`soldComps`;
+  `hypotheticalReferenceEstimate` preserves whatever price the pipeline
+  computed, relabeled, never deleted.
+- `canUseExactIssuePricingCache(confirmedIssue, issueAuthority)` — **Item 1,
+  review round.** Extracts the `ac:` exact-pricing cache-guard composition
+  (previously an inline `confirmedIssue != null && issueAuthority?.status
+  !== 'provisional' && ... !== 'conflicted'` at the call site) into a
+  single named, exported predicate — production and tests now share one
+  implementation instead of the test re-deriving the same boolean
+  independently. Ineligible: `confirmedIssue == null` (Commit B.1's
+  original case), or `issueAuthority.status` is `'provisional'`/
+  `'conflicted'`. Eligible: any other status (`'confirmed'`, or no
+  `issueAuthority` at all — the ordinary pre-campaign case, no regression).
+
+**`api/enrich.js` wiring:** four real call sites — `deriveIssueAuthorityFromAdoption`
+inside the existing family-issue-consensus `if/else if` chain (sibling to
+the pre-existing `'conflict-locked'` branch, ~line 2737);
+`escalateIssueAuthorityOnConflict` immediately after the visual-pool
+issue-divergence check (~line 8127); `canUseExactIssuePricingCache` at the
+`ac:` cache-guard site (~line 4713, was the inline composition);
+`computeIssueAuthorityContractPatch` as a new, fourth terminal block
+positioned identically to the Q140/Commit-B/E1 blocks — the LAST check
+before `out.decision = computeDecision(...)`.
+
+**Item 2, review round — pricing-eligible-population exclusion, not just
+final-price nulling.** The original packet proved `out.price` ends up
+null but never proved the ROWS that produced the adoption are excluded
+from the pricing populations themselves — a real, separate gap: with
+`confirmedIssue` non-null (the adopted value), the pre-existing
+`TARGET_ISSUE_UNRESOLVED` gate (`src/lib/evidenceEligibility.js`, keyed on
+`target.issue == null`) never fires, so comp rows matching the
+unconfirmed number would flow through `buildPricingEligibleRows`/
+`buildEvidencePopulations` as fully pricing-eligible. New
+`TARGET_ISSUE_PROVISIONAL_AUTHORITY` rejection code in
+`classifyEvidenceRow` — fires when `target.issue` is present but
+`target.issueAuthorityStatus` is `'provisional'`/`'conflicted'`, demoting
+EVERY row regardless of whether its own title happens to match
+`target.issue` (a row matching an unconfirmed number is not evidence the
+number is right — same "absence of evidence is not evidence of
+correctness" reasoning as `TARGET_ISSUE_UNRESOLVED`, one authority tier
+up). Added to `PRICING_GATE_CODES` (so it actually excludes from pricing
+math, not just display) and routes to a new
+`provisionalAuthorityReferences` bucket in `buildEvidencePopulations`
+(I13 custody — reference-only, never deleted, annotated with
+`comparabilityStatus:'PROVISIONAL_ISSUE_REFERENCE'` + the rejection code
+as source/reason). `issueAuthorityStatus` threaded through the two real
+production consumers of this classifier — `api/comps.js`'s `fetchComps`
+(new param, added to `evidenceTarget`) and
+`src/lib/soldVerification.js`'s `verifySoldComps` (same pattern) — and
+both real `api/enrich.js` call sites (`fetchComps({...})` ~line 4762,
+`verifySoldComps(...)` ~line 5217) now pass
+`out.issueAuthority?.status || null`.
+
+**Item 3, review round — full-result 10x determinism, not status-only.**
+The original 10x loop only compared `issueAuthority.status` across runs.
+New `runFullPipelineOnce()` test helper runs the complete real chain
+(`resolveFamilyIssueConsensus` -> `deriveIssueAuthorityFromAdoption` ->
+`canUseExactIssuePricingCache` -> `buildEvidencePopulations` ->
+`computeIssueAuthorityContractPatch` -> `computeDecision` ->
+`finalizeResponse`) and returns a complete snapshot (authority object
+including `supportRatio` and `reasons` IN ORDER, `identityProvisionalFields`,
+contract state/price/bands/listable, `hypotheticalReferenceEstimate`,
+cache eligibility, pricing-eligible pool size, listing-lock fields,
+decision action). 10 runs serialized and deep-compared — `new
+Set(serialized).size===1` — byte-identical, not just status-equal.
+
+**Item 4, review round — anti-overcorrection controls, through real
+exports.** A gate that demotes everything looks safe but is a different
+bug:
+- (a) a prior confirmed issue (`priorIssue='12'`) with a 5/5 unanimous
+  agreeing pool reaches `mode:'corroborated'`, not `'adopted'` —
+  `deriveIssueAuthorityFromAdoption` has nothing to say about it
+  (`issueAuthority: null`), `computeIssueAuthorityContractPatch` is a
+  genuine no-op, and the full pipeline confirms the contract state is NOT
+  ID_REQUIRED/REFUSED and a real price survives.
+- (b) Commit 3's real `buildManualCorrectionProvenance` — fed a
+  `priorIdentity` carrying a genuine Commit-4-provisional authority (proving
+  the two commits compose: a user correction promotes a marketplace-only-
+  provisional issue to user-confirmed) — produces `status:'confirmed'`,
+  and `computeIssueAuthorityContractPatch` is a no-op for it.
+- (c) a Commit-4-provisional item's real `identityProvisionalFields`
+  correctly activates Commit 3's real `getCorrectableFields(item)` ->
+  `['issue']`, and the FULL real correction submit path —
+  `buildManualCorrectionPayload` -> `prepareManualCorrectionRequest` ->
+  `applyManualCorrectionResult` (all Commit 3 exports, none
+  re-implemented) — completes end-to-end on top of a provisional card,
+  confirming collection-replacement integrity (same length, same ID,
+  corrected issue applied).
+- (d) `classifyEvidenceRow` on a `tpb`/`book`/`collected` target: with
+  `issueAuthorityStatus:'provisional'` set, `TARGET_ISSUE_PROVISIONAL_AUTHORITY`
+  never fires (no issue axis to gate) and the FULL classification is
+  byte-identical to the same call with no `issueAuthorityStatus` at all —
+  genuinely unaffected, not coincidentally equal.
+
+**Client readiness (eight-joint-assertion point 5) satisfied without an
+App.jsx change.** `getListingReadiness` isn't exported (no test in this
+campaign has a JSX-transform harness to import it), so its two governing
+conditions were verified by direct reading instead: `identityConfirmed`'s
+`isUnresolved` check reads `decision.action === 'ID_REQUIRED'` (App.jsx
+~line 439); `priceReady` reads `price > 0` where `price` derives from
+`getDisplayPrice`, whose FIRST branch (App.jsx ~line 229-231) is
+`item.contract && !item.priceOverridden ? item.contract.price ?? 0 : ...`.
+Both are already satisfied by the real `decision.action`/`contract.price`
+this commit's transition produces. Full UI reconciliation (badge/copy
+specific to `issueAuthority.status`) remains Commit 5's job.
+
+**Tests** (`tests/q-trackB-commit4-adoption-provisional.test.js`,
+**86/86 passing** — up from 53: +8 net for the eight-joint-assertion
+extension (items 7/8 and their comp-pool fixture), +5 net for the
+full-result-determinism rewrite (8 new assertions replacing the 3
+superseded status-only ones), +20 net for the anti-overcorrection
+controls section (a)-(d) — 53+8+5+20=86, confirmed at each intermediate
+step during implementation, not just at the end. Every
+assertion via real exported functions: `resolveFamilyIssueConsensus`/
+`detectVisualIssueDivergence` (`identityCore.js`); `deriveIssueAuthorityFromAdoption`/
+`escalateIssueAuthorityOnConflict`/`computeIssueAuthorityContractPatch`/
+`canUseExactIssuePricingCache`/`mapConfidenceRatioToTier`
+(`issueAuthority.js`); `classifyEvidenceRow`/`buildEvidencePopulations`/
+`buildPricingEligibleRows`/`PRICING_GATE_CODES` (`evidenceEligibility.js`);
+`getCorrectableFields`/`prepareManualCorrectionRequest`/
+`buildManualCorrectionProvenance`/`buildManualCorrectionPayload`/
+`applyManualCorrectionResult` (`manualCorrection.js`); `computeDecision`
+(`decisionEngine.js`); `finalizeResponse`/`assembleContract`
+(`responseContract.js` — the actual `api/enrich.js:9352` terminal call):
+- **Teeth-proof A** — confirms the real `resolveFamilyIssueConsensus`
+  genuinely reaches `mode:'adopted'` on the fixture, then contrasts a
+  naive "no Commit 4 code at all" stand-in against the real
+  `deriveIssueAuthorityFromAdoption` output.
+- **Eight joint assertions** — one pool-only-adoption fixture run through
+  the full real pipeline, asserting together: (1) `status==='provisional'`,
+  (2) `contract.state==='ID_REQUIRED'`, (3) price+bands null, (4) zero
+  portfolio contribution, (5) the two real readiness-driving conditions,
+  (6) `listable===false` + `listingHardLocked===true`, (7) the adopting
+  marketplace rows — a synthetic active/sold comp pool genuinely matching
+  `#12` by title — are absent from every pricing-eligible population
+  (`rawPricingPool`, `buildPricingEligibleRows`) and land in
+  `provisionalAuthorityReferences` with source/reason annotation intact,
+  (8) `canUseExactIssuePricingCache` returns `false`. Plus I13 custody
+  (`rawComps`/`soldComps` byte-identical) and `hypotheticalReferenceEstimate`
+  preservation.
+- **Teeth-proof B** — the inverse: leaving `issueAuthority` unset on the
+  identical fixture produces `patch === null` and a normal priced contract.
+- **Full-result 10x determinism** — see Item 3 above.
+- **Contradiction-detector-fired case** — a real `detectVisualIssueDivergence`
+  call (confirmed `#12` vs. a later, differently-scoped pool-wide value
+  `#9`) escalates `'provisional'` to `'conflicted'`, preserving the
+  original reason and appending the new one; confirmed pure. The escalated
+  case is run through the full pipeline too, confirming
+  `ID_REQUIRED`/null-price there as well.
+- **Behavior matrix sanity** — `'corroborated'`/`'conflict-locked'`/
+  `'no-consensus'`/`null`/`undefined` familyIssueConsensus inputs all
+  confirmed inert.
+- **`mapConfidenceRatioToTier` boundaries** — full domain, not just the
+  reachable slice.
+- **Guard** — a card with a pre-existing `refusedToPrice===true` is
+  confirmed not double-patched.
+- **Anti-overcorrection controls (a)-(d)** — see Item 4 above.
+
+**Teeth-proofs for the review-round assertions specifically (genuine
+temporary injection into the REAL functions, observed to fail, then
+reverted — same practice as Commit 3's Safeguard 4):**
+1. `deriveIssueAuthorityFromAdoption`'s `status: 'provisional'` changed to
+   `'confirmed'` — 26 real assertions failed (cascading through joint
+   assertions 1-8, the full-result determinism sanity checks, and the
+   contradiction-escalation case), confirming the whole chain genuinely
+   depends on this value. Reverted; file confirmed byte-identical
+   (`diff` against a pre-injection copy) and 86/86 passing again.
+2. `canUseExactIssuePricingCache` body replaced with a bare `return true`
+   — exactly assertion (8) and its full-result-determinism counterpart
+   failed, nothing else cascaded (a clean, isolated proof this specific
+   assertion is load-bearing). Reverted; byte-identical, 86/86 passing.
+3. `classifyEvidenceRow`'s new branch had its `identityEligible = false;`
+   line removed (simulating a row silently promoted into pricing) —
+   assertions (7b)/(7c)/(7d) and the full-result pricing-pool-size check
+   failed; (7a)/(7f)/(7g) did NOT fail (they test a second, independent
+   protection layer — the `PRICING_GATE_CODES` gate on `rejectionCodes`,
+   which the injection didn't touch), a genuinely informative result about
+   the two-layer design, not a flaw in the teeth-proof. Reverted;
+   byte-identical, 86/86 passing (at this point in the sequence).
+
+**Second review-round amendment (two scope-fenced fixes, folded in before
+staging):**
+
+**Fix 1 — evidence dropped on `api/comps.js`'s zero-eligible early return.**
+Confirmed real, scope-fenced to exactly one site: `fetchComps`'s `if
+(rawPricingEligibleRows.length === 0) return {...emptyComps(...),
+attemptUsed: 0}` ran AFTER `evidencePopulations` was computed but returned
+a bare `emptyComps()` shape with no `evidence` field at all — every
+reference-only row (including this commit's own
+`provisionalAuthorityReferences`, and the pre-existing
+`gradedPricingReferences`/`incompleteReferences`/etc.) silently vanished
+in exactly the case where EVERY row in the pool was demoted to
+reference-only (e.g. a pool entirely composed of rows matching a
+marketplace-only-adopted, not-yet-corroborated issue). Fix: a new
+`evidenceForResponse` object built once, immediately after
+`evidencePopulations`, attached identically at BOTH the zero-eligible
+early return and the pre-existing success-path return (which previously
+hand-rebuilt an equivalent but separately-maintained object literal —
+now one shared construction, no drift risk between the two). Also closes
+a second, smaller gap discovered while building `evidenceForResponse`:
+the success path's own hand-built object never included
+`provisionalAuthorityReferences` either, even when other rows in the same
+pool DID make it into pricing — so a mixed pool would have silently lost
+the provisional-authority rows too, not just the all-excluded case.
+**Sold-side checked, confirmed NOT affected — no fix needed there:**
+`src/lib/soldVerification.js`'s `verifySoldComps` returns `evidence:
+evidencePopulations` (the FULL, unmodified populations object) at all
+three of its return sites, including the zero-verified-rows case — it
+already carries `provisionalAuthorityReferences` through by construction,
+with no separate "empty" shape that drops it. Confirmed by direct
+reading, not assumed.
+**Explicitly deferred, not fixed here (per scope fence):** every OTHER
+early-return site in `api/comps.js` that predates `evidencePopulations`
+being computed at all (e.g. the `parsed.length === 0` return before
+evidence classification even runs) has no evidence to lose in the first
+place and is unaffected either way. The broader "attach evidence at every
+early return in this file" project — Commit 2's own already-queued item
+(Section 2) — stays queued; this fix touches only the one site downstream
+of `evidencePopulations` that Commit 4's own bucket flows through, per
+the scope fence.
+
+**Fix 2 — fail-closed inversion, two surfaces.** Both
+`canUseExactIssuePricingCache` and the `TARGET_ISSUE_PROVISIONAL_AUTHORITY`
+gate (`classifyEvidenceRow`) originally BLOCKLISTED the two known-bad
+status values (`=== 'provisional' || === 'conflicted'`) and let everything
+else — including a status value nobody anticipated (a future third
+status, a typo, an unrelated bug writing something unexpected onto
+`issueAuthority.status`) — fall through as if trustworthy. Both now
+ALLOWLIST the known-safe shapes instead: no `issueAuthority` object at
+all (the ordinary pre-campaign case, `canUseExactIssuePricingCache`) or no
+`issueAuthorityStatus` at all (`classifyEvidenceRow`) — zero regression
+for the ~99% of requests with no authority tracking — or an explicit
+`'confirmed'` status. Every other value, known or not-yet-invented, is
+now ineligible/gated by default — conservative-on-uncertainty, the same
+standing posture this codebase already applies to pricing and
+identification generally. **Scope-fenced to exactly these two surfaces**
+(the ones this commit introduces) — no sweep of other legacy gates
+elsewhere in the codebase for the same fail-open shape; none were spotted
+incidentally while making this change, so there is nothing to list for a
+future queue from this pass.
+
+New tests (6, all via the real exports): an unrecognized/future status
+value is confirmed ineligible for both `canUseExactIssuePricingCache` and
+the `classifyEvidenceRow` gate; the two known-safe shapes (absent
+authority, `'confirmed'`) are confirmed to remain eligible/inert for both
+— proving this is a genuine allowlist inversion, not a blanket new
+restriction. Both teeth-proofed: reverting each surface to its prior
+blocklist form (temporary injection into the real function) produced
+exactly the expected failures (1 for the cache guard, 2 for the
+classifier gate) and no others; reverted, byte-identical.
+
+Tests (at this point in the sequence): 92/92 passing (up from 86 — the 6
+fail-closed assertions above).
+
+**Third review-round amendment — structural upgrade to Fix 1 (required,
+not optional):** hand-adding `similarTitleReferences` to the manually-
+maintained `evidenceForResponse` object literal would have fixed the one
+known instance but left the defect CLASS intact — a hand-maintained
+partial object is exactly what produced this omission (and, before it,
+the longer-standing separate omission of `provisionalAuthorityReferences`
+itself from the success-path object). Extracted instead:
+- `EVIDENCE_RESPONSE_BUCKETS` (`src/lib/evidenceEligibility.js`, exported
+  constant) — the complete, ordered list of the 8 display/reference bucket
+  keys (`similarTitleReferences`, `provisionalAuthorityReferences`,
+  `gradedPricingReferences`, `incompleteReferences`,
+  `incompatibleEditionReferences`, `unconfirmedEditionReferences`,
+  `rejectedEvidence`, `eraRejectedReferenceRows`) a fully-assembled
+  evidence response carries. Same pattern as Commit 3's
+  `IDENTITY_DEPENDENT_FIELDS_TO_CLEAR`/`IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE`
+  — explicit, named, exported enumeration, never inferred "everything
+  except" logic.
+- `buildEvidenceForResponse(evidencePopulations, eraRejectedReferenceRows)`
+  (same file, exported) — iterates `EVIDENCE_RESPONSE_BUCKETS`, every
+  bucket always present as an array. `eraRejectedReferenceRows` is
+  accepted as a second argument (it's computed by a separate, earlier
+  pipeline stage — api/comps.js's own era-consistency filter — not one of
+  `buildEvidencePopulations`' own fields) rather than requiring
+  `buildEvidencePopulations` to know about an upstream filter stage, or
+  being silently dropped.
+- `api/comps.js`'s BOTH return sites (the zero-eligible early return from
+  Fix 1, and the pre-existing success-path return) now call this one
+  function — no hand-maintained object literal remains at either site.
+- `src/lib/soldVerification.js` confirmed to need NO change: its real
+  `evidence: evidencePopulations` (all 3 return sites) already returns the
+  complete raw object, which already carries every bucket in
+  `EVIDENCE_RESPONSE_BUCKETS` except `eraRejectedReferenceRows` (no
+  sold-side equivalent pre-filter stage) — verified directly, not assumed.
+
+**New tests, both sides of the real UI consumption verified** (App.jsx
+:7010-7011 reads `item.activeEvidence?.similarTitleReferences` AND
+`item.soldEvidence?.similarTitleReferences` — a one-sided proof would miss
+half the regression surface):
+- **Response-shape completeness** — iterates the real, exported
+  `EVIDENCE_RESPONSE_BUCKETS` against both the real `buildEvidenceForResponse`
+  output (activeEvidence shape) and a raw `buildEvidencePopulations` result
+  (soldEvidence shape, `eraRejectedReferenceRows` explicitly asserted
+  ABSENT there, a documented shape difference, not a silent gap) —
+  confirming every bucket is always an array on both shapes for the same
+  underlying provisional-authority-excluded population.
+- **`fetchComps` integration test** (real HTTP-layer function, `global.fetch`
+  mocked) — the established pattern already used by
+  `q-trackB-commit2-era-classification`/`q141-v0i-slab-exclusion`/`q120-cv-year-penalty-and-marvel-tokenize`/
+  `q-batman222-cv-zero-score`/`perf-kv-dedup-and-oauth-cache` (no new
+  harness). A genuine 3-row comp pool that survives the ENTIRE upstream
+  filter chain (title/era/reprint/variant/lot/sanity) prices normally with
+  no `issueAuthorityStatus` (CONTROL, count>0, proving the fixture is real
+  — not vacuously empty already), then collapses to `count=0` through the
+  REAL `TARGET_ISSUE_PROVISIONAL_AUTHORITY` gate and the REAL zero-eligible
+  early return (Fix 1's own target) when `issueAuthorityStatus:'provisional'`
+  is passed — with `evidence.provisionalAuthorityReferences` carrying all
+  3 rows, source/reason intact, and the FULL `EVIDENCE_RESPONSE_BUCKETS`
+  set present on the actual `fetchComps()` return value, not just at the
+  unit-test level. Repeated for `'conflicted'`. All 4 pre-existing
+  precedent test files re-run clean (19/16/all-pass/12 assertions, no
+  regression from the `evidenceForResponse` refactor).
+
+Tests (at this point in the sequence): 128/128 passing.
+
+**Fourth review-round amendment — presence-threading correction (a
+requirement that had been silently dropped twice before this pass;
+addressed explicitly here, not folded in silently).** Every prior packet's
+`issueAuthorityStatus` threading (`api/enrich.js`'s two real call sites ->
+`api/comps.js`/`soldVerification.js` -> `classifyEvidenceRow`) was built
+from a single collapsed scalar: `out.issueAuthority?.status || null`. That
+expression cannot distinguish two genuinely different upstream states —
+(a) no `issueAuthority` object exists at all (the ordinary, legacy,
+pre-campaign case — safe), and (b) an `issueAuthority` object DOES exist
+but its own `.status` field is itself null/undefined (a malformed PRESENT
+record) — both collapse to the identical bare `null` by the time they
+reach `evidenceTarget`, so `classifyEvidenceRow`'s gate (checking
+`issueAuthorityStatus != null`) could never tell them apart, and silently
+treated (b) as if it were the safe case (a).
+
+**Fix:** a second primitive, `issueAuthorityPresent` (boolean), threaded
+as its OWN field — never derived from the status value — alongside
+`issueAuthorityStatus`, through every real call site: `api/enrich.js`'s
+`fetchComps(...)` and `verifySoldComps(...)` calls now pass
+`issueAuthorityPresent: out.issueAuthority != null` explicitly;
+`api/comps.js`'s `fetchComps` signature and `src/lib/soldVerification.js`'s
+`verifySoldComps` signature both gained the new parameter (default
+`false`, the safe legacy value) and thread it into `evidenceTarget`.
+`classifyEvidenceRow`'s gate now reads `target.issueAuthorityPresent ===
+true && target.issueAuthorityStatus !== 'confirmed'` — presence is the
+gate, not status alone; a present-but-statusless record is now correctly
+caught, and the truly-absent case is unaffected. **Confirmed, not
+assumed, that the sold path actually receives and forwards both fields**
+(the "no change needed" note in the prior packet's Fix 1 was specifically
+about response SHAPE — `evidence: evidencePopulations` already carrying
+every bucket — and never covered this threading, which is new in this
+pass).
+
+**Scope note per the clarification:** `canUseExactIssuePricingCache`
+(`src/lib/issueAuthority.js`) is UNCHANGED — it already receives the full
+`issueAuthority` object directly from its one real call site and performs
+its own `issueAuthority == null` presence check internally; only the
+`evidenceEligibility.js` chain ever had the collapsing problem, since that
+was the one path serializing the object down to a bare scalar before it
+crossed a file/module boundary.
+
+New tests (5, all via real exports, both at the `classifyEvidenceRow` unit
+level and through the real `fetchComps` HTTP-layer integration test): a
+present-but-null-status target is confirmed gated (the exact new
+distinction), contrasted directly against the truly-absent-authority
+control (same row, same issue, same title — genuinely different outcome).
+Teeth-proofed: reverting the gate to its prior status-only check
+(temporary injection into the real function) produced exactly the 4
+expected failures — the new presence-specific assertions only, nothing
+else — confirming this correction's own tests, not just its absence, are
+load-bearing; reverted, byte-identical.
+
+Tests: **133/133 passing** (up from 128 — 5 presence-threading
+assertions). Full-suite baseline unchanged — 11 failing files,
+byte-identical failing set before/after across FIVE separate `git stash`
+A/B passes (2-file, 6-file, 7-file, the prior 7-file structural-upgrade
+pass, and this final pass, diffed directly, not just counted):
+`batch1-fixes`, `comp-filter-hygiene`, `decision-engine`, `identity-gate`,
+`image-search-extraction`, `mega-keys`, `pattern-k-dedupe-issue`,
+`priceBands`, `q-adv397-visual-guard`, `ship26-integration`,
+`sold-verification` — none of which this commit's diff touches. Build
+clean (`npm run build`); ESM-mode parse verified explicitly on all five
+touched/new production files (`api/enrich.js`, `api/comps.js`,
+`src/lib/evidenceEligibility.js`, `src/lib/soldVerification.js`,
+`src/lib/issueAuthority.js`). All 5 precedent `fetchComps`/`global.fetch`-
+mocking test files (`q-trackB-commit2-era-classification`,
+`q141-v0i-slab-exclusion`, `q120-cv-year-penalty-and-marvel-tokenize`,
+`q-batman222-cv-zero-score`, `perf-kv-dedup-and-oauth-cache`) re-run clean.
+
+**Standing process amendment, effective this packet forward:** every
+evidence packet ends with a dispatch-compliance table — every numbered
+item from the directive it answers, marked DONE (with proof)/DEFERRED
+(with the approval that deferred it)/NOT DONE (with why) — so a silently
+dropped requirement is structurally visible on both ends, not just
+caught eventually by a subsequent review pass.
+
+**Explicitly out of scope for this commit (per instruction, queued
+separately):** the Spawn #351 isolated visual-family candidate work
+(marketplace-visual source, 2-row family adoption, a
+`visualReferenceEvidence` bucket) — new recovery capability from a
+separate review chain, not implemented here in any form. Queues as its
+own commit immediately after Commit 4 lands, pending scope decision.
+
+Full-suite A/B: no new failures relative to documented baseline.

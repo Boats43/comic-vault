@@ -64,7 +64,7 @@ import {
 } from "../src/lib/compHygiene.js";
 
 import { classifyVariantTokens } from "../src/lib/imageSearchIdentity.js";
-import { buildEvidencePopulations, buildPricingEligibleRows, classifyYearEvidence } from "../src/lib/evidenceEligibility.js";
+import { buildEvidencePopulations, buildPricingEligibleRows, buildEvidenceForResponse, classifyYearEvidence } from "../src/lib/evidenceEligibility.js";
 
 export {
   VARIANT_CONTAM_RE,
@@ -947,6 +947,16 @@ export const fetchComps = async ({
   cvVolumeStartYear = null,  // Q128 — ComicVine volume's own start_year (lookupComicVine's `.startYear`), used by Filter 0c to corroborate a "volume launch year" label distinct from confirmedYear
   artistOverride = null,  // Q136 Slice A — extractArtist(confirmedTitle) from api/enrich.js, when the RESOLVED identity itself names a recognized artist (see applyArtistPreferenceNarrowing below for why this differs from extractArtist(variant))
   signedConsensus = false,  // Slice C — pool-corroborated "our book is signed" signal (extractConfirmedVariant), for the case where Vision's own variant text can't say so (see Filter 2b below)
+  // Track B Phase 0, Commit 4 (presence-threading correction) — two
+  // primitives, not one collapsed scalar. issueAuthorityPresent: does an
+  // issueAuthority object exist at all on the caller's side? Threaded
+  // separately from issueAuthorityStatus (its .status value, if present) so
+  // classifyEvidenceRow's gate can distinguish "no issueAuthority tracking
+  // at all" (legacy, safe) from "an issueAuthority object exists but its
+  // status is somehow null/undefined" (a malformed present record) — both
+  // used to collapse to the identical bare `null` before this correction.
+  issueAuthorityPresent = false,
+  issueAuthorityStatus = null,  // Track B Phase 0, Commit 4 — out.issueAuthority?.status ('provisional'/'conflicted'/'confirmed'/null), threaded into evidenceTarget below for the TARGET_ISSUE_PROVISIONAL_AUTHORITY gate
 }) => {
   if (!appId || !certId) {
     return emptyComps(null, "missing eBay credentials");
@@ -2124,6 +2134,8 @@ export const fetchComps = async ({
       userGradeKey: rawOnly ? 'raw' : (gradedOnly ? 'graded' : null),
       assetType: isTPB ? 'tpb' : 'comic',
       isSignedTarget: SIGNED_RE.test(String(variant || '')),
+      issueAuthorityPresent,  // Track B Phase 0, Commit 4 (presence-threading correction) — TARGET_ISSUE_PROVISIONAL_AUTHORITY gate
+      issueAuthorityStatus,  // Track B Phase 0, Commit 4 — TARGET_ISSUE_PROVISIONAL_AUTHORITY gate
     };
     const evidenceRows = parsed.map((it) => ({ ...it, marketState: 'active' }));
     // Full classification — powers the display/reference buckets below
@@ -2132,6 +2144,32 @@ export const fetchComps = async ({
     // category gets annotated (I13), regardless of whether it additionally
     // excludes the row from pricing math (narrower — see below).
     const evidencePopulations = buildEvidencePopulations(evidenceRows, evidenceTarget);
+    // Track B Phase 0, Commit 4 (review-round structural upgrade) — built
+    // once, immediately after evidencePopulations, via the exported,
+    // enumeration-driven buildEvidenceForResponse (evidenceEligibility.js —
+    // see that function's own doc comment) rather than a hand-maintained
+    // object literal, so BOTH the zero-eligible early return just below AND
+    // the success-path return further down attach the IDENTICAL, COMPLETE
+    // evidence shape. Previously only the success path attached `evidence`
+    // at all — the zero-eligible early return (`rawPricingEligibleRows.length
+    // === 0`) returned a bare `emptyComps(...)` with no evidence field
+    // whatsoever, silently dropping every reference-only row (including
+    // this commit's own provisionalAuthorityReferences) in exactly the case
+    // where ALL rows in the pool were demoted to reference-only — e.g. a
+    // pool made ENTIRELY of rows matching a marketplace-only-adopted,
+    // not-yet-corroborated issue number. A hand-maintained object literal
+    // was the exact defect class that produced this omission (and, before
+    // it, the longer-standing omission of similarTitleReferences from
+    // EITHER return site) — the exported EVIDENCE_RESPONSE_BUCKETS
+    // enumeration prevents the class, not just the one instance already
+    // found. Scope: this fix touches only the one early-return site
+    // downstream of evidencePopulations in THIS function; it does not
+    // attempt the broader "evidence attached at every early return in this
+    // file" audit (Commit 2's own already-queued item, see Section 2/16 —
+    // several earlier early returns in this function, e.g.
+    // `parsed.length === 0` above, fire BEFORE evidencePopulations is even
+    // computed and are unaffected by, and out of scope for, this fix).
+    const evidenceForResponse = buildEvidenceForResponse(evidencePopulations, eraRejectedReferenceRows);
     // Pricing-math gate — narrower than evidencePopulations.rawPricingPool.
     // `parsed` here already survived the ENTIRE formal filter chain (era/
     // reprint/variant/lot/tpb/slab/signed/grade-proximity/price-sanity/
@@ -2150,9 +2188,14 @@ export const fetchComps = async ({
       console.log(
         `[evidence-eligibility] active: classification eliminated all ` +
         `${parsed.length} pre-classification survivor(s) — returning empty ` +
-        `(never re-admitting rejected/reference-only evidence)`
+        `pricing pool, evidence preserved (never re-admitting rejected/` +
+        `reference-only evidence into pricing, never silently dropping it either)`
       );
-      return { ...emptyComps(query, "no pricing-eligible comps after evidence classification"), attemptUsed: 0 };
+      // Track B Phase 0, Commit 4 (review-round fix) — evidence attached
+      // even on this zero-eligible path (was previously dropped entirely
+      // by the bare emptyComps() spread). See evidenceForResponse's own
+      // comment above for the exact scope of this fix.
+      return { ...emptyComps(query, "no pricing-eligible comps after evidence classification"), attemptUsed: 0, evidence: evidenceForResponse };
     }
     console.log(
       `[evidence-eligibility] activeInput=${parsed.length} ` +
@@ -2235,23 +2278,12 @@ export const fetchComps = async ({
       // D1 — sanitized reference groups (never the pricing-eligible pool
       // itself, which is `prices`/`count`/`average`/`lowest`/`highest`
       // above, already narrowed to rawPricingPool). Display-only, I13.
-      evidence: {
-        gradedPricingReferences: evidencePopulations.gradedPricingReferences,
-        incompleteReferences: evidencePopulations.incompleteReferences,
-        incompatibleEditionReferences: evidencePopulations.incompatibleEditionReferences,
-        // Commit D1.1 — "Unconfirmed same-title/issue references": rows
-        // with no affirmative mismatch but insufficient positive evidence
-        // on a collision-prone axis. Never merged into
-        // incompatibleEditionReferences (that bucket implies an
-        // affirmative false claim; these rows made none).
-        unconfirmedEditionReferences: evidencePopulations.unconfirmedEditionReferences,
-        rejectedEvidence: evidencePopulations.rejectedEvidence,
-        // Track B Phase 0, Commit 2 (consumer-audit correction) — rows the
-        // era-consistency filter rejected (modern relaunch marker or a
-        // genuine year mismatch), preserved here instead of being restored
-        // into the priced pool the way the pre-Commit-2 wipe-out bypass did.
-        eraRejectedReferenceRows,
-      },
+      // Track B Phase 0, Commit 4 (review-round fix) — the same
+      // evidenceForResponse object the zero-eligible early return above
+      // now also attaches, so both paths carry an identical evidence
+      // shape (including provisionalAuthorityReferences) rather than two
+      // independently-maintained copies that could drift.
+      evidence: evidenceForResponse,
     };
   } catch (err) {
     console.error(`[comps] error: ${err?.message || err}`);
