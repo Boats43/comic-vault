@@ -183,42 +183,281 @@ export function escalateIssueAuthorityOnConflict(issueAuthority, issueConsensusC
  */
 const CACHE_SAFE_ISSUE_AUTHORITY_STATUSES = new Set(['confirmed']);
 
-export function canUseExactIssuePricingCache(confirmedIssue, issueAuthority) {
+/**
+ * Track B Phase 0, Commit 4.1 (review round, item 2) — the third,
+ * optional `identityProvisionalFields` parameter closes a real gap: a
+ * production composition where Vision's ISSUE is trusted (family issue
+ * vote reaches `resolveFamilyIssueConsensus` mode `'corroborated'`, not
+ * `'adopted'` — no `issueAuthority` object is ever created for a
+ * corroborated issue, `deriveIssueAuthorityFromAdoption` returns `null`
+ * for every mode except `'adopted'`) while the YEAR is still
+ * family-adopted-only (`resolveFamilyYearConsensus` mode `'adopted'`,
+ * `'year'` present in `identityProvisionalFields`). Before this fix,
+ * `issueAuthority == null` in that exact composition, so this function
+ * returned `true` (cacheable) — caching an exact-issue price keyed on a
+ * confirmed issue number while the book's YEAR (a real pricing input —
+ * grade multipliers and PriceCharting/comp queries are era-sensitive) is
+ * still only a marketplace guess would poison the `ac:` namespace the
+ * identical way an unconfirmed issue does; year deserves the same
+ * containment, not a parallel cache namespace. Backward compatible: the
+ * parameter is optional and defaults to a no-op (`undefined` fails
+ * `Array.isArray`), so every pre-existing call site and test that never
+ * passes it behaves byte-identically to before this fix.
+ */
+export function canUseExactIssuePricingCache(confirmedIssue, issueAuthority, identityProvisionalFields) {
   if (confirmedIssue == null) return false;
+  if (Array.isArray(identityProvisionalFields) && identityProvisionalFields.includes('year')) return false;
   if (issueAuthority == null) return true;
   return CACHE_SAFE_ISSUE_AUTHORITY_STATUSES.has(issueAuthority.status);
 }
 
-export function computeIssueAuthorityContractPatch(issueAuthority, priorOut) {
+/**
+ * Track B Phase 0, Commit 4.1 (review round, item 2) — the third,
+ * optional `identityProvisionalFields` parameter closes the containment
+ * gap `canUseExactIssuePricingCache` closes above, for the contract/
+ * readiness surface specifically: `computeIssueAuthorityContractPatch`
+ * previously gated ENTIRELY on `issueAuthority?.status` — in the same
+ * trusted-issue/adopted-year composition described above,
+ * `issueAuthority` is `null` (issue was corroborated, not adopted), so
+ * this function returned `null` (no patch) and authoritative pricing/
+ * listing would have proceeded on a book whose year is still an
+ * unconfirmed marketplace guess. `identityProvisionalFields` now
+ * participates in the gate independently of `issueAuthority.status` —
+ * exactly the instruction this fix follows ("make identityProvisionalFields
+ * participate in the contract/readiness gate independently"), reusing this
+ * SAME existing patch shape and machinery rather than a parallel
+ * `yearAuthority` schema. When issue is ALSO provisional/conflicted
+ * (Commit 4's original case), that branch's wording wins unchanged — this
+ * only adds a THIRD, year-only branch, never altering the first two.
+ * Backward compatible: optional parameter, `undefined` is a safe no-op for
+ * every pre-existing call site/test.
+ */
+export function computeIssueAuthorityContractPatch(issueAuthority, priorOut, identityProvisionalFields) {
   const status = issueAuthority?.status;
-  if (status !== 'provisional' && status !== 'conflicted') return null;
+  const issueProvisional = status === 'provisional';
+  const issueConflicted = status === 'conflicted';
+  const yearOnlyProvisional = !issueProvisional && !issueConflicted &&
+    Array.isArray(identityProvisionalFields) && identityProvisionalFields.includes('year');
+
+  if (!issueProvisional && !issueConflicted && !yearOnlyProvisional) return null;
   if (priorOut?.refusedToPrice === true) return null;
 
-  const isConflicted = status === 'conflicted';
+  let pricingSource, priceNote, listingHardLockReason, listingHardLockBanner;
+  if (issueConflicted) {
+    pricingSource = 'refused-issue-authority-conflicted';
+    priceNote = "Marketplace listings disagree on this book's issue number — price withheld pending verification.";
+    listingHardLockReason = 'issue-authority-conflicted';
+    listingHardLockBanner = "Marketplace listings disagree on this book's issue number — identification requires manual verification before listing.";
+  } else if (issueProvisional) {
+    pricingSource = 'refused-issue-authority-provisional';
+    priceNote = "This book's issue number was inferred from marketplace listings alone, with no independent confirmation — price withheld pending verification.";
+    listingHardLockReason = 'issue-authority-provisional';
+    listingHardLockBanner = "This book's issue number was inferred from marketplace listings alone (no Vision or user confirmation) — identification requires manual verification before listing.";
+  } else {
+    // yearOnlyProvisional — issue is trusted (Vision-confirmed or
+    // family-corroborated), only the year is a marketplace-only guess.
+    pricingSource = 'refused-year-authority-provisional';
+    priceNote = "This book's publication year was inferred from marketplace listings alone, with no independent confirmation — price withheld pending verification.";
+    listingHardLockReason = 'year-authority-provisional';
+    listingHardLockBanner = "This book's publication year was inferred from marketplace listings alone (no Vision or user confirmation) — identification requires manual verification before listing.";
+  }
+
   const patch = {
     authoritativeRecommendation: null,
     price: null,
     priceLow: null,
     priceHigh: null,
     priceBands: null,
-    pricingSource: isConflicted
-      ? 'refused-issue-authority-conflicted'
-      : 'refused-issue-authority-provisional',
+    pricingSource,
     refusedToPrice: true,
     confidenceLevel: 'LOW',
-    priceNote: isConflicted
-      ? "Marketplace listings disagree on this book's issue number — price withheld pending verification."
-      : "This book's issue number was inferred from marketplace listings alone, with no independent confirmation — price withheld pending verification.",
+    priceNote,
     matchConfidence: { score: 0, tier: 'LOW' },
     identityConfident: false,
     listingHardLocked: true,
-    listingHardLockReason: isConflicted ? 'issue-authority-conflicted' : 'issue-authority-provisional',
-    listingHardLockBanner: isConflicted
-      ? "Marketplace listings disagree on this book's issue number — identification requires manual verification before listing."
-      : "This book's issue number was inferred from marketplace listings alone (no Vision or user confirmation) — identification requires manual verification before listing.",
+    listingHardLockReason,
+    listingHardLockBanner,
   };
   if (priorOut?.price != null) {
     patch.hypotheticalReferenceEstimate = priorOut.price;
   }
   return patch;
+}
+
+/**
+ * Track B Phase 0, Commit 4.1 — "Not this comic" rejection fingerprint.
+ *
+ * Investigated before implementation, per instruction: keying rejection on
+ * the visual-family CLUSTER LABEL (e.g. the merged family's consensus
+ * title string, "spawn brett booth cameo of lyra htf scarce") is NOT
+ * stable across separate scans of the same physical book. That label is a
+ * byproduct of exactly which listings eBay's reverse-image search happens
+ * to return that day (Q45's 60%-of-members token-consensus computation,
+ * imageSearchIdentity.js) — a listing being delisted, a new one appearing,
+ * or ranking shifting between two scans of the identical photo can change
+ * which tokens clear the 60% bar, producing a different label for the
+ * SAME underlying candidate. Confirmed directly: the real Spawn #351
+ * fixture's own founding-vs-corroborating requests (this dispatch's own
+ * investigation) already show the pool composition differing scan to
+ * scan (16 vs 18 vs 20 eligible rows across three separate captures of
+ * the same photo).
+ *
+ * Keys on the PROPOSED IDENTITY instead — the thing the user actually
+ * looked at and rejected — which is stable once the merge/adoption
+ * machinery resolves it: normalized title + adopted/trusted issue +
+ * adopted/trusted year + composed variant designation (variant omitted
+ * while unresolved). Two separate scans of the same photo that both
+ * resolve to the same proposed identity produce the identical fingerprint
+ * even if the underlying visual-pool cluster label differs between them.
+ *
+ * YEAR IS INCLUDED (review round, item 1 — reverses this function's own
+ * original "year deliberately omitted" design). The asymmetry that
+ * decides it: a title|issue-only key (e.g. "spawn|351") can COLLIDE
+ * across genuinely different products sharing the same title+issue text
+ * — different volumes, reboots, or renumbered series (the exact
+ * same-title/same-issue/different-year shape this codebase has hit
+ * before — see the Pattern Library's "Batman #608 class" and "Catwoman
+ * #64 Szerdy-variant class" entries in CLAUDE.md). A collision here
+ * SILENTLY suppresses a "not this comic" candidate the user never
+ * actually rejected — confident and wrong. A year-instability mismatch
+ * (the risk the original no-year design was guarding against) merely
+ * re-asks the user on the next scan — honest and open. Confident-and-
+ * wrong is strictly worse than honest-and-open, so year is included.
+ * NEVER silently shortens the identity when year is unavailable: an
+ * explicit, stable `'unknown-year'` token is used instead of omitting the
+ * segment — `buildFingerprintYearToken` below guarantees this token is
+ * itself deterministic (same absent/unresolved input always produces the
+ * identical literal string), not an accidental one-off.
+ *
+ * @param {string|null} title
+ * @param {string|number|null} issue
+ * @param {string|number|null} year - the ADOPTED/TRUSTED year (post
+ *   resolveFamilyYearConsensus, or Vision's own trusted year) — NEVER a
+ *   raw per-row or pool-wide value, same authority discipline as `issue`.
+ * @param {string|null} variant
+ * @returns {string}
+ */
+export function buildFingerprintYearToken(year) {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const normalized = norm(year);
+  return normalized || 'unknown-year';
+}
+
+export function buildRejectedCandidateFingerprint(title, issue, year, variant) {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return [norm(title), norm(issue), buildFingerprintYearToken(year), norm(variant)].filter(Boolean).join('|');
+}
+
+/**
+ * Track B Phase 0, Commit 4.1 — extracted for testability (same rationale
+ * as every other pure-function extraction this campaign has made): the
+ * real api/enrich.js call site only ever needs to add 'year' to the
+ * existing identityProvisionalFields array when resolveIdentity's
+ * family-scoped year vote (resolveFamilyYearConsensus, identityCore.js)
+ * actually adopted a value — never unconditionally, never duplicated if
+ * already present. No parallel yearAuthority object: year's
+ * provisional-ness is expressed entirely through this field plus
+ * out.issueAuthority.status (already 'provisional' whenever issue was
+ * adopted) — computeIssueAuthorityContractPatch needs no changes to cover
+ * it.
+ *
+ * @param {string[]} identityProvisionalFields
+ * @param {{mode: string}|null|undefined} familyYearConsensus
+ * @returns {string[]} the same array reference when no change applies
+ *   (referential no-op, mirrors escalateIssueAuthorityOnConflict's own
+ *   convention), otherwise a NEW array with 'year' appended
+ */
+export function appendYearToProvisionalFields(identityProvisionalFields, familyYearConsensus) {
+  const fields = Array.isArray(identityProvisionalFields) ? identityProvisionalFields : [];
+  if (familyYearConsensus?.mode !== 'adopted') return fields;
+  if (fields.includes('year')) return fields;
+  return [...fields, 'year'];
+}
+
+/**
+ * Track B Phase 0, Commit 4.1 — builds out.visualReferenceEvidence from
+ * ONLY the accepted family's own topFamily.indices, extracted out of
+ * api/enrich.js for the same invariant-10 reason as every other function
+ * in this file: a test must be able to invoke the real computation
+ * directly rather than only exercising it through the full enrich handler.
+ *
+ * Population discipline (the reason this function exists at all, not just
+ * for testability): familyIndices must be the MERGED family's own
+ * indices — the exact rows that drove the issue/year consensus vote —
+ * never the broader issue-scoped population filterItemsByIssue produces
+ * later for variant extraction. Confirmed on the real Spawn #351 fixture:
+ * the merged family has 5 rows, but 6 rows in the same pool independently
+ * assert issue #351 (one row belongs to neither title-family cluster).
+ * Passing the wrong population in would silently broaden this evidence
+ * bucket beyond what actually produced the identity.
+ *
+ * familyKey input discipline (corrected — a real bug found and fixed in
+ * review): the first shipped version of this function's call site passed
+ * `identity.confirmedTitle`, which in the family-override branch
+ * (identityCore.js resolveIdentity, ~line 1331) is
+ * `sanitizeSeriesTitle(family.selectedTitle)` — the visual-family CLUSTER
+ * LABEL, not the stable proposed identity this key is supposed to capture.
+ * Confirmed by direct execution: the real Spawn #351 fixture produced
+ * `familyKey: "spawn-brett-booth-cameo-of-lyra-scarce|351"` — cluster-
+ * derived and NOT stable across re-scans of the same book (see
+ * buildRejectedCandidateFingerprint's own doc comment on pool-composition
+ * drift). `stableSeriesTitle` below MUST be Vision's own title read (the
+ * `vision.title`/`effectiveTitle` value passed INTO resolveIdentity as the
+ * prior, before any family override) or an explicitly normalized
+ * base-series field — NEVER `family.selectedTitle`,
+ * `identity.confirmedTitle`, `identity.displayTitle`, or any other
+ * cluster/consensus-derived string. `stableYear` is the ADOPTED/TRUSTED
+ * year (`identity.confirmedYear`, post `resolveFamilyYearConsensus`) —
+ * included in the key (review round, item 1 reverses this function's
+ * earlier "year omitted" design; see buildRejectedCandidateFingerprint's
+ * own doc comment for the collision-vs-instability asymmetry that
+ * decided it) via `buildFingerprintYearToken`'s `'unknown-year'` fallback
+ * when unavailable, never silently omitted. Variant is likewise omitted
+ * while unresolved, never fabricated.
+ *
+ * @param {number[]} familyIndices - the accepted family's topFamily.indices
+ * @param {Array<object>} parsedVisualRows - index-aligned parsed rows (rawTitle/title/price/itemWebUrl)
+ * @param {string|null} stableSeriesTitle - Vision's own title (pre-family-override), NEVER a cluster label
+ * @param {string|number|null} stableIssue
+ * @param {string|number|null} stableYear - the adopted/trusted year, NEVER a raw per-row or pool-wide value
+ * @returns {object|null} the visualReferenceEvidence object, or null when
+ *   no row in the family carries a usable title+price (nothing to show —
+ *   caller should leave out.visualReferenceEvidence unset, never fabricate
+ *   a zero-row evidence object)
+ */
+export function buildVisualReferenceEvidence(familyIndices, parsedVisualRows, stableSeriesTitle, stableIssue, stableYear) {
+  const rows = (Array.isArray(familyIndices) ? familyIndices : []).map((idx) => {
+    const row = parsedVisualRows?.[idx];
+    return {
+      title: row?.rawTitle || row?.title || null,
+      price: typeof row?.price === 'number' ? row.price : null,
+      itemWebUrl: row?.itemWebUrl || null,
+    };
+  }).filter((r) => r.title != null);
+
+  const prices = rows
+    .map((r) => r.price)
+    .filter((p) => typeof p === 'number' && p > 0)
+    .sort((a, b) => a - b);
+
+  if (rows.length === 0 || prices.length === 0) return null;
+
+  const low = prices[0];
+  const high = prices[prices.length - 1];
+  const mid = Math.floor(prices.length / 2);
+  const median = prices.length % 2 === 0
+    ? (prices[mid - 1] + prices[mid]) / 2
+    : prices[mid];
+
+  return {
+    familyKey: buildRejectedCandidateFingerprint(stableSeriesTitle, stableIssue, stableYear, null),
+    rows,
+    count: rows.length,
+    low,
+    high,
+    median: Math.round(median * 100) / 100,
+    marketState: 'active',
+    status: 'reference-only',
+    reason: 'provisional-visual-family',
+  };
 }

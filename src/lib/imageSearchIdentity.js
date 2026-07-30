@@ -23,8 +23,8 @@
 // Function count stays at 12/12.
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
-import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate } from './identityCore.js';
-import { ARTIST_PATTERNS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms, NON_GENUINE_COPY_RE } from './compHygiene.js';
+import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate, resolveFamilyYearConsensus } from './identityCore.js';
+import { ARTIST_PATTERNS, ARTIST_FAMILY_STRIP_EXCEPTIONS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms, NON_GENUINE_COPY_RE, LOT_RE, REPRINT_RE, SLAB_RE, GRADED_RE, SIGNED_RE, TPB_MARKER_RE, extractArtist } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
 //
@@ -369,6 +369,23 @@ export const extractIdentityFromImageSearch = (items) => {
     return [];
   }
   console.log(`[extractIdentity] processing ${items.length} items, first item:`, items[0]);
+  // Track B Phase 0, Commit 4.1 review round (item 3) — the original
+  // permanent instrumentation here (a `[extractIdentity] full pool:` dump
+  // of every one of the pool's items on EVERY request) was narrowed after
+  // the mandated full-suite A/B showed it altering two failing suites'
+  // captured output (harmlessly, but real log-volume noise nonetheless)
+  // and after review flagged it as an unbounded per-request Vercel log-
+  // volume cost with no corresponding need — the actual approved ask was
+  // recovering a SELECTED family's own member itemIds, not the entire raw
+  // pool on every single scan regardless of outcome. That narrower,
+  // family-scoped log now lives in selectTitleFamilyCandidate (this file,
+  // below), which fires exactly once per request and only for the two
+  // decisions where a family is genuinely selected (top-rank-protection /
+  // weighted-consensus) — never for fallback-vision/refused-identity-
+  // conflict, where there is no selected family to log. itemId/legacyItemId
+  // are still carried on every parsed row below (their presence there is
+  // what makes the family-scoped log possible) — just no longer dumped in
+  // bulk here.
   const results = items.map((it, idx) => {
     const rawTitle = (it && typeof it.title === 'string') ? it.title : null;
     // Ship 6 prep — preserve commerce fields per item so downstream pricing
@@ -391,6 +408,12 @@ export const extractIdentityFromImageSearch = (items) => {
       price: !isNaN(priceVal) && priceVal > 0 ? priceVal : null,
       itemWebUrl: it?.itemWebUrl || null,
       endTime: it?.itemEndDate || null,
+      // Track B Phase 0, Commit 4.1 review round (item 3) — carried
+      // through so the family-scoped log in selectTitleFamilyCandidate
+      // (this file) can report a selected family member's real eBay
+      // itemId/legacyItemId without a second, separate raw-item lookup.
+      itemId: it?.itemId || null,
+      legacyItemId: it?.legacyItemId || null,
       // Ship #28a: Preserve eBay metadata for conflict detection
       leafCategoryIds: Array.isArray(it?.leafCategoryIds) ? it.leafCategoryIds : [],
       buyingOptions: Array.isArray(it?.buyingOptions) ? it.buyingOptions : [],
@@ -872,10 +895,25 @@ export const tokenizeTitleFamily = (title) => {
   const cleaned = extractSeriesTitle(acronymNormalized);
   if (!cleaned) return [];
 
+  // Track B Phase 0, Commit 4.1 review round (items 2/3 investigation) —
+  // ARTIST_FAMILY_STRIP_EXCEPTIONS (compHygiene.js) is the single, explicit
+  // opt-out from this destructive strip. A pattern's match text is checked
+  // against the set BEFORE replacing — an excepted artist (e.g. "brett
+  // booth") is still recognized (every OTHER ARTIST_PATTERNS consumer is
+  // unaffected and untouched by this change) but survives into the family
+  // token stream, exactly as every token did before this commit ever added
+  // an entry here. Every pre-existing pattern is absent from the exception
+  // set, so this loop's behavior for all of them is byte-identical to
+  // before — only a newly-added, explicitly-excepted entry can ever change
+  // what tokenizeTitleFamily produces.
   let artistStripped = cleaned;
   for (const pattern of ARTIST_PATTERNS) {
     const flags = new Set([...pattern.flags, 'g']);
-    artistStripped = artistStripped.replace(new RegExp(pattern.source, [...flags].join('')), ' ');
+    const re = new RegExp(pattern.source, [...flags].join(''));
+    const m = artistStripped.match(re);
+    if (!m) continue;
+    if (ARTIST_FAMILY_STRIP_EXCEPTIONS.has(m[0].toLowerCase())) continue;
+    artistStripped = artistStripped.replace(re, ' ');
   }
   artistStripped = artistStripped.replace(/\s+/g, ' ').trim();
   const source = artistStripped.length >= 2 ? artistStripped : cleaned;
@@ -1421,6 +1459,412 @@ export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, 
  * @param {string|number} visionYear - Vision-identified year (optional, for era-aware gates)
  * @returns {{decision: string, selectedTitle: string|null, rawTitle: string|null, reason: string, topFamily: object|null, runnerUp: object|null, families: array}}
  */
+// Small, locally-scoped cover-letter extractor — compHygiene.js's
+// OTHER_COVER_RE only detects the PRESENCE of a non-A cover letter, it
+// never extracts WHICH letter, which mergeFragmentedTitleFamilies' own
+// contradiction check needs (agreeing on "Cover C" across rows is fine;
+// "Cover C" vs "Cover D" is a real contradiction). Deliberately narrow —
+// this is not meant to replace OTHER_COVER_RE's broader detection use
+// elsewhere, only to serve this one contradiction check.
+const extractCoverLetter = (title) => {
+  const m = String(title || '').match(/\b(?:cover|cvr)\s*([a-z])\b/i);
+  return m ? m[1].toUpperCase() : null;
+};
+
+/**
+ * Track B Phase 0, Commit 4.1 — controlled family-fragment merge.
+ *
+ * A single physical product's listings can fragment into more than one
+ * Jaccard-clustered family purely because of listing-title verbosity
+ * differences. Confirmed live on the Spawn #351 Cover C Brett Booth Virgin
+ * fixture: a 2-member family ("...cameo of lyra htf scarce") and a
+ * 3-member family ("spawn brett booth") whose ENTIRE token vocabulary is a
+ * strict subset of the first, at Jaccard(0.375) — just under the 0.4
+ * single-pass clustering threshold buildTitleFamilies already uses. This
+ * is fragmentation of ONE identity, not two competing ones.
+ *
+ * MERGE-DIRECTION PIN (explicit, tested — see the founding fixture in this
+ * function's own test coverage): the subset relation is on TOKEN SETS,
+ * independent of member counts. Whichever family's tokens are the subset
+ * merges INTO the token-superset (more specific) family, regardless of
+ * which family happens to have more members. The founding fixture is
+ * exactly the case a naive "bigger family wins" rule would get backwards:
+ * the count-LARGER family (3 members, 3 tokens) is the token-subset; the
+ * count-SMALLER family (2 members, 8 tokens) is the token-superset and
+ * becomes the canonical/representative identity.
+ *
+ * Does NOT lower or touch the existing >=3-member promotion floor
+ * (this file's weighted-consensus branch, selectTitleFamilyCandidate) —
+ * this only combines already-sub-floor families (each individually < 3)
+ * into one family that may then clear that same, unmodified floor. A
+ * family that already clears the floor alone is never a merge candidate.
+ *
+ * Merge conditions (ALL required). Final attribute taxonomy (corrected,
+ * review round 3, item 1 — issue was originally documented as
+ * absence-never-blocks, the same standard as year; it is now its own,
+ * stricter class, reflecting that issue is the single most load-bearing
+ * attribute in this merge — the merged family is the thing that CAUSES
+ * issue adoption downstream (resolveFamilyIssueConsensus), so it cannot be
+ * held to a weaker agreement standard than the attributes that merely
+ * gate whether the merge is allowed to happen at all):
+ *  1. tokens(subset family) is a full, strict subset of tokens(superset
+ *     family) — full containment, not partial Jaccard overlap.
+ *  2. Combined DEDUPLICATED member count >= 3 — a pairing that still
+ *     couldn't clear the floor is never evaluated further.
+ *  3. ISSUE — MANDATORY POSITIVE PER-FRAGMENT AGREEMENT (upgraded, review
+ *     round 3, item 1). Both fragments must POSITIVELY assert the SAME
+ *     issue number — reuses the exact same fragmentAssertion machinery
+ *     condition 5 below uses, with extractIssueFromTitle as the extractor
+ *     (no second issue parser). Internal disagreement within one fragment
+ *     blocks (same "contradiction" semantics as everywhere else in this
+ *     function); a genuine different-asserted-issue mismatch between the
+ *     two fragments blocks; asserted-by-one/silent-on-the-other blocks
+ *     (unlike condition 5's conditional attributes, silence is NOT treated
+ *     as "not applicable" here — issue has no "doesn't apply to this book"
+ *     case, every real listing names an issue or it doesn't); BOTH
+ *     fragments silent also blocks, for the same reason. Only both
+ *     fragments positively asserting and agreeing passes.
+ *  4. YEAR — absence never blocks, only a genuine asserted conflict does
+ *     (UNCHANGED from the first review round, and deliberately NOT
+ *     upgraded to issue's mandatory-agreement standard — a book can
+ *     legitimately have zero year-bearing rows in a fragment without that
+ *     meaning anything is wrong). No member of either family may assert a
+ *     different, conflicting year than another. Reuses the real, exported
+ *     resolveFamilyYearConsensus (identityCore.js) rather than a second,
+ *     ad-hoc check, so this gate and the later year-adoption vote
+ *     (resolveIdentity) can never disagree about what counts as a
+ *     conflict.
+ *  5. No member of either family trips LOT_RE/REPRINT_RE/SLAB_RE/
+ *     GRADED_RE/SIGNED_RE/TPB_MARKER_RE (compHygiene.js — the same
+ *     detectors the formal comp-pricing filter chain already trusts).
+ *  6. POSITIVE PRODUCT-AGREEMENT GATE, CONDITIONAL FORM (review round 2,
+ *     item 2) — token containment + no-contradiction (conditions 1/3) is
+ *     necessary but not sufficient to prove two fragments describe the
+ *     SAME visual product; this condition proves it, per attribute, in
+ *     {cover designation, artist, presentation/finish marker (e.g.
+ *     Virgin)}. Conditional form, NOT a blanket require-both-present rule
+ *     — this is what distinguishes it from issue's mandatory standard
+ *     (condition 3) above:
+ *       - A fragment ASSERTS an attribute when >=1 of its own member rows
+ *         assert a value and no member row asserts a DIFFERENT value
+ *         (internal disagreement within one fragment is itself a block,
+ *         same "contradiction" semantics as condition 3).
+ *       - If EITHER fragment asserts an attribute, the OTHER fragment
+ *         must positively assert the SAME value — asserted-by-one,
+ *         absent-from-the-other, blocks the merge (absence is not
+ *         positive support, mirroring this codebase's standing "absence
+ *         of evidence is not evidence of correctness" doctrine — see
+ *         TARGET_ISSUE_UNRESOLVED's own reasoning, evidenceEligibility.js).
+ *       - If NEITHER fragment asserts an attribute, it is NOT APPLICABLE
+ *         and does not block — an ordinary, non-variant book (no artist,
+ *         no presentation tokens anywhere in either fragment) still
+ *         merges on the remaining gates. Without this branch, the gate
+ *         would silently neuter the whole feature for the common case.
+ *         Issue has no equivalent "not applicable" case (condition 3) —
+ *         every real listing either names an issue or doesn't, and a
+ *         silent fragment is never treated as agreeing.
+ *     This gate still NEVER confers variant authority (see the IMPORTANT
+ *     note below) — these three attributes exist only to establish
+ *     same-product before
+ *     membership combines, not to resolve or confirm what the variant is.
+ *
+ * IMPORTANT — what this merge does NOT confer: agreement on issue number
+ * (condition 3) produces IDENTITY consensus (fed to
+ * resolveFamilyIssueConsensus downstream, in resolveIdentity), but never
+ * VARIANT confirmation. Even the full attribute set this merge checks
+ * (issue, year, cover designation, artist, presentation/finish marker —
+ * conditions 3/4/6) only establishes that both fragments plausibly
+ * describe the same physical product; it is not itself variant
+ * resolution — variant resolution runs through its own, entirely
+ * separate, already-issue-scoped mechanism (filterItemsByIssue/
+ * extractConfirmedVariant, api/enrich.js) after this merge and its
+ * consequent issue adoption complete, with its own segregation gates
+ * unchanged by anything here.
+ *
+ * Deduplication: mirrors (does not import — resolveFamilyIssueConsensus
+ * itself is explicitly unmodified by this dispatch) the same key-priority
+ * chain resolveFamilyIssueConsensus already applies — itemId ->
+ * legacyItemId -> normalized itemWebUrl -> title text — so a literal
+ * duplicate/relisted row never inflates the merged count.
+ *
+ * Only ever considers `scored[0]` — the single family
+ * selectTitleFamilyCandidate would actually promote — as the side that
+ * NEEDS a merge (corrected, review round: a real regression, found via
+ * the mandated full-suite A/B against tests/q85-compact-key.test.js's
+ * Funnybook fixture, in an earlier version that instead paired ANY
+ * below-floor family, at any rank, against every other family — which
+ * wrongly disturbed an already-independently-qualifying `scored[0]`
+ * ("funny book," 4 members) by merging it into a lower-ranked, noise-
+ * bearing singleton that happened to be its token-superset, replacing a
+ * clean title with one carrying unexplained extra tokens and tripping an
+ * unrelated downstream gate). If `scored[0].count >= 3` already, this
+ * function is a pure no-op — nothing needs merging, and nothing already
+ * fine is ever pulled into one. Only ever merges the FIRST qualifying
+ * partner found for `scored[0]`, trying candidates in the order `scored`
+ * is already sorted in (weightSum-descending). A pool that fragments into
+ * more than 2 pieces of the same product is a real possibility not
+ * exercised by the founding fixture — left as a documented limitation,
+ * not silently generalized to N-way merging without a test proving it.
+ *
+ * @param {Array<Object>} scored - scoreTitleFamilies' own output
+ * @param {Array} itemsOrTitles - the same array passed to buildTitleFamilies
+ * @returns {Array<Object>} scored, unchanged, if scored[0] already
+ *   clears the floor or no qualifying partner is found; otherwise a new
+ *   array with scored[0] and its merge partner replaced by their merge
+ */
+export const mergeFragmentedTitleFamilies = (scored, itemsOrTitles) => {
+  if (!Array.isArray(scored) || scored.length < 2) return scored;
+
+  const getRawTitle = (idx) => {
+    const it = itemsOrTitles?.[idx];
+    return String(typeof it === 'string' ? it : (it?.rawTitle || it?.title || ''));
+  };
+
+  const dedupKeyFor = (idx) => {
+    const item = itemsOrTitles?.[idx];
+    if (typeof item !== 'string' && item?.itemId) return `id:${item.itemId}`;
+    if (typeof item !== 'string' && item?.legacyItemId) return `legacy:${item.legacyItemId}`;
+    if (typeof item !== 'string' && item?.itemWebUrl) {
+      const s = String(item.itemWebUrl);
+      const q = s.indexOf('?');
+      return `url:${q === -1 ? s : s.slice(0, q)}`;
+    }
+    return `title:${getRawTitle(idx).trim()}`;
+  };
+
+  const tokenSubsetOf = (small, large) => {
+    const bigSet = new Set(large);
+    return small.length > 0 && small.every((t) => bigSet.has(t));
+  };
+
+  const isContaminated = (idx) => {
+    const raw = getRawTitle(idx);
+    return LOT_RE.test(raw) || REPRINT_RE.test(raw) || SLAB_RE.test(raw) ||
+      GRADED_RE.test(raw) || SIGNED_RE.test(raw) || TPB_MARKER_RE.test(raw);
+  };
+
+  // Review round, item 2 — positive product-agreement gate. Extracts a
+  // single canonical value for one attribute from one title, or null when
+  // the attribute isn't present at all. extractCoverLetter/extractArtist
+  // already return a single scalar (letter / matched artist string) or
+  // null — used as-is. Presentation/finish markers (Virgin, foil, sketch,
+  // etc — extractVariantTokens' own 'finish' category, the only
+  // inherently-generic category per the Q111 dispatch's taxonomy) can
+  // appear multiple-per-title ("Virgin Foil"), so they're canonicalized
+  // into one sorted, comma-joined string for exact scalar comparison,
+  // reusing extractVariantTokens/tokenToVariantCategory (compHygiene.js/
+  // this file's own existing registries) rather than a new parser.
+  const extractPresentationValue = (title) => {
+    const cat = tokenToVariantCategory();
+    const finishTokens = extractVariantTokens(title).filter((t) => cat[t] === 'finish');
+    return finishTokens.length > 0 ? finishTokens.slice().sort().join(',') : null;
+  };
+
+  // Per-FRAGMENT (not combined-set) assertion status for one attribute:
+  // 'not-asserted' (no row in this fragment carries a value — attribute
+  // is not applicable for this fragment), 'contradiction' (>=2 rows in
+  // this SAME fragment assert different values — an internal
+  // disagreement, same semantics as the issue/year contradiction checks
+  // above), or 'asserted' (every row that carries a value agrees on one).
+  const fragmentAssertion = (indices, extractFn) => {
+    const values = new Set();
+    for (const idx of indices) {
+      const v = extractFn(getRawTitle(idx));
+      if (v != null) values.add(v);
+    }
+    if (values.size === 0) return { status: 'not-asserted', value: null };
+    if (values.size > 1) return { status: 'contradiction', value: null };
+    return { status: 'asserted', value: [...values][0] };
+  };
+
+  // The conditional rule itself, applied per attribute across the TWO
+  // fragments being considered for merge (famA/famB, before combining):
+  //  - either fragment internally contradicts itself on this attribute -> blocked
+  //  - neither fragment asserts anything -> NOT APPLICABLE, not blocked
+  //    (an ordinary, non-variant book must still merge on the remaining
+  //    gates — without this branch the gate would neuter the whole
+  //    feature for the common case)
+  //  - both assert and agree -> not blocked
+  //  - both assert but disagree, OR one asserts and the other is silent
+  //    (absence is not positive support) -> blocked
+  const checkAttributeAgreement = (fragA, fragB, extractFn, label) => {
+    const a = fragmentAssertion(fragA.indices, extractFn);
+    const b = fragmentAssertion(fragB.indices, extractFn);
+    if (a.status === 'contradiction' || b.status === 'contradiction') {
+      return { ok: false, reason: `${label} internal contradiction within one fragment` };
+    }
+    if (a.status === 'not-asserted' && b.status === 'not-asserted') {
+      return { ok: true, reason: `${label} not applicable (neither fragment asserts it)` };
+    }
+    if (a.status === 'asserted' && b.status === 'asserted') {
+      return a.value === b.value
+        ? { ok: true, reason: `${label} agrees ("${a.value}")` }
+        : { ok: false, reason: `${label} mismatch ("${a.value}" vs "${b.value}")` };
+    }
+    const assertedSide = a.status === 'asserted' ? a : b;
+    return { ok: false, reason: `${label} asserted by one fragment ("${assertedSide.value}"), absent from the other` };
+  };
+
+  // Review round 3, item 1 — issue is upgraded to a MANDATORY positive
+  // per-fragment agreement, stricter than checkAttributeAgreement's
+  // conditional form above: unlike cover/artist/presentation, issue has no
+  // "not applicable" case (every real listing either names an issue or it
+  // doesn't — there's no such thing as a book the issue-number question
+  // doesn't apply to), so silence on EITHER side — one fragment asserting
+  // and the other silent, or both fragments silent — blocks the merge,
+  // never passes as "not applicable." Reuses the exact same
+  // fragmentAssertion machinery checkAttributeAgreement uses (no second
+  // issue parser) — only the not-asserted branch's verdict differs.
+  //  - both fragments assert the SAME issue -> pass
+  //  - one asserts, the other is entirely silent -> block
+  //  - both silent -> block
+  //  - both assert but different issues -> block
+  //  - internal disagreement within either fragment -> block
+  const checkMandatoryAttributeAgreement = (fragA, fragB, extractFn, label) => {
+    const a = fragmentAssertion(fragA.indices, extractFn);
+    const b = fragmentAssertion(fragB.indices, extractFn);
+    if (a.status === 'contradiction' || b.status === 'contradiction') {
+      return { ok: false, reason: `${label} internal contradiction within one fragment` };
+    }
+    if (a.status !== 'asserted' || b.status !== 'asserted') {
+      return { ok: false, reason: `${label} not positively asserted by both fragments (asserted-by-one/absent-from-other, or both silent, is not sufficient — ${label} has no "not applicable" case)` };
+    }
+    return a.value === b.value
+      ? { ok: true, reason: `${label} agrees ("${a.value}")` }
+      : { ok: false, reason: `${label} mismatch ("${a.value}" vs "${b.value}")` };
+  };
+
+  const PRODUCT_AGREEMENT_ATTRIBUTES = [
+    { label: 'cover designation', extract: extractCoverLetter },
+    { label: 'artist', extract: extractArtist },
+    { label: 'presentation/finish marker', extract: extractPresentationValue },
+  ];
+
+  // A merge is only ever worth evaluating when `scored[0]` — the SINGLE
+  // family selectTitleFamilyCandidate would actually promote — is itself
+  // below the floor. A family ranked #2+ that already independently
+  // clears >=3 has nothing to gain from being a merge TARGET (it was
+  // never going to be promoted on its own regardless), and — the real bug
+  // this restriction fixes, found via the mandated full-suite A/B
+  // (tests/q85-compact-key.test.js's Funnybook fixture) — a family
+  // ranked #1 that ALREADY independently clears >=3 must never be
+  // disturbed by a merge either, even when a lower-ranked, noise-bearing
+  // singleton happens to be its token-superset. Pre-fix, this function
+  // paired ANY below-floor family (not just scored[0]) against every
+  // other family regardless of rank — on the Funnybook fixture, that
+  // wrongly merged the already-fine, already-promotable 4-member "funny
+  // book" family (scored[0], count>=3 on its own) into a 1-member "funny
+  // book nice copy" singleton (ranked #2, below floor), replacing a clean
+  // title with one carrying two extra unexplained tokens ("nice"/"copy")
+  // that then tripped the pre-existing Q85-B compact-bigram gate and
+  // flipped the decision to 'refused-identity-conflict'. Restricting the
+  // below-floor side to `scored[0]` specifically preserves the real Spawn
+  // #351 fixture (its 2-member top family, weightSum 8.0, WAS scored[0]
+  // and below floor) while correctly leaving the Funnybook fixture's
+  // already-qualifying scored[0] untouched — mirrors this function's own
+  // documented intent ("a below-floor TOP family needs to merge with a
+  // partner") exactly: "top family" means scored[0], not any below-floor
+  // family at any rank.
+  if (scored[0].count >= 3) return scored;
+  const famA = scored[0];
+
+  for (let j = 0; j < scored.length; j++) {
+    const famB = scored[j];
+    if (famA === famB) continue;
+
+    let superset, subset;
+    if (tokenSubsetOf(famA.tokens, famB.tokens)) {
+      superset = famB; subset = famA;
+    } else if (tokenSubsetOf(famB.tokens, famA.tokens)) {
+      superset = famA; subset = famB;
+    } else {
+      continue; // neither is a subset of the other — not a fragmentation candidate
+    }
+
+    const combinedIndices = [...superset.indices, ...subset.indices];
+    const seen = new Set();
+    const dedupedIndices = [];
+    for (const idx of combinedIndices) {
+      const key = dedupKeyFor(idx);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dedupedIndices.push(idx);
+    }
+
+    if (dedupedIndices.length < 3) continue; // wouldn't newly clear the floor
+
+    if (dedupedIndices.some((idx) => isContaminated(idx))) {
+      console.log(`[commit4.1-merge] REFUSED (contamination): "${superset.title}" + "${subset.title}"`);
+      continue;
+    }
+
+    const issueAgreement = checkMandatoryAttributeAgreement(famA, famB, extractIssueFromTitle, 'issue');
+    if (!issueAgreement.ok) {
+      console.log(`[commit4.1-merge] REFUSED (${issueAgreement.reason}): "${superset.title}" + "${subset.title}"`);
+      continue;
+    }
+    const yearCheck = resolveFamilyYearConsensus(null, itemsOrTitles, dedupedIndices);
+    if (yearCheck.mode === 'conflict-locked') {
+      console.log(`[commit4.1-merge] REFUSED (year contradiction ${yearCheck.assertedYears.join(' vs ')}): "${superset.title}" + "${subset.title}"`);
+      continue;
+    }
+
+    // Positive product-agreement gate (review round, item 2) — token
+    // containment + no-contradiction above is necessary but not
+    // sufficient; prove the two FRAGMENTS (famA/famB, not the combined
+    // set) describe the same visual product on cover designation, artist,
+    // and presentation/finish marker, per the conditional rule documented
+    // on this function itself. Replaces the old cover-letter-only,
+    // combined-set, contradiction-only check (which only caught two
+    // DIFFERENT asserted letters somewhere in the merged pool — it never
+    // caught one fragment asserting a specific cover/artist/presentation
+    // with the other fragment silent on it entirely, which this gate now
+    // also blocks).
+    let agreementBlocked = false;
+    for (const { label, extract } of PRODUCT_AGREEMENT_ATTRIBUTES) {
+      const agreement = checkAttributeAgreement(famA, famB, extract, label);
+      if (!agreement.ok) {
+        console.log(`[commit4.1-merge] REFUSED (${agreement.reason}): "${superset.title}" + "${subset.title}"`);
+        agreementBlocked = true;
+        break;
+      }
+    }
+    if (agreementBlocked) continue;
+
+    // Clean merge — canonical identity (title/tokens/rawTitle/
+    // memberTokens) comes from the token-SUPERSET family (the merge-
+    // direction pin), recomputed via the existing scoreTitleFamilies
+    // (not a duplicated weight-sum calculation) so weightSum/topRank/
+    // count stay consistent with every other family this file produces.
+    const mergedRaw = {
+      title: superset.title,
+      tokens: superset.tokens,
+      indices: dedupedIndices,
+      memberTokens: [...(superset.memberTokens || []), ...(subset.memberTokens || [])],
+    };
+    const [mergedScored] = scoreTitleFamilies([mergedRaw], itemsOrTitles);
+    // Review round, item 3 — explicit marker so identityCore.js's
+    // resolveIdentity can narrow its publisher-caution behavior to ONLY
+    // this merged-fragment path, never to an ordinary (unmerged)
+    // top-rank-protection/weighted-consensus family. Set here, at the
+    // single point of truth for "this family is a Commit 4.1 merge
+    // result," rather than inferred downstream from indirect signals.
+    mergedScored.mergedFromFragments = true;
+    console.log(
+      `[commit4.1-merge] ACCEPTED: "${subset.title}" (${subset.count} members) merges into ` +
+      `"${superset.title}" (${superset.count} members) -> ${mergedScored.count} members, ` +
+      `weightSum=${mergedScored.weightSum.toFixed(1)}`
+    );
+
+    const remaining = scored.filter((f) => f !== superset && f !== subset);
+    const result = [mergedScored, ...remaining];
+    result.sort((a, b) => (b.weightSum - a.weightSum) || (b.count - a.count));
+    return result;
+  }
+
+  return scored; // no qualifying pair found — unchanged, byte-identical to today
+};
+
 export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visionYear = null, opts = {}) => {
   // Guard clauses
   if (!Array.isArray(items) || items.length === 0) {
@@ -1449,7 +1893,15 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
 
   // Build and score families
   const families = buildTitleFamilies(items);
-  const scored = scoreTitleFamilies(families, items);
+  const scoredRaw = scoreTitleFamilies(families, items);
+  // Track B Phase 0, Commit 4.1 — controlled fragment merge. Runs BEFORE
+  // the existing floor checks below, so a merge that clears the floor is
+  // indistinguishable, from this point on, from any other family that
+  // arrived at >=3 members on its own — no new decision branch, no
+  // touched existing branch. A pool with no qualifying fragmentation
+  // returns `scoredRaw` completely unchanged (see the function's own
+  // no-op guarantee).
+  const scored = mergeFragmentedTitleFamilies(scoredRaw, items);
 
   if (scored.length === 0) {
     return {
@@ -1465,6 +1917,30 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
 
   const topFamily = scored[0];
   const runnerUp = scored[1] || null;
+
+  // Track B Phase 0, Commit 4.1 review round (item 3) — narrowed,
+  // permanent, family-scoped instrumentation. Fires exactly once per
+  // request, ONLY at the point a family is genuinely selected (the two
+  // decisions below where a real identity gets adopted:
+  // top-rank-protection / weighted-consensus) — never for
+  // fallback-vision/refused-identity-conflict, where nothing was
+  // selected and there is nothing to prove an itemId for. Replaces the
+  // prior unconditional `[extractIdentity] full pool:` dump (removed —
+  // see that function's own comment) which logged the ENTIRE visual pool
+  // on every request regardless of outcome.
+  const logFamilyEvidence = (decision, family) => {
+    const rows = (family?.indices || []).map((idx) => {
+      const it = items?.[idx];
+      return {
+        idx,
+        itemId: (it && typeof it !== 'string' && it.itemId) || null,
+        legacyItemId: (it && typeof it !== 'string' && it.legacyItemId) || null,
+        title: (typeof it === 'string' ? it : it?.rawTitle || it?.title) || null,
+        price: (it && typeof it !== 'string' && typeof it.price === 'number') ? it.price : null,
+      };
+    });
+    console.log(`[family-evidence] decision=${decision} merged=${family?.mergedFromFragments === true} rows=${JSON.stringify(rows)}`);
+  };
 
   // Extract issue from items[0]
   const item0 = items[0];
@@ -1577,6 +2053,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
           // Then apply post-selection boilerplate sanitization.
           const cleaned = sanitizeSeriesTitle(item0Family.title);
           const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(cleaned, visionIssue));
+          logFamilyEvidence('top-rank-protection', item0Family);
           return {
             decision: 'top-rank-protection',
             selectedTitle: sanitizedTitle,
@@ -1693,6 +2170,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     const compoundCompletion = completeCompoundTitle(visionTitle, visionTokens, topFamily.tokens);
     if (compoundCompletion) {
       console.log(`[Q119] compound-title completion: "${visionTitle}" → "${compoundCompletion}" (blocked additions [${q84ConsensusStrict.reason}] still excluded)`);
+      logFamilyEvidence('weighted-consensus', topFamily);
       return {
         decision: 'weighted-consensus',
         selectedTitle: compoundCompletion,
@@ -1737,6 +2215,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
       sanitizedTitle = String(visionTitle).trim();
       console.log(`[Q85-B] compact-key acceptance — selectedTitle uses Vision spelling "${sanitizedTitle}"`);
     }
+    logFamilyEvidence('weighted-consensus', topFamily);
     return {
       decision: 'weighted-consensus',
       selectedTitle: sanitizedTitle,

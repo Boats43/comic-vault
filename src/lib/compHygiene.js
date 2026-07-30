@@ -240,6 +240,13 @@ export const ARTIST_PATTERNS = [
   /alexander lozano/i,  // Q136 Slice A — Pop Kill #1 MegaCon "Naughty" metal
   // exclusive artist. Collision-swept: "lozano" is not a substring of any
   // common English word or existing pattern in this file.
+  /brett booth/i,  // Track B Phase 0, Commit 4.1 review round (item 2) —
+  // the Spawn #351 Cover C Virgin variant checkpoint found this artist
+  // entirely absent from this registry. Multi-word ONLY, deliberately no
+  // bare /booth/i single-word fallback below — "booth" is common non-artist
+  // usage in this domain ("convention booth," "artist alley booth," "photo
+  // booth"), same reasoning already applied to /guillem march/i and
+  // /john giang/i above.
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
   //
   // Q131 systemic-audit follow-up (2026-07-19, One World Under Doom #1 /
@@ -275,6 +282,37 @@ export const ARTIST_PATTERNS = [
   // variant the multi-word /kyuyong eom/i pattern above doesn't match).
   /\blozano\b/i,  // Q136 Slice A — unambiguous last name, collision-swept (alias policy).
 ];
+
+// Track B Phase 0, Commit 4.1 review round (items 2/3 investigation) —
+// ARTIST_PATTERNS carries two coupled responsibilities that don't always
+// agree: (1) RECOGNIZE an artist for display/query/gate purposes (every
+// consumer of ARTIST_PATTERNS needs this for every entry — extractArtist
+// here, extractPoolArtistTokens/tokenizeTitleFamily's own match in
+// imageSearchIdentity.js, variantIdentity.js's local extractArtist,
+// api/comps.js's artist-specific query builder); (2) tokenizeTitleFamily
+// (imageSearchIdentity.js) ALSO destructively STRIPS every match before
+// title-family clustering (the Q-BC/Black Cat/Skottie Young fix — a
+// variant-cover artist named in nearly every pool listing must not fuse
+// into the family's own consensus title). Those two responsibilities are
+// appropriate together for a WIDELY-SHARED variant-cover artist (Skottie
+// Young on Black Cat #1 — stripping is correct, the name would otherwise
+// dominate the token-consensus vote) but WRONG for an artist whose name is
+// one of very few surviving distinguishing tokens on an otherwise-sparse
+// listing (Brett Booth on Spawn #351 Cover C — confirmed by direct
+// execution: stripping it collapsed two genuinely-#351 rows into an
+// over-generic bare "spawn" token bucket, indistinguishable from unrelated
+// #300 McFarlane-variant rows in the same real production pool, which then
+// correctly failed the pre-existing issue-contradiction merge gate and
+// prevented a merge that should have succeeded).
+//
+// This Set is the SINGLE, explicit, auditable opt-out from stripping
+// specifically — ARTIST_PATTERNS itself is untouched (still one canonical
+// detection registry, every consumer above still sees every entry).
+// DEFAULT PRESERVES CURRENT BEHAVIOR: every pre-existing ARTIST_PATTERNS
+// entry is absent from this set and therefore still stripped by
+// tokenizeTitleFamily exactly as before this commit — no global default
+// flip. 'brett booth' is the ONLY member added this commit.
+export const ARTIST_FAMILY_STRIP_EXCEPTIONS = new Set(['brett booth']);
 
 // Q89-CACHE — Comp-filter version. Bump whenever a comp-admission filter
 // (MERCH_RE, LOT_RE, SLAB_RE, …) changes behavior — OR, per Q129, when

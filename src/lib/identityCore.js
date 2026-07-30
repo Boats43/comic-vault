@@ -1070,6 +1070,124 @@ export const resolveFamilyIssueConsensus = (priorIssue, visualItems, indices) =>
 };
 
 /**
+ * Track B Phase 0, Commit 4.1 — family-scoped year consensus. Mirrors
+ * resolveFamilyIssueConsensus's own scoping pattern (family.topFamily.indices
+ * only, never the pool-wide visualConsensus/extractConsensus object), for
+ * the identical reason: resolveIdentity's family-override branch previously
+ * read `ebay?.year` — the POOL-WIDE year consensus (extractConsensus,
+ * imageSearchIdentity.js), gated on >=50%-of-the-ENTIRE-pool agreement —
+ * which is structurally near-guaranteed null for a family that's a genuine
+ * minority within a larger, mixed pool. Confirmed empirically, not assumed:
+ * the real Spawn #351 production log shows `[year-ebay] raw="undefined"
+ * int=null ratio=0.00 authoritative=null` for a 16-row pool spanning five
+ * different Spawn products/years, even though the winning family's own rows
+ * unanimously assert "2024".
+ *
+ * Reads the ALREADY-COMPUTED `.year` field each visualItems row carries
+ * (extractYearFromTitle, computed once at parse time by
+ * extractIdentityFromImageSearch, imageSearchIdentity.js) rather than
+ * recomputing from raw title text the way resolveFamilyIssueConsensus
+ * recomputes `.issue` via extractIssueCandidate. Deliberately different, not
+ * an inconsistency: extractIssueCandidate's recomputation exists
+ * specifically to bypass Q12c's marketing-copy issue-suppression guard (a
+ * real, documented upstream field-level gap for issue specifically) — no
+ * equivalent suppression exists for year, so reading the cached field is
+ * both correct and avoids a new cross-file import (extractYearFromTitle
+ * lives in imageSearchIdentity.js, which already imports FROM this file —
+ * importing back would create a cycle).
+ *
+ * Behavior matrix (five cases, one function, per the Commit 4.1 dispatch):
+ *   A. priorYear null + >=2 unique rows assert ONE unanimous year (no
+ *      other row asserts a DIFFERENT year) -> mode:'adopted', year:winner
+ *   B. priorYear null + fewer than 2 rows assert any year at all
+ *      -> mode:'no-data', year:null. Absence is not agreement, and is
+ *      also not disagreement — no adoption, no conflict.
+ *   C. priorYear null + two or more DIFFERENT years are each asserted by
+ *      at least one row -> mode:'conflict-locked', year:null. A genuine
+ *      internal disagreement — never treated as a clean family regardless
+ *      of whether one year has more support than another.
+ *   D. priorYear present + every row that asserts a year agrees with it
+ *      (or no row asserts a year at all) -> mode:'preserved', year:priorYear
+ *   E. priorYear present + at least one row asserts a DIFFERENT year
+ *      -> mode:'conflict-locked', year:priorYear (never overwritten)
+ *
+ * Same dedup discipline as resolveFamilyIssueConsensus (itemId ->
+ * legacyItemId -> normalized itemWebUrl -> raw title text) so a literal
+ * duplicate/relisted row is never counted twice toward the vote.
+ *
+ * @param {string|number|null} priorYear
+ * @param {Array} visualItems
+ * @param {number[]} indices
+ * @returns {{year: string|number|null, mode: 'adopted'|'no-data'|'conflict-locked'|'preserved', assertedYears: string[], uniqueRows: number, support: number}}
+ */
+export const resolveFamilyYearConsensus = (priorYear, visualItems, indices) => {
+  const rows = Array.isArray(indices) ? indices : [];
+  const seenKeys = new Set();
+  const assertedYears = new Set();
+  let uniqueRows = 0;
+  let yearBearingRows = 0;
+
+  const normalizeUrl = (u) => {
+    const s = String(u);
+    const qIdx = s.indexOf('?');
+    return qIdx === -1 ? s : s.slice(0, qIdx);
+  };
+
+  for (const idx of rows) {
+    const item = visualItems?.[idx];
+    if (item == null) continue;
+    const raw = String(typeof item === 'string' ? item : (item?.rawTitle || item?.title || '')).trim();
+    if (!raw) continue;
+    let dedupKey;
+    if (typeof item !== 'string' && item?.itemId) {
+      dedupKey = `id:${item.itemId}`;
+    } else if (typeof item !== 'string' && item?.legacyItemId) {
+      dedupKey = `legacy:${item.legacyItemId}`;
+    } else if (typeof item !== 'string' && item?.itemWebUrl) {
+      dedupKey = `url:${normalizeUrl(item.itemWebUrl)}`;
+    } else {
+      dedupKey = `title:${raw}`;
+    }
+    if (seenKeys.has(dedupKey)) continue;
+    seenKeys.add(dedupKey);
+    uniqueRows += 1;
+
+    const rowYear = typeof item !== 'string' ? item?.year : null;
+    if (rowYear != null) {
+      yearBearingRows += 1;
+      assertedYears.add(String(rowYear));
+    }
+  }
+
+  const distinctYears = [...assertedYears];
+
+  if (priorYear != null) {
+    if (distinctYears.length === 0 || (distinctYears.length === 1 && distinctYears[0] === String(priorYear))) {
+      return { year: priorYear, mode: 'preserved', assertedYears: distinctYears, uniqueRows, support: yearBearingRows };
+    }
+    // At least one row asserts a year different from priorYear (whether or
+    // not the rest agree with priorYear) — a genuine conflict against
+    // trusted data. Never overwritten.
+    return { year: priorYear, mode: 'conflict-locked', assertedYears: distinctYears, uniqueRows, support: yearBearingRows };
+  }
+
+  if (distinctYears.length === 0) {
+    return { year: null, mode: 'no-data', assertedYears: distinctYears, uniqueRows, support: yearBearingRows };
+  }
+  if (distinctYears.length > 1) {
+    return { year: null, mode: 'conflict-locked', assertedYears: distinctYears, uniqueRows, support: yearBearingRows };
+  }
+  // Exactly one distinct year asserted, no prior to conflict with — still
+  // needs >=2 unique rows actually ASSERTING it (not just >=2 unique rows
+  // total in the family) per case A's explicit wording — a lone assertion
+  // inside an otherwise year-silent family is not yet a vote.
+  if (yearBearingRows >= 2) {
+    return { year: distinctYears[0], mode: 'adopted', assertedYears: distinctYears, uniqueRows, support: yearBearingRows };
+  }
+  return { year: null, mode: 'no-data', assertedYears: distinctYears, uniqueRows, support: yearBearingRows };
+};
+
+/**
  * Commit A.1/A.3 (Strange Tales dispatch, 2026-07-28) — terminal
  * query-issue authority. Same single-writer philosophy as
  * detectVisualIssueDivergence just below (Q140), applied one step
@@ -1177,6 +1295,12 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // engine at all — the conflict was real and correctly computed, but
   // structurally invisible outside this function.
   let familyIssueConsensusResult = null;
+  // Track B Phase 0, Commit 4.1 — same hoisting reason as
+  // familyIssueConsensusResult just above: resolveFamilyYearConsensus's
+  // result must be returned to the caller (api/enrich.js), not just used
+  // locally, so out.identityProvisionalFields can include 'year' when its
+  // mode is 'adopted', mirroring exactly how 'issue' already gets added.
+  let familyYearConsensusResult = null;
 
   // Ship 26.2 — Family candidate overrides when top-rank-protection or
   // weighted-consensus selected. Takes precedence over visualConsensus
@@ -1228,8 +1352,45 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     );
     familyIssueConsensusResult = familyIssueConsensus;
     confirmedIssue = familyIssueConsensus.issue ?? (ebay?.issue || vision.issue || null);
-    confirmedYear = ebay?.year || vision.year;
-    confirmedPublisher = ebay?.publisher || vision.publisher;
+    // Track B Phase 0, Commit 4.1 — family-scoped year, same reasoning and
+    // scoping pattern as the issue vote directly above (resolveFamilyYearConsensus,
+    // this file). Replaces the prior `ebay?.year || vision.year` — the
+    // pool-WIDE year consensus, near-guaranteed null for a family that's a
+    // minority within a larger mixed pool (confirmed empirically on the
+    // Spawn #351 fixture: pool-wide year agreement was 0% even though the
+    // winning family's own 5 rows unanimously asserted "2024"). vision.year
+    // is the only legitimate "prior" here, same as vision.issue above —
+    // ebay.year (pool-wide) is the weaker, potentially-wrong-family signal
+    // this dispatch exists to stop leaking in.
+    const familyYearConsensus = resolveFamilyYearConsensus(
+      vision.year ?? null, opts.visualItems, family.topFamily?.indices
+    );
+    familyYearConsensusResult = familyYearConsensus;
+    confirmedYear = familyYearConsensus.year ?? (ebay?.year || vision.year || null);
+    // Track B Phase 0, Commit 4.1 (dispatch item 3), NARROWED in review
+    // round (item 3) — publisher caution applies ONLY to the merged-
+    // fragment path, gated by the explicit mergedFromFragments marker
+    // mergeFragmentedTitleFamilies itself sets (imageSearchIdentity.js).
+    // The real recovered Spawn #351 title text ("...Image Comics Malibu
+    // Comics March 2024") proves marketplace publisher-adjacent tokens can
+    // carry store/seller-boilerplate noise ("Malibu Comics" is a seller's
+    // store name here, not a real publisher imprint) — adopting it the
+    // same way issue/year are adopted would risk confidently promoting a
+    // wrong or noisy publisher string for a MERGED family specifically,
+    // whose member rows were never vetted as mutually consistent on
+    // anything beyond issue/cover/year (the merge's own condition 3).
+    // An ORDINARY (unmerged) top-rank-protection/weighted-consensus family
+    // is unaffected — this dispatch does not globally replace publisher
+    // behavior for every family-override decision; it retains the
+    // pre-Commit-4.1 `ebay?.publisher || vision.publisher` read, unchanged.
+    // A broader publisher-authority mechanism (mirroring issue/year's
+    // family-scoped consensus, with its own noise-filtering, for ALL
+    // family-override paths) is queued as future work, not built here.
+    if (family.topFamily?.mergedFromFragments === true) {
+      confirmedPublisher = vision.publisher || null;
+    } else {
+      confirmedPublisher = ebay?.publisher || vision.publisher;
+    }
     identitySource = 'title-family-' + family.decision;
     console.log(`[phase1] family candidate OVERRIDE: using "${confirmedTitle}" (source: ${identitySource})`);
     if (rawFamilyTitle !== sanitizedFamilyTitle) {
@@ -1520,6 +1681,8 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     visionPublisherZeroSupport,
     isProvisionalOverride,
     familyIssueConsensus: familyIssueConsensusResult,
+    // Track B Phase 0, Commit 4.1
+    familyYearConsensus: familyYearConsensusResult,
   };
 };
 

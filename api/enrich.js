@@ -120,7 +120,7 @@ import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } f
 // authority validation (allow-list + normalization), never trusting the
 // client's correctedFields claim alone.
 import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
-import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache } from "../src/lib/issueAuthority.js";
+import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence } from "../src/lib/issueAuthority.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -2771,6 +2771,74 @@ export default async function handler(req, res) {
           `issue=#${fic.winner} support=${fic.support}/${fic.uniqueRows}=${(fic.ratio * 100).toFixed(0)}% — ` +
           `no prior Vision/user issue existed to corroborate against`
         );
+        // Track B Phase 0, Commit 4.1 — same field, same union machinery
+        // Commit 3 already shipped (getCorrectableFields,
+        // manualCorrection.js) — 'year' is added ONLY when
+        // resolveIdentity's own family-scoped year vote
+        // (resolveFamilyYearConsensus, identityCore.js) actually adopted a
+        // value from this same family, never unconditionally. No parallel
+        // yearAuthority object: year's provisional-ness is fully expressed
+        // by its presence here plus out.issueAuthority.status staying
+        // 'provisional' (already the case whenever issue adopted) — the
+        // existing Commit 4 contract-transition machinery
+        // (computeIssueAuthorityContractPatch) needs no changes at all to
+        // cover it.
+        const nextProvisionalFields = appendYearToProvisionalFields(out.identityProvisionalFields, identity.familyYearConsensus);
+        if (nextProvisionalFields !== out.identityProvisionalFields) {
+          out.identityProvisionalFields = nextProvisionalFields;
+          console.log(
+            `[commit4.1] identityProvisionalFields += 'year' (family-scoped adoption): ` +
+            `year=${identity.familyYearConsensus.year} support=${identity.familyYearConsensus.support}/${identity.familyYearConsensus.uniqueRows}`
+          );
+        }
+
+        // Track B Phase 0, Commit 4.1 — visualReferenceEvidence, built
+        // ONLY from the merged family's own topFamily.indices (the exact
+        // rows that drove the issue/year consensus above) — NEVER from
+        // filterItemsByIssue's broader issue-scoped population (used much
+        // later, separately, for variant extraction only). These are two
+        // distinct populations with two distinct purposes: confirmed by
+        // direct execution on the real Spawn #351 fixture — the merged
+        // family has 5 rows, but 6 rows in the pool independently assert
+        // issue #351 (one of them, "Spawn 351 NM (9.6) 2024 - Booth Cover
+        // C...", was never part of either title-family cluster) — mixing
+        // the sixth row into this evidence bucket would silently broaden
+        // it beyond what actually produced the identity above. Extracted
+        // into buildVisualReferenceEvidence (issueAuthority.js) so a test
+        // can invoke this exact computation directly (invariant 10).
+        //
+        // Fingerprint title input — CORRECTED (review round item 1):
+        // `confirmedTitle` at this point in the pipeline is the visual-
+        // family CLUSTER LABEL (sanitizeSeriesTitle(family.selectedTitle),
+        // identityCore.js ~line 1331), NOT the stable proposed identity.
+        // Confirmed by direct execution: the real fixture produced
+        // familyKey "spawn-brett-booth-cameo-of-lyra-scarce|351" —
+        // cluster-derived, not stable across re-scans of the same book.
+        // `effectiveTitle` is Vision's own title, passed as `vision.title`
+        // into resolveIdentity a few lines above (~line 2707) — the
+        // stable prior this key is supposed to capture. confirmedIssue is
+        // unaffected: it comes from resolveFamilyIssueConsensus's vote,
+        // not from raw cluster-label text. confirmedYear (5th argument,
+        // review round item 2) is likewise the adopted/trusted value from
+        // resolveFamilyYearConsensus/vision, never a raw pool value —
+        // included so a same-title/same-issue, different-year product
+        // (a different volume, reboot, or renumbering) never collides
+        // into the same fingerprint.
+        const visualReferenceEvidence = buildVisualReferenceEvidence(
+          familyCandidate?.topFamily?.indices,
+          parsedVisualRows,
+          effectiveTitle,
+          confirmedIssue,
+          confirmedYear
+        );
+        if (visualReferenceEvidence) {
+          out.visualReferenceEvidence = visualReferenceEvidence;
+          console.log(
+            `[commit4.1] visualReferenceEvidence: ${visualReferenceEvidence.count} rows, ` +
+            `range=$${visualReferenceEvidence.low}-$${visualReferenceEvidence.high} median=$${visualReferenceEvidence.median}, ` +
+            `familyKey="${visualReferenceEvidence.familyKey}"`
+          );
+        }
       }
 
       // P0 (Q-VISION-ZERO-SUPPORT) — surface the loud override/escalate
@@ -4711,12 +4779,21 @@ export default async function handler(req, res) {
             // guards against for the null-issue case, just one authority
             // tier up. Real call site for the extracted, exported
             // canUseExactIssuePricingCache (src/lib/issueAuthority.js).
-            const exactPricingCacheEligible = canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority);
+            // Commit 4.1 (review round, item 2) — identityProvisionalFields
+            // passed as a third argument so a trusted/corroborated issue
+            // paired with a still-provisional (family-adopted-only) year is
+            // also excluded from the exact-issue cache namespace, not just
+            // an unconfirmed issue.
+            const exactPricingCacheEligible = canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority, out.identityProvisionalFields);
             if (!exactPricingCacheEligible) {
+              const yearOnlyGate = (out.identityProvisionalFields || []).includes('year') &&
+                out.issueAuthority?.status !== 'provisional' && out.issueAuthority?.status !== 'conflicted';
               console.log(
                 confirmedIssue == null
                   ? `[active-cache] SKIP: confirmedIssue is null — no title|null key in the ac: namespace (Commit B.1)`
-                  : `[active-cache] SKIP: issueAuthority.status="${out.issueAuthority?.status}" — marketplace-only-adopted issue not cached (Commit 4)`
+                  : yearOnlyGate
+                    ? `[active-cache] SKIP: identityProvisionalFields includes 'year' (family-adopted-only) — not cached even though issue itself is trusted (Commit 4.1)`
+                    : `[active-cache] SKIP: issueAuthority.status="${out.issueAuthority?.status}" — marketplace-only-adopted issue not cached (Commit 4)`
               );
             }
             // CACHE-BUST: skipCache flag bypasses poisoned cache entries
@@ -9324,11 +9401,20 @@ export default async function handler(req, res) {
     // deliberate absence of a "no contradiction still confirmed"
     // carve-out anywhere in this commit's diff.
     {
-      const authorityPatch = computeIssueAuthorityContractPatch(out.issueAuthority, out);
+      // Commit 4.1 (review round, item 2) — identityProvisionalFields
+      // passed as a third argument so this containment fires even when
+      // out.issueAuthority is null (issue trusted/corroborated) but 'year'
+      // is still family-adopted-only — see computeIssueAuthorityContractPatch's
+      // own doc comment (issueAuthority.js) for the three-branch gate this
+      // now runs.
+      const authorityPatch = computeIssueAuthorityContractPatch(out.issueAuthority, out, out.identityProvisionalFields);
       if (authorityPatch) {
         console.log(
-          `[commit4-terminal] issueAuthority.status="${out.issueAuthority.status}" — forcing ID_REQUIRED-class ` +
-          `contract state, clearing price authority, locking listing (reasons=[${(out.issueAuthority.reasons || []).join(', ')}])`
+          out.issueAuthority?.status
+            ? `[commit4-terminal] issueAuthority.status="${out.issueAuthority.status}" — forcing ID_REQUIRED-class ` +
+              `contract state, clearing price authority, locking listing (reasons=[${(out.issueAuthority.reasons || []).join(', ')}])`
+            : `[commit4.1-terminal] identityProvisionalFields includes 'year' (issue trusted/corroborated, no issueAuthority) — ` +
+              `forcing ID_REQUIRED-class contract state, clearing price authority, locking listing`
         );
         Object.assign(out, authorityPatch);
       }

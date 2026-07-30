@@ -1522,7 +1522,17 @@ else — confirming this correction's own tests, not just its absence, are
 load-bearing; reverted, byte-identical.
 
 Tests: **133/133 passing** (up from 128 — 5 presence-threading
-assertions). Full-suite baseline unchanged — 11 failing files,
+assertions) **at this checkpoint** — a later evidence-custody/sold-path
+completion pass (same implementation session, prior to this file's
+current on-disk state) added further assertions covering full evidence-
+bucket custody across both the active (`api/comps.js`) and sold
+(`soldVerification.js`) paths, bringing the suite to its current, final
+133+19=**152/152**. That later pass is not narrated as its own numbered
+review round above (unlike the four that are) because it closed out
+custody proofs the four rounds above already scoped, rather than
+introducing a new fix — recorded here so the count itself is never an
+unexplained discrepancy against the file's actual current size. Full-suite
+baseline unchanged — 11 failing files,
 byte-identical failing set before/after across FIVE separate `git stash`
 A/B passes (2-file, 6-file, 7-file, the prior 7-file structural-upgrade
 pass, and this final pass, diffed directly, not just counted):
@@ -1553,3 +1563,704 @@ separate review chain, not implemented here in any form. Queues as its
 own commit immediately after Commit 4 lands, pending scope decision.
 
 Full-suite A/B: no new failures relative to documented baseline.
+
+**Commit 4.1** — controlled family-fragment merge (the Spawn #351 work
+queued at the end of Commit 4, now implemented) + a new family-scoped
+year resolver + issue-scoped variant checkpoint + population-lineage-
+honest `visualReferenceEvidence`. Root case: scanning "Spawn #351, Cover
+C, Brett Booth Virgin, 2024" produced a correct 2-row visual-family
+cluster that was rejected outright because promotion requires >=3 rows,
+while the pipeline still retained a price aggregate but discarded the
+identity candidate and every underlying reference row. Direct execution
+(scoping investigation, Condition 2 trace) proved the rejected 2-member
+family's tokens are the token-SUPERSET of an independently-3-member
+runner-up family's tokens (Jaccard 0.375, just under the 0.4 single-pass
+clustering threshold `buildTitleFamilies` already uses) — this is
+fragmentation of ONE identity (Answer A), not two competing products
+(Answer B).
+
+**`src/lib/imageSearchIdentity.js` — `mergeFragmentedTitleFamilies(scored, itemsOrTitles)`,
+new, exported, wired into `selectTitleFamilyCandidate` immediately after
+the pre-existing `scoreTitleFamilies` call, before every existing floor
+check.** Merge conditions (ALL required): (1) tokens of one family are a
+full, strict subset of the other's — merge-direction pin is on TOKEN SETS,
+independent of member count; whichever family's tokens are the subset
+merges INTO the token-superset (more specific) family. The founding
+fixture is exactly the case a naive "bigger family wins" rule would get
+backwards: the count-LARGER family (3 members, 3 tokens, "spawn brett
+booth") is the token-subset; the count-SMALLER family (2 members, 8
+tokens, "...cameo of lyra htf scarce") is the token-superset and becomes
+canonical. (2) Combined DEDUPLICATED member count >= 3 — a pairing that
+still couldn't clear the existing floor is never evaluated further; the
+existing >=3-member weighted-consensus promotion floor itself is untouched,
+never lowered, never duplicated. (3) **CORRECTED, review round 3, item 1
+— issue is now a MANDATORY positive per-fragment agreement, NOT the
+absence-never-blocks standard originally documented here:** both
+fragments must positively assert the SAME issue number; asserted-by-one/
+silent-on-the-other blocks, both-silent blocks, a genuine mismatch blocks,
+internal disagreement within one fragment blocks — only both-assert-and-
+agree passes. Year remains the absence-never-blocks standard (unchanged):
+no member of either family may assert a DIFFERENT, conflicting year than
+another; a row silent on year never blocks, only a genuine differing
+asserted value does. Year contradiction reuses the real, exported
+`resolveFamilyYearConsensus` (below) rather than a second ad-hoc check, so
+this gate and the later year-adoption vote can never disagree about what
+counts as a conflict. Cover designation, artist, and presentation/finish
+marker are their own, separate, CONDITIONAL positive-agreement condition
+(review round 2, item 2, described in its own entry below) — asserted-by-
+neither is "not applicable" and never blocks for those three attributes
+specifically, unlike issue. (4) No member trips `LOT_RE`/`REPRINT_RE`/
+`SLAB_RE`/`GRADED_RE`/`SIGNED_RE`/`TPB_MARKER_RE` (`compHygiene.js` — the
+same detectors the formal comp-pricing filter chain already trusts).
+Deduplication mirrors (does not
+import — `resolveFamilyIssueConsensus` itself is explicitly unmodified)
+the same key-priority chain that function already applies: itemId ->
+legacyItemId -> normalized itemWebUrl -> raw title text. Only ever merges
+the first qualifying pair, trying pairs in weightSum-descending order — a
+pool fragmenting into more than 2 pieces of the same product is a real
+possibility not exercised by the founding fixture, left as a documented
+limitation, not silently generalized to N-way merging without a test
+proving it. **What the merge does NOT confer:** agreement on issue number
+produces IDENTITY consensus (fed to `resolveFamilyIssueConsensus`
+downstream), but never VARIANT confirmation — variant resolution runs
+through its own, entirely separate, already-issue-scoped mechanism
+(`filterItemsByIssue`/`extractConfirmedVariant`) after this merge and its
+consequent issue adoption complete, with its own segregation gates
+unchanged by anything here.
+
+**`src/lib/identityCore.js` — `resolveFamilyYearConsensus(priorYear,
+visualItems, indices)`, new, exported, family-scoped (operates ONLY on the
+accepted family's own indices, never pool-wide — mirrors
+`resolveFamilyIssueConsensus`'s own scoping discipline).** Five-case
+matrix, all confirmed via direct execution: (A) prior null + >=2 unanimous
+asserting rows -> adopt provisionally; (B) prior null + <2 asserting rows
+-> leave null, `mode:'no-data'` (a single assertion is not enough to
+nominate); (C) prior null + conflicting asserted years -> no adoption,
+`mode:'conflict-locked'`, year null; (D) prior trusted + family agrees or
+is entirely silent -> preserve, `mode:'preserved'`; (E) prior trusted +
+family conflicts -> never overwrite, `mode:'conflict-locked'`, year stays
+the prior value. Deduplicates via the same key-priority chain as the
+merge function above, reads the already-computed `.year` field on each
+row (not recomputed from raw title — avoids a circular import, since
+`extractYearFromTitle` lives in `imageSearchIdentity.js`, which already
+imports FROM `identityCore.js`). Wired into `resolveIdentity`'s family-
+override branch, replacing the pre-existing pool-wide
+`confirmedYear = ebay?.year || vision.year` read — that pool-wide read
+was the root cause of the year/publisher resolution gap found during the
+Condition 2 trace (`[year-ebay] ratio=0.00`, empirically null on this
+exact fixture). `resolveIdentity`'s return object gained
+`familyYearConsensus` alongside the pre-existing `familyIssueConsensus`,
+both surfaced to `api/enrich.js`.
+
+**Publisher — explicitly NOT adopted from family/marketplace evidence this
+commit.** `resolveIdentity`'s family-override branch now sets
+`confirmedPublisher = vision.publisher || null` unconditionally — it never
+reads `ebay?.publisher` in this branch at all, regardless of what any
+merged family member's raw title contains (one of the founding fixture's
+own merged rows literally contains "Image Comics Malibu Comics" in its raw
+title — confirmed this text cannot backfill publisher under the current
+code, by direct execution). A broader publisher-authority audit (whether
+publisher should ever adopt from marketplace evidence, under what bar) is
+recorded as a queued follow-up in the roadmap, not decided here.
+
+**Variant — executed checkpoint, not assumed.** The informal hypothesis
+going into this commit was that the merged family would also yield a
+"Cover C Brett Booth Virgin" variant consensus. Ran the real
+`filterItemsByIssue`/`extractConfirmedVariant` chain against the recovered
+16-row population: `filterItemsByIssue` retains 6 rows (the 5 merged-
+family rows plus a 6th row, "Spawn 351 NM (9.6) 2024 - Booth Cover C...",
+that independently asserts issue #351 by title match but was never part
+of either title-family cluster — confirming the issue-scoped population
+and the family population are genuinely different sizes, not aliased).
+`extractConfirmedVariant` returns **null**. **HISTORICAL, SUPERSEDED
+finding (this paragraph described the state at initial packet time only —
+see the second review round below for the current, accurate reason):**
+at the time this checkpoint first ran, "Brett Booth" was absent from
+`ARTIST_PATTERNS` (`compHygiene.js`), and that absence was the reason
+given for the null result. The second review round (item 2) added
+`/brett booth/i` to `ARTIST_PATTERNS` — "Brett Booth" is RECOGNIZED as of
+that round. The variant checkpoint's result is STILL null, but for a
+different, now-current reason: Brett Booth clears the pre-existing >=70%
+majority-artist non-distinguishing threshold (5/6 pool rows) — see the
+second review round's own re-verification of this checkpoint. "Cover C"
+being a lettered-cover designation `extractConfirmedVariant` does not
+separately capture as a named variant token remains true and unchanged.
+Reported as found, not encoded as fact — the informally-hypothesized
+variant consensus does NOT materialize with current code, for either
+reason. The lettered-cover-designation capture gap remains recorded in
+the roadmap's edition-fingerprint campaign entry, not fixed here (out of
+this commit's scope); the `ARTIST_PATTERNS` Brett-Booth-absence gap is
+CLOSED (recognition added), though the destructive-stripping side effect
+that recognition triggered required its own separate fix (see below).
+
+**`visualReferenceEvidence` — population-lineage discipline.** New
+`buildVisualReferenceEvidence(familyIndices, parsedVisualRows,
+stableSeriesTitle, stableIssue, stableYear)` (current signature — `stableYear`
+added in the second review round below; `src/lib/issueAuthority.js`,
+extracted for testability alongside the file's existing Commit 4 exports) builds
+this bucket ONLY from the accepted family's own `topFamily.indices` — the
+exact 5 rows that drove the issue/year consensus above — NEVER from
+`filterItemsByIssue`'s broader 6-row issue-scoped population used later,
+separately, for variant extraction only. Confirmed by direct execution on
+the real fixture: mixing the 6th row in would silently broaden this
+evidence bucket beyond what actually produced the identity (a dedicated
+teeth-proof in the test suite proves this — passing the naive 6-index
+population directly into `buildVisualReferenceEvidence` DOES produce a
+6-row result, confirming the real call site's restriction to
+`candidate.topFamily.indices` is what keeps the production behavior honest
+at 5, not a coincidence of the function's own logic). Each response row
+retains exactly three fields: `title` (the row's raw listing title),
+`price` (numeric), and `itemWebUrl` (the listing URL) — no more, no less.
+Item IDs (`itemId`/`legacyItemId`) are NOT part of this response shape;
+**as of the second review round (item 3), they exist in a compact,
+family-SCOPED `[family-evidence] decision=... merged=... rows=[...]` log
+line** (`selectTitleFamilyCandidate`, `imageSearchIdentity.js`), emitted
+only at the two decisions where a family is genuinely selected — NOT the
+original, since-removed `[extractIdentity] full pool:` unconditional
+whole-pool dump this paragraph first described. Not retained on the
+response object itself either way — a deliberate scope boundary, not an
+oversight, since adding them to the client-facing bucket was never part
+of this commit's ask.
+
+`familyKey` is keyed on the PROPOSED IDENTITY — **corrected in review
+round 2 (item 1):** the first version of this call site passed
+`identity.confirmedTitle`, which in the family-override branch is
+`sanitizeSeriesTitle(family.selectedTitle)` — the visual-family CLUSTER
+LABEL, not the stable proposed identity the fingerprint doc comment
+always claimed to use. Confirmed by direct execution: that produced
+`familyKey: "spawn-brett-booth-cameo-of-lyra-scarce|351"` on the founding
+fixture — cluster-derived, and (per a targeted teeth-proof pool
+engineered to shift the Q45 60%-of-members token-consensus outcome)
+genuinely UNSTABLE once pool composition shifts that consensus. The real
+call site now passes `effectiveTitle` — Vision's own title, the value
+passed as `vision.title` into `resolveIdentity` BEFORE any family
+override — never `identity.confirmedTitle`, `identity.displayTitle`, or
+`family.selectedTitle`.
+
+**HISTORICAL, SUPERSEDED (this paragraph originally continued describing
+a title+issue-only key with year deliberately excluded — reversed in
+review round 3; see that section below for the current, accurate
+design):** ~~Verified stable across three REAL, separately-captured pools
+of the same physical Spawn #351 photo (16/18/20-row pools, all recovered
+from production logs): all three now produce the identical "spawn|351".
+Year is deliberately NOT part of the key.~~ Current behavior: all three
+pools now produce the identical `"spawn|351|2024"` (year included — see
+review round 3, item 1, for the collision-vs-instability reasoning that
+reversed this). Returns `null` (never a fabricated zero-row object) when
+no family row carries a usable title+price.
+
+**Review round — four corrections plus one regression found and fixed by
+the mandated full-suite A/B, all before this commit's first
+stage/commit/push:**
+
+1. **Fingerprint input corrected** (detailed above) — `effectiveTitle`
+   (Vision's stable title) replaces `identity.confirmedTitle` (the cluster
+   label) as `buildVisualReferenceEvidence`'s title input at the real
+   `api/enrich.js` call site. **Read-only investigation finding, reported
+   as instructed, not silently fixed:** `identity.confirmedTitle` itself
+   — cluster-label-derived whenever a family override fires — is NOT
+   scoped to this one fingerprint call. It is the SAME value threaded into
+   `out.title` (the terminal field returned to the client, `api/enrich.js`
+   line ~8807 at time of writing) and into the PriceCharting query
+   (`lookupPriceCharting({ title: confirmedTitle, ... })`, ~3215), the
+   ComicVine query (`cleanTitleForComicVine(confirmedTitle, ...)`, ~3137),
+   the PriceCharting cache key (`` `pc:v...:${confirmedTitle}|...` ``,
+   ~3180), and the real comp-pricing query (`fetchComps({ title:
+   confirmedTitle, ... })`, ~4810) — meaning a customer's card can display
+   and price against the cluster-label string itself (e.g. "spawn brett
+   booth cameo of lyra scarce"), not just "Spawn," whenever a family
+   override fires. This is pre-existing architecture that predates Commit
+   4.1 (Commit 4.1 only changed WHICH cluster label wins for the merged
+   case; it did not create the "cluster label feeds the pipeline title"
+   design). Flagged here as a genuine finding — the display-not-equal-
+   pipeline class — for its own scoped decision; NOT fixed in this
+   dispatch.
+2. **Year-only containment closed.** A real gap: a trusted/corroborated
+   issue paired with a family-adopted-only year (`identityProvisionalFields`
+   containing `'year'` with no `issueAuthority` object at all, since
+   `deriveIssueAuthorityFromAdoption` only produces one for mode
+   `'adopted'`, never `'corroborated'`) previously sailed through both
+   `canUseExactIssuePricingCache` and `computeIssueAuthorityContractPatch`
+   uncontained — both gated exclusively on `issueAuthority.status`, which
+   is `null` in this exact composition. Both functions gained a third,
+   optional `identityProvisionalFields` parameter (backward compatible —
+   omitting it is a safe no-op, byte-identical to before): the cache guard
+   now also excludes on `'year'` being provisional regardless of issue
+   status; the contract patch gained a third branch (`refused-year-
+   authority-provisional` / `year-authority-provisional`), reusing the
+   IDENTICAL patch shape and machinery as the pre-existing issue-provisional/
+   issue-conflicted branches — no parallel `yearAuthority` schema. Both
+   real call sites (`api/enrich.js`, the `ac:` cache guard ~4776 and the
+   terminal contract-transition block ~9389) now thread
+   `out.identityProvisionalFields` through. Commit 3's existing correction
+   path (`getCorrectableFields`'s pre-existing union over
+   `identityProvisionalFields`) requires no change to cover a year-only
+   correction.
+3. **Publisher caution narrowed to the merged-fragment path only.** The
+   first version applied `confirmedPublisher = vision.publisher || null`
+   to EVERY family-override decision (`top-rank-protection` and
+   `weighted-consensus` alike), not just merged ones — a global behavior
+   change the dispatch never asked for. New `mergedFromFragments: true`
+   marker, set by `mergeFragmentedTitleFamilies` itself on its merged
+   result (the single point of truth for "this family is a Commit 4.1
+   merge"), gates the cautious branch; an ordinary, unmerged family
+   retains the exact pre-Commit-4.1 `ebay?.publisher || vision.publisher`
+   read. Anti-regression fixture: an unrelated, single-cluster
+   (never-fragmented) weighted-consensus family, confirmed via direct
+   execution to produce byte-identical publisher output (ebay-publisher-
+   wins, vision-fallback-when-absent) before and after this narrowing.
+4. **A genuine regression, found by the mandated full-suite A/B itself,
+   not by inspection.** The initial merge implementation paired ANY
+   below-floor family (at any rank) against every other family in
+   `scored`, not just `scored[0]` (the one `selectTitleFamilyCandidate`
+   would actually promote). On `tests/q85-compact-key.test.js`'s
+   Funnybook fixture, this wrongly merged an already-independently-
+   qualifying `scored[0]` (a clean, 4-member "funny book" family) into a
+   lower-ranked, 1-member "funny book nice copy" singleton that happened
+   to be its token-superset — replacing a working title with one carrying
+   two unexplained extra tokens ("nice"/"copy") that then tripped the
+   pre-existing Q85-B compact-bigram gate and flipped the decision to
+   `refused-identity-conflict`, a real 12th failing file the true
+   full-suite A/B caught that a 3-file spot check (the first packet's
+   checkpoint 4) did not. Fixed: `mergeFragmentedTitleFamilies` now only
+   ever considers `scored[0]` as the side needing a merge — a family
+   ranked #1 that already independently clears the floor is now a pure
+   no-op, never disturbed, exactly mirroring this function's own
+   documented intent ("a below-floor TOP family needs to merge with a
+   partner" — "top family" means `scored[0]`, not any below-floor family
+   at any rank). Re-verified: `q85-compact-key` 11/11 passing; the
+   founding Spawn fixture (whose below-floor family WAS `scored[0]`)
+   unaffected.
+5. **Doc wording corrected** (this entry) — the Commit 4 count-progression
+   flag and the `visualReferenceEvidence` row-shape/item-ID description,
+   both addressed above.
+6. **TRUE full-suite A/B, all 128 `tests/*.test.js` files** (not the first
+   packet's 3-file spot check), run twice via `git stash` on all four
+   touched production files (`api/enrich.js`, `src/lib/identityCore.js`,
+   `src/lib/imageSearchIdentity.js`, `src/lib/issueAuthority.js`) — the
+   new test file excluded from the stashed BEFORE run (it does not exist
+   pre-Commit-4.1). BEFORE: exactly 11 failing files, matching the
+   documented baseline. AFTER (post-regression-fix): the same exact 11
+   files, byte-identical for 9 of them; the remaining 2
+   (`image-search-extraction`, `q-adv397-visual-guard`) differ ONLY by the
+   (at-the-time) permanent `[extractIdentity] full pool:` instrumentation
+   log lines appearing in their output (161/2 and 11/0 pass/fail counts
+   unchanged in both) — **HISTORICAL: this instrumentation was replaced by
+   the narrower `[family-evidence]` log in review round 2, item 3; see
+   that section's own re-run A/B for the current, narrower diff.**
+   **Full-suite A/B: no new failures relative to documented baseline.**
+
+Teeth-proofs for all four numbered fixes above (temporary injection,
+observed failure, reverted, clean state re-verified — item 5 of the
+review round): (1) feeding the cluster label as the fingerprint's title
+input, verified via a targeted engineered pool, genuinely produces a
+DIFFERENT fingerprint than Vision's stable title does for the identical
+underlying book — the historical bad shape, confirmed real; (2) routing
+containment through `issueAuthority.status` alone (the pre-fix signature)
+on the trusted-issue/adopted-year composition produces no patch and
+wrongly authorizes the pricing cache — confirms the fix is load-bearing;
+(3) a naive "always apply merge-caution" reconstruction confirms the
+`mergedFromFragments` gate is what keeps the anti-regression fixture
+passing, not coincidence; (4) needs no separate teeth-proof — the
+full-suite A/B run itself, both before and after the fix, is the proof.
+
+**`src/lib/issueAuthority.js` — `appendYearToProvisionalFields(identityProvisionalFields,
+familyYearConsensus)`, new, exported.** Adds `'year'` to the existing
+`identityProvisionalFields` array — the same field Commit 3 already
+consumes via `getCorrectableFields`/the inline correction UI — only when
+`familyYearConsensus.mode === 'adopted'`, and never duplicates it. No
+parallel `yearAuthority` object: year's provisional-ness is fully
+expressed by its presence in this one array plus `out.issueAuthority.status`
+staying `'provisional'` (already the case whenever issue was adopted) —
+Commit 4's `computeIssueAuthorityContractPatch` needs no changes at all to
+cover it. Referential no-op (returns the same array reference) when no
+change applies, matching `escalateIssueAuthorityOnConflict`'s own
+convention.
+
+**`api/enrich.js` wiring:** the family-issue-consensus `else if` branch
+(sibling to Commit 4's existing `deriveIssueAuthorityFromAdoption` call)
+now also calls `appendYearToProvisionalFields` and
+`buildVisualReferenceEvidence`, both real exported functions, no inline
+reimplementation of either at the call site.
+
+**Instrumentation (permanent, not temporary) — HISTORICAL, SUPERSEDED
+design, replaced in review round 2 (item 3); current design described
+there, not here.** ~~`extractIdentityFromImageSearch`
+(`imageSearchIdentity.js:384`) gained a compact, permanent log line —
+`[extractIdentity] full pool:` — dumping idx/itemId/legacyItemId/title/
+price for every row in one execution's own logs on EVERY request.~~ This
+design was replaced: it dumped the entire visual pool unconditionally,
+which turned out to be an unbounded per-request Vercel log-volume cost
+and measurably altered two of the eleven baseline suites' captured output
+in this round's own full-suite A/B (see below). Current design: a
+compact, family-SCOPED `[family-evidence]` line, emitted only at the two
+decisions where a family is genuinely selected — see review round 2, item
+3, for the full current description. The underlying goal this
+instrumentation exists for is unchanged either way: making a specific
+family member's real eBay itemId provable from one execution's own logs
+once family clustering reports its indices — the literal single-request
+itemId proof for the recovered idx2 lands on the first live scan after
+deploy, a post-deploy verification item, not a blocker on this commit.
+
+**"Not this comic" rejection — fingerprint stability, design only (no
+rejection-persistence feature built this commit).** Investigated whether
+the raw visual-family cluster label is stable enough to key a future
+rejection record on. Confirmed NOT stable: repeated captures of the
+identical physical book produced 16/18/20-row pools with different
+cluster compositions across separate scan requests. Designed and shipped
+`buildRejectedCandidateFingerprint(title, issue, year, variant)` (current
+signature — year added in the second review round below) keying on the
+normalized PROPOSED IDENTITY instead, already wired as the one live
+consumer inside `buildVisualReferenceEvidence` above; no persistent
+rejection-record feature exists yet to consume it beyond that.
+
+**Tests** (`tests/q-trackB-commit4.1-spawn-visual-family-merge.test.js`,
+**116/116 passing** — 73 from the first packet plus 43 from the review
+round: cross-pool fingerprint stability across three real 16/18/20-row
+production pools plus an engineered teeth-proof pool, year-only
+containment's full production-composition control with its two
+teeth-proofs and a combined-composition regression guard, and the
+publisher-scoping anti-regression fixture with its own teeth-proof):
+founding-fixture end-to-end chain (pre-merge 2-vs-3
+fragmentation, merge-direction pin, post-merge weighted-consensus
+promotion, issue/year adoption, the honest null variant checkpoint, 5-row
+`visualReferenceEvidence` vs. the 6-row issue-scoped pool, downstream-order
+proof); the full resolveFamilyYearConsensus 5-case matrix (A-E), each with
+its own teeth-proof (Case B against a naive single-assertion-nominates
+implementation; Case E against the naive pre-Commit-4.1 pool-wide
+`ebay?.year || vision.year` fallback this dispatch replaced); isolated
+`mergeFragmentedTitleFamilies` gate controls via hand-built `scored`
+fixtures (merge-direction pin in isolation, absence-is-not-agreement,
+issue contradiction, cover-letter contradiction, year contradiction,
+`LOT_RE` contamination, an anti-overcorrection control confirming two
+genuinely unrelated below-floor families never merge and the returned
+array holds the same object references as the input — a true no-op, not a
+reconstructed-but-equal copy — and a both-already-above-floor no-op
+control); publisher non-adoption (both no-trusted-publisher-stays-null and
+trusted-publisher-preserved-even-against-a-second-publisher-like-phrase-in
+-a-merged-row); `buildVisualReferenceEvidence` unit controls (price-gap
+handling, empty-result honesty, the population-lineage teeth-proof);
+`appendYearToProvisionalFields` unit controls plus a teeth-proof against a
+naive always-append implementation; 10x full-result determinism on the
+merged promotion. Two hand-built isolated fixtures were found, during
+this pass, to be internally invalid (duplicate raw-title text across
+supposedly-distinct rows collapsed under the real dedup chain, and a
+2-total-member pairing that could never clear the floor) — both are
+genuine artifacts of constructing synthetic fixtures by hand, not
+production bugs; both corrected and re-verified before being counted in
+the total (the first packet's original 73). Full-suite regression:
+`q-trackB-commit4-adoption-provisional` 152/152 (re-run clean, no change),
+`q-trackB-commit3-manual-correction` 465/465 (re-run clean, no change),
+`q142-instance2-phase2-population` 11/11, `variantIdentity` 37/37 — all
+re-run clean. `npm run build` clean. ESM-mode parse verified explicitly on
+all four touched files (`api/enrich.js`, `src/lib/identityCore.js`,
+`src/lib/imageSearchIdentity.js`, `src/lib/issueAuthority.js`) plus the
+new test file. **Full-suite baseline claim superseded by the review round
+above (item 6):** the first packet's 3-file `git stash` spot check
+(`image-search-extraction`, `identity-gate`, `pattern-k-dedupe-issue`) is
+no longer the checkpoint-4 evidence — see the review round's TRUE
+128-file full-suite A/B, which additionally caught a real 12th-file
+regression (`q85-compact-key`) the 3-file spot check could not have
+surfaced, since that file was never among the three checked.
+
+**Resolved (was flagged as an open discrepancy in the first Commit 4.1
+packet, closed in review round item 6):** Commit 4's 133/133 figure was
+the presence-threading checkpoint specifically, not its final count — a
+later evidence-custody/sold-path completion pass (same implementation
+session) brought the suite to its actual final 152/152, documented in
+Commit 4's own entry above at the point it occurred rather than left as
+an unexplained +19 delta.
+
+**Commit 4.1 — second review round (three further corrections, same
+commit, still unstaged):**
+
+**1. Year included in the rejected-candidate fingerprint.** The first
+review round deliberately OMITTED year from `buildRejectedCandidateFingerprint`,
+reasoning that a family-adopted year is itself potentially unstable.
+Reversed this round: the asymmetry that decides it — a title|issue-only
+key can silently COLLIDE across genuinely different products sharing the
+same title+issue text (a different volume, reboot, or renumbering — see
+the Pattern Library's "Batman #608 class" and "Catwoman #64 Szerdy-variant
+class" above), silently suppressing a "not this comic" rejection the user
+never made (confident and wrong); a year-instability mismatch merely
+re-asks the user on the next scan (honest and open). `buildFingerprintYearToken(year)`
+(new, exported, `issueAuthority.js`) normalizes a real year or returns the
+literal, deterministic string `'unknown-year'` when unavailable — NEVER
+silently shortens the key. `buildRejectedCandidateFingerprint` gained a
+year parameter (title, issue, year, variant); `buildVisualReferenceEvidence`
+threads `identity.confirmedYear` through as a new 5th argument. Founding
+fixture: `spawn|351|2024`. Verified via direct execution across all three
+REAL production-recovered pools (16/18/20-row) — all three produce the
+identical `spawn|351|2024`, confirmed no #300/#307 row joined any of the
+three accepted families. Determinism control: a fixture where year
+adoption fails (<2 asserting rows) deterministically produces
+`foo|12|unknown-year` across 5 independent runs — the fallback token is
+itself stable, not an accident of whatever happened to be falsy that run.
+
+**2. Positive product-agreement gate, conditional form.** Token
+containment + no-contradiction (the first round's conditions 1/3) is
+necessary but not sufficient to prove two fragments describe the SAME
+visual product. New condition 5 on `mergeFragmentedTitleFamilies`, per
+attribute in {cover designation, artist, presentation/finish marker}: a
+fragment ASSERTS an attribute when >=1 of its own rows carries a value and
+none disagrees (internal contradiction blocks, same semantics as the
+existing issue/year checks); if EITHER fragment asserts, the OTHER must
+positively assert the SAME value — asserted-by-one/absent-from-the-other
+blocks (absence is not positive support); if NEITHER asserts, the
+attribute is NOT APPLICABLE and never blocks (without this branch the gate
+would silently neuter the whole feature for an ordinary, non-variant
+book). Replaces the first round's cover-letter-only, combined-set,
+contradiction-only check (which never caught the asserted-by-one/silent-
+other shape). Reuses existing registries only: `extractCoverLetter`
+(this file, pre-existing), `extractArtist` (`compHygiene.js`, newly
+imported here), and a new `extractPresentationValue` built on the
+existing `extractVariantTokens`/`tokenToVariantCategory` 'finish' category
+(no new parser). Founding fixture verified at the ROW level: all 5 members
+of both original fragments assert cover="C", artist="brett booth",
+presentation="virgin" identically. Five new controls, all via the real
+`mergeFragmentedTitleFamilies`: same title/issue/cover with a genuinely
+different artist blocks; same title/issue/artist with Virgin-vs-no-finish-
+token blocks; artist asserted by one fragment and absent from the entire
+other blocks; presentation asserted by one fragment and absent from the
+other blocks; a plain, non-variant book (neither fragment asserts artist
+or presentation) still merges normally on the remaining gates. Teeth-proof:
+a naive contradiction-only reconstruction of the gate wrongly allows the
+artist-asserted-by-one fixture; the real gate correctly blocks it.
+
+**Real regression found and fixed during this item's own investigation —
+`ARTIST_PATTERNS` dual-responsibility class.** Implementing the artist
+attribute required recognizing "Brett Booth" — absent from `ARTIST_PATTERNS`
+(the variant checkpoint had already found this). Adding it as an ordinary
+new entry, per the standing convention for this registry, broke the
+16/18/20-row cross-pool fingerprint proof for two of three real pools:
+`tokenizeTitleFamily` (this file) destructively strips every
+`ARTIST_PATTERNS` match BEFORE title-family clustering (the pre-existing
+Q-BC/Black Cat/Skottie Young fix, so a variant-cover artist named in
+nearly every pool listing can't fuse into the family's own consensus
+title) — a single shared registry serving two responsibilities
+(recognition and destructive stripping) that don't always agree. Once
+"Brett Booth" stripped, two genuinely-#351 rows in the 18/20-row pools
+collapsed to a bare `"spawn"` token set, indistinguishable at the token
+level from unrelated #300 McFarlane-variant rows in the same real pool
+that ALSO reduce to bare `"spawn"` after stripping — the (correct,
+unmodified) issue-contradiction gate then rightly refused the resulting
+contaminated merge candidate, and the 16-row founding pool's own merge
+shape silently shrank from 5 to 4 members as a side effect. Investigated
+(all 5 real consumers of `ARTIST_PATTERNS` audited by file:line — only
+`tokenizeTitleFamily` destructively strips; `extractArtist` (compHygiene.js),
+`extractPoolArtistTokens` and the artist-specific query builder in
+`api/comps.js`, and `variantIdentity.js`'s own local `extractArtist` are
+all recognition-only and need every entry regardless) and reported before
+implementing, per standing practice. Fix (user-approved diff, minimal —
+corrected wording, this pass): the array SHAPE and every PRE-EXISTING
+entry in `ARTIST_PATTERNS` are unchanged; `/brett booth/i` was added as a
+new, narrow, multi-word-only recognition entry (needed for the positive
+product-agreement gate's artist check, condition 6). New companion export
+`ARTIST_FAMILY_STRIP_EXCEPTIONS` (a `Set`, `compHygiene.js`) holds
+`'brett booth'` as its sole member — the single explicit opt-out from
+`tokenizeTitleFamily`'s destructive stripping specifically. Every
+pre-existing pattern is absent from that set and therefore still stripped
+exactly as before (PIN A — no global default flip).
+`tokenizeTitleFamily` now checks each match's text against the set before
+replacing; the 4 recognition-only consumers are completely unchanged.
+Verified (PIN B): the founding fixture's merge reverted to its ORIGINAL
+5-member shape (indices `[0,2,1,5,7]`, tokens include "brett"/"booth"
+again) once Brett Booth was excepted from stripping rather than naively
+added to it; all three real 16/18/20-row pools now converge on
+`spawn|351|2024` with zero #300/#307 contamination, confirmed by direct
+execution. Regression controls: `tests/family-clustering.test.js`
+(Black Cat/Skottie Young, the strip=true path this fix must never touch)
+36/36 unchanged; a strip=true control (Skottie Young still stripped from
+family tokens) and a strip=false control (Brett Booth still recognized by
+`extractArtist`, now preserved in family tokens) both pass.
+
+**3. Permanent instrumentation narrowed to the selected family only.**
+The first round's `[extractIdentity] full pool:` line (removed) dumped
+the ENTIRE visual pool on every single request regardless of outcome —
+real, unbounded per-request Vercel log-volume cost, and it measurably
+altered two of the eleven baseline-failing suites' captured stdout in the
+first round's full-suite A/B (harmlessly, but real noise). Replaced with
+a compact, family-SCOPED line —
+`` [family-evidence] decision=<...> merged=<bool> rows=[{idx, itemId, legacyItemId, title, price}...] `` —
+emitted by `selectTitleFamilyCandidate` itself (new local `logFamilyEvidence`
+helper, not exported — a side-effecting log with no separate entry point,
+verified structurally by firing exactly when a decision this commit's own
+tests exercise fires), and ONLY at the two decisions where a family is
+genuinely selected (`top-rank-protection` / `weighted-consensus`) — never
+for `fallback-vision`/`refused-identity-conflict`, where nothing was
+selected and there is nothing to prove an itemId for. `itemId`/`legacyItemId`
+are still carried on every parsed row (`extractIdentityFromImageSearch`)
+so the family-scoped log can read them — just no longer bulk-dumped.
+This still closes the idx2-class single-request itemId proof on the first
+live scan post-deploy; it now does so with a single, bounded, decision-
+gated log line instead of an unconditional whole-pool dump.
+
+**Re-verification after all three second-round items, in full:**
+Focused suite (`tests/q-trackB-commit4.1-spawn-visual-family-merge.test.js`)
+**162/162 passing** (116 from the first review round + 46 new: founding-
+fixture row-level attribute assertions, 4 negative + 1 positive
+product-agreement controls + 1 teeth-proof, 2 ARTIST_PATTERNS strip/
+recognize decoupling controls + PIN B regression proof, the year-inclusive
+cross-pool fingerprint re-verification with #300/#307-absence checks, and
+the unknown-year determinism control). Commit 4 suite 152/152 (re-run
+clean, no change). Commit 3 suite 465/465 (re-run clean, no change).
+`q85-compact-key` 11/11. `family-clustering` (Black Cat/Skottie Young)
+36/36. `npm run build` clean. ESM-mode parse verified explicitly on all
+five touched production files (`api/enrich.js`, `src/lib/identityCore.js`,
+`src/lib/imageSearchIdentity.js`, `src/lib/issueAuthority.js`,
+`src/lib/compHygiene.js`) plus the test file.
+
+**TRUE full 128-file suite A/B, run twice via `git stash` on all five
+touched production files** (the new test file excluded from the stashed
+BEFORE run, as it does not exist pre-Commit-4.1): BEFORE and AFTER both
+produce EXACTLY the eleven documented baseline files
+(`batch1-fixes`, `comp-filter-hygiene`, `decision-engine`, `identity-gate`,
+`image-search-extraction`, `mega-keys`, `pattern-k-dedupe-issue`,
+`priceBands`, `q-adv397-visual-guard`, `ship26-integration`,
+`sold-verification`) — ten of the eleven byte-identical; the eleventh
+(`pattern-k-dedupe-issue`) differs ONLY by the new narrow
+`[family-evidence]` log line now firing on two of its fixtures (exactly
+the approved, narrowed instrumentation working as intended), pass/fail
+count unchanged (4 passed / 4 failed / 8 total, identical before and
+after). **Full-suite A/B: no new failures relative to documented
+baseline.**
+
+**Commit 4.1 — third review round (two technical corrections plus a
+Section 16 wording cleanup, same commit, still unstaged):**
+
+**1. Issue upgraded to a MANDATORY positive per-fragment agreement.** The
+original merge condition on issue (a combined-set `Set` of
+`extractIssueFromTitle` over the deduplicated pool, rejecting only when
+size>1) permitted three shapes it should not have: one fragment asserting
+an issue while the other stayed entirely silent, both fragments entirely
+silent, and — because it operated on the COMBINED set rather than
+per-fragment — masked which side of a pair actually carried the
+assertion. Issue is the single most load-bearing attribute in this merge
+(the merged family is what CAUSES issue adoption downstream, via
+`resolveFamilyIssueConsensus`), so it cannot be held to a weaker standard
+than the conditional cover/artist/presentation gate (review round 2). New
+`checkMandatoryAttributeAgreement(fragA, fragB, extractFn, label)`
+(`imageSearchIdentity.js`) reuses the EXACT same `fragmentAssertion`
+machinery `checkAttributeAgreement` (round 2) already built — only the
+not-asserted branch's verdict differs: where the conditional gate treats
+both-silent as "not applicable, don't block," this mandatory variant
+treats ANY non-"both asserted and agree" outcome as a block — one
+asserts/one silent, both silent, a genuine mismatch, or internal
+disagreement within one fragment, all block; only both fragments
+positively asserting the identical issue passes. Wired in place of the
+old combined-set `Set` check, using `famA`/`famB` (the two original
+pre-merge fragments) rather than the post-dedup combined indices. Five
+required controls, all via the real `mergeFragmentedTitleFamilies`: both
+assert the same issue -> pass; one asserts/other entirely silent ->
+block; both entirely silent -> block; both assert different issues ->
+block; internal disagreement within one fragment -> block. Teeth-proof: a
+naive combined-set reconstruction (the pre-fix shape — filters out nulls
+before checking size) wrongly permits the asserted-by-one/silent-other
+fixture; the real per-fragment gate correctly blocks it. Re-verified the
+four fixtures this upgrade could plausibly have affected — founding,
+Alpha Flight, Bar Comics, and the Ordinary Comic positive control — all
+still merge exactly as before, confirmed by direct execution: every
+fragment in each of these already positively asserts its own issue
+number, so the stricter standard changes nothing about their outcome.
+Doc comment on `mergeFragmentedTitleFamilies` itself rewritten: the
+taxonomy is now issue = mandatory positive per-fragment agreement
+(condition 3), year = absence-never-blocks / only-asserted-conflict-blocks
+(condition 4, unchanged), cover/artist/presentation = conditional
+positive agreement (condition 6, unchanged) — the prior wording
+(erroneously grouping issue with year under one absence-never-blocks
+standard) corrected throughout, including the function's own doc comment
+and the earlier Section 16 entries describing it (marked historical/
+superseded in place, not silently rewritten as if always accurate).
+
+**2. Fingerprint signature-change audit — repo-wide, both functions.**
+`buildRejectedCandidateFingerprint` changed `(title, issue, variant)` ->
+`(title, issue, year, variant)`; `buildVisualReferenceEvidence` changed
+4 args -> 5 (added `stableYear`). JavaScript raises no error on stale
+arity, so a missed legacy 3-/4-arg call would silently place a wrong
+value in the new parameter's slot rather than fail loudly. Ran
+`grep -RIn` for both function names across `src`, `api`, `tests`, `docs`
+and produced the complete consumer table:
+
+| File:line | Function | Args | Verdict |
+|---|---|---|---|
+| `issueAuthority.js:346` | `buildRejectedCandidateFingerprint` (definition) | 4 params | current signature |
+| `issueAuthority.js:453` | real call site (inside `buildVisualReferenceEvidence`) | 4 | OK |
+| `tests/...:207` | test | 4 | OK |
+| `tests/...:208` | test | 4 | OK |
+| `tests/...:698` | test | 4 | OK |
+| `tests/...:763` | test | 4 | OK |
+| `docs/LAUNCH-AUDIT.md:1872` (pre-fix) | prose reference | described 3-arg | **STALE, fixed this pass** — now states the current 4-arg signature with a forward pointer |
+| `issueAuthority.js:428` | `buildVisualReferenceEvidence` (definition) | 5 params | current signature |
+| `api/enrich.js:2827` | real call site | 5 | OK |
+| `tests/...:201` | test | 5 | OK |
+| `tests/...:508` (pre-fix) | test | 4 | **STALE, fixed this pass** — now 5 args, plus a new assertion on the resulting `familyKey`'s year segment |
+| `tests/...:522` (pre-fix) | test | 4 | **STALE, fixed this pass** — now 5 args |
+| `tests/...:532` | test — deliberate omitted-year control (NEW this pass) | 4 (intentional) | correct by design — proves the omitted-5th-arg fallback (`'unknown-year'`) is safe, not a stale call; `buildVisualReferenceEvidence` has no variant parameter, so a missing 5th arg can only ever affect the year segment, never silently misplace a different value |
+| `tests/...:536` (pre-fix) | test | 4 | **STALE, fixed this pass** — now 5 args |
+| `tests/...:544` | test | 5 | OK |
+| `tests/...:690` | test | 5 | OK |
+| `docs/LAUNCH-AUDIT.md:1676` (pre-fix) | prose reference | described 4-arg | **STALE, fixed this pass** — now states the current 5-arg signature with a forward pointer |
+
+**Proof: every `buildRejectedCandidateFingerprint` call uses 4 args; every
+`buildVisualReferenceEvidence` call uses 5 args except one deliberate,
+clearly-labeled test of the omitted-arg fallback; zero legacy-arity calls
+remain anywhere in `src`, `api`, `tests`, or `docs`.** Four stale test
+calls found and fixed (adding the 5th argument each), two stale doc
+prose references found and fixed (now stating current signatures with
+explicit forward pointers to where each changed).
+
+**3. Section 16 wording cleanup.** The second review round's own entry
+asserted `` `ARTIST_PATTERNS` itself is completely untouched `` —
+factually false; this commit added `/brett booth/i` to it as a new entry.
+Corrected: the array SHAPE and every PRE-EXISTING entry are unchanged;
+`/brett booth/i` was added as a new, narrow, multi-word-only recognition
+entry (needed for the artist attribute in the positive product-agreement
+gate); `'brett booth'` was added as the sole `ARTIST_FAMILY_STRIP_EXCEPTIONS`
+member; default stripping is unchanged for every pre-existing artist.
+Swept the rest of Section 16 for the same class of now-stale current-
+state claim and fixed each, explicitly labeled historical/superseded
+rather than silently rewritten: the variant checkpoint's original
+"Brett Booth is absent from `ARTIST_PATTERNS`" finding (now recognized —
+the checkpoint's null result persists for a different, current reason,
+the majority-artist non-distinguishing threshold); the first round's
+`"spawn|351"` (year-less) fingerprint description and its "year
+deliberately NOT part of the key" claim (reversed in round 3 — corrected
+to `"spawn|351|2024"` with a pointer to the reversal); the original
+`[extractIdentity] full pool:` instrumentation description presented as
+current design (marked historical, replaced by the family-scoped
+`[family-evidence]` line, with a pointer to round 2's own description);
+the old 3-arg/4-arg function signatures in prose (item 2, above). Every
+correction is a strikethrough-or-explicit-historical-label edit in place,
+not a silent rewrite — a reader following the document from its first
+Commit 4.1 entry through this round can see exactly what changed and why
+at each step.
+
+**Re-verification after all three third-round items:** Focused suite
+(`tests/q-trackB-commit4.1-spawn-visual-family-merge.test.js`) **175/175
+passing** (162 from the second review round + 13 new: the five
+mandatory-issue-agreement cases, its teeth-proof, and the four
+re-verified pre-existing fixtures — founding/Alpha Flight/Bar Comics/
+Ordinary Comic — confirmed unaffected). Commit 4 suite 152/152 (re-run
+clean, no change). Commit 3 suite 465/465 (re-run clean, no change).
+`q85-compact-key` 11/11. `family-clustering` 36/36. `npm run build`
+clean. ESM-mode parse verified explicitly on all five touched production
+files plus the test file.
+
+**TRUE full 128-file suite A/B, run a third time via `git stash` on all
+five touched production files:** BEFORE and AFTER both produce EXACTLY
+the eleven documented baseline files — ten of the eleven byte-identical;
+the eleventh (`pattern-k-dedupe-issue`) differs ONLY by the same narrow
+`[family-evidence]` log lines already disclosed in round 2 (pass/fail
+count unchanged: 4 passed / 4 failed / 8 total, identical before and
+after). **Full-suite A/B: no new failures relative to documented
+baseline.**
+
+**`git diff --name-only` (exact campaign file list, this pass):**
+`api/enrich.js`, `docs/LAUNCH-AUDIT.md`, `src/lib/compHygiene.js`,
+`src/lib/identityCore.js`, `src/lib/imageSearchIdentity.js`,
+`src/lib/issueAuthority.js` (tracked, modified) plus
+`tests/q-trackB-commit4.1-spawn-visual-family-merge.test.js` (untracked,
+new). `.claude/settings.local.json` also shows modified in `git status`
+but is excluded from this campaign's scope per standing convention.
+
+DO NOT STAGE, COMMIT, OR PUSH before review.
