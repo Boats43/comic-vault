@@ -20,6 +20,11 @@
 // in shipped code; every function below is its replacement and contains no
 // such carve-out.
 
+// Track B Phase 0, Commit 4.2 — shared canonical placeholder-year set,
+// see buildFingerprintYearToken below and resolveFamilyYearConsensus
+// (identityCore.js).
+import { normalizeOptionalYear } from './yearEvidence.js';
+
 /**
  * Maps a raw adoption-vote ratio to the SAME string confidence-tier
  * vocabulary Commit 3's issueAuthority.confidence already uses
@@ -338,6 +343,17 @@ export function computeIssueAuthorityContractPatch(issueAuthority, priorOut, ide
  * @returns {string}
  */
 export function buildFingerprintYearToken(year) {
+  // Track B Phase 0, Commit 4.2 — defense-in-depth, independent of the
+  // resolver-entry fix in resolveFamilyYearConsensus (identityCore.js).
+  // Reuses the SAME canonical placeholder set (yearEvidence.js) so this
+  // function and the resolver can never drift into two different
+  // placeholder lists. A semantic placeholder now maps directly to
+  // 'unknown-year' — never a normalized-but-meaningless string like
+  // "unknown" (the literal, confirmed-live bug this closes: a real
+  // production fingerprint read `familyKey="spawn|351|unknown"`, not
+  // "spawn|351|unknown-year", because "Unknown" normalized to "unknown"
+  // and that non-empty string never reached the old fallback).
+  if (normalizeOptionalYear(year) == null) return 'unknown-year';
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   const normalized = norm(year);
   return normalized || 'unknown-year';
@@ -460,4 +476,137 @@ export function buildVisualReferenceEvidence(familyIndices, parsedVisualRows, st
     status: 'reference-only',
     reason: 'provisional-visual-family',
   };
+}
+
+/**
+ * Track B Phase 0, Commit 4.2 — terminal fingerprint finalizer.
+ *
+ * Root case this closes: `buildVisualReferenceEvidence` runs early in
+ * phase 1, using whatever year was known at that point. A LATER, more
+ * authoritative year resolution (PriceCharting/ComicVine agreement, via
+ * the pre-existing `resolveYear`, identityCore.js) can become available
+ * afterward and is never retroactively applied — confirmed live:
+ * `[commit4.1] visualReferenceEvidence: ... familyKey="spawn|351|unknown"`
+ * followed, later in the SAME request, by
+ * `[year-resolved] Unknown → 2024 (source=pc-cv-agreement)`. This function
+ * is the terminal re-check that lets a genuinely-improved year replace a
+ * placeholder — never anything else.
+ *
+ * FOUR ACTIONS ONLY: 'no-evidence' | 'fingerprint-custody-mismatch' |
+ * 'no-op' | 'restamped'. No conflict-reporting action — REAL-YEAR
+ * TERMINAL DIVERGENCE (a phase-1 family-adopted REAL year that later
+ * genuinely disagrees with a REAL terminal-resolved year) is explicitly
+ * OUT OF SCOPE for this commit: no existing gate contains that specific
+ * divergence shape (Ship-28b's own YEAR_DRIFT conflict detector is keyed
+ * on {vision, comicVine, priceCharting} only — it never reads the
+ * family-vote's own adopted value, so it would not catch this either) —
+ * recorded as the REAL-YEAR TERMINAL DIVERGENCE finding, a scoped input
+ * to Commit 5's authority work, not solved here. Monotonicity is still
+ * enforced: a phase-1 REAL year is NEVER overwritten, regardless of what
+ * the terminal value holds — it silently resolves to 'no-op', with no
+ * signal raised (the gap the finding above documents honestly).
+ *
+ * CUSTODY PRECEDES ALL YEAR-ACTION BRANCHING. Two independent links, both
+ * required:
+ *   - Link 1 (current vs original): has `visualReferenceEvidence.familyKey`
+ *     been mutated since `visualReferenceFingerprintContext` was captured?
+ *   - Link 2 (original vs expected): was the captured context itself
+ *     internally consistent — does rebuilding the fingerprint from its own
+ *     captured stableTitle/stableIssue/phaseOneYear reproduce the captured
+ *     originalFamilyKey?
+ * Either link failing is a custody mismatch — no mutation, no year-action
+ * evaluation, one bounded log line. A missing or incomplete context
+ * (`visualReferenceFingerprintContext` null, or missing stableTitle/
+ * stableIssue/originalFamilyKey) is treated as a custody failure too —
+ * NEVER reconstructed from terminal-mutable values (`effectiveTitle`/
+ * `confirmedIssue` as read live at the terminal point) — missing context
+ * stays inside the four-action matrix as a custody-mismatch, not a fifth
+ * action.
+ *
+ * The `custodyExpected` log selector reports the FIRST broken link: if
+ * link 1 failed (current != original), `originalKey` is the more useful
+ * diagnostic value (it names what the key was supposed to still be,
+ * before whatever touched it); if only link 2 failed (capture-time
+ * inconsistency), `expectedKey` is what's useful (it names what a
+ * self-consistent capture would have produced). An implementation that
+ * always logs `expectedKey` regardless of which link failed loses this
+ * distinction — the reason this selector exists rather than a single
+ * fixed field.
+ *
+ * Both the custody expected-key rebuild and the restamp's new-key
+ * construction use ONLY the captured `stableTitle`/`stableIssue` from
+ * `visualReferenceFingerprintContext` — never `effectiveTitle`/
+ * `confirmedIssue` read live at the terminal call site. This function
+ * changes only the YEAR SEGMENT of the identity that originally built the
+ * key; it never re-derives title or issue.
+ *
+ * Restamping may change ONLY `visualReferenceEvidence.familyKey` — every
+ * other field (`rows`, `count`, `low`, `high`, `median`, `marketState`,
+ * `status`, `reason`, and each row's own `title`/`price`/`itemWebUrl`)
+ * stays byte-identical, enforced by spreading the original object and
+ * overwriting exactly one key.
+ *
+ * Bounded logging — the ONLY two outputs this function ever produces,
+ * fired exactly once each when they apply, never on 'no-op'/'no-evidence':
+ *   `[commit4.2] fingerprint custody mismatch current="..." expected="..."`
+ *   `[commit4.2] familyKey finalized old="..." new="..." yearSource="..."`
+ *
+ * @param {object|null} visualReferenceEvidence - out.visualReferenceEvidence, or null/undefined
+ * @param {{stableTitle: string, stableIssue: string|number, phaseOneYear: *, originalFamilyKey: string}|null} visualReferenceFingerprintContext
+ * @param {*} terminalYear - the fully-resolved terminal year (e.g. the real, current value of `confirmedYear` after `resolveYear` has run)
+ * @param {string|null} terminalYearSource - the real, already-computed `yearResolution.yearSource` label (e.g. 'pc-cv-agreement') — never fabricated
+ * @returns {{evidence: object|null, action: 'no-evidence'|'fingerprint-custody-mismatch'|'no-op'|'restamped'}}
+ */
+export function restampVisualReferenceEvidenceYear(visualReferenceEvidence, visualReferenceFingerprintContext, terminalYear, terminalYearSource) {
+  if (!visualReferenceEvidence) {
+    return { evidence: visualReferenceEvidence, action: 'no-evidence' };
+  }
+
+  const hasCompleteContext = visualReferenceFingerprintContext != null &&
+    visualReferenceFingerprintContext.stableTitle != null &&
+    visualReferenceFingerprintContext.stableIssue != null &&
+    'phaseOneYear' in visualReferenceFingerprintContext &&
+    visualReferenceFingerprintContext.originalFamilyKey != null;
+
+  if (!hasCompleteContext) {
+    console.log(`[commit4.2] fingerprint custody mismatch current="${visualReferenceEvidence.familyKey}" expected="unavailable/missing-context"`);
+    return { evidence: visualReferenceEvidence, action: 'fingerprint-custody-mismatch' };
+  }
+
+  const currentKey = visualReferenceEvidence.familyKey;
+  const originalKey = visualReferenceFingerprintContext.originalFamilyKey;
+  const expectedKey = buildRejectedCandidateFingerprint(
+    visualReferenceFingerprintContext.stableTitle,
+    visualReferenceFingerprintContext.stableIssue,
+    visualReferenceFingerprintContext.phaseOneYear,
+    null
+  );
+
+  if (currentKey !== originalKey || originalKey !== expectedKey) {
+    const custodyExpected = currentKey !== originalKey ? originalKey : expectedKey;
+    console.log(`[commit4.2] fingerprint custody mismatch current="${currentKey}" expected="${custodyExpected}"`);
+    return { evidence: visualReferenceEvidence, action: 'fingerprint-custody-mismatch' };
+  }
+
+  // Custody passed (both links). Four-action year matrix — no conflict
+  // branch (REAL-YEAR TERMINAL DIVERGENCE deliberately out of scope).
+  const phaseOneToken = buildFingerprintYearToken(visualReferenceFingerprintContext.phaseOneYear);
+  const terminalToken = buildFingerprintYearToken(terminalYear);
+
+  if (phaseOneToken !== 'unknown-year') {
+    // Phase-1 already real — ALWAYS no-op, regardless of terminal value.
+    return { evidence: visualReferenceEvidence, action: 'no-op' };
+  }
+  if (terminalToken === 'unknown-year') {
+    return { evidence: visualReferenceEvidence, action: 'no-op' };
+  }
+
+  const newFamilyKey = buildRejectedCandidateFingerprint(
+    visualReferenceFingerprintContext.stableTitle,
+    visualReferenceFingerprintContext.stableIssue,
+    terminalYear,
+    null
+  );
+  console.log(`[commit4.2] familyKey finalized old="${currentKey}" new="${newFamilyKey}" yearSource="${terminalYearSource}"`);
+  return { evidence: { ...visualReferenceEvidence, familyKey: newFamilyKey }, action: 'restamped' };
 }

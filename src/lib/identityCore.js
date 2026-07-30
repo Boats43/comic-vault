@@ -16,6 +16,7 @@
  */
 
 import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE } from './compHygiene.js';
+import { normalizeOptionalYear } from './yearEvidence.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
 // source of truth for "publisher name is legitimately PART of the series
@@ -1115,12 +1116,33 @@ export const resolveFamilyIssueConsensus = (priorIssue, visualItems, indices) =>
  * legacyItemId -> normalized itemWebUrl -> raw title text) so a literal
  * duplicate/relisted row is never counted twice toward the vote.
  *
+ * Commit 4.2 — `priorYear` is normalized via `normalizeOptionalYear`
+ * (yearEvidence.js) as the first step, before any branch above runs. A
+ * semantic placeholder (e.g. Vision's own literal "Unknown" string) is
+ * treated exactly as `null` — every case in the matrix above already
+ * describes "priorYear null" behavior; this just ensures a placeholder
+ * string reaches that same behavior instead of being trusted as real.
+ *
  * @param {string|number|null} priorYear
  * @param {Array} visualItems
  * @param {number[]} indices
  * @returns {{year: string|number|null, mode: 'adopted'|'no-data'|'conflict-locked'|'preserved', assertedYears: string[], uniqueRows: number, support: number}}
  */
 export const resolveFamilyYearConsensus = (priorYear, visualItems, indices) => {
+  // Track B Phase 0, Commit 4.2 — resolver-entry boundary normalization,
+  // the FIRST executable trust-decision step, before any prior-year
+  // branch below runs. Confirmed live in production: Vision's own year
+  // field can be the literal string "Unknown" — a truthy, non-null value
+  // `?? null` at any caller does not intercept — which was being trusted
+  // as a real prior year, landing in the conflict-locked branch below
+  // against the family's own legitimate asserted year and suppressing
+  // adoption. This function defends its own boundary (not the caller,
+  // per architectural review — resolveIdentity carries no duplicate
+  // placeholder defense, and every future caller of this function
+  // inherits the protection automatically). See yearEvidence.js for the
+  // canonical placeholder set, shared with buildFingerprintYearToken
+  // (issueAuthority.js) so the two never drift.
+  const normalizedPriorYear = normalizeOptionalYear(priorYear);
   const rows = Array.isArray(indices) ? indices : [];
   const seenKeys = new Set();
   const assertedYears = new Set();
@@ -1161,14 +1183,14 @@ export const resolveFamilyYearConsensus = (priorYear, visualItems, indices) => {
 
   const distinctYears = [...assertedYears];
 
-  if (priorYear != null) {
-    if (distinctYears.length === 0 || (distinctYears.length === 1 && distinctYears[0] === String(priorYear))) {
-      return { year: priorYear, mode: 'preserved', assertedYears: distinctYears, uniqueRows, support: yearBearingRows };
+  if (normalizedPriorYear != null) {
+    if (distinctYears.length === 0 || (distinctYears.length === 1 && distinctYears[0] === String(normalizedPriorYear))) {
+      return { year: normalizedPriorYear, mode: 'preserved', assertedYears: distinctYears, uniqueRows, support: yearBearingRows };
     }
-    // At least one row asserts a year different from priorYear (whether or
-    // not the rest agree with priorYear) — a genuine conflict against
+    // At least one row asserts a year different from normalizedPriorYear
+    // (whether or not the rest agree with it) — a genuine conflict against
     // trusted data. Never overwritten.
-    return { year: priorYear, mode: 'conflict-locked', assertedYears: distinctYears, uniqueRows, support: yearBearingRows };
+    return { year: normalizedPriorYear, mode: 'conflict-locked', assertedYears: distinctYears, uniqueRows, support: yearBearingRows };
   }
 
   if (distinctYears.length === 0) {

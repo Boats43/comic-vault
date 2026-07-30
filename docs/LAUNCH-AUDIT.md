@@ -2263,4 +2263,299 @@ baseline.**
 new). `.claude/settings.local.json` also shows modified in `git status`
 but is excluded from this campaign's scope per standing convention.
 
+**Commit 4.2** — fingerprint year-placeholder resolver-entry fix + terminal
+restamp finalizer. Closes the live-origin verification gap CP2 raised
+against Commit 4.1 (a real physical scan of the Spawn #351 Cover C Brett
+Booth Virgin book): the deployed Commit 4.1 build produced
+`familyKey="spawn|351|unknown"`, not the required `"spawn|351|2024"`.
+
+**Root cause, two independent, stacked defects, both confirmed via real,
+unfiltered Vercel production log pulls (never query-filtered — a first,
+filtered pull silently hid the diagnostic line and was caught and
+re-pulled clean):**
+
+1. Vision's own year field for the live scan was the literal string
+   `"Unknown"` — `[ship12] ... Spawn #351 Unknown`, `[comicvine]
+   query="Spawn 351" issue=351 year=Unknown`, `[ship28b-conflicts]
+   sources={"vision":"Unknown","comicVine":"1992","priceCharting":2024}`.
+   A truthy, non-null string `?? null` never intercepts. In
+   `resolveFamilyYearConsensus` (`identityCore.js`), this was trusted as a
+   real prior year, landing in the `conflict-locked` branch against the
+   merged family's own legitimate 3/5-row `"2024"` vote instead of
+   adopting it — explaining the absence of the expected `[commit4.1]
+   identityProvisionalFields += 'year'` log line on the live request.
+2. `buildVisualReferenceEvidence` runs in phase 1, BEFORE the separate,
+   pre-existing `resolveYear` mechanism later corrects `confirmedYear` via
+   PC/CV agreement — confirmed live, same request: `[commit4.1]
+   visualReferenceEvidence: ... familyKey="spawn|351|unknown"` followed
+   later by `[year-resolved] Unknown → 2024 (source=pc-cv-agreement)`. A
+   placeholder captured early never retroactively benefits from a later,
+   better resolution — even had defect 1 not existed, this gap would
+   still strand a genuinely-late-resolving year.
+
+**Ship-28b family-vote blind spot (why the existing conflict detector
+didn't already catch this):** `[ship28b-conflicts]` is keyed ONLY on
+`{vision, comicVine, priceCharting}` raw values — confirmed by direct
+inspection, it never reads the family-vote's own adopted value, so it
+cannot see "phase-1 family-adopted value disagrees with the later
+terminal-resolved value," the specific shape this fix's own finalizer
+partially addresses (for the placeholder case only — see REAL-YEAR
+TERMINAL DIVERGENCE below).
+
+**Fix 1 — resolver-entry boundary normalization.** New
+`normalizeOptionalYear(value)` (`src/lib/yearEvidence.js`, new file — a
+neutral home, not folded into `compHygiene.js`, so it is unambiguously
+shared by both consumers below without implying a comp-hygiene-specific
+scope): maps a fixed placeholder set (`'', 'unknown', 'unknown year',
+'unknown-year', 'n/a', 'na', 'none', '?'`, case/whitespace-insensitive,
+plus `null`/`undefined`) to `null`; every other value — including a real
+non-string year — passes through completely unchanged. Applied as the
+FIRST executable line inside `resolveFamilyYearConsensus`, before any
+`priorYear`-branch below it runs; every existing branch's "priorYear
+null" behavior already does the right thing, so a normalized placeholder
+simply reaches that same behavior instead of being trusted as real. The
+resolver defends its own boundary (not the caller) — `resolveIdentity`'s
+call site needed zero changes, and any future caller of this function
+inherits the protection automatically.
+
+**Fix 2 — `buildFingerprintYearToken` defense-in-depth**
+(`src/lib/issueAuthority.js`), independent of fix 1, reusing the SAME
+canonical placeholder set so the two can never drift apart (the
+"drifted-duplicate-constant" class this codebase has hit repeatedly — see
+CLAUDE.md's Pattern Library): a semantic placeholder now maps directly to
+the literal `'unknown-year'` token, never a normalized-but-meaningless
+string like `"unknown"` — the exact mechanism that produced the live
+`"spawn|351|unknown"` symptom (old code: `norm("Unknown")` returns the
+non-empty string `"unknown"`, which was returned directly, never reaching
+the old fallback that only fired on an EMPTY string).
+
+**Fix 3 — terminal restamp finalizer.** New
+`restampVisualReferenceEvidenceYear(visualReferenceEvidence,
+visualReferenceFingerprintContext, terminalYear, terminalYearSource)`
+(`src/lib/issueAuthority.js`) — a terminal, custody-gated re-check that
+lets a genuinely-improved terminal year replace a phase-1 placeholder in
+`out.visualReferenceEvidence.familyKey`, closing the timing gap from
+defect 2 above (for cases fix 1 doesn't already fully resolve — see
+Fixture B below).
+
+**Four actions only — `'no-evidence' | 'fingerprint-custody-mismatch' |
+'no-op' | 'restamped'`.** No fifth, conflict-reporting action. This was a
+deliberate removal from an earlier draft of this plan (a
+`'conflict-reported'` action was designed, then explicitly withdrawn):
+**REAL-YEAR TERMINAL DIVERGENCE** — a phase-1 family-adopted REAL year
+that later genuinely disagrees with a REAL terminal-resolved year — is
+explicitly OUT OF SCOPE for Commit 4.2. Monotonicity is still enforced: a
+phase-1 REAL year is NEVER overwritten regardless of what the terminal
+value holds (silently resolves to `'no-op'`, tested in Section 8 of the
+regression file below) — but no signal is raised when the two genuinely
+disagree, an honest, documented gap rather than a claimed fix. No
+existing gate contains this specific divergence shape either — Ship-28b's
+own detector is blind to it for the reason described above. Recorded as a
+named finding, scoped as Commit 5 input, not solved here.
+
+**Custody precedes all year-action branching — two independent links,
+both required, checked before any mutation is considered:**
+- **Link 1** (current vs original): has
+  `visualReferenceEvidence.familyKey` been mutated since
+  `visualReferenceFingerprintContext` was captured?
+- **Link 2** (original vs expected): was the captured context itself
+  internally consistent — does rebuilding the fingerprint from its own
+  captured `stableTitle`/`stableIssue`/`phaseOneYear` reproduce the
+  captured `originalFamilyKey`?
+
+Either link failing is a custody mismatch — no mutation is attempted, one
+bounded log line fires. A missing or incomplete
+`visualReferenceFingerprintContext` (null, or missing
+`stableTitle`/`stableIssue`/`originalFamilyKey`) is a custody failure
+too, NEVER reconstructed from terminal-mutable values
+(`effectiveTitle`/`confirmedIssue` read live at the call site) — this
+stays inside the four-action matrix as a custody-mismatch subtype, not a
+fifth action. `phaseOneYear` itself may legitimately be `null` — checked
+via `'phaseOneYear' in context`, not a null-check, so a genuine
+placeholder capture is never mistaken for a missing one.
+
+The `custodyExpected` log selector — `currentKey !== originalKey ?
+originalKey : expectedKey` — reports the FIRST broken link rather than
+always logging one fixed field: link-1 failure logs `originalKey` (what
+the key was supposed to still be); link-2-only failure logs the rebuilt
+`expectedKey` (what a self-consistent capture would have produced). Both
+the custody rebuild and the restamp's new-key construction use ONLY the
+captured `stableTitle`/`stableIssue` — never live/terminal-scope
+`effectiveTitle`/`confirmedIssue`.
+
+**Evidence custody:** restamping changes ONLY
+`visualReferenceEvidence.familyKey` (via object-spread, overwriting
+exactly one key) — `rows`, `count`, `low`, `high`, `median`,
+`marketState`, `status`, `reason`, and every row's own
+`title`/`price`/`itemWebUrl` stay byte-identical, enforced structurally
+and tested explicitly (Section 5 of the regression file).
+
+**Bounded logging — the only two outputs, fired exactly once each, never
+on `no-op`/`no-evidence`:**
+```
+[commit4.2] fingerprint custody mismatch current="..." expected="..."
+[commit4.2] familyKey finalized old="..." new="..." yearSource="..."
+```
+
+**`api/enrich.js` wiring** — a captured custody-context local
+(`visualReferenceFingerprintContext`, declared separately from the
+grouped `let` block above it for clarity, not merged into it) is bound
+ONCE at the phase-1 `buildVisualReferenceEvidence` call site
+(`fingerprintStableTitle`/`fingerprintStableIssue`/`fingerprintPhaseOneYear`
+locals, guaranteeing the builder call and the captured context use
+IDENTICAL values — `confirmedYear` in particular gets reassigned later in
+this same function by `resolveYear`'s own PC/CV agreement, so reading it
+live a second time at the terminal point would silently defeat the whole
+point of a phase-1 snapshot). The terminal call site — a thin, six-line
+pass-through with zero independent logic of its own — sits immediately
+before the pre-existing `commit4-terminal` block, using the real,
+already-computed `confirmedYear` and `yearResolution.yearSource`:
+```js
+if (out.visualReferenceEvidence) {
+  const restamp = restampVisualReferenceEvidenceYear(
+    out.visualReferenceEvidence, visualReferenceFingerprintContext,
+    confirmedYear, yearResolution.yearSource);
+  out.visualReferenceEvidence = restamp.evidence;
+}
+```
+
+**Fixture B (Foo #12) — the case the terminal finalizer exists for,
+distinct from the founding fixture's bug shape.** Verified via real
+execution against the actual parser/clustering/merge chain before being
+finalized into the test file: a real family-adopted issue (`"12"`, 3/3
+unanimous) with GENUINELY insufficient year support at phase 1 (only 1/3
+rows assert a year — below the 2-row adoption floor; `mode: 'no-data'`,
+not a placeholder-mistrust case) — `confirmedYear` stays legitimately
+`null`, `familyKey` is `"foo|12|unknown-year"`. When a real year later
+arrives via the terminal path, the finalizer restamps to
+`"foo|12|2024"`. This is the scenario where fix 1 alone (the resolver
+boundary) does NOT help — there was never a placeholder to mistrust, only
+genuinely thin evidence — so fix 3 (the terminal finalizer) is what
+closes it.
+
+**Founding fixture (the live scan's own shape), re-run with the exact
+live bug input (`vision.year: "Unknown"`):** confirms `identity.confirmedYear`
+adopts `"2024"` at phase 1 already (fix 1 alone fully resolves it — the
+family's 3/5-row vote adopts cleanly once the placeholder is no longer
+trusted as a real prior), `identityProvisionalFields` is exactly
+`["issue","year"]`, `visualReferenceEvidence.familyKey` is
+`"spawn|351|2024"` — the live bug's exact symptom does not reproduce. The
+terminal restamp on this fixture is consequently a `no-op` (nothing left
+for it to fix) — proving it is fix 1, not fix 3, that actually closes the
+live scan's own bug. Fix 3 exists for the Fixture B shape and any future
+case where phase 1 genuinely cannot resolve a real year in time.
+
+**Teeth-proofs, both performed as a literal, live source-edit/observe/
+revert/re-verify cycle during implementation (real commands/output, not
+simulated), AND embedded in permanent, automated form in the regression
+file (Section 2 and Section 10):**
+- **X1** (`identityCore.js` resolver boundary) — bypassed
+  `normalizeOptionalYear` at the function's entry
+  (`const normalizedPriorYear = /* bypass */ priorYear;`), re-ran a
+  direct reproduction of the founding fixture's family-vote shape:
+  bug reproduced exactly — `{"year":"Unknown","mode":"conflict-locked",
+  "assertedYears":["2024"],"uniqueRows":5,"support":3}`. Reverted;
+  re-verified clean — `{"year":"2024","mode":"adopted",...}`,
+  `git diff` line-count unchanged from pre-injection, ESM parse clean,
+  Commit 4.1 suite 175/175 and Commit 4 suite 152/152 both clean.
+- **X2** (`api/enrich.js` terminal call site) — replaced the terminal
+  `if (out.visualReferenceEvidence)` guard with `if (false && ...)`
+  (dead branch); confirmed via `grep` that
+  `out.visualReferenceEvidence.familyKey` has exactly one writer in the
+  entire file (the phase-1 `buildVisualReferenceEvidence` assignment) and
+  the restamp call is the ONLY mechanism that ever updates it afterward —
+  disabling it structurally proves no other code path would heal a
+  placeholder. ESM parse still clean with the bypass injected (syntax-
+  valid dead branch). Reverted; ESM parse clean, `git diff --stat`
+  restored to the pre-injection 55-line diff, Commit 4.1 and Commit 4
+  suites both re-verified clean.
+
+**Test file:** `tests/q-trackB-commit4.2-fingerprint-year-restamp.test.js`
+(new), **160/160 passing.** Ten sections: `normalizeOptionalYear`
+controls (Section 0), `buildFingerprintYearToken` controls (Section 1),
+the placeholder-boundary matrix with an embedded automated X1 teeth-proof
+(Section 2), the founding fixture live-bug reproduction (Section 3),
+Fixture B full chain (Section 4), Custody Test C — the concrete
+successful restamp (Section 5), Custody Tests A/B/D — link-1 failure,
+link-2 failure, and the `custodyExpected` selector distinguishing which
+link failed (Section 6), missing/incomplete-context defense including
+the legitimate-`phaseOneYear:null` control (Section 7), real-year no-op/
+monotonicity controls documenting REAL-YEAR TERMINAL DIVERGENCE as an
+honest gap (Section 8), placeholder-to-placeholder no-op (Section 9), and
+`no-evidence` plus the embedded automated X2 call-vs-no-call teeth-proof
+(Section 10).
+
+**Handler-level integration test — scope note, disclosed, not a silent
+substitution.** The approved contract's Required Test 3 described a
+"handler-level" Fixture B exercise (a real `api/enrich.js` `handler`
+import with `global.fetch` mocked). Investigated before writing the test
+file: the real terminal call site this commit adds is the thin six-line
+pass-through quoted above, with zero independent logic — verified by
+direct reading of the diff. Exercising it via the full HTTP handler would
+require mocking `api/enrich.js`'s entire external-call surface
+(PriceCharting HTML scrape, ComicVine JSON, eBay Browse API JSON,
+Ximilar, CGC lookup) — a large, fragile undertaking with no existing
+hermetic precedent in this codebase (the one prior handler-level test,
+`ship26-integration.test.js`, requires real API keys and is gated on
+their presence, not mocked). The test file instead exercises the
+IDENTICAL real functions in the IDENTICAL sequence the real call site
+uses (Section 4), plus an explicit call-vs-no-call teeth-proof (Section
+10) standing in for a literal source-edit/revert cycle against that call
+site — which was ALSO performed once, live, as X2 above. A deliberate,
+disclosed judgment call, not a scope reduction presented as full
+coverage.
+
+**Re-verification:** Commit 4.2 suite 160/160. Commit 4.1 suite 175/175
+(re-run clean, no change). Commit 4 suite 152/152 (re-run clean, no
+change). ESM-mode parse verified explicitly on `api/enrich.js`,
+`src/lib/identityCore.js`, `src/lib/issueAuthority.js`, and the new
+`src/lib/yearEvidence.js`. `npm run build` clean.
+
+**TRUE manifest-based 128-file suite A/B** (one explicit manifest of the
+original 128 `tests/*.test.js` files, the new Commit 4.2 test file
+excluded per the approved mechanics; BEFORE = the three touched
+production files path-limited-stashed via `git stash push --
+api/enrich.js src/lib/identityCore.js src/lib/issueAuthority.js` and the
+new untracked `yearEvidence.js` moved aside — never `-u`/`-a`, never
+touching `.claude/settings.local.json`; AFTER = both restored): **11
+failing files, IDENTICAL set before and after**
+(`batch1-fixes`, `comp-filter-hygiene`, `decision-engine`,
+`identity-gate`, `image-search-extraction`, `mega-keys`,
+`pattern-k-dedupe-issue`, `priceBands`, `q-adv397-visual-guard`,
+`ship26-integration`, `sold-verification` — one file beyond the 10 named
+in CLAUDE.md's own "Known stale test suites" list, consistent with the
+documented-11 baseline this campaign's prior Section 16 entries have
+tracked since Commit 1.1), **zero pass/fail-count differences across all
+128 files**, and — stricter than the Commit 4.1 precedent (which had one
+file, `pattern-k-dedupe-issue`, differing only by disclosed new log
+lines) — **all 11 failing files' raw stdout+stderr byte-identical
+before vs after, zero differences of any kind.** A full-output grep
+across all 128 AFTER captures for `[commit4.2]` returned zero matches —
+confirms neither approved log format leaks into any unrelated suite. A
+first attempt at this A/B was interrupted mid-sequence by a `for`-loop
+exit code breaking the `&&` chain before `git stash pop` ran (loop body
+included a known-failing test's nonzero exit); caught immediately via
+`git status`, the stash was still present and un-lost, popped cleanly,
+and the exercise was redone start to finish with `|| true` guards on the
+loop body. Recorded here per this document's own standing practice of
+logging near-misses, not silently omitting them.
+
+**Relationship to Commit 4.1's live-closure requirement — stated
+explicitly, per this dispatch's own accuracy standard:** Commit 4.2
+makes the deployed build **capable of** producing
+`familyKey="spawn|351|2024"` under the corrected live path. **Commit 4.2
+alone does NOT close Commit 4.1.** Commit 4.1 closes only after the
+required repeat live scans pass against the SHA-verified deployed Commit
+4.2 build — the same CP1-CP4 checkpoint structure used for the original
+live-origin verification, re-run once Commit 4.2 is staged, committed,
+pushed, and independently deployment-verified.
+
+**`git diff --name-only` (exact campaign file list, Commit 4.2 pass):**
+`api/enrich.js`, `docs/LAUNCH-AUDIT.md`, `src/lib/identityCore.js`,
+`src/lib/issueAuthority.js` (tracked, modified) plus
+`src/lib/yearEvidence.js` (untracked, new) and
+`tests/q-trackB-commit4.2-fingerprint-year-restamp.test.js` (untracked,
+new). `.claude/settings.local.json` also shows modified in `git status`
+but is excluded from this campaign's scope per standing convention.
+
 DO NOT STAGE, COMMIT, OR PUSH before review.

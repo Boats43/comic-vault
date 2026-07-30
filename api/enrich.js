@@ -120,7 +120,7 @@ import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } f
 // authority validation (allow-list + normalization), never trusting the
 // client's correctedFields claim alone.
 import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
-import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence } from "../src/lib/issueAuthority.js";
+import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear } from "../src/lib/issueAuthority.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -2645,6 +2645,15 @@ export default async function handler(req, res) {
     // TRACK A: Skip identity resolution for barcode scans (100% certain)
     // FIX 4: Also skip for manual identity (user typed, no camera)
     let identity, confirmedTitle, confirmedIssue, confirmedYear, confirmedPublisher, identitySource, confirmedGrade, confirmedLabelType;
+    // Track B Phase 0, Commit 4.2 — declared separately from the grouped
+    // list above (not an uninitialized member of it) so its intent reads
+    // clearly: this is the captured custody context for the terminal
+    // fingerprint finalizer, visible to both the phase-1 evidence-
+    // construction branch (which assigns it) and the terminal
+    // finalization block (which reads it), far later in this same
+    // handler. See issueAuthority.js's restampVisualReferenceEvidenceYear
+    // for what consumes it.
+    let visualReferenceFingerprintContext = null;
     // Q134 dispatch (2026-07-21) — captured once, straight from
     // resolveIdentity's isProvisionalOverride (set at branch-fire time,
     // before any zero-support suffix can mutate identitySource). Every
@@ -2824,15 +2833,33 @@ export default async function handler(req, res) {
         // included so a same-title/same-issue, different-year product
         // (a different volume, reboot, or renumbering) never collides
         // into the same fingerprint.
+        //
+        // Track B Phase 0, Commit 4.2 — bound ONCE into named locals so
+        // the builder call and the custody context below are guaranteed
+        // to use the identical values, never re-reading effectiveTitle/
+        // confirmedIssue/confirmedYear a second time (confirmedYear in
+        // particular gets REASSIGNED later in this function by
+        // resolveYear's own PC/CV agreement — reading it live a second
+        // time at the terminal point would silently defeat the whole
+        // point of capturing a phase-1 snapshot).
+        const fingerprintStableTitle = effectiveTitle;
+        const fingerprintStableIssue = confirmedIssue;
+        const fingerprintPhaseOneYear = confirmedYear;
         const visualReferenceEvidence = buildVisualReferenceEvidence(
           familyCandidate?.topFamily?.indices,
           parsedVisualRows,
-          effectiveTitle,
-          confirmedIssue,
-          confirmedYear
+          fingerprintStableTitle,
+          fingerprintStableIssue,
+          fingerprintPhaseOneYear
         );
         if (visualReferenceEvidence) {
           out.visualReferenceEvidence = visualReferenceEvidence;
+          visualReferenceFingerprintContext = {
+            stableTitle: fingerprintStableTitle,
+            stableIssue: fingerprintStableIssue,
+            phaseOneYear: fingerprintPhaseOneYear,
+            originalFamilyKey: visualReferenceEvidence.familyKey,
+          };
           console.log(
             `[commit4.1] visualReferenceEvidence: ${visualReferenceEvidence.count} rows, ` +
             `range=$${visualReferenceEvidence.low}-$${visualReferenceEvidence.high} median=$${visualReferenceEvidence.median}, ` +
@@ -9383,6 +9410,26 @@ export default async function handler(req, res) {
       // else: out.price stayed null AND no fallback was available either —
       // genuinely nothing anywhere. Banner stays the default "Visual
       // identification uncertain" text set when identityRefused fired.
+    }
+
+    // Track B Phase 0, Commit 4.2 — fingerprint year finalization. Must
+    // run BEFORE the commit4-terminal block below: it only touches
+    // out.visualReferenceEvidence.familyKey (never price/decision fields),
+    // so ordering relative to that block is not load-bearing for
+    // correctness, but this keeps all Track B terminal blocks grouped in
+    // one place and keeps the finalizer's own single log line adjacent to
+    // its cause (confirmedYear's final resolveYear-driven value, above).
+    // restampVisualReferenceEvidenceYear does its own internal logging
+    // (both required formats, [commit4.2] fingerprint custody mismatch /
+    // [commit4.2] familyKey finalized) — no duplicate log needed here.
+    if (out.visualReferenceEvidence) {
+      const restamp = restampVisualReferenceEvidenceYear(
+        out.visualReferenceEvidence,
+        visualReferenceFingerprintContext,
+        confirmedYear,
+        yearResolution.yearSource
+      );
+      out.visualReferenceEvidence = restamp.evidence;
     }
 
     // Track B Phase 0, Commit 4 (2026-07-29) — explicit server-side
