@@ -2559,3 +2559,877 @@ new). `.claude/settings.local.json` also shows modified in `git status`
 but is excluded from this campaign's scope per standing convention.
 
 DO NOT STAGE, COMMIT, OR PUSH before review.
+
+**Commit 4.3** — winning-family authority preservation and conflict
+containment. Root cause: a real live production scan (Spawn #351 Cover C
+Brett Booth Virgin, 2026-07-30 23:16:50, deployment
+`dpl_7PHbRJGqB3Cn6itx1iBYuM7tqVJx` / build `c9530ba`, Commit 4.2's own
+deployed build) produced a coherent 5-member Spawn #351 title family
+(merged from a 2-row + 3-row fragment, weightSum=13.5, 5/5 internal issue
+support, 3/5 asserting "2024") — but Q84's title-safety gate correctly
+refused to replace the clean canonical title "Spawn" with the family's own
+marketplace-derived cluster label, forcing title decision =
+`fallback-vision`. Two different axes were conflated: `resolveIdentity`'s
+family-issue/year-consensus computation was gated behind the SAME decision
+value Q84's title-safety check controlled, so the coherent family's own
+issue/year evidence was silently discarded whenever title projection was
+blocked. `vision-zero-support` then fell through to the raw pool's
+unrelated #300 plurality (9/18, from unrelated Todd McFarlane 1:50 variant
+listings mixed into the same pool) and adopted it as `confirmedIssue` —
+Phase 2 went on to query, cache, and price Spawn #300 entirely, while the
+"PROMOTED" banner and reference evidence both spoke of the #351 family, and
+the client-forwarded "Brett Booth virgin variant" text (a genuinely correct
+Vision read, captured against Vision's own issue "301") survived unchanged
+alongside it — an impossible identity on one card.
+
+**Title-axis-only qualification.** A first-draft implementation gated
+retention on bare `topFamily.count >= 3` — too permissive:
+`selectTitleFamilyCandidate` returns `decision:'fallback-vision'` with a
+populated, possibly `>=3`-member `topFamily` for BOTH a genuine title-axis-
+only Q84 block AND a family that merely shares weak token overlap with
+Vision's own title (confirmed live via direct execution — a real "Batman
+Beyond Legacy Special Returns Edition" 5-member family, 33% overlap,
+reaches `fallback-vision` with `topFamily.count:5`). Fixed with an explicit
+`titleAxisOnlyBlock: true` marker, set ONLY at the single genuine
+Q84-dual-axis-blocked return site in `selectTitleFamilyCandidate`
+(`src/lib/imageSearchIdentity.js`).
+
+**The qualified-family predicate — one precondition, then 4 evidence-
+quality conditions, all required (FINAL, corrected form — see the two
+named findings immediately below):**
+
+- **PRECONDITION — `hasValidFamilyMembership(visualItems, topFamily.indices,
+  topFamily.count)`** (`src/lib/compHygiene.js`). Runs FIRST, short-
+  circuiting the whole predicate. Requires: `visualItems` is an array;
+  `indices` is an array; `indices.length` agrees with the family's own
+  claimed `count`; every index is a unique integer; every index is in
+  bounds; every referenced row actually exists (`visualItems[idx] !=
+  null`). This is a current-request-membership precondition, NOT a fifth
+  evidence-quality signal — its failure means the family never reaches
+  measurement at all: `familyIssueConsensus`/`familyYearConsensus` stay
+  `null`, zero `[commit4.3]` log lines, zero structured `[family-evidence]`
+  events, no provisional override, and the pre-existing raw-pool fallback
+  path stays fully reachable.
+
+1. `family.titleAxisOnlyBlock === true` — a genuine Q84 title-axis-only
+   block, not a weak-overlap or any other `fallback-vision` reason.
+2. `family.topFamily.count >= FAMILY_AUTHORITY_COHERENCE_FLOOR` (3) — a
+   minimum coherence floor.
+3. `!hasContaminatedMember(visualItems, topFamily.indices)` — no member of
+   the family trips the shared contamination screen (lot/reprint/slab/
+   graded/signed/TPB markers; `src/lib/compHygiene.js`, shared with
+   `imageSearchIdentity.js`'s own merge-gating logic to avoid a circular
+   import from `identityCore.js`).
+4. `familyDominatesRunnerUp(topFamily.weightSum, runnerUp?.weightSum)` —
+   the SELECTED family must dominate the runner-up by the reused 3x
+   margin (`top >= runner * 3`), inclusive boundary.
+
+**NAMED FINDING 1 (IMPLEMENTATION PACKET HOLD — FINAL NARROW HOLD, item 1,
+2026-07-30) — the first-pass predicate had no membership precondition at
+all.** A stale/foreign family (e.g. `topFamily.indices` carried over from a
+different/prior scan, not belonging to the current request's
+`visualItems`) could reach the MEASURE step, relying on
+`resolveFamilyIssueConsensus` degrading gracefully to `no-data` rather than
+being rejected up front by the gate itself. Fixed by adding
+`hasValidFamilyMembership` as an explicit precondition (above), verified
+via direct execution to fail closed on all six structural violation modes
+(non-array inputs, count mismatch, duplicate indices, non-integer indices,
+out-of-bounds indices, a referenced row that doesn't exist) and to produce
+the full required silent-safe contract end-to-end through `resolveIdentity`.
+
+**NAMED FINDING 2 (IMPLEMENTATION PACKET HOLD — FINAL NARROW HOLD, item 2,
+2026-07-30) — the first-pass margin condition was VACUOUS, masked by an
+impossible test fixture.** The first-pass implementation reused
+`isCompetingFamilyTooStrong(topFamily.weightSum, [runnerUp])` verbatim
+(inverted with `!`) as the 4th condition. This function's real, original
+semantics (top-rank-protection, `imageSearchIdentity.js`) is "does the
+strongest competitor outweigh `item0Family` by 3x?", correct THERE because
+`item0Family` is selected by POSITION (the visually-first search result)
+and can legitimately have less weight than a competitor. At the retention
+gate's call site, however, `topFamily`/`runnerUp` are literally
+`scored[0]`/`scored[1]` — `topFamily.weightSum >= runnerUp.weightSum`
+ALWAYS holds by construction. Under that constraint,
+`isCompetingFamilyTooStrong(top, [runner])` can only ever return `true` in
+a degenerate zero-weight case (`runner >= top*3` requires `runner > top`,
+contradicting the ordering invariant) — the first-pass condition could
+NEVER actually have blocked retention in production. This went undetected
+because the first-pass regression control used an IMPOSSIBLE fixture
+(`topFamily.weightSum=3`, `runnerUp.weightSum=10` — a runner-up outweighing
+the top family, which cannot occur at this call site) that happened to
+exercise the buggy formula's "blocked" branch by coincidence, not by
+correctly modeling real data. Root cause was investigated per R1's STOP-
+and-report instruction: reusing `isCompetingFamilyTooStrong` for the
+retention gate's genuinely different weight-ordering invariant would have
+required changing that function's meaning, which would have broken its
+own, correct, original top-rank-protection call site. Resolution: a
+separately-named function, `familyDominatesRunnerUp(topWeightSum,
+runnerUpWeightSum)` = `topWeightSum >= runnerUpWeightSum * 3` (`true`
+trivially when there is no real runner-up), added alongside
+`isCompetingFamilyTooStrong` in `src/lib/compHygiene.js` — NOT a mutation
+of that function's shared semantics, which is untouched and still correct
+at its original call site; both functions' doc comments now cross-
+reference each other's weight-ordering assumptions explicitly, and the
+generic-hype boundary is inclusive (`>=`), matching
+`isCompetingFamilyTooStrong`'s own convention: `top=9, runner=3` exactly
+dominates. Verified via direct execution against three real, correctly-
+ordered examples: `top=13.5, runner=3.0` (the real live Spawn fixture's
+own numbers) → dominates, ALLOWED; `top=10, runner=4` → does not dominate
+(`10 < 12`), BLOCKED; `top=9, runner=3` → exact equality boundary,
+ALLOWED. Confirmed the real live Spawn fixture's own outcome is
+byte-identical under the corrected logic (13.5 dominates 3.0 either way,
+so this specific production case was never actually affected by the bug —
+the vacuousness was a latent gap, not a symptom observed in the one
+production incident this commit is built around).
+
+**Measure/decide split — `decideFieldAuthority`
+(`src/lib/identityCore.js`), five outcomes (FINAL, corrected form — see
+NAMED FINDING: CONFIDENCE-AS-AUTHORITY, immediately below):**
+
+**Confidence vs. authority — the distinction this hold corrected.**
+Confidence measures certainty WITHIN a source: how sure Vision is of its
+own read. Authority records PROVENANCE — who or what asserted a value, and
+what permission that source has to control identity — and is a completely
+separate axis. Confidence cannot manufacture provenance: a source being
+very sure of itself is not the same as a second, independent source having
+corroborated it. `decideFieldAuthority` now takes an explicit,
+source-aware input:
+```
+{ priorValue, priorSource: 'manual'|'user'|'catalog'|'vision'|'unknown',
+  priorIndependentlyTrusted, priorConfidence, familyValue, familyMode,
+  priorHasSupportInFamily }
+```
+`priorIndependentlyTrusted` is computed by the caller via the new
+`isPriorSourceIndependentlyTrusted(priorSource, hasCorroboratingAuthorityRecord)`
+— trusted for `'manual'`/`'user'` (a server-validated correction),
+trusted for `'catalog'` ONLY when an explicit corroborating authority
+record is also supplied (the bare tag alone proves nothing — no live
+catalog-authority source exists in this codebase yet, so this currently
+always evaluates `false` in practice, a deliberate conflicted-safe
+default), and NEVER trusted for `'vision'` (including HIGH confidence) or
+an unrecognized/absent source. `priorConfidence` remains a genuine input
+to the decide contract — NOT vestigial, and NOT re-purposed to derive
+trust — see the `provisionally-corrected`/`conflicted` split below, where
+it legitimately still matters:
+
+- `adopted` — prior missing/placeholder; `resolvedValue` = family's
+  observed value; `authoritativeForCustody: true`.
+- `corroborated` — prior present, family agrees; `resolvedValue` = prior
+  (unchanged); `authoritativeForCustody: true`. Agreement needs no
+  independent-trust argument — both sides already concur.
+- `provisionally-corrected` — an UNTRUSTED prior (`priorIndependentlyTrusted:
+  false`) that is also NOT high-confidence (`priorConfidence !== 'high'`),
+  with ZERO support in a qualified, disagreeing family; `resolvedValue` =
+  family's observed value; `authoritativeForCustody: true`. This is the
+  Spawn fixture's own path for both issue and year (Vision's issue "301"/
+  year "2020" are LOW-confidence, untrusted, 0/5 family support) — a
+  silent correction is only safe here because the prior was never
+  confident about itself either.
+- `preserved-prior` — `resolvedValue` = prior; `authoritativeForCustody`
+  is `true` only when the prior is INDEPENDENTLY TRUSTED BY PROVENANCE
+  (`priorIndependentlyTrusted: true` — a validated manual/user correction
+  or corroborated catalog record; NEVER Vision alone, regardless of
+  confidence). Fires both when the family doesn't qualify at all, and when
+  a qualified family disagrees but the prior is trusted.
+- `conflicted` — `authoritativeForCustody: false`; fires in THREE cases:
+  (a) the prior is placeholder and the family is inconclusive (genuinely
+  no data); (b) a qualified family disagrees with an untrusted prior that
+  nonetheless has SOME support in the family (a genuine, non-unanimous
+  ambiguity); or (c) — NEW this hold — a qualified, unanimous family
+  disagrees with an untrusted-but-HIGH-CONFIDENCE prior with ZERO family
+  support (an ordinary Vision read at its own most confident is still not
+  independent corroboration; overriding a confident-but-untrusted
+  assertion silently is a different, greater risk than overriding an
+  admittedly weak one — the disagreement is recorded, resolved in neither
+  direction). `resolvedValue` = prior in all three cases (never silently
+  overwritten by the family).
+
+A legacy-mode mapping (`legacyModeFor`, inline in `resolveIdentity`) maps
+the five-outcome vocabulary onto the pre-existing mode vocabulary
+(`adopted`/`corroborated`/`preserved`/`conflict-locked`/`no-consensus`/
+`no-data`) so unmodified downstream consumers
+(`deriveIssueAuthorityFromAdoption`, `out.issueConsensusConflict`) keep
+working without changes.
+
+**`resolveFamilyIssueConsensus`'s additive `assertedIssues` field**
+mirrors `resolveFamilyYearConsensus`'s pre-existing `assertedYears` field
+exactly; added to all 6 return statements. Landed only after the required
+pre-change audit — grepped `resolveFamilyIssueConsensus`/
+`resolveFamilyYearConsensus` across `tests/`, `src/`, `api/`; distinguished
+comment-only mentions from real calls (16 real consumers across 21 broadly-
+matching files); found exactly 9 real exact-shape (`assertEq(x, {...})`)
+assertions across exactly 2 files (5 in
+`tests/q-trackB-commit4.1-spawn-visual-family-merge.test.js` against
+`resolveFamilyYearConsensus`, unaffected by an issue-side-only field; 4 in
+`tests/q-trackB-commit4.2-fingerprint-year-restamp.test.js` — 2 against
+`resolveFamilyYearConsensus`, unaffected, and 2 against
+`identity.familyIssueConsensus`/`familyYearConsensus`, of which 1 needed
+the new field added — done, and the suite re-verified at 160/160 with no
+other change). One apparent match
+(`tests/q-trackB-commit3-manual-correction.test.js:188`) was ruled out as
+an unrelated `validateManualAuthority` function sharing no relationship to
+either consensus function. The new field is additive-only — no existing
+exact-shape assertion needed to change beyond the one identified.
+
+**Shared custody invariant — `checkCrossPopulationPromotionGuard`
+(`src/lib/issueAuthority.js`, revised signature
+`(familyIssueDecision, custodyValues)`).** Consumes the decide-result's
+`authoritativeForCustody`/`resolvedValue` fields directly — never
+reconstructed from `.mode` string matching, which is what let the
+original live bug through undetected (a `mode==='adopted'`-only guard
+would have silently passed a `corroborated`-but-mismatched case; see
+Mutation 3 below). Called at exactly 4 sites in `api/enrich.js`:
+1. Promotion — before `identityRefusedPromotionEligible` is finalized.
+2. Exact-cache access — before `canUseExactIssuePricingCache` is consulted
+   (`cacheCustodyCheck`).
+3. Terminal authoritative-pricing — before
+   `computeIssueAuthorityContractPatch`; synthesizes a `conflicted`
+   `issueAuthority` object on violation to reuse existing machinery rather
+   than inventing a parallel contract.
+4. Response finalization — before `out.issue = confirmedIssue ?? null`.
+
+Each site logs a `[commit4.3] ... custody blocked: ...` line and sets
+`out.crossPopulationPromotionBlocked` (I13 — annotate, never silently
+drop) on a violation.
+
+**Variant provenance follows the final issue.**
+`isVariantProvenanceValid(variantSourceIssue, confirmedIssue)`
+(`src/lib/variantIdentity.js`) — `variantSourceIssue == null ||
+String(variantSourceIssue) === String(confirmedIssue)`, wired via
+`issueNum` (the practical proxy for "the issue this variant was captured
+alongside"). In the live fixture, "Brett Booth virgin variant" was
+captured against Vision's original issue "301" — invalidated once
+`confirmedIssue` resolves to "351"; `api/enrich.js` clears
+`req.body.variant` and recomputes from the final issue-scoped population
+only when provenance is invalid.
+
+**`computeListingPricingAuthority` — implemented, then FULLY REMOVED**
+(not merely reverted in spirit — the function, its call sites, and its
+doc comment are gone from `src/lib/issueAuthority.js`/`api/enrich.js`).
+The existing, unmodified Commit 4 `computeIssueAuthorityContractPatch`
+already satisfies every observable pricing/listing requirement this
+commit needed; the four new field names it would have introduced
+(`recommendedListPrice`/`priceReady`/`pricingAuthority`/
+`listingAuthority`) are real Commit 6 consumer-contract design work, not a
+two-function bolt-on to Commit 4.3.
+
+**Structured `[family-evidence]` event — a deliberate supersession, not
+drift.** `imageSearchIdentity.js`'s pre-existing `logFamilyEvidence` call
+site explicitly excludes `fallback-vision`/`refused-identity-conflict` —
+retention is a newly-recognized authority path that never had ANY
+`[family-evidence]` coverage before this commit. The new event fires from
+`api/enrich.js` (not `identityCore.js`) specifically because issue/year
+support numbers and the final `familyKey` are only known at that later
+point in the pipeline, gated so it fires exactly once per qualifying
+request (never alongside the pre-existing site's own line). Extracted into
+`buildRetentionFamilyEvidenceLog` (`src/lib/imageSearchIdentity.js`) — a
+real, exported, pure function returning `{isRetentionPath, logLine, rows}`
+rather than calling `console.log` itself, so it is directly assertion-
+testable; `api/enrich.js`'s real call site imports and invokes this exact
+function and logs its returned `logLine` unmodified. Verified via direct
+execution against the real 18-row Spawn fixture to reproduce the real
+production log byte-for-byte: `[family-evidence] decision=fallback-vision
+merged=true familyEvidenceQualified=true
+qualificationReason=title-axis-only-block-retained issueSupport=5/5
+yearSupport=3/5 familyKey="spawn|351|2024" rows=[...]`.
+
+**Exact-vs-synthetic fixture disclosure.** The regression file's 18-row
+Spawn pool reproduces EXACT LIVE IDENTITY DATA recovered from the
+production log (row ordering, all 18 titles, extracted issues, the one
+real itemId/price/itemWebUrl — row 0, the only row the log dumped as a
+full object — the original Vision fields, the original eBay pool-wide
+consensus, and the original `fallback-vision` decision, reproduced via the
+real `selectTitleFamilyCandidate` call). The 17 non-row-0 prices/
+itemWebUrls are SYNTHETIC HARNESS METADATA, clearly labeled inline, never
+used to prove price amounts or commerce behavior. The two hard-rejected
+rows (`categoryClassifier.js`, untouched by this commit) are preserved as
+counts + codes ONLY (`hardRejectedCount:2, TITLE_PATTERN_PRINT:1,
+MARKETPLACE_POSTER_CATEGORY:1, rowBodiesAvailable:false`) — the runtime
+log never recorded their title text, and no synthetic row bodies are
+fabricated to fill the gap.
+
+**Direct, non-mocked #300 proofs (Precision Clause 3):**
+- Cache-key level: `buildComicVineCacheKey`/`buildPriceChartingCacheKey`/
+  `buildActiveCompCacheKey` (relocated to new `src/lib/cacheKeys.js`,
+  re-exported from `api/enrich.js` for backward compatibility) built from
+  the fixture's resolved identity (issue "351") never parse out "300" via
+  `parseCacheKeyIssueSegment`; the identical parser applied to the
+  original live-bug key shapes (`ac:v9:Spawn|300`,
+  `pc:v1:spawn|300|2020`, `pc:v1:Spawn|300|2024`, `cv:Spawn|300|Image
+  Comics`) all correctly parse OUT as "300" — confirming the parser
+  genuinely distinguishes rather than vacuously passing.
+- Query-params level: new `buildComicVineQueryParams`/
+  `buildPriceChartingQueryParams` (`src/lib/cacheKeys.js`) extract the
+  exact `{title, issue, year, ...}` object each real `api/enrich.js` Fix-3
+  Promise.all call site builds for `lookupComicVine`/`lookupPriceCharting`
+  — asserted directly against the fixture's resolved identity, never "300".
+- Cache read/write level: the real `kvGet`/`kvSet`
+  (`api/kv-cache.js`) are called directly (not mocked) — confirmed safe in
+  this environment via standalone execution before being relied on:
+  without Redis credentials, the real `.get()`/`.set()` call fails before
+  any network is reached (observed as either a module-resolution failure
+  for `@upstash/redis` or, when the module resolves, a "Failed to parse
+  URL from /pipeline" error from the client itself, depending on the
+  importing file's own resolution context — both caught internally by
+  `kv-cache.js`'s own try/catch, `kvGet` resolving `null` and `kvSet`
+  resolving `undefined` either way). A spy wrapper around these real
+  functions proves zero `ac:` cache calls occur when exact-issue cache
+  access is disallowed (not merely that the eligibility boolean is false),
+  with a positive control confirming the same spy DOES record a call when
+  eligible, using the corrected issue "351".
+- **PC-specific read adapter (IMPLEMENTATION PACKET HOLD — FINAL NARROW
+  HOLD, item 3, 2026-07-30):** the prior packet proved `pc:v1` key
+  CONSTRUCTION only, not actual read/write custody — corrected. New
+  `readPriceChartingCache(fullTitleKey, strippedTitleKey, kvGetFn)`
+  (`src/lib/cacheKeys.js`), extracted verbatim from `api/enrich.js`'s real
+  Fix-3 Promise.all call site (the "try full title, fall back to stripped
+  title, skip the redundant second read when both keys are identical"
+  pattern) — the real call site and the test now invoke the IDENTICAL
+  function, `kvGetFn` injected so the test passes a spy wrapper around the
+  real `kvGet` while the real call site passes the real `kvGet` directly.
+  Verified via direct execution: called with the corrected fixture's own
+  keys (issue "351"), records exactly one real `kvGet` call (the dedup
+  correctly skips the second read), returns the genuine `{hit: null,
+  result: null}` MISS shape (no fabricated cache hit), and the recorded
+  call never references issue "300". A parallel write-side proof spies the
+  real `kvSet` directly (no separate write wrapper was added — the real
+  call site's write is a single, un-branching `kvSet(key, result, ttl)`
+  with no PC-specific branching logic worth centralizing beyond what the
+  read side already needed) and confirms a write scoped to the corrected
+  fixture's own key never references issue "300" either. Negative controls
+  confirm `pc:v1`/`ac:v9` keys built with the wrong issue "300" parse
+  correctly as "300" and are never among the keys the corrected fixture's
+  real calls actually used. A positive control confirms an independently-
+  eligible case's PC and AC keys both parse to issue "351".
+  **Disclosed structural asymmetry, named honestly rather than glossed
+  over:** the `ac:` exact-issue cache IS gated by the custody invariant
+  (`canUseExactIssuePricingCache` + `checkCrossPopulationPromotionGuard`)
+  and shows literally ZERO calls when ineligible. The `pc:`/`cv:` Fix-3
+  Promise.all block has NO equivalent custody gate today — it is
+  UNCONDITIONAL, always attempting a cache read (and a write on a fresh
+  miss plus successful live query) regardless of whether the resolved
+  issue is provisional or authoritative. This is pre-existing, pre-Commit-
+  4.3 behavior, not something this commit was asked to or did change (the
+  PC/CV lookup is what RESOLVES the identity's supporting data in the
+  first place — gating it behind a custody check that itself depends on
+  identity resolution having already happened would be circular). What
+  this commit proves directly instead: for the corrected Spawn fixture,
+  this unconditional activity is scoped exclusively to the corrected issue
+  "351" — it never reads or writes under the wrong issue "300" the live
+  bug actually cached under. As a small bonus correctness fix found while
+  wiring this in, the second (subtitle-stripped-fallback) `lookupPriceCharting`
+  call at this same call site was also converted from an inline object
+  literal to `buildPriceChartingQueryParams`, matching the first call —
+  it had been missed in the original Section 3(a) pass.
+- **Remaining structural limitation, disclosed per the addendum's
+  feasibility rule rather than papered over:** `lookupComicVine`/
+  `lookupPriceCharting` themselves perform real network calls (ComicVine
+  REST API / PriceCharting scrape) and cannot be invoked for real in a
+  test without either live network access or mocking `global.fetch` —
+  the latter is the handler-scale mocking the addendum instructs against
+  reaching for without a narrower alternative. No narrower adapter exists
+  past the query-params-construction boundary proven above. This is not
+  load-bearing for the bug class this commit closes: both call sites read
+  the query-params object (or `confirmedIssue` directly) with no
+  independently-tracked "target issue" variable that could diverge from
+  what's asserted.
+
+**Mutation proofs (8 required, all embedded as automated naive-
+reconstruction contrasts in the regression file; Mutations 1 and 6 were
+ALSO performed as literal live source-edit/observe/revert cycles against
+the real production files during implementation):** count-only family
+authority (the qualified predicate's core fix); automatic null-prior
+adoption (measure-with-null-prior vs. the real decide step); omission of
+`corroborated` mode in the custody invariant; terminal issue drift (no
+custody check before `out.issue`); cache issue drift (no custody check
+before exact-cache access); removed cross-population promotion guard (the
+ORIGINAL live bug, reproduced exactly); stale variant surviving an issue
+change; missing family-evidence emission — this last one now three
+independent proofs (8a: the pre-existing `[commit4.3]` summary line; 8b:
+direct exercise of the real `buildRetentionFamilyEvidenceLog` function,
+contrasted against a naive skipped-call simulation; 8c: source-presence
+assertions against the real `api/enrich.js` file on disk, confirming the
+call site still imports and invokes the real function and still gates its
+`console.log` on `isRetentionPath` — closing the gap flagged during review
+that testing only the summary line was insufficient to catch a deleted/
+bypassed structured-emission call site).
+
+**Five additional required controls (A-E), all using real exported
+production functions against hand-built `family` fixtures** (the same
+accepted pattern already used elsewhere in this file for a hand-set
+`titleAxisOnlyBlock` marker standing in for what
+`selectTitleFamilyCandidate` would produce):
+- **A — stale/foreign family:** `topFamily.indices` referencing positions
+  that don't exist in the current `visualItems` (simulating an identity
+  object carried over from a different scan). The qualified predicate has
+  no index-bounds check, but the real measurement function
+  (`resolveFamilyIssueConsensus`) maps out-of-range indices to undefined
+  rows and correctly returns zero real assertions
+  (`mode:'no-data', uniqueRows:0`) — `decideFieldAuthority` degrades to
+  `preserved-prior`/`authoritativeForCustody:false`; no silent
+  wrong-authority adoption from a stale family occurs.
+- **B — weak-margin family:** clears the coherence floor and carries
+  `titleAxisOnlyBlock:true`, but the real `isCompetingFamilyTooStrong`
+  correctly flags a competing family at >=3x weight — the 4th predicate
+  condition blocks retention despite the first three passing.
+- **C — naturally-formed contaminated family:** clears the coherence
+  floor WITHOUT any fragment merge (a real single-cluster family, not a
+  Spawn-class 2+3 merge), but one member trips the real
+  `hasContaminatedMember` (a bare "CGC 9.8" token) — confirms the
+  contamination screen applies to naturally-formed families, not only
+  merge-produced ones.
+- **D — valid contradictory TRUSTED prior:** SUPERSEDED by Controls T1-T5
+  (IMPLEMENTATION PACKET HOLD — FINAL AUTHORITY-SOURCE HOLD, below) — the
+  original form of this control used `confidence:'HIGH'` alone as its
+  trust signal, which is exactly the defect that hold corrected. Replaced
+  entirely, not patched, since testing `confidence:'HIGH'` as a trust
+  proxy would now assert the WRONG (pre-correction) outcome. See NAMED
+  FINDING: CONFIDENCE-AS-AUTHORITY and Controls T1-T5 below for the
+  corrected, provenance-based replacement.
+- **E — raw-pool fallback reachability:** a non-qualifying family (weak
+  overlap, no `titleAxisOnlyBlock`) coexists on the same request with a
+  Vision issue carrying genuinely zero raw-pool support — confirmed the
+  pre-existing `vision-zero-support` ESCALATE mechanism remains fully
+  reachable (`identityEscalation:'ID_REQUIRED'`), not silently suppressed
+  by the mere presence of an unrelated, non-qualifying family.
+
+**Verification battery (manifest-correct baseline procedure, fresh
+isolated worktree, FINAL round — the "IMPLEMENTATION PACKET HOLD — FINAL
+NARROW HOLD" corrections, 2026-07-30).** Two disclosed incidents this
+round, both caught and corrected before the reported results below, per
+this document's own standing practice of logging near-misses rather than
+omitting them:
+
+1. **`core.longpaths` (first pass, prior round, still outstanding per
+   R3's explicit re-request):** the first isolated-worktree attempt hit a
+   real Windows "Filename too long" error on a long base64-encoded image
+   filename in the repo. Ran `git config core.longpaths true` as a
+   workaround — a direct violation of the standing "never update git
+   config" instruction. Caught immediately, ran `git config --unset
+   core.longpaths` right away, confirmed via `git config --get
+   core.longpaths` returning empty. All worktrees in every subsequent
+   round (including this final one) used a short root path instead
+   (`C:\cv-baseline-4.3b`, then `C:\cv-baseline-4.3c`) with zero git
+   config changes — confirmed via `git config --get core.longpaths`
+   returning empty both before and after every round since.
+2. **`node_modules` junction deletion (this round, new):** the prior
+   round's baseline worktree (`C:\cv-baseline-4.3b`) had its
+   `node_modules` linked in via a Windows directory junction pointing at
+   the MAIN project's real `node_modules` (since `git worktree add` does
+   not carry over gitignored directories). When that worktree was later
+   removed via `git worktree remove --force`, the removal recursed
+   THROUGH the junction rather than treating it as an opaque reparse
+   point — deleting the CONTENTS of the main project's real, shared
+   `node_modules` directory, not just the junction pointer. This was
+   caught immediately afterward when an unrelated focused-suite re-run
+   (`q-trackB-commit3-manual-correction.test.js`, which imports
+   `api/enrich.js` and transitively `@anthropic-ai/sdk`) crashed with
+   `ERR_MODULE_NOT_FOUND`. Investigated before acting further (confirmed
+   `node_modules` was genuinely empty — 0 entries — and that `git status`
+   showed all tracked source/test files completely untouched, ruling out
+   any git-level damage). Recovered via a plain `npm install` in the main
+   project directory (a safe, standard, reversible restorative action —
+   reinstalls from `package.json`/`package-lock.json`, touches no source
+   or git state) — confirmed via the same test re-running clean
+   afterward (465/465). **Junctions to the main project's `node_modules`
+   are no longer used for baseline worktrees as a result** — this final
+   round's baseline worktree (`C:\cv-baseline-4.3c`) instead runs its own
+   independent `npm install` directly inside the worktree, avoiding the
+   shared-target class of accident entirely.
+
+With both incidents resolved, the battery: fresh `git worktree add` at
+`c9530ba` (`C:\cv-baseline-4.3c`, short root path, zero git config
+changes), `npm install` run directly inside the worktree (256 packages, no
+junction). 128-file manifest built from the BASELINE worktree's own 129
+tracked test files, excluding the Commit 4.2 test file (129 − 1 = 128, the
+established convention). Identical manifest run on both the baseline
+worktree and the current working tree: **11 failing files on both sides,
+byte-identical file-name sets** (`batch1-fixes`, `comp-filter-hygiene`,
+`decision-engine`, `identity-gate`, `image-search-extraction`,
+`mega-keys`, `pattern-k-dedupe-issue`, `priceBands`, `q-adv397-visual-guard`,
+`ship26-integration`, `sold-verification`) — **no new failures relative to
+documented baseline.** New suite
+`tests/q-trackB-commit4.3-winning-family-authority.test.js`: **188/188**
+passing (160 after the prior HOLD's corrections, +28 this round: the
+membership precondition Controls A/A2, the corrected margin-boundary
+Control B with three real sorted examples, and the PC-side read/write
+custody proofs). Focused re-runs, all clean: `q-trackB-commit4-adoption-provisional`
+152/152, `q-trackB-commit4.1-spawn-visual-family-merge` 175/175,
+`q-trackB-commit4.2-fingerprint-year-restamp` 160/160,
+`q140-at-vision-zero-support-skip` 25/25,
+`q-trackB-commit3-manual-correction` 465/465 (the file that surfaced the
+`node_modules` incident above — confirmed clean after recovery). `npm run
+build` clean (ESM-mode parse checks on `api/enrich.js`, `api/grade.js`,
+`api/comps.js`, `src/lib/priceBands.js`, `src/lib/compHygiene.js`,
+`src/lib/responseContract.js`, then `vite build` — 268 modules, no
+errors). Baseline worktree removed after use (disposable scratch artifact,
+not the main working tree) — confirmed the removal this time did NOT
+touch the main project's `node_modules` (no junction present to recurse
+through).
+
+**`git diff --name-only` (exact campaign file list, Commit 4.3 pass):**
+`api/enrich.js`, `docs/LAUNCH-AUDIT.md`, `src/lib/compHygiene.js`,
+`src/lib/identityCore.js`, `src/lib/imageSearchIdentity.js`,
+`src/lib/issueAuthority.js`, `src/lib/variantIdentity.js` (tracked,
+modified) plus `src/lib/cacheKeys.js` (untracked, new) and
+`tests/q-trackB-commit4.3-winning-family-authority.test.js` (untracked,
+new). `tests/q-trackB-commit4.2-fingerprint-year-restamp.test.js` and
+`tests/q140-at-vision-zero-support-skip.test.js` also modified (the Option-
+A `assertedIssues` field addition and the Commit 4.3 retention-outcome
+correction, respectively). `.claude/settings.local.json` also shows
+modified in `git status` but is excluded from this campaign's scope per
+standing convention, as always.
+
+**Re-homing table (five previously-adjudicated findings, routing
+confirmed by direct instruction, not derived — recorded here as this
+campaign's authoritative record since none of these are otherwise
+addressed in this document):**
+| Finding | Routed to |
+|---|---|
+| Harley Quinn #62 — rejected-year persistence | Commit 4.4 queue |
+| Iron Man #150 — canonical-title contamination | Commit 4.4 queue |
+| D'Orc #4 — seller-stopword registry (same registry as Iron Man #150; explicitly distinct from this document's own "D'Orc #1 apostrophe class") | Commit 4.4 queue |
+| Superman #233 — unsupported-newsstand clearing | Commit 5 |
+| Adventure Time — reference-evidence preservation (consumer display) | Commit 6 |
+
+**Closure status.** Commit 4.3 makes the deployed build capable of
+retaining a coherent title-axis-blocked family's own issue/year authority
+and containing cross-population promotion when it does not. Matching
+Commit 4.1/4.2's own standard: **Commit 4.1, 4.2, AND 4.3 all remain open
+until the required repeat live scans pass against the SHA-verified
+deployed build carrying all three fixes** — the same CP1-CP4 checkpoint
+structure used for the original live-origin verification, re-run once this
+commit is staged, committed, pushed, and independently deployment-verified.
+
+**Note on process, recorded per this document's own standing practice of
+logging near-misses:** the implementation packet for this commit went
+through TWO review holds before staging approval, not one. The first HOLD
+(after the initial implementation pass) returned seven correction items
+(Option-A audit write-up, real cache-builder imports replacing test-local
+mirrors, direct query/cache capture replacing a vacuous assertion, testing
+the real family-evidence emission site rather than a simulation, five
+additional controls, this documentation entry, and a from-scratch
+verification re-run) — all seven addressed and verified via real
+execution. A SECOND, narrower HOLD then found three remaining defects in
+that revised packet, all genuine and all corrected before this final
+state: (1) the stale/foreign-family control relied on a downstream
+function degrading gracefully rather than the qualified gate itself
+rejecting membership up front — fixed with the `hasValidFamilyMembership`
+precondition (NAMED FINDING 1 above); (2) the margin-dominance control
+used an impossible top/runner weight ordering that masked a genuinely
+VACUOUS production condition — fixed with `familyDominatesRunnerUp`, a
+correctly-named, separately-scoped function (NAMED FINDING 2 above); (3)
+the PC cache proof stopped at key construction rather than proving actual
+read/write custody — fixed with the real `readPriceChartingCache` adapter.
+Both holds, and the two additional incidents surfaced and resolved while
+addressing the second (the `core.longpaths` incident, first caught in an
+earlier round and re-confirmed clean this round; the `node_modules`
+junction-deletion incident, new this round), are recorded here in full
+rather than only reporting the clean final state — the process itself,
+including its own mistakes and corrections, is part of the evidence
+record this document exists to keep honest.
+
+**NAMED FINDING: CONFIDENCE-AS-AUTHORITY (IMPLEMENTATION PACKET HOLD —
+FINAL AUTHORITY-SOURCE HOLD, third review round, 2026-07-30).** The
+first-pass `decideFieldAuthority` classified a prior as independently
+trusted via `isPriorIndependentlyTrusted(visionConfidence)` —
+`confidence === 'high'` alone. Caught at review before staging, this is
+the same disease class as the campaign's other wrong-population findings
+(Q115 Batman #608, Q127 Catwoman #64, Q128's drifted-duplicate-constant
+class) — data or a signal from the wrong axis being treated as
+authoritative — here specifically on the PROVENANCE axis rather than the
+identity-population axis those findings occupied: **confidence measures
+certainty WITHIN a source; authority records PROVENANCE and permission to
+control identity.** They are different questions. A Vision read that is
+very sure of itself is still Vision-derived — its own self-assessed
+certainty is not third-party corroboration, not a validated user
+correction, and not a catalog-authority record. Confidence cannot
+manufacture independent provenance. The bug happened to also correctly
+recognize manually-corrected priors (`manualCorrection.js`'s
+`buildManualCorrectionPayload` sets `confidence:'HIGH'` on its request
+payload) — but that was coincidental (a shared confidence VALUE, not a
+provenance check): an ordinary, high-confidence Vision read carries the
+exact same bare `'HIGH'` string.
+
+**Corrected:** `decideFieldAuthority` now accepts an explicit,
+source-aware input (`priorSource`, `priorIndependentlyTrusted`,
+`priorConfidence` — see the Measure/decide split section above for the
+full five-outcome contract). Trust is granted ONLY by
+`isPriorSourceIndependentlyTrusted(priorSource, ...)`:
+`'manual'`/`'user'` (a server-validated correction) → trusted;
+`'catalog'` → trusted only with an explicit corroborating record (no live
+source of this kind exists in this codebase yet — a deliberate
+conflicted-safe default, not a placeholder left to silently pass);
+`'vision'` (including HIGH confidence) or anything unrecognized → NEVER
+trusted. **Manual/user authority requires the validated Commit 3
+contract** (`manualCorrection.js`'s `isValidManualAuthorityRequestContract`
+/ `prepareManualCorrectionRequest` — the four-condition request contract:
+`manualIdentity===true && skipVision===true && skipImageSearch===true &&
+identitySource==='manual'`) — `isPriorSourceIndependentlyTrusted` does not
+invent or bypass that validation; it only recognizes the resulting
+`priorSource:'manual'`/`'user'` tag once genuine validation has already
+happened elsewhere. **Vision/family disagreement remains `conflicted`
+unless an explicit source-authority rule adjudicates it** — a qualified,
+unanimous family disagreeing with an untrusted Vision prior that has ZERO
+support in the family now splits on confidence for exactly one purpose
+(never to grant authority): LOW/unknown confidence retains the existing,
+approved silent provisional-correction (the Spawn fixture's own path,
+`resolveIdentity`'s docs); HIGH confidence becomes a recorded `conflicted`
+state instead — no silent win for either side.
+
+**Disclosed dependency (R1, traced per the directive's own stop-and-report
+rule):** a validated manual/user correction does NOT reach
+`resolveIdentity` at all today. `manualCorrection.js`'s own header comment
+(lines 14-24) and a direct grep of every real, non-test `resolveIdentity()`
+call site in this codebase (exactly one — `api/enrich.js`'s "Standard
+Vision-based identity resolution" branch, the `else` arm of a plain
+`manualIdentity` / `cgcIdentityConfirmed` / `resolveIdentity` if/else-if
+chain) confirm Safeguard 1's four-condition contract routes a manual
+correction around this entire function via a separate, already-validated
+branch. The real `vision` object `resolveIdentity` is called with there
+is a plain `{title, issue, year, publisher}` — no `.source` field at all.
+`vision.source` is accepted by `resolveIdentity`'s retention branch as a
+forward-compatible extension point (proven correct and real via Control
+T2(b) — `resolveIdentity` genuinely honors it when supplied), but no live
+caller populates it. This is safe today ONLY because manual corrections
+bypass `resolveIdentity` entirely via the separate, already-validated
+Safeguard 1 path — not because of anything in this hold. If manual-
+correction provenance is ever threaded through `resolveIdentity`, the one
+call site in `api/enrich.js` is what would need to start setting
+`vision.source`.
+
+**Compounding fix, surfaced by Control T1 during testing (not part of the
+original ask, reported before fixing per standing protocol):**
+`deriveIssueAuthorityFromAdoption` (`src/lib/issueAuthority.js`) returns
+`{issueAuthority: null, ...}` for every consensus mode other than
+`'adopted'` — designed for a pre-existing, non-retention `'corroborated'`/
+`'conflict-locked'` shape correctly left to the separate
+`out.issueConsensusConflict` mechanism. A retention-branch `'conflicted'`
+outcome (this hold's own rule D) fell through to that SAME null default —
+and `canUseExactIssuePricingCache`'s own `if (issueAuthority == null)
+return true` (designed for a DIFFERENT null shape — an already-trustworthy
+corroborated issue) would have silently treated a genuinely conflicted
+identity as cache-eligible, and `computeIssueAuthorityContractPatch` would
+have returned no patch at all — neither cache access nor authoritative
+pricing/listing would have actually been blocked for Control T1's own
+scenario, contradicting rule D's explicit requirements. Fixed with a
+narrowly-scoped addition to `deriveIssueAuthorityFromAdoption`: detects a
+retention-branch conflict specifically via `familyIssueConsensus.outcome
+=== 'conflicted' && authoritativeForCustody === false` — fields ONLY the
+Commit 4.3 retention branch ever sets (confirmed via source inspection: no
+other call site in this codebase assigns `outcome` onto a consensus
+object), so this addition can never misfire on an unrelated, pre-existing
+`'conflict-locked'` shape that predates Commit 4.3 — and produces a real,
+non-null `status:'conflicted'` `issueAuthority` object, correctly blocking
+both `canUseExactIssuePricingCache` and `computeIssueAuthorityContractPatch`
+through their EXISTING, unmodified machinery (`CACHE_SAFE_ISSUE_AUTHORITY_STATUSES`
+already excludes `'conflicted'`; `computeIssueAuthorityContractPatch`
+already has a full `issueConflicted` branch with its own containment
+copy) — reused, not reinvented.
+
+**PriceCharting ruling reaffirmed, unchanged, per the directive's item 4:**
+PC/CV retrieval may occur under the corrected issue "351" for reference
+evidence; it must never use issue "300" for the founding fixture (proven
+in the prior round's Section 3(c) and unaffected by this round's changes —
+Control T4 re-confirms the founding fixture's own identity/evidence fields
+byte-identical); existing Commit 4 containment (now including this round's
+`deriveIssueAuthorityFromAdoption` fix) keeps provisional/conflicted
+evidence from becoming an actionable price or listing. Not broadened into
+a new zero-PC-access contract — no change to the PC/CV Promise.all block's
+own unconditional-read structural asymmetry (already disclosed in the
+prior round) was made or needed here.
+
+**PRODUCTION AUTHORITY-CONTEXT INTEGRATION HOLD (fourth review round,
+2026-07-31).** The prior round's authority-source correction was proven
+correct in isolation (Controls T1-T5) but two real production-integration
+gaps remained, plus one genuinely new finding surfaced by this round's own
+investigation, not part of the original ask.
+
+**Item 1 — real Vision confidence threaded into production.** Traced to
+its actual origin, not a proxy (per R1's stop-and-report requirement):
+Vision's own self-reported identification confidence is requested
+explicitly in `api/grade.js`'s `STANDARD_PROMPT`/`WATCH_PROMPT` JSON_SHAPE
+(`"confidence": "low", "medium", or "high" based on image quality and
+visible information`), returned in `grade.js`'s response, forwarded by the
+client as part of the `/api/enrich` request body, and destructured at
+`api/enrich.js`'s handler entry (`const { ..., confidence, ... } =
+req.body;` — the same variable already read elsewhere in that file at the
+`[ship12]`/`visionConfidenceLower` call sites). A genuine signal exists;
+no fabrication was needed. New `buildStandardVisionAuthorityContext(rawConfidence)`
+and `normalizeVisionConfidence(rawConfidence)` (`src/lib/identityCore.js`)
+— the single, shared, import-safe export (R2) that assigns
+`source:'vision'` (hard-coded, never derived from `req.body.source`,
+`req.body.identitySource`, or any client-forwarded field) and
+`priorIndependentlyTrusted:false` for the standard path. The real
+`api/enrich.js` `resolveIdentity` call site now spreads
+`...buildStandardVisionAuthorityContext(confidence)` into the vision
+object — the SAME function this feature's tests (Control T1, its LOW
+companion, Control T6) call directly, proving "HIGH Vision reaches
+resolveIdentity as HIGH," "LOW Vision reaches resolveIdentity as LOW,"
+"source is always 'vision'," and "priorIndependentlyTrusted is always
+false" with the real production builder, not a re-derived mirror.
+
+**Item 2 — the free-form manual trust path removed.** The prior round's
+`const priorSource = vision.source || 'vision';` inside `resolveIdentity`
+was itself a residual risk: a bare, unvalidated `'manual'`/`'user'` string
+reaching this function proved nothing about whether the Commit 3
+four-condition manual-authority contract was ever actually validated.
+Corrected: `resolveIdentity` no longer re-derives trust from any
+free-form source string at all — `priorIndependentlyTrusted` is now
+consumed DIRECTLY from `vision.priorIndependentlyTrusted`, a boolean the
+CALLER must have already computed (via `buildStandardVisionAuthorityContext`
+for the real production path, always `false`); `vision.source` is read
+only for diagnostics/traceability and can no longer grant authority no
+matter what string a caller supplies. `isPriorSourceIndependentlyTrusted`
+itself remains exported (Control T2(a)'s pure unit contract stays valid —
+the decide step's own handling of a genuinely-validated manual/user
+source is still correct and still tested), but Control T2(b) — the
+first-pass synthetic proof that `resolveIdentity` "honors an explicit
+`vision.source='manual'` when supplied" — is REMOVED entirely, not
+patched: that test asserted the very free-form-trust behavior this item
+closes. Control T2(c) is INVERTED (R3) from a disclosed-absence check
+into a POSITIVE guard: a hand-set `vision.source='manual'` fixture (no
+accompanying `priorIndependentlyTrusted:true`) now correctly lands in
+`'conflicted'`, proving the dormant path stays dead; source-presence
+checks confirm the real call site never reads `req.body.source`,
+`req.body.identitySource`, or a client-forwarded `vision.source`, and
+that `source:` can only ever originate from the shared builder's own
+hard-coded value. The disclosed dependency from the prior round stands
+unchanged: a validated manual/user correction still does not, and under
+this ruling still must not, enter `resolveIdentity` at all — Safeguard 1's
+four-condition contract (`manualCorrection.js`) remains the sole,
+separate, already-validated mechanism.
+
+**Item 3 — year-only conflict containment, PLUS a major wiring gap found
+while wiring it (not part of the original ask, reported before fixing per
+standing protocol).** Extended `deriveIssueAuthorityFromAdoption` with an
+optional second parameter, `familyYearConsensus` — backward-compatible
+(every pre-existing single-argument call site unaffected) — that detects
+a YEAR-axis-only retention-branch conflict (same `outcome`/
+`authoritativeForCustody` convention as the issue-axis branch, exclusive
+to the Commit 4.3 retention branch) and returns a real, non-null
+`status:'conflicted'` object with reason `'vision-family-year-authority-conflict'`
+(distinct from the issue-axis `'vision-family-authority-conflict'`) and
+`identityProvisionalFields:['year']` (never `'issue'` — the issue axis was
+never in question; the year is never labeled `'adopted'` anywhere in this
+path). Reuses the EXISTING Commit 4 `computeIssueAuthorityContractPatch`
+`issueConflicted` branch verbatim, per the directive's explicit "do not
+invent a broad Commit 6 consumer contract" — the banner text is
+issue-phrased even for a year-only conflict; the machine-readable
+`reasons` array is what actually distinguishes the axis. Confirmed via
+Control T6 (a real, corroborated-issue/conflicted-year fixture) and its
+required mutation (omitting `familyYearConsensus` from the
+`deriveIssueAuthorityFromAdoption` call — the exact pre-fix shape every
+call site used — restores cache eligibility and produces no contract
+patch at all, proving the fix load-bearing).
+
+**The major finding:** investigating item 3's real production wiring
+surfaced that the PRIOR round's own "compounding fix" to
+`deriveIssueAuthorityFromAdoption` (the conflicted-outcome branch) was
+correct in isolation but **never actually reachable from the real
+production call site.** `api/enrich.js`'s only call to
+`deriveIssueAuthorityFromAdoption` sits inside `else if
+(identity.familyIssueConsensus?.mode === 'adopted')` — mutually exclusive
+with the separate `if (mode === 'conflict-locked')` branch (the
+pre-existing Q140 mechanism, which only sets the informational
+`out.issueConsensusConflict`, never `out.issueAuthority`). Control T1's
+own `outcome:'conflicted'` legacy-maps to `mode:'conflict-locked'` — which
+takes the Q140 branch, never the `'adopted'` branch — so
+`deriveIssueAuthorityFromAdoption` was NEVER CALLED for this exact
+scenario in production, despite the test proving the function itself
+correct. Separately, the terminal `pricingCustodyCheck`
+(`checkCrossPopulationPromotionGuard`) only fires on a genuine MISMATCH
+when `authoritativeForCustody===true` — never the case for an unresolved
+conflict by definition — so that mechanism doesn't catch it either. Net
+effect: T1's own containment (no exact-cache, no authoritative pricing, no
+listing readiness) was NOT actually live in production before this round,
+despite passing in test isolation. Confirmed via direct trace before
+writing the fix, not assumed. **Fixed** with a new, independent block in
+`api/enrich.js` (composes with, does not replace, the existing
+`issueConsensusConflict`/`'adopted'` branches — gated on
+`out.issueAuthority == null` so the `'adopted'` branch's own object is
+never touched) that unconditionally calls the now-extended
+`deriveIssueAuthorityFromAdoption(identity.familyIssueConsensus,
+identity.familyYearConsensus)` and assigns the result to the real
+`out.issueAuthority`/`out.identityProvisionalFields` fields the pricing/
+listing gates actually read.
+
+**Near-miss caught during this round's own verification, disclosed per
+standing practice:** the first attempt at item 1's production comment (a
+long, multi-line explanatory block placed between `} else {` and
+`identity = resolveIdentity(`) broke an unrelated, pre-existing structural
+test — `tests/q140-issue-consensus-corrective.test.js`'s Part 9 regex
+(`/if \(barcodeIdentity\) \{[\s\S]*?\} else if \(manualIdentity\)
+\{[\s\S]*?\} else if \(cgcIdentityConfirmed\) \{[\s\S]*?\} else
+\{[\s\S]{0,400}?identity = resolveIdentity\(/`), which bounds the
+distance between `} else {` and the call to 400 characters — a genuine,
+real regression, caught by the full 128-file A/B battery (12 failing
+files instead of the documented 11) before being reported as clean.
+Fixed by shortening the inline comment to a one-liner and moving the
+detailed explanation to sit between `resolveIdentity(` and its argument
+object instead (still within the function call, but past the 400-
+character checkpoint) — confirmed via re-run: the file returns to
+124/124, and the full manifest returns to the documented 11 failing
+files. A second, related near-miss: the SAME long comment's own prose
+(explaining what NOT to do) literally contained the substrings
+`req.body.source`/`req.body.identitySource` as documentation, which
+false-positived this hold's own Control T2(c) positive-guard scan — fixed
+by stripping `//`-comment lines from the captured span before scanning
+for forbidden patterns, so the check examines only actual code, never
+prose. Both are recorded here in full, not silently smoothed over.
+
+**Verification (this round, final):** 4.3 suite 252/252 (was 221, +31 —
+Control T1's LOW companion, the revised Control T2(a)/(c), Control T6 and
+its mutation). `q140-issue-consensus-corrective.test.js` 124/124 (the file
+whose regex the near-miss above broke and then restored). Focused
+suites unaffected: Commit 4 152/152, Commit 4.1 175/175, Commit 4.2
+160/160, q140-at-vision-zero-support-skip 25/25, Commit 3
+manual-correction 465/465. Full 128-file A/B, fresh isolated worktree
+(`npm install` directly inside, no junction): identical 11-file failing
+set both sides — **no new failures relative to documented baseline.**
+`npm run build` clean, 268 modules. Baseline worktree removed after use,
+main project's `node_modules` confirmed untouched (no junction present).
+`core.longpaths` confirmed unset before and after.
+
+**Fifth review round (rider, 2026-07-31) — CONTROL T6(c), the wiring
+pin.** Review flagged that T6's own containment proof (like T1's before
+it) had no assertion pinning the real wiring block's PRESENCE and
+POSITION in `api/enrich.js` — only that the underlying functions behave
+correctly when called directly. Added CONTROL T6(c), mirroring
+`q140-issue-consensus-corrective.test.js`'s own Part 13 ORDERING
+convention exactly (exact source `indexOf` anchors, `//`-comments
+stripped before any pattern scan — the same lesson Control T2(c)'s own
+near-miss taught two rounds ago, applied proactively here rather than
+discovered again the hard way): confirms the `out.issueAuthority==null`
+guard genuinely wraps the `deriveIssueAuthorityFromAdoption(identity.familyIssueConsensus,
+identity.familyYearConsensus)` call, and that this call is positioned
+BEFORE both the pricing/listing contract site
+(`computeIssueAuthorityContractPatch(out.issueAuthority, out,
+out.identityProvisionalFields)`) and the terminal `finalizeResponse(out)`
+response call. This is now the THIRD load-bearing wiring point in this
+feature that received an explicit presence/position assertion, after two
+earlier instances where a function proven correct in isolation was later
+found NOT reliably connected to its real call site: (1) Mutation 8c —
+`buildRetentionFamilyEvidenceLog`, the structured `[family-evidence]`
+emission (FINAL NARROW HOLD round); (2) Control T2(c) —
+`buildStandardVisionAuthorityContext`, the real confidence-threading call
+site (PRODUCTION AUTHORITY-CONTEXT INTEGRATION HOLD, item 1); (3) Control
+T6(c) — the retention-conflict `deriveIssueAuthorityFromAdoption` wiring
+block itself, whose absence from the real call site was this same round's
+own major finding. Every load-bearing wiring point this feature has
+introduced now carries an explicit presence assertion, an explicit
+position assertion (where ordering matters for correctness), or both —
+not merely a passing test of the underlying function in isolation.
+Verified: 4.3 suite 256/256 (was 252, +4). No production code changed
+this round — CONTROL T6(c) exercises the wiring already fixed and
+verified in the fourth round; this is test-only hardening. **Completion
+(same round, follow-up):** the wiring pin now covers presence, position,
+AND assignment — an assignment-presence check (`out.issueAuthority =
+retentionConflictDerived.issueAuthority;` / `out.identityProvisionalFields
+= retentionConflictDerived.identityProvisionalFields;`, both anchored
+after the derivation call and before the exact-cache eligibility site,
+the pricing/listing contract site, and `finalizeResponse`) means a
+derivation whose result is computed but silently discarded now fails the
+pin, not just a derivation that is never called at all. Verified: 4.3
+suite 262/262 (was 256, +6).
+
+DO NOT STAGE, COMMIT, OR PUSH before review.

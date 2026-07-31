@@ -209,22 +209,56 @@ console.log('   same family branch. Verified directly against identityCore.js ~1
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Test 5 (NEG): authority belongs to a previous/non-current family
-// (current-family guard) -> NOT skipped
+// Test 5 — SUPERSEDED by Track B Phase 0, Commit 4.3 (2026-07-30, Section
+// A/B, "Spawn #351 raw-pool-plurality class"). Original premise (below,
+// preserved for the historical record, not silently rewritten): family
+// data present under a NON-winning TITLE decision (e.g. 'fallback-vision')
+// was treated as stale/non-current and never consulted for issue/year
+// authority. Confirmed live (2026-07-30 23:16:50 production dispatch)
+// this premise was itself the bug: Q84's title-safety gate can correctly
+// leave decision='fallback-vision' (refusing to replace a clean canonical
+// title with a marketplace-derived label) while the SAME family's own
+// topFamily remains a perfectly coherent, unanimous issue/year witness (a
+// real 5-member Spawn #351 family, 5/5 internal issue agreement) — title
+// projection and family issue/year authority are independent axes, and
+// conflating "title override blocked" with "family data is stale" silently
+// discarded real evidence, letting vision-zero-support's raw-pool
+// plurality check (below) adopt an entirely unrelated issue instead.
+// resolveIdentity now retains family issue/year authority for ANY
+// decision (not just FAMILY_OVERRIDE_DECISIONS/'refused-identity-
+// conflict') once topFamily.count clears the SAME >=3-member coherence
+// floor already used elsewhere for family-pool promotion — see
+// identityCore.js's Commit 4.3 doc comment. This test now verifies THAT
+// corrected behavior directly; a genuinely below-floor (2-member) family
+// under a non-winning decision is a separate, still-valid NEG case,
+// covered by Test 5b immediately below.
 // ═══════════════════════════════════════════════════════════════════════
-console.log('\nTest 5 (NEG): current-family guard — family data present under a NON-winning decision -> NOT skipped\n');
+console.log('\nTest 5 (POS, corrected by Commit 4.3): coherent family under a NON-winning TITLE decision IS now retained as issue/year authority\n');
 {
-  // Real resolveIdentity call: family carries usable topFamily/indices
-  // data that WOULD produce a clean 'adopted' consensus if consulted, but
-  // family.decision is 'fallback-vision' — not a winning-family decision
-  // (not in FAMILY_OVERRIDE_DECISIONS, not 'refused-identity-conflict').
-  // Neither family branch fires, so familyIssueConsensusResult is never
-  // computed for this call at all — proving stale/irrelevant family data
-  // sitting in the param is never mistaken for current authority.
+  // Track B Phase 0, Commit 4.3 — two rows changed from the original
+  // Q140-AT fixture text (Test 1/Test 2 above keep the ORIGINAL text
+  // unchanged — they route through the PRE-EXISTING FAMILY_OVERRIDE_DECISIONS
+  // branch, which never calls hasContaminatedMember at all). This fixture
+  // routes through the NEW retention branch, whose qualified-family
+  // predicate correctly screens out a family with any contamination-regex
+  // match:
+  //   - row 2's original "...SDCC 2013 CGC 7.0" tripped GRADED_RE
+  //     ("CGC") — changed to "...Near Mint".
+  //   - row 0's original "...Convention Exclusive..." tripped REPRINT_RE's
+  //     own "convention exclusive" sub-pattern — a REAL, newly-discovered
+  //     regex-collision edge case (REPRINT_RE's promotional-reprint
+  //     detector doesn't distinguish "reprinted and sold as a con freebie"
+  //     from "a genuine, first-run convention-exclusive product," and this
+  //     exact fixture — the real Adventure Time Summer Special #1 SDCC
+  //     class the Q140-AT dispatch was built around — is the latter).
+  //     Flagged as an open dependency in the Commit 4.3 packet rather than
+  //     silently redesigning the shared, already-approved contamination
+  //     check; changed to "...Brand New" here since testing RETENTION,
+  //     not this regex's own semantics, is this fixture's actual purpose.
   const visualItems = rows([
-    'Adventure Time Summer Special #1 SDCC Convention Exclusive 2013 NEW',
+    'Adventure Time Summer Special #1 SDCC 2013 Brand New',
     'Adventure Time Summer Special #1 SDCC 2013 NM',
-    'Adventure Time Summer Special #1 SDCC 2013 CGC 7.0',
+    'Adventure Time Summer Special #1 SDCC 2013 Near Mint',
     'Adventure Time Summer Special #1 SDCC 2013 In Hand',
   ]);
   const vision = { title: 'Adventure Time Summer Special', issue: '1', year: '2013', publisher: 'Boom Studios' };
@@ -239,14 +273,74 @@ console.log('\nTest 5 (NEG): current-family guard — family data present under 
   };
   const family = {
     selectedTitle: 'Adventure Time Summer Special',
-    decision: 'fallback-vision', // NOT a winning-family decision
+    decision: 'fallback-vision', // NOT a winning TITLE decision — Q84 stands
     topFamily: { indices: [0, 1, 2, 3], rawTitle: visualItems[0].rawTitle, count: 4, weightSum: 4 },
+    // Revised (2026-07-30, qualified-predicate rewrite) — the retention
+    // branch now gates on this explicit marker, not bare topFamily.count.
+    // Set here to represent the genuine "Q84 blocked title projection
+    // specifically" case; see q-trackB-commit4.3's own case-#9 control for
+    // the fixture WITHOUT this marker (weak-overlap family, must NOT
+    // qualify even at the same member count).
+    titleAxisOnlyBlock: true,
   };
   const result = resolveIdentity(vision, ebay, family, { ebayResultCount: 3, visualItems });
 
-  assertEq(result.familyIssueConsensus, null, 'familyIssueConsensusResult never computed — decision is not a winning-family decision, so the family branch never fired');
-  assertEq(result.confirmedIssue, null, 'confirmedIssue nulled — the raw-pool escalate branch fired unshortcut, exactly as if no family data existed at all');
-  assertEq(result.identityEscalation, 'ID_REQUIRED', 'escalation fires — stale/non-current family data was correctly never treated as authority');
+  // Vision's own issue ("1") is PRESENT here (not null/placeholder) and
+  // the qualified family unanimously agrees — per the measure/decide
+  // split's five-outcome table, this is 'corroborated' (confirmation of
+  // an already-correct value), NOT 'adopted' (which requires a missing/
+  // placeholder prior) — Carry-forward A's own distinction: "existing
+  // prior agrees: corroboration without mutation." Year has zero support
+  // anywhere in this family (none of the 4 rows carry a parseable year at
+  // all) and Vision's own confidence isn't HIGH, so year lands on
+  // 'preserved-prior' with authoritativeForCustody=false — a genuinely
+  // different, weaker case than the Spawn fixture's own year outcome
+  // (which is 'provisionally-corrected', since THAT family unanimously
+  // asserts a real year the untrusted Vision prior has zero support
+  // against).
+  assertEq(result.familyIssueConsensus?.mode, 'corroborated', 'Commit 4.3: familyIssueConsensusResult IS computed despite decision=fallback-vision — 4/4 rows unanimously assert #1, matching Vision\'s own present prior');
+  assertEq(result.familyIssueConsensus?.outcome, 'corroborated', 'Commit 4.3: decide-step outcome is "corroborated" — Vision\'s issue "1" was already present and the family confirms it, not a correction');
+  assertEq(result.familyIssueConsensus?.authoritativeForCustody, true, 'corroboration is authoritative for custody');
+  assertEq(result.familyYearConsensus?.outcome, 'preserved-prior', 'Commit 4.3: year outcome is "preserved-prior" — the family has zero year data at all (uniqueRows=4, support=0), nothing to corroborate or correct with');
+  assertEq(result.familyYearConsensus?.authoritativeForCustody, false, 'an untrusted, family-unsupported year prior is NOT authoritative for custody (distinct from the Spawn fixture, where the family DOES unanimously assert a real year)');
+  assertEq(result.confirmedIssue, '1', 'Commit 4.3: confirmedIssue is "1" (corroborated, not nulled by the raw-pool escalate branch)');
+  assertEq(result.identityEscalation, null, 'Commit 4.3: no ID_REQUIRED escalation — familyAuthoritySkip correctly fires (family?.decision === "fallback-vision" is now a recognized third condition, gated on the qualified-family predicate)');
+  assertEq(String(result.identitySource).includes('family_issue_year_authority_retained'), false, 'identitySource carries NO retention suffix — corroboration is not a correction, nothing was overridden');
+  assertTrue(result.isProvisionalOverride === false, 'Commit 4.3: pure corroboration is NOT marked provisional — only an actual "adopted"/"provisionally-corrected" outcome marks isProvisionalOverride, distinguishing genuine correction from mere confirmation');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Test 5b (NEG, new — Commit 4.3): a genuinely below-floor family under a
+// non-winning decision is still correctly treated as no authority at all.
+// Preserves real regression coverage for the "truly stale/thin data"
+// case Test 5 used to (incorrectly) represent with a 4-member family.
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\nTest 5b (NEG): below-coherence-floor family under a non-winning decision -> still NOT treated as authority\n');
+{
+  const visualItems = rows([
+    'Adventure Time Summer Special #1 SDCC Convention Exclusive 2013 NEW',
+    'Adventure Time Summer Special #1 SDCC 2013 NM',
+  ]);
+  const vision = { title: 'Adventure Time Summer Special', issue: '1', year: '2013', publisher: 'Boom Studios' };
+  const ebay = {
+    title: null,
+    issue: null,
+    year: null,
+    publisher: null,
+    agreement: { visionIssueCount: 0, total: 20, publisher: 0, visionPublisherCount: null },
+    noIssueConsensus: true,
+    noPublisherConsensus: false,
+  };
+  const family = {
+    selectedTitle: 'Adventure Time Summer Special',
+    decision: 'fallback-vision',
+    topFamily: { indices: [0, 1], rawTitle: visualItems[0].rawTitle, count: 2, weightSum: 2 }, // below FAMILY_AUTHORITY_COHERENCE_FLOOR (3)
+  };
+  const result = resolveIdentity(vision, ebay, family, { ebayResultCount: 3, visualItems });
+
+  assertEq(result.familyIssueConsensus, null, 'familyIssueConsensusResult never computed — topFamily.count=2 is below the >=3 coherence floor, Commit 4.3\'s retention branch never fires');
+  assertEq(result.confirmedIssue, null, 'confirmedIssue nulled — the raw-pool escalate branch fires unshortcut, exactly as before Commit 4.3');
+  assertEq(result.identityEscalation, 'ID_REQUIRED', 'escalation fires — a genuinely thin (2-member) family is correctly never treated as authority, regardless of decision');
 }
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);

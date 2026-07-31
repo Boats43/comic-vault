@@ -24,7 +24,7 @@
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
 import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate, resolveFamilyYearConsensus } from './identityCore.js';
-import { ARTIST_PATTERNS, ARTIST_FAMILY_STRIP_EXCEPTIONS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms, NON_GENUINE_COPY_RE, LOT_RE, REPRINT_RE, SLAB_RE, GRADED_RE, SIGNED_RE, TPB_MARKER_RE, extractArtist } from './compHygiene.js';
+import { ARTIST_PATTERNS, ARTIST_FAMILY_STRIP_EXCEPTIONS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms, NON_GENUINE_COPY_RE, LOT_RE, REPRINT_RE, SLAB_RE, GRADED_RE, SIGNED_RE, TPB_MARKER_RE, extractArtist, hasContaminatedMember, isCompetingFamilyTooStrong, FAMILY_OVERRIDE_DECISIONS } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
 //
@@ -1637,11 +1637,13 @@ export const mergeFragmentedTitleFamilies = (scored, itemsOrTitles) => {
     return small.length > 0 && small.every((t) => bigSet.has(t));
   };
 
-  const isContaminated = (idx) => {
-    const raw = getRawTitle(idx);
-    return LOT_RE.test(raw) || REPRINT_RE.test(raw) || SLAB_RE.test(raw) ||
-      GRADED_RE.test(raw) || SIGNED_RE.test(raw) || TPB_MARKER_RE.test(raw);
-  };
+  // Track B Phase 0, Commit 4.3 — delegates to the shared, exported
+  // hasContaminatedMember (compHygiene.js — a true leaf module both this
+  // file and identityCore.js already import from with no circularity
+  // risk, unlike importing it from this file) instead of maintaining its
+  // own copy of the same six-regex check. Single-index call, byte-
+  // identical behavior.
+  const isContaminated = (idx) => hasContaminatedMember(itemsOrTitles, [idx]);
 
   // Review round, item 2 — positive product-agreement gate. Extracts a
   // single canonical value for one attribute from one title, or null when
@@ -1865,6 +1867,54 @@ export const mergeFragmentedTitleFamilies = (scored, itemsOrTitles) => {
   return scored; // no qualifying pair found — unchanged, byte-identical to today
 };
 
+// Track B Phase 0, Commit 4.3 (Rider E, 2026-07-30) — the shared
+// family-evidence row serializer. Extracted from selectTitleFamilyCandidate's
+// own logFamilyEvidence closure (below) — same row shape
+// (idx/itemId/legacyItemId/title/price) that closure has used since
+// Commit 4.1 — so BOTH the pre-existing [family-evidence] call sites
+// (top-rank-protection/weighted-consensus, unchanged) and the new
+// retention-path structured event (api/enrich.js, at the point issue/
+// year support and the final familyKey are known) build rows from ONE
+// implementation rather than two independently-maintained copies.
+export const buildFamilyEvidenceRows = (indices, items) => {
+  return (indices || []).map((idx) => {
+    const it = items?.[idx];
+    return {
+      idx,
+      itemId: (it && typeof it !== 'string' && it.itemId) || null,
+      legacyItemId: (it && typeof it !== 'string' && it.legacyItemId) || null,
+      title: (typeof it === 'string' ? it : it?.rawTitle || it?.title) || null,
+      price: (it && typeof it !== 'string' && typeof it.price === 'number') ? it.price : null,
+    };
+  });
+};
+
+// Track B Phase 0, Commit 4.3 (IMPLEMENTATION PACKET HOLD, Section 4) —
+// pure extraction of the retention-path [family-evidence] event, so it is
+// directly testable against the real api/enrich.js call site's inputs
+// without needing to simulate the log line or import the whole handler.
+// Deliberately returns the computed isRetentionPath + logLine rather than
+// calling console.log itself, so a test can assert on the exact string
+// this function produces AND independently confirm api/enrich.js's real
+// call site logs that identical string (not a re-derived copy). Mirrors
+// the gate api/enrich.js used inline before this extraction — moved here
+// verbatim, not redesigned.
+export const buildRetentionFamilyEvidenceLog = (familyCandidate, familyIssueConsensus, familyYearConsensus, familyKey, visualItems) => {
+  const isRetentionPath = !FAMILY_OVERRIDE_DECISIONS.includes(familyCandidate?.decision)
+    && familyCandidate?.decision !== 'refused-identity-conflict'
+    && familyCandidate?.titleAxisOnlyBlock === true;
+  if (!isRetentionPath) return { isRetentionPath: false, logLine: null, rows: null };
+  const rows = buildFamilyEvidenceRows(familyCandidate?.topFamily?.indices, visualItems);
+  const logLine =
+    `[family-evidence] decision=${familyCandidate?.decision} ` +
+    `merged=${familyCandidate?.topFamily?.mergedFromFragments === true} ` +
+    `familyEvidenceQualified=true qualificationReason=title-axis-only-block-retained ` +
+    `issueSupport=${familyIssueConsensus?.support ?? 'null'}/${familyIssueConsensus?.uniqueRows ?? 'null'} ` +
+    `yearSupport=${familyYearConsensus?.support ?? 'null'}/${familyYearConsensus?.uniqueRows ?? 'null'} ` +
+    `familyKey="${familyKey}" rows=${JSON.stringify(rows)}`;
+  return { isRetentionPath: true, logLine, rows };
+};
+
 export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visionYear = null, opts = {}) => {
   // Guard clauses
   if (!Array.isArray(items) || items.length === 0) {
@@ -1928,17 +1978,20 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   // prior unconditional `[extractIdentity] full pool:` dump (removed —
   // see that function's own comment) which logged the ENTIRE visual pool
   // on every request regardless of outcome.
+  //
+  // Track B Phase 0, Commit 4.3 — row-building logic extracted to the
+  // module-level, exported buildFamilyEvidenceRows (below), a deliberate
+  // amendment (not drift) to this instrumentation contract: the event's
+  // real purpose was always "fires wherever family rows DRIVE AUTHORITY,"
+  // and Commit 4.3's retention path (identityCore.js) is a newly-
+  // recognized authority path that needed the SAME row payload shape,
+  // computed at a later point in the pipeline (api/enrich.js, after
+  // issue/year support and the final familyKey are known) than this
+  // function ever has access to. Byte-identical output for these two
+  // pre-existing call sites — this is a pure extraction, not a behavior
+  // change.
   const logFamilyEvidence = (decision, family) => {
-    const rows = (family?.indices || []).map((idx) => {
-      const it = items?.[idx];
-      return {
-        idx,
-        itemId: (it && typeof it !== 'string' && it.itemId) || null,
-        legacyItemId: (it && typeof it !== 'string' && it.legacyItemId) || null,
-        title: (typeof it === 'string' ? it : it?.rawTitle || it?.title) || null,
-        price: (it && typeof it !== 'string' && typeof it.price === 'number') ? it.price : null,
-      };
-    });
+    const rows = buildFamilyEvidenceRows(family?.indices, items);
     console.log(`[family-evidence] decision=${decision} merged=${family?.mergedFromFragments === true} rows=${JSON.stringify(rows)}`);
   };
 
@@ -2038,7 +2091,11 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
         // New threshold (3x): 6.5 >= 15.0? NO → protection fires → correct.
         const competingFamilies = scored.filter(f => f !== item0Family);
         const strongestCompetitor = competingFamilies[0]; // already sorted by weight descending
-        const competingFamilyTooStrong = strongestCompetitor && strongestCompetitor.weightSum >= (item0Family.weightSum * 3);
+        // Track B Phase 0, Commit 4.3 — delegates to the shared, exported
+        // isCompetingFamilyTooStrong (above) instead of an inline copy of
+        // the same 3x-margin arithmetic, so identityCore.js's qualified-
+        // family-authority predicate can reuse this exact bar.
+        const competingFamilyTooStrong = isCompetingFamilyTooStrong(item0Family.weightSum, competingFamilies);
 
         // GREENLIGHT: Drop hasEnoughTokens from gate chain.
         // Token count anti-correlates with quality (clean titles: 1-3 tokens,
@@ -2198,6 +2255,23 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
       topFamily,
       runnerUp,
       families: scored,
+      // Track B Phase 0, Commit 4.3 (Matrix A, 2026-07-30) — set ONLY at
+      // this single return site, the single point of truth for "this
+      // fallback-vision decision is a genuine title-axis-only block": the
+      // family already independently cleared the >=3-member floor AND the
+      // >=40% Vision-overlap bar AND is not a LOT listing — the ONLY
+      // reason title projection didn't happen is Q84's dual-axis gate
+      // vetoing the TITLE content specifically. Every other fallback-
+      // vision/refused-identity-conflict return path in this function
+      // (weak overlap, below-floor count, zero overlap, insufficient
+      // pool) leaves this field absent/undefined — a falsy default,
+      // mirroring mergedFromFragments' own "set here, at the single point
+      // of truth, rather than inferred downstream from indirect signals"
+      // convention (this file, Commit 4.1). identityCore.js's qualified-
+      // family-authority predicate gates on this field being exactly
+      // `true`, never on `family.decision` or `family.reason` string
+      // content.
+      titleAxisOnlyBlock: true,
     };
   }
 

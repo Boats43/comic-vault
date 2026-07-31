@@ -48,6 +48,7 @@ import {
   shouldSkipAssemblyIntegrityCheck,
   detectVisualIssueDivergence,
   enforceQueryIssueAuthority,
+  buildStandardVisionAuthorityContext,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -101,7 +102,7 @@ import {
 // Ship v0-B — Decision Engine integration. Computes accountable decision
 // (LIST_NOW, RESEARCH, ID_REQUIRED, etc.) after full enrich object assembled.
 import { computeDecision } from "../src/lib/decisionEngine.js";
-import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate, inferAssetTypeFromCategories } from "../src/lib/imageSearchIdentity.js";
+import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate, inferAssetTypeFromCategories, buildRetentionFamilyEvidenceLog } from "../src/lib/imageSearchIdentity.js";
 // Session 4A — Universal category filter (pre-clustering)
 // Commit C — filterVisualIdentityPool is the primary entry point now (runs
 // inside lookupEbayVisual, before extraction/consensus); filterByCategory
@@ -120,13 +121,19 @@ import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } f
 // authority validation (allow-list + normalization), never trusting the
 // client's correctedFields claim alone.
 import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
-import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear } from "../src/lib/issueAuthority.js";
+import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard } from "../src/lib/issueAuthority.js";
+// Track B Phase 0, Commit 4.3 (revision round 2) — cache-key builders,
+// relocated to src/lib/cacheKeys.js for import-safety (see that file's
+// own header comment). Imported here for this handler's own internal use
+// AND re-exported (below, near the old definition site) for backward
+// compatibility with existing consumers of this module's namespace.
+import { buildActiveCompCacheKey, buildComicVineCacheKey, buildPriceChartingCacheKey, parseCacheKeyIssueSegment, buildComicVineQueryParams, buildPriceChartingQueryParams, readPriceChartingCache } from "../src/lib/cacheKeys.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
-import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear, pcMatchConflictsWithPoolName, pcMatchMissingFamilyDiscriminator, hasUnresolvedActiveVariantConflict } from "../src/lib/variantIdentity.js";
+import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear, pcMatchConflictsWithPoolName, pcMatchMissingFamilyDiscriminator, hasUnresolvedActiveVariantConflict, isVariantProvenanceValid } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
 // Q118 — internal consistency checker (Vision's free-text reason vs its own structured fields).
@@ -1969,18 +1976,15 @@ export {
 };
 
 // Q89-CACHE / Commit B.1 (Strange Tales dispatch) — the exact-pricing `ac:`
-// active-comp cache key. Version-salted (a filter fix must not replay pools
-// filtered by an old regex — Evil Ernie class) and NEVER built from a null
-// confirmedIssue (a `title|null` key would be a title-only bucket any
-// future request for the same title could collide on, regardless of which,
-// or whether any, issue that later request resolves to — the historical
-// failure class this exact template exists to prevent). Extracted as its
-// own exported pure function — Track B Phase 0, Commit 3, Safeguard 2
-// amendment — so the real call site (below, inside the handler) and this
-// feature's tests build the IDENTICAL key, per invariant 10, rather than a
-// test-local mirror of the template string.
-export const buildActiveCompCacheKey = (filterVersion, confirmedTitle, confirmedIssue) =>
-  `v${filterVersion}:${confirmedTitle}|${confirmedIssue}`;
+// active-comp cache key, plus the Commit 4.3 ComicVine/PriceCharting
+// cache-key builders and the shared parser. Track B Phase 0, Commit 4.3
+// (revision round 2, 2026-07-30) — RELOCATED to src/lib/cacheKeys.js
+// (imported below) so a test can import the REAL functions directly
+// without importing this whole handler file (which does not cleanly
+// exit in a bare Node/test context — confirmed during implementation).
+// Re-exported here for any other consumer that already imports them from
+// this file's own module namespace.
+export { buildActiveCompCacheKey, buildComicVineCacheKey, buildPriceChartingCacheKey, parseCacheKeyIssueSegment } from "../src/lib/cacheKeys.js";
 
 export default async function handler(req, res) {
   // A6 BUILD-ID: Inject commit hash header (Vercel auto-injects VERCEL_GIT_COMMIT_SHA)
@@ -2711,9 +2715,16 @@ export default async function handler(req, res) {
       pricingIssue = confirmedIssue;
       console.log(`[cgc-identity] confirmed from cert title="${confirmedTitle}" issue="${confirmedIssue}" grade="${confirmedGrade}" label="${confirmedLabelType}"`);
     } else {
-      // Standard Vision-based identity resolution
+      // Standard Vision-based identity resolution.
       identity = resolveIdentity(
-        { title: effectiveTitle, issue: issueNum, year: effectiveYear, publisher },
+        // Track B Phase 0, Commit 4.3 (PRODUCTION AUTHORITY-CONTEXT
+        // INTEGRATION HOLD, item 1, 2026-07-31) — buildStandardVisionAuthorityContext
+        // (src/lib/identityCore.js) is the single, shared, server-built
+        // authority context: `confidence` is Vision's own self-reported
+        // req.body.confidence (never req.body.source/identitySource, never
+        // a client-forwarded field) — see that function's own doc comment
+        // for the full trace and rationale.
+        { title: effectiveTitle, issue: issueNum, year: effectiveYear, publisher, ...buildStandardVisionAuthorityContext(confidence) },
         visualConsensus,
         familyCandidate,
         {
@@ -2864,6 +2875,74 @@ export default async function handler(req, res) {
             `[commit4.1] visualReferenceEvidence: ${visualReferenceEvidence.count} rows, ` +
             `range=$${visualReferenceEvidence.low}-$${visualReferenceEvidence.high} median=$${visualReferenceEvidence.median}, ` +
             `familyKey="${visualReferenceEvidence.familyKey}"`
+          );
+          // Track B Phase 0, Commit 4.3 (Rider E, 2026-07-30; extracted to
+          // a testable pure function per the IMPLEMENTATION PACKET HOLD,
+          // Section 4) — the NEW structured [family-evidence] event,
+          // amending the Commit 4.1 instrumentation contract to also fire
+          // for the retention path (identityCore.js). GATED to fire ONLY
+          // for that path — a request whose decision is title-override-
+          // accepted or refused-conflict-provisional already got its OWN
+          // [family-evidence] line from imageSearchIdentity.js's pre-
+          // existing, UNCHANGED logFamilyEvidence call, at title-decision
+          // time; firing here TOO for those cases would produce two lines
+          // per request, violating "exactly one... zero duplicate evidence
+          // events." This is a deliberate supersession, not drift: the
+          // event's real contract was always "fires wherever family rows
+          // drive authority" — retention is a newly-recognized authority
+          // path that never had ANY [family-evidence] coverage before
+          // Commit 4.3 (imageSearchIdentity.js's own site explicitly
+          // excludes fallback-vision/refused-identity-conflict). Computed
+          // from HERE (not identityCore.js) specifically because issue/
+          // year support numbers and the final familyKey are only known at
+          // this later point in the pipeline. buildRetentionFamilyEvidenceLog
+          // is the SAME real, exported function the regression test calls
+          // directly — no second, independently-maintained gate/log copy.
+          const retentionEvidenceLog = buildRetentionFamilyEvidenceLog(
+            familyCandidate,
+            identity.familyIssueConsensus,
+            identity.familyYearConsensus,
+            visualReferenceEvidence.familyKey,
+            parsedVisualRows
+          );
+          if (retentionEvidenceLog.isRetentionPath) {
+            console.log(retentionEvidenceLog.logLine);
+          }
+        }
+      }
+
+      // Track B Phase 0, Commit 4.3 (PRODUCTION AUTHORITY-CONTEXT
+      // INTEGRATION HOLD, item 3, 2026-07-31) — wires the retention-branch
+      // conflict containment (deriveIssueAuthorityFromAdoption's outcome/
+      // authoritativeForCustody-driven branches) into the REAL
+      // out.issueAuthority/out.identityProvisionalFields fields the
+      // pricing/listing gates below actually read. Runs independently of
+      // the mode==='conflict-locked'/mode==='adopted' chain above —
+      // composes with it (out.issueConsensusConflict, the pre-existing
+      // Q140 mechanism, is untouched; the mode==='adopted' branch's own
+      // provisional object is untouched via the out.issueAuthority==null
+      // guard) rather than replacing anything. Without this, a rule-D
+      // 'conflicted' issue outcome (mode maps to 'conflict-locked', which
+      // ONLY sets out.issueConsensusConflict, an informational field) or a
+      // year-only conflict (issue mode 'corroborated'/other — matches
+      // NEITHER existing branch above at all) left out.issueAuthority at
+      // its initialized null — and the terminal pricingCustodyCheck below
+      // (checkCrossPopulationPromotionGuard) only fires on a genuine
+      // MISMATCH when authoritativeForCustody===true, which is never the
+      // case for an unresolved conflict (authoritativeForCustody===false
+      // by definition) — so NEITHER mechanism actually blocked cache/
+      // pricing/listing for this exact scenario despite Controls T1/T6
+      // proving the underlying function correct in isolation. Confirmed
+      // via direct trace before writing this fix, not assumed.
+      if (out.issueAuthority == null) {
+        const retentionConflictDerived = deriveIssueAuthorityFromAdoption(identity.familyIssueConsensus, identity.familyYearConsensus);
+        if (retentionConflictDerived.issueAuthority != null) {
+          out.issueAuthority = retentionConflictDerived.issueAuthority;
+          out.identityProvisionalFields = retentionConflictDerived.identityProvisionalFields;
+          console.log(
+            `[commit4.3] retention-branch authority conflict wired to out.issueAuthority: ` +
+            `status=${out.issueAuthority.status} reasons=${JSON.stringify(out.issueAuthority.reasons)} ` +
+            `identityProvisionalFields=${JSON.stringify(out.identityProvisionalFields)}`
           );
         }
       }
@@ -3200,7 +3279,9 @@ export default async function handler(req, res) {
 
     // Session 6/20/26 — Cache lookups (5-min TTL, same as Anthropic prompt cache)
     // Crow fix — PC cache key MUST include year (year validation makes year-dependent results)
-    const cvKey = `${cleanedCVTitle}|${confirmedIssue}|${confirmedPublisher}`;
+    // Track B Phase 0, Commit 4.3 — cvKey's own template inlined directly
+    // into buildComicVineCacheKey's call site below (no longer a separate
+    // local — was unused after that extraction).
     const pcKey = `${subtitleStripped}|${confirmedIssue}|${pcQueryYear || ''}`;
     const now = Date.now();
 
@@ -3209,10 +3290,14 @@ export default async function handler(req, res) {
     const [comicVine, priceChartingInitial] = await Promise.all([
       // FIX 3 — ComicVine KV cache (persistent across cold starts)
       (async () => {
-        const kvKey = `cv:${cvKey}`;
+        // Track B Phase 0, Commit 4.3 — real call site for the extracted,
+        // exported buildComicVineCacheKey (invariant 10).
+        const kvKey = buildComicVineCacheKey(cleanedCVTitle, confirmedIssue, confirmedPublisher);
         const cached = await kvGet(kvKey);
         if (cached) return cached;
-        const result = await lookupComicVine({ title: cleanedCVTitle, issue: confirmedIssue, year: confirmedYear, publisher: confirmedPublisher, poolYearHint }).catch(() => null);
+        // Track B Phase 0, Commit 4.3 (Section 3) — real call site for the
+        // extracted, exported buildComicVineQueryParams.
+        const result = await lookupComicVine(buildComicVineQueryParams(cleanedCVTitle, confirmedIssue, confirmedYear, confirmedPublisher, poolYearHint)).catch(() => null);
         await kvSet(kvKey, result, KV_TTL.CV);
         return result;
       })(),
@@ -3223,30 +3308,23 @@ export default async function handler(req, res) {
         // already is (COMP_FILTER_VERSION): a lookupPriceCharting logic
         // change must invalidate old cached entries, not have them served
         // untouched for up to 24h (Wonder Woman #75 class).
-        const fullTitleKey = `pc:v${PC_FILTER_VERSION}:${confirmedTitle}|${confirmedIssue}|${pcQueryYear || ''}`;
+        // Track B Phase 0, Commit 4.3 — real call site for the extracted,
+        // exported buildPriceChartingCacheKey (invariant 10).
+        const fullTitleKey = buildPriceChartingCacheKey(PC_FILTER_VERSION, confirmedTitle, confirmedIssue, pcQueryYear);
         const strippedTitleKey = `pc:v${PC_FILTER_VERSION}:${pcKey}`;
 
-        // Try cache for full title first
-        const cachedFull = await kvGet(fullTitleKey);
-        if (cachedFull) {
-          console.log('[pc-query] cache hit for full title');
-          return cachedFull;
-        }
-
-        // Try cache for stripped title — skipped when identical to
-        // fullTitleKey (true whenever confirmedTitle has no subtitle/colon,
-        // the common case: subtitleStripped === confirmedTitle, so pcKey's
-        // title portion is byte-identical and strippedTitleKey collapses to
-        // the same string already checked above). A second kvGet() for a
-        // key just proven to MISS is pure redundant latency, confirmed live
-        // via production logs showing the identical `[kv-cache] MISS:
-        // pc:v1:...` line twice in a row for the same key.
-        if (strippedTitleKey !== fullTitleKey) {
-          const cachedStripped = await kvGet(strippedTitleKey);
-          if (cachedStripped) {
-            console.log('[pc-query] cache hit for stripped title (fallback)');
-            return cachedStripped;
-          }
+        // Track B Phase 0, Commit 4.3 (IMPLEMENTATION PACKET HOLD — FINAL
+        // NARROW HOLD, item 3) — real call site for the extracted, exported
+        // readPriceChartingCache. Preserves the exact prior "full title
+        // first, stripped-title fallback skipped when identical to
+        // fullTitleKey" behavior byte-for-byte — a second kvGet() for a key
+        // just proven to MISS is pure redundant latency, confirmed live via
+        // production logs showing the identical `[kv-cache] MISS: pc:v1:...`
+        // line twice in a row for the same key.
+        const cacheRead = await readPriceChartingCache(fullTitleKey, strippedTitleKey, kvGet);
+        if (cacheRead.hit) {
+          console.log(`[pc-query] cache hit for ${cacheRead.hit} title${cacheRead.hit === 'stripped' ? ' (fallback)' : ''}`);
+          return cacheRead.result;
         }
 
         // No cache hit — try live query with full title first
@@ -3258,7 +3336,9 @@ export default async function handler(req, res) {
         // in the handler (that runs later, ~line 3090); req.body.variant is
         // the same value it would default to absent an eBay-consensus
         // override, so it's the correct proxy signal here.
-        let result = await lookupPriceCharting({ title: confirmedTitle, issue: confirmedIssue, year: pcQueryYear, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out, pcProductId: req.body.pcProductId || null }).catch(() => null);
+        // Track B Phase 0, Commit 4.3 (Section 3) — real call site for the
+        // extracted, exported buildPriceChartingQueryParams.
+        let result = await lookupPriceCharting(buildPriceChartingQueryParams(confirmedTitle, confirmedIssue, pcQueryYear, q86PreYearConfidence, eraAdvisory, req.body.variant, out, req.body.pcProductId)).catch(() => null);
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
@@ -3269,7 +3349,10 @@ export default async function handler(req, res) {
         // Full title returned zero results — fallback to subtitle-stripped
         if (hasSubtitle && subtitleStripped !== confirmedTitle) {
           console.log(`[pc-query] full title zero results — fallback to stripped: "${subtitleStripped}"`);
-          result = await lookupPriceCharting({ title: subtitleStripped, issue: confirmedIssue, year: pcQueryYear, yearConfidence: q86PreYearConfidence, eraHint: eraAdvisory, variant: req.body.variant || null, pcDiag: out, pcProductId: req.body.pcProductId || null }).catch(() => null);
+          // Track B Phase 0, Commit 4.3 (Section 3 follow-up) — same
+          // buildPriceChartingQueryParams builder as the full-title call
+          // above, for the stripped-title fallback query.
+          result = await lookupPriceCharting(buildPriceChartingQueryParams(subtitleStripped, confirmedIssue, pcQueryYear, q86PreYearConfidence, eraAdvisory, req.body.variant, out, req.body.pcProductId)).catch(() => null);
           if (result) {
             console.log(`[pc-query] stripped title matched: "${result.productName}"`);
             await kvSet(strippedTitleKey, result, KV_TTL.PC);
@@ -4327,7 +4410,34 @@ export default async function handler(req, res) {
     // every remaining raw req.body.variant consumer stays in sync with the
     // same gate rather than drifting into a fourth independently-checked
     // copy.
-    const safeReqVariant = suppressVariantForYearConflict ? null : (req.body.variant || null);
+    // Track B Phase 0, Commit 4.3 (Section D, 2026-07-30) — variant
+    // provenance guard. req.body.variant is a bare string with no
+    // provenance metadata of its own — issueNum (vision.issue, the exact
+    // value this variant text was captured ALONGSIDE at scan time, both
+    // arriving in the same request payload) is the only signal this
+    // codebase has for "which issue was this variant candidate computed
+    // for." When issueNum disagrees with the FINAL confirmedIssue —
+    // confirmedIssue changed since this variant text was captured, by
+    // ANY mechanism (Commit 4.3's own family-authority retention,
+    // vision-zero-support, an eBay title override, a future code path) —
+    // the candidate is invalidated before it can be used anywhere,
+    // including as the `visionVariant` input to extractConfirmedVariant
+    // below, which would otherwise silently pair a stale variant read
+    // with a re-scoped issue population. This is independent, narrower
+    // defense-in-depth alongside the pre-existing `identityIsProvisionalOverride
+    // ? null : safeReqVariant` clearing a few lines down and
+    // filterItemsByIssue's own confirmedIssue-scoped population (Q115) —
+    // together these ensure a variant candidate can never outlive the
+    // issue number it was originally paired with.
+    const variantSourceIssue = issueNum ?? null;
+    const variantProvenanceValid = isVariantProvenanceValid(variantSourceIssue, confirmedIssue);
+    if (!variantProvenanceValid) {
+      console.log(
+        `[commit4.3] variant provenance invalidated: variantSourceIssue="${variantSourceIssue}" ` +
+        `!= confirmedIssue="${confirmedIssue}" — clearing req.body.variant, recomputing from the final issue-scoped population only`
+      );
+    }
+    const safeReqVariant = (suppressVariantForYearConflict || !variantProvenanceValid) ? null : (req.body.variant || null);
 
     // Ship #20a.6.18 — Variant identity check (additive, gated). Only runs
     // on modern books (year >= 2000) with variant detected AND Vision
@@ -4541,7 +4651,33 @@ export default async function handler(req, res) {
     // noise" case Q127's original rationale was built around — stays on
     // today's early-return path, byte-identical.
     const identityRefusedTopFamily = familyCandidate?.topFamily;
-    const identityRefusedPromotionEligible = identityRefused && !!identityRefusedTopFamily && identityRefusedTopFamily.count >= 3;
+    // Track B Phase 0, Commit 4.3 (Section E, revised — shared custody
+    // invariant, 2026-07-30) — call site 1 of 4 (promotion). Confirmed
+    // live: this promotion branch used a family's own coherent evidence
+    // to justify "PROMOTED" while confirmedIssue/pricingIssue had
+    // separately drifted to an unrelated issue (a raw-pool plurality,
+    // pre-Commit-4.3) — Phase 2 then queried, cached, and priced that
+    // unrelated issue under the family's banner. Checked BEFORE the
+    // >=3-member floor decides eligibility so a genuine mismatch can
+    // never reach promotion regardless of family size. Passes
+    // identity?.familyIssueConsensus directly — the decide-result shape
+    // (authoritativeForCustody/resolvedValue), never reconstructed from
+    // `.mode` — see checkCrossPopulationPromotionGuard's own doc comment
+    // (issueAuthority.js).
+    const crossPopulationPromotionCheck = checkCrossPopulationPromotionGuard(
+      identity?.familyIssueConsensus, { confirmedIssue, pricingIssue }
+    );
+    if (!crossPopulationPromotionCheck.allowed) {
+      out.crossPopulationPromotionBlocked = crossPopulationPromotionCheck.conflict;
+      console.log(
+        `[commit4.3] cross-population promotion blocked: reason=${crossPopulationPromotionCheck.conflict.reason} ` +
+        `selectedFamilyIssue=${crossPopulationPromotionCheck.conflict.selectedFamilyIssue ?? 'null'} ` +
+        `mismatchedField=${crossPopulationPromotionCheck.conflict.mismatchedField} ` +
+        `mismatchedValue=${crossPopulationPromotionCheck.conflict.mismatchedValue ?? 'null'}`
+      );
+    }
+    const identityRefusedPromotionEligible = identityRefused && !!identityRefusedTopFamily &&
+      identityRefusedTopFamily.count >= 3 && crossPopulationPromotionCheck.allowed;
     // Stashed here (not inside the early-return branch below) so it's still
     // in scope ~4000 lines later, near computeDecision — used ONLY as a
     // last-resort if a promoted card's real Phase 2 fetch comes back with
@@ -4599,7 +4735,9 @@ export default async function handler(req, res) {
         // Provisional banner text — overwritten below (near computeDecision)
         // once we know whether Phase 2 actually found real comps or not;
         // this is the fallback wording if somehow neither branch fires.
-        out.listingHardLockBanner = isProvisionalFamilyIdentity
+        out.listingHardLockBanner = out.crossPopulationPromotionBlocked
+          ? `Visual pool evidence points to #${out.crossPopulationPromotionBlocked.selectedFamilyIssue}, but ${out.crossPopulationPromotionBlocked.mismatchedField} was about to use #${out.crossPopulationPromotionBlocked.mismatchedValue} — blocked pending verification`
+          : isProvisionalFamilyIdentity
           ? `Provisional ID from visual pool: "${confirmedTitle}" #${confirmedIssue} — AI read "${req.body.title}" instead, but the visual pool unanimously disagrees — verify before listing`
           : familyCandidate?.reason
           ? `Visual identification uncertain — ${familyCandidate.reason} — verify before listing`
@@ -4627,7 +4765,11 @@ export default async function handler(req, res) {
         // fall through — Phase 2 runs normally below, NOT skipped.
       } else {
 
-      console.log(`[phase2] SKIPPED — identity refused by title-family clustering (${identityRefusedTopFamily?.count ?? 0} member(s), below the >=3 promotion floor)`);
+      console.log(
+        crossPopulationPromotionCheck.allowed
+          ? `[phase2] SKIPPED — identity refused by title-family clustering (${identityRefusedTopFamily?.count ?? 0} member(s), below the >=3 promotion floor)`
+          : `[phase2] SKIPPED — identity refused, promotion blocked by cross-population guard (${identityRefusedTopFamily?.count ?? 0} member(s), otherwise above the >=3 floor)`
+      );
 
       // FIX 1: Include backfilled year/publisher in refused response
       // (backfillFromComps ran at line 1990, may have set confirmedYear/confirmedPublisher)
@@ -4677,6 +4819,13 @@ export default async function handler(req, res) {
           runnerUp: familyCandidate.runnerUp,
           families: familyCandidate.families
         } : null,
+        // Track B Phase 0, Commit 4.3 (Section E) — I13: annotate, never
+        // silently drop. This early-return path builds refusedOut
+        // separately from `out` (sanitizeIdentityFields(req.body) base),
+        // so the guard's own conflict object (set on `out` earlier in
+        // this handler) must be threaded through explicitly or it never
+        // reaches the response on this exit.
+        crossPopulationPromotionBlocked: out.crossPopulationPromotionBlocked || null,
         // Advisory, not a wall — LOCKED state (responseContract.js) shows
         // whatever price/range was computed above and gates only listing.
         listingHardLocked: true,
@@ -4811,14 +4960,36 @@ export default async function handler(req, res) {
             // paired with a still-provisional (family-adopted-only) year is
             // also excluded from the exact-issue cache namespace, not just
             // an unconfirmed issue.
-            const exactPricingCacheEligible = canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority, out.identityProvisionalFields);
+            // Track B Phase 0, Commit 4.3 (Section E/F, revised — shared
+            // custody invariant) — call site 2 of 4 (exact-cache access).
+            // Independent, additional layer alongside the existing
+            // canUseExactIssuePricingCache gate (which already correctly
+            // blocks this namespace whenever out.issueAuthority.status is
+            // 'provisional' — the Commit 4.3 retention branch's own legacy-
+            // mode mapping already routes here for the Spawn fixture) — a
+            // genuine belt-and-suspenders check for any FUTURE code path
+            // that might set confirmedIssue without going through the
+            // issueAuthority-provisional signal.
+            const cacheCustodyCheck = checkCrossPopulationPromotionGuard(
+              identity?.familyIssueConsensus, { cacheIssue: confirmedIssue }
+            );
+            if (!cacheCustodyCheck.allowed) {
+              console.log(
+                `[commit4.3] exact-cache custody blocked: selectedFamilyIssue=${cacheCustodyCheck.conflict.selectedFamilyIssue} ` +
+                `cacheIssue=${cacheCustodyCheck.conflict.mismatchedValue}`
+              );
+            }
+            const exactPricingCacheEligible = canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority, out.identityProvisionalFields)
+              && cacheCustodyCheck.allowed;
             if (!exactPricingCacheEligible) {
               const yearOnlyGate = (out.identityProvisionalFields || []).includes('year') &&
                 out.issueAuthority?.status !== 'provisional' && out.issueAuthority?.status !== 'conflicted';
               console.log(
                 confirmedIssue == null
                   ? `[active-cache] SKIP: confirmedIssue is null — no title|null key in the ac: namespace (Commit B.1)`
-                  : yearOnlyGate
+                  : !cacheCustodyCheck.allowed
+                    ? `[active-cache] SKIP: custody invariant blocked (see [commit4.3] line above)`
+                    : yearOnlyGate
                     ? `[active-cache] SKIP: identityProvisionalFields includes 'year' (family-adopted-only) — not cached even though issue itself is trusted (Commit 4.1)`
                     : `[active-cache] SKIP: issueAuthority.status="${out.issueAuthority?.status}" — marketplace-only-adopted issue not cached (Commit 4)`
               );
@@ -8996,6 +9167,26 @@ export default async function handler(req, res) {
     // entire consensus rewrite. confirmedIssue is now the single authority
     // for out.issue, full stop.
     if (!out.issue) {
+      // Track B Phase 0, Commit 4.3 (Section E, revised — shared custody
+      // invariant) — call site 4 of 4 (response finalization). By this
+      // point Phase 2/pricing already ran using confirmedIssue — this
+      // check can no longer PREVENT anything, only ANNOTATE (I13: never
+      // silently suppress) a genuine divergence between the family's own
+      // resolved authority and the value about to be written to out.issue
+      // (the single terminal write, per this block's own established
+      // convention). Composed with, not replacing, the pre-existing Q140
+      // detectVisualIssueDivergence below (a different source pair —
+      // visual-pool consensus vs. confirmedIssue).
+      const responseCustodyCheck = checkCrossPopulationPromotionGuard(
+        identity?.familyIssueConsensus, { responseIssue: confirmedIssue }
+      );
+      if (!responseCustodyCheck.allowed && !out.crossPopulationPromotionBlocked) {
+        out.crossPopulationPromotionBlocked = responseCustodyCheck.conflict;
+        console.log(
+          `[commit4.3] response-finalization custody blocked: selectedFamilyIssue=${responseCustodyCheck.conflict.selectedFamilyIssue} ` +
+          `responseIssue=${responseCustodyCheck.conflict.mismatchedValue}`
+        );
+      }
       out.issue = confirmedIssue ?? null;
     } else {
       console.log(`[q140-terminal] INVARIANT VIOLATION: out.issue was already set to "${out.issue}" before the terminal write — a new upstream writer bypassed confirmedIssue`);
@@ -9448,6 +9639,29 @@ export default async function handler(req, res) {
     // deliberate absence of a "no contradiction still confirmed"
     // carve-out anywhere in this commit's diff.
     {
+      // Track B Phase 0, Commit 4.3 (Section E, revised — shared custody
+      // invariant) — call site 3 of 4 (authoritative pricing). Runs
+      // BEFORE computeIssueAuthorityContractPatch immediately below so a
+      // genuine custody violation forces the SAME ID_REQUIRED-class
+      // contract state a provisional issueAuthority already gets — one
+      // shared mechanism, not a second parallel lockdown. Synthesizes an
+      // issueAuthority-shaped object only when out.issueAuthority isn't
+      // already provisional/conflicted (avoids double-writing reasons
+      // when both signals fire for the same underlying cause).
+      const pricingCustodyCheck = checkCrossPopulationPromotionGuard(
+        identity?.familyIssueConsensus, { confirmedIssue }
+      );
+      if (!pricingCustodyCheck.allowed
+        && out.issueAuthority?.status !== 'provisional' && out.issueAuthority?.status !== 'conflicted') {
+        console.log(
+          `[commit4.3] authoritative-pricing custody blocked: selectedFamilyIssue=${pricingCustodyCheck.conflict.selectedFamilyIssue} ` +
+          `confirmedIssue=${pricingCustodyCheck.conflict.mismatchedValue}`
+        );
+        out.issueAuthority = {
+          source: 'marketplace', status: 'conflicted', confidence: 'low', supportRatio: null,
+          reasons: ['custody-invariant-violation'], priorObservations: [],
+        };
+      }
       // Commit 4.1 (review round, item 2) — identityProvisionalFields
       // passed as a third argument so this containment fires even when
       // out.issueAuthority is null (issue trusted/corroborated) but 'year'

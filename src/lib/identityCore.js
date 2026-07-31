@@ -15,7 +15,7 @@
  * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
 
-import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE } from './compHygiene.js';
+import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership } from './compHygiene.js';
 import { normalizeOptionalYear } from './yearEvidence.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
@@ -1019,9 +1019,21 @@ export const resolveFamilyIssueConsensus = (priorIssue, visualItems, indices) =>
   }
 
   if (uniqueRows === 0) {
-    return { issue: null, mode: 'no-data', winner: null, support: 0, ratio: 0, uniqueRows: 0, runnerUp: null, runnerUpSupport: 0, tiedCandidates: [] };
+    return { issue: null, mode: 'no-data', winner: null, support: 0, ratio: 0, uniqueRows: 0, runnerUp: null, runnerUpSupport: 0, tiedCandidates: [], assertedIssues: [] };
   }
 
+  // Track B Phase 0, Commit 4.3 (Matrix B / rider F, Option A) — the
+  // distinct-issue-values-asserted list, additive to this function's
+  // return shape. Mirrors resolveFamilyYearConsensus's own pre-existing
+  // `assertedYears` field exactly (same purpose, same naming convention)
+  // — exposes what `counts` already computed above, no new counting
+  // mechanism. Lets a caller answer "does value X have ANY support in
+  // this family" (`assertedIssues.includes(String(X))`) without a second,
+  // parallel presence-scan. Existing callers destructuring named fields
+  // are unaffected; the Commit 4.1/4.2 test suites' own exact-shape
+  // assertions were audited (2026-07-30) and one (q-trackB-commit4.2's
+  // FIXTURE B full-shape check) was updated to include this field.
+  const assertedIssues = Object.keys(counts);
   const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   const topCount = ranked[0]?.[1] ?? 0;
   // How many distinct candidates share the top count — >1 means a genuine
@@ -1054,20 +1066,20 @@ export const resolveFamilyIssueConsensus = (priorIssue, visualItems, indices) =>
       // these is a real signal either way — the prior issue is still
       // preserved (this only affects the CONFIDENCE LABEL, never the
       // value), reported honestly as 'no-consensus'.
-      return { issue: priorIssue, mode: 'no-consensus', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+      return { issue: priorIssue, mode: 'no-consensus', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates, assertedIssues };
     }
     if (String(winner) === String(priorIssue)) {
-      return { issue: priorIssue, mode: 'corroborated', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+      return { issue: priorIssue, mode: 'corroborated', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates, assertedIssues };
     }
     // Disagreement that DOES clear the adoption bar — a genuine competing
     // consensus. Locked, never overwritten.
-    return { issue: priorIssue, mode: 'conflict-locked', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+    return { issue: priorIssue, mode: 'conflict-locked', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates, assertedIssues };
   }
 
   if (meetsAdoptionBar) {
-    return { issue: winner, mode: 'adopted', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+    return { issue: winner, mode: 'adopted', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates, assertedIssues };
   }
-  return { issue: null, mode: 'no-consensus', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates };
+  return { issue: null, mode: 'no-consensus', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates, assertedIssues };
 };
 
 /**
@@ -1280,6 +1292,224 @@ export const detectVisualIssueDivergence = (confirmedIssue, visualIssue) => {
   if (String(confirmedIssue) === String(visualIssue)) return null;
   return { confirmedIssue: String(confirmedIssue), visualIssue: String(visualIssue) };
 };
+
+/**
+ * Track B Phase 0, Commit 4.3 (Section A/B, Carry-forward A, 2026-07-30) —
+ * the "decide" half of the measure/decide split. MEASURING a family's own
+ * independent observation (resolveFamilyIssueConsensus/
+ * resolveFamilyYearConsensus, called with a null prior — see the retention
+ * branch in resolveIdentity below) never mutates anything; this function
+ * is the SEPARATE step that compares that measurement against an existing
+ * field's value, its independent trust level, and whether it has any
+ * support at all within the family, producing exactly one of five
+ * outcomes. Corrects an earlier draft's real error: measuring with a null
+ * prior and then unconditionally adopting whatever came back is NOT the
+ * same as proving an existing field is never silently overwritten —
+ * monotonicity must be an explicit property of THIS step, not an
+ * accidental consequence of which parameter happened to be passed to the
+ * measurement.
+ *
+ * Five outcomes (exact enum, consumed directly by the shared custody
+ * invariant below — never reconstructed from mode-name string matching).
+ * IMPLEMENTATION PACKET HOLD — FINAL AUTHORITY-SOURCE HOLD (2026-07-30):
+ * authority (whether a prior can override or resist a qualified family) is
+ * granted by PROVENANCE (priorSource / priorIndependentlyTrusted) alone,
+ * never by confidence. Confidence measures certainty WITHIN a source — it
+ * still legitimately affects ONE thing below (whether a zero-support,
+ * untrusted disagreement is safe to silently correct, vs. a genuine
+ * conflict), never whether a source is trusted in the first place:
+ *   - 'adopted' — priorValue was missing/placeholder, family qualifies
+ *     (its own null-prior measurement reached its own adoption bar).
+ *     resolvedValue = observedFamilyValue. authoritativeForCustody = true.
+ *   - 'corroborated' — priorValue present, family qualifies AND agrees.
+ *     resolvedValue = priorValue (unchanged — this is confirmation, not a
+ *     new assignment). authoritativeForCustody = true.
+ *   - 'provisionally-corrected' — priorValue present, NOT independently
+ *     trusted (priorIndependentlyTrusted===false), NOT high-confidence
+ *     (priorConfidence !== 'high'), AND has ZERO support anywhere within a
+ *     qualified, otherwise-unanimous family. resolvedValue =
+ *     observedFamilyValue (the family's own value WINS, replacing the
+ *     unsupported prior). authoritativeForCustody = true. This is the
+ *     Spawn #351 fixture's own path: Vision's issue "301"/year "2020" are
+ *     LOW-confidence, untrusted, and have 0/5 family support; the
+ *     qualified family's own 5/5-unanimous "351"/"2024" provisionally
+ *     corrects them. A silent correction is only safe here because the
+ *     prior was never confident about itself either.
+ *   - 'preserved-prior' — EITHER the family doesn't qualify at all
+ *     (nothing to compare against — prior stands, unaffected) OR the
+ *     family qualifies and disagrees but priorValue is independently
+ *     trusted (priorIndependentlyTrusted===true — a validated manual/user
+ *     correction, or a corroborated catalog authority record; NEVER Vision
+ *     alone, regardless of confidence — see isPriorSourceIndependentlyTrusted).
+ *     resolvedValue = priorValue, NEVER silently overwritten.
+ *     authoritativeForCustody = true only when the prior's own independent
+ *     trust justifies it (i.e., the disagree-but-trusted branch) — false
+ *     in the no-family-signal branch, since "nothing established" is not
+ *     the same as "trusted."
+ *   - 'conflicted' — priorValue present, NOT independently trusted, family
+ *     qualifies and disagrees, AND EITHER (a) priorValue itself has SOME
+ *     support within the family (a genuine, non-unanimous ambiguity — not
+ *     the clean zero-support case 'provisionally-corrected' handles), OR
+ *     (b) priorValue has ZERO family support but priorConfidence==='high'
+ *     — an ordinary Vision read at its own most confident is still not
+ *     independent corroboration, and overriding a CONFIDENT (even if
+ *     untrusted) assertion silently is not the same risk as overriding an
+ *     admittedly-weak one; the disagreement is recorded, not silently
+ *     adjudicated either direction. resolvedValue = priorValue (never
+ *     overwritten by the family in either sub-case), but
+ *     authoritativeForCustody = false — neither side is trusted enough to
+ *     drive exact-cache access, authoritative pricing, or response
+ *     finalization.
+ *
+ * Pure, no console/log side effects — the caller decides what to log.
+ *
+ * @param {Object} params
+ * @param {*} params.priorValue - the existing field value before this measurement (e.g. vision.issue)
+ * @param {string} [params.priorSource] - 'manual'|'user'|'catalog'|'vision'|'unknown' — WHERE priorValue came from. IMPLEMENTATION PACKET HOLD — FINAL AUTHORITY-SOURCE HOLD (2026-07-30): provenance, not confidence, is what grants independent authority — see isPriorSourceIndependentlyTrusted below and the LAUNCH-AUDIT.md named finding. Accepted here purely for traceability (echoed nowhere internally; the caller is responsible for having already derived priorIndependentlyTrusted from it) — this function does not re-derive trust from the string itself, to keep "decide what a given trust level implies" and "decide what counts as trusted" as separate, independently-testable steps.
+ * @param {boolean} params.priorIndependentlyTrusted - true when priorValue's OWN source is independently authoritative (a validated manual/user correction, or a corroborated catalog authority record) — computed by the caller via isPriorSourceIndependentlyTrusted(priorSource, ...), NEVER from confidence and NEVER from a marketplace/pool-derived signal
+ * @param {string} [params.priorConfidence] - the source's OWN self-assessed certainty (e.g. Vision's 'low'/'high'). Confidence measures certainty WITHIN a source, not whether that source has independent standing, and NEVER derives priorIndependentlyTrusted — but it DOES still gate one real branch: a disagreeing, untrusted, zero-family-support prior is silently corrected (rule E, 'provisionally-corrected') only when NOT high-confidence; a high-confidence-but-untrusted disagreement in the same zero-support shape becomes a recorded 'conflicted' state instead (rule D) — never silently overridden in either direction.
+ * @param {string} params.familyMode - the null-prior measurement's own mode ('adopted'|'no-consensus'|'no-data'|'corroborated'|'conflict-locked' — only 'adopted' means the family itself reached a clean, unanimous-enough-per-its-own-bar conclusion; a null-prior call can never itself return 'corroborated'/'conflict-locked')
+ * @param {*} params.familyValue - the null-prior measurement's own resolved value (its `.issue` or `.year`)
+ * @param {boolean} params.priorHasSupportInFamily - whether priorValue appears anywhere among the family's own asserted values (assertedIssues/assertedYears) — distinguishes a clean zero-support correction from a genuine ambiguity
+ * @returns {{observedFamilyValue: *, resolvedValue: *, outcome: 'adopted'|'corroborated'|'provisionally-corrected'|'preserved-prior'|'conflicted', authoritativeForCustody: boolean}}
+ */
+export const decideFieldAuthority = ({ priorValue, priorSource, priorIndependentlyTrusted, priorConfidence, familyMode, familyValue, priorHasSupportInFamily }) => {
+  const priorIsPlaceholder = priorValue == null;
+  const familyQualifies = familyMode === 'adopted';
+
+  if (priorIsPlaceholder) {
+    if (familyQualifies) {
+      return { observedFamilyValue: familyValue, resolvedValue: familyValue, outcome: 'adopted', authoritativeForCustody: true };
+    }
+    // Nothing to adopt (family itself inconclusive) and no prior to
+    // preserve either — genuinely no data, not a disagreement. Bucketed
+    // under 'conflicted' to stay within the fixed five-outcome enum;
+    // callers that need the underlying no-data/no-consensus distinction
+    // still have it via the raw measurement object (unchanged, still
+    // returned alongside this decision — see resolveIdentity below).
+    return { observedFamilyValue: familyValue ?? null, resolvedValue: null, outcome: 'conflicted', authoritativeForCustody: false };
+  }
+
+  if (!familyQualifies) {
+    // Family has nothing conclusive to say about this field — prior
+    // stands, completely unaffected. Not "trusted" in the sense of being
+    // independently verified, just genuinely undisturbed.
+    return { observedFamilyValue: familyValue ?? null, resolvedValue: priorValue, outcome: 'preserved-prior', authoritativeForCustody: priorIndependentlyTrusted === true };
+  }
+
+  if (String(familyValue) === String(priorValue)) {
+    return { observedFamilyValue: familyValue, resolvedValue: priorValue, outcome: 'corroborated', authoritativeForCustody: true };
+  }
+
+  // Family qualifies AND disagrees with a present prior.
+  if (priorIndependentlyTrusted) {
+    // Trusted prior (a validated manual/user correction, or a corroborated
+    // catalog authority record — see isPriorSourceIndependentlyTrusted;
+    // NEVER Vision alone, regardless of confidence) wins outright — the
+    // family's disagreement is surfaced as an annotation by the caller,
+    // never as a silent overwrite.
+    return { observedFamilyValue: familyValue, resolvedValue: priorValue, outcome: 'preserved-prior', authoritativeForCustody: true };
+  }
+  if (!priorHasSupportInFamily) {
+    // Untrusted prior, ZERO support anywhere in a qualified, unanimous
+    // family. IMPLEMENTATION PACKET HOLD — FINAL AUTHORITY-SOURCE HOLD,
+    // rules D/E (2026-07-30): confidence still matters here — NOT to grant
+    // authority (priorIndependentlyTrusted already ruled that out above),
+    // but to decide whether a silent family-side correction is safe.
+    //   - Rule E (retained, unchanged): a LOW/unknown-confidence prior with
+    //     zero support is the Spawn #351 fixture's own class — Vision's
+    //     own weak guess, silently and safely corrected by a qualified,
+    //     unanimous family. authoritativeForCustody: true.
+    //   - Rule D (new): a HIGH-confidence-but-untrusted prior (ordinary
+    //     Vision at its own most confident, still never independently
+    //     corroborated) disagreeing with a qualified, unanimous family
+    //     that has ZERO support for it is a genuine conflict, not a clean
+    //     correction — overriding a confident assertion silently is
+    //     exactly the risk this hold exists to close. outcome:'conflicted',
+    //     authoritativeForCustody: false — resolvedValue stays priorValue
+    //     (never silently overwritten by the family either), the
+    //     disagreement is recorded, not adjudicated.
+    const priorIsHighConfidence = String(priorConfidence || '').toLowerCase() === 'high';
+    if (priorIsHighConfidence) {
+      return { observedFamilyValue: familyValue, resolvedValue: priorValue, outcome: 'conflicted', authoritativeForCustody: false };
+    }
+    return { observedFamilyValue: familyValue, resolvedValue: familyValue, outcome: 'provisionally-corrected', authoritativeForCustody: true };
+  }
+  // Prior has SOME support within the family (a genuine, non-unanimous
+  // ambiguity, not a clean zero-support case) — real conflict, neither
+  // side clearly wins.
+  return { observedFamilyValue: familyValue, resolvedValue: priorValue, outcome: 'conflicted', authoritativeForCustody: false };
+};
+
+// Track B Phase 0, Commit 4.3 (IMPLEMENTATION PACKET HOLD — FINAL
+// AUTHORITY-SOURCE HOLD, 2026-07-30) — CORRECTED. The first-pass version
+// of this function judged a prior's independence by `confidence ===
+// 'high'` alone (reusing extractConfirmedVariant's own Gate 2/4 "don't
+// second-guess this" signal, variantIdentity.js). That was wrong: a
+// high-confidence Vision observation is still Vision-derived — confidence
+// measures certainty WITHIN a source (how sure Vision is of its own read),
+// not whether that source has independent standing (third-party
+// corroboration, or explicit user/catalog authority) to override a
+// qualified, disagreeing family. Confidence cannot manufacture provenance.
+// It happened to also correctly recognize manually-corrected priors
+// (manualCorrection.js's buildManualCorrectionPayload sets
+// `confidence:'HIGH'` on its request payload) — but that was a
+// coincidence of a SHARED confidence value, not a genuine provenance
+// check, and the same bare 'HIGH' string is exactly what an ordinary
+// high-confidence Vision read also carries. Named finding — see
+// LAUNCH-AUDIT.md.
+//
+// Corrected to judge trust by PROVENANCE:
+//   - 'manual' | 'user' — a server-validated manual/user correction — independently trusted.
+//   - 'catalog' — a corroborating external-catalog authority record — independently trusted ONLY when
+//     `hasCorroboratingAuthorityRecord` is explicitly true (the bare tag alone proves nothing; no live
+//     catalog-authority source exists in this codebase yet, so this currently always evaluates false in
+//     practice — a deliberate conflicted-safe default, not a placeholder left to silently pass).
+//   - 'vision' (including HIGH confidence), 'unknown', or anything else — NOT independently trusted.
+//     Vision's own self-assessed certainty is not third-party corroboration; an unrecognized/absent
+//     source defaults to untrusted, never the reverse.
+export const isPriorSourceIndependentlyTrusted = (priorSource, hasCorroboratingAuthorityRecord = false) => {
+  if (priorSource === 'manual' || priorSource === 'user') return true;
+  if (priorSource === 'catalog') return hasCorroboratingAuthorityRecord === true;
+  return false;
+};
+
+// Track B Phase 0, Commit 4.3 (PRODUCTION AUTHORITY-CONTEXT INTEGRATION
+// HOLD, item 1, 2026-07-31) — normalizes a raw Vision confidence string.
+// Traced to its actual origin (not a proxy, not grade-confidence): this is
+// Vision's own self-reported identification confidence, requested
+// explicitly in api/grade.js's STANDARD_PROMPT/WATCH_PROMPT JSON_SHAPE
+// ("confidence: 'low', 'medium', or 'high' based on image quality and
+// visible information"), returned in grade.js's response, forwarded by
+// the client as part of the /api/enrich request body, and destructured at
+// api/enrich.js's handler entry (`const { ..., confidence, ... } =
+// req.body;`) — the exact same variable `[ship12]`/`visionConfidenceLower`
+// already read elsewhere in that file. Mirrors the EXISTING normalization
+// convention already used at those call sites
+// (`String(confidence || 'medium').toLowerCase()`) rather than inventing
+// a stricter validator — Vision is instructed to return exactly one of
+// three values, so a fixed-set validator would add complexity with no
+// real additional safety.
+export const normalizeVisionConfidence = (rawConfidence) => String(rawConfidence || 'medium').toLowerCase();
+
+// Track B Phase 0, Commit 4.3 (PRODUCTION AUTHORITY-CONTEXT INTEGRATION
+// HOLD, item 1, 2026-07-31) — the SINGLE point that assigns
+// priorSource='vision' and priorIndependentlyTrusted=false for the
+// standard (non-manual, non-CGC-cert) identity-resolution path, matching
+// the single-point-of-truth pattern already established for
+// titleAxisOnlyBlock (imageSearchIdentity.js). `source` is hard-coded —
+// NEVER derived from req.body.source, req.body.identitySource, a client-
+// forwarded vision.source, or any other free-form request value; the only
+// input this function accepts is the raw Vision confidence string itself.
+// Imported by BOTH the real api/enrich.js call site and this feature's
+// tests, so a real "HIGH Vision reaches resolveIdentity as HIGH" proof
+// and a real "source is always 'vision' on the automatic path" proof are
+// the SAME function call, not two independently-maintained copies.
+export const buildStandardVisionAuthorityContext = (rawVisionConfidence) => ({
+  source: 'vision',
+  confidence: normalizeVisionConfidence(rawVisionConfidence),
+  priorIndependentlyTrusted: isPriorSourceIndependentlyTrusted('vision'), // always false — vision is never independently trusted, computed via the real predicate rather than hand-typed
+});
 
 /**
  * Resolve identity from multiple sources (Vision, eBay, title-family).
@@ -1533,6 +1763,205 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     console.log(`[phase1] eBay visual insufficient (${ebayResultCount} results), using Vision title`);
   }
 
+  // Track B Phase 0, Commit 4.3 (Section A/B/C, revised 2026-07-30) —
+  // family issue/year authority, decoupled from the title-projection
+  // decision above. Q84's title-safety gate (which can leave the branches
+  // above at decision='fallback-vision', keeping Vision's own title)
+  // speaks ONLY to the canonical/display TITLE — it must never also
+  // discard a coherent winning family's own independently-valid issue/
+  // year consensus.
+  //
+  // Confirmed live (2026-07-30 23:16:50 production dispatch): a coherent
+  // 5-member Spawn #351 family (5/5 internal issue support, correctly
+  // Q84-blocked from replacing the "Spawn" title with a marketplace label)
+  // was silently discarded — familyIssueConsensusResult stayed null for
+  // any decision outside FAMILY_OVERRIDE_DECISIONS/'refused-identity-
+  // conflict', so vision-zero-support (below) fell through to the RAW
+  // POOL's unrelated #300 plurality (9/18) instead of the family's own
+  // coherent #351 consensus (5/5) — pricing and caching an entirely
+  // different book under the family's own reference evidence.
+  //
+  // QUALIFIED-FAMILY PREDICATE (Matrix A, revised — the original draft's
+  // bare `topFamily.count >= 3` gate was too permissive: it could not
+  // distinguish a genuine title-axis-only block from a family that merely
+  // shares WEAK token overlap with Vision's own title — imageSearchIdentity.js's
+  // selectTitleFamilyCandidate returns decision='fallback-vision' with a
+  // populated, possibly >=3-member topFamily for BOTH shapes, and only the
+  // former is a safe retention candidate). One precondition, then four
+  // evidence-quality conditions, all required:
+  //
+  //   PRECONDITION — hasValidFamilyMembership(...): the family's
+  //   topFamily.indices must genuinely belong to the CURRENT request's
+  //   visualItems (array, unique in-bounds integer indices, count
+  //   agreement, every referenced row actually exists). IMPLEMENTATION
+  //   PACKET HOLD — FINAL NARROW HOLD, item 1 (2026-07-30): added after
+  //   review found the first-pass predicate had no membership check at
+  //   all — a stale/foreign family (indices from a different/prior scan)
+  //   could reach the MEASURE step, relying on resolveFamilyIssueConsensus
+  //   to degrade to no-data rather than being rejected up front. This is a
+  //   precondition of current-request membership, not a fifth evidence-
+  //   quality signal — it runs FIRST (short-circuits the whole predicate)
+  //   and a failure here means the family never reaches measurement at
+  //   all: no consensus objects, no [commit4.3] log, no structured
+  //   [family-evidence] event, no provisional override — silent-safe,
+  //   exactly as if no family had been supplied.
+  //
+  //   1. family.titleAxisOnlyBlock === true — set at the SINGLE Q84-dual-
+  //      axis-blocked return site (imageSearchIdentity.js), the only path
+  //      where topFamily already cleared count>=3 AND >=40% Vision-title
+  //      overlap AND is not a LOT listing, and the ONLY reason no title
+  //      override happened is Q84 vetoing the TITLE content specifically.
+  //   2. topFamily.count >= FAMILY_AUTHORITY_COHERENCE_FLOOR (3, unchanged
+  //      — the same floor Ship 26.3B / identityRefusedPromotionEligible,
+  //      api/enrich.js, already uses for family-pool promotion).
+  //   3. !hasContaminatedMember(...) — a NATURALLY-occurring (non-merged)
+  //      >=3-member family never passes through mergeFragmentedTitleFamilies'
+  //      own contamination screen (that function is a pure no-op once
+  //      scored[0].count>=3 already) — this re-applies the identical,
+  //      shared LOT/REPRINT/SLAB/GRADED/SIGNED/TPB check independently
+  //      here so a naturally-large-but-contaminated family can't qualify
+  //      either.
+  //   4. familyDominatesRunnerUp(...) — CORRECTED, IMPLEMENTATION PACKET
+  //      HOLD — FINAL NARROW HOLD, item 2 (2026-07-30). The first-pass
+  //      implementation reused isCompetingFamilyTooStrong(top, [runner])
+  //      verbatim (inverted) here — WRONG and, worse, VACUOUS in this
+  //      context: at this call site topFamily/runnerUp are literally
+  //      scored[0]/scored[1] (top.weightSum >= runner.weightSum ALWAYS
+  //      holds by construction), under which isCompetingFamilyTooStrong
+  //      can only ever return true in a degenerate zero-weight case — it
+  //      could never actually block retention in production. The correct
+  //      rule is the INVERSE relationship: the SELECTED family must
+  //      dominate the runner-up by the reused 3x margin (top >=
+  //      runner*3), not "the runner-up must outweigh the selected family
+  //      by 3x." familyDominatesRunnerUp (src/lib/compHygiene.js) is a
+  //      separately-named function implementing this — NOT a mutation of
+  //      isCompetingFamilyTooStrong's own meaning, which stays exactly as-
+  //      is for its original top-rank-protection call site (a genuinely
+  //      different weight-ordering context; see that function's own
+  //      updated doc comment). See LAUNCH-AUDIT.md for the full named
+  //      finding — the first-pass margin condition was vacuous, masked by
+  //      an impossible (top<runner) test fixture, not a deliberate design.
+  const FAMILY_AUTHORITY_COHERENCE_FLOOR = 3;
+  const isQualifiedFamilyForRetention = !!(hasValidFamilyMembership(opts.visualItems, family?.topFamily?.indices, family?.topFamily?.count)
+    && family?.titleAxisOnlyBlock === true
+    && family?.topFamily?.count >= FAMILY_AUTHORITY_COHERENCE_FLOOR
+    && !hasContaminatedMember(opts.visualItems, family.topFamily.indices)
+    && familyDominatesRunnerUp(family.topFamily.weightSum, family.runnerUp?.weightSum));
+
+  // Only runs when neither branch above already populated
+  // familyIssueConsensusResult (those are strictly stronger signals — an
+  // accepted title override, or a proven Vision-vs-pool conflict — and are
+  // left completely untouched here) AND the family clears the qualified
+  // predicate above. confirmedTitle is deliberately NEVER touched here —
+  // the title decision made above stands, unchanged.
+  if (familyIssueConsensusResult == null && isQualifiedFamilyForRetention) {
+    // MEASURE — the family's own independent observation, prior=null,
+    // never mutates confirmedIssue/confirmedYear by itself. Mirrors the
+    // refused-identity-conflict branch's own null-prior reasoning above:
+    // this measures the family's internal coherence, independent of
+    // whether Vision's per-field guesses agree with it.
+    const issueMeasurement = resolveFamilyIssueConsensus(null, opts.visualItems, family.topFamily.indices);
+    const yearMeasurement = resolveFamilyYearConsensus(null, opts.visualItems, family.topFamily.indices);
+
+    // DECIDE — compares the measurement against the existing field's
+    // value, source, and support. IMPLEMENTATION PACKET HOLD — PRODUCTION
+    // AUTHORITY-CONTEXT INTEGRATION HOLD (2026-07-31), corrected again:
+    // this function no longer derives trust from a free-form
+    // `vision.source` string at all — that was itself a residual "free-
+    // form manual trust path" (a bare 'manual'/'user' tag reaching this
+    // function proves nothing about whether the Commit 3 four-condition
+    // manual-authority contract was ever actually validated; validated
+    // manual corrections bypass resolveIdentity entirely and always will
+    // — see manualCorrection.js). `priorIndependentlyTrusted` is now
+    // consumed DIRECTLY from `vision.priorIndependentlyTrusted` — a
+    // boolean the CALLER must have already computed (via
+    // buildStandardVisionAuthorityContext for the real production path,
+    // which hard-codes it to `false`) — this function never re-interprets
+    // a source string into a trust decision itself. `vision.source` is
+    // read ONLY for diagnostics/traceability (the [commit4.3] log line,
+    // and threaded into decideFieldAuthority's own accepted-but-not-
+    // branched-on priorSource param) — it can no longer grant authority no
+    // matter what string a caller supplies, since authority is driven
+    // exclusively by the pre-computed boolean. A vision object that omits
+    // both fields (every existing test fixture that predates this hold)
+    // safely defaults to `source:'unknown'`/`priorIndependentlyTrusted:false` —
+    // never trusted.
+    const priorSource = vision.source ?? 'unknown';
+    const priorTrusted = vision.priorIndependentlyTrusted === true;
+    const issueHasSupport = vision.issue != null && (issueMeasurement.assertedIssues || []).includes(String(vision.issue));
+    const yearHasSupport = vision.year != null && (yearMeasurement.assertedYears || []).includes(String(vision.year));
+
+    const issueDecision = decideFieldAuthority({
+      priorValue: vision.issue, priorSource, priorIndependentlyTrusted: priorTrusted, priorConfidence: vision.confidence,
+      familyMode: issueMeasurement.mode, familyValue: issueMeasurement.issue,
+      priorHasSupportInFamily: issueHasSupport,
+    });
+    const yearDecision = decideFieldAuthority({
+      priorValue: vision.year, priorSource, priorIndependentlyTrusted: priorTrusted, priorConfidence: vision.confidence,
+      familyMode: yearMeasurement.mode, familyValue: yearMeasurement.year,
+      priorHasSupportInFamily: yearHasSupport,
+    });
+
+    // Legacy-mode mapping — every EXISTING downstream consumer
+    // (deriveIssueAuthorityFromAdoption, out.issueConsensusConflict,
+    // issueAuthority.js, api/enrich.js) reads `.mode` using the ORIGINAL
+    // five-value vocabulary each function already documented
+    // ('adopted'|'corroborated'/'preserved'|'conflict-locked'|'no-consensus'/
+    // 'no-data') — never the new outcome enum directly (per the approved
+    // custody-invariant design, the new outcome/authoritativeForCustody
+    // fields are what the SHARED CUSTODY INVARIANT consumes; this mapping
+    // is purely for backward compatibility with pre-4.3 consumers that
+    // were never rebuilt). Whenever the family itself wasn't conclusive
+    // (familyMode !== 'adopted'), the honest legacy mode is simply
+    // familyMode's own value ('no-data'/'no-consensus') — never guessed.
+    const legacyModeFor = (fieldType, familyMode, decision) => {
+      if (decision.outcome === 'adopted' || decision.outcome === 'provisionally-corrected') return 'adopted';
+      if (decision.outcome === 'corroborated') return fieldType === 'year' ? 'preserved' : 'corroborated';
+      if (familyMode !== 'adopted') return familyMode;
+      return 'conflict-locked'; // familyMode==='adopted' + outcome is preserved-prior/conflicted -> genuine disagreement
+    };
+
+    familyIssueConsensusResult = {
+      ...issueMeasurement,
+      issue: issueDecision.resolvedValue,
+      mode: legacyModeFor('issue', issueMeasurement.mode, issueDecision),
+      observedFamilyValue: issueDecision.observedFamilyValue,
+      resolvedValue: issueDecision.resolvedValue,
+      outcome: issueDecision.outcome,
+      authoritativeForCustody: issueDecision.authoritativeForCustody,
+    };
+    familyYearConsensusResult = {
+      ...yearMeasurement,
+      year: yearDecision.resolvedValue,
+      mode: legacyModeFor('year', yearMeasurement.mode, yearDecision),
+      observedFamilyValue: yearDecision.observedFamilyValue,
+      resolvedValue: yearDecision.resolvedValue,
+      outcome: yearDecision.outcome,
+      authoritativeForCustody: yearDecision.authoritativeForCustody,
+    };
+
+    if (issueDecision.authoritativeForCustody) confirmedIssue = issueDecision.resolvedValue;
+    if (yearDecision.authoritativeForCustody) confirmedYear = yearDecision.resolvedValue;
+
+    // A qualifying retention branch entry ALWAYS gets exactly one summary
+    // log line — never zero (a silent, unauditable authority decision),
+    // never duplicated — reporting both fields' outcomes regardless of
+    // which specific outcome each landed on.
+    isProvisionalOverride = issueDecision.outcome === 'adopted' || issueDecision.outcome === 'provisionally-corrected'
+      || yearDecision.outcome === 'adopted' || yearDecision.outcome === 'provisionally-corrected';
+    if (isProvisionalOverride) {
+      identitySource = `${identitySource}+family_issue_year_authority_retained`;
+    }
+    console.log(
+      `[commit4.3] family authority retained despite title decision="${family.decision}": ` +
+      `priorSource=${priorSource} priorIndependentlyTrusted=${priorTrusted} ` +
+      `issue outcome=${issueDecision.outcome} resolved=${issueDecision.resolvedValue ?? 'null'} authoritative=${issueDecision.authoritativeForCustody} ` +
+      `support=${issueMeasurement.support}/${issueMeasurement.uniqueRows}; ` +
+      `year outcome=${yearDecision.outcome} resolved=${yearDecision.resolvedValue ?? 'null'} authoritative=${yearDecision.authoritativeForCustody} ` +
+      `support=${yearMeasurement.support}/${yearMeasurement.uniqueRows}`
+    );
+  }
+
   // P0 (Q-VISION-ZERO-SUPPORT) — Vision "confidently wrong" issue override.
   // None of the branches above cross-check Vision's own ISSUE against the
   // pool when title already agrees (or the pool is <10 items) —
@@ -1558,14 +1987,20 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // "#1" near words like "Special"/"Exclusive" at pool-BUILD time) even
   // when the winning family's own membership — resolveFamilyIssueConsensus,
   // scoped to family.topFamily.indices, computed above — is in full
-  // agreement. familyIssueConsensusResult is only ever set inside the two
-  // family-override branches above (never carried over between calls), so
-  // checking it non-null already proves the authority is FROM THE CURRENT
-  // family selection, not a stale/previous one — re-checked explicitly here
-  // anyway against family.decision so a future refactor that starts
-  // reusing this variable across branches can't silently widen the skip.
+  // agreement. familyIssueConsensusResult is only ever set inside the
+  // three family-authority branches above (never carried over between
+  // calls), so checking it non-null already proves the authority is FROM
+  // THE CURRENT family selection, not a stale/previous one — re-checked
+  // explicitly here anyway against family.decision so a future refactor
+  // that starts reusing this variable across branches can't silently
+  // widen the skip. Commit 4.3 (Section B) — third allowed condition
+  // mirrors exactly the retained-family-authority branch's own gate
+  // (family?.topFamily?.count >= FAMILY_AUTHORITY_COHERENCE_FLOOR) so this
+  // stays a precise, explicit list rather than a blanket `!= null`.
   const familyAuthorityCurrent = familyIssueConsensusResult != null
-    && (FAMILY_OVERRIDE_DECISIONS.includes(family?.decision) || family?.decision === 'refused-identity-conflict');
+    && (FAMILY_OVERRIDE_DECISIONS.includes(family?.decision)
+      || family?.decision === 'refused-identity-conflict'
+      || family?.topFamily?.count >= FAMILY_AUTHORITY_COHERENCE_FLOOR);
   // Only a genuine ADOPTED/CORROBORATED result for the SAME issue the check
   // below is about to evaluate counts as authority — 'conflict-locked' and
   // 'no-consensus'/'no-data' must still reach the raw-pool check unshortcut

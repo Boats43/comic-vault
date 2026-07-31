@@ -99,6 +99,126 @@ export const SIGNED_RE = /\b(?:signed|signature\s+series|autographed?|yellow\s*l
 export const TPB_MARKER_RE =
   /\b(?:tpb|trade\s*paperback|hardcover|hc|omnibus|compendium|deluxe(?:\s*edition)?|absolute(?:\s*edition)?|treasury(?:\s*edition)?|collected\s*edition|graphic\s*novel|gn)\b/i;
 
+// Track B Phase 0, Commit 4.3 (Matrix A / rider F, 2026-07-30) — extracted
+// here, not into imageSearchIdentity.js or identityCore.js, specifically
+// because both of those files need to call it and imageSearchIdentity.js
+// already imports FROM identityCore.js — putting it in either would create
+// a circular import. compHygiene.js is a true leaf module both already
+// import from safely. Single source of truth for "is this row a
+// lot/reprint/slab/graded/signed/TPB listing" — was previously a local
+// closure inside mergeFragmentedTitleFamilies (imageSearchIdentity.js);
+// that function now delegates here instead of maintaining its own copy,
+// and identityCore.js's new qualified-family-authority predicate reuses
+// the identical check — exactly the drifted-duplicate-constant class this
+// codebase has been burned by repeatedly (see CLAUDE.md's Pattern
+// Library). Same six detectors, same row-title extraction convention
+// (rawTitle || title || string item) already used throughout this
+// codebase.
+export const hasContaminatedMember = (visualItems, indices) => {
+  const rows = Array.isArray(indices) ? indices : [];
+  for (const idx of rows) {
+    const item = visualItems?.[idx];
+    const raw = String(typeof item === 'string' ? item : (item?.rawTitle || item?.title || '')).trim();
+    if (LOT_RE.test(raw) || REPRINT_RE.test(raw) || SLAB_RE.test(raw) ||
+      GRADED_RE.test(raw) || SIGNED_RE.test(raw) || TPB_MARKER_RE.test(raw)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+// Track B Phase 0, Commit 4.3 (Matrix A, 2026-07-30) — extracted from
+// selectTitleFamilyCandidate's top-rank-protection branch
+// (imageSearchIdentity.js). `familyWeightSum` there is
+// item0Family.weightSum — the family containing the visually-FIRST
+// (position-ranked, not necessarily weight-ranked) search result — and
+// `competingFamilies` is the REST of the pre-sorted-weight-descending
+// `scored` array. Because item0Family is picked by POSITION, it can
+// legitimately have LESS weight than a competitor; this function answers
+// "does the strongest competitor outweigh item0Family by 3x or more?" —
+// if so, don't trust the position-based signal over a much larger
+// alternative cluster.
+//
+// CORRECTION (IMPLEMENTATION PACKET HOLD — FINAL NARROW HOLD, item 2,
+// 2026-07-30): this function was ORIGINALLY reused verbatim (inverted
+// with `!`) as the 4th condition of identityCore.js's qualified-family-
+// authority predicate. That reuse was WRONG and, worse, VACUOUS in that
+// context — see familyDominatesRunnerUp below for why, and the LAUNCH-
+// AUDIT.md Commit 4.3 entry for the full named finding. Left unchanged
+// here (its original top-rank-protection call site is correct and
+// untouched); do not reuse it for retention-gate dominance again.
+export const isCompetingFamilyTooStrong = (familyWeightSum, competingFamilies) => {
+  const strongest = Array.isArray(competingFamilies) ? competingFamilies[0] : null;
+  return !!(strongest && strongest.weightSum >= familyWeightSum * 3);
+};
+
+// Track B Phase 0, Commit 4.3 (IMPLEMENTATION PACKET HOLD — FINAL NARROW
+// HOLD, item 2, 2026-07-30) — the CORRECT dominance predicate for
+// identityCore.js's qualified-family-authority retention gate. Deliberately
+// a NEW, separately-named function rather than a reuse of
+// isCompetingFamilyTooStrong above, because the two contexts have opposite
+// weight-ordering invariants:
+//   - top-rank-protection (isCompetingFamilyTooStrong's real call site):
+//     item0Family is picked by POSITION — it can have LESS weight than a
+//     competitor. The check is "does a competitor outweigh item0Family by
+//     3x?" (competitor >= family * 3).
+//   - the retention gate (this function's only call site): `topFamily`/
+//     `runnerUp` are literally `scored[0]`/`scored[1]` — by construction,
+//     topFamily.weightSum >= runnerUp.weightSum ALWAYS holds here. Under
+//     that constraint, isCompetingFamilyTooStrong(top, [runner]) can only
+//     ever be true in a degenerate zero-weight case (runner >= top*3
+//     requires runner > top, contradicting top >= runner) — i.e. reusing
+//     it here, as the first-pass implementation did, is VACUOUS: it can
+//     never actually block retention in production. Confirmed as a named
+//     finding, not silently patched over — see LAUNCH-AUDIT.md.
+// The correct question for retention is the INVERSE relationship: "does
+// the SELECTED family dominate the runner-up by 3x?" (top >= runner * 3).
+// A runner-up that is present but not overwhelming (e.g. top=9, runner=4)
+// must still BLOCK retention under this rule — 9 is not >= 12 — which
+// isCompetingFamilyTooStrong could never express given the ordering
+// constraint above (runner=4 could never be flagged "too strong" against
+// top=9 by that formula). Boundary is inclusive (>=), matching
+// isCompetingFamilyTooStrong's own >= convention: top=9, runner=3 exactly
+// dominates (9 >= 3*3).
+export const familyDominatesRunnerUp = (topWeightSum, runnerUpWeightSum) => {
+  if (runnerUpWeightSum == null || !(runnerUpWeightSum > 0)) return true; // no real competitor — nothing to dominate
+  return topWeightSum >= runnerUpWeightSum * 3;
+};
+
+// Track B Phase 0, Commit 4.3 (IMPLEMENTATION PACKET HOLD — FINAL NARROW
+// HOLD, item 1, 2026-07-30) — current-request family MEMBERSHIP
+// precondition for identityCore.js's qualified-family-authority retention
+// gate. Distinct from the four evidence-quality conditions (title-axis-
+// only block, coherence floor, contamination screen, dominance margin):
+// this is a precondition that must hold BEFORE any of those are even
+// evaluated, or before resolveFamilyIssueConsensus/resolveFamilyYearConsensus
+// ever measure the family. Guards against a stale/foreign family object —
+// one whose topFamily.indices don't actually belong to the CURRENT
+// request's visualItems (e.g. carried over from a different/prior scan) —
+// slipping through on the strength of a coincidentally-satisfied count/
+// weight/contamination check alone. Fails closed (returns false) on any
+// structural mismatch:
+//   - visualItems must be an array
+//   - indices must be an array
+//   - indices.length must equal expectedCount (the family's own claimed count)
+//   - every index must be a unique integer (no duplicates)
+//   - every index must be in bounds (0 <= idx < visualItems.length)
+//   - every referenced row must actually exist (visualItems[idx] != null)
+export const hasValidFamilyMembership = (visualItems, indices, expectedCount) => {
+  if (!Array.isArray(visualItems)) return false;
+  if (!Array.isArray(indices)) return false;
+  if (indices.length !== expectedCount) return false;
+  const seen = new Set();
+  for (const idx of indices) {
+    if (!Number.isInteger(idx)) return false;
+    if (seen.has(idx)) return false;
+    seen.add(idx);
+    if (idx < 0 || idx >= visualItems.length) return false;
+    if (visualItems[idx] == null) return false;
+  }
+  return true;
+};
+
 // 2026-07-18 (Uncanny X-Men #27 / Ultimate X-Men #1 Momoko class) — stricter
 // sibling of TPB_MARKER_RE for use BEFORE a title is known (identity
 // determination), not after (comp-pricing pool). TPB_MARKER_RE's "absolute"/

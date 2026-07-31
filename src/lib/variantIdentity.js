@@ -191,6 +191,46 @@ export const filterItemsByIssue = (items, confirmedIssue, familyOverrideAccepted
 };
 
 /**
+ * Track B Phase 0, Commit 4.3 (Section D, 2026-07-30) — variant provenance
+ * check. A client-forwarded variant string (req.body.variant) carries no
+ * provenance metadata of its own — the issue number it arrived alongside
+ * in the SAME request (variantSourceIssue — in practice, Vision's own
+ * issue read at scan time) is the only signal this codebase has for
+ * "which issue was this variant candidate computed for."
+ *
+ * Confirmed live (2026-07-30 23:16:50 production dispatch, pre-Commit-4.3
+ * build): a genuinely correct Vision read ("Brett Booth virgin variant")
+ * survived unchanged even after confirmedIssue silently drifted from #351
+ * to an unrelated #300 — producing an impossible identity (a Brett Booth
+ * Cover C Virgin variant of a completely different issue). This check is
+ * the explicit invalidation point: when variantSourceIssue disagrees with
+ * the FINAL confirmedIssue — by ANY mechanism that can move confirmedIssue
+ * (family-authority retention, vision-zero-support, an eBay title
+ * override, a future code path) — the candidate must be treated as stale
+ * and never used, neither as a starting default nor as input to any
+ * consensus recomputation. filterItemsByIssue (above) is the complementary
+ * half of this containment: it ensures the POOL a variant gets
+ * re-derived FROM is scoped to the final issue; this function ensures the
+ * CLIENT-FORWARDED CANDIDATE itself doesn't leak past an issue change
+ * either.
+ *
+ * A null variantSourceIssue (no issue was ever associated with the
+ * variant text — e.g. a manual/no-camera entry) is not a provenance
+ * failure — there's nothing to have drifted from, so the candidate stays
+ * valid; the caller's own issue-scoped re-derivation is what will
+ * actually confirm or reject it downstream.
+ *
+ * Pure, no console/log side effects.
+ *
+ * @param {string|number|null} variantSourceIssue - the issue this variant candidate was captured alongside (in practice, Vision's own issue read)
+ * @param {string|number|null} confirmedIssue - the FINAL, fully-resolved issue
+ * @returns {boolean} true when the candidate is still trustworthy (no provenance conflict)
+ */
+export const isVariantProvenanceValid = (variantSourceIssue, confirmedIssue) => {
+  return variantSourceIssue == null || String(variantSourceIssue) === String(confirmedIssue);
+};
+
+/**
  * Q127 dispatch (2026-07-19, Catwoman #64 Szerdy-variant class) — a NEW
  * visual-pool contamination shape, distinct from Q115's Batman #608 class.
  * There, the wrong-book pool shared a DIFFERENT issue number, so

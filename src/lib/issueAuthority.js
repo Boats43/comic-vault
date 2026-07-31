@@ -57,13 +57,92 @@ export function mapConfidenceRatioToTier(ratio) {
  * put directly on confidence.
  *
  * Returns { issueAuthority: null, identityProvisionalFields: null } for
- * every mode other than 'adopted' — this function has nothing to say about
- * 'corroborated'/'conflict-locked'/'no-consensus'/'no-data', which are
- * handled by pre-existing mechanisms (out.issueConsensusConflict, etc.)
- * untouched by this commit.
+ * every mode other than 'adopted' (and, per the optional second
+ * parameter below, other than a retention-branch conflict on either
+ * axis) — this function has nothing to say about an ordinary
+ * 'corroborated'/'conflict-locked'/'no-consensus'/'no-data' shape, which
+ * is handled by pre-existing mechanisms (out.issueConsensusConflict,
+ * etc.) untouched by this commit.
+ *
+ * @param {Object} familyIssueConsensus
+ * @param {Object} [familyYearConsensus] - IMPLEMENTATION PACKET HOLD —
+ * PRODUCTION AUTHORITY-CONTEXT INTEGRATION HOLD, item 3 (2026-07-31),
+ * optional, backward-compatible (every pre-existing call site that omits
+ * it behaves byte-identically). Considers the YEAR axis's own retention-
+ * branch conflict independently of the issue axis — a "correct" HIGH-
+ * confidence-Vision-vs-family issue can coexist with a genuine, separate
+ * year conflict (Control T6), and the issue side being fine must never
+ * silently swallow a real year-side conflict.
  */
-export function deriveIssueAuthorityFromAdoption(familyIssueConsensus) {
+export function deriveIssueAuthorityFromAdoption(familyIssueConsensus, familyYearConsensus) {
   if (familyIssueConsensus?.mode !== 'adopted') {
+    // IMPLEMENTATION PACKET HOLD — FINAL AUTHORITY-SOURCE HOLD (2026-07-30)
+    // — a Commit 4.3 retention-branch 'conflicted' outcome (rule D: a
+    // high-confidence-but-untrusted prior disagreeing with a qualified,
+    // unanimous family) is a genuine, UNRESOLVED identity conflict, not
+    // the same "nothing to say" shape this function's general null default
+    // was designed for (a pre-existing, non-retention 'corroborated'/
+    // 'conflict-locked' consensus, correctly left to the separate
+    // out.issueConsensusConflict mechanism this function has never
+    // touched). Without this branch, a rule-D 'conflicted' outcome fell
+    // through to the null default — and canUseExactIssuePricingCache's own
+    // `if (issueAuthority == null) return true` default (designed for a
+    // DIFFERENT null-issueAuthority shape — a corroborated, already-
+    // trustworthy issue) would have silently treated a genuinely conflicted
+    // identity as cache-eligible. Caught during this hold's own controls
+    // (T1), not shipped silently — see LAUNCH-AUDIT.md.
+    //
+    // Detected via familyIssueConsensus.outcome/authoritativeForCustody —
+    // fields ONLY the Commit 4.3 retention branch ever sets (confirmed: no
+    // other call site in this codebase assigns `outcome` onto a consensus
+    // object) — so this branch can never misfire on an unrelated,
+    // pre-existing 'conflict-locked' shape that predates Commit 4.3.
+    if (familyIssueConsensus?.outcome === 'conflicted' && familyIssueConsensus?.authoritativeForCustody === false) {
+      return {
+        issueAuthority: {
+          source: 'marketplace',
+          status: 'conflicted',
+          confidence: 'low',
+          supportRatio: null,
+          reasons: ['vision-family-authority-conflict'],
+          priorObservations: [],
+        },
+        identityProvisionalFields: ['issue'],
+      };
+    }
+    // IMPLEMENTATION PACKET HOLD — PRODUCTION AUTHORITY-CONTEXT
+    // INTEGRATION HOLD, item 3 (2026-07-31, Control T6) — a YEAR-ONLY
+    // retention-branch conflict (the issue axis may be perfectly fine —
+    // 'corroborated', or any other non-adopted, non-conflicted mode; only
+    // the year axis disagrees). Same detection convention as the issue
+    // branch above (outcome/authoritativeForCustody, exclusive to the
+    // Commit 4.3 retention branch) — reason is deliberately distinct
+    // ('vision-family-year-authority-conflict', not the issue reason
+    // above) so a consumer can tell which axis is actually in dispute.
+    // identityProvisionalFields is ['year'] only (never 'issue' — the
+    // issue side was never in question here) — this is the field
+    // canUseExactIssuePricingCache's own pre-existing
+    // `identityProvisionalFields.includes('year')` check already reads,
+    // so no change was needed there; the gap was purely that nothing
+    // upstream ever populated 'year' into this list for a retention-
+    // branch year conflict (appendYearToProvisionalFields only appends
+    // 'year' for familyYearConsensus.mode==='adopted', never
+    // 'conflict-locked'). The correction field MAY include 'year' (so the
+    // existing Commit 3 correction UI can surface an input for it) — the
+    // year is never labeled 'adopted' anywhere in this branch.
+    if (familyYearConsensus?.outcome === 'conflicted' && familyYearConsensus?.authoritativeForCustody === false) {
+      return {
+        issueAuthority: {
+          source: 'marketplace',
+          status: 'conflicted',
+          confidence: 'low',
+          supportRatio: null,
+          reasons: ['vision-family-year-authority-conflict'],
+          priorObservations: [],
+        },
+        identityProvisionalFields: ['year'],
+      };
+    }
     return { issueAuthority: null, identityProvisionalFields: null };
   }
   const supportRatio = Number(familyIssueConsensus.ratio.toFixed(2));
@@ -610,3 +689,96 @@ export function restampVisualReferenceEvidenceYear(visualReferenceEvidence, visu
   console.log(`[commit4.2] familyKey finalized old="${currentKey}" new="${newFamilyKey}" yearSource="${terminalYearSource}"`);
   return { evidence: { ...visualReferenceEvidence, familyKey: newFamilyKey }, action: 'restamped' };
 }
+
+/**
+ * Track B Phase 0, Commit 4.3 (Section E, revised — shared custody
+ * invariant, 2026-07-30) — cross-population promotion/cache/pricing/
+ * response custody guard.
+ *
+ * Root case this closes: api/enrich.js's identity-refused PROMOTED branch
+ * (Q133 Slice 2) lets Phase 2 run normally "with the pool's provisional
+ * identity" whenever the pool's own top family clears a >=3-member
+ * promotion floor — but never actually checked that the family's own
+ * issue consensus AGREES with confirmedIssue/pricingIssue before
+ * promoting. Confirmed live (2026-07-30 23:16:50 production dispatch,
+ * pre-Commit-4.3 build): a 5-member Spawn #351 family (5/5 internal issue
+ * support) justified "PROMOTED", but confirmedIssue/pricingIssue had
+ * separately been set to #300 (an unrelated raw-pool plurality) — Phase 2
+ * went on to query, cache, and price Spawn #300 while the promotion
+ * banner and reference evidence both spoke of the #351 family.
+ *
+ * REVISED (implementation-approval addendum, Precision Clause 1): consumes
+ * the measure/decide split's own decide-result object directly —
+ * `authoritativeForCustody` and `resolvedValue` — NEVER reconstructs
+ * authority from `familyIssueConsensus.mode` string matching. This is
+ * what lets a 'provisionally-corrected' outcome (the Spawn fixture's own
+ * path — a real correction, not a fresh null-prior "adoption") be
+ * correctly recognized as authoritative for custody, alongside 'adopted'
+ * and 'corroborated' — the original draft's `mode === 'adopted'` check
+ * would have missed 'corroborated' entirely (Matrix C finding) and had no
+ * way to represent 'provisionally-corrected' as a distinct, still-
+ * authoritative outcome at all.
+ *
+ * Deliberately conservative: only blocks when `authoritativeForCustody`
+ * is exactly `true` AND at least one of the supplied custody values
+ * genuinely disagrees with `resolvedValue`. A decision that isn't
+ * authoritative for custody (`'preserved-prior'` with an untrusted prior,
+ * or `'conflicted'`) has nothing to assert custody over, and is not
+ * blocked here — those are pre-existing, separate signals (e.g.
+ * `out.issueConsensusConflict`) this guard does not duplicate or
+ * re-decide.
+ *
+ * Called from four sites (api/enrich.js): before promotion, before
+ * exact-cache access, before the terminal authoritative-pricing contract
+ * patch, and before response finalization (`out.issue` write) — composed
+ * with, not duplicating, the pre-existing Q140 `detectVisualIssueDivergence`
+ * (a different source pair: visual-pool consensus vs. confirmedIssue).
+ * Each site passes only the custody value(s) it actually has at that
+ * point in the pipeline.
+ *
+ * Pure, no console/log side effects — the caller decides what to log.
+ *
+ * @param {{resolvedValue: *, authoritativeForCustody: boolean}|null} familyIssueDecision - identity.familyIssueConsensus (Commit 4.3 retention branch shape — carries the decide-result fields directly; undefined/absent on the pre-existing FAMILY_OVERRIDE_DECISIONS/refused-identity-conflict branches, which are unaffected by this guard and rely on their own pre-existing containment)
+ * @param {Object.<string, *>} custodyValues - a map of custody-relevant field name -> value known at THIS call site (e.g. {confirmedIssue, pricingIssue} at promotion; {cacheIssue} at cache access; {responseIssue} at response finalization) — null/undefined entries are skipped (not yet known, not a mismatch)
+ * @returns {{allowed: boolean, conflict: null|{selectedFamilyIssue: *, mismatchedField: string, mismatchedValue: *, custodyValues: Object, reason: string}}}
+ */
+export function checkCrossPopulationPromotionGuard(familyIssueDecision, custodyValues) {
+  if (!familyIssueDecision || familyIssueDecision.authoritativeForCustody !== true) {
+    return { allowed: true, conflict: null };
+  }
+  const resolvedValue = familyIssueDecision.resolvedValue;
+  if (resolvedValue == null) {
+    return { allowed: true, conflict: null };
+  }
+  const entries = Object.entries(custodyValues || {}).filter(([, v]) => v != null);
+  const mismatch = entries.find(([, v]) => String(v) !== String(resolvedValue));
+  if (mismatch) {
+    const [mismatchedField, mismatchedValue] = mismatch;
+    return {
+      allowed: false,
+      conflict: {
+        selectedFamilyIssue: resolvedValue,
+        mismatchedField,
+        mismatchedValue,
+        custodyValues,
+        reason: `${mismatchedField}-diverges-from-resolved-family-issue`,
+      },
+    };
+  }
+  return { allowed: true, conflict: null };
+}
+
+// Track B Phase 0, Commit 4.3 (Matrix D, 2026-07-30) — computeListingPricingAuthority
+// was implemented then REMOVED from this commit, per explicit reviewer
+// ruling: it was a second, parallel pricing-readiness contract sitting
+// alongside the existing, unmodified Commit 4 computeIssueAuthorityContractPatch
+// above, without clearing every legacy price/band/routing/UI-alias field
+// that function already owns — a real risk of contradictory states. This
+// commit's own test assertions proved the EXISTING contract (price/
+// priceBands nulled, refusedToPrice/listingHardLocked set) already
+// satisfies every observable requirement for the Spawn #351 closure
+// without it. The four field names it introduced (recommendedListPrice/
+// priceReady/pricingAuthority/listingAuthority) are real Commit 6 design
+// work — deciding the full field set and reconciling it against every
+// existing consumer — not a two-function bolt-on. See LAUNCH-AUDIT.md
+// Section 16 for the full record.

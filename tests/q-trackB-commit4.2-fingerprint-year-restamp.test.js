@@ -385,7 +385,12 @@ let fixtureBEvidence, fixtureBContext;
   );
   assertEq(identity.confirmedIssue, '12', 'FIXTURE B IDENTITY: confirmedIssue adopts "12" (3/3 unanimous)');
   assertEq(identity.confirmedYear, null, 'FIXTURE B IDENTITY: confirmedYear stays null (genuinely insufficient support, NOT the placeholder-mistrust bug)');
-  assertEq(identity.familyIssueConsensus, { issue: '12', mode: 'adopted', winner: '12', support: 3, ratio: 1, uniqueRows: 3, runnerUp: null, runnerUpSupport: 0, tiedCandidates: [] }, 'FIXTURE B IDENTITY: familyIssueConsensus full shape');
+  // Track B Phase 0, Commit 4.3 (Option-A audit, 2026-07-30) — assertedIssues
+  // is a new additive field on resolveFamilyIssueConsensus's return shape
+  // (mirrors resolveFamilyYearConsensus's pre-existing assertedYears).
+  // This is the one exact-shape assertion the audit found affected;
+  // updated in place, not silently left to fail.
+  assertEq(identity.familyIssueConsensus, { issue: '12', mode: 'adopted', winner: '12', support: 3, ratio: 1, uniqueRows: 3, runnerUp: null, runnerUpSupport: 0, tiedCandidates: [], assertedIssues: ['12'] }, 'FIXTURE B IDENTITY: familyIssueConsensus full shape');
   assertEq(identity.familyYearConsensus, { year: null, mode: 'no-data', assertedYears: ['2024'], uniqueRows: 3, support: 1 }, 'FIXTURE B IDENTITY: familyYearConsensus mode is "no-data" — only row 2 asserts "2024" (1/3, below the 2-row adoption floor), the other 2 rows are silent, not contradicting');
 
   const stableSeriesTitle = 'Foo';
