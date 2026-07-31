@@ -1899,19 +1899,45 @@ export const buildFamilyEvidenceRows = (indices, items) => {
 // call site logs that identical string (not a re-derived copy). Mirrors
 // the gate api/enrich.js used inline before this extraction — moved here
 // verbatim, not redesigned.
-export const buildRetentionFamilyEvidenceLog = (familyCandidate, familyIssueConsensus, familyYearConsensus, familyKey, visualItems) => {
+export const buildRetentionFamilyEvidenceLog = (familyCandidate, familyIssueConsensus, familyYearConsensus, familyKey, visualItems, observedFamilyFingerprint) => {
   const isRetentionPath = !FAMILY_OVERRIDE_DECISIONS.includes(familyCandidate?.decision)
     && familyCandidate?.decision !== 'refused-identity-conflict'
     && familyCandidate?.titleAxisOnlyBlock === true;
   if (!isRetentionPath) return { isRetentionPath: false, logLine: null, rows: null };
+  // Track B Phase 0, Commit 4.3.1 — a near-miss margin-decline conflict
+  // (identityCore.js's own reason marker on familyIssueConsensus) still
+  // reaches this same retention path (titleAxisOnlyBlock===true), but was
+  // NOT granted authority — familyEvidenceQualified must say so honestly
+  // rather than claim the generic qualified-retention reason.
+  //
+  // COMMIT 4.3.1 HOLD (R1) — a first-shipped version of this near-miss
+  // branch passed the PRIOR issue (the untouched, preserved Vision value)
+  // as the SAME `familyKey` argument the qualified-retention branch uses
+  // for the family's OWN adopted value — producing a familyKey like
+  // "spawn|1" while the event's own `rows` field lists five #351 listings.
+  // The whole point of this event is documenting a three-way disagreement
+  // (prior vs. family vs. raw pool) — collapsing two of those identities
+  // into one field misrepresents which issue the evidence rows actually
+  // describe. Fixed per explicit reviewer preference (R1): emit BOTH
+  // fingerprints, named, rather than relabeling one. `familyKey` (5th
+  // positional arg) is reinterpreted as `priorFingerprint` ONLY for the
+  // near-miss branch specifically (the qualified-retention call site is
+  // untouched — it never disagrees with itself, so a single familyKey
+  // remains correct and sufficient there); `observedFamilyFingerprint`
+  // (new, optional 6th arg) is only ever populated by the near-miss call
+  // site. Omitting it is a safe no-op for every pre-existing caller.
+  const isNearMissDecline = familyIssueConsensus?.reason === 'retention-margin-decline-conflict';
   const rows = buildFamilyEvidenceRows(familyCandidate?.topFamily?.indices, visualItems);
+  const identityField = (isNearMissDecline && observedFamilyFingerprint)
+    ? `priorFingerprint="${familyKey}" observedFamilyFingerprint="${observedFamilyFingerprint}"`
+    : `familyKey="${familyKey}"`;
   const logLine =
     `[family-evidence] decision=${familyCandidate?.decision} ` +
     `merged=${familyCandidate?.topFamily?.mergedFromFragments === true} ` +
-    `familyEvidenceQualified=true qualificationReason=title-axis-only-block-retained ` +
+    `familyEvidenceQualified=${!isNearMissDecline} qualificationReason=${isNearMissDecline ? 'retention-margin-decline-conflict' : 'title-axis-only-block-retained'} ` +
     `issueSupport=${familyIssueConsensus?.support ?? 'null'}/${familyIssueConsensus?.uniqueRows ?? 'null'} ` +
     `yearSupport=${familyYearConsensus?.support ?? 'null'}/${familyYearConsensus?.uniqueRows ?? 'null'} ` +
-    `familyKey="${familyKey}" rows=${JSON.stringify(rows)}`;
+    `${identityField} rows=${JSON.stringify(rows)}`;
   return { isRetentionPath: true, logLine, rows };
 };
 

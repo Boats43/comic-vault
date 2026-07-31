@@ -3432,4 +3432,249 @@ derivation whose result is computed but silently discarded now fails the
 pin, not just a derivation that is never called at all. Verified: 4.3
 suite 262/262 (was 256, +6).
 
+**Commit 4.3.1** — RETENTION-DECLINE FAIL-CLOSED CONTAINMENT (2026-07-31,
+unstaged). A near-miss shape sits one condition short of Commit 4.3's own
+qualified-retention predicate: `titleAxisOnlyBlock===true`, coherence
+floor cleared, no contamination — but the family does NOT dominate its
+runner-up by the required 3x margin. Before this commit, that exact shape
+left `familyIssueConsensusResult` null (same as "no family at all") and
+fell through unshortcut into the raw-pool vision-zero-support
+OVERRIDE/ESCALATE check — silently adopting whatever the RAW POOL's own
+unrelated plurality happened to be, with zero acknowledgment that a
+coherent, unanimous family actively disagreed with it. Same failure
+SHAPE as the original Commit 4.3 root cause (Spawn #351 vs. raw-pool
+#300), one qualification condition removed.
+
+**Fix (Section A).** `identityCore.js`'s `resolveIdentity` now detects
+this exact shape (`isNearMissMarginDecline` — the same four base
+conditions as `isQualifiedFamilyForRetention`, differing only on margin)
+and records a genuine, UNRESOLVED conflict instead of silence:
+`outcome:'conflicted'`, `authoritativeForCustody:false`,
+`observedFamilyValue` = the family's own measured issue,
+`resolvedValue` = the untouched prior (never adopted, never
+overwritten — Control T1's own convention), `reason:
+'retention-margin-decline-conflict'`. `familyAuthoritySkip` is extended
+(`isNearMissConflictActive`) so raw-pool OVERRIDE/ESCALATE never fires on
+top of a recorded conflict — verified via MUTATION 1 (naive: #300
+takeover; real: blocked).
+
+**Fix (Section B, market custody).** The `ac:` exact-issue active-comp
+cache was already fail-closed by Commit 4's own `CACHE_SAFE` allowlist
+(`'conflicted'` was never in it). The `cv:`/`pc:v1` Fix-3 Promise.all
+lookups had NO equivalent gate — a disclosed-but-unfixed asymmetry from
+Commit 4.3's own Section 3(c) note. `marketCustodyConflicted` (`out.issueAuthority?.status
+=== 'conflicted'`) now skips both lookups entirely (no cache read, no
+cache write, no live query). **HOLD-round finding (Item 3):** the initial
+gate alone was insufficient — with `priceCharting` left `null` by the
+gate, the pre-existing `needsRequery = !priceCharting || ...` expression
+would ALWAYS evaluate true, silently reopening an unconditional PC
+fallback/requery call for every conflicted request. Composed
+`!marketCustodyConflicted` into that requery's own condition to close it
+— verified via MUTATION 4 (naive: 1 unconditional cache read; real: 0).
+
+**Fix (Section C, corroboration).** Slice A3's `visionLowButCorroborated`
+gate used bare `topFamily.count` as `coherentFamilyCount` — ANY coherent
+family counted toward corroboration regardless of whether its OWN issue
+measurement agreed with `confirmedIssue` at all. Now requires
+`hasValidFamilyMembership` (current-request membership) AND the family's
+own `resolveFamilyIssueConsensus` measurement (the existing resolver, no
+second issue parser) to be `'adopted'` AND equal `confirmedIssue`
+exactly — verified via MUTATION 3 (naive: the #351 family wrongly
+contributes 5 toward corroborating issue "1"; real: 0).
+
+**Fix (Section D, terminal contract).** Achieved via EXISTING Commit 4
+machinery once `.reason` propagates through
+`deriveIssueAuthorityFromAdoption` — no new contract mechanism.
+`computeIssueAuthorityContractPatch` nulls price/priceBands, sets
+`refusedToPrice`/`listingHardLocked`, sets `identityConfident:false`.
+**HOLD-round addition (Item 3):** verified `decision.action==='ID_REQUIRED'`
+via a REAL, direct `computeDecision` (decisionEngine.js) call against the
+exact patch shape — not asserted from a doc comment. Also verified (real
+`computeConvergenceScore` field-mapping, `comicVine`/`priceChartingInitial`
+both null): no catalog result can enter convergence; and (contract patch's
+own `hypotheticalReferenceEstimate` field) a real active/sold reference is
+relabeled, never allowed to silently unlock pricing.
+
+**Fix (Section E, observability) — REVISED per reviewer rider (R1).** The
+first-shipped near-miss `[family-evidence]` event built its `familyKey`
+from `confirmedIssue` — which, for a near-miss, IS the untouched PRIOR
+(the family was never authoritative for custody) — producing a
+`familyKey="spawn|1"` line whose own `rows` field listed five #351
+listings: the event contradicted itself. Explicit reviewer preference
+(R1): emit BOTH fingerprints, named, rather than relabel one.
+`buildRetentionFamilyEvidenceLog` (`imageSearchIdentity.js`) gained an
+optional 6th parameter (`observedFamilyFingerprint`); for the near-miss
+branch specifically the log now reads
+`priorFingerprint="spawn|1|..." observedFamilyFingerprint="spawn|351|..."`
+instead of a single `familyKey=`. Backward compatible — every
+pre-existing (qualified-retention) call site omits the new parameter and
+is byte-identical. The `[commit4.3.1] near-miss family conflict: ...`
+containment line (N1 format: `family=<issue>@<count>/<weight>
+runnerUp=<weight> margin=<ratio> prior=<vision issue>`) is unchanged and
+fires exactly once per qualifying near-miss.
+
+**Fixture honesty (Item 2 / R2, explicit finding).** "Pair 2" was
+dispatched as summary statistics only (top=5/10.5, runner-up=1/4.0,
+margin=2.625), with no accompanying raw row data. Per R2's explicit
+instruction, inputs were NOT tuned to force a match: the real
+`buildTitleFamilies`/`scoreTitleFamilies`/`mergeFragmentedTitleFamilies`/
+`selectTitleFamilyCandidate` chain was run FIRST on the unmodified,
+certified-real 18-row pool (the same physical Spawn #351 scan Commit 4.3
+reconstructed from real production logs) — it produces the Pair 1
+dominant shape (13.5/3.0, dominance holds), **not** a near-miss. Honest,
+reported finding: no near-miss margin is reconstructable from currently
+available real production logs for this book. A second, explicitly
+SYNTHETIC pool was then built — the same 5 real Brett Booth listing
+strings and the same real lot-listing string (both reused verbatim),
+reassigned to row POSITIONS chosen using the disclosed, real, pure
+rank-weight formula (never a hand-set `weightSum` field anywhere in the
+test) — which the real scorer chain resolves to genuinely emergent
+10.5/4.0/2.625, with `titleAxisOnlyBlock` computed by the real Q84 gate
+(never hand-set). This fixture is labeled SYNTHETIC throughout, not
+claimed as reconstructed production data.
+
+**Consumer-spy boundary (Item 3 / R4) — CORRECTED WORDING (2026-07-31
+HOLD, Item A).** The prior packet's summary text ("real kvGet/kvSet spies
+prove zero ac:/cv:/pc:v1 cache activity") overstated what was actually
+proven for two of the three namespaces. Precise accounting, by namespace:
+  - **`ac:` (active-comp exact-issue cache) — genuine real-spy proof.** A
+    real `kvGet` function, wrapped in a call-counting spy, is invoked only
+    when the exact same boolean composition the real `api/enrich.js` gate
+    uses (`canUseExactIssuePricingCache(...) &&
+    checkCrossPopulationPromotionGuard(...).allowed`) evaluates true;
+    under this fixture it evaluates false, and the spy genuinely records
+    zero calls. This is a real, executed spy proof, extending the Commit
+    4.3 orchestration-harness pattern directly.
+  - **`cv:`/`pc:v1` (ComicVine / PriceCharting exact-issue cache) — key
+    construction and structural proofs ONLY, NOT a call-count spy through
+    the real consumer path.** What was actually proven: (1) the real,
+    exported cache-key BUILDER/PARSER functions
+    (`buildComicVineCacheKey`/`buildPriceChartingCacheKey`/
+    `parseCacheKeyIssueSegment`) produce keys carrying the corrected issue
+    "1", never "300" or "351" — a genuine, real-function proof, but of key
+    CONSTRUCTION, not of whether a read/write actually occurs; (2) source
+    presence — `api/enrich.js`'s own source text contains the
+    `marketCustodyConflicted` guard, gating both the `cv:` and `pc:v1`
+    IIFEs and the `pc:` requery fallback; (3) a structural, source-ORDER
+    check — each gate's `return null;` appears, in the source text, before
+    that same IIFE's `lookupComicVine(`/`lookupPriceCharting(` call
+    (necessarily also before the `kvGet`/`kvSet` calls that follow it in
+    the same block). This is a textual/positional proof, not a runtime
+    call-count observation. Section 9's MUTATION 4 additionally spies a
+    real `kvGet` call, but against a HAND-WRITTEN replica of the gate's
+    boolean shape (`if (!marketCustodyConflicted) { spy(...) }`) written
+    inline in the test — illustrative of the naive-vs-real contrast, and
+    not itself a spy on `api/enrich.js`'s actual executing closures. No
+    handler-level (full HTTP-request, `req`/`res`) proof exists for `cv:`/
+    `pc:v1`, matching Commit 4.3's own disclosed scope boundary.
+  - **`lookupComicVine`/`lookupPriceCharting` themselves (the real
+    network-calling functions)** — NOT spied at all, at any level. A
+    genuine call-count spy on these two specific functions requires live
+    network access or `global.fetch` mocking — the SAME boundary Commit
+    4.3's own Section 3 already disclosed and accepted for this exact pair
+    of functions. Per the standing feasibility rule (invoked explicitly,
+    not silently substituted): stopped at that boundary rather than
+    claiming a proof that was not obtained.
+
+**Isolated-worktree A/B baseline (Item 5).** `git worktree add --detach
+<sibling-dir> 406c34f` (current `main` HEAD), `node_modules` symlinked
+(not copied/reinstalled) from the primary tree for speed, full 130-file
+suite run inside the isolated worktree. Diffed byte-for-byte against the
+same 130 files in the primary working tree (the new, untracked Commit
+4.3.1 test file excluded from the comparison since it does not exist at
+the baseline SHA): identical output on every file except the intentionally-
+updated `q-trackB-commit4.3-winning-family-authority.test.js` (262→266,
+CONTROL B's own fixture is exactly the near-miss shape this commit adds
+handling for — its pre-4.3.1 "stays null" assertion was superseded, not
+reverted, with a dated comment). **No new failures relative to the
+documented baseline** — same 11 pre-existing files (batch1-fixes,
+comp-filter-hygiene, decision-engine, identity-gate,
+image-search-extraction, mega-keys, pattern-k-dedupe-issue, priceBands,
+q-adv397-visual-guard, ship26-integration, sold-verification), same
+failure counts, on both sides.
+
+**Worktree symlink deviation, disclosed (R1).** The `node_modules`
+population step above deviated from the amended independent-npm-install
+procedure a prior review round had established (fresh `npm install`
+inside the isolated worktree, no shared storage with the primary tree) —
+this round used `ln -s` instead, for speed, without re-verifying it
+actually produced a live link. It did not: a direct canary check (a
+marker file written into the primary tree's `node_modules` did not
+appear inside the worktree's `node_modules`, and vice versa) proved the
+worktree's `node_modules` was an independent, disconnected directory —
+Windows `Get-Item` confirmed no `ReparsePoint` attribute and an empty
+`LinkType`/`Target`, meaning `ln -s` on this filesystem (a OneDrive-synced
+path) silently produced ordinary directory content rather than a real
+symlink or junction, not a failure that was caught at creation time. The
+test results this round are unaffected by this deviation (the worktree's
+`node_modules` — real or linked — served the same 130-file suite
+correctly either way, confirmed by the byte-identical diff above), but
+the deviation itself is the finding: a symlink that silently isn't one is
+indistinguishable from a real link by directory listing alone, and this
+round trusted the listing. **Standing procedure going forward:** either
+(a) a fresh `npm install` inside the isolated worktree (the original,
+now-reconfirmed-correct procedure), or (b) if a link is used for speed,
+verify it with a canary write-through check immediately after creation,
+before relying on it for anything.
+
+**Worktree/symlink removal (Item B, this HOLD round).** The prior
+dispatch's proposed `git worktree remove` was correctly halted mid-session
+while the (believed-to-be) `node_modules` link still existed inside the
+worktree — removing a worktree containing an actual live symlink/junction
+to the primary tree's `node_modules` risked a recursive delete following
+the link into shared storage. This round's safe sequence, now standing
+procedure: (1) inspect the link (`Get-Item ... | Select LinkType,Target,
+Attributes` on Windows) and independently canary-verify it before
+assuming its type from a directory listing alone; (2) remove the
+`node_modules` entry specifically, as its own explicit step, BEFORE
+touching the worktree itself; (3) verify the primary tree's own
+`node_modules` immediately afterward (entry count + a known-package
+existence check); (4) only then run `git worktree remove` on the
+now-empty-of-node_modules worktree; (5) verify the primary tree's
+`node_modules` a second time, post-removal. Executed exactly this way:
+primary tree `node_modules` top-level entry count was 190 both
+BEFORE step (2) and AFTER step (4) (identical), `node_modules/
+@anthropic-ai/sdk` confirmed present both times, and `git worktree list`
+after step (4) shows only the primary worktree. **The baseline worktree
+(`comic-vault-baseline-4331`) has now been fully removed** — the prior
+entry's "intentionally left in place, pending a separate decision" note
+is superseded by this round's explicit removal.
+
+**Repo-hygiene incident, disclosed (Item 6 / R3).** The PRIOR dispatch's
+own verification pass used an unscoped `git stash && ... && git stash
+pop` (not a `-- <pathspec>`-restricted stash) to compare working-tree
+behavior against a clean checkout — this is the "unrestricted git stash"
+this HOLD's own instruction (Item 5) explicitly prohibited going forward,
+now replaced with the isolated-worktree method above. Because the stash
+was unscoped, it also swept up `.claude/settings.local.json` (a
+local-only, gitignored-adjacent-in-spirit but not actually gitignored
+settings file — modified at session start, before Commit 4.3.1 work
+began, accumulating this session's Bash-permission allowlist entries)
+alongside the intended source files, and briefly held it inside the
+stash object database before `git stash pop` restored it. Reviewed the
+file's diff directly (`git diff -- .claude/settings.local.json`,
+reproduced in this dispatch's own packet): it contains only Bash command
+allowlist patterns and local filesystem paths — no credentials, tokens,
+or secrets of any kind were present or exposed. `git stash list`
+(checked BEFORE any new git operation this round, per R3) confirmed zero
+stale stash entries — the pop completed cleanly and left no residue.
+Disclosed as a process-scope finding (an unscoped git operation
+unnecessarily enveloped a file with no reason to be part of a
+source-code comparison), not a data-exposure finding.
+
+**Verification.** New test
+(`tests/q-trackB-commit4.3.1-retention-decline-fail-closed.test.js`):
+73/73, including the Section-1 honest real-log finding, the Section-2
+synthetic real-producer proof, 4 named mutations, 5 named controls.
+`q-trackB-commit4.3-winning-family-authority.test.js`: 266/266 (CONTROL B
+updated, dated, not reverted). Full 131-file suite (130 pre-existing +
+1 new): 11 pre-existing failures, isolated-worktree-verified identical to
+the 406c34f baseline. `npm run build` clean. `git diff --check` clean.
+`git status --short`: nothing staged — 5 modified files
+(`.claude/settings.local.json` pre-existing/unrelated,
+`api/enrich.js`, `src/lib/identityCore.js`,
+`src/lib/imageSearchIdentity.js`, `src/lib/issueAuthority.js`,
+`tests/q-trackB-commit4.3-winning-family-authority.test.js`), 1 new
+untracked test file. **No new failures relative to documented baseline.**
+
 DO NOT STAGE, COMMIT, OR PUSH before review.

@@ -98,13 +98,21 @@ export function deriveIssueAuthorityFromAdoption(familyIssueConsensus, familyYea
     // object) — so this branch can never misfire on an unrelated,
     // pre-existing 'conflict-locked' shape that predates Commit 4.3.
     if (familyIssueConsensus?.outcome === 'conflicted' && familyIssueConsensus?.authoritativeForCustody === false) {
+      // Track B Phase 0, Commit 4.3.1 — familyIssueConsensus.reason, when
+      // present, names a SPECIFIC conflict subtype (currently only
+      // 'retention-margin-decline-conflict', identityCore.js's near-miss
+      // branch) rather than the generic rule-D "high-confidence-Vision-vs-
+      // qualified-family" shape this branch was originally written for
+      // (which never sets .reason at all). Falls back to the original
+      // generic string when absent — byte-identical for every pre-existing
+      // caller.
       return {
         issueAuthority: {
           source: 'marketplace',
           status: 'conflicted',
           confidence: 'low',
           supportRatio: null,
-          reasons: ['vision-family-authority-conflict'],
+          reasons: [familyIssueConsensus.reason || 'vision-family-authority-conflict'],
           priorObservations: [],
         },
         identityProvisionalFields: ['issue'],

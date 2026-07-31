@@ -49,6 +49,7 @@ import {
   detectVisualIssueDivergence,
   enforceQueryIssueAuthority,
   buildStandardVisionAuthorityContext,
+  resolveFamilyIssueConsensus,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -115,13 +116,13 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens, buildSanitizedComicSearchTitle } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens, buildSanitizedComicSearchTitle, hasValidFamilyMembership } from "../src/lib/compHygiene.js";
 import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } from "../src/lib/evidenceEligibility.js";
 // Track B Phase 0, Commit 3 — manual identity correction: server-side
 // authority validation (allow-list + normalization), never trusting the
 // client's correctedFields claim alone.
 import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
-import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard } from "../src/lib/issueAuthority.js";
+import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint } from "../src/lib/issueAuthority.js";
 // Track B Phase 0, Commit 4.3 (revision round 2) — cache-key builders,
 // relocated to src/lib/cacheKeys.js for import-safety (see that file's
 // own header comment). Imported here for this handler's own internal use
@@ -2770,6 +2771,44 @@ export default async function handler(req, res) {
           `[q140-terminal] issueConsensusConflict surfaced: current=#${confirmedIssue} (${identitySource}) ` +
           `vs family consensus=#${fic.winner} (${fic.support}/${fic.uniqueRows} = ${(fic.ratio * 100).toFixed(0)}%) — locked, never overwritten`
         );
+        // Track B Phase 0, Commit 4.3.1 (Section E) — the near-miss
+        // margin-decline conflict (identityCore.js's resolveIdentity)
+        // shares this SAME legacy 'conflict-locked' mode, but is a
+        // distinct shape from an ordinary Q140 family-vs-Vision conflict
+        // (fic.reason is only ever set by that one branch) and, per the
+        // observability requirement, additionally needs its own
+        // structured [family-evidence] event — no other branch in this
+        // file fires one for it (the mode==='adopted' branch below fires
+        // only for that mode, which this near-miss shape never carries).
+        // Reuses the same buildRetentionFamilyEvidenceLog/
+        // buildRejectedCandidateFingerprint primitives the qualified
+        // retention path already uses (Commit 4.1/4.3), not a second,
+        // independently-maintained event shape.
+        if (fic.reason === 'retention-margin-decline-conflict') {
+          // COMMIT 4.3.1 HOLD (R1) — two DIFFERENT identities are in play
+          // here (the untouched prior vs. the family's own disputed
+          // measurement), so two DIFFERENT fingerprints are built and
+          // logged by name, rather than collapsing them into one
+          // familyKey that would misrepresent which issue the event's own
+          // `rows` actually describe. Built from fic.resolvedValue/
+          // fic.observedFamilyValue directly (the exact fields this
+          // dispatch itself named), not re-read from confirmedIssue —
+          // correct by construction even if a future refactor changes
+          // what confirmedIssue holds at this point in the pipeline.
+          const priorFingerprint = buildRejectedCandidateFingerprint(effectiveTitle, fic.resolvedValue, confirmedYear, null);
+          const observedFamilyFingerprint = buildRejectedCandidateFingerprint(effectiveTitle, fic.observedFamilyValue, confirmedYear, null);
+          const nearMissEvidenceLog = buildRetentionFamilyEvidenceLog(
+            familyCandidate,
+            fic,
+            identity.familyYearConsensus,
+            priorFingerprint,
+            parsedVisualRows,
+            observedFamilyFingerprint
+          );
+          if (nearMissEvidenceLog.isRetentionPath) {
+            console.log(nearMissEvidenceLog.logLine);
+          }
+        }
       } else if (identity.familyIssueConsensus?.mode === 'adopted') {
         // Track B Phase 0, Commit 4 (2026-07-29) — a marketplace/pool-only
         // adoption (resolveFamilyIssueConsensus's 'adopted' mode is only
@@ -3285,11 +3324,38 @@ export default async function handler(req, res) {
     const pcKey = `${subtitleStripped}|${confirmedIssue}|${pcQueryYear || ''}`;
     const now = Date.now();
 
+    // Track B Phase 0, Commit 4.3.1 (Section B) — RETENTION-DECLINE
+    // FAIL-CLOSED CONTAINMENT, market-custody half. The ac: exact-issue
+    // active-comp cache is already gated on out.issueAuthority.status via
+    // canUseExactIssuePricingCache (Commit 4) — 'conflicted' was never in
+    // its CACHE_SAFE allowlist, so that namespace was already fail-closed
+    // before this commit. The cv:/pc:v1 lookups just below had NO
+    // equivalent gate at all (disclosed, not previously fixed, in the
+    // Commit 4.3 test's own "DISCLOSED STRUCTURAL ASYMMETRY" note) — they
+    // ran unconditionally regardless of whether the resolved identity was
+    // provisional/conflicted. Narrowest safe fix: skip both lookups
+    // entirely (no cache read, no cache write, no live query, so no
+    // result can corroborate identity/pricing/convergence) whenever
+    // out.issueAuthority.status is 'conflicted' at this point in the
+    // pipeline — which is already true here, since the retention-branch
+    // wiring above (~line 2937) runs before this Promise.all. Preserving
+    // Vision's own issue while still querying/caching under that same
+    // issue number would only relocate the pollution risk from the
+    // family's disputed value to Vision's unconfirmed one — not close it.
+    const marketCustodyConflicted = out.issueAuthority?.status === 'conflicted';
+
     // Q106 FIX-1 — cgcResult already fetched in Phase 1 (races the visual
     // pool); no longer re-fetched here.
     const [comicVine, priceChartingInitial] = await Promise.all([
       // FIX 3 — ComicVine KV cache (persistent across cold starts)
       (async () => {
+        if (marketCustodyConflicted) {
+          console.log(
+            `[commit4.3.1] exact-identity cv: lookup SKIPPED — issueAuthority.status="conflicted" ` +
+            `(reasons=${JSON.stringify(out.issueAuthority?.reasons || [])}) — no cache read/write, no live query`
+          );
+          return null;
+        }
         // Track B Phase 0, Commit 4.3 — real call site for the extracted,
         // exported buildComicVineCacheKey (invariant 10).
         const kvKey = buildComicVineCacheKey(cleanedCVTitle, confirmedIssue, confirmedPublisher);
@@ -3304,6 +3370,13 @@ export default async function handler(req, res) {
       // FIX 3 — PriceCharting KV cache (persistent across cold starts)
       // Crow: Dead Time fix — try full title FIRST, fallback to stripped only if zero results
       (async () => {
+        if (marketCustodyConflicted) {
+          console.log(
+            `[commit4.3.1] exact-identity pc: lookup SKIPPED — issueAuthority.status="conflicted" ` +
+            `(reasons=${JSON.stringify(out.issueAuthority?.reasons || [])}) — no cache read/write, no live query`
+          );
+          return null;
+        }
         // Q108-B — version-salted the same way the active-comps cache
         // already is (COMP_FILTER_VERSION): a lookupPriceCharting logic
         // change must invalidate old cached entries, not have them served
@@ -3724,7 +3797,17 @@ export default async function handler(req, res) {
     // check between confirmedTitle and PC's productName.
     const needsRequery = !priceCharting || !titleOverlapsProduct(confirmedTitle, priceCharting.productName);
 
-    if (needsRequery) {
+    // Track B Phase 0, Commit 4.3.1 HOLD (Item 3) — the initial pc: lookup
+    // above is skipped entirely while issueAuthority is conflicted
+    // (marketCustodyConflicted, ~line 3313), which leaves `priceCharting`
+    // null here — `needsRequery`'s own `!priceCharting` clause would
+    // therefore ALWAYS evaluate true and fire this requery unconditionally
+    // for every conflicted request, silently reopening the exact exact-
+    // identity PC read this dispatch's Section B closes at the initial
+    // lookup. Composed with needsRequery (not replacing it) so the
+    // pre-existing title-overlap requery behavior is byte-identical for
+    // every non-conflicted request.
+    if (needsRequery && !marketCustodyConflicted) {
       mark('pc_requery_start');
       const gateSource = familyCandidateAccepted
         ? `family-candidate ${familyCandidate.decision}`
@@ -3755,6 +3838,8 @@ export default async function handler(req, res) {
       if (priceCharting) {
         console.log(`[pc-requery] matched: "${priceCharting.productName}"`);
       }
+    } else if (marketCustodyConflicted) {
+      console.log(`[commit4.3.1] exact-identity pc: requery SKIPPED — issueAuthority.status="conflicted", no fallback lookup attempted`);
     } else {
       console.log(`[pc-query] initial PC match "${priceCharting.productName}" already overlaps confirmedTitle "${confirmedTitle}" sufficiently — keeping initial result`);
     }
@@ -6495,7 +6580,29 @@ export default async function handler(req, res) {
     if (!idCheckFinal.confident && idCheckFinal.missingFields.length === 0) {
       const activePoolCountForVLC = Array.isArray(compsFromEbay?.prices) ? compsFromEbay.prices.length : 0;
       const soldPoolCountForVLC = Array.isArray(filteredSold) ? filteredSold.length : 0;
-      const coherentFamilyCount = familyCandidate?.topFamily?.count || 0;
+      // Track B Phase 0, Commit 4.3.1 (Section C) — coherentFamilyCount
+      // used to be bare topFamily.count: ANY coherent family contributed
+      // toward corroboration regardless of whether its OWN issue
+      // measurement agreed with confirmedIssue — a family that is
+      // internally coherent but measures a DIFFERENT issue than the one
+      // actually confirmed (e.g. the Commit 4.3.1 near-miss shape: family
+      // observes #351, confirmedIssue stays Vision's own prior) would have
+      // wrongly corroborated an issue it explicitly disagrees with. A
+      // family may now only contribute when (a) its topFamily.indices
+      // genuinely belong to the CURRENT request's visualItems
+      // (hasValidFamilyMembership, the same precondition identityCore.js's
+      // own retention gate uses), and (b) its OWN issue measurement — the
+      // existing resolveFamilyIssueConsensus resolver, no second issue
+      // parser — is 'adopted' AND equals confirmedIssue exactly.
+      const topFamilyForVLC = familyCandidate?.topFamily;
+      const familyMembershipValidForVLC = hasValidFamilyMembership(parsedVisualRows, topFamilyForVLC?.indices, topFamilyForVLC?.count);
+      const familyIssueMeasurementForVLC = familyMembershipValidForVLC
+        ? resolveFamilyIssueConsensus(null, parsedVisualRows, topFamilyForVLC.indices)
+        : null;
+      const familyIssueMatchesConfirmedForVLC = familyIssueMeasurementForVLC?.mode === 'adopted'
+        && familyIssueMeasurementForVLC.issue != null
+        && String(familyIssueMeasurementForVLC.issue) === String(confirmedIssue);
+      const coherentFamilyCount = familyIssueMatchesConfirmedForVLC ? (topFamilyForVLC?.count || 0) : 0;
       const convergenceTierOk = !!convergence?.tier && convergence.tier !== 'LOW';
 
       if (convergenceTierOk && coherentFamilyCount >= 3 && (activePoolCountForVLC > 0 || soldPoolCountForVLC > 0)) {

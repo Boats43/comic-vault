@@ -779,8 +779,25 @@ assertTrue(true, 'CONTROL 7: documented via full regression suite re-runs — se
   };
   const vision = { title: 'Bar', issue: '1', year: null, publisher: null, confidence: 'low' };
   const result = resolveIdentity(vision, null, family, { ebayResultCount: 3, visualItems });
-  assertEq(result.familyIssueConsensus, null, 'CONTROL B: familyIssueConsensus stays null — the qualified predicate\'s dominance condition (4th of 4) correctly blocks retention despite titleAxisOnlyBlock=true and count>=3, using a real, possible top/runner ordering');
-  assertEq(result.confirmedIssue, '1', 'CONTROL B: confirmedIssue stays Vision\'s own "1", untouched by the non-dominant family');
+  // Track B Phase 0, Commit 4.3.1 (2026-07-31) — SUPERSEDES this control's
+  // original "familyIssueConsensus stays null" expectation. Before 4.3.1,
+  // a margin-failing near-miss fell through with familyIssueConsensus left
+  // null (silent — the exact shape 4.3.1's RETENTION-DECLINE FAIL-CLOSED
+  // CONTAINMENT closes). 4.3.1 recognizes this exact shape (all four
+  // qualification conditions hold except margin) as its own "near-miss
+  // margin decline" conflict instead of a silent fall-through to the
+  // raw-pool vision-zero-support check. Re-verified here as a control: the
+  // family (top=10, the "Bar #9" rows) genuinely disagrees with
+  // confirmedIssue (still "1", Vision's own untouched prior) on its OWN
+  // measured issue ("9") — a real, now-recorded conflict — but this does
+  // NOT contradict Commit 4.3's own dominance gate, which still correctly
+  // withholds AUTHORITY: confirmedIssue is never overwritten either way.
+  assertEq(result.familyIssueConsensus?.outcome, 'conflicted', 'CONTROL B (superseded by Commit 4.3.1): a margin-failing near-miss now records a conflict rather than staying null');
+  assertEq(result.familyIssueConsensus?.authoritativeForCustody, false, 'CONTROL B (superseded by Commit 4.3.1): never authoritative for custody — the dominance condition (4th of 4) still correctly withholds authority');
+  assertEq(result.familyIssueConsensus?.reason, 'retention-margin-decline-conflict', 'CONTROL B (superseded by Commit 4.3.1): tagged with the new near-miss reason');
+  assertEq(result.familyIssueConsensus?.observedFamilyValue, '9', 'CONTROL B (superseded by Commit 4.3.1): observedFamilyValue is the family\'s own unanimous "9" (all three "Bar #9" rows)');
+  assertEq(result.familyIssueConsensus?.resolvedValue, '1', 'CONTROL B (superseded by Commit 4.3.1): resolvedValue stays the untouched prior "1", never the family\'s "9"');
+  assertEq(result.confirmedIssue, '1', 'CONTROL B: confirmedIssue stays Vision\'s own "1", untouched by the non-dominant family — dominance still correctly withholds authority to overwrite it');
 
   // End-to-end: top=9, runner=3 (the exact equality boundary) through
   // resolveIdentity — confirms the boundary is ALLOWED end-to-end, not

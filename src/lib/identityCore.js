@@ -1842,11 +1842,30 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   //      finding — the first-pass margin condition was vacuous, masked by
   //      an impossible (top<runner) test fixture, not a deliberate design.
   const FAMILY_AUTHORITY_COHERENCE_FLOOR = 3;
-  const isQualifiedFamilyForRetention = !!(hasValidFamilyMembership(opts.visualItems, family?.topFamily?.indices, family?.topFamily?.count)
+  // Track B Phase 0, Commit 4.3.1 (Section A, 2026-07-31) — split the
+  // original single-expression predicate into a shared base (the four
+  // non-margin conditions) and the margin condition on its own, so a
+  // "near miss" — every condition holds except margin — can be detected
+  // as its own distinct shape rather than falling through to the
+  // catch-all "not qualified" case. isQualifiedFamilyForRetention's own
+  // truth table is unchanged: it is still exactly
+  // (all four base conditions) AND (margin).
+  const familyAuthorityBaseConditions = !!(hasValidFamilyMembership(opts.visualItems, family?.topFamily?.indices, family?.topFamily?.count)
     && family?.titleAxisOnlyBlock === true
     && family?.topFamily?.count >= FAMILY_AUTHORITY_COHERENCE_FLOOR
-    && !hasContaminatedMember(opts.visualItems, family.topFamily.indices)
-    && familyDominatesRunnerUp(family.topFamily.weightSum, family.runnerUp?.weightSum));
+    && !hasContaminatedMember(opts.visualItems, family.topFamily.indices));
+  const familyAuthorityMarginQualifies = familyAuthorityBaseConditions
+    && familyDominatesRunnerUp(family.topFamily.weightSum, family.runnerUp?.weightSum);
+  const isQualifiedFamilyForRetention = familyAuthorityBaseConditions && familyAuthorityMarginQualifies;
+  // Commit 4.3.1 (Section A) — the near-miss shape this commit closes:
+  // every base condition holds (genuine title-axis-only block, coherence
+  // floor, no contamination) but the family does NOT dominate its
+  // runner-up by the required 3x margin — margin is the SOLE failed
+  // qualification condition. familyDominatesRunnerUp returns true
+  // whenever there is no real competing runner-up at all, so this can
+  // only be true when a genuine, non-trivial runner-up is actually
+  // present and simply isn't dominated.
+  const isNearMissMarginDecline = familyAuthorityBaseConditions && !familyAuthorityMarginQualifies;
 
   // Only runs when neither branch above already populated
   // familyIssueConsensusResult (those are strictly stronger signals — an
@@ -1960,6 +1979,70 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
       `year outcome=${yearDecision.outcome} resolved=${yearDecision.resolvedValue ?? 'null'} authoritative=${yearDecision.authoritativeForCustody} ` +
       `support=${yearMeasurement.support}/${yearMeasurement.uniqueRows}`
     );
+  } else if (familyIssueConsensusResult == null && isNearMissMarginDecline) {
+    // Track B Phase 0, Commit 4.3.1 (Section A, 2026-07-31) —
+    // RETENTION-DECLINE FAIL-CLOSED CONTAINMENT. All four Commit 4.3
+    // qualification conditions hold except margin. Left alone, this
+    // near-miss would fall through with familyIssueConsensusResult still
+    // null — one condition short of the qualified branch above instead
+    // of absent entirely — straight into the raw-pool vision-zero-support
+    // override/escalate check below, which would adopt whatever the RAW
+    // POOL's own unrelated plurality happens to be. That is the exact
+    // Commit 4.3 failure mode this containment closes: record a genuine,
+    // UNRESOLVED conflict instead, never adopt the family's value, and
+    // never let raw-pool override/escalate run for this field either
+    // (see familyAuthoritySkip below, extended to recognize this shape).
+    //
+    // MEASURE ONLY — same null-prior measurement as the qualified branch
+    // (the family's own internal coherence is unaffected by whether it
+    // clears the margin bar against a competing family). DECIDE is
+    // skipped deliberately: decideFieldAuthority's rule D/E branches are
+    // for a family that WON custody eligibility; this family did not, so
+    // there is nothing to decide between "corrected" and "conflicted" —
+    // it is unconditionally a recorded conflict, resolvedValue always the
+    // untouched prior (Control T1's convention: preserved unresolved,
+    // never adopted, never overwritten).
+    const issueMeasurement = resolveFamilyIssueConsensus(null, opts.visualItems, family.topFamily.indices);
+    const priorSource = vision.source ?? 'unknown';
+    const priorTrusted = vision.priorIndependentlyTrusted === true;
+
+    familyIssueConsensusResult = {
+      ...issueMeasurement,
+      issue: vision.issue,
+      // legacyModeFor's own rule: outcome 'conflicted' + familyMode
+      // 'adopted' (the family WAS internally coherent, just didn't clear
+      // the margin bar) maps to 'conflict-locked' — routes this through
+      // the SAME pre-existing containment api/enrich.js already applies
+      // to any mode==='conflict-locked' result (out.issueConsensusConflict),
+      // rather than inventing a parallel mechanism.
+      mode: issueMeasurement.mode === 'adopted' ? 'conflict-locked' : issueMeasurement.mode,
+      observedFamilyValue: issueMeasurement.issue,
+      resolvedValue: vision.issue,
+      outcome: 'conflicted',
+      authoritativeForCustody: false,
+      reason: 'retention-margin-decline-conflict',
+    };
+    identitySource = `${identitySource}+family_margin_decline_conflict`;
+
+    // N1 instrumentation — exactly one structured containment line per
+    // qualifying near-miss, never silent. Format required verbatim by the
+    // implementation-approval addendum: "family=<issue>@<count>/<weight>
+    // runnerUp=<weight> margin=<ratio> prior=<vision issue>" — additional
+    // fields (raw-pool proposed issue, required margin, runner-up count,
+    // final authority status) appended after, per Section E.
+    const runnerUpWeight = family.runnerUp?.weightSum ?? null;
+    const REQUIRED_MARGIN = 3;
+    const measuredMargin = (runnerUpWeight != null && runnerUpWeight > 0)
+      ? Number((family.topFamily.weightSum / runnerUpWeight).toFixed(2))
+      : null;
+    console.log(
+      `[commit4.3.1] near-miss family conflict: ` +
+      `family=${issueMeasurement.issue}@${family.topFamily.count}/${family.topFamily.weightSum} ` +
+      `runnerUp=${runnerUpWeight ?? 'none'} margin=${measuredMargin ?? 'n/a'} prior=${vision.issue ?? 'null'} ` +
+      `requiredMargin=${REQUIRED_MARGIN} runnerUpCount=${family.runnerUp?.count ?? 0} ` +
+      `rawPoolProposed=${ebay?.issue ?? 'null'} priorSource=${priorSource} priorIndependentlyTrusted=${priorTrusted} ` +
+      `reason=retention-margin-decline-conflict status=conflicted`
+    );
   }
 
   // P0 (Q-VISION-ZERO-SUPPORT) — Vision "confidently wrong" issue override.
@@ -2006,10 +2089,20 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // 'no-consensus'/'no-data' must still reach the raw-pool check unshortcut
   // (a real family-vs-Vision conflict, or a family with nothing to say, is
   // not a reason to skip the pool's own independent zero-support signal).
-  const familyAuthoritySkip = familyAuthorityCurrent
+  // Track B Phase 0, Commit 4.3.1 (Section A) — the near-miss margin-
+  // decline conflict is NEVER a reason to skip on "authority" (there IS
+  // none — authoritativeForCustody is false by construction), but it
+  // still must skip: "do not run raw-pool OVERRIDE / do not run raw-pool
+  // ESCALATE" for this exact shape. A separate, explicitly-named check
+  // rather than folding into familyAuthoritySkip's own adopted/corroborated
+  // condition — that condition means something different ("the family IS
+  // custody-authoritative for this value"), which is specifically false
+  // here.
+  const isNearMissConflictActive = familyIssueConsensusResult?.reason === 'retention-margin-decline-conflict';
+  const familyAuthoritySkip = isNearMissConflictActive || (familyAuthorityCurrent
     && (familyIssueConsensusResult.mode === 'adopted' || familyIssueConsensusResult.mode === 'corroborated')
     && familyIssueConsensusResult.issue != null
-    && String(familyIssueConsensusResult.issue) === String(confirmedIssue);
+    && String(familyIssueConsensusResult.issue) === String(confirmedIssue));
 
   if (poolReprintDominant) {
     // EX-7 — pool is not an eligible witness (facsimile/reprint dominance
@@ -2018,6 +2111,11 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     // reads visionConfidence independently of this function) still
     // escalates to ID_REQUIRED on its own — no new code needed here.
     console.log(`[vision-zero-support] SKIPPED — pool is reprint/facsimile-dominant (ratio=${reprintRatio.toFixed(2)} >= ${REPRINT_DOMINANCE_THRESHOLD}), Vision's issue stands`);
+  } else if (isNearMissConflictActive) {
+    console.log(
+      `[vision-zero-support] SKIPPED reason=retention-margin-decline-conflict ` +
+      `— a near-miss family conflict is already recorded for this field; raw-pool override/escalate must not run on top of it`
+    );
   } else if (familyAuthoritySkip) {
     console.log(
       `[vision-zero-support] SKIPPED reason=winning-family-authority ` +
