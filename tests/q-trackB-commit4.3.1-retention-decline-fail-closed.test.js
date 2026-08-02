@@ -323,7 +323,17 @@ console.log('\n--- Section 7: real ac: cache gate — zero calls (spy, real kvGe
 console.log('\n--- Section 8: source-presence + control-flow-order proofs (api/enrich.js real wiring) ---\n');
 {
   const enrichSrc = readFileSync(new URL('../api/enrich.js', import.meta.url), 'utf8');
-  assertTrue(enrichSrc.includes('const marketCustodyConflicted = out.issueAuthority?.status === \'conflicted\';'), 'the real gate is defined');
+  // GrailKey Commit B2 (2026-08-02) superseded this line's exact text, not
+  // its purpose — confirmed live (22:53:21 UTC, build af32d21) that the
+  // status-only check evaluates false for a mode='conflict-locked' outcome
+  // (out.issueAuthority is never assigned outside mode='adopted'), so cv:
+  // wrote a polluted null-issue cache entry the ac: namespace's own
+  // canUseExactIssuePricingCache already guarded against. The gate now
+  // reuses that exact function (one namespace extension of an existing,
+  // already-tested primitive) instead of a narrower, independently-tuned
+  // status check — see tests/grailkey-commit-b2-cv-cache-guard.test.js for
+  // the dedicated regression/mutation coverage of the new implementation.
+  assertTrue(enrichSrc.includes('const marketCustodyConflicted = !canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority, out.identityProvisionalFields);'), 'the real gate is defined (superseded by Commit B2, reuses canUseExactIssuePricingCache)');
   assertTrue(enrichSrc.includes('[commit4.3.1] exact-identity cv: lookup SKIPPED'), 'the real cv: IIFE is gated');
   assertTrue(enrichSrc.includes('[commit4.3.1] exact-identity pc: lookup SKIPPED'), 'the real pc: IIFE is gated');
   assertTrue(enrichSrc.includes('[commit4.3.1] exact-identity pc: requery SKIPPED'), 'ITEM 3: the real pc: REQUERY fallback is ALSO gated (closes the needsRequery=!priceCharting gap: priceCharting is null when conflicted, which would otherwise force an unconditional requery)');

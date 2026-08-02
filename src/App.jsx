@@ -10093,6 +10093,15 @@ export default function App() {
                 grade: gradeGuard.grade,
                 confidenceLevel: gradeGuard.confidenceLevel,
                 identityConfident: idGated ? false : (enrich.identityConfident ?? cur.identityConfident ?? true),
+                // GrailKey Commit C3 (2026-08-02) — assetTypeConfident was
+                // read transiently (idGated computation) but never
+                // persisted to the catalogue record by any merge path,
+                // so a server-side correction (Commit C1's image-search
+                // corroboration) never survived a page refresh. Threaded
+                // alongside identityConfident using the same presence
+                // pattern.
+                assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true,
+                assetTypeCorroboratedBy: enrich.assetTypeCorroboratedBy ?? cur.assetTypeCorroboratedBy ?? null,
                 identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                 identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
                 // Ship 6.2 — Polybag-aware merge.
@@ -10605,6 +10614,15 @@ export default function App() {
                   grade: gradeGuardB.grade,
                   confidenceLevel: gradeGuardB.confidenceLevel,
                   identityConfident: idGated ? false : (enrich.identityConfident ?? cur.identityConfident ?? true),
+                // GrailKey Commit C3 (2026-08-02) — assetTypeConfident was
+                // read transiently (idGated computation) but never
+                // persisted to the catalogue record by any merge path,
+                // so a server-side correction (Commit C1's image-search
+                // corroboration) never survived a page refresh. Threaded
+                // alongside identityConfident using the same presence
+                // pattern.
+                assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true,
+                assetTypeCorroboratedBy: enrich.assetTypeCorroboratedBy ?? cur.assetTypeCorroboratedBy ?? null,
                   identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                   identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
                   keyIssue: enrich.keyIssue || cur.keyIssue,
@@ -10717,6 +10735,9 @@ export default function App() {
                   priceLow: idGatedSel ? null : (enrich.priceLow || s.priceLow),
                   priceHigh: idGatedSel ? null : (enrich.priceHigh || s.priceHigh),
                   identityConfident: idGatedSel ? false : (enrich.identityConfident ?? s.identityConfident ?? true),
+                  // GrailKey Commit C3 — see standard-merge comment for rationale.
+                  assetTypeConfident: enrich.assetTypeConfident ?? s.assetTypeConfident ?? true,
+                  assetTypeCorroboratedBy: enrich.assetTypeCorroboratedBy ?? s.assetTypeCorroboratedBy ?? null,
                   identityMissingFields: enrich.identityMissingFields ?? s.identityMissingFields ?? null,
                   identityReasons: enrich.identityReasons ?? s.identityReasons ?? null,
                   keyIssue: enrich.keyIssue || s.keyIssue,
@@ -11055,6 +11076,9 @@ export default function App() {
                 grade: gradeGuardC.grade,
                 confidenceLevel: gradeGuardC.confidenceLevel,
                 identityConfident: idGatedBulk ? false : (enrich.identityConfident ?? cur.identityConfident ?? true),
+                // GrailKey Commit C3 — see standard-merge comment for rationale.
+                assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true,
+                assetTypeCorroboratedBy: enrich.assetTypeCorroboratedBy ?? cur.assetTypeCorroboratedBy ?? null,
                 identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
                 identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
                 // Ship 6.2 — Polybag-aware merge.
@@ -11602,6 +11626,9 @@ export default function App() {
       priceHigh: idGatedRM ? null : (enrich.priceHigh ?? item.priceHigh),
       priceUpdatedAt: priceChangedRM ? (enrich.priceUpdatedAt || Date.now()) : (item.priceUpdatedAt || item.timestamp),
       identityConfident: idGatedRM ? false : (enrich.identityConfident ?? item.identityConfident ?? true),
+      // GrailKey Commit C3 — see standard-merge comment for rationale.
+      assetTypeConfident: enrich.assetTypeConfident ?? item.assetTypeConfident ?? true,
+      assetTypeCorroboratedBy: enrich.assetTypeCorroboratedBy ?? item.assetTypeCorroboratedBy ?? null,
       identityMissingFields: enrich.identityMissingFields ?? item.identityMissingFields ?? null,
       identityReasons: enrich.identityReasons ?? item.identityReasons ?? null,
       keyIssue: enrich.keyIssue || item.keyIssue,

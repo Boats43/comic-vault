@@ -3350,7 +3350,26 @@ export default async function handler(req, res) {
     // Vision's own issue while still querying/caching under that same
     // issue number would only relocate the pollution risk from the
     // family's disputed value to Vision's unconfirmed one — not close it.
-    const marketCustodyConflicted = out.issueAuthority?.status === 'conflicted';
+    //
+    // GrailKey Commit B2 (2026-08-02, Spawn #351 virgin-variant dispatch)
+    // — confirmed via a real production trace (22:53:21 UTC, build af32d21)
+    // that this check alone is insufficient: a `mode==='conflict-locked'`
+    // outcome (the q140 issue-consensus-conflict path, distinct from
+    // `mode==='adopted'`) never calls deriveIssueAuthorityFromAdoption at
+    // all, so out.issueAuthority stays null/undefined and
+    // marketCustodyConflicted evaluates false — yet confirmedIssue is
+    // ALSO null in this exact shape (Vision's own issue was rejected,
+    // no adoptable alternate exists), which is precisely the case the
+    // ac: namespace's own canUseExactIssuePricingCache already guards
+    // against (`if (confirmedIssue == null) return false;`, Commit B.1).
+    // Confirmed live: `[active-cache] SKIP: confirmedIssue is null...
+    // (Commit B.1)` correctly fired for ac: on this exact request, while
+    // cv: had no equivalent check and wrote `cv:spawn brett booth|null|Image`
+    // unconditionally. Reusing canUseExactIssuePricingCache here (rather
+    // than a second, independently-tuned null check) closes the gap with
+    // the same function ac: already trusts, extended to a second
+    // namespace — not a new subsystem.
+    const marketCustodyConflicted = !canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority, out.identityProvisionalFields);
 
     // Q106 FIX-1 — cgcResult already fetched in Phase 1 (races the visual
     // pool); no longer re-fetched here.
@@ -3359,8 +3378,10 @@ export default async function handler(req, res) {
       (async () => {
         if (marketCustodyConflicted) {
           console.log(
-            `[commit4.3.1] exact-identity cv: lookup SKIPPED — issueAuthority.status="conflicted" ` +
-            `(reasons=${JSON.stringify(out.issueAuthority?.reasons || [])}) — no cache read/write, no live query`
+            confirmedIssue == null
+              ? `[commit-b2] exact-identity cv: lookup SKIPPED — confirmedIssue is null (no title|null key in the cv: namespace)`
+              : `[commit4.3.1] exact-identity cv: lookup SKIPPED — issueAuthority.status="${out.issueAuthority?.status}" ` +
+                `(reasons=${JSON.stringify(out.issueAuthority?.reasons || [])}) — no cache read/write, no live query`
           );
           return null;
         }
@@ -3380,8 +3401,10 @@ export default async function handler(req, res) {
       (async () => {
         if (marketCustodyConflicted) {
           console.log(
-            `[commit4.3.1] exact-identity pc: lookup SKIPPED — issueAuthority.status="conflicted" ` +
-            `(reasons=${JSON.stringify(out.issueAuthority?.reasons || [])}) — no cache read/write, no live query`
+            confirmedIssue == null
+              ? `[commit-b2] exact-identity pc: lookup SKIPPED — confirmedIssue is null (no title|null key in the pc:v1 namespace)`
+              : `[commit4.3.1] exact-identity pc: lookup SKIPPED — issueAuthority.status="${out.issueAuthority?.status}" ` +
+                `(reasons=${JSON.stringify(out.issueAuthority?.reasons || [])}) — no cache read/write, no live query`
           );
           return null;
         }
@@ -3847,7 +3870,11 @@ export default async function handler(req, res) {
         console.log(`[pc-requery] matched: "${priceCharting.productName}"`);
       }
     } else if (marketCustodyConflicted) {
-      console.log(`[commit4.3.1] exact-identity pc: requery SKIPPED — issueAuthority.status="conflicted", no fallback lookup attempted`);
+      console.log(
+        confirmedIssue == null
+          ? `[commit-b2] exact-identity pc: requery SKIPPED — confirmedIssue is null, no fallback lookup attempted`
+          : `[commit4.3.1] exact-identity pc: requery SKIPPED — issueAuthority.status="${out.issueAuthority?.status}", no fallback lookup attempted`
+      );
     } else {
       console.log(`[pc-query] initial PC match "${priceCharting.productName}" already overlaps confirmedTitle "${confirmedTitle}" sufficiently — keeping initial result`);
     }
