@@ -16,6 +16,7 @@ import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeCo
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
+import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE } from "./lib/scanOwnership.js";
 
 // A3 ACCESS GATE: Client-side key helper
 // ACCESS GATE — T1 invite key management (A3 + LAUNCH BLOCKER FIX)
@@ -9815,6 +9816,15 @@ export default function App() {
   // mismatch) are dropped before they can overwrite the catalogue.
   const activeCardEnrichIdRef = useRef(null);
   const cardEnrichAbortRef = useRef(null);
+  // Slice 7 — per-scan ownership guard for gradeBlob's transient `result`
+  // preview state (src/lib/scanOwnership.js). Two dimensions: scanId
+  // (crypto.randomUUID(), server-echoed on both /api/grade and
+  // /api/enrich) + generation (monotonic local counter, never sent to the
+  // server) — see that module's own header comment for why both are
+  // required. Extends the same class of guard activeCardEnrichIdRef above
+  // already proves out for refreshMarketData's single-endpoint case.
+  const activeScanRef = useRef(null);
+  const scanGenerationRef = useRef(0);
   // Auto-refresh queue abort registry. Effect cleanup aborts every
   // in-flight fetch so responses can't land after the user opens a card.
   const autoRefreshAbortersRef = useRef(new Set());
@@ -10380,6 +10390,15 @@ export default function App() {
 
   const gradeBlob = useCallback(
     async (blob, { save = false, buyerMode = false } = {}) => {
+      // Slice 7 — mint this scan's ownership identity BEFORE any request
+      // fires, so both the /api/grade and /api/enrich responses can be
+      // checked against it later regardless of which resolves first
+      // (src/lib/scanOwnership.js). activeScanRef is updated immediately —
+      // any scan already in flight is superseded from this point on.
+      const scanId = mintScanId();
+      const generation = nextGeneration(scanGenerationRef);
+      const scanOwnership = { scanId, generation };
+      activeScanRef.current = scanOwnership;
       setError(null);
       setResult(null);
       setEnriching(false);
@@ -10397,8 +10416,8 @@ export default function App() {
         // the book is clearly identifiable. Scan tab stays on the full
         // Opus standard path for condition-report accuracy.
         const gradeBody = buyerMode
-          ? { images: [b64], source: 'watch' }
-          : { images: [b64] };
+          ? { images: [b64], source: 'watch', scanId }
+          : { images: [b64], scanId };
         const res = await fetch("/api/grade", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
@@ -10448,8 +10467,22 @@ export default function App() {
           data.gradeLocked = true;
         }
 
-        // Show the Claude result immediately.
-        setResult({ ...data, issue: issueNum, image: b64 });
+        // Show the Claude result immediately. Slice 7 — guard against a
+        // stale/superseded scan's grade response overwriting a later
+        // scan's preview (src/lib/scanOwnership.js). SHADOW mode (the
+        // production default) still performs this write unconditionally
+        // and only logs what ENFORCE mode would have blocked. The
+        // persisted catalogue write below is UNCONDITIONAL regardless of
+        // this guard either way — it is already independently safe
+        // (savedId-keyed, find-by-id) and must remain so.
+        applyScanOwnershipGuard(
+          'grade',
+          data,
+          scanOwnership,
+          activeScanRef.current,
+          CURRENT_SCAN_OWNERSHIP_MODE,
+          () => setResult({ ...data, issue: issueNum, image: b64 })
+        );
         setLoading(false);
         const savedId = (save && !isDuplicate) ? await addToCatalogue({ ...data, issue: issueNum }, b64) : null;
 
@@ -10486,6 +10519,7 @@ export default function App() {
           foreignEdition: data.foreignEdition,
           isReprint: data.isReprint,
           editionType: data.editionType,
+          scanId,
         };
         if (!buyerMode) enrichBody.images = [b64];
         fetch("/api/enrich", {
@@ -10504,10 +10538,28 @@ export default function App() {
           })
           .then((enrich) => {
             if (!enrich) return;
-            // Explicitly preserve the cover image from the initial grade
-            // response in case enrich ever returns its own image field.
-            setResult((prev) =>
-              prev ? { ...prev, ...enrich, image: prev.image } : prev
+            // Slice 7 — guard against a stale/superseded scan's enrich
+            // response overwriting a later scan's preview
+            // (src/lib/scanOwnership.js). SHADOW mode (the production
+            // default) still performs this write unconditionally and only
+            // logs what ENFORCE mode would have blocked. The persisted
+            // catalogue write below is UNCONDITIONAL regardless of this
+            // guard either way — it is already independently safe
+            // (savedId-keyed, find-by-id) and must remain so.
+            applyScanOwnershipGuard(
+              'enrich',
+              enrich,
+              scanOwnership,
+              activeScanRef.current,
+              CURRENT_SCAN_OWNERSHIP_MODE,
+              () => {
+                // Explicitly preserve the cover image from the initial
+                // grade response in case enrich ever returns its own
+                // image field.
+                setResult((prev) =>
+                  prev ? { ...prev, ...enrich, image: prev.image } : prev
+                );
+              }
             );
             // Persist comps + enriched price fields into the stored
             // catalogue entry so CollectionDetail can display them after

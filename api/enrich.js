@@ -2070,6 +2070,7 @@ export default async function handler(req, res) {
       skipImageSearch, // FIX 4 — Skip eBay image search when manual
       manualAuthority, // Track B Phase 0, Commit 3 — { correctedBy, correctedFields }, present only on a card-correction request
       priorIdentity,   // Track B Phase 0, Commit 3 — { title, issue, year, publisher, issueAuthority } snapshot of the card BEFORE correction, client-supplied (server has no other way to know the prior state)
+      scanId,          // Slice 7 — client-minted per-scan ownership identifier (src/lib/scanOwnership.js), echoed back verbatim so App.jsx's gradeBlob can verify this response belongs to the scan that requested it. Absent on requests from older clients or non-gradeBlob call sites (e.g. refreshMarketData) — always optional.
     } = req.body || {};
 
     // Track B Phase 0, Commit 3 — Safeguards 1+2. prepareManualCorrectionRequest
@@ -2224,6 +2225,13 @@ export default async function handler(req, res) {
     // Lesson encoded: variable declarations referenced across a function
     // must be at function top, not deep in execution flow.
     const out = {};
+    // Slice 7 — stamp once; finalizeResponse(out) returns `out` unmodified
+    // except for attaching `.contract`, so this reaches every response
+    // path that flows through `out` (the terminal res.status(200).json
+    // sites at the bottom of this handler and the identity-refused early
+    // return a few thousand lines below both do). JSON.stringify drops the
+    // key entirely when scanId is undefined — no conditional needed here.
+    out.scanId = scanId;
 
     // 2026-07-18 (anime/manga poster class) — Vision's own structured
     // assetTypeConfident read. Defaults true when absent (older callers,
@@ -4874,6 +4882,11 @@ export default async function handler(req, res) {
           : {}),
         identitySource: identitySource || 'vision',
         identityProvisional: isProvisionalFamilyIdentity,
+        // Slice 7 — refusedOut spreads from req.body, not `out`, above;
+        // stamped explicitly here (rather than relying on the spread) so
+        // this path is correct regardless of whether sanitizeIdentityFields
+        // preserves unrecognized keys.
+        scanId,
         // Q134 dispatch — same freeform-text caveat as the promoted branch
         // above: item.reason was written before this identity resolution
         // ran and may still narrate the AI's original (rejected) read.

@@ -137,6 +137,15 @@ const ensureAssetType = (responseObj, initialScan = null) => {
   return responseObj;
 };
 
+// Slice 7 — echo the client-minted scanId (if present) on every response
+// path, so App.jsx's ownership guard (src/lib/scanOwnership.js) can verify
+// this response belongs to the scan that requested it. Older/other clients
+// that don't send scanId are unaffected — the field is simply omitted.
+const echoScanId = (responseObj, scanId) => {
+  if (scanId) responseObj.scanId = scanId;
+  return responseObj;
+};
+
 // Ship #19 MVP — AI-CROSS-LAYER-DISCONNECT edition warning detection.
 //
 // Scans Vision's free-form `reason` text for reprint / later-print /
@@ -584,12 +593,12 @@ export default async function handler(req, res) {
         body.gradeLocked === true &&
         !body.forceRegrade) {
       console.log('[grade-lock] returning locked grade, skipping Vision');
-      return res.status(200).json({
+      return res.status(200).json(echoScanId({
         ...body.existingGrade,
         skipReason: 'grade_locked',
         locked: true,
         skippedVision: true,
-      });
+      }, body.scanId));
     }
 
     const { images, image } = body;
@@ -627,7 +636,7 @@ export default async function handler(req, res) {
       if (noImage) result.noImage = true;
       res.setHeader("x-watch-passes", String(passes));
       res.setHeader("x-watch-timing", JSON.stringify(timings));
-      res.status(200).json(ensureAssetType(result));
+      res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
       return;
     }
 
@@ -697,7 +706,7 @@ export default async function handler(req, res) {
 
       console.log('[grade] eBay-first path succeeded');
       mark('response_sent');
-      res.status(200).json(ensureAssetType(result));
+      res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
       return;
     }
 
@@ -738,7 +747,7 @@ export default async function handler(req, res) {
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
     mark('response_sent');
-    res.status(200).json(ensureAssetType(finalParsed, initialScan));
+    res.status(200).json(echoScanId(ensureAssetType(finalParsed, initialScan), body.scanId));
   } catch (err) {
     console.error('[FATAL /api/grade]', err?.message || err);
     console.error('[FATAL STACK]', err?.stack || 'no stack trace');
