@@ -2272,12 +2272,64 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   const q84Consensus = (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily && !q84ConsensusStrict.allowed)
     ? q84Gate(topFamily.tokens, topFamily.rawTitle, topFamily.memberTokens)
     : q84ConsensusStrict;
-  if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily && !q84Consensus.allowed) {
+
+  // GrailKey Commit B1 (2026-08-02, Spawn #351 virgin-variant dispatch) —
+  // confirmed live (22:53:21 UTC, build af32d21): applyDualAxisGate's bare
+  // "creator-tokens" fallthrough (added tokens are ALL recognized creator/
+  // artist names, nonCreator.length===0) returns allowed:true unconditionally
+  // — a verdict correctly designed for TITLE-TEXT AUGMENTATION onto an
+  // already-agreed identity (the Wonder Woman #75 / Jenny Frison precedent,
+  // tests/q84-dual-axis.test.js). At THIS call site the same verdict also
+  // authorizes selecting an entire DIFFERENT winning title family for
+  // FAMILY/IDENTITY SELECTION, not mere title augmentation.
+  //
+  // CORRECTED (same dispatch, review round): the real production trace's
+  // visionIssue was NOT absent — it was "1", present and truthy
+  // (`[visual] no coherent consensus — keeping Claude issue as-is: 1`). An
+  // earlier version of this fix gated on `!visionIssue` (issue absent) and
+  // would NOT have fired for this exact request. The real distinguishing
+  // signal, also confirmed live in the same trace
+  // (`[visual] consensus: issue=none (8/20) visionIssueCount=0`), is that
+  // the winning family's OWN members carry ZERO support for Vision's
+  // issue — every one of "spawn brett booth"'s 3 members is a #351 listing,
+  // none is "#1". WW#75's real fixture (tests/q84-dual-axis.test.js,
+  // visionIssue='75') has full family-member support (the pool is
+  // "Wonder Woman #75 Jenny Frison..." throughout) — the correct
+  // discriminator is family-member issue agreement, not mere presence of
+  // a Vision issue number. Reuses extractIssueFromTitle (already imported/
+  // used one block above, item0Issue) rather than a new extractor — no new
+  // subsystem. Scoped narrowly: only fires when (a) creator-tokens is the
+  // SOLE reason for allowance (not adjacent-pair recovery or the coherent-
+  // content lane, both of which carry independent additional evidence) and
+  // (b) visionIssue is present AND not a single one of the winning family's
+  // own members' own extracted issue agrees with it. When visionIssue is
+  // itself absent, there is nothing to corroborate against and this gate
+  // does not fire — that case is unaffected, same as before.
+  const isBareCreatorTokensOnly = q84Consensus.allowed === true
+    && /^creator-tokens \[/.test(q84Consensus.reason || '')
+    && !/adjacent-pair recovered/.test(q84Consensus.reason || '');
+  const familyMemberIssueSupport = !isBareCreatorTokensOnly || !visionIssue
+    ? null
+    : (topFamily.indices || []).some((idx) => {
+        const memberItem = items[idx];
+        const memberTitle = typeof memberItem === 'string' ? memberItem : (memberItem?.rawTitle || memberItem?.title || '');
+        const memberIssue = extractIssueFromTitle(memberTitle);
+        return memberIssue != null && String(memberIssue) === String(visionIssue);
+      });
+  const creatorTokensLackIssueCorroboration = isBareCreatorTokensOnly
+    && visionIssue
+    && familyMemberIssueSupport === false;
+
+  if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily
+      && (!q84Consensus.allowed || creatorTokensLackIssueCorroboration)) {
+    const blockReason = creatorTokensLackIssueCorroboration
+      ? `creator-tokens-without-issue-corroboration [${q84Consensus.reason}] — Vision's issue #${visionIssue} has zero support among the winning family's own members`
+      : q84Consensus.reason;
     return {
       decision: 'fallback-vision',
       selectedTitle: null,
       rawTitle: null,
-      reason: `[Q84-dual-axis] ${q84Consensus.reason} — Vision+eBay agree, family override blocked`,
+      reason: `[Q84-dual-axis] ${blockReason} — Vision+eBay agree, family override blocked`,
       topFamily,
       runnerUp,
       families: scored,
