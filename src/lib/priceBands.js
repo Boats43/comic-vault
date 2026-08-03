@@ -9,6 +9,13 @@
  * Price bands: Quick (10th), Market (50th), Stretch (90th) percentile.
  */
 
+// GrailKey Commit Q (Q2, 2026-08-03) — reuses hasIssueNumber
+// (compHygiene.js), the SAME issue-matching predicate api/comps.js's own
+// Filter 0a and soldVerification.js's issue-mismatch check already apply,
+// rather than a second, independently-maintained matcher. See
+// buildVerifiedActivePool below for why this import exists.
+import { hasIssueNumber } from './compHygiene.js';
+
 /**
  * Calculate percentile from sorted array of numbers.
  * @param {number[]} sortedValues - array sorted ascending
@@ -221,6 +228,26 @@ export function buildVerifiedActivePool(comps, { title, issue, year, variant }) 
         if (ourWords.length === 0 || matchCount / ourWords.length < 0.5) {
           return false;
         }
+      }
+
+      // GrailKey Commit Q (Q2, 2026-08-03) — issue-number enforcement.
+      // Reuses hasIssueNumber (compHygiene.js) — the SAME predicate
+      // api/comps.js's own Filter 0a and soldVerification.js's issue-
+      // mismatch check already apply — rather than a second,
+      // independently-maintained matcher. Without this, the title-overlap
+      // check above is the ONLY gate on series identity: "absolute batman
+      // #2 (2024)".includes("absolute batman") is true, so every issue of
+      // an ongoing series sharing a stable title (Absolute Batman #2
+      // through #15, plus two hardcovers) passed straight into a #1's
+      // priced pool — confirmed live, GrailKey full-pipeline audit
+      // 2026-08-03 ("filtered 41/41 active comps" removed nothing because
+      // there was no issue check to remove anything on). hasIssueNumber
+      // itself returns true unconditionally when issue is falsy (books,
+      // or a genuinely unresolved issue number) — no separate book/asset
+      // guard needed here, matches its own existing convention.
+      if (issue && !hasIssueNumber(String(p.title || ''), issue, title)) {
+        console.log(`[Q53-buildActive] active rejected: "${p.title?.slice(0, 60)}" reason=issue (want #${issue})`);
+        return false;
       }
 
       // Q75-1: Year token filter (era contamination)

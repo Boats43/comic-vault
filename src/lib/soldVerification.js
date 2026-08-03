@@ -28,7 +28,17 @@ import {
   MERCH_RE,
   HALF_ISSUE_RE,
   TRADING_CARD_RE,
-  TPB_MARKER_RE,
+  // GrailKey Commit Q (Q1a, 2026-08-03) — IDENTITY_TPB_MARKER_RE, not
+  // TPB_MARKER_RE. The loose form's bare "absolute"/"deluxe"/"treasury"
+  // alternatives (compHygiene.js:99-100) collide with DC's real "Absolute"
+  // line (launched 2024) — every sold comp for Absolute Batman #1 matched
+  // it and was rejected as format:tpb (confirmed live: 27/30 rejected,
+  // GrailKey full-pipeline audit 2026-08-03). IDENTITY_TPB_MARKER_RE
+  // (compHygiene.js:222-235) requires the edition suffix on all three
+  // ambiguous terms — already built and documented for exactly this
+  // collision, previously applied only to the identity pool
+  // (imageSearchIdentity.js) and never propagated here.
+  IDENTITY_TPB_MARKER_RE,
   COVERLESS_RE,
   isValidIssueRange,
   hasIssueNumber,
@@ -495,8 +505,9 @@ export const verifySoldComps = (rawRows, ctx) => {
 
   // 3c. TPB / collected edition format. Ship #20a.6.20 parity with active
   //     Filter 1g. Reject TPB sales from floppy pools.
+  // GrailKey Commit Q (Q1a) — IDENTITY_TPB_MARKER_RE, see import comment.
   working = working.filter((r) => {
-    if (TPB_MARKER_RE.test(String(r.title || ''))) {
+    if (IDENTITY_TPB_MARKER_RE.test(String(r.title || ''))) {
       reasons.format++;
       pushSample(r, 'format:tpb');
       return false;
@@ -998,8 +1009,9 @@ export const verifySoldComps = (rawRows, ctx) => {
       }
       return true;
     });
+    // GrailKey Commit Q (Q1a) — IDENTITY_TPB_MARKER_RE, see import comment.
     fallbackPool = fallbackPool.filter((r) => {
-      if (TPB_MARKER_RE.test(String(r.title || ''))) {
+      if (IDENTITY_TPB_MARKER_RE.test(String(r.title || ''))) {
         fallbackReasons.format++;
         pushFallbackSample(r, 'format:tpb');
         return false;

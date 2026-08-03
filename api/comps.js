@@ -30,6 +30,20 @@ import {
   VARIANT_CONTAM_RE,
   SIGNED_RE,
   TPB_MARKER_RE,
+  // GrailKey Commit Q (Q1b, 2026-08-03) — used ONLY for the isTPB
+  // derivation below (our OWN book's title), not for comp-title matching.
+  // TPB_MARKER_RE's bare "absolute"/"deluxe"/"treasury" alternatives
+  // collide with DC's real "Absolute" line (launched 2024) — a plain
+  // "Absolute Batman" single-issue scan was wrongly classified isTPB=true,
+  // which (a) drops #issue from the eBay query attempt (ARROW 1, below)
+  // and (b) bypasses Filter 0a's issue-number enforcement for any
+  // TPB_MARKER_RE-matching comp title — together the mechanism that let
+  // #2-#15 and hardcovers into a #1 active pool (GrailKey full-pipeline
+  // audit, 2026-08-03). Every OTHER TPB_MARKER_RE use in this file tests
+  // COMP titles under an already-correct isTPB gate and is intentionally
+  // left on the looser form — see the Q1c report in that commit for the
+  // full per-consumer breakdown of which is which.
+  IDENTITY_TPB_MARKER_RE,
   PREMIUM_VARIANT_RE,
   OTHER_COVER_RE,
   OTHER_VARIANT_DESCRIPTOR_RE,
@@ -1212,7 +1226,10 @@ export const fetchComps = async ({
   // sold by issue number) so eBay's relevance ranker stops biasing to
   // floppies. Marker is appended only if cleanTitle doesn't already
   // contain it (avoids "Collected Edition Collected Edition" duplication).
-  const tpbMatch = String(title || '').match(TPB_MARKER_RE);
+  // GrailKey Commit Q (Q1b) — IDENTITY_TPB_MARKER_RE, not TPB_MARKER_RE.
+  // This tests OUR OWN book's title, not a comp title — see the import
+  // comment above for the full collision rationale.
+  const tpbMatch = String(title || '').match(IDENTITY_TPB_MARKER_RE);
   isTPB = !!tpbMatch;  // FIX: assign to outer scope variable (declared at line 578)
   const tpbMarker = isTPB ? tpbMatch[0] : null;
   if (isTPB) {

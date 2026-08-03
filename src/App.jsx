@@ -18,6 +18,7 @@ import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE } from "./lib/scanOwnership.js";
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
+import { parsePriceNumber } from "./lib/responseContract.js";
 
 // A3 ACCESS GATE: Client-side key helper
 // ACCESS GATE — T1 invite key management (A3 + LAUNCH BLOCKER FIX)
@@ -4957,9 +4958,16 @@ function CollectionDetail({
               no indication the pipeline had actually estimated one. Only
               shown for REFUSED (the state class that actually nulls price;
               LOCKED already shows the real, unhidden price). */}
-          {item.contract.state === 'REFUSED' && item.hypotheticalReferenceEstimate != null && (
+          {/* GrailKey Commit Q (Q0) — defense-in-depth render guard. The
+              write site (issueAuthority.js computeIssueAuthorityContractPatch)
+              now coerces with parsePriceNumber before ever setting this
+              field, but the render still re-validates with the SAME
+              function rather than trusting the server unconditionally —
+              a stray non-finite/non-numeric value from any future writer
+              renders nothing here, never "$NaN". */}
+          {item.contract.state === 'REFUSED' && parsePriceNumber(item.hypotheticalReferenceEstimate) != null && (
             <div style={{ fontWeight: 400, marginTop: 6, opacity: 0.85 }}>
-              Estimated ${Number(item.hypotheticalReferenceEstimate).toFixed(2)} from marketplace listings — issue not independently confirmed
+              Estimated ${parsePriceNumber(item.hypotheticalReferenceEstimate).toFixed(2)} from marketplace listings — issue not independently confirmed
             </div>
           )}
           {/* GrailKey Commit P (P2b) — identityProvisionalFields carries

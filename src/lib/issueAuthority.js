@@ -33,6 +33,13 @@ import { normalizeOptionalYear } from './yearEvidence.js';
 // that has no prior home in the identity-resolution pipeline (only ever
 // applied comp-pool-side before this commit).
 import { hasValidFamilyMembership, hasContaminatedMember, detectSeriesMarkers, familyDominatesRunnerUp } from './compHygiene.js';
+// GrailKey Commit Q (Q0, 2026-08-03) — reuses responseContract.js's own
+// parsePriceNumber, the SAME coercion the response-contract layer already
+// applies to every other price field it assembles ("Parse any price
+// representation the pipeline produces into a number. Handles fmtUsd
+// strings, raw numbers, and null/undefined/NaN -> null."). No second,
+// independently-maintained price parser invented for this one field.
+import { parsePriceNumber } from './responseContract.js';
 
 // GrailKey Commit P (P1, 2026-08-03) — high-confidence marketplace-consensus
 // carve-out for commit4-terminal.
@@ -542,8 +549,29 @@ export function computeIssueAuthorityContractPatch(issueAuthority, priorOut, ide
     listingHardLockReason,
     listingHardLockBanner,
   };
-  if (priorOut?.price != null) {
-    patch.hypotheticalReferenceEstimate = priorOut.price;
+  // GrailKey Commit Q (Q0, 2026-08-03) — the production Spawn card rendered
+  // "Estimated $NaN from marketplace listings". Root cause: priorOut.price
+  // is NOT reliably a number by the time this function runs — most of
+  // api/enrich.js's pricing writers assign `out.price = fmtUsd(n)`
+  // (src/lib/pricingEngine.js), which returns a FORMATTED STRING
+  // ("$21.25"), not a number; only a minority of writers (e.g. Ship 11's
+  // visual-pool fallback, api/enrich.js ~8703) assign a raw number
+  // directly. This function was copying priorOut.price verbatim into
+  // hypotheticalReferenceEstimate regardless of which shape it was in.
+  // App.jsx's render site (`Number(item.hypotheticalReferenceEstimate)
+  // .toFixed(2)`) parses a fmtUsd string with Number() directly — which
+  // returns NaN for any string containing "$" or "," — producing the
+  // literal "$NaN" text. Coerced HERE, at the write, with
+  // parsePriceNumber (not at the render site) so every consumer of this
+  // field — current and future — receives a genuine number or nothing.
+  // parsePriceNumber returns null for a non-numeric string, an object, or
+  // a non-finite number; the field is left OFF the patch entirely in that
+  // case (mirrors this function's own existing `priorOut?.price != null`
+  // convention for "nothing to preserve") rather than ever being set to
+  // null/NaN explicitly.
+  const parsedReferenceEstimate = parsePriceNumber(priorOut?.price);
+  if (parsedReferenceEstimate != null) {
+    patch.hypotheticalReferenceEstimate = parsedReferenceEstimate;
   }
   return patch;
 }
