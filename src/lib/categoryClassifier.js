@@ -46,8 +46,22 @@ const CANVAS_PATTERN = /\bcanvas\b/i;
 
 /**
  * Card-specific signals (trading cards, graded cards)
+ *
+ * GrailKey Commit S (S3, 2026-08-03) — non-sport trading card terms added.
+ * Real production case: "1984 FTCC Marvel Superheroes First Issue Covers
+ * Thor Tales of Asgard #14 07hl #14" and its sibling listing both carry a
+ * genuine "#14" (matching COMIC_SIGNALS below) and none of the pre-existing
+ * sports-card vocabulary (topps/panini/upper deck/fleer/psa/bgs/sgc/
+ * rookie/refractor/prizm/optic/chrome) — the pre-existing pattern was built
+ * for SPORTS trading cards specifically and had no coverage for non-sport
+ * card manufacturers/products, so both rows classified COMIC and entered
+ * the identity pool as a real Marvel Tales #14 scan's competing evidence.
+ * SAME new alternation text added to TRADING_CARD_RE (src/lib/compHygiene.js,
+ * this commit) so the two patterns can't drift apart on this addition — see
+ * that file's own comment for the reciprocal note (same structure as the
+ * P3 bullion-pattern precedent, MERCHANDISE_PATTERN/MERCH_RE).
  */
-const CARD_PATTERN = /\b(psa|bgs|sgc)\s*\d+|\b(rookie|rc|auto|autograph|patch|relic|prizm|optic|chrome|refractor|parallel|topps|panini|upper\s*deck|fleer)\b/i;
+const CARD_PATTERN = /\b(psa|bgs|sgc)\s*\d+|\b(rookie|rc|auto|autograph|patch|relic|prizm|optic|chrome|refractor|parallel|topps|panini|upper\s*deck|fleer|ftcc|impel|skybox|trading\s*card|non[\s-]?sport(?:\s*card)?|first\s*issue\s*covers?|card\s*set)\b/i;
 
 /**
  * Book-specific signals (novels, TPBs already handled by compHygiene)

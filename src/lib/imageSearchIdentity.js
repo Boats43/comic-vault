@@ -1386,8 +1386,45 @@ export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, 
   const agreed = (agreedTokens || []).filter((t) => !drop(t));
   if (agreed.length === 0) return { allowed: true, reason: 'no agreed tokens to protect' };
 
+  // GrailKey Commit S (S1, 2026-08-03) — Marvel Tales #14 class. This
+  // branch used to block whenever ANY agreed (Vision+eBay) token was
+  // absent from the family — requiring the family to cover 100% of
+  // agreed's content. That direction is backwards when the "agreed"
+  // title is itself wrong: Vision misread the cover as "Tales of
+  // Asgard," eBay's real, 4-row, 100%-internal-overlap "Marvel Tales"
+  // family was blocked from correcting it because "asgard" (a genuine
+  // word, on no stopword list, simply wrong) was absent from the
+  // family's own tokens — confirmed live via direct execution:
+  // applyDualAxisGate(['marvel','tales'], ['tales','of','asgard'], ...)
+  // returned `family drops agreed tokens [of,asgard]` even though
+  // "tales" — the one word that actually IS shared — never entered the
+  // computation at all.
+  //
+  // Fix: only block on this axis when the family shares ZERO tokens
+  // with agreed (complete disagreement — "family shares no agreed
+  // tokens" is the correct question; "does family contain literally
+  // every agreed token" is not). A single genuinely shared token (here,
+  // "tales") is treated as sufficient coverage — the family isn't
+  // required to also absorb whatever ELSE Vision's title claims.
+  //
+  // Verified this does NOT admit the exact case this check exists to
+  // catch (tests/q84-dual-axis.test.js's own header comment: Flash #75,
+  // Vision+eBay agreed "the flash," a story-arc-labeled "flash year one"
+  // cluster tried to override with zero relation to "flash" once its own
+  // tokens are extracted). Confirmed via direct execution on the fixture
+  // that test already exercises (`applyDualAxisGate(['year','one'],
+  // ['the','flash'], ...)`): agreed=['flash'] shares NO tokens with
+  // fam=['year','one'] — still blocked below, reason string unchanged
+  // ("family drops agreed tokens [flash]"), so the pre-existing
+  // tests/q84-dual-axis.test.js assertion (`/drops agreed/.test(reason)`)
+  // continues to pass byte-identically. Independently, even if this
+  // branch were removed entirely, the SAME fixture is separately caught
+  // by the arc-token check a few lines below (ARC_RE.test('year one')
+  // === true) — two independent protections existed for this one case;
+  // only the one fixed here was broken.
   const missing = agreed.filter((t) => !fam.includes(t));
-  if (missing.length > 0) {
+  const overlapping = agreed.filter((t) => fam.includes(t));
+  if (missing.length > 0 && overlapping.length === 0) {
     return { allowed: false, reason: `family drops agreed tokens [${missing.join(',')}]` };
   }
   const added = fam.filter((t) => !agreed.includes(t));

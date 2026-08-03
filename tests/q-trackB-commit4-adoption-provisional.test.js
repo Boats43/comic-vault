@@ -244,7 +244,19 @@ console.log('\nEight joint assertions: pool-only-adoption fixture\n');
   // I13 custody — comp pool never nulled/altered, only the derived price.
   assertEq(JSON.stringify(out.rawComps), rawCompsBefore, 'I13 custody: out.rawComps byte-identical, never nulled');
   assertEq(JSON.stringify(out.soldComps), soldCompsBefore, 'I13 custody: out.soldComps byte-identical, never nulled');
-  assertEq(out.hypotheticalReferenceEstimate, '$45.00', 'I13: the pipeline\'s computed price ($45.00) is preserved verbatim as hypotheticalReferenceEstimate, not silently deleted');
+  // GrailKey Commit Q (Q0, 2026-08-03) — corrected. This fixture's out.price
+  // is the fmtUsd-formatted string '$45.00' (line ~123), matching what most
+  // real api/enrich.js pricing writers actually produce. Pre-Commit-Q,
+  // computeIssueAuthorityContractPatch copied it into
+  // hypotheticalReferenceEstimate verbatim as that same string — which is
+  // exactly the shape that produced the live "$NaN" render bug
+  // (App.jsx: Number('$45.00').toFixed(2) === 'NaN'). Commit Q coerces at
+  // the write site with parsePriceNumber (responseContract.js), so the
+  // field now holds the genuine number 45, never the pre-formatted string.
+  // "Preserved verbatim" was never actually the intended contract — I13
+  // custody requires the VALUE survive, not its display formatting; this
+  // assertion was asserting the bug's own byproduct.
+  assertEq(out.hypotheticalReferenceEstimate, 45, 'I13: the pipeline\'s computed price ($45.00) is preserved as the number 45 (coerced, not the raw "$45.00" string), not silently deleted');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

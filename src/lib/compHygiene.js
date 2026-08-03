@@ -337,8 +337,18 @@ export const COVERLESS_RE =
 // `&type=comic` parameter but still returns trading card products for some
 // queries. Downstream filter required. Closes Avengers #20 trading-card class.
 // Extended to include Impel, Marvel Universe, Series I/II/III, Score, Leaf, etc.
+//
+// GrailKey Commit S (S3, 2026-08-03) — non-sport terms added: ftcc, "first
+// issue covers", "card set", "non-sport". Real production case: "1984 FTCC
+// Marvel Superheroes First Issue Covers Thor Tales of Asgard #14 07hl #14"
+// and its sibling — 1984 non-sport trading cards, not comics — passed every
+// pre-existing term here (impel/skybox already present cover THOSE
+// manufacturers; FTCC did not) and entered the comps chain for a real
+// Marvel Tales #14 scan, priced the book off two $2-ish card sales. SAME
+// new alternation text added to CARD_PATTERN (src/lib/categoryClassifier.js,
+// this commit) — see that file's own comment for the reciprocal note.
 export const TRADING_CARD_RE =
-  /\b(?:fleer|upper\s*deck|topps|panini|skybox|impel|score|leaf|pro\s*set|press\s*pass|stadium\s*club|finest|chrome|marvel\s*universe|base\s*card|trading\s*card|insert\s*card|parallel|chase\s*card|series\s*[ivx]+|card\s*#\d+)\b/i;
+  /\b(?:fleer|upper\s*deck|topps|panini|skybox|impel|score|leaf|pro\s*set|press\s*pass|stadium\s*club|finest|chrome|marvel\s*universe|base\s*card|trading\s*card|insert\s*card|parallel|chase\s*card|series\s*[ivx]+|card\s*#\d+|ftcc|non[\s-]?sport(?:\s*card)?|first\s*issue\s*covers?|card\s*set)\b/i;
 
 // Cover artist patterns — used both for active-comp creator filter
 // (api/comps.js Filter 3b) and sold-row variant-artist matching
