@@ -1654,6 +1654,22 @@ export const fetchComps = async ({
       // comic TPB logic incorrectly.
       const beforeTPB = p.length;
       if (assetType !== 'book' && isTPB && p.length > 0) {
+        // GrailKey Commit R (R1) — investigated, deliberately NOT migrated.
+        // isTPB is now trustworthy (Q1b — derived from OUR OWN title via
+        // IDENTITY_TPB_MARKER_RE), so this branch only ever runs when we
+        // genuinely ARE scanning a collected edition. Requiring comp
+        // titles to match the LOOSER marker set here is intentional —
+        // sellers describe TPBs/omnibuses/hardcovers more loosely than a
+        // strict identity check needs to. Residual finding, out of scope
+        // for R1 (not named in the dispatch): for an Absolute-line
+        // collected edition specifically (e.g. our book is genuinely
+        // "Absolute Batman: The Zoo [Hardcover] #1"), this loose match
+        // ALSO admits plain floppy "Absolute Batman #N" comps into what
+        // should be a hardcover-only pool, since every comp in the
+        // Absolute line matches TPB_MARKER_RE's bare "absolute"
+        // alternative regardless of format — the mirror image of the R1
+        // bug on the require-marker side rather than the exclude side.
+        // Flagged for a future commit, not fixed here.
         const tpbFiltered = p.filter((item) => TPB_MARKER_RE.test(String(item.title || '')));
         if (tpbFiltered.length > 0) {
           console.log(`[comps] tpb-format filter: before=${beforeTPB} after=${tpbFiltered.length} kept=${tpbFiltered.length} (marker required)`);
@@ -1672,7 +1688,23 @@ export const fetchComps = async ({
         // Graceful fallback (same convention as every other filter here):
         // if EVERY comp happens to be a TPB-marked listing, keep them all
         // rather than starve the pool to zero.
-        const nonTpbFiltered = p.filter((item) => !TPB_MARKER_RE.test(String(item.title || '')));
+        //
+        // GrailKey Commit R (R1, 2026-08-03) — IDENTITY_TPB_MARKER_RE, not
+        // TPB_MARKER_RE. Reported and confirmed before changing (per
+        // instruction): migrating this ONE site fully closes the gap —
+        // the graceful-fallback-to-keep-all condition itself needs no
+        // separate handling. It was never broken on its own; it was being
+        // fed a garbage classification. TPB_MARKER_RE's bare "absolute"
+        // alternative matched every "Absolute Batman" comp regardless of
+        // format, so nonTpbFiltered was ALWAYS empty for that book — the
+        // fallback fired on effectively every request, silently admitting
+        // hardcovers/omnibuses it exists to exclude. With
+        // IDENTITY_TPB_MARKER_RE, a genuine floppy no longer matches (test
+        // becomes accurate), so nonTpbFiltered correctly contains the real
+        // floppies and the fallback only engages in its intended rare
+        // case — a pool that is genuinely 100% collected-edition listings
+        // with zero floppies to fall back to.
+        const nonTpbFiltered = p.filter((item) => !IDENTITY_TPB_MARKER_RE.test(String(item.title || '')));
         if (nonTpbFiltered.length > 0) {
           console.log(`[comps] non-tpb-format filter: before=${beforeTPB} after=${nonTpbFiltered.length} removed=${beforeTPB - nonTpbFiltered.length} (rejecting omnibus/hc/collected-edition for single-issue book)`);
           p = nonTpbFiltered;

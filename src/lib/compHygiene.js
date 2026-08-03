@@ -114,13 +114,33 @@ export const TPB_MARKER_RE =
 // Library). Same six detectors, same row-title extraction convention
 // (rawTitle || title || string item) already used throughout this
 // codebase.
+// GrailKey Commit R (R2, 2026-08-03) — IDENTITY_TPB_MARKER_RE, not
+// TPB_MARKER_RE. Investigated per instruction before changing: this
+// function's own doc comment above states its purpose at ALL THREE real
+// call sites identically — "is this row a lot/reprint/slab/graded/signed/
+// TPB listing," i.e. NOT a genuine, primary-market single-issue floppy
+// that should count toward a title-family's own coherence. The three
+// sites (identityCore.js's Commit 4.3 qualified-family-authority
+// retention gate; issueAuthority.js's Commit P1
+// meetsHighConfidenceMarketplaceConsensusBar; imageSearchIdentity.js's
+// mergeFragmentedTitleFamilies, via its own isContaminated) all consume
+// this SAME function for this SAME reason — none of the three has any
+// use for "does this row's title merely contain the word 'absolute'"
+// as a contamination signal; a genuine "Absolute Batman #1 ..." family
+// member is not a lot, not a reprint, not a slab, not graded, not signed,
+// and not a TPB — the loose form's bare "absolute" alternative was never
+// the intended check at any of the three sites, so no site is left on
+// the loose form. Fixed once, here, at the single shared function — the
+// same "one source of truth" reasoning this function's own header comment
+// already documents for why it exists as a shared export at all, rather
+// than three independently-migrated call sites that could drift again.
 export const hasContaminatedMember = (visualItems, indices) => {
   const rows = Array.isArray(indices) ? indices : [];
   for (const idx of rows) {
     const item = visualItems?.[idx];
     const raw = String(typeof item === 'string' ? item : (item?.rawTitle || item?.title || '')).trim();
     if (LOT_RE.test(raw) || REPRINT_RE.test(raw) || SLAB_RE.test(raw) ||
-      GRADED_RE.test(raw) || SIGNED_RE.test(raw) || TPB_MARKER_RE.test(raw)) {
+      GRADED_RE.test(raw) || SIGNED_RE.test(raw) || IDENTITY_TPB_MARKER_RE.test(raw)) {
       return true;
     }
   }
