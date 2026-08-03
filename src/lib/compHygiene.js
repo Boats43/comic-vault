@@ -1277,6 +1277,41 @@ export const extractVariantTokens = (str) => {
   ];
 };
 
+// GrailKey Commit N1 (2026-08-03, Spawn Brett Booth PC-anchor class) —
+// distinguishes a genuine variant descriptor from title-residue noise.
+// api/enrich.js's q141-a canonical-title projection produces
+// editionDescriptorCandidate as a pure token diff (assembled title
+// minus canonical title) — it has zero awareness of WHAT kind of text
+// survives the diff. Confirmed via direct trace this dispatch: for
+// Spawn, the residue is "brett booth" (a real artist credit); for Iron
+// Man #126, the residue is "the invincible" (a masthead adjective
+// phrase, not a variant). extractVariantTokensByAxis cleanly separates
+// these with zero new patterns — "brett booth" populates the artist
+// axis (ARTIST_PATTERNS already includes it), "the invincible" matches
+// no axis at all. Printing axis is deliberately excluded from
+// promotable content (D1's invariant: printing/edition status may
+// never be adopted from marketplace/title-diff text alone) — a
+// descriptor whose only recognized axis is printing has nothing
+// promotable and this returns null.
+//
+// @param {string|null} descriptor - editionDescriptorCandidate
+// @returns {{ promotable: boolean, text: string|null, axes: object }}
+export const classifyPromotableVariantDescriptor = (descriptor) => {
+  if (!descriptor) return { promotable: false, text: null, axes: null };
+  const axes = extractVariantTokensByAxis(descriptor);
+  const nonPrintingTokens = [
+    ...axes.artist,
+    ...axes.coverType,
+    ...axes.coverLetter,
+    ...axes.distribution,
+  ];
+  return {
+    promotable: nonPrintingTokens.length > 0,
+    text: nonPrintingTokens.length > 0 ? descriptor : null,
+    axes,
+  };
+};
+
 // Q109 (greenlit, soldVerification.js) — bare-surname corroboration check.
 // A surname counts as fully trusted (not just "partial") when
 // premiumCreators.js has ALREADY registered it as an unambiguous alias for

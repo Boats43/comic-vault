@@ -44,6 +44,7 @@ import {
   extractAnchorBracketDescriptor,
   diffEditionDescriptorCandidate,
   selectBestVariantCandidate,
+  variantTokenOverlapScore,
   buildIdentityRefusedFallbackPool,
   shouldSkipAssemblyIntegrityCheck,
   detectVisualIssueDivergence,
@@ -116,7 +117,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens, buildSanitizedComicSearchTitle, hasValidFamilyMembership } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens, buildSanitizedComicSearchTitle, hasValidFamilyMembership, classifyPromotableVariantDescriptor } from "../src/lib/compHygiene.js";
 import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } from "../src/lib/evidenceEligibility.js";
 // Track B Phase 0, Commit 3 — manual identity correction: server-side
 // authority validation (allow-list + normalization), never trusting the
@@ -1796,6 +1797,22 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
           console.log(`[pc-anchor] base entry preferred over ${variantFallbacks.length} deferred variant candidate(s)`);
         }
         console.log(`[pc-accept] "${candidate.productName}" — reason=base-entry`);
+        // GrailKey Commit N2 (2026-08-03, Spawn Brett Booth PC-anchor
+        // class) — carry forward whatever variant-descriptor candidates
+        // were already seen (and deprioritized) BEFORE this base entry
+        // was accepted, so the caller can re-score them once
+        // confirmedVariant becomes known later in the request (it is
+        // not resolved yet at this point — see api/enrich.js's own N2
+        // re-anchor block for why retain-and-rescore was chosen over a
+        // second live PC query). Honest scope limit: only captures
+        // variant candidates PC listed BEFORE this base entry in its own
+        // result order — one still unseen after this point (had the loop
+        // continued) is not recoverable without a second query. Matches
+        // the real Spawn #351 production case, where PC listed the
+        // variant entry first.
+        if (variantFallbacks.length > 0) {
+          candidate.deferredVariantCandidates = variantFallbacks.slice();
+        }
         return candidate;
       }
       // Q88(a): no in-era product — accept the best out-of-era candidate.
@@ -4909,6 +4926,74 @@ export default async function handler(req, res) {
       if (specificPrintingForVariant && !String(confirmedVariant || '').toLowerCase().includes(specificPrintingForVariant.text)) {
         confirmedVariant = confirmedVariant ? `${confirmedVariant} ${specificPrintingForVariant.text}` : specificPrintingForVariant.text;
         console.log(`[edition-variant] threaded "${specificPrintingForVariant.text}" into confirmedVariant (from Vision's own reasoning) — now "${confirmedVariant}"`);
+      }
+    }
+
+    // GrailKey Commit N1 (2026-08-03, Spawn Brett Booth PC-anchor class)
+    // — promote a canonical-projection residue (out.editionDescriptorCandidate,
+    // q141-a above) to confirmedVariant when confirmedVariant is still
+    // null and the residue carries a recognized, non-printing variant-
+    // axis signal. Uses D3's own extractVariantTokensByAxis
+    // (compHygiene.js) — the SAME taxonomy the rest of the variant
+    // pipeline already trusts — rather than a new heuristic. Distinguishes
+    // a genuine descriptor ("brett booth" -> artist axis populated) from
+    // title-residue noise ("the invincible" -> every axis empty; this is
+    // Iron Man #126's own editionDescriptorCandidate, confirmed via
+    // direct trace this dispatch — diffEditionDescriptorCandidate has no
+    // awareness of what's a masthead adjective vs a real variant credit,
+    // it just diffs tokens) by requiring AT LEAST ONE non-printing axis
+    // to be non-empty. Printing axis is never adopted from this path
+    // (D1's invariant, unchanged) — the promoted string is built only
+    // from artist/coverType/coverLetter/distribution axis content; a
+    // descriptor whose ONLY recognized axis is printing ("2nd print")
+    // has nothing left to adopt and confirmedVariant stays null.
+    if (!confirmedVariant && out.editionDescriptorCandidate) {
+      const promotion = classifyPromotableVariantDescriptor(out.editionDescriptorCandidate);
+      if (promotion.promotable) {
+        confirmedVariant = promotion.text;
+        variantIdentitySource = 'canonical-projection-residue';
+        console.log(
+          `[n1-variant-promotion] promoted editionDescriptorCandidate="${out.editionDescriptorCandidate}" ` +
+          `to confirmedVariant (axes: ${JSON.stringify(promotion.axes)})`
+        );
+      } else {
+        console.log(
+          `[n1-variant-promotion] editionDescriptorCandidate="${out.editionDescriptorCandidate}" ` +
+          `carries no recognized variant-axis signal — NOT promoted (title residue, not a variant)`
+        );
+      }
+    }
+
+    // GrailKey Commit N2 (2026-08-03, Spawn Brett Booth PC-anchor class)
+    // — re-anchor the PC product once confirmedVariant is known, when the
+    // initial anchor deprioritized a genuine variant-descriptor product in
+    // favor of a base entry because confirmedVariant was still null at PC
+    // lookup time (a decision made before its input existed — same class
+    // as the printing-axis bug D1/D2 fixed). Retain-and-rescore, not a
+    // second live query: fetchPricechartingPop/fetchPricechartingSales
+    // (below, ~line 5400+) both key off priceCharting.id and run well
+    // after this point, so reassigning priceCharting here rebinds ladder/
+    // population/velocity/sold-pool automatically — no separate rebind
+    // step needed. selectBestVariantCandidate (variantIdentity.js) is the
+    // SAME scoring function the base PC-anchor path already trusts when
+    // no base entry survives at all — reused here, not reimplemented, for
+    // the case a base entry DID survive and won only by default.
+    if (confirmedVariant && priceCharting?.deferredVariantCandidates?.length > 0) {
+      const bestVariant = selectBestVariantCandidate(priceCharting.deferredVariantCandidates, confirmedVariant);
+      const variantScore = bestVariant ? variantTokenOverlapScore(confirmedVariant, bestVariant.productName) : 0;
+      if (bestVariant && variantScore > 0) {
+        console.log(
+          `[n2-reanchor] re-anchoring PC product: "${priceCharting.productName}" (id=${priceCharting.id}) -> ` +
+          `"${bestVariant.productName}" (id=${bestVariant.id}) — confirmedVariant="${confirmedVariant}" ` +
+          `matched ${variantScore} token(s)`
+        );
+        priceCharting = { ...bestVariant, variantReanchored: true };
+        out.pcVariantReanchored = true;
+      } else {
+        console.log(
+          `[n2-reanchor] confirmedVariant="${confirmedVariant}" known, but no deferred candidate scored a match — ` +
+          `keeping base entry "${priceCharting.productName}"`
+        );
       }
     }
 
