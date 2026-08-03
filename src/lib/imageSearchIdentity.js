@@ -2376,6 +2376,13 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
       topFamily,
       runnerUp,
       families: scored,
+      // GrailKey Commit P — overlapRatio was already computed above (used
+      // only to build the `reason` string and gate this same branch) but
+      // never returned on the object itself. issueAuthority.js's
+      // high-confidence marketplace-consensus predicate (P1) needs the
+      // exact ratio, not just confirmation it cleared the >=40% floor —
+      // additive field, no change to the decision this function reaches.
+      overlapRatio,
     };
   }
 

@@ -4949,6 +4949,32 @@ function CollectionDetail({
           <div style={{ fontWeight: 400, marginTop: 4, opacity: 0.9 }}>
             {item.contract.locks?.[0]?.reason || 'Review before listing'}
           </div>
+          {/* GrailKey Commit P (P2a) — I13: hypotheticalReferenceEstimate
+              is computed and shipped in the response (issueAuthority.js,
+              computeIssueAuthorityContractPatch) whenever a real price
+              existed before a REFUSED-class gate cleared it, but was never
+              rendered anywhere — a REFUSED card showed a blank price with
+              no indication the pipeline had actually estimated one. Only
+              shown for REFUSED (the state class that actually nulls price;
+              LOCKED already shows the real, unhidden price). */}
+          {item.contract.state === 'REFUSED' && item.hypotheticalReferenceEstimate != null && (
+            <div style={{ fontWeight: 400, marginTop: 6, opacity: 0.85 }}>
+              Estimated ${Number(item.hypotheticalReferenceEstimate).toFixed(2)} from marketplace listings — issue not independently confirmed
+            </div>
+          )}
+          {/* GrailKey Commit P (P2b) — identityProvisionalFields carries
+              'year' whenever the year shown was adopted from a marketplace
+              vote alone (Commit 4.1), but the card had no way to say what
+              year, or on what evidence — only that "something" is
+              provisional. identityProvisionalYearDetail (added this
+              commit, api/enrich.js) carries the exact vote this renders. */}
+          {Array.isArray(item.identityProvisionalFields) &&
+            item.identityProvisionalFields.includes('year') &&
+            item.identityProvisionalYearDetail && (
+            <div style={{ fontWeight: 400, marginTop: 6, opacity: 0.85 }}>
+              Year {item.identityProvisionalYearDetail.year} ({item.identityProvisionalYearDetail.support} of {item.identityProvisionalYearDetail.population} listings) — confirm
+            </div>
+          )}
         </div>
       )}
 
@@ -10232,6 +10258,16 @@ export default function App() {
                 // A6 dispatch — response-embedded pipelineAudit, same
                 // parity requirement as the identity fields above.
                 pipelineAudit: mergePipelineAudit(enrich, cur),
+                // GrailKey Commit P (P2a/P2b) — both already reach the API
+                // response body (issueAuthority.js:computeIssueAuthorityContractPatch
+                // sets hypotheticalReferenceEstimate; api/enrich.js commit4/4.1
+                // sets identityProvisionalFields) but neither was threaded
+                // through any client merge path before this commit — the
+                // card had no way to read either. Same `enrich.X ?? cur.X ?? null`
+                // convention as every other field in this merge.
+                hypotheticalReferenceEstimate: enrich.hypotheticalReferenceEstimate ?? cur.hypotheticalReferenceEstimate ?? null,
+                identityProvisionalFields: enrich.identityProvisionalFields ?? cur.identityProvisionalFields ?? null,
+                identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? cur.identityProvisionalYearDetail ?? null,
               };
               putComic(updated).catch(() => {});
               return prev.map((x) => {
@@ -10731,6 +10767,10 @@ export default function App() {
                   // A6 dispatch — response-embedded pipelineAudit, same
                   // parity requirement as the identity fields above.
                   pipelineAudit: mergePipelineAudit(enrich, cur),
+                  // GrailKey Commit P (P2a/P2b) — see auto-refresh path for full rationale.
+                  hypotheticalReferenceEstimate: enrich.hypotheticalReferenceEstimate ?? cur.hypotheticalReferenceEstimate ?? null,
+                  identityProvisionalFields: enrich.identityProvisionalFields ?? cur.identityProvisionalFields ?? null,
+                  identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? cur.identityProvisionalYearDetail ?? null,
                 };
                 console.log('[persist] savedId:', savedId,
                   'price:', updated.price,
@@ -10847,6 +10887,10 @@ export default function App() {
                   // A6 dispatch — response-embedded pipelineAudit, same
                   // parity requirement as the identity fields above.
                   pipelineAudit: mergePipelineAudit(enrich, s),
+                  // GrailKey Commit P (P2a/P2b) — see auto-refresh path for full rationale.
+                  hypotheticalReferenceEstimate: enrich.hypotheticalReferenceEstimate ?? s.hypotheticalReferenceEstimate ?? null,
+                  identityProvisionalFields: enrich.identityProvisionalFields ?? s.identityProvisionalFields ?? null,
+                  identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? s.identityProvisionalYearDetail ?? null,
                 };
               });
               // SPEED-2a: Load deferred metadata asynchronously
@@ -11201,6 +11245,10 @@ export default function App() {
                 // A6 dispatch — response-embedded pipelineAudit, same
                 // parity requirement as the identity fields above.
                 pipelineAudit: mergePipelineAudit(enrich, cur),
+                // GrailKey Commit P (P2a/P2b) — see auto-refresh path for full rationale.
+                hypotheticalReferenceEstimate: enrich.hypotheticalReferenceEstimate ?? cur.hypotheticalReferenceEstimate ?? null,
+                identityProvisionalFields: enrich.identityProvisionalFields ?? cur.identityProvisionalFields ?? null,
+                identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? cur.identityProvisionalYearDetail ?? null,
               };
               console.log('[persist-bulk] savedId:', savedId,
                 'price:', updated.price,
@@ -11747,6 +11795,10 @@ export default function App() {
       // A6 dispatch — response-embedded pipelineAudit, same parity
       // requirement as the identity fields above.
       pipelineAudit: mergePipelineAudit(enrich, item),
+      // GrailKey Commit P (P2a/P2b) — see auto-refresh path for full rationale.
+      hypotheticalReferenceEstimate: enrich.hypotheticalReferenceEstimate ?? item.hypotheticalReferenceEstimate ?? null,
+      identityProvisionalFields: enrich.identityProvisionalFields ?? item.identityProvisionalFields ?? null,
+      identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? item.identityProvisionalYearDetail ?? null,
     };
 
     // Ship #20a.6.22 — Apply autofix engine

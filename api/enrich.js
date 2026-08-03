@@ -123,7 +123,7 @@ import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } f
 // authority validation (allow-list + normalization), never trusting the
 // client's correctedFields claim alone.
 import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
-import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint } from "../src/lib/issueAuthority.js";
+import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint, buildIdentityProvisionalYearDetail } from "../src/lib/issueAuthority.js";
 // Track B Phase 0, Commit 4.3 (revision round 2) — cache-key builders,
 // relocated to src/lib/cacheKeys.js for import-safety (see that file's
 // own header comment). Imported here for this handler's own internal use
@@ -2967,13 +2967,20 @@ export default async function handler(req, res) {
         // documented, deliberate absence of a "no contradiction still
         // confirmed" carve-out.
         const fic = identity.familyIssueConsensus;
-        const derived = deriveIssueAuthorityFromAdoption(fic);
+        // GrailKey Commit P (P1) — familyCandidate/parsedVisualRows passed
+        // through so deriveIssueAuthorityFromAdoption can additionally
+        // check whether the SAME family driving this adoption clears the
+        // high-confidence marketplace-consensus bar (issueAuthority.js).
+        // Does not change status ('provisional' either way) — only adds a
+        // flag consumed later by computeIssueAuthorityContractPatch.
+        const derived = deriveIssueAuthorityFromAdoption(fic, undefined, familyCandidate, parsedVisualRows);
         out.issueAuthority = derived.issueAuthority;
         out.identityProvisionalFields = derived.identityProvisionalFields;
         console.log(
           `[commit4] issueAuthority=provisional (marketplace-only-adoption): ` +
           `issue=#${fic.winner} support=${fic.support}/${fic.uniqueRows}=${(fic.ratio * 100).toFixed(0)}% — ` +
-          `no prior Vision/user issue existed to corroborate against`
+          `no prior Vision/user issue existed to corroborate against` +
+          (derived.issueAuthority?.highConfidenceMarketplaceConsensus ? ' — [commit-p] high-confidence marketplace consensus qualifies (price will not be nulled at the terminal gate)' : '')
         );
         // Track B Phase 0, Commit 4.1 — same field, same union machinery
         // Commit 3 already shipped (getCorrectableFields,
@@ -2990,6 +2997,15 @@ export default async function handler(req, res) {
         const nextProvisionalFields = appendYearToProvisionalFields(out.identityProvisionalFields, identity.familyYearConsensus);
         if (nextProvisionalFields !== out.identityProvisionalFields) {
           out.identityProvisionalFields = nextProvisionalFields;
+          // GrailKey Commit P (P2b) — this year/support/population triple
+          // was previously computed for this exact log line and nothing
+          // else: identityProvisionalFields itself (the bare flag) reached
+          // out and the client, but the VALUE the flag is about, and how
+          // strong the vote behind it was, existed only in server console
+          // output. Card could show "year is provisional" but never what
+          // year, or on what evidence. Mirrors the log line's own data
+          // exactly — no new computation, just also assigning it to out.
+          out.identityProvisionalYearDetail = buildIdentityProvisionalYearDetail(identity.familyYearConsensus);
           console.log(
             `[commit4.1] identityProvisionalFields += 'year' (family-scoped adoption): ` +
             `year=${identity.familyYearConsensus.year} support=${identity.familyYearConsensus.support}/${identity.familyYearConsensus.uniqueRows}`
@@ -10068,13 +10084,28 @@ export default async function handler(req, res) {
       // now runs.
       const authorityPatch = computeIssueAuthorityContractPatch(out.issueAuthority, out, out.identityProvisionalFields);
       if (authorityPatch) {
-        console.log(
-          out.issueAuthority?.status
-            ? `[commit4-terminal] issueAuthority.status="${out.issueAuthority.status}" — forcing ID_REQUIRED-class ` +
-              `contract state, clearing price authority, locking listing (reasons=[${(out.issueAuthority.reasons || []).join(', ')}])`
-            : `[commit4.1-terminal] identityProvisionalFields includes 'year' (issue trusted/corroborated, no issueAuthority) — ` +
-              `forcing ID_REQUIRED-class contract state, clearing price authority, locking listing`
-        );
+        // GrailKey Commit P (P1) — the soft, high-confidence-consensus
+        // patch never sets refusedToPrice (it doesn't touch price at all),
+        // so it's distinguished from the hard patches on that field alone
+        // — no new marker needed on the patch object itself. Logging the
+        // wrong ("forcing ID_REQUIRED-class... clearing price authority")
+        // message for this case would itself be an I13 violation (log
+        // must match what actually happened) of exactly the shape this
+        // whole audit was commissioned to find.
+        if (authorityPatch.refusedToPrice === true) {
+          console.log(
+            out.issueAuthority?.status
+              ? `[commit4-terminal] issueAuthority.status="${out.issueAuthority.status}" — forcing ID_REQUIRED-class ` +
+                `contract state, clearing price authority, locking listing (reasons=[${(out.issueAuthority.reasons || []).join(', ')}])`
+              : `[commit4.1-terminal] identityProvisionalFields includes 'year' (issue trusted/corroborated, no issueAuthority) — ` +
+                `forcing ID_REQUIRED-class contract state, clearing price authority, locking listing`
+          );
+        } else {
+          console.log(
+            `[commit-p] issueAuthority.status="provisional" but high-confidence marketplace consensus qualifies ` +
+            `(reasons=[${(out.issueAuthority?.reasons || []).join(', ')}]) — price preserved, listing still locked pending confirmation`
+          );
+        }
         Object.assign(out, authorityPatch);
       }
     }

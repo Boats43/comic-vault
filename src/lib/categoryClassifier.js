@@ -57,13 +57,32 @@ const BOOK_PATTERN = /\b(isbn|978-\d{10}|novel|paperback|hardcover|kindle|ebook|
 
 /**
  * Merchandise signals — novelty/decor items printed with cover art, not
- * the comic itself (magnets, metal/tin signs). Batman #15 production case:
- * "Batman #15 FRIDGE MAGNET comic book" and "...Refrigerator Magnet Free
- * Shipping" both survived the pre-existing patterns (no dimension pair, no
- * poster/canvas word) and reached title-family clustering as real pool
- * members.
+ * the comic itself (magnets, metal/tin signs, bullion). Batman #15
+ * production case: "Batman #15 FRIDGE MAGNET comic book" and
+ * "...Refrigerator Magnet Free Shipping" both survived the pre-existing
+ * patterns (no dimension pair, no poster/canvas word) and reached
+ * title-family clustering as real pool members.
+ *
+ * GrailKey Commit P (P3, 2026-08-03) — bullion/silver-ingot collectibles
+ * ("1 oz superman #1 summer 1939 agoro foil...", "...1oz Silver Foil
+ * Agoro 2026 .999 LE 1000...") had ZERO filter pattern anywhere in the
+ * codebase, on either side (confirmed by repo-wide search during the
+ * GrailKey full-pipeline audit) — two such listings entered a real
+ * Superman #1 facsimile scan's identity pool. Deliberately narrower than
+ * blanket-rejecting "silver foil": that phrase is ALREADY a legitimate
+ * comic cover-finish variant descriptor elsewhere in this codebase
+ * (imageSearchIdentity.js's finish-category token set) — a genuine
+ * silver-foil-COVER comic variant must never be rejected here. The two
+ * signals below (a troy-ounce weight marker, ".999" fine-silver purity)
+ * are specific to bullion/ingot novelty products and essentially never
+ * appear in genuine comic-listing text; "bullion"/"ingot" are the
+ * category's own name terms, kept for the case a listing states them
+ * directly without a weight/purity marker. SAME alternation text as
+ * MERCH_RE (src/lib/compHygiene.js) — added there too, this commit, so
+ * the two independently-maintained regexes can't drift apart on this
+ * addition (see that file's own comment for the reciprocal note).
  */
-const MERCHANDISE_PATTERN = /\b(magnet|refrigerator\s*magnet|fridge\s*magnet|metal\s*sign|tin\s*sign|wall\s*sign)\b/i;
+const MERCHANDISE_PATTERN = /\b(magnet|refrigerator\s*magnet|fridge\s*magnet|metal\s*sign|tin\s*sign|wall\s*sign|bullion|ingot)\b|\b\d+(?:\.\d+)?\s*oz\b|\.999\s*(?:fine\s*)?(?:silver|gold)?\b/i;
 
 // ────────────────────── MARKETPLACE CATEGORY METADATA ──────────────────────
 //

@@ -24,6 +24,126 @@
 // see buildFingerprintYearToken below and resolveFamilyYearConsensus
 // (identityCore.js).
 import { normalizeOptionalYear } from './yearEvidence.js';
+// GrailKey Commit P (P1) — reusing the SAME primitives Commit 4.3's
+// qualified-family-authority retention gate already uses (identityCore.js),
+// not a parallel membership/contamination check. detectSeriesMarkers is the
+// existing sequel/volume-asymmetry detector (compHygiene.js, also used by
+// api/comps.js's Filter 0 and soldVerification.js) — reused here for
+// internal same-series consistency across a family's own members, a check
+// that has no prior home in the identity-resolution pipeline (only ever
+// applied comp-pool-side before this commit).
+import { hasValidFamilyMembership, hasContaminatedMember, detectSeriesMarkers } from './compHygiene.js';
+
+// GrailKey Commit P (P1, 2026-08-03) — high-confidence marketplace-consensus
+// carve-out for commit4-terminal.
+//
+// Root problem this closes: commit4-terminal (computeIssueAuthorityContractPatch
+// below) nulls out.price the instant issueAuthority.status is 'provisional'
+// — it fires on the LABEL "marketplace-only-adoption" alone and never
+// inspects how strong the underlying consensus actually was. The real
+// Spawn #351 production trace (GrailKey full-pipeline audit, 2026-08-03)
+// showed a genuinely computed $21.25 (Ship 11's visual-pool fallback)
+// discarded this way even though the family that drove the adoption was 5
+// members, weight 14.0, 100% token overlap, with no competing family at
+// all — the strongest shape this pipeline's own consensus machinery can
+// produce. issueAuthority.status stays 'provisional' either way (P-2) —
+// this predicate governs ONLY whether commit4-terminal's contract patch
+// hides an already-computed price, never whether the issue number itself
+// is trusted enough to cache, query PC/CV, or list without confirmation
+// (canUseExactIssuePricingCache, below, is completely untouched by this
+// commit — a separate, later-scoped finding, not fixed here).
+//
+// HIGH_CONFIDENCE_WEIGHT_FLOOR = 12, justified from getRankWeight's own
+// scale (imageSearchIdentity.js): the top 3 eBay search ranks are worth
+// 5 + 4 + 3 = 12. That is the MAXIMUM weight three members could carry
+// using only the highest-ranked results the pool offers — i.e. the
+// strongest signal obtainable at the minimum required member count (3,
+// the same FAMILY_AUTHORITY_COHERENCE_FLOOR Commit 4.3's retention gate
+// already uses). A family clearing 12 has either 3+ members drawn from
+// the top 3 ranks, or a broader membership compensating for lower rank —
+// either way, requiring at least this much rules out a family that
+// scraped together its 3-member floor entirely from the weak, long tail
+// (ranks 10-19, worth 0.5 each). The real Spawn #351 trace's weightSum
+// (14.0) clears this floor with room (one of its 5 members ranked outside
+// the top 3).
+export const HIGH_CONFIDENCE_WEIGHT_FLOOR = 12;
+
+/**
+ * Internal-consistency check across a title-family's own members: no
+ * member may carry a sequel/volume/format marker (roman numeral, Vol-N,
+ * Part-N, Book-N, Annual/Special/King-Size) that another member lacks.
+ * Reuses detectSeriesMarkers (compHygiene.js) — the SAME sequel-asymmetry
+ * detector api/comps.js's Filter 0 and soldVerification.js already apply
+ * comp-pool-side — rather than a new pattern set. The simplest, most
+ * conservative reading of "same series": every member's marker signature
+ * (sorted, joined) must be identical. In practice this means the common
+ * case (no member carries any marker at all) passes trivially, and any
+ * family mixing a "Vol. 2" listing with a bare listing, or a "Part 3"
+ * with a "Part 4", fails — exactly the asymmetry shape the sequel-filter
+ * already exists to catch, applied here to the family's own internal
+ * coherence rather than our-title-vs-a-comp.
+ *
+ * @param {Array} visualItems - the raw pool rows (index-aligned)
+ * @param {number[]} indices - the family's own topFamily.indices
+ * @returns {boolean} true when an asymmetry exists (i.e. NOT same-series)
+ */
+export function hasFamilySeriesMarkerAsymmetry(visualItems, indices) {
+  const rows = Array.isArray(indices) ? indices : [];
+  let baseline = null;
+  for (const idx of rows) {
+    const item = visualItems?.[idx];
+    const raw = String(typeof item === 'string' ? item : (item?.rawTitle || item?.title || '')).trim();
+    const signature = detectSeriesMarkers(raw).slice().sort().join(',');
+    if (baseline === null) {
+      baseline = signature;
+    } else if (signature !== baseline) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The P1 gate itself. Every condition is either an existing, reused
+ * predicate (hasValidFamilyMembership / hasContaminatedMember, both
+ * Commit 4.3's own primitives, compHygiene.js) or a direct field read off
+ * the title-family clustering result — no new consensus computation.
+ *
+ * Deliberately scoped to `decision === 'weighted-consensus'` only (not
+ * 'top-rank-protection', which the real reference case never used, and
+ * carries a structurally different weight/overlap shape this predicate
+ * was not built or tested against) — narrower than "any family override",
+ * matching the reference case exactly rather than generalizing past it.
+ *
+ * `runnerUp` requires TRUE absence (no second-place family scored at
+ * all), not merely 3x domination — the stricter of the two readings
+ * available (compHygiene.js's own familyDominatesRunnerUp tolerates a
+ * present-but-weak runner-up; this predicate does not reuse it, on
+ * purpose). Conservative-under-uncertainty per standing project doctrine.
+ * Documented consequence, not silently absorbed: of the 3 real Spawn #351
+ * production requests the audit captured, ALL THREE carried a nonzero
+ * runner-up (weight 2.5 or 4.0 against a top family of 14.0 or 10.0) — a
+ * literal reading of this predicate would not have fired on any of the 3
+ * captured requests, only on a hypothetical capture with zero competing
+ * cluster. Flagged in the commit report, not hidden.
+ *
+ * @param {{decision: string, topFamily: object, runnerUp: object|null, overlapRatio: number}|null} familyCandidate
+ * @param {Array} visualItems - the raw pool rows the family's indices reference
+ * @returns {boolean}
+ */
+export function meetsHighConfidenceMarketplaceConsensusBar(familyCandidate, visualItems) {
+  if (!familyCandidate || familyCandidate.decision !== 'weighted-consensus') return false;
+  const topFamily = familyCandidate.topFamily;
+  if (!topFamily) return false;
+  if (!hasValidFamilyMembership(visualItems, topFamily.indices, topFamily.count)) return false;
+  if (!(topFamily.count >= 3)) return false;
+  if (!(topFamily.weightSum >= HIGH_CONFIDENCE_WEIGHT_FLOOR)) return false;
+  if (familyCandidate.overlapRatio !== 1) return false;
+  if (familyCandidate.runnerUp != null) return false;
+  if (hasContaminatedMember(visualItems, topFamily.indices)) return false;
+  if (hasFamilySeriesMarkerAsymmetry(visualItems, topFamily.indices)) return false;
+  return true;
+}
 
 /**
  * Maps a raw adoption-vote ratio to the SAME string confidence-tier
@@ -73,8 +193,21 @@ export function mapConfidenceRatioToTier(ratio) {
  * confidence-Vision-vs-family issue can coexist with a genuine, separate
  * year conflict (Control T6), and the issue side being fine must never
  * silently swallow a real year-side conflict.
+ * @param {Object} [familyCandidate] - GrailKey Commit P (P1), optional,
+ * backward-compatible (omitted or undefined behaves byte-identically to
+ * before this commit — meetsHighConfidenceMarketplaceConsensusBar returns
+ * false on a null familyCandidate). The title-family clustering result
+ * (imageSearchIdentity.js selectTitleFamilyCandidate's return value) —
+ * passed through ONLY so the 'adopted' branch below can additionally
+ * check whether the SAME family that drove this adoption also clears the
+ * P1 high-confidence bar. Does not change status ('provisional' either
+ * way, P-2) — only adds a flag consumed later by
+ * computeIssueAuthorityContractPatch.
+ * @param {Array} [visualItems] - GrailKey Commit P (P1), the raw pool rows
+ * familyCandidate.topFamily.indices reference — required alongside
+ * familyCandidate for the membership/contamination/series checks.
  */
-export function deriveIssueAuthorityFromAdoption(familyIssueConsensus, familyYearConsensus) {
+export function deriveIssueAuthorityFromAdoption(familyIssueConsensus, familyYearConsensus, familyCandidate, visualItems) {
   if (familyIssueConsensus?.mode !== 'adopted') {
     // IMPLEMENTATION PACKET HOLD — FINAL AUTHORITY-SOURCE HOLD (2026-07-30)
     // — a Commit 4.3 retention-branch 'conflicted' outcome (rule D: a
@@ -154,6 +287,11 @@ export function deriveIssueAuthorityFromAdoption(familyIssueConsensus, familyYea
     return { issueAuthority: null, identityProvisionalFields: null };
   }
   const supportRatio = Number(familyIssueConsensus.ratio.toFixed(2));
+  // GrailKey Commit P (P1) — attached ONLY when the SAME family driving
+  // this adoption also clears meetsHighConfidenceMarketplaceConsensusBar.
+  // status stays 'provisional' unconditionally (P-2) — this is a sibling
+  // flag, never a promotion.
+  const highConfidenceMarketplaceConsensus = meetsHighConfidenceMarketplaceConsensusBar(familyCandidate, visualItems);
   return {
     issueAuthority: {
       source: 'marketplace',
@@ -162,6 +300,7 @@ export function deriveIssueAuthorityFromAdoption(familyIssueConsensus, familyYea
       supportRatio,
       reasons: ['marketplace-only-adoption'],
       priorObservations: [],
+      highConfidenceMarketplaceConsensus,
     },
     identityProvisionalFields: ['issue'],
   };
@@ -334,6 +473,33 @@ export function computeIssueAuthorityContractPatch(issueAuthority, priorOut, ide
   if (!issueProvisional && !issueConflicted && !yearOnlyProvisional) return null;
   if (priorOut?.refusedToPrice === true) return null;
 
+  // GrailKey Commit P (P1) — high-confidence marketplace-consensus
+  // carve-out. Scoped to issueProvisional ONLY (never issueConflicted or
+  // yearOnlyProvisional — a genuine disagreement, or an unresolved year,
+  // is not what this predicate was built or tested against). Returns a
+  // DIFFERENT, softer patch: price/priceLow/priceHigh/priceBands/
+  // matchConfidence are simply absent from the object below, so
+  // Object.assign(out, patch) at the real call site leaves whatever the
+  // pipeline already computed untouched. identityConfident is likewise
+  // never set false here — decisionEngine's 'identity-not-confident'
+  // blocker (and the ID_REQUIRED it forces) never fires from this patch.
+  // listingHardLocked IS still set — "PRICE IT... Listing still requires
+  // the tap" (P1) — reusing the SAME lock mechanism Q110's advisory
+  // conditions already use (responseContract.js resolves this to LOCKED,
+  // not REFUSED/ID_REQUIRED: price/bands stay visible, only the List
+  // button gates). issueAuthority.status itself is untouched by this
+  // function — still 'provisional', never promoted (P-2).
+  if (issueProvisional && issueAuthority?.highConfidenceMarketplaceConsensus === true) {
+    return {
+      listingHardLocked: true,
+      listingHardLockReason: 'issue-authority-provisional-high-confidence',
+      listingHardLockBanner:
+        "This book's issue number was inferred from marketplace listings alone, but a strong, internally-consistent " +
+        'consensus (no competing family, no contamination, full title-token overlap) backs it — price shown, ' +
+        'listing still requires confirmation.',
+    };
+  }
+
   let pricingSource, priceNote, listingHardLockReason, listingHardLockBanner;
   if (issueConflicted) {
     pricingSource = 'refused-issue-authority-conflicted';
@@ -449,6 +615,28 @@ export function buildFingerprintYearToken(year) {
 export function buildRejectedCandidateFingerprint(title, issue, year, variant) {
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return [norm(title), norm(issue), buildFingerprintYearToken(year), norm(variant)].filter(Boolean).join('|');
+}
+
+/**
+ * GrailKey Commit P (P2b) — extracted for testability (same rationale as
+ * every other function in this file, invariant 10): the real
+ * api/enrich.js call site previously built this object inline, right
+ * next to the console.log that already reported the identical
+ * year/support/uniqueRows values — computed for that one log line and
+ * nothing else. identityProvisionalFields (the bare flag) reached out and
+ * the client; the value the flag is ABOUT, and the vote behind it, did
+ * not. Mirrors the log line's data exactly, no new computation.
+ *
+ * @param {{year: *, support: number, uniqueRows: number}|null|undefined} familyYearConsensus
+ * @returns {{year: *, support: number, population: number}|null}
+ */
+export function buildIdentityProvisionalYearDetail(familyYearConsensus) {
+  if (!familyYearConsensus) return null;
+  return {
+    year: familyYearConsensus.year,
+    support: familyYearConsensus.support,
+    population: familyYearConsensus.uniqueRows,
+  };
 }
 
 /**

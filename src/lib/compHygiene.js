@@ -280,8 +280,16 @@ export const OTHER_VARIANT_DESCRIPTOR_RE =
 // residue"). "patch" is a homonym (Wolverine alias), not a compound —
 // no adjacent-word guard can separate it; residual risk stands per the
 // 2026-07-11 ruling.
+//
+// GrailKey Commit P (P3, 2026-08-03) — bullion/silver-ingot terms
+// (\d+ oz weight marker, .999 fine-silver purity, bullion/ingot) added.
+// SAME alternation text as MERCHANDISE_PATTERN (src/lib/categoryClassifier.js,
+// added this same commit) — see that file's own comment for the full
+// rationale (why "silver foil" alone is deliberately NOT blanket-rejected
+// here — it's a legitimate comic cover-finish descriptor elsewhere in
+// this codebase) and the real production listings this closes.
 export const MERCH_RE =
-  /\b(?:art\s+print|cover\s+print|poster|tin\s+sign|metal\s+sign|plaque|magnet|statue|figur(?:e|ine)s?|funko|t-?shirts?|canvas|postcard|lithograph|keychain|patch|bookmark)\b|\bmugs?\b(?!\s*shot)|(?<!price\s)\bstickers?\b(?!\s*(?:residue|damage))|\bpins?\b(?!\s*-?\s*ups?\b)/i;
+  /\b(?:art\s+print|cover\s+print|poster|tin\s+sign|metal\s+sign|plaque|magnet|statue|figur(?:e|ine)s?|funko|t-?shirts?|canvas|postcard|lithograph|keychain|patch|bookmark|bullion|ingot)\b|\bmugs?\b(?!\s*shot)|(?<!price\s)\bstickers?\b(?!\s*(?:residue|damage))|\bpins?\b(?!\s*-?\s*ups?\b)|\b\d+(?:\.\d+)?\s*oz\b|\.999\s*(?:fine\s*)?(?:silver|gold)?\b/i;
 
 // Lot / set / bundle / multi-book markers. Excludes bare issue-number
 // ranges (e.g. "#1-5") which are validated separately by isValidIssueRange
