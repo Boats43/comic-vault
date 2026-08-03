@@ -124,9 +124,24 @@ console.log('\nmeetsHighConfidenceMarketplaceConsensusBar\n');
     meetsHighConfidenceMarketplaceConsensusBar({ ...spawnFamilyCandidateQualifying, overlapRatio: 0.99 }, spawnVisualItems),
     'overlapRatio=0.99 (not exactly 100%) -> false'
   );
-  assertFalse(
+  // GrailKey Commit P2 (Part A, 2026-08-03) — CORRECTED. This assertion
+  // originally used runnerUp weightSum=0.5 to prove "any runner-up present
+  // at all -> false" (the strict-absence reading). That reading made this
+  // gate dead code against all 3 real Spawn #351 production requests (see
+  // tests/grailkey-commit-p2.test.js). Now reuses familyDominatesRunnerUp
+  // (3x margin) — a weightSum=0.5 runner-up against a 14.0 top family is a
+  // 28x margin, which DOES dominate and now correctly QUALIFIES. This
+  // assertion is inverted (was assertFalse, now assertTrue) to match the
+  // corrected semantics; the genuine "present but not dominated" case is
+  // covered by the weightSum=6.0 case immediately below (2.33x, does not
+  // dominate) and by tests/grailkey-commit-p2.test.js's P2-7.
+  assertTrue(
     meetsHighConfidenceMarketplaceConsensusBar({ ...spawnFamilyCandidateQualifying, runnerUp: { weightSum: 0.5 } }, spawnVisualItems),
-    'any runner-up present at all -> false (strict "none" reading, not 3x-domination — see this predicate\'s own doc comment)'
+    'GrailKey Commit P2: runner-up present but overwhelmingly dominated (14.0 vs 0.5 = 28x) -> true (3x-domination reading, not strict absence)'
+  );
+  assertFalse(
+    meetsHighConfidenceMarketplaceConsensusBar({ ...spawnFamilyCandidateQualifying, runnerUp: { weightSum: 6.0 } }, spawnVisualItems),
+    'GrailKey Commit P2: runner-up present and NOT dominated by 3x (14.0 vs 6.0 = 2.33x) -> false'
   );
   const contaminatedItems = spawnVisualItems.map((r, i) => (i === 1 ? { rawTitle: 'Spawn #350 & #351 Comic Lot Image Comics' } : r));
   assertFalse(
@@ -206,7 +221,11 @@ console.log('\nP-4 — weak consensus stays unchanged\n');
 {
   const weakShapes = [
     { label: '2 members (below floor)', familyCandidate: { ...spawnFamilyCandidateQualifying, topFamily: { ...spawnTopFamily, count: 2, weightSum: 9, indices: [0, 1] } } },
-    { label: 'runner-up present', familyCandidate: { ...spawnFamilyCandidateQualifying, runnerUp: { weightSum: 2.5 } } },
+    // GrailKey Commit P2 (Part A) — CORRECTED from weightSum: 2.5 (14.0 vs
+    // 2.5 = 5.6x, which now DOMINATES under the corrected 3x-margin
+    // semantics and would no longer be a "weak" shape). weightSum: 6.0
+    // (14.0 vs 6.0 = 2.33x) is the genuine below-3x-margin weak case.
+    { label: 'runner-up present, not dominated (2.33x)', familyCandidate: { ...spawnFamilyCandidateQualifying, runnerUp: { weightSum: 6.0 } } },
     { label: '<100% overlap (80%)', familyCandidate: { ...spawnFamilyCandidateQualifying, overlapRatio: 0.8 } },
   ];
   for (const { label, familyCandidate } of weakShapes) {
@@ -231,9 +250,12 @@ console.log('\nP-4 — weak consensus stays unchanged\n');
 // ══════════════════════════════════════════════════════════════════════════════
 console.log('\nP-5 — hypotheticalReferenceEstimate reaches the response body\n');
 {
+  // GrailKey Commit P2 (Part A) — CORRECTED from weightSum: 2.5 (now
+  // dominates at 5.6x under the corrected margin semantics). weightSum:
+  // 6.0 (2.33x) is the genuine non-dominating weak shape — see P-4 above.
   const derivedWeak = deriveIssueAuthorityFromAdoption(
     spawnFic, undefined,
-    { ...spawnFamilyCandidateQualifying, runnerUp: { weightSum: 2.5 } },
+    { ...spawnFamilyCandidateQualifying, runnerUp: { weightSum: 6.0 } },
     spawnVisualItems
   );
   const out = { price: 21.25, refusedToPrice: false, issueAuthority: derivedWeak.issueAuthority };

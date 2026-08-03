@@ -123,7 +123,7 @@ import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } f
 // authority validation (allow-list + normalization), never trusting the
 // client's correctedFields claim alone.
 import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
-import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint, buildIdentityProvisionalYearDetail } from "../src/lib/issueAuthority.js";
+import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint, buildIdentityProvisionalYearDetail, deriveProvisionalYearBackfill } from "../src/lib/issueAuthority.js";
 // Track B Phase 0, Commit 4.3 (revision round 2) — cache-key builders,
 // relocated to src/lib/cacheKeys.js for import-safety (see that file's
 // own header comment). Imported here for this handler's own internal use
@@ -6717,6 +6717,68 @@ export default async function handler(req, res) {
           out.publisherBackfillSource = 'active-comp-consensus-correction';
         }
       }
+    }
+
+    // GrailKey Commit P2 (Part B, 2026-08-03) — narrow, contained year
+    // backfill for the P1 high-confidence marketplace-consensus carve-out.
+    // Without this, P1 firing (out.issueAuthority.highConfidenceMarketplaceConsensus
+    // === true) still hit a SECOND, independent wall below: this same
+    // request's own family year vote (identity.familyYearConsensus,
+    // resolveFamilyYearConsensus) reaching mode 'adopted' is already
+    // logged and 'year' is already appended to out.identityProvisionalFields
+    // (Commit 4.1) — but the VALUE never reached confirmedYear.
+    //
+    // B-Q1 (Phase 0 finding): confirmedYear IS assigned from the family
+    // vote inside resolveIdentity (identityCore.js:1621), but is
+    // unconditionally overwritten later in this function by resolveYear()'s
+    // own authoritative pass (~line 4222) — resolveYear's "user year"
+    // input (yearForResolution, ~line 4213) only reuses the family-adopted
+    // confirmedYear when identityIsProvisionalOverride is true, a flag the
+    // weighted-consensus/top-rank-protection family-override path (P1's
+    // own target) never sets — only the separate 'refused-identity-conflict'
+    // branch does. For a book with no PC/CV/user year of its own (Ship
+    // 11's visual-pool-fallback territory — exactly where P1 lives),
+    // resolveYear falls through to null, and every later backfill chain
+    // (Q86 PC-tolerated, Q58-TITLE comp consensus) has nothing to work
+    // with either — confirmedYear reaches the identity-gate below still
+    // null, blocking on missing 'year' even though the exact same family
+    // that just cleared P1's bar also voted on a year.
+    //
+    // B-Q2 (Phase 0 finding): identityIsProvisionalOverride is NOT a
+    // contained lever — it also selects the PC query year (~line 3478,
+    // already executed by this point in the request), nulls
+    // confirmedVariant (~line 4763, already executed), and gates out.year's
+    // own fallback (~line 9856). Flipping it on here to let resolveYear
+    // pick up confirmedYear would reach back and change decisions already
+    // made earlier in this same request under a different, broader
+    // contract. This backfill is deliberately narrower: it only ever
+    // writes confirmedYear itself, only when nothing else (PC, CV, user,
+    // comp-consensus) already resolved it, and only behind the SAME P1
+    // predicate that already gates the price carve-out — no new consensus
+    // math, no promotion of issueAuthority.status (stays 'provisional').
+    //
+    // B-Q3 (Phase 0 finding): assessIdentityConfidence/sanitizeIdentityFields
+    // (identityGate.js, called just below) have no authority/provenance
+    // concept at all — they only check presence and format
+    // (isCleanYearString). Writing any well-formed year string here clears
+    // the gate identically to a canonical one; provenance is preserved
+    // separately via out.confirmedYearMeta.source and
+    // out.identityProvisionalFields (already includes 'year' from Commit
+    // 4.1, unchanged by this write).
+    //
+    // Real call site for the extracted, exported deriveProvisionalYearBackfill
+    // (src/lib/issueAuthority.js) — see that function's own doc comment for
+    // the B-Q1/B-Q2/B-Q3 findings and the full invariant. Support threshold
+    // (>= 3, stricter than resolveFamilyYearConsensus's own bare adoption
+    // floor of 2) lives inside that function, not duplicated here.
+    const provisionalYearBackfill = deriveProvisionalYearBackfill(confirmedYear, out.issueAuthority, identity?.familyYearConsensus);
+    if (provisionalYearBackfill) {
+      confirmedYear = provisionalYearBackfill.year;
+      out.confirmedYearMeta = provisionalYearBackfill.meta;
+      console.log(
+        `[commit-p2] confirmedYear backfilled from family consensus (provisional, unblocks identity-gate only): ` +
+        `year=${confirmedYear} support=${identity.familyYearConsensus.support}/${identity.familyYearConsensus.uniqueRows}`
+      );
     }
 
     // Ship #20a.6.4 — identity gate. Runs AFTER phase 1 (so PC/CV year-heal

@@ -32,7 +32,7 @@ import { normalizeOptionalYear } from './yearEvidence.js';
 // internal same-series consistency across a family's own members, a check
 // that has no prior home in the identity-resolution pipeline (only ever
 // applied comp-pool-side before this commit).
-import { hasValidFamilyMembership, hasContaminatedMember, detectSeriesMarkers } from './compHygiene.js';
+import { hasValidFamilyMembership, hasContaminatedMember, detectSeriesMarkers, familyDominatesRunnerUp } from './compHygiene.js';
 
 // GrailKey Commit P (P1, 2026-08-03) — high-confidence marketplace-consensus
 // carve-out for commit4-terminal.
@@ -115,17 +115,23 @@ export function hasFamilySeriesMarkerAsymmetry(visualItems, indices) {
  * was not built or tested against) — narrower than "any family override",
  * matching the reference case exactly rather than generalizing past it.
  *
- * `runnerUp` requires TRUE absence (no second-place family scored at
- * all), not merely 3x domination — the stricter of the two readings
- * available (compHygiene.js's own familyDominatesRunnerUp tolerates a
- * present-but-weak runner-up; this predicate does not reuse it, on
- * purpose). Conservative-under-uncertainty per standing project doctrine.
- * Documented consequence, not silently absorbed: of the 3 real Spawn #351
- * production requests the audit captured, ALL THREE carried a nonzero
- * runner-up (weight 2.5 or 4.0 against a top family of 14.0 or 10.0) — a
- * literal reading of this predicate would not have fired on any of the 3
- * captured requests, only on a hypothetical capture with zero competing
- * cluster. Flagged in the commit report, not hidden.
+ * GrailKey Commit P2 (Part A, 2026-08-03) — CORRECTED. The original
+ * Commit P version required `runnerUp` to be TRUE ABSENCE (no
+ * second-place family scored at all), documented at the time as "the
+ * stricter of the two readings available." That reading made this gate
+ * dead code in production: all 3 real Spawn #351 requests the audit
+ * captured carried a nonzero runner-up (weight 2.5 or 4.0 against a top
+ * family of 14.0 or 10.0), so the literal-absence check never fired on
+ * any of them. Now reuses the SAME dominance predicate
+ * (`familyDominatesRunnerUp`, compHygiene.js) Commit 4.3's own qualified-
+ * family-authority retention gate already applies to this exact
+ * topFamily/runnerUp shape (identityCore.js's `familyAuthorityMarginQualifies`)
+ * — a runner-up is tolerated only when the selected family outweighs it
+ * by 3x or more (`topWeightSum >= runnerUpWeightSum * 3`; no real
+ * runner-up at all, i.e. null/zero/undefined weightSum, also passes —
+ * "nothing to dominate"). Not a weaker bar than the retention gate: it is
+ * the identical function, so the two can never drift apart. The real
+ * Spawn #351 shape (14.0 vs 2.5, a 5.6x margin) clears this with room.
  *
  * @param {{decision: string, topFamily: object, runnerUp: object|null, overlapRatio: number}|null} familyCandidate
  * @param {Array} visualItems - the raw pool rows the family's indices reference
@@ -139,7 +145,7 @@ export function meetsHighConfidenceMarketplaceConsensusBar(familyCandidate, visu
   if (!(topFamily.count >= 3)) return false;
   if (!(topFamily.weightSum >= HIGH_CONFIDENCE_WEIGHT_FLOOR)) return false;
   if (familyCandidate.overlapRatio !== 1) return false;
-  if (familyCandidate.runnerUp != null) return false;
+  if (!familyDominatesRunnerUp(topFamily.weightSum, familyCandidate.runnerUp?.weightSum)) return false;
   if (hasContaminatedMember(visualItems, topFamily.indices)) return false;
   if (hasFamilySeriesMarkerAsymmetry(visualItems, topFamily.indices)) return false;
   return true;
@@ -978,3 +984,75 @@ export function checkCrossPopulationPromotionGuard(familyIssueDecision, custodyV
 // work — deciding the full field set and reconciling it against every
 // existing consumer — not a two-function bolt-on. See LAUNCH-AUDIT.md
 // Section 16 for the full record.
+
+/**
+ * GrailKey Commit P2 (Part B, 2026-08-03) — narrow, contained
+ * `confirmedYear` backfill for the P1 high-confidence marketplace-
+ * consensus carve-out (`meetsHighConfidenceMarketplaceConsensusBar`
+ * above). Extracted as a pure function (invariant 10, same rationale as
+ * every other primitive in this file) so the real api/enrich.js call site
+ * and this feature's tests invoke the IDENTICAL logic.
+ *
+ * Root problem (Phase 0 finding B-Q1): `confirmedYear` IS assigned from
+ * the family's own year vote inside `resolveIdentity`
+ * (identityCore.js:1621, `familyYearConsensus.year ?? ...`), but is
+ * unconditionally overwritten later in api/enrich.js by `resolveYear()`'s
+ * own authoritative PC/CV/user pass (~line 4222) — `resolveYear`'s "user
+ * year" input only reuses the family-adopted `confirmedYear` when
+ * `identityIsProvisionalOverride` is true, a flag the weighted-consensus/
+ * top-rank-protection family-override path (P1's own target) never sets
+ * (only the separate 'refused-identity-conflict' branch does). For a book
+ * with no PC/CV/user year of its own — Ship 11's visual-pool-fallback
+ * territory, exactly where P1 lives — `resolveYear` falls through to
+ * null, and every later backfill chain (Q86 PC-tolerated, Q58-TITLE comp
+ * consensus) has nothing to work with either: `confirmedYear` reaches the
+ * identity-gate still null, blocking on missing 'year' even though the
+ * exact same family that just cleared P1's bar also voted on a year.
+ *
+ * Containment (Phase 0 finding B-Q2): `identityIsProvisionalOverride` is
+ * NOT a contained lever for this — it also selects the PC query year
+ * (api/enrich.js ~line 3478), nulls `confirmedVariant` (~line 4763), and
+ * gates `out.year`'s own fallback (~line 9856), all already executed
+ * earlier in the same request by the time this function's real call site
+ * runs. Flipping that flag on here would reach back and change decisions
+ * already made under a different, broader contract. This function is
+ * deliberately narrower: it only ever proposes a value for
+ * `confirmedYear` itself, only when the caller reports nothing else (PC,
+ * CV, user, comp-consensus) already resolved one
+ * (`currentConfirmedYear == null`), and only behind the SAME P1 predicate
+ * that already gates the price carve-out
+ * (`issueAuthority.highConfidenceMarketplaceConsensus === true`) — no new
+ * consensus math, no promotion of `issueAuthority.status` (stays
+ * 'provisional', untouched by this function).
+ *
+ * Gate transparency (Phase 0 finding B-Q3): the identity-gate this
+ * backfill exists to clear (`assessIdentityConfidence`/
+ * `sanitizeIdentityFields`, `identityGate.js`) has no authority/
+ * provenance concept at all — it only checks field presence and format
+ * (`isCleanYearString`). A well-formed year string clears it identically
+ * regardless of source. This function's return carries its own explicit
+ * provenance (`source: 'family-consensus-provisional'`) so a caller can
+ * still distinguish it downstream, even though the gate itself cannot.
+ *
+ * Support threshold >= 3 — stricter than `resolveFamilyYearConsensus`'s
+ * own bare adoption floor of 2 (`yearBearingRows >= 2`) — matches the
+ * real Spawn #351 reference shape (3 of 5 rows) this predicate was built
+ * and tested against; a caller may not weaken this by passing a lower
+ * threshold, it is fixed inside this function.
+ *
+ * @param {string|number|null} currentConfirmedYear - confirmedYear as already resolved by resolveYear() and every backfill chain ahead of this call
+ * @param {{highConfidenceMarketplaceConsensus?: boolean}|null} issueAuthority - out.issueAuthority
+ * @param {{mode: string, year: *, support: number, uniqueRows: number}|null} familyYearConsensus - identity.familyYearConsensus
+ * @returns {{year: string, meta: {value: string, source: string, confidence: string}}|null} null when the backfill does not apply — caller leaves confirmedYear untouched
+ */
+export function deriveProvisionalYearBackfill(currentConfirmedYear, issueAuthority, familyYearConsensus) {
+  if (currentConfirmedYear != null) return null;
+  if (issueAuthority?.highConfidenceMarketplaceConsensus !== true) return null;
+  if (familyYearConsensus?.mode !== 'adopted') return null;
+  if (!(familyYearConsensus.support >= 3)) return null;
+  const year = String(familyYearConsensus.year);
+  return {
+    year,
+    meta: { value: year, source: 'family-consensus-provisional', confidence: 'provisional' },
+  };
+}
