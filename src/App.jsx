@@ -17,6 +17,7 @@ import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectio
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE } from "./lib/scanOwnership.js";
+import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 
 // A3 ACCESS GATE: Client-side key helper
 // ACCESS GATE — T1 invite key management (A3 + LAUNCH BLOCKER FIX)
@@ -614,6 +615,11 @@ const getCollectionMetrics = (catalogue) => {
 
   return metrics;
 };
+
+// getAggregateCollectionStatus — extracted to src/lib/collectionMetrics.js
+// for testability (imported at top of file). Computed ONLY from
+// getCollectionMetrics' own output above, never independently re-derived,
+// so the header and the bucket grid it sits above can never disagree.
 
 // Q145 dispatch (2026-07-22, Poison Ivy #31 collection-routing class) —
 // single shared channel resolver. Prefers item.contract?.bestChannel
@@ -2765,7 +2771,7 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude, onClaudeCardCh
   );
 }
 
-function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onDelete, refreshingPrices, snapshots, bulkEnrichProgress }) {
+function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, onDelete, refreshingPrices, snapshots, bulkEnrichProgress }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [sortBy, setSortBy] = useState("recent");
@@ -2923,7 +2929,7 @@ function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onD
         <div className="stat">
           <div className="stat-value">
             {items.some(c => !c.marketPending)
-              ? fmt(totalValue)
+              ? fmt(liquidValue)
               : "Updating…"}
           </div>
           <div className="stat-label">Liquid Value</div>
@@ -2971,10 +2977,21 @@ function CollectionList({ items, totalValue, soldCount, soldRevenue, onOpen, onD
       {/* Collection Action Dashboard */}
       {(() => {
         const metrics = getCollectionMetrics(items);
+        // GrailKey Commit C — aggregate status derived from this SAME
+        // metrics object the bucket grid below already renders from, so
+        // the header can never disagree with what the buckets show.
+        const aggregateStatus = getAggregateCollectionStatus(metrics);
+        const aggregateStatusColor = {
+          BLOCKED: '#e05656', REVIEW: '#fb923c', PHOTOS: '#fbbf24',
+          READY: '#22c55e', EMPTY: '#888',
+        }[aggregateStatus];
         return (
           <div style={{ margin: "12px 0 8px", padding: "12px", borderRadius: 8, background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.15)" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: "#888", marginBottom: 10, textAlign: "center" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: "#888", marginBottom: 2, textAlign: "center" }}>
               Collection Status
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: aggregateStatusColor, textAlign: "center", marginBottom: 8 }}>
+              {aggregateStatus}
             </div>
 
             {/* Action buckets grid */}
@@ -12062,10 +12079,30 @@ export default function App() {
 
   const marketValue = marketValueOf(result);
 
+  // totalValue — raw, readiness-blind sum across the entire catalogue.
+  // Retained: ManagePage (below) is a genuine, separate consumer of the
+  // unfiltered total-portfolio figure, a legitimately different concept
+  // from liquid value.
   const totalValue = catalogue.reduce((sum, item) => {
     if (item.marketPending) return sum;  // exclude pending items
     return sum + (getDisplayPrice(item) || 0);
   }, 0);
+
+  // GrailKey Commit C (2026-08-02, collection-header defect) — the
+  // "Liquid Value" stat rendered in CollectionList's top stats-row
+  // previously reused the SAME raw totalValue above (readiness-blind)
+  // under the "Liquid Value" label — confirmed live: a card showed 0
+  // ready items yet "Liquid Value: $537." A SECOND, separate, correctly-
+  // filtered "Liquid Value" already existed lower in the same view
+  // (getCollectionMetrics(items).liquidValue, ready+photosNeeded only) —
+  // two different numbers, one label, same screen. Reusing
+  // getCollectionMetrics here (single source of truth, the same pure
+  // function CollectionList's own bucket grid already calls) rather than
+  // a second independently-tuned filter — the two "Liquid Value"
+  // displays can now never disagree, since both are the same function
+  // applied to the same catalogue. totalValue itself is left untouched
+  // for ManagePage's own, legitimately different, unfiltered-total use.
+  const liquidValue = getCollectionMetrics(catalogue).liquidValue;
 
   const soldRevenue = catalogue.reduce((sum, item) => {
     if (item.status === "sold" && item.soldPrice != null) {
@@ -12752,7 +12789,7 @@ export default function App() {
         ) : (
           <CollectionList
             items={catalogue}
-            totalValue={totalValue}
+            liquidValue={liquidValue}
             soldCount={soldCount}
             soldRevenue={soldRevenue}
             refreshingPrices={refreshingPrices}
