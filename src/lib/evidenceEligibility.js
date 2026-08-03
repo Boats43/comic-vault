@@ -38,7 +38,6 @@ import {
   GRADED_RE,
   COVERLESS_RE,
   REPRINT_RE,
-  VARIANT_CONTAM_RE,
   LOT_RE,
   HALF_ISSUE_RE,
   SIGNED_RE,
@@ -49,6 +48,7 @@ import {
   getEraYearTolerance,
   evaluateEraYearMatch,
   IDENTITY_TPB_MARKER_RE,
+  extractVariantTokensByAxis,
 } from './compHygiene.js';
 import { extractYearFromTitle } from './imageSearchIdentity.js';
 
@@ -403,18 +403,42 @@ export const classifyEvidenceRow = (row, target = {}) => {
     (targetIsReprintEdition && !rowIsReprintEdition && rowIsExplicitFirstPrint);
   if (wrongPrinting) rejectionCodes.push('WRONG_PRINTING');
 
-  // Variant contamination — token-precise, not a bare truthy check on
-  // target.variant. A target variant string can be non-empty without
-  // being a foil/virgin/ratio marker itself (Commit D Fixture 5: target
-  // variant is "second printing" — a row matching a DIFFERENT variant
-  // contamination word, "foil"/"virgin", is still a mismatch even though
-  // target.variant is non-empty; the blunt !target.variant guard
-  // api/comps.js Filter 1b uses would have missed this). Flags only when
-  // the row's specific matched contamination word is absent from the
-  // target's own variant text.
-  const variantContamMatch = title.match(VARIANT_CONTAM_RE);
-  const wrongVariant = !!variantContamMatch &&
-    !new RegExp(variantContamMatch[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(targetText);
+  // Variant contamination — axis-aware, not a flat single-regex match.
+  // GrailKey Commit D3 follow-on (2026-08-02): the prior flat
+  // VARIANT_CONTAM_RE match (any recognized contamination word, checked
+  // as a literal substring of target.variant) carried the identical
+  // defect D3 fixed in soldVerification.js's Filter 8 — a target variant
+  // naming only the cover ARTIST ("Brett Booth") against a row naming
+  // only the cover TYPE ("virgin") is the same physical product
+  // described two different ways, but "virgin" never literally appears
+  // in "brett booth" so the flat check flagged it as a mismatch. Reuses
+  // the SAME extractor Filter 8 uses (compHygiene.js,
+  // extractVariantTokensByAxis) — one extractor, both call sites — and
+  // the same per-axis comparison shape. 'artist' is included in the
+  // globally-empty check (an artist-only target variant still counts as
+  // "target specified something") but excluded from the iterated
+  // comparison axes, mirroring Filter 8's own AXES/ALL_AXES split
+  // exactly so the two mechanisms can't drift apart on this point again.
+  const VARIANT_AXES = ['coverType', 'distribution', 'coverLetter', 'printing'];
+  const VARIANT_ALL_AXES = ['coverType', 'distribution', 'coverLetter', 'printing', 'artist'];
+  const targetVariantByAxis = extractVariantTokensByAxis(targetText);
+  const rowVariantByAxis = extractVariantTokensByAxis(title);
+  const targetVariantGloballyEmpty = VARIANT_ALL_AXES.every((axis) => targetVariantByAxis[axis].length === 0);
+  let wrongVariant = false;
+  for (const axis of VARIANT_AXES) {
+    const targetAxisTokens = targetVariantByAxis[axis];
+    const rowAxisTokens = rowVariantByAxis[axis];
+    if (targetAxisTokens.length > 0 && rowAxisTokens.length > 0) {
+      const overlap = rowAxisTokens.some((t) =>
+        targetAxisTokens.some((u) => u === t || u.includes(t) || t.includes(u))
+      );
+      if (!overlap) { wrongVariant = true; break; }
+      continue;
+    }
+    if (targetAxisTokens.length > 0 && rowAxisTokens.length === 0) { wrongVariant = true; break; }
+    if (rowAxisTokens.length > 0 && targetAxisTokens.length === 0 && targetVariantGloballyEmpty) { wrongVariant = true; break; }
+    // Cross-axis: no signal on this axis, continue.
+  }
   if (wrongVariant) rejectionCodes.push('WRONG_VARIANT');
 
   // Collected-edition mismatch — our target is a single issue, row is a

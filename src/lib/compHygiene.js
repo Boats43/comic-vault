@@ -1195,6 +1195,88 @@ export const extractArtist = (variantOrTitle) => {
   return null;
 };
 
+// GrailKey Commit D3 (2026-08-02, ASM #300 / Spawn #351 dispatch) —
+// AXIS-LABELED variant-token extraction. Promoted here from
+// soldVerification.js (single source of truth, matching this file's own
+// established convention) after the identical WRONG_VARIANT defect was
+// confirmed independently present in evidenceEligibility.js's
+// classifyEvidenceRow (flat VARIANT_CONTAM_RE match + literal-substring
+// check) — same failure class as soldVerification.js's old flat
+// extractVariantTokens, different code path. Both consumers now share
+// this one extractor rather than each maintaining their own axis logic.
+//
+// The prior flat-array shape conflated four structurally distinct axes
+// into one undifferentiated list (cover-type/finish, distribution,
+// cover-letter, and — critically — printing/edition), with a fifth axis
+// (artist) never represented at all despite being a real,
+// independently-recognized signal elsewhere (extractArtist itself,
+// Filter 7/classifyArtistMatch). Confirmed live: userVariant "Brett
+// Booth" (an artist-axis value) produced ZERO tokens from the old flat
+// extractor, so any any-axis comparison treated a real, correctly-
+// adopted artist-only variant as if the user's variant were completely
+// blank, rejecting every comp that mentioned ANY recognized token on ANY
+// axis (29/29 Spawn #351 sold comps, all carrying "virgin" — a
+// coverType-axis token "Brett Booth" says nothing about one way or the
+// other).
+export const extractVariantTokensByAxis = (str) => {
+  const s = String(str).toLowerCase();
+
+  const coverType = [];
+  if (/foil/.test(s)) coverType.push('foil');
+  if (/virgin/.test(s)) coverType.push('virgin');
+  if (/sketch/.test(s)) coverType.push('sketch');
+
+  const distribution = [];
+  if (/newsstand/.test(s)) distribution.push('newsstand');
+  if (/exclusive|excl\./.test(s)) distribution.push('exclusive');
+  if (/1:\d+|ratio|incentive/.test(s)) distribution.push('ratio');
+
+  // Q48: "Cover B/C/D" detection — must NOT match artist-name + "cover"
+  // descriptors. Pattern requires a letter IMMEDIATELY after "cover"
+  // (optional whitespace only) — see original Q48-FIX rationale,
+  // unchanged.
+  const coverLetter = [];
+  if (/\bcover\s*[b-z]\b/.test(s)) coverLetter.push('altcover');
+
+  // Ship 18 — printing/edition axis. D1 (GrailKey dispatch, separate
+  // commit) will additionally gate what may ADOPT into this axis from
+  // comp text in the first place — this extractor only detects the
+  // signal for MATCHING purposes, unchanged scope from Ship 18's
+  // original intent.
+  const printing = [];
+  if (/\breprint(?!\s+series)\b/.test(s)) printing.push('reprint');
+  if (/facsimile/.test(s)) printing.push('reprint'); // facsimile = reprint family
+  if (/loot.?crate/.test(s)) printing.push('reprint');
+  if (/\b(?:2nd|3rd|second|third)\s*print(?:ing)?\b/.test(s)) printing.push('reprint');
+  if (/millennium\s+edition/.test(s)) printing.push('reprint');
+  if (/famous\s+first\s+edition/.test(s)) printing.push('reprint');
+
+  // Artist axis — reuses extractArtist (above) rather than a second,
+  // independently-tuned name registry. A recognized artist name
+  // populates this axis; anything extractArtist doesn't recognize
+  // leaves it empty — no new registry invented here.
+  const artist = [];
+  const recognizedArtist = extractArtist(str);
+  if (recognizedArtist) artist.push(String(recognizedArtist).toLowerCase());
+
+  return { coverType, distribution, coverLetter, printing, artist };
+};
+
+// Flat, backward-compatible shape — for consumers (e.g.
+// soldVerification.js's fallback-pool self-consistency signature check)
+// that only need "the full set of recognized tokens," not axis
+// separation. Byte-identical to the pre-D3 flat extractor's output.
+export const extractVariantTokens = (str) => {
+  const byAxis = extractVariantTokensByAxis(str);
+  return [
+    ...byAxis.coverType,
+    ...byAxis.distribution,
+    ...byAxis.coverLetter,
+    ...byAxis.printing,
+    ...byAxis.artist,
+  ];
+};
+
 // Q109 (greenlit, soldVerification.js) — bare-surname corroboration check.
 // A surname counts as fully trusted (not just "partial") when
 // premiumCreators.js has ALREADY registered it as an unambiguous alias for

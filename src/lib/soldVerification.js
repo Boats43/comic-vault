@@ -43,6 +43,8 @@ import {
   getEraYearTolerance,
   evaluateEraYearMatch,
   classifyArtistMatch,
+  extractVariantTokensByAxis,
+  extractVariantTokens,
 } from "./compHygiene.js";
 import { buildEvidencePopulations, classifyEvidenceRow, buildPricingEligibleRows, PRICING_GATE_CODES } from "./evidenceEligibility.js";
 
@@ -164,48 +166,14 @@ const printingMatch = (rowTitle, ourVariant) => {
 // reused by api/comps.js's new artist-preference narrowing tier). Imported
 // above; see compHygiene.js for the full docstrings.
 
-// Extract variant tokens from string. Returns array of normalized tokens.
-// Used to detect variant type mismatches (foil vs ratio, newsstand vs
-// exclusive, etc.). Covers the main variant types that should NOT mix.
-const extractVariantTokens = (str) => {
-  const tokens = [];
-  const s = String(str).toLowerCase();
-  if (/foil/.test(s)) tokens.push('foil');
-  if (/virgin/.test(s)) tokens.push('virgin');
-  if (/newsstand/.test(s)) tokens.push('newsstand');
-  if (/exclusive|excl\./.test(s)) tokens.push('exclusive');
-  if (/1:\d+|ratio|incentive/.test(s)) tokens.push('ratio');
-  if (/sketch/.test(s)) tokens.push('sketch');
-
-  // Q48: "Cover B/C/D" detection — must NOT match artist-name + "cover" descriptors.
-  // Q48-FIX: Remove adjective blocklist. Trailing \b alone fixes "Cover Key"
-  // class (word boundary prevents "cover k" match). Blocklist suppresses
-  // genuine "Rare Cover B" variants.
-  //
-  // Pattern: /\bcover\s*[b-z]\b/ requires letter IMMEDIATELY after "cover"
-  // (optional whitespace only). Prevents matches on:
-  // - "todd mcfarlane cover" (no b-z after "cover")
-  // - "iconic cover" (no b-z after "cover")
-  // - "cover key" (k not in [b-z])
-  //
-  // Keeps matches on:
-  // - "cover b" / "cover-b" → variant ✓
-  // - "rare cover b" → variant ✓ (b-z present)
-  if (/\bcover\s*[b-z]\b/.test(s)) {
-    tokens.push('altcover');
-  }
-  // Ship 18 — Add reprint-class tokens. Without these, first-print sold
-  // comps leaked into reprint pricing pools (B&B #28 Loot Crate, Detective
-  // #27 facsimile, etc.). Active comps had VARIANT_CONTAM_RE protection
-  // but sold comps did not.
-  if (/\breprint(?!\s+series)\b/.test(s)) tokens.push('reprint');
-  if (/facsimile/.test(s)) tokens.push('reprint'); // facsimile = reprint family
-  if (/loot.?crate/.test(s)) tokens.push('reprint');
-  if (/\b(?:2nd|3rd|second|third)\s*print(?:ing)?\b/.test(s)) tokens.push('reprint');
-  if (/millennium\s+edition/.test(s)) tokens.push('reprint');
-  if (/famous\s+first\s+edition/.test(s)) tokens.push('reprint');
-  return tokens;
-};
+// GrailKey Commit D3 (2026-08-02, ASM #300 / Spawn #351 dispatch) —
+// AXIS-LABELED variant-token extraction. extractVariantTokensByAxis /
+// extractVariantTokens promoted to compHygiene.js (imported above) —
+// single source of truth, reused by evidenceEligibility.js's
+// classifyEvidenceRow, which independently carried the identical
+// WRONG_VARIANT defect (flat VARIANT_CONTAM_RE match, no axis
+// separation, no artist awareness) on a completely separate code path.
+// See compHygiene.js for the full rationale/docstring.
 
 // Slab/raw mismatch.
 //   Our user grade is 'raw' → reject SLAB_RE rows (CGC/CBCS/PGX listings).
@@ -618,75 +586,109 @@ export const verifySoldComps = (rawRows, ctx) => {
     return true;
   });
 
-  // 8. Variant token mismatch. Three cases:
-  //    (a) User has NO variant → reject comps with variant tokens
-  //    (b) User HAS variant → reject comps with DIFFERENT variant tokens
-  //    (c) Both have variant tokens that overlap → keep
+  // 8. Variant token mismatch — GrailKey Commit D3, AXIS-AWARE rewrite.
+  //
+  // A missing token on one axis is not a mismatch on another axis (D3
+  // invariant). Compared per axis (coverType, distribution, coverLetter,
+  // printing, artist) independently:
+  //
+  //   Case (b), same-axis DISAGREEMENT (both sides have tokens on this
+  //   axis, zero overlap) → REJECT. Unconditional, per axis — this is a
+  //   genuine same-axis conflict regardless of what any other axis says
+  //   (D-4 requirement: axis separation must not weaken same-axis
+  //   matching).
+  //
+  //   Case (a-inverse) — Ship 18 — user HAS tokens on this axis, comp has
+  //   NONE on this axis → REJECT. Unconditional, per axis. Preserves
+  //   Ship 18's original protection unchanged (a virgin-labeled book
+  //   must not price off a comp with zero variant signal at all on that
+  //   same axis — One World Under Doom #1 / Mega Man X Timelines #1
+  //   classes, still real, still enforced identically).
+  //
+  //   Case (a) — comp HAS tokens on this axis, user has NONE on this
+  //   axis → REJECT only when the user's variant is EMPTY ACROSS EVERY
+  //   AXIS (userVariantByAxis has zero tokens anywhere at all — the
+  //   genuine "plain/standard book" case Q114's original protection
+  //   exists for). When the user's variant has real content on ANY OTHER
+  //   axis (they clearly specified something — just not this axis), this
+  //   axis contributes NO rejection signal at all. This is the exact
+  //   fix for the confirmed live bug: userVariant "Brett Booth" (artist
+  //   axis populated, all four other axes empty) was, under the prior
+  //   flat-array comparison, indistinguishable from "no variant
+  //   specified at all" — rejecting all 29 genuine Spawn #351 sold comps
+  //   for carrying "virgin" (a coverType-axis token the user's variant
+  //   never claimed anything about one way or the other).
+  //
+  // Q114 dispatch (2026-07-18, Batman #608 class) note preserved: the
+  // specific/generic token classification approach was investigated and
+  // reverted there — this axis-based approach is a different mechanism
+  // (structural axis identity, not a specific/generic marketing-language
+  // heuristic) and does not reopen that same gap; same-axis explicit
+  // "variant" declarations ("Test Comic #1 virgin variant" vs a
+  // no-variant book) still correctly reject via Case (a) whenever the
+  // user's variant is genuinely empty everywhere, exactly as before.
+  // 'artist' is deliberately excluded from the iterated comparison set:
+  // Filter 7 (classifyArtistMatch, above) is the sole artist-matching
+  // mechanism. Including 'artist' here as well double-counts it — a comp
+  // title mentioning a recognized artist name (e.g. "Jim Lee") would
+  // newly trigger Case (a) rejection under a globally-empty user variant,
+  // even for a book Filter 7 already correctly passed, since this
+  // extractor (unlike the old flat one) is artist-aware. 'artist' STAYS
+  // in ALL_AXES for the globally-empty check below — an artist-only user
+  // variant ("Brett Booth") must still count as "user specified
+  // something" so Case (a) doesn't fire on an unrelated axis.
+  const ALL_AXES = ['coverType', 'distribution', 'coverLetter', 'printing', 'artist'];
+  const AXES = ['coverType', 'distribution', 'coverLetter', 'printing'];
   working = working.filter((r) => {
-    const userVariantTokens = variant
-      ? extractVariantTokens(String(variant).toLowerCase())
-      : [];
-    const compVariantTokens = extractVariantTokens(String(r.title || '').toLowerCase());
+    const userVariantByAxis = variant
+      ? extractVariantTokensByAxis(String(variant).toLowerCase())
+      : { coverType: [], distribution: [], coverLetter: [], printing: [], artist: [] };
+    const compVariantByAxis = extractVariantTokensByAxis(String(r.title || '').toLowerCase());
+    const userIsGloballyEmpty = ALL_AXES.every((axis) => userVariantByAxis[axis].length === 0);
 
-    // Case (a): comp has variant tokens, user has none → reject
-    //
-    // Q114 dispatch (2026-07-18, Batman #608 class) — INVESTIGATED, fix
-    // REVERTED after implementation testing exposed a flaw the report
-    // didn't catch. Attempted: classify tokens as SPECIFIC (convention/
-    // ratio/retailer/exclusive/limitation/authentication) vs GENERIC
-    // (finish: foil/virgin/sketch) and only reject on specific-token
-    // presence, on the theory that a comp mentioning "foil"/"virgin" as
-    // marketing language shouldn't reject a no-variant book's comps. Broke
-    // a validated, real protection instead: "Test Comic #1 virgin variant"
-    // and "Test Comic #1 foil variant" are UNAMBIGUOUS explicit variant
-    // labels (the word "variant" is right there), not marketing hype — and
-    // the "generic vs specific" split can't tell those apart from
-    // incidental hype-word usage, because CATEGORY_BLOCKS classifies by
-    // WORD MEANING, not by whether the word appears as part of an actual
-    // "X variant"/"X cover" declaration vs standing alone as sales
-    // language. A correct fix needs that context-sensitivity (does the
-    // token appear adjacent to an explicit variant-declaring phrase?),
-    // which doesn't exist yet in any pattern this codebase has built —
-    // deeper investigation needed before attempting again, not a
-    // same-night follow-up guess. See CLAUDE.md Pattern Library.
-    if (compVariantTokens.length > 0 && userVariantTokens.length === 0) {
-      console.log('[sold-reject] variantMismatch:comp_has_user_none |', r.title?.slice(0, 80),
-        '| userVariant:', variant, '| compTokens:', compVariantTokens.join(','));
-      reasons.variantMismatch++;
-      pushSample(r, 'variantMismatch:comp_has_user_none');
-      return false;
-    }
+    for (const axis of AXES) {
+      const userAxisTokens = userVariantByAxis[axis];
+      const compAxisTokens = compVariantByAxis[axis];
 
-    // Case (a-inverse) — Ship 18 — user has variant tokens, comp has none → reject
-    // When subject is virgin/foil/etc. and comp title shows no variant signals,
-    // the comp is likely a different (typically standard) variant of the same
-    // issue. Production cases:
-    //   One World Under Doom #1 virgin → MegaCon Secret Drop comps leaked
-    //   Mega Man X Timelines #1 virgin → Cvr B Steinbach comps leaked
-    // Sold pool contamination caused 100-300% overpricing.
-    if (compVariantTokens.length === 0 && userVariantTokens.length > 0) {
-      console.log('[sold-reject] variantMismatch:user_has_comp_none |', r.title?.slice(0, 80),
-        '| userVariant:', variant, '| userTokens:', userVariantTokens.join(','));
-      reasons.variantMismatch++;
-      pushSample(r, 'variantMismatch:user_has_comp_none');
-      return false;
-    }
+      // Case (b): same-axis disagreement.
+      if (userAxisTokens.length > 0 && compAxisTokens.length > 0) {
+        const overlap = compAxisTokens.some((t) =>
+          userAxisTokens.some((u) => u === t || u.includes(t) || t.includes(u))
+        );
+        if (!overlap) {
+          console.log('[sold-reject] variantMismatch:different_tokens |', r.title?.slice(0, 80),
+            `| axis:${axis}`, '| userTokens:', userAxisTokens.join(','), '| compTokens:', compAxisTokens.join(','));
+          reasons.variantMismatch++;
+          pushSample(r, 'variantMismatch:different_tokens');
+          return false;
+        }
+        continue;
+      }
 
-    // Case (b): both have tokens but NO overlap → reject
-    if (compVariantTokens.length > 0 && userVariantTokens.length > 0) {
-      const overlap = compVariantTokens.some((t) =>
-        userVariantTokens.some((u) => u === t || u.includes(t) || t.includes(u))
-      );
-      if (!overlap) {
-        console.log('[sold-reject] variantMismatch:different_tokens |', r.title?.slice(0, 80),
-          '| userTokens:', userVariantTokens.join(','), '| compTokens:', compVariantTokens.join(','));
+      // Case (a-inverse) — Ship 18 — user has this axis, comp has none.
+      if (userAxisTokens.length > 0 && compAxisTokens.length === 0) {
+        console.log('[sold-reject] variantMismatch:user_has_comp_none |', r.title?.slice(0, 80),
+          `| axis:${axis}`, '| userVariant:', variant, '| userTokens:', userAxisTokens.join(','));
         reasons.variantMismatch++;
-        pushSample(r, 'variantMismatch:different_tokens');
+        pushSample(r, 'variantMismatch:user_has_comp_none');
         return false;
       }
+
+      // Case (a) — comp has this axis, user has none on this axis —
+      // reject ONLY when user is empty on EVERY axis, not just this one.
+      if (compAxisTokens.length > 0 && userAxisTokens.length === 0 && userIsGloballyEmpty) {
+        console.log('[sold-reject] variantMismatch:comp_has_user_none |', r.title?.slice(0, 80),
+          `| axis:${axis}`, '| userVariant:', variant, '| compTokens:', compAxisTokens.join(','));
+        reasons.variantMismatch++;
+        pushSample(r, 'variantMismatch:comp_has_user_none');
+        return false;
+      }
+      // Cross-axis case (comp has this axis, user has none HERE but has
+      // content on a DIFFERENT axis) — no signal, this axis contributes
+      // nothing to the verdict. Continue checking remaining axes.
     }
 
-    // Case (c): overlap exists OR neither has tokens → keep
+    // No axis triggered a rejection → keep.
     return true;
   });
 
