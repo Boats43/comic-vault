@@ -19,7 +19,7 @@
 // count stays at 12/12.
 
 import { extractVariantTokens, tokenizeTitleFamily, classifyVariantTokens } from './imageSearchIdentity.js';
-import { ARTIST_PATTERNS, extractAcronymTokens, detectSeriesMarkers } from './compHygiene.js';
+import { ARTIST_PATTERNS, extractAcronymTokens, detectSeriesMarkers, extractVariantTokensByAxis } from './compHygiene.js';
 
 // Helper: find the most frequent item in an array. Returns null when array
 // is empty or all items appear only once (no consensus).
@@ -228,6 +228,74 @@ export const filterItemsByIssue = (items, confirmedIssue, familyOverrideAccepted
  */
 export const isVariantProvenanceValid = (variantSourceIssue, confirmedIssue) => {
   return variantSourceIssue == null || String(variantSourceIssue) === String(confirmedIssue);
+};
+
+/**
+ * GrailKey Commit D2 (2026-08-02, ASM #300 facsimile-injection dispatch)
+ * — Vision non-contradiction gate, standalone/exported so it can also
+ * gate the TRUE unconditional injection point (api/enrich.js:
+ * `confirmedVariant = ... safeReqVariant` — a plain default assignment
+ * that runs whether or not extractConfirmedVariant ever finds pool
+ * consensus; extractConfirmedVariant's own internal gate, above, only
+ * ever runs when it reaches its return statement, which a zero-consensus
+ * pool never does). Applying this ONCE, before safeReqVariant is used to
+ * seed confirmedVariant at all, closes the gap that would otherwise let
+ * an uncorroborated printing claim through untouched on exactly the
+ * pools (thin/no consensus) where extractConfirmedVariant's own
+ * defense-in-depth copy of this check never gets to run.
+ *
+ * Real production case (ASM #300, 2026-08-02): a client-forwarded
+ * variant="facsimile" (Vision's own free-form `variant` field) reached
+ * confirmedVariant unconditionally, rejecting 30/30 sold comps on
+ * axis:printing — while the SAME scan's structured isReprint/editionType
+ * fields (and Vision's own free-text condition report) described a raw
+ * first print with no facsimile indication. Structural reason: a
+ * facsimile is a photographic reproduction of the original cover — image
+ * search (and a free-form guess influenced by a facsimile-dominated
+ * reverse-image pool) cannot distinguish a facsimile from a first print
+ * by definition. Only the physical object's own indicia can, which is
+ * exactly what isReprint/editionType are prompted to require ("EXPLICIT
+ * indicators only... Do NOT infer from cover-art recognition alone...
+ * default to false when uncertain") — stricter than the free-form
+ * `variant` field's own general "SHORT STANDARDIZED description"
+ * instruction. Per dispatch: use structured Vision fields, never the
+ * free-text condition report (reason) — deliberately not consulted here.
+ *
+ * Deliberately coarse: an uncorroborated printing-axis claim nulls the
+ * ENTIRE visionVariant string, not just the printing token — surgical
+ * extraction would need to map a normalized axis token ('reprint', the
+ * shared label for reprint/facsimile/2nd-print/3rd-print alike) back to
+ * whichever original substring produced it, which extractVariantTokens
+ * doesn't preserve. A variant string genuinely carrying BOTH a printing
+ * claim and another legitimate axis (e.g. "newsstand facsimile") is rare
+ * enough, and the failure mode of over-suppressing is a small miss (a
+ * lost coverType/distribution word) versus the failure mode of
+ * under-suppressing (a $175-est book priced at $19 off contaminated
+ * comps) — conservative direction preferred when uncertain, per standing
+ * doctrine.
+ *
+ * @param {string|null} visionVariant - req.body.variant (free-form, unvalidated)
+ * @param {boolean} visionIsReprint - req.body.isReprint (structured)
+ * @param {string|null} visionEditionType - req.body.editionType (structured)
+ * @returns {{ safeVariant: string|null, conflict: null | { claimed: string, isReprint: boolean, editionType: string|null } }}
+ */
+export const validateVisionPrintingClaim = (visionVariant, visionIsReprint, visionEditionType) => {
+  if (!visionVariant) return { safeVariant: visionVariant, conflict: null };
+  const printingAxis = extractVariantTokensByAxis(String(visionVariant)).printing;
+  if (printingAxis.length === 0) return { safeVariant: visionVariant, conflict: null };
+
+  const editionTypeLower = String(visionEditionType || '').toLowerCase().trim();
+  const corroborated = visionIsReprint === true || editionTypeLower === 'reprint' || editionTypeLower === 'facsimile';
+  if (corroborated) return { safeVariant: visionVariant, conflict: null };
+
+  return {
+    safeVariant: null,
+    conflict: {
+      claimed: String(visionVariant),
+      isReprint: visionIsReprint === true,
+      editionType: visionEditionType || null,
+    },
+  };
 };
 
 /**
@@ -612,7 +680,19 @@ export const extractConfirmedVariant = (
   visualItems,
   visionVariant,
   bookYear,
-  visionConfidence
+  visionConfidence,
+  // GrailKey Commit D1/D2 (2026-08-02, ASM #300 facsimile-injection
+  // dispatch) — Vision's OWN structured printing/edition read
+  // (grade.js JSON_SHAPE isReprint/editionType — deliberately prompted
+  // "do NOT infer from cover-art recognition alone... default to false
+  // when uncertain," stricter than the free-form `variant` field). Used
+  // ONLY as a corroboration check for visionVariant's own printing-axis
+  // content below (D2) — never as an independent adoption source, and
+  // never touches the comp-pool consensus mechanism at all (D1).
+  // Optional, default false/null — every pre-existing call site (there
+  // is exactly one, api/enrich.js) is unaffected until it opts in.
+  visionIsReprint = false,
+  visionEditionType = null
 ) => {
   // Gate 1: visualItems must exist
   if (!Array.isArray(visualItems) || visualItems.length === 0) {
@@ -694,6 +774,20 @@ export const extractConfirmedVariant = (
   // artist distinguishing-ratio check below — count of pool items that
   // actually had a title to extract tokens from.
   let consideredCount = 0;
+  // GrailKey Commit D1 (2026-08-02) — printing/edition axis (reprint/
+  // facsimile/Nth-print) tracked SEPARATELY from the consensus token
+  // arrays above. Deliberately never joins allConventions/allExclusives/
+  // allArtists/allLimitations and never gets a `consensus.printing`
+  // entry below — a facsimile is a photographic reproduction of the
+  // original cover; image search cannot distinguish a facsimile from a
+  // first print by definition (a famous key's reverse-image pool is
+  // routinely facsimile-dominated regardless of which printing the user
+  // actually holds — same confound Q98 already ruled on for the
+  // reprint-ratio polybag signal). Printing/edition status describes the
+  // physical object in hand and may never be adopted from marketplace
+  // comp text alone. Surfaced below as an informational reference
+  // candidate only — never folded into confirmedVariant.
+  const allPrintings = [];
 
   for (const item of visualItems) {
     const rawTitle = item?.rawTitle || '';
@@ -702,6 +796,10 @@ export const extractConfirmedVariant = (
 
     // Extract tokens using imageSearchIdentity helper
     const tokens = extractVariantTokens(rawTitle);
+
+    // D1 — printing-axis tokens, reference-only (see comment above).
+    const printingAxis = extractVariantTokensByAxis(rawTitle).printing;
+    if (printingAxis.length > 0) allPrintings.push(printingAxis[0]);
 
     // Convention tokens (c2e2, sdcc, nycc, fanexpo, etc.)
     const convention = tokens.find((t) =>
@@ -879,8 +977,56 @@ export const extractConfirmedVariant = (
   // of replacing preserves Vision's edition-type read while still adding
   // whatever the eBay pool corroborates. Backfill path (visionVariant
   // falsy) is unaffected — nothing to prepend, identical to prior output.
+  // D1 — printing-axis reference candidate. Never joins `consensus`
+  // (that dict is what `parts` below reads from), so it structurally
+  // cannot reach confirmedVariant — surfaced here purely as an
+  // informational reference for a future user-confirm prompt, only when
+  // the function already has other consensus to return (a pool with
+  // ONLY printing-axis agreement and nothing else returns null above,
+  // same as before this dispatch — see D2's gate at the actual
+  // unconditional injection point, api/enrich.js, for the real fix).
+  const topPrinting = mode(allPrintings);
+  const printingReferenceCandidate =
+    topPrinting && count(allPrintings, topPrinting) >= 2 ? topPrinting : null;
+  if (printingReferenceCandidate) {
+    console.log(
+      `[variant-identity] printing-axis reference candidate: "${printingReferenceCandidate}" ` +
+      `(${count(allPrintings, topPrinting)}/${consideredCount}) — NOT adopted into confirmedVariant ` +
+      `(D1: printing/edition status may never be adopted from marketplace comp text alone)`
+    );
+  }
+
+  // D2 — Vision non-contradiction gate. visionVariant's OWN printing-axis
+  // content (e.g. Vision's free-form variant field literally reading
+  // "facsimile") is only trustworthy when corroborated by Vision's own,
+  // separately and more strictly prompted structured fields
+  // (isReprint/editionType — grade.js JSON_SHAPE: "EXPLICIT indicators
+  // only... Do NOT infer from cover-art recognition alone... default to
+  // false when uncertain"). Uncorroborated, it is not adopted — the
+  // override-path passthrough below drops it rather than blindly
+  // including it. This mirrors the primary fix applied at the true
+  // unconditional injection point (api/enrich.js, where confirmedVariant
+  // is DEFAULT-initialized from the same raw value even when this
+  // function finds no pool consensus at all and returns null early) —
+  // defense-in-depth for the case pool consensus DOES fire alongside an
+  // uncorroborated Vision printing claim.
+  let effectiveVisionVariant = visionVariant;
+  let visionPrintingConflict = null;
+  if (!isBackfill && visionVariant) {
+    const claimCheck = validateVisionPrintingClaim(visionVariant, visionIsReprint, visionEditionType);
+    if (claimCheck.conflict) {
+      visionPrintingConflict = claimCheck.conflict;
+      effectiveVisionVariant = null;
+      console.log(
+        `[variant-identity] D2 conflict: visionVariant="${visionVariant}" claims a printing/edition ` +
+        `status not corroborated by structured fields (isReprint=${visionIsReprint}, ` +
+        `editionType="${visionEditionType || 'null'}") — not adopted, surfaced as conflict only`
+      );
+    }
+  }
+
   const parts = [];
-  if (!isBackfill && visionVariant) parts.push(String(visionVariant).trim());
+  if (!isBackfill && effectiveVisionVariant) parts.push(String(effectiveVisionVariant).trim());
   if (consensus.convention) parts.push(consensus.convention);
   if (consensus.exclusive) parts.push(consensus.exclusive);
   if (consensus.artist) parts.push(consensus.artist);
@@ -901,5 +1047,10 @@ export const extractConfirmedVariant = (
     // book" signal, kept separate from the free-text confirmedVariant so it
     // never reaches title-family clustering or eBay query construction.
     signedConsensus: !!consensus.signed,
+    // D1 — printing-axis reference candidate, informational only.
+    printingReferenceCandidate,
+    // D2 — non-null only when visionVariant's own printing claim was
+    // rejected for lack of structured-field corroboration.
+    visionPrintingConflict,
   };
 };

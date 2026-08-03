@@ -134,7 +134,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
 // eBay image search). Overrides Vision variant field when ≥2 eBay listings
 // agree on specific tokens (convention, artist, exclusive, limitation).
-import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear, pcMatchConflictsWithPoolName, pcMatchMissingFamilyDiscriminator, hasUnresolvedActiveVariantConflict, isVariantProvenanceValid } from "../src/lib/variantIdentity.js";
+import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear, pcMatchConflictsWithPoolName, pcMatchMissingFamilyDiscriminator, hasUnresolvedActiveVariantConflict, isVariantProvenanceValid, validateVisionPrintingClaim } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
 import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
 // Q118 — internal consistency checker (Vision's free-text reason vs its own structured fields).
@@ -4559,6 +4559,35 @@ export default async function handler(req, res) {
     }
     const safeReqVariant = (suppressVariantForYearConflict || !variantProvenanceValid) ? null : (req.body.variant || null);
 
+    // GrailKey Commit D2 (2026-08-02, ASM #300 facsimile-injection
+    // dispatch) — the true unconditional injection point: confirmedVariant
+    // is DEFAULT-initialized from safeReqVariant a few lines below,
+    // whether or not extractConfirmedVariant ever finds pool consensus
+    // (it early-returns null on zero consensus, which a facsimile-
+    // dominated but otherwise-non-agreeing pool hits routinely). Gate
+    // ONCE here, before that seed is used anywhere, rather than only
+    // inside extractConfirmedVariant (whose own copy of this same check,
+    // added the same dispatch, is defense-in-depth for the case pool
+    // consensus DOES fire — it cannot reach the zero-consensus path).
+    // req.body.variant itself is left untouched for its other existing
+    // consumers (variant-multiplier block, computePriceBandsFromSold,
+    // AI-verify prompt) — out of scope for this dispatch, which is
+    // specifically about what becomes confirmedVariant for pricing.
+    const visionPrintingClaimCheck = validateVisionPrintingClaim(
+      safeReqVariant,
+      req.body?.isReprint,
+      req.body?.editionType
+    );
+    if (visionPrintingClaimCheck.conflict) {
+      out.visionPrintingConflict = visionPrintingClaimCheck.conflict;
+      console.log(
+        `[variant-printing-gate] D2 conflict: req.body.variant="${safeReqVariant}" claims a printing/edition ` +
+        `status not corroborated by structured fields (isReprint=${req.body?.isReprint}, ` +
+        `editionType="${req.body?.editionType || 'null'}") — confirmedVariant seed suppressed`
+      );
+    }
+    const safeVariantForConfirmed = visionPrintingClaimCheck.safeVariant;
+
     // Ship #20a.6.18 — Variant identity check (additive, gated). Only runs
     // on modern books (year >= 2000) with variant detected AND Vision
     // confidence not HIGH AND eBay image search returned results. Extracts
@@ -4578,7 +4607,7 @@ export default async function handler(req, res) {
     // real variant untouched. If extractConfirmedVariant (below) finds a
     // pool-derived consensus, it overwrites this null with THAT — pool-
     // derived or honestly-null, never the overruled source.
-    let confirmedVariant = identityIsProvisionalOverride ? null : safeReqVariant;
+    let confirmedVariant = identityIsProvisionalOverride ? null : safeVariantForConfirmed;
     let variantIdentitySource = 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
@@ -4595,7 +4624,7 @@ export default async function handler(req, res) {
     // back to Vision's variant field. The Q100 FIX-A auth-token strip is
     // applied downstream in fetchComps/api/comps.js using confirmedLabelType.
     if (cgcIdentityConfirmed) {
-      confirmedVariant = cgcResult.variant || safeReqVariant || null;
+      confirmedVariant = cgcResult.variant || safeVariantForConfirmed || null;
       variantIdentitySource = cgcResult.variant ? 'cgc_cert' : 'vision';
       console.log(`[cgc-variant] source=${cgcResult.variant ? 'cgc' : 'vision'} value="${confirmedVariant || ''}"`);
     } else {
@@ -4689,7 +4718,9 @@ export default async function handler(req, res) {
       variantSourceItems,
       safeReqVariant,
       variantBookYear,
-      confidence
+      confidence,
+      req.body?.isReprint,
+      req.body?.editionType
     );
     if (variantCheck) {
       confirmedVariant = variantCheck.confirmedVariant;
@@ -4697,6 +4728,21 @@ export default async function handler(req, res) {
       variantConsensus = variantCheck.consensus;
       variantOverriddenVision = variantCheck.overriddenVision;
       confirmedSignedConsensus = variantCheck.signedConsensus === true;
+
+      // GrailKey Commit D1/D2 — I13 (log-card fidelity): surface both,
+      // never silently drop. printingReferenceCandidate is informational
+      // (pool agrees on a printing signal, not adopted into pricing);
+      // visionPrintingConflict overrides the enrich.js-level gate's own
+      // (identical-shape) value only when THIS call is the one that
+      // actually detected it — the pool-consensus path can find a
+      // conflict the earlier, zero-consensus-unaware gate had no chance
+      // to see yet if extractConfirmedVariant reaches its own gate first.
+      if (variantCheck.printingReferenceCandidate) {
+        out.printingReferenceCandidate = variantCheck.printingReferenceCandidate;
+      }
+      if (variantCheck.visionPrintingConflict) {
+        out.visionPrintingConflict = variantCheck.visionPrintingConflict;
+      }
 
       // Q99-B: an artist-facsimile's own listings (Skottie Young 2023, etc.)
       // are more authoritative on publication year than CV's volume
