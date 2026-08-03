@@ -1472,6 +1472,22 @@ export const extractKeyFromComps = (titles) => {
 const PRICECHARTING_EXCLUDE =
   /facsimile|reprint|homage|variant|walmart|newsstand|mexican|authentix|true believers|marvel tales|card stock|cardstock|foil cover|sketch cover|blank cover|trade dress|virgin cover|gold foil|silver foil/i;
 
+// GrailKey Commit M2 (2026-08-03, Iron Man #126 signed-edition class) —
+// PC's own '#' convention is unambiguous: a genuine issue number is
+// ALWAYS '#' + digits ("#126"). A '#' immediately followed by a LETTER
+// is structurally never an issue number — it's a certification/signing
+// SKU code. Real evidence: "Bob Layton The Invincible Iron Man Vol.1 126
+// #CC-BL" (a signed/certified edition, confirmed via Commit L's
+// diagnostic) — "#CC-BL" is exactly this shape. Loosening issueRe (M1,
+// below) to accept a bare "126" without a leading '#' would otherwise
+// ALSO admit this exact product (it carries "126" bare in "Vol.1 126"),
+// pricing a raw copy off a signed-edition entry — worse than no match at
+// all. This check is what keeps that from happening. Deliberately a
+// structural signal (letter immediately after '#'), not a name/alias
+// list — generalizes to any PC-cataloged signed/certified SKU without
+// needing to know the specific signer or service.
+const PC_SKU_CODE_RE = /#[a-z]/i;
+
 // Token-health visibility (dispatch 2026-07-16). PC gives no dedicated
 // status endpoint — an expired/invalid token surfaces as either a 401/403/410
 // HTTP status or (observed in practice) an HTTP 200 with an error string in
@@ -1553,34 +1569,26 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
 
   try {
     const seriesName = String(title).replace(/#\s*\d+/, "").trim();
-    const query = issue ? `${seriesName} ${issue}` : seriesName;
-    const url =
-      `https://www.pricecharting.com/api/products` +
-      `?q=${encodeURIComponent(query)}&type=comic&t=${encodeURIComponent(token)}`;
-    console.log(`[pricecharting] query="${query}"`);
-    const res = await fetch(url);
-    if (!res.ok) {
-      const bodyText = await res.text().catch(() => "");
-      if (flagPcTokenErrorIfPresent(res.status, bodyText, pcDiag)) return null;
-      console.error(`[pricecharting] HTTP ${res.status}`);
-      return null;
-    }
-    const json = await res.json();
-    // PC's auth failures aren't always a non-2xx status — the API has been
-    // observed returning HTTP 200 with an error payload for an expired
-    // token. Check the body regardless of res.ok.
-    if (json && typeof json.error === "string" && flagPcTokenErrorIfPresent(res.status, json.error, pcDiag)) {
-      return null;
-    }
-    const products = Array.isArray(json?.products) ? json.products : [];
-    if (products.length === 0) {
-      console.log(`[pc-reject] query="${query}" — reason=zero-products (PC's own search returned nothing)`);
-      return null;
-    }
 
     const issueStr = issue ? String(issue).trim() : null;
+    // GrailKey Commit M1 (2026-08-03, Iron Man #126 class) — was
+    // `#${issueStr}\b` (required a literal '#' immediately before the
+    // digits). PC formats some products with a BARE issue number ("Vol.1
+    // 126", no '#' at all) — confirmed via Commit L's diagnostic: PC's
+    // single returned candidate for Iron Man #126 carried "126" bare,
+    // and its only '#' was on an unrelated SKU suffix ("#CC-BL"). `\b`
+    // on both sides is what actually does the work: it requires the
+    // digits to stand alone (not glued to another digit or letter), so
+    // "1265" and "SKU126A" still correctly fail to match while "Vol.1
+    // 126" and "Iron Man #126" (the '#' is a non-word character, so a
+    // boundary exists there either way) both succeed. False-positive
+    // risk: a product name that happened to embed the bare number as an
+    // unrelated standalone token (e.g. a price string like "$126.00" in
+    // the name field) would now match — PC's product-name field has
+    // never been observed carrying price text in any sample seen this
+    // session, so this is a theoretical, not evidenced, risk.
     const issueRe = issueStr
-      ? new RegExp(`#${issueStr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
+      ? new RegExp(`\\b${issueStr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
       : null;
 
     const comicYear = year ? parseInt(String(year).trim(), 10) : null;
@@ -1601,204 +1609,289 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         .split(/\s+/)
         .filter(t => t.length > 1 && !COMMON_TOKENS.has(t));
 
-    const queryTokens = tokenize(seriesName);
-    const mainToken = queryTokens[0];
-
-    // Q86: unproven-year candidates that fail the year gate are demoted to
-    // a fallback rank instead of rejected — a Vision-guessed year must not
-    // veto the only real product match (Funny Book #1 1971 class).
-    const q86Fallbacks = [];
-    // Q88(a): below-quorum era is ADVISORY — out-of-era candidates are
-    // demoted (rank penalty), never rejected. Any in-era product wins first.
-    const eraFallbacks = [];
-    // Q108 CHANGE 2 — when no variant is confirmed, a PC product carrying a
-    // named-variant descriptor (bracket, or a paren group that isn't just
-    // the bare year) is demoted below any plain base entry. Lowest-priority
-    // fallback tier — only consulted once era/year fallbacks are exhausted.
-    const variantFallbacks = [];
     const hasVariantDescriptor = (name) => {
       if (/\[[^\]]+\]/.test(name)) return true;
       const parenGroups = name.match(/\(([^)]*)\)/g) || [];
       return parenGroups.some((g) => !/^\(\s*\d{4}\s*\)$/.test(g));
     };
 
-    for (const p of products) {
-      const name = p["product-name"] || "";
-      // GrailKey Commit L (2026-08-03) — I13 applied to PC matching: the
-      // trace must carry both the rejected candidate and the reason.
-      // These two checks previously rejected silently (bare `continue`,
-      // no log) — the Iron Man #126 class (PC returns exactly 1 product,
-      // "no valid match" with zero visibility into why). Log only, no
-      // behavior/filter change.
-      const excludeMatch = PRICECHARTING_EXCLUDE.exec(name);
-      if (excludeMatch) {
-        console.log(`[pc-reject] "${name}" — reason=exclude:${excludeMatch[0]}`);
-        continue;
-      }
-      if (issueRe && !issueRe.test(name)) {
-        console.log(`[pc-reject] "${name}" — reason=issue-regex`);
-        continue;
-      }
-
-      // Year validation: reject products from the wrong era — unless the
-      // claimed year is UNPROVEN (Q86): then mismatch = rank penalty only.
-      let q86YearMismatch = false;
-      if (comicYear) {
-        const yearMatch = name.match(/\((\d{4})\)/);
-        const productYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
-        if (productYear && Math.abs(productYear - comicYear) > 5) {
-          if (yearConfidence === 'unproven') {
-            q86YearMismatch = true; // demote below year-matching candidates
-          } else {
-            console.log(`[pricecharting] skipping "${name}" — year ${productYear} vs ${comicYear}`);
-            continue;
-          }
-        }
-      }
-
-      // Ship #20a.6.7b.1 — Token overlap validation. Skip when the main
-      // query token (first substantive word) is absent from the product name.
-      // Q85: compact-key fallback — "Funnybook" query vs "Funny Book #1
-      // (1971)" product: mainToken "funnybook" is absent at token level
-      // but the compact keys are identical. Strict containment of the
-      // whole compacted series name (≥4 chars) in the compacted product
-      // name rescues compound-spacing variants.
-      if (mainToken) {
-        const productTokens = tokenize(name);
-        if (!productTokens.includes(mainToken)) {
-          const seriesKey = compactTitleKey(seriesName);
-          const productKey = compactTitleKey(name);
-          if (seriesKey.length >= 4 && productKey.includes(seriesKey)) {
-            console.log(`[Q85] compact-key rescue: "${seriesName}" ⊂ "${name}"`);
-          } else {
-            console.log(`[pricecharting] skipping "${name}" — main token "${mainToken}" absent`);
-            console.log(`[pc-reject] "${name}" — reason=main-token`);
-            continue;
-          }
-        }
-      }
-
-      const cents = p["loose-price"];
-      if (cents == null || isNaN(cents) || cents <= 0) {
-        console.log(`[pc-reject] "${name}" — reason=no-price (loose-price=${cents})`);
-        continue;
-      }
-      const price = cents / 100;
-      const yearMatch2 = name.match(/\((\d{4})\)/);
-      const productYear = yearMatch2 ? parseInt(yearMatch2[1], 10) : null;
-      console.log(`[pt] matched: "${name}" year: ${productYear} comic year: ${comicYear}`);
-      // Stricter era check: skip if year gap > 5 (Q86: unproven → demote)
-      if (comicYear && productYear && Math.abs(productYear - comicYear) > 5) {
-        if (yearConfidence === 'unproven') {
-          q86YearMismatch = true;
-        } else {
-          console.log(`[pt] year mismatch — skipping`);
-          continue;
-        }
-      }
-      const candidate = { price, productName: name, id: p.id, year: productYear, source: "pricecharting" };
-      // Q108 CHANGE 2 — a product name carrying a variant descriptor is
-      // deferred (not returned immediately) regardless of whether variant
-      // is confirmed — Q-PC-VARIANT-SCORE (below) needs to see the FULL
-      // set of bracket candidates to score them, not just the first one PC
-      // happens to list. Null confirmedVariant: unchanged, a plain/
-      // unbracketed entry still wins outright via the early return below
-      // (Q108's original base-preference, untouched). Populated
-      // confirmedVariant: previously these fell through to an immediate
-      // `return candidate` on whichever bracket PC listed FIRST — the
-      // Captain America [Steranko] #25 (2017) class bug, an unrelated
-      // printing beating the actual [Young] #25 (2020) variant in hand
-      // purely by API ordering. Scored at resolution time instead.
-      if (hasVariantDescriptor(name)) {
-        console.log(
-          variant
-            ? `[pc-anchor] deferred "${name}" for variant-match scoring against "${variant}"`
-            : `[pc-anchor] deprioritized "${name}" — variant descriptor present, confirmedVariant=null`
-        );
-        variantFallbacks.push(candidate);
-        continue;
-      }
-      if (q86YearMismatch) {
-        q86Fallbacks.push(candidate);
-        continue; // keep scanning for a year-matching product first
-      }
-      // Q88(a): advisory-era rank penalty — a year-passing candidate outside
-      // the advisory era is demoted, preferring any in-era product.
-      if (eraHint && productYear && (productYear < eraHint.minYear || productYear > eraHint.maxYear)) {
-        eraFallbacks.push(candidate);
-        continue;
-      }
-      if (variantFallbacks.length > 0) {
-        console.log(`[pc-anchor] base entry preferred over ${variantFallbacks.length} deferred variant candidate(s)`);
-      }
-      console.log(`[pc-accept] "${candidate.productName}" — reason=base-entry`);
-      return candidate;
-    }
-    // Q88(a): no in-era product — accept the best out-of-era candidate.
-    // Advisory era (below quorum) is a rank penalty, never a rejection.
-    if (eraFallbacks.length > 0) {
-      const fb = eraFallbacks[0];
-      console.log(
-        `[22a] era-advisory demotion tolerated: "${fb.productName}" (${fb.year}) ` +
-        `outside advisory ${eraHint.decade}s — no in-era product`
-      );
-      console.log(`[pc-accept] "${fb.productName}" — reason=era-advisory-fallback`);
-      return { ...fb, eraAdvisoryConflict: true };
-    }
-    // Q86: no year-matching product — accept the best year-mismatched
-    // candidate when the claimed year was unproven (rank penalty, not
-    // rejection). Product-page year becomes the better anchor downstream.
-    if (q86Fallbacks.length > 0) {
-      const fb = q86Fallbacks[0];
-      // Q86-B: BOUND the tolerance. A 38y-gap DIFFERENT book slipped through
-      // (CA Special 1984 → Winter Soldier Special 2022). Tolerance requires
-      // compact-title containment BOTH directions — the claimed series key
-      // must equal the product's core key (issue/paren stripped, articles
-      // dropped) — AND a year gap ≤15y. Else no-match stands.
-      const q86bGap = (comicYear && fb.year) ? Math.abs(fb.year - comicYear) : null;
-      const q86bCoreKey = (s) => compactTitleKey(
-        String(s || '').toLowerCase().replace(/\b(?:the|a|an)\b/g, ' ')
-      );
-      const productCore = String(fb.productName || '')
-        .replace(/#\s*[\d.]+.*$/, ' ')
-        .replace(/\([^)]*\)/g, ' ');
-      const claimedKey = q86bCoreKey(seriesName);
-      const productKey = q86bCoreKey(productCore);
-      const coreEquivalent = claimedKey.length >= 4 && claimedKey === productKey;
-      if (!coreEquivalent || q86bGap == null || q86bGap > 15) {
-        console.log(
-          `[Q86-B] tolerance rejected: "${fb.productName}" gap=${q86bGap}y ` +
-          `claimedKey="${claimedKey}" productKey="${productKey}" — no-match stands`
-        );
+    // GrailKey Commit M (2026-08-03) — the fetch + match-loop, extracted
+    // to a closure so it can run against more than one query text (M3,
+    // below) without duplicating the ~100 lines of matching logic.
+    // Unchanged from the pre-M implementation except: (1) issueRe
+    // loosened per M1 above, (2) PC_SKU_CODE_RE exclusion added per M2,
+    // (3) every raw candidate logged via [pc-candidate] before any
+    // filtering — the Phase 0 diagnostic the dispatch asked for, kept
+    // permanently rather than thrown away, since it's needed for every
+    // future rejection this cheaply.
+    const attemptPcSearch = async (attemptSeriesName) => {
+      const query = issue ? `${attemptSeriesName} ${issue}` : attemptSeriesName;
+      const url =
+        `https://www.pricecharting.com/api/products` +
+        `?q=${encodeURIComponent(query)}&type=comic&t=${encodeURIComponent(token)}`;
+      console.log(`[pricecharting] query="${query}"`);
+      const res = await fetch(url);
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => "");
+        if (flagPcTokenErrorIfPresent(res.status, bodyText, pcDiag)) return null;
+        console.error(`[pricecharting] HTTP ${res.status}`);
         return null;
       }
-      console.log(
-        `[Q86] year-mismatch tolerated (unproven year): "${fb.productName}" ` +
-        `product-year=${fb.year} vs claimed=${comicYear} (Q86-B: core-equivalent, gap=${q86bGap}y)`
-      );
-      console.log(`[pc-accept] "${fb.productName}" — reason=year-mismatch-tolerated`);
-      return { ...fb, yearMismatchTolerated: true };
+      const json = await res.json();
+      // PC's auth failures aren't always a non-2xx status — the API has
+      // been observed returning HTTP 200 with an error payload for an
+      // expired token. Check the body regardless of res.ok.
+      if (json && typeof json.error === "string" && flagPcTokenErrorIfPresent(res.status, json.error, pcDiag)) {
+        return null;
+      }
+      const products = Array.isArray(json?.products) ? json.products : [];
+      if (products.length === 0) {
+        console.log(`[pc-reject] query="${query}" — reason=zero-products (PC's own search returned nothing)`);
+        return null;
+      }
+      for (const p of products) {
+        console.log(`[pc-candidate] "${p["product-name"] || ''}"`);
+      }
+
+      const queryTokens = tokenize(attemptSeriesName);
+      const mainToken = queryTokens[0];
+
+      // Q86: unproven-year candidates that fail the year gate are demoted
+      // to a fallback rank instead of rejected — a Vision-guessed year
+      // must not veto the only real product match (Funny Book #1 1971
+      // class).
+      const q86Fallbacks = [];
+      // Q88(a): below-quorum era is ADVISORY — out-of-era candidates are
+      // demoted (rank penalty), never rejected. Any in-era product wins
+      // first.
+      const eraFallbacks = [];
+      // Q108 CHANGE 2 — when no variant is confirmed, a PC product
+      // carrying a named-variant descriptor (bracket, or a paren group
+      // that isn't just the bare year) is demoted below any plain base
+      // entry. Lowest-priority fallback tier — only consulted once
+      // era/year fallbacks are exhausted.
+      const variantFallbacks = [];
+
+      for (const p of products) {
+        const name = p["product-name"] || "";
+        // GrailKey Commit L (2026-08-03) — I13 applied to PC matching:
+        // the trace must carry both the rejected candidate and the
+        // reason. These previously rejected silently (bare `continue`,
+        // no log) — the Iron Man #126 class (PC returns exactly 1
+        // product, "no valid match" with zero visibility into why).
+        const excludeMatch = PRICECHARTING_EXCLUDE.exec(name);
+        if (excludeMatch) {
+          console.log(`[pc-reject] "${name}" — reason=exclude:${excludeMatch[0]}`);
+          continue;
+        }
+        // GrailKey Commit M2 (2026-08-03) — signed/certified SKU
+        // exclusion. MUST run before issueRe (below): M1 loosened
+        // issueRe to accept a bare issue number, which would otherwise
+        // ALSO admit a signed-edition product carrying that same bare
+        // number ("Vol.1 126") — this check keeps that from happening.
+        // See PC_SKU_CODE_RE's own doc comment for the full rationale.
+        const skuMatch = PC_SKU_CODE_RE.exec(name);
+        if (skuMatch) {
+          console.log(`[pc-reject] "${name}" — reason=signed-sku:${skuMatch[0]}`);
+          continue;
+        }
+        if (issueRe && !issueRe.test(name)) {
+          console.log(`[pc-reject] "${name}" — reason=issue-regex`);
+          continue;
+        }
+
+        // Year validation: reject products from the wrong era — unless
+        // the claimed year is UNPROVEN (Q86): then mismatch = rank
+        // penalty only.
+        let q86YearMismatch = false;
+        if (comicYear) {
+          const yearMatch = name.match(/\((\d{4})\)/);
+          const productYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
+          if (productYear && Math.abs(productYear - comicYear) > 5) {
+            if (yearConfidence === 'unproven') {
+              q86YearMismatch = true; // demote below year-matching candidates
+            } else {
+              console.log(`[pricecharting] skipping "${name}" — year ${productYear} vs ${comicYear}`);
+              continue;
+            }
+          }
+        }
+
+        // Ship #20a.6.7b.1 — Token overlap validation. Skip when the main
+        // query token (first substantive word) is absent from the
+        // product name. Q85: compact-key fallback — "Funnybook" query
+        // vs "Funny Book #1 (1971)" product: mainToken "funnybook" is
+        // absent at token level but the compact keys are identical.
+        // Strict containment of the whole compacted series name (≥4
+        // chars) in the compacted product name rescues compound-spacing
+        // variants.
+        if (mainToken) {
+          const productTokens = tokenize(name);
+          if (!productTokens.includes(mainToken)) {
+            const seriesKey = compactTitleKey(attemptSeriesName);
+            const productKey = compactTitleKey(name);
+            if (seriesKey.length >= 4 && productKey.includes(seriesKey)) {
+              console.log(`[Q85] compact-key rescue: "${attemptSeriesName}" ⊂ "${name}"`);
+            } else {
+              console.log(`[pricecharting] skipping "${name}" — main token "${mainToken}" absent`);
+              console.log(`[pc-reject] "${name}" — reason=main-token`);
+              continue;
+            }
+          }
+        }
+
+        const cents = p["loose-price"];
+        if (cents == null || isNaN(cents) || cents <= 0) {
+          console.log(`[pc-reject] "${name}" — reason=no-price (loose-price=${cents})`);
+          continue;
+        }
+        const price = cents / 100;
+        const yearMatch2 = name.match(/\((\d{4})\)/);
+        const productYear = yearMatch2 ? parseInt(yearMatch2[1], 10) : null;
+        console.log(`[pt] matched: "${name}" year: ${productYear} comic year: ${comicYear}`);
+        // Stricter era check: skip if year gap > 5 (Q86: unproven → demote)
+        if (comicYear && productYear && Math.abs(productYear - comicYear) > 5) {
+          if (yearConfidence === 'unproven') {
+            q86YearMismatch = true;
+          } else {
+            console.log(`[pt] year mismatch — skipping`);
+            continue;
+          }
+        }
+        const candidate = { price, productName: name, id: p.id, year: productYear, source: "pricecharting" };
+        // Q108 CHANGE 2 — a product name carrying a variant descriptor is
+        // deferred (not returned immediately) regardless of whether
+        // variant is confirmed — Q-PC-VARIANT-SCORE (below) needs to see
+        // the FULL set of bracket candidates to score them, not just the
+        // first one PC happens to list. Null confirmedVariant: unchanged,
+        // a plain/unbracketed entry still wins outright via the early
+        // return below (Q108's original base-preference, untouched).
+        // Populated confirmedVariant: previously these fell through to
+        // an immediate `return candidate` on whichever bracket PC listed
+        // FIRST — the Captain America [Steranko] #25 (2017) class bug,
+        // an unrelated printing beating the actual [Young] #25 (2020)
+        // variant in hand purely by API ordering. Scored at resolution
+        // time instead.
+        if (hasVariantDescriptor(name)) {
+          console.log(
+            variant
+              ? `[pc-anchor] deferred "${name}" for variant-match scoring against "${variant}"`
+              : `[pc-anchor] deprioritized "${name}" — variant descriptor present, confirmedVariant=null`
+          );
+          variantFallbacks.push(candidate);
+          continue;
+        }
+        if (q86YearMismatch) {
+          q86Fallbacks.push(candidate);
+          continue; // keep scanning for a year-matching product first
+        }
+        // Q88(a): advisory-era rank penalty — a year-passing candidate
+        // outside the advisory era is demoted, preferring any in-era
+        // product.
+        if (eraHint && productYear && (productYear < eraHint.minYear || productYear > eraHint.maxYear)) {
+          eraFallbacks.push(candidate);
+          continue;
+        }
+        if (variantFallbacks.length > 0) {
+          console.log(`[pc-anchor] base entry preferred over ${variantFallbacks.length} deferred variant candidate(s)`);
+        }
+        console.log(`[pc-accept] "${candidate.productName}" — reason=base-entry`);
+        return candidate;
+      }
+      // Q88(a): no in-era product — accept the best out-of-era candidate.
+      // Advisory era (below quorum) is a rank penalty, never a rejection.
+      if (eraFallbacks.length > 0) {
+        const fb = eraFallbacks[0];
+        console.log(
+          `[22a] era-advisory demotion tolerated: "${fb.productName}" (${fb.year}) ` +
+          `outside advisory ${eraHint.decade}s — no in-era product`
+        );
+        console.log(`[pc-accept] "${fb.productName}" — reason=era-advisory-fallback`);
+        return { ...fb, eraAdvisoryConflict: true };
+      }
+      // Q86: no year-matching product — accept the best year-mismatched
+      // candidate when the claimed year was unproven (rank penalty, not
+      // rejection). Product-page year becomes the better anchor
+      // downstream.
+      if (q86Fallbacks.length > 0) {
+        const fb = q86Fallbacks[0];
+        // Q86-B: BOUND the tolerance. A 38y-gap DIFFERENT book slipped
+        // through (CA Special 1984 → Winter Soldier Special 2022).
+        // Tolerance requires compact-title containment BOTH directions —
+        // the claimed series key must equal the product's core key
+        // (issue/paren stripped, articles dropped) — AND a year gap
+        // ≤15y. Else no-match stands.
+        const q86bGap = (comicYear && fb.year) ? Math.abs(fb.year - comicYear) : null;
+        const q86bCoreKey = (s) => compactTitleKey(
+          String(s || '').toLowerCase().replace(/\b(?:the|a|an)\b/g, ' ')
+        );
+        const productCore = String(fb.productName || '')
+          .replace(/#\s*[\d.]+.*$/, ' ')
+          .replace(/\([^)]*\)/g, ' ');
+        const claimedKey = q86bCoreKey(attemptSeriesName);
+        const productKey = q86bCoreKey(productCore);
+        const coreEquivalent = claimedKey.length >= 4 && claimedKey === productKey;
+        if (!coreEquivalent || q86bGap == null || q86bGap > 15) {
+          console.log(
+            `[Q86-B] tolerance rejected: "${fb.productName}" gap=${q86bGap}y ` +
+            `claimedKey="${claimedKey}" productKey="${productKey}" — no-match stands`
+          );
+          return null;
+        }
+        console.log(
+          `[Q86] year-mismatch tolerated (unproven year): "${fb.productName}" ` +
+          `product-year=${fb.year} vs claimed=${comicYear} (Q86-B: core-equivalent, gap=${q86bGap}y)`
+        );
+        console.log(`[pc-accept] "${fb.productName}" — reason=year-mismatch-tolerated`);
+        return { ...fb, yearMismatchTolerated: true };
+      }
+      // Q108 CHANGE 2 — no base entry survived at all; the only usable
+      // data is a named-variant product. Deprioritized, not excluded —
+      // fall back to it rather than refuse a price outright.
+      // Q-PC-VARIANT-SCORE — when confirmedVariant is populated, pick
+      // the candidate whose bracket best matches it (Captain America
+      // [Young] #25 (2020) over an unrelated [Steranko] #25 (2017) that
+      // merely happened to rank first in PC's own API order). Null
+      // confirmedVariant: selectBestVariantCandidate returns
+      // candidates[0] — identical to the prior arbitrary/first-
+      // encountered behavior, unchanged.
+      if (variantFallbacks.length > 0) {
+        const fb = selectBestVariantCandidate(variantFallbacks, variant);
+        console.log(
+          variant
+            ? `[pc-anchor] variant-scored: "${fb.productName}" best matches confirmedVariant="${variant}" (of ${variantFallbacks.length} candidates)`
+            : `[pc-anchor] no base entry found — falling back to variant entry "${fb.productName}"`
+        );
+        console.log(`[pc-accept] "${fb.productName}" — reason=variant-fallback`);
+        return { ...fb, variantFallback: true };
+      }
+      console.log(`[pricecharting] no valid match in ${products.length} results — all ${products.length} candidate(s) rejected, see [pc-reject] lines above`);
+      return null;
+    };
+
+    let result = await attemptPcSearch(seriesName);
+    if (result) return result;
+
+    // GrailKey Commit M3 (2026-08-03) — query fallback. Scoped strictly
+    // to the Phase 0 evidence: PC's own search behaves differently for
+    // an inflated masthead-banner title ("The Invincible Iron Man")
+    // than for its shorter catalog form ("Iron Man"). Rather than a
+    // hardcoded alias table (explicitly out of scope per the dispatch),
+    // this reuses the SAME tokenize/COMMON_TOKENS machinery mainToken
+    // already relies on: drop the single leading substantive word
+    // (mechanically — "Invincible" is never named explicitly anywhere
+    // in this code) and retry once. Bounded to exactly one retry, and
+    // only fires when the primary attempt found nothing — ASM #300 and
+    // every other book whose primary query already succeeds never
+    // reaches this path, so their behavior is byte-identical.
+    const fallbackTokens = tokenize(seriesName);
+    if (fallbackTokens.length >= 3) {
+      const fallbackSeriesName = fallbackTokens.slice(1).join(' ');
+      console.log(`[pc-query] primary query found no match — retrying with leading word stripped: "${seriesName}" -> "${fallbackSeriesName}"`);
+      result = await attemptPcSearch(fallbackSeriesName);
+      if (result) return result;
     }
-    // Q108 CHANGE 2 — no base entry survived at all; the only usable data
-    // is a named-variant product. Deprioritized, not excluded — fall back
-    // to it rather than refuse a price outright.
-    // Q-PC-VARIANT-SCORE — when confirmedVariant is populated, pick the
-    // candidate whose bracket best matches it (Captain America [Young]
-    // #25 (2020) over an unrelated [Steranko] #25 (2017) that merely
-    // happened to rank first in PC's own API order). Null confirmedVariant:
-    // selectBestVariantCandidate returns candidates[0] — identical to the
-    // prior arbitrary/first-encountered behavior, unchanged.
-    if (variantFallbacks.length > 0) {
-      const fb = selectBestVariantCandidate(variantFallbacks, variant);
-      console.log(
-        variant
-          ? `[pc-anchor] variant-scored: "${fb.productName}" best matches confirmedVariant="${variant}" (of ${variantFallbacks.length} candidates)`
-          : `[pc-anchor] no base entry found — falling back to variant entry "${fb.productName}"`
-      );
-      console.log(`[pc-accept] "${fb.productName}" — reason=variant-fallback`);
-      return { ...fb, variantFallback: true };
-    }
-    console.log(`[pricecharting] no valid match in ${products.length} results — all ${products.length} candidate(s) rejected, see [pc-reject] lines above`);
+
     return null;
   } catch (err) {
     console.error(`[pricecharting] error: ${err?.message || err}`);
