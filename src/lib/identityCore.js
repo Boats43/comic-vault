@@ -15,7 +15,7 @@
  * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
 
-import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership } from './compHygiene.js';
+import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership, tokenizeTitle } from './compHygiene.js';
 import { normalizeOptionalYear } from './yearEvidence.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
@@ -467,15 +467,6 @@ export const shouldSkipAssemblyIntegrityCheck = (familyDecision) =>
 export const isProvisionalRefusedIdentity = (identitySource) =>
   identitySource === 'title-family-refused-provisional';
 
-// Generic publisher/franchise words that pass on nearly every comic and
-// don't discriminate between products — filtered out of the PC-match
-// overlap check below so e.g. "comics"/"the" don't inflate the ratio.
-const PC_MATCH_COMMON_TOKENS = new Set([
-  'marvel', 'dc', 'image', 'idw', 'comics', 'comic',
-  'book', 'the', 'a', 'an', 'of', 'and', 'in', 'for',
-  'dark', 'horse', 'boom', 'archie', 'dynamite',
-]);
-
 /**
  * Q-PC-REQUERY-GATE — does a PriceCharting product name still adequately
  * represent our confirmed identity?
@@ -490,29 +481,83 @@ const PC_MATCH_COMMON_TOKENS = new Set([
  * wrongly passed. This checks the MAJORITY of confirmedTitle's substantive
  * tokens, not just the first.
  *
+ * GrailKey Commit T (T2, 2026-08-03) — Marvel Tales #14 class, corrected.
+ * The local `PC_MATCH_COMMON_TOKENS` stoplist this function used to run its
+ * own, INDEPENDENT tokenizer against (rather than reusing title-family
+ * scoring's shared one) hard-coded "marvel" as always-generic — correct
+ * for a book merely PUBLISHED by Marvel, wrong for "Marvel Tales" itself,
+ * where "Marvel" is part of the actual two-word series name. Confirmed
+ * live: "marvel tales" vs PC anchor "Tales of Asgard #14" computed
+ * overlapCount=1 ("tales", the only survivor once "marvel" was stripped)
+ * over confirmedTokens.length=1 (same reason) = 100% — a razor-thin,
+ * single-shared-word match reported as PERFECT overlap. Now reuses
+ * tokenizeTitle (compHygiene.js) — the SAME tokenizer title-family scoring
+ * already uses, Q54-compound-protected: "marvel tales" is a real
+ * COMPOUND_WHITELIST entry (confirmed: this exact request logged
+ * `[Q54] compound-protected="marvel tales" -> [marvel, tales]` 45 times),
+ * so "marvel" now correctly survives as a real token rather than being
+ * treated as generic publisher noise. With the tokenizer fixed alone, the
+ * Marvel Tales case computes 1 shared ("tales") / 2 confirmed tokens
+ * ("marvel","tales") = 50% — still a coin-flip at the OLD 0.5 threshold.
+ * Threshold raised to 0.6 to actually reject it — reusing, not inventing,
+ * a number: 0.6 is this function's OWN doc comment's pre-existing
+ * reference point ("the stricter 0.6 pool-consensus bar used elsewhere in
+ * this file"), not a new arbitrary value. Verified via direct execution
+ * against every pre-existing fixture (tests/q-pc-requery-gate.test.js) —
+ * all four hold unchanged: Amazing Spider-Man (100%), Spider-Versity
+ * (33%, already below even the old threshold), degenerate "The Comics"
+ * (nothing substantive, short-circuits true).
+ *
  * @param {string} confirmedTitle - our current, fully-resolved identity
  * @param {string} productName - PriceCharting's matched product name
- * @param {number} threshold - minimum overlap ratio (default 0.5 — this is
- *   a single-title-vs-single-product comparison, not pool-internal
- *   consensus, so it uses the existing top-rank-guard forwardRatio
- *   convention rather than the stricter 0.6 pool-consensus bar used
- *   elsewhere in this file)
+ * @param {number} threshold - minimum overlap ratio (default 0.6 — see
+ *   above; a single-title-vs-single-product comparison now held to the
+ *   SAME bar as pool-internal consensus elsewhere in this file, not a
+ *   looser one)
  * @returns {boolean} true when productName sufficiently represents confirmedTitle
  */
-export const titleOverlapsProduct = (confirmedTitle, productName, threshold = 0.5) => {
-  // G.O.D.S. dispatch — collapse punctuated acronyms before the strip below.
-  const tokenize = (s) => normalizeAcronyms(String(s || '')).toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter((t) => t.length > 1 && !PC_MATCH_COMMON_TOKENS.has(t));
-
-  const confirmedTokens = tokenize(confirmedTitle);
+export const titleOverlapsProduct = (confirmedTitle, productName, threshold = 0.6) => {
+  const confirmedTokens = tokenizeTitle(confirmedTitle);
   if (confirmedTokens.length === 0) return true; // nothing substantive to check against
 
-  const productTokens = tokenize(productName);
+  const productTokens = tokenizeTitle(productName);
   const overlapCount = confirmedTokens.filter((t) => productTokens.includes(t)).length;
   return (overlapCount / confirmedTokens.length) >= threshold;
 };
+
+/**
+ * GrailKey Commit T (T1, 2026-08-03) — is this confirmedTitle backed by a
+ * real title-family clustering consensus (not a bare Vision guess, not a
+ * pool-wide visual-consensus override, not an already-uncertain
+ * refused-conflict surface)?
+ *
+ * Reuses FAMILY_OVERRIDE_DECISIONS (compHygiene.js) directly — the exact
+ * two decision values identityCore.js's own resolveIdentity (this file)
+ * requires a family to have cleared BEFORE ever setting
+ * identitySource = 'title-family-' + family.decision (see the
+ * FAMILY_OVERRIDE_DECISIONS.includes(family.decision) guard a few hundred
+ * lines below). No new source enum invented — "corroborated" here means
+ * exactly, and only, what this file's own identity-resolution logic
+ * already required to produce that source string.
+ *
+ * Deliberately excludes 'title-family-refused-provisional' — a REAL
+ * pool-corroborated source (2+ unanimous listings), but one the identity
+ * layer itself already flags uncertain (isProvisionalOverride=true,
+ * surfaced downstream as identityProvisional) precisely because it
+ * represents an unresolved CONFLICT with Vision, not agreement. A
+ * different epistemic status than the two FAMILY_OVERRIDE_DECISIONS
+ * sources, which only ever fire when a real consensus bar (count/overlap
+ * thresholds inside buildTitleFamilies/scoreTitleFamilies) was actually
+ * cleared. Also excludes 'ebay_visual_override'/'vision_numeric_protection'
+ * (a different mechanism — pool-wide title-vote overriding Vision, not
+ * title-family clustering) and plain 'vision' (uncorroborated) — q141-a
+ * may still correct any of these, unchanged from before this commit.
+ *
+ * @param {string|null|undefined} identitySource
+ * @returns {boolean}
+ */
+export const isCorroboratedIdentitySource = (identitySource) =>
+  FAMILY_OVERRIDE_DECISIONS.some((decision) => identitySource === `title-family-${decision}`);
 
 /**
  * Q141-A — canonical catalog-title projection from a trusted anchor's own

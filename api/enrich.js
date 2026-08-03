@@ -51,6 +51,7 @@ import {
   enforceQueryIssueAuthority,
   buildStandardVisionAuthorityContext,
   resolveFamilyIssueConsensus,
+  isCorroboratedIdentitySource,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -3599,7 +3600,29 @@ export default async function handler(req, res) {
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
-          await kvSet(fullTitleKey, result, KV_TTL.PC);
+          // GrailKey Commit T (T3, 2026-08-03) — do not write a PC product
+          // to a durable cache key when the product name fails the T2
+          // overlap check against the key's own title. Same containment
+          // discipline Commits B.1/B.2 already apply to the ac:/cv:
+          // exact-pricing namespaces (skip the write rather than let a
+          // mismatched result poison a key future, differently-identified
+          // requests will read back as a HIT). Root case this closes:
+          // pc:v1:marvel tales|14|1968 held id=8878655 "Tales of Asgard
+          // #14" — correct key, wrong product, written under an earlier
+          // request whose confirmedTitle was itself wrong at the time,
+          // then served back unconditionally (KV_TTL.PC = 86400s = 24h)
+          // to every later request for the same key, including one whose
+          // identity had since been correctly resolved. Gated on the SAME
+          // titleOverlapsProduct this file's own requery gate already
+          // uses — no second, independently-tuned comparison.
+          if (titleOverlapsProduct(confirmedTitle, result.productName)) {
+            await kvSet(fullTitleKey, result, KV_TTL.PC);
+          } else {
+            console.log(
+              `[pc-cache-guard] durable write SKIPPED — "${result.productName}" fails title-overlap ` +
+              `against "${confirmedTitle}" (would poison ${fullTitleKey} for future requests)`
+            );
+          }
           return result;
         }
 
@@ -3612,7 +3635,15 @@ export default async function handler(req, res) {
           result = await lookupPriceCharting(buildPriceChartingQueryParams(subtitleStripped, confirmedIssue, pcQueryYear, q86PreYearConfidence, eraAdvisory, req.body.variant, out, req.body.pcProductId)).catch(() => null);
           if (result) {
             console.log(`[pc-query] stripped title matched: "${result.productName}"`);
-            await kvSet(strippedTitleKey, result, KV_TTL.PC);
+            // GrailKey Commit T (T3) — same guard as the full-title write above.
+            if (titleOverlapsProduct(subtitleStripped, result.productName)) {
+              await kvSet(strippedTitleKey, result, KV_TTL.PC);
+            } else {
+              console.log(
+                `[pc-cache-guard] durable write SKIPPED — "${result.productName}" fails title-overlap ` +
+                `against "${subtitleStripped}" (would poison ${strippedTitleKey} for future requests)`
+              );
+            }
           }
         }
 
@@ -4602,19 +4633,45 @@ export default async function handler(req, res) {
         console.log(`[q141-a2] anchor bracket descriptor captured: "${anchorBracketDescriptor}" (anchor="${priceCharting.productName}")`);
       }
       if (canonicalTitle && canonicalTitle !== confirmedTitle) {
-        // Anchor-sourced bracket content is preferred over the
-        // family-cluster-diff heuristic when both are available — it's a
-        // direct read of the anchor's own descriptor, not an inference.
-        const editionDescriptorCandidate = anchorBracketDescriptor || diffEditionDescriptorCandidate(confirmedTitle, canonicalTitle);
-        console.log(
-          `[q141-a] canonical projection: confirmedTitle "${confirmedTitle}" -> "${canonicalTitle}" ` +
-          `(anchor="${priceCharting.productName}")` +
-          (editionDescriptorCandidate ? ` editionDescriptorCandidate="${editionDescriptorCandidate}"` : '')
-        );
-        confirmedTitle = canonicalTitle;
-        out.confirmedTitle = canonicalTitle;
-        if (editionDescriptorCandidate) {
-          out.editionDescriptorCandidate = editionDescriptorCandidate;
+        // GrailKey Commit T (T1, 2026-08-03) — Marvel Tales #14 class. A
+        // corroborated identity (title-family clustering cleared a real
+        // consensus bar — see isCorroboratedIdentitySource's own doc
+        // comment, identityCore.js) must never be overwritten by a PC
+        // anchor's product name. A PC anchor whose name conflicts with a
+        // corroborated title is evidence the ANCHOR is wrong, not the
+        // title: confirmed live — "marvel tales" (source=title-family-
+        // weighted-consensus, 17/20 eBay rows / 4-row 100%-overlap family)
+        // was overwritten to "Tales of Asgard" from a PC anchor that only
+        // survived because PRICECHARTING_EXCLUDE's own "marvel tales"
+        // reprint-exclusion term rejected the correct candidate (a
+        // separate, still-open defect, out of this commit's scope) — the
+        // corroborated title had already done more work to establish
+        // itself than a single PC catalog match ever does. Uncorroborated
+        // sources ('vision', 'ebay_visual_override', etc.) are unaffected
+        // — q141-a still corrects those exactly as before (e.g. the
+        // Batman #15 "batman machine gun" class this projection was
+        // originally built for).
+        if (isCorroboratedIdentitySource(identitySource)) {
+          console.log(
+            `[q141-a] SKIPPED — confirmedTitle "${confirmedTitle}" is corroborated ` +
+            `(source=${identitySource}); anchor "${priceCharting.productName}" projects to "${canonicalTitle}", ` +
+            `rejected as evidence the ANCHOR is wrong, not the title`
+          );
+        } else {
+          // Anchor-sourced bracket content is preferred over the
+          // family-cluster-diff heuristic when both are available — it's a
+          // direct read of the anchor's own descriptor, not an inference.
+          const editionDescriptorCandidate = anchorBracketDescriptor || diffEditionDescriptorCandidate(confirmedTitle, canonicalTitle);
+          console.log(
+            `[q141-a] canonical projection: confirmedTitle "${confirmedTitle}" -> "${canonicalTitle}" ` +
+            `(anchor="${priceCharting.productName}")` +
+            (editionDescriptorCandidate ? ` editionDescriptorCandidate="${editionDescriptorCandidate}"` : '')
+          );
+          confirmedTitle = canonicalTitle;
+          out.confirmedTitle = canonicalTitle;
+          if (editionDescriptorCandidate) {
+            out.editionDescriptorCandidate = editionDescriptorCandidate;
+          }
         }
       }
     }
