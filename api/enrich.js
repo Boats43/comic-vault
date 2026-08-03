@@ -1497,7 +1497,10 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
     return null;
   }
   const token = process.env.PRICECHARTING_TOKEN;
-  if (!token || !title) return null;
+  if (!token || !title) {
+    console.log(`[pc-reject] query never sent — reason=${!token ? 'no-token' : 'no-title'}`);
+    return null;
+  }
 
   // Q109-E [2026-07-17] — id-anchored lookup. When a prior successful
   // resolution's PC product id is known (persisted client-side alongside
@@ -1570,7 +1573,10 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
       return null;
     }
     const products = Array.isArray(json?.products) ? json.products : [];
-    if (products.length === 0) return null;
+    if (products.length === 0) {
+      console.log(`[pc-reject] query="${query}" — reason=zero-products (PC's own search returned nothing)`);
+      return null;
+    }
 
     const issueStr = issue ? String(issue).trim() : null;
     const issueRe = issueStr
@@ -1618,8 +1624,21 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
 
     for (const p of products) {
       const name = p["product-name"] || "";
-      if (PRICECHARTING_EXCLUDE.test(name)) continue;
-      if (issueRe && !issueRe.test(name)) continue;
+      // GrailKey Commit L (2026-08-03) — I13 applied to PC matching: the
+      // trace must carry both the rejected candidate and the reason.
+      // These two checks previously rejected silently (bare `continue`,
+      // no log) — the Iron Man #126 class (PC returns exactly 1 product,
+      // "no valid match" with zero visibility into why). Log only, no
+      // behavior/filter change.
+      const excludeMatch = PRICECHARTING_EXCLUDE.exec(name);
+      if (excludeMatch) {
+        console.log(`[pc-reject] "${name}" — reason=exclude:${excludeMatch[0]}`);
+        continue;
+      }
+      if (issueRe && !issueRe.test(name)) {
+        console.log(`[pc-reject] "${name}" — reason=issue-regex`);
+        continue;
+      }
 
       // Year validation: reject products from the wrong era — unless the
       // claimed year is UNPROVEN (Q86): then mismatch = rank penalty only.
@@ -1653,13 +1672,17 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
             console.log(`[Q85] compact-key rescue: "${seriesName}" ⊂ "${name}"`);
           } else {
             console.log(`[pricecharting] skipping "${name}" — main token "${mainToken}" absent`);
+            console.log(`[pc-reject] "${name}" — reason=main-token`);
             continue;
           }
         }
       }
 
       const cents = p["loose-price"];
-      if (cents == null || isNaN(cents) || cents <= 0) continue;
+      if (cents == null || isNaN(cents) || cents <= 0) {
+        console.log(`[pc-reject] "${name}" — reason=no-price (loose-price=${cents})`);
+        continue;
+      }
       const price = cents / 100;
       const yearMatch2 = name.match(/\((\d{4})\)/);
       const productYear = yearMatch2 ? parseInt(yearMatch2[1], 10) : null;
@@ -1708,6 +1731,7 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
       if (variantFallbacks.length > 0) {
         console.log(`[pc-anchor] base entry preferred over ${variantFallbacks.length} deferred variant candidate(s)`);
       }
+      console.log(`[pc-accept] "${candidate.productName}" — reason=base-entry`);
       return candidate;
     }
     // Q88(a): no in-era product — accept the best out-of-era candidate.
@@ -1718,6 +1742,7 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         `[22a] era-advisory demotion tolerated: "${fb.productName}" (${fb.year}) ` +
         `outside advisory ${eraHint.decade}s — no in-era product`
       );
+      console.log(`[pc-accept] "${fb.productName}" — reason=era-advisory-fallback`);
       return { ...fb, eraAdvisoryConflict: true };
     }
     // Q86: no year-matching product — accept the best year-mismatched
@@ -1751,6 +1776,7 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         `[Q86] year-mismatch tolerated (unproven year): "${fb.productName}" ` +
         `product-year=${fb.year} vs claimed=${comicYear} (Q86-B: core-equivalent, gap=${q86bGap}y)`
       );
+      console.log(`[pc-accept] "${fb.productName}" — reason=year-mismatch-tolerated`);
       return { ...fb, yearMismatchTolerated: true };
     }
     // Q108 CHANGE 2 — no base entry survived at all; the only usable data
@@ -1769,9 +1795,10 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
           ? `[pc-anchor] variant-scored: "${fb.productName}" best matches confirmedVariant="${variant}" (of ${variantFallbacks.length} candidates)`
           : `[pc-anchor] no base entry found — falling back to variant entry "${fb.productName}"`
       );
+      console.log(`[pc-accept] "${fb.productName}" — reason=variant-fallback`);
       return { ...fb, variantFallback: true };
     }
-    console.log(`[pricecharting] no valid match in ${products.length} results`);
+    console.log(`[pricecharting] no valid match in ${products.length} results — all ${products.length} candidate(s) rejected, see [pc-reject] lines above`);
     return null;
   } catch (err) {
     console.error(`[pricecharting] error: ${err?.message || err}`);
