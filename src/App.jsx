@@ -944,7 +944,7 @@ const MarketReferences = ({ item }) => {
       borderRadius: 6, fontSize: 12,
     }}>
       <div style={{ fontWeight: 700, color: '#93c5fd', marginBottom: 4 }}>
-        📊 Market references{usingVisualReferenceFallback ? ' · marketplace image match, identity unconfirmed' : ''}
+        📊 Market references{vre ? ` · ${vre.count} active listing${vre.count === 1 ? '' : 's'}, image-matched` : ''}
       </div>
       {rows.length > 0 ? (
         rows.map((r, i) => (
@@ -968,8 +968,17 @@ const MarketReferences = ({ item }) => {
       ) : (
         <div style={{ color: '#888' }}>No reference data yet — search the live market below.</div>
       )}
+      {/* GrailKey Commit G (F1) — the asking-vs-sold distinction is the
+          real one, not verified-vs-unverified: `rows` above are genuinely
+          completed sales / verified active comps (ASM #300's 23 sold
+          comps), while `vre` rows are real image-matched ACTIVE listings
+          (asking prices — Spawn's 3 rows). "Reference points only — not a
+          verified price" undersold real evidence on the vre path and is
+          kept verbatim, unchanged, for the verified-comp path (and the
+          genuine no-data case) per explicit instruction not to weaken
+          that language. */}
       <div style={{ color: '#64748b', fontSize: 10, marginTop: 4 }}>
-        Reference points only — not a verified price.
+        {vre ? 'Asking prices, not completed sales.' : 'Reference points only — not a verified price.'}
       </div>
     </div>
   );
@@ -5013,6 +5022,52 @@ function CollectionDetail({
               Year {item.identityProvisionalYearDetail.year} ({item.identityProvisionalYearDetail.support} of {item.identityProvisionalYearDetail.population} listings) — confirm
             </div>
           )}
+        </div>
+      )}
+
+      {/* GrailKey Commit G (F2) — non-canonical estimate for ID_REQUIRED
+          cards carrying visualReferenceEvidence. F2-Q3 finding: the
+          existing hypotheticalReferenceEstimate slot (immediately above)
+          is a SEPARATE, narrower mechanism — server-computed from
+          out.price before a REFUSED-class clear, rendered ONLY when
+          item.contract.state === 'REFUSED'. The banner wrapper it lives
+          in is itself gated ['REFUSED','LOCKED','INCOMPLETE'].includes(state)
+          — ID_REQUIRED is structurally excluded from that wrapper
+          entirely, so it never fires for an ID_REQUIRED card (Spawn's
+          real state) regardless of what hypotheticalReferenceEstimate
+          holds. This is a deliberately SEPARATE addition, not a widening
+          of that slot or its data source — sources directly from
+          item.visualReferenceEvidence.median (the same fallback data
+          MarketReferences already surfaces elsewhere on the card), and
+          only fires as a fallback when the REFUSED slot above had
+          nothing to show, so the two never double-render the same card.
+          Pure display: does not read or set contract.price, locks,
+          decision.action, or any lock/authority field. */}
+      {item.contract &&
+        (item.contract.state === 'ID_REQUIRED' ||
+          (item.contract.state === 'REFUSED' && parsePriceNumber(item.hypotheticalReferenceEstimate) == null)) &&
+        Array.isArray(item.visualReferenceEvidence?.rows) &&
+        item.visualReferenceEvidence.rows.length > 0 && (
+        <div
+          style={{
+            marginTop: 8,
+            marginBottom: 4,
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: "1px solid rgba(245,158,11,0.5)",
+            background: "rgba(245,158,11,0.08)",
+            color: "#f59e0b",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          Estimated {formatCurrency(item.visualReferenceEvidence.median)}
+          <div style={{ fontWeight: 400, marginTop: 4, opacity: 0.9 }}>
+            From {item.visualReferenceEvidence.count} active listing{item.visualReferenceEvidence.count === 1 ? '' : 's'} · asking {formatCurrency(item.visualReferenceEvidence.low)}–{formatCurrency(item.visualReferenceEvidence.high)}
+          </div>
+          <div style={{ fontWeight: 400, marginTop: 4, opacity: 0.85 }}>
+            Identity not confirmed — verify before listing
+          </div>
         </div>
       )}
 
