@@ -6676,30 +6676,78 @@ function CollectionDetail({
         })()}
 
         {!hasComps && !item.megaKeyFloorApplied && !item.manualReviewRequired && !item.gradeExceedsMap && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: 12,
-              border: "1px solid rgba(245,158,11,0.5)",
-              borderRadius: 8,
-              background: "rgba(245,158,11,0.1)",
-              color: "#f59e0b",
-            }}
-          >
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>
-              ⚠ No stored eBay comps for this comic
-            </div>
-            <div className="small" style={{ marginBottom: 4 }}>
-              Tap refresh to fetch live market data
-            </div>
-            {(item.priceLow || item.priceHigh) && (
-              <div style={{ fontWeight: 600, marginTop: 6 }}>
-                AI range: {item.priceLow}
-                {item.priceLow && item.priceHigh ? " – " : ""}
-                {item.priceHigh}
+          Array.isArray(item.visualReferenceEvidence?.rows) && item.visualReferenceEvidence.rows.length > 0 ? (
+            // GrailKey Commit E — display-only. visualReferenceEvidence is
+            // computed server-side (issueAuthority.js buildVisualReferenceEvidence)
+            // and already reaches this response untouched (responseContract.js
+            // never references it, finalizeResponse returns `out` in full) —
+            // it was simply never rendered anywhere. This block shows exactly
+            // what the server already computed and discarded at display time:
+            // real per-row titles/prices, the range, and the median. It does
+            // NOT touch identity, issueAuthority, listing lock state, pricing
+            // tier, or merge/containment/dominance — pure display of data
+            // that already exists in the response, labeled honestly as
+            // reference evidence, never presented as a verified price.
+            <div
+              style={{
+                marginTop: 12,
+                padding: 12,
+                border: "1px solid rgba(59,130,246,0.5)",
+                borderRadius: 8,
+                background: "rgba(59,130,246,0.1)",
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 4, color: "#f59e0b" }}>
+                ⚠ Reference evidence only — not a verified price
               </div>
-            )}
-          </div>
+              <div className="small" style={{ marginBottom: 8, color: "#aaa" }}>
+                {item.visualReferenceEvidence.count} listing{item.visualReferenceEvidence.count === 1 ? "" : "s"} found for this book — identity/pricing not confirmed
+              </div>
+              <div style={{ fontWeight: 600, marginBottom: 6, color: "#93c5fd" }}>
+                Range: ${item.visualReferenceEvidence.low.toFixed(2)} – ${item.visualReferenceEvidence.high.toFixed(2)} · Median: ${item.visualReferenceEvidence.median.toFixed(2)}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {item.visualReferenceEvidence.rows.map((row, i) => (
+                  <div
+                    key={row.itemWebUrl || `${row.title}-${i}`}
+                    style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}
+                  >
+                    <span style={{ color: "#ccc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {row.title}
+                    </span>
+                    <span style={{ fontWeight: 600, flexShrink: 0, color: "#93c5fd" }}>
+                      {row.price != null ? `$${row.price.toFixed(2)}` : "—"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                marginTop: 12,
+                padding: 12,
+                border: "1px solid rgba(245,158,11,0.5)",
+                borderRadius: 8,
+                background: "rgba(245,158,11,0.1)",
+                color: "#f59e0b",
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                ⚠ No stored eBay comps for this comic
+              </div>
+              <div className="small" style={{ marginBottom: 4 }}>
+                Tap refresh to fetch live market data
+              </div>
+              {(item.priceLow || item.priceHigh) && (
+                <div style={{ fontWeight: 600, marginTop: 6 }}>
+                  AI range: {item.priceLow}
+                  {item.priceLow && item.priceHigh ? " – " : ""}
+                  {item.priceHigh}
+                </div>
+              )}
+            </div>
+          )
         )}
 
         {item.cgcVerified === true && (
