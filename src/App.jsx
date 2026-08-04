@@ -924,17 +924,47 @@ const MarketReferences = ({ item }) => {
     rows.push(`PriceCharting anchor ${formatCurrency(pcAnchor)} (${item.isGraded ? 'graded' : 'raw'})`);
   }
 
+  // GrailKey Commit F — fallback (not merge) to visualReferenceEvidence
+  // (marketplace image-match listings, issueAuthority.js
+  // buildVisualReferenceEvidence) when the verified-comp path above
+  // produced zero rows — exactly the ID_REQUIRED/REFUSED case this
+  // component already targets. Only activates when `rows` is still
+  // empty: verified comps (comps/soldComps/PC anchor, above) are the
+  // stronger evidence class and are never displaced or blended with
+  // marketplace-image-match rows in the same undifferentiated list.
+  const usingVisualReferenceFallback = rows.length === 0 &&
+    Array.isArray(item.visualReferenceEvidence?.rows) &&
+    item.visualReferenceEvidence.rows.length > 0;
+  const vre = usingVisualReferenceFallback ? item.visualReferenceEvidence : null;
+
   return (
     <div style={{
       padding: '10px 12px', marginBottom: 10,
       background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.3)',
       borderRadius: 6, fontSize: 12,
     }}>
-      <div style={{ fontWeight: 700, color: '#93c5fd', marginBottom: 4 }}>📊 Market references</div>
+      <div style={{ fontWeight: 700, color: '#93c5fd', marginBottom: 4 }}>
+        📊 Market references{usingVisualReferenceFallback ? ' · marketplace image match, identity unconfirmed' : ''}
+      </div>
       {rows.length > 0 ? (
         rows.map((r, i) => (
           <div key={i} style={{ color: '#cbd5e1', lineHeight: 1.7 }}>{r}</div>
         ))
+      ) : vre ? (
+        <>
+          <div style={{ color: '#cbd5e1', lineHeight: 1.7 }}>
+            {vre.count} listing{vre.count === 1 ? '' : 's'} · {formatCurrency(vre.low)}–{formatCurrency(vre.high)} · median {formatCurrency(vre.median)}
+          </div>
+          {vre.rows.map((row, i) => (
+            <div
+              key={row.itemWebUrl || `${row.title}-${i}`}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#cbd5e1', fontSize: 11, lineHeight: 1.6 }}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.title}</span>
+              <span style={{ flexShrink: 0 }}>{row.price != null ? formatCurrency(row.price) : '—'}</span>
+            </div>
+          ))}
+        </>
       ) : (
         <div style={{ color: '#888' }}>No reference data yet — search the live market below.</div>
       )}
