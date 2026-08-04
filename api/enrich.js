@@ -149,6 +149,7 @@ import { checkRateLimit } from "./rate-limit.js";
 import { randomUUID } from "node:crypto";
 import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
 import { resetTitleStripStats, logTitleStripSummary } from "../src/lib/titleStripStats.js";
+import { writeConfirmed } from "../src/lib/identityWriteLog.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -3892,6 +3893,24 @@ export default async function handler(req, res) {
       `overrode=${alignment.overrodeVision}`
     );
 
+    // GrailKey Commit V1 — per-field provenance trackers. identitySource
+    // (above) reflects only the INITIAL resolution (barcode/manual/cgc/
+    // resolveIdentity) and, confirmed during V1's investigation, is
+    // reassigned exactly once more after this point (line ~6956, the Q83
+    // rescue block) — every other post-anchor write to confirmedTitle/
+    // Year/Publisher would otherwise leave identitySource stale relative
+    // to what actually produced the current value. These five trackers
+    // seed from the best already-known value at this point and are
+    // updated by every writeConfirmed() call below, so each write's
+    // logged "from" source is the true incumbent provenance, not a stale
+    // global. confirmedVariant reuses the EXISTING variantIdentitySource
+    // (declared later, ~line 4821) rather than a duplicate — threaded in
+    // at that declaration site instead of here.
+    let titleSource = identitySource;
+    let issueSource = identitySource;
+    let yearSource = out?.confirmedYearMeta?.source || 'unknown';
+    let publisherSource = identitySource;
+
     if (alignment.overrodeVision) {
       console.log(
         `[identity] OVERRIDE: Vision="${alignment.visionWas}" → eBay="${confirmedTitle}"`
@@ -4250,7 +4269,8 @@ export default async function handler(req, res) {
       { keyIssue: keyIssueStr }
     );
 
-    confirmedYear = yearResolution.confirmedYear;
+    confirmedYear = writeConfirmed('confirmedYear', confirmedYear, yearResolution.confirmedYear, yearSource, yearResolution.yearSource, 'resolve-year');
+    yearSource = yearResolution.yearSource;
     let yearOverrideRejected = yearResolution.yearOverrideRejected;
 
     // Q86: structured year provenance on the response — {value, source,
@@ -4273,7 +4293,8 @@ export default async function handler(req, res) {
         yearResolution.yearConfidence === 'unproven' &&
         String(confirmedYear || '') !== String(pcYear)) {
       console.log(`[Q86] year backfill from tolerated PC product: ${confirmedYear || 'null'} → ${pcYear}`);
-      confirmedYear = String(pcYear);
+      confirmedYear = writeConfirmed('confirmedYear', confirmedYear, String(pcYear), yearSource, 'pc-product-tolerated', 'Q86');
+      yearSource = 'pc-product-tolerated';
       out.confirmedYearMeta = {
         value: confirmedYear,
         source: 'pc-product-tolerated',
@@ -4296,20 +4317,23 @@ export default async function handler(req, res) {
 
     // Q58-TITLE — Title backfill from comp consensus
     if (backfill.titleBackfilled) {
-      confirmedTitle = backfill.title;
+      confirmedTitle = writeConfirmed('confirmedTitle', confirmedTitle, backfill.title, titleSource, 'comp-consensus-backfill', 'Q58-TITLE');
+      titleSource = 'comp-consensus-backfill';
       out.titleBackfilledFromComps = true;
       out.titleBackfillRatio = backfill.titleBackfillRatio;
     }
 
     if (backfill.yearBackfilled) {
-      confirmedYear = backfill.year;
+      confirmedYear = writeConfirmed('confirmedYear', confirmedYear, backfill.year, yearSource, backfill.yearBackfillSource || 'comp-consensus-backfill', 'Q58-TITLE');
+      yearSource = backfill.yearBackfillSource || 'comp-consensus-backfill';
       out.yearBackfilledFromComps = true;
       out.yearBackfillRatio = backfill.yearBackfillRatio;
       out.yearBackfillSource = backfill.yearBackfillSource;
     }
 
     if (backfill.publisherBackfilled) {
-      confirmedPublisher = backfill.publisher;
+      confirmedPublisher = writeConfirmed('confirmedPublisher', confirmedPublisher, backfill.publisher, publisherSource, 'comp-consensus-backfill', 'Q58-TITLE');
+      publisherSource = 'comp-consensus-backfill';
       out.publisherBackfilledFromComps = true;
       out.publisherBackfillRatio = backfill.yearBackfillRatio;
     }
@@ -4340,7 +4364,8 @@ export default async function handler(req, res) {
     // drift / Momoko style-confusion entries in the Pattern Library) — not
     // itself a bug to fix, just the trigger condition that exposes this one.
     if (!confirmedPublisher && comicVine?.publisher) {
-      confirmedPublisher = comicVine.publisher;
+      confirmedPublisher = writeConfirmed('confirmedPublisher', confirmedPublisher, comicVine.publisher, publisherSource, 'comicvine', 'q135-cv-autofill');
+      publisherSource = 'comicvine';
       out.publisherBackfilledFromCV = true;
       console.log(`[cv-pub-autofill] ${confirmedPublisher} (from CV match)`);
     }
@@ -4582,7 +4607,8 @@ export default async function handler(req, res) {
             `[pc-anchor-gate] confirmedYear corrected: ${confirmedYear} → ${correctedYear} ` +
             `(was derived from the just-rejected PC match)`
           );
-          confirmedYear = String(correctedYear);
+          confirmedYear = writeConfirmed('confirmedYear', confirmedYear, String(correctedYear), yearSource, 'pc-anchor-rejected-corrected', 'pc-anchor-gate');
+          yearSource = 'pc-anchor-rejected-corrected';
           out.confirmedYearMeta = {
             value: confirmedYear,
             source: 'pc-anchor-rejected-corrected',
@@ -4667,7 +4693,8 @@ export default async function handler(req, res) {
             `(anchor="${priceCharting.productName}")` +
             (editionDescriptorCandidate ? ` editionDescriptorCandidate="${editionDescriptorCandidate}"` : '')
           );
-          confirmedTitle = canonicalTitle;
+          confirmedTitle = writeConfirmed('confirmedTitle', confirmedTitle, canonicalTitle, titleSource, 'pc-anchor-projection', 'q141-a');
+          titleSource = 'pc-anchor-projection';
           out.confirmedTitle = canonicalTitle;
           if (editionDescriptorCandidate) {
             out.editionDescriptorCandidate = editionDescriptorCandidate;
@@ -4817,7 +4844,7 @@ export default async function handler(req, res) {
     // real variant untouched. If extractConfirmedVariant (below) finds a
     // pool-derived consensus, it overwrites this null with THAT — pool-
     // derived or honestly-null, never the overruled source.
-    let confirmedVariant = identityIsProvisionalOverride ? null : safeVariantForConfirmed;
+    let confirmedVariant = writeConfirmed('confirmedVariant', null, identityIsProvisionalOverride ? null : safeVariantForConfirmed, 'unknown', 'vision', 'ship-20a.6.18-init');
     let variantIdentitySource = 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
@@ -4834,7 +4861,7 @@ export default async function handler(req, res) {
     // back to Vision's variant field. The Q100 FIX-A auth-token strip is
     // applied downstream in fetchComps/api/comps.js using confirmedLabelType.
     if (cgcIdentityConfirmed) {
-      confirmedVariant = cgcResult.variant || safeVariantForConfirmed || null;
+      confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, cgcResult.variant || safeVariantForConfirmed || null, variantIdentitySource, cgcResult.variant ? 'cgc_cert' : 'vision', 'q106-fix1-cgc');
       variantIdentitySource = cgcResult.variant ? 'cgc_cert' : 'vision';
       console.log(`[cgc-variant] source=${cgcResult.variant ? 'cgc' : 'vision'} value="${confirmedVariant || ''}"`);
     } else {
@@ -4933,7 +4960,7 @@ export default async function handler(req, res) {
       req.body?.editionType
     );
     if (variantCheck) {
-      confirmedVariant = variantCheck.confirmedVariant;
+      confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, variantCheck.confirmedVariant, variantIdentitySource, 'ebay_image_consensus', 'variant-check-consensus');
       variantIdentitySource = 'ebay_image_consensus';
       variantConsensus = variantCheck.consensus;
       variantOverriddenVision = variantCheck.overriddenVision;
@@ -4965,7 +4992,8 @@ export default async function handler(req, res) {
           `[variant-year] overriding confirmedYear ${confirmedYear || 'null'} → ` +
           `${variantCheck.variantYear} from ${variantConsensus.artist} pool`
         );
-        confirmedYear = String(variantCheck.variantYear);
+        confirmedYear = writeConfirmed('confirmedYear', confirmedYear, String(variantCheck.variantYear), yearSource, 'variant-pool', 'q99-b-variant-year');
+        yearSource = 'variant-pool';
         out.confirmedYearMeta = {
           value: confirmedYear,
           source: 'variant-pool',
@@ -4997,7 +5025,20 @@ export default async function handler(req, res) {
     if (!cgcIdentityConfirmed && editionWarning?.detected) {
       const specificPrintingForVariant = classifySpecificPrinting(editionWarning.signals);
       if (specificPrintingForVariant && !String(confirmedVariant || '').toLowerCase().includes(specificPrintingForVariant.text)) {
-        confirmedVariant = confirmedVariant ? `${confirmedVariant} ${specificPrintingForVariant.text}` : specificPrintingForVariant.text;
+        // GrailKey Commit V1 — this was the one confirmedVariant write site
+        // with NO source attribution at all (V1-Q3 finding): it threads
+        // Vision's own classified printing signal without ever updating
+        // variantIdentitySource. The LOG now attributes it correctly
+        // ('edition-warning-printing', genuinely determinable from
+        // classifySpecificPrinting's own output — not a guess). Deliberately
+        // NOT updating the real variantIdentitySource variable itself here —
+        // V1 is log-only/zero-behavior-change, and that variable is read
+        // downstream (`variantIdentitySource === 'ebay_image_consensus'`,
+        // ~line 6198) for real output construction; changing it would be a
+        // real behavior change, not an instrumentation one. Left as a
+        // disclosed, still-open gap for a future (non-V1) fix.
+        const newConfirmedVariant = confirmedVariant ? `${confirmedVariant} ${specificPrintingForVariant.text}` : specificPrintingForVariant.text;
+        confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, newConfirmedVariant, variantIdentitySource, 'edition-warning-printing', 'q116-edition-variant');
         console.log(`[edition-variant] threaded "${specificPrintingForVariant.text}" into confirmedVariant (from Vision's own reasoning) — now "${confirmedVariant}"`);
       }
     }
@@ -5023,7 +5064,7 @@ export default async function handler(req, res) {
     if (!confirmedVariant && out.editionDescriptorCandidate) {
       const promotion = classifyPromotableVariantDescriptor(out.editionDescriptorCandidate);
       if (promotion.promotable) {
-        confirmedVariant = promotion.text;
+        confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, promotion.text, variantIdentitySource, 'canonical-projection-residue', 'commit-n1-residue');
         variantIdentitySource = 'canonical-projection-residue';
         console.log(
           `[n1-variant-promotion] promoted editionDescriptorCandidate="${out.editionDescriptorCandidate}" ` +
@@ -5898,7 +5939,8 @@ export default async function handler(req, res) {
           `[22e-LOSS] Phase 2 FORCED vision="${effectiveTitle}" rejected="${confirmedTitle}" ` +
           `non-consensus=[${phase2Check.added.join(',')}]`
         );
-        confirmedTitle = effectiveTitle;
+        confirmedTitle = writeConfirmed('confirmedTitle', confirmedTitle, effectiveTitle, titleSource, 'vision', '22e-LOSS');
+        titleSource = 'vision';
         out.assemblyIntegrityFailed = true;
         out.assemblyIntegrityAdded = phase2Check.added;
         out.assemblyIntegrityReason = phase2Check.reason;
@@ -6014,7 +6056,8 @@ export default async function handler(req, res) {
         const majority = Object.entries(gotCounts).sort((a, b) => b[1] - a[1])[0];
         if (majority && majority[0] && majority[0].toLowerCase() !== String(confirmedTitle || '').toLowerCase()) {
           const oldTitle = confirmedTitle;
-          confirmedTitle = majority[0];
+          confirmedTitle = writeConfirmed('confirmedTitle', confirmedTitle, majority[0], titleSource, 'title-axis-majority-rejection', '22c-title-revote');
+          titleSource = 'title-axis-majority-rejection';
           out.titleRevotedFrom22c = true;
           out.needsReview = true;
           console.log(`[22c-title-revote] old="${oldTitle}" new="${confirmedTitle}" (unanimous rejection + PC no-match + pool=${verifiedPool})`);
@@ -6737,7 +6780,8 @@ export default async function handler(req, res) {
         {
           const pubConsensus = backfillPublisherFromTitles(activeCompTitles);
           if (pubConsensus) {
-            confirmedPublisher = pubConsensus.publisher;
+            confirmedPublisher = writeConfirmed('confirmedPublisher', confirmedPublisher, pubConsensus.publisher, publisherSource, 'active-comp-consensus', 'q94-active-comp');
+            publisherSource = 'active-comp-consensus';
             out.publisher = confirmedPublisher;
             out.publisherBackfilledFromComps = true;
             out.publisherBackfillRatio = pubConsensus.ratio;
@@ -6767,7 +6811,8 @@ export default async function handler(req, res) {
             `(${pubConsensus.hitCount}/${pubConsensus.total}=${Math.round(pubConsensus.ratio * 100)}%)`
           );
           out.publisherBeforeCorrection = confirmedPublisher;
-          confirmedPublisher = pubConsensus.publisher;
+          confirmedPublisher = writeConfirmed('confirmedPublisher', confirmedPublisher, pubConsensus.publisher, publisherSource, 'active-comp-consensus-correction', 'q96-active-comp-correction');
+          publisherSource = 'active-comp-consensus-correction';
           out.publisher = confirmedPublisher;
           out.publisherConflictCorrected = true;
           out.publisherBackfillRatio = pubConsensus.ratio;
@@ -6830,7 +6875,8 @@ export default async function handler(req, res) {
     // floor of 2) lives inside that function, not duplicated here.
     const provisionalYearBackfill = deriveProvisionalYearBackfill(confirmedYear, out.issueAuthority, identity?.familyYearConsensus);
     if (provisionalYearBackfill) {
-      confirmedYear = provisionalYearBackfill.year;
+      confirmedYear = writeConfirmed('confirmedYear', confirmedYear, provisionalYearBackfill.year, yearSource, provisionalYearBackfill.meta?.source || 'unknown', 'commit-p2');
+      yearSource = provisionalYearBackfill.meta?.source || 'unknown';
       out.confirmedYearMeta = provisionalYearBackfill.meta;
       console.log(
         `[commit-p2] confirmedYear backfilled from family consensus (provisional, unblocks identity-gate only): ` +
@@ -6926,9 +6972,18 @@ export default async function handler(req, res) {
         const consensusTitleRatio =
           titleConsensus?.ratio ?? rescueBackfill.titleBackfillRatio ?? 0;
         const consensusIssue = confirmedIssue || issueConsensus;
-        // Consensus may also complete year/publisher (same extractor family)
-        if (!confirmedYear && rescueBackfill.yearBackfilled) confirmedYear = rescueBackfill.year;
-        if (!confirmedPublisher && rescueBackfill.publisherBackfilled) confirmedPublisher = rescueBackfill.publisher;
+        // Consensus may also complete year/publisher (same extractor family
+        // as `backfill` above — backfillFromComps — invoked a second time
+        // here against a different pool, hence the same 'comp-consensus-
+        // backfill' source).
+        if (!confirmedYear && rescueBackfill.yearBackfilled) {
+          confirmedYear = writeConfirmed('confirmedYear', confirmedYear, rescueBackfill.year, yearSource, 'comp-consensus-backfill', 'q83-rescue');
+          yearSource = 'comp-consensus-backfill';
+        }
+        if (!confirmedPublisher && rescueBackfill.publisherBackfilled) {
+          confirmedPublisher = writeConfirmed('confirmedPublisher', confirmedPublisher, rescueBackfill.publisher, publisherSource, 'comp-consensus-backfill', 'q83-rescue');
+          publisherSource = 'comp-consensus-backfill';
+        }
 
         if (consensusTitle && consensusIssue) {
           const rescuedIdentity = sanitizeIdentityFields({
@@ -6946,8 +7001,10 @@ export default async function handler(req, res) {
             rescuedIdentity, 'ebay_comp_consensus', adapter.identityFields, out.pcProductId
           );
           if (idCheck2.confident) {
-            confirmedTitle = rescuedIdentity.title;
-            confirmedIssue = rescuedIdentity.issue;
+            confirmedTitle = writeConfirmed('confirmedTitle', confirmedTitle, rescuedIdentity.title, titleSource, 'ebay_comp_consensus', 'q83-rescue');
+            titleSource = 'ebay_comp_consensus';
+            confirmedIssue = writeConfirmed('confirmedIssue', confirmedIssue, rescuedIdentity.issue, issueSource, 'ebay_comp_consensus', 'q83-rescue');
+            issueSource = 'ebay_comp_consensus';
             out.title = rescuedIdentity.title;
             // Q140 terminal fingerprint invariant — out.issue is no longer
             // written here directly. confirmedIssue (just set above) is the
