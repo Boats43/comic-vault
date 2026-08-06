@@ -303,6 +303,55 @@ regression pass rather than a bundled fix. `deriveCvYear` alone fully and
 independently resolves the Batman #608 class — this follow-up is
 additional defense-in-depth, not a dependency.
 
+### Issue-consensus guard (`resolveFamilyIssueConsensus`, `src/lib/identityCore.js`) — STANDING CONSTRAINT, do not rank-weight
+**Rule: issue-axis consensus is a pure aggregate vote (unique-row count vs. a
+fixed 60% agreement bar + a clear-lead margin over the runner-up). It is
+NEVER weighted by eBay search-result rank/position.** A rank-weighted
+version of this was attempted and reverted twice before landing on the
+aggregate-vote design now shipped (commit `18ed481`, "Q140 corrective
+dispatch: issue consensus + terminal fingerprint invariant") — the
+reasoning lives in a session handoff outside this repo, not in git history
+(`git log -S "Commit U"` returns zero hits — that commit never landed).
+Record here so it is not silently re-attempted.
+
+**Load-bearing precedent: Flash #139 mixed-family conflict.** A real visual
+pool where a numerically-dominant #170 anniversary-issue cluster (3/5 rows)
+outnumbers the genuinely-correct #139 rows (2/5, matching Vision's own
+read). `resolveFamilyIssueConsensus` must NOT adopt the numeric plurality
+here — `mode: 'conflict-locked'`, `issue` stays `'139'` (Vision's value,
+never overwritten), `winner: '170'` recorded only for diagnostics.
+Verified directly (`tests/q140-issue-consensus-corrective.test.js:178-187,
+226-241`). Any issue-consensus fix that would resolve this case by ranking
+or weighting candidate issues risks reintroducing the exact regression
+this precedent guards against — a numerically-louder wrong cluster must
+never outvote a present, Vision-asserted value it disagrees with.
+
+Five modes, all pure count-based (`tests/q140-issue-consensus-corrective.test.js:139-212`):
+- missing issue + ≥3 unique family rows + ≥60% agreement + clear lead over runner-up → `adopted`
+- present issue + family aggregate agrees (same 60%+clear-lead bar, never a bare single-row match) → `corroborated` (issue unchanged, just confirmed)
+- present issue + family aggregate disagrees → `conflict-locked` (Flash #139 shape above — never overwrite)
+- present issue + family has zero issue-token consensus at all → `no-consensus` (keep prior)
+- a single representative row, even at 100% self-agreement, can never establish an issue (`<3`-unique-row floor) → `no-consensus`
+
+**Q51/Jetsons note (2026-08-06, GrailKey Dispatch 03):** the Jetsons #19
+misfire (real production request `cnvm8-1786031045100-377b3eb920d3`,
+2026-08-06 15:44 UTC) is a DIFFERENT shape than Flash #139 — Vision's issue
+("19") had **zero** pool support at all (not present-but-outnumbered), and
+the winning title family's own issue consensus was `mode: 'no-consensus'`
+(ratio=0.20, below the 60% bar) while the true answer (#32) was the
+plurality candidate. `familyAuthoritySkip`
+(`identityCore.js:2147-2150`) was checked directly against this shape and
+already correctly requires `mode ∈ {'adopted','corroborated'}` before
+skipping the raw-pool zero-support check — `'no-consensus'` does NOT
+qualify, by explicit design (`identityCore.js:2132-2136` comment). A
+"vision-zero-support skips on family authority without checking issue
+consensus" hypothesis was tested against this exact code path and
+**falsified** — the mode-check already exists. The real cause of #19
+surviving to the card is still open (candidates: `isGraded` short-
+circuiting the zero-support check silently, or a downstream re-hydration
+after a correct null) — needs a non-truncated log or a direct runtime
+reconstruction to close; do not re-attempt a fix here without that.
+
 ### Mega-keys (`api/mega-keys.js`, 43 entries)
 - 10 Golden / 15 Silver / 2 Bronze / 2 Modern.
 - Two types: MEGA (has `grades` bucket map) and MANUAL (Action #1, Superman #1; null grades, manual review only).
