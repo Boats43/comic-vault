@@ -352,6 +352,32 @@ circuiting the zero-support check silently, or a downstream re-hydration
 after a correct null) — needs a non-truncated log or a direct runtime
 reconstruction to close; do not re-attempt a fix here without that.
 
+### `applyDualAxisGate` reason-string coupling (`src/lib/imageSearchIdentity.js`) — STANDING CONSTRAINT, do not reword the reason string
+**`applyDualAxisGate`'s `reason` string is parsed by at least one downstream
+consumer as load-bearing behavior, not read as a log message.**
+`imageSearchIdentity.js:2345-2347` (`isBareCreatorTokensOnly`, Commit B1)
+regex-matches `reason` — `/^creator-tokens \[/` AND explicitly excludes
+`/adjacent-pair recovered/` — to distinguish "bare creator-tokens" additions
+(which get a family-member issue-corroboration check) from "adjacent-pair
+recovered" additions (which don't, per Commit B1's own documented
+reasoning: adjacent-pair carries independent adjacency evidence the bare
+case lacks). **Changing `applyDualAxisGate`'s reason wording for either
+branch is a behavior change, not a cosmetic one** — it can silently flip
+which branch `isBareCreatorTokensOnly` matches.
+
+Found during GrailKey Dispatch 03 (2026-08-06) while scoping Strip 2 —
+confirmed the second instance of this exact shape in one file (the first:
+22c's `[22c-title-revote]` guard also originally read a rejection-detail
+shape before Q48 confirmed `convergence.axes[axis].rejections` is
+structured data, not string-only). Two independent load-bearing
+string-parses in the same file is a pattern, not a coincidence — **when
+`applyDualAxisGate` gains an explicit `provenance` field (queued, GrailKey
+Dispatch 03 Strip 2+1 combined work), convert `isBareCreatorTokensOnly` to
+read `provenance` directly and retire this regex.** Until then, any edit
+to `applyDualAxisGate`'s `reason` strings must grep
+`isBareCreatorTokensOnly`'s two patterns first and confirm they still
+match the intended branches.
+
 ### Mega-keys (`api/mega-keys.js`, 43 entries)
 - 10 Golden / 15 Silver / 2 Bronze / 2 Modern.
 - Two types: MEGA (has `grades` bucket map) and MANUAL (Action #1, Superman #1; null grades, manual review only).
