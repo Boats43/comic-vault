@@ -1380,11 +1380,77 @@ const countMemberSupport = (token, familyMemberTokens) =>
 // (buildTitleFamilies' `memberTokens`), used only for the coherent-content-
 // token lane above — optional, omitting it disables that lane only.
 // Returns { allowed, reason }.
+// GrailKey Dispatch 03 (2026-08-06) — narrow-scope fallback, adopted after
+// the broader "Vision-assertion" discriminator was tested and falsified.
+// Reconstruction of the real Q109-C incident (commit a558f9d, "Replacement
+// God and Other Stories" #1, 1997, Image) confirmed Vision's OWN read was
+// the SHORT, truncated title ("Replacement God") — the family/pool
+// supplied the correct, complete title. Routing "not Vision-asserted"
+// tokens to confirmedVariant would have moved "and other stories" OUT of
+// confirmedTitle, reproducing the exact bug a558f9d fixed (truncated title
+// -> wrong ComicVine volume -> wrong year). Vision-assertion cannot
+// distinguish genuine title continuation from noise; no existing
+// classifier in this codebase can either (classifyVariantTokens, tested
+// directly, returns {specific:[],generic:[]} for all four: "and other
+// stories", "cartoon books", "local shop day", "joker iconic" — it's
+// scoped to variant-descriptor specificity, not this question).
+//
+// Fallback, explicitly authorized as narrower-but-provably-safe: only
+// route a Q140-admitted token subsequence when it's an EXACT, known
+// publisher/imprint/event name — never a general noise/content
+// classifier. Same STOPGAP-not-permanent posture as
+// OTHER_VARIANT_DESCRIPTOR_RE (compHygiene.js) and NO_TITLE_VARIANTS
+// (list-ebay.js) — a static name list, extend as new cases surface, not a
+// substitute for the real classifier this problem eventually needs.
+// Phrases only (no bare single generic words like "gold" alone — too
+// ambiguous, "Iron Man Gold" is a real comic) except where the name is
+// itself unambiguous as a single token ("wildstorm").
+const KNOWN_PUBLISHER_IMPRINT_EVENT_PHRASES = [
+  ['cartoon', 'books'],       // Bone's publisher (Cartoon Books)
+  ['local', 'shop', 'day'],   // LCSD (Local Comic Shop Day) event
+  ['wildstorm'],              // DC imprint
+  ['hanna', 'barbera'],       // Hanna-Barbera studio/imprint
+  ['gold', 'key'],            // Gold Key publisher
+];
+
+// Splits `tokens` into { matched, remaining } — matched is every token that
+// participates in a contiguous, in-order match against one of the known
+// phrases above; remaining is everything else, in original order. A phrase
+// only matches as a complete, contiguous run (partial phrase overlap does
+// not count) so "gold" alone (elsewhere, unrelated) is never mistaken for
+// the "gold key" entry.
+const matchKnownPublisherImprintEventTokens = (tokens) => {
+  const matched = new Set();
+  for (const phrase of KNOWN_PUBLISHER_IMPRINT_EVENT_PHRASES) {
+    for (let i = 0; i + phrase.length <= tokens.length; i++) {
+      if (phrase.every((word, j) => tokens[i + j] === word)) {
+        phrase.forEach((_, j) => matched.add(i + j));
+      }
+    }
+  }
+  const matchedTokens = tokens.filter((_, i) => matched.has(i));
+  const remaining = tokens.filter((_, i) => !matched.has(i));
+  return { matchedTokens, remaining };
+};
+
+// GrailKey Dispatch 03 (2026-08-06) — universal admittedTokens + provenance.
+// Every allow-branch now returns admittedTitleTokens (stays in
+// confirmedTitle, via sanitizeSeriesTitle) and admittedVariantTokens
+// (routes to confirmedVariant instead) alongside the existing
+// allowed/reason shape — additive, not a breaking change to callers that
+// only read allowed/reason. provenance is the new explicit field 22c and
+// isBareCreatorTokensOnly read directly, retiring their reason-string
+// parses (see CLAUDE.md "applyDualAxisGate reason-string coupling").
 export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, familyRawText = null, familyMemberTokens = null) => {
   const drop = (t) => ARTICLE_TOKENS.has(t) || NEUTRAL_ADDITION_TOKENS.has(t);
   const fam = (familyTokens || []).filter((t) => !drop(t));
   const agreed = (agreedTokens || []).filter((t) => !drop(t));
-  if (agreed.length === 0) return { allowed: true, reason: 'no agreed tokens to protect' };
+  if (agreed.length === 0) {
+    return {
+      allowed: true, reason: 'no agreed tokens to protect', provenance: 'no-agreement',
+      admittedTitleTokens: [], admittedVariantTokens: [], agreedTokens: agreed,
+    };
+  }
 
   // GrailKey Commit S (S1, 2026-08-03) — Marvel Tales #14 class. This
   // branch used to block whenever ANY agreed (Vision+eBay) token was
@@ -1425,14 +1491,25 @@ export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, 
   const missing = agreed.filter((t) => !fam.includes(t));
   const overlapping = agreed.filter((t) => fam.includes(t));
   if (missing.length > 0 && overlapping.length === 0) {
-    return { allowed: false, reason: `family drops agreed tokens [${missing.join(',')}]` };
+    return {
+      allowed: false, reason: `family drops agreed tokens [${missing.join(',')}]`, provenance: 'blocked',
+      admittedTitleTokens: [], admittedVariantTokens: [], agreedTokens: agreed,
+    };
   }
   const added = fam.filter((t) => !agreed.includes(t));
-  if (added.length === 0) return { allowed: true, reason: 'same title, nothing added' };
+  if (added.length === 0) {
+    return {
+      allowed: true, reason: 'same title, nothing added', provenance: 'no-addition',
+      admittedTitleTokens: [], admittedVariantTokens: [], agreedTokens: agreed,
+    };
+  }
 
   const addedStr = added.join(' ');
   if (ARC_RE.test(addedStr)) {
-    return { allowed: false, reason: `arc-token "${addedStr}"` };
+    return {
+      allowed: false, reason: `arc-token "${addedStr}"`, provenance: 'blocked',
+      admittedTitleTokens: [], admittedVariantTokens: [], agreedTokens: agreed,
+    };
   }
   const nonCreator = added.filter((t) => !(poolArtistTokens && poolArtistTokens.has(t)));
   if (nonCreator.length > 0) {
@@ -1447,9 +1524,29 @@ export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, 
     // not unrelated noise. Recovering only the paired first name while
     // still blocking on its own variant's descriptor words would leave the
     // gate blocking the exact family this recovery exists to unblock.
+    //
+    // GrailKey Dispatch 03 Strip 2 (2026-08-06) — admittedTitleTokens is
+    // `recovered` ONLY, not the full `added`/`nonCreator` set. Before this,
+    // the reason string said "adjacent-pair recovered: [neal]" but the
+    // ALLOWED verdict let the whole addedStr ("neal joker iconic") through
+    // to the title via topFamily.title — "joker"/"iconic" rode along as
+    // passengers on "neal"'s recovery (Batman #251 class). Callers must
+    // build selectedTitle from admittedTitleTokens now, not topFamily.title
+    // wholesale, for this fix to take effect (see selectTitleFamilyCandidate
+    // call sites below).
     const recovered = recoverAdjacentCreatorTokens(nonCreator, poolArtistTokens, familyRawText);
     if (recovered.length > 0) {
-      return { allowed: true, reason: `creator-tokens [${addedStr}] (adjacent-pair recovered: [${recovered.join(',')}])` };
+      return {
+        allowed: true, reason: `creator-tokens [${addedStr}] (adjacent-pair recovered: [${recovered.join(',')}])`,
+        // 'creator-lane-adjacent-recovery', not the bare 'creator-lane-direct'
+        // sibling below — Commit B1's isBareCreatorTokensOnly needs this
+        // distinction (adjacent-pair recovery carries its own independent
+        // adjacency evidence, exempting it from B1's extra issue-corroboration
+        // check). Both are still 'creator-lane' at the broad level any other
+        // consumer (buildGatedTitleSource, 22c) should check with a prefix
+        // match — see their own comments.
+        provenance: 'creator-lane-adjacent-recovery', admittedTitleTokens: recovered, admittedVariantTokens: [], agreedTokens: agreed,
+      };
     }
     // Q140 coherent-content-token lane — see comment above countMemberSupport.
     // Every still-blocked token must independently clear the >=3-member
@@ -1458,15 +1555,70 @@ export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, 
     if (familyMemberTokens && familyMemberTokens.length > 0) {
       const supportCounts = nonCreator.map((t) => countMemberSupport(t, familyMemberTokens));
       if (supportCounts.every((c) => c >= 3)) {
+        // GrailKey Dispatch 03 Strip 1 (2026-08-06) — narrow-scope
+        // publisher/imprint/event routing (see
+        // matchKnownPublisherImprintEventTokens / KNOWN_PUBLISHER_IMPRINT_
+        // EVENT_PHRASES above for the full rationale: the broader
+        // "Vision-assertion" discriminator was tested and falsified against
+        // the real Q109-C incident — "and other stories" is ALSO
+        // not-Vision-asserted, so that rule would have routed genuine title
+        // content to confirmedVariant, reproducing the bug a558f9d fixed).
+        // Only tokens matching a KNOWN name move to admittedVariantTokens;
+        // everything else stays in admittedTitleTokens, byte-identical to
+        // pre-Dispatch-03 behavior for anything not on the narrow list.
+        const { matchedTokens, remaining } = matchKnownPublisherImprintEventTokens(nonCreator);
         return {
           allowed: true,
-          reason: `coherent-content tokens [${nonCreator.join(',')}] (>=3 member support each: [${supportCounts.join(',')}])`,
+          reason: `coherent-content tokens [${nonCreator.join(',')}] (>=3 member support each: [${supportCounts.join(',')}])` +
+            (matchedTokens.length > 0 ? ` [publisher/imprint/event routed to variant: ${matchedTokens.join(',')}]` : ''),
+          provenance: 'q140-coherent-content',
+          admittedTitleTokens: remaining,
+          admittedVariantTokens: matchedTokens,
+          agreedTokens: agreed,
         };
       }
     }
-    return { allowed: false, reason: `non-creator additions [${nonCreator.join(',')}]` };
+    return {
+      allowed: false, reason: `non-creator additions [${nonCreator.join(',')}]`, provenance: 'blocked',
+      admittedTitleTokens: [], admittedVariantTokens: [], agreedTokens: agreed,
+    };
   }
-  return { allowed: true, reason: `creator-tokens [${addedStr}]` };
+  return {
+    // 'creator-lane-direct' — every added token is a directly-recognized
+    // creator name (nonCreator.length===0), no adjacency inference needed.
+    // The bare-vs-adjacent-recovery split is Commit B1's own distinction
+    // (isBareCreatorTokensOnly); see the sibling branch's comment above.
+    allowed: true, reason: `creator-tokens [${addedStr}]`, provenance: 'creator-lane-direct',
+    admittedTitleTokens: added, admittedVariantTokens: [], agreedTokens: agreed,
+  };
+};
+
+// GrailKey Dispatch 03 Strips 1+2 (2026-08-06) — shared title-source
+// construction for both selectTitleFamilyCandidate call sites (top-rank-
+// protection and weighted-consensus). Only overrides the fallback
+// (today's family.title, used wholesale) for the two provenances that
+// carry a real admittedTitleTokens filter — 'creator-lane' (Strip 2: only
+// recovered/creator tokens, not the whole addedStr) and
+// 'q140-coherent-content' (Strip 1: publisher/imprint/event tokens
+// excluded, routed to admittedVariantTokens instead). Every other
+// provenance ('no-addition', 'no-agreement', 'blocked', or the q84Gate
+// wrapper's own 'no dual-axis agreement' fallback which carries no
+// provenance field at all) falls through to `fallbackTitle` — byte-
+// identical to pre-Dispatch-03 behavior. The `agreedTokens.length > 0`
+// check is defense-in-depth (applyDualAxisGate's own early return already
+// guarantees this whenever these two provenances are reached) — required
+// per explicit instruction: an empty selectedTitle is a worse failure
+// than any corruption this change fixes, so this path never fires on an
+// empty agreedTokens even if that invariant is ever violated upstream.
+const buildGatedTitleSource = (gate, fallbackTitle) => {
+  if (
+    gate &&
+    (String(gate.provenance || '').startsWith('creator-lane') || gate.provenance === 'q140-coherent-content') &&
+    Array.isArray(gate.agreedTokens) && gate.agreedTokens.length > 0
+  ) {
+    return [...gate.agreedTokens, ...(gate.admittedTitleTokens || [])].join(' ');
+  }
+  return fallbackTitle;
 };
 
 /**
@@ -2171,7 +2323,12 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
           // A1.a: Route through sanitizeSeriesTitle to remove creator names,
           // cover descriptors, condition words, embedded years, seller noise.
           // Then apply post-selection boilerplate sanitization.
-          const cleaned = sanitizeSeriesTitle(item0Family.title);
+          // GrailKey Dispatch 03 Strips 1+2 — titleSource is item0Family.title
+          // (unchanged) UNLESS the gate carries a real admittedTitleTokens
+          // filter (creator-lane/q140-coherent-content), see
+          // buildGatedTitleSource's own doc comment.
+          const titleSource = buildGatedTitleSource(q84TopRank, item0Family.title);
+          const cleaned = sanitizeSeriesTitle(titleSource);
           const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(cleaned, visionIssue));
           logFamilyEvidence('top-rank-protection', item0Family);
           return {
@@ -2182,6 +2339,11 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
             topFamily: item0Family,
             runnerUp: strongestCompetitor,
             families: scored,
+            // GrailKey Dispatch 03 Strip 1 — tokens routed out of the title
+            // (publisher/imprint/event names) for the caller to thread into
+            // confirmedVariant. Empty except on the q140-coherent-content
+            // provenance with a real match.
+            admittedVariantTokens: q84TopRank.admittedVariantTokens || [],
           };
         }
       }
@@ -2342,9 +2504,15 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   // own members' own extracted issue agrees with it. When visionIssue is
   // itself absent, there is nothing to corroborate against and this gate
   // does not fire — that case is unaffected, same as before.
+  // GrailKey Dispatch 03 (2026-08-06) — converted from a reason-string
+  // regex pair to the explicit provenance field (see CLAUDE.md
+  // "applyDualAxisGate reason-string coupling"). 'creator-lane-direct' is
+  // exactly the bare-creator-tokens branch this check always meant;
+  // 'creator-lane-adjacent-recovery' (previously excluded via the
+  // "adjacent-pair recovered" substring) is now excluded by simply not
+  // being 'creator-lane-direct'.
   const isBareCreatorTokensOnly = q84Consensus.allowed === true
-    && /^creator-tokens \[/.test(q84Consensus.reason || '')
-    && !/adjacent-pair recovered/.test(q84Consensus.reason || '');
+    && q84Consensus.provenance === 'creator-lane-direct';
   const familyMemberIssueSupport = !isBareCreatorTokensOnly || !visionIssue
     ? null
     : (topFamily.indices || []).some((idx) => {
@@ -2394,7 +2562,12 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily) {
     // Q43 A1.a: Apply same sanitizeSeriesTitle treatment as top-rank-protection
     // for consistency — removes creator names, descriptors, noise before final title.
-    const cleaned = sanitizeSeriesTitle(topFamily.title);
+    // GrailKey Dispatch 03 Strips 1+2 — titleSource is topFamily.title
+    // (unchanged) UNLESS q84Consensus carries a real admittedTitleTokens
+    // filter (creator-lane/q140-coherent-content); see
+    // buildGatedTitleSource's own doc comment.
+    const titleSource = buildGatedTitleSource(q84Consensus, topFamily.title);
+    const cleaned = sanitizeSeriesTitle(titleSource);
     let sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(cleaned, visionIssue));
     // Q85-B: compact-key acceptance means family ≡ Vision — prefer Vision's
     // compact spelling. The generic sanitizer treats "book" as noise and
@@ -2420,6 +2593,9 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
       // exact ratio, not just confirmation it cleared the >=40% floor —
       // additive field, no change to the decision this function reaches.
       overlapRatio,
+      // GrailKey Dispatch 03 Strip 1 — see top-rank-protection's identical
+      // field for the full rationale.
+      admittedVariantTokens: q84Consensus.admittedVariantTokens || [],
     };
   }
 

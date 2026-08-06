@@ -5114,6 +5114,26 @@ export default async function handler(req, res) {
       }
     }
 
+    // GrailKey Dispatch 03 Strip 1 (2026-08-06) — narrow-scope publisher/
+    // imprint/event token routing. selectTitleFamilyCandidate's Q140
+    // coherent-content lane (imageSearchIdentity.js) now separates its
+    // admitted tokens into admittedTitleTokens (stays in confirmedTitle,
+    // e.g. "and other stories" — Q109-C precedent, protected) vs
+    // admittedVariantTokens (a narrow, explicit known-name list only —
+    // "cartoon books", "local shop day", "wildstorm", "hanna barbera",
+    // "gold key" — see KNOWN_PUBLISHER_IMPRINT_EVENT_PHRASES for the full
+    // rationale, including why the broader "route everything not
+    // Vision-asserted" design was tested and rejected). Fill-only-if-empty,
+    // same pattern as the N1 promotion block just above — every other
+    // confirmedVariant source (CGC cert, eBay image consensus, edition-
+    // warning printing, canonical-projection-residue) takes priority.
+    if (!confirmedVariant && Array.isArray(familyCandidate?.admittedVariantTokens) && familyCandidate.admittedVariantTokens.length > 0) {
+      const routedVariant = familyCandidate.admittedVariantTokens.join(' ');
+      confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, routedVariant, variantIdentitySource, 'title-family-publisher-imprint-event', 'grailkey-d03-strip1');
+      variantIdentitySource = 'title-family-publisher-imprint-event';
+      console.log(`[strip1-variant-routing] routed publisher/imprint/event tokens to confirmedVariant: "${routedVariant}"`);
+    }
+
     // GrailKey Commit N2 (2026-08-03, Spawn Brett Booth PC-anchor class)
     // — re-anchor the PC product once confirmedVariant is known, when the
     // initial anchor deprioritized a genuine variant-descriptor product in

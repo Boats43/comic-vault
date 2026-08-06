@@ -167,9 +167,12 @@ console.log('\nPart 3: Q116 site logs a source but does not mutate the real vari
     if (trimmed.startsWith('out.variantIdentitySource')) return false;
     return /^(let\s+)?variantIdentitySource\s*=[^=]/.test(trimmed);
   });
-  // Expected: declaration (1) + q106-fix1-cgc (1) + variant-check-consensus (1) + commit-n1-residue (1) = 4.
-  // NOT 5 — the Q116 site must NOT add a 5th real assignment.
-  assertEq(assignmentLines.length, 4, 'variantIdentitySource has exactly 4 real local-variable assignments (declaration + 3 sites) — Q116 does not add a 5th');
+  // Expected: declaration (1) + q106-fix1-cgc (1) + variant-check-consensus (1) + commit-n1-residue (1)
+  // + grailkey-d03-strip1 (1, 2026-08-06) = 5. Q116 still does not add its
+  // own assignment; the Dispatch 03 Strip 1 publisher/imprint/event
+  // routing site is a genuinely new, distinct source category, so it
+  // reassigns variantIdentitySource like the other 3 real sites do.
+  assertEq(assignmentLines.length, 5, 'variantIdentitySource has exactly 5 real local-variable assignments (declaration + 4 sites) — Q116 still does not add its own, GrailKey Dispatch 03 Strip 1 does');
 
   // The one real downstream READ (not a comment mentioning it in prose —
   // this file's own Q116 comment explains the read using different
@@ -205,13 +208,16 @@ console.log('\nPart 4: identitySource real-assignment count unchanged by this co
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Part 5 — every one of the 23 real write sites routes through
+// Part 5 — every one of the 24 real write sites routes through
 // writeConfirmed(); NONE bypass it. This is the actual "17 vs 23"
-// correction, re-verified programmatically (not just eyeballed) so a
-// future edit that adds a bare `confirmedX = ...` assignment fails this
-// test immediately.
+// correction (originally), re-verified programmatically (not just
+// eyeballed) so a future edit that adds a bare `confirmedX = ...`
+// assignment fails this test immediately. 23 -> 24 (2026-08-06, GrailKey
+// Dispatch 03 Strip 1): one new post-anchor site,
+// grailkey-d03-strip1, routing publisher/imprint/event tokens into
+// confirmedVariant.
 // ═══════════════════════════════════════════════════════════════════════
-console.log('\nPart 5: all 23 real write sites route through writeConfirmed() — none bypass it\n');
+console.log('\nPart 5: all 24 real write sites route through writeConfirmed() — none bypass it\n');
 
 {
   const anchorIdx = enrichSrc.indexOf('[identity] confirmed="${confirmedTitle}"');
@@ -234,7 +240,7 @@ console.log('\nPart 5: all 23 real write sites route through writeConfirmed() �
   assertEq(bareLines, [], `no bare (unwrapped) post-anchor assignment to any of the 5 fields exists (found: ${JSON.stringify(bareLines)})`);
 
   const writeConfirmedCallLines = postAnchorLines.filter((line) => /confirmed\w+\s*=\s*writeConfirmed\(/.test(line.trim()));
-  assertEq(writeConfirmedCallLines.length, 23, 'exactly 23 writeConfirmed() call-assignments after the anchor — the corrected count (not the previously-assumed 17)');
+  assertEq(writeConfirmedCallLines.length, 24, 'exactly 24 writeConfirmed() call-assignments after the anchor (23 + grailkey-d03-strip1, 2026-08-06)');
 }
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -155,7 +155,15 @@ console.log('\nS-4 — Spawn Q84/Q85-B interaction unaffected\n');
   const poolArtists = new Set(['brett', 'booth']);
   const real = applyDualAxisGate(['spawn', 'brett', 'booth'], ['spawn'], poolArtists);
   const naive = naiveDualAxisGate(['spawn', 'brett', 'booth'], ['spawn'], poolArtists);
-  assertEq(real, naive, 'S-4: real (post-fix) and naive (pre-fix) results are identical for the Spawn shape');
+  // GrailKey Dispatch 03 (2026-08-06) — scoped to allowed/reason, the two
+  // fields naiveDualAxisGate (this test's own pre-fix local reimplementation)
+  // has ever returned. applyDualAxisGate's real return now additionally
+  // carries provenance/admittedTitleTokens/admittedVariantTokens/agreedTokens
+  // (universal, additive — every allow-branch) — a deep-equal against the
+  // 2-field naive shape would fail on the new fields alone, which is not
+  // what S-4 is testing (S1's fix not touching this fixture's core verdict).
+  assertEq(real.allowed, naive.allowed, 'S-4: real (post-fix) and naive (pre-fix) allowed flag identical for the Spawn shape');
+  assertEq(real.reason, naive.reason, 'S-4: real (post-fix) and naive (pre-fix) reason string identical for the Spawn shape');
   assertTrue(real.allowed && /creator-tokens/.test(real.reason), `S-4: creator-token override still allowed (${real.reason})`);
 }
 
