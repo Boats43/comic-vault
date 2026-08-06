@@ -72,7 +72,7 @@ const makeMockRes = () => {
 
 // Call enrich handler
 const callEnrich = async (body) => {
-  const req = { method: 'POST', body };
+  const req = { method: 'POST', body, headers: {} };
   const res = makeMockRes();
   await handler(req, res);
   return res._captured.body;

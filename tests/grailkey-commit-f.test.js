@@ -76,6 +76,12 @@ console.log('Part 1: dispatch premise correction (verified before implementing)\
 console.log('\nPart 2: scope — only App.jsx touched\n');
 
 {
+  // KNOWN-FRAGILE (2026-08-06, GrailKey Dispatch 02 Commit 0a) — see the
+  // identical note in grailkey-commit-e.test.js Part 2. Reads the live
+  // working-tree-vs-HEAD diff; only valid immediately after this commit's
+  // own changes, false-fails on any later multi-file change reviewed
+  // before commit. Informational only when it fails, not a regression
+  // signal on its own.
   let diffFiles = [];
   try {
     diffFiles = execSync('git diff --name-only HEAD', { cwd: repoRoot, encoding: 'utf8' })
@@ -130,8 +136,12 @@ console.log('\nPart 4: Option A — fallback, not merge\n');
 console.log('\nPart 5: source visibility — verified vs marketplace-image-match distinguishable at a glance\n');
 
 {
+  // GrailKey Commit G superseded the header-suffix copy (F1 honest
+  // asking-vs-sold labeling) — assertion intent unchanged (suffix stays
+  // conditional on the fallback flag; verified-comp cards keep the base
+  // header), only the expected literal was stale.
   assertTrue(
-    appSrc.includes("📊 Market references{usingVisualReferenceFallback ? ' · marketplace image match, identity unconfirmed' : ''}"),
+    appSrc.includes("📊 Market references{vre ? ` · ${vre.count} active listing${vre.count === 1 ? '' : 's'}, image-matched` : ''}"),
     'header suffix is CONDITIONAL on the fallback flag — verified-comp cards keep the exact original header text'
   );
 }

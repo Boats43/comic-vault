@@ -78,6 +78,16 @@ console.log('Part 1: pre-conditions — visualReferenceEvidence reaches the clie
 console.log('\nPart 2: scope — only App.jsx touched (no identity/pricing/lock code changed)\n');
 
 {
+  // KNOWN-FRAGILE (2026-08-06, GrailKey Dispatch 02 Commit 0a): this reads
+  // the live working-tree-vs-HEAD diff, not commit E's actual historical
+  // diff. It only holds when the working tree is clean except for commit
+  // E's own changes at the moment this file runs — true right after E was
+  // authored, false any time an unrelated multi-file change (including
+  // this exact patch) is sitting uncommitted. Written for single-file
+  // commits; will false-fail on any future multi-file change reviewed
+  // before commit. Not fixed here (out of scope for a display-only patch);
+  // treat a failure here as informational, not a regression signal, unless
+  // the working tree is confirmed clean of unrelated changes first.
   let diffFiles = [];
   try {
     diffFiles = execSync('git diff --name-only HEAD', { cwd: repoRoot, encoding: 'utf8' })
@@ -132,7 +142,11 @@ console.log('\nPart 4: renders title+price per row, range, median, count — not
 {
   // Extract just the new block's source (between the ternary's true-branch
   // opening and its `) : (` split) to scope these assertions precisely.
-  const blockStart = appSrc.indexOf('Array.isArray(item.visualReferenceEvidence?.rows)');
+  // Anchored on the full ternary-opening string (unique to this block —
+  // Commit F later added an earlier occurrence of the shorter substring
+  // this used to search on, at the `usingVisualReferenceFallback` gate,
+  // which broke this extraction without touching the shipped feature).
+  const blockStart = appSrc.indexOf('Array.isArray(item.visualReferenceEvidence?.rows) && item.visualReferenceEvidence.rows.length > 0 ? (');
   const blockEnd = appSrc.indexOf(') : (', blockStart);
   assertTrue(blockStart > 0 && blockEnd > blockStart, 'new block located for scoped assertions');
   const block = appSrc.slice(blockStart, blockEnd);

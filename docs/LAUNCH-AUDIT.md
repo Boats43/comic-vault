@@ -5,6 +5,13 @@
 **Launch-gate build:** `39d7b2f` (Q139 — G.O.D.S. acronym-tokenizer fix + bidirectional orphan-acronym gate extension). Confirmed `READY` on `comic-vault-rouge.vercel.app` via direct Vercel deployment lookup (`githubCommitSha` matched exactly) prior to this audit. The dispatch that requested this audit referenced build `f60c56b`, which does not exist anywhere in `git log --all` (local or `origin/main`, freshly fetched) — treated as a typo for `39d7b2f` per explicit confirmation.
 **Method:** Built from `CLAUDE.md`'s Pattern Library, `git log`, the `tests/` directory listing, and this session's own direct observations (live rescans I personally read the logs for). Every SHA below was confirmed via `git log`, not recalled from memory. Every test file was confirmed to exist via `ls tests/`.
 
+**Test-baseline note (added 2026-08-06, GrailKey Dispatch 02 Commit 0a):**
+this document's "documented baseline" mentions (Sections 9/10/16 and others)
+are dated snapshots, accurate as of the commit they were written against.
+**CLAUDE.md's "Known stale test suites" entry (under Current State) is now
+the canonical, continuously-reconciled baseline — check there, not here,
+for the current failing-suite list and counts.**
+
 ---
 
 ## SECTION 1 — Shipped & Live-Verified (the trust inventory)
