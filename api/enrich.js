@@ -3244,7 +3244,13 @@ export default async function handler(req, res) {
             `[22e] FORCED vision="${effectiveTitle}" rejected="${confirmedTitle}" ` +
             `reason=${integrityCheck.reason} missing=[${integrityCheck.missing.join(',')}]`
           );
-          confirmedTitle = effectiveTitle;
+          // GrailKey Dispatch 03 (2026-08-06) — routed through writeConfirmed
+          // for V1 instrumentation visibility (log-only, per identityWriteLog.js's
+          // own contract — does not change what gets written). titleSource
+          // isn't declared yet at this point in the handler (first assignment
+          // is later, ~line 3933), so fromSource is honestly 'unknown' rather
+          // than referencing an out-of-scope variable.
+          confirmedTitle = writeConfirmed('confirmedTitle', confirmedTitle, effectiveTitle, 'unknown', 'vision', '22e-force');
           out.assemblyIntegrityFailed = true;
           out.assemblyIntegrityMissing = integrityCheck.missing;
           out.assemblyIntegrityReason = integrityCheck.reason;
@@ -3348,7 +3354,13 @@ export default async function handler(req, res) {
     // gate runs.
     if (coTitleToken && confirmedTitle && !confirmedTitle.toLowerCase().includes(coTitleToken.toLowerCase())) {
       console.log(`[co-title] preserving "${coTitleToken}" (source=${coTitleSource}) — appending to confirmedTitle "${confirmedTitle}"`);
-      confirmedTitle = `${confirmedTitle} ${coTitleToken}`;
+      // GrailKey Dispatch 03 (2026-08-06) — routed through writeConfirmed
+      // for V1 instrumentation visibility (log-only, does not change what
+      // gets written — see identityWriteLog.js's own contract). Behavior
+      // (the blind append itself) is unchanged this commit; Strip 3b
+      // (confirmedVariant destination + crossover-fixture verification) is
+      // the actual behavior fix, deferred per explicit instruction.
+      confirmedTitle = writeConfirmed('confirmedTitle', confirmedTitle, `${confirmedTitle} ${coTitleToken}`, 'unknown', 'co-title-preserved', 'co-title-append');
       out.coTitlePreserved = coTitleToken;
       out.coTitleSource = coTitleSource;
     }
