@@ -1510,6 +1510,18 @@ const flagPcTokenErrorIfPresent = (status, bodyText, pcDiag) => {
   return true;
 };
 
+// GrailKey Dispatch 03 prerequisite (2026-08-06) — [pc-candidate]/[pc-reject]
+// are per-PC-product diagnostics (Commit L/M) that can run to 100+ lines on
+// a broad query (Jetsons class: 90 candidates, 90 rejections in one request)
+// and were observed eating a Vercel runtime-log capture's size budget before
+// later, more load-bearing lines ([decision], [vision-zero-support]) ever
+// got written — a real investigation blocker, not just noise. OFF by
+// default; set PC_VERBOSE_LOG=true to restore full per-candidate tracing
+// when actually debugging PC matching itself. Does not touch the single-shot
+// [pricecharting]/[pc-reject] lines outside the per-product loop (query-level
+// events, already low-volume).
+const PC_VERBOSE_LOG = process.env.PC_VERBOSE_LOG === 'true';
+
 const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'proven', eraHint = null, variant = null, pcDiag = null, pcProductId = null }) => {
   if (!issue) {
     console.log("[pt] no issue number — skipping");
@@ -1652,8 +1664,10 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         console.log(`[pc-reject] query="${query}" — reason=zero-products (PC's own search returned nothing)`);
         return null;
       }
-      for (const p of products) {
-        console.log(`[pc-candidate] "${p["product-name"] || ''}"`);
+      if (PC_VERBOSE_LOG) {
+        for (const p of products) {
+          console.log(`[pc-candidate] "${p["product-name"] || ''}"`);
+        }
       }
 
       const queryTokens = tokenize(attemptSeriesName);
@@ -1684,7 +1698,7 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         // product, "no valid match" with zero visibility into why).
         const excludeMatch = PRICECHARTING_EXCLUDE.exec(name);
         if (excludeMatch) {
-          console.log(`[pc-reject] "${name}" — reason=exclude:${excludeMatch[0]}`);
+          if (PC_VERBOSE_LOG) console.log(`[pc-reject] "${name}" — reason=exclude:${excludeMatch[0]}`);
           continue;
         }
         // GrailKey Commit M2 (2026-08-03) — signed/certified SKU
@@ -1695,11 +1709,11 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
         // See PC_SKU_CODE_RE's own doc comment for the full rationale.
         const skuMatch = PC_SKU_CODE_RE.exec(name);
         if (skuMatch) {
-          console.log(`[pc-reject] "${name}" — reason=signed-sku:${skuMatch[0]}`);
+          if (PC_VERBOSE_LOG) console.log(`[pc-reject] "${name}" — reason=signed-sku:${skuMatch[0]}`);
           continue;
         }
         if (issueRe && !issueRe.test(name)) {
-          console.log(`[pc-reject] "${name}" — reason=issue-regex`);
+          if (PC_VERBOSE_LOG) console.log(`[pc-reject] "${name}" — reason=issue-regex`);
           continue;
         }
 
@@ -1736,8 +1750,10 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
             if (seriesKey.length >= 4 && productKey.includes(seriesKey)) {
               console.log(`[Q85] compact-key rescue: "${attemptSeriesName}" ⊂ "${name}"`);
             } else {
-              console.log(`[pricecharting] skipping "${name}" — main token "${mainToken}" absent`);
-              console.log(`[pc-reject] "${name}" — reason=main-token`);
+              if (PC_VERBOSE_LOG) {
+                console.log(`[pricecharting] skipping "${name}" — main token "${mainToken}" absent`);
+                console.log(`[pc-reject] "${name}" — reason=main-token`);
+              }
               continue;
             }
           }
@@ -1745,7 +1761,7 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
 
         const cents = p["loose-price"];
         if (cents == null || isNaN(cents) || cents <= 0) {
-          console.log(`[pc-reject] "${name}" — reason=no-price (loose-price=${cents})`);
+          if (PC_VERBOSE_LOG) console.log(`[pc-reject] "${name}" — reason=no-price (loose-price=${cents})`);
           continue;
         }
         const price = cents / 100;
