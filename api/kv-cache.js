@@ -122,5 +122,20 @@ export const KV_TTL = {
  * never ran because a pre-fix cache entry served untouched). Bump this
  * whenever lookupPriceCharting's matching/scoring logic changes so old
  * entries stop being reachable under the new key.
+ *
+ * Bumped 1->2 (2026-08-06, GrailKey Dispatch 03 prerequisite): the key
+ * shape itself changed (variant segment added, see cacheKeys.js) — old v1
+ * entries never carried a variant differentiator and must not be read back
+ * as if they did.
  */
-export const PC_FILTER_VERSION = 1;
+export const PC_FILTER_VERSION = 2;
+
+/**
+ * GrailKey Dispatch 03 prerequisite (2026-08-06) — CV cache version salt.
+ * ComicVine cache keys (cv:) carried no version prefix at all before this —
+ * introduced alongside the new variant segment so old, variant-blind cv:
+ * entries are never read back as if they were variant-aware. Same bump
+ * discipline as PC_FILTER_VERSION: increment whenever the CV cache-key
+ * shape or the underlying lookupComicVine matching logic changes.
+ */
+export const CV_FILTER_VERSION = 1;

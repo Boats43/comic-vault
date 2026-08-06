@@ -144,7 +144,7 @@ import { checkVisionConsistency } from "../src/lib/visionConsistency.js";
 // Session 4B — Import book signal detection from shared classifier
 import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map caches)
-import { kvGet, kvSet, KV_TTL, PC_FILTER_VERSION } from "./kv-cache.js";
+import { kvGet, kvSet, KV_TTL, PC_FILTER_VERSION, CV_FILTER_VERSION } from "./kv-cache.js";
 import { checkRateLimit } from "./rate-limit.js";
 import { randomUUID } from "node:crypto";
 import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
@@ -3484,7 +3484,12 @@ export default async function handler(req, res) {
     // Track B Phase 0, Commit 4.3 — cvKey's own template inlined directly
     // into buildComicVineCacheKey's call site below (no longer a separate
     // local — was unused after that extraction).
-    const pcKey = `${subtitleStripped}|${confirmedIssue}|${pcQueryYear || ''}`;
+    // GrailKey Dispatch 03 prerequisite (2026-08-06) — variant segment
+    // added, same reasoning as buildPriceChartingCacheKey/
+    // buildComicVineCacheKey (cacheKeys.js): confirmedVariant isn't
+    // resolved yet at this point in the handler (see Q108 CHANGE 2 note
+    // below), req.body.variant is the same established proxy.
+    const pcKey = `${subtitleStripped}|${confirmedIssue}|${pcQueryYear || ''}|${req.body.variant || ''}`;
     const now = Date.now();
 
     // Track B Phase 0, Commit 4.3.1 (Section B) — RETENTION-DECLINE
@@ -3542,7 +3547,10 @@ export default async function handler(req, res) {
         }
         // Track B Phase 0, Commit 4.3 — real call site for the extracted,
         // exported buildComicVineCacheKey (invariant 10).
-        const kvKey = buildComicVineCacheKey(cleanedCVTitle, confirmedIssue, confirmedPublisher);
+        // GrailKey Dispatch 03 prerequisite (2026-08-06) — variant segment
+        // + CV_FILTER_VERSION added (see cacheKeys.js). req.body.variant is
+        // the same pre-resolution proxy used at the PC call site below.
+        const kvKey = buildComicVineCacheKey(cleanedCVTitle, confirmedIssue, confirmedPublisher, req.body.variant, CV_FILTER_VERSION);
         const cached = await kvGet(kvKey);
         if (cached) return cached;
         // Track B Phase 0, Commit 4.3 (Section 3) — real call site for the
@@ -3569,7 +3577,7 @@ export default async function handler(req, res) {
         // untouched for up to 24h (Wonder Woman #75 class).
         // Track B Phase 0, Commit 4.3 — real call site for the extracted,
         // exported buildPriceChartingCacheKey (invariant 10).
-        const fullTitleKey = buildPriceChartingCacheKey(PC_FILTER_VERSION, confirmedTitle, confirmedIssue, pcQueryYear);
+        const fullTitleKey = buildPriceChartingCacheKey(PC_FILTER_VERSION, confirmedTitle, confirmedIssue, pcQueryYear, req.body.variant);
         const strippedTitleKey = `pc:v${PC_FILTER_VERSION}:${pcKey}`;
 
         // Track B Phase 0, Commit 4.3 (IMPLEMENTATION PACKET HOLD — FINAL

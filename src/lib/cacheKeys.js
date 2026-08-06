@@ -35,11 +35,21 @@ export const buildActiveCompCacheKey = (filterVersion, confirmedTitle, confirmed
 // key call site (api/enrich.js) and this feature's regression fixture
 // build the IDENTICAL key string, for a direct, spy-free "no issue-300
 // activity" proof at the KEY-CONSTRUCTION level.
-export const buildComicVineCacheKey = (cleanedTitle, confirmedIssue, confirmedPublisher) =>
-  `cv:${cleanedTitle}|${confirmedIssue}|${confirmedPublisher}`;
+//
+// GrailKey Dispatch 03 prerequisite (2026-08-06) — variant segment +
+// version prefix added. Before this, two genuinely different variants of
+// the same title|issue|publisher (a MegaCon exclusive vs. a standard
+// cover, e.g.) collided on one cache entry. `cvFilterVersion` defaults to
+// 1 (not imported from kv-cache.js here — this file is deliberately
+// side-effect-free at module load, per the file-header rationale above;
+// callers pass CV_FILTER_VERSION explicitly) so existing call sites that
+// don't pass one still produce a valid, version-prefixed key rather than
+// silently reverting to the old unversioned shape.
+export const buildComicVineCacheKey = (cleanedTitle, confirmedIssue, confirmedPublisher, variant = null, cvFilterVersion = 1) =>
+  `cv:v${cvFilterVersion}:${cleanedTitle}|${confirmedIssue}|${confirmedPublisher}|${variant || ''}`;
 
-export const buildPriceChartingCacheKey = (filterVersion, title, confirmedIssue, year) =>
-  `pc:v${filterVersion}:${title}|${confirmedIssue}|${year || ''}`;
+export const buildPriceChartingCacheKey = (filterVersion, title, confirmedIssue, year, variant = null) =>
+  `pc:v${filterVersion}:${title}|${confirmedIssue}|${year || ''}|${variant || ''}`;
 
 // Track B Phase 0, Commit 4.3 (Precision Clause 3) — the zero-#300
 // assertions must not depend on capitalization or one literal, incomplete
