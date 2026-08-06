@@ -39,7 +39,26 @@ export const buildActiveCompCacheKey = (filterVersion, confirmedTitle, confirmed
 // GrailKey Dispatch 03 prerequisite (2026-08-06) — variant segment +
 // version prefix added. Before this, two genuinely different variants of
 // the same title|issue|publisher (a MegaCon exclusive vs. a standard
-// cover, e.g.) collided on one cache entry. `cvFilterVersion` defaults to
+// cover, e.g.) collided on one cache entry.
+//
+// The variant this function receives is req.body.variant, NOT
+// confirmedVariant — deliberately. Both real call sites (api/enrich.js,
+// this CV key and the sibling PC key below) construct their cache keys
+// BEFORE confirmedVariant is resolved in the handler (that resolution
+// runs later, ~enrich.js:4847+); req.body.variant is the pre-resolution
+// proxy already established for this exact reason at the PC query
+// call site (Q108 CHANGE 2 comment, a few lines below this file's own
+// PC builder). This means a cache key built here can diverge from the
+// FINAL confirmedVariant a request ends up with (e.g. a Q140/Strip-1
+// reroute admitting a variant token AFTER this key is built) — an
+// accepted gap, not a bug: worst case is a cache miss (a fresh lookup
+// keyed on the pre-resolution variant guess) rather than a collision
+// (two different confirmed variants sharing one entry), which is the
+// failure mode this change exists to close. Revisit only if a future
+// case shows the reverse — a false HIT across two different confirmed
+// variants because both happened to share the same req.body.variant.
+//
+// `cvFilterVersion` defaults to
 // 1 (not imported from kv-cache.js here — this file is deliberately
 // side-effect-free at module load, per the file-header rationale above;
 // callers pass CV_FILTER_VERSION explicitly) so existing call sites that
