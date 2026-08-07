@@ -7765,8 +7765,37 @@ export default async function handler(req, res) {
     // applied a spurious multiplier from the same contaminated string
     // (the real "[variant] exclusive limited signed x 1.15" case).
     const variant = safeReqVariant ? String(safeReqVariant).trim() : null;
+
+    // Newsstand multiplier eligibility (GrailKey Dispatch 14, 2026-08-07)
+    // — deliberately broader than the rest of the variant-multiplier
+    // system below, and split from isFromPC on purpose. Ladder-tested and
+    // cleared (ASM #222: projected $13.40 vs its real FN 6.0 PriceCharting
+    // rung of $20.80 — 35% under, see CLAUDE.md "dormant-multiplier
+    // class"). Every tier-engine comp-derived source becomes eligible for
+    // the newsstand branch specifically: a comp pool has no way to see
+    // "this specific copy is the newsstand distribution" on its own —
+    // that scarcity signal has to be applied externally regardless of how
+    // well-verified the base price already is (inverted-trust-model
+    // finding: the more-verified a price is, the LESS reason to withhold
+    // this multiplier, not more).
+    //
+    // Every OTHER variant multiplier (35¢/30¢, gold, triple/double cover,
+    // canadian, whitman, virgin, exclusive, etc.) and the key multiplier
+    // stay under the ORIGINAL, narrower isFromPC gate — untested at this
+    // tier this round, not part of what was greenlit, completely
+    // unchanged. Does not require priceCharting?.price the way isFromPC
+    // does: unlike isFromPC, this can't depend on PC data existing at all
+    // (the Killing Joke class — real, well-priced active-comp data with
+    // zero PC anchor whatsoever, pcBase undefined).
+    const NEWSSTAND_MULT_TIER_SOURCES = new Set([
+      'verified_sold_recency', 'sold_active_blend_30', 'verified_sold',
+      'verified_sold_stale', 'active_ask_derived',
+    ]);
+    const isNewsstandMultEligible = !!out.price && !sanityFired &&
+      NEWSSTAND_MULT_TIER_SOURCES.has(out.pricingSource);
+
     // Ship 6 — skip variant multiplier when polybag pricing active.
-    if (variant && out.price && isFromPC && !isPolybagPricing) {
+    if (variant && out.price && (isFromPC || isNewsstandMultEligible) && !isPolybagPricing) {
       const NO_PREMIUM = [
         'corner box', 'masterpieces', 'design variant', 'headshot',
         'trading card', 'cover a', 'cover b', 'cover c', 'cover d',
@@ -7863,6 +7892,16 @@ export default async function handler(req, res) {
           }
         }
 
+        // GrailKey Dispatch 14 (2026-08-07) — everything below this point
+        // (numbered/limited tiered mult + the flat variantMultipliers
+        // table: 35¢/30¢, gold, triple/double cover, canadian, whitman,
+        // virgin, exclusive, etc.) is NOT part of what was ladder-tested/
+        // greenlit this round — newsstand alone was. Gated behind the
+        // ORIGINAL narrow isFromPC specifically, so a tier-engine source
+        // that only qualifies via the newsstand-broadened
+        // isNewsstandMultEligible above can't also silently pick up one of
+        // these untested multipliers.
+        if (isFromPC) {
         // Numbered/limited print-run tiered multiplier (2026-07-18, Magik
         // #1 class) — runs BEFORE the flat table lookup, same shape as the
         // newsstand era block above. Smaller print runs command a larger
@@ -7927,6 +7966,7 @@ export default async function handler(req, res) {
             break;
           }
         }
+        } // end isFromPC-gated block (Dispatch 14)
         if (vMult) {
           // Ship #13 Bug 4: composition-aware damping. When the comp
           // pool is dominated by variant listings (>80% match
