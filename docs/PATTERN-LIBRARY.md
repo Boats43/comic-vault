@@ -2712,3 +2712,139 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
      is the honest next step if this is prioritized, not a query against
      data already being collected.
 
+- **GrailKey Dispatch 25 (2026-08-07) — unanimous-consensus identity
+  unblock. Fix 1 STEP 1 shipped, bare-title hypothesis KILLED, Fix 1/
+  Fix 2 confirmed as one root cause, GK-35 opened.**
+
+  **Repro (locked, reproduced twice on demand):** Spawn #351 Cover C
+  Brett Booth Virgin Variant, two scans (22:08:43 and 22:16:19 UTC,
+  build `b926dba`), identical failure both times — `ID_REQUIRED`, no
+  price, listing blocked, despite unanimous marketplace evidence
+  (`[commit4] issueAuthority=provisional (marketplace-only-adoption):
+  issue=#351 support=4/4=100%`).
+
+  **Step 0/0b locations (`git grep`, verified structurally, not from
+  memory):** `[evidence-eligibility]` (`api/comps.js:2238/2250`, inside
+  `fetchComps`); `[commit4] issueAuthority` (`api/enrich.js:3011`
+  provisional-adoption, `:9302` conflict-escalation, both inside the
+  single `handler` function — confirmed no nested function boundary
+  anywhere in `api/enrich.js` between lines 2158–10600); `[commit4-
+  terminal]` (`api/enrich.js:10549`, also inside `handler`); `[22e-LOSS]`
+  (three print sites — `src/lib/identityCore.js:352`/`:386` inside
+  `checkAssemblyIntegrity`, and `api/enrich.js:6102` inside `handler`,
+  its own wrapper log around calling that function a second time in
+  "Phase 2"); `[identity-gate] REFUSED` (`api/enrich.js:7403`, inside
+  `handler`). Step 0b — the actual Phase 1 force behind the repro's
+  title revert — `api/enrich.js:3266` (`writeConfirmed(...,
+  '22e-force')`, inside `handler`, calling `checkAssemblyIntegrity` at
+  line 3254 — runs BEFORE the `fetchComps` call site at line 5689, which
+  is why this site and not the Phase 2 one at 6102 is the one that could
+  have affected `evidenceTarget.seriesTitle` at classification time).
+
+  **Fix 1 STEP 1, SHIPPED — instrumentation only, zero behavior
+  change.** `classifyEvidenceRow` (`src/lib/evidenceEligibility.js:245`)
+  now returns a `rejectionDetails` array alongside the existing
+  `rejectionCodes` — one entry per code, pairing it with the exact
+  predicate/values that produced it. `buildPricingEligibleRows`
+  (`evidenceEligibility.js:824`) now logs `[evidence-eligibility-reject]`
+  once per row it filters out, naming the specific `PRICING_GATE_CODES`
+  entry(ies) that blocked it. `fetchComps` (`api/comps.js:2175`) now
+  logs `[evidence-target]` once, printing the exact population every row
+  is measured against. Every behavior-determining line
+  (`rejectionCodes.push`, `identityEligible`, `rawPricingEligible`, the
+  `isPricingMathEligible(...)` call itself) is byte-identical to before
+  — confirmed via a 471-assertion regression sweep across the 9 suites
+  that exercise this file, all unchanged, plus 22 new assertions
+  (`tests/grailkey-dispatch-25-fix1-instrumentation.test.js`).
+
+  **Bare-title hypothesis — KILLED, not left open.** The original
+  hypothesis (classification measures against `confirmedTitle="Spawn"`,
+  the post-`22e-force` bare title, rather than the winning family, so
+  variant-specific comps fail a title predicate they already passed
+  upstream) is refuted at the code level, confirmed by a direct test
+  (`grailkey-dispatch-25-fix1-instrumentation.test.js`, Section 2): a
+  row reconstructing the repro's exact shape
+  (`issueAuthorityPresent=true, issueAuthorityStatus='provisional'`)
+  rejects on `TARGET_ISSUE_PROVISIONAL_AUTHORITY` alone — no
+  `WRONG_ISSUE`, no `WRONG_VARIANT` — **despite a title that would
+  otherwise match on both axes**. Swapping in a row title with zero
+  relation to "Spawn"/"351" produces the byte-identical single rejection
+  code, proving the result does not depend on title content at all:
+  `TARGET_ISSUE_PROVISIONAL_AUTHORITY` (`evidenceEligibility.js` ~line
+  322) is an `else if` branch mutually exclusive with `WRONG_ISSUE` —
+  when it fires, `hasIssueNumber()` (the actual title/issue text check)
+  is never evaluated for that row, regardless of what
+  `evidenceTarget.seriesTitle` holds. The 22e-force mechanism (Step 0b)
+  is real and does revert `confirmedTitle` to Vision's bare title in
+  this exact scan, but that revert is irrelevant to why these 14 rows
+  were eliminated — a genuinely different mechanism, evaluated earlier
+  in the same `if`/`else if` chain, got there first.
+
+  **Fix 1 and Fix 2 are one root cause, not two — confirmed, all four
+  cited blocks verified present in this exact repro's log shape, not
+  assumed from the claim alone.** `out.issueAuthority.status ===
+  'provisional'` (Commit 4's marketplace-only-adoption) independently
+  gates four separate blocks, all keyed off the identical field:
+  1. CV/PC exact-identity lookup skip — `[commit4.3.1] exact-identity
+     cv/pc: lookup SKIPPED — issueAuthority.status="provisional"`.
+  2. Active-comps cache skip — `[active-cache] SKIP:
+     issueAuthority.status="provisional" — marketplace-only-adopted
+     issue not cached (Commit 4)`.
+  3. Evidence-eligibility 14→0 elimination — this dispatch's own
+     finding, above: `TARGET_ISSUE_PROVISIONAL_AUTHORITY` in
+     `PRICING_GATE_CODES` rejects every row unconditionally.
+  4. `commit4-terminal` forcing `ID_REQUIRED`, clearing price authority,
+     locking the listing (`api/enrich.js:10549`).
+  A single upstream promotion (provisional → confirmed, under the strict
+  unanimous-consensus predicate specified below) resolves all four
+  simultaneously, since none of the four has any logic of its own beyond
+  reading this one field. **Fix 2 is now GREENLIT** — explicit
+  price-authority greenlight given per this project's standing
+  pricing-math protocol. Plan review in progress; not yet coded.
+
+- **GK-35 (2026-08-07, GrailKey Dispatch 25) — `PRICING_GATE_CODES`
+  covers only 6 of 14 `classifyEvidenceRow` rejection codes; the other
+  8 have zero redundancy at the pricing layer. LOGGED ONLY, not
+  scoped or acted on this session, per explicit instruction.** Found
+  while writing Fix 1 STEP 1's regression test (a wrong test assumption
+  — that `LOT_OR_BUNDLE` would block `buildPricingEligibleRows` —
+  failed and revealed this directly, not inferred from documentation).
+  `PRICING_GATE_CODES` (`evidenceEligibility.js:802`) = `[INCOMPLETE_COPY,
+  RESTORED_COPY, FORMAT_MISMATCH_RAW_VS_SLAB, UNCONFIRMED_EDITION,
+  TARGET_ISSUE_UNRESOLVED, TARGET_ISSUE_PROVISIONAL_AUTHORITY]`. The
+  other 8 codes `classifyEvidenceRow` can produce — `WRONG_VARIANT`,
+  `WRONG_PRINTING`, `WRONG_ISSUE`, `WRONG_YEAR`, `SIGNED_MISMATCH`,
+  `LOT_OR_BUNDLE`, `COLLECTED_EDITION_MISMATCH`,
+  `FORMAT_MISMATCH_GRADED_VS_RAW` — do NOT block
+  `isPricingMathEligible`. A row carrying ONLY one of those 8 codes
+  (`identityEligible=false` inside `classifyEvidenceRow`, per that
+  function's own determination) still passes `buildPricingEligibleRows`
+  and can enter `fetchComps`'s pricing pool. This is deliberate,
+  documented design (`evidenceEligibility.js`'s own Track B Phase 0
+  Commit 1 comment: those 9 original codes — now 8, `TARGET_ISSUE_
+  UNRESOLVED` having since been added to the gate — "already locked in
+  by tests/q-commitD1.1-collision-aware-eligibility.test.js's
+  LEGACY_OVERLAPPING_CODES assertion... the existing, more nuanced
+  api/comps.js/soldVerification.js filter chains already enforce these
+  with edge-case handling this narrower classifier doesn't replicate")
+  — `classifyEvidenceRow` was designed as a SECOND, narrower layer
+  covering gaps in the legacy filter chains specifically, not a full
+  redundant re-check of everything the legacy chains already do. That
+  design intent is real, but its practical consequence is what this
+  finding names: variant/issue/printing/year correctness at the
+  pricing-math layer currently has exactly ONE line of defense (the
+  legacy `api/comps.js`/`soldVerification.js` filter chains) for 8 of
+  14 possible mismatch classes, not two. Directly relevant to this
+  session's own virgin-variant repro: if a future scan's legacy filter
+  chain ever admits a wrong-variant row (e.g. a Cover B listing
+  contaminating a virgin-variant pool) that `classifyEvidenceRow`
+  correctly flags `WRONG_VARIANT` on, that row still prices — the
+  narrower classifier's correct identification provides zero backstop
+  for 8 of its own 14 possible findings. Not scoped, not fixed, no
+  threshold or gate touched this session — flagged for a future
+  dispatch to decide whether closing this gap (widening
+  `PRICING_GATE_CODES`, and re-running the Commit 1 audit that
+  originally decided against it) is warranted, given the legacy chains'
+  own edge-case handling was the stated reason it wasn't done at the
+  time.
+
