@@ -81,6 +81,13 @@ const newCreators = [
   { full: 'Cory Walker', lastName: 'walker', sample: 'Invincible #1 Cory Walker Cover Art CGC 9.0' },
   { full: 'Raymond Gay', lastName: 'gay', sample: 'Some Comic #1 Raymond Gay Variant' },
   { full: 'Stanley Lau', lastName: 'lau', sample: 'Some Comic #1 Stanley Lau Exclusive' },
+  // GrailKey Dispatch 10 (2026-08-07) — real production gaps: Wolverine
+  // #37 (confirmedTitle corrupted to "wolverine greg capullo," 25/30
+  // sold comps rejected on titleMismatch) and Spider-Gwen ("spider gwen
+  // latour rodriguez," both co-creators missing at once).
+  { full: 'Greg Capullo', lastName: 'capullo', sample: 'Wolverine #37 Greg Capullo Variant' },
+  { full: 'Jason Latour', lastName: 'latour', sample: 'Spider-Gwen #1 Jason Latour Signed' },
+  { full: 'Robbi Rodriguez', lastName: 'rodriguez', sample: 'Spider-Gwen #1 Robbi Rodriguez Cover' },
 ];
 
 for (const { full, lastName, sample } of newCreators) {
@@ -97,6 +104,14 @@ for (const { full, lastName, sample } of newCreators) {
 check(
   !ARTIST_PATTERNS.some((re) => re.test('Amazing Spider-Man #50 signed by John Smith the seller')),
   'Jeff Smith addition is multi-word-only — an unrelated "Smith" does not false-match'
+);
+
+// Same check for Robbi Rodriguez — "Rodriguez" is one of the most common
+// surnames in the US; an unrelated seller/reviewer named Rodriguez must
+// not false-match the new entry.
+check(
+  !ARTIST_PATTERNS.some((re) => re.test('Ultimate Spider-Man #1 CGC 9.8 seller: M. Rodriguez')),
+  'Robbi Rodriguez addition is multi-word-only — an unrelated "Rodriguez" does not false-match'
 );
 
 // ═══════════════════════════════════════════════════════════════════════

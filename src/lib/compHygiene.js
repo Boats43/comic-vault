@@ -459,6 +459,23 @@ export const ARTIST_PATTERNS = [
   // this same pass — "Jusko" itself has low collision risk (not an
   // ordinary English word), but kept multi-word to match the other three
   // rather than mixing conventions within one discovery batch.
+  /greg capullo/i,  // GrailKey Dispatch 10 (2026-08-07) — real production
+  // gap: a Wolverine #37 scan's confirmedTitle corrupted to "wolverine
+  // greg capullo," rejecting 25/30 genuine sold comps on titleMismatch
+  // and forcing a tier-4 pc_estimate fallback. Multi-word ONLY, kept
+  // consistent with this batch's other two entries — "Capullo" itself is
+  // distinctive enough that a bare fallback is plausible under this
+  // file's own established convention (see fabok/ejikure/suayan), but
+  // deliberately not added here without a real collision sweep.
+  /jason latour/i,  // GrailKey Dispatch 10 — found in the same batch as
+  // Greg Capullo, real production gap: a Spider-Gwen scan's
+  // confirmedTitle corrupted to "spider gwen latour rodriguez" (both
+  // co-creators missing at once). Multi-word ONLY — "Latour" has real
+  // ambiguity (Château Latour, La Tour place names), no bare fallback.
+  /robbi rodriguez/i,  // GrailKey Dispatch 10 — same Spider-Gwen gap as
+  // Jason Latour above. Multi-word ONLY — "Rodriguez" is one of the most
+  // common surnames in the US; a bare fallback here would be a
+  // significant false-positive risk, not a judgment call worth revisiting.
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
   //
   // Q131 systemic-audit follow-up (2026-07-19, One World Under Doom #1 /
@@ -803,6 +820,10 @@ export const ARTIST_SURNAME_WORDS = new Set([
   // John Romita/Alan Moore/Chris Claremont/Joe Jusko ARTIST_PATTERNS
   // additions found via the reverse-direction sync test.
   'romita', 'moore', 'claremont', 'jusko',
+  // GrailKey Dispatch 10 — 'capullo'/'latour'/'rodriguez' from the Greg
+  // Capullo/Jason Latour/Robbi Rodriguez ARTIST_PATTERNS additions,
+  // found via real Wolverine #37 / Spider-Gwen production scans.
+  'capullo', 'latour', 'rodriguez',
 ]);
 
 export const tokenizeTitle = (title) => {
