@@ -1970,11 +1970,30 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
        reusable per the Narrowing finding above), THEN fetch only those
        specific candidate images one at a time, checking local cache and
        back-end cache first, archiving each fetched image permanently
-       once retrieved. Permanent archival needs real storage — Vercel
-       Blob (public or private) is the natural fit, not yet evaluated
-       against GCD's terms for whether re-hosting an archived copy
-       itself needs separate review beyond the fetch-and-cache pattern
-       they describe. The `jimp` perceptual-hash spike (still not done)
+       once retrieved.
+
+       **Vercel Blob question, sharpened (2026-08-07, GrailKey Dispatch
+       18) — explicitly unresolved, do not assume equivalence.** The
+       CBI pattern GCD points to describes caching to your OWN back-end
+       — an internal application cache, not visible to the outside world
+       as a re-served copy. Vercel Blob, even on private access, is a
+       distinct third-party cloud storage/CDN product with its own
+       delivery infrastructure — storing an archived GCD image there is
+       plausibly a materially different act than an in-process or
+       same-service cache, and GCD's terms (as reported so far) don't
+       speak to that distinction one way or the other. Treat "cache to
+       our back-end" and "re-host in a blob store" as two different
+       claims until reviewed, not two names for the same thing. Default,
+       pending that review: **private access only, never public** — a
+       publicly-reachable Blob URL for an archived GCD image is the
+       closer of the two to redistribution, and redistribution is
+       exactly what the fair-use-for-identification basis does NOT
+       obviously cover. Do not provision or wire up Blob storage for
+       this feature until this specific question — internal cache vs.
+       third-party-hosted archive, under GCD's actual terms — has an
+       answer.
+
+       The `jimp` perceptual-hash spike (still not done)
        now scopes down to hashing individual on-demand-fetched images
        against a narrowed candidate set, not building a pre-hashed index
        of an entire series' variant covers.
