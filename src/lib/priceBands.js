@@ -28,6 +28,110 @@ import { hasIssueNumber } from './compHygiene.js';
 // call sites for what happens instead when it's this thin.
 const MIN_POOL_FOR_OVERRIDE = 3;
 
+// GrailKey Dispatch 11 (2026-08-07) — canonical, exhaustive list of every
+// `source` string computePriceBands()/applyVariantFallbackDivergenceCap()
+// can emit. Exists specifically so tests/tier-source-map-completeness.test.js
+// can assert api/enrich.js's TIER_SOURCE_MAP has an explicit entry for
+// each one — three production incidents (Q109-DISPATCH-1-B, Q109-D,
+// GK-34/Dispatch-10) have now hit the identical shape: a new source value
+// introduced here with no corresponding entry there, silently falling
+// through to a default that's eligible for a second, silent price
+// multiplier. MUST be updated in the same commit as any new/renamed
+// `source:` literal below — the completeness test can only be as
+// trustworthy as this list is exhaustive.
+export const PRICE_BANDS_SOURCES = [
+  'tier1_recency_weighted',
+  'tier2_active_dominant_thin_sold',
+  'tier2_sold_only_active_suspect',
+  'tier2_blend_70_30',
+  'tier2_sold_only',
+  'verified_sold_stale',
+  'tier3_active_discounted_over_fallback_sold',
+  'tier3_active_discounted',
+  'tier4_pc_estimate',
+  'variant_fallback_capped',
+];
+
+// #20b-FIX1 — tier source -> display label map. Consumed by
+// api/enrich.js (`out.pricingSource = TIER_SOURCE_MAP[priceBandsRaw.source]
+// || 'pc_estimate'`), which also gates variant/key multiplier eligibility
+// on the resulting label (VARIANT_MULT_ELIGIBLE_SOURCES). Colocated here
+// with PRICE_BANDS_SOURCES, not left in api/enrich.js, for two reasons:
+// (1) this file is the single source of truth for what `source` values
+// exist, so the map that must cover them lives next to the list, not in
+// a separate handler file where the two can drift silently; (2)
+// api/enrich.js does not cleanly exit when imported in a bare Node/test
+// context, so a completeness test needs this importable from a plain lib
+// file (see tests/tier-source-map-completeness.test.js).
+//
+// Three production incidents of the identical shape (Q109-DISPATCH-1-B,
+// Q109-D, GK-34/Dispatch-10) have now hit the same root defect: a NEW
+// source value introduced above with no corresponding entry here
+// silently falls through to api/enrich.js's 'pc_estimate' default, which
+// is VARIANT_MULT_ELIGIBLE_SOURCES-eligible — making an already-adjusted
+// price eligible for a second, silent multiplier re-application. "Every
+// new tier source is a live pricing hazard until it's mapped" — a
+// missing-completeness-check design gap, not a one-off missed entry.
+// MUST gain an entry in the SAME commit as any addition to
+// PRICE_BANDS_SOURCES above — the completeness test enforces this.
+export const TIER_SOURCE_MAP = {
+  'tier1_recency_weighted': 'verified_sold_recency',
+  'tier2_blend_70_30': 'sold_active_blend_30',
+  'tier2_sold_only': 'verified_sold',
+  'verified_sold_stale': 'verified_sold_stale',  // Q71: tier-2.5 stale-sold source
+  'tier3_active_discounted': 'active_ask_derived',
+  // Q109-DISPATCH-1-B (2026-07-16): missing this entry silently fell
+  // through to the 'pc_estimate' default — which is IN
+  // VARIANT_MULT_ELIGIBLE_SOURCES, so a Tier-3 active-anchored price
+  // (already variant-confirmed by construction) got re-multiplied by
+  // the newsstand era multiplier as if it were an unverified PC
+  // estimate, double-counting the premium (ASM #300: correct $856.51
+  // silently overwritten to $513.91). Mirrors its sibling exactly —
+  // same reasoning as verified_sold's exclusion above: the pool
+  // backing this source is already variant-restricted, so the
+  // era-multiplier must not run again on top of it.
+  'tier3_active_discounted_over_fallback_sold': 'active_ask_derived',
+  // Q109-D [2026-07-17]: same fallthrough class as the entry above —
+  // applyVariantFallbackDivergenceCap() (this file) produces this
+  // source when it caps an inflated variant-fallback sold price back
+  // down to the trustworthy, variant-CORRECT active anchor. Missing
+  // here, it fell through to 'pc_estimate' (eligible) and risked the
+  // same double-count re-multiply on an already-capped, already
+  // active-anchored price. Mapped to its semantic sibling
+  // 'active_ask_derived' — active-anchored by construction, not
+  // eligible for the era/variant multiplier.
+  'variant_fallback_capped': 'active_ask_derived',
+  'tier4_pc_estimate': 'pc_estimate',
+  // Legacy sources (pre-tier, never actually emitted by this file's
+  // computePriceBands — kept for any caller still passing them through
+  // directly, not covered by the PRICE_BANDS_SOURCES completeness list).
+  'verified_sold': 'verified_sold',
+  'verified_active': 'verified_active',
+  'verified_sold_active_blend': 'verified_sold_active_blend',
+  // Q109-D [2026-07-17]: same fallthrough class — the ASM #17-class
+  // franchise-relaunch guard (this file) excludes a contaminated
+  // active pool and prices sold-only, tagging this source. Missing
+  // here, it also fell through to the eligible 'pc_estimate' default.
+  // Mapped to its semantic sibling 'tier2_sold_only' -> 'verified_sold'
+  // (already sold-verified via the Ship 18 strict variant filter —
+  // explicitly excluded from the multiplier-eligible set above).
+  'tier2_sold_only_active_suspect': 'verified_sold',
+  // GK-34 (2026-08-07, GrailKey Dispatch 10) — same fallthrough class
+  // as the two entries above, confirmed live in production before this
+  // fix landed: missing this entry silently fell through to the
+  // 'pc_estimate' default, which is IN VARIANT_MULT_ELIGIBLE_SOURCES,
+  // risking the identical double-count re-multiply this exact map
+  // exists to prevent (ASM #300 / Q109-D history above) on a price
+  // that's already active-anchored and ×0.85-discounted by this file's
+  // tier2_active_dominant_thin_sold branch. Also an I13 provenance
+  // violation independent of the multiplier risk: the card displayed
+  // "pc_estimate" for a price that was never a PriceCharting estimate
+  // at all. Mapped to its semantic sibling 'active_ask_derived' — same
+  // construction as tier3_active_discounted (active pool anchor,
+  // ask-derived, already discounted).
+  'tier2_active_dominant_thin_sold': 'active_ask_derived',
+};
+
 /**
  * Calculate percentile from sorted array of numbers.
  * @param {number[]} sortedValues - array sorted ascending

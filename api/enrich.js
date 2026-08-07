@@ -114,7 +114,7 @@ import { filterByCategory, filterVisualIdentityPool } from "../src/lib/categoryC
 // Session 4B — Adapter registry (per-asset routing config)
 import { getAdapter } from "../src/adapters/adapterRegistry.js";
 // Ship #20b — price bands engine (verified sold-first pricing).
-import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforceFloorFromBands } from "../src/lib/priceBands.js";
+import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforceFloorFromBands, TIER_SOURCE_MAP } from "../src/lib/priceBands.js";
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
@@ -2130,6 +2130,17 @@ export {
   enforceFloorWithCap,
   lookupPriceCharting,  // Q86 — exported for year-confidence tests
 };
+
+// TIER_SOURCE_MAP now lives in src/lib/priceBands.js, colocated with
+// PRICE_BANDS_SOURCES (the exhaustive list of source values it must
+// cover) — see that file for the map itself and the full incident
+// history in its comments. Relocated here rather than just hoisted to
+// this file's own module scope (GrailKey Dispatch 11, 2026-08-07)
+// because this handler file does not cleanly exit when imported in a
+// bare Node/test context (same reason buildActiveCompCacheKey and
+// friends were relocated to cacheKeys.js, see the comment above) —
+// tests/tier-source-map-completeness.test.js needs to import both the
+// map and PRICE_BANDS_SOURCES directly.
 
 // Q89-CACHE / Commit B.1 (Strange Tales dispatch) — the exact-pricing `ac:`
 // active-comp cache key, plus the Commit 4.3 ComicVine/PriceCharting
@@ -7363,63 +7374,25 @@ export default async function handler(req, res) {
       out.priceLow = fmtUsd(priceBandsRaw.quick);
       out.priceHigh = fmtUsd(priceBandsRaw.stretch);
       out.gradeMultiplier = gradeMultiplier;
-      // #20b-FIX1: Map tier sources to display labels
-      const tierSourceMap = {
-        'tier1_recency_weighted': 'verified_sold_recency',
-        'tier2_blend_70_30': 'sold_active_blend_30',
-        'tier2_sold_only': 'verified_sold',
-        'verified_sold_stale': 'verified_sold_stale',  // Q71: tier-2.5 stale-sold source
-        'tier3_active_discounted': 'active_ask_derived',
-        // Q109-DISPATCH-1-B (2026-07-16): missing this entry silently fell
-        // through to the 'pc_estimate' default below — which is IN
-        // VARIANT_MULT_ELIGIBLE_SOURCES, so a Tier-3 active-anchored price
-        // (already variant-confirmed by construction) got re-multiplied by
-        // the newsstand era multiplier as if it were an unverified PC
-        // estimate, double-counting the premium (ASM #300: correct $856.51
-        // silently overwritten to $513.91). Mirrors its sibling exactly —
-        // same reasoning as verified_sold's exclusion above: the pool
-        // backing this source is already variant-restricted, so the
-        // era-multiplier must not run again on top of it.
-        'tier3_active_discounted_over_fallback_sold': 'active_ask_derived',
-        // Q109-D [2026-07-17]: same fallthrough class as the entry above —
-        // applyVariantFallbackDivergenceCap() (priceBands.js) produces this
-        // source when it caps an inflated variant-fallback sold price back
-        // down to the trustworthy, variant-CORRECT active anchor. Missing
-        // here, it fell through to 'pc_estimate' (eligible) and risked the
-        // same double-count re-multiply on an already-capped, already
-        // active-anchored price. Mapped to its semantic sibling
-        // 'active_ask_derived' — active-anchored by construction, not
-        // eligible for the era/variant multiplier.
-        'variant_fallback_capped': 'active_ask_derived',
-        'tier4_pc_estimate': 'pc_estimate',
-        // Legacy sources (pre-tier)
-        'verified_sold': 'verified_sold',
-        'verified_active': 'verified_active',
-        'verified_sold_active_blend': 'verified_sold_active_blend',
-        // Q109-D [2026-07-17]: same fallthrough class — the ASM #17-class
-        // franchise-relaunch guard (priceBands.js) excludes a contaminated
-        // active pool and prices sold-only, tagging this source. Missing
-        // here, it also fell through to the eligible 'pc_estimate' default.
-        // Mapped to its semantic sibling 'tier2_sold_only' -> 'verified_sold'
-        // (already sold-verified via the Ship 18 strict variant filter —
-        // explicitly excluded from the multiplier-eligible set above).
-        'tier2_sold_only_active_suspect': 'verified_sold',
-        // GK-34 (2026-08-07, GrailKey Dispatch 10) — same fallthrough class
-        // as the two entries above, confirmed live in production before
-        // this fix landed: missing this entry silently fell through to the
-        // 'pc_estimate' default, which is IN VARIANT_MULT_ELIGIBLE_SOURCES
-        // (~line 7629), risking the identical double-count re-multiply this
-        // exact map exists to prevent (ASM #300 / Q109-D history above) on
-        // a price that's already active-anchored and ×0.85-discounted by
-        // priceBands.js's tier2_active_dominant_thin_sold branch. Also an
-        // I13 provenance violation independent of the multiplier risk: the
-        // card displayed "pc_estimate" for a price that was never a
-        // PriceCharting estimate at all. Mapped to its semantic sibling
-        // 'active_ask_derived' — same construction as tier3_active_discounted
-        // (active pool anchor, ask-derived, already discounted).
-        'tier2_active_dominant_thin_sold': 'active_ask_derived',
-      };
-      out.pricingSource = tierSourceMap[priceBandsRaw.source] || 'pc_estimate';
+      // #20b-FIX1: Map tier sources to display labels. Definition hoisted
+      // to module scope (TIER_SOURCE_MAP, below the handler) — three
+      // incidents of the identical shape now (Q109-DISPATCH-1-B, Q109-D,
+      // GK-34/Dispatch-10) all trace to a NEW priceBands.js source value
+      // silently falling through to the 'pc_estimate' default, which is
+      // eligible for a variant/key re-multiply — see
+      // tests/tier-source-map-completeness.test.js, which asserts every
+      // source PRICE_BANDS_SOURCES (priceBands.js) can emit has an
+      // explicit entry here. Third-incident pattern closed by the test,
+      // not by remembering harder.
+      if (!(priceBandsRaw.source in TIER_SOURCE_MAP)) {
+        console.error(
+          `[tier-source-map] UNMAPPED source "${priceBandsRaw.source}" — falling through to ` +
+          `'pc_estimate' default, which is VARIANT_MULT_ELIGIBLE_SOURCES-eligible. This is exactly ` +
+          `the Q109-DISPATCH-1-B/Q109-D/GK-34 double-count shape. Add an explicit TIER_SOURCE_MAP ` +
+          `entry for this source.`
+        );
+      }
+      out.pricingSource = TIER_SOURCE_MAP[priceBandsRaw.source] || 'pc_estimate';
 
       // Ship #24 — source-specific comp count. priceBandsRaw.count reflects
       // the pool that calculatePriceBands() received (sold comps when source
