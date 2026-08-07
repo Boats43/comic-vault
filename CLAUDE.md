@@ -1897,12 +1897,29 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   get a variant/key multiplier re-applied on top, double-counting. Fixed
   by mapping to the same semantic sibling those two prior fixes used —
   `'active_ask_derived'` (matches `tier3_active_discounted`'s
-  construction: active-pool anchor, ask-derived, already discounted). No
-  dedicated unit test added — this inline handler-level map has never had
-  one, including for the two prior fixes it mirrors; verification is via
-  direct inspection against the 3 existing analogous entries plus the
-  next production re-scan, matching established practice for this exact
-  map.
+  construction: active-pool anchor, ask-derived, already discounted).
+
+  **Reclassified and closed permanently (2026-08-07, GrailKey Dispatch
+  11, `1699c2e`) — this was called a display defect; it wasn't.**
+  `pc_estimate` is the default for any unmapped source, and it sits
+  inside `VARIANT_MULT_ELIGIBLE_SOURCES` (~`api/enrich.js:7629`) — so an
+  already active-anchored, already-discounted price was eligible for a
+  variant/key multiplier re-application on top, the exact double-count
+  this map exists to prevent. Three incidents of the identical shape
+  (`Q109-DISPATCH-1-B`, `Q109-D`, this one) is a design gap, not a
+  pattern of missed entries — closed with a completeness check instead
+  of hoping for a fourth catch: `PRICE_BANDS_SOURCES` (the exhaustive
+  list of every `source` value `priceBands.js` can emit) and
+  `TIER_SOURCE_MAP` both relocated to `src/lib/priceBands.js` (not left
+  in `api/enrich.js`, which does not cleanly exit when imported in a
+  bare Node/test context — same reason `cacheKeys.js` exists) so
+  `tests/tier-source-map-completeness.test.js` can assert every source
+  has an explicit map entry (12/12 passing). Also added a
+  `console.error` diagnostic in the handler itself for the case this
+  test can't cover — an unmapped source actually reaching production
+  before the next test run catches it — so the gap is loud at runtime
+  too, not just at test time. "No silent default," both statically and
+  at runtime.
 
   **Wolverine #37 — worst card in the batch, traced.** Two numbers from
   one request: `[price-bands] source=tier4_pc_estimate market=$5.09`
@@ -1921,21 +1938,38 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   dispatch's own description ("a floor fired at 99.99 after the fact")
   exactly. **The card shows $99.99, not $5.09** — `out.price` is the same
   field both `[verify]` and the client read; nothing after
-  `computeLowGradeFloor` in this trace lowers it back down. Root chain,
-  consistent with but not yet independently re-confirmed against a raw
-  log capture of `[low-grade-floor]` itself: the Greg Capullo registry
-  gap (below) corrupted the search query (`confirmedTitle="wolverine
-  greg capullo"`), which — being the same query construction
-  `api/comps.js` uses to build BOTH the sold-comp pool (25/30
-  titleMismatch-rejected) and the active `rawComps` pool the low-grade
-  floor reads `rawComps.lowest` from — plausibly pulled in wrong-book
-  active listings whose lowest price is $99.99, which the floor then
-  (correctly, by its own logic, on contaminated input) trusted as the
-  real market bottom. Not yet fixed — the floor mechanism itself is
-  working as designed; the actual defect is the upstream query
-  corruption, closed for this specific case by the registry fix below,
-  but the general "a floor built on a contaminated active pool inherits
-  the contamination" risk is not something this dispatch closes.
+  `computeLowGradeFloor` in this trace lowers it back down. **CONFIRMED
+  (2026-08-07)** — the `[price-trace]` line from the actual request
+  supplies the direct evidence this entry originally lacked:
+  `rawFloor: 99.99 floor: 99.99 floorFired: true`. `computeLowGradeFloor`
+  fired, and its anchor came from `rawComps.lowest` in a comp pool built
+  on the corrupted query. Root chain: the Greg Capullo registry gap
+  (below) corrupted the search query (`confirmedTitle="wolverine greg
+  capullo"`), which — being the same query construction `api/comps.js`
+  uses to build BOTH the sold-comp pool (25/30 titleMismatch-rejected)
+  and the active `rawComps` pool the low-grade floor reads
+  `rawComps.lowest` from — pulled in wrong-book active listings whose
+  lowest price is $99.99, which the floor then (correctly, by its own
+  logic, on contaminated input) trusted as the real market bottom. This
+  specific instance is closed by the registry fix below (a corrected
+  query no longer feeds the floor a contaminated pool). **The general
+  class stays open as its own standing finding, separate from this
+  instance:**
+
+  - **Floor-on-contaminated-pool class (open).** `computeLowGradeFloor`
+    (and, by the same reasoning, `computeThinPoolAnchor` — any mechanism
+    that derives a price from `rawComps` rather than from
+    identity-verified sold/active pools) trusts whatever `rawComps`
+    contains with no independent check that the pool itself is
+    correctly-identified. Registry gaps are ONE way to corrupt the query
+    that builds `rawComps` — closing them one name at a time (this week's
+    9 additions) reduces how often this fires but does not close the
+    class, since ANY upstream identity corruption (a title-family
+    misfire, a wrong-issue consensus, any of the other classes already
+    documented in this Pattern Library) feeds the exact same floor
+    mechanism with the exact same blind trust. Not yet scoped as a fix —
+    recorded here so a future "why did the floor anchor to a wrong price"
+    report is recognized as this class, not investigated from scratch.
 
   **Registry gaps 5, 6, 7 — SHIPPED (`cb49224`), same shape as 1-4, found
   by production scans instead of the reverse-direction sweep this time.**
@@ -1956,6 +1990,68 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   reverse-direction test itself in one week — the registry's real
   completeness gap is likely still wider than either discovery channel
   has surfaced alone.
+
+  **Seeding `ARTIST_PATTERNS` from ComicVine `person_credits` —
+  investigated (2026-08-07, GrailKey Dispatch 11), PLAN ONLY, not coded.**
+  Nine additions in one week across two independent discovery channels
+  (five production incidents, four from the reverse-direction test) is
+  the strategic signal this dispatch called it: one-at-a-time addition
+  will not converge. The proposal — reuse data already being fetched,
+  the same move that closed the publisher question — checks out on
+  direct inspection, not assumption:
+  - `api/enrich.js:609` already requests `person_credits` in the
+    ComicVine issue-search `field_list` (has for a while — this is not a
+    new API call).
+  - `api/enrich.js:1219-1224` already parses it into a clean
+    `personCredits: [{name, role}, ...]` array per match.
+  - `docs/WHAT_WE_HAVE.md:96-100` confirms this data is currently used
+    for exactly one thing: display-only "Creators" text on the metadata
+    endpoint. It is fetched, parsed, and then discarded for registry
+    purposes on every single scan.
+
+  **Proposed plan, two phases, neither built yet:**
+  1. **Live detection (near-zero cost, no new API calls, no pricing/
+     identity behavior change).** On every scan that already returns
+     `personCredits`, check each credited name against
+     `ARTIST_PATTERNS` (reusing the exact substring-match logic
+     `tests/artist-registry-sync.test.js` already uses) and log a
+     structured line — e.g. `[artist-registry-gap] name="X" role="Y" not
+     in ARTIST_PATTERNS` — for anything unrecognized. Purely additive
+     instrumentation, same shape as the `titleOk`-failure and
+     `pool-ratio-warn` logging already shipped this week; zero risk to
+     pricing or identity resolution.
+  2. **Periodic batch review (reuses existing tooling, no new
+     infrastructure).** Query accumulated `[artist-registry-gap]` lines
+     via the same Vercel `get_runtime_logs` mechanism already used for
+     the stale-threshold measurement above, producing a ranked list of
+     real, production-observed creator gaps — reviewed and added to
+     `ARTIST_PATTERNS` in a batch sweep, the same discipline already
+     established this week (multi-word-only by default, individual
+     collision sweep before any bare single-word fallback), rather than
+     waiting for the next book to misfire.
+
+  **Explicitly NOT proposed:** a one-time bulk harvest that calls
+  ComicVine's API against a broad catalog swath to pre-populate the
+  registry wholesale. That would need new tooling, raises API-quota
+  questions (`COMICVINE_API_KEY` is presumably rate-limited, exact limits
+  not confirmed), and would scan mostly-irrelevant books — Option 1
+  above gets the same data for free, scoped to exactly the books real
+  users actually scan, with zero additional ComicVine calls.
+
+  **Open questions, not resolved by this investigation:** should ALL
+  credited roles feed the check, or only cover/artist-relevant ones? The
+  week's own evidence argues for ALL roles — Alan Moore and Chris
+  Claremont are writers, not artists, and both bled into titles exactly
+  the way Jeff Smith and Cory Walker did; role does not predict whether a
+  name shows up in a seller's listing title. Should gap-detection ALSO
+  apply the multi-word-vs-bare-fallback risk classification
+  automatically (flag common-word surnames for mandatory human review,
+  auto-suggest distinctive ones), or should every detected gap go through
+  the same manual judgment call this week's 9 additions did? Leaning
+  toward the latter — the `'dekal'`/`'spears'` artifacts are a caution
+  against trusting any mechanical classification of "safe to auto-add"
+  without a human step. Not coded; both phases require their own
+  greenlight before implementation.
 
   **Build/version skew across a single log batch — flagged, not a code
   issue.** Four different deployment SHAs appeared across one scan
