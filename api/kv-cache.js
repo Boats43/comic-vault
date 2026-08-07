@@ -17,6 +17,11 @@
 //   bc: — Browse comps
 //   ph: — PriceCharting HTML
 //   oauth: — eBay OAuth client-credentials tokens (api/comps.js)
+//   scanlog: — per-scan analytics records (src/lib/scanLog.js, GrailKey
+//     Dispatch 22) — a distinct purpose from every prefix above (audit
+//     trail, not avoiding redundant external API calls); own TTL
+//     (KV_TTL.SCANLOG, 90 days) and own time index (SCAN_LOG_INDEX_KEY,
+//     a sorted set, scanlog:index:v1)
 
 let redis = null;
 let kvUnavailable = false;
@@ -86,6 +91,35 @@ export const kvSet = async (key, value, ttlSeconds) => {
 };
 
 /**
+ * GrailKey Dispatch 22 (2026-08-07) — sorted-set add, for the scanlog:
+ * time index (src/lib/scanLog.js). Chosen over Redis Streams (the
+ * originally-recommended primitive) because this project's Upstash
+ * plan's stream-command support was unverified at decision time, while
+ * ZADD/ZRANGE are plain sorted-set primitives — the same category of
+ * command kvGet/kvSet already prove work against this project's real
+ * Upstash instance. Two writes per scan (this plus the record itself
+ * via kvSet) instead of Streams' one, judged irrelevant at current scan
+ * volume (~60/week). Streams remain the documented upgrade path if
+ * write volume ever grows enough to matter (Pattern Library, "GrailKey
+ * Dispatch 21").
+ *
+ * Same graceful-degradation contract as kvGet/kvSet: never throws,
+ * fails silently (best-effort) so a logging write can never break a
+ * real scan response.
+ */
+export const kvZAdd = async (key, score, member) => {
+  const client = await getKV();
+  if (!client) return;
+
+  try {
+    await client.zadd(key, { score, member });
+    console.log('[kv-cache] ZADD:', key, member);
+  } catch (err) {
+    console.warn('[kv-cache] ZADD failed:', key, err.message);
+  }
+};
+
+/**
  * Delete value from KV cache.
  * Used for cache invalidation (rarely needed).
  */
@@ -111,6 +145,7 @@ export const KV_TTL = {
   ACTIVE: 3600,     // 1 hour — Active comps (listings change hourly)
   BROWSE: 21600,    // 6 hours — Browse comps
   PC_HTML: 604800,  // 7 days — PriceCharting HTML (very stable)
+  SCANLOG: 7776000, // 90 days — scanlog: per-scan analytics records (src/lib/scanLog.js), a distinct purpose from the caches above (audit trail, not avoiding redundant API calls)
 };
 
 /**

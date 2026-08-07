@@ -2548,3 +2548,92 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   real unknown blocking a choice between the two storage options above)
   before any code is written.
 
+- **GrailKey Dispatch 22 (2026-08-07) — structured KV scan-logging
+  SHIPPED, greenlit with two decisions made explicitly to avoid waiting
+  on data that wouldn't start accumulating until this was live.**
+
+  **Decision 1: log every scan, not just the interesting ones.** The
+  Dispatch 21 plan's own argument was the deciding one — a narrowly-
+  scoped log recreates the exact denominator problem that broke both
+  of this session's frequency investigations, each needing a different
+  filter. Volume judged not a real constraint at current scale (~60
+  scans/week during heavy testing, ~500-byte records, well under
+  20MB/year) — explicitly revisit if usage grows an order of magnitude,
+  not a permanent assumption.
+
+  **Decision 2: sorted-set index instead of Redis Streams.** Streams
+  were the Dispatch 21 recommendation but carried one real, named
+  blocker: unverified whether this project's Upstash plan supports
+  stream commands. The sorted-set fallback uses only primitives
+  `api/kv-cache.js` already proves work against this project's real
+  Upstash instance (plain `GET`/`SET`, now `ZADD`/`ZRANGE`) — removes
+  the blocker outright rather than resolving it. Two writes per scan
+  (the record plus the index entry) instead of Streams' one judged
+  irrelevant at ~60 scans/week. Streams remain the documented upgrade
+  path, not abandoned — worth revisiting if write volume ever grows
+  enough that two round-trips per scan starts to matter.
+
+  **What shipped, concretely:**
+  - `src/lib/scanLog.js` (new) — `buildScanLogRecord` (pure, no I/O,
+    every field defaults to `null` rather than being omitted, so a
+    consumer querying many records never needs a presence check) and
+    `buildScanLogKey` (`scanlog:v1:<ts>:<id>`). `SCAN_LOG_VERSION=1`,
+    `SCAN_LOG_TTL_SECONDS` (90 days), `SCAN_LOG_INDEX_KEY`
+    (`scanlog:index:v1`) all exported as named constants, matching this
+    file's own `PC_FILTER_VERSION`/`CV_FILTER_VERSION` versioning
+    discipline (`api/kv-cache.js`) from day one — a future schema
+    change bumps the version rather than silently reshaping historical
+    records a live query is still reading.
+  - `api/kv-cache.js` — new `kvZAdd(key, score, member)`, same
+    graceful-degradation contract as the existing `kvGet`/`kvSet`
+    (try/catch, swallow failures, `console.warn`, never throw). New
+    `KV_TTL.SCANLOG` constant and a `scanlog:` line added to the file's
+    own key-prefix documentation comment.
+  - `api/enrich.js` — three changes: (1) a `scanLogTerminalReason`
+    variable, declared just above the commit4-terminal/commit-p branch
+    and set inside each (`'commit4-terminal'` / `'commit4.1-terminal'`
+    / `'commit-p'` / stays `null` when neither fires — a normal,
+    confident scan); (2) Fix 5's `assetTypeOverrideEvaluated`/
+    `assetTypeOverrideBlockedBy` now persisted onto `out` (previously
+    only logged, not stored, so the scanlog write site — much later in
+    the same handler — had nothing to read); (3) the write site itself,
+    placed immediately after `out.decision = computeDecision(...)` (the
+    point every field the record needs — `out.issueAuthority`,
+    `familyCandidate.topFamily`, pool sizes, the terminal reason — is
+    settled), wrapped in its own try/catch as a second layer of
+    protection beyond `kvSet`/`kvZAdd`'s own internal error-swallowing
+    (this block also builds the record and reads several `out`/local
+    fields, which the KV wrapper functions' own try/catch can't cover).
+    Awaited, not fire-and-forget — a genuinely un-awaited promise in a
+    serverless function has no guaranteed chance to complete once the
+    response is sent; `kvSet`/`kvZAdd` already resolve in one fast
+    Redis round-trip each, so awaiting costs negligible latency while
+    guaranteeing the write is attempted.
+  - `scripts/query-scanlog.mjs` (new) — local script, no new Vercel
+    function (deliberately: `api/` is already at 14 files against a
+    nominally-12 cap, an unresolved open question since GrailKey
+    Dispatch 18; spending one of those scarce slots on an investigation
+    tool rather than a customer-facing feature would be the wrong
+    trade). Loads `KV_REST_API_URL`/`KV_REST_API_TOKEN` from whichever
+    pulled `.env*` file has them, same preference-order pattern already
+    established in `scripts/pc-token-health.mjs` — no new dependency,
+    no dotenv (this repo has none). Accepts `--since`/`--until` (ISO or
+    relative, `"7d"`/`"24h"`/`"30m"`), `--json` for raw records, `--limit`
+    on the index read. Default summary output breaks down
+    `terminalReason` and `issueAuthority.status` counts and Fix 5's
+    evaluated/fired counts directly — the exact shape both of this
+    session's dead-end investigations actually needed.
+
+  **26-assertion regression** (`tests/grailkey-dispatch-22-scanlog.test.js`):
+  the pure builders' full/minimal/partial-input behavior, and a direct
+  confirmation that `kvZAdd` never throws even with no KV configured
+  (this test environment's own real shape — the same shape a production
+  Redis outage would produce). Full build clean. Regression sweep against
+  `q-trackB-commit4.3-winning-family-authority` (266/266),
+  `q110-intake-nonblocking` (38/38), `identity-gate` (1 pre-existing,
+  unrelated failure, unchanged), and every Dispatch 19/20 test file
+  (`fix6-year-rescue`, `vision-confidence-leak`,
+  `fix5-asset-type-override`, `fix5-decline-logging`) — all confirmed
+  passing, zero regressions from touching `api/enrich.js` a fourth time
+  this session.
+

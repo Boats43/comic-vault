@@ -145,7 +145,8 @@ import { checkVisionConsistency } from "../src/lib/visionConsistency.js";
 // Session 4B — Import book signal detection from shared classifier
 import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map caches)
-import { kvGet, kvSet, KV_TTL, PC_FILTER_VERSION, CV_FILTER_VERSION } from "./kv-cache.js";
+import { kvGet, kvSet, kvZAdd, KV_TTL, PC_FILTER_VERSION, CV_FILTER_VERSION } from "./kv-cache.js";
+import { buildScanLogRecord, buildScanLogKey, SCAN_LOG_INDEX_KEY } from "../src/lib/scanLog.js";
 import { checkRateLimit } from "./rate-limit.js";
 import { randomUUID } from "node:crypto";
 import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
@@ -3499,6 +3500,11 @@ export default async function handler(req, res) {
           const comicVotes = categoryVotes.length - merchandiseVotes;
           const comicRatio = categoryVotes.length > 0 ? comicVotes / categoryVotes.length : 0;
           const coherent = visualConsensus !== null;
+          // GrailKey Dispatch 22 — persisted (not just logged) so the
+          // scanlog: write site, much later in this handler, can report
+          // whether this predicate was evaluated at all this scan and
+          // why it declined, without re-deriving it from log text.
+          out.assetTypeOverrideEvaluated = true;
           if (shouldLiftAssetTypeAdvisoryLock(merchandiseRatio, comicVotes, categoryVotes.length, coherent)) {
             out.assetTypeConfidentOverride = true;
             console.log(
@@ -3523,6 +3529,7 @@ export default async function handler(req, res) {
             if (comicVotes < 5) blockedBy.push('comicVotes<5');
             if (comicRatio < 0.6) blockedBy.push('comicRatio<60%');
             if (!coherent) blockedBy.push('pool-incoherent');
+            out.assetTypeOverrideBlockedBy = blockedBy;
             console.log(
               `[Q32-asset-type-override] declined: comicVotes=${comicVotes}/${categoryVotes.length} ` +
               `(ratio=${(comicRatio*100).toFixed(0)}%) merchandiseRatio=${(merchandiseRatio*100).toFixed(0)}% ` +
@@ -10484,6 +10491,17 @@ export default async function handler(req, res) {
     // decisionEngine's real ID_REQUIRED path) and the documented,
     // deliberate absence of a "no contradiction still confirmed"
     // carve-out anywhere in this commit's diff.
+    // GrailKey Dispatch 22 (2026-08-07) — scan-log terminal-reason capture.
+    // Declared here, set inside the commit4-terminal/commit-p branches
+    // immediately below, read later at the scanlog write site (near the
+    // final response). Stays null when neither branch fires — a normal,
+    // confident scan where out.issueAuthority was never set provisional/
+    // conflicted in the first place — which the scanlog record reports
+    // as terminalReason: null (mapped to "clean" by the query script,
+    // not baked into this variable itself, so the record stays an
+    // honest reflection of "nothing fired" rather than a synthesized
+    // label).
+    let scanLogTerminalReason = null;
     {
       // Track B Phase 0, Commit 4.3 (Section E, revised — shared custody
       // invariant) — call site 3 of 4 (authoritative pricing). Runs
@@ -10525,6 +10543,7 @@ export default async function handler(req, res) {
         // must match what actually happened) of exactly the shape this
         // whole audit was commissioned to find.
         if (authorityPatch.refusedToPrice === true) {
+          scanLogTerminalReason = out.issueAuthority?.status ? 'commit4-terminal' : 'commit4.1-terminal';
           console.log(
             out.issueAuthority?.status
               ? `[commit4-terminal] issueAuthority.status="${out.issueAuthority.status}" — forcing ID_REQUIRED-class ` +
@@ -10533,6 +10552,7 @@ export default async function handler(req, res) {
                 `forcing ID_REQUIRED-class contract state, clearing price authority, locking listing`
           );
         } else {
+          scanLogTerminalReason = 'commit-p';
           console.log(
             `[commit-p] issueAuthority.status="provisional" but high-confidence marketplace consensus qualifies ` +
             `(reasons=[${(out.issueAuthority?.reasons || []).join(', ')}]) — price preserved, listing still locked pending confirmation`
@@ -10554,6 +10574,58 @@ export default async function handler(req, res) {
       `blockers=${out.decision.blockers?.length || 0} ` +
       `warnings=${out.decision.warnings?.length || 0}`
     );
+
+    // GrailKey Dispatch 22 (2026-08-07) — structured per-scan KV log.
+    // Every scan gets a record (not just "interesting" ones — see
+    // src/lib/scanLog.js's own header comment for why a narrowly-scoped
+    // log recreates the exact problem this exists to fix). Fire-and-
+    // forget in spirit but actually awaited: kvSet/kvZAdd already
+    // swallow their own errors internally (graceful-degradation
+    // contract, api/kv-cache.js) and resolve in a single fast Redis
+    // round-trip each, so awaiting them costs negligible latency while
+    // guaranteeing the write is attempted before this invocation can be
+    // torn down — an un-awaited promise in a serverless function has no
+    // guaranteed chance to complete after the response is sent.
+    try {
+      const scanLogId = req.headers?.['x-vercel-id'] || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const scanLogTs = Date.now();
+      const scanLogKey = buildScanLogKey(scanLogTs, scanLogId);
+      const scanLogRecord = buildScanLogRecord({
+        ts: scanLogTs,
+        id: scanLogId,
+        book: { title: confirmedTitle ?? null, issue: confirmedIssue ?? null, year: confirmedYear ?? null },
+        issueAuthority: out.issueAuthority || null,
+        familyWeight: familyCandidate
+          ? {
+              weightSum: familyCandidate.topFamily?.weightSum ?? null,
+              count: familyCandidate.topFamily?.count ?? null,
+              overlapRatio: familyCandidate.overlapRatio ?? null,
+              decision: familyCandidate.decision ?? null,
+            }
+          : null,
+        terminalReason: scanLogTerminalReason,
+        poolSizes: {
+          raw: (parsedVisualRows?.length || 0) + (visualResult?.rejectedVisualEvidence?.length || 0),
+          eligible: parsedVisualRows?.length ?? null,
+          familyMembers: familyCandidate?.topFamily?.count ?? null,
+        },
+        assetTypeOverride: out.assetTypeOverrideEvaluated
+          ? {
+              evaluated: true,
+              fired: out.assetTypeConfidentOverride === true,
+              blockedBy: out.assetTypeOverrideBlockedBy || [],
+            }
+          : null,
+      });
+      await kvSet(scanLogKey, scanLogRecord, KV_TTL.SCANLOG);
+      await kvZAdd(SCAN_LOG_INDEX_KEY, scanLogTs, scanLogKey);
+    } catch (err) {
+      // Belt-and-suspenders: kvSet/kvZAdd already catch internally, but
+      // this block also builds the record itself (buildScanLogRecord,
+      // familyCandidate/out field reads) — a logging feature must never
+      // be able to throw into the real response path.
+      console.warn('[scanlog] write failed (non-fatal):', err.message);
+    }
 
     // P0-D: Add timestamp so UI can show "Updated X ago"
     out.priceUpdatedAt = Date.now();
