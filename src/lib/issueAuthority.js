@@ -158,6 +158,196 @@ export function meetsHighConfidenceMarketplaceConsensusBar(familyCandidate, visu
   return true;
 }
 
+// GrailKey Dispatch 25 (2026-08-07) — Fix 2/2b, unanimous-consensus
+// promotion (provisional -> confirmed). A STRICTER, SEPARATE gate from
+// P1 above: P1 (meetsHighConfidenceMarketplaceConsensusBar) governs
+// only whether commit4-terminal's contract patch hides an already-
+// computed price — issueAuthority.status stays 'provisional' either
+// way (P-2, the standing invariant this whole file exists to enforce:
+// absence of contradiction is not corroboration). This gate is the
+// deliberate, narrow exception to that invariant: when consensus is
+// not just strong but UNANIMOUS (zero dissent, not merely a clear
+// lead) AND independently corroborated by non-collusion signals
+// (distinct sellers, distinct listings), the marketplace pool itself
+// becomes the corroboration Vision/the user failed to supply — this is
+// no longer "nothing contradicted it," it is affirmative, redundant
+// agreement from independent sources.
+//
+// Shared by both the issue-axis (evaluateUnanimousConsensusPromotion)
+// and year-axis (evaluateUnanimousYearConsensusPromotion) predicates.
+// Missing/null itemId or seller data is treated as a FAILURE, not a
+// pass — this codebase's standing "conservative when uncertain"
+// posture, and seller-distinctness specifically is the anti-injection
+// guard replacing the corroboration Vision never provided (a single
+// seller listing 4 near-identical rows under different item IDs is not
+// 4 independent sources).
+//
+// @param {number[]} indices - the specific member indices to check (NOT necessarily the full family — the year-axis caller passes only the asserting subset)
+// @param {Array} visualItems - the raw pool rows the indices reference
+// @returns {{distinct: boolean, reason: string|null, itemIdCount: number, uniqueItemIdCount: number, sellerCount: number, uniqueSellerCount: number}}
+function checkDistinctItemIdAndSeller(indices, visualItems) {
+  const rows = Array.isArray(indices) ? indices : [];
+  const itemIds = [];
+  const sellers = [];
+  for (const idx of rows) {
+    const item = visualItems?.[idx];
+    if (item == null || typeof item === 'string') continue;
+    itemIds.push(item.itemId || item.legacyItemId || null);
+    sellers.push(item.sellerUsername || null);
+  }
+  const uniqueItemIds = new Set(itemIds);
+  const uniqueSellers = new Set(sellers);
+  const itemIdsDistinct = itemIds.length > 0 && !itemIds.includes(null) && uniqueItemIds.size === itemIds.length;
+  const sellersDistinct = sellers.length > 0 && !sellers.includes(null) && uniqueSellers.size === sellers.length;
+  return {
+    distinct: itemIdsDistinct && sellersDistinct,
+    reason: !itemIdsDistinct ? 'duplicate-or-missing-itemId' : (!sellersDistinct ? 'duplicate-or-missing-seller' : null),
+    itemIdCount: itemIds.length,
+    uniqueItemIdCount: uniqueItemIds.size,
+    sellerCount: sellers.length,
+    uniqueSellerCount: uniqueSellers.size,
+  };
+}
+
+/**
+ * Fix 2 — issue-axis unanimous-consensus promotion. Every input is read
+ * directly off resolveFamilyIssueConsensus's own return shape
+ * (identityCore.js) — uniqueRows/support/runnerUp are ALREADY scoped to
+ * winning-family membership (the `indices` argument passed into that
+ * function is the family's own topFamily.indices, never the raw pool),
+ * so no population correction is needed on this axis (contrast Fix 2b
+ * below, where a real wrong-population defect was found and fixed
+ * before this predicate was written).
+ *
+ * `support === uniqueRows` (integer comparison), not `ratio === 1`
+ * (float comparison) — same value for realistic small integer counts,
+ * chosen to avoid float-equality risk entirely rather than rely on it
+ * being safe.
+ *
+ * Every condition failing independently declines (predicate order
+ * matters only for which declineReason is reported first — the FIRST
+ * failing condition is named, not every one that would fail).
+ *
+ * @param {{uniqueRows: number, support: number, runnerUp: string|null}|null} familyIssueConsensus
+ * @param {{topFamily: {indices: number[], weightSum: number}}|null} familyCandidate
+ * @param {Array} visualItems
+ * @returns {{promote: boolean, declineReason: string|null, inputs: object}}
+ */
+export function evaluateUnanimousConsensusPromotion(familyIssueConsensus, familyCandidate, visualItems) {
+  const inputs = {
+    uniqueRows: familyIssueConsensus?.uniqueRows ?? null,
+    support: familyIssueConsensus?.support ?? null,
+    runnerUp: familyIssueConsensus?.runnerUp ?? null,
+    weightSum: familyCandidate?.topFamily?.weightSum ?? null,
+  };
+  if (!(inputs.uniqueRows >= 4)) {
+    return { promote: false, declineReason: 'uniqueRows<4', inputs };
+  }
+  if (!(inputs.support === inputs.uniqueRows)) {
+    return { promote: false, declineReason: 'not-exact-unanimity', inputs };
+  }
+  if (inputs.runnerUp !== null) {
+    return { promote: false, declineReason: 'runnerUp-present', inputs };
+  }
+  if (!(inputs.weightSum >= 8.0)) {
+    return { promote: false, declineReason: 'weightSum<8.0', inputs };
+  }
+  const memberCheck = checkDistinctItemIdAndSeller(familyCandidate?.topFamily?.indices, visualItems);
+  if (!memberCheck.distinct) {
+    return { promote: false, declineReason: memberCheck.reason, inputs: { ...inputs, ...memberCheck } };
+  }
+  return { promote: true, declineReason: null, inputs: { ...inputs, ...memberCheck } };
+}
+
+// Fix 2b — year-axis, corrected population. resolveFamilyYearConsensus's
+// own `uniqueRows`/`support` denominator is family MEMBERSHIP (every
+// deduped family row), not assertion (Step A finding, GrailKey
+// Dispatch 25 — verified directly against that function's source, not
+// assumed): `support` (=yearBearingRows) is rows that asserted a year,
+// `uniqueRows` counts silent (no year token) rows too. Reusing those
+// two fields directly as a naive `support === uniqueRows` check
+// (mirroring Fix 2's issue-axis pattern exactly) would be the THIRD
+// recorded instance of "measuring coherence against the wrong
+// population" (Pattern Library — vision-zero-support at launch
+// certification was the first) — a family member that never asserted a
+// year at all would count against unanimity exactly like a member that
+// asserted a CONFLICTING year, even though silence and dissent are not
+// the same thing. This recomputes directly from the same raw
+// indices/visualItems inputs, scoped to asserting rows from the start,
+// rather than reusing the family-membership-scoped aggregate.
+//
+// @param {number[]} indices - familyCandidate.topFamily.indices
+// @param {Array} visualItems
+// @returns {{assertingIndices: number[], assertingCount: number, silentCount: number, majorityYear: string|null, dissentingCount: number}}
+function analyzeYearAssertions(indices, visualItems) {
+  const rows = Array.isArray(indices) ? indices : [];
+  const asserting = [];
+  for (const idx of rows) {
+    const item = visualItems?.[idx];
+    if (item == null) continue;
+    const rowYear = typeof item !== 'string' ? item?.year : null;
+    if (rowYear != null) asserting.push({ idx, year: String(rowYear) });
+  }
+  const counts = {};
+  for (const a of asserting) counts[a.year] = (counts[a.year] || 0) + 1;
+  const majorityYear = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const dissentingCount = asserting.filter((a) => a.year !== majorityYear).length;
+  return {
+    assertingIndices: asserting.map((a) => a.idx),
+    assertingCount: asserting.length,
+    silentCount: rows.length - asserting.length,
+    majorityYear,
+    dissentingCount,
+  };
+}
+
+/**
+ * Fix 2b — year-axis unanimous-consensus promotion. On promote, the
+ * caller should NOT append 'year' to identityProvisionalFields at all
+ * (rather than append-then-remove — there is no removal mechanism
+ * anywhere in this codebase, appendYearToProvisionalFields is purely
+ * additive by design, so the correct fix is to never append in the
+ * first place when this predicate clears).
+ *
+ * A row asserting a DIFFERENT year than the majority is dissent and
+ * hard-fails (`dissentingCount !== 0`) — only ABSENCE (a row with no
+ * parseable year at all) is treated as neutral. Unanimity stays at
+ * exactly zero dissent among asserting rows; this is a corrected
+ * DENOMINATOR, not a lowered bar — a family with 3 silent members and 1
+ * asserting member still needs that 1 to be unanimous among asserters
+ * (trivially true at n=1, but still gated by the `>=3` asserting-row
+ * floor below, so a single lonely assertion can never promote alone).
+ *
+ * @param {{topFamily: {indices: number[]}}|null} familyCandidate
+ * @param {Array} visualItems
+ * @param {{mode: string, support: number, uniqueRows: number}|null} [familyYearConsensus] - cross-reference only, logged for comparison against this function's own recomputed figures; never consulted for the promote/decline decision itself
+ * @returns {{promote: boolean, declineReason: string|null, inputs: object, year: string|null}}
+ */
+export function evaluateUnanimousYearConsensusPromotion(familyCandidate, visualItems, familyYearConsensus) {
+  const indices = familyCandidate?.topFamily?.indices;
+  const analysis = analyzeYearAssertions(indices, visualItems);
+  const inputs = {
+    priorMode: familyYearConsensus?.mode ?? null,
+    priorSupport: familyYearConsensus?.support ?? null,
+    priorUniqueRows: familyYearConsensus?.uniqueRows ?? null,
+    assertingRows: analysis.assertingCount,
+    silentRows: analysis.silentCount,
+    dissentingRows: analysis.dissentingCount,
+    majorityYear: analysis.majorityYear,
+  };
+  if (!(analysis.assertingCount >= 3)) {
+    return { promote: false, declineReason: 'assertingRows<3', inputs, year: null };
+  }
+  if (analysis.dissentingCount !== 0) {
+    return { promote: false, declineReason: 'dissenting-row-present', inputs, year: null };
+  }
+  const memberCheck = checkDistinctItemIdAndSeller(analysis.assertingIndices, visualItems);
+  if (!memberCheck.distinct) {
+    return { promote: false, declineReason: memberCheck.reason, inputs: { ...inputs, ...memberCheck }, year: null };
+  }
+  return { promote: true, declineReason: null, inputs: { ...inputs, ...memberCheck }, year: analysis.majorityYear };
+}
+
 /**
  * Maps a raw adoption-vote ratio to the SAME string confidence-tier
  * vocabulary Commit 3's issueAuthority.confidence already uses
@@ -341,25 +531,46 @@ export function deriveIssueAuthorityFromAdoption(familyIssueConsensus, familyYea
  * and returns the SAME reference unchanged when no escalation applies —
  * callers can rely on referential equality to detect a no-op.
  *
- * Only escalates a 'provisional' status that was reached via
- * marketplace-only-adoption specifically (checked via the reasons array,
- * not just status) — this function has nothing to say about a
- * 'provisional'/'conflicted' status that might arrive here via some future,
- * different reason.
+ * GrailKey Dispatch 25 (2026-08-07), V4 fix — provenance, not a loosened
+ * status check. Fix 2 (evaluateUnanimousConsensusPromotion, this file)
+ * promotes a marketplace-only-adopted issue from 'provisional' to
+ * 'confirmed', which ALSO independently unlocks CV/PC exact-identity
+ * lookups (canUseExactIssuePricingCache) that were skipped while
+ * provisional — the sources most able to surface a genuine contradiction
+ * are the ones promotion just opened, and without this fix the guard
+ * that would catch one was dead for exactly those rows (this function's
+ * original condition checked `status === 'provisional'` only, so a
+ * promoted 'confirmed' row could never re-escalate even on a real
+ * conflict — a net safety regression found in review, before push, not
+ * by any test). Second condition below is provenance-scoped, not a
+ * loosened status check: `status === 'confirmed' &&
+ * reasons.includes('unanimous-marketplace-consensus')` — the exact
+ * reason string Fix 2 stamps onto the SAME `reasons` array this
+ * function already reads for the provisional case, never a separate
+ * field that could drift from it. A 'confirmed' status arriving via any
+ * OTHER route (manualCorrection.js's real one: `source: 'user',
+ * reasons: ['user-correction']`, Commit 3) carries no such reason and
+ * stays non-escalatable, exactly as before this fix — the standing
+ * authority matrix (catalog sources hold identity authority, marketplace
+ * holds pricing-evidence authority) is preserved, not inverted.
+ *
+ * Only escalates a 'provisional' status reached via marketplace-only-
+ * adoption specifically, OR a 'confirmed' status reached via THIS FILE'S
+ * OWN unanimous-consensus promotion specifically (both checked via the
+ * reasons array, never bare status) — this function has nothing to say
+ * about a status that might arrive here via some other, future reason.
  */
 export function escalateIssueAuthorityOnConflict(issueAuthority, issueConsensusConflict) {
-  if (
-    issueAuthority?.status === 'provisional' &&
-    Array.isArray(issueAuthority.reasons) &&
-    issueAuthority.reasons.includes('marketplace-only-adoption') &&
-    issueConsensusConflict
-  ) {
+  const reasons = Array.isArray(issueAuthority?.reasons) ? issueAuthority.reasons : [];
+  const eligibleFromProvisional = issueAuthority?.status === 'provisional' && reasons.includes('marketplace-only-adoption');
+  const eligibleFromPromotedConfirmed = issueAuthority?.status === 'confirmed' && reasons.includes('unanimous-marketplace-consensus');
+  if ((eligibleFromProvisional || eligibleFromPromotedConfirmed) && issueConsensusConflict) {
     return {
       ...issueAuthority,
       status: 'conflicted',
-      reasons: issueAuthority.reasons.includes('visual-pool-issue-divergence')
-        ? issueAuthority.reasons
-        : [...issueAuthority.reasons, 'visual-pool-issue-divergence'],
+      reasons: reasons.includes('visual-pool-issue-divergence')
+        ? reasons
+        : [...reasons, 'visual-pool-issue-divergence'],
     };
   }
   return issueAuthority;

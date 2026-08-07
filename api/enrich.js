@@ -125,7 +125,7 @@ import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } f
 // authority validation (allow-list + normalization), never trusting the
 // client's correctedFields claim alone.
 import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
-import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint, buildIdentityProvisionalYearDetail, deriveProvisionalYearBackfill, rescueYearFromVisionFallback } from "../src/lib/issueAuthority.js";
+import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint, buildIdentityProvisionalYearDetail, deriveProvisionalYearBackfill, rescueYearFromVisionFallback, evaluateUnanimousConsensusPromotion, evaluateUnanimousYearConsensusPromotion } from "../src/lib/issueAuthority.js";
 // Track B Phase 0, Commit 4.3 (revision round 2) — cache-key builders,
 // relocated to src/lib/cacheKeys.js for import-safety (see that file's
 // own header comment). Imported here for this handler's own internal use
@@ -3013,6 +3013,51 @@ export default async function handler(req, res) {
           `no prior Vision/user issue existed to corroborate against` +
           (derived.issueAuthority?.highConfidenceMarketplaceConsensus ? ' — [commit-p] high-confidence marketplace consensus qualifies (price will not be nulled at the terminal gate)' : '')
         );
+        // GrailKey Dispatch 25 (2026-08-07) — Fix 2, issue-axis unanimous-
+        // consensus promotion. Runs immediately after out.issueAuthority is
+        // set to 'provisional' above — never silently, always logged on
+        // both the promote and decline path. Only ever fires when
+        // out.issueAuthority is non-null (fic.mode was genuinely 'adopted'
+        // — the only mode deriveIssueAuthorityFromAdoption returns a real
+        // issueAuthority object for). Terminal invariant
+        // (computeIssueAuthorityContractPatch) and the cache gate
+        // (canUseExactIssuePricingCache) are both untouched — they already
+        // treat status==='confirmed' as satisfying, by design, since
+        // before this dispatch (CACHE_SAFE_ISSUE_AUTHORITY_STATUSES =
+        // new Set(['confirmed'])).
+        if (out.issueAuthority) {
+          const promotion = evaluateUnanimousConsensusPromotion(fic, familyCandidate, parsedVisualRows);
+          if (promotion.promote) {
+            out.issueAuthority.status = 'confirmed';
+            // V4 fix (2026-08-07, same dispatch, pre-push review) —
+            // provenance, not a loosened status check. Stamped onto the
+            // EXISTING reasons array — this file's own already-live
+            // provenance mechanism (escalateIssueAuthorityOnConflict
+            // already gates on reasons.includes('marketplace-only-
+            // adoption'); manualCorrection.js's real 'other confirmed
+            // route', source:'user'/reasons:['user-correction'], proves
+            // this array is genuinely how provenance is tracked here) —
+            // rather than a new parallel field that could drift from it.
+            // Read by escalateIssueAuthorityOnConflict below to scope
+            // conflict-escalation to promoted rows specifically, never to
+            // a catalog/user-confirmed identity arriving via any other
+            // route.
+            out.issueAuthority.reasons = [...(out.issueAuthority.reasons || []), 'unanimous-marketplace-consensus'];
+            console.log(
+              `[commit4-promote] PROMOTE issue=#${fic.winner} uniqueRows=${promotion.inputs.uniqueRows} ` +
+              `support=${promotion.inputs.support} runnerUp=${promotion.inputs.runnerUp} weightSum=${promotion.inputs.weightSum} ` +
+              `uniqueItemIdCount=${promotion.inputs.uniqueItemIdCount}/${promotion.inputs.itemIdCount} ` +
+              `uniqueSellerCount=${promotion.inputs.uniqueSellerCount}/${promotion.inputs.sellerCount} — ` +
+              `issueAuthority.status: provisional -> confirmed (reasons += 'unanimous-marketplace-consensus')`
+            );
+          } else {
+            console.log(
+              `[commit4-promote] DECLINE predicate=${promotion.declineReason} issue=#${fic.winner} ` +
+              `uniqueRows=${promotion.inputs.uniqueRows} support=${promotion.inputs.support} runnerUp=${promotion.inputs.runnerUp} ` +
+              `weightSum=${promotion.inputs.weightSum} — issueAuthority.status stays provisional`
+            );
+          }
+        }
         // Track B Phase 0, Commit 4.1 — same field, same union machinery
         // Commit 3 already shipped (getCorrectableFields,
         // manualCorrection.js) — 'year' is added ONLY when
@@ -3025,7 +3070,47 @@ export default async function handler(req, res) {
         // existing Commit 4 contract-transition machinery
         // (computeIssueAuthorityContractPatch) needs no changes at all to
         // cover it.
-        const nextProvisionalFields = appendYearToProvisionalFields(out.identityProvisionalFields, identity.familyYearConsensus);
+        // GrailKey Dispatch 25 (2026-08-07) — Fix 2b, year-axis unanimous-
+        // consensus promotion. Corrected population (Step A finding): NOT
+        // a naive reuse of familyYearConsensus.support/uniqueRows (that
+        // denominator is family MEMBERSHIP, silent rows count against it
+        // exactly like dissenting rows would — see
+        // evaluateUnanimousYearConsensusPromotion's own doc comment,
+        // issueAuthority.js). Only evaluated when familyYearConsensus.mode
+        // is genuinely 'adopted' — the same condition that would otherwise
+        // trigger the append below; nothing to promote or decline when
+        // there's no adoption to begin with. On promote, 'year' is never
+        // appended to identityProvisionalFields at all (there is no
+        // removal mechanism anywhere in this codebase —
+        // appendYearToProvisionalFields is purely additive by design — so
+        // not appending is the only correct way to represent "not
+        // provisional," never append-then-remove).
+        const familyYearConsensus = identity.familyYearConsensus;
+        let yearPromoted = false;
+        if (familyYearConsensus?.mode === 'adopted') {
+          const yearPromotion = evaluateUnanimousYearConsensusPromotion(familyCandidate, parsedVisualRows, familyYearConsensus);
+          if (yearPromotion.promote) {
+            yearPromoted = true;
+            console.log(
+              `[commit4-promote-year] PROMOTE year=${yearPromotion.year} assertingRows=${yearPromotion.inputs.assertingRows} ` +
+              `silentRows=${yearPromotion.inputs.silentRows} dissentingRows=${yearPromotion.inputs.dissentingRows} ` +
+              `uniqueItemIdCount=${yearPromotion.inputs.uniqueItemIdCount}/${yearPromotion.inputs.itemIdCount} ` +
+              `uniqueSellerCount=${yearPromotion.inputs.uniqueSellerCount}/${yearPromotion.inputs.sellerCount} — ` +
+              `'year' NOT appended to identityProvisionalFields`
+            );
+          } else {
+            console.log(
+              `[commit4-promote-year] DECLINE predicate=${yearPromotion.declineReason} ` +
+              `assertingRows=${yearPromotion.inputs.assertingRows} silentRows=${yearPromotion.inputs.silentRows} ` +
+              `dissentingRows=${yearPromotion.inputs.dissentingRows} ` +
+              `priorMode=${yearPromotion.inputs.priorMode} priorSupport=${yearPromotion.inputs.priorSupport}/${yearPromotion.inputs.priorUniqueRows} — ` +
+              `'year' stays provisional`
+            );
+          }
+        }
+        const nextProvisionalFields = yearPromoted
+          ? out.identityProvisionalFields
+          : appendYearToProvisionalFields(out.identityProvisionalFields, familyYearConsensus);
         if (nextProvisionalFields !== out.identityProvisionalFields) {
           out.identityProvisionalFields = nextProvisionalFields;
           // GrailKey Commit P (P2b) — this year/support/population triple
@@ -9295,11 +9380,19 @@ export default async function handler(req, res) {
     // less. Real call site for the extracted, exported
     // escalateIssueAuthorityOnConflict (src/lib/issueAuthority.js).
     {
+      // GrailKey Dispatch 25, V4 fix — origin status captured BEFORE the
+      // call so the log line can distinguish a promoted-then-conflicted
+      // row from a provisional-then-conflicted one (item 4 of the
+      // review). escalateIssueAuthorityOnConflict itself stays pure (no
+      // logging inside it) — this is the one real call site.
+      const originStatus = out.issueAuthority?.status;
+      const wasPromoted = Array.isArray(out.issueAuthority?.reasons) && out.issueAuthority.reasons.includes('unanimous-marketplace-consensus');
       const escalated = escalateIssueAuthorityOnConflict(out.issueAuthority, out.issueConsensusConflict);
       if (escalated !== out.issueAuthority) {
         out.issueAuthority = escalated;
         console.log(
-          `[commit4] issueAuthority escalated provisional -> conflicted: ` +
+          `[commit4] issueAuthority escalated ${originStatus} -> conflicted ` +
+          `(origin=${wasPromoted ? 'promoted-confirmed (unanimous-marketplace-consensus)' : 'provisional (marketplace-only-adoption)'}): ` +
           `visual-pool divergence detected against marketplace-adopted issue #${out.issueConsensusConflict.currentIssue} ` +
           `(pool suggests #${out.issueConsensusConflict.consensusIssue})`
         );
