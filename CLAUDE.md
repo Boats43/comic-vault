@@ -2246,6 +2246,98 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   explicit instruction. Two confirmed books (one clearing, one not) was
   enough to answer the gating question.
 
+  **Part 7 — SPLIT (2026-08-07, GrailKey Dispatch 14). Newsstand
+  greenlit and SHIPPED (`3d5ec78`); key held.** The two
+  multipliers had two different verdicts (newsstand clears, key doesn't)
+  and were de-coupled rather than shipped or held together. Implemented
+  in `api/enrich.js`: a new `isNewsstandMultEligible` flag
+  (`NEWSSTAND_MULT_TIER_SOURCES` — the 5 tier-engine labels:
+  `verified_sold_recency`, `sold_active_blend_30`, `verified_sold`,
+  `verified_sold_stale`, `active_ask_derived`), checked independently of
+  `isFromPC`. The outer variant-multiplier gate now reads
+  `isFromPC || isNewsstandMultEligible`; internally, the era-aware
+  newsstand branch runs under that OR, while the numbered/limited-run
+  block and the entire flat `variantMultipliers` table (35¢/30¢, gold,
+  triple/double cover, canadian, whitman, virgin, exclusive, etc.) were
+  wrapped in an explicit `if (isFromPC)` so they stay on the original,
+  narrower, untouched eligibility — none of those were ladder-tested this
+  round. `isFromPC` itself, and everything it gates for the key
+  multiplier (`isFromPC && blendedAvg` at the key-mult's primary path),
+  is completely unmodified — key stays held by construction, not by
+  convention. No dedicated unit test added (matches established practice
+  for this exact inline handler logic — the two prior fixes to this same
+  area, Q109-DISPATCH-1-B and Q109-D, also shipped on production-log
+  verification rather than a unit harness, since the handler doesn't
+  cleanly import into a bare test context); verify on the next real
+  1985-1995 newsstand scan.
+
+  **Part 8 — double-count hypothesis: investigated, hypothesis
+  correction found, genuine test still open.** The proposed test
+  ("compare $52.19, sold-derived, against the $47.43 rung") rests on a
+  factual error worth catching before it shapes the recalibration:
+  **Killing Joke's $52.19 is NOT sold-derived.** Its own production log
+  states `[Q52-investigate] Batman: The Killing Joke #1: zero sold rows
+  from PriceCharting` — zero sold comps existed for this request at all;
+  `$52.19` came from `tier3_active_discounted` (7 active/ask comps ×0.85),
+  the SAME `active_ask_derived` label the whole dormant-multiplier
+  finding is about, not a sold-tier price. The evidence offered doesn't
+  test "do sold comps already price in the key premium" — there's no
+  sold data in this example to test that claim with. What it DOES
+  support, more narrowly: active ASK prices for a widely-recognized key
+  may already reflect elevated demand (sellers who know what they're
+  listing price accordingly) — a real, plausible, but different and
+  narrower finding than the one proposed.
+  A genuine test of the original hypothesis needs a book that (a)
+  actually has `out.keyIssue` populated (rare — established earlier this
+  same dispatch that 10/10 scans in a 6h production sample had
+  `keyIssue: null`) AND (b) priced via a genuinely sold-derived tier
+  (1, 2, or 2.5 — `verified_sold_recency`/`verified_sold`/
+  `sold_active_blend_30`/`verified_sold_stale`), so a real sold-average
+  can be compared against the ladder rung directly. Neither confirmed
+  example from Part 3 satisfies both conditions (Killing Joke: no
+  keyIssue path relevant here since it's active-derived; ASM #222: real
+  sold data existed — 27 verified comps, sold avg $7.77 — but no
+  `keyIssue` was ever populated for it either, and its sold avg sits
+  63% BELOW its own $20.80 ladder rung, which if anything argues against
+  "sold data converges to ladder value" as a general rule, independent
+  of the key question). **Not resolved — flagged as needing a genuinely
+  matching example, not answered by the data in hand.** The theoretical
+  case for excluding key-mult from truly sold-derived sources remains
+  plausible on its own economic logic (a completed transaction for a
+  recognized key already reflects whatever premium buyers paid), but
+  that logic hasn't yet been tested against real matching data — treat
+  it as a hypothesis worth keeping, not yet as a confirmed answer.
+
+  **Part 9 — PC-product-discovery gap, elevated to its own standing
+  finding.** Killing Joke's genuine 1988 first-print PriceCharting
+  product (id=2405125, `https://www.pricecharting.com/game/2405125`) —
+  the exact product whose ladder just settled the key-multiplier
+  question — was **never returned as a candidate by the app's own PC
+  search query** for this book at all. The real production log's
+  `[pc-candidate]` list for this request contained only "Absolute
+  Batman: The Killing Joke [30th Anniversary] #1 (2018)" and three 2026
+  reprint/foil/blank entries — all correctly rejected on year grounds —
+  never the plain 1988 base entry, despite it demonstrably existing on
+  PriceCharting (found directly via their site search, 31 total results
+  for "Batman The Killing Joke", of which the genuine 1988 entry is one).
+  This means: **the ladder that just decided this dispatch's outcome was
+  never available to the pricing engine itself** — Killing Joke priced
+  via Tier 3 active-only specifically BECAUSE its own PC query never
+  found a usable anchor, the same structural shape as the anchor
+  rejection already visible in this exact request's own log
+  (`[pc-anchor-gate] rejecting PC match ... no PC anchor for this book's
+  actual edition`), just one layer further upstream — not a rejection of
+  a found-but-wrong candidate, an outright miss of the right one. Root
+  cause not yet investigated (query construction, PriceCharting's own
+  search ranking for this specific product, or something else) — logged
+  here as its own finding per explicit instruction, not folded into the
+  ladder-check note it was originally attached to.
+
+  **dekal/spears — unchanged, still the only two deliberately-failing
+  entries in the registry sync test**, per explicit instruction (no
+  action needed; recorded here only to confirm the standing state wasn't
+  touched by this dispatch).
+
 ## Open Blockers
 
 ### External
