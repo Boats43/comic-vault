@@ -753,6 +753,24 @@ export const tokenizeTitle = (title) => {
   // Extracts single-word last names from both multi-word patterns (kirkham from
   // /tyler kirkham/, lee from /jim lee/, etc.) AND single-word patterns.
   // COMPLETE LIST — 60+ artists from ARTIST_PATTERNS regex catalog.
+  //
+  // Registry consolidation, commit 1 of 2 (GrailKey Dispatch 08,
+  // 2026-08-07, Bone #1 / Jeff Smith class) — this hand list had drifted
+  // out of sync with ARTIST_PATTERNS' own single-word entries again
+  // (frison/giang/eom/lozano added to the canonical list by Q84/Q130/
+  // Q133/Q136 respectively, never synced here despite this comment's own
+  // "Full sync" claim) — the third confirmed instance of the drifted-
+  // duplicate-constant class in this codebase. Closing the gap here is
+  // deliberately NOT a scripted derivation from ARTIST_PATTERNS' regex
+  // sources: several entries (`/dell'?otto/i`, `/windsor.?smith/i`) don't
+  // reduce to clean words, and this exact list already carries a stray,
+  // unexplained 'dekal' artifact that isn't a substring of any pattern in
+  // this file — live evidence that hand-parsing these regex sources is
+  // error-prone even by hand, let alone by script. Guarded going forward
+  // by tests/artist-registry-sync.test.js, which asserts every
+  // single-word ARTIST_PATTERNS entry actually gets stripped by
+  // tokenizeTitle — this specific gap is exactly what that test would
+  // have caught.
   const artistWords = new Set([
     // From single-word patterns (lines 117-123)
     'skan', 'rapoza', 'quash', 'momoko', 'ross', 'adams',
@@ -762,6 +780,7 @@ export const tokenizeTitle = (title) => {
     'hughes', 'byrne', 'perez', 'kirby', 'ditko', 'mele',
     'albuquerque', 'hama', 'fabok', 'ejikure',
     'gleason', 'quah', 'parrillo', 'maer', 'lim', 'chew', 'ngu', 'sanders',
+    'frison', 'giang', 'eom', 'lozano',  // GrailKey Dispatch 08: sync gap closed
     // From multi-word patterns (lines 111-115) — extract last-name tokens
     // /tyler kirkham/ → kirkham (already above), /jim lee/ → lee,
     // /inhyuk lee/ → lee, /skottie young/ → young, /frank cho/ → cho,
