@@ -2637,3 +2637,48 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   passing, zero regressions from touching `api/enrich.js` a fourth time
   this session.
 
+  **What this instrumentation exists to answer (GrailKey Dispatch 23,
+  2026-08-07) — recorded here so a future session queries for these
+  directly instead of re-deriving them from scratch. All three are
+  currently guesses; revisit after roughly 2 weeks of accumulated
+  records (`node scripts/query-scanlog.mjs --since=14d`).**
+  1. **Does `shouldLiftAssetTypeAdvisoryLock` ever fire in production,
+     or is the bar too conservative?** Dispatch 19's own disclosed gap
+     — the fix shipped with its own motivating scan (Spawn #351)
+     confirmed NOT to qualify under its own bar. Query:
+     `assetTypeOverride.evaluated` count vs. `assetTypeOverride.fired`
+     count (the query script's default summary already reports both).
+     If `evaluated > 0` and `fired` stays at 0 across a real batch, the
+     `>=5` / `>=60%` / coherence-gate combination needs revisiting with
+     real numbers instead of the Dispatch 15 placeholders it still
+     carries.
+  2. **How often does a commit-p near-miss happen, and on books other
+     than Spawn #351, does fragmentation or junk-slot theft dominate?**
+     Dispatch 20's finding was a single-book sample (8 of 9 verified
+     scans were the same physical book) — explicitly flagged as not
+     generalizable. Query: `terminalReason` breakdown
+     (`commit-p`/`commit4-terminal`/`commit4.1-terminal`/`clean`)
+     grouped by `book.title`/`book.issue`, once enough distinct books
+     have accumulated records to say anything. The `familyWeight` field
+     doesn't by itself distinguish fragmentation from junk-slot-theft —
+     that still requires reading the actual raw-pool row content the
+     way Dispatch 20 did by hand — but a `terminalReason` breakdown
+     across many DIFFERENT books would at minimum answer the frequency
+     half of the question, which the single-book sample explicitly
+     could not.
+  3. **Are the `titleOk` 0.15 bar (GrailKey Dispatch 15 Fix 1) and the
+     vision-zero-support ratio floor (Dispatch 15 Fix 2) actually
+     catching real cases, or firing on nothing?** Both shipped against
+     specific cited production misses at the time, but neither has a
+     structured way to check its ongoing hit rate — today that would
+     mean a fresh runtime-log sweep for each, the same reach-limited
+     approach that produced two unanswerable measurements this session.
+     Not yet a field on the scanlog record — closing this specific
+     question would need `familyIssueConsensus`'s `titleOk` value (and
+     whether the zero-support override path was taken at all) added to
+     `buildScanLogRecord`'s schema before it's queryable. Recorded here
+     as a real gap in the CURRENT schema, not just an open question —
+     v1 doesn't carry what this specific question needs; a v2 addition
+     is the honest next step if this is prioritized, not a query against
+     data already being collected.
+
