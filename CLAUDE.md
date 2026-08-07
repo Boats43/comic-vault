@@ -346,11 +346,60 @@ skipping the raw-pool zero-support check — `'no-consensus'` does NOT
 qualify, by explicit design (`identityCore.js:2132-2136` comment). A
 "vision-zero-support skips on family authority without checking issue
 consensus" hypothesis was tested against this exact code path and
-**falsified** — the mode-check already exists. The real cause of #19
-surviving to the card is still open (candidates: `isGraded` short-
-circuiting the zero-support check silently, or a downstream re-hydration
-after a correct null) — needs a non-truncated log or a direct runtime
-reconstruction to close; do not re-attempt a fix here without that.
+**falsified** — the mode-check already exists.
+
+**Root cause closed (Q54, GrailKey Dispatch 04, 2026-08-06):** confirmed via
+direct log evidence (`[phase1] eBay visual: N results, consensus=YES/NO`,
+`api/enrich.js:2477`) that `visionIssueCount` was **0** for Vision's issue
+in BOTH the failing scan ("19") and the correctly-blocked rescan ("16") —
+ruling out the initially-suspected cause (a nonzero, coincidental pool
+mention of Vision's own issue number silently disabling the safety net).
+With `visionIssueCount===0` and `issueOk===false` fixed identically across
+both scans (the latter directly evidenced today by the ESCALATE firing at
+all — `noIssueConsensus` is exactly `!issueOk` — and implied yesterday by
+the shipped value being Vision's raw, unmodified guess with no OVERRIDE
+logged), `extractConsensus`'s own early-return gate
+(`imageSearchIdentity.js:646-648`) reduces to a single live term:
+```
+zeroSupportNoAdoption = titleOk && !issueOk && visionIssueNorm!=null && visionIssueCount===0
+returnsNull          = !titleOk || (!issueOk && !zeroSupportNoAdoption)
+```
+substituting the two fixed-true terms collapses `returnsNull` to exactly
+`!titleOk`. `visionIssueNorm` was non-null both scans (Vision always
+supplies *some* issue guess) and is not the discriminator either. **`titleOk`
+(`imageSearchIdentity.js:625`, `titleResult.count/total >= 0.3` — raw-pool
+title-string agreement, computed over `parsedVisualRows`, upstream of and
+independent from `resolveFamilyIssueConsensus`'s own family-scoped ratio)
+is the sole term that flipped**, false→true between the two scans. When
+`titleOk` was false, `extractConsensus` returned `null` outright —
+collapsing `ebay` to `null` for the entire `resolveIdentity` call — so the
+`ebay?.agreement?.visionIssueCount === 0` guard (`identityCore.js:2171`)
+evaluated `undefined === 0` (false) and the whole OVERRIDE/ESCALATE branch
+was silently skipped, with no log line at all. `confirmedIssue` was left
+standing at whatever `identityCore.js:1651` had already assigned earlier in
+the same call — Vision's own "19", preserved verbatim by
+`resolveFamilyIssueConsensus`'s `'no-consensus'` mode (explicit by design,
+per that function's own comment: "this only affects the CONFIDENCE LABEL,
+never the value"). No downstream re-hydration and no `isGraded`
+short-circuit were needed to explain the miss — both earlier candidate
+hypotheses are superseded by this one, confirmed rather than assumed.
+
+**Standing finding, independent of any fix — title-coherence gates the
+issue-safety net:** `extractConsensus`'s `titleOk` gate (raw eBay-pool
+title-string agreement, ≥30%) was designed as a basic "is there even a
+coherent pool here" precondition for computing ANY consensus field. It was
+not designed with the awareness that dropping below it also silently
+disables `zeroSupportNoAdoption`/`noIssueConsensus` — the specific
+mechanism built to catch a Vision issue number with zero pool support. A
+pool whose TITLE text is too scattered to reach 30% agreement (for any
+reason — noisy query, contaminated results, genuinely mixed listings)
+currently forfeits the issue-zero-support protection entirely, silently,
+with no log signal distinguishing "title too incoherent to check" from
+"checked and found fine." This coupling is real and general, not specific
+to the Jetsons pool — flag it before scoping any fix to the issue-safety
+path itself, since a fix that touches `zeroSupportNoAdoption`/
+`noIssueConsensus` without also addressing the `titleOk` gate it sits
+behind will not close this class.
 
 ### `applyDualAxisGate` reason-string coupling (`src/lib/imageSearchIdentity.js`) — STANDING CONSTRAINT, do not reword the reason string
 **`applyDualAxisGate`'s `reason` string is parsed by at least one downstream
