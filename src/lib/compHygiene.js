@@ -405,6 +405,31 @@ export const ARTIST_PATTERNS = [
   // usage in this domain ("convention booth," "artist alley booth," "photo
   // booth"), same reasoning already applied to /guillem march/i and
   // /john giang/i above.
+  /jeff smith/i,  // GrailKey Dispatch 08 (2026-08-07) — Bone creator, found
+  // entirely absent from this registry (override-blocked reason=non-creator
+  // additions [jeff,smith] on a real Bone #1 scan). Multi-word ONLY,
+  // deliberately no bare /smith/i fallback — "Smith" is an extremely
+  // common surname, same reasoning as /guillem march/i (calendar month)
+  // and /brett booth/i (convention booth) above; the existing
+  // /windsor.?smith/i compound entry already covers the one context where
+  // a bare-"smith" fallback would have been considered.
+  /cory walker/i,  // GrailKey Dispatch 08 — Invincible co-creator/artist,
+  // found absent alongside Jeff Smith in the same investigation (real
+  // Invincible #1 sold-comp title "Invincible #1 Cory Walker Cover / Art
+  // CGC 9.0 2003", tests/priceBands.test.js). Multi-word ONLY — "Walker"
+  // is common enough (non-artist usage: "The Walking Dead," generic
+  // surname) to warrant the same no-bare-fallback treatment as the
+  // entries above rather than a collision sweep that was never run.
+  /raymond gay/i,  // GrailKey Dispatch 08 — found missing from this
+  // registry as a reverse gap while investigating the Jeff Smith/Cory
+  // Walker consolidation (present in imageSearchIdentity.js's
+  // stripVariantNoise but nowhere in the canonical list it was assumed to
+  // mirror). Multi-word ONLY — "Gay" alone collides far too broadly with
+  // unrelated text to ever get a bare fallback.
+  /stanley lau/i,  // GrailKey Dispatch 08 — same reverse-gap discovery as
+  // Raymond Gay above, found in the same stripVariantNoise investigation.
+  // Multi-word ONLY — "Lau" is a short, generic-looking string; no bare
+  // fallback.
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
   //
   // Q131 systemic-audit follow-up (2026-07-19, One World Under Doom #1 /
@@ -793,6 +818,10 @@ export const tokenizeTitle = (title) => {
     // /lucio parrillo/ → parrillo (already above)
     'lee', 'young', 'cho', 'miller', 'smith', 'otto', 'dekal', 'andrews',
     'suayan', 'meyers', 'spears',  // Q55-C: add missing 'dekal', 'spears'
+    // GrailKey Dispatch 08, commit 2 of 2 — 'walker'/'gay'/'lau' from the
+    // Jeff Smith/Cory Walker/Raymond Gay/Stanley Lau ARTIST_PATTERNS
+    // additions above ('smith' already present, from windsor.?smith).
+    'walker', 'gay', 'lau',
   ]);
   // Signature markers: signed, sig, auto, autographed (do NOT strip "ss" —
   // false positive risk: "Secret Six", "Space Squadron", etc.)

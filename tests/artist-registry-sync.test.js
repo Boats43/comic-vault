@@ -17,6 +17,16 @@
 // tokenizeTitle, so a future addition to ARTIST_PATTERNS that isn't
 // mirrored here fails loudly instead of drifting silently a third time.
 //
+// Commit 2 of 2 (below) — the actual name additions this whole
+// consolidation was triggered by: Jeff Smith and Cory Walker (the real
+// Bone #1 / Invincible #1 gaps), plus Raymond Gay and Stanley Lau (a
+// reverse gap found while investigating imageSearchIdentity.js's
+// stripVariantNoise — present there but nowhere in the canonical list it
+// was assumed to mirror). All four added as multi-word-only entries
+// (collision-swept individually, see compHygiene.js) plus their last
+// names in artistWords, so this consolidation's own guard covers them
+// from day one instead of needing a second pass.
+//
 // Invoke: node tests/artist-registry-sync.test.js
 
 import { ARTIST_PATTERNS, tokenizeTitle } from '../src/lib/compHygiene.js';
@@ -57,6 +67,35 @@ for (const word of ['frison', 'giang', 'eom', 'lozano']) {
   const tokens = tokenizeTitle(`Wonder Woman #75 ${word} Virgin Variant`);
   check(!tokens.includes(word), `GrailKey Dispatch 08 gap closed: "${word}" is stripped by tokenizeTitle`);
 }
+
+// Commit 2 — the four names this dispatch actually adds. Each checked
+// two ways: (a) ARTIST_PATTERNS itself recognizes the full name (the
+// mechanism applyDualAxisGate/extractPoolArtistTokens/api/comps.js's
+// query builder/variantIdentity.js's extractArtist all consume), and
+// (b) tokenizeTitle strips the last name (the artistWords consumer,
+// title-family clustering's own tokenizer).
+const newCreators = [
+  { full: 'Jeff Smith', lastName: 'smith', sample: 'Bone #1 Signed Jeff Smith Nth Print' },
+  { full: 'Cory Walker', lastName: 'walker', sample: 'Invincible #1 Cory Walker Cover Art CGC 9.0' },
+  { full: 'Raymond Gay', lastName: 'gay', sample: 'Some Comic #1 Raymond Gay Variant' },
+  { full: 'Stanley Lau', lastName: 'lau', sample: 'Some Comic #1 Stanley Lau Exclusive' },
+];
+
+for (const { full, lastName, sample } of newCreators) {
+  const matched = ARTIST_PATTERNS.some((re) => re.test(full));
+  check(matched, `ARTIST_PATTERNS recognizes "${full}"`);
+
+  const tokens = tokenizeTitle(sample);
+  check(!tokens.includes(lastName), `tokenizeTitle strips "${lastName}" (from "${full}") via artistWords`);
+}
+
+// "Smith" specifically must stay multi-word-only — no bare fallback was
+// added (too common a surname), so a title with an UNRELATED "Smith"
+// and no "Jeff" nearby must not falsely match ARTIST_PATTERNS' new entry.
+check(
+  !ARTIST_PATTERNS.some((re) => re.test('Amazing Spider-Man #50 signed by John Smith the seller')),
+  'Jeff Smith addition is multi-word-only — an unrelated "Smith" does not false-match'
+);
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
 process.exit(failed > 0 ? 1 : 0);
