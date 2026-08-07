@@ -647,6 +647,17 @@ export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher
 
   if (!titleOk || (!issueOk && !zeroSupportNoAdoption)) {
     // Can't establish consensus on basic identity
+    // Q54 (GrailKey Dispatch 04) — !titleOk short-circuits this return
+    // before zeroSupportNoAdoption is ever consulted, which silently
+    // disables resolveIdentity's vision-zero-support OVERRIDE/ESCALATE
+    // check downstream (ebay collapses to null, so its
+    // `agreement.visionIssueCount === 0` guard never evaluates true).
+    // No prior signal distinguished this from any other null-return
+    // reason — log it specifically so a title-agreement collapse is an
+    // observable event, not a silent gap.
+    if (!titleOk) {
+      console.log(`[extractConsensus] returning null — titleOk failed (${titleResult.count}/${total} = ${(titleResult.count / total).toFixed(2)}, need >=0.30), suppressing vision-zero-support check downstream`);
+    }
     return null;
   }
 
