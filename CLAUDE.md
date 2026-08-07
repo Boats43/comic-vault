@@ -2338,6 +2338,238 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   action needed; recorded here only to confirm the standing state wasn't
   touched by this dispatch).
 
+- **GrailKey Dispatch 15 (2026-08-07) — six identity/pricing fixes, three
+  shipped, three designed-not-coded, plus a cover-matcher investigation.**
+  ~14 production scans this dispatch, all production-observed evidence.
+
+  **Fix 1 SHIPPED (`2c11377`) — `extractConsensus`'s `titleOk` bar lowered
+  0.30 → 0.15** (`src/lib/imageSearchIdentity.js`). Two confirmed live
+  misses at the old bar (Wha...!? #1 5/20=0.25, Power Rangers #1
+  4/20=0.20) — both indie titles whose pools legitimately can't reach 30%
+  title-string agreement, which silently disabled the downstream
+  vision-zero-support OVERRIDE/ESCALATE check exactly on the thin/
+  scattered pools most likely to need it. Issue consensus keeps its own
+  separate 50% bar untouched — lowering titleOk alone cannot adopt a
+  wrong issue on an incoherent pool, it only stops discarding the
+  zero-support signal outright. Verified against the full
+  extractConsensus-touching regression battery (9 suites); one real,
+  understood side effect found and handled: two Adventure Time SS #1
+  assertions (`tests/q141b-shared-issue-extractor.test.js`,
+  `tests/q141c-marketplace-category-rejection.test.js`) were pinned to
+  the old null return and flipped to a real (safe, `noIssueConsensus`)
+  object — confirmed inert in production because
+  `familyAuthoritySkip` (`identityCore.js` ~2170) already resolves that
+  exact book via family-scoped consensus before the raw-pool check this
+  object feeds ever runs. Both pre-existing documented-baseline failure
+  counts (image-search-extraction: 2, q-adv397-visual-guard: 5)
+  unchanged.
+
+  **Fix 2 SHIPPED (`368f4d0`) — vision-zero-support ratio floor, not
+  exact zero.** `visionIssueCount === 0` was an equality test. Real case
+  (Jetsons, Dispatch 05 item 2): Vision's "#10" had 1/19 = 5.3% raw-pool
+  support — not literally zero — so the escalation never fired and the
+  book shipped under the wrong issue (#10 instead of the correct #32,
+  market $9.95–$16.00). New shared `isIssueZeroSupport(count, total)`
+  helper (`identityCore.js`, `ISSUE_ZERO_SUPPORT_RATIO_FLOOR = 0.10`)
+  replaces the equality check at both call sites — `resolveIdentity`'s
+  OVERRIDE/ESCALATE gate and `extractConsensus`'s
+  `zeroSupportNoAdoption` carve-out — one source of truth instead of two
+  independently-maintained checks. Scoped to the issue axis only, per
+  explicit dispatch scope: the sibling `visionPublisherCount` check and
+  `resolveFamilyIssueConsensus`'s own pure aggregate-vote adoption logic
+  (the Flash #139 standing constraint) are untouched. Verified against
+  18 suites / ~1,100 assertions, zero new failures.
+
+  **Fix 3 SHIPPED (`184675a`) — registry additions.** Greg Land
+  (`ARTIST_PATTERNS`, `compHygiene.js`) — Wolverine #10 scan corrupted
+  `confirmedTitle` to "wolverine greg land," rejecting 26/27 genuine
+  sold comps; a real eBay search for the correct book returns 5+
+  listings ($4.99–$19.99, median ~$13.85) vs. the 1 GrailKey found priced
+  at $9.99. Multi-word ONLY, no bare `/land/i` — deliberately also NOT
+  added to `ARTIST_SURNAME_WORDS` (the `tokenizeTitle` strip-list),
+  unlike this batch's precedent (Capullo/Latour/Rodriguez/etc. all got a
+  surname-list entry) — "land" as a standalone token appears in real
+  comic titles ("No Man's Land"), a materially higher collision risk for
+  a strip-list than a surname like Moore/Walker; the reverse-sync test
+  only requires single-word `ARTIST_PATTERNS` entries to have a surname
+  counterpart, so this is not a test gap. Bruce Hershenson
+  (`KNOWN_PUBLISHER_IMPRINT_EVENT_PHRASES`, `imageSearchIdentity.js`) —
+  Wha...!? #1's `confirmedTitle` corrupted to "wha hero hershenson,"
+  every comp query zero-matched; not a publisher/imprint/event in the
+  strict sense this list is named for, reused anyway rather than forking
+  a fifth near-identical list for one entry.
+
+  **Fix 4 DESIGNED, NOT CODED — issue adoption bar for the zero-support
+  override.** Real case: Spawn #350 (Vision) → pool consensus adopted
+  #369 at 9/17=53% winner share, reported `[22c] convergence=90
+  tier=HIGH`. Real answer: #360D (Brett Booth 1:50 virgin variant),
+  which never appeared in the pool at all — a cover-image-only variant
+  with no masthead text a title-based reverse-image search can surface.
+  Two distinct, independently-confirmed root causes:
+  1. The OVERRIDE branch (`identityCore.js` ~2194) adopts `ebay.issue`
+     whenever non-null, and `ebay.issue` is set by `extractConsensus`'s
+     plain `issueOk >= 0.5` bar (`imageSearchIdentity.js`,
+     `agreement.issue = issueResult.count`) — a 53% winner over a close
+     runner-up is treated identically to a 95% landslide. No
+     margin-over-runner-up signal exists anywhere in this path today.
+  2. `[22c]` convergence (`src/lib/convergenceScore.js`,
+     `computeConvergenceScore`/`applyIdentityConflictDemotion`) is a
+     genuinely separate, uncoordinated scoring mechanism from
+     vision-zero-support's own `matchConfidenceDemote`/`visionZeroSupport`
+     flags — those are consumed only by the `finalMc` match-confidence
+     cap at `api/enrich.js:8663`, computed hundreds of lines AFTER `[22c]`
+     runs (`api/enrich.js:3759-3803`). `applyIdentityConflictDemotion`'s
+     only existing input is `familyDecision==='refused-identity-conflict'`
+     — it has never been told "this axis's value came from an
+     unsupported-claim override," so a confidently-reported HIGH tier can
+     sit directly on top of an override the system itself flagged as
+     uncertain.
+
+  Proposed design (not implemented): (a) extend `extractConsensus`'s
+  issue tally with a runner-up count (new sibling to `getMostCommon`,
+  e.g. `getTopTwo`), exposed as `agreement.issueRunnerUpCount` — a pure
+  aggregate count, no rank-weighting, Flash #139-constraint-compliant.
+  (b) In the OVERRIDE branch specifically (not the general `issueOk`
+  report used elsewhere), require `issueWinnerRatio >= 0.75 AND
+  (issueWinnerRatio - issueRunnerUpRatio) >= <margin, candidate 0.20>`
+  before adopting; below that bar (including the current 50–74% adoption
+  band), fall through to the ESCALATE branch (`confirmedIssue = null`,
+  `ID_REQUIRED`) instead of silently adopting a bare-majority winner —
+  strictly more conservative, per the standing "conservative direction
+  preferred when uncertain" rule. (c) Thread `visionZeroSupport`/
+  `matchConfidenceDemote` into `applyIdentityConflictDemotion` as a
+  second demotion input alongside the existing family-conflict cap, so
+  an override/escalate always caps convergence to LOW/≤69 directly
+  rather than relying on the axis-disagreement side effect that
+  currently only sometimes drags the score down. Open before landing:
+  confirm the exact adoption-margin number against real captured pools
+  (same discipline as Fix 2's ratio floor and Dispatch 14's ladder
+  check, not guessed blind); confirm scope stays confined to this
+  OVERRIDE branch, never touching `resolveFamilyIssueConsensus`'s own
+  adoption bar.
+
+  **Fix 5 DESIGNED, NOT CODED, RE-SCOPED — pool overriding a "not a
+  comic" verdict.** Investigation found the dispatch's literal framing
+  doesn't match current code: `assetTypeConfident`
+  (`api/enrich.js:2402-2420`, `:7328-7334`) has been advisory-only since
+  Q110 — it sets `listingHardLocked` (List button gated) but does NOT
+  block title/issue extraction, the eBay visual-pool search, or pricing;
+  all of those already run unconditionally regardless of this flag. The
+  real damage the dispatch describes (Vision returns no issue at all)
+  is a Vision-output-shape problem upstream of this gate, not something
+  the gate itself causes. Re-scoped design: reuse the EXISTING Q32
+  category-vote machinery (`inferAssetTypeFromCategories`,
+  `imageSearchIdentity.js:428-467`, wired at `api/enrich.js:3428-3445`)
+  that today only detects merchandise contamination (`merchandiseRatio
+  >= 0.5` → hard `DO_NOT_LIST` block) — extend it to also tally
+  comic-category votes, and when `!assetTypeConfident` but the pool
+  independently shows strong, title-coherent comic-category agreement
+  (candidate bar: `>=5` comic-category listings, `>=60%` ratio, plus
+  reusing `extractConsensus`'s own title-coherence check on the same
+  pool so a scattered pool of unrelated comic-category junk can't force
+  an override), flip the advisory lock off before it fires. Must be
+  strictly additive to the Q32 merchandise hard-block, never able to
+  override it. Open before landing: one real captured Vision JSON
+  response for a genuine "not a comic" virgin-variant misread, to
+  confirm whether `issue` comes back null vs. a stale wrong value
+  (determines whether this is a display/lock-only fix or also needs to
+  feed a corrected issue back into `resolveIdentity` — though the
+  now-shipped Fixes 1–2 already improve that path independently);
+  threshold numbers are placeholders pending real-pool validation.
+
+  **Fix 6 DESIGNED, NOT CODED — pool year hint feeding `resolveYear`.**
+  Confirmed real and currently narrow: `poolYearHint`
+  (`api/enrich.js:2659-2678`, >=3 pool items / >=50% agreement) is
+  computed early but today feeds ONLY ComicVine volume-disambiguation
+  scoring and two narrow conflict-detection checks — never `resolveYear`
+  itself (`identityCore.js:2787`), whose 4th argument (`ebayYear`) is
+  bound to the separate, stricter `ebayYearAuthoritative` (>=10 items,
+  >=8 agreeing). Proposed design: thread `poolYearHint` into `resolveYear`
+  via a new branch inserted between existing branch (a) (`ebayYear`,
+  kept top-priority — already vetted at a stronger bar) and branch (b)
+  (pc+cv agreement), firing ONLY when there is no Vision/user year at
+  all (`!visionYear && !userYear`) and `poolYearHint.agreement >= 0.80`
+  — deliberately narrower than the raw 50%-bar computation, applied only
+  at this consumption point so the two existing looser-bar consumers are
+  untouched. This targets exactly the documented gap in the "Year
+  override guard" section above (branch (e)'s "no year at all" hole) and
+  never overrides an actual Vision-asserted year, unlike Fix 4's
+  issue-override territory. New `yearSource = 'pool-year-hint'` needs an
+  explicit `PROVEN_SOURCES` classification decision (candidate:
+  `'unproven'`, same tier as `vision-fallback` — a raw title-text tally
+  is a weaker source than the independently-verified sources that
+  currently earn `'proven'`). **Found a real inconsistency in the
+  dispatch's own evidence, not silently resolved either way:** the
+  dispatch cites two production instances — "year=2019 agreement=80%
+  (4/5)" and "year=2024 support=3/4" — but 3/4 is 75%, not >=80% as the
+  dispatch's own proposed bar states. Either the bar needs to be >=75%
+  to cover both cited cases, or the second case is expected to still
+  fail and escalate under an 80% bar. Needs an explicit decision before
+  coding, not a guess.
+
+  **Cover-matcher investigation — PLAN ONLY, no code, per explicit
+  scope.** Six virgin/sketch variant scans this dispatch, zero correct
+  identifications (three scans of the same book alone returned #351,
+  #293, #369 — correct answer #360D). Researched, not assumed:
+  - **GCD (comics.org) API** — public JSON endpoints, no auth challenge.
+    Variant linkage exists as data (`variant_of_id`, `is_variant` fields
+    on the issue model) — i.e. variant covers ARE distinct records,
+    filterable by series/year via the series walk. Data/metadata is
+    CC-BY-SA (commercial use with attribution permitted). Two real
+    caveats worth flagging before building on this: (1) GCD explicitly
+    prohibits bulk image distribution and aggressive scraping — cover
+    images are hosted under fair-use for on-site identification, a
+    materially different (and murkier, for a commercial third-party app)
+    legal footing than the CC-BY-SA metadata; a production integration
+    needs its own light-touch usage review, not an assumption that the
+    data license covers the images too. (2) The app guidelines page
+    (`docs.comics.org/wiki/App_Guidelines`) returned HTTP 403 on a
+    direct fetch during this investigation — confirm current terms
+    directly before integrating, this doc is relaying search-result
+    summaries, not a verified primary read. Community guidance (not
+    official docs) suggests conservative concurrency (~8 parallel issue
+    fetches, 200ms/series-page and 50ms/issue-fetch delays) to stay
+    within polite-use norms on the community-run server.
+  - **ComicVine's `image` field** — per existing public documentation
+    and community reports, models one primary image per issue record;
+    variant covers are inconsistently catalogued (sometimes as separate
+    issue objects with a lettered issue_number suffix, often not at
+    all) — not a reliable variant-cover source on its own, consistent
+    with this codebase's own existing experience (`deriveCvYear`,
+    `comicVine.volume` shape bugs elsewhere in this doc already
+    established ComicVine's data as inconsistent in adjacent ways).
+  - **Narrowing — confirmed already possible without new extraction
+    code.** The dispatch worried Booth's variant/artist tokens are
+    invisible at the point an issue would resolve, since
+    `tokenizeTitleFamily` (`imageSearchIdentity.js:920`) strips
+    `ARTIST_PATTERNS` matches (including `/brett booth/i`, already
+    registered) from the family-clustering title key — by design, the
+    Black Cat/Skottie Young class protection. Confirmed this does NOT
+    lose the data: `extractVariantTokens(rawTitle)` is computed and
+    stored per-row independently (`imageSearchIdentity.js:407`,
+    `row.variantTokens`), untouched by the family-title stripping. A
+    cover-matcher candidate-narrowing step can reuse
+    `row.variantTokens`/`extractArtist` directly to scope a candidate
+    set to series + artist + year, without touching the existing
+    stripping behavior that a different, load-bearing fix depends on.
+  - **Image hashing** — `jimp` (`^0.22.12`) is already a dependency,
+    currently used only for resize/JPEG-quality reduction before the
+    Vision API call (`api/grade.js:413-428`), not for any hashing today.
+    Jimp's own API includes a perceptual-hash method and a
+    hash-distance comparator, which would need a small spike to confirm
+    behavior/accuracy on real comic cover photos (cover art has very
+    different structure than the photography Jimp's hash is typically
+    validated against) before relying on it — not yet spiked.
+  - **Failure mode, per explicit instruction:** strict threshold,
+    `ID_REQUIRED` below it, never a guess. A cover-matcher would be a
+    NEW identity authority requiring an explicit rank in the existing
+    authority matrix (`decideFieldAuthority`, `identityCore.js:1444`) —
+    not scoped further than that here; where it ranks relative to
+    Vision/eBay-consensus/family-clustering is a design decision for
+    when this moves from investigation to a real proposal.
+  - **Explicitly not scoped into this dispatch's six fixes** — ships
+    independently, per instruction.
+
 ## Open Blockers
 
 ### External
