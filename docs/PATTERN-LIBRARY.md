@@ -1682,6 +1682,51 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   OVERRIDE branch, never touching `resolveFamilyIssueConsensus`'s own
   adoption bar.
 
+  **Margin validation attempt (2026-08-07, GrailKey Dispatch 16) — one
+  anchor confirmed, one anchor confirmed VACUOUS, still NOT CODED.**
+  Pulled both cited anchors directly from live Vercel production runtime
+  logs, not re-derived from the dispatch's own summary:
+  - **Spawn #369 (2026-08-07 04:51:10 UTC, `/api/enrich`) — must-fail
+    case, confirmed as specced.** `[visual] consensus: issue=369 (9/17)
+    visionIssueCount=0`, `[vision-zero-support] OVERRIDE: Vision
+    issue="350" has 0/17 pool support — adopting pool #369`, `[22c]
+    convergence=90 tier=HIGH`. Raw-pool winner share is 9/17=52.9% (just
+    clears the existing `issueOk >= 0.5` bar); the family-scoped
+    consensus separately reports `ratio=0.75 uniqueRows=8 runnerUp=366`
+    — a different, stricter computation over deduplicated rows, not the
+    number the OVERRIDE branch actually reads. Under the proposed design
+    (`>=0.75` winner AND `>=0.20` margin over runner-up, both computed on
+    the SAME basis the OVERRIDE branch consumes), this adoption would
+    correctly fail to clear and fall through to ESCALATE — confirms the
+    bug is real and the proposed gate closes it on the exact case that
+    motivated it.
+  - **Tomb of Dracula #17 (2026-08-07 04:23:00 UTC, `/api/enrich`) —
+    confirmed VACUOUS, does not test this branch at all.** `[visual]
+    consensus: issue=17 (20/20) visionIssueCount=20`, `[vision-zero-
+    support] SKIPPED reason=winning-family-authority mode=corroborated
+    issue=17 population=8 support=8 ratio=1.00 rawPoolVisionSupport=20`.
+    Vision's own issue had full raw-pool support, so `familyAuthoritySkip`
+    exempted this scan from the zero-support check entirely — the
+    OVERRIDE branch this fix targets never ran. This anchor can confirm
+    Fix 4 doesn't regress a clean-agreement scan, but cannot validate the
+    margin gate's pass side, since the gate it would sit inside never
+    engaged.
+  - **Searched for a natural third anchor, found none.** Queried
+    production logs for every `[vision-zero-support] OVERRIDE` firing
+    over the trailing 3 days (`get_runtime_logs`, full-text + grouped
+    count) — exactly 1 result, the Spawn #369 scan above. No production
+    scan in this window shows the shape Fix 4's "must pass" side needs:
+    Vision issue with near-zero pool support, where the ADOPTED pool
+    consensus itself is a landslide (candidate: `>=0.90` with a clear
+    runner-up gap). **Fix 4 stays DESIGNED, NOT CODED — blocked on a
+    genuine must-pass anchor, not on the margin number itself.** Coding
+    against only a must-fail example risks tuning the gate to reject
+    everything rather than to discriminate; a landslide OVERRIDE case
+    needs to actually pass once one is captured, either from a future
+    production scan or (if the wait is unacceptable) a synthetic pool
+    constructed and explicitly flagged as synthetic rather than presented
+    as production-validated.
+
   **Fix 5 DESIGNED, NOT CODED, RE-SCOPED — pool overriding a "not a
   comic" verdict.** Investigation found the dispatch's literal framing
   doesn't match current code: `assetTypeConfident`
@@ -1740,6 +1785,18 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   to cover both cited cases, or the second case is expected to still
   fail and escalate under an 80% bar. Needs an explicit decision before
   coding, not a guess.
+
+  **RESOLVED (2026-08-07, GrailKey Dispatch 16) — bar set to >=0.75, not
+  >=0.80. Still DESIGNED, NOT CODED.** Both cited production instances
+  (year=2019 at 4/5=80%, year=2024 at 3/4=75%) were confirmed correct
+  identifications — an 80% bar would silently exclude the second, correct
+  case to hit a round number, and this branch only fires when there is no
+  Vision year at all, so the alternative for that case is the book
+  blocking entirely rather than resolving. `yearSource = 'pool-year-hint'`
+  confirmed classified `'unproven'` (same tier as `vision-fallback`) — a
+  raw title-text tally is weaker than the independently-verified sources
+  that earn `'proven'`. Still not coded — this closes the bar-selection
+  question only; implementation is unstarted.
 
   **Cover-matcher investigation — PLAN ONLY, no code, per explicit
   scope.** Six virgin/sketch variant scans this dispatch, zero correct
@@ -1801,6 +1858,42 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
     not scoped further than that here; where it ranks relative to
     Vision/eBay-consensus/family-clustering is a design decision for
     when this moves from investigation to a real proposal.
+  - **GCD terms verification attempt (2026-08-07, GrailKey Dispatch 16)
+    — BLOCKED, primary source unreachable, gate stays closed.** Per
+    explicit instruction, attempted to read GCD's terms directly rather
+    than relay the search-summary caveat a second time. Every path tried
+    failed:
+    - `docs.comics.org/wiki/App_Guidelines` — HTTP 403 (repeat of the
+      original finding, re-confirmed).
+    - `docs.comics.org/wiki/API_Terms` — HTTP 403.
+    - `www.comics.org/about/` — HTTP 403.
+    - `www.comics.org/` (bare root) — HTTP 403. This confirms the block
+      is domain-wide (both `docs.` and `www.` subdomains, including the
+      bare root), not a permissions issue on one specific page — reads as
+      a bot/WAF block on this fetch tool generically, not a
+      terms-specific restriction.
+    - A web.archive.org mirror of the App_Guidelines page — refused
+      outright at the tool level ("unable to fetch from web.archive.org"),
+      not a site-specific 403.
+    - `github.com/GrandComicsDatabase/gcd-django` (the Django application
+      repo) — reachable, but its GPL-3.0 license badge covers the
+      **application code**, not comics.org's site content, images, or
+      API data; conflating the two would be a real category error, not a
+      substitute answer. No terms-of-use text present in the visible
+      README/LICENSE excerpt.
+    - `github.com/GrandComicsDatabase/gcd-django/wiki/API` (GitHub-hosted
+      wiki, reachable) — contains only a rate-limit note ("accessible for
+      anonymous users with some limits... larger limits" for logged-in
+      users, no numbers given); zero licensing or image-usage terms.
+    **Conclusion, stated plainly rather than re-summarized from search
+    results: no path available to this session can reach GCD's actual
+    terms.** The image-licensing question this gates — whether cover
+    images fall under the same CC-BY-SA the metadata carries, or under a
+    narrower fair-use-for-identification basis as the original
+    search-summary suggested — remains unverified from a primary source.
+    Cover-matcher stays blocked on this exactly as before; the entire
+    feature is gated pending terms obtained through a different channel
+    (a logged-in browser session, a direct GCD contact, or equivalent).
   - **Explicitly not scoped into this dispatch's six fixes** — ships
     independently, per instruction.
 

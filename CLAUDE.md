@@ -307,6 +307,22 @@ regression pass rather than a bundled fix. `deriveCvYear` alone fully and
 independently resolves the Batman #608 class — this follow-up is
 additional defense-in-depth, not a dependency.
 
+**Queued fix, not yet coded (GrailKey Dispatch 15/16, 2026-08-07) — pool
+year hint into branch (e)'s "no year at all" gap.** `poolYearHint`
+(`api/enrich.js:2659-2678`, ≥3 pool items / ≥50% agreement) is computed
+but today feeds only ComicVine volume-disambiguation and two narrow
+conflict checks — never `resolveYear` itself. Design: a new branch
+between (a) and (b), firing ONLY when there is no Vision/user year at all
+(`!visionYear && !userYear`), requiring `poolYearHint.agreement >= 0.75`
+(bar set 2026-08-07 — 0.80 would have excluded a real, correct production
+instance at exactly 75%; deliberately looser than the ≥50% raw
+computation since this is the sole consumption point). `yearSource =
+'pool-year-hint'` classified `'unproven'` (same tier as `vision-fallback`
+— a raw title-text tally is weaker than the independently-verified
+sources that earn `'proven'`). Never overrides an actual Vision-asserted
+year. Full validation history: Pattern Library, "GrailKey Dispatch 15"
+entry, Fix 6.
+
 ### Issue-consensus guard (`resolveFamilyIssueConsensus`, `src/lib/identityCore.js`) — STANDING CONSTRAINT, do not rank-weight
 **Rule: issue-axis consensus is a pure aggregate vote (unique-row count vs. a
 fixed 60% agreement bar + a clear-lead margin over the runner-up). It is
@@ -810,6 +826,7 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
 - **Bone #1 class** (GK Dispatch 05/06/09/10/11) — Strip 1 title-routing validated in production; GK-34 (mirror of GK-21) let a single sold comp override 18 actives, fixed with a shared `MIN_POOL_FOR_OVERRIDE=3` floor; drove a multi-round `ARTIST_PATTERNS` registry audit (9 creator-name gaps found/fixed) and a `TIER_SOURCE_MAP` completeness test.
 - **Dormant-multiplier class** (GK Dispatch 12–14) — tier-engine (comp-verified) prices were excluded from key/newsstand multipliers while the least-verified `pc_estimate` tier got both; newsstand mult extended to tier-engine sources and shipped, key mult held pending recalibration (1.5× overshot the PC ladder rung by 65% on the one book tested).
 - **GrailKey Dispatch 15** (2026-08-07) — `titleOk` bar lowered 0.30→0.15 (shipped), vision-zero-support ratio floor replacing exact-zero check (shipped), 3 creator-registry additions (shipped), issue-adoption margin for the zero-support override (designed, not coded — pending margin validation), category-vote override for the advisory asset-type lock (designed, not coded — pending a captured Vision JSON), pool-year-hint feeding `resolveYear` (designed, not coded — bar set 2026-08-07 Dispatch 16), cover-matcher GCD/ComicVine feasibility (investigated, plan only).
+- **GrailKey Dispatch 16** (2026-08-07) — CLAUDE.md split (193k→76k chars, Pattern Library extracted to `docs/PATTERN-LIBRARY.md`, this size limit made a standing constraint above); pool-year-hint bar set to 0.75, not 0.80 (design closed, still not coded); issue-adoption margin gate validated against production logs — Spawn #369 confirms the must-fail case, Tomb of Dracula #17 confirmed vacuous for this branch, no natural must-pass anchor found in 3 days of logs (still blocked, not coded); GCD terms unreachable through every path tried — domain-wide 403, cover-matcher stays gated.
 
 ## Open Blockers
 
