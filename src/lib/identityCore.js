@@ -1173,6 +1173,44 @@ export const resolveFamilyIssueConsensus = (priorIssue, visualItems, indices) =>
   return { issue: null, mode: 'no-consensus', winner, support: winnerCount, ratio, uniqueRows, runnerUp, runnerUpSupport: runnerUpCount, tiedCandidates, assertedIssues };
 };
 
+// GrailKey Dispatch 25, Fix 2c (2026-08-07) — per-row issue tally,
+// logging-only helper for resolveIdentity's near-miss axis-check.
+// Deliberately a local mirror of resolveFamilyIssueConsensus's own
+// row-counting loop (same dedup-key preference, same NON_GENUINE_COPY_RE
+// exclusion, same extractIssueCandidate call) rather than a new field
+// added to resolveFamilyIssueConsensus's own return shape — that shape is
+// spread verbatim (`...issueMeasurement`) into familyIssueConsensusResult
+// at multiple call sites, at least one of which (Commit 4.2's Fixture B)
+// has an existing exact-full-object-shape regression assertion; adding a
+// field there would silently break it. This tally is read-only, used only
+// for log detail, and never feeds any decision.
+const tallyFamilyIssueCounts = (indices, visualItems) => {
+  const rows = Array.isArray(indices) ? indices : [];
+  const seenKeys = new Set();
+  const counts = {};
+  const normalizeUrl = (u) => {
+    const s = String(u);
+    const qIdx = s.indexOf('?');
+    return qIdx === -1 ? s : s.slice(0, qIdx);
+  };
+  for (const idx of rows) {
+    const item = visualItems?.[idx];
+    const raw = String(typeof item === 'string' ? item : (item?.rawTitle || item?.title || '')).trim();
+    if (!raw) continue;
+    if (NON_GENUINE_COPY_RE.test(raw)) continue;
+    let dedupKey;
+    if (typeof item !== 'string' && item?.itemId) dedupKey = `id:${item.itemId}`;
+    else if (typeof item !== 'string' && item?.legacyItemId) dedupKey = `legacy:${item.legacyItemId}`;
+    else if (typeof item !== 'string' && item?.itemWebUrl) dedupKey = `url:${normalizeUrl(item.itemWebUrl)}`;
+    else dedupKey = `title:${raw}`;
+    if (seenKeys.has(dedupKey)) continue;
+    seenKeys.add(dedupKey);
+    const candidate = extractIssueCandidate(raw);
+    if (candidate) counts[candidate.issue] = (counts[candidate.issue] || 0) + 1;
+  }
+  return counts;
+};
+
 /**
  * Track B Phase 0, Commit 4.1 — family-scoped year consensus. Mirrors
  * resolveFamilyIssueConsensus's own scoping pattern (family.topFamily.indices
@@ -2123,43 +2161,123 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     const priorSource = vision.source ?? 'unknown';
     const priorTrusted = vision.priorIndependentlyTrusted === true;
 
-    familyIssueConsensusResult = {
-      ...issueMeasurement,
-      issue: vision.issue,
-      // legacyModeFor's own rule: outcome 'conflicted' + familyMode
-      // 'adopted' (the family WAS internally coherent, just didn't clear
-      // the margin bar) maps to 'conflict-locked' — routes this through
-      // the SAME pre-existing containment api/enrich.js already applies
-      // to any mode==='conflict-locked' result (out.issueConsensusConflict),
-      // rather than inventing a parallel mechanism.
-      mode: issueMeasurement.mode === 'adopted' ? 'conflict-locked' : issueMeasurement.mode,
-      observedFamilyValue: issueMeasurement.issue,
-      resolvedValue: vision.issue,
-      outcome: 'conflicted',
-      authoritativeForCustody: false,
-      reason: 'retention-margin-decline-conflict',
-    };
-    identitySource = `${identitySource}+family_margin_decline_conflict`;
-
-    // N1 instrumentation — exactly one structured containment line per
-    // qualifying near-miss, never silent. Format required verbatim by the
-    // implementation-approval addendum: "family=<issue>@<count>/<weight>
-    // runnerUp=<weight> margin=<ratio> prior=<vision issue>" — additional
-    // fields (raw-pool proposed issue, required margin, runner-up count,
-    // final authority status) appended after, per Section E.
-    const runnerUpWeight = family.runnerUp?.weightSum ?? null;
-    const REQUIRED_MARGIN = 3;
-    const measuredMargin = (runnerUpWeight != null && runnerUpWeight > 0)
-      ? Number((family.topFamily.weightSum / runnerUpWeight).toFixed(2))
+    // GrailKey Dispatch 25, Fix 2c (2026-08-07, Batman #213 class) — AXIS
+    // CHECK. The margin test above (familyDominatesRunnerUp) is measured
+    // entirely on TITLE-FAMILY WEIGHT (topFamily.weightSum vs
+    // runnerUp.weightSum) — it has no awareness of what issue number
+    // either family's rows actually assert. Two title-string clusters can
+    // legitimately disagree on wording ("Batman Giant 30th Anniversary
+    // Issue Origin Robin" vs "Batman DC") while every row in BOTH
+    // clusters names the identical issue — a title-axis ambiguity, not an
+    // issue-axis one. Before this fix, that shape was unconditionally
+    // written up as outcome:'conflicted', which api/enrich.js then
+    // surfaces verbatim to the card as "Marketplace listings disagree on
+    // this book's issue number" — false when every row agrees. Checked
+    // against the runner-up specifically (not a broader all-families
+    // sweep): the margin predicate itself is only ever computed against
+    // scored[1] (runnerUp) — no other family enters this branch's
+    // decision at all, so it is the only competing family whose issue
+    // agreement is relevant to the conflict this branch is about to
+    // record.
+    // CORRECTED (2026-08-07, review before push) — the first-shipped
+    // version of this check used `.winner` (raw per-row PLURALITY —
+    // populated the instant a single non-tied top candidate exists,
+    // regardless of whether every row agrees). That is not what
+    // "agreement" means here: a 3-row runner-up with two rows asserting
+    // #213 and one asserting #300 has `.winner === '213'` — plurality —
+    // while a real dissenting row sits in the pool. Shipping that would
+    // have suppressed a genuine conflict on live dissent, the same
+    // disease class as Fix 2b's denominator bug, inverted: there, silence
+    // was wrongly counted as dissent; here, dissent would have been
+    // wrongly absorbed by plurality. Fixed to require UNANIMITY —
+    // `.assertedIssues` (the distinct SET of issue values a family's rows
+    // assert, from `resolveFamilyIssueConsensus`'s own `Object.keys(counts)`,
+    // entirely unfloored — unlike `.issue`/`.winner`, its size is exactly
+    // 1 if and only if every asserting row in the family names the same
+    // value): a family "agrees" only when its own asserted-issue set has
+    // size exactly 1, and the two families' single values match. A row
+    // that asserts nothing (silent) never enters `assertedIssues` at all
+    // — neutral, consistent with Fix 2b's "silence is not dissent" rule.
+    // A family with 2+ distinct asserted values — real internal dissent —
+    // fails unanimity regardless of which value is more common.
+    const runnerUpIssueMeasurement = family.runnerUp?.indices
+      ? resolveFamilyIssueConsensus(null, opts.visualItems, family.runnerUp.indices)
       : null;
+    const topAssertedIssues = issueMeasurement.assertedIssues || [];
+    const runnerUpAssertedIssues = runnerUpIssueMeasurement?.assertedIssues || [];
+    const topUnanimous = topAssertedIssues.length === 1;
+    const runnerUpUnanimous = runnerUpAssertedIssues.length === 1;
+    const axisAgreement = topUnanimous && runnerUpUnanimous
+      && topAssertedIssues[0] === runnerUpAssertedIssues[0];
+    // Per-family dissent tally for the log — mirrors resolveFamilyIssueConsensus's
+    // own row-counting loop exactly (same dedup keys, same NON_GENUINE_COPY_RE
+    // exclusion, same extractIssueCandidate call) so these counts are
+    // guaranteed consistent with assertedIssues itself, not a second,
+    // independently-drifting reimplementation. Local and read-only —
+    // logging only, never feeds the axisAgreement decision above.
+    const topIssueCounts = tallyFamilyIssueCounts(family.topFamily.indices, opts.visualItems);
+    const runnerUpIssueCounts = tallyFamilyIssueCounts(family.runnerUp?.indices, opts.visualItems);
     console.log(
-      `[commit4.3.1] near-miss family conflict: ` +
-      `family=${issueMeasurement.issue}@${family.topFamily.count}/${family.topFamily.weightSum} ` +
-      `runnerUp=${runnerUpWeight ?? 'none'} margin=${measuredMargin ?? 'n/a'} prior=${vision.issue ?? 'null'} ` +
-      `requiredMargin=${REQUIRED_MARGIN} runnerUpCount=${family.runnerUp?.count ?? 0} ` +
-      `rawPoolProposed=${ebay?.issue ?? 'null'} priorSource=${priorSource} priorIndependentlyTrusted=${priorTrusted} ` +
-      `reason=retention-margin-decline-conflict status=conflicted`
+      `[commit4.3.1-axis-check] topFamilyAssertedIssues=${JSON.stringify(topAssertedIssues)} ` +
+      `topFamilyIssueCounts=${JSON.stringify(topIssueCounts)} ` +
+      `runnerUpAssertedIssues=${JSON.stringify(runnerUpAssertedIssues)} ` +
+      `runnerUpIssueCounts=${JSON.stringify(runnerUpIssueCounts)} ` +
+      `topUnanimous=${topUnanimous} runnerUpUnanimous=${runnerUpUnanimous} agreement=${axisAgreement} ` +
+      `decision=${axisAgreement ? 'title-axis-only-no-issue-conflict' : 'genuine-issue-conflict'}`
     );
+
+    if (axisAgreement) {
+      // Every family the margin check concerns agrees on the issue — the
+      // ambiguity is confined to the TITLE axis. familyIssueConsensusResult
+      // is deliberately left null (not populated with a 'conflicted'
+      // outcome): this lets every downstream consumer — the
+      // vision-zero-support raw-pool check below, and
+      // api/enrich.js's out.issueConsensusConflict construction, gated on
+      // familyIssueConsensus?.mode==='conflict-locked' — evaluate this
+      // field exactly as if no near-miss had occurred at all, rather than
+      // inventing a second, parallel "agreed" state. Advisory recorded on
+      // identitySource (the existing provenance-string convention used
+      // throughout this function) rather than a new field.
+      identitySource = `${identitySource}+title_axis_ambiguous_issue_agreed`;
+    } else {
+      familyIssueConsensusResult = {
+        ...issueMeasurement,
+        issue: vision.issue,
+        // legacyModeFor's own rule: outcome 'conflicted' + familyMode
+        // 'adopted' (the family WAS internally coherent, just didn't clear
+        // the margin bar) maps to 'conflict-locked' — routes this through
+        // the SAME pre-existing containment api/enrich.js already applies
+        // to any mode==='conflict-locked' result (out.issueConsensusConflict),
+        // rather than inventing a parallel mechanism.
+        mode: issueMeasurement.mode === 'adopted' ? 'conflict-locked' : issueMeasurement.mode,
+        observedFamilyValue: issueMeasurement.issue,
+        resolvedValue: vision.issue,
+        outcome: 'conflicted',
+        authoritativeForCustody: false,
+        reason: 'retention-margin-decline-conflict',
+      };
+      identitySource = `${identitySource}+family_margin_decline_conflict`;
+
+      // N1 instrumentation — exactly one structured containment line per
+      // qualifying near-miss, never silent. Format required verbatim by the
+      // implementation-approval addendum: "family=<issue>@<count>/<weight>
+      // runnerUp=<weight> margin=<ratio> prior=<vision issue>" — additional
+      // fields (raw-pool proposed issue, required margin, runner-up count,
+      // final authority status) appended after, per Section E.
+      const runnerUpWeight = family.runnerUp?.weightSum ?? null;
+      const REQUIRED_MARGIN = 3;
+      const measuredMargin = (runnerUpWeight != null && runnerUpWeight > 0)
+        ? Number((family.topFamily.weightSum / runnerUpWeight).toFixed(2))
+        : null;
+      console.log(
+        `[commit4.3.1] near-miss family conflict: ` +
+        `family=${issueMeasurement.issue}@${family.topFamily.count}/${family.topFamily.weightSum} ` +
+        `runnerUp=${runnerUpWeight ?? 'none'} margin=${measuredMargin ?? 'n/a'} prior=${vision.issue ?? 'null'} ` +
+        `requiredMargin=${REQUIRED_MARGIN} runnerUpCount=${family.runnerUp?.count ?? 0} ` +
+        `rawPoolProposed=${ebay?.issue ?? 'null'} priorSource=${priorSource} priorIndependentlyTrusted=${priorTrusted} ` +
+        `reason=retention-margin-decline-conflict status=conflicted`
+      );
+    }
   }
 
   // P0 (Q-VISION-ZERO-SUPPORT) — Vision "confidently wrong" issue override.

@@ -2980,3 +2980,239 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   verification, not incidental). Fix 3 (Vision virgin-variant prompt
   change) remains explicitly HELD, not started this session.
 
+- **GrailKey Dispatch 25, Fix 2c (2026-08-07) — Batman #213 class:
+  title-family weight margin was reported as an issue-authority
+  conflict.** `identityCore.js`'s near-miss margin-decline branch
+  (Commit 4.3.1, `isNearMissMarginDecline`) measures its 3x dominance
+  requirement purely on TITLE-FAMILY WEIGHT
+  (`familyDominatesRunnerUp(topFamily.weightSum, runnerUp.weightSum)`,
+  `compHygiene.js:203-206`) — zero awareness of what issue number either
+  family's own rows assert. A real production scan (Batman #213, scan
+  23:13:49 UTC, build `b2c7358`) hit this: two competing TITLE clusters
+  ("batman giant 30th anniversary issue origin robin" vs "batman dc"),
+  margin 1.3 against a required 3 — but every row in BOTH clusters, and
+  the raw pool overall (19/19), asserted issue #213. Verified by direct
+  source read (STEP A, before any code was written): the near-miss
+  branch only ever measures `resolveFamilyIssueConsensus` against
+  `topFamily.indices` — `runnerUp.indices` was never read at all — so it
+  wrote `outcome:'conflicted'` unconditionally whenever the margin
+  failed, regardless of whether the competing family agreed. That false
+  conflict reached the card verbatim via `api/enrich.js`'s
+  `out.issueConsensusConflict` construction
+  (`identity.familyIssueConsensus?.mode==='conflict-locked'` gate,
+  ~line 2935): "Marketplace listings disagree on this book's issue
+  number" — false when every row agrees. Wrong axis, the same disease
+  class as Fix 2b's denominator and vision-zero-support.
+
+  Fix: before recording a conflict, measure the DISTINCT set of issues
+  asserted by the top family AND by the runner-up (the only competing
+  family the margin predicate itself concerns — it is `scored[1]`, the
+  sole family ever compared against `scored[0]`). Agreement requires
+  UNANIMITY, not plurality: both families' own asserted-issue sets must
+  each have size exactly 1, and those two single values must match. If
+  so, there is no issue conflict — `familyIssueConsensusResult` is left
+  `null` (not populated with a new "agreed" pseudo-state) so every
+  downstream consumer evaluates the field exactly as if no near-miss had
+  occurred at all. A genuine disagreement — either family internally
+  split, or both unanimous but on different issues — is unaffected, same
+  `'conflicted'` outcome as before, confirmed unchanged against the
+  pre-existing 73-assertion
+  `q-trackB-commit4.3.1-retention-decline-fail-closed.test.js` suite
+  (its own fixture's runner-up is a lot listing with no coherent issue
+  of its own — correctly still conflicts under the fix).
+
+  **Two implementation traps found and fixed before shipping — both
+  caught by the user's own review, not by the first-pass test suite.**
+  (1) The obvious choice, comparing `resolveFamilyIssueConsensus(...).issue`
+  on both families, is silently wrong: `.issue` is gated behind the
+  standing uniqueRows>=3 adoption floor (the "Issue-consensus guard"
+  standing constraint elsewhere in this file) — a real 2-member
+  synthetic runner-up family whose both rows plainly assert the same
+  issue returns `{issue: null, mode: 'no-consensus', winner: '213', ...}`.
+  Caught during test authoring, not static review: the first fixture
+  attempt failed against `.issue` and revealed the floor directly. (2) A
+  first-shipped correction reached for `.winner` (raw per-row PLURALITY)
+  instead — this is a SECOND, more dangerous defect, caught only in
+  review before push: `.winner` is populated the instant a single
+  non-tied top candidate exists, regardless of whether every row agrees.
+  A 3-row runner-up with two rows asserting #213 and one asserting #300
+  has `.winner==='213'` — plurality — so the `.winner`-based version
+  would have suppressed a GENUINE conflict on live dissent. Explicitly
+  named as the fourth instance this session of the "measuring coherence
+  against the wrong population" disease class — and its own inverse of
+  Fix 2b's bug: there, silence was wrongly counted as dissent; here,
+  dissent would have been wrongly absorbed by plurality. Fixed by using
+  `.assertedIssues` (the distinct SET of values a family's rows assert —
+  `Object.keys(counts)` inside `resolveFamilyIssueConsensus`, entirely
+  unfloored, same underlying tally `.issue`/`.winner` are both built
+  from) and requiring its size be exactly 1 on BOTH families before
+  calling it agreement — silence (a row asserting nothing) stays neutral
+  per Fix 2b's own rule, but any row asserting a genuinely different
+  value fails unanimity outright, regardless of how rare it is relative
+  to the majority.
+
+  Logs `[commit4.3.1-axis-check]` with `topFamilyAssertedIssues`,
+  `topFamilyIssueCounts` (a local, read-only per-family tally —
+  `tallyFamilyIssueCounts`, `identityCore.js` — deliberately mirroring
+  `resolveFamilyIssueConsensus`'s own row-counting loop exactly rather
+  than adding a field to that function's return shape, which is spread
+  verbatim into `familyIssueConsensusResult` at multiple call sites, at
+  least one of which has an existing exact-full-object-shape regression
+  assertion — `q-trackB-commit4.2-fingerprint-year-restamp.test.js`,
+  confirmed unaffected, still 160/160), `runnerUpAssertedIssues`,
+  `runnerUpIssueCounts`, `topUnanimous`, `runnerUpUnanimous`, and
+  `decision` on BOTH paths (agree/disagree) — never silent. 60 assertions
+  (`tests/grailkey-dispatch-25-fix2c-axis-check.test.js`, up from an
+  initial 31 before the unanimity correction): the real near-miss shape
+  (genuinely emergent weights from real row positions, not hand-set) for
+  the agreement case (Batman #213 itself, some rows silent elsewhere in
+  the wider pool), a full-disagreement regression guard (both families
+  unanimous but on different issues), a no-runner-up sanity check, and —
+  the two cases the plurality defect required — a runner-up internally
+  split 2x#213/1x#300 (conflict correctly stands; this fixture is proven
+  to be exactly the shape that would have wrongly agreed under the
+  rejected `.winner`-based version) and a top family internally split
+  (conflict stands regardless of a unanimous runner-up). Full
+  pre-existing suite sweep re-run clean; `npm run build` clean.
+
+  **Regression-baseline discipline (V-A, per explicit instruction):**
+  every failing suite in the post-fix sweep was individually checked
+  against a clean `git worktree` at `bf543d6` (the commit immediately
+  preceding Dispatch 25's first commit), not summarized as "matches
+  documented baseline." `artist-registry-sync` (163/2),
+  `decision-engine` (39/7), `image-search-extraction` (161/2),
+  `mega-keys` (198/8), `pattern-k-dedupe-issue` (4/4), `priceBands`
+  (24/7), `sold-verification` (124/5), `comp-filter-hygiene`,
+  `identity-gate`, `q-adv397-visual-guard`, and `batch1-fixes`
+  (throws-on-first, same first assertion) all reproduce byte-identical
+  failures at `bf543d6` once the worktree's missing `node_modules`
+  symlink was fixed (a worktree doesn't share `node_modules`, which
+  isn't git-tracked — the first baseline run threw
+  `ERR_MODULE_NOT_FOUND` for unrelated files, not a real difference).
+  `grailkey-commit-m-pc-query-fallback` and `ship26-integration` both
+  time out identically at `bf543d6` too (network-dependent — no
+  `KV_REST_API_URL`/PriceCharting token in this sandbox). `grailkey-
+  commit-v1`'s drift was already proven pre-existing earlier this
+  dispatch (checked out `bf543d6`, same 24-vs-25 mismatch, unrelated to
+  Dispatch 25 entirely). `grailkey-commit-e`/`-f`/`-g` are the
+  documented "false-fail on any uncommitted diff" tests (`git diff
+  --name-only HEAD` against the live working tree, not the historical
+  commit diff) — expected to fail whenever ANY uncommitted change
+  exists, which one genuinely did at sweep time; `-g`'s own failure text
+  names the exact extra file (`src/lib/identityCore.js`), confirming the
+  mechanism directly rather than by assertion. All three go green
+  immediately upon commit (already demonstrated twice earlier this
+  dispatch, for `81ca1d2` and again expected here).
+
+  **Downstream investigation, reported not fixed blind (per explicit
+  instruction) — `confirmedPublisher` resolving to `null` on this same
+  book. CORRECTED after an initial reported comp-title count turned out
+  wrong (a misread of a different log figure, `[cv-pool-year-hint]`'s
+  11/11 year-agreement, not a DC publisher count).** Real counts from
+  the 19 visual titles: "DC Comics" exact phrasing 3/19 = 15.8%; any
+  form including bare "DC" 7/19 = 36.8%. Two independent publisher paths
+  exist. (1) `comicVine?.publisher` fallback (`api/enrich.js:4594`) is
+  genuinely gated on the CV/PC exact-identity lookup skip
+  (`marketCustodyConflicted`, driven by `out.issueAuthority.status===
+  'conflicted'`) — Fix 2c resolves this one for free, since the
+  axis-agreement case no longer sets that status. (2)
+  `backfillFromComps`'s comp-consensus publisher backfill
+  (`identityCore.js:2668`, called `api/enrich.js:4539`) reads
+  `visualResult?.items` directly and is NOT gated on `issueAuthority` at
+  all. Verified precisely against source: `hitRatio`'s denominator
+  (`identityCore.js:2824`) is `compTitles.length` — essentially the full
+  comp pool — not narrowed by the separate `titleMatchRatio>=0.7`
+  precondition gate a few lines up, which only decides whether ANY
+  publisher-backfill attempt is allowed at all, not which titles count
+  toward the ratio. Against the `>=0.5` backfill floor, **both real
+  counts fail** — even the generous "any form" figure (36.8%) falls
+  well short. Confirmed: on this specific book, the bare-word "DC"
+  pattern gap (found while investigating, real as a general observation
+  — see GK-37 below) would NOT have rescued publisher resolution either
+  way. `confirmedPublisher` on Batman #213 resolves only via the CV/PC
+  path Fix 2c unblocks — not via comp-consensus regardless of pattern
+  coverage. The pattern gap itself is downgraded to its own logged
+  finding (GK-37), explicitly not scoped as part of Fix 2c.
+
+- **GK-36 (2026-08-07, GrailKey Dispatch 25) — `[ship11]
+  visual_pool_fallback` median is not grade-scoped. LOG ONLY, not
+  scoped or acted on this session, per explicit instruction.**
+  `api/enrich.js:9149-9184`: when the primary comp pipeline returns zero
+  verified/sold comps and the eBay visual-similarity pool has >=10 items
+  with >=5 valid prices, the block computes `median`/`low`(p25)/`high`
+  (p75) directly from `poolPrices` — every priced item in the visual
+  pool, unconditionally, with **no grade filter of any kind** against
+  the book's own actual grade. Confirmed via direct source read: the
+  only filters applied are `Number.isFinite(p) && p > 0 && p < 10000`
+  (numeric sanity), nothing grade-related. Reported on a real GD 2.0
+  book: `median=$71.85` from a pool spanning VG through VF/NM
+  ($34.99-$153.00) — not representative of the book's actual condition.
+  `out.pricingSource`/`out.price` ARE set to this value when the block
+  fires (lines 9165-9175), so on a book where this is the terminal
+  pricing path it would be the shown price, not merely a reference
+  figure — worth re-checking against the specific request that surfaced
+  this the next time it's investigated, since "not used as price here"
+  implies some other path won out on that particular scan. Not scoped,
+  not fixed, no threshold touched.
+
+- **GK-37 (2026-08-07, GrailKey Dispatch 25) — `PUBLISHER_CONSENSUS_PATTERNS`
+  has no bare-word fallback for major publishers (DC/Marvel/Image/etc.).
+  LOG ONLY, not scoped or acted on this session — explicitly downgraded
+  out of Fix 2c after V-B correction (see that entry above): confirmed
+  NOT the cause of Batman #213's `confirmedPublisher=null`, since even
+  the generous "any bare-DC form" count (36.8%) falls short of the
+  backfill floor on that specific book.** `identityCore.js:2572-2600`:
+  DC's entry is `\b(?:dc\s+comics?|dc\s+universe|dcu)\b` — requires "DC"
+  followed by "Comics"/"Universe," or the exact token "DCU." No bare-word
+  "DC" pattern exists, unlike Charlton/Eclipse/Warren, which explicitly
+  got one added (same list, Q96 comment) specifically because casual
+  eBay listing titles often drop "Comics." Marvel/Image/Dark
+  Horse/IDW/BOOM!/Valiant/Archie share the identical shape — full-name-
+  only, no bare-word fallback — while several smaller indies do have
+  one. This is a real, general asymmetry in the pattern table (the
+  publishers most likely to be shortened casually in listing titles are
+  exactly the ones with no fallback for it), independent of any single
+  book's resolution. Not scoped, not fixed, no pattern added — a future
+  dispatch should decide whether adding bare-word fallbacks for the
+  major publishers is warranted, and if so, whether a higher hit-ratio
+  floor is needed for a bare 2-letter/short token to avoid false
+  positives that "DC Comics"/"Marvel Comics"-style full phrases don't
+  risk.
+
+- **"Measuring coherence against the wrong population" — four instances
+  in one session (2026-08-07, GrailKey Dispatch 25). The frequency is
+  itself the finding.** (1) vision-zero-support's `visionIssueCount===0`
+  equality check (prior dispatch, referenced in this session's Fix 1/2
+  root-cause work) measured presence against the WRONG population
+  boundary (exact-zero vs. near-zero support). (2) Fix 2b's year-axis
+  promotion predicate: `resolveFamilyYearConsensus`'s own `support`/
+  `uniqueRows` denominator is family MEMBERSHIP (every row, silent or
+  not), not ASSERTION — a naive reuse would have counted a silent row
+  against unanimity exactly like a dissenting row ("silence counted as
+  dissent"). (3) Fix 2c's first draft: `.issue` is gated behind the
+  unrelated uniqueRows>=3 adoption floor — a real 2-member family that
+  unanimously agrees returns `issue: null` anyway, because the FLOOR's
+  population (rows needed to trust ADOPTION elsewhere) is not the
+  question being asked (do these rows agree with each other at all).
+  (4) Fix 2c's second draft: `.winner` measures PLURALITY across a
+  family's rows — the wrong population is "the majority" when the actual
+  question is "every row, including the minority." A 2-of-3 majority
+  read as agreement while a real dissenting row sat in the pool
+  unexamined.
+  Every instance has the same shape: a value or threshold that is
+  correct and well-tested FOR THE QUESTION IT WAS ORIGINALLY BUILT TO
+  ANSWER gets reused for a DIFFERENT question that sounds similar but
+  scopes a different population — adoption-worthiness vs. mere
+  agreement, membership vs. assertion, majority vs. unanimity. None of
+  the four were caught by writing the predicate correctly the first
+  time; all four were caught by either dedicated verification steps or
+  by review before push, never by intuition about what a field named
+  `.issue` or `.winner` "obviously" measures.
+  **Standing check, going forward: before writing any consensus or
+  agreement predicate, name the population the CANDIDATE FIELD actually
+  measures and the population THE QUESTION AT HAND is actually about,
+  and confirm the two match, in writing, before the code is written —
+  not after a test fails.** This is now the highest-yield single check
+  available for this class of bug in this codebase, evidenced by a 4-for-4
+  hit rate in one session once someone started asking it explicitly.
+
