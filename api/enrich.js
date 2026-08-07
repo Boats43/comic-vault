@@ -7404,6 +7404,20 @@ export default async function handler(req, res) {
         // (already sold-verified via the Ship 18 strict variant filter —
         // explicitly excluded from the multiplier-eligible set above).
         'tier2_sold_only_active_suspect': 'verified_sold',
+        // GK-34 (2026-08-07, GrailKey Dispatch 10) — same fallthrough class
+        // as the two entries above, confirmed live in production before
+        // this fix landed: missing this entry silently fell through to the
+        // 'pc_estimate' default, which is IN VARIANT_MULT_ELIGIBLE_SOURCES
+        // (~line 7629), risking the identical double-count re-multiply this
+        // exact map exists to prevent (ASM #300 / Q109-D history above) on
+        // a price that's already active-anchored and ×0.85-discounted by
+        // priceBands.js's tier2_active_dominant_thin_sold branch. Also an
+        // I13 provenance violation independent of the multiplier risk: the
+        // card displayed "pc_estimate" for a price that was never a
+        // PriceCharting estimate at all. Mapped to its semantic sibling
+        // 'active_ask_derived' — same construction as tier3_active_discounted
+        // (active pool anchor, ask-derived, already discounted).
+        'tier2_active_dominant_thin_sold': 'active_ask_derived',
       };
       out.pricingSource = tierSourceMap[priceBandsRaw.source] || 'pc_estimate';
 
