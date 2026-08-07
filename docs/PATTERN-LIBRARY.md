@@ -2798,9 +2798,10 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   A single upstream promotion (provisional → confirmed, under the strict
   unanimous-consensus predicate specified below) resolves all four
   simultaneously, since none of the four has any logic of its own beyond
-  reading this one field. **Fix 2 is now GREENLIT** — explicit
-  price-authority greenlight given per this project's standing
-  pricing-math protocol. Plan review in progress; not yet coded.
+  reading this one field. **Fix 2/2b SHIPPED (commit `81ca1d2`)** — see
+  the dedicated writeup below for the final predicate, the year-axis
+  correction found during plan review, and the V4 safety-regression
+  closure.
 
 - **GK-35 (2026-08-07, GrailKey Dispatch 25) — `PRICING_GATE_CODES`
   covers only 6 of 14 `classifyEvidenceRow` rejection codes; the other
@@ -2847,4 +2848,135 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   originally decided against it) is warranted, given the legacy chains'
   own edge-case handling was the stated reason it wasn't done at the
   time.
+
+- **GrailKey Dispatch 25, Fix 2/2b SHIPPED (2026-08-07, commit `81ca1d2`)
+  — unanimous-consensus promotion of `issueAuthority.status`, plus a
+  third "wrong population" instance found in plan review, plus a safety
+  regression found in the same review before push.** Closes the four
+  blocks enumerated in the entry above by promoting
+  `out.issueAuthority.status` from `'provisional'` to `'confirmed'`
+  ONLY under a strict, all-of predicate — never a general loosening.
+
+  **Fix 2 (issue axis) — `evaluateUnanimousConsensusPromotion`
+  (`src/lib/issueAuthority.js`).** Promotes only when: family
+  `uniqueRows >= 4`; `support === uniqueRows` (exact unanimity, integer
+  equality, not a ratio threshold); `runnerUp === null` (no second-place
+  candidate exists at all — confirmed via direct source read that
+  `resolveFamilyIssueConsensus` returns literal `null` here, not a
+  string `'none'`, which only appears in one display-only log template
+  downstream); family `weightSum >= 8.0`; every contributing row has a
+  distinct `itemId` AND a distinct `sellerUsername` (new
+  `checkDistinctItemIdAndSeller` helper — guards against a single seller
+  cross-posting the same claim under several listings inflating
+  `uniqueRows` without genuine independent corroboration). Any one
+  condition failing declines outright; current pre-Dispatch-25 behavior
+  is unchanged on decline. Logs `[commit4-promote]` with every input on
+  both the promote and decline paths.
+
+  **Fix 2b (year axis) — third recorded instance of "measuring
+  coherence against the wrong population."** The first two instances of
+  this class are the launch-era vision-zero-support defect and the
+  Bone #1/GK-34 sold-pool-size-floor family documented earlier in this
+  file. This is the third, found during plan review (not shipped, then
+  caught by tests) — the user explicitly required a verification step
+  before any code was written. `resolveFamilyYearConsensus`'s own
+  `uniqueRows`/`support` fields (`identityCore.js:1234`) are NOT
+  assertion counts — `uniqueRows` increments for every deduped family
+  member regardless of whether that row carries a parseable year at all
+  (line 1278), while `support` (the field this dispatch initially
+  proposed reusing directly) only increments for rows that DO assert a
+  year (line 1281-1282). Naively reusing `support === uniqueRows` as the
+  unanimity check would therefore count a SILENT row (no year token in
+  that listing's title — neutral, no claim made) as equivalent to a
+  DISSENTING row (a different year explicitly asserted) — both would
+  suppress promotion identically, when only the second is a real
+  disagreement. Named explicitly per the user's instruction: **"silence
+  counted as dissent."** Fixed by `evaluateUnanimousYearConsensusPromotion`
+  recomputing directly from raw `indices`/`visualItems` rather than
+  reusing the family-consensus object's aggregate fields at all: tallies
+  only rows that assert a year (`analyzeYearAssertions`), requires
+  `assertingCount >= 3`, requires zero dissent among the asserting rows
+  (any asserting row naming a different year is a hard fail — the
+  standing rule, "conservative direction preferred when uncertain," made
+  explicit at the row level), and applies the identical
+  itemId/seller-distinctness check as Fix 2. Verified directly against
+  the real repro shape before shipping: 3 rows unanimously asserting one
+  year, 1 silent row — would have wrongly DECLINED under the naive
+  `support === uniqueRows` reuse (the silent row drags `support` below
+  `uniqueRows`), correctly PROMOTES under the corrected, assertion-scoped
+  predicate. On promotion, `'year'` is deliberately never appended to
+  `identityProvisionalFields` (there is no removal primitive for that
+  list; not appending in the first place is the correct representation
+  of "no longer provisional").
+
+  **V4 — found in review before push, not by any test: "status
+  promotion orphans a status-gated guard."** Fix 2's promotion
+  unconditionally unlocked two things at once: the CV/PC exact-identity
+  lookup and active-cache paths that were correctly skipped while
+  provisional, AND `escalateIssueAuthorityOnConflict`
+  (`issueAuthority.js`), which existed before this dispatch specifically
+  to re-escalate a marketplace-only-adopted issue back to `'conflicted'`
+  if later evidence disagreed with it. That function's original guard
+  checked `status === 'provisional'` only — so a row promoted to
+  `'confirmed'` by Fix 2 could never re-escalate again, even on a
+  genuine later contradiction. **A safety regression shipped inside a
+  safety fix**, and the general lesson is the point worth keeping: any
+  code path that promotes/upgrades a status field must grep every
+  consumer that gates on the PRE-promotion value before shipping — a
+  promotion is not just "this row is now trusted more," it is also
+  "every guard that only fires on the old, lower-trust status now goes
+  silently dark for this row." Nothing in Fix 2's own test suite caught
+  this, because nothing in that suite exercised the conflict-escalation
+  path against a promoted row — it took a second, explicit review pass
+  before push to find it, not a red test.
+
+  The user explicitly forbade the obvious-looking fix
+  (`status === 'provisional' || status === 'confirmed'`), since that
+  would let ANY confirmed row — including one confirmed via the
+  catalog/user-correction route, which this project's standing authority
+  matrix (catalog holds identity authority, marketplace holds
+  pricing-evidence authority only) treats as strictly higher-trust than
+  marketplace consensus — be knocked back down by a mere marketplace
+  pool disagreement. Verified directly against
+  `manualCorrection.js:599-605`, the real other-confirmed route:
+  `{source:'user', status:'confirmed', reasons:['user-correction']}` —
+  no `'unanimous-marketplace-consensus'` reason present. Fixed with
+  provenance instead of a loosened status check, reusing this file's own
+  pre-existing convention rather than adding a new field: promotion now
+  appends `'unanimous-marketplace-consensus'` to `issueAuthority.reasons`
+  (the same array `escalateIssueAuthorityOnConflict` already read for its
+  provisional-case check, `reasons.includes('marketplace-only-adoption')`
+  — the array was already the live provenance mechanism in this file
+  before this session touched it). `escalateIssueAuthorityOnConflict`'s
+  eligibility is now `(status==='provisional' && reasons.includes(
+  'marketplace-only-adoption')) || (status==='confirmed' &&
+  reasons.includes('unanimous-marketplace-consensus'))` — a confirmed
+  row is only escalatable if its OWN reasons explicitly say it arrived
+  via this dispatch's marketplace-consensus route; the user-correction
+  route's `reasons` array never contains that string, so it structurally
+  cannot be knocked back down by marketplace disagreement, preserving the
+  authority matrix by construction rather than by convention.
+  `computeIssueAuthorityContractPatch` verified (not assumed) to already
+  handle `'conflicted'` uniformly regardless of which status it
+  escalated from — no `escalatedFrom`-style branching exists anywhere in
+  that function, so no change was needed there. The one real
+  escalation call site (`api/enrich.js`) now captures `originStatus`/
+  `wasPromoted` before calling and logs which origin produced a given
+  `'conflicted'` outcome, so a promoted-then-conflicted row is
+  distinguishable in logs from a provisional-then-conflicted one.
+
+  Regression: `tests/grailkey-dispatch-25-fix2-unanimous-promotion.test.js`,
+  38 assertions — sections 1-8 cover Fix 2/2b promote/decline cases
+  including the exact real repro shapes for both axes; sections 9-12
+  (added for V4) cover promoted-confirmed+conflict escalates,
+  catalog/user-confirmed+conflict does NOT escalate (the proof this fix
+  is provenance-scoped, not status-loosened), provisional+conflict still
+  escalates (regression guard on the original mechanism), and
+  promoted-confirmed+no-conflict stays confirmed (referential no-op).
+  Full pre-existing suite sweep re-run clean after the V4 amend, working
+  tree confirmed clean via `grailkey-commit-e`/`-f` going green (both are
+  the pre-documented "false-fails on any uncommitted diff" tests
+  elsewhere in this file — their passing here is itself part of the
+  verification, not incidental). Fix 3 (Vision virgin-variant prompt
+  change) remains explicitly HELD, not started this session.
 
