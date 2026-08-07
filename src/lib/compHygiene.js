@@ -430,6 +430,35 @@ export const ARTIST_PATTERNS = [
   // Raymond Gay above, found in the same stripVariantNoise investigation.
   // Multi-word ONLY — "Lau" is a short, generic-looking string; no bare
   // fallback.
+  /john romita/i,  // GrailKey Dispatch 09 (2026-08-07) — found via the
+  // reverse-direction sync test (tests/artist-registry-sync.test.js):
+  // NOISE_PATTERNS[0] (identityCore.js) strips bare "romita" as title
+  // noise but no ARTIST_PATTERNS entry recognized it at all — a real
+  // creator gap, same shape as Raymond Gay/Stanley Lau, just surfaced by
+  // the new test instead of a production incident. Covers both John
+  // Romita Sr. and Jr. (the pattern matches as a substring, "Jr."/"Sr."
+  // trailing text doesn't need its own alternative). Multi-word ONLY —
+  // no bare fallback added for either "john" (common first name,
+  // deliberately excluded from this registry's scope, see
+  // LEGACY_CREATOR_NOISE_WORDS in identityCore.js) or "romita" alone
+  // (not swept for collision risk; safer to match the file's established
+  // conservative default).
+  /alan moore/i,  // GrailKey Dispatch 09 — same reverse-test discovery as
+  // John Romita. Multi-word ONLY, deliberately no bare /moore/i fallback
+  // — "Moore" is a common enough English surname/word that this file's
+  // own established convention (no bare /miller/i for Frank Miller,
+  // despite being an equally major creator) argues against a bare
+  // fallback here too.
+  /chris claremont/i,  // GrailKey Dispatch 09 — same reverse-test
+  // discovery. Multi-word ONLY — "Claremont" is also a real place name
+  // (Claremont, CA; Claremont Colleges), enough ambiguity to prefer the
+  // same conservative no-bare-fallback default as Moore above rather
+  // than a collision sweep that was never run.
+  /joe jusko/i,  // GrailKey Dispatch 09 — same reverse-test discovery.
+  // Multi-word ONLY, for consistency with the other three names found by
+  // this same pass — "Jusko" itself has low collision risk (not an
+  // ordinary English word), but kept multi-word to match the other three
+  // rather than mixing conventions within one discovery batch.
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
   //
   // Q131 systemic-audit follow-up (2026-07-19, One World Under Doom #1 /
@@ -717,6 +746,65 @@ export const extractAcronymTokens = (text) => {
 // tokens (years, raw numbers carry no series-name signal).
 // Q22 FIX — Normalize hyphens before tokenization to match "Spider-Man" vs "Spiderman"
 // Q42 C-A3 — Expand abbreviations BEFORE tokenization (TMNT → teenage mutant ninja turtles)
+// Q55-C: Full sync with ARTIST_PATTERNS single-word entries. Extracts
+// single-word last names from both multi-word patterns (kirkham from
+// /tyler kirkham/, lee from /jim lee/, etc.) AND single-word patterns.
+//
+// Registry consolidation, commit 1 of 2 (GrailKey Dispatch 08,
+// 2026-08-07, Bone #1 / Jeff Smith class) — this hand list had drifted
+// out of sync with ARTIST_PATTERNS' own single-word entries again
+// (frison/giang/eom/lozano added to the canonical list by Q84/Q130/
+// Q133/Q136 respectively, never synced here despite this comment's own
+// "Full sync" claim) — the third confirmed instance of the drifted-
+// duplicate-constant class in this codebase. Closing the gap here is
+// deliberately NOT a scripted derivation from ARTIST_PATTERNS' regex
+// sources: several entries (`/dell'?otto/i`, `/windsor.?smith/i`) don't
+// reduce to clean words, and this exact list already carried a stray,
+// unexplained 'dekal' artifact that isn't a substring of any pattern in
+// this file — live evidence that hand-parsing these regex sources is
+// error-prone even by hand, let alone by script.
+//
+// GrailKey Dispatch 09 — promoted from a local const inside
+// tokenizeTitle() to a module-level export (ARTIST_SURNAME_WORDS) so
+// tests/artist-registry-sync.test.js can enumerate it directly for its
+// reverse-direction assertion (every entry here should trace back to
+// ARTIST_PATTERNS, or be a documented, deliberately-failing exception —
+// 'dekal' is the latter, kept failing on purpose rather than silently
+// exempted, per that dispatch: "if nobody can say what it's for, that's
+// evidence it should go"). Pure extraction — tokenizeTitle references
+// this Set directly below, byte-identical runtime behavior.
+export const ARTIST_SURNAME_WORDS = new Set([
+  // From single-word patterns
+  'skan', 'rapoza', 'quash', 'momoko', 'ross', 'adams',
+  'kirkham', 'bean', 'andolfo', 'browne', 'forstner',
+  'howard', 'corona', 'stegman', 'ottley',
+  'jimenez', 'mcfarlane', 'campbell', 'artgerm', 'nakayama',
+  'hughes', 'byrne', 'perez', 'kirby', 'ditko', 'mele',
+  'albuquerque', 'hama', 'fabok', 'ejikure',
+  'gleason', 'quah', 'parrillo', 'maer', 'lim', 'chew', 'ngu', 'sanders',
+  'frison', 'giang', 'eom', 'lozano',  // GrailKey Dispatch 08: sync gap closed
+  // From multi-word patterns — extract last-name tokens
+  // /tyler kirkham/ → kirkham (already above), /jim lee/ → lee,
+  // /inhyuk lee/ → lee, /skottie young/ → young, /frank cho/ → cho,
+  // /frank miller/ → miller, /windsor.?smith/ → smith, /dell'?otto/ → otto/dekal,
+  // /jeehyung lee/ → lee, /alex ross/ → ross (already above),
+  // /kaare andrews/ → andrews, /alan quah/ → quah (already above),
+  // /mico suayan/ → suayan, /puppeteer lee/ → lee, /derrick chew/ → chew (already above),
+  // /jonboy meyers/ → meyers, /kael ngu/ → ngu (already above),
+  // /natali sanders/ → sanders (already above), /kendrick lim/ → lim (already above),
+  // /lucio parrillo/ → parrillo (already above)
+  'lee', 'young', 'cho', 'miller', 'smith', 'otto', 'dekal', 'andrews',
+  'suayan', 'meyers', 'spears',  // Q55-C: add missing 'dekal', 'spears'
+  // GrailKey Dispatch 08, commit 2 of 2 — 'walker'/'gay'/'lau' from the
+  // Jeff Smith/Cory Walker/Raymond Gay/Stanley Lau ARTIST_PATTERNS
+  // additions above ('smith' already present, from windsor.?smith).
+  'walker', 'gay', 'lau',
+  // GrailKey Dispatch 09 — 'romita'/'moore'/'claremont'/'jusko' from the
+  // John Romita/Alan Moore/Chris Claremont/Joe Jusko ARTIST_PATTERNS
+  // additions found via the reverse-direction sync test.
+  'romita', 'moore', 'claremont', 'jusko',
+]);
+
 export const tokenizeTitle = (title) => {
   // G.O.D.S. dispatch — collapse punctuated acronyms BEFORE anything else
   // touches the string, so both the compound-whitelist check below and the
@@ -774,55 +862,9 @@ export const tokenizeTitle = (title) => {
     console.log(`[22f] metadata-stripped: "${beforeStrip}" → "${normalized}"`);
   }
 
-  // Q55-C: Full sync with ARTIST_PATTERNS single-word entries (lines 117-123).
-  // Extracts single-word last names from both multi-word patterns (kirkham from
-  // /tyler kirkham/, lee from /jim lee/, etc.) AND single-word patterns.
-  // COMPLETE LIST — 60+ artists from ARTIST_PATTERNS regex catalog.
-  //
-  // Registry consolidation, commit 1 of 2 (GrailKey Dispatch 08,
-  // 2026-08-07, Bone #1 / Jeff Smith class) — this hand list had drifted
-  // out of sync with ARTIST_PATTERNS' own single-word entries again
-  // (frison/giang/eom/lozano added to the canonical list by Q84/Q130/
-  // Q133/Q136 respectively, never synced here despite this comment's own
-  // "Full sync" claim) — the third confirmed instance of the drifted-
-  // duplicate-constant class in this codebase. Closing the gap here is
-  // deliberately NOT a scripted derivation from ARTIST_PATTERNS' regex
-  // sources: several entries (`/dell'?otto/i`, `/windsor.?smith/i`) don't
-  // reduce to clean words, and this exact list already carries a stray,
-  // unexplained 'dekal' artifact that isn't a substring of any pattern in
-  // this file — live evidence that hand-parsing these regex sources is
-  // error-prone even by hand, let alone by script. Guarded going forward
-  // by tests/artist-registry-sync.test.js, which asserts every
-  // single-word ARTIST_PATTERNS entry actually gets stripped by
-  // tokenizeTitle — this specific gap is exactly what that test would
-  // have caught.
-  const artistWords = new Set([
-    // From single-word patterns (lines 117-123)
-    'skan', 'rapoza', 'quash', 'momoko', 'ross', 'adams',
-    'kirkham', 'bean', 'andolfo', 'browne', 'forstner',
-    'howard', 'corona', 'stegman', 'ottley',
-    'jimenez', 'mcfarlane', 'campbell', 'artgerm', 'nakayama',
-    'hughes', 'byrne', 'perez', 'kirby', 'ditko', 'mele',
-    'albuquerque', 'hama', 'fabok', 'ejikure',
-    'gleason', 'quah', 'parrillo', 'maer', 'lim', 'chew', 'ngu', 'sanders',
-    'frison', 'giang', 'eom', 'lozano',  // GrailKey Dispatch 08: sync gap closed
-    // From multi-word patterns (lines 111-115) — extract last-name tokens
-    // /tyler kirkham/ → kirkham (already above), /jim lee/ → lee,
-    // /inhyuk lee/ → lee, /skottie young/ → young, /frank cho/ → cho,
-    // /frank miller/ → miller, /windsor.?smith/ → smith, /dell'?otto/ → otto/dekal,
-    // /jeehyung lee/ → lee, /alex ross/ → ross (already above),
-    // /kaare andrews/ → andrews, /alan quah/ → quah (already above),
-    // /mico suayan/ → suayan, /puppeteer lee/ → lee, /derrick chew/ → chew (already above),
-    // /jonboy meyers/ → meyers, /kael ngu/ → ngu (already above),
-    // /natali sanders/ → sanders (already above), /kendrick lim/ → lim (already above),
-    // /lucio parrillo/ → parrillo (already above)
-    'lee', 'young', 'cho', 'miller', 'smith', 'otto', 'dekal', 'andrews',
-    'suayan', 'meyers', 'spears',  // Q55-C: add missing 'dekal', 'spears'
-    // GrailKey Dispatch 08, commit 2 of 2 — 'walker'/'gay'/'lau' from the
-    // Jeff Smith/Cory Walker/Raymond Gay/Stanley Lau ARTIST_PATTERNS
-    // additions above ('smith' already present, from windsor.?smith).
-    'walker', 'gay', 'lau',
-  ]);
+  // GrailKey Dispatch 09 — artistWords now aliases the module-level
+  // ARTIST_SURNAME_WORDS export (above), not a per-call local Set.
+  const artistWords = ARTIST_SURNAME_WORDS;
   // Signature markers: signed, sig, auto, autographed (do NOT strip "ss" —
   // false positive risk: "Secret Six", "Space Squadron", etc.)
   const signatureWords = new Set(['signed', 'sig', 'auto', 'autographed']);

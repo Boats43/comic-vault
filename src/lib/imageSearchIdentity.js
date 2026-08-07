@@ -486,6 +486,22 @@ export const inferAssetTypeFromCategories = (leafCategoryIds) => {
 //     source: "ebay_image_search"
 //   }
 //
+// GrailKey Dispatch 09 (2026-08-07) — extracted from stripVariantNoise's
+// two inline creator-name regexes (below) so tests/artist-registry-sync.test.js
+// can import the exact live word lists for its reverse-direction
+// assertion (does every creator-shaped name stripped here also exist in
+// the canonical ARTIST_PATTERNS registry, or is it a documented
+// exception?) rather than parsing a regex .source string — the Dispatch
+// 08 investigation found that error-prone (the 'dekal' artifact in
+// compHygiene.js's artistWords). Pure extraction, split across two
+// arrays only because the original code was two separate .replace()
+// calls — kept split to minimize diff risk, not a behavior change.
+export const STRIP_VARIANT_NOISE_CREATOR_NAMES_1 = ['alan quah', 'inhyuk lee', 'jeehyung lee', 'raymond gay', 'peach momoko', 'artgerm', 'stanley lau'];
+export const STRIP_VARIANT_NOISE_CREATOR_NAMES_2 = ['david nakayama', 'alex ross', 'jim lee', 'todd mcfarlane', 'frank miller'];
+const buildNameNoiseRe = (names) => new RegExp(`\\b(${names.map((n) => n.replace(/\s+/g, '\\s+')).join('|')})\\b`, 'gi');
+const VARIANT_NOISE_CREATOR_RE_1 = buildNameNoiseRe(STRIP_VARIANT_NOISE_CREATOR_NAMES_1);
+const VARIANT_NOISE_CREATOR_RE_2 = buildNameNoiseRe(STRIP_VARIANT_NOISE_CREATOR_NAMES_2);
+
 // Confidence calculation: average agreement across title+issue+year fields.
 // Only fields with ≥50% agreement are returned (null otherwise).
 // Minimum 5 listings required for consensus (returns null if < 5).
@@ -525,8 +541,8 @@ export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher
     return String(title)
       .replace(/\b(virgin|virgins?|foil|exclusive|exclusives?|signed|autographed?|ltd|limited|coa|w\/coa|with\s+coa)\b/gi, '')
       .replace(/\b(fanexpo|fan[\s-]?expo|megacon|nycc|sdcc|c2e2|eccc|wondercon|emerald\s+city)\b/gi, '')
-      .replace(/\b(alan\s+quah|inhyuk\s+lee|jeehyung\s+lee|raymond\s+gay|peach\s+momoko|artgerm|stanley\s+lau)\b/gi, '')
-      .replace(/\b(david\s+nakayama|alex\s+ross|jim\s+lee|todd\s+mcfarlane|frank\s+miller)\b/gi, '')
+      .replace(VARIANT_NOISE_CREATOR_RE_1, '')
+      .replace(VARIANT_NOISE_CREATOR_RE_2, '')
       .replace(/\b(\d+\s*copies?)\b/gi, '')
       .replace(/\b(ltd\s*\d+|ltd\s*to\s*\d+|limited\s*\d+|limited\s*to\s*\d+)\b/gi, '')
       .replace(/\b(1:\d+)\b/gi, '') // ratio variants

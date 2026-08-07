@@ -63,6 +63,28 @@ export const COMPOUND_TITLE_WHITELIST = [
   'tales of marvel', 'age of marvel', 'age of dc',
 ];
 
+// GrailKey Dispatch 09 (2026-08-07) — extracted from sanitizeSeriesTitle's
+// inline NOISE_PATTERNS[0] regex (below) so tests/artist-registry-sync.test.js
+// can import the exact live word list for its reverse-direction assertion,
+// rather than parsing a regex .source string (shown error-prone by the
+// Dispatch 08 'dekal' finding). Pure extraction — the runtime regex is
+// built from this array, byte-identical behavior.
+//
+// Deliberately NOT expected to be a subset of ARTIST_PATTERNS: this list
+// mixes bare, individual FIRST names (neal, john, jim, todd, steve,
+// barry, alan, chris, joe, kaare) with surnames — its job is "strip any
+// name-shaped token that bleeds into a title," not "recognize a specific
+// creator," which is why it's broader than the creator registry and not
+// expected to trace back to it one-for-one. See CLAUDE.md's "first-name
+// split" note for the open question of whether this list should be
+// renamed/relocated to make that scope explicit.
+export const LEGACY_CREATOR_NOISE_WORDS = [
+  'neal', 'adams', 'john', 'romita', 'jack', 'kirby', 'steve', 'ditko',
+  'barry', 'windsor', 'smith', 'jim', 'lee', 'todd', 'mcfarlane', 'frank',
+  'miller', 'alan', 'moore', 'chris', 'claremont', 'joe', 'jusko', 'kaare',
+  'andrews', 'alex', 'ross',
+];
+
 /**
  * EX-7 — reprint/facsimile dominance in the eBay visual (image-search) pool.
  *
@@ -167,8 +189,9 @@ export const sanitizeSeriesTitle = (rawTitle) => {
   const isCompoundTitle = COMPOUND_TITLE_WHITELIST.some(w => rawLower.includes(w));
 
   const NOISE_PATTERNS = [
-    // Creator names that bleed into titles
-    /\b(neal|adams|john|romita|jack|kirby|steve|ditko|barry|windsor|smith|jim|lee|todd|mcfarlane|frank|miller|alan|moore|chris|claremont|joe|jusko|kaare|andrews|alex|ross)\b/gi,
+    // Creator names that bleed into titles — see LEGACY_CREATOR_NOISE_WORDS
+    // (module scope, exported) for the source list.
+    new RegExp(`\\b(${LEGACY_CREATOR_NOISE_WORDS.join('|')})\\b`, 'gi'),
     // Cover descriptors
     /\b(classic|vintage|original|key|issue|cover|homage|parody|takeoff|beatles|art|lesson)\b/gi,
     // Condition/grade words
