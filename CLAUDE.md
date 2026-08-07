@@ -827,7 +827,11 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   once sold data reaches tier pricing. Residual gap: this backstop only
   engages when verified sold comps exist (`soldPool > 0`, i.e. Tier 2); a
   book with zero sold comps and a contaminated active-only pool (Tier 3/4)
-  has no sold anchor to flag against and remains exposed.
+  has no sold anchor to flag against and remains exposed. **A second,
+  more severe gap in this exact guard — a sold pool of `n=1` treated as
+  authoritative over 18 actives — found 2026-08-07: see "Bone #1 class"
+  in the Pattern Library below (GK-34), scoped together with the
+  mirror-image GK-21 defect in `applyVariantFallbackDivergenceCap`.**
 - **Distinctive-artist-style confusion class** (Uncanny X-Men #27 /
   Ultimate X-Men #1, 2026-07-18) — Vision's own direct-image read
   (`STANDARD_PROMPT`, Sonnet) and eBay's independent reverse-image search
@@ -1509,6 +1513,172 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   RIGHT comps for a legitimate reason, leaving only wrong-but-permitted
   comps behind — this is a different failure shape from data getting IN
   that shouldn't have, and needs a flag, not a filter change.
+- **Bone #1 class — Strip 1's first production validation, plus a cluster
+  of independent real findings surfaced by the same scan** (GrailKey
+  Dispatch 05/06, 2026-08-07). Two Bone #1 books scanned back to back.
+
+  **Strip 1 confirmed working, first production evidence.** Book 1:
+  `[Q84] override-allowed reason=coherent-content tokens [cartoon,books]
+  (>=3 member support each: [4,4])`, `[title-family] selected=bone`,
+  `[identity] confirmed="bone" #1` — verified against `confirmedTitle` in
+  the logs, not the card, per standing practice in this dispatch chain.
+  The publisher/imprint-noise tokens ("cartoon," "books" — pool boilerplate
+  from "Cartoon Books" imprint mentions) were routed to the variant-suffix
+  path instead of corrupting the title, exactly as Strip 1 was designed to
+  do. `[strip1-variant-routing]` itself did not fire on this scan because
+  `confirmedVariant` was already populated ("signed nth print" from
+  Vision) and that block is fill-only-if-empty — an acceptable non-fire,
+  not a miss: the load-bearing half (keeping the tokens OUT of the title)
+  worked regardless of which specific block absorbed them. Book 2 shows
+  Strip 1's known limit, not a regression: Q140 admitted `[jeff,smith]` as
+  coherent-content (not on the routing phrase list), so both tokens stayed
+  in the title — `confirmedTitle = "bone jeff"` — and were then rejected
+  by the pre-existing `[22c]` title-revote backstop as expected
+  (`title rejections: ebay="bone" (expected "bone jeff"), vision="bone"
+  (expected "bone jeff")`). The creator-recognition gate independently
+  failed on the same input (`override-blocked reason=non-creator additions
+  [jeff,smith]`) — see the registry-gap finding below; this is a separate
+  mechanism from Strip 1/22c, not a second instance of the same bug.
+
+  **GK-34 — mirror-image of GK-21, same root defect, not yet fixed.**
+  Both books priced at $1,619.99 (real value ~$15-40). Root chain,
+  verified directly in `src/lib/priceBands.js`:
+  `[sold-verify] kept 1/21 (rejected 20: annualMismatch=1, gradeMismatch=4,
+  stale=15)` left exactly one surviving sold comp — a genuine $1,619.99
+  sale of a **1991 US first printing** — against a book that is actually a
+  **later-printing UK edition** (£2.95, "signed nth print"). The Tier-2
+  `activePoolSuspect` predicate (`priceBands.js:658-661`,
+  `activeAvg > 0 && soldAvg > 0 && (activeAvg < soldAvg*0.25 ||
+  activeLow < soldLow*0.25)`) compared that lone $1,619.99 sold comp
+  against 18 active listings averaging $40.50, concluded the 18 actives
+  must be the anomaly, and discarded them — `market = soldAvg` at line
+  668. **Confirmed: neither this predicate nor its mirror-image sibling
+  has any minimum-pool-size floor on the side doing the overriding.**
+  `applyVariantFallbackDivergenceCap` (`priceBands.js:417-459`, the GK-21
+  mechanism — 1 active listing previously overrode 28 solds) only checks
+  `activePrices.length === 0` (line 423, i.e. "not empty," not "big
+  enough") before letting a single active price cap/overwrite a
+  sold-pool-derived result of any size. Both are pure ratio tests with no
+  sample-size gate on the overriding pool — `n=1` carries the same
+  authority as `n=18` or `n=28`. (By contrast, the sibling
+  `activeAnchoredOverFallbackSold`/GK-31 branch, `priceBands.js:546`, and
+  `isActivePoolVariantConfirmed`, `priceBands.js:298`, already DO enforce
+  a `verifiedActive.length >= 3` / `< 2`-reject floor — precedent for the
+  fix below already exists in this same file, just not applied to these
+  two mechanisms.)
+
+  **Proposed fix, scoped but NOT implemented — pricing-math greenlight
+  required before any code:** one shared constant,
+  `MIN_POOL_FOR_OVERRIDE = 3` (matching the existing GK-31/
+  `isActivePoolVariantConfirmed` precedent), gating both directions at the
+  point each reads the size of the pool about to do the overriding:
+  (a) `priceBands.js:658` — add `soldPrices.length >= MIN_POOL_FOR_OVERRIDE
+  &&` into the `activePoolSuspect` boolean, so a 1-comp sold pool can no
+  longer discard an 18-comp active pool (falls through to the normal
+  70/30 blend instead); (b) `priceBands.js:423` — change
+  `activePrices.length === 0` to `activePrices.length <
+  MIN_POOL_FOR_OVERRIDE`, so a 1-comp active pool can no longer overwrite
+  a 28-comp sold-derived result. Same constant, one added line in each of
+  the two functions the dispatch named; no change to tier-selection
+  thresholds or to the two already-floored siblings. **Not yet coded** —
+  this is comp-pool trust/composition logic, Flash #139-adjacent standing
+  discipline in this file, requires explicit greenlight first.
+
+  **Upstream contributor to the GK-34 singleton, investigated, not yet
+  addressed:** the `stale` filter in `verifySoldComps`
+  (`src/lib/soldVerification.js:216-224`, thresholds at lines 61-68 —
+  `MODERN_STALE_DAYS=90` for books ≥2000, `COPPER_STALE_DAYS=180` for
+  1985-1999, no cutoff at all below 1985) rejected 15 of Bone #1's 21 raw
+  sold rows. Bone #1 (1991) falls in the 180-day Copper tier. Git history
+  shows this was tightened from a uniform 540-day window
+  (commit `1e77516`, "Modern (2000+): 540d → 90d, Copper (1985-1999):
+  540d → 180d") — a 3x cut for Copper, 6x for Modern — on an asserted-not-
+  demonstrated rationale ("higher velocity markets... still active," no
+  sales-cadence data cited). `tests/sold-verification.test.js`'s existing
+  stale fixture only exercises day values that reject/keep identically
+  under both the old and new thresholds (30/90 kept, 600/800 rejected) —
+  the tightening shipped with no regression test pinning the new
+  90/180-day boundary specifically. The vintage tier (`bookYear < 1985`)
+  is explicitly exempted from rejection because "sold pools naturally
+  thin" (`soldVerification.js:64`) — the same reasoning applies to a
+  non-blockbuster Copper-era back issue like Bone #1 in a specific grade,
+  which the current era cutoff doesn't protect. Not yet fixed or
+  rescoped — flagged as the upstream manufacturer of GK-34-shaped
+  singletons generally, not just this one book; any fix to the trust-
+  decision floor above should be paired with re-examining this threshold,
+  not treated as a full substitute for it.
+
+  **Creator-registry gap, confirmed as a real audit (not a one-off name
+  add) — "Jeff Smith"/"Cory Walker" class.** Traced the
+  `override-blocked reason=non-creator additions [jeff,smith]` gate to its
+  actual source: `applyDualAxisGate`
+  (`src/lib/imageSearchIdentity.js:1455`, blocked-return at line 1593)
+  computes `nonCreator` (line 1525) against `poolArtistTokens`
+  (`extractPoolArtistTokens`, lines 1296-1314), which matches pool titles
+  against `ARTIST_PATTERNS` — the canonical registry
+  (`src/lib/compHygiene.js:370-442`, ~68 patterns, already named canonical
+  by the Variant-artist-token-fusion entry above). **Root cause: neither
+  "Jeff Smith" nor "Cory Walker" exists in `ARTIST_PATTERNS`, or in any of
+  the other five creator-name-adjacent lists in the codebase** — a genuine
+  absence, not a canonical-vs-drifted disagreement for these two names
+  specifically. Full inventory: `ARTIST_PATTERNS` (canonical, ~68
+  patterns); the `artistWords` Set inside `compHygiene.js`'s own
+  `tokenizeTitle()` (lines 756-777, labeled "Q55-C: Full sync with
+  ARTIST_PATTERNS" but confirmed stale — missing frison/giang/eom/lozano,
+  all added to the canonical list after that sync comment was written —
+  **a THIRD drifted copy, not previously named in this doc alongside the
+  two the Variant-artist-token-fusion entry already tracks**
+  (`sanitizeSeriesTitle`'s `NOISE_PATTERNS` in `identityCore.js:171`, and
+  `stripVariantNoise` in `imageSearchIdentity.js:528-529`)); and
+  `PREMIUM_CREATORS` (`src/lib/premiumCreators.js`, 84 entries — grown
+  from the "80" this doc's own Premium Creator Credits section states,
+  itself minor doc/code drift — architecturally separate, display-only,
+  does not gate anything, should NOT be folded into a gating-list
+  consolidation). "neal passenger" resolved as a false lead — not a named
+  case, no dedicated registry: it's two adjacent words from an unrelated
+  `imageSearchIdentity.js:1541-1547` comment ("'joker'/'iconic' rode along
+  as **passengers** on **'neal'**'s recovery, Batman #251 class") about
+  the generic token `"neal"`, already covered by existing test coverage.
+  **Scoping note, not yet actioned:** this doc's own prior text (line
+  ~927-931, Variant-artist-token-fusion entry) already flagged "extend
+  this list as new named-variant patterns emerge" / "flag for a future
+  pass if either [drifted list] surfaces its own production miss" — Jeff
+  Smith/Cory Walker are exactly that trigger, now on its third instance
+  (after Q119's title-whitelist and Q128's year-tolerance consolidations).
+  Adding the two missing names to `ARTIST_PATTERNS` alone would fix this
+  one instance but leave `artistWords`/`sanitizeSeriesTitle`/
+  `stripVariantNoise` independently stale again, per the established
+  pattern — a real consolidation (mirroring Q119's) is the request here,
+  not a fourth patch. Not yet scoped as a concrete diff or implemented.
+
+  **Two further real, independently-verified findings from the same
+  scan, not yet actioned (surfaced, not requested for investigation this
+  round):**
+  - **Mega-key protection defeated by a publisher mismatch.** Bone #1 is
+    in the mega-keys table, but `passesIdentityGates`
+    (`api/mega-keys.js:1081-1103`) hard-rejects on any publisher
+    disagreement (`entryPub && userPub && userPub !== entryPub`, line
+    1097) with no fuzzy tolerance — logged as `[mega-key-match] rejected —
+    publisher mismatch`. `confirmedPublisher` had been set to "Bonnier
+    Carlsen" (a Swedish publisher) via a ComicVine volume-match issue,
+    defeating the strongest available protection against exactly this
+    class of mispricing on the one book most in need of it.
+  - **`[q27]` correctly detects, but doesn't gate the path that mattered.**
+    The foreign-edition flag (`api/enrich.js:10130-10134`,
+    `out.foreignEdition = true`, logged `[q27] foreign edition detected —
+    pc_estimate blocked`) fired correctly and, per its own design, blocks
+    the `pc_estimate` (PriceCharting single-point lookup) path only. It
+    does not gate the PriceCharting sales-history scrape /
+    `verifySoldComps` pipeline (Ship #20a) — the actual path that
+    supplied the $1,619.99 US-first-print anchor. The system detected the
+    mismatch and the detection had no reach into the pricing path that
+    used it.
+  - **GK-29 recurrence, untracked.** `gradeMult=0.55` was displayed but
+    not applied — `$1,619.99 × 0.55 = $891`, not the shipped price. Both
+    books (VG 4.0 and VF 8.0) received the identical price despite
+    different grades. Referenced as "again" in the dispatch (implying a
+    prior, undocumented occurrence) — not yet given its own root-cause
+    investigation in this doc; flagged here so it isn't lost, not closed.
 
 ## Open Blockers
 
