@@ -1760,6 +1760,81 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   documented pre-existing baselines — zero regressions. Both deployed
   (`dpl_7kgVfL5M7dz8gdsbsfNTqKr1QFCM`, READY, production).
 
+  **Reverse direction, SHIPPED (2026-08-07, `818037c`, GrailKey Dispatch
+  09).** Commit 1's guard only checked one direction (`ARTIST_PATTERNS` →
+  `artistWords`). Promoted `NOISE_PATTERNS[0]` and `stripVariantNoise`'s
+  two creator-name regexes to module-level exports
+  (`LEGACY_CREATOR_NOISE_WORDS` in `identityCore.js`;
+  `STRIP_VARIANT_NOISE_CREATOR_NAMES_1`/`_2` in `imageSearchIdentity.js`;
+  `artistWords` itself promoted and renamed `ARTIST_SURNAME_WORDS` in
+  `compHygiene.js`) — pure extraction, zero behavior change, verified via
+  a full regression sweep. Three reverse checks added to
+  `tests/artist-registry-sync.test.js`: (1) `stripVariantNoise`'s 12
+  names against `ARTIST_PATTERNS` — all pass; (2)
+  `LEGACY_CREATOR_NOISE_WORDS`' 27 bare words against
+  `ARTIST_SURNAME_WORDS`, with two documented, permanent exception
+  classes (13 bare first names — `neal, john, jack, steve, barry, jim,
+  todd, frank, alan, chris, joe, kaare, alex` — `ARTIST_PATTERNS`
+  deliberately never carries these; `windsor`, a compound-surname
+  fragment, neither a first name nor independently a surname); (3)
+  `ARTIST_SURNAME_WORDS` itself against `ARTIST_PATTERNS`' raw regex
+  sources (word-boundary-safe — a naive `\bword\b` test against a raw
+  `.source` string false-negatives right at the `\b` anchor's own literal
+  "b" character, a real bug hit and fixed while building this).
+
+  **Found 4 new, real, previously-unknown gaps via check (2) — fixed in
+  the same commit:** John Romita, Alan Moore, Chris Claremont, Joe Jusko
+  — all legitimate, major, well-known creators entirely absent from
+  `ARTIST_PATTERNS`, identical shape to Raymond Gay/Stanley Lau, just
+  surfaced by the test instead of a production incident. Added as
+  multi-word-only entries (individually collision-swept — no bare
+  `moore`/`claremont` fallback, both have real ambiguity; `romita`/`jusko`
+  kept multi-word for consistency within the batch rather than mixing
+  conventions) plus their surnames into `ARTIST_SURNAME_WORDS`.
+
+  **Found a second unexplained artifact via check (3), left deliberately
+  failing, same as `dekal`:** `'spears'` in `ARTIST_SURNAME_WORDS` traces
+  to no `ARTIST_PATTERNS` entry either — origin unknown, not documented
+  anywhere. Per the explicit instruction that produced check (3), neither
+  `dekal` nor `spears` is exempted or silently fixed. The test currently
+  reports 153/155 — those 2 failures are the point, not a bug in the
+  test. If a future investigation explains either, add it with a reason;
+  otherwise the evidence points toward removing both.
+
+  **First-name split — investigated (Dispatch 09), NOT coded, per
+  explicit instruction.** The proposal: `LEGACY_CREATOR_NOISE_WORDS`
+  conflates two different jobs — bare first-name stripping (genuine
+  title noise, no creator-recognition intent) and surname stripping
+  (creator recognition, ARTIST_PATTERNS' actual job) — and should split
+  so each list has one clear purpose. Checked empirically, not assumed:
+  of the 27 words, 13 are bare first names (`neal`/`john`/`jack`/...,
+  listed above) and 1 (`windsor`) is the compound-fragment edge case;
+  the remaining 13 are surnames (`adams, romita, kirby, ditko, smith,
+  lee, mcfarlane, miller, moore, claremont, jusko, andrews, ross`) —
+  **every single one of which is now, post-Dispatch-09, already a member
+  of `ARTIST_SURNAME_WORDS`** (confirmed via direct set-difference query,
+  zero remainder). **The split is clean, and better than a rename: the
+  surname half doesn't need its own list at all — it can just import
+  `ARTIST_SURNAME_WORDS` directly**, leaving `identityCore.js` with only
+  a small, genuinely-standalone `BARE_FIRST_NAME_TITLE_NOISE`-style list
+  (13 entries + `windsor` as a documented edge case) that has zero
+  overlap with the creator registry and never will by design. This would
+  eliminate `LEGACY_CREATOR_NOISE_WORDS` as an independent list entirely
+  rather than just renaming it — one fewer hand-maintained structure, not
+  a relabeled one.
+  **One real caveat, not resolved, requires a decision:** `ARTIST_SURNAME_WORDS`
+  is 60 entries; the current surname-stripping behavior in
+  `sanitizeSeriesTitle` only ever exercised the 13 that happened to be
+  hand-copied into `LEGACY_CREATOR_NOISE_WORDS`. Switching to import
+  `ARTIST_SURNAME_WORDS` wholesale would widen what `sanitizeSeriesTitle`
+  strips from raw titles to all 60 (`kirkham`, `suayan`, `forstner`,
+  `albuquerque`, etc.) — a real behavior change for this specific
+  consumer, not yet vetted against real title data the way the original
+  13-word list implicitly was by years of production use. Recommend: if
+  this split is greenlit, treat the behavior-widening as its own
+  reviewable decision (possibly a separate flag/step), not a silent
+  side effect of the rename. Not coded.
+
   **Two further real, independently-verified findings from the same
   scan, not yet actioned (surfaced, not requested for investigation this
   round):**
