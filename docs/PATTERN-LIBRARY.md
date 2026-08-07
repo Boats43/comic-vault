@@ -2178,6 +2178,36 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
      of the live prompt source confirming the instruction text actually
      landed: `tests/grailkey-dispatch-19-vision-confidence-leak.test.js`.
 
+  **The leak is intermittent, not deterministic — confirmed, not
+  assumed (GrailKey Dispatch 24, 2026-08-07).** A second Spawn #351
+  scan, same build (`b212c64`, the pre-push build — this observation
+  predates the fix reaching production), did NOT reproduce the bad
+  string: `confidence="Low"` / `visionConfidence: "low"` /
+  `[match-conf] vision=low`, a well-formed value, on the exact same
+  code that produced `"High that this is NOT a comic book"` the day
+  before. Same prompt, same code path, different Vision output shape
+  from one photo to the next — the model doesn't reliably free-style
+  the bad sentence every time it sets `assetTypeConfident=false`, only
+  sometimes. **This does not weaken the Dispatch 19 fix or its
+  reasoning** — a prompt gap plus an unvalidated consumer was a real
+  defect regardless of how often it manifested, and an intermittent
+  failure mode is arguably worse to leave unfixed, not less urgent,
+  since it would have passed casual spot-checks indefinitely. It DOES
+  mean: **do not expect to reproduce the original bad string on demand
+  for verification.** A future regression check for this class of bug
+  should rely on the unit test (`grailkey-dispatch-19-vision-confidence-
+  leak.test.js`, which forces the input directly rather than waiting for
+  Vision to volunteer it) and on the validator's own
+  `[vision-confidence-invalid]` log line staying silent in production
+  (its absence over time is the actual evidence the fix holds), not on
+  catching the literal sentence in a fresh scan — the sentence's
+  absence from any one scan is not evidence of anything, in either
+  direction. The `scanlog:` record (GrailKey Dispatch 22) does not
+  currently carry `confidence`/`visionConfidence` as a field either —
+  another concrete instance of the same "v1 doesn't collect what a
+  follow-up question needs" gap already noted for the `titleOk`
+  question in the Dispatch 23 scan-log validation-questions note above.
+
   **Fix 5 SHIPPED — `shouldLiftAssetTypeAdvisoryLock`
   (`src/lib/imageSearchIdentity.js`), log tag `[Q32-asset-type-override]`.**
   Blocked since GrailKey Dispatch 15 on a real captured Vision JSON to
