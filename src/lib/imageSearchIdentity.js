@@ -636,9 +636,16 @@ export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher
   const issueResult = getMostCommon(issues);
   const yearResult = getMostCommon(years);
 
-  // Lower threshold: 30% for title (when issue passes at 60%, title at 30% is sufficient)
-  // Issue still requires 50% agreement as critical field
-  const titleOk = titleResult.count / total >= 0.3;
+  // GrailKey Dispatch 15 (2026-08-07): 0.30 -> 0.15. Two confirmed live
+  // misses at the old bar — Wha...!? #1 (5/20=0.25) and Power Rangers #1
+  // (4/20=0.20) — both indie titles whose pools legitimately can't reach
+  // 30% title-string agreement (fragmented seller phrasing, no dominant
+  // wording), silently disabling the vision-zero-support check downstream
+  // exactly on the books most likely to need it (thin, scattered pools).
+  // Issue still requires its own separate 50% agreement bar below —
+  // lowering titleOk alone does not let a genuinely incoherent pool adopt
+  // an issue number; it only stops discarding the zero-support signal.
+  const titleOk = titleResult.count / total >= 0.15;
   const issueOk = issueResult.count / total >= 0.5;
   const yearOk = yearResult.count / total >= 0.5;
 
@@ -672,7 +679,7 @@ export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher
     // reason — log it specifically so a title-agreement collapse is an
     // observable event, not a silent gap.
     if (!titleOk) {
-      console.log(`[extractConsensus] returning null — titleOk failed (${titleResult.count}/${total} = ${(titleResult.count / total).toFixed(2)}, need >=0.30), suppressing vision-zero-support check downstream`);
+      console.log(`[extractConsensus] returning null — titleOk failed (${titleResult.count}/${total} = ${(titleResult.count / total).toFixed(2)}, need >=0.15), suppressing vision-zero-support check downstream`);
     }
     return null;
   }

@@ -385,7 +385,14 @@ assertEq(h2.consensus?.issue, '44', 'Immortal Hulk #44: still issue "44" end-to-
 
 const h3 = runFixture('Adventure Time SS #1', ADVENTURE_TIME_POOL, '1');
 assertTrue(h3.eligibleSize < h3.poolSize, 'Adventure Time: category filter removes real PRINT rows (posters) from this pool end-to-end');
-assertEq(h3.consensus, null, 'Adventure Time: extractConsensus still null end-to-end (matches real production; the actual fix for this fixture is family-scoped resolveFamilyIssueConsensus, Commit B2, untouched by Commit C)');
+// GrailKey Dispatch 15 (2026-08-07): titleOk lowered 0.30 -> 0.15
+// (imageSearchIdentity.js). This pool's title consensus (0.23) now
+// clears the bar, so extractConsensus returns a real object instead of
+// null — see tests/q141b-shared-issue-extractor.test.js for the full
+// explanation of why this is inert in production (familyAuthoritySkip
+// resolves this book via family-scoped consensus first).
+assertEq(h3.consensus?.issue, null, 'Adventure Time: raw-pool issue consensus still null end-to-end (no 50% winner) — only the outer null-vs-object wrapper changed with the threshold, not the issue conclusion');
+assertEq(h3.consensus?.noIssueConsensus, true, 'Adventure Time: noIssueConsensus true end-to-end — the safe ESCALATE shape, moot in production behind familyAuthoritySkip');
 
 const h4 = runFixture('Wonder Woman #1 2nd print', WONDER_WOMAN_POOL, '750');
 assertTrue(h4.eligibleSize < h4.poolSize, 'Wonder Woman: category filter removes the real magnet row from this pool end-to-end');

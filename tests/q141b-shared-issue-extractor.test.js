@@ -234,7 +234,23 @@ const ADVENTURE_TIME_POOL = [
   'ADVENTURE TIME #5 COVER D BAGGED/BOARDED NM KABOOM.','ADVENTURE TIME ~ ORANGE CAST COLLAGE ~ 24x36 POSTER ~ GAMES 24x36',
   'Adventure Time Original Graphic Novel Vo..., Leth, Kate','Adventure Time  Poster 24x36 Inch',
 ];
-assertEq(extractConsensus(buildPool(ADVENTURE_TIME_POOL), '1'), null, 'Adventure Time SS #1: extractConsensus stays null, matching real production `[visual] consensus: none`. The real fix for this fixture (family-scoped resolveFamilyIssueConsensus, a separate, already-shipped mechanism from 69a1d769) is untouched by Commit B.');
+// GrailKey Dispatch 15 (2026-08-07): titleOk lowered 0.30 -> 0.15
+// (imageSearchIdentity.js) to stop discarding vision-zero-support on
+// thin/scattered pools (two confirmed live misses: Wha...!? #1, Power
+// Rangers #1). This pool's title consensus is 3/13=0.23 — below the old
+// bar (null return) but above the new one, so extractConsensus no longer
+// short-circuits and now returns a real (low-confidence, noIssueConsensus)
+// object instead of null. This is inert for this specific book: in the
+// full pipeline, resolveIdentity's familyAuthoritySkip (identityCore.js
+// ~2170) already resolves Adventure Time SS #1 via the family-scoped
+// resolveFamilyIssueConsensus mode='adopted' result (Part 7 below,
+// support=4/ratio=1.00) BEFORE the raw-pool vision-zero-support check
+// this object feeds ever runs — so this value change doesn't reach
+// production for this book. Pinned to the new real output, not null.
+const advTimeRawConsensus = extractConsensus(buildPool(ADVENTURE_TIME_POOL), '1');
+assertEq(advTimeRawConsensus.issue, null, 'Adventure Time SS #1: raw-pool extractConsensus no longer discards the pool outright (titleOk now passes at 0.23), but issue consensus itself still does not reach the 50% adoption bar — issue stays null');
+assertEq(advTimeRawConsensus.noIssueConsensus, true, 'Adventure Time SS #1: noIssueConsensus true — this is the vision-zero-support ESCALATE shape (safe), not a wrong-adoption shape; moot in production because familyAuthoritySkip resolves this book first');
+assertEq(advTimeRawConsensus.agreement.visionIssueCount, 0, 'Adventure Time SS #1: Vision\'s issue "1" still has zero raw-pool support by this narrow measure (the family-scoped consensus above finds it via family clustering, a different mechanism)');
 
 const WONDER_WOMAN_POOL = [
   'Wonder Woman #1 2nd Printing Jim Lee Foil Variant NM Dc  Comics','Wonder Woman #1 DC Virgin Variant Artwork Jim Lee Embossed Foil Italian Edition',
