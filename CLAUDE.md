@@ -1567,22 +1567,40 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   fix below already exists in this same file, just not applied to these
   two mechanisms.)
 
-  **Proposed fix, scoped but NOT implemented — pricing-math greenlight
-  required before any code:** one shared constant,
-  `MIN_POOL_FOR_OVERRIDE = 3` (matching the existing GK-31/
-  `isActivePoolVariantConfirmed` precedent), gating both directions at the
-  point each reads the size of the pool about to do the overriding:
-  (a) `priceBands.js:658` — add `soldPrices.length >= MIN_POOL_FOR_OVERRIDE
-  &&` into the `activePoolSuspect` boolean, so a 1-comp sold pool can no
-  longer discard an 18-comp active pool (falls through to the normal
-  70/30 blend instead); (b) `priceBands.js:423` — change
-  `activePrices.length === 0` to `activePrices.length <
-  MIN_POOL_FOR_OVERRIDE`, so a 1-comp active pool can no longer overwrite
-  a 28-comp sold-derived result. Same constant, one added line in each of
-  the two functions the dispatch named; no change to tier-selection
-  thresholds or to the two already-floored siblings. **Not yet coded** —
-  this is comp-pool trust/composition logic, Flash #139-adjacent standing
-  discipline in this file, requires explicit greenlight first.
+  **FIXED (2026-08-07, commit `2dbf651`) — greenlit with a revision to the
+  original GK-34 proposal.** Shared constant `MIN_POOL_FOR_OVERRIDE = 3`
+  (matching the GK-31/`isActivePoolVariantConfirmed` precedent),
+  `priceBands.js`. **GK-21** (line 423, `applyVariantFallbackDivergenceCap`):
+  shipped exactly as specced — `activePrices.length === 0` → `< 3`. **GK-34**
+  (Tier 2 `activePoolSuspect`): the original 70/30-blend-fallthrough
+  proposal was rejected before coding — 0.7×1619.99 + 0.3×40.50 = $1,146,
+  still absurd for a $15-40 book, because a thin sold pool would still
+  dominate the blend's arithmetic even without dominating it outright.
+  Revised instead: when `soldPrices.length < MIN_POOL_FOR_OVERRIDE`, the
+  weighting inverts — the active pool carries the price via the same
+  ask-discount formula Tier 3 already uses (`activeAvg × 0.85`), and the
+  thin sold pool is demoted to a reference annotation
+  (`soldPoolTreatedAsReference`, I13-compliant: surfaced, never
+  vaporized, never the anchor). **Verified against the real Bone #1
+  numbers before shipping, per the acceptance-test requirement**:
+  soldAvg=$1,619.99 (n=1), activeAvg=$40.50 (n=18) → market=**$34.42**,
+  inside the specified $15–40 target. A sold pool that clears the floor
+  keeps the original sold-only behavior — the ASM #17 contamination
+  defense this guard exists for is untouched. Also added, per explicit
+  request: `[pool-ratio-warn]` logging (observational, non-gating) on
+  both mechanisms whenever an override fires with the overriding pool
+  smaller than 1/3 of the overridden pool — n=3 clears the floor but
+  isn't asserted as sufficient; this is what will show whether it is, in
+  production. Regression: `tests/priceBands.test.js` — EX-A(c)'s "2.01x
+  caps" fixture widened to a 3-comp active pool to keep testing the cap
+  threshold now that it requires a floor-clearing pool (discovered while
+  updating it: 3 identically-titled comps matching the confirmed variant
+  word tripped `isActivePoolVariantConfirmed` and rerouted to the
+  unrelated GK-31 branch — retitled to a non-matching title to keep the
+  test on its original target); new dedicated test confirms a 1-comp
+  active pool no longer caps at all, any divergence ratio. Baseline
+  7-failure count (this doc's own documented pre-existing stale-suite
+  list) unchanged before and after — zero regressions.
 
   **Upstream contributor to the GK-34 singleton, investigated, not yet
   addressed:** the `stale` filter in `verifySoldComps`
@@ -1607,6 +1625,28 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   singletons generally, not just this one book; any fix to the trust-
   decision floor above should be paired with re-examining this threshold,
   not treated as a full substitute for it.
+
+  **Measurement attempt (2026-08-07), partial, honest result — does NOT
+  answer "how many of the 48 ledger scans" as asked.** Queried live
+  Vercel production runtime logs directly (`get_runtime_logs`, full-text
+  search on `[sold-verify] kept`) rather than guessing. A `since=24h`
+  window returned exactly 15 scans total; wider windows (`48h`, `4d`,
+  `7d`) all timed out against this project's log volume before returning
+  results — this tool cannot currently reach back far enough to cover an
+  arbitrary 48-scan ledger without knowing which 48 requests those are.
+  Of the 15 scans in the successful 24h sample, exactly 2 hit the `stale`
+  filter at all — and both are the two Bone #1 scans from this exact
+  dispatch (`kept 1/21 ... stale=15` / `kept 1/21 ... stale=14`,
+  byte-matching the quoted log lines). Zero of the other 13 scans in the
+  sample show any `stale=` rejection. This is consistent with either "the
+  180-day cutoff mostly doesn't bite in practice, Bone #1 was unlucky" or
+  "the ledger's other 46 scans mostly fall outside this 24h window and
+  the sample is too small/recent to say anything" — 15 scans, 2 of which
+  are the known-bad case, cannot distinguish those. **Does not clear the
+  threshold change for a decision either way.** To get a real answer:
+  either supply the actual 48 request IDs/timestamps being tracked so
+  they can be queried directly, or accept a `deploymentId`-scoped,
+  narrower-but-deeper query as a substitute. Threshold left untouched.
 
   **Creator-registry gap, confirmed as a real audit (not a one-off name
   add) — "Jeff Smith"/"Cory Walker" class.** Traced the
@@ -1650,6 +1690,67 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   `stripVariantNoise` independently stale again, per the established
   pattern — a real consolidation (mirroring Q119's) is the request here,
   not a fourth patch. Not yet scoped as a concrete diff or implemented.
+
+  **Consolidation attempt (2026-08-07) — started, deliberately stopped
+  before coding. The three "drifted copies" are not as structurally
+  uniform as the first-pass audit characterized; a byte-identical
+  mechanical merge is not actually mechanical.** Read all three in full
+  before touching anything:
+  - `identityCore.js:171`'s `NOISE_PATTERNS[0]` strips bare, individual
+    FIRST names (neal, john, jim, todd, chris, joe, steve, barry, alan,
+    kaare) alongside surnames — `ARTIST_PATTERNS` has NO first-name
+    entries at all (deliberately — this doc's own Q131 note explains bare
+    single words are collision-risk-swept one at a time, first names
+    being far more collision-prone than distinctive surnames). Replacing
+    this list with an `ARTIST_PATTERNS`-derived regex would silently
+    **stop** stripping "neal," "john," "jim," etc. — a real behavior
+    regression, and specifically the kind of gap the "neal passenger"
+    comment thread (`imageSearchIdentity.js:1541-1547`, referenced above)
+    is adjacent to.
+  - `imageSearchIdentity.js:528-529`'s `stripVariantNoise` list has the
+    inverse problem: "raymond gay" and "stanley lau" appear in it but
+    exist **nowhere** in `ARTIST_PATTERNS` — not as multi-word entries,
+    not even as bare surnames. These aren't drift from the canonical
+    list; they're names the canonical list itself is missing. Discovered
+    as a direct byproduct of attempting this consolidation, not
+    previously known.
+  - `compHygiene.js:756-777`'s `artistWords` Set (inside `tokenizeTitle`)
+    IS confirmed genuinely stale relative to `ARTIST_PATTERNS`'s own
+    single-word entries specifically (missing `frison`/`giang`/`eom`/
+    `lozano` — re-verified directly against the live file this session,
+    matching the original audit) — but attempting to auto-derive it from
+    `ARTIST_PATTERNS.map(p => p.source)` risks a different class of bug:
+    several patterns use regex constructs that don't reduce to clean
+    words (`/dell'?otto/i`, `/windsor.?smith/i`) — the existing hand list
+    already has an unexplained artifact from this exact ambiguity
+    (`'dekal'`, which is not a substring of `dell'?otto` or any other
+    entry — likely a stale/mistaken addition from a past manual edit, a
+    small live example of exactly the risk a scripted derivation could
+    reintroduce silently).
+
+  **Conclusion: pushed no code this round.** A safe "same recognized
+  set" merge is possible but requires more than a find-and-replace — at
+  minimum: (1) add Raymond Gay / Stanley Lau to `ARTIST_PATTERNS` itself
+  first (closing the reverse gap `stripVariantNoise` was catching that
+  the canonical list wasn't), (2) decide explicitly whether bare-first-
+  name stripping (`neal`/`john`/`jim`/...) is genuinely creator-registry
+  scope or a separate, broader title-noise concern that only coincidentally
+  overlaps with creator names — that's a real design question, not a
+  mechanical one, (3) for `artistWords`, prefer a regression test
+  asserting `ARTIST_PATTERNS`'s single-word entries ⊆ `artistWords` (which
+  would have caught the frison/giang/eom/lozano gap immediately and
+  currently fails) over a scripted auto-derivation, given the `'dekal'`
+  evidence that hand-parsing these specific regex sources is genuinely
+  error-prone. Recommend: close the frison/giang/eom/lozano gap in
+  `artistWords` directly (that part IS mechanical — it's catching up to
+  what the canonical list already recognizes, not new recognition) plus
+  the new regression test, as consolidation commit 1; add Raymond Gay /
+  Stanley Lau to `ARTIST_PATTERNS` (closing the reverse gap this
+  investigation found) alongside Jeff Smith / Cory Walker as commit 2,
+  since all four are the identical "genuinely missing from the canonical
+  list" shape; leave `NOISE_PATTERNS[0]`'s first-name stripping and
+  `stripVariantNoise`'s exact regex shape alone pending the design
+  decision in (2) above. None of this is coded yet.
 
   **Two further real, independently-verified findings from the same
   scan, not yet actioned (surfaced, not requested for investigation this
