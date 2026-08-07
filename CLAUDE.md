@@ -348,12 +348,20 @@ qualify, by explicit design (`identityCore.js:2132-2136` comment). A
 consensus" hypothesis was tested against this exact code path and
 **falsified** — the mode-check already exists.
 
+**CORRECTED (Q54, GrailKey Dispatch 05, 2026-08-07) — the "root cause
+closed" ruling immediately below was wrong about generalizing "not the
+cause of the #19/#16 pair" to "not a real cause at all."** The `titleOk`
+derivation it contains is still correct **for that specific scan pair
+only**; the "ruling out" clause is retracted — see the correction that
+follows.
+
 **Root cause closed (Q54, GrailKey Dispatch 04, 2026-08-06):** confirmed via
 direct log evidence (`[phase1] eBay visual: N results, consensus=YES/NO`,
 `api/enrich.js:2477`) that `visionIssueCount` was **0** for Vision's issue
 in BOTH the failing scan ("19") and the correctly-blocked rescan ("16") —
-ruling out the initially-suspected cause (a nonzero, coincidental pool
-mention of Vision's own issue number silently disabling the safety net).
+~~ruling out the initially-suspected cause (a nonzero, coincidental pool
+mention of Vision's own issue number silently disabling the safety
+net)~~ — **this clause is false, see the correction below.**
 With `visionIssueCount===0` and `issueOk===false` fixed identically across
 both scans (the latter directly evidenced today by the ESCALATE firing at
 all — `noIssueConsensus` is exactly `!issueOk` — and implied yesterday by
@@ -366,11 +374,11 @@ returnsNull          = !titleOk || (!issueOk && !zeroSupportNoAdoption)
 ```
 substituting the two fixed-true terms collapses `returnsNull` to exactly
 `!titleOk`. `visionIssueNorm` was non-null both scans (Vision always
-supplies *some* issue guess) and is not the discriminator either. **`titleOk`
+supplies *some* issue guess) and is not the discriminator either. `titleOk`
 (`imageSearchIdentity.js:625`, `titleResult.count/total >= 0.3` — raw-pool
 title-string agreement, computed over `parsedVisualRows`, upstream of and
 independent from `resolveFamilyIssueConsensus`'s own family-scoped ratio)
-is the sole term that flipped**, false→true between the two scans. When
+is the term that flipped, false→true, between THIS pair of scans. When
 `titleOk` was false, `extractConsensus` returned `null` outright —
 collapsing `ebay` to `null` for the entire `resolveIdentity` call — so the
 `ebay?.agreement?.visionIssueCount === 0` guard (`identityCore.js:2171`)
@@ -381,25 +389,76 @@ the same call — Vision's own "19", preserved verbatim by
 `resolveFamilyIssueConsensus`'s `'no-consensus'` mode (explicit by design,
 per that function's own comment: "this only affects the CONFIDENCE LABEL,
 never the value"). No downstream re-hydration and no `isGraded`
-short-circuit were needed to explain the miss — both earlier candidate
-hypotheses are superseded by this one, confirmed rather than assumed.
+short-circuit were needed to explain THIS scan pair's miss.
 
-**Standing finding, independent of any fix — title-coherence gates the
-issue-safety net:** `extractConsensus`'s `titleOk` gate (raw eBay-pool
-title-string agreement, ≥30%) was designed as a basic "is there even a
-coherent pool here" precondition for computing ANY consensus field. It was
-not designed with the awareness that dropping below it also silently
-disables `zeroSupportNoAdoption`/`noIssueConsensus` — the specific
-mechanism built to catch a Vision issue number with zero pool support. A
-pool whose TITLE text is too scattered to reach 30% agreement (for any
-reason — noisy query, contaminated results, genuinely mixed listings)
-currently forfeits the issue-zero-support protection entirely, silently,
-with no log signal distinguishing "title too incoherent to check" from
-"checked and found fine." This coupling is real and general, not specific
-to the Jetsons pool — flag it before scoping any fix to the issue-safety
-path itself, since a fix that touches `zeroSupportNoAdoption`/
-`noIssueConsensus` without also addressing the `titleOk` gate it sits
-behind will not close this class.
+**What Dispatch 04 got wrong (Q54, GrailKey Dispatch 05, 2026-08-07):**
+generalizing "not the cause of the #19/#16 pair" to "not a cause at all."
+A third, separate same-day scan (Vision issue "10") proves the
+originally-dismissed hypothesis correct on its own terms:
+`[visual] extracted issues: [...,'10',...]` shows "10" present once out of
+19 raw-pool rows — one unrelated listing ("Jetsons 10 Gold Key Comic 1964
+Hanna-Barbera... W/TOUCHE TURTLE"). `visionIssueCount = 1`, so
+`zeroSupportNoAdoption` is false; combined with `issueOk` false (no 50%+
+winner anywhere in this pool either), `extractConsensus`'s early return
+fires on its OTHER disjunct (`!issueOk && !zeroSupportNoAdoption`, both
+true) — not on `!titleOk`. Confirmed directly, not inferred: the
+`[extractConsensus] returning null — titleOk failed` instrumentation
+(added Dispatch 04, live in production for this exact scan) did **not**
+fire on it — its absence is itself the evidence `titleOk` was NOT this
+scan's cause, unlike the #19/#16 pair above.
+
+| Scan | Vision issue | In raw pool? | `extractConsensus` null via | Outcome |
+|---|---|---|---|---|
+| Aug 6, scan A | #19 | no (0/N) | `!titleOk` | shipped $2.89, wrong book |
+| Aug 6, scan B | #16 | no (0/20) | — stayed non-null; ESCALATE fired | correctly blocked, ID_REQUIRED |
+| Aug 6/7, scan C | #10 | **yes (1/19)** | `!issueOk && !zeroSupportNoAdoption` (visionIssueCount≠0) | shipped $6.46, wrong book (real answer: #32, Oct 1969) |
+
+**Both mechanisms are real, independent, and each alone is sufficient to
+silently disable the OVERRIDE/ESCALATE safety net** (`identityCore.js:2171`,
+gated on `ebay?.agreement?.visionIssueCount === 0`, which never evaluates
+true when `ebay` is null regardless of which of `extractConsensus`'s two
+return-null disjuncts fired). `titleOk` is **one of at least two
+independently-sufficient failure paths** into the identical silent-skip
+outcome, not the sole discriminator — correct that framing wherever this
+finding is cited going forward.
+
+**Real underlying defect, investigated but NOT yet scoped (item 2,
+Dispatch 05, 2026-08-07):** `zeroSupportNoAdoption` requires Vision's issue
+to have **literally zero** occurrences anywhere in the raw pool
+(`visionIssueCount === 0`, `imageSearchIdentity.js:646`) — an equality
+test, not a threshold. Scan C shows 1 occurrence out of 19 (~5%) was
+sufficient to disable the check entirely. On any long-running series, a
+large raw pool will contain most issue numbers *somewhere* purely by
+chance — meaning this protection can structurally almost never fire on
+exactly the books most likely to need it (long runs with many candidate
+issues genuinely in circulation on eBay). Proposed direction, not yet
+scoped or coded: replace the `=== 0` equality with a support-RATIO floor
+(candidate: Vision's issue below roughly 10% of pool support counts as
+zero-support for this purpose) — one change would cover both the
+literal-zero case (scan B) and the near-zero case (scan C's 1/19). This
+reaches directly into `extractConsensus`'s issue-consensus math — Flash
+#139 constraint territory, same standing rule as every other adjustment
+in this section — requires explicit scoping and greenlight before any
+implementation. No code written against this yet.
+
+**Standing finding, independent of either fix — title-coherence gates the
+issue-safety net (still true, now known to be one of two gating paths):**
+`extractConsensus`'s `titleOk` gate (raw eBay-pool title-string agreement,
+≥30%) was designed as a basic "is there even a coherent pool here"
+precondition for computing ANY consensus field. It was not designed with
+the awareness that dropping below it also silently disables
+`zeroSupportNoAdoption`/`noIssueConsensus` — the specific mechanism built
+to catch a Vision issue number with zero (or, per the finding above, near-
+zero) pool support. A pool whose TITLE text is too scattered to reach 30%
+agreement (for any reason — noisy query, contaminated results, genuinely
+mixed listings) currently forfeits the issue-zero-support protection
+entirely, silently — a gap now closed by the Dispatch 04 instrumentation,
+which distinguishes "title too incoherent to check" from "checked and
+found fine." This coupling is real and general, not specific to the
+Jetsons pool — flag it before scoping any fix to the issue-safety path
+itself, since a fix that touches `zeroSupportNoAdoption`/
+`noIssueConsensus` without also addressing BOTH the `titleOk` gate it sits
+behind AND the equality-vs-ratio defect above will not close this class.
 
 ### `applyDualAxisGate` reason-string coupling (`src/lib/imageSearchIdentity.js`) — STANDING CONSTRAINT, do not reword the reason string
 **`applyDualAxisGate`'s `reason` string is parsed by at least one downstream
@@ -1474,6 +1533,33 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
 - PriceCharting sales-history scrape (Ship #20a foundation data layer).
 
 ### Internal — under investigation
+- **`cv-lang-gate` passes foreign volumes through while reporting a filter
+  (found 2026-08-07, GrailKey Dispatch 05, Jetsons #10 class) — logged
+  only, NOT fixed.** `api/enrich.js:728-742` filters ComicVine volume
+  candidates by testing `vol.name` (the volume's own title string) against
+  a literal language-keyword regex
+  (`/\b(german|deutsch|french|français|spanish|español|italian|italiano)\b/i`).
+  A real production scan matched `comicvine.matched = "Die Jetsons #10"`
+  (`vol_id=146851`, publisher "Neuer Tessloff Verlag" — a German imprint)
+  through this gate untouched: `[cv-lang-gate] 1 → 1 volumes (non-English
+  filtered)`. The volume's own title is "Die Jetsons," not "German
+  Jetsons" or similar — the regex checks for the literal NAME of a
+  language, not any actual language/locale signal, so a foreign edition
+  whose title is simply translated (not annotated with its language)
+  never matches and survives. Compounding: the log fires whenever
+  `langFiltered.length > 0` (`api/enrich.js:737`), with no check that
+  anything was actually removed — `beforeLang=1, after=1` (zero
+  candidates dropped) still prints "(non-English filtered)," so the log
+  line itself is misleading evidence of a working filter even on a
+  complete no-op pass. No damage in the case that surfaced this — a
+  downstream, independent gate (`[ship28b-conflicts]`, `PUBLISHER_MISMATCH`
+  + `YEAR_DRIFT`) caught the resulting publisher/year contradiction and
+  suppressed the story — but the language gate itself is not doing what
+  its own log line claims. Not yet fixed — needs a real language/locale
+  signal (ComicVine's volume or issue payload, if one exists beyond the
+  title string) rather than a keyword match against translated titles,
+  and the log line should only claim "(non-English filtered)" when
+  `langFiltered.length < beforeLang`.
 - **GitHub→Vercel auto-deploy not firing (2026-07-16)** — two consecutive
   pushes to `main` (`58009cb`, `d03d5bf`) produced zero Vercel deployment
   activity, confirmed via the Vercel API (`list_deployments`,
