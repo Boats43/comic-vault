@@ -308,21 +308,35 @@ regression pass rather than a bundled fix. `deriveCvYear` alone fully and
 independently resolves the Batman #608 class — this follow-up is
 additional defense-in-depth, not a dependency.
 
-**Queued fix, not yet coded (GrailKey Dispatch 15/16, 2026-08-07) — pool
-year hint into branch (e)'s "no year at all" gap.** `poolYearHint`
-(`api/enrich.js:2659-2678`, ≥3 pool items / ≥50% agreement) is computed
-but today feeds only ComicVine volume-disambiguation and two narrow
-conflict checks — never `resolveYear` itself. Design: a new branch
-between (a) and (b), firing ONLY when there is no Vision/user year at all
-(`!visionYear && !userYear`), requiring `poolYearHint.agreement >= 0.75`
-(bar set 2026-08-07 — 0.80 would have excluded a real, correct production
-instance at exactly 75%; deliberately looser than the ≥50% raw
-computation since this is the sole consumption point). `yearSource =
-'pool-year-hint'` classified `'unproven'` (same tier as `vision-fallback`
-— a raw title-text tally is weaker than the independently-verified
-sources that earn `'proven'`). Never overrides an actual Vision-asserted
-year. Full validation history: Pattern Library, "GrailKey Dispatch 15"
-entry, Fix 6.
+**Fix 6, SHIPPED (GrailKey Dispatch 19, 2026-08-07) — vision-fallback
+downgrade rescue, corrected from the original poolYearHint design.** The
+Dispatch 15/16 design above (thread `poolYearHint` into branch (e)) was
+built on a misread of a real log line and was never shipped as designed
+— `poolYearHint` is NOT consumed by the fix that actually landed. Real
+production evidence (Spawn #351, 2026-08-07 20:40:36 UTC) showed Commit
+4.1's family-scoped year adoption (`identity.familyYearConsensus`,
+year=2024, support=3/4=75%) being silently overwritten by `resolveYear`
+falling through to Vision's own literal `"Unknown"` string
+(`yearSource='vision-fallback'`) — a DIFFERENT signal than
+`poolYearHint`, which was 2020 at 3/6 on that same scan and wrong.
+`rescueYearFromVisionFallback` (`src/lib/issueAuthority.js`, called from
+`api/enrich.js` right after the existing commit-p2 block, log tag
+`[commit-p3]`) fires whenever `resolveYear`'s own `yearSource` resolves
+to exactly `'vision-fallback'` AND a family-scoped year was adopted
+(`identity.familyYearConsensus.mode === 'adopted'`, `support >= 3` — the
+same floor commit-p2 already enforces, validated by this real 3/4=75%
+case) — restoring the adopted year instead of letting it downgrade to
+Vision's placeholder. Deliberately independent of commit-p2's own
+`highConfidenceMarketplaceConsensus` P1 gate: an adopted family-scoped
+year is always a better answer than `resolveYear`'s weakest fallback,
+regardless of whether the stricter P1 price-carve-out bar also cleared
+(on this exact scan it did not — see the Pattern Library "commit-p
+near-miss" entry, GrailKey Dispatch 19). `yearSource =
+'family-consensus-vision-fallback-rescue'`, `confidence: 'provisional'`.
+Never overrides any real corroboration (PC, CV, eBay-consensus, or even
+the rejected-override case) — only the bare fallback. Full details and
+25-assertion regression: Pattern Library, "GrailKey Dispatch 19" entry;
+`tests/grailkey-dispatch-19-fix6-year-rescue.test.js`.
 
 ### Issue-consensus guard (`resolveFamilyIssueConsensus`, `src/lib/identityCore.js`) — STANDING CONSTRAINT, do not rank-weight
 **Rule: issue-axis consensus is a pure aggregate vote (unique-row count vs. a
@@ -830,6 +844,7 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
 - **GrailKey Dispatch 16** (2026-08-07) — CLAUDE.md split (193k→76k chars, Pattern Library extracted to `docs/PATTERN-LIBRARY.md`, this size limit made a standing constraint above); pool-year-hint bar set to 0.75, not 0.80 (design closed, still not coded); issue-adoption margin gate validated against production logs — Spawn #369 confirms the must-fail case, Tomb of Dracula #17 confirmed vacuous for this branch, no natural must-pass anchor found in 3 days of logs (still blocked, not coded); GCD terms unreachable through every path tried — domain-wide 403, cover-matcher stays gated.
 - **GrailKey Dispatch 17** (2026-08-07) — GCD App Guidelines terms obtained via an external channel (superseding Dispatch 16's "blocked" finding; recorded with an explicit verbatim-vs-reported caveat, full verbatim page text still outstanding). Cover-matcher re-scoped, still plan-only: no GCD API exists (DB-dump import + own query layer + refresh cadence required, not a live-query integration); images permitted only under a fetch-on-demand-and-archive pattern, not bulk retrieval (invalidates the original bulk-hash spike idea); CC-BY-SA attribution is a hard UI requirement on any GCD-sourced card data. Net: materially larger scope than originally estimated — three separate infra pieces needing their own scoping before any code.
 - **GrailKey Dispatch 18** (2026-08-07) — KV drift reconciled: Stack section corrected (Upstash Redis via `api/kv-cache.js` has been live since 2026-06-29, not "no server database"), `KV_REST_API_URL`/`KV_REST_API_TOKEN` added to Environment Variables, the stale "Future: Vercel KV for rate limiting" item narrowed to what's actually still true (`api/rate-limit.js` stays in-memory, never touches the KV that already exists for everything else). Found and flagged, not fixed: `api/` actually has 14 files, not the 12 the function-cap section describes (`kv-cache.js`/`rate-limit.js` missing from that list) — current real cap unverified, do not trust "12/12, adding will fail deploy" until checked directly. Vercel Blob question sharpened in the Pattern Library cover-matcher entry: caching to your own back-end (GCD's actual described pattern) vs. re-hosting in a third-party blob store may not be the same act under their terms — treat as unresolved, private access only if/when built, do not provision until reviewed. Full App Guidelines text still not received — pending a resend.
+- **GrailKey Dispatch 19** (2026-08-07) — one real production scan (Spawn #351, 20:40:36 UTC), four findings. Fix 6 SHIPPED, corrected from the Dispatch 15/16 design (`rescueYearFromVisionFallback`, reads the family-scoped adopted year, never `poolYearHint` — see the "Year override guard" section above). Fix 5 SHIPPED (`shouldLiftAssetTypeAdvisoryLock`) — the null-vs-stale-issue question that blocked it since Dispatch 15 is answered (null, confirmed). Vision confidence string leak traced and fixed (prompt gap in `STANDARD_PROMPT`/`WATCH_PROMPT` + zero validation across 3 independently-drifted `api/enrich.js` call sites, all now routed through a validating `normalizeVisionConfidence`). commit-p near-miss INVESTIGATED, report only, no code — `HIGH_CONFIDENCE_WEIGHT_FLOOR=12` missed by one point (weightSum=11) purely because an irrelevant lot listing occupied a top-3 eBay search-rank slot; reported for a greenlight decision, not fixed. 59 new regression assertions across 3 test files.
 
 ## Open Blockers
 

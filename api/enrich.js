@@ -52,6 +52,7 @@ import {
   buildStandardVisionAuthorityContext,
   resolveFamilyIssueConsensus,
   isCorroboratedIdentitySource,
+  normalizeVisionConfidence,
 } from "../src/lib/identityCore.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
@@ -105,7 +106,7 @@ import {
 // Ship v0-B — Decision Engine integration. Computes accountable decision
 // (LIST_NOW, RESEARCH, ID_REQUIRED, etc.) after full enrich object assembled.
 import { computeDecision } from "../src/lib/decisionEngine.js";
-import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate, inferAssetTypeFromCategories, buildRetentionFamilyEvidenceLog } from "../src/lib/imageSearchIdentity.js";
+import { extractIdentityFromImageSearch, extractConsensus, selectTitleFamilyCandidate, inferAssetTypeFromCategories, buildRetentionFamilyEvidenceLog, shouldLiftAssetTypeAdvisoryLock } from "../src/lib/imageSearchIdentity.js";
 // Session 4A — Universal category filter (pre-clustering)
 // Commit C — filterVisualIdentityPool is the primary entry point now (runs
 // inside lookupEbayVisual, before extraction/consensus); filterByCategory
@@ -124,7 +125,7 @@ import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } f
 // authority validation (allow-list + normalization), never trusting the
 // client's correctedFields claim alone.
 import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
-import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint, buildIdentityProvisionalYearDetail, deriveProvisionalYearBackfill } from "../src/lib/issueAuthority.js";
+import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint, buildIdentityProvisionalYearDetail, deriveProvisionalYearBackfill, rescueYearFromVisionFallback } from "../src/lib/issueAuthority.js";
 // Track B Phase 0, Commit 4.3 (revision round 2) — cache-key builders,
 // relocated to src/lib/cacheKeys.js for import-safety (see that file's
 // own header comment). Imported here for this handler's own internal use
@@ -3441,6 +3442,76 @@ export default async function handler(req, res) {
         } else {
           console.log(`[Q32] merchandise vote: ${merchandiseVotes}/${categoryVotes.length} (ratio=${(merchandiseRatio*100).toFixed(0)}%) — threshold not met, keeping assetType=comic`);
         }
+
+        // GrailKey Dispatch 19 (2026-08-07) — Fix 5, unblocked and
+        // implemented. Q110 already made assetTypeConfident advisory-only
+        // (listingHardLocked, never a hard price block) — this extends
+        // the SAME Q32 category-vote machinery above to ALSO tally
+        // comic-category votes, and when Vision itself flagged
+        // !assetTypeConfident but the pool independently shows strong,
+        // coherent comic-category agreement, lifts the advisory lock
+        // before it fires. Strictly additive to the merchandise
+        // hard-block above — this only runs inside the merchandiseRatio
+        // < 0.5 branch already reached, never able to override that block.
+        //
+        // Blocked since GrailKey Dispatch 15 on a real captured Vision
+        // JSON to determine whether a "not a comic" misread returns
+        // issue=null (display/lock-only fix) or a stale wrong value
+        // (would also need to feed a corrected issue back into
+        // resolveIdentity) — resolved via a real production scan (Spawn
+        // #351, 2026-08-07 20:40:36 UTC): Vision returned #null, confirmed
+        // null-not-stale. Display/lock-only, as designed — this block
+        // never writes confirmedIssue/confirmedTitle, only the advisory
+        // lock flag consumed at the listingHardLocked gate below.
+        //
+        // Coherence gate: requires visualConsensus !== null —
+        // extractConsensus's own overall verdict on this exact pool
+        // (computed once at phase1, already in scope) — rather than
+        // isolating just its internal titleOk sub-check. Deliberately the
+        // MORE conservative of the two options (titleOk alone is a lower
+        // bar than "extractConsensus produced ANY real consensus,
+        // title AND issue"), per the standing "conservative when
+        // uncertain" rule, and avoids refactoring extractConsensus's
+        // internal closures (stripVariantNoise/extractMainTitle/
+        // getMostCommon) out to module scope just to isolate one
+        // sub-check — a real option, not taken, to keep this fix's
+        // surface area contained.
+        //
+        // Disclosed limitation, not hidden: the real Spawn #351 scan that
+        // unblocked this fix had visualConsensus === null itself (title
+        // consensus was fine, but the ISSUE axis never reached its own
+        // separate 50% bar — a different, narrower problem; see the
+        // commit-p/HIGH_CONFIDENCE_WEIGHT_FLOOR near-miss investigated
+        // separately this same dispatch). This fix would NOT have lifted
+        // that exact scan's own advisory lock. It targets the more common
+        // shape where the pool agrees on both title AND issue but
+        // Vision's own assetTypeConfident read was wrong (a poster/print
+        // visually confused for a genuine listing pool that DOES
+        // converge) — a real, different case from Spawn #351's own.
+        //
+        // Thresholds (>=5 comic-category listings, >=60% ratio) are the
+        // Dispatch 15 design's own candidates; validated against the one
+        // real pool available (Spawn #351: 0/20 merchandise, ~20/20
+        // comic-category — clears trivially, confirming the bar isn't
+        // miscalibrated against real eBay category data, though this
+        // pool doesn't exercise the boundary itself).
+        if (!out.assetTypeConfident) {
+          const comicVotes = categoryVotes.length - merchandiseVotes;
+          const comicRatio = categoryVotes.length > 0 ? comicVotes / categoryVotes.length : 0;
+          if (shouldLiftAssetTypeAdvisoryLock(merchandiseRatio, comicVotes, categoryVotes.length, visualConsensus !== null)) {
+            out.assetTypeConfidentOverride = true;
+            console.log(
+              `[Q32-asset-type-override] lifting advisory lock: comic-category vote ${comicVotes}/${categoryVotes.length} ` +
+              `(ratio=${(comicRatio*100).toFixed(0)}%), pool title/issue coherent (extractConsensus non-null) — ` +
+              `Vision's assetTypeConfident=false treated as overridden for the listing-lock gate only`
+            );
+          } else {
+            console.log(
+              `[Q32-asset-type-override] declined: comicVotes=${comicVotes}/${categoryVotes.length} ` +
+              `(ratio=${(comicRatio*100).toFixed(0)}%) coherent=${visualConsensus !== null} — advisory lock stays`
+            );
+          }
+        }
       }
     }
 
@@ -4045,7 +4116,7 @@ export default async function handler(req, res) {
       return strippedTitle || consensusTitle;
     };
 
-    const visionConfidenceLower = String(confidence || 'medium').toLowerCase();
+    const visionConfidenceLower = normalizeVisionConfidence(confidence);
 
     // Ship 26.0 / 26.2 — imageConsensusTitle retained for logging/diagnostics
     // and as a requery-title fallback only. It no longer GATES whether PC's
@@ -4228,7 +4299,7 @@ export default async function handler(req, res) {
       // when eBay pool was empty and Vision confidence was implicitly low. Fallback-vision
       // blocked comps query but left confirmedTitle = fabricated Vision output.
       imageSearchTitle = null;
-      const visionConfidence = String(confidence || 'medium').toLowerCase();
+      const visionConfidence = normalizeVisionConfidence(confidence);
       if (visionConfidence === 'low') {
         console.log(`[ship12] fallback-vision + LOW Vision confidence → escalate to refused`);
         familyCandidate.decision = 'refused-identity-conflict';
@@ -6984,6 +7055,30 @@ export default async function handler(req, res) {
       );
     }
 
+    // GrailKey Dispatch 19 (2026-08-07) — Fix 6, corrected and shipped.
+    // Runs AFTER commit-p2 above and reads the CURRENT yearSource, not
+    // confirmedYear's nullness — deliberately: commit-p2's own
+    // `currentConfirmedYear != null` guard never fires when resolveYear's
+    // fallback left confirmedYear as the literal string "Unknown" rather
+    // than JS null (see rescueYearFromVisionFallback's doc comment,
+    // src/lib/issueAuthority.js, for the real Spawn #351 production scan
+    // this closes). Placing this check here, after every intermediate
+    // backfill (Q86 PC-tolerated, Q58-TITLE comp consensus, pc-anchor-gate,
+    // q99-b-variant-year) has already had its chance to run, means this
+    // only fires when NOTHING else found a better year — yearSource stays
+    // 'vision-fallback' only when every one of those declined too.
+    const visionFallbackRescue = rescueYearFromVisionFallback(yearSource, identity?.familyYearConsensus);
+    if (visionFallbackRescue) {
+      const priorFallbackYear = confirmedYear;
+      confirmedYear = writeConfirmed('confirmedYear', confirmedYear, visionFallbackRescue.year, yearSource, visionFallbackRescue.meta.source, 'commit-p3');
+      yearSource = visionFallbackRescue.meta.source;
+      out.confirmedYearMeta = visionFallbackRescue.meta;
+      console.log(
+        `[commit-p3] confirmedYear rescued from vision-fallback ("${priorFallbackYear}") using family-scoped adoption: ` +
+        `year=${confirmedYear} support=${identity.familyYearConsensus.support}/${identity.familyYearConsensus.uniqueRows}`
+      );
+    }
+
     // Ship #20a.6.4 — identity gate. Runs AFTER phase 1 (so PC/CV year-heal
     // chain has applied → confirmedYear; visual issue correction → confirmedIssue;
     // publisher cleanup → publisher) and BEFORE the pricing block. When
@@ -7325,12 +7420,18 @@ export default async function handler(req, res) {
     // not intake). Pricing below is no longer gated on this flag, so a
     // real price computes from the same comps and lands inside the LOCKED
     // card instead of being suppressed.
-    if (!out.assetTypeConfident) {
+    if (!out.assetTypeConfident && !out.assetTypeConfidentOverride) {
       out.listingHardLocked = true;
       out.listingHardLockReason = out.listingHardLockReason || 'asset-type-uncertain';
       out.listingHardLockBanner = out.listingHardLockBanner
         || 'This image may be a reference scan or promotional print — verify before listing';
       console.log('[asset-type-gate] advisory only — pricing proceeds, listing locked pending verification');
+    } else if (!out.assetTypeConfident && out.assetTypeConfidentOverride) {
+      // GrailKey Dispatch 19 — Fix 5. Vision said not-a-comic, but the Q32
+      // category-vote override above lifted the advisory lock. Explicitly
+      // logged as its own case (not silent) — the lock genuinely does not
+      // fire here, which should be visible in the log same as when it does.
+      console.log('[asset-type-gate] advisory lock overridden by Q32 comic-category consensus — listing NOT locked');
     }
 
     // Hoisted out of the pricing block so the [price-trace] log below has
@@ -8639,7 +8740,7 @@ export default async function handler(req, res) {
       // (wrong book → matching comps still scores HIGH). Cap the tier and
       // score by Claude Vision's own confidence so a LOW-confidence ID
       // can never surface as "✓ Verified".
-      const visionConfidence = String(confidence || 'medium').toLowerCase();
+      const visionConfidence = normalizeVisionConfidence(confidence);
       out.visionConfidence = visionConfidence;
 
       if (visionConfidence === 'low') {

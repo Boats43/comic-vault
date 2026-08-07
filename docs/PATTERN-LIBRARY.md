@@ -2020,3 +2020,221 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   - **Explicitly not scoped into this dispatch's six fixes** — ships
     independently, per instruction.
 
+- **GrailKey Dispatch 19 (2026-08-07) — Spawn #351 real scan, four
+  findings: Fix 6 shipped (corrected design), Fix 5 shipped, Vision
+  confidence string leak fixed, commit-p near-miss investigated (report
+  only, no code).** Single real production scan (Spawn #351, 2026-08-07
+  20:40:36 UTC, POST /api/enrich, `dep=dpl_4mwr6MwTQZ7m4CxsZQFdjoaXr1SW`)
+  supplied the evidence for all four items — pulled directly from Vercel
+  runtime logs, not summarized secondhand.
+
+  **Fix 6 SHIPPED, design corrected from Dispatch 15/16's original —
+  `rescueYearFromVisionFallback` (`src/lib/issueAuthority.js`, log tag
+  `[commit-p3]`).** The queued design (thread `poolYearHint` into
+  `resolveYear`) was never coded as originally specced — investigating
+  this scan found the design's own justifying citation had conflated two
+  different signals. The scan's real log:
+  ```
+  [commit4.1] identityProvisionalFields += 'year' (family-scoped adoption): year=2024 support=3/4
+  ...
+  [identity-write] field=confirmedYear from="2024" (source=unknown) to="Unknown" (source=vision-fallback) site=resolve-year
+  ```
+  Commit 4.1 (`api/enrich.js` ~3026-3041) had already adopted year=2024
+  from `identity.familyYearConsensus` (family-scoped, support=3/4=75%) —
+  but `resolveYear` (`identityCore.js`) never even sees that adopted
+  value on this path (`identityIsProvisionalOverride` is false for the
+  weighted-consensus family-override route — B-Q1, `api/enrich.js`
+  ~6933), so it fell through its own final branch and returned Vision's
+  raw sentinel value, the literal string `"Unknown"` — not JS `null`.
+  This is why the pre-existing `deriveProvisionalYearBackfill`/commit-p2
+  rescue (added GrailKey Commit P2, 2026-08-03, specifically to guard
+  against resolveYear clobbering an adopted year) didn't catch it: its
+  `currentConfirmedYear != null` guard was built assuming a JS-`null`
+  fallback and never fires against a non-null "Unknown" string, and
+  separately its `issueAuthority.highConfidenceMarketplaceConsensus`
+  gate was ALSO false on this exact scan (see the commit-p near-miss
+  finding below — the same root cause blocks both commit-p and
+  commit-p2 on this scan, independently discovered while investigating
+  each). Two compounding reasons, not one.
+
+  **The Dispatch 15/16 citation error, specifically:** the original Fix
+  6 write-up cited "year=2024 support=3/4" as a `poolYearHint` instance
+  ("agreement=X%" is `poolYearHint`'s own log format;
+  `[commit4.1]`'s format is "support=X/Y" — a different field entirely).
+  On this exact scan, `poolYearHint` really was computed
+  (`[cv-pool-year-hint] year=2020 agreement=50% (3/6)`) and it was
+  WRONG (2020, diluted by unrelated #300/#307/#293 listings in the raw
+  20-item pool) — confirming `poolYearHint` was never the right signal
+  to thread into `resolveYear` at all. `rescueYearFromVisionFallback`
+  reads `identity.familyYearConsensus` exclusively; `poolYearHint` is
+  not a parameter.
+
+  **Fires ONLY when `yearSource === 'vision-fallback'` exactly** (not a
+  loose truthy/null check) **AND** `familyYearConsensus.mode ===
+  'adopted'` **AND** `support >= 3` — the same floor commit-p2 already
+  enforces, validated by this real 3/4=75% case, unchanged. Placed
+  immediately after the existing commit-p2 block in `api/enrich.js`
+  (after every intermediate backfill — Q86 PC-tolerated, Q58-TITLE comp
+  consensus, pc-anchor-gate, q99-b-variant-year — has already had its
+  chance to find something better), so it only fires when NOTHING else
+  fixed the year in between. Never touches any yearSource representing
+  real corroboration (pc-cv-agreement, pricecharting, comicvine,
+  ebay-consensus, or even the rejected-override case). 25-assertion
+  regression: `tests/grailkey-dispatch-19-fix6-year-rescue.test.js`.
+
+  **commit-p near-miss — INVESTIGATED, report only, no code changed,
+  per explicit instruction.** The same scan's terminal gate fired
+  `[commit4-terminal]` (forcing `ID_REQUIRED`, clearing price authority)
+  instead of `[commit-p]` (price preserved) despite `issue=#351
+  support=4/4=100%` — matching the shape of an earlier same-day scan
+  (04:37:20 UTC, same book, same deployment) where `[commit-p]` DID
+  fire. Traced to `meetsHighConfidenceMarketplaceConsensusBar`
+  (`src/lib/issueAuthority.js`): `HIGH_CONFIDENCE_WEIGHT_FLOOR = 12`
+  (justified in-code as "the maximum weight three members could carry
+  using only the highest-ranked results," 5+4+3 from `getRankWeight`'s
+  own scale, `imageSearchIdentity.js`). The two scans' own title-family
+  weightSums:
+  | Scan | Members (raw-pool rank indices) | Weight | Clears floor? |
+  |---|---|---|---|
+  | 04:37:20 (earlier, same day) | 0,1,2,5 → 5+4+3+1 | 13 | Yes — `[commit-p]` fired |
+  | 20:40:36 (the dispatch scan) | 0,1,3,4 → 5+4+1+1 | 11 | No — one point short |
+
+  Every OTHER `meetsHighConfidenceMarketplaceConsensusBar` condition
+  passed identically on the 20:40 scan (decision='weighted-consensus',
+  `topFamily.count=4 >= 3`, `overlapRatio=1`, dominant margin over
+  runner-up 11 vs 3, no contaminated member, no series-marker
+  asymmetry) — it failed on weight alone, by exactly one point. Root
+  cause of the DIFFERENCE between the two scans: in the 04:37 scan,
+  eBay's own reverse-image-search results happened to put a genuine
+  #351 comp at raw-pool rank-2 (the third-highest weight tier, worth 3);
+  in the 20:40 scan, that same rank slot was occupied by an unrelated
+  "Spawn #326-#352 YOU PICK We Combine Shipping!!" lot listing, which
+  the family-clustering step correctly excludes from membership but
+  which still CONSUMED the rank-2 weight slot, denying it to a genuine
+  member. `filterVisualIdentityPool`, `getRankWeight`, and
+  `meetsHighConfidenceMarketplaceConsensusBar` all behaved correctly and
+  identically given their actual inputs on both scans — this is NOT a
+  code bug in either mechanism. It is a structural property of a
+  rank-position-based weight floor: which raw listings eBay's live
+  search-by-image API returns, and in what order, genuinely varies
+  scan-to-scan for the same physical book (ordinary marketplace
+  listing churn, not a determinism bug on this codebase's side) —
+  meaning the SAME confirmed-correct book, photographed and scanned
+  identically hours apart, can non-deterministically land on either
+  side of the P1 high-confidence bar depending purely on what else eBay
+  happened to rank alongside it that day.
+  **Not fixed, not scoped — reported for a decision.** Two directions
+  worth naming, neither implemented: (a) leave the floor as-is — it is
+  a genuine floor, not a bug, and this near-miss is exactly the kind of
+  case a floor is supposed to sometimes not clear; or (b) exclude
+  known-junk categories (lot/bundle listings specifically, reusing the
+  existing `LOT_RE`-family detection already used elsewhere in this
+  codebase) from consuming a top-3 rank slot in the weight computation,
+  so an irrelevant listing can no longer silently cost a genuine
+  family its rank-3 weight. Direction (b) touches
+  `meetsHighConfidenceMarketplaceConsensusBar`/`getRankWeight` — pricing
+  math-adjacent territory (the P1 gate directly controls whether a
+  price gets nulled) and needs its own explicit greenlight before any
+  implementation, per this project's standing pricing-math protocol.
+
+  **Vision confidence string leak — TRACED AND FIXED.** The same
+  scan's own `[match-conf]` log line read
+  `vision=high that this is not a comic book` — an asset-type verdict
+  sentence being consumed where a `low`/`medium`/`high` confidence tier
+  was expected. Traced to `req.body.confidence`
+  (`api/enrich.js`, destructured at handler entry) literally containing
+  the string `"High that this is NOT a comic book"` on this scan.
+  Root cause was two-layered:
+  1. **Prompt gap (`api/grade.js`).** `STANDARD_PROMPT`/`WATCH_PROMPT`
+     never actually instructed Vision on `confidence`'s required format
+     — confirmed by direct read of the live prompt text, no such
+     sentence existed, despite `normalizeVisionConfidence`'s own doc
+     comment (`identityCore.js`) claiming otherwise. The separately-
+     specified `buildGradeOnlyPrompt` (the eBay-first cheap path) DID
+     already have the correct instruction — the gap was specific to the
+     two full-identification prompts. With `assetTypeConfident` and
+     `confidence` presented back-to-back with no explicit format given
+     for the latter, the model free-styled a justification sentence
+     instead. Fixed: both prompts now carry an explicit "confidence
+     must always be exactly one of the three words low/medium/high...
+     never a restatement of the assetTypeConfident determination"
+     instruction.
+  2. **Zero validation at consumption (four independently-drifted call
+     sites).** `normalizeVisionConfidence` (`identityCore.js`) blindly
+     lowercased whatever string arrived with no check against the
+     three-value enum — AND three separate, independent inline
+     duplicates of the identical unchecked
+     `String(confidence || 'medium').toLowerCase()` pattern existed in
+     `api/enrich.js` (~4049, ~4232, ~8667), none of them routing
+     through the one centralized function at all — the same
+     drifted-duplicate-constant shape this file has documented
+     repeatedly (Q119/Q127/Q128, the `ARTIST_PATTERNS` registry saga).
+     Fixed: `normalizeVisionConfidence` now validates against
+     `{low, medium, high}`, defaulting anything else to `'medium'` with
+     a loud `[vision-confidence-invalid]` log line (never silent,
+     preserves the offending raw value for diagnosis); all three inline
+     `api/enrich.js` duplicates now call the shared function instead of
+     re-deriving it. 20-assertion regression, including a direct read
+     of the live prompt source confirming the instruction text actually
+     landed: `tests/grailkey-dispatch-19-vision-confidence-leak.test.js`.
+
+  **Fix 5 SHIPPED — `shouldLiftAssetTypeAdvisoryLock`
+  (`src/lib/imageSearchIdentity.js`), log tag `[Q32-asset-type-override]`.**
+  Blocked since GrailKey Dispatch 15 on a real captured Vision JSON to
+  determine whether a "not a comic" misread returns `issue=null`
+  (display/lock-only fix) or a stale wrong value (would also need to
+  feed a corrected issue back into `resolveIdentity`). This exact scan
+  answers it: `[phase1] identity determination: Vision="Spawn" #null` —
+  confirmed null, not stale. Implemented as originally re-scoped in
+  Dispatch 15: extends the existing Q32 category-vote machinery
+  (merchandise detection) to also tally comic-category votes, and when
+  Vision flagged `!assetTypeConfident` but the pool independently shows
+  strong (`>=5` listings, `>=60%` ratio) comic-category agreement AND
+  the pool is coherent, lifts Q110's advisory `listingHardLocked` flag
+  before it fires. Strictly additive to the Q32 merchandise hard-block —
+  the predicate short-circuits to `false` whenever `merchandiseRatio >=
+  0.5`, so it can never override that block; it only ever runs from
+  inside the branch merchandise detection already declined.
+  **Coherence-gate design decision, made explicit rather than left
+  ambiguous:** the original Dispatch 15 wording said "reusing
+  extractConsensus's own title-coherence check" — investigating the
+  actual code found `titleOk` is a private local variable inside
+  `extractConsensus` (`imageSearchIdentity.js`), not exposed on its
+  return value, and `extractConsensus` returning `null` conflates TWO
+  independent failure axes (title OR issue incoherence), not title
+  alone. Rather than refactor `extractConsensus`'s internal closures
+  (`stripVariantNoise`/`extractMainTitle`/`getMostCommon`) out to module
+  scope just to isolate the title-only sub-check — a real option,
+  deliberately not taken, to keep this fix's surface area contained —
+  the shipped gate reuses `extractConsensus(...) !== null` as a single
+  boolean input, which is the MORE conservative of the two choices
+  (requires the pool to agree on both title AND issue, not title alone),
+  consistent with this project's standing "conservative when uncertain"
+  rule. **Disclosed limitation, not hidden:** this exact scan's own
+  `visualConsensus` was `null` (`[phase1] eBay visual: 20 results,
+  consensus=NO` — title consensus was fine, but the issue axis never
+  reached its own separate 50% bar, the same near-miss described
+  above) — so Fix 5, as shipped, would NOT have lifted this specific
+  scan's own advisory lock. It targets the more common, different shape
+  where the pool agrees on both title and issue but Vision's own
+  `assetTypeConfident` read was wrong (a poster/print visually confused
+  for a genuine, convergent listing pool) — real and different from
+  this scan's own outcome, which is disclosed rather than papered over.
+  Thresholds (`>=5`, `>=60%`) validated against this scan's real numbers
+  (0/20 merchandise, ~20/20 comic-category — clears trivially, though
+  this pool doesn't exercise the boundary itself since its own
+  coherence gate declines regardless). 14-assertion regression:
+  `tests/grailkey-dispatch-19-fix5-asset-type-override.test.js`.
+
+  **Regression sweep, all pre-existing baseline failures confirmed
+  byte-identical before/after (via `git stash`, not assumed):**
+  `q-trackB-commit4.3-winning-family-authority` (266/266, zero
+  pre-existing failures), `q110-intake-nonblocking` (38/38),
+  `identity-gate` (1 pre-existing failure, an unrelated stale "author"
+  field fixture, confirmed identical on `git stash`), `mega-keys` (the
+  documented B&B #28 boundary failure), `q-adv397-visual-guard` (the
+  documented 5-failure baseline), `image-search-extraction` (the
+  documented 2-failure baseline), `pattern-k-dedupe-issue` (the
+  documented 4-failure baseline) — none of this dispatch's four changes
+  touched any of the code paths those pre-existing failures exercise.
+

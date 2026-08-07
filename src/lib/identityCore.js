@@ -1569,19 +1569,45 @@ export const isPriorSourceIndependentlyTrusted = (priorSource, hasCorroboratingA
 // HOLD, item 1, 2026-07-31) — normalizes a raw Vision confidence string.
 // Traced to its actual origin (not a proxy, not grade-confidence): this is
 // Vision's own self-reported identification confidence, requested
-// explicitly in api/grade.js's STANDARD_PROMPT/WATCH_PROMPT JSON_SHAPE
-// ("confidence: 'low', 'medium', or 'high' based on image quality and
-// visible information"), returned in grade.js's response, forwarded by
-// the client as part of the /api/enrich request body, and destructured at
-// api/enrich.js's handler entry (`const { ..., confidence, ... } =
-// req.body;`) — the exact same variable `[ship12]`/`visionConfidenceLower`
-// already read elsewhere in that file. Mirrors the EXISTING normalization
-// convention already used at those call sites
-// (`String(confidence || 'medium').toLowerCase()`) rather than inventing
-// a stricter validator — Vision is instructed to return exactly one of
-// three values, so a fixed-set validator would add complexity with no
-// real additional safety.
-export const normalizeVisionConfidence = (rawConfidence) => String(rawConfidence || 'medium').toLowerCase();
+// explicitly in api/grade.js's STANDARD_PROMPT/WATCH_PROMPT JSON_SHAPE,
+// returned in grade.js's response, forwarded by the client as part of the
+// /api/enrich request body, and destructured at api/enrich.js's handler
+// entry (`const { ..., confidence, ... } = req.body;`) — the exact same
+// variable `[ship12]`/`visionConfidenceLower` already read elsewhere in
+// that file.
+//
+// CORRECTED (GrailKey Dispatch 19, 2026-08-07): the claim this comment
+// used to make — that STANDARD_PROMPT/WATCH_PROMPT already instructed
+// Vision to return exactly one of "low"/"medium"/"high" — was not
+// actually true of the prompt text in api/grade.js; confirmed by direct
+// read, no such sentence existed there (unlike the separate, correctly-
+// specified `buildGradeOnlyPrompt`, which always has). Confirmed by a
+// real production failure, not just the prompt-text gap: a genuine
+// "not a comic book" scan (Spawn #351, 2026-08-07 20:40:36 UTC) returned
+// `confidence: "High that this is NOT a comic book"` — a free-text
+// asset-type justification, not one of the three instructed values —
+// which flowed unchecked into match-conf's `vision=` log field and every
+// downstream confidence-tier comparison in api/enrich.js (`=== 'low'`,
+// `=== 'medium'`) as if it were a real tier (silently never matching any
+// of them, since none of those checks fail closed on an unrecognized
+// value — an asset-type sentence being consumed where a confidence level
+// was expected). Fixed at BOTH ends: STANDARD_PROMPT/WATCH_PROMPT now
+// carry the explicit instruction this comment always claimed they had,
+// AND this function now validates against the fixed set instead of
+// trusting it blindly — a model can still deviate from instructions
+// under adversarial or unusual imagery (same caution as Q140-CP's
+// condition-report containment, grade.js), so the prompt fix and this
+// validator are two independent layers, not either/or.
+const VALID_VISION_CONFIDENCE_TIERS = new Set(['low', 'medium', 'high']);
+export const normalizeVisionConfidence = (rawConfidence) => {
+  const normalized = String(rawConfidence || 'medium').toLowerCase().trim();
+  if (VALID_VISION_CONFIDENCE_TIERS.has(normalized)) return normalized;
+  console.warn(
+    `[vision-confidence-invalid] raw="${String(rawConfidence).slice(0, 120)}" — ` +
+    `not one of low/medium/high (an asset-type sentence or other free text), defaulting to medium`
+  );
+  return 'medium';
+};
 
 // Track B Phase 0, Commit 4.3 (PRODUCTION AUTHORITY-CONTEXT INTEGRATION
 // HOLD, item 1, 2026-07-31) — the SINGLE point that assigns

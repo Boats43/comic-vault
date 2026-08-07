@@ -1084,3 +1084,60 @@ export function deriveProvisionalYearBackfill(currentConfirmedYear, issueAuthori
     meta: { value: year, source: 'family-consensus-provisional', confidence: 'provisional' },
   };
 }
+
+/**
+ * GrailKey Dispatch 19 (2026-08-07) — Fix 6, corrected and shipped.
+ *
+ * Rescues an already-adopted family-scoped year (Commit 4.1,
+ * `identityProvisionalFields += 'year'`) from being silently downgraded
+ * to `resolveYear`'s own weakest outcome: falling all the way through to
+ * Vision's raw sentinel value with `yearSource === 'vision-fallback'`
+ * (identityCore.js, `resolveYear`'s final else branch). Confirmed via a
+ * real production scan (Spawn #351, 2026-08-07 20:40:36 UTC): Commit 4.1
+ * had already adopted year=2024 (family-scoped, support=3/4=75%), but
+ * `resolveYear` — which never even sees that adopted value when
+ * `identityIsProvisionalOverride` is false, the case on this exact path
+ * (B-Q1 above) — fell through and overwrote `confirmedYear` with the
+ * literal string `"Unknown"` (Vision's own raw placeholder for an
+ * undetermined field, not JS `null` — confirmed via `writeConfirmed`'s
+ * `to="Unknown"` log; this is why `deriveProvisionalYearBackfill`'s
+ * `currentConfirmedYear != null` guard does not catch this shape, it was
+ * built assuming a JS-`null` fallback). The originally-queued Fix 6
+ * design (thread `poolYearHint` into `resolveYear`) was built on a
+ * misread of this exact log line: "year=2024 support=3/4" is Commit
+ * 4.1's family-scoped adoption (`identity.familyYearConsensus`), never
+ * `poolYearHint` (which was 2020 at 3/6 on this same scan — wrong).
+ * Corrected here instead of shipped as originally designed;
+ * `poolYearHint` is not consumed by this function at all.
+ *
+ * Deliberately independent of `deriveProvisionalYearBackfill`/commit-p2's
+ * own P1 gate (`issueAuthority.highConfidenceMarketplaceConsensus ===
+ * true`) — that gate serves a narrower purpose (unblocking the
+ * identity-gate specifically, behind the same bar as the P1 price
+ * carve-out, B-Q2 above). This rescue is a different, more general rule:
+ * an adopted family-scoped year is always a better answer than
+ * `resolveYear`'s own weakest fallback, regardless of whether the
+ * stricter P1 weight-floor also cleared for this particular scan (on the
+ * real Spawn #351 case above, it did not — see the Pattern Library's
+ * "commit-p near-miss" entry). Never fires when `resolveYear` found ANY
+ * independent corroboration (pc-cv-agreement, pricecharting, comicvine,
+ * ebay-consensus, or even the rejected-override case) — only its bare
+ * fallback. Reuses the exact same `support >= 3` floor
+ * `deriveProvisionalYearBackfill` already enforces — the real Spawn #351
+ * case is exactly `support=3`, ratio=0.75, the instance that validated
+ * this threshold (GrailKey Dispatch 16).
+ *
+ * @param {string|null|undefined} resolvedYearSource - yearSource immediately after resolveYear() returns (before any later backfill chain runs)
+ * @param {{mode: string, year: *, support: number, uniqueRows: number}|null} familyYearConsensus - identity.familyYearConsensus
+ * @returns {{year: string, meta: {value: string, source: string, confidence: string}}|null} null when the rescue does not apply — caller leaves confirmedYear untouched
+ */
+export function rescueYearFromVisionFallback(resolvedYearSource, familyYearConsensus) {
+  if (resolvedYearSource !== 'vision-fallback') return null;
+  if (familyYearConsensus?.mode !== 'adopted') return null;
+  if (!(familyYearConsensus.support >= 3)) return null;
+  const year = String(familyYearConsensus.year);
+  return {
+    year,
+    meta: { value: year, source: 'family-consensus-vision-fallback-rescue', confidence: 'provisional' },
+  };
+}
