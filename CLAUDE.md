@@ -2173,10 +2173,78 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   structure instead of maintaining them as separate hardcoded Sets. A new
   tier source then can't be added without an explicit eligibility
   decision at the same time it's named — the same "no silent default"
-  shape that closed the `TIER_SOURCE_MAP` gap itself. This is a real
-  design proposal, not filed as done: it touches what gets a price
-  multiplier and by how much, squarely pricing math, and stays
-  unimplemented pending the projection review above.
+  shape that closed the `TIER_SOURCE_MAP` gap itself.
+
+  **Reframed explicitly (2026-08-07, GrailKey Dispatch 13) — this is not
+  "add missing labels to a whitelist," it's an inverted trust model.**
+  Every tier-engine source (real, comp-verified prices) is currently
+  LESS eligible for a key/newsstand premium than `pc_estimate` (the
+  least-verified source). The default direction going forward: **yes for
+  both**, per-source, unless a specific source has a reason to decline —
+  a verified sold pool for a key issue already reflects real market
+  demand for that key (the comps ARE the premium), and a newsstand
+  premium is a scarcity signal the comp pool cannot see on its own (nothing
+  in an active-listing price tells you it's the rarer distribution
+  channel) and therefore still needs to be applied externally regardless
+  of how well-verified the base price is.
+
+  **Approved in principle (2026-08-07) — plan-only, still gated on the
+  ladder check below, not on anything else.**
+
+  **Part 6 — the ladder-rung check, done. Split verdict — the multiplier
+  does NOT clear cleanly.** Pulled the real PriceCharting price guide for
+  both books directly (their public price-guide pages, not estimated),
+  matched to the exact grade (6.0 = Fine, matching both books'
+  user-supplied "FN 6.0"):
+  - **Amazing Spider-Man #222 (1981)**, PC product id=2315254 (the exact
+    product the real production request anchored to): **FN 6.0 rung =
+    $20.80.** Projected price with the newsstand ×1.3 multiplier: $13.40
+    — comfortably BELOW the rung (35% under). No over-correction; the
+    multiplier moves the price toward the ladder, not past it. **Clears.**
+  - **Batman: The Killing Joke (1988)**, PC product id=2405125 — the
+    genuine 1988 first-print entry. Note: this exact product was NEVER
+    surfaced by the app's own PC search query for this book at all (its
+    candidate list only ever returned the 2018 Absolute anniversary
+    edition and 2026 reprints, all correctly rejected on year grounds) —
+    a separate, real gap (the app's PC query construction misses this
+    product entirely) flagged here but not investigated further, out of
+    scope for this dispatch. **FN 6.0 rung = $47.43.** Projected price
+    with the key ×1.5 multiplier: $78.29 — **65% ABOVE the rung**
+    ($30.86 over). This is the over-correction the ladder check exists to
+    catch. **Does not clear.**
+
+  **Verdict, per the explicit decision rule this check was set up to
+  answer: 1.5× needs recalibration before it ships to every key in the
+  collection.** The newsstand ×1.3 multiplier clears on its one tested
+  book; the key ×1.5 multiplier does not, on the one book where a real
+  ladder comparison was possible. Structural fix (Part 5) stays
+  plan-only — approved in principle, but the specific 1.5×/1.2× key-tier
+  multiplier values themselves are now confirmed miscalibrated for at
+  least this tier/book combination and must not ship as-is. Recalibrating
+  those values is itself pricing math and needs its own dedicated pass
+  (likely a lower multiplier, or a cap relative to the ladder rung when
+  one is available) before the structural fix's eligibility change is
+  implemented — implementing eligibility correctly and then immediately
+  overshipping the multiplier value would just move the over-correction
+  from "silently skipped" to "silently applied wrong."
+
+  **Dead-code cleanup, SHIPPED (`b30d4e7`).** `'verified_active'`
+  confirmed genuinely dead (not in `PRICE_BANDS_SOURCES`, never assigned
+  to `out.pricingSource` anywhere) and removed from both multiplier
+  whitelists plus `TIER_SOURCE_MAP`'s own legacy pass-through. Two more
+  independent references found in the same sweep, deliberately left
+  untouched (different mechanisms, not multiplier eligibility, out of
+  this fix's scope): `src/lib/responseContract.js`'s `ESTIMATED_SOURCES`
+  Set + an inline `===` check, and `src/lib/dataQualityGuard.js`'s
+  `PRICE_RANK` ordering table. `src/App.jsx`'s display label for this
+  value was also deliberately left alone — legitimate backward-compat
+  rendering for old catalogue items that may still carry this value in
+  IndexedDB from before it went dead in the live pipeline, a display
+  concern rather than a pricing gate.
+
+  **Giant-Size Chillers — stays partial, no further effort spent**, per
+  explicit instruction. Two confirmed books (one clearing, one not) was
+  enough to answer the gating question.
 
 ## Open Blockers
 
