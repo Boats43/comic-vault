@@ -118,7 +118,7 @@ import { computePriceBands as computePriceBandsFromSold, enforceFloor as enforce
 // Ship #21 — demand signals from sales data.
 import { computeDemandSignals } from "../src/lib/demandSignals.js";
 // C5 — parseListingGrade for lone-sold anchor.
-import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens, buildSanitizedComicSearchTitle, hasValidFamilyMembership, classifyPromotableVariantDescriptor } from "../src/lib/compHygiene.js";
+import { parseListingGrade, compactTitleKey, COMP_FILTER_VERSION, FAMILY_OVERRIDE_DECISIONS, detectConditionReportArtistConflict, PREMIUM_VARIANT_RE, extractArtist, normalizeAcronyms, extractAcronymTokens, buildSanitizedComicSearchTitle, hasValidFamilyMembership, classifyPromotableVariantDescriptor, ARTIST_PATTERNS } from "../src/lib/compHygiene.js";
 import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } from "../src/lib/evidenceEligibility.js";
 // Track B Phase 0, Commit 3 — manual identity correction: server-side
 // authority validation (allow-list + normalization), never trusting the
@@ -6264,6 +6264,39 @@ export default async function handler(req, res) {
       out.cvCharacterCredits = Array.isArray(comicVine.character_credits)
         ? comicVine.character_credits.map(c => ({ name: c.name, id: c.id }))
         : [];
+
+      // GrailKey Dispatch 12 (2026-08-07) — ARTIST_PATTERNS registry-gap
+      // detection, phase 1 (live, zero new API calls). ComicVine's
+      // person_credits is already fetched (field_list above) and already
+      // parsed into comicVine.personCredits ({name, role}[]) for display
+      // purposes (claudeCheckData.creators) — this reads that same,
+      // already-in-memory data to check each credited name against the
+      // canonical creator registry. Nine registry additions in one week
+      // across two discovery channels (five production incidents, four
+      // from the reverse-direction sync test) established that one-at-a-
+      // time addition doesn't converge; this is the third channel — real
+      // credit data on every scan, logged for periodic batch review
+      // rather than waiting for the next book to misfire.
+      //
+      // Deliberately logs ALL roles, not just artist/cover — this week's
+      // own evidence (Alan Moore, Chris Claremont: both writers, both
+      // bled into corrupted titles exactly like Jeff Smith/Cory Walker
+      // did) shows role does not predict whether a name lands in a
+      // seller's listing title. Detection only — no auto-classification,
+      // no auto-add. The 'dekal'/'spears' artifacts are the standing
+      // argument against ever trusting a mechanical "safe to add"
+      // judgment; every gap this surfaces still needs a human collision
+      // sweep before it becomes an ARTIST_PATTERNS entry.
+      if (Array.isArray(comicVine.personCredits)) {
+        for (const credit of comicVine.personCredits) {
+          const name = credit?.name;
+          if (!name || typeof name !== 'string') continue;
+          const recognized = ARTIST_PATTERNS.some((re) => re.test(name));
+          if (!recognized) {
+            console.log(`[artist-registry-gap] name="${name}" role="${credit.role || 'unknown'}" not in ARTIST_PATTERNS (title="${confirmedTitle || title}" issue=${confirmedIssue || issue || '?'})`);
+          }
+        }
+      }
     }
 
     // Ship #20a.6.18 — Variant identity fields (moved after out initialization)
