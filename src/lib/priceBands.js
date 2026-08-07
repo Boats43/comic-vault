@@ -16,6 +16,18 @@
 // buildVerifiedActivePool below for why this import exists.
 import { hasIssueNumber } from './compHygiene.js';
 
+// GK-21 / GK-34 (2026-08-07 dispatch) — shared minimum pool-size floor for
+// any trust decision where one comp pool overrides or dominates the other
+// (sold-overrides-active in Tier 2's activePoolSuspect guard, and
+// active-overrides-sold in applyVariantFallbackDivergenceCap). Matches the
+// pool-size floor already established elsewhere in this file
+// (activeAnchoredOverFallbackSold and isActivePoolVariantConfirmed both
+// require verifiedActive.length >= 3 / reject < 2) — this is that same
+// precedent applied consistently, not new safety logic. A pool below this
+// size is never trusted to override the other side outright; see both
+// call sites for what happens instead when it's this thin.
+const MIN_POOL_FOR_OVERRIDE = 3;
+
 /**
  * Calculate percentile from sorted array of numbers.
  * @param {number[]} sortedValues - array sorted ascending
@@ -414,18 +426,34 @@ export function applyGradeMultiplierToBands(bands, gradeMultiplier) {
  * the sold pool wasn't fallback-derived, or when there's no active pool
  * to validate against.
  */
-function applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted) {
+function applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted, soldPoolSize = null) {
   if (!result || !variantAdjusted) return result;
 
   const activePrices = (verifiedActive || [])
     .map(v => (typeof v === 'number' ? v : v?.price))
     .filter(p => p > 0);
-  if (activePrices.length === 0) return result; // no trustworthy anchor to check against
+  // GK-21 (2026-08-07 dispatch) — a pool this thin is not a trustworthy
+  // override anchor either. Was `=== 0` ("not empty" was sufficient for a
+  // single active listing to overwrite a much larger sold-derived result);
+  // now requires the same MIN_POOL_FOR_OVERRIDE floor GK-34 applies on the
+  // mirror-image side of this exact trust decision (Tier 2's
+  // activePoolSuspect guard, computePriceBands below) — same defect,
+  // same fix, applied consistently rather than invented twice.
+  if (activePrices.length < MIN_POOL_FOR_OVERRIDE) return result; // no trustworthy anchor to check against
 
   const activeAvg = activePrices.reduce((a, b) => a + b, 0) / activePrices.length;
   if (!(activeAvg > 0) || !(result.market > activeAvg * 2)) return result;
 
   console.log(`[variant-fallback-cap] market $${result.market.toFixed(2)} > activeAvg×2 ($${(activeAvg * 2).toFixed(2)}) — capping to active-anchored price (I9-style)`);
+
+  // Dispatch 06 follow-up (2026-08-07) — n=3 clears MIN_POOL_FOR_OVERRIDE
+  // but can still be a poor ratio against a much larger overridden pool
+  // (3 actives overriding 28 solds is directionally better than the prior
+  // n=1 case, not obviously correct on its own). Log without blocking the
+  // override, so production can show whether n=3 is actually sufficient.
+  if (soldPoolSize != null && activePrices.length < soldPoolSize / 3) {
+    console.log(`[pool-ratio-warn] GK-21 override fired with pool ratio worse than 1:3 — activePool=${activePrices.length} overriding soldPool=${soldPoolSize} (ratio 1:${(soldPoolSize / activePrices.length).toFixed(1)})`);
+  }
 
   const cappedMarket = roundCurrency(activeAvg);
   // D2 — this cap overrides whatever the tier's own trace concluded with;
@@ -629,7 +657,7 @@ export function computePriceBands({
     };
 
     console.log(`[tier-1] recencyWeighted=$${recencyWeighted.toFixed(2)} soldLow=$${soldLow.toFixed(2)}`);
-    return applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted);
+    return applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted, tier1Prices.length);
   }
 
   // TIER 2: 70/30 blend (soldAvg × 0.7 + activeAvg × 0.3)
@@ -660,27 +688,57 @@ export function computePriceBands({
       (activeLow > 0 && activeLow < soldLow * 0.25)
     );
 
+    // GK-34 (2026-08-07 dispatch, Bone #1 class) — activePoolSuspect firing
+    // does not by itself mean the sold pool should dominate the price. A
+    // sold pool below MIN_POOL_FOR_OVERRIDE (n=1, Bone #1: a single
+    // $1,619.99 first-print sale mismatched against a later-printing UK
+    // edition) has no more standing to override an 18-comp active pool
+    // outright (market=soldAvg) than to dominate a 70/30 blend —
+    // 0.7×1619.99 + 0.3×40.50 is still $1,146, still absurd for a $15-40
+    // book. When the sold side is this thin, invert the weighting: the
+    // active pool carries the price using the same ask-discount formula
+    // Tier 3 already uses for active-only pricing (activeAvg × 0.85), and
+    // the thin sold pool is demoted to a reference annotation — surfaced
+    // per I13 (never vaporized), never treated as the pricing anchor. A
+    // sold pool that clears MIN_POOL_FOR_OVERRIDE keeps the original
+    // sold-only behavior below — the ASM #17 contamination defense this
+    // guard was built for legitimately trusts a real-sized sold pool over
+    // a suspect active one; this only changes what happens when the sold
+    // side is too thin to have earned that trust.
+    const soldPoolTooThinToOverride = activePoolSuspect && soldPrices.length < MIN_POOL_FOR_OVERRIDE;
+
     const blendApplies = !activePoolSuspect && activeAvg > 0;
     let market;
-    if (activePoolSuspect) {
+    let quickBase;
+    if (soldPoolTooThinToOverride) {
+      market = activeAvg * 0.85;
+      quickBase = activeLow > 0 ? activeLow * 0.85 : market;
+    } else if (activePoolSuspect) {
       // Suspect active data excluded from the blend — sold-only, same as
       // the no-active-data path below.
       market = soldAvg;
+      quickBase = soldLow;
     } else if (activeAvg > 0) {
       market = (soldAvg * 0.7) + (activeAvg * 0.3);
+      quickBase = soldLow;
     } else {
       // Sold-only: use soldAvg raw (no bump needed — Tier 2 already conservative)
       market = soldAvg;
+      quickBase = soldLow;
     }
     const tier2Market = roundCurrency(market);
 
+    const tier2Source = soldPoolTooThinToOverride
+      ? 'tier2_active_dominant_thin_sold'
+      : (activePoolSuspect
+          ? 'tier2_sold_only_active_suspect'
+          : (activeAvg > 0 ? 'tier2_blend_70_30' : 'tier2_sold_only'));
+
     const result = {
-      quick: Math.round(soldLow * 100) / 100,
+      quick: Math.round(quickBase * 100) / 100,
       market: tier2Market,
       stretch: Math.round(market * 1.15 * 100) / 100,
-      source: activePoolSuspect
-        ? 'tier2_sold_only_active_suspect'
-        : (activeAvg > 0 ? 'tier2_blend_70_30' : 'tier2_sold_only'),
+      source: tier2Source,
       count: soldPrices.length + verifiedActive.length,
       tier: 2,
       variantAdjusted: variantAdjusted || false,
@@ -688,27 +746,43 @@ export function computePriceBands({
       activePoolSuspectReason: activePoolSuspect
         ? `active avg $${activeAvg.toFixed(2)} / low $${activeLow.toFixed(2)} < 25% of sold avg $${soldAvg.toFixed(2)} / low $${soldLow.toFixed(2)}`
         : null,
+      ...(soldPoolTooThinToOverride && {
+        soldPoolTreatedAsReference: true,
+        soldPoolReferenceReason: `sold pool n=${soldPrices.length} below MIN_POOL_FOR_OVERRIDE=${MIN_POOL_FOR_OVERRIDE} — shown as reference (I13), active pool (n=${activePrices.length}) used as pricing anchor instead`,
+      }),
       // D2 — reference-only pcBase/gradeMultiplier; sold/active averages
       // control this tier entirely.
       derivationTrace: buildDerivationTrace(
-        activePoolSuspect ? 'tier2_sold_only_active_suspect' : (activeAvg > 0 ? 'tier2_blend_70_30' : 'tier2_sold_only'),
+        tier2Source,
         { priceChartingRaw: pcBase ?? null, gradeMultiplier: gradeMultiplier ?? null },
         [
-          buildTraceStep('sold_average', soldPrices, 'average', null, roundCurrency(soldAvg), true, 'eligible_verified_sold'),
-          buildTraceStep('active_average', activePrices, 'average', null, activePrices.length > 0 ? roundCurrency(activeAvg) : null, blendApplies, 'eligible_active'),
-          blendApplies
-            ? buildTraceStep('blend_70_30', [roundCurrency(soldAvg), roundCurrency(activeAvg)], 'weighted_blend', { sold: 0.7, active: 0.3 }, tier2Market, true, 'computed')
-            : buildTraceStep('sold_only', roundCurrency(soldAvg), 'identity', null, tier2Market, true, 'computed'),
+          buildTraceStep('sold_average', soldPrices, 'average', null, roundCurrency(soldAvg), true, soldPoolTooThinToOverride ? 'reference_only' : 'eligible_verified_sold'),
+          buildTraceStep('active_average', activePrices, 'average', null, activePrices.length > 0 ? roundCurrency(activeAvg) : null, blendApplies || soldPoolTooThinToOverride, 'eligible_active'),
+          soldPoolTooThinToOverride
+            ? buildTraceStep('active_dominant_thin_sold_discount', roundCurrency(activeAvg), 'multiply', 0.85, tier2Market, true, 'computed')
+            : (blendApplies
+                ? buildTraceStep('blend_70_30', [roundCurrency(soldAvg), roundCurrency(activeAvg)], 'weighted_blend', { sold: 0.7, active: 0.3 }, tier2Market, true, 'computed')
+                : buildTraceStep('sold_only', roundCurrency(soldAvg), 'identity', null, tier2Market, true, 'computed')),
         ],
         tier2Market
       ),
     };
 
-    if (activePoolSuspect) {
+    if (soldPoolTooThinToOverride) {
+      console.log(`[tier-2] SOLD POOL TOO THIN TO OVERRIDE — treated as reference, active pool anchors price: ${result.soldPoolReferenceReason}`);
+    } else if (activePoolSuspect) {
       console.log(`[tier-2] ACTIVE POOL SUSPECT — excluded from blend: ${result.activePoolSuspectReason}`);
+      // Dispatch 06 follow-up (2026-08-07) — n>=3 clears MIN_POOL_FOR_OVERRIDE
+      // but can still be a poor ratio against a much larger active pool (3
+      // solds overriding 18 actives is directionally better than the prior
+      // n=1 case, not obviously correct on its own). Log without blocking
+      // the override, so production can show whether n=3 is sufficient.
+      if (activePrices.length > 0 && soldPrices.length < activePrices.length / 3) {
+        console.log(`[pool-ratio-warn] GK-34 override fired with pool ratio worse than 1:3 — soldPool=${soldPrices.length} overriding activePool=${activePrices.length} (ratio 1:${(activePrices.length / soldPrices.length).toFixed(1)})`);
+      }
     }
     console.log(`[tier-2] soldAvg=$${soldAvg.toFixed(2)} activeAvg=$${activeAvg.toFixed(2)} blend=$${market.toFixed(2)}`);
-    return applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted);
+    return applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted, soldPrices.length);
   }
 
   // TIER 2.5: All-stale sold pool (≥5 comps, 100% stale >90d) — Q64
@@ -743,7 +817,7 @@ export function computePriceBands({
     };
 
     console.log(`[tier-2.5] staleAvg=$${staleAvg.toFixed(2)} discounted=$${discounted.toFixed(2)} (all ${staleCount} stale)`);
-    return applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted);
+    return applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjusted, soldPrices.length);
   }
 
   // TIER 3: Active-only × 0.85 discount

@@ -426,9 +426,58 @@ test('EX-A(c) — divergence cap fires at exactly the I9 threshold (>2x pool avg
 });
 
 test('EX-A(c) — divergence cap fires at exactly the I9 threshold (>2x pool avg): 2.01x caps to active-anchored price', () => {
-  // Same setup, soldPrice=$171 → blended market = 171×0.7 + 70×0.3 =
-  // $140.70 = activeAvg×2.01 exactly. Must cap (I9 fires at price > poolAvg×2,
-  // i.e. strictly more than 100% over — $140.70 > $140.00 satisfies that).
+  // GK-21 (2026-08-07 dispatch) — this fixture was originally a single
+  // active comp. Under the new MIN_POOL_FOR_OVERRIDE=3 floor (Bone #1
+  // class: a 1-comp pool must not be trusted to override/cap a
+  // sold-derived result), a 1-comp active pool no longer reaches the cap
+  // logic at all — see the new "GK-21 floor" test below for that case.
+  // Widened to 3 active comps (same $70 average, so the 2.01x boundary
+  // math this test exists to pin is unchanged) to keep testing the
+  // threshold itself, now on a pool large enough to legitimately clear
+  // the floor. Deliberately does NOT reuse "Right Variant" in the added
+  // comps' titles: isActivePoolVariantConfirmed (priceBands.js:297)
+  // would then treat a >=3-comp, >=70%-matching active pool as
+  // GK-31/activeAnchoredOverFallbackSold-eligible and route straight to
+  // Tier 3 before Tier 2's divergence-cap logic (this test's actual
+  // target) ever runs — confirmed by running into that branch directly
+  // while drafting this fixture. Same setup otherwise, soldPrice=$171 →
+  // blended market = 171×0.7 + 70×0.3 = $140.70 = activeAvg×2.01 exactly.
+  // Must cap (I9 fires at price > poolAvg×2, i.e. strictly more than
+  // 100% over — $140.70 > $140.00 satisfies that).
+  const soldVerifyResult = {
+    verified: [{ price: 171, title: 'Boundary Test #1 Wrong Variant', daysAgo: 10, recencyBand: 'fresh', variantVerified: false }],
+    variantAdjusted: true,
+  };
+  const bands = computePriceBands({
+    soldComps: soldVerifyResult.verified,
+    activeComps: { prices: [
+      { price: 70, title: 'Boundary Test #1 Standard Cover' },
+      { price: 70, title: 'Boundary Test #1 Standard Cover' },
+      { price: 70, title: 'Boundary Test #1 Standard Cover' },
+    ] },
+    pcBase: 0,
+    gradeMultiplier: 1,
+    title: 'Boundary Test',
+    issue: '1',
+    variant: 'Right Variant',
+    variantAdjusted: true,
+    soldVerifyResult,
+  });
+  assert(bands.variantFallbackCapped === true, 'must cap at 2.01x — above the >2x I9 threshold, with a pool large enough to clear MIN_POOL_FOR_OVERRIDE');
+  assert(bands.market === 70, `capped market should equal activeAvg $70.00, got $${bands.market}`);
+  assert(bands.quick === 59.5, `capped quick should be activeAvg×0.85=$59.50, got $${bands.quick}`);
+  assert(bands.stretch === 80.5, `capped stretch should be activeAvg×1.15=$80.50, got $${bands.stretch}`);
+  assert(bands.tier === 3, `capped tier should be max(2,3)=3, got ${bands.tier}`);
+  assert(bands.source === 'variant_fallback_capped', `source should be variant_fallback_capped, got ${bands.source}`);
+});
+
+test('GK-21 (2026-08-07) — a 1-comp active pool must NOT cap/override a sold-derived result, even at a huge divergence ratio', () => {
+  // Same $171 sold price / $70 active price as the fixture above (2.01x,
+  // previously capped) but with only 1 active comp instead of 3. Confirms
+  // applyVariantFallbackDivergenceCap's MIN_POOL_FOR_OVERRIDE=3 floor
+  // (priceBands.js:423) actually gates the cap — this is the exact
+  // shape of the GK-21 defect (a single active listing overriding 28
+  // solds in production) reproduced at unit scale.
   const soldVerifyResult = {
     verified: [{ price: 171, title: 'Boundary Test #1 Wrong Variant', daysAgo: 10, recencyBand: 'fresh', variantVerified: false }],
     variantAdjusted: true,
@@ -444,12 +493,9 @@ test('EX-A(c) — divergence cap fires at exactly the I9 threshold (>2x pool avg
     variantAdjusted: true,
     soldVerifyResult,
   });
-  assert(bands.variantFallbackCapped === true, 'must cap at 2.01x — above the >2x I9 threshold');
-  assert(bands.market === 70, `capped market should equal activeAvg $70.00, got $${bands.market}`);
-  assert(bands.quick === 59.5, `capped quick should be activeAvg×0.85=$59.50, got $${bands.quick}`);
-  assert(bands.stretch === 80.5, `capped stretch should be activeAvg×1.15=$80.50, got $${bands.stretch}`);
-  assert(bands.tier === 3, `capped tier should be max(2,3)=3, got ${bands.tier}`);
-  assert(bands.source === 'variant_fallback_capped', `source should be variant_fallback_capped, got ${bands.source}`);
+  assert(!bands.variantFallbackCapped, 'a 1-comp active pool must not cap — below MIN_POOL_FOR_OVERRIDE regardless of divergence ratio');
+  assert(bands.market === 140.7, `market should stay the uncapped 2.01x blend $140.70, got $${bands.market}`);
+  assert(bands.tier === 2, `tier should stay 2 (uncapped) with a thin active pool, got ${bands.tier}`);
 });
 
 test('EX-A(d) — regression: normal Tier-1 pool (zero variantMismatch rejections) produces the pre-EX-A exact expected output', () => {
