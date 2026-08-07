@@ -1647,6 +1647,10 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   either supply the actual 48 request IDs/timestamps being tracked so
   they can be queried directly, or accept a `deploymentId`-scoped,
   narrower-but-deeper query as a substitute. Threshold left untouched.
+  **Parked (2026-08-07)** — not answerable from available logs, not worth
+  further time until the right requests can be queried directly (request
+  IDs/timestamps, or a `deploymentId`-scoped query). No further action
+  pending new input.
 
   **Creator-registry gap, confirmed as a real audit (not a one-off name
   add) — "Jeff Smith"/"Cory Walker" class.** Traced the
@@ -1728,29 +1732,33 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
     small live example of exactly the risk a scripted derivation could
     reintroduce silently).
 
-  **Conclusion: pushed no code this round.** A safe "same recognized
-  set" merge is possible but requires more than a find-and-replace — at
-  minimum: (1) add Raymond Gay / Stanley Lau to `ARTIST_PATTERNS` itself
-  first (closing the reverse gap `stripVariantNoise` was catching that
-  the canonical list wasn't), (2) decide explicitly whether bare-first-
-  name stripping (`neal`/`john`/`jim`/...) is genuinely creator-registry
-  scope or a separate, broader title-noise concern that only coincidentally
-  overlaps with creator names — that's a real design question, not a
-  mechanical one, (3) for `artistWords`, prefer a regression test
-  asserting `ARTIST_PATTERNS`'s single-word entries ⊆ `artistWords` (which
-  would have caught the frison/giang/eom/lozano gap immediately and
-  currently fails) over a scripted auto-derivation, given the `'dekal'`
-  evidence that hand-parsing these specific regex sources is genuinely
-  error-prone. Recommend: close the frison/giang/eom/lozano gap in
-  `artistWords` directly (that part IS mechanical — it's catching up to
-  what the canonical list already recognizes, not new recognition) plus
-  the new regression test, as consolidation commit 1; add Raymond Gay /
-  Stanley Lau to `ARTIST_PATTERNS` (closing the reverse gap this
-  investigation found) alongside Jeff Smith / Cory Walker as commit 2,
-  since all four are the identical "genuinely missing from the canonical
-  list" shape; leave `NOISE_PATTERNS[0]`'s first-name stripping and
-  `stripVariantNoise`'s exact regex shape alone pending the design
-  decision in (2) above. None of this is coded yet.
+  **SHIPPED (2026-08-07), the narrowed two-commit split — approved as
+  proposed, with `NOISE_PATTERNS[0]`'s bare-first-name stripping and
+  `stripVariantNoise`'s exact regex shape deliberately left untouched
+  pending the design decision above (not a mechanical question).**
+  Commit 1 (`e05b040`): closed the confirmed frison/giang/eom/lozano gap
+  in `artistWords` directly (mechanical — catching up to what
+  `ARTIST_PATTERNS` already recognized, not new recognition) and added
+  `tests/artist-registry-sync.test.js`, asserting every single-word
+  `ARTIST_PATTERNS` entry is actually stripped by `tokenizeTitle` —
+  47/47 passing, would have caught this exact gap. Commit 2 (`47cf1e0`):
+  added Jeff Smith, Cory Walker (the two real Bone #1/Invincible #1
+  gaps), and Raymond Gay / Stanley Lau (the reverse gap this
+  investigation found — present in `stripVariantNoise`, absent from the
+  canonical list it was assumed to mirror) to `ARTIST_PATTERNS` as
+  multi-word-only entries, each individually collision-swept (no bare
+  `smith`/`walker`/`gay`/`lau` fallback — all four too generic alone,
+  same convention as `guillem march`/`brett booth`); their last names
+  also added to `artistWords` in the same commit, so the addition works
+  in the tokenizer immediately rather than leaving a second gap for
+  commit 1's guard to eventually catch. Extended the same test file with
+  per-name checks (pattern match + tokenizer strip) plus a negative check
+  confirming Jeff Smith stays multi-word-only — 56/56 passing. Full build
+  clean both commits; adjacent suites (`comp-filter-hygiene`,
+  `image-search-extraction`, `family-clustering`,
+  `q130`/`q131`/`q133`/`q136`-named artist tests) all match their
+  documented pre-existing baselines — zero regressions. Both deployed
+  (`dpl_7kgVfL5M7dz8gdsbsfNTqKr1QFCM`, READY, production).
 
   **Two further real, independently-verified findings from the same
   scan, not yet actioned (surfaced, not requested for investigation this
