@@ -2186,6 +2186,18 @@ export const fetchComps = async ({
       issueAuthorityPresent,  // Track B Phase 0, Commit 4 (presence-threading correction) — TARGET_ISSUE_PROVISIONAL_AUTHORITY gate
       issueAuthorityStatus,  // Track B Phase 0, Commit 4 — TARGET_ISSUE_PROVISIONAL_AUTHORITY gate
     };
+    // GrailKey Dispatch 25 (2026-08-07), Fix 1 STEP 1 — instrumentation
+    // ONLY. Logs the exact population classifyEvidenceRow measures every
+    // row against, once, so it's printed rather than inferred from
+    // upstream state. issueAuthorityPresent/issueAuthorityStatus included
+    // beyond the requested format's five fields — directly relevant to
+    // the repro's hypothesis test (does TARGET_ISSUE_PROVISIONAL_AUTHORITY
+    // fire) and already threaded onto evidenceTarget two lines above.
+    console.log(
+      `[evidence-target] seriesTitle="${evidenceTarget.seriesTitle ?? ''}" issue="${evidenceTarget.issue ?? ''}" ` +
+      `variant="${evidenceTarget.variant ?? ''}" year="${evidenceTarget.confirmedYear ?? ''}" grade="${grade ?? ''}" ` +
+      `issueAuthorityPresent=${evidenceTarget.issueAuthorityPresent} issueAuthorityStatus="${evidenceTarget.issueAuthorityStatus ?? ''}"`
+    );
     const evidenceRows = parsed.map((it) => ({ ...it, marketState: 'active' }));
     // Full classification — powers the display/reference buckets below
     // (evidence.gradedPricingReferences/incompleteReferences/

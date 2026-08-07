@@ -245,6 +245,18 @@ export const assessCollisionRisk = (target = {}) => {
 export const classifyEvidenceRow = (row, target = {}) => {
   const title = String(row?.title || '');
   const rejectionCodes = [];
+  // GrailKey Dispatch 25 (2026-08-07), Fix 1 STEP 1 — instrumentation
+  // ONLY. Pairs each pushed rejectionCodes entry with the exact
+  // predicate/values that produced it. Never read by any eligibility
+  // decision in this file — rejectionCodes/identityEligible/
+  // rawPricingEligible/gradedPricingEligible/floorEligible/
+  // referenceOnly are computed identically to before this change, from
+  // the same conditions, in the same order. This array exists solely so
+  // [evidence-eligibility-reject] (api/comps.js call site) can print
+  // WHY, not just WHICH code, without a second reviewer needing to
+  // re-read this function's internals to translate a bare code back
+  // into the comparison that produced it.
+  const rejectionDetails = [];
   const targetIsGraded = target.isGraded === true;
   const rowIsGraded = GRADED_RE.test(title);
 
@@ -277,6 +289,7 @@ export const classifyEvidenceRow = (row, target = {}) => {
     // no-op — issue axis does not apply to this target's asset type
   } else if (target.issue == null || String(target.issue).length === 0) {
     rejectionCodes.push('TARGET_ISSUE_UNRESOLVED');
+    rejectionDetails.push({ code: 'TARGET_ISSUE_UNRESOLVED', predicate: 'target.issue is null/empty — issue axis genuinely unresolved' });
     identityEligible = false;
     comparabilityStatus = 'SIMILAR_TITLE_REFERENCE';
   } else if (target.issueAuthorityPresent === true && target.issueAuthorityStatus !== 'confirmed') {
@@ -320,10 +333,19 @@ export const classifyEvidenceRow = (row, target = {}) => {
     // stray `issueAuthorityStatus` value might otherwise be present —
     // presence is the gate, not status alone.
     rejectionCodes.push('TARGET_ISSUE_PROVISIONAL_AUTHORITY');
+    rejectionDetails.push({
+      code: 'TARGET_ISSUE_PROVISIONAL_AUTHORITY',
+      predicate: `target.issueAuthorityPresent=true, target.issueAuthorityStatus="${target.issueAuthorityStatus}" !== "confirmed" — ` +
+        `row demoted to reference-only regardless of title/variant match (hasIssueNumber was never evaluated for this row)`,
+    });
     identityEligible = false;
     comparabilityStatus = 'PROVISIONAL_ISSUE_REFERENCE';
   } else if (!hasIssueNumber(title, target.issue, target.seriesTitle || null)) {
     rejectionCodes.push('WRONG_ISSUE');
+    rejectionDetails.push({
+      code: 'WRONG_ISSUE',
+      predicate: `hasIssueNumber(title, target.issue="${target.issue}", target.seriesTitle="${target.seriesTitle}") === false`,
+    });
     identityEligible = false;
   }
 
@@ -358,6 +380,10 @@ export const classifyEvidenceRow = (row, target = {}) => {
         // Affirmatively conflicting year — the row DOES claim a year, and
         // it's outside tolerance. A genuine, stated mismatch.
         rejectionCodes.push('WRONG_YEAR');
+        rejectionDetails.push({
+          code: 'WRONG_YEAR',
+          predicate: `rowYear=${rowYear} outside tolerance ${tolerance} of target.confirmedYear=${target.confirmedYear}`,
+        });
         identityEligible = false;
       }
     } else if (publicationIdentityRequired) {
@@ -375,6 +401,10 @@ export const classifyEvidenceRow = (row, target = {}) => {
       // in this codebase's current data shape).
       unconfirmedEdition = true;
       rejectionCodes.push('UNCONFIRMED_EDITION');
+      rejectionDetails.push({
+        code: 'UNCONFIRMED_EDITION',
+        predicate: `no year token on row, but publicationIdentityRequired=true (collision-prone target: confirmedYear=${target.confirmedYear}, publisher="${target.publisher}")`,
+      });
     }
   }
 
@@ -386,6 +416,10 @@ export const classifyEvidenceRow = (row, target = {}) => {
     HALF_ISSUE_RE.test(title)
   ) {
     rejectionCodes.push('LOT_OR_BUNDLE');
+    rejectionDetails.push({
+      code: 'LOT_OR_BUNDLE',
+      predicate: `title matched LOT_RE=${LOT_RE.test(title)} / isValidIssueRange=${isValidIssueRange(title)} / hasCrossSeriesSeparator=${hasCrossSeriesSeparator(title)} / isEnumeratedIssueList=${isEnumeratedIssueList(title)} / HALF_ISSUE_RE=${HALF_ISSUE_RE.test(title)}`,
+    });
     identityEligible = false;
   }
 
@@ -401,7 +435,13 @@ export const classifyEvidenceRow = (row, target = {}) => {
   const wrongPrinting =
     (!targetIsReprintEdition && rowIsReprintEdition) ||
     (targetIsReprintEdition && !rowIsReprintEdition && rowIsExplicitFirstPrint);
-  if (wrongPrinting) rejectionCodes.push('WRONG_PRINTING');
+  if (wrongPrinting) {
+    rejectionCodes.push('WRONG_PRINTING');
+    rejectionDetails.push({
+      code: 'WRONG_PRINTING',
+      predicate: `targetIsReprintEdition=${targetIsReprintEdition} rowIsReprintEdition=${rowIsReprintEdition} rowIsExplicitFirstPrint=${rowIsExplicitFirstPrint} (target.variant="${targetText}")`,
+    });
+  }
 
   // Variant contamination — axis-aware, not a flat single-regex match.
   // GrailKey Commit D3 follow-on (2026-08-02): the prior flat
@@ -425,6 +465,13 @@ export const classifyEvidenceRow = (row, target = {}) => {
   const rowVariantByAxis = extractVariantTokensByAxis(title);
   const targetVariantGloballyEmpty = VARIANT_ALL_AXES.every((axis) => targetVariantByAxis[axis].length === 0);
   let wrongVariant = false;
+  // GrailKey Dispatch 25, Fix 1 STEP 1 — records which axis broke and the
+  // exact token sets compared, purely for rejectionDetails below. Every
+  // `break` site, condition, and the resulting `wrongVariant` value are
+  // byte-identical to before this change — only the two new lines
+  // (`wrongVariantAxis = axis`) immediately before each existing `break`
+  // were added.
+  let wrongVariantAxis = null;
   for (const axis of VARIANT_AXES) {
     const targetAxisTokens = targetVariantByAxis[axis];
     const rowAxisTokens = rowVariantByAxis[axis];
@@ -432,14 +479,20 @@ export const classifyEvidenceRow = (row, target = {}) => {
       const overlap = rowAxisTokens.some((t) =>
         targetAxisTokens.some((u) => u === t || u.includes(t) || t.includes(u))
       );
-      if (!overlap) { wrongVariant = true; break; }
+      if (!overlap) { wrongVariant = true; wrongVariantAxis = axis; break; }
       continue;
     }
-    if (targetAxisTokens.length > 0 && rowAxisTokens.length === 0) { wrongVariant = true; break; }
-    if (rowAxisTokens.length > 0 && targetAxisTokens.length === 0 && targetVariantGloballyEmpty) { wrongVariant = true; break; }
+    if (targetAxisTokens.length > 0 && rowAxisTokens.length === 0) { wrongVariant = true; wrongVariantAxis = axis; break; }
+    if (rowAxisTokens.length > 0 && targetAxisTokens.length === 0 && targetVariantGloballyEmpty) { wrongVariant = true; wrongVariantAxis = axis; break; }
     // Cross-axis: no signal on this axis, continue.
   }
-  if (wrongVariant) rejectionCodes.push('WRONG_VARIANT');
+  if (wrongVariant) {
+    rejectionCodes.push('WRONG_VARIANT');
+    rejectionDetails.push({
+      code: 'WRONG_VARIANT',
+      predicate: `axis="${wrongVariantAxis}" target=[${targetVariantByAxis[wrongVariantAxis]}] row=[${rowVariantByAxis[wrongVariantAxis]}] (target.variant="${targetText}")`,
+    });
+  }
 
   // Collected-edition mismatch — our target is a single issue, row is a
   // TPB/HC/omnibus/collected-edition listing. Uses IDENTITY_TPB_MARKER_RE,
@@ -453,28 +506,36 @@ export const classifyEvidenceRow = (row, target = {}) => {
   // ambiguous terms, closing exactly this collision (confirmed live by
   // this file's own Commit D Fixture 5 test).
   const collectedEditionMismatch = target.assetType !== 'tpb' && IDENTITY_TPB_MARKER_RE.test(title);
-  if (collectedEditionMismatch) rejectionCodes.push('COLLECTED_EDITION_MISMATCH');
+  if (collectedEditionMismatch) {
+    rejectionCodes.push('COLLECTED_EDITION_MISMATCH');
+    rejectionDetails.push({ code: 'COLLECTED_EDITION_MISMATCH', predicate: `target.assetType="${target.assetType}" !== "tpb" and title matches IDENTITY_TPB_MARKER_RE` });
+  }
 
   // Signed mismatch — our target isn't signed, row is.
   const signedMismatch = !target.isSignedTarget && SIGNED_RE.test(title);
-  if (signedMismatch) rejectionCodes.push('SIGNED_MISMATCH');
+  if (signedMismatch) {
+    rejectionCodes.push('SIGNED_MISMATCH');
+    rejectionDetails.push({ code: 'SIGNED_MISMATCH', predicate: `target.isSignedTarget=${target.isSignedTarget} and title matches SIGNED_RE` });
+  }
 
   // Completeness / restoration / coverless — condition-class rejections,
   // independent of format or edition.
   const incompleteHit = INCOMPLETE_COPY_RE.test(title);
   const coverlessHit = COVERLESS_RE.test(title);
   const restoredHit = RESTORED_TITLE_RE.test(title);
-  if (incompleteHit) rejectionCodes.push('INCOMPLETE_COPY');
-  if (coverlessHit) rejectionCodes.push('COVERLESS_COPY');
-  if (restoredHit) rejectionCodes.push('RESTORED_COPY');
+  if (incompleteHit) { rejectionCodes.push('INCOMPLETE_COPY'); rejectionDetails.push({ code: 'INCOMPLETE_COPY', predicate: 'title matches INCOMPLETE_COPY_RE' }); }
+  if (coverlessHit) { rejectionCodes.push('COVERLESS_COPY'); rejectionDetails.push({ code: 'COVERLESS_COPY', predicate: 'title matches COVERLESS_RE' }); }
+  if (restoredHit) { rejectionCodes.push('RESTORED_COPY'); rejectionDetails.push({ code: 'RESTORED_COPY', predicate: 'title matches RESTORED_TITLE_RE' }); }
 
   // Format — raw vs. graded, target-relative, bidirectional.
   let formatMismatch = false;
   if (!targetIsGraded && rowIsGraded) {
     rejectionCodes.push('FORMAT_MISMATCH_RAW_VS_SLAB');
+    rejectionDetails.push({ code: 'FORMAT_MISMATCH_RAW_VS_SLAB', predicate: `target.isGraded=${targetIsGraded}, row title matches GRADED_RE` });
     formatMismatch = true;
   } else if (targetIsGraded && !rowIsGraded) {
     rejectionCodes.push('FORMAT_MISMATCH_GRADED_VS_RAW');
+    rejectionDetails.push({ code: 'FORMAT_MISMATCH_GRADED_VS_RAW', predicate: `target.isGraded=${targetIsGraded}, row title does not match GRADED_RE` });
     formatMismatch = true;
   }
 
@@ -516,6 +577,13 @@ export const classifyEvidenceRow = (row, target = {}) => {
     floorEligible,
     referenceOnly,
     rejectionCodes,
+    // GrailKey Dispatch 25, Fix 1 STEP 1 — instrumentation only, additive.
+    // One entry per code in rejectionCodes (same order, same length),
+    // pairing each code with the exact predicate/values that produced
+    // it. Never consulted by isPricingMathEligible or any other
+    // eligibility decision — purely for [evidence-eligibility-reject]
+    // diagnostics.
+    rejectionDetails,
     // Commit A.4 — null except for the TARGET_ISSUE_UNRESOLVED case, where
     // it's always 'SIMILAR_TITLE_REFERENCE': this row is a plausible
     // same-title reference, never mislabeled as "incompatible" (it made no
@@ -762,7 +830,40 @@ export const buildPricingEligibleRows = (rows, target = {}) => {
     );
     return [];
   }
-  return rows.filter((row) => isPricingMathEligible(classifyEvidenceRow(row, target)));
+  // GrailKey Dispatch 25 (2026-08-07), Fix 1 STEP 1 — instrumentation
+  // ONLY. The filter predicate itself (isPricingMathEligible(classification))
+  // is computed identically to before this change — classifyEvidenceRow
+  // is still called exactly once per row, its result still decides
+  // inclusion/exclusion via the same function, same logic, same order.
+  // The only addition is capturing that same call's result in a variable
+  // (instead of leaving it inline-anonymous) so a rejected row can be
+  // logged before the filter moves on. Zero eligibility behavior change.
+  return rows.filter((row, idx) => {
+    const classification = classifyEvidenceRow(row, target);
+    const eligible = isPricingMathEligible(classification);
+    if (!eligible) {
+      // "class"/"reason" cover ONLY the code(s) actually in
+      // PRICING_GATE_CODES — i.e. the ones isPricingMathEligible reacted
+      // to — not every code classifyEvidenceRow may have pushed (a row
+      // can carry a non-pricing-gate code like WRONG_VARIANT alongside
+      // a pricing-gate one; printing only the blocking code(s) here
+      // keeps "reason" answering the actual question this log exists
+      // for: why did THIS FILTER reject the row, not every observation
+      // classifyEvidenceRow made about it).
+      const blockingCodes = classification.rejectionCodes.filter((c) => PRICING_GATE_CODES.includes(c));
+      const blockingReasons = classification.rejectionDetails
+        .filter((d) => blockingCodes.includes(d.code))
+        .map((d) => `${d.code}: ${d.predicate}`)
+        .join(' | ');
+      console.log(
+        `[evidence-eligibility-reject] idx=${idx} title="${String(row?.title || '')}" ` +
+        `class=${blockingCodes.join(',') || '(none — see full rejectionCodes)'} ` +
+        `reason=${blockingReasons || JSON.stringify(classification.rejectionCodes)} ` +
+        `targetTitle="${target.seriesTitle ?? ''}" targetVariant="${target.variant ?? ''}"`
+      );
+    }
+    return eligible;
+  });
 };
 
 // Commit E (2026-07-28) — catalog ladder reference. Same family as the
