@@ -1447,6 +1447,13 @@ const KNOWN_PUBLISHER_IMPRINT_EVENT_PHRASES = [
   ['wildstorm'],              // DC imprint
   ['hanna', 'barbera'],       // Hanna-Barbera studio/imprint
   ['gold', 'key'],            // Gold Key publisher
+  ['bruce', 'hershenson'],    // GrailKey Dispatch 15 (2026-08-07) —
+  // Wha...!? #1: confirmedTitle corrupted to "wha hero hershenson",
+  // every comp query zero-matched. Not a publisher/imprint/event by the
+  // strict sense this list was named for, but the same "coherent-content
+  // token that isn't part of the series title" shape Q140 admits and this
+  // fallback exists to route away from confirmedTitle — reused rather
+  // than forking a fifth list for one entry.
 ];
 
 // Splits `tokens` into { matched, remaining } — matched is every token that

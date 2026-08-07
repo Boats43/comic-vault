@@ -476,6 +476,15 @@ export const ARTIST_PATTERNS = [
   // Jason Latour above. Multi-word ONLY — "Rodriguez" is one of the most
   // common surnames in the US; a bare fallback here would be a
   // significant false-positive risk, not a judgment call worth revisiting.
+  /greg land/i,  // GrailKey Dispatch 15 (2026-08-07) — real production gap:
+  // a Wolverine #10 scan's confirmedTitle corrupted to "wolverine greg
+  // land," rejecting 26/27 genuine sold comps on titleMismatch (a real
+  // eBay live search for the correct book returned 5+ matching listings,
+  // $4.99-$19.99, median ~$13.85 — GrailKey found only 1, priced $9.99).
+  // Multi-word ONLY, deliberately no bare /land/i single-word fallback —
+  // "land" is a common English word ("Wonder Land," "no man's land,"
+  // generic marketing copy), unlike the distinctive surnames elsewhere in
+  // this file that get a bare fallback.
   // Single-word — original 28 + Ship #20a.6 /fabok/ + Ship #20a.6.18 /ejikure/ + Ship #20a.6.21 modern variant artists.
   //
   // Q131 systemic-audit follow-up (2026-07-19, One World Under Doom #1 /
