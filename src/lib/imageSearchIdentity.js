@@ -23,7 +23,7 @@
 // Function count stays at 12/12.
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
-import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate, resolveFamilyYearConsensus } from './identityCore.js';
+import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate, resolveFamilyYearConsensus, isIssueZeroSupport } from './identityCore.js';
 import { ARTIST_PATTERNS, ARTIST_FAMILY_STRIP_EXCEPTIONS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms, NON_GENUINE_COPY_RE, LOT_RE, REPRINT_RE, SLAB_RE, GRADED_RE, SIGNED_RE, TPB_MARKER_RE, extractArtist, hasContaminatedMember, isCompetingFamilyTooStrong, FAMILY_OVERRIDE_DECISIONS } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
@@ -660,13 +660,15 @@ export const extractConsensus = (parsedRows, visionIssue = null, visionPublisher
     : null;
 
   // Escalation carve-out (Q78's resurrected intent): title consensus IS
-  // coherent (>=30%) but no single issue reaches the >=50% adoption bar —
-  // normally that's "not enough information," discard everything. When
-  // Vision's own issue ALSO has zero occurrences anywhere in the pool,
-  // that's not a lack of information — it's an unsupported claim with
-  // nothing to adopt in its place. Surface it instead of silently
-  // discarding so the caller can escalate rather than default to Vision.
-  const zeroSupportNoAdoption = titleOk && !issueOk && visionIssueNorm != null && visionIssueCount === 0;
+  // coherent (>=15%, see titleOk above) but no single issue reaches the
+  // >=50% adoption bar — normally that's "not enough information,"
+  // discard everything. When Vision's own issue ALSO has (near-)zero
+  // support anywhere in the pool (GrailKey Dispatch 15 Fix 2 — below
+  // ISSUE_ZERO_SUPPORT_RATIO_FLOOR, not just literally zero), that's not
+  // a lack of information — it's an unsupported claim with nothing to
+  // adopt in its place. Surface it instead of silently discarding so the
+  // caller can escalate rather than default to Vision.
+  const zeroSupportNoAdoption = titleOk && !issueOk && visionIssueNorm != null && isIssueZeroSupport(visionIssueCount, total);
 
   if (!titleOk || (!issueOk && !zeroSupportNoAdoption)) {
     // Can't establish consensus on basic identity

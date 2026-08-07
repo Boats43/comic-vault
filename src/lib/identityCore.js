@@ -116,6 +116,29 @@ export const computeReprintDominanceRatio = (items, { minItems = 5 } = {}) => {
 // Same threshold Q98 established for the polybag facsimile signal.
 export const REPRINT_DOMINANCE_THRESHOLD = 0.6;
 
+// GrailKey Dispatch 15 Fix 2 (2026-08-07) — the vision-zero-support
+// OVERRIDE/ESCALATE mechanism (resolveIdentity below, and
+// extractConsensus's zeroSupportNoAdoption in imageSearchIdentity.js)
+// originally required Vision's own issue to have LITERALLY ZERO
+// occurrences anywhere in the raw pool (an equality test) before treating
+// it as unsupported. Real production case (Jetsons, GrailKey Dispatch 05
+// item 2): Vision's "#10" had 1/19 = 5.3% pool support — not literally
+// zero, so the escalation never fired and the book shipped under the
+// wrong issue (#10 instead of the correct #32). On any long-running
+// series, a large raw pool will contain most issue numbers *somewhere*
+// purely by chance, so the exact-zero test can structurally almost never
+// fire on the books most likely to need it. Ratio floor: an issue below
+// this fraction of pool support counts as zero-support for this purpose
+// — covers both the literal-zero case and the near-zero case with one
+// change. Scoped to the issue-axis check only (not the sibling
+// visionPublisherCount check, not resolveFamilyIssueConsensus's own pure
+// aggregate-vote adoption bar — see the Flash #139 standing constraint in
+// CLAUDE.md: this ratio floor never weights or ranks candidates, it only
+// changes when Vision's OWN claim is treated as unsupported).
+export const ISSUE_ZERO_SUPPORT_RATIO_FLOOR = 0.10;
+export const isIssueZeroSupport = (count, total) =>
+  typeof count === 'number' && typeof total === 'number' && total > 0 && (count / total) < ISSUE_ZERO_SUPPORT_RATIO_FLOOR;
+
 /**
  * Sanitize Vision descriptive title to canonical series name.
  *
@@ -2191,7 +2214,7 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
       `population=${familyIssueConsensusResult.uniqueRows} support=${familyIssueConsensusResult.support} ` +
       `ratio=${familyIssueConsensusResult.ratio.toFixed(2)} rawPoolVisionSupport=${ebay?.agreement?.visionIssueCount ?? 'null'}`
     );
-  } else if (!isGraded && vision.issue != null && ebay?.agreement?.visionIssueCount === 0) {
+  } else if (!isGraded && vision.issue != null && isIssueZeroSupport(ebay?.agreement?.visionIssueCount, ebay?.agreement?.total)) {
     if (ebay.issue != null) {
       // Coherent alternate issue exists in the pool — adopt it, loudly.
       confirmedIssue = ebay.issue;
@@ -2203,7 +2226,7 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
         adoptedIssue: ebay.issue,
         poolTotal: ebay.agreement.total,
       };
-      console.log(`[vision-zero-support] OVERRIDE: Vision issue="${vision.issue}" has 0/${ebay.agreement.total} pool support — adopting pool #${ebay.issue}`);
+      console.log(`[vision-zero-support] OVERRIDE: Vision issue="${vision.issue}" has ${ebay.agreement.visionIssueCount}/${ebay.agreement.total} pool support (< ${(ISSUE_ZERO_SUPPORT_RATIO_FLOOR * 100).toFixed(0)}%) — adopting pool #${ebay.issue}`);
     } else if (ebay.noIssueConsensus) {
       // Vision's issue is unsupported AND the pool doesn't converge on any
       // replacement — Q78's resurrected intent: escalate to ID_REQUIRED
@@ -2221,7 +2244,7 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
         visionIssue: vision.issue,
         poolTotal: ebay.agreement.total,
       };
-      console.log(`[vision-zero-support] ESCALATE: Vision issue="${vision.issue}" has 0/${ebay.agreement.total} pool support and no adoptable alternate — forcing ID_REQUIRED`);
+      console.log(`[vision-zero-support] ESCALATE: Vision issue="${vision.issue}" has ${ebay.agreement.visionIssueCount}/${ebay.agreement.total} pool support (< ${(ISSUE_ZERO_SUPPORT_RATIO_FLOOR * 100).toFixed(0)}%) and no adoptable alternate — forcing ID_REQUIRED`);
     }
   }
 
