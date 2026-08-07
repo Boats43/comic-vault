@@ -1894,6 +1894,110 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
     Cover-matcher stays blocked on this exactly as before; the entire
     feature is gated pending terms obtained through a different channel
     (a logged-in browser session, a direct GCD contact, or equivalent).
+  - **GCD terms obtained via external channel (2026-08-07, GrailKey
+    Dispatch 17) — supersedes the "BLOCKED" finding above.** Obtained and
+    read directly by the user (not this session's fetch tool, which
+    remained blocked) — GCD App Guidelines page (`docs.comics.org` wiki),
+    last edited 2022-01-02. **Evidence-quality caveat, stated explicitly
+    rather than glossed over:** only one sentence was passed through as
+    an exact quote; the three findings below are the user's own summary
+    of the page, not a second verbatim transcript. Recorded as such —
+    the one verbatim sentence quoted, the rest marked reported —
+    consistent with this file's own standing discipline elsewhere
+    (confirm via direct evidence, don't present a paraphrase as a
+    primary read). A true verbatim archive of the full page is still
+    outstanding; add it here if it becomes available.
+
+    **Verbatim quote:** "We don't offer access to our data via an API,
+    only as a database dump download."
+
+    **Reported findings (paraphrase, not verbatim):**
+    1. **No API exists.** Confirmed by the quote above. Intended
+       consumption pattern per GCD: download the database dump, import
+       it into your own store, build your own query layer against it,
+       refresh periodically.
+    2. **Images ARE permitted under fair use for identification**, with
+       a named compliant pattern GCD points integrators to (the CBI case
+       study): check local cache → check back-end cache → fetch the
+       single image on demand → archive it permanently. This is a
+       narrower basis than the CC-BY-SA metadata license, and a
+       materially different *pattern* than bulk retrieval.
+    3. **CC-BY-SA attribution is a hard requirement** on the metadata:
+       visible credit to Grand Comics Database plus a link back to the
+       specific source page, on any UI surfacing their data. ShareAlike's
+       interaction with a commercial pricing product is a separate
+       question from attribution and is NOT resolved by this finding.
+
+    **Re-scoped plan, PLAN ONLY, no code — three changes from the
+    original Dispatch 15 sketch:**
+    1. **No live API → local dump import, not a live-query integration.**
+       The original sketch ("GCD API — public JSON endpoints") was
+       wrong; there is no API to call at request time. This means: (a)
+       download and import GCD's DB dump into a store this project
+       controls, (b) build a query layer over that import, (c) refresh
+       on some cadence (release frequency not established — open
+       question). This is a genuinely different category of work than
+       "call an endpoint" — it's a new data-ingestion pipeline plus
+       wherever it lives long-term. Concretely against this codebase:
+       the Stack section states "no server database," but production
+       logs show an active `[kv-cache]` layer already caching ComicVine/
+       PriceCharting/eBay lookups in production right now (`SET`/`MISS`
+       lines on nearly every `/api/enrich` request) — meaning some
+       server-side KV already exists and is provisioned, contradicting
+       the "Future: Vercel KV for cross-instance rate limit persistence"
+       framing as not-yet-done elsewhere in this doc (flagged here as a
+       doc/reality drift worth reconciling separately, not fixed in this
+       pass). That existing KV is a plain key-value store, not a
+       relational one — adequate for flattening the dump into precomputed
+       lookup keys (e.g. `gcd:covers:<series>:<issue>` populated once at
+       import time), NOT adequate for arbitrary relational queries
+       (fuzzy series matching, joins across variant/series/publisher
+       tables) the way the raw dump itself supports. Two real options,
+       neither scoped further than naming them: (i) flatten the dump to
+       the specific lookup shapes this feature needs and load those into
+       the existing KV — smaller lift, less flexible; (ii) provision a
+       real relational store for the dump via the Vercel Marketplace
+       (Neon Postgres is the natural fit per current Vercel offerings)
+       — bigger lift, keeps the dump queryable on its own terms. This
+       decision needs its own scoping pass, not a default pick here.
+    2. **Bulk-hash spike → per-lookup fetch with permanent archival.**
+       The original idea ("pull a series' variant covers to hash") is
+       exactly the bulk-retrieval pattern GCD's terms don't cover —
+       re-scoped to the CBI pattern instead: at scan time, narrow to a
+       small candidate set using data already available locally (the
+       dump-derived series/issue/variant match, refined by
+       `row.variantTokens`/`extractArtist`, both already confirmed
+       reusable per the Narrowing finding above), THEN fetch only those
+       specific candidate images one at a time, checking local cache and
+       back-end cache first, archiving each fetched image permanently
+       once retrieved. Permanent archival needs real storage — Vercel
+       Blob (public or private) is the natural fit, not yet evaluated
+       against GCD's terms for whether re-hosting an archived copy
+       itself needs separate review beyond the fetch-and-cache pattern
+       they describe. The `jimp` perceptual-hash spike (still not done)
+       now scopes down to hashing individual on-demand-fetched images
+       against a narrowed candidate set, not building a pre-hashed index
+       of an entire series' variant covers.
+    3. **Attribution — new UI surface, not yet designed.** Any card
+       showing GCD-sourced data (metadata now, images later if the
+       fair-use pattern above ships) needs a visible "Grand Comics
+       Database" credit and a link back to the specific GCD source page
+       — a real, unscoped UI addition, not a footer-once fix, since
+       CC-BY-SA attribution conventionally travels with the specific
+       data shown, not just a blanket site-wide mention. ShareAlike vs.
+       the commercial pricing model is a legal/product question flagged
+       for explicit human review — not something to resolve by
+       implementation choice.
+
+    **Net effect on scope: materially larger than the original Dispatch
+    15 estimate.** The original sketch treated this as roughly
+    "call GCD's API, add a hash spike." The actual requirement is a
+    data-ingestion pipeline (dump download + import + refresh cadence +
+    a storage decision), a request-time fetch-and-archive pattern
+    instead of a pre-built index, and a new attribution UI surface — three
+    separate, real pieces of infrastructure work, each needing its own
+    scoping before any of this becomes buildable. Cover-matcher remains
+    plan-only; nothing here is coded.
   - **Explicitly not scoped into this dispatch's six fixes** — ships
     independently, per instruction.
 
