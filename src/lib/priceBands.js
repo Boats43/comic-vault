@@ -105,8 +105,13 @@ export const TIER_SOURCE_MAP = {
   // Legacy sources (pre-tier, never actually emitted by this file's
   // computePriceBands — kept for any caller still passing them through
   // directly, not covered by the PRICE_BANDS_SOURCES completeness list).
+  // GrailKey Dispatch 13 — 'verified_active' removed from this legacy
+  // set: confirmed dead everywhere in api/enrich.js's own multiplier-
+  // eligibility gates (never assigned to out.pricingSource, not in
+  // PRICE_BANDS_SOURCES) — keeping a pass-through entry for a value that
+  // can never arrive as input serves no purpose and is the same landmine
+  // shape as the gate references it was removed from alongside.
   'verified_sold': 'verified_sold',
-  'verified_active': 'verified_active',
   'verified_sold_active_blend': 'verified_sold_active_blend',
   // Q109-D [2026-07-17]: same fallthrough class — the ASM #17-class
   // franchise-relaunch guard (this file) excludes a contaminated

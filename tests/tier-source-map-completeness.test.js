@@ -44,7 +44,9 @@ for (const source of PRICE_BANDS_SOURCES) {
 // mean PRICE_BANDS_SOURCES has drifted out of being a genuinely
 // exhaustive list — worth knowing, not worth failing the build over.
 // Documented "legacy (pre-tier)" keys are expected here and excluded.
-const LEGACY_KEYS = new Set(['verified_sold', 'verified_active', 'verified_sold_active_blend']);
+// GrailKey Dispatch 13 — 'verified_active' removed from this set: it was
+// removed from TIER_SOURCE_MAP itself (confirmed dead, see priceBands.js).
+const LEGACY_KEYS = new Set(['verified_sold', 'verified_sold_active_blend']);
 const orphanedMapEntries = Object.keys(TIER_SOURCE_MAP).filter(
   (key) => !LEGACY_KEYS.has(key) && !PRICE_BANDS_SOURCES.includes(key)
 );

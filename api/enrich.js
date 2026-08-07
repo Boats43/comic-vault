@@ -7646,10 +7646,28 @@ export default async function handler(req, res) {
     // Pre-Ship-14 production case: Marvel Saga #18 (1987 newsstand) priced
     // at $3.99 via pc_estimate path. Ship 7 era multiplier (1.2× for
     // 1985-1995) skipped, underpriced ~20%. Should price ~$4.79.
+    //
+    // GrailKey Dispatch 13 (2026-08-07) — 'verified_active' removed.
+    // Confirmed genuinely dead: not in PRICE_BANDS_SOURCES
+    // (src/lib/priceBands.js, the exhaustive current source enum), never
+    // directly assigned to out.pricingSource anywhere in this handler —
+    // a gate condition that can never fire, referenced here as though
+    // live. "Dead code inside a pricing gate is a landmine" — a future
+    // change could add a real code path assuming this entry already
+    // covers it, silently not covering anything. Frontend display
+    // support for this label (src/App.jsx) is deliberately left
+    // untouched — that's backward-compat rendering for old catalogue
+    // items whose stored pricingSource may predate whatever removed this
+    // value from the live pipeline, a different concern from this
+    // pricing-eligibility gate. Two more independent 'verified_active'
+    // references were found in the same investigation
+    // (src/lib/responseContract.js's ESTIMATED_SOURCES + inline check,
+    // src/lib/dataQualityGuard.js's PRICE_RANK) — out of scope for this
+    // specific fix (a different mechanism each, not multiplier
+    // eligibility), flagged in CLAUDE.md for their own review.
     const VARIANT_MULT_ELIGIBLE_SOURCES = new Set([
       'pricecharting',
       'pc_estimate',
-      'verified_active',
       'browse_api',
     ]);
     const isFromPC = !!(priceCharting?.price) && !sanityFired && VARIANT_MULT_ELIGIBLE_SOURCES.has(out.pricingSource);
@@ -7995,7 +8013,10 @@ export default async function handler(req, res) {
         if (isFromPC && blendedAvg) {
           keyMultBase = blendedAvg;
           keyMultBaseSource = 'blendedAvg';
-        } else if (out.pricingSource === 'verified_sold' || out.pricingSource === 'verified_active') {
+        } else if (out.pricingSource === 'verified_sold') {
+          // GrailKey Dispatch 13 — 'verified_active' removed from this
+          // check (dead: never produced by the current tier engine, see
+          // VARIANT_MULT_ELIGIBLE_SOURCES above for the full rationale).
           keyMultBase = curPrice;
           keyMultBaseSource = 'priceBandsMarket';
         }
