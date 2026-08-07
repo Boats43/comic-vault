@@ -2069,6 +2069,115 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
   several builds can contain both pre-fix and post-fix evidence at once,
   and conflating them misreads which is which.
 
+- **Dormant-multiplier class (GrailKey Dispatch 12, 2026-08-07) —
+  investigated, PLAN ONLY, no code, pricing-math greenlight held pending
+  review of the projection below.** Every tier-engine pricing source
+  (Tiers 1/2/2.5/3 — i.e. every price actually derived from verified
+  sold/active comps) is excluded from the newsstand/variant multiplier,
+  and mostly excluded from the key multiplier too, while Tier 4
+  (`pc_estimate`, the LEAST-verified generic PriceCharting lookup) is the
+  primary source that DOES get both. This is backwards from what you'd
+  want — multipliers apply most readily to the least-trustworthy price,
+  not the best-verified one.
+
+  **Part 1 — every `pricingSource` whitelist in the repo, enumerated by
+  direct grep, not assumed to be "the two" originally suspected:**
+  1. `VARIANT_MULT_ELIGIBLE_SOURCES` (`api/enrich.js:~7616`) — Set of 4:
+     `pricecharting`, `pc_estimate`, `verified_active`, `browse_api`.
+     Gates `isFromPC`, which gates BOTH the newsstand/era/variant
+     multiplier directly AND (via `isFromPC && blendedAvg`) the PRIMARY
+     key-multiplier path.
+  2. Key-mult fallback inline check (`~7998`):
+     `out.pricingSource === 'verified_sold' || out.pricingSource ===
+     'verified_active'` — the SECONDARY key-mult path used when
+     `isFromPC` is false.
+  3. `SOLD_DERIVED_SOURCES` (`~8179`) — Set of 5:
+     `verified_sold_recency`, `verified_sold`, `sold_active_blend_30`,
+     `verified_sold_active_blend`, `verified_sold_stale`. Gates the
+     mega-key-floor contamination-detection basis — a different purpose
+     (not multiplier eligibility), but the same whitelist-drift shape.
+     Checked against `TIER_SOURCE_MAP`'s current sold-tier outputs:
+     **currently correct and complete**, not itself a gap.
+  4. Web-search trigger gate (`~9247-9248`):
+     `out.pricingSource !== 'verified_sold' && out.pricingSource !==
+     'pricecharting'` — unrelated to multipliers (gates the AI web-search
+     fallback), noted for completeness of the grep, not in scope here.
+  5. `hasPCData = out.pricingSource === "pricecharting"` (`~8851`) —
+     gates match-confidence display tier, not a multiplier, not in scope.
+
+  **Part 2 — cross-referencing every real `out.pricingSource` label
+  against whitelists 1 and 2 (the actual multiplier gates):**
+
+  | pricingSource label | Tier | Newsstand/variant mult (whitelist 1) | Key mult (whitelist 1 or 2) |
+  |---|---|---|---|
+  | `verified_sold_recency` | 1 | ✗ excluded | ✗ excluded (exact-string mismatch — check wants literal `'verified_sold'`) |
+  | `sold_active_blend_30` | 2 blend | ✗ excluded | ✗ excluded |
+  | `verified_sold` | 2 sold-only / sold-only-suspect | ✗ excluded | ✓ eligible (whitelist 2) |
+  | `verified_sold_stale` | 2.5 | ✗ excluded | ✗ excluded |
+  | `active_ask_derived` | 3 (all sub-variants) + GK-34 | ✗ excluded | ✗ excluded — **this is the label all 3 confirmed-affected books hit** |
+  | `pc_estimate` | 4 | ✓ eligible | ✓ eligible (via `isFromPC && blendedAvg`, if PC price present) |
+  | `active_reference_range`, `thin_pool_anchor`, `visual_pool_fallback`/`visual_pool_family_isolated`, `catalog_ladder_reference` | non-tier real pricing paths | ✗ excluded | ✗ excluded |
+  | `ebay-polybag-active` | polybag | ✗ excluded (deliberately — Ship 6 explicitly skips key mult on polybag pricing; correct, not a gap) | ✗ excluded (deliberate) |
+  | `web_search_fallback`, `ai_estimate` | AI-estimated fallback | ✗ excluded | ✗ excluded (defensible — compounding an AI estimate with a premium multiplier is a real risk, not obviously a bug) |
+  | `verified_active` | — | referenced in both whitelists but **dead code** — not in `PRICE_BANDS_SOURCES`, never directly assigned anywhere in the handler; a stale reference, plausibly meant to represent what `active_ask_derived` now covers |
+
+  **Part 3 — impact projection, real production data, table form.**
+  Pulled directly from live Vercel runtime logs (`get_runtime_logs`),
+  not estimated. 2 of the 3 named books fully confirmed end-to-end; the
+  third confirmed as a real request with the same root shape but its
+  pricing-tail log lines could not be retrieved within reasonable query
+  effort (truncated before the `[key]`/`[price-bands]` lines across
+  multiple attempts) — reported as partial, not padded into a number:
+
+  | Book | Grade | Tier / mapped source | Current price | Multiplier(s) dormant | Would-be price | Δ |
+  |---|---|---|---|---|---|---|
+  | Batman: The Killing Joke #1 | FN 6.0 | `tier3_active_discounted` → `active_ask_derived` | $52.19 | key ×1.5 (major: "first printing, classic Brian Bolland cover, seminal Joker origin story") | $78.29 | +50.0% |
+  | Amazing Spider-Man #222 | FN 6.0, newsstand | `tier3_active_discounted_over_fallback_sold` → `active_ask_derived` | $10.31 | newsstand ×1.3 (variant mult skipped via whitelist 1) | $13.40 | +30.0% |
+  | Giant-Size Chillers #1 | — | `active_ask_derived` (confirmed via identity/title logs) | not retrieved | key ×1.5 per original report | not retrieved | — |
+
+  **Important nuance on ASM #222, found directly in its logs, not
+  assumed:** its key multiplier did NOT skip via the whitelist-gap
+  mechanism this dispatch is about — `[key] keyIssue: null major: false
+  minor: false mult: 1 isFromPC: false` shows `out.keyIssue` itself was
+  never populated for this scan, so `keyMult` was `1.0` by construction;
+  the multi-key comp-derived detection did find the signal
+  (`[key-from-comps] consensus: first-appearance/1st App×5`) but that
+  mechanism is **display-only** (Ship #12a, `CLAUDE.md` "Multi-key
+  extraction from comps" — promotion to `keyIssue` is Ship #12b, gated
+  behind its own separate greenlight, never granted). So ASM #222's
+  newsstand-multiplier loss IS the whitelist-gap class; its key-multiplier
+  loss is a different, already-documented, separately-gated limitation —
+  conflating the two would misdiagnose the fix's actual scope.
+
+  **Part 4 — over-correction check: inconclusive, not cleared.** Neither
+  confirmed example strikes an obvious "too high" note on a plain-market
+  read ($78.29 for a raw FN 6.0 Killing Joke #1 — a well-known,
+  consistently $75-150-raw back issue — reads as a correction toward
+  accuracy, not past it; $13.40 for a raw FN 6.0 ASM #222 newsstand with
+  a minor first appearance is unremarkable). **This is a qualitative
+  read, not a verified one** — the actual PC price-ladder rung values for
+  the confirmed grade on each book were not pulled (ASM #222's own logs
+  confirm a real 12-rung ladder exists — `[pc-sales] id=2315254 grades=8
+  ... ladder=12` — but not its dollar values). Before this multiplier
+  ships, the ladder-rung comparison the dispatch asked for needs the
+  actual numbers, not an eyeball read — flagged as not yet done, not
+  quietly assumed clear.
+
+  **Part 5 — structural fix, proposed, NOT coded.** Same discipline just
+  established for `TIER_SOURCE_MAP` itself: stop hardcoding independent
+  literal whitelists that can silently exclude a new source by omission.
+  Concretely: restructure `TIER_SOURCE_MAP`'s values from plain label
+  strings to small records carrying explicit eligibility flags (e.g.
+  `{ label, variantMultEligible, keyMultEligible }`), and derive
+  `VARIANT_MULT_ELIGIBLE_SOURCES` / the key-mult check FROM that
+  structure instead of maintaining them as separate hardcoded Sets. A new
+  tier source then can't be added without an explicit eligibility
+  decision at the same time it's named — the same "no silent default"
+  shape that closed the `TIER_SOURCE_MAP` gap itself. This is a real
+  design proposal, not filed as done: it touches what gets a price
+  multiplier and by how much, squarely pricing math, and stays
+  unimplemented pending the projection review above.
+
 ## Open Blockers
 
 ### External
