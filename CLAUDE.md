@@ -1864,6 +1864,115 @@ AssetCore is now **universal** — operates on primitives only (title, year, gra
     prior, undocumented occurrence) — not yet given its own root-cause
     investigation in this doc; flagged here so it isn't lost, not closed.
 
+  **GK-34 + registry, CONFIRMED IN PRODUCTION (2026-08-07, GrailKey
+  Dispatch 10) — third and fourth validated fixes of this effort.** Both
+  Bone books re-scanned on live production traffic, not the unit
+  harness:
+  ```
+  [tier-2] SOLD POOL TOO THIN TO OVERRIDE — treated as reference, active pool anchors price:
+           sold pool n=1 below MIN_POOL_FOR_OVERRIDE=3 — shown as reference (I13),
+           active pool (n=2) used as pricing anchor instead
+  [price-bands] source=tier2_active_dominant_thin_sold market=$10.49
+  ```
+  $1,619.99 → $10.49 and $13.51, exact arithmetic ($12.34×0.85=$10.49,
+  $15.89×0.85=$13.51), real market $10-25. Same scan's `[Q84]
+  override-allowed reason=same title, nothing added` and
+  `confirmedTitle="bone"` (not "bone jeff") confirms the registry fix
+  independently — Jeff Smith recognized, no override needed at all this
+  time since Q140 didn't even try to add the tokens.
+
+  **Found in the same batch — a real I13 provenance bug in the NEW GK-34
+  path, fixed same-day (`b2d16ed`).** `api/enrich.js`'s `tierSourceMap`
+  (~line 7367, `#20b-FIX1`) translates `priceBands.js`'s internal
+  `source` values into the label the card displays, defaulting unmapped
+  sources to `'pc_estimate'`. `tier2_active_dominant_thin_sold` was
+  missing from this map — confirmed live: `[price-bands] source=
+  tier2_active_dominant_thin_sold` (correct) immediately followed by the
+  card showing `pc_estimate` (wrong). Not merely cosmetic: this exact map
+  already has two documented prior incidents of the identical shape
+  (`Q109-DISPATCH-1-B`, `Q109-D`, both inline in this file) where a
+  missing entry fell through to `'pc_estimate'`, which sits inside
+  `VARIANT_MULT_ELIGIBLE_SOURCES` (~line 7629) — an unmapped,
+  already-active-anchored, already-0.85-discounted price is eligible to
+  get a variant/key multiplier re-applied on top, double-counting. Fixed
+  by mapping to the same semantic sibling those two prior fixes used —
+  `'active_ask_derived'` (matches `tier3_active_discounted`'s
+  construction: active-pool anchor, ask-derived, already discounted). No
+  dedicated unit test added — this inline handler-level map has never had
+  one, including for the two prior fixes it mirrors; verification is via
+  direct inspection against the 3 existing analogous entries plus the
+  next production re-scan, matching established practice for this exact
+  map.
+
+  **Wolverine #37 — worst card in the batch, traced.** Two numbers from
+  one request: `[price-bands] source=tier4_pc_estimate market=$5.09`
+  followed later by `[verify] ... recommended: $99.99`. Traced directly:
+  `recommendedPrice` (`api/enrich.js` ~line 8957) reads `finalPriceNum =
+  parseFloat(out.price)` — so `[verify]` showing $99.99 proves `out.price`
+  was ALREADY $99.99 by the time that log line ran, not $5.09. Between
+  the `[price-bands-pricing]` log (~line 7443, where `out.price` is first
+  set to $5.09) and `[verify]` (~line 8967), two floor mechanisms run:
+  `computeThinPoolAnchor` (Ship #13.1, a CAP — cannot raise a price, ruled
+  out) and `computeLowGradeFloor` (Ship #17, ~line 8078 — a genuine
+  raise: "when pop.belowGrade===0, override with `rawComps.lowest`").
+  `computeLowGradeFloor` is the only mechanism in that window capable of
+  moving a price UP from $5.09 to $99.99, and its own log format
+  (`[low-grade-floor] anchored cur=$X → comp.lowest=$Y`) matches the
+  dispatch's own description ("a floor fired at 99.99 after the fact")
+  exactly. **The card shows $99.99, not $5.09** — `out.price` is the same
+  field both `[verify]` and the client read; nothing after
+  `computeLowGradeFloor` in this trace lowers it back down. Root chain,
+  consistent with but not yet independently re-confirmed against a raw
+  log capture of `[low-grade-floor]` itself: the Greg Capullo registry
+  gap (below) corrupted the search query (`confirmedTitle="wolverine
+  greg capullo"`), which — being the same query construction
+  `api/comps.js` uses to build BOTH the sold-comp pool (25/30
+  titleMismatch-rejected) and the active `rawComps` pool the low-grade
+  floor reads `rawComps.lowest` from — plausibly pulled in wrong-book
+  active listings whose lowest price is $99.99, which the floor then
+  (correctly, by its own logic, on contaminated input) trusted as the
+  real market bottom. Not yet fixed — the floor mechanism itself is
+  working as designed; the actual defect is the upstream query
+  corruption, closed for this specific case by the registry fix below,
+  but the general "a floor built on a contaminated active pool inherits
+  the contamination" risk is not something this dispatch closes.
+
+  **Registry gaps 5, 6, 7 — SHIPPED (`cb49224`), same shape as 1-4, found
+  by production scans instead of the reverse-direction sweep this time.**
+  Greg Capullo (Wolverine #37 — corrupted `confirmedTitle`, the direct
+  cause of the trace above) and Jason Latour + Robbi Rodriguez
+  (Spider-Gwen — `confirmedTitle="spider gwen latour rodriguez"`, both
+  co-creators missing at once). All three added to `ARTIST_PATTERNS` as
+  multi-word-only entries (no bare fallback — Rodriguez is one of the
+  most common US surnames, Latour has real ambiguity with wine/place
+  names, Capullo is plausibly bare-fallback-safe under this file's own
+  precedent for distinctive names but deliberately not swept to keep this
+  batch's risk profile consistent with the rest) plus their surnames into
+  `ARTIST_SURNAME_WORDS`. `tests/artist-registry-sync.test.js` extended
+  with all three (163/165 passing — `dekal`/`spears` remain the only, and
+  only intended, failures). Both commits deployed
+  (`dpl_FtwvjUjjWW8pgiNBoAPm2FpCqhTu`, READY, production). This is now
+  five production-incident-driven additions plus four found by the
+  reverse-direction test itself in one week — the registry's real
+  completeness gap is likely still wider than either discovery channel
+  has surfaced alone.
+
+  **Build/version skew across a single log batch — flagged, not a code
+  issue.** Four different deployment SHAs appeared across one scan
+  window: `0b46a52`, `3f0ed98`, `6979b4f`, `6af0698`. The Wolverine and
+  Marvel Feature scans specifically ran on `6979b4f` — pushed BEFORE
+  GK-34/GK-21 (`2dbf651`) — meaning their pricing behavior reflects a
+  pre-fix build, not a regression against the fixes documented above.
+  This is expected, ordinary client/CDN cache staleness (a phone or
+  browser tab that loaded the app before a newer deploy went out keeps
+  hitting the old bundle's API calls until it's reloaded or the cache
+  expires) — not a deployment pipeline defect. Recorded here as a
+  standing caution for reading any future multi-scan batch: **check the
+  `[boot] Comic Vault build <sha>` line on every individual scan before
+  attributing its behavior to the current code** — a batch spanning
+  several builds can contain both pre-fix and post-fix evidence at once,
+  and conflating them misreads which is which.
+
 ## Open Blockers
 
 ### External
