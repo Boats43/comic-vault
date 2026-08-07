@@ -2412,3 +2412,139 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   `selectTitleFamilyCandidate`'s merge logic) remain completely
   untouched by this dispatch.
 
+- **GrailKey Dispatch 21 (2026-08-07) — title-family fragmentation added
+  to the watch list (no action); structured KV scan-logging investigated,
+  plan only, no code.**
+
+  **Watch list, not scoped, no action — title-family fragmentation.**
+  Dispatch 20's commit-p investigation found that 4 of 9 verified scans'
+  near-misses were caused by `selectTitleFamilyCandidate` splitting
+  genuinely on-topic, relevant listings into sibling sub-families instead
+  of merging them into the winning family (e.g. a "CAMEO OF LYRA"
+  variant-descriptor listing landing in its own 2-member family rather
+  than joining the main 3-member "spawn brett booth" family it visually
+  and topically belongs with) — a structurally different mechanism from
+  junk-listing rank-slot theft, confirmed by direct re-verification of
+  each scan's actual row content. **Explicitly not scoped or
+  investigated further per instruction:** all 4 instances are the same
+  single book (Spawn #351) in a sample already established as
+  non-diverse (dominated by repeat scans of that one book) — one book at
+  nine repeats is not evidence of a general pattern, and generalizing
+  from it would repeat the exact misattribution error this session
+  already found and corrected once (the Fix 6 spec error). Recorded here
+  so a future dispatch that sees this shape on an UNRELATED book
+  recognizes it rather than re-diagnosing from scratch — flag if it
+  recurs elsewhere; no threshold, no code, no scoping decision made now.
+
+  **Structured KV scan-logging — INVESTIGATED, PLAN ONLY, no code.**
+  Two separate frequency questions this session ended genuinely
+  unanswered for the identical underlying reason: the GK-34 stale-comp
+  threshold measurement (see that entry above, "Parked... not answerable
+  from available logs") and this dispatch's own commit-p rank-slot
+  frequency investigation (7 of 16 scans unreachable). Both hit the same
+  wall: the Vercel runtime-log tool reliably answers COUNT queries
+  (`group_by`) over wide time ranges, but full-content pulls — the only
+  way to see the actual field values a frequency question needs — time
+  out past roughly a 12-hour window regardless of `deploymentId` scoping,
+  confirmed via repeated direct attempts across both investigations, not
+  assumed. This is a standing tooling gap, not a one-off — two unrelated
+  questions failed on it in one session.
+
+  **The proposal: write one compact, structured record per scan directly
+  to the KV layer that already exists** (`api/kv-cache.js`, Upstash
+  Redis, live since 2026-06-29 — see the Stack section and GrailKey
+  Dispatch 18) — a direct Redis query against that store is not subject
+  to the runtime-log tool's content-scan timeout at all, since it reads
+  pre-structured records instead of re-parsing verbose console output
+  after the fact.
+
+  **Record shape, first draft, not final — needs iteration before
+  coding:**
+  ```json
+  {
+    "v": 1,
+    "ts": 1786...,
+    "requestId": "...",
+    "book": { "title": "...", "issue": "...", "year": "..." },
+    "issueAuthority": { "status": "provisional", "reasons": [...], "highConfidenceMarketplaceConsensus": true, "supportRatio": 0.53 },
+    "familyWeight": { "weightSum": 11, "count": 4, "overlapRatio": 1, "decision": "weighted-consensus" },
+    "terminalReason": "commit-p" | "commit4-terminal" | "clean" | null,
+    "poolSizes": { "raw": 20, "eligible": 20, "familyMembers": 4 },
+    "assetTypeOverride": { "evaluated": true, "fired": false, "blockedBy": ["pool-incoherent"] }
+  }
+  ```
+  Directly answers both of this session's dead-end questions (the
+  `familyWeight`/`terminalReason` fields alone would have made the
+  rank-slot investigation a direct query instead of nine individual log
+  pulls) and is written generally enough to answer whatever the NEXT
+  unanswerable frequency question turns out to be — a per-scan record
+  scoped only to today's specific question would just recreate today's
+  problem the next time a different filter is needed. Versioned (`v: 1`)
+  from day one, matching this exact file's own `PC_FILTER_VERSION`/
+  `CV_FILTER_VERSION` convention (`api/kv-cache.js`) — a schema change
+  must not silently corrupt historical queries.
+
+  **Storage primitive — two options, recommendation given, needs
+  verification before committing:**
+  1. **Redis Streams (`XADD`/`XRANGE`), recommended.** Purpose-built for
+     exactly this shape (append-only, time-ordered, range-queryable
+     event log) — one command per write, no separate index structure to
+     keep in sync. Not yet verified whether Upstash Redis's specific
+     offering supports stream commands on the plan this project is on —
+     a real prerequisite check, not assumed, before this direction is
+     picked.
+  2. **Plain per-record keys (`scanlog:v1:<ts>:<id>`) + a sorted-set time
+     index (`ZADD scanlog:index:v1 <ts> <key>`), fallback.** Definitely
+     supported (uses only primitives `api/kv-cache.js` already proves
+     work against this project's Upstash instance), but two writes per
+     scan instead of one, and the index needs its own retention/trim
+     policy independent of the records it points to.
+
+  Either option needs new wrapper functions in `api/kv-cache.js` (today
+  only exports `kvGet`/`kvSet`/`kvDel`, plain GET/SET/DEL — no
+  stream/sorted-set operations wrapped yet) — a small, additive change to
+  that file, not a rewrite.
+
+  **Open questions, deliberately not resolved here:**
+  - **Volume/cost.** No current daily/monthly scan-count figure exists
+    in this codebase's own documentation to project storage or
+    per-command cost against. Needs a real number (Vercel function
+    invocation count, or a short observation period) before committing
+    to "log every scan" — the record above is small, but small × unknown
+    volume × unbounded retention is not a costed decision.
+  - **Retention.** This is an analytics/audit trail, not a cache in the
+    existing sense (avoiding redundant external API calls) — a distinct
+    purpose deserving its own TTL policy (candidate: 30-90 days) rather
+    than inheriting any existing `KV_TTL` constant, and its own key
+    namespace (`scanlog:`, distinct from the existing `cv:`/`pc:`/`gc:`/
+    `ac:`/`bc:`/`ph:`/`oauth:` prefixes) per this file's own established
+    namespace-isolation discipline.
+  - **Scope: every scan, or only the interesting ones?** Logging only
+    `commit4`-provisional scans directly answers today's specific
+    question cheaply, but recreates the SAME narrow-denominator problem
+    the next time a different filter is needed (as it did twice this
+    session, for two different filters). Logging every scan with a
+    small, flat record answers arbitrary future frequency questions but
+    costs more and is a bigger decision — leaning toward "every scan"
+    for durability of the investment, but this is exactly the kind of
+    tradeoff to decide once volume is known, not before.
+  - **Write-site failure mode.** Must follow the SAME graceful-degradation
+    convention `kvGet`/`kvSet` already use (try/catch, swallow failures,
+    console.warn, never block or fail the actual pricing response) — a
+    logging write must never be able to take down a real scan.
+  - **Query interface.** Recommended: a local Node script
+    (`scripts/query-scanlog.mjs`, not yet written) run against
+    `KV_REST_API_URL`/`TOKEN` pulled via `vercel env pull` — talks
+    directly to Upstash, no new deploy, no new Vercel function. A
+    dedicated API endpoint was considered and rejected as the default:
+    `api/` is already at 14 files against a nominally-12 cap (unresolved
+    per GrailKey Dispatch 18) — spending one of those scarce slots on an
+    investigation tool, not a customer-facing feature, is the wrong
+    trade when a local script reaches the same data with zero function
+    cost.
+
+  Nothing in this proposal is implemented. The next step, if greenlit,
+  is verifying Upstash's stream-command support specifically (the one
+  real unknown blocking a choice between the two storage options above)
+  before any code is written.
+
