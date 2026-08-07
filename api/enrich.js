@@ -3498,7 +3498,8 @@ export default async function handler(req, res) {
         if (!out.assetTypeConfident) {
           const comicVotes = categoryVotes.length - merchandiseVotes;
           const comicRatio = categoryVotes.length > 0 ? comicVotes / categoryVotes.length : 0;
-          if (shouldLiftAssetTypeAdvisoryLock(merchandiseRatio, comicVotes, categoryVotes.length, visualConsensus !== null)) {
+          const coherent = visualConsensus !== null;
+          if (shouldLiftAssetTypeAdvisoryLock(merchandiseRatio, comicVotes, categoryVotes.length, coherent)) {
             out.assetTypeConfidentOverride = true;
             console.log(
               `[Q32-asset-type-override] lifting advisory lock: comic-category vote ${comicVotes}/${categoryVotes.length} ` +
@@ -3506,9 +3507,26 @@ export default async function handler(req, res) {
               `Vision's assetTypeConfident=false treated as overridden for the listing-lock gate only`
             );
           } else {
+            // GrailKey Dispatch 20 (2026-08-07) — Dispatch 19 shipped this
+            // fix with a disclosed, honest gap: its own motivating scan
+            // (Spawn #351) wouldn't have qualified under its own bar, so
+            // the fix landed production-unvalidated. This decline log
+            // (always fired when the predicate is evaluated, mirroring the
+            // fire-path log above 1:1, not added after the fact) is the
+            // instrumentation a future dispatch needs to answer "does this
+            // ever actually fire" from real batch data instead of a guess
+            // — includes a `blockedBy` breakdown so a log sweep doesn't
+            // need to hand-recompute which specific sub-condition failed
+            // from the raw ratios alone.
+            const blockedBy = [];
+            if (merchandiseRatio >= 0.5) blockedBy.push('merchandise-hard-block-region');
+            if (comicVotes < 5) blockedBy.push('comicVotes<5');
+            if (comicRatio < 0.6) blockedBy.push('comicRatio<60%');
+            if (!coherent) blockedBy.push('pool-incoherent');
             console.log(
               `[Q32-asset-type-override] declined: comicVotes=${comicVotes}/${categoryVotes.length} ` +
-              `(ratio=${(comicRatio*100).toFixed(0)}%) coherent=${visualConsensus !== null} — advisory lock stays`
+              `(ratio=${(comicRatio*100).toFixed(0)}%) merchandiseRatio=${(merchandiseRatio*100).toFixed(0)}% ` +
+              `coherent=${coherent} blockedBy=[${blockedBy.join(',')}] — advisory lock stays`
             );
           }
         }

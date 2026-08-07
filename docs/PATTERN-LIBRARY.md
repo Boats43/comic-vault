@@ -2238,3 +2238,177 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   documented 4-failure baseline) — none of this dispatch's four changes
   touched any of the code paths those pre-existing failures exercise.
 
+- **Misattributed-anchor class — the Fix 6 spec error, standing note
+  (GrailKey Dispatch 20, 2026-08-07).** Not just a corrected
+  implementation: a wrong specification survived three dispatches (15,
+  16, and would have shipped as designed in 19 had a real production
+  scan not incidentally exposed it during unrelated work) with a
+  passing, 25-assertion regression suite behind it — worth recording as
+  its own failure class, because "well-tested" and "correctly specified"
+  turned out to be independent properties here, and the gap between
+  them is exactly the dangerous kind: invisible from the test output.
+
+  **What happened, precisely.** GrailKey Dispatch 15 proposed Fix 6
+  ("thread `poolYearHint` into `resolveYear`'s branch (e)"), citing two
+  production log lines as validation: "year=2019 agreement=80% (4/5)"
+  and "year=2024 support=3/4." Dispatch 15 itself flagged that 80% and
+  75% didn't match one proposed bar and left the number an open
+  question — a good instinct — but did not ask a prior, more basic
+  question: were both citations actually instances of the SAME signal
+  (`poolYearHint`) at all? GrailKey Dispatch 16 (this same session,
+  earlier) picked `>=0.75` to accommodate both citations and shipped
+  the design decision, with a 25-assertion regression suite built
+  entirely from those two numbers. Every assertion passed. The design
+  itself was never coded in that dispatch (implementation stayed
+  queued) — which is the only reason this didn't ship silently wrong;
+  had implementation kept pace with the validated bar, it would have
+  shipped reading `poolYearHint` on every future scan, believing itself
+  tested.
+
+  GrailKey Dispatch 19, investigating an unrelated real production scan
+  (Spawn #351) for Fix 5's evidence, incidentally pulled the exact log
+  line the second citation came from and found it was never
+  `poolYearHint` at all — it was `[commit4.1]`'s own family-scoped year
+  adoption line (`identity.familyYearConsensus`), a structurally
+  different computation (scoped to a title-family's own members, not
+  the raw whole pool) that happens to share a superficially similar log
+  shape: both read as "a ratio of pool rows supporting a candidate
+  year," both print an X/Y-shaped fraction, easy to mistake for the
+  same field at a glance if you don't trace the literal source line.
+  `poolYearHint`'s OWN real value on that same scan was 2020 at
+  3/6=50% — a third number, genuinely computed, and wrong. Three
+  numbers on one real scan (2019/80%, 2024/75%, 2020/50%), only one of
+  which was ever poolYearHint, and the design being validated (Fix 6)
+  was never checked against that one correctly.
+
+  **Why the passing tests didn't catch it.** The 25 Dispatch 16
+  assertions validated that `>=0.75` correctly accepted both cited
+  ratios and correctly rejected values below it — a genuine, honest
+  test of the THRESHOLD. They could not have caught the deeper problem
+  because the test fixtures were HAND-CONSTRUCTED from the citations
+  themselves (`{ agreement: 0.75, year: 2024 }`-shaped inputs), not
+  derived by re-tracing each citation back to its actual log line and
+  variable. A test built from a mislabeled citation faithfully tests
+  the mislabel. Coverage of "does the bar behave correctly given this
+  input" is a different claim from "is this the right input" — the
+  first is a property of the test, the second is a property of the
+  citation, and no amount of the first proves the second.
+
+  **The standing rule, generalized beyond this one case:** when a
+  design cites a production log line as validation — a ratio, a
+  count, an X/Y fraction — trace it back to its LITERAL source (the
+  exact `console.log` call site and the exact variable printed) before
+  building anything on it, not just its face-value meaning. This
+  matters most exactly when two mechanisms in the same pipeline can
+  produce similarly-shaped output for a related purpose (here:
+  `poolYearHint`'s whole-pool `agreement=X%` vs `[commit4.1]`'s
+  family-scoped `support=X/Y` — both about "how many rows support this
+  year," different scopes, different reliability, easy to conflate).
+  A citation that "looks like" the signal a design names is not
+  evidence it IS that signal. This is a different, earlier-stage
+  failure than the drifted-duplicate-constant class already documented
+  in this file (Q119/Q127/Q128, the `ARTIST_PATTERNS` saga) — those are
+  about a value or list independently drifting apart from a sibling
+  copy after correct attribution; this is about the attribution itself
+  being wrong from the start, before any drift could even occur. Watch
+  for it specifically whenever a fix's evidence section cites "a real
+  production log line" without also showing the line's own log tag/
+  call-site context — the tag is what proves which mechanism actually
+  produced it.
+
+- **GrailKey Dispatch 20 (2026-08-07) — Fix 5 decline-path logging
+  shipped; commit-p rank-slot theft investigated and found to be the
+  MINORITY cause, not the majority, of the near-misses it superficially
+  resembles.**
+
+  **Fix 5 decline-path logging, SHIPPED.** The `[Q32-asset-type-override]`
+  call site already logged both branches (fire and decline) as shipped
+  in Dispatch 19 — verified directly before changing anything, not
+  assumed missing. Enhanced the decline log with a `blockedBy` reason
+  breakdown (`merchandise-hard-block-region` / `comicVotes<5` /
+  `comicRatio<60%` / `pool-incoherent`) and explicit `merchandiseRatio`,
+  so a future batch sweep asking "does this ever fire" doesn't need to
+  hand-recompute which sub-condition failed from raw numbers alone.
+  8-assertion regression: `tests/grailkey-dispatch-20-fix5-decline-logging.test.js`.
+
+  **commit-p rank-slot theft — INVESTIGATED, report only, no code,
+  `HIGH_CONFIDENCE_WEIGHT_FLOOR` left untouched, per explicit
+  instruction.** Queried production runtime logs for every
+  `[commit4] issueAuthority=provisional` firing (the only population
+  where `HIGH_CONFIDENCE_WEIGHT_FLOOR` actually gates anything) across
+  2026-08-01 through 2026-08-07. Group-by counts (fast, reliable):
+  16 total firings in that window. Full-content pulls (the only way to
+  see each scan's actual raw-pool indices) repeatedly timed out over
+  multi-day and even single-day windows for this specific query — narrow
+  (≤12h) windows worked reliably; wider ones did not, regardless of
+  `deploymentId` scoping. **9 of the 16 were reachable and fully
+  verified** (indices, family membership, and the literal content of
+  every raw-pool row checked directly, not inferred); **7 remain
+  unreachable** within this investigation's tool budget — recorded as a
+  genuine gap, not glossed over.
+
+  **Critical caveat found while pulling the 9: this is not a diverse
+  sample.** All 9 reachable scans are repeat scans of essentially ONE
+  physical book — Spawn #351 Cover C Brett Booth Virgin (8 of the 9) —
+  plus one scan of a second book, Spawn #369 (the Dispatch 15/16 anchor).
+  This strongly suggests the reachable window is dominated by this
+  investigation's own repeated test/dev scans of the same book, not a
+  representative cross-section of real customer traffic. Any frequency
+  claim below is scoped honestly to "within this narrow, non-diverse
+  sample," not "across the scan ledger" as originally asked — the
+  ledger-wide question remains genuinely unanswered given the tool's
+  reach limits, the same honest conclusion this file already reached
+  once before for a different measurement (see the Bone #1 / GK-34
+  entry's own stale-threshold measurement, "Parked... not answerable
+  from available logs").
+
+  **Finding, precise per-scan (all 9 checked directly against the raw
+  `[visual] titles:` array and the `[family-evidence]` index list, not
+  pattern-matched from memory across scans):**
+
+  | Scan (UTC) | Book | Weight | Family indices | Top-3 slot 2 occupant | Mechanism |
+  |---|---|---|---|---|---|
+  | 04:37:20 Aug 7 | Spawn #351 | 13 | {0,1,2,5} | genuine family member | clean, `commit-p` fires |
+  | 03:48:42 Aug 4 | Spawn #351 | 14 | {0,1,2,3,5} | genuine family member | clean, `commit-p` fires |
+  | 04:40:00 Aug 3 | Spawn #351 | 14 | (5 members) | genuine family member | clean, `commit-p` fires |
+  | 04:39:27 Aug 3 | Spawn #351 | 14 | (5 members) | genuine family member | clean, `commit-p` fires |
+  | 20:40:36 Aug 7 | Spawn #351 | 11 | {0,1,3,4} | **genuine junk — "Spawn #326-#352 YOU PICK We Combine Shipping!!" lot listing** | **junk rank-slot theft** |
+  | 02:23:00 Aug 4 | Spawn #351 | 10 | {0,1,4} | real, on-topic "CAMEO OF LYRA" listing — split into its own 2-member sibling sub-family instead of merging | title-family fragmentation, NOT junk |
+  | 04:24:49 Aug 3 | Spawn #351 | 10 | {0,1,4} | same as above | fragmentation, NOT junk |
+  | 03:52:16 Aug 3 | Spawn #351 | 10 | {0,1,4} | same as above | fragmentation, NOT junk |
+  | 04:51:10 Aug 7 | Spawn #369 | 8.5 | (8 members, broad "spawn"-only family) | slots 0 and 1 both genuine, on-topic #369 listings that didn't cluster into this family | fragmentation, NOT junk |
+
+  **The specific mechanism asked about — a lot/multi-issue/junk-category
+  listing directly occupying a top-3 rank slot — was confirmed in
+  exactly 1 of the 9 reachable scans.** The mechanism that actually
+  recurs more often in this sample (4 of 9, all involving no junk
+  whatsoever) is a different, structurally distinct problem: title-family
+  clustering splitting genuinely relevant, on-topic listings into
+  sibling sub-families instead of merging them into the winning family —
+  which drags `weightSum` below the floor for a completely unrelated
+  reason. Both mechanisms independently produce the same visible symptom
+  (near-miss, `commit-p` doesn't fire, `commit4-terminal` forces
+  `ID_REQUIRED`) — which is why a first look at two symptomatically
+  identical scans (both landing on `family={0,1,4}`/weight=10) can look
+  like "the same bug happening twice" when re-tracing the ACTUAL content
+  behind the missing slot shows they are not. The initial hypothesis
+  going into this investigation ("the junk listing keeps stealing rank
+  slots") was itself a version of the misattributed-anchor mistake
+  documented above — two scans producing an identical-looking
+  `family=/weight=` fingerprint were assumed to share a cause without
+  independently re-verifying each one's actual row content.
+
+  **Conclusion, matching the explicit instruction not to touch anything:**
+  within the reachable, honestly-caveated sample, junk-in-top-3 is a
+  known marginal case — 1 confirmed instance, not evidence of a common
+  problem, consistent with "leave `HIGH_CONFIDENCE_WEIGHT_FLOOR` alone."
+  The fragmentation mechanism recurred more often in this same sample
+  and is a genuinely different, unscoped problem — flagged here as a
+  candidate for its own future investigation if the pattern holds up
+  outside this narrow, single-book-dominated sample, but explicitly NOT
+  requested or scoped this dispatch, and not investigated further here.
+  `HIGH_CONFIDENCE_WEIGHT_FLOOR` and every rank-weight mechanism
+  (`getRankWeight`, `meetsHighConfidenceMarketplaceConsensusBar`,
+  `selectTitleFamilyCandidate`'s merge logic) remain completely
+  untouched by this dispatch.
+
