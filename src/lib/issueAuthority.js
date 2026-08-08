@@ -259,6 +259,135 @@ export function evaluateUnanimousConsensusPromotion(familyIssueConsensus, family
   return { promote: true, declineReason: null, inputs: { ...inputs, ...memberCheck } };
 }
 
+// GrailKey Dispatch 26, Fix 4, condition 6 (2026-08-08) — title-text
+// independence. checkDistinctItemIdAndSeller (above) proves listings were
+// independently POSTED (distinct accounts, distinct item IDs) — it cannot
+// detect independently PROPAGATED wording: eBay sellers routinely copy a
+// competitor's listing title verbatim for search-ranking reasons (a
+// well-documented, non-adversarial marketplace behavior, not collusion),
+// which produces N distinct sellers all carrying ONE mislabeling error —
+// indistinguishable, to that check, from N sellers who each independently
+// identified the book correctly. See Pattern Library, "independent
+// posting is not independent identification" (GrailKey Dispatch 26) for
+// the concrete risk case this closes.
+//
+// Copy-propagated titles are near-identical strings; independently-
+// authored titles describing the same real book diverge in wording. This
+// reuses the SAME Jaccard token-set-overlap FORMULA buildTitleFamilies
+// already uses for coarse family clustering (imageSearchIdentity.js) —
+// not literally imported, since that implementation is a private closure
+// local to buildTitleFamilies, not exported; the formula is reused, the
+// call site is new. Deliberately NOT tokenizeTitle's normalization
+// (compHygiene.js): that function strips artist surnames, signature
+// words, and ordinal-key markers ("key", "1st", "origin") because
+// they're noise for "does this listing match our target series." For
+// THIS check they are exactly the wording variation that distinguishes
+// independent authorship from a copy-paste — stripping them would
+// destroy the discriminator. Normalization here is deliberately lighter:
+// case-fold, strip punctuation/emoji, collapse whitespace, strip only an
+// explicit grade/condition stoplist (book-condition words carry no
+// authorship signal and vary for uninteresting reasons — a reseller
+// grading the same book "NM" vs "near mint" isn't evidence of
+// independent identification).
+//
+// Threshold (0.7) and clustering method were fixed BEFORE being run
+// against the real repro this dispatch was scoped against (Spawn #351) —
+// not tuned after seeing the result. Verified against that repro: one
+// genuinely copy-propagated pair scored 0.929, every other pairing
+// scored 0.368-0.538 — a wide, unambiguous gap; 0.7 sits in the middle of
+// it, and the clustering result is identical anywhere from roughly
+// 0.6-0.8. See the Pattern Library entry for the full record, including
+// why NO MARGIN was added on top of the bare ">=3 clusters" floor even
+// though the real repro lands exactly at it (deferred pending telemetry,
+// not closed).
+const TITLE_INDEPENDENCE_CONDITION_STOPWORDS = new Set([
+  'nm', 'vf', 'fn', 'gd', 'fr', 'pr', 'mt', 'mint', 'near', 'high', 'grade', 'graded',
+]);
+
+export const NEAR_DUPLICATE_JACCARD_THRESHOLD = 0.7;
+
+function normalizeForTitleIndependence(title) {
+  const stripped = String(title || '')
+    .toLowerCase()
+    // Strip emoji ranges, then any remaining punctuation, to bare
+    // alphanumerics/whitespace.
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const tokens = stripped
+    .split(' ')
+    .filter((t) => t.length > 0 && !TITLE_INDEPENDENCE_CONDITION_STOPWORDS.has(t));
+  return new Set(tokens);
+}
+
+function jaccardTokenSets(setA, setB) {
+  if (setA.size === 0 && setB.size === 0) return 1;
+  let intersection = 0;
+  for (const t of setA) if (setB.has(t)) intersection++;
+  const union = setA.size + setB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/**
+ * Condition 6 — clusters near-duplicate title wording among a SET OF
+ * ALREADY-SCOPED title strings. Callers are responsible for population
+ * scoping (identityCore.js's getAssertingIssueRows — the same asserting-
+ * row population evaluateUnanimousConsensusPromotion's own inputs are
+ * scoped to, per Fix 2b's population-consistency lesson); this function
+ * does no row selection of its own, purely string clustering. Requires
+ * >=3 distinct clusters among the given titles — a bare floor, no margin
+ * — a family whose asserting rows collapse to fewer than 3 distinct
+ * wordings fails regardless of how many distinct sellers/item IDs posted
+ * them.
+ *
+ * Clustering method mirrors buildTitleFamilies exactly (imageSearchIdentity.js):
+ * compare each row to the FIRST member of each existing cluster; join the
+ * first cluster it clears the threshold against, else start a new
+ * cluster. maxPairwiseJaccard/minPairwiseJaccard are computed over the
+ * FULL pairwise matrix (not just the pairs the clustering pass happened
+ * to compare) so the telemetry is complete regardless of clustering
+ * shortcuts — family sizes are small (single digits), so this is
+ * negligible cost.
+ *
+ * @param {string[]} titles - raw title strings of the asserting rows only
+ * @param {number} [threshold]
+ * @returns {{pass: boolean, assertingRows: number, distinctClusters: number, largestClusterSize: number, maxPairwiseJaccard: number|null, minPairwiseJaccard: number|null, clusters: string[][]}}
+ */
+export function evaluateTitleTextIndependence(titles, threshold = NEAR_DUPLICATE_JACCARD_THRESHOLD) {
+  const rows = Array.isArray(titles) ? titles.filter((t) => typeof t === 'string' && t.trim()) : [];
+  const tokenSets = rows.map(normalizeForTitleIndependence);
+
+  let maxPairwiseJaccard = null;
+  let minPairwiseJaccard = null;
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      const sim = jaccardTokenSets(tokenSets[i], tokenSets[j]);
+      if (maxPairwiseJaccard === null || sim > maxPairwiseJaccard) maxPairwiseJaccard = sim;
+      if (minPairwiseJaccard === null || sim < minPairwiseJaccard) minPairwiseJaccard = sim;
+    }
+  }
+
+  const clusters = []; // [{ members: [rowIndex, ...] }]
+  rows.forEach((_, i) => {
+    const joined = clusters.find((c) => jaccardTokenSets(tokenSets[i], tokenSets[c.members[0]]) >= threshold);
+    if (joined) joined.members.push(i);
+    else clusters.push({ members: [i] });
+  });
+
+  const largestClusterSize = clusters.reduce((max, c) => Math.max(max, c.members.length), 0);
+
+  return {
+    pass: clusters.length >= 3,
+    assertingRows: rows.length,
+    distinctClusters: clusters.length,
+    largestClusterSize,
+    maxPairwiseJaccard,
+    minPairwiseJaccard,
+    clusters: clusters.map((c) => c.members.map((i) => rows[i])),
+  };
+}
+
 // Fix 2b — year-axis, corrected population. resolveFamilyYearConsensus's
 // own `uniqueRows`/`support` denominator is family MEMBERSHIP (every
 // deduped family row), not assertion (Step A finding, GrailKey
@@ -559,11 +688,27 @@ export function deriveIssueAuthorityFromAdoption(familyIssueConsensus, familyYea
  * OWN unanimous-consensus promotion specifically (both checked via the
  * reasons array, never bare status) — this function has nothing to say
  * about a status that might arrive here via some other, future reason.
+ *
+ * GrailKey Dispatch 26 (2026-08-08), Fix 4 — extended the SAME way V4
+ * extended this function for Fix 2's promotion path: a 'confirmed' status
+ * reached via the zero-support unanimous rescue (identityCore.js,
+ * distinct reason string 'unanimous-marketplace-consensus-zero-support-
+ * rescue' — deliberately NOT the same string Fix 2 stamps, since that
+ * string specifically documents "no prior Vision/user issue existed,"
+ * false for a rescued row where Vision's prior existed and was overridden)
+ * must stay re-escalatable on a later contradiction exactly like a Fix-2-
+ * promoted row does. Omitting this was the exact V4 gap already found and
+ * fixed once for Fix 2 — not repeating it for Fix 4's own distinct reason
+ * string was a required, non-optional part of this diff (GrailKey
+ * Dispatch 26, Q2).
  */
 export function escalateIssueAuthorityOnConflict(issueAuthority, issueConsensusConflict) {
   const reasons = Array.isArray(issueAuthority?.reasons) ? issueAuthority.reasons : [];
   const eligibleFromProvisional = issueAuthority?.status === 'provisional' && reasons.includes('marketplace-only-adoption');
-  const eligibleFromPromotedConfirmed = issueAuthority?.status === 'confirmed' && reasons.includes('unanimous-marketplace-consensus');
+  const eligibleFromPromotedConfirmed = issueAuthority?.status === 'confirmed' && (
+    reasons.includes('unanimous-marketplace-consensus')
+    || reasons.includes('unanimous-marketplace-consensus-zero-support-rescue')
+  );
   if ((eligibleFromProvisional || eligibleFromPromotedConfirmed) && issueConsensusConflict) {
     return {
       ...issueAuthority,

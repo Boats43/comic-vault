@@ -17,6 +17,13 @@
 
 import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership, tokenizeTitle } from './compHygiene.js';
 import { normalizeOptionalYear } from './yearEvidence.js';
+// GrailKey Dispatch 26, Fix 4 (2026-08-08) — zero-support unanimous
+// rescue reuses Fix 2's own promotion predicate (evaluateUnanimousConsensusPromotion)
+// and adds a new title-text-independence check (evaluateTitleTextIndependence),
+// both in issueAuthority.js. No import cycle: issueAuthority.js imports only
+// compHygiene.js/responseContract.js/yearEvidence.js, none of which import
+// identityCore.js.
+import { evaluateUnanimousConsensusPromotion, evaluateUnanimousYearConsensusPromotion, evaluateTitleTextIndependence } from './issueAuthority.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
 // source of truth for "publisher name is legitimately PART of the series
@@ -1211,6 +1218,76 @@ const tallyFamilyIssueCounts = (indices, visualItems) => {
   return counts;
 };
 
+// GrailKey Dispatch 26, Fix 4 (2026-08-08) — per-row asserting-title
+// extractor for the zero-support unanimous-rescue predicate's title-text-
+// independence check (evaluateTitleTextIndependence, issueAuthority.js).
+// SAME population as resolveFamilyIssueConsensus/tallyFamilyIssueCounts
+// above — identical dedup-key preference, identical NON_GENUINE_COPY_RE
+// exclusion, identical extractIssueCandidate gate for "asserting" — this
+// is deliberate, not incidental: the title-independence check must
+// cluster exactly the rows the issue-tally counted, never a silently
+// different population (Fix 2b's "wrong population" lesson, applied on
+// the way in this time rather than caught after the fact — see the
+// Pattern Library). A silent row (no extractable issue candidate) is
+// neutral here exactly as it is in the tally above — it contributes no
+// title to cluster and no vote either.
+export const getAssertingIssueRows = (indices, visualItems) => {
+  const rows = Array.isArray(indices) ? indices : [];
+  const seenKeys = new Set();
+  const asserting = [];
+  const normalizeUrl = (u) => {
+    const s = String(u);
+    const qIdx = s.indexOf('?');
+    return qIdx === -1 ? s : s.slice(0, qIdx);
+  };
+  for (const idx of rows) {
+    const item = visualItems?.[idx];
+    const raw = String(typeof item === 'string' ? item : (item?.rawTitle || item?.title || '')).trim();
+    if (!raw) continue;
+    if (NON_GENUINE_COPY_RE.test(raw)) continue;
+    let dedupKey;
+    if (typeof item !== 'string' && item?.itemId) dedupKey = `id:${item.itemId}`;
+    else if (typeof item !== 'string' && item?.legacyItemId) dedupKey = `legacy:${item.legacyItemId}`;
+    else if (typeof item !== 'string' && item?.itemWebUrl) dedupKey = `url:${normalizeUrl(item.itemWebUrl)}`;
+    else dedupKey = `title:${raw}`;
+    if (seenKeys.has(dedupKey)) continue;
+    seenKeys.add(dedupKey);
+    const candidate = extractIssueCandidate(raw);
+    if (candidate) asserting.push({ idx, rawTitle: raw });
+  }
+  return asserting;
+};
+
+// GrailKey Dispatch 26, Fix 4b (2026-08-08) — year-axis mirror of
+// getAssertingIssueRows, above. SAME asserting criterion
+// issueAuthority.js's analyzeYearAssertions uses for its own promotion
+// predicate (a structured `item.year` field present — never re-parsed
+// from rawTitle text, matching resolveFamilyYearConsensus's own field
+// source) — required so the year-axis title-independence check clusters
+// exactly the rows the year-promotion predicate counted, never a
+// silently different population (same population-consistency
+// requirement Fix 4's issue-axis rescue was built under). Deliberately
+// does NOT apply the dedup-key/NON_GENUINE_COPY_RE screen
+// getAssertingIssueRows uses — analyzeYearAssertions itself has no such
+// screen either (it dedupes nothing, excludes nothing beyond "does this
+// row have a year field") — reusing a stricter population here would
+// once again be measuring against the wrong population, the exact
+// disease this comment exists to avoid.
+export const getAssertingYearRows = (indices, visualItems) => {
+  const rows = Array.isArray(indices) ? indices : [];
+  const asserting = [];
+  for (const idx of rows) {
+    const item = visualItems?.[idx];
+    if (item == null) continue;
+    const rowYear = typeof item !== 'string' ? item?.year : null;
+    if (rowYear == null) continue;
+    const raw = String(typeof item === 'string' ? item : (item?.rawTitle || item?.title || '')).trim();
+    if (!raw) continue;
+    asserting.push({ idx, rawTitle: raw });
+  }
+  return asserting;
+};
+
 /**
  * Track B Phase 0, Commit 4.1 — family-scoped year consensus. Mirrors
  * resolveFamilyIssueConsensus's own scoping pattern (family.topFamily.indices
@@ -1708,6 +1785,18 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // locally, so out.identityProvisionalFields can include 'year' when its
   // mode is 'adopted', mirroring exactly how 'issue' already gets added.
   let familyYearConsensusResult = null;
+  // GrailKey Dispatch 26, Fix 4 (2026-08-08) — hoisted from their original
+  // declaration point (just above the vision-zero-support block, further
+  // down this function) so the zero-support unanimous-rescue branch
+  // (inside the isQualifiedFamilyForRetention block below, which runs
+  // BEFORE the original declaration point) can assign matchConfidenceDemote/
+  // visionZeroSupport directly on a successful rescue, instead of
+  // threading a second, parallel signal back out. identityEscalation
+  // moved alongside for the same reason these three have always been
+  // declared as one group — no behavior change for any existing reader.
+  let identityEscalation = null;
+  let matchConfidenceDemote = false;
+  let visionZeroSupport = null;
 
   // Ship 26.2 — Family candidate overrides when top-rank-protection or
   // weighted-consensus selected. Takes precedence over visualConsensus
@@ -2134,6 +2223,191 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
       `year outcome=${yearDecision.outcome} resolved=${yearDecision.resolvedValue ?? 'null'} authoritative=${yearDecision.authoritativeForCustody} ` +
       `support=${yearMeasurement.support}/${yearMeasurement.uniqueRows}`
     );
+
+    // GrailKey Dispatch 26, Fix 4 (2026-08-08) — zero-support unanimous
+    // rescue. decideFieldAuthority's Rule D (just above) correctly
+    // refuses to let a qualified family silently overwrite a CONFIDENT
+    // Vision assertion — that protection is untouched (see
+    // decideFieldAuthority's own doc comment). But Rule D's confidence
+    // check has no visibility into the RAW, unclustered pool: a Vision
+    // issue that is not just unsupported inside this one family but has
+    // ZERO support anywhere in the raw pool either is not "confident
+    // with weak corroboration" — it is confident with NO corroboration
+    // at all, exactly the "confident and wrong" shape the standing
+    // product principle exists to prevent (see the vision-zero-support
+    // block below, whose ESCALATE branch this rescue preempts for this
+    // one narrow shape). Six required conditions, ALL of, none optional
+    // (GrailKey Dispatch 26):
+    //   1. Rule D actually produced the conflicted/non-authoritative
+    //      outcome this fires on top of — never touches 'adopted'/
+    //      'corroborated'/'preserved-prior', which already resolved.
+    //   2. vision.priorIndependentlyTrusted === false — a user
+    //      correction or barcode read must never be overridden. RE-VERIFIED
+    //      (P0 review, GrailKey Dispatch 26, 2026-08-08) after the initial
+    //      Step A finding alone was correctly challenged as insufficient —
+    //      two independent structural facts, not one, close this off
+    //      completely:
+    //      (a) api/enrich.js's identity resolution is a plain
+    //      if(barcodeIdentity){}else if(manualIdentity){}else
+    //      if(cgcIdentityConfirmed){}else{identity=resolveIdentity(...)} —
+    //      a genuine mutually-exclusive chain, not a fallthrough (confirmed
+    //      by direct read, ~api/enrich.js:2860-2896). Only the final `else`
+    //      calls resolveIdentity at all.
+    //      (b) The one remaining question was whether a POST-scan
+    //      correction request (manualAuthority, Commit 3) could somehow
+    //      reach the resolveIdentity branch without also tripping (a) —
+    //      it cannot: manualCorrection.js's isValidManualAuthorityRequestContract
+    //      (manualCorrection.js:195-199) requires body.manualIdentity===true
+    //      as one of its four hard conditions before prepareManualCorrectionRequest
+    //      will ever return valid:true. Any request that successfully
+    //      supplies a manual correction therefore ALSO satisfies (a)'s
+    //      `manualIdentity` branch on that exact same request — there is no
+    //      shape where a correction lands but (a)'s bypass doesn't fire.
+    //      Combined with (a), a trusted prior structurally cannot reach
+    //      this function today via ANY known route — checked here anyway
+    //      as defense in depth against a future second call site that
+    //      doesn't share this structure.
+    //   3. Raw-pool zero support — isIssueZeroSupport, the SAME helper
+    //      and floor the vision-zero-support block below already uses,
+    //      not recomputed.
+    //   4/5. evaluateUnanimousConsensusPromotion (issueAuthority.js) —
+    //      the SAME predicate Fix 2 uses, reused verbatim, never a
+    //      second parallel implementation: uniqueRows>=4, exact
+    //      unanimity, no issue-tally runner-up, weightSum>=8, distinct
+    //      itemId AND distinct sellerUsername.
+    //   6. evaluateTitleTextIndependence (issueAuthority.js) — >=3
+    //      distinct title-wording clusters (Jaccard >=0.7) among the
+    //      asserting rows only (getAssertingIssueRows, above — same
+    //      population evaluateUnanimousConsensusPromotion's own asserting
+    //      rows come from). Closes the gap distinct-seller/distinct-
+    //      itemId alone cannot: those prove independent POSTING, not
+    //      independent IDENTIFICATION — marketplace title-copy
+    //      propagation produces N distinct sellers carrying ONE
+    //      propagated error (see Pattern Library, "independent posting
+    //      is not independent identification"). Threshold fixed before
+    //      being run against real data; no margin requirement — see the
+    //      Pattern Library entry for why a margin was deliberately NOT
+    //      added.
+    // Any single condition failing leaves Rule D's outcome untouched —
+    // ESCALATE stands, current behavior. [commit4.3-zero-support-rescue]
+    // logs every input on BOTH the fire and decline path — never silent.
+    if (
+      issueDecision.outcome === 'conflicted'
+      && issueDecision.authoritativeForCustody === false
+      && priorTrusted === false
+      && vision.issue != null
+      && isIssueZeroSupport(ebay?.agreement?.visionIssueCount, ebay?.agreement?.total)
+    ) {
+      const promotion = evaluateUnanimousConsensusPromotion(issueMeasurement, family, opts.visualItems);
+      const assertingRows = getAssertingIssueRows(family.topFamily.indices, opts.visualItems);
+      const independence = evaluateTitleTextIndependence(assertingRows.map((r) => r.rawTitle));
+      const rescueEligible = promotion.promote && independence.pass;
+      console.log(
+        `[commit4.3-zero-support-rescue] ${rescueEligible ? 'FIRE' : 'DECLINE'} ` +
+        `visionIssue="${vision.issue}" familyIssue=#${issueMeasurement.winner ?? 'null'} ` +
+        `rawPoolSupport=${ebay?.agreement?.visionIssueCount ?? 'null'}/${ebay?.agreement?.total ?? 'null'} ` +
+        `promotion.promote=${promotion.promote} promotion.declineReason=${promotion.declineReason ?? 'none'} ` +
+        `uniqueRows=${promotion.inputs.uniqueRows} support=${promotion.inputs.support} runnerUp=${promotion.inputs.runnerUp} weightSum=${promotion.inputs.weightSum} ` +
+        `uniqueItemIdCount=${promotion.inputs.uniqueItemIdCount ?? 'n/a'}/${promotion.inputs.itemIdCount ?? 'n/a'} ` +
+        `uniqueSellerCount=${promotion.inputs.uniqueSellerCount ?? 'n/a'}/${promotion.inputs.sellerCount ?? 'n/a'} ` +
+        `independence.pass=${independence.pass} assertingRows=${independence.assertingRows} ` +
+        `distinctClusters=${independence.distinctClusters} largestClusterSize=${independence.largestClusterSize} ` +
+        `maxPairwiseJaccard=${independence.maxPairwiseJaccard ?? 'n/a'} minPairwiseJaccard=${independence.minPairwiseJaccard ?? 'n/a'} ` +
+        `clusters=${JSON.stringify(independence.clusters)}`
+      );
+      if (rescueEligible) {
+        confirmedIssue = issueMeasurement.issue ?? issueMeasurement.winner;
+        familyIssueConsensusResult = {
+          ...familyIssueConsensusResult,
+          issue: confirmedIssue,
+          mode: 'unanimous-zero-support-rescue',
+          resolvedValue: confirmedIssue,
+          outcome: 'rescued',
+          authoritativeForCustody: true,
+        };
+        matchConfidenceDemote = true;
+        visionZeroSupport = {
+          mode: 'rescue',
+          visionIssue: vision.issue,
+          adoptedIssue: confirmedIssue,
+          poolTotal: ebay?.agreement?.total ?? null,
+        };
+        identitySource = `${identitySource}+zero_support_unanimous_rescue`;
+      }
+    }
+
+    // GrailKey Dispatch 26, Fix 4b (2026-08-08) — year-axis mirror of the
+    // rescue above. Fix 4 alone left a real gap: confirmedYear stays at
+    // Rule D's preserved, unverified Vision value even after the issue is
+    // rescued — reported and confirmed by trace (Fix 4b scoping): the
+    // book would go from an honest ID_REQUIRED block to a confident-and-
+    // wrong price against a fabricated year, poisoning five separate
+    // downstream consumers (getEraYearTolerance's three call sites,
+    // ComicVine's ±4y strict filter, PriceCharting's own product-match
+    // gate AND query construction). Fix 4 and Fix 4b ship together for
+    // exactly this reason — Fix 4 without this is a net regression on
+    // this book's own axis (an honest block becoming a wrong price is
+    // worse than the block, per the standing "honest and locked, never
+    // confident and wrong" principle), not merely incomplete.
+    //
+    // Four conditions (not six) — deliberately narrower than the issue
+    // axis. Conditions 1/2 mirror the issue rescue exactly (Rule D fired
+    // for THIS axis; untrusted prior, same `priorTrusted` local already
+    // computed above — reused, not recomputed). Conditions 3/4 reuse
+    // Fix 2b's own year predicate and condition 6's title-independence
+    // check, both verbatim, both required (GrailKey Dispatch 26, Fix 4b
+    // Q1/Q2 — condition 6 is NOT optional here: a copy-pasted listing
+    // title carries a copy-pasted year exactly as it carries a
+    // copy-pasted issue number, and a wrong year gates five downstream
+    // consumers versus mislabeling one card). There is NO raw-pool
+    // zero-support condition on this axis (unlike the issue axis's
+    // condition 3) — no equivalent primitive exists anywhere in this
+    // codebase (no `ebay.agreement.visionYearCount`, no
+    // isYearZeroSupport) and none is built here; inventing one would be
+    // new functionality, not verbatim reuse, and was not part of what
+    // was scoped or approved.
+    if (
+      yearDecision.outcome === 'conflicted'
+      && yearDecision.authoritativeForCustody === false
+      && priorTrusted === false
+    ) {
+      const yearPromotion = evaluateUnanimousYearConsensusPromotion(family, opts.visualItems, yearMeasurement);
+      const assertingYearRows = getAssertingYearRows(family.topFamily.indices, opts.visualItems);
+      const yearIndependence = evaluateTitleTextIndependence(assertingYearRows.map((r) => r.rawTitle));
+      const yearRescueEligible = yearPromotion.promote && yearIndependence.pass;
+      console.log(
+        `[commit4.3-year-zero-support-rescue] ${yearRescueEligible ? 'FIRE' : 'DECLINE'} ` +
+        `visionYear="${vision.year}" familyYear=${yearPromotion.year ?? 'null'} ` +
+        `promotion.promote=${yearPromotion.promote} promotion.declineReason=${yearPromotion.declineReason ?? 'none'} ` +
+        `assertingRows=${yearPromotion.inputs.assertingRows} silentRows=${yearPromotion.inputs.silentRows} dissentingRows=${yearPromotion.inputs.dissentingRows} ` +
+        `uniqueItemIdCount=${yearPromotion.inputs.uniqueItemIdCount ?? 'n/a'}/${yearPromotion.inputs.itemIdCount ?? 'n/a'} ` +
+        `uniqueSellerCount=${yearPromotion.inputs.uniqueSellerCount ?? 'n/a'}/${yearPromotion.inputs.sellerCount ?? 'n/a'} ` +
+        `independence.pass=${yearIndependence.pass} assertingTitleRows=${yearIndependence.assertingRows} ` +
+        `distinctClusters=${yearIndependence.distinctClusters} largestClusterSize=${yearIndependence.largestClusterSize} ` +
+        `maxPairwiseJaccard=${yearIndependence.maxPairwiseJaccard ?? 'n/a'} minPairwiseJaccard=${yearIndependence.minPairwiseJaccard ?? 'n/a'} ` +
+        `clusters=${JSON.stringify(yearIndependence.clusters)}`
+      );
+      if (yearRescueEligible) {
+        confirmedYear = yearPromotion.year;
+        familyYearConsensusResult = {
+          ...familyYearConsensusResult,
+          year: confirmedYear,
+          mode: 'unanimous-year-zero-support-rescue',
+          resolvedValue: confirmedYear,
+          outcome: 'rescued',
+          authoritativeForCustody: true,
+        };
+        identitySource = `${identitySource}+year_zero_support_unanimous_rescue`;
+      }
+      // DECLINE is deliberately a no-op here — familyYearConsensusResult
+      // stays at whatever legacyModeFor already produced ('conflict-locked'
+      // for this exact shape, since Rule D's 'conflicted' outcome is only
+      // reachable when familyMode==='adopted'). api/enrich.js reads that
+      // mode directly to decide whether to mark 'year' provisional (HARD
+      // CONSTRAINT: an unresolved year must keep the book blocked, not
+      // price against the unverified value) — no separate signal needed
+      // from this function.
+    }
   } else if (familyIssueConsensusResult == null && isNearMissMarginDecline) {
     // Track B Phase 0, Commit 4.3.1 (Section A, 2026-07-31) —
     // RETENTION-DECLINE FAIL-CLOSED CONTAINMENT. All four Commit 4.3
@@ -2291,9 +2565,9 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // Slabs excluded: Q106 established the visual pool is a confirmed-
   // unreliable witness for graded books (CGC cert page is authoritative
   // there, not the image-search pool) — isGraded books never reach here.
-  let identityEscalation = null;
-  let matchConfidenceDemote = false;
-  let visionZeroSupport = null;
+  // (identityEscalation/matchConfidenceDemote/visionZeroSupport are
+  // declared earlier in this function now — GrailKey Dispatch 26, Fix 4 —
+  // so the zero-support unanimous-rescue branch above can assign them.)
   const reprintRatio = computeReprintDominanceRatio(opts.visualItems);
   const poolReprintDominant = reprintRatio != null && reprintRatio >= REPRINT_DOMINANCE_THRESHOLD;
 
@@ -2334,7 +2608,17 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // custody-authoritative for this value"), which is specifically false
   // here.
   const isNearMissConflictActive = familyIssueConsensusResult?.reason === 'retention-margin-decline-conflict';
-  const familyAuthoritySkip = isNearMissConflictActive || (familyAuthorityCurrent
+  // GrailKey Dispatch 26, Fix 4 — the zero-support unanimous-rescue branch
+  // above already overwrote confirmedIssue/familyIssueConsensusResult
+  // directly when it fires; without this check, the raw-pool zero-support
+  // block just below would run RIGHT ON TOP of that decision (raw-pool
+  // support is unchanged — still zero — so its own condition would still
+  // be true) and immediately null confirmedIssue right back out via
+  // ESCALATE, silently undoing the rescue. Mirrors isNearMissConflictActive's
+  // exact shape just above (derived from the already-set mode/reason, not
+  // a separately-threaded flag).
+  const isZeroSupportRescueActive = familyIssueConsensusResult?.mode === 'unanimous-zero-support-rescue';
+  const familyAuthoritySkip = isNearMissConflictActive || isZeroSupportRescueActive || (familyAuthorityCurrent
     && (familyIssueConsensusResult.mode === 'adopted' || familyIssueConsensusResult.mode === 'corroborated')
     && familyIssueConsensusResult.issue != null
     && String(familyIssueConsensusResult.issue) === String(confirmedIssue));
@@ -2350,6 +2634,11 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     console.log(
       `[vision-zero-support] SKIPPED reason=retention-margin-decline-conflict ` +
       `— a near-miss family conflict is already recorded for this field; raw-pool override/escalate must not run on top of it`
+    );
+  } else if (isZeroSupportRescueActive) {
+    console.log(
+      `[vision-zero-support] SKIPPED reason=zero-support-unanimous-rescue ` +
+      `— confirmedIssue already rescued to #${confirmedIssue} by the qualified-family zero-support predicate; raw-pool override/escalate must not run on top of it`
     );
   } else if (familyAuthoritySkip) {
     console.log(

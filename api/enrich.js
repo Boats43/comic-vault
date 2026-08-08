@@ -3225,6 +3225,93 @@ export default async function handler(req, res) {
             console.log(retentionEvidenceLog.logLine);
           }
         }
+      } else if (identity.familyIssueConsensus?.mode === 'unanimous-zero-support-rescue') {
+        // GrailKey Dispatch 26, Fix 4 (2026-08-08) — zero-support unanimous
+        // rescue landed in resolveIdentity (identityCore.js), which already
+        // overwrote confirmedIssue and stamped familyIssueConsensus.mode to
+        // this sentinel after clearing all six required conditions (see
+        // that function's own comment for the full list). This branch's
+        // only job is wiring the decision into out.issueAuthority — a
+        // DISTINCT reason string from Fix 2's 'unanimous-marketplace-
+        // consensus', never reused: that string documents "no prior
+        // Vision/user issue existed to corroborate against"
+        // (deriveIssueAuthorityFromAdoption's own invariant, this file);
+        // here Vision's prior DID exist and was actively, deliberately
+        // overridden. Reusing Fix 2's string would be a false provenance
+        // claim (GrailKey Dispatch 26, Q2). status: 'confirmed' directly,
+        // no 'provisional' staging step — the six conditions already ARE
+        // the promotion-strength bar, and computeIssueAuthorityContractPatch/
+        // canUseExactIssuePricingCache both require exactly 'confirmed' to
+        // unblock price/cache (issueAuthority.js:639-697/690-697).
+        // GrailKey Dispatch 26 (2026-08-08), P1 review finding — deliberately
+        // does NOT set out.identityProvisionalFields = ['issue']. Caught in
+        // review: status:'confirmed' immediately below plus a provisional-
+        // fields entry for the SAME field is a contradictory pair —
+        // getCorrectableFields (src/lib/manualCorrection.js, real call site
+        // App.jsx:6001) unions identityMissingFields with
+        // identityProvisionalFields with no awareness of issueAuthority.status
+        // at all, so setting it here would render an "Issue #" correction
+        // input on a card whose issue was just confirmed via a strict
+        // six-condition bar — mislabeling a strong result as needing
+        // verification. Mirrors Fix 2b's own already-shipped precedent for
+        // the YEAR axis exactly (issueAuthority.js's evaluateUnanimousYearConsensusPromotion
+        // doc comment: "'year' NOT appended to identityProvisionalFields at
+        // all... not appending is the only correct way to represent 'not
+        // provisional'" — there is no removal mechanism anywhere in this
+        // codebase, so never adding it is the only correct move). Fix 2
+        // itself (the issue axis, mode==='adopted' branch above) does NOT
+        // follow this same discipline — it always sets ['issue'] via
+        // deriveIssueAuthorityFromAdoption BEFORE its own promotion check
+        // runs, and never removes it after promoting to 'confirmed' — a
+        // pre-existing asymmetry, flagged here, deliberately NOT touched
+        // (out of scope for this diff; Fix 2 already shipped and this
+        // branch doesn't reuse its code path).
+        const fic = identity.familyIssueConsensus;
+        out.issueAuthority = {
+          source: 'marketplace',
+          status: 'confirmed',
+          confidence: 'high',
+          supportRatio: Number((fic.ratio ?? 1).toFixed(2)),
+          reasons: ['unanimous-marketplace-consensus-zero-support-rescue'],
+          priorObservations: issueNum != null
+            ? [{ value: issueNum, source: 'vision', status: 'conflicted', provenanceTrust: 'vision-zero-support' }]
+            : [],
+        };
+        console.log(
+          `[commit4-rescue] issueAuthority=confirmed (zero-support-unanimous-rescue): ` +
+          `issue=#${fic.issue ?? fic.winner} visionIssue=#${issueNum ?? 'null'} — ` +
+          `Vision's own issue had zero support in both the raw pool and the winning family`
+        );
+
+        // GrailKey Dispatch 26, Fix 4b (2026-08-08) — HARD CONSTRAINT: an
+        // issue rescue must never silently open the pricing path on a year
+        // we don't trust. `identity.familyYearConsensus?.mode ===
+        // 'conflict-locked'` is the exact, narrow signal for "Rule D fired
+        // on the year axis and was not (or could not be) rescued" — it can
+        // ONLY be produced when familyMode==='adopted' AND the decision
+        // outcome wasn't 'adopted'/'provisionally-corrected'/'corroborated'
+        // (decideFieldAuthority/legacyModeFor, identityCore.js), i.e. a
+        // genuine unresolved disagreement, never a benign 'preserved'/
+        // 'no-data'/'no-consensus' shape — so this check never over-blocks
+        // a year that was actually fine.
+        //
+        // This branch would otherwise be silently skipped for THIS row:
+        // the pre-existing year-conflict detector
+        // (deriveIssueAuthorityFromAdoption's own year branch, further
+        // below in this file) only runs inside `if (out.issueAuthority ==
+        // null)` — which is now false, since out.issueAuthority was just
+        // set above. Confirmed by trace during Fix 4b scoping, not
+        // assumed: without this explicit check, a rescued-issue row with
+        // an unresolved year would fall through with identityProvisionalFields
+        // untouched, and price would proceed against the unverified year.
+        if (identity.familyYearConsensus?.mode === 'conflict-locked') {
+          out.identityProvisionalFields = [...(Array.isArray(out.identityProvisionalFields) ? out.identityProvisionalFields : []), 'year'];
+          console.log(
+            `[commit4-rescue] year NOT rescued (mode=conflict-locked) — identityProvisionalFields += 'year', ` +
+            `keeps the book blocked via the existing yearOnlyProvisional contract patch (issueAuthority.js) ` +
+            `rather than pricing against confirmedYear="${identity.confirmedYear}"`
+          );
+        }
       }
 
       // Track B Phase 0, Commit 4.3 (PRODUCTION AUTHORITY-CONTEXT
@@ -3265,11 +3352,19 @@ export default async function handler(req, res) {
 
       // P0 (Q-VISION-ZERO-SUPPORT) — surface the loud override/escalate
       // note for the card UI + one-tier match-confidence demotion below.
+      // GrailKey Dispatch 26, Fix 4 — third mode 'rescue' reuses this SAME
+      // existing surface (rather than inventing a parallel UI field) for
+      // the zero-support unanimous-rescue case: Vision confident and
+      // wrong, corrected via a much stronger bar than a plain pool
+      // plurality (evaluateUnanimousConsensusPromotion + title-text
+      // independence, not just ebay.issue).
       if (identity.visionZeroSupport) {
         out.visionZeroSupport = {
           ...identity.visionZeroSupport,
           note: identity.visionZeroSupport.mode === 'override'
             ? `Vision read issue #${identity.visionZeroSupport.visionIssue}, but the comp pool shows zero support for that number — corrected to #${identity.visionZeroSupport.adoptedIssue}. Please verify.`
+            : identity.visionZeroSupport.mode === 'rescue'
+            ? `Vision read issue #${identity.visionZeroSupport.visionIssue}, but neither the comp pool nor the matching listings support it — corrected to #${identity.visionZeroSupport.adoptedIssue} from a unanimous, independently-worded group of listings. Please verify.`
             : `Vision read issue #${identity.visionZeroSupport.visionIssue}, but the comp pool shows zero support and no adoptable alternate — identity requires manual verification.`,
         };
       }
@@ -3697,7 +3792,29 @@ export default async function handler(req, res) {
     // equals vision.year by resolveIdentity's own initial-declaration
     // fallthrough — this is byte-identical to the pre-existing behavior
     // (pcQueryYear === year). Zero blast radius on normal identification.
-    const pcQueryYear = identityIsProvisionalOverride ? confirmedYear : year;
+    //
+    // GrailKey Dispatch 26, Fix 4b (2026-08-08) — NARROW SENTINEL, not a
+    // reuse of identityIsProvisionalOverride. That flag fans out to seven
+    // consumers (audited directly: this one, a publisher fallback, a
+    // confirmedVariant init, a refused-identity-only branch, two terminal
+    // out.year/out.publisher fallbacks); five of the seven were confirmed
+    // NOT to need the year-rescue signal — either irrelevant to year, or
+    // already short-circuiting on an always-truthy confirmedYear before
+    // the flag is ever consulted — reusing the broad flag would mean
+    // silently inheriting behavior designed for the title-override/
+    // refused-identity-conflict shapes it was actually built for. Same
+    // "measuring against the wrong question" disease this whole dispatch
+    // has been naming (Fix 2b's denominator, Fix 2c's `.issue`/`.winner`,
+    // Rule D's own confidence carve-out) — reused mechanisms only for the
+    // TWO consumers the audit proved need it (this one and
+    // yearForResolution below), each via its own explicit, narrow check.
+    // Justified specifically here (not just "it's a good idea"): a wrong
+    // confirmedYear poisons the PriceCharting QUERY itself — PC returns
+    // nothing (or the wrong product) for a correctly-identified book
+    // regardless of what any downstream filter does afterward.
+    const pcQueryYear = (identityIsProvisionalOverride || identity?.familyYearConsensus?.mode === 'unanimous-year-zero-support-rescue')
+      ? confirmedYear
+      : year;
 
     // Session 6/20/26 — Cache lookups (5-min TTL, same as Anthropic prompt cache)
     // Crow fix — PC cache key MUST include year (year validation makes year-dependent results)
@@ -4488,7 +4605,17 @@ export default async function handler(req, res) {
     // for every case except the provisional outcome specifically —
     // including the general (non-provisional) refused-conflict sub-case,
     // where confirmedYear already legitimately equals vision.year.
-    const yearForResolution = identityIsProvisionalOverride ? confirmedYear : year;
+    // GrailKey Dispatch 26, Fix 4b — same narrow sentinel as pcQueryYear
+    // above, not identityIsProvisionalOverride (see that site's comment
+    // for the seven-consumer audit). This is the site that determines
+    // what resolveYear() itself receives as its own "prior" — without it,
+    // resolveYear would be handed the raw, still-fabricated `year` field
+    // and could re-derive the wrong value even after resolveIdentity
+    // already corrected it, the year-axis instance of Fix 4's own
+    // "two parallel symptoms" trap.
+    const yearForResolution = (identityIsProvisionalOverride || identity?.familyYearConsensus?.mode === 'unanimous-year-zero-support-rescue')
+      ? confirmedYear
+      : year;
     const yearResolution = resolveYear(
       yearForResolution,
       pcYear,

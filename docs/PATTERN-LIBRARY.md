@@ -3216,3 +3216,129 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   available for this class of bug in this codebase, evidenced by a 4-for-4
   hit rate in one session once someone started asking it explicitly.
 
+- **CORRECTED (2026-08-08, GrailKey Dispatch 26, before any code was
+  written) — Dispatch 26's own opening diagnosis was wrong about WHICH
+  gate blocked the Spawn #351 (Cover C Brett Booth virgin variant) family
+  alternate, and the wrong framing is retracted here rather than left
+  standing.** The dispatch's initial repro writeup attributed the miss to
+  "a TITLE-axis block suppressed an ISSUE-axis adoption" — i.e., Q84's
+  title-safety gate (`family.decision === 'fallback-vision'`). Verified
+  false by direct source read (STEP A, `identityCore.js`) before any fix
+  was scoped: Commit 4.3's retention branch (`isQualifiedFamilyForRetention`,
+  ~line 2031) exists specifically to survive a Q84 title-axis block, and it
+  fired correctly on this exact scan — the family's 4/4=100% unanimous
+  issue consensus (`#351`, weightSum 13.0) WAS measured and reached
+  `decideFieldAuthority` (`identityCore.js:1505`). Q84 is not the gate that
+  discarded the alternate; Commit 4.3 already defeats that mechanism, as
+  designed.
+
+  The real gate is `decideFieldAuthority`'s Rule D (`identityCore.js:1561-1564`,
+  GrailKey Dispatch 25's own IMPLEMENTATION PACKET HOLD): a Vision prior
+  that is untrusted (`priorIndependentlyTrusted=false`) but self-reports
+  `confidence:'high'`, with ZERO support inside an otherwise-unanimous
+  qualified family, is deliberately routed to `outcome:'conflicted',
+  authoritativeForCustody:false` rather than silently adopting the
+  family's value — a design decision from Dispatch 25 to protect a
+  confident Vision read from being silently overridden. `legacyModeFor`
+  then maps that to the legacy mode `'conflict-locked'`
+  (`identityCore.js:2095`), which fails `familyAuthoritySkip`'s
+  `mode==='adopted'||'corroborated'` check (~line 2338), and the
+  zero-support ESCALATE branch (~line 2361) falls through to a check of
+  the RAW, unclustered pool's `ebay.issue`/`ebay.noIssueConsensus` only —
+  never re-consulting `familyIssueConsensusResult`, which is fully present
+  at that point but was already read once (for the coarse skip check) and
+  discarded.
+
+  Net effect unchanged from the dispatch's original conclusion (a real,
+  unanimous family alternate is discarded in favor of ID_REQUIRED) — only
+  the MECHANISM was misattributed. Filed as its own entry, not folded into
+  the "wrong population" pattern above: this is a different disease
+  (correct population, correct measurement, but a confidence-based override
+  rule applied to a case — Vision confident on a virgin variant with no
+  printed issue number, 0/20 raw-pool support, 0/4 family support — where
+  the self-reported confidence itself has no corroboration and should not
+  have earned the veto). Fix 4 (scoping in progress) targets Rule D's
+  confidence carve-out directly, not the population-measurement class of
+  bug this correction sits next to.
+
+- **"Independent posting is not independent identification" (2026-08-08,
+  GrailKey Dispatch 26, Fix 4 scoping) — caught by asking the risk
+  question before shipping, not by a test.** While scoping Fix 4's
+  zero-support rescue predicate (reuses `evaluateUnanimousConsensusPromotion`,
+  `issueAuthority.js`), the question "construct a case where Vision is
+  right and a unanimous, distinct-seller family is wrong" produced a
+  concrete, realistic answer: eBay sellers routinely copy a competitor's
+  listing title verbatim for search-ranking reasons (a well-documented,
+  non-adversarial marketplace behavior, not collusion). If the first
+  seller to list a hard-to-identify book (a no-printed-issue-number
+  virgin variant, exactly Fix 3's target class) mislabels it, later
+  sellers copying that title text propagate the identical wrong number
+  under their own distinct account, distinct item ID, distinct listing.
+  `checkDistinctItemIdAndSeller` (`issueAuthority.js:188-210`) — the
+  anti-collusion guard `evaluateUnanimousConsensusPromotion` already
+  relies on for both the issue-axis and year-axis unanimous-promotion
+  predicates (Fix 2/2b, this same dispatch) — answers "were these
+  listings independently POSTED," which it does correctly. It cannot
+  answer, and was never built to answer, "did these sellers independently
+  IDENTIFY the book." Four distinct sellers carrying one propagated
+  labeling error look identical, to that check, to four sellers who each
+  independently read the cover and agreed.
+
+  The fix is not a new axis of distrust — it's a signal already latent in
+  the data. Copy-propagated titles are near-identical strings; independently-
+  authored titles describing the same real book diverge in wording,
+  ordering, and which details get mentioned. Verified directly against the
+  real Spawn #351 repro's four family-member titles: pairwise Jaccard
+  token-set similarity (the same metric `buildTitleFamilies` already uses
+  for coarse family formation, `imageSearchIdentity.js:1046-1055`, reapplied
+  within a family at a much higher threshold to detect near-duplicates
+  rather than same-book clustering) separates one genuinely-copied pair
+  (0.929) from every other pairing (0.368–0.538) with a clean gap — the
+  two listings sharing the identical "cameo of lyra htf scarce" boilerplate
+  phrase are the copy-propagated pair; the other two are independently
+  worded. See Fix 4's sixth condition (title-text independence, ≥3 distinct
+  clusters among asserting rows) for the shipped predicate.
+
+  General lesson, stated for reuse: **any predicate that treats
+  seller-distinctness or listing-ID-distinctness as evidence of
+  independent corroboration is measuring the wrong thing** — distinct
+  postings prove nothing about how many people actually looked at the
+  book and formed an opinion, only that nobody technically reused an
+  account. Anywhere this codebase leans on "N distinct sellers" as a
+  trust signal (currently: `checkDistinctItemIdAndSeller`, both call
+  sites) should be read as "N distinct postings, authorship not yet
+  verified" until a text-independence check like this one is layered on
+  top.
+
+- **GK-38 (2026-08-08, GrailKey Dispatch 26) — Fix 2's issue-axis path
+  renders a correction box on a book it just confirmed. LOG ONLY, not
+  fixed this pass.** Found while reviewing Fix 4's own `out.issueAuthority`/
+  `out.identityProvisionalFields` wiring (P1-1, same dispatch): Fix 2's
+  promotion call site (`api/enrich.js`, the `mode==='adopted'` branch)
+  calls `deriveIssueAuthorityFromAdoption`, which unconditionally returns
+  `identityProvisionalFields: ['issue']` for the 'adopted' case
+  (`issueAuthority.js:508`) — set BEFORE Fix 2's own promotion check
+  (`evaluateUnanimousConsensusPromotion`) even runs, and never revisited
+  afterward. When promotion succeeds and `out.issueAuthority.status`
+  becomes `'confirmed'`, `out.identityProvisionalFields` still carries
+  `'issue'` — `getCorrectableFields` (`manualCorrection.js:286-291`, real
+  render site `App.jsx:6001`) unions `identityProvisionalFields` with
+  `identityMissingFields` with no awareness of `issueAuthority.status` at
+  all, so a Fix-2-promoted book renders an "Issue #" correction input
+  exactly as if the issue were still an unconfirmed marketplace guess.
+  Contrast Fix 2b (year axis), which already gets this right by design —
+  its own doc comment: "'year' NOT appended to identityProvisionalFields
+  at all... not appending is the only correct way to represent 'not
+  provisional'" (there is no removal mechanism anywhere in this codebase,
+  so the only way to avoid this state is to never enter it). Fix 4's own
+  new rescue branch (this dispatch) was built correctly from the start —
+  it never sets `identityProvisionalFields` for the field it confirms,
+  matching Fix 2b's precedent rather than Fix 2's. Real, user-visible,
+  pre-existing (Fix 2 shipped GrailKey Dispatch 25, 2026-08-07) — not
+  touched here: fixing it means either making `deriveIssueAuthorityFromAdoption`
+  promotion-aware (a signature change) or having Fix 2's own promotion
+  block strip `'issue'` back out of `out.identityProvisionalFields` after
+  a successful promotion (no removal mechanism currently exists for that
+  either — would be the first). Scoping either belongs to its own
+  dispatch, not folded into Fix 4/4b.
+
