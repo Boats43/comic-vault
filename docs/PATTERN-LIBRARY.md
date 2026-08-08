@@ -3415,6 +3415,78 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   belongs to its own dispatch, scoped and greenlit on its own, not folded
   into a pricing fix under time pressure.
 
+  **GK-40 addendum (2026-08-08, GrailKey Dispatch 28) — a fourth
+  independent variant-token vocabulary, found while diagnosing why
+  `buildVerifiedActivePool`'s Q75 filter rejected the same 4 comps the
+  variant preference filter had just accepted.**
+  `src/lib/priceBands.js:329`, `VARIANT_CONTAM_ACTIVE = /\b(1:25|1:50|
+  1:100|1:500|incentive|sketch|virgin|timeless|ratio|exclusive|
+  convention|sdcc|nycc)\b/i` — its own bare hand-rolled list, matching
+  none of the three named above. **Confirmed NOT the actual cause of the
+  Q75 rejection** (GrailKey Dispatch 28 STEP A1): the real defect was a
+  stale INPUT VALUE (`safeReqVariant`, pre-consensus, passed where
+  `confirmedVariant` was needed — see the "deferred debt" entry below),
+  not the vocabulary itself — even a perfectly shared vocabulary would
+  have misfired against the wrong input. **Deliberately NOT touched**
+  when the real fix shipped: with `confirmedVariant` correctly wired,
+  `scanIsVariant` is true and this regex never evaluates for this class
+  of book — the vocabulary divergence goes DORMANT, not fixed. Flagging
+  explicitly: a future change that nulls or bypasses `confirmedVariant`
+  on this code path reactivates this exact divergence. Left for the
+  consolidation dispatch GK-40 already scopes.
+
+- **"Deferred debt promoted to live by a downstream fix's success"
+  (2026-08-08, GrailKey Dispatch 28) — a distinct class from GK-40's
+  vocabulary drift and from the wrong-population family. SHIPPED.**
+  `enrich.js:6529`'s `computePriceBandsFromSold` call passed
+  `variant: safeReqVariant` (the raw, pre-consensus request field)
+  instead of `confirmedVariant` — one wrong variable, two simultaneous
+  symptoms: `buildVerifiedActivePool`'s Q75 filter (`priceBands.js`)
+  saw a false `scanIsVariant=false` and rejected a book's own confirmed-
+  variant active comps down to zero; `isActivePoolVariantConfirmed`'s
+  `!variant` early-return starved GK-31's own already-shipped
+  `activeAnchoredOverFallbackSold` mechanism — built specifically to
+  anchor to a confirmed variant-matched active pool instead of blending
+  in wrong-variant sold-fallback data — so it never got the chance to
+  fire even though the exact condition it exists for was present.
+
+  This was not a fresh oversight. `enrich.js:5152-5167` (Commit D2,
+  2026-08-02) explicitly named this exact gap and consciously deferred
+  it: *"req.body.variant itself is left untouched for its other
+  existing consumers (variant-multiplier block, computePriceBandsFromSold,
+  AI-verify prompt) — out of scope for this dispatch."* The gap sat
+  inert for six days because `confirmedVariant` was categorically never
+  populated from backfill at all before Fix 27-A (GrailKey Dispatch 27)
+  — `safeReqVariant` and `confirmedVariant` were identical (both null)
+  for any book reaching this shape, so the wrong-variable bug had no
+  observable effect. The moment Fix 27-A started producing real,
+  non-null backfilled values, the six-day-old deferred gap became
+  load-bearing on the very next relevant scan.
+
+  Fixed as a bare one-line substitution (`variant: safeReqVariant` →
+  `variant: confirmedVariant`), not a composite re-guarded expression —
+  verified, not assumed, that `confirmedVariant` already carries both
+  guards `safeReqVariant` encodes (`suppressVariantForYearConflict` via
+  two redundant paths — `safeReqVariant`'s own null-out, which seeds
+  `confirmedVariant`, AND the separate `variantCheck = ... ? null : ...`
+  gate on the pool-consensus update itself — and `variantProvenanceValid`
+  the same way, plus Fix 27-A's own backfill path being independently
+  safe regardless since it's scoped to `confirmedIssue` by construction
+  via `filterItemsByIssue`). Re-deriving either guard a second time at
+  the pricing call site would have been exactly the kind of redundant,
+  independently-drifting logic GK-40's vocabularies show the cost of.
+  Every other consumer of the same parameter audited (`buildVerifiedSoldPool`
+  destructures `variant` but never reads it — confirmed dead, noted in
+  its own doc comment so a future reader doesn't wonder).
+
+  **The general check this implies, for reuse whenever a fix starts
+  producing real values in a field that was categorically null/empty
+  before: grep every consumer of that field, AND every sibling variable
+  that was previously interchangeable with it while the field was
+  always empty — the divergence between them only becomes observable
+  once the field stops being empty, exactly like the value-vs-variable
+  confusion this entry documents.**
+
 - **Accepted residual risk (2026-08-08, GrailKey Dispatch 27, Fix
   27-A) — population contamination on `fallback-vision` variant
   extraction, defended by exact-unanimity, not by population-scoping.**
@@ -3455,4 +3527,34 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   would not have closed this specific residual case either. Accepted
   as a known, named, residual risk rather than built around, per
   explicit instruction.
+
+- **Fix 27-A PRODUCTION VALIDATION (2026-08-08, GrailKey Dispatch 28,
+  build `75a2ba3`).** The Spawn #351 re-scan fired exactly as predicted,
+  verbatim:
+  ```
+  [coverType-consensus] FIRE winner=virgin support=4/4 runnerUp=null
+    promotion.declineReason=none uniqueItemIdCount=4/4
+    uniqueSellerCount=4/4 independence.pass=true assertingRows=4
+    distinctClusters=3 largestClusterSize=2 maxPairwiseJaccard=1
+    minPairwiseJaccard=0.3888888888888889
+  [identity-write] field=confirmedVariant from="" to="virgin"
+    (source=ebay_image_consensus) site=variant-check-consensus fill=true
+  [comps] variant preference filter: before=35 after=4 kept=4
+    (match "virgin", mode=any, premium-variant isolation)
+  [evidence-target] variant="virgin" issueAuthorityStatus="confirmed"
+  ```
+  Three distinct clusters on the real production pool (the copy-
+  propagated pair scored `maxPairwiseJaccard=1.0` this time — a
+  verbatim duplicate rather than the near-duplicate 0.929 seen during
+  scoping; `minPairwiseJaccard=0.389` for the independents) — condition
+  6 held on real, not synthetic, data. The active-comp variant
+  preference filter (`api/comps.js`) correctly narrowed 35 candidates
+  to the 4 real virgin listings ($21.25-$26.50) using the newly-
+  confirmed variant. **Two further, previously-invisible bugs
+  surfaced downstream once `confirmedVariant` stopped being null for
+  the first time on this exact book** — `[Q75]` rejecting the same 4
+  rows the variant preference filter had just accepted, and the sold-
+  comp variant fallback re-admitting Cover A pricing data onto a now-
+  confirmed-virgin book — both scoped as their own dispatch (GrailKey
+  Dispatch 28), not fixed in this entry.
 

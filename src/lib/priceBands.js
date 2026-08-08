@@ -281,6 +281,16 @@ export function variantMatch(compTitle, expectedVariant) {
 /**
  * Build verified sold pool with exact-match filtering.
  * Returns array of verified sold comps with prices.
+ *
+ * GrailKey Dispatch 28 (2026-08-08) — `variant` (and `title`/`issue`, for
+ * that matter) is destructured but never read anywhere in this function
+ * body — confirmed by direct read while auditing every consumer of
+ * computePriceBands' own `variant` parameter (the exact-match filtering
+ * this comment describes already happened upstream, Trust Layer 10,
+ * verifySoldComps in soldVerification.js — see the Ship 1.6 comment on
+ * the return statement below). A dead parameter, not a bug — noted here
+ * so a future reader doesn't assume passing a wrong or stale `variant`
+ * here has any effect; it doesn't, for this function specifically.
  */
 export function buildVerifiedSoldPool(soldComps, { title, issue, variant }) {
   if (!soldComps || soldComps.length === 0) return [];

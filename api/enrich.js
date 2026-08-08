@@ -6526,6 +6526,33 @@ export default async function handler(req, res) {
 
     const pcBase = priceCharting?.price || null;
     // Ship #20b: Pass soldVerifyResult for tier-based pricing (live recency bands)
+    // GrailKey Dispatch 28 (2026-08-08) — was `variant: safeReqVariant`, the
+    // raw pre-consensus request field, not `confirmedVariant`. That single
+    // stale variable simultaneously (a) fed buildVerifiedActivePool's Q75
+    // filter (priceBands.js) a false `scanIsVariant=false`, rejecting our
+    // OWN book's own confirmed-variant active comps down to zero, and
+    // (b) starved isActivePoolVariantConfirmed's `!variant` early-return —
+    // the already-shipped GK-31 mechanism (activeAnchoredOverFallbackSold)
+    // built specifically to anchor to a confirmed variant-matched active
+    // pool instead of blending in wrong-variant sold-fallback data — never
+    // got the chance to fire. One wrong variable, two symptoms, one fix.
+    // Verified (not assumed) that confirmedVariant already carries both
+    // guards safeReqVariant encodes — suppressVariantForYearConflict (via
+    // two redundant paths: safeReqVariant's own null-out, which seeds
+    // confirmedVariant, AND the separate `variantCheck = ... ? null : ...`
+    // gate on the pool-consensus update itself) and variantProvenanceValid
+    // (same null-out for the Vision-candidate path; Fix 27-A's own
+    // backfill/coverType path is independently safe regardless, since it's
+    // scoped to confirmedIssue by construction via filterItemsByIssue) —
+    // so this is a bare substitution, not a composite re-guarded
+    // expression. Re-deriving either guard here would be redundant logic
+    // in a second place, the exact shape GK-40's vocabularies drifted
+    // apart from. See docs/PATTERN-LIBRARY.md, "deferred debt promoted to
+    // live by a downstream fix's success" — this exact gap was named and
+    // consciously deferred by Commit D2's own comment, dormant only
+    // because confirmedVariant was categorically never populated from
+    // backfill before Fix 27-A (Dispatch 26/27) started producing real
+    // values in it.
     const priceBandsRaw = computePriceBandsFromSold({
       soldComps: filteredSold,
       activeComps: rawComps,
@@ -6534,7 +6561,7 @@ export default async function handler(req, res) {
       title: confirmedTitle,
       issue: confirmedIssue,
       year: confirmedYear,
-      variant: safeReqVariant,
+      variant: confirmedVariant,
       variantAdjusted: soldVerifyResult.variantAdjusted || false,
       soldVerifyResult,
     });
