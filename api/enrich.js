@@ -3542,10 +3542,35 @@ export default async function handler(req, res) {
     // query (fetchComps) — all three consume confirmedTitle downstream, so
     // fixing it once here means the pc-requery suppression gate (below,
     // gated on visualConsensus/familyCandidate acceptance) never gets a
-    // chance to drop a co-title that came from the visual pool's top-3,
-    // because the token is already baked into confirmedTitle before that
-    // gate runs.
-    if (coTitleToken && confirmedTitle && !confirmedTitle.toLowerCase().includes(coTitleToken.toLowerCase())) {
+    // chance to drop a co-title that came from Vision's own read, because
+    // the token is already baked into confirmedTitle before that gate runs.
+    //
+    // GrailKey Dispatch 32 (2026-08-08) — `source === 'visual_pool_top3'`
+    // no longer has append authority at all, gated out entirely (not
+    // conditionally) below. Audited every [co-title] firing across the
+    // 47-scan real corpus this dispatch's deletion work was verified
+    // against: exactly one existed (iron man #150, "DR DOOM White"), and
+    // it was pollution, not a legitimate co-title — "White" is a truncated
+    // fragment of "White Pages" (a physical-copy condition grade, never
+    // part of any title) and "DR DOOM" is the antagonist named in a "VS"
+    // cover blurb, not a crossover-title component. Zero of the resolved
+    // visual_pool_top3 firings were beneficial (0/1) — same finding, same
+    // remedy as the coherent-content lane: a token does not gain identity
+    // authority by being repeated across marketplace listings, and the
+    // visual pool's top-3 listings are exactly that, marketplace
+    // repetition, not identity evidence. Vision-sourced co-title
+    // (`coTitleSource === 'vision'`) is UNCHANGED and keeps full append
+    // authority — this is the validated path (Q104 FIX-3, the real
+    // Deadpool/Batman crossover-title incident it exists for), untouched
+    // by this audit, which found zero firings of it either way in this
+    // corpus (a gap in the corpus's coverage, not evidence against the
+    // mechanism). Boundary, stated plainly: VISION may assert a
+    // crossover/co-title — existing validated path. The VISUAL
+    // MARKETPLACE POOL may provide corroborating evidence for an
+    // already-classified claim; it may NOT manufacture one. Marketplace
+    // evidence can corroborate identity. Marketplace repetition does not
+    // create identity.
+    if (coTitleToken && coTitleSource === 'vision' && confirmedTitle && !confirmedTitle.toLowerCase().includes(coTitleToken.toLowerCase())) {
       console.log(`[co-title] preserving "${coTitleToken}" (source=${coTitleSource}) — appending to confirmedTitle "${confirmedTitle}"`);
       // GrailKey Dispatch 03 (2026-08-06) — routed through writeConfirmed
       // for V1 instrumentation visibility (log-only, does not change what
@@ -3556,6 +3581,8 @@ export default async function handler(req, res) {
       confirmedTitle = writeConfirmed('confirmedTitle', confirmedTitle, `${confirmedTitle} ${coTitleToken}`, 'unknown', 'co-title-preserved', 'co-title-append');
       out.coTitlePreserved = coTitleToken;
       out.coTitleSource = coTitleSource;
+    } else if (coTitleToken && coTitleSource === 'visual_pool_top3') {
+      console.log(`[co-title] "${coTitleToken}" from source=visual_pool_top3 NOT preserved — marketplace-pool repetition has no title-append authority (GrailKey Dispatch 32)`);
     }
 
     // eBay year authority — requires year-specific agreement ≥70%

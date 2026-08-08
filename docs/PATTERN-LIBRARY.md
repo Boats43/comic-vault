@@ -4022,6 +4022,247 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   to touch the self-consistency guard's behavior when the disputed axis
   token is itself uncorroborated.
 
+- **NAMED OPEN INFRASTRUCTURE PROJECT (2026-08-08, GrailKey Dispatch 32,
+  post-catalog title finalization) — scoped, NOT started. An outside
+  architectural review reached this independently: the durable fix for
+  the coherent-content-token-lane class of bug is Evidence ->
+  Classification -> Authority -> Identity -> Market, replacing
+  marketplace-repetition-infers-identity-with-exceptions-patched-after.**
+  Confirmed tractable because **this architecture already exists in this
+  codebase, on the issue axis** — `issueAuthority`
+  (`{status: provisional|confirmed|conflicted, reasons[], source}`,
+  `identityProvisionalFields` as pending state, promotion via
+  `decideFieldAuthority`/`resolveFamilyIssueConsensus`, shipped by Fix
+  2/2b/V4) is the exact pattern. `titleComponents`
+  (`[{value, type, status:'pending-catalog'}]`) is the SAME pattern
+  extended to the title axis — not a rewrite, an application of a proven
+  in-repo pattern to the one axis that lacks it.
+  **CORRECTED (parallel review, same dispatch) — not "reusable
+  verbatim."** The authority-state vocabulary, custody semantics,
+  provisional-state pattern, and decision model (`decideFieldAuthority`'s
+  outcome vocabulary — adopted / provisionally-corrected / corroborated /
+  preserved-prior / conflicted, the `authoritativeForCustody` boolean,
+  `identityProvisionalFields`'s pending-state bookkeeping, the
+  legacy-mode compatibility mapping pattern) are reusable as a PATTERN.
+  **Direct implementation reuse requires title-axis interface proof
+  first** — `decideFieldAuthority` takes a single scalar `priorValue`/
+  `familyValue` pair; title is an ORDERED SET of independently-typed
+  claims, not one scalar claim, and nothing in this codebase has proven
+  the function (or a variant of it) actually composes over a set without
+  redesign. Recording this distinction explicitly so a future engineer
+  doesn't read "reusable verbatim," conclude `decideFieldAuthority()`
+  just needs to accept arrays, and call the architecture question closed
+  without doing that proof.
+  **Needs a title-axis equivalent, does not exist today**: issue
+  authority only ever resolves a single scalar (a number, via one regex
+  shape, `#\s*(\d+)`) — title is a SET/SEQUENCE of tokens, and unlike an
+  issue number, individual tokens need their own TYPE classification
+  (canonical / edition-event / creator / story-content / publisher-
+  imprint / seller-boilerplate) before authority can even be asked about
+  them. This per-token classification step has no issue-axis analog to
+  reuse — it is new work, not an extension of `resolveFamilyIssueConsensus`.
+  Target shape for the eventual project (Phase 1 collect candidates
+  without finalizing uncertain tokens -> Phase 2 acquire CV/PC catalog
+  candidates -> Phase 3 reconcile candidate tokens against catalog
+  identity -> Phase 4 finalize canonicalTitle/issue/year/publisher/
+  format/variant -> Phase 5 generate market-search fingerprint -> Phase 6
+  price only against the finalized fingerprint) is recorded here as the
+  standing target, not yet designed in detail.
+  **Standing design criteria for this project, going forward:**
+  1. Does the code encode a property of the world, or today's dataset
+     behavior?
+  2. Does the same concept exist in more than one place? Consolidate.
+  3. Would adding 100 new publishers/conventions/formats/marketplaces
+     require modifying control flow? If yes, the abstraction is wrong.
+  4. Can the system say "unknown / not yet authoritative" instead of
+     deciding prematurely? If not, it needs an intermediate
+     representation.
+  **Question 4 is load-bearing — it is the structural form of this
+  codebase's own standing product principle: honest and locked, never
+  confident and wrong.** The Adventure Time SDCC reachability trace
+  (this same dispatch) is a direct, empirical instance of question 4 in
+  action: post-deletion, the book resolves to `confirmedTitle="Adventure
+  Time"` / `confirmedIssue=null` — an honest incomplete state — rather
+  than the pre-fix confidently-wrong $22.09 off a different product.
+  This project would let the SAME honest-null discipline extend to the
+  title tokens themselves ("summer special" is `pending-catalog`, not
+  silently dropped and not silently promoted) instead of the current
+  binary admit-or-block choice this dispatch is stuck making.
+
+- **SDCC-fix scope correction, recorded alongside the deletion
+  (2026-08-08, GrailKey Dispatch 32).** An earlier draft of the
+  EDITION/EVENT typed-replacement list proposed routing `annual`,
+  `giant-size`, and `summer special` to variant alongside genuine
+  event/convention tokens (`sdcc`, `nycc`, `c2e2`). Two real corpus
+  books falsify this: **giant size doctor strange #1** ($15.00, 20 sold
+  comps, Vision itself already reads "giant size" directly off the
+  cover — "giant-size" is CANONICAL for this book, not a routable
+  edition descriptor) and **Marvel 85th Anniversary Special #1**
+  ($11.62 — "special" is CANONICAL, part of PriceCharting's own product
+  name). Routing either word to variant would strip canonical title
+  content on these two books — the inverse of the bug being fixed. The
+  typed EDITION/EVENT list ships scoped to genuine named-convention/
+  event phrases only (`sdcc`, `nycc`, `c2e2`, `convention exclusive`);
+  `annual`/`giant-size`/`summer special`/`special` are explicitly
+  excluded and stay in the "never blindly routed, catalog-corroboration
+  only" bucket — which, per the open infrastructure project above, does
+  not exist yet. Adventure Time Summer Special's own "summer special"
+  falls in this excluded bucket and stays a named, explicitly
+  unresolved gap.
+
+- **CLASSIFICATION IS NOT AUTHORITY — standing design principle
+  (2026-08-08, GrailKey Dispatch 32).** Recognizing that a token is a
+  particular KIND of claim (an event name, a creator name, a printing
+  descriptor) answers only what kind it is — never whether it belongs to
+  the specific book being identified. Required shape for any future
+  classifier in this codebase: `token -> classification -> [family-scoped
+  corroboration | visual evidence | catalog evidence] -> authority
+  decision -> adopt | provisional | conflict | reject`. NOT: `known type
+  -> automatically adopted`. Concretely enforced in this dispatch's own
+  typed event/imprint routing (`matchKnownPublisherImprintEventTokens` +
+  `countMemberSupport`'s >=3-member floor, `imageSearchIdentity.js`) —
+  matching a known phrase (classification) and clearing family-scoped
+  corroboration (authority) are both required, checked in that order, and
+  a token that clears only the first (e.g. "sdcc" at 2/5 member support)
+  is never routed. This is the same principle the coherent-content
+  lane's own deletion establishes from the opposite direction: a token
+  does not gain identity authority by being repeated across marketplace
+  listings — classification by phrase-match doesn't grant authority
+  either, corroboration does the actual work in both directions. Applies
+  to the co-title gating in this same dispatch too: `visual_pool_top3` as
+  a SOURCE is a classification of where a token came from, not evidence
+  it belongs to the book — audited (0/1 beneficial) and found wanting on
+  authority grounds, not on classification grounds (the source was
+  correctly identified as visual_pool_top3 every time; that correct
+  classification never implied the token belonged to the family).
+
+- **3x margin finding — narrow conclusion only, not an argument to tune
+  (2026-08-08, GrailKey Dispatch 32).** `isQualifiedFamilyForRetention`'s
+  `familyDominatesRunnerUp` (Commit 4.3, `identityCore.js`) requires the
+  winning family to out-weight its runner-up by 3x before independently
+  rescuing issue/year on a title-axis-only block. Checked against 8 real
+  corpus books during this dispatch's reachability work: **5 of 8 fail
+  the margin** (star wars #68 10<12, strange tales 8.5<25.5, batman #608
+  5.5<16.5, gears of war #1 14.5<21, fantasy masterpieces #1 13.5<22.5),
+  3 pass (immortal hulk #44 18>=9, super villain team-up #5 17.5>=9,
+  spidey super stories #23 14>=12). **The correct, narrow conclusion:
+  Commit 4.3 is a deliberately narrow rescue that frequently does not
+  activate, and this is usually harmless — checked directly, 7 of the 8
+  books above have Vision independently supplying the correct issue
+  number regardless of whether Commit 4.3 fires, so the margin miss has
+  no consequence for them.** The demonstrated residual-risk class is
+  narrower than "the margin is too strict": it is specifically
+  Vision-has-zero-issue-signal PLUS an ambiguous-or-wrong pool-wide vote
+  — Adventure Time Summer Special is the one specimen of this class found
+  in this dispatch's work (real trace: `confirmedIssue` resolves to
+  honest `null`, not the wrong pool-wide vote, when the margin misses —
+  see the Part 2 reachability trace, `tests/q140-coherent-content-token-
+  lane.test.js`). Adventure Time's own margin miss (14 < 15) is a
+  one-point coincidence, not evidence the threshold is miscalibrated —
+  do not read it as one. **Explicitly not touched this dispatch, and not
+  to be touched as adjacent cleanup in any future dispatch without its
+  own dedicated scoping and greenlight**: `familyDominatesRunnerUp`'s 3x
+  constant, same standing status as the standing "do not rank-weight
+  issue-consensus" and "do not touch Commit 4.3" rules already recorded
+  in this file.
+
+- **Coherent-content lane deletion + co-title `visual_pool_top3` gating
+  — SHIPPED (2026-08-08, GrailKey Dispatch 32).** Two independent
+  injectors closed in one atomic commit, per real-corpus audit evidence
+  gathered across this dispatch (47 real production scans, 2026-08-08
+  07:00-08:15 UTC): the Q140 coherent-content-token lane
+  (`applyDualAxisGate`, `imageSearchIdentity.js`) deleted outright — 15
+  observed firings, 0 beneficial, real motivating incident (Adventure
+  Time SDCC) not reproduced in the audited corpus and left explicitly
+  unresolved rather than half-fixed; and `co-title`'s `visual_pool_top3`
+  source (`api/enrich.js`) stripped of append authority entirely — 1
+  observed firing (iron man #150, "DR DOOM White"), 0 beneficial,
+  vision-sourced co-title (the validated Q104 FIX-3 crossover-title
+  path) left untouched. Replaced by a standalone typed event/imprint
+  routing mechanism reusing the existing >=3-member corroboration floor
+  (never title-admission authority again) — widened with genuine named-
+  convention phrases (`sdcc`, `nycc`, `c2e2`, `convention exclusive`),
+  deliberately excluding `annual`/`giant-size`/`summer special`/`special`
+  (see the SDCC-fix-scope-correction entry above). **Corpus role, not
+  count, for the 15 firings** — do not let a future benchmark or launch
+  document read this as "15 books fixed": ~8 were genuine harm this
+  deletion corrects (star wars #68, strange tales, immortal hulk #44,
+  batman #608, gears of war #1, fantasy masterpieces #1, spidey super
+  stories #23, amazing spider man #17); 4 were already self-correcting
+  pre-deletion via an unrelated mechanism (super villain team-up #5 via
+  22e-force Rule 2; x-men #39, marvel team-up #14, marvel team-up #141
+  via Rule 1) and stay correct post-deletion via the same or a more
+  direct path; amazing spider man #119's title is fixed here but its
+  pricing outcome is governed separately by the already-shipped Fix
+  32-C; iron man #150 needed BOTH injectors closed to reach fully clean.
+  Frozen as a permanent, deterministic, no-live-eBay regression suite:
+  `tests/grailkey-dispatch-32-frozen-corpus.test.js` (33 assertions, all
+  15 firings plus 2 controls, real pools copied verbatim from the
+  production log corpus, not reconstructed), plus
+  `tests/q140-coherent-content-token-lane.test.js` rewritten (26
+  assertions: lane-deletion proof, typed-routing unit behavior including
+  a CLASSIFICATION-IS-NOT-AUTHORITY control, and the Adventure Time gap
+  re-verified against real function calls) and
+  `tests/q133-slice1b-eom-registry.test.js` restored to its pre-Q140
+  assertions verbatim (13 assertions — the reintroduction guard). One
+  real gap found and fixed during implementation, not just documented:
+  the `fallback-vision` return object in `selectTitleFamilyCandidate`
+  never threaded `admittedVariantTokens` at all — without the fix, Gears
+  of War #1's "wildstorm" routing would have silently regressed the
+  moment the lane's admission path stopped being the only way to reach
+  that return site. Full regression sweep (decision-engine 39/7, comp-
+  filter-hygiene 182/4, sold-verification 124/5, identity-gate 92/7,
+  image-search-extraction 161/2, mega-keys 198/8, pattern-k-dedupe-issue
+  4/4, q-adv397-visual-guard 11/5) matches documented baseline exactly;
+  one pre-existing test (`tests/q144a-family-discriminator-gate.test.js`)
+  had its one predicted assertion updated, everything else in that file
+  unaffected, confirmed by the suite staying green. `npm run build`
+  clean. `resolveFamilyIssueConsensus`, Commit 4.3, the 3x margin, Fix
+  32-B, and the gate chain are all untouched.
+
+- **HIDDEN-PATH DEPENDENCY — named, reusable principle (2026-08-08,
+  GrailKey Dispatch 32).** `selectTitleFamilyCandidate`'s
+  `fallback-vision` return object (`imageSearchIdentity.js`, the
+  weighted-consensus branch's blocked-addition return) never threaded
+  `admittedVariantTokens` through — this went unnoticed for as long as
+  the coherent-content lane existed, because that lane's own
+  `allowed: true` success return was the only place `admittedVariantTokens`
+  ever needed to survive to the caller; the blocked path never carried a
+  populated value worth losing. Deleting the lane made `fallback-vision`
+  the sole outcome for every non-creator addition — including the new
+  standalone typed event/imprint routing's corroborated tokens — and the
+  same missing field that was harmless for years became a silent
+  regression on the very first real case (Gears of War #1's "wildstorm").
+  Found and fixed during implementation, not left as a shipped defect.
+  **Reusable principle, name it before it recurs: a mechanism reached
+  through only one historical control-flow path can acquire a hidden
+  dependency on that path — a field or side effect that "just happens"
+  to survive because nothing else ever took the other branches. When
+  deleting or bypassing a path, audit every side-channel field produced
+  anywhere in the deleted/bypassed code for whether every NEWLY reachable
+  return site actually threads it through — do not assume a return
+  object's shape was ever exercised by the case you're about to make
+  common.**
+
+- **CO-TITLE EVIDENCE DISCIPLINE — three verdicts, not two (2026-08-08,
+  GrailKey Dispatch 32).** Auditing `[co-title]` firings across the
+  47-scan corpus produced exactly one resolved case (`visual_pool_top3`,
+  iron man #150, pollution) and zero firings of the other source
+  (`vision`-sourced co-title, the validated Q104 FIX-3 crossover-title
+  path). **Zero firings is recorded as a COVERAGE GAP, not as evidence
+  either for or against the mechanism** — the corpus simply never
+  exercised it. `visual_pool_top3`'s append authority was removed on its
+  own resolved evidence (1 firing, 0 beneficial); `vision`-sourced
+  co-title was left unchanged on the correct basis that its own separate,
+  prior validation (the real Deadpool/Batman incident) still stands,
+  never on this corpus having tested it. Recorded as a standing
+  discipline for future hit-rate audits in this codebase: a mechanism
+  with zero observed firings in an audit corpus gets UNRESOLVED, not a
+  default verdict borrowed from a sibling mechanism's result — the same
+  three-verdict requirement (BENEFICIAL / POLLUTION / UNRESOLVED, never
+  forced to a binary) that governed the co-title audit itself applies one
+  level up, to whether a source was tested at all.
+
 - **Dispatch 32 Defect 7 downgraded, log only, not scoped (2026-08-08).**
   The three `[22e-LOSS]` log lines the batch report read as
   `buildTitleFamilies` silently dropping tokens (`x`, `marvel`) into a

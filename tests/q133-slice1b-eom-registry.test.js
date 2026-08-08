@@ -22,20 +22,25 @@
 //     adjacent to atom/eve (megacon exclusive sits between them) — recovery
 //     does NOT fire
 //   - gate reason narrows from "non-creator additions [eom,atom,eve]" to
-//     "non-creator additions [atom,eve]"
+//     "non-creator additions [atom,eve]" but STILL BLOCKS
+// This is the honest, correct, already-anticipated boundary — "Atom Eve" is
+// a character name and Q84 has no legitimate-content lane for character
+// names (explicitly queued, not this slice). The registry fix is still
+// real and valuable: it correctly narrows the block reason (no longer
+// blaming the artist's own name), and fully unblocks the case it's actually
+// built for — a Kyuyong Eom variant with no trailing character-name suffix.
 //
-// UPDATED (Q140 dispatch, 2026-07-22) — at Slice 1b ship time this was the
-// honest, correct, already-anticipated boundary: "Atom Eve" is a character
-// name and Q84 had no legitimate-content lane for character names
-// (explicitly queued, not that slice). The Q140 coherent-content-token lane
-// closes exactly that queued gap, per an explicit ruling naming this book
-// ("Invincible Returns tokens... Atom Eve-adjacent") as one of the cases
-// required to resolve to pool identity under the new lane — "atom"/"eve"
-// are each named by 15/16 family members, vastly clearing the >=3-member
-// coherence floor. The registry fix (this file's real subject) is
-// unchanged and still does its own job (narrows the block reason / fully
-// unblocks the no-character-suffix case in Part 3) — Part 2 below now
-// documents the POST-Q140 outcome instead of the pre-Q140 boundary.
+// RESTORED (GrailKey Dispatch 32, 2026-08-08) — the Q140 coherent-content-
+// token lane that briefly flipped Part 2's outcome (2026-07-22 through
+// 2026-08-08) is deleted. Real-corpus audit (47 scans) found that lane
+// produced a beneficial title correction in zero of 15 real firings — every
+// firing was marketplace SEO copy, seller-listing boilerplate, or story/
+// character content, never the product-identifying-edition-word shape it
+// was built for. This file's own header note above ("Atom Eve is a
+// character name... explicitly queued, not this slice") turned out to be
+// the correct, durable boundary — restored here verbatim as the
+// reintroduction guard for exactly this class of regression. See
+// docs/PATTERN-LIBRARY.md, "coherent-content lane deletion."
 //
 // Invoke: node tests/q133-slice1b-eom-registry.test.js
 
@@ -100,32 +105,29 @@ assertFalse(familyTokensForItem0.includes('eom'), 'tokenizeTitleFamily strips "e
 assertTrue(familyTokensForItem0.includes('atom') && familyTokensForItem0.includes('eve'), 'tokenizeTitleFamily leaves "atom"/"eve" untouched (character name, not a creator pattern)');
 
 // ═══════════════════════════════════════════════════════════════════════
-// Part 2 — real Invincible case: coherent-content-token lane resolves it
-// (Q140, post-dispatch outcome — see header note)
+// Part 2 — real Invincible case: gate reason narrows, override still blocks
 // ═══════════════════════════════════════════════════════════════════════
-console.log('\nPart 2: real Invincible pool — Q140 coherent-content-token lane\n');
+console.log('\nPart 2: real Invincible pool — honest outcome (narrowed, not flipped)\n');
 
 const families = scoreTitleFamilies(buildTitleFamilies(INVINCIBLE_POOL), INVINCIBLE_POOL);
 const topFamily = families[0];
 assertEq(topFamily.tokens.join(' '), 'invincible atom eve', 'top family consensus tokens no longer include "eom" (stripped at tokenization)');
-assertTrue(topFamily.count >= 3, 'family clears the existing >=3-member floor (16 members)');
 
-const gateResult = applyDualAxisGate(topFamily.tokens, ['invincible'], poolArtistTokens, topFamily.rawTitle, topFamily.memberTokens);
-assertTrue(gateResult.allowed, 'Q140: override ALLOWED — "atom"/"eve" each independently corroborated by >=3 family members (coherent content, not scattered noise)');
-assertTrue(/coherent-content tokens \[atom,eve\]/.test(gateResult.reason), `reason cites the coherent-content lane, not a block (got "${gateResult.reason}")`);
+const gateResult = applyDualAxisGate(topFamily.tokens, ['invincible'], poolArtistTokens, topFamily.rawTitle);
+assertFalse(gateResult.allowed, 'HONEST RESULT: override still blocked — "atom eve" is a character name, no legitimate-content lane (explicitly queued, not this slice)');
+assertEq(gateResult.reason, 'non-creator additions [atom,eve]', 'block reason correctly narrows from [eom,atom,eve] to [atom,eve] — eom no longer blamed');
 
 // End-to-end through the real selectTitleFamilyCandidate — confirms the
-// full pipeline (not just the gate in isolation) now resolves to the
-// pool's own identity instead of falling back to bare Vision "invincible".
+// full pipeline (not just the gate in isolation) still lands on
+// fallback-vision for this exact pool, i.e. Slice 1b does NOT regress
+// today's actual (already-priced-correctly-via-Slice-1) Invincible card.
 // ebayConsensusTitle mirrors the real api/enrich.js call site
 // (visualConsensus?.title, "invincible" per the real production log) —
 // dualAxisAgreed (and therefore whether Q84 engages at all) depends on it.
 const fullResult = selectTitleFamilyCandidate(INVINCIBLE_POOL, 'invincible', '1', null, {
   ebayConsensusTitle: 'invincible',
 });
-assertEq(fullResult.decision, 'weighted-consensus', 'selectTitleFamilyCandidate: resolves via weighted-consensus (Q140) instead of fallback-vision');
-assertTrue(/atom/.test(fullResult.selectedTitle || '') && /eve/.test(fullResult.selectedTitle || ''),
-  `selectedTitle carries the resolved variant identity (got "${fullResult.selectedTitle}")`);
+assertEq(fullResult.decision, 'fallback-vision', 'selectTitleFamilyCandidate: still fallback-vision end-to-end (Slice 1/1c pricing path is untouched by this fix)');
 
 // ═══════════════════════════════════════════════════════════════════════
 // Part 3 — the case Slice 1b DOES fully unblock: no trailing character name

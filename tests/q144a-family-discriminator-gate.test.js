@@ -94,7 +94,14 @@ const atWinningTitles = (atFamily?.topFamily?.indices || [])
   .map((idx) => ADVENTURE_TIME_POOL[idx])
   .filter(Boolean);
 
-assertEq(atFamily.decision, 'weighted-consensus', `Q140 baseline intact: family resolves via weighted-consensus (got ${atFamily.decision})`);
+// GrailKey Dispatch 32 (2026-08-08) — the coherent-content lane that used
+// to make this book resolve via weighted-consensus is deleted (see
+// docs/PATTERN-LIBRARY.md); it now correctly blocks (fallback-vision).
+// topFamily.indices survives unchanged on the fallback-vision return path
+// (verified directly against source, imageSearchIdentity.js) — everything
+// below this line (the actual subject of this file, pcMatchMissingFamily
+// Discriminator) is unaffected, confirmed by this suite staying green.
+assertEq(atFamily.decision, 'fallback-vision', `title-admission correctly blocked post-deletion (got ${atFamily.decision})`);
 assertEq(atWinningTitles.length, 5, `topFamily.indices reconstructs exactly the 5 SDCC member titles (got ${atWinningTitles.length})`);
 assertTrue(atWinningTitles.every((t) => /summer special/i.test(t)), 'every reconstructed member title is from the SDCC family, not the KaBOOM family');
 
