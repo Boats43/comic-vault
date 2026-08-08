@@ -4263,6 +4263,34 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   forced to a binary) that governed the co-title audit itself applies one
   level up, to whether a source was tested at all.
 
+- **"NO NEW REGRESSION AGAINST DOCUMENTED BASELINE" — standing
+  terminology rule, not "tests pass" (2026-08-08, GrailKey Dispatch
+  32).** This codebase's test suites carry real, individually-documented
+  pre-existing failures — decision-engine 39/7, comp-filter-hygiene
+  182/4, identity-gate 92/7, image-search-extraction 161/2, mega-keys
+  198/8, sold-verification 124/5, q-adv397-visual-guard 11/5, and more
+  (see "Known stale test suites" in CLAUDE.md's Current State section).
+  **"Tests pass" is never the accurate claim for a sweep against this
+  suite — it silently grandfathers 30+ already-known failures as if they
+  were successes.** The accurate, required claim is that the sweep
+  produced NO NEW failures beyond the documented count for each file —
+  verified by comparing the exact pass/fail numbers to the documented
+  baseline, not by checking exit codes or "did it print all-green."
+  GrailKey Dispatch 32's own regression sweep is the worked example:
+  reported as "decision-engine 39/7... matches documented baseline
+  exactly," never as "decision-engine passes." **Use this exact phrasing
+  in every future commit message and report describing a regression
+  sweep against this suite.** Standing reason to keep this precise, not
+  just a style preference: when a formal launch-certification gate is
+  eventually built in this codebase, this distinction is the entire
+  difference between an honest gate and one that silently certifies
+  everything already broken. A certification step that reports "tests
+  pass" against a baseline already carrying 30+ known failures certifies
+  nothing — it would pass unchanged the day before and the day after an
+  unrelated regression landed in one of the already-red suites, because
+  nothing in "tests pass" phrasing distinguishes "still red for the
+  documented reason" from "newly red for an undocumented one."
+
 - **Dispatch 32 Defect 7 downgraded, log only, not scoped (2026-08-08).**
   The three `[22e-LOSS]` log lines the batch report read as
   `buildTitleFamilies` silently dropping tokens (`x`, `marvel`) into a
