@@ -3869,3 +3869,171 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   per CLAUDE.md's standing protocol; 31-B's width explicitly signed off
   given the GK-41 risk-budget argument above.
 
+- **"A log excerpt is not evidence unless it includes the reconciling
+  line" — review-discipline note, GrailKey Dispatch 32 (2026-08-08),
+  pairing two retractions.** Two flagged defects in the same batch
+  review (47 real scans) both turned out to be pipeline components
+  working as designed, both caught by the identical failure mode: a
+  partial log excerpt was read as proof of a discrepancy without
+  checking for the line that explains it.
+  - **Key multiplier** (Marvel Super Heroes Secret Wars #8, Batman: The
+    Killing Joke, Immortal Hulk Great Power #1). `[key] SKIPPED — no
+    multiplier base available (source=verified_sold_recency/
+    active_ask_derived, isFromPC=false)` was read as a missed
+    multiplier. It is the `isFromPC` gate working exactly as designed —
+    a comp-verified price (18 real sold comps of that exact key issue)
+    already embeds the key premium; applying the 1.5x key multiplier on
+    top would double-count. The gate exists precisely so the multiplier
+    only lifts a generic PriceCharting base, never a real,
+    comp-derived price.
+  - **Recommended-price divergence** (Spidey Super Stories #23,
+    Dispatch 32 Defect 5). `[tier-4] pc_estimate=$9.90` next to
+    `[verify] ... recommended: $50` was read as an untracked variable.
+    `[verify]`'s `recommended` re-parses `out.price` directly
+    (`enrich.js:9364-9386`) — it is not independently computed. The
+    $9.90→$50 jump is the single-comp ask-based floor guard
+    (`enrich.js:8065-8093`, `enforceFloorWithCap`) firing correctly on a
+    1-item active pool, logged at `` `[floor] price 9.90 < floor 50 ...
+    — enforcing` `` (line 8087) — a line the report's excerpt simply
+    stopped short of.
+  Both defects were retracted in the same review pass they were raised
+  in, at the cost of one extra grep each. **Standing check, going
+  forward: when a report cites two numeric values from the pipeline as
+  evidence of a discrepancy, the report must also show — or explicitly
+  say it checked for and did not find — the log lines between them.** A
+  value pulled from one log line and compared against a value pulled
+  from a different, non-adjacent log line is not itself evidence of a
+  bug; it is evidence that needs the connecting narrative before it's
+  reportable.
+
+- **"Two guards on the same population with different threshold shapes
+  disagree by construction" — GrailKey Dispatch 32 (2026-08-08), STEP A
+  finding, provable from the arithmetic rather than observed from
+  failures.** Q84's coherent-content lane (`src/lib/
+  imageSearchIdentity.js:1545-1695`, `applyDualAxisGate`) admits a
+  marketplace token into `confirmedTitle` on an ABSOLUTE floor:
+  `countMemberSupport(token, familyMemberTokens) >= 3` (`:1465-1466`,
+  `:1652-1681`). `22e-force`/`22e-LOSS` (`identityCore.js:294-436`,
+  `checkAssemblyIntegrity`) rejects the same class of token as a stray
+  addition on a PERCENTAGE floor: `<60%` of `compTitles` (`:368-406`).
+  When a family override has occurred, both predicates are confirmed to
+  run over the literal same population — `compTitles` at the
+  `22e-force`/`22e-LOSS` call sites is set to `winningFamilyTitles`
+  (`enrich.js:3422-3428`, `6282-6285`), the identical `topFamily`
+  Q84's `familyMemberTokens` is drawn from.
+  Given that, the two thresholds are not independently tunable — they
+  are the same measurement expressed in two incompatible units, and the
+  crossover point is arithmetic, not incidental: in any family with 5 or
+  fewer members, 3 supporters is already >=60% (3/5 = 60%), so
+  `22e-force`'s percentage floor can mathematically never flag what
+  Q84's absolute floor admitted, for any family at or under that size.
+  In a larger family, 3 supporters can fall under 60% and gets caught.
+  This reproduces the observed catch-rate split exactly (small, tight
+  visual-pool families — Star Wars #68, Strange Tales, and others —
+  passed through uncaught; larger families — Iron Man #150, X-Men #39,
+  and others — were caught) without needing to have observed every
+  individual failure to know it would happen: the disagreement is
+  guaranteed by the two threshold shapes alone, for any family under the
+  crossover size, regardless of which specific tokens are involved.
+  Related to, but a distinct sibling of, the "measuring coherence
+  against the wrong population" class (vision-zero-support, Bone
+  #1/GK-34, Fix 2b, Fix 2c's two drafts) and the "drifted-duplicate-
+  constant" class (Q119, Q127, Q128, GK-40): those are about a
+  measurement applied to the wrong population, or the same nominal
+  vocabulary independently drifting in content. This is neither — the
+  population is identical and correctly identified by both guards; what
+  disagrees is the SHAPE of the threshold applied to it. Recorded as its
+  own class since a fix that only closes one sibling (e.g. widening a
+  drifted vocabulary, or re-scoping a wrong-population measurement)
+  would not touch this one. (Numbering note: this entry is not asserted
+  as a specific ordinal instance of any single prior-named class — it is
+  the first instance of this particular sub-shape, cross-referenced
+  above to its two nearest siblings rather than folded into either
+  one's running count.)
+  **Standing check, added to the existing "name the population" check
+  from the wrong-population class: when two predicates gate the same
+  population, state both thresholds in the same units — before shipping
+  either — and confirm neither can structurally out-vote the other for
+  any population size in the expected range.**
+
+- **GK-45 (2026-08-08, GrailKey Dispatch 32, found while scoping Fix 32-C).
+  `convergence.tier` does not actually certify PriceCharting agreement on
+  issue number or title — LOG ONLY, not fixed this dispatch.**
+  `convergenceSources` (`api/enrich.js:4016-4060`) feeds PC data into the
+  `era` (`:4046`) and `publisher` (`:4052`) axes only. The `title` axis
+  has no `pc:` key at all (`:4017-4036` — only `ebay`/`vision`/`cv`), and
+  the `issue` axis's `pc: priceChartingInitial?.issue` (`:4040`) is a
+  dead reference: `lookupPriceCharting`'s returned candidate objects
+  (`api/enrich.js:1782`, `{ price, productName, id, year, source }`; the
+  id-anchored branch's return at `:1568-1575` is the same shape) never
+  set an `.issue` field, so this axis reads `undefined` from PC on every
+  scan, always. Net effect: `convergence.tier === 'HIGH'` currently means
+  year/publisher agreement was confirmed against PC — it says nothing
+  about whether PC agrees on issue number or title, despite the field's
+  name implying general identity convergence. Relevant to Fix 32-C:
+  `visionLowButCorroborated`'s new catalog-corroboration arm deliberately
+  does NOT gate on `convergence.tier === 'HIGH'` for exactly this reason
+  — raising that bar would not buy real issue-level assurance, only make
+  the arm harder to satisfy for an unrelated reason. Flag for any other
+  future consumer of `convergence.tier`: treat it as weaker evidence than
+  its name implies until the dead `.issue` axis and missing `title`/`pc`
+  key are addressed.
+
+- **GK-46 (2026-08-08, GrailKey Dispatch 32, found while scoping Fix
+  32-B). The `soldVerification.js:934` zero-pool variant fallback is
+  ALREADY unconditionally reachable today, regardless of
+  `variantIdentitySource` — meaning Fix 32-B's originally-planned
+  mechanism (gate Filter 8's case a-inverse by provenance, route to the
+  `:934` fallback) may not change Marvel Team-Up #141's actual outcome.
+  Investigated, NOT resolved — needs live verification before 32-B's
+  code proceeds.** `soldVerification.js:934`'s guard —
+  `working.length === 0 && reasons.variantMismatch > 0 && rawCount > 0`
+  — has no provenance check today. If Filter 8's case (a-inverse) zeroed
+  `working` for Marvel Team-Up #141 (as the Dispatch 32 report's
+  `codes={"WRONG_VARIANT":30}` log line implied), this fallback should
+  already have engaged in the real scan, independent of whether
+  `confirmedVariant="newsstand"` came from Vision alone or a corroborated
+  source. That means the real production outcome (zero pricing evidence,
+  per the original report) was decided by what happened INSIDE the
+  fallback — either its self-consistency guard
+  (`recognizedDistinct.size >= 2`, `:1149-1151`) tripped, or the
+  re-filtered pool fell to zero via filters 1-6/9-13 — not by the
+  fallback failing to trigger at all. **This is also a corroborating
+  data gap, not just a mechanism gap**: the `codes={"WRONG_VARIANT":30}`
+  figure cited in the original report comes from
+  `evidenceEligibility.js`'s independent DIAGNOSTIC classifier (confirmed
+  elsewhere in this dispatch to be non-gating for pricing), not from
+  `soldVerification.js`'s own internal fallback logging — so it is not
+  itself proof that `soldVerification.js`'s real working pool ended up
+  empty after the fallback ran; it only proves Filter 8's initial
+  rejection tally. Fix 32-B's design (skip the case-(a-inverse) hard
+  reject when uncorroborated, route through the same `:934` machinery)
+  produces a near-identical candidate pool to what the existing
+  unconditional fallback already computes — if the fallback already ran
+  and already failed via `recognizedDistinct` or re-filtering, the
+  planned fix may hit the identical failure point and change nothing.
+  **Before writing code for Fix 32-B: pull the real `[sold-verify]`
+  fallback log lines (`variant fallback triggered` /
+  `variant fallback INCOHERENT` / `variant fallback — N any-variant
+  grade-matched comps`) from the actual Marvel Team-Up #141 production
+  scan, or re-scan live, to confirm which of the fallback's three
+  outcomes actually occurred** — this determines whether Fix 32-B's
+  provenance gate is the real fix, or whether the real fix instead needs
+  to touch the self-consistency guard's behavior when the disputed axis
+  token is itself uncorroborated.
+
+- **Dispatch 32 Defect 7 downgraded, log only, not scoped (2026-08-08).**
+  The three `[22e-LOSS]` log lines the batch report read as
+  `buildTitleFamilies` silently dropping tokens (`x`, `marvel`) into a
+  truncated `confirmedTitle` are the guard's own FAIL output
+  (`identityCore.js:358-363`) — meaning all three were caught and
+  reverted to Vision's clean title before shipping, not silently
+  truncated. Underlying mechanism confirmed real: a min-length filter
+  drops single-character tokens (`src/lib/imageSearchIdentity.js:
+  1015-1019`, catches "x"), and a separate 60%-family-consensus step
+  drops non-majority publisher tokens like "marvel" (`:1114-1118`) — but
+  confirmed cosmetic only, since family membership/clustering is decided
+  before the token-consensus step runs (`:1074-1097` vs. `:1103-1174`),
+  so truncation never changes which listings cluster together. No fix
+  scoped.
+
