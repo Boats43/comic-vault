@@ -62,6 +62,7 @@ export const buildScanLogKey = (ts, id) => `${SCAN_LOG_KEY_PREFIX}:v${SCAN_LOG_V
  * @param {string|null} fields.terminalReason
  * @param {{raw?: number|null, eligible?: number|null, familyMembers?: number|null}|null} fields.poolSizes
  * @param {{evaluated?: boolean, fired?: boolean, blockedBy?: string[]}|null} fields.assetTypeOverride
+ * @param {{convergenceTier?: string|null, coherentFamilyCount?: number|null, pcProductIdPresent?: boolean|null, catalogCorroborated?: boolean|null, activePoolCount?: number|null, soldPoolCount?: number|null, fired?: boolean|null}|null} fields.visionLowButCorroborated
  * @returns {object}
  */
 export const buildScanLogRecord = ({
@@ -73,6 +74,7 @@ export const buildScanLogRecord = ({
   terminalReason = null,
   poolSizes = null,
   assetTypeOverride = null,
+  visionLowButCorroborated = null,
 } = {}) => ({
   v: SCAN_LOG_VERSION,
   ts,
@@ -109,6 +111,23 @@ export const buildScanLogRecord = ({
         evaluated: assetTypeOverride.evaluated ?? false,
         fired: assetTypeOverride.fired ?? false,
         blockedBy: Array.isArray(assetTypeOverride.blockedBy) ? assetTypeOverride.blockedBy : [],
+      }
+    : null,
+  // GrailKey Dispatch 32, Fix 32-C — additive field, no version bump.
+  // Captures visionLowButCorroborated's inputs on both the fire and
+  // decline paths (see api/enrich.js's out.visionLowButCorroboratedDiag),
+  // so its fire rate and which arm (family vs. catalog) fired is
+  // queryable post-hoc instead of dying on the same "no captured field"
+  // gap that blocked the Fix 3b investigation (GrailKey Dispatch 32).
+  visionLowButCorroborated: visionLowButCorroborated
+    ? {
+        convergenceTier: visionLowButCorroborated.convergenceTier ?? null,
+        coherentFamilyCount: visionLowButCorroborated.coherentFamilyCount ?? null,
+        pcProductIdPresent: visionLowButCorroborated.pcProductIdPresent ?? null,
+        catalogCorroborated: visionLowButCorroborated.catalogCorroborated ?? null,
+        activePoolCount: visionLowButCorroborated.activePoolCount ?? null,
+        soldPoolCount: visionLowButCorroborated.soldPoolCount ?? null,
+        fired: visionLowButCorroborated.fired ?? null,
       }
     : null,
 });

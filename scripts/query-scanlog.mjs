@@ -31,6 +31,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { SCAN_LOG_INDEX_KEY } from "../src/lib/scanLog.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..");
@@ -62,8 +63,6 @@ if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
 
 const { Redis } = await import("@upstash/redis");
 const redis = Redis.fromEnv();
-
-const SCAN_LOG_INDEX_KEY = "scanlog:index:v1";
 
 const parseArgs = (argv) => {
   const args = { since: "7d", until: null, json: false, limit: 1000 };

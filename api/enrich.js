@@ -7527,7 +7527,31 @@ export default async function handler(req, res) {
       const coherentFamilyCount = familyIssueMatchesConfirmedForVLC ? (topFamilyForVLC?.count || 0) : 0;
       const convergenceTierOk = !!convergence?.tier && convergence.tier !== 'LOW';
 
-      if (convergenceTierOk && coherentFamilyCount >= 3 && (activePoolCountForVLC > 0 || soldPoolCountForVLC > 0)) {
+      // GrailKey Dispatch 32, Fix 32-C — catalog-match corroboration arm.
+      // A direct PriceCharting product match on the confirmed issue is
+      // CATALOG identity authority (standing authority matrix, CLAUDE.md)
+      // — strictly stronger than an eBay pool cluster, not weaker — so it
+      // can satisfy this predicate independently of coherentFamilyCount.
+      // Deliberately does NOT also require convergence.tier === 'HIGH':
+      // GK-45 (docs/PATTERN-LIBRARY.md) found convergence's issue/title
+      // axes never actually receive real PC data (dead `.issue` field on
+      // lookupPriceCharting's candidate shape), so that bar would only
+      // make this arm harder to satisfy for a reason unrelated to catalog
+      // identity. The issue-number re-check below exists specifically to
+      // close the one confirmed gap: the id-anchored PC lookup path
+      // (req.body.pcProductId) bypasses the issueRe word-boundary check
+      // the normal search path already enforces — year/name/family-
+      // discriminator conflicts are independently covered upstream by
+      // [pc-anchor-gate] regardless of which path produced the match.
+      const pcIssueRe = confirmedIssue != null
+        ? new RegExp(`\\b${String(confirmedIssue).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
+        : null;
+      const catalogCorroborated = !!out.pcProductId
+        && !!out.pcProductName
+        && !!pcIssueRe
+        && pcIssueRe.test(out.pcProductName);
+
+      if (convergenceTierOk && (coherentFamilyCount >= 3 || catalogCorroborated) && (activePoolCountForVLC > 0 || soldPoolCountForVLC > 0)) {
         visionLowButCorroborated = true;
         out.identityVisionLowButCorroborated = true;
         out.needsReview = true;
@@ -7536,16 +7560,33 @@ export default async function handler(req, res) {
           convergenceTier: convergence.tier,
           convergenceScore: convergence.convergenceScore,
           familyCount: coherentFamilyCount,
+          catalogCorroborated,
           activePoolCount: activePoolCountForVLC,
           soldPoolCount: soldPoolCountForVLC,
           visionVetoOverridden: true,
         };
         console.log(
           `[slice-a3] vision-low-but-corroborated: convergence=${convergence.tier}(${convergence.convergenceScore}) ` +
-          `familyCount=${coherentFamilyCount} activePool=${activePoolCountForVLC} soldPool=${soldPoolCountForVLC} — ` +
+          `familyCount=${coherentFamilyCount} catalogCorroborated=${catalogCorroborated} ` +
+          `activePool=${activePoolCountForVLC} soldPool=${soldPoolCountForVLC} — ` +
           `Vision's low self-confidence not treated as a veto; identity fields were already fully resolved`
         );
       }
+
+      // scanLog v2 field (GrailKey Dispatch 32, Fix 32-C) — captured
+      // unconditionally whenever this block evaluates, not only on the
+      // fire path, so a decline's inputs are queryable too (mirrors the
+      // gap GK-23's "revisit after ~2 weeks" note flagged: fire rate
+      // alone can't be measured if declines leave no trace).
+      out.visionLowButCorroboratedDiag = {
+        convergenceTier: convergence?.tier ?? null,
+        coherentFamilyCount,
+        pcProductIdPresent: !!out.pcProductId,
+        catalogCorroborated,
+        activePoolCount: activePoolCountForVLC,
+        soldPoolCount: soldPoolCountForVLC,
+        fired: visionLowButCorroborated,
+      };
     }
 
     out.identityConfident = idCheckFinal.confident;
@@ -10843,6 +10884,7 @@ export default async function handler(req, res) {
               blockedBy: out.assetTypeOverrideBlockedBy || [],
             }
           : null,
+        visionLowButCorroborated: out.visionLowButCorroboratedDiag || null,
       });
       await kvSet(scanLogKey, scanLogRecord, KV_TTL.SCANLOG);
       await kvZAdd(SCAN_LOG_INDEX_KEY, scanLogTs, scanLogKey);
