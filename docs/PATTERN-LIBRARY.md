@@ -2980,6 +2980,31 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   verification, not incidental). Fix 3 (Vision virgin-variant prompt
   change) remains explicitly HELD, not started this session.
 
+  **PRODUCTION VALIDATION (2026-08-08, GrailKey Dispatch 27, build
+  `4f9a62c`).** The Spawn #351 re-scan that motivated Dispatch 26 landed
+  on `mode==='adopted'` — Fix 2/2b's own path, not Fix 4/4b's — and
+  validated both fixes directly against real production data, verbatim:
+  ```
+  [commit4-promote] PROMOTE issue=#351 uniqueRows=4 support=4
+    runnerUp=null weightSum=11 uniqueItemIdCount=4/4
+    uniqueSellerCount=4/4 — provisional -> confirmed
+  [commit4-promote-year] PROMOTE year=2024 assertingRows=3 silentRows=1
+    dissentingRows=0
+  [evidence-target] issueAuthorityStatus="confirmed"
+  [evidence-eligibility] activeInput=14 rawPricingEligible=14 rejected=0
+  ```
+  The year promotion is the EXACT Fix 2b corrected-denominator shape
+  this entry documents above (3 asserting rows, 1 silent, 0 dissent) —
+  under the naive `support === uniqueRows` reuse Fix 2b replaced, this
+  would have wrongly declined (`support=3 !== uniqueRows=4`). Confirmed
+  live, not just in the regression fixture: zero comps eliminated
+  (`rejected=0` of 14), the book priced. Fix 4/4b (this same session,
+  GrailKey Dispatch 26) shipped alongside this validated path but were
+  NOT exercised by this scan — record that distinction explicitly: Fix
+  2/2b is production-validated; Fix 4/4b remains shipped but
+  UNVALIDATED in production, pending a scan that actually reaches the
+  `mode==='conflict-locked'`/zero-support shape.
+
 - **GrailKey Dispatch 25, Fix 2c (2026-08-07) — Batman #213 class:
   title-family weight margin was reported as an issue-authority
   conflict.** `identityCore.js`'s near-miss margin-decline branch
@@ -3341,4 +3366,93 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   a successful promotion (no removal mechanism currently exists for that
   either — would be the first). Scoping either belongs to its own
   dispatch, not folded into Fix 4/4b.
+
+- **GK-40 (2026-08-08, GrailKey Dispatch 27) — three independent variant-
+  token vocabularies, plus two same-named-but-different functions. LOG
+  ONLY, its own dispatch, not consolidated here.** Found while diagnosing
+  why a 16/20-consensus "virgin" signal (Spawn #351, real production
+  scan) never reached `confirmedVariant` and, independently, why
+  `soldVerification.js` rejected 11 real virgin sold comps outright. The
+  fourth recorded instance of the drifted-duplicate-constant class
+  (Q119/Q127/Q128 were the first three — all VALUE-level constants; this
+  is the first at the FUNCTION/vocabulary level). Three separate lists,
+  all encoding roughly "which physical cover-treatment terms exist,"
+  independently extended over time:
+  - `src/lib/compHygiene.js:extractVariantTokensByAxis`'s `coverType`
+    axis — 3 tokens (`foil`, `virgin`, `sketch`), bare substring regex,
+    no `\b` word-boundary. This is the ONLY one `soldVerification.js`
+    (`:56,655-657`) actually reads when comparing a comp's title against
+    `confirmedVariant`.
+  - `src/lib/imageSearchIdentity.js:CATEGORY_BLOCKS`'s `'finish'` kind
+    (`FINISH_PATTERNS`) — 10 tokens (adds `gold foil`/`silver foil`/
+    `holofoil`/`holographic`/`glow-in-dark`/`embossed`/`metallic`),
+    `\b`-bounded. Feeds `item.variantTokens` on every pool row
+    (`imageSearchIdentity.js:407`) and `extractConsensus`'s own
+    per-category consensus — this is where the real scan's `[image-
+    search-titles]` log's `tokens:["virgin"]` actually came from.
+  - `src/lib/compHygiene.js` ALSO exports its own, second,
+    **identically-named** `extractVariantTokens` (line 1427) — a flat
+    wrapper over its own `extractVariantTokensByAxis` — confusable with
+    `imageSearchIdentity.js`'s unrelated `extractVariantTokens` (line
+    262) of the same name in a different file. `variantIdentity.js`
+    imports the `imageSearchIdentity.js` one; `soldVerification.js`
+    imports the `compHygiene.js` one. Neither file's own token vocabulary
+    is aware the other exists.
+  Verified directly (not assumed): extracting via the richer
+  `imageSearchIdentity.js` 'finish' list and feeding it into
+  `confirmedVariant` would silently fail to round-trip for 4 of its 10
+  tokens (`holographic`/`glow-in-dark`/`embossed`/`metallic` — none
+  contain the substrings `foil`/`virgin`/`sketch` `compHygiene.js`'s
+  narrower regex checks for) — confirming a variant `soldVerification`
+  could never subsequently match, the exact "nothing changes" failure
+  the fix this dispatch's own predicate had to route around. Fix 27-A
+  (below) reads `compHygiene.js`'s narrower list specifically, BY
+  CONSTRUCTION guaranteeing the round-trip, rather than consolidating
+  the three vocabularies — a real, separate piece of work (which list
+  should be canonical, whether the richer 'finish' set should be taught
+  to `compHygiene.js`'s coverType axis or vice versa, and a rename to
+  de-collide the two same-named `extractVariantTokens` exports) that
+  belongs to its own dispatch, scoped and greenlit on its own, not folded
+  into a pricing fix under time pressure.
+
+- **Accepted residual risk (2026-08-08, GrailKey Dispatch 27, Fix
+  27-A) — population contamination on `fallback-vision` variant
+  extraction, defended by exact-unanimity, not by population-scoping.**
+  `variantSourceItemsPreIssueFilter` (`api/enrich.js:5228-5233`) uses the
+  FULL raw visual pool (not the winning title-family) whenever
+  `familyCandidate.decision === 'fallback-vision'`, narrowed only by
+  `filterItemsByIssue`'s per-row issue-number text match — never by
+  title-cluster membership. Deliberately NOT reworked to scope to
+  `family.topFamily.indices` instead: doing so requires either exposing
+  a new "is this family qualified" signal out of `resolveIdentity`
+  (`identityCore.js`'s `isQualifiedFamilyForRetention` is presently a
+  local, unexported variable) or re-deriving that exact predicate a
+  second time at the variant call site — the latter would be a FOURTH
+  independently-drifting copy of the same population-qualification
+  logic GK-40 already names one instance of, at the function-vocabulary
+  level, and Q119/Q127/Q128 name at the value level. The existing
+  raw-pool behavior is also deliberately load-bearing for the GENERAL
+  `fallback-vision` case (Q115 dispatch, Batman #608: title-clustering
+  itself found no coherent family at all, so scoping to a "family" would
+  scope to nothing trustworthy) — reworking it purely for this dispatch
+  risks reintroducing that exact regression for the many `fallback-
+  vision` scans that never reach a qualified family.
+
+  Instead, Fix 27-A relies on `evaluateUnanimousConsensusPromotion`'s
+  own exact-unanimity requirement (`support === uniqueRows`) as the
+  practical defense — identical reasoning, identical population, and
+  identical residual risk to Fix 4's own issue-axis rescue, which
+  already accepted this exact trade-off on this exact population. A
+  contaminating row from a different, same-issue-number variant cluster
+  would almost always assert either a different coverType token or none
+  at all, failing exact unanimity and declining the whole rescue —
+  fail-closed, consistent with the standing "when uncertain, leave
+  null" principle. **Explicitly NOT a complete defense**: a
+  contaminating row that coincidentally also asserts the SAME coverType
+  token (e.g. a second, genuinely different virgin-variant product
+  sharing the same issue number) would slip through either way, whether
+  or not the population were family-scoped — narrowing to the family
+  would not have closed this specific residual case either. Accepted
+  as a known, named, residual risk rather than built around, per
+  explicit instruction.
 

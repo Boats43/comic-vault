@@ -185,7 +185,14 @@ export function meetsHighConfidenceMarketplaceConsensusBar(familyCandidate, visu
 // @param {number[]} indices - the specific member indices to check (NOT necessarily the full family — the year-axis caller passes only the asserting subset)
 // @param {Array} visualItems - the raw pool rows the indices reference
 // @returns {{distinct: boolean, reason: string|null, itemIdCount: number, uniqueItemIdCount: number, sellerCount: number, uniqueSellerCount: number}}
-function checkDistinctItemIdAndSeller(indices, visualItems) {
+//
+// GrailKey Dispatch 27 (2026-08-08) — exported. Was module-private; Fix
+// 27-A (src/lib/variantIdentity.js, coverType consensus) needed the same
+// anti-injection distinctness check on a different token axis. Exporting
+// the real function rather than writing a second copy — a duplicate here
+// would be GK-40's own drifted-vocabulary class reproduced inside the fix
+// meant to close a GK-40 symptom.
+export function checkDistinctItemIdAndSeller(indices, visualItems) {
   const rows = Array.isArray(indices) ? indices : [];
   const itemIds = [];
   const sellers = [];

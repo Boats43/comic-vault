@@ -20,6 +20,12 @@
 
 import { extractVariantTokens, tokenizeTitleFamily, classifyVariantTokens } from './imageSearchIdentity.js';
 import { ARTIST_PATTERNS, extractAcronymTokens, detectSeriesMarkers, extractVariantTokensByAxis } from './compHygiene.js';
+// GrailKey Dispatch 27, Fix 27-A (2026-08-08) — reuses the SAME
+// anti-injection distinctness check and title-independence primitive
+// Fix 4/4b already built and shipped, never a second implementation. No
+// import cycle: issueAuthority.js imports only compHygiene.js/
+// responseContract.js/yearEvidence.js, none of which import this file.
+import { checkDistinctItemIdAndSeller, evaluateTitleTextIndependence } from './issueAuthority.js';
 
 // Helper: find the most frequent item in an array. Returns null when array
 // is empty or all items appear only once (no consensus).
@@ -676,6 +682,97 @@ export const hasUnresolvedActiveVariantConflict = (compRows) => {
   return false;
 };
 
+// GrailKey Dispatch 27, Fix 27-A (2026-08-08) — coverType consensus tally.
+// Mirrors resolveFamilyIssueConsensus's own tie-handling (identityCore.js)
+// exactly: a tie for the top count NEVER masquerades as a winner (`winner`
+// stays null, `support` stays 0) — the exact discipline that function's own
+// doc comment established for the issue axis, reused here rather than
+// re-derived. Reads the coverType axis SPECIFICALLY from
+// extractVariantTokensByAxis (compHygiene.js) — not imageSearchIdentity.js's
+// richer 'finish' vocabulary — verified by direct execution (GrailKey
+// Dispatch 27 STEP B) that 4 of that richer list's 10 tokens
+// (holographic/glow-in-dark/embossed/metallic) do not round-trip through
+// the narrower list soldVerification.js actually checks against; reading
+// from the literal same function that verifies it back guarantees the
+// round-trip by construction. See Pattern Library GK-40 — three
+// independently-drifted variant-token vocabularies exist in this codebase;
+// this reads exactly one of them on purpose, does not consolidate the
+// other two.
+//
+// A row asserting MULTIPLE coverType tokens (rare — e.g. "foil" and
+// "virgin" both present) contributes to both tallies; `uniqueRows` counts
+// rows with at least one coverType token, not token occurrences.
+export function tallyCoverTypeConsensus(visualItems) {
+  const rows = Array.isArray(visualItems) ? visualItems : [];
+  const counts = {};
+  const assertingIndices = [];
+  const assertingRows = [];
+  rows.forEach((item, idx) => {
+    const raw = String(typeof item === 'string' ? item : (item?.rawTitle || item?.title || '')).trim();
+    if (!raw) return;
+    const coverTypeTokens = extractVariantTokensByAxis(raw.toLowerCase()).coverType;
+    if (!coverTypeTokens || coverTypeTokens.length === 0) return;
+    assertingIndices.push(idx);
+    assertingRows.push({ idx, rawTitle: raw });
+    for (const tok of new Set(coverTypeTokens)) {
+      counts[tok] = (counts[tok] || 0) + 1;
+    }
+  });
+  const uniqueRows = assertingIndices.length;
+  const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const topCount = ranked[0]?.[1] ?? 0;
+  const tiedForTop = ranked.filter(([, c]) => c === topCount).length;
+  const winner = tiedForTop === 1 ? (ranked[0]?.[0] ?? null) : null;
+  const winnerCount = tiedForTop === 1 ? topCount : 0;
+  const runnerUp = tiedForTop === 1 ? (ranked[1]?.[0] ?? null) : null;
+  return { winner, support: winnerCount, uniqueRows, runnerUp, assertingIndices, assertingRows };
+}
+
+// GrailKey Dispatch 27, Fix 27-A — promotion predicate. Deliberately FIVE
+// conditions, not six: mirrors evaluateUnanimousConsensusPromotion's
+// (issueAuthority.js) uniqueRows>=4 / exact-unanimity / no-runnerUp /
+// distinct-itemId-AND-seller structure exactly, reusing
+// checkDistinctItemIdAndSeller verbatim rather than a second
+// implementation — but does NOT include that function's weightSum>=8.0
+// condition. Argued and greenlit explicitly (GrailKey Dispatch 27):
+// weightSum requires each row's ORIGINAL eBay search-rank index
+// (getRankWeight, imageSearchIdentity.js, itself module-private), but by
+// the time `visualItems` reaches this function it has already been
+// filtered (filterItemsByIssue, api/enrich.js) and re-indexed — local
+// array position no longer corresponds to original search rank.
+// Fabricating a weightSum from the wrong index would be the SIXTH
+// instance of "measuring coherence against the wrong population" in this
+// codebase (Pattern Library) — self-inflicted, inside the very fix meant
+// to close a different instance of the same class. Omitting a condition
+// that cannot be computed honestly was judged better than computing it
+// wrong. A genuine sixth condition remains available if original-rank
+// threading is ever done for OTHER reasons — not built here, not this
+// diff. Caller supplies the ALREADY-COMPUTED condition-6 result
+// (evaluateTitleTextIndependence) rather than this function calling it
+// internally, so the caller can log it whether promotion.promote is true
+// or the population is too thin to bother — see the call site.
+export function evaluateCoverTypeConsensusPromotion(tally, visualItems) {
+  const inputs = {
+    uniqueRows: tally.uniqueRows,
+    support: tally.support,
+    runnerUp: tally.runnerUp,
+  };
+  if (!(inputs.uniqueRows >= 4)) {
+    return { promote: false, declineReason: 'uniqueRows<4', inputs };
+  }
+  if (!(inputs.support === inputs.uniqueRows)) {
+    return { promote: false, declineReason: 'not-exact-unanimity', inputs };
+  }
+  if (inputs.runnerUp !== null) {
+    return { promote: false, declineReason: 'runnerUp-present', inputs };
+  }
+  const memberCheck = checkDistinctItemIdAndSeller(tally.assertingIndices, visualItems);
+  if (!memberCheck.distinct) {
+    return { promote: false, declineReason: memberCheck.reason, inputs: { ...inputs, ...memberCheck } };
+  }
+  return { promote: true, declineReason: null, inputs: { ...inputs, ...memberCheck } };
+}
+
 export const extractConfirmedVariant = (
   visualItems,
   visionVariant,
@@ -923,6 +1020,45 @@ export const extractConfirmedVariant = (
     (allAuthentications.length > 0 ? ` tokens=${JSON.stringify(allAuthentications)}` : '')
   );
 
+  // GrailKey Dispatch 27, Fix 27-A (2026-08-08) — coverType consensus.
+  // NOT the artist ratio gate's job and NOT subject to its majority
+  // ceiling: an artist NAME is always true of every copy of a single-cover
+  // book (100% agreement is uninformative about edition), but "virgin" /
+  // "sketch" / "foil" is a disputable FACTUAL CLAIM about which PRODUCT is
+  // being sold — a seller mislabeling a real Cover A copy "virgin" is
+  // asserting something false, not citing an omnipresent truth for
+  // searchability. Structurally the SAME shape as the authentication axis
+  // just above (no majority ceiling, per that code's own reasoning: "a
+  // signed sub-listing genuinely IS a distinguishing purchase option...
+  // not an SEO-citation artifact"), not the artist axis. This is
+  // NOT a reversal of GENERIC_VARIANT_KINDS/Q111 (imageSearchIdentity.js)
+  // — that classification answers a different question (can this token
+  // alone disambiguate WHICH of several competing specific variants two
+  // listings describe — no, many different virgin covers all just say
+  // "virgin") from this one (does near-unanimous pool agreement mean OUR
+  // book itself is a virgin variant). Filter 1c and Q111's own
+  // specific/generic split are untouched by this change.
+  const coverTypeTally = tallyCoverTypeConsensus(visualItems);
+  const coverTypePromotion = evaluateCoverTypeConsensusPromotion(coverTypeTally, visualItems);
+  const coverTypeIndependence = coverTypePromotion.promote
+    ? evaluateTitleTextIndependence(coverTypeTally.assertingRows.map((r) => r.rawTitle))
+    : { pass: false, assertingRows: 0, distinctClusters: 0, largestClusterSize: 0, maxPairwiseJaccard: null, minPairwiseJaccard: null, clusters: [] };
+  const coverTypeEligible = coverTypePromotion.promote && coverTypeIndependence.pass;
+  console.log(
+    `[coverType-consensus] ${coverTypeEligible ? 'FIRE' : 'DECLINE'} ` +
+    `winner=${coverTypeTally.winner ?? 'null'} support=${coverTypeTally.support}/${coverTypeTally.uniqueRows} ` +
+    `runnerUp=${coverTypeTally.runnerUp ?? 'null'} promotion.declineReason=${coverTypePromotion.declineReason ?? 'none'} ` +
+    `uniqueItemIdCount=${coverTypePromotion.inputs.uniqueItemIdCount ?? 'n/a'}/${coverTypePromotion.inputs.itemIdCount ?? 'n/a'} ` +
+    `uniqueSellerCount=${coverTypePromotion.inputs.uniqueSellerCount ?? 'n/a'}/${coverTypePromotion.inputs.sellerCount ?? 'n/a'} ` +
+    `independence.pass=${coverTypeIndependence.pass} assertingRows=${coverTypeIndependence.assertingRows} ` +
+    `distinctClusters=${coverTypeIndependence.distinctClusters} largestClusterSize=${coverTypeIndependence.largestClusterSize} ` +
+    `maxPairwiseJaccard=${coverTypeIndependence.maxPairwiseJaccard ?? 'n/a'} minPairwiseJaccard=${coverTypeIndependence.minPairwiseJaccard ?? 'n/a'} ` +
+    `clusters=${JSON.stringify(coverTypeIndependence.clusters)}`
+  );
+  if (coverTypeEligible) {
+    consensus.coverType = coverTypeTally.winner;
+  }
+
   // If no consensus on ANY token, return null (keep Vision variant — null
   // stays null on the backfill path, nothing to fill in)
   if (Object.keys(consensus).length === 0) {
@@ -1027,6 +1163,11 @@ export const extractConfirmedVariant = (
 
   const parts = [];
   if (!isBackfill && effectiveVisionVariant) parts.push(String(effectiveVisionVariant).trim());
+  // GrailKey Dispatch 27, Fix 27-A — coverType placed first among the
+  // consensus tokens (base physical-product classifier; convention/
+  // exclusive/artist/limitation are additional distinguishing facts
+  // layered on top of it, not alternatives to it).
+  if (consensus.coverType) parts.push(consensus.coverType);
   if (consensus.convention) parts.push(consensus.convention);
   if (consensus.exclusive) parts.push(consensus.exclusive);
   if (consensus.artist) parts.push(consensus.artist);
