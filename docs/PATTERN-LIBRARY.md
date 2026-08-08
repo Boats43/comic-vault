@@ -3558,3 +3558,76 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   confirmed-virgin book — both scoped as their own dispatch (GrailKey
   Dispatch 28), not fixed in this entry.
 
+- **GrailKey Dispatch 28 PRODUCTION VALIDATION (2026-08-08, build
+  `c95f1c8`) — verified via the card, not the runtime log.** Spawn #351
+  re-scanned 2026-08-07 9:56 PM: headline price **$20.77** (was
+  $5.49/$5.64 before Dispatch 27/28) — Price Bands Quick $18.06 /
+  Market $20.77 / Stretch $23.88; Active Listings correctly shows the 4
+  virgin comps, $21.25-$26.50, avg $24.43; "Price ready" checkmark set;
+  the old $5.64 sold average correctly DEMOTED to a labeled reference
+  line rather than driving the headline; no two-prices-on-one-card
+  contradiction. Both symptoms confirmed resolved: Q75 no longer zeroes
+  the active pool, and GK-31's `activeAnchoredOverFallbackSold` fired
+  in production for the first time on record. (Note for anyone
+  reviewing this session's transcript: a runtime log pasted alongside
+  this card in the same message was from a DIFFERENT, unrelated scan —
+  build `75a2ba3`, pre-Dispatch-28, a different book — and does not
+  belong to this verification; the card is the evidence here, not that
+  log.)
+
+- **"The prompt told it to guess" (2026-08-08, GrailKey Dispatch 29,
+  Fix 3a) — the fabricated "Spawn #1, 1992, high confidence" this
+  session's own Fix 4/4b were built to survive was not a model
+  hallucination.** `api/grade.js`'s `STANDARD_PROMPT` `year` clause, as
+  shipped through GrailKey Dispatch 28, ended: *"Read it from the cover
+  — do not guess. If year is not visible use context clues like art
+  style, cover price, and characters."* That second sentence is an
+  **explicit, standing instruction** to infer a year from recognizing
+  the character/franchise when no printed year is visible — precisely
+  what produced "1992" on a virgin variant with no cover date at all.
+  The `issue` clause had the mirror-image gap: no absence guidance at
+  all, leaving Vision free to default to "1" on any recognized
+  first-issue-adjacent character with nothing telling it not to.
+
+  The instinct on seeing a fabricated field is to suspect the model.
+  The first place to look is the instruction actually given to it —
+  named here as its own standing check, for reuse whenever a Vision
+  field looks fabricated rather than merely wrong: **read the literal
+  prompt text governing that field before assuming the model invented
+  the value on its own.** Fixed by replacing (not appending after) the
+  guess-from-characters sentence — appending would have left the
+  prompt self-contradictory, with a real risk Vision keeps obeying the
+  older, more specific instruction over a newer, more general one
+  added alongside it. Same reasoning applied to the `issue` clause,
+  which previously had no absence guidance to contradict but was given
+  an explicit one for the same reason.
+
+  Full wording and the asset-type-classification companion fix (a
+  virgin/sketch/blank-cover variant recognized by physical book cues —
+  staples, spine, interior page edges — rather than cover text) are
+  Fix 3a, `api/grade.js`, both `STANDARD_PROMPT` and `WATCH_PROMPT`.
+  Explicitly verified before shipping (per the standing risk-asymmetry
+  discipline) that the new physical-cue wording does not weaken the
+  existing poster/art-print/statue/toy disqualification — the gate
+  requires positive physical-book evidence (staples/spine/page edges),
+  not merely "the art looks like a comic," so a flat art print or
+  poster fails it regardless of how comic-accurate the rendering is. A
+  bound art-print-portfolio edge case was identified and deliberately
+  NOT closed with a required paper-stock gate (Vision judging stock
+  from a photo is unreliable and would trade a common virgin-variant
+  false-negative for a rare portfolio false-positive) — added instead
+  as a tiebreaker for the specifically-ambiguous case only (staples/
+  spine visible, but stock/format suggests an oversized art object).
+
+  **`shouldLiftAssetTypeAdvisoryLock`'s documented gap remains open,
+  log only, not fixed here.** Its own Dispatch 19 doc comment already
+  ran this exact Spawn #351 pool and found `hasCoherentConsensus ===
+  false`, meaning it would not have qualified to lift the advisory
+  lock even under its own merchandise/comic-vote conditions clearing.
+  Fix 3a routes around this entirely for the virgin-variant class — if
+  the prompt fix makes Vision report `assetTypeConfident=true`
+  directly, the advisory-lock/lift mechanism never engages for this
+  book at all — but the underlying gap is untouched and remains open
+  for any pool where Vision still reports `assetTypeConfident=false`
+  for other reasons.
+
