@@ -3749,3 +3749,123 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   reimplementing it — a reimplementation is a second copy of the logic,
   and a second copy is exactly what GK-40 and GK-43 show the cost of.
 
+- **GrailKey Dispatch 30 PRODUCTION VALIDATION (2026-08-08, build
+  `30fb7f2`).** Bulk import of the same Spawn #351 virgin variant
+  (`s-l1600.webp`) accepted — "1 of 5," no "not a comic" rejection.
+  GK-41 confirmed resolved on real production data. Full pricing chain
+  confirmed working on the same scan, verbatim:
+  ```
+  [coverType-consensus] FIRE winner=virgin support=4/4
+  [commit4-promote] PROMOTE issue=#351 ... provisional -> confirmed
+  [commit4-promote-year] PROMOTE year=2024 assertingRows=3 silentRows=1
+  [Q53-buildActive] filtered 4/4 active comps
+  [price-trace] sold pool 100% edition-fallback but active pool
+    confirmed variant-matched (4 comps, variant="virgin") — anchoring
+    Tier 3 active-only instead of blending
+  [tier-3] activeAvg=$24.43 discounted=$20.77
+  [match-conf] score=96 tier=HIGH
+  ```
+  Fix 3a's null clauses (Dispatch 29, kept unchanged through Dispatch
+  30) also confirmed working on this same scan, recorded here as its
+  own separate success rather than folded into the failure below:
+  `[phase1] identity determination: Vision="Spawn" #null`, and the
+  year-drift conflict log shows `"vision": null` — no fabricated issue,
+  no fabricated year. Half of Fix 3a's job (issue/year absence
+  guidance) has been production-correct since Dispatch 29; the other
+  half (assetTypeConfident wording) needed two more corrective passes
+  — Dispatch 30, then Dispatch 31 below — before it matched reality.
+
+- **GrailKey Dispatch 31 (2026-08-08) — two independent bugs found on
+  the same re-scan, one prompt (second correction), one decision gate.**
+
+  **Fix 31-A, SHIPPED — the wrong-axis gate, named and removed.**
+  `shouldLiftAssetTypeAdvisoryLock`'s `hasCoherentConsensus` conjunct
+  (title+issue majority-vote agreement on the eBay visual pool) gated
+  whether Vision's own `assetTypeConfident=false` could be overridden
+  by category-vote evidence. On the real re-scan: `comicVotes=20/20
+  (ratio=100%) merchandiseRatio=0% coherent=false blockedBy=
+  [pool-incoherent]` — an unambiguous asset-type signal (20/20 comic-
+  category, zero merchandise) blocked solely because the pool's 20
+  listings didn't converge on one title/issue. Confirmed by direct
+  source read: `hasCoherentConsensus` measures "do these listings
+  describe the same book," a different question from "is this object a
+  comic," which the category vote already answers directly over the
+  identical pool. No named failure case motivated the conjunct at
+  introduction (Dispatch 19's own comment called it "the MORE
+  conservative of the two options," a general principle) and it failed
+  against its own only validation pool at ship time (that same comment
+  disclosed the motivating Spawn #351 scan wouldn't have qualified
+  under its own bar). Removed entirely, not replaced — category votes
+  are already the correct-axis, direct measure; inventing a replacement
+  conjunct would be a second, weaker proxy for what Q32 already
+  measures. If a genuine pool-quality failure mode is ever observed, it
+  needs a signal that actually measures pool quality/diversity, sized
+  against a real incident — logged as an unscoped watch item, not built
+  speculatively here. `src/lib/imageSearchIdentity.js`'s
+  `shouldLiftAssetTypeAdvisoryLock` dropped from 4 params to 3; call
+  site (`api/enrich.js`) and both stale test files
+  (`grailkey-dispatch-19-fix5-asset-type-override.test.js`,
+  `grailkey-dispatch-20-fix5-decline-logging.test.js`) updated in the
+  same commit — the former's Section 1/5 inverted to assert the new
+  behavior rather than deleted, so the removal itself stays a checked
+  fact.
+
+  **Fix 31-B, SHIPPED — Dispatch 30's own aspect-ratio wording
+  backfired the same day it shipped.** The photo was the book on a
+  light background with margins; Vision's condition report cited "The
+  proportions and presentation suggest this is printed art stock rather
+  than a periodical comic book cover" and "The paper stock and framing
+  indicate this is likely a standalone art piece or poster." Two
+  failures: (a) Vision cited paper stock — the exact tiebreaker
+  Dispatch 30 explicitly dropped — re-inventing it; (b) IMAGE
+  proportions are not OBJECT proportions, and the aspect-ratio/framing
+  cue Dispatch 30 added was read as evidence AGAINST an ordinary
+  photographed book, backfiring on the ordinary case it was meant to
+  protect. Both cues removed entirely (not narrowed) from both prompts
+  — an explicit, by-name prohibition on paper-stock/print-stock/
+  material-appearance reasoning added instead. Explicitly a wider
+  positive-signal surface than Dispatch 30's version, and explicitly
+  conditional on GK-41 (Dispatch 30) remaining in place: before GK-41 a
+  false "is a comic" could reach a hard block; after GK-41 it degrades
+  to `ID_REQUIRED` (if identity can't resolve) or an advisory-locked
+  listing button (if it can't be verified) — never a fabricated price
+  or a dead end. A future reader must not treat this width as an
+  unconditional loosening independent of GK-41 staying shipped.
+
+  **GK-44 — named finding, most reusable of this dispatch, standing
+  rule for every future prompt change in this codebase.** Vision has
+  now reached for an unstated criterion twice: the masthead/price-box/
+  barcode checklist (pre-Dispatch-29, part of "the prompt told it to
+  guess"), then paper stock and framing (pre-Dispatch-31, this entry).
+  **Omitting guidance is not the same as prohibiting a behavior —
+  silence reads as "unconstrained," not "not applicable."** Pre-ship
+  check for every future default-permissive prompt clause: ask what
+  specific reasoning shortcut a model might reach for to justify the
+  restrictive outcome, and forbid it by name before shipping, rather
+  than discovering it re-invented in production after the fact.
+
+  **GK-42 status, checked before scoping (per the explicit note left in
+  Dispatch 30): re-verify before touching.** Not re-checked this
+  dispatch — still open, unchanged.
+
+  Verified: 19/19 new assertions
+  (`tests/grailkey-dispatch-31-fix31a-wrong-axis-removed.test.js`),
+  split three ways — Part 1 calls the real exported
+  `shouldLiftAssetTypeAdvisoryLock` directly on the actual Spawn #351
+  figures and a genuine merchandise-heavy contrast case; Part 2
+  extracts the real `listingHardLocked` conditional text from
+  `api/enrich.js` via anchored regex (tightened during authoring after
+  an initial loose anchor-then-wildcard pattern accidentally matched an
+  unrelated polybag-pricing gate elsewhere in the file — caught before
+  commit, not shipped) and evaluates it against the real predicate's
+  output, proving the actual downstream outcome (not locked) rather
+  than just the predicate in isolation; Part 3 is prompt source-
+  presence, absence-first per the standing Dispatch 29/30 discipline.
+  13/13 pre-existing assertions across the two superseded Dispatch
+  19/20 test files updated (not deleted) to assert current behavior —
+  34/34 the (twice-superseded) Dispatch 29 prompt test still clean.
+  Both changes are decision-gate / trust-intake adjacent, not pricing
+  math — 31-A explicitly flagged and greenlit as a decision-gate change
+  per CLAUDE.md's standing protocol; 31-B's width explicitly signed off
+  given the GK-41 risk-budget argument above.
+

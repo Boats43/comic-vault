@@ -13,6 +13,14 @@
 // hand-recompute which specific sub-condition failed from raw ratios
 // alone, and surfaces merchandiseRatio explicitly (previously only
 // comicVotes/comicRatio/coherent were shown).
+//
+// SUPERSEDED, the 'pool-incoherent' assertion (GrailKey Dispatch 31,
+// 2026-08-08): the coherence conjunct this reason string described was
+// removed from shouldLiftAssetTypeAdvisoryLock entirely (wrong-axis
+// gate, see that function's own JSDoc) — 'pool-incoherent' can no
+// longer appear in the blockedBy breakdown. Rewritten below to assert
+// its ABSENCE instead, matching the standing "absence assertion matters
+// more than presence" discipline (Dispatch 29/30).
 
 import { readFileSync } from 'node:fs';
 
@@ -23,6 +31,7 @@ const assertTrue = (cond, label) => {
   if (cond) { passed++; console.log(`  ✓ ${label}`); }
   else { failed++; const msg = `  ✗ ${label}`; failures.push(msg); console.log(msg); }
 };
+const assertFalse = (cond, label) => assertTrue(!cond, label);
 
 console.log('\n=== GrailKey Dispatch 20 — Fix 5 decline-path logging ===\n');
 
@@ -33,7 +42,7 @@ const enrichSource = readFileSync(new URL('../api/enrich.js', import.meta.url), 
 const fireLogMatch = enrichSource.match(/console\.log\(\s*\n\s*`\[Q32-asset-type-override\] lifting advisory lock:[\s\S]*?\);/);
 const declineLogMatch = enrichSource.match(/console\.log\(\s*\n\s*`\[Q32-asset-type-override\] declined:[\s\S]*?\);/);
 const declineLog = declineLogMatch?.[0] || '';
-const blockedByComputation = enrichSource.match(/const blockedBy = \[\];[\s\S]*?blockedBy\.push\('pool-incoherent'\);/)?.[0] || '';
+const blockedByComputation = enrichSource.match(/const blockedBy = \[\];[\s\S]*?blockedBy\.push\('comicRatio<60%'\);/)?.[0] || '';
 
 console.log('-- Both branches log, not just the fire path --');
 {
@@ -47,12 +56,17 @@ console.log('\n-- Decline log carries a reason breakdown, not just raw numbers -
   assertTrue(/blockedBy\.push\('merchandise-hard-block-region'\)/.test(blockedByComputation), 'breakdown distinguishes the merchandise-hard-block-region case');
   assertTrue(/blockedBy\.push\('comicVotes<5'\)/.test(blockedByComputation), 'breakdown distinguishes the comicVotes<5 case');
   assertTrue(/blockedBy\.push\('comicRatio<60%'\)/.test(blockedByComputation), 'breakdown distinguishes the comicRatio<60% case');
-  assertTrue(/blockedBy\.push\('pool-incoherent'\)/.test(blockedByComputation), 'breakdown distinguishes the pool-incoherent case');
 }
 
 console.log('\n-- Decline log surfaces merchandiseRatio explicitly (not just comic-side ratios) --');
 {
   assertTrue(/merchandiseRatio=/.test(declineLog), 'merchandiseRatio is printed in the decline log line, for full diagnostic context alongside comicVotes/comicRatio');
+}
+
+console.log('\n-- GrailKey Dispatch 31: pool-incoherent reason is GONE, not just unused --');
+{
+  assertFalse(/pool-incoherent/.test(enrichSource), 'no reference to pool-incoherent remains anywhere in api/enrich.js — the wrong-axis conjunct was removed, not merely stopped-being-pushed');
+  assertFalse(/coherent/.test(declineLog), 'decline log no longer prints a coherent= field');
 }
 
 console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);

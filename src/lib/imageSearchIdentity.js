@@ -468,46 +468,60 @@ export const inferAssetTypeFromCategories = (leafCategoryIds) => {
 
 /**
  * GrailKey Dispatch 19 (2026-08-07) — Fix 5, unblocked and implemented.
+ * GrailKey Dispatch 31 (2026-08-08) — hasCoherentConsensus conjunct
+ * REMOVED entirely (see below), not replaced.
  *
  * Pure decision predicate for lifting the assetType-uncertain advisory
  * lock (Q110's listingHardLocked) when Vision itself flagged
  * !assetTypeConfident but the SAME Q32 category-vote machinery that
- * detects merchandise contamination independently shows strong, coherent
- * comic-category agreement. Strictly additive to the Q32 merchandise
+ * detects merchandise contamination independently shows strong comic-
+ * category agreement. Strictly additive to the Q32 merchandise
  * hard-block — `merchandiseRatio >= 0.5` short-circuits to `false`
  * unconditionally, so this can never override that block; it only ever
  * fires from inside the branch where merchandise detection already
  * declined.
  *
- * `hasCoherentConsensus` is the caller's own `extractConsensus(...) !==
- * null` result on the identical pool — deliberately the pool's OVERALL
- * consensus verdict (title AND issue), not just extractConsensus's
- * internal titleOk sub-check, which is a lower, less conservative bar.
- * Reused as a boolean input here (not recomputed) rather than importing
- * extractConsensus's internals, avoiding a second, independently-drifting
- * copy of that logic — the exact "drifted-duplicate-constant" shape this
- * codebase has hit and fixed repeatedly (see the Pattern Library).
+ * REMOVED, Dispatch 31: a fourth parameter, `hasCoherentConsensus`
+ * (the caller's `extractConsensus(...) !== null` result on the same
+ * pool — title+issue majority-vote agreement), previously required
+ * here. It measured the wrong axis: "do these listings describe the
+ * same book," not "is this object a comic" — a question Q32's own
+ * category vote already answers directly, over the identical pool. It
+ * had no named failure case motivating it at introduction — the
+ * original comment here called it "the MORE conservative of the two
+ * options," a general principle, not a response to an observed
+ * incident — and it failed against its own only validation pool at
+ * ship time (that comment disclosed the Spawn #351 pool it was
+ * validated against had hasCoherentConsensus=false, so the fix landed
+ * already unable to fire on the scan that motivated it). Two real
+ * production pools have exercised this predicate to date; both had
+ * unambiguous comicVotes/merchandiseRatio signal (Spawn #351: 20/20
+ * comic-category, 0% merchandise, both times) and both were blocked
+ * SOLELY by hasCoherentConsensus=false on a scattered-title pool.
+ * Removed, not replaced — if a genuine pool-quality failure mode is
+ * ever observed (e.g. a degenerate/noise image-search result set
+ * voting comic-category by chance rather than genuine content match),
+ * that needs a signal that actually measures pool quality or
+ * diversity, sized against a real incident when one appears — not
+ * built speculatively against a hypothetical one now. Logged as an
+ * unscoped watch item, not built here.
  *
  * Thresholds (>=5 comic-category listings, >=60% ratio) are the
  * GrailKey Dispatch 15 design's own candidates, validated against the
- * real Spawn #351 production pool (2026-08-07 20:40:36 UTC: 0/20
- * merchandise, ~20/20 comic-category — clears trivially, confirming the
- * bar isn't miscalibrated against real eBay category data, though that
- * specific pool's own `hasCoherentConsensus` was false, so it would not
- * itself have qualified — see the real call site's own comment in
- * api/enrich.js for the full disclosure).
+ * real Spawn #351 production pool (0/20 merchandise, ~20/20
+ * comic-category — clears trivially both times this predicate has been
+ * exercised in production).
  *
  * @param {number} merchandiseRatio - merchandiseVotes / categoryVotes.length
  * @param {number} comicVotes - categoryVotes.length - merchandiseVotes
  * @param {number} totalVotes - categoryVotes.length
- * @param {boolean} hasCoherentConsensus - extractConsensus(...) !== null on the same pool
  * @returns {boolean}
  */
-export const shouldLiftAssetTypeAdvisoryLock = (merchandiseRatio, comicVotes, totalVotes, hasCoherentConsensus) => {
+export const shouldLiftAssetTypeAdvisoryLock = (merchandiseRatio, comicVotes, totalVotes) => {
   if (!(merchandiseRatio < 0.5)) return false;
   if (!(totalVotes > 0)) return false;
   const comicRatio = comicVotes / totalVotes;
-  return comicVotes >= 5 && comicRatio >= 0.6 && hasCoherentConsensus === true;
+  return comicVotes >= 5 && comicRatio >= 0.6;
 };
 
 // Ship #EBAY-FIRST — consensus extraction from eBay image search results.

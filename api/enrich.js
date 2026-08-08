@@ -3629,11 +3629,11 @@ export default async function handler(req, res) {
         // (listingHardLocked, never a hard price block) — this extends
         // the SAME Q32 category-vote machinery above to ALSO tally
         // comic-category votes, and when Vision itself flagged
-        // !assetTypeConfident but the pool independently shows strong,
-        // coherent comic-category agreement, lifts the advisory lock
-        // before it fires. Strictly additive to the merchandise
-        // hard-block above — this only runs inside the merchandiseRatio
-        // < 0.5 branch already reached, never able to override that block.
+        // !assetTypeConfident but the pool independently shows strong
+        // comic-category agreement, lifts the advisory lock before it
+        // fires. Strictly additive to the merchandise hard-block above —
+        // this only runs inside the merchandiseRatio < 0.5 branch already
+        // reached, never able to override that block.
         //
         // Blocked since GrailKey Dispatch 15 on a real captured Vision
         // JSON to determine whether a "not a comic" misread returns
@@ -3645,51 +3645,32 @@ export default async function handler(req, res) {
         // never writes confirmedIssue/confirmedTitle, only the advisory
         // lock flag consumed at the listingHardLocked gate below.
         //
-        // Coherence gate: requires visualConsensus !== null —
-        // extractConsensus's own overall verdict on this exact pool
-        // (computed once at phase1, already in scope) — rather than
-        // isolating just its internal titleOk sub-check. Deliberately the
-        // MORE conservative of the two options (titleOk alone is a lower
-        // bar than "extractConsensus produced ANY real consensus,
-        // title AND issue"), per the standing "conservative when
-        // uncertain" rule, and avoids refactoring extractConsensus's
-        // internal closures (stripVariantNoise/extractMainTitle/
-        // getMostCommon) out to module scope just to isolate one
-        // sub-check — a real option, not taken, to keep this fix's
-        // surface area contained.
-        //
-        // Disclosed limitation, not hidden: the real Spawn #351 scan that
-        // unblocked this fix had visualConsensus === null itself (title
-        // consensus was fine, but the ISSUE axis never reached its own
-        // separate 50% bar — a different, narrower problem; see the
-        // commit-p/HIGH_CONFIDENCE_WEIGHT_FLOOR near-miss investigated
-        // separately this same dispatch). This fix would NOT have lifted
-        // that exact scan's own advisory lock. It targets the more common
-        // shape where the pool agrees on both title AND issue but
-        // Vision's own assetTypeConfident read was wrong (a poster/print
-        // visually confused for a genuine listing pool that DOES
-        // converge) — a real, different case from Spawn #351's own.
-        //
-        // Thresholds (>=5 comic-category listings, >=60% ratio) are the
-        // Dispatch 15 design's own candidates; validated against the one
-        // real pool available (Spawn #351: 0/20 merchandise, ~20/20
-        // comic-category — clears trivially, confirming the bar isn't
-        // miscalibrated against real eBay category data, though this
-        // pool doesn't exercise the boundary itself).
+        // GrailKey Dispatch 31 (2026-08-08) — the hasCoherentConsensus
+        // (extractConsensus/visualConsensus) conjunct that used to gate
+        // this predicate is REMOVED, not replaced. It measured whether
+        // the pool's listings agree on title+issue identity — a
+        // different question from whether the object is a comic, which
+        // the comicVotes/merchandiseRatio tally below already answers
+        // directly. A real production pool (Spawn #351, 20/20 comic-
+        // category, 0% merchandise — unambiguous asset-type signal) was
+        // blocked SOLELY by a scattered-title pool failing that identity
+        // bar, twice. See shouldLiftAssetTypeAdvisoryLock's own JSDoc
+        // (imageSearchIdentity.js) for the full removal reasoning,
+        // including that the conjunct never had a named failure case and
+        // failed against its own only validation pool at ship time.
         if (!out.assetTypeConfident) {
           const comicVotes = categoryVotes.length - merchandiseVotes;
           const comicRatio = categoryVotes.length > 0 ? comicVotes / categoryVotes.length : 0;
-          const coherent = visualConsensus !== null;
           // GrailKey Dispatch 22 — persisted (not just logged) so the
           // scanlog: write site, much later in this handler, can report
           // whether this predicate was evaluated at all this scan and
           // why it declined, without re-deriving it from log text.
           out.assetTypeOverrideEvaluated = true;
-          if (shouldLiftAssetTypeAdvisoryLock(merchandiseRatio, comicVotes, categoryVotes.length, coherent)) {
+          if (shouldLiftAssetTypeAdvisoryLock(merchandiseRatio, comicVotes, categoryVotes.length)) {
             out.assetTypeConfidentOverride = true;
             console.log(
               `[Q32-asset-type-override] lifting advisory lock: comic-category vote ${comicVotes}/${categoryVotes.length} ` +
-              `(ratio=${(comicRatio*100).toFixed(0)}%), pool title/issue coherent (extractConsensus non-null) — ` +
+              `(ratio=${(comicRatio*100).toFixed(0)}%) — ` +
               `Vision's assetTypeConfident=false treated as overridden for the listing-lock gate only`
             );
           } else {
@@ -3708,12 +3689,11 @@ export default async function handler(req, res) {
             if (merchandiseRatio >= 0.5) blockedBy.push('merchandise-hard-block-region');
             if (comicVotes < 5) blockedBy.push('comicVotes<5');
             if (comicRatio < 0.6) blockedBy.push('comicRatio<60%');
-            if (!coherent) blockedBy.push('pool-incoherent');
             out.assetTypeOverrideBlockedBy = blockedBy;
             console.log(
               `[Q32-asset-type-override] declined: comicVotes=${comicVotes}/${categoryVotes.length} ` +
               `(ratio=${(comicRatio*100).toFixed(0)}%) merchandiseRatio=${(merchandiseRatio*100).toFixed(0)}% ` +
-              `coherent=${coherent} blockedBy=[${blockedBy.join(',')}] — advisory lock stays`
+              `blockedBy=[${blockedBy.join(',')}] — advisory lock stays`
             );
           }
         }

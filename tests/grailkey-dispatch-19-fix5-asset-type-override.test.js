@@ -14,11 +14,26 @@
 // machinery (merchandise detection) to also lift Q110's advisory
 // listingHardLocked flag when Vision flagged !assetTypeConfident but the
 // pool independently shows strong (>=5 listings, >=60% ratio)
-// comic-category agreement AND the pool is coherent (extractConsensus
-// produced a real, non-null consensus on title AND issue — deliberately
-// the stricter of the two coherence options, see the function's own doc
-// comment). Strictly additive to the Q32 merchandise hard-block — can
-// never fire when merchandiseRatio >= 0.5 already claimed the pool.
+// comic-category agreement. Strictly additive to the Q32 merchandise
+// hard-block — can never fire when merchandiseRatio >= 0.5 already
+// claimed the pool.
+//
+// SUPERSEDED, Sections 1 and 5 (GrailKey Dispatch 31, 2026-08-08): the
+// original design also required `hasCoherentConsensus` (a 4th argument
+// — extractConsensus's title+issue majority-vote verdict on the same
+// pool) before lifting the lock. That conjunct measured the wrong axis
+// — "do these listings describe the same book," not "is this object a
+// comic" — and blocked a real production pool (Spawn #351, 20/20
+// comic-category, 0% merchandise: an unambiguous asset-type signal)
+// SOLELY because its 20 listings didn't agree on one title/issue. It had
+// no named failure case motivating it at introduction and failed
+// against its own only validation pool at ship time (see this file's
+// original Section 1, now rewritten below). Dispatch 31 removed the
+// conjunct entirely, not replaced it — see shouldLiftAssetTypeAdvisoryLock's
+// own JSDoc for the full removal reasoning. The predicate is now 3-arg;
+// Sections 2/3/4/6 below (merchandise hard-block, comicVotes floor,
+// comicRatio floor, degenerate inputs) are unaffected and still describe
+// shipped behavior.
 
 import { shouldLiftAssetTypeAdvisoryLock } from '../src/lib/imageSearchIdentity.js';
 
@@ -34,58 +49,59 @@ const assertFalse = (cond, label) => assertEq(!!cond, false, label);
 
 console.log('\n=== GrailKey Dispatch 19 — Fix 5 (shouldLiftAssetTypeAdvisoryLock) ===\n');
 
-// ─── SECTION 1 — the real Spawn #351 production pool numbers ───
+// ─── SECTION 1 (current, Dispatch 31 wording) — the real Spawn #351
+// production pool numbers now lift the lock outright. ───
 // 0/20 merchandise, ~20/20 comic-category (merchandiseRatio=0,
-// comicVotes=20, totalVotes=20) — but visualConsensus WAS null on this
-// exact scan (issue-axis never reached its own 50% bar), disclosed
-// honestly: this specific fix would NOT have fired for that scan.
-console.log('-- Section 1: real Spawn #351 pool shape, both coherence outcomes --');
+// comicVotes=20, totalVotes=20) — this is the ACTUAL shape observed
+// twice in production (2026-08-07 and 2026-08-08), both times blocked
+// only by the now-removed coherence conjunct. This is the GK-41-enabled
+// regression fix this dispatch exists to ship.
+console.log('-- Section 1: real Spawn #351 pool shape — lifts outright, no coherence conjunct --');
 {
   assertTrue(
-    shouldLiftAssetTypeAdvisoryLock(0, 20, 20, true),
-    'if the pool HAD been coherent (hasCoherentConsensus=true), the real 0/20 merchandise, 20/20 comic-category numbers clear the bar trivially'
-  );
-  assertFalse(
-    shouldLiftAssetTypeAdvisoryLock(0, 20, 20, false),
-    'the ACTUAL real scan shape (visualConsensus was null) — declines, disclosed limitation, not silently different from what shipped'
+    shouldLiftAssetTypeAdvisoryLock(0, 20, 20),
+    'the real 0/20 merchandise, 20/20 comic-category numbers clear the bar — the actual production shape that was wrongly blocked twice before Dispatch 31'
   );
 }
 
 // ─── SECTION 2 — never overrides the merchandise hard-block ───
 console.log('\n-- Section 2: merchandise hard-block always wins --');
 {
-  assertFalse(shouldLiftAssetTypeAdvisoryLock(0.5, 10, 20, true), 'merchandiseRatio exactly 0.5 (the hard-block\'s own bar) — declines regardless of comic votes');
-  assertFalse(shouldLiftAssetTypeAdvisoryLock(0.9, 2, 20, true), 'merchandiseRatio=0.9 — declines even with a coherent pool');
-  assertFalse(shouldLiftAssetTypeAdvisoryLock(1.0, 0, 20, true), 'merchandiseRatio=1.0, zero comic votes — declines');
+  assertFalse(shouldLiftAssetTypeAdvisoryLock(0.5, 10, 20), 'merchandiseRatio exactly 0.5 (the hard-block\'s own bar) — declines regardless of comic votes');
+  assertFalse(shouldLiftAssetTypeAdvisoryLock(0.9, 2, 20), 'merchandiseRatio=0.9 — declines');
+  assertFalse(shouldLiftAssetTypeAdvisoryLock(1.0, 0, 20), 'merchandiseRatio=1.0, zero comic votes — declines');
 }
 
 // ─── SECTION 3 — comic-vote count floor (>=5) ───
 console.log('\n-- Section 3: comicVotes >= 5 floor --');
 {
-  assertFalse(shouldLiftAssetTypeAdvisoryLock(0, 4, 4, true), 'comicVotes=4, ratio=100% — below the count floor, declines');
-  assertTrue(shouldLiftAssetTypeAdvisoryLock(0, 5, 5, true), 'comicVotes=5, ratio=100% — clears at exactly the floor');
+  assertFalse(shouldLiftAssetTypeAdvisoryLock(0, 4, 4), 'comicVotes=4, ratio=100% — below the count floor, declines');
+  assertTrue(shouldLiftAssetTypeAdvisoryLock(0, 5, 5), 'comicVotes=5, ratio=100% — clears at exactly the floor');
 }
 
 // ─── SECTION 4 — comic-ratio floor (>=0.6) ───
 console.log('\n-- Section 4: comicRatio >= 0.6 floor --');
 {
-  assertFalse(shouldLiftAssetTypeAdvisoryLock(0.41, 10, 17, true), 'comicVotes=10/17=59% — just below the ratio floor, declines (merchandiseRatio=7/17=0.41 < 0.5, so only the ratio floor is being tested here)');
-  assertTrue(shouldLiftAssetTypeAdvisoryLock(0.4, 12, 20, true), 'comicVotes=12/20=60% — clears at exactly the floor');
+  assertFalse(shouldLiftAssetTypeAdvisoryLock(0.41, 10, 17), 'comicVotes=10/17=59% — just below the ratio floor, declines (merchandiseRatio=7/17=0.41 < 0.5, so only the ratio floor is being tested here)');
+  assertTrue(shouldLiftAssetTypeAdvisoryLock(0.4, 12, 20), 'comicVotes=12/20=60% — clears at exactly the floor');
 }
 
-// ─── SECTION 5 — coherence gate is a hard requirement, not a tiebreaker ───
-console.log('\n-- Section 5: coherence gate --');
+// ─── SECTION 5 (current, Dispatch 31 wording) — the coherence conjunct
+// is GONE: a scattered-title pool with a clean category signal now
+// lifts the lock, and a trailing 4th argument (a caller that hasn't
+// been updated) has no effect at all. ───
+console.log('\n-- Section 5: no coherence gate — scattered-title pool with clean category signal lifts; extra args are ignored --');
 {
-  assertFalse(shouldLiftAssetTypeAdvisoryLock(0, 20, 20, false), 'overwhelming category votes (20/20) but incoherent pool — still declines, a scattered pool of unrelated comic-category junk must not force an override');
-  assertFalse(shouldLiftAssetTypeAdvisoryLock(0, 20, 20, null), 'hasCoherentConsensus=null (not strictly true) — declines, exact-match required');
-  assertFalse(shouldLiftAssetTypeAdvisoryLock(0, 20, 20, undefined), 'hasCoherentConsensus=undefined — declines');
+  assertTrue(shouldLiftAssetTypeAdvisoryLock(0, 20, 20), 'overwhelming category votes (20/20), no merchandise — lifts regardless of title/issue coherence (this is the actual Dispatch 31 fix)');
+  assertTrue(shouldLiftAssetTypeAdvisoryLock(0, 20, 20, false), 'passing a stale 4th argument (false, as a not-yet-updated caller might) has NO effect — the function is now 3-arg and still lifts');
+  assertTrue(shouldLiftAssetTypeAdvisoryLock(0, 20, 20, null), 'stale 4th argument (null) also has no effect');
 }
 
 // ─── SECTION 6 — degenerate inputs ───
 console.log('\n-- Section 6: degenerate inputs --');
 {
-  assertFalse(shouldLiftAssetTypeAdvisoryLock(0, 0, 0, true), 'zero total votes — declines, never divides by zero into a false positive');
-  assertFalse(shouldLiftAssetTypeAdvisoryLock(NaN, 5, 5, true), 'NaN merchandiseRatio — declines (NaN < 0.5 is false)');
+  assertFalse(shouldLiftAssetTypeAdvisoryLock(0, 0, 0), 'zero total votes — declines, never divides by zero into a false positive');
+  assertFalse(shouldLiftAssetTypeAdvisoryLock(NaN, 5, 5), 'NaN merchandiseRatio — declines (NaN < 0.5 is false)');
 }
 
 console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);
