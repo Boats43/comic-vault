@@ -3631,3 +3631,121 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   for any pool where Vision still reports `assetTypeConfident=false`
   for other reasons.
 
+- **Fix 3a SAME-DAY PRODUCTION REGRESSION, corrected as GrailKey
+  Dispatch 30 (2026-08-08) — the physical-cues-required design was
+  unsatisfiable by the way comics are normally photographed.** Fix
+  3a's `assetTypeConfident` wording required a visible staple, spine,
+  or interior page edge before treating a textless cover as a comic. A
+  flat, straight-on cover photograph — the ordinary shape of a bulk-
+  import scan — can never show any of those, comic or not. A real
+  Spawn #351 virgin-variant bulk import returned "0 added, 1 failed…
+  not a comic" the same day Fix 3a shipped. **Corrected direction:**
+  a textless or minimally-texted cover at comic-cover proportions
+  (~6.6 x 10.2 in) showing comic-style character art is a comic BY
+  DEFAULT — `assetTypeConfident=true`. Physical-book cues, when
+  visible, only STRENGTHEN that call; their absence is the ordinary
+  case for a cover scan, never evidence against it. The
+  paper-stock/"bound art portfolio" tiebreaker is dropped entirely —
+  also unassessable from a flat scan, same root problem one level
+  down. **Named misclassification gap, stated plainly rather than
+  claimed airtight:** a poster deliberately printed at exact
+  comic-cover proportions, photographed straight-on with no visible
+  mat, mounting, or border, has no remaining discriminator besides
+  aspect ratio and framing, and could pass. Accepted per the standing
+  risk-asymmetry principle — a false "is a comic" is caught downstream
+  by identity resolution and comp-matching (no real comps for a
+  poster's fabricated identity); a false "not a comic" kills the
+  workflow with nothing downstream to catch it.
+
+  **GK-41, SHIPPED same commit — the actual bug the wording fix alone
+  would NOT have resolved.** The bulk-import "0 added" hard-reject is
+  `(!data.publisher && !data.year && !data.issue)` at both
+  `gradeBlob` and `handleBulkImport` (`src/App.jsx`) — a gate fully
+  independent of `assetTypeConfident`, never consulted by it. On a
+  genuine virgin variant Vision now correctly returns null for all
+  three, because Fix 3a's own (correct, kept) issue-null and
+  year-null clauses are working exactly as designed. **The old
+  year-guessing sentence Fix 3a removed had been accidentally
+  load-bearing for this gate**: a fabricated "1992" kept the
+  three-null clause from ever firing; removing the fabrication —
+  correctly — exposed a downstream consumer that had never seen an
+  empty value before. Named class, general check for reuse: **"a
+  consumer depending on a fabricated value fails when the value
+  becomes honest"** — one layer deeper than Dispatch 28's "deferred
+  debt promoted to live by a downstream fix's success" (same shape:
+  a fix makes a field honest for the first time, and a latent
+  consumer that only ever saw the dishonest version breaks). When a
+  fix replaces a fabricated value with null, grep every consumer that
+  tests that field for presence — a truthiness check written against
+  a field that was never empty is a latent hard failure.
+
+  Fix: `(!data.publisher && !data.year && !data.issue &&
+  data.assetTypeConfident !== true)` at both call sites — the
+  three-null clause is bypassed only when Vision itself affirms
+  `assetTypeConfident===true`. Deliberately NOT also re-gated on
+  `data.title` in the new conjunct: `!data.title` already forces
+  rejection via the first clause in the same `||` chain, so repeating
+  it would be dead logic dressed as a safeguard — the exact shape
+  GK-40's duplicated-vocabulary drift warns against. Slipped-through
+  case, bounded and accepted: Vision wrongly asserts
+  `assetTypeConfident=true` on a genuine non-comic object AND
+  simultaneously returns zero identity signal — narrower than the
+  prior blanket rejection of every zero-metadata cover, and it
+  degrades honestly downstream (`identityGate.assessIdentityConfidence`
+  still requires `missingFields.length===0`, so the book lands on
+  `ID_REQUIRED`, not a fabricated price). Verified via extraction-and-
+  eval of the real shipped `if` condition text from both call sites
+  (`tests/grailkey-dispatch-30-gk41-non-comic-gate.test.js`) rather
+  than a hand-retyped predicate, so the test cannot silently drift
+  from the shipped code. **Cannot-verify note, stated plainly:**
+  client-side bulk rejections never reach `/api/enrich`, so there is
+  no server-side log trace of the specific reported failure
+  (`s-l1600.webp`) — the evidence for this fix is the code read (the
+  byte-identical three-null predicate at both call sites), not a
+  reproduced production log line.
+
+  **GK-42, logged only — a different, adjacent bug found while
+  pulling logs for GK-41, not chased.** A post-`ba28666` Spawn #351
+  scan resolved to "Spawn #1" via `commit4.3.1`'s near-miss
+  family-conflict margin decline (`family=351@4/9.5 runnerUp=4
+  margin=2.38 prior=1 requiredMargin=3`) — Dispatch 26/Fix 2c
+  territory. Note for whoever picks this up: `prior=1` is Vision's
+  own fabricated issue number, which Fix 3a's issue-null clause
+  should now prevent from ever being set in the first place — this
+  may resolve itself on the next scan with no code change. Re-check
+  before scoping any fix.
+
+  **GK-43, logged only — pre-existing, deliberately untouched in this
+  commit.** `gradeBlob`'s non-comic title check uses
+  `.includes('unknown')` (substring match); `handleBulkImport`'s uses
+  `titleLower === 'unknown'` (exact match). Real divergence, confirmed
+  by direct outcome test (Section 3,
+  `tests/grailkey-dispatch-30-gk41-non-comic-gate.test.js`), unrelated
+  to GK-41, left alone — touching an unrelated pre-existing quirk
+  inside an urgent regression fix is how unrelated regressions get
+  bought.
+
+- **STANDING TEST-DESIGN RULE (2026-08-08, GrailKey Dispatch 30) —
+  assert against the shipped expression, never a copy of it.** A test
+  that hand-retypes the logic under test (a predicate, a regex, a
+  formula) passes even after the shipped version drifts, because it is
+  only ever checking itself. This is the third time this exact
+  false-pass shape was caught and avoided in one session: the Fix 27-A
+  fixture (an all-virgin-only sold pool triggered `verifySoldComps`'s
+  legitimate variant-fallback safety net and produced a false pass by
+  accident, not by design), the Dispatch 28 test's
+  `variantAdjusted`-vs-`diagnostics.reasons.variantMismatch` assertion
+  (checking the wrong pass's tally), and GK-41's own non-comic gate,
+  which has no exported function to import at all — the App.jsx
+  predicate is an inline conditional in a React callback. Rather than
+  hand-retype it into the test (which would silently drift from the
+  shipped code the moment either changed independently — precisely the
+  GK-43 divergence this same dispatch documents happening for real),
+  `tests/grailkey-dispatch-30-gk41-non-comic-gate.test.js` extracts
+  each call site's actual `if (...)` condition text directly from the
+  live `src/App.jsx` source via anchored regex and evaluates it as real
+  JavaScript against fixture data. When no exported function exists to
+  test directly, extract-and-eval the literal shipped text rather than
+  reimplementing it — a reimplementation is a second copy of the logic,
+  and a second copy is exactly what GK-40 and GK-43 show the cost of.
+

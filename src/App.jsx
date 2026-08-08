@@ -10637,11 +10637,18 @@ export default function App() {
 
         if (!res.ok) throw new Error(data.error || "Failed to grade");
 
-        // FIX 2: Non-comic rejection
+        // FIX 2: Non-comic rejection. GK-41 (2026-08-08): the three-null
+        // clause no longer fires when Vision itself affirms
+        // assetTypeConfident=true — a virgin/sketch/blank-cover variant
+        // legitimately prints none of publisher/year/issue, and Fix 3a's
+        // (correct) removal of year/issue fabrication means all three can
+        // now come back honestly null on a real book. Not also gated on
+        // data.title here: !data.title already forces rejection via the
+        // first clause above, so repeating it would be dead logic.
         if (!data.title ||
             data.title.toLowerCase().includes('not a comic') ||
             data.title.toLowerCase().includes('unknown') ||
-            (!data.publisher && !data.year && !data.issue)) {
+            (!data.publisher && !data.year && !data.issue && data.assetTypeConfident !== true)) {
           setError("No comic detected. Try again.");
           setLoading(false);
           return;
@@ -11151,12 +11158,18 @@ export default function App() {
         }
         console.log('[bulk] grade result:', JSON.stringify(data));
 
-        // Non-comic rejection (mirrors gradeBlob :3844-3852)
+        // Non-comic rejection (mirrors gradeBlob :3844-3852). GK-41
+        // (2026-08-08): same three-null bypass as gradeBlob when Vision
+        // affirms assetTypeConfident=true — see that site's comment for
+        // the full reasoning. NOTE: this site's 'unknown' check
+        // (titleLower === 'unknown', exact match) still differs from
+        // gradeBlob's (.includes('unknown')) — pre-existing, unrelated to
+        // GK-41, deliberately left alone (GK-43).
         const titleLower = (data.title || '').toLowerCase();
         if (!data.title ||
             titleLower === 'unknown' ||
             titleLower.includes('not a comic') ||
-            (!data.publisher && !data.year && !data.issue)) {
+            (!data.publisher && !data.year && !data.issue && data.assetTypeConfident !== true)) {
           console.warn('[bulk] not a comic, skipping:', file.name);
           errors.push(`${file.name}: not a comic`);
           return;

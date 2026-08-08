@@ -40,6 +40,24 @@
 // this dispatch is about (appending instead of replacing would have left
 // Vision free to keep obeying the older, more specific sentence).
 //
+// SUPERSEDED, Section 2 only (GrailKey Dispatch 30, 2026-08-08): this
+// dispatch's original (a) design — REQUIRE physical-book cues (staples,
+// spine, interior page edges) before assetTypeConfident=true — shipped a
+// same-day production regression. A flat, straight-on cover scan (the
+// normal case for any bulk-import photo) can never show a staple, spine,
+// or interior page, comic or not — the gate was unsatisfiable by the way
+// comics are normally photographed, and a real virgin-variant bulk
+// import hard-rejected as "not a comic". Dispatch 30 replaced (a) with:
+// textless cover + comic-cover proportions (~6.6x10.2in) + comic-style
+// art is a comic BY DEFAULT; physical cues, when visible, only
+// strengthen that call; their absence is never evidence against. The
+// paper-stock/"bound art portfolio" tiebreaker is dropped entirely (also
+// unassessable from a flat scan). Section 2 below asserts the CURRENT
+// (Dispatch 30) wording, not the original Dispatch 29 design — the
+// physical-cues-required framing was live for one deploy and is not a
+// state this file should keep asserting. Sections 1, 3, 4 are unaffected
+// and still describe shipped behavior.
+//
 // Invoke: node tests/grailkey-dispatch-29-fix3a-vision-prompt.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
@@ -80,24 +98,26 @@ console.log('-- Section 1: the old contradictory instruction is GONE, not just a
 
 // ══════════════ Section 2 — the new instructions are present, in BOTH prompts ══════════════
 
-console.log('\n-- Section 2: (a) virgin/sketch/blank-cover recognized as a legitimate comic shape, by physical cues --');
+console.log('\n-- Section 2 (current, Dispatch 30 wording): virgin/sketch/blank-cover is a comic BY DEFAULT at comic-cover proportions; physical cues strengthen, never require --');
 {
   assertTrue(standardPrompt.includes('virgin, sketch, or blank-cover variant is a real, common printing type'), 'STANDARD_PROMPT names virgin/sketch/blank-cover as a known shape');
-  assertTrue(standardPrompt.includes('PHYSICAL BOOK CUES'), 'STANDARD_PROMPT directs recognition by physical cues, not cover text');
-  assertTrue(standardPrompt.includes('visible staple or staples along the spine edge'), 'STANDARD_PROMPT names the staple/spine cue specifically');
-  assertTrue(standardPrompt.includes('interior page edges visible at the trim'), 'STANDARD_PROMPT names the interior-page-edge cue specifically');
-  assertTrue(standardPrompt.includes('A single flat art sheet with NO visible staples, spine, or interior pages'), 'STANDARD_PROMPT explicitly keeps a flat print/poster disqualified regardless of art style');
-  assertTrue(standardPrompt.includes('bound art portfolio'), 'STANDARD_PROMPT includes the ambiguous-case tiebreaker (ownership of the ambiguity, not a required gate)');
+  assertTrue(standardPrompt.includes('6.6 x 10.2 inches'), 'STANDARD_PROMPT gives the aspect-ratio discriminator (assessable from a flat scan, unlike staples/spine)');
+  assertTrue(standardPrompt.includes('is a comic by default'), 'STANDARD_PROMPT: textless cover at comic-cover proportions defaults to assetTypeConfident=true');
+  assertTrue(standardPrompt.includes('treat them as confirming evidence that strengthens the comic reading, not as a requirement'), 'STANDARD_PROMPT: physical cues are confirming, never gating');
+  assertFalse(standardPrompt.includes('A single flat art sheet with NO visible staples, spine, or interior pages'), 'STANDARD_PROMPT: the unsatisfiable-by-flat-scan poster rule is gone (Dispatch 30 root cause)');
+  assertFalse(standardPrompt.includes('bound art portfolio'), 'STANDARD_PROMPT: paper-stock/portfolio tiebreaker deliberately dropped (Dispatch 30 — unassessable from a flat scan)');
 
-  assertTrue(watchPrompt.includes('virgin/sketch/blank-cover variant intentionally has no masthead'), 'WATCH_PROMPT names virgin/sketch/blank-cover as a known shape');
-  assertTrue(watchPrompt.includes('physical cues (visible staples or spine, interior page edges'), 'WATCH_PROMPT directs recognition by physical cues');
-  assertTrue(watchPrompt.includes('A flat art sheet with no staples, spine, or pages is a print, not a comic'), 'WATCH_PROMPT explicitly keeps a flat print/poster disqualified');
-  assertTrue(watchPrompt.includes('bound art portfolio'), 'WATCH_PROMPT includes the ambiguous-case tiebreaker');
+  assertTrue(watchPrompt.includes('A textless or minimally-texted cover at comic-cover proportions showing comic-style character art is a comic by default'), 'WATCH_PROMPT: same default-true framing as STANDARD_PROMPT');
+  assertTrue(watchPrompt.includes('6.6 x 10.2 in'), 'WATCH_PROMPT gives the same aspect-ratio discriminator');
+  assertTrue(watchPrompt.includes('strengthen the read when present but are not required'), 'WATCH_PROMPT: physical cues are confirming, never gating');
+  assertFalse(watchPrompt.includes('A flat art sheet with no staples, spine, or pages is a print, not a comic'), 'WATCH_PROMPT: the unsatisfiable-by-flat-scan poster rule is gone');
+  assertFalse(watchPrompt.includes('bound art portfolio'), 'WATCH_PROMPT: paper-stock/portfolio tiebreaker deliberately dropped');
 
   // Verify the EXISTING disqualification list is untouched — this fix
-  // adds a recognized shape, it does not remove or weaken the gate.
-  assertTrue(standardPrompt.includes("it's a poster, art print, statue, toy, page scan without a cover, unrelated object"), 'STANDARD_PROMPT\'s original disqualification list is byte-identical, untouched');
-  assertTrue(watchPrompt.includes('(poster, print, toy, unrelated object, unclear)'), 'WATCH_PROMPT\'s original disqualification list is byte-identical, untouched');
+  // changes the discriminator, it does not remove or weaken the gate for
+  // genuine non-comic objects.
+  assertTrue(standardPrompt.includes('a statue, a toy, an unrelated object, an interior page shown without any cover'), 'STANDARD_PROMPT: genuine non-comic disqualification list present');
+  assertTrue(watchPrompt.includes('statue, toy, unrelated object, an interior page with no cover'), 'WATCH_PROMPT: genuine non-comic disqualification list present');
 }
 
 console.log('\n-- Section 3: (b) no fabricated issue/year — both fields --');
