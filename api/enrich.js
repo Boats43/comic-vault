@@ -3810,7 +3810,17 @@ export default async function handler(req, res) {
     // ═══════════════════════════════════════════════════════════════════════
     // Query PC/CV/comps with CONFIRMED identity (not Vision title).
 
-    mark('phase2_start');
+    // GrailKey Dispatch 34 (2026-08-08) — renamed from 'phase2_start'.
+    // This label collided with a second, unrelated mark('phase2_start')
+    // call further down this handler (Step 2b's comps/pricing-fetch
+    // gate, now 'comps_pricing_start'); the second write silently
+    // overwrote this one in `t`, and since it fires AFTER
+    // 'identity_fetch_complete' below, the final timings summary could
+    // report this phase's start as later than its own complete —
+    // confirmed live on two production scans. Pure rename, same
+    // mark()/`t` mechanism, no control-flow change; see
+    // docs/PATTERN-LIBRARY.md "GrailKey Dispatch 34" for the full trace.
+    mark('identity_fetch_start');
     console.log(`[phase2] data fetching: "${confirmedTitle}" #${confirmedIssue}`);
 
     // Subtitle strip helper (Ship #20a.6.15).
@@ -4087,7 +4097,9 @@ export default async function handler(req, res) {
 
     const ximilar = null; // Ximilar lookup disabled
 
-    mark('phase2_complete');
+    // GrailKey Dispatch 34 — renamed from 'phase2_complete', paired with
+    // 'identity_fetch_start' above. See that mark's comment for why.
+    mark('identity_fetch_complete');
 
     // Ship #22c: AXIS VOTING convergence score
     // Computes identity confidence from multi-source voting per axis.
@@ -5550,7 +5562,14 @@ export default async function handler(req, res) {
     }
 
     // Step 2b: year-dependent lookups using confirmedYear.
-    mark('phase2_start');
+    // GrailKey Dispatch 34 — renamed from a second, colliding
+    // 'phase2_start' call (this handler's real "Phase 2" data-fetching
+    // window already opened and closed above, as 'identity_fetch_start'/
+    // 'identity_fetch_complete'). This mark is the true start of the
+    // comps/pricing-fetch window that out.timings.comps_ms measures
+    // against 'comps_fetched' below — same pairing, same value, correct
+    // name now.
+    mark('comps_pricing_start');
 
     // Ship 26.2 — Gate Phase 2 when identity refused
     //
@@ -10246,7 +10265,10 @@ export default async function handler(req, res) {
     out.timings = {
       total_ms: Date.now() - startTime,
       phase1_ms: (t.phase1_complete != null && t.phase1_start != null) ? t.phase1_complete - t.phase1_start : null,
-      comps_ms: (t.comps_fetched != null && t.phase2_start != null) ? t.comps_fetched - t.phase2_start : null,
+      // GrailKey Dispatch 34 — reads the renamed 'comps_pricing_start'
+      // mark (was the colliding second 'phase2_start' write). Same pair,
+      // same computed value — see that mark's comment.
+      comps_ms: (t.comps_fetched != null && t.comps_pricing_start != null) ? t.comps_fetched - t.comps_pricing_start : null,
       verify_ms: (t.ai_verify_complete != null && t.ai_verify_start != null) ? t.ai_verify_complete - t.ai_verify_start : null,
       claude_check_ms: (t.claude_check_complete != null && t.claude_check_start != null) ? t.claude_check_complete - t.claude_check_start : null,
       marks: t,
