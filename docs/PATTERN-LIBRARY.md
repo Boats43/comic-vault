@@ -4936,3 +4936,157 @@ cross-category leak, comp-query degradation, title-family fragmentation
 (`$0.000409`, `$0.000434`) — one lane, two data points. Do not average
 these into an architecture conclusion; wait for the batch.
 
+## GrailKey Dispatch 37 (2026-08-09) — cache-key proxy-vs-predicate fix shipped, standing invariant, architecture scope closed
+
+Three commits shipped (`c11346c`, `913cb46`, `c8a9c71`), each verified in
+isolation against the complete final tree with the documented baseline
+re-run and matched exactly — no new regression. Full commit messages
+carry the per-suite pass/fail breakdown; not repeated here.
+
+### New standing invariant — CACHE CORRECTNESS IS AUTHORITY CORRECTNESS
+
+> **A correct filter is worthless if its output can later be served to a
+> different asset under an incomplete cache identity.**
+
+Fourth standing invariant, joining Monotonic Evidence Extension and No
+Self-Corroboration (GrailKey Dispatch 33) and Rejection Must Not Create
+Authority (GrailKey Dispatch 34). Concrete instance this dispatch: the
+active-comp cache key (`buildActiveCompCacheKey`) was built from
+title+issue alone while `applyFilterChain` (`api/comps.js`) actually
+consumed seven material inputs — grade target, confirmedYear,
+confirmedVariant, isGraded, labelType, signedConsensus, assetType — none
+of them keyed. A correctly-filtered pool for one grade/year/variant
+combination could be served, byte-identical, to a request that resolved
+to a different asset entirely. Fixed via `buildFilterContextFingerprint`
+(SHA-256 over all seven, fail-closed — `buildActiveCompCacheKey` now
+throws on a missing/malformed fingerprint rather than silently
+stringifying `undefined` into the key). `COMP_FILTER_VERSION` bumped
+9→10. See commit `913cb46` for full detail.
+
+### Derived rule — derive the key from the predicate, never a proxy
+
+> **Derive the key from the lookup's own predicate, never from a proxy
+> for it.**
+
+Concrete instance: `buildComicVineCacheKey`'s `poolYearHint` segment
+must be keyed (non-null) exactly when `lookupComicVine`'s own scoring
+would actually consult it — that condition is `hasYearComparison =
+Boolean(comicYear && startYear)` (`api/enrich.js:963`), a truthiness
+predicate. An earlier draft of this dispatch's fix gated on `comicYear
+== null` instead — `year present` used as a stand-in for `year
+usable-and-comparable`. The two diverge on exactly the input GrailKey is
+known to produce: `parseInt("Unknown", 10)` is `NaN`. `NaN != null` is
+`true` (so `== null` reads "year present," suppressing the hint from the
+key) while `Boolean(NaN)` is `false` (so the real lookup reads "no year,"
+and DOES consult the hint). Two requests sharing the same unusable year
+but different `poolYearHint` values would have silently collided on one
+cache entry despite the real lookup behaving differently for each — a
+false-HIT, caught before shipping only because the diff was checked
+against `hasYearComparison`'s literal source rather than reimplemented
+from a paraphrase of it. Regression case:
+`tests/cacheKeys-comicvine-year.test.js`, the `"Unknown"`-year block.
+Generalized rule for any future cache-key or gate-parity work in this
+codebase: when a key or gate is meant to mirror another function's
+condition, read that function's actual predicate at the call site — do
+not re-derive a description of it from memory or from a comment.
+
+### Tracked debt — duplicated normalization inside buildFilterContextFingerprint
+
+`buildFilterContextFingerprint`'s grade/year derivation
+(`deriveNumericGradeTargetForFingerprint`,
+`deriveNormalizedYearForFingerprint`, `src/lib/cacheKeys.js`) is
+deliberately DUPLICATED from `fetchComps`'s own inline normalization
+(`api/comps.js`, ~line 984-989 for grade, ~line 1020 for year) rather
+than imported, to scope this fix to the cache-key layer only. This is
+the same shape as the **Drifted-duplicate-constant class** already
+documented three times in this file (Q119: five separate
+`COMPOUND_TITLE_WHITELIST`-equivalent lists; Q127: ~10 separate
+`req.body.variant` read-sites; Q128: year-tolerance constants
+independently drifting between `api/comps.js` and two passes of
+`soldVerification.js` behind a comment that falsely claimed they still
+matched). Explicit failure mode for this fourth instance: **if
+`fetchComps`'s inline grade/year normalization ever changes and
+`cacheKeys.js`'s two derive functions aren't updated identically, the
+fingerprint will silently key on stale semantics** — it will keep
+computing a valid-looking 64-character hash, tests against the
+fingerprint function in isolation will keep passing, and the drift will
+only surface as a real cache-identity failure once a request pattern hits
+the exact input where the two normalizations disagree. Not remediated
+this dispatch (duplication was the explicit scope decision). Flag: any
+future edit to `fetchComps`'s inline grade/year parsing must grep
+`cacheKeys.js`'s two derive functions and update them in lockstep, the
+same discipline `getEraYearTolerance`/`evaluateEraYearMatch` now enforce
+for the year-tolerance class.
+
+### Architecture decision — 14-broker memo rejected except two items
+
+An external memo proposed 14 broker abstractions (ModelRouter,
+SourceBroker, VisualBroker, CatalogBroker, MarketBroker, AgentGateway,
+SkillRegistry, CommerceGateway, PaymentBroker, RightsPolicyEngine,
+EvaluationHarness, and others), an 8-layer event-sourced kernel, MCP
+server exposure, A2A, ACP/UCP agentic-commerce protocols, x402 payments,
+WebMCP, and on-device inference. **Rejected in full except two items,
+confirmed and recorded this dispatch:**
+
+- **Adopted:** the four-layer authority distinction (*observation is not
+  a claim; a claim is not authority; authority is not history*), and an
+  immutable ledger with supersession — as a forward **design target
+  only**, not a refactor, so future persistence decisions aren't built in
+  a direction that forecloses it.
+- **Declined:** all 14 broker abstractions, the 8-layer kernel, and every
+  agent/commerce-protocol item (MCP server exposure, A2A, ACP/UCP, x402,
+  WebMCP, on-device inference). Checked directly against the current
+  codebase before declining — none of the 14 broker names, kernel layers,
+  or protocol integrations appear anywhere in this repo; nothing declined
+  is currently load-bearing.
+
+**Reasoning, recorded so this doesn't resurface without new evidence:**
+the memo's central justification was insurance against vendor lock-in,
+which this project has no live symptom of. Meanwhile the SAME dispatch
+that evaluated the memo found this codebase's single existing
+active-comp cache key was missing **seven** material dependencies (not
+six — the exact count is grade target, confirmedYear, confirmedVariant,
+isGraded, labelType, signedConsensus, assetType; corrected here from an
+earlier six-item paraphrase of this same finding, since this file is the
+canonical record and the miscount would otherwise propagate). Fourteen
+new broker abstractions is fourteen new identity/caching/normalization
+surfaces, each capable of the exact class of bug this one dispatch just
+spent three commits fixing on a single surface. The adopted two items
+(authority-layer distinction, ledger-as-target) cost nothing to hold as
+direction and constrain future work in the right direction; the declined
+items would have created surface area with no demonstrated corresponding
+need.
+
+### GCD corroboration — second source, reported not independently verified
+
+A June 2026 GCD technical mailing-list message is reported to state "We
+do not have an API at this time" — consistent with the App Guidelines
+text obtained in GrailKey Dispatch 17. **Recorded with the same
+verbatim-vs-reported caveat Dispatch 17 already applies to its own
+source:** this message was not independently fetched or read in full by
+this session; it is recorded as reported corroboration, not as a
+directly-verified primary source. Taken together, two independently-
+sourced statements now agree GCD has no live query API — this
+strengthens, but does not newly establish, the cover-matcher scoping
+already on record (DB-dump import + own query layer + refresh cadence,
+GrailKey Dispatch 17; still blocked on rights-safe image corpus/
+licensing and catalog-import infrastructure, per Dispatch 34's open
+ledger). No cover-matcher work authorized or started this dispatch.
+
+### Blocked items — reaffirmed, no workaround taken
+
+- **Bone pricing fix** — still blocked on production KV credentials for
+  the 13-scan blast-radius report.
+- **Fix 4** — still blocked on a must-pass anchor; scoping only, see
+  GrailKey Dispatch 34's dedicated entry above.
+
+### Next by measured frequency, once the above unblock
+
+Key-authority gap (6/15, 40%), then ComicVine fail-open (4/15, 27%) —
+reported ranking from the production batch Dispatch 34's "Step 2/Step 3"
+plan called for. Note this reverses Dispatch 34's own anecdotal
+1-ComicVine/2-key-authority ordering (recorded there explicitly as
+unranked hypothesis, not measurement) — the measured batch is the
+authoritative ranking going forward once available for direct
+cross-check in a future dispatch.
+
