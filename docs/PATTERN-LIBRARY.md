@@ -5295,3 +5295,131 @@ Everything else — no key-authority work, no ComicVine fail-open work,
 Q54 work, or any other expansion — stays held pending the A/B/C
 certification result and the Bone dataset recollection above.
 
+## GrailKey Dispatch 40 (2026-08-09) — Gate 2 (A/B/C) CLOSED: PASSED, stronger than specified; new decision-layer non-determinism finding
+
+Record only, no code shipped. Live production evidence: three Batman
+#213 scans against `f0690ab`/`dpl_FVdxeJXajkXqy4jmTGEzRKmwMReT`.
+
+### A/B/C active-comp cache certification — PASSED
+
+| Time | Grade | Fingerprint | Result | Pool |
+|---|---|---|---|---|
+| A 19:15:47 | GD 2.0 (target 2) | `7c71e899…` | MISS → SET | cached 17 |
+| C 19:18:03 | FN 6.0 (target 6) | `fd384d8e…` | MISS → SET, grade-proximity reran (`before=14 after=10, ±1.5 from 6`) | cached 9 |
+| B 19:20:19 | GD 2.0 (target 2) | `7c71e899…` | **HIT** | **activePool=17**, exactly A's pool |
+
+Both halves of the Gate 2 requirement (`c8a9c71`/`913cb46`'s fingerprint
+work) are proven, not merely asserted:
+- Same normalized context → same fingerprint (`7c71e899…` recurred
+  identically at 18:05, 19:15, and 19:20 — the 18:05 occurrence MISSED
+  its own repeat at 19:15 correctly: 70 minutes elapsed against the
+  1-hour `KV_TTL.ACTIVE` TTL, expected behavior, not a defect).
+- Grade change alone → different fingerprint, with grade-proximity
+  correctly rerunning (`fd384d8e…` on the FN 6.0 scan).
+- **B retrieved exactly what A cached** — the actual missing proof from
+  Dispatch 38's certification protocol, now closed.
+
+**Stronger than the protocol specified:** C ran between A and B, which
+wasn't required by the original design. A different-grade scan
+sandwiched between A and B did not clobber or contaminate A's entry —
+B still hit A's exact key with A's exact pool. This proves the Hero for
+Hire class of cross-request contamination impossible under the new
+fingerprint scheme, not merely absent from this one test. **Gate 2:
+CLOSED.**
+
+### New finding — decision-layer non-determinism, independent of pricing
+
+Same book, same fingerprint, same cached pool, same price, three scans:
+
+| Time | Price | Pools | Decision |
+|---|---|---|---|
+| 18:05:16 | $19.24 | sold 19 / active 14 (fresh MISS) | LIST_NOW, high, warnings=0 |
+| 19:15:47 (A) | $19.24 | sold 19 / active 17 (fresh MISS) | RESEARCH, low, warnings=1 |
+| 19:20:19 (B) | $19.24 | sold 19 / active 17 (**cache HIT of A**) | LIST_NOW, high, warnings=0 |
+
+A and B are the sharpest pair: **identical fingerprint, identical
+cached pool object (B is a literal HIT of A's write), identical price —
+and opposite decision.action.** The pricing layer was stable and
+correct all three times; something entirely outside it flipped
+`decision.warnings` from empty to non-empty and back.
+
+**Investigated via direct code read (no live log access to the actual
+`decision.warnings` array or `[ship28b-conflicts]` line for these three
+specific requests — this is a code-grounded hypothesis, not a confirmed
+root cause):**
+
+`api/enrich.js`'s active-comp cache boundary (`ac:v10:*`, the code this
+dispatch just certified) sits entirely *inside* the pricing path. Two
+mechanisms run **downstream of, and independently from,** that boundary
+on every request regardless of HIT or MISS:
+
+1. **`allConflicts` is recomputed fresh every request**
+   (`detectIdentityConflicts` + `detectCompsConflicts`,
+   `api/enrich.js:6108-6140`), gating `shouldRunAIVerify`. Its inputs
+   (`visualConsensus`, `comicVine`, `priceCharting`, live
+   `compsFromEbay` metadata) are not all part of the cached pool object
+   — some come from identity resolution, which runs on a **fresh,
+   uncached eBay image search every single request**
+   (`lookupEbayIdentity` — there is no identity-level cache anywhere in
+   this pipeline, only the ComicVine/PriceCharting/active-comp caches
+   downstream of it). Two calls 5 minutes apart can see different live
+   eBay search-result ordering/content, changing `visualConsensus`
+   without touching the active-comp cache at all.
+2. When `allConflicts.length > 0`, `verifyCompsTitles` (AI verify) runs
+   — a **live, non-deterministic Claude call** — and its output filters
+   `rawComps.recentSales` downstream of the cache read. A cache HIT
+   returns the identical raw pool, but AI verify's filtering of that
+   pool is not itself cached or pinned to the fingerprint; it can
+   legitimately produce a different verified subset on two calls
+   against the exact same input pool.
+
+Either path can flip a `criticalWarnings`-listed slug
+(`src/lib/decisionEngine.js:697-722`) without moving price at all — most
+plausible candidates given they depend on live, per-request identity/
+consensus state rather than the cached price pool:
+`vision-confidence-overridden` (fires on `isVisionLowButCorroborated`,
+itself downstream of Vision's own per-request, non-deterministic
+confidence read — `api/grade.js`, a separate LLM call every scan),
+`issue-consensus-conflict`, `identity-conflict-unresolved`,
+`zero-verified-comps`/`ai-verify-rejected-all` (both downstream of AI
+verify specifically). **Not narrowed further than this without the
+actual `decision.warnings` array or `[ship28b-conflicts]` log line from
+the 19:15 response** — that is the specific artifact that would confirm
+or eliminate candidates from this list; the confirming evidence stays
+uncaptured until a future scan pins down which slug actually fired,
+rather than guessing now. No code changed to investigate or fix this;
+flagged as a new open item, independent of and unrelated to the
+cache-fingerprint work this dispatch certified.
+
+**Architectural framing, stated plainly because it sets a ceiling, not
+just a bug report:** the finding here isn't merely "a warning flipped."
+The cache boundary this dispatch just certified sits *below* two
+uncached, non-deterministic inputs — the live eBay image search feeding
+conflict detection, and Vision itself. **Deterministic pricing does not
+imply deterministic routing, and no amount of cache correctness changes
+that.** Gate 2 proves the price a request produces is reproducible;
+nothing in this dispatch, or available to fix within the current
+architecture's identity/Vision layers, makes the *decision* that price
+gets routed through equally reproducible. That is a property of the
+current design, not a defect introduced by any commit in this series —
+worth stating explicitly, because it bounds what "certified" can mean
+for anything downstream of pricing until the identity and Vision layers
+get their own reproducibility story.
+
+### Bone — confirmed unchanged, more precisely specified
+
+`tier2_active_dominant_thin_sold` → `$19.33` → `mega-key-floor` →
+`$800`, decision `LIST_LOW` (corrects the looser "LIST_NOW-class"
+phrasing this was recorded with in Dispatch 38/39 — now confirmed to the
+exact branch name and decision action). Still blocked on the Upstash
+read-only token and a fresh pool capture per the Dispatch 39 recollection
+protocol — the 13/15-book batch's own pools are gone (`KV_TTL.ACTIVE`).
+
+### Status
+
+Gate 2 (A/B/C cache certification): **CLOSED, PASSED.**
+Gate 1 (Upstash read-only token): still open — the only remaining
+blocker on Bone dataset recollection.
+Decision-layer non-determinism: new, open, record-only, no fix scoped.
+Holding everything else, unchanged.
+
