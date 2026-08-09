@@ -5203,3 +5203,95 @@ Key-authority gap (6/15, 40%), then ComicVine fail-open (4/15, 27%) —
 still pending the KV/certification unblocks above before either gets its
 own dedicated dispatch.
 
+## GrailKey Dispatch 39 (2026-08-09) — pricing auditability gap named; Bone dataset recollection protocol; KV access path corrected
+
+Record only, no code, no fix this dispatch. Direct continuation of
+Dispatch 38's blocked gates — one gate's access path corrected, one new
+architectural gap named as a direct consequence of attempting it.
+
+### KV access path corrected — `vercel env pull` abandoned for these credentials
+
+`KV_REST_API_URL`/`KV_REST_API_TOKEN`/`KV_REST_API_READ_ONLY_TOKEN`/
+`KV_URL`/`REDIS_URL` (plus `ANTHROPIC_API_KEY`/`ACCESS_CODE`/
+`GOCOLLECT_API`) pulled as deterministic empty strings via
+`vercel env pull` — reproduced twice, while every other production var
+(`PRICECHARTING_TOKEN`, `XIMILAR_API_TOKEN`, `COMICVINE_API_KEY`,
+`EBAY_*`) pulled with real values in the same file. Root cause: these
+are stored as Vercel **Sensitive** variables, not the milder Encrypted
+type `vercel env ls` labels them as in list view — Sensitive values are
+write-only by platform design and never come back through the CLI, the
+API, or the dashboard once set. **Do not retry `vercel env pull` for
+these — it is not a flag or retry problem, it is a platform access
+boundary.** Corrected path: this is an Upstash-backed integration, so a
+read-only REST token is obtainable directly from the Upstash console
+(Console → Redis → production DB → Connect/REST), independent of
+Vercel's restriction, into a separately gitignored local file. In
+progress, owner-side.
+
+### New architectural debt — PRICING AUDITABILITY GAP
+
+> **A past price cannot be reproduced from durable telemetry alone.**
+
+Discovered as a direct consequence of attempting the Bone blast-radius
+report (Dispatch 34/38): the durable scanLog record
+(`src/lib/scanLog.js`, 90-day TTL) captures identity-resolution state
+(`issueAuthority`, `familyWeight`, `poolSizes` for identity candidates)
+but has **no fields for the active/sold comp pools or the pricing-branch
+inputs** (tier, mega-key-floor application, final price, dispersion) that
+would be needed to reconstruct a historical valuation. The one place
+that data DOES exist — the `ac:v10:*` cached comp-pool objects
+(`api/kv-cache.js`) — has a **one-hour TTL** (`KV_TTL.ACTIVE = 3600`).
+Once that hour passes, the evidence a price was built on is gone,
+durably, everywhere. Today's pricing pipeline can be fully event-sourced
+for identity, and not at all for the market evidence and pricing
+decision that actually produced a shipped number. Not remediated this
+dispatch — named so no future blast-radius attempt re-discovers it from
+scratch, and so any future scanLog schema work treats "pricing branch
+inputs" as a known, scoped gap rather than an incidental omission.
+
+### Bone dataset must be recollected — the 13/15-book batch's pools are gone
+
+Direct consequence of the TTL fact above, not a new finding: the pools
+Dispatch 38's batch analysis would have needed no longer exist —
+`KV_TTL.ACTIVE = 3600` means any `ac:v10:*` entry from that batch expired
+long before KV read access was corrected. **Recollection protocol,
+specified now so it's ready the moment Upstash read access lands, not
+improvised under time pressure against another expiring window:**
+
+1. Scan a **fresh** batch (Bone plus the rest of the representative set)
+   against current production.
+2. Retrieve each book's `ac:v10:*` object **immediately**, before the
+   one-hour TTL elapses — this step is time-critical in a way most of
+   this project's other KV work has not been.
+3. Save a **sanitized** local fixture per book (pool contents only, no
+   credentials, no unrelated PII) — freeze it. This fixture, not live KV,
+   becomes the input for everything downstream.
+4. Implement the count+dispersion recovery predicate **offline** against
+   the frozen fixture — no production code touched at this stage.
+5. Replay **every** book in the fixture through the predicate, not just
+   Bone, and report every changed outcome — including full
+   mega-key-floor behavior, per the Dispatch 38 acceptance criterion
+   (Bone demotes and does not re-emerge at $800 through the floor; clean
+   pools stay semantically unchanged; if normal books shift, the
+   dispersion bound is wrong, not Bone).
+6. Only after that offline replay report is reviewed does a production
+   code proposal get scoped — still subject to the standing
+   pricing-math greenlight protocol regardless of how convincing the
+   offline replay looks.
+
+### A/B/C cache certification — status correction
+
+Dispatch 38 recorded this as blocked on KV credentials; that was
+imprecise. **A/B/C is not blocked on credentials at all — it only needs
+the app's own runtime traces (the scan logs each request already
+produces), not a direct KV connection.** Three Batman #213 scans
+(A: MISS + write, B: same request, must HIT the same key, C: grade
+changed only, must MISS with grade-proximity rerun) are in progress
+against production directly. Results land in their own dispatch.
+
+### Holding
+
+Everything else — no key-authority work, no ComicVine fail-open work,
+Q54 work, or any other expansion — stays held pending the A/B/C
+certification result and the Bone dataset recollection above.
+
