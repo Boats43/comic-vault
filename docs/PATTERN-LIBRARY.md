@@ -4545,16 +4545,52 @@ never a separate index-key bug to fix here).
 Claude call site in both `api/grade.js` (`callModel`) and
 `api/enrich.js` (`verifyCompsTitles`) — real token counts
 (`message.usage`), real computed cost (`PRICING_USD_PER_MTOK`), and for
-`api/grade.js` specifically, a real Anthropic-token-counted static-prefix
-length (not a character-length proxy) via the cached `countTokens` call
-described above. **No real numbers are reported here yet — that would be
-fabrication.** Pull them from Vercel runtime logs (or, once accumulated,
+`api/grade.js` specifically, an ESTIMATED static-prefix length via the
+cached `countTokens` call described above.
+
+**Precision correction (2026-08-08, same-day review):** the function was
+initially named `getStaticPrefixTokenCount` and its log field
+`staticPrefixTokens`, both implying a measured, authoritative count.
+Anthropic's own token-counting docs
+(`platform.claude.com/docs/en/build-with-claude/token-counting`,
+retrieved 2026-08-08) say otherwise, verbatim: *"The token count is an
+estimate. In some cases, the actual number of input tokens used when
+creating a message might differ by a small amount,"* counts *"may
+include tokens added automatically by Anthropic for system
+optimizations,"* and — the more consequential line — *"token counting
+provides an estimate without using caching logic"* — it does not
+simulate or confirm caching behavior at all. Renamed to
+`getEstimatedStaticPrefixTokens` / `estimatedStaticPrefixTokens`
+throughout, with the docstring and log line now stating plainly that
+`usage.cache_creation_input_tokens`/`cache_read_input_tokens`/the
+`cache_creation.ephemeral_5m_input_tokens`/`ephemeral_1h_input_tokens`
+breakdown from a REAL call (already read by `computeAnthropicCallCostUsd`)
+are the only authoritative signal — this estimate is diagnostic-only, a
+"is this prefix in the right ballpark" check, never a substitute.
+
+A new `classifyCacheEligibility(estimatedTokens, model)` returns
+`likely-eligible`/`likely-ineligible`/`unresolved` against real, verified
+per-model cache minimums (`platform.claude.com/docs/en/build-with-claude
+/prompt-caching`, "Cache limitations" section, retrieved 2026-08-08 —
+**no longer "reportedly," now confirmed**: Haiku 4.5 = 4,096 tokens,
+Sonnet 4.5 = 1,024 tokens, Opus 4.7 = 2,048 tokens). Estimates landing
+within ±10% of the model's minimum classify as `unresolved` rather than
+asserting a side of the line — that 10% band is this file's own chosen
+diagnostic margin, not an Anthropic-published error figure, and should
+be revisited once real `usage` data shows whether it's too tight or too
+loose. If a real call's `cache_creation_input_tokens` and
+`cache_read_input_tokens` both read 0, the prefix did not meet the
+minimum, full stop — that observation always overrides this
+classification.
+
+**No real numbers are reported here yet — that would be fabrication.**
+Pull them from Vercel runtime logs (or, once accumulated,
 `scripts/query-scanlog.mjs` for the `enrich.js`-side lanes) after this
 ships and a real batch of scans runs. Whether Haiku's cache hit rate
-being 0% (if that's what the data shows) is a bug or correct behavior —
-Anthropic's minimum cacheable prefix reportedly differs by model — is
-exactly the open question this logging exists to answer; do not assume
-either way before the data is in.
+being 0% (if that's what the data shows) is a bug or correct behavior
+given its real 4,096-token minimum is exactly the open question this
+logging exists to answer; do not assume either way before the data is
+in.
 
 ### Step 5B — Fix 4/4b reachability, traced against the G.I. Joe #303 shape
 

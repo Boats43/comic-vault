@@ -109,14 +109,15 @@ export const computeAnthropicCallCostUsd = (model, usage) => {
   };
 };
 
-// In-memory cache for the reusable-prefix token count. Keyed on
-// (model, git SHA, prompt hash) — the static system-prompt prefix only
-// changes when the deployed code or the prompt text itself changes, so
-// counting it once per unique combination (not once per scan) avoids a
-// redundant countTokens call on every single request. Resets on cold
-// start, which is fine: the first request on a fresh instance recomputes
-// and every subsequent request on that instance reuses it.
-const staticPrefixTokenCountCache = new Map();
+// In-memory cache for the ESTIMATED reusable-prefix token count. Keyed
+// on (model, git SHA, prompt hash) — the static system-prompt prefix
+// only changes when the deployed code or the prompt text itself
+// changes, so counting it once per unique combination (not once per
+// scan) avoids a redundant countTokens call on every single request.
+// Resets on cold start, which is fine: the first request on a fresh
+// instance recomputes and every subsequent request on that instance
+// reuses it.
+const estimatedStaticPrefixTokenCache = new Map();
 
 // Cheap non-cryptographic string hash (FNV-1a) — only used to keep the
 // cache key short; collision risk is irrelevant here since a collision
@@ -132,13 +133,82 @@ const hashPromptText = (text) => {
   return (hash >>> 0).toString(16);
 };
 
+// Per-model minimum token count for a prefix to be cacheable at all.
+// Verified against Anthropic's official prompt-caching docs —
+// https://platform.claude.com/docs/en/build-with-claude/prompt-caching,
+// "Cache limitations" section — retrieved 2026-08-08:
+//   Claude Haiku 4.5:  4,096 tokens
+//   Claude Sonnet 4.5: 1,024 tokens
+//   Claude Opus 4.7:   2,048 tokens
+// Below this minimum, cache_control is silently ignored — no error, the
+// prompt simply never gets cached. UPDATE ALONGSIDE PRICING_USD_PER_MTOK
+// if Anthropic changes these minimums.
+const CACHE_MINIMUM_TOKENS = {
+  'claude-haiku-4-5-20251001': 4096,
+  'claude-haiku-4-5': 4096, // same model family/minimum as the dated row above
+  'claude-sonnet-4-5-20250929': 1024,
+  'claude-opus-4-7': 2048,
+};
+
+// How close an ESTIMATE has to be to a model's cache minimum before this
+// diagnostic refuses to guess which side of the line it's actually on.
+// Anthropic documents the count-tokens estimate as differing from real
+// usage "by a small amount" but does not publish a specific error
+// margin — 10% is this file's own chosen diagnostic band, not an
+// Anthropic-published figure. Revisit if real `usage` data (the
+// authoritative signal — see classifyCacheEligibility below) shows this
+// band is too tight or too loose in practice.
+const CACHE_ELIGIBILITY_UNRESOLVED_BAND = 0.10;
+
 /**
- * Real, Anthropic-token-counted length of the reusable cached prefix
- * (system prompt blocks up to and including the cache_control
- * breakpoint) — NOT a character-length proxy. Character length is
- * useful only as a cheap diagnostic (log it separately, never as the
- * cache-eligibility or reported-token figure); actual token count
- * depends on tokenizer behavior the character count doesn't capture.
+ * Classifies whether an ESTIMATED static-prefix token count is likely
+ * above or below a model's cache minimum — diagnostic only, never
+ * authoritative. Anthropic's own docs: "token counting provides an
+ * estimate without using caching logic" — it cannot actually confirm
+ * whether a real call would be cached. Actual cache behavior is ONLY
+ * ever authoritative from a real call's response `usage`:
+ * `cache_creation_input_tokens`, `cache_read_input_tokens`, and (when
+ * present) `cache_creation.ephemeral_5m_input_tokens`/
+ * `cache_creation.ephemeral_1h_input_tokens` (see
+ * computeAnthropicCallCostUsd above, which already reads these). If a
+ * real call's `cache_creation_input_tokens` and `cache_read_input_tokens`
+ * both read 0, the prefix did NOT meet the minimum — that observation
+ * always overrides this classification.
+ *
+ * @param {number|null} estimatedTokens
+ * @param {string} model
+ * @returns {'likely-eligible'|'likely-ineligible'|'unresolved'}
+ */
+export const classifyCacheEligibility = (estimatedTokens, model) => {
+  const minimum = CACHE_MINIMUM_TOKENS[model];
+  if (estimatedTokens == null || !minimum) return 'unresolved';
+  const band = minimum * CACHE_ELIGIBILITY_UNRESOLVED_BAND;
+  if (estimatedTokens > minimum + band) return 'likely-eligible';
+  if (estimatedTokens < minimum - band) return 'likely-ineligible';
+  return 'unresolved';
+};
+
+/**
+ * ESTIMATED token count of the reusable cached prefix (system prompt
+ * blocks up to and including the cache_control breakpoint) via
+ * Anthropic's countTokens API — NOT an authoritative cache measurement.
+ * Per Anthropic's own documentation
+ * (platform.claude.com/docs/en/build-with-claude/token-counting,
+ * retrieved 2026-08-08): "The token count is an estimate. In some cases,
+ * the actual number of input tokens used when creating a message might
+ * differ by a small amount," counts "may include tokens added
+ * automatically by Anthropic for system optimizations," and critically,
+ * "token counting provides an estimate without using caching logic" —
+ * it does not simulate or confirm caching behavior at all.
+ *
+ * Actual cache behavior is ALWAYS read from a real call's response
+ * `usage` block, never from this function — this exists purely to
+ * diagnose, ahead of time, whether a prefix is materially above or below
+ * a model's cache minimum. See classifyCacheEligibility.
+ *
+ * Character length is a cheap diagnostic only — never a token-count or
+ * cache-eligibility proxy. Real token counts depend on tokenizer
+ * behavior a character count doesn't capture.
  *
  * Never throws: on any countTokens failure, logs once and returns null
  * so a transient API issue against this side-channel audit call can
@@ -151,12 +221,12 @@ const hashPromptText = (text) => {
  * @param {string} gitSha
  * @returns {Promise<number|null>}
  */
-export const getStaticPrefixTokenCount = async (client, model, systemBlocks, gitSha) => {
+export const getEstimatedStaticPrefixTokens = async (client, model, systemBlocks, gitSha) => {
   const combinedText = systemBlocks.map((b) => b.text).join('\n');
   const promptHash = hashPromptText(combinedText);
   const cacheKey = `${model}:${gitSha ?? 'unknown'}:${promptHash}`;
-  if (staticPrefixTokenCountCache.has(cacheKey)) {
-    return staticPrefixTokenCountCache.get(cacheKey);
+  if (estimatedStaticPrefixTokenCache.has(cacheKey)) {
+    return estimatedStaticPrefixTokenCache.get(cacheKey);
   }
   try {
     const result = await client.messages.countTokens({
@@ -165,10 +235,10 @@ export const getStaticPrefixTokenCount = async (client, model, systemBlocks, git
       messages: [{ role: 'user', content: [{ type: 'text', text: '' }] }],
     });
     const count = result.input_tokens;
-    staticPrefixTokenCountCache.set(cacheKey, count);
+    estimatedStaticPrefixTokenCache.set(cacheKey, count);
     return count;
   } catch (err) {
-    console.log(`[cache-audit] static-prefix-token-count-failed model=${model} err=${err?.message ?? 'unknown'}`);
+    console.log(`[cache-audit] estimated-static-prefix-tokens-failed model=${model} err=${err?.message ?? 'unknown'}`);
     return null;
   }
 };

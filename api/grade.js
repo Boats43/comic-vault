@@ -8,7 +8,7 @@ import {
 } from "../src/lib/imageSearchIdentity.js";
 import { getOAuthToken } from "./comps.js";
 import { checkRateLimit } from "./rate-limit.js";
-import { computeAnthropicCallCostUsd, getStaticPrefixTokenCount } from "../src/lib/anthropicPricing.js";
+import { computeAnthropicCallCostUsd, getEstimatedStaticPrefixTokens, classifyCacheEligibility } from "../src/lib/anthropicPricing.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -488,12 +488,20 @@ async function logCostAndCacheAudit(model, usage, promptText, systemBlocks) {
     `cacheCreationTokens=${usage?.cache_creation_input_tokens ?? 'null'} cacheReadTokens=${usage?.cache_read_input_tokens ?? 'null'} ` +
     `totalCostUsd=${cost ? cost.totalCostUsd.toFixed(6) : 'null'}`
   );
-  const staticPrefixTokens = await getStaticPrefixTokenCount(client, model, systemBlocks, GIT_SHA);
+  // ESTIMATE only — Anthropic's countTokens API "provides an estimate
+  // without using caching logic" (see anthropicPricing.js docstring).
+  // The `usage.*` fields logged alongside it below are the AUTHORITATIVE
+  // signal for whether this specific call actually got cached; this
+  // estimate exists only to diagnose, ahead of time, whether the prefix
+  // is materially above/below the model's cache minimum.
+  const estimatedStaticPrefixTokens = await getEstimatedStaticPrefixTokens(client, model, systemBlocks, GIT_SHA);
+  const cacheEligibility = classifyCacheEligibility(estimatedStaticPrefixTokens, model);
   console.log(
-    `[cache-audit] model=${model} staticPrefixTokens=${staticPrefixTokens ?? 'null'} ` +
+    `[cache-audit] model=${model} estimatedStaticPrefixTokens=${estimatedStaticPrefixTokens ?? 'null'} ` +
+    `cacheEligibility(estimate-only)=${cacheEligibility} ` +
     `promptTextCharLength=${promptText.length} (diagnostic only, not a token count) ` +
-    `cacheCreationInputTokens=${usage?.cache_creation_input_tokens ?? 'null'} ` +
-    `cacheReadInputTokens=${usage?.cache_read_input_tokens ?? 'null'} ` +
+    `AUTHORITATIVE-cacheCreationInputTokens=${usage?.cache_creation_input_tokens ?? 'null'} ` +
+    `AUTHORITATIVE-cacheReadInputTokens=${usage?.cache_read_input_tokens ?? 'null'} ` +
     `uncachedInputTokens=${usage?.input_tokens ?? 'null'}`
   );
 }
