@@ -3953,10 +3953,13 @@ export default async function handler(req, res) {
         }
         // Track B Phase 0, Commit 4.3 — real call site for the extracted,
         // exported buildComicVineCacheKey (invariant 10).
-        // GrailKey Dispatch 03 prerequisite (2026-08-06) — variant segment
-        // + CV_FILTER_VERSION added (see cacheKeys.js). req.body.variant is
-        // the same pre-resolution proxy used at the PC call site below.
-        const kvKey = buildComicVineCacheKey(cleanedCVTitle, confirmedIssue, confirmedPublisher, req.body.variant, CV_FILTER_VERSION);
+        // GrailKey Dispatch 36 (P1) — the dead `variant` segment (Dispatch
+        // 03) is removed; `confirmedYear` and `poolYearHint` take its
+        // place, both real gaps (see cacheKeys.js's own comment on this
+        // function for the full audit trail). `poolYearHint` is the SAME
+        // variable the lookupComicVine call one line below already uses —
+        // not a separate read.
+        const kvKey = buildComicVineCacheKey(cleanedCVTitle, confirmedIssue, confirmedPublisher, confirmedYear, CV_FILTER_VERSION, poolYearHint);
         const cached = await kvGet(kvKey);
         if (cached) return cached;
         // Track B Phase 0, Commit 4.3 (Section 3) — real call site for the

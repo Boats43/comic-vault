@@ -143,36 +143,107 @@ export const buildActiveCompCacheKey = (filterVersion, confirmedTitle, confirmed
 // build the IDENTICAL key string, for a direct, spy-free "no issue-300
 // activity" proof at the KEY-CONSTRUCTION level.
 //
-// GrailKey Dispatch 03 prerequisite (2026-08-06) — variant segment +
-// version prefix added. Before this, two genuinely different variants of
-// the same title|issue|publisher (a MegaCon exclusive vs. a standard
-// cover, e.g.) collided on one cache entry.
+// GrailKey Dispatch 03 (2026-08-06) added a variant segment here,
+// believing it closed a MegaCon-exclusive-vs-standard-cover collision.
 //
-// The variant this function receives is req.body.variant, NOT
-// confirmedVariant — deliberately. Both real call sites (api/enrich.js,
-// this CV key and the sibling PC key below) construct their cache keys
-// BEFORE confirmedVariant is resolved in the handler (that resolution
-// runs later, ~enrich.js:4847+); req.body.variant is the pre-resolution
-// proxy already established for this exact reason at the PC query
-// call site (Q108 CHANGE 2 comment, a few lines below this file's own
-// PC builder). This means a cache key built here can diverge from the
-// FINAL confirmedVariant a request ends up with (e.g. a Q140/Strip-1
-// reroute admitting a variant token AFTER this key is built) — an
-// accepted gap, not a bug: worst case is a cache miss (a fresh lookup
-// keyed on the pre-resolution variant guess) rather than a collision
-// (two different confirmed variants sharing one entry), which is the
-// failure mode this change exists to close. Revisit only if a future
-// case shows the reverse — a false HIT across two different confirmed
-// variants because both happened to share the same req.body.variant.
+// GrailKey Dispatch 36 (P1) — REMOVED. Direct source audit of
+// lookupComicVine (api/enrich.js) proved this segment was dead the whole
+// time: `buildComicVineQueryParams` never had a variant slot,
+// `lookupComicVine` never received one, and `cleanTitleForComicVine`'s
+// own docstring says its `variant` parameter is "unused, kept for
+// signature compat." The segment fragmented cache hits (two requests
+// differing only in `req.body.variant` could never share an entry) for
+// zero correctness benefit — the mirror-image problem to an
+// under-scoped key, not a fix. Removing it is safe under the standing
+// invariant ("cache key must encode every input capable of changing the
+// cached result") precisely because variant is NOT such an input here.
+//
+// GrailKey Dispatch 36 (P1) — `year` ADDED in its place, the real gap:
+// `lookupComicVine`'s `comicYear` (`parseInt(String(year).trim(), 10)`)
+// drives the hard `cv-year-strict` reject AND the `total` score that
+// picks the winning volume — two requests sharing title|issue|publisher
+// but resolving different years can legitimately get different
+// ComicVine matches, and today share one cache entry regardless.
+// Normalized identically to lookupComicVine's own `comicYear` derivation
+// so the key matches exactly what the lookup consumes. A genuinely
+// absent year serializes to the literal token 'null' — never coerced
+// toward '' or a real year number, so "no year" can never collide with
+// an actual parsed year (all real years are digit-only strings, `null`
+// is not).
+//
+// GrailKey Dispatch 36 (correction round) — `poolYearHint` (a distinct,
+// eBay-pool-derived modal-year estimate, separate from `year`/
+// `confirmedYear`) is ALSO consulted by lookupComicVine's scoring
+// (api/enrich.js:942-1000, `scoreWithDetails`) and CAN change which
+// volume gets selected — but only when `!hasYearComparison`. The
+// GATING must match `hasYearComparison`'s OWN definition exactly
+// (api/enrich.js:963): `const hasYearComparison = Boolean(comicYear &&
+// startYear);` — a Boolean/truthiness test on the LEFT operand
+// (`comicYear`), not a `!= null` test. Those two are NOT equivalent: a
+// malformed/unusable year ("Unknown", any non-numeric string) parses via
+// `parseInt` to `NaN`, and `NaN != null` is true (NaN is not null or
+// undefined) while `Boolean(NaN)` is false (NaN is falsy). An earlier
+// version of this function gated on `comicYear == null`, which would
+// treat a NaN comicYear as "year present" and wrongly suppress
+// poolYearHint from the key — while the real lookupComicVine, via
+// `Boolean(NaN && startYear)` short-circuiting to `NaN` then to `false`,
+// treats it as "no year" and DOES consult poolYearHint. That is a
+// confirmed false-HIT class: two requests with the same unusable year
+// but different poolYearHint values would incorrectly share one cache
+// entry despite the real lookup behaving differently for each. Fixed by
+// gating on `Boolean(comicYear)` — the exact same truthiness check
+// `hasYearComparison` itself applies to this variable (the right-hand
+// `startYear` operand is per-ComicVine-candidate data returned by the
+// API, not a caller-side input, and is correctly out of this key's scope
+// exactly as it already was before this correction).
+//
+// Only `.year` is proven to matter here — direct read of
+// `scoreWithDetails` (the ONLY place inside lookupComicVine that touches
+// `poolYearHint`, api/enrich.js:980-985) shows it reads exclusively
+// `poolYearHint.year` and `poolYearHint?.year`; `.agreement` and
+// `.sampleSize` are never referenced there (they ARE read by other,
+// unrelated functions elsewhere in this codebase —
+// detectVariantPoolYearConflict, pcMatchConflictsWithPoolYear — but
+// those don't run inside lookupComicVine and don't affect what gets
+// cached under this key). No representation of `.agreement`/
+// `.sampleSize` is needed in this key. Confirmed and regression-tested,
+// tests/cacheKeys-comicvine-year.test.js.
+//
+// A coarse bucket was rejected for the value itself (no proof every
+// value in a bucket produces identical lookup behavior) — this keys the
+// EXACT normalized `.year` value instead, only when behaviorally active.
+// When `year` IS present (truthy comicYear), `poolYearHint` is
+// normalized to `null` regardless of its actual value, matching
+// lookupComicVine's own behavior of never consulting it in that case —
+// two requests differing only in `poolYearHint` while both carrying a
+// real `year` correctly share one cache entry, since the lookup itself
+// would behave identically for both. `poolYearHint` was confirmed
+// already in-scope at the one real call site (api/enrich.js,
+// immediately adjacent to this function's own call, used one line later
+// for the live lookupComicVine call) — no bypass needed, the "cannot be
+// made available without disproportionate change" escape hatch does not
+// apply here.
 //
 // `cvFilterVersion` defaults to
 // 1 (not imported from kv-cache.js here — this file is deliberately
 // side-effect-free at module load, per the file-header rationale above;
 // callers pass CV_FILTER_VERSION explicitly) so existing call sites that
 // don't pass one still produce a valid, version-prefixed key rather than
-// silently reverting to the old unversioned shape.
-export const buildComicVineCacheKey = (cleanedTitle, confirmedIssue, confirmedPublisher, variant = null, cvFilterVersion = 1) =>
-  `cv:v${cvFilterVersion}:${cleanedTitle}|${confirmedIssue}|${confirmedPublisher}|${variant || ''}`;
+// silently reverting to the old unversioned shape. `poolYearHint` is
+// appended AFTER `cvFilterVersion` (not inserted before it) specifically
+// so every pre-existing call site that doesn't pass it continues to work
+// unchanged, defaulting to `null` — the same safe, conservative value
+// this function would compute anyway whenever `year` is present.
+export const buildComicVineCacheKey = (cleanedTitle, confirmedIssue, confirmedPublisher, year = null, cvFilterVersion = 1, poolYearHint = null) => {
+  const comicYear = year ? parseInt(String(year).trim(), 10) : null;
+  // Boolean(comicYear) — NOT `comicYear == null` — to match
+  // hasYearComparison's own truthiness test exactly (see comment above;
+  // this is what makes NaN-from-malformed-year behave identically here
+  // and in the real lookup).
+  const yearIsAuthoritative = Boolean(comicYear);
+  const activePoolYearHint = (!yearIsAuthoritative && poolYearHint?.year != null) ? poolYearHint.year : null;
+  return `cv:v${cvFilterVersion}:${cleanedTitle}|${confirmedIssue}|${confirmedPublisher}|${comicYear ?? 'null'}|${activePoolYearHint ?? 'null'}`;
+};
 
 export const buildPriceChartingCacheKey = (filterVersion, title, confirmedIssue, year, variant = null) =>
   `pc:v${filterVersion}:${title}|${confirmedIssue}|${year || ''}|${variant || ''}`;

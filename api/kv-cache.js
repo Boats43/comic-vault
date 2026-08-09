@@ -172,5 +172,16 @@ export const PC_FILTER_VERSION = 2;
  * entries are never read back as if they were variant-aware. Same bump
  * discipline as PC_FILTER_VERSION: increment whenever the CV cache-key
  * shape or the underlying lookupComicVine matching logic changes.
+ *
+ * Bumped 1->2 (2026-08-08, GrailKey Dispatch 36, P1): key shape changed —
+ * the dead `variant` segment (never reached lookupComicVine at all,
+ * confirmed by direct audit) removed; two real gaps added in its place:
+ * normalized `year` (drives cv-year-strict and the volume-selection
+ * score), and `poolYearHint` (keyed only when behaviorally active per
+ * lookupComicVine's own `!hasYearComparison` gate — i.e. only when `year`
+ * is absent; normalized to `null` otherwise, matching the lookup's own
+ * behavior of ignoring it whenever a real year exists). Old v1 entries
+ * have none of these segments and must not be read back under the new
+ * shape.
  */
-export const CV_FILTER_VERSION = 1;
+export const CV_FILTER_VERSION = 2;

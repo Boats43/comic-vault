@@ -275,7 +275,13 @@ console.log('\n--- Section 6: zero-#300/#351 cache-key custody + convergence non
 {
   const cvKey = buildComicVineCacheKey(identity.confirmedTitle, identity.confirmedIssue, identity.confirmedPublisher ?? 'Image Comics');
   const pcKey = buildPriceChartingCacheKey(1, identity.confirmedTitle, identity.confirmedIssue, identity.confirmedYear);
-  const acKey = buildActiveCompCacheKey(9, identity.confirmedTitle, identity.confirmedIssue);
+  // GrailKey Dispatch 36 — buildActiveCompCacheKey now requires a fourth
+  // filterContextFingerprint segment (Hero for Hire class fix); not
+  // under test in this file, so a fixed sentinel is passed.
+  // GrailKey Dispatch 36 (correction round) — must be valid 64-char hex,
+  // buildActiveCompCacheKey now throws on anything else (fail-closed).
+  const FP_NOT_UNDER_TEST = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const acKey = buildActiveCompCacheKey(9, identity.confirmedTitle, identity.confirmedIssue, FP_NOT_UNDER_TEST);
   assertEq(parseCacheKeyIssueSegment(cvKey).issue, '1', 'cv: key carries issue "1"');
   assertEq(parseCacheKeyIssueSegment(pcKey).issue, '1', 'pc:v1 key carries issue "1"');
   assertEq(parseCacheKeyIssueSegment(acKey).issue, '1', 'ac:v9 key carries issue "1"');
@@ -313,7 +319,8 @@ console.log('\n--- Section 7: real ac: cache gate — zero calls (spy, real kvGe
 {
   const kvCalls = [];
   const spyKvGet = async (key) => { kvCalls.push({ op: 'get', key }); return kvGet(key); };
-  const acKey = buildActiveCompCacheKey(9, identity.confirmedTitle, identity.confirmedIssue);
+  // GrailKey Dispatch 36 — see Section 6's identical note; separate block scope needs its own declaration.
+  const acKey = buildActiveCompCacheKey(9, identity.confirmedTitle, identity.confirmedIssue, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
   const exactPricingCacheEligible = canUseExactIssuePricingCache(identity.confirmedIssue, derivedIssueAuthority, terminalProvisionalFields)
     && checkCrossPopulationPromotionGuard(identity.familyIssueConsensus, { cacheIssue: identity.confirmedIssue }).allowed;
   if (exactPricingCacheEligible) { await spyKvGet(acKey); }

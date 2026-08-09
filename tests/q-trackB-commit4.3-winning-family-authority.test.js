@@ -332,7 +332,16 @@ console.log('\n--- Section 2: custody invariant + direct zero-#300 cache proofs 
   // genuine, non-mocked, non-mirrored proof.
   const realCvKey = buildComicVineCacheKey(liveIdentity.confirmedTitle, liveIdentity.confirmedIssue, liveIdentity.confirmedPublisher ?? 'Image Comics');
   const realPcKey = buildPriceChartingCacheKey(1, liveIdentity.confirmedTitle, liveIdentity.confirmedIssue, liveIdentity.confirmedYear);
-  const realAcKey = buildActiveCompCacheKey(9, liveIdentity.confirmedTitle, liveIdentity.confirmedIssue);
+  // GrailKey Dispatch 36 — buildActiveCompCacheKey now requires a fourth
+  // filterContextFingerprint segment (Hero for Hire class fix). This
+  // file is about issue-authority/custody, not fingerprint correctness,
+  // so every call below passes the same fixed sentinel; parseCacheKeyIssueSegment
+  // still correctly extracts the issue segment regardless of this extra
+  // trailing segment.
+  // GrailKey Dispatch 36 (correction round) — must be valid 64-char hex,
+  // buildActiveCompCacheKey now throws on anything else (fail-closed).
+  const FP_NOT_UNDER_TEST = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const realAcKey = buildActiveCompCacheKey(9, liveIdentity.confirmedTitle, liveIdentity.confirmedIssue, FP_NOT_UNDER_TEST);
 
   assertEq(parseCacheKeyIssueSegment(realCvKey).issue, '351', 'PRECISION CLAUSE 3: ComicVine cache key built from the resolved identity has issue segment "351"');
   assertEq(parseCacheKeyIssueSegment(realPcKey).issue, '351', 'PRECISION CLAUSE 3: PriceCharting cache key built from the resolved identity has issue segment "351"');
@@ -390,7 +399,7 @@ console.log('\n--- Section 2: custody invariant + direct zero-#300 cache proofs 
   const spyKvGet = async (key) => { kvCalls.push({ op: 'get', key }); return kvGet(key); };
   const spyKvSet = async (key, value, ttl) => { kvCalls.push({ op: 'set', key }); return kvSet(key, value, ttl); };
 
-  const acKeyForThisIssue = buildActiveCompCacheKey(9, liveIdentity.confirmedTitle, liveIdentity.confirmedIssue);
+  const acKeyForThisIssue = buildActiveCompCacheKey(9, liveIdentity.confirmedTitle, liveIdentity.confirmedIssue, FP_NOT_UNDER_TEST);
   const exactCacheGateAllowed = cacheEligible; // computed above via the real canUseExactIssuePricingCache + custody guard
   if (exactCacheGateAllowed) {
     await spyKvGet(acKeyForThisIssue);
@@ -404,7 +413,7 @@ console.log('\n--- Section 2: custody invariant + direct zero-#300 cache proofs 
   // exactly one call, under the corrected issue "351", proving the spy
   // wrapper itself is load-bearing and not a tautology.
   kvCalls.length = 0;
-  await spyKvGet(buildActiveCompCacheKey(9, 'Spawn', '351'));
+  await spyKvGet(buildActiveCompCacheKey(9, 'Spawn', '351', FP_NOT_UNDER_TEST));
   assertEq(kvCalls.length, 1, 'SECTION 3(b) positive control: an eligible cache read DOES record exactly one real kvGet call');
   assertEq(parseCacheKeyIssueSegment(kvCalls[0].key).issue, '351', 'SECTION 3(b) positive control: the recorded call carries the corrected issue "351", never "300"');
   kvCalls.length = 0;
@@ -463,7 +472,7 @@ console.log('\n--- Section 2: custody invariant + direct zero-#300 cache proofs 
   kvCalls.length = 0;
   const badPcKeyFull = buildPriceChartingCacheKey(1, 'Spawn', '300', '2020');
   const badPcKeyFull2024 = buildPriceChartingCacheKey(1, 'Spawn', '300', '2024');
-  const badAcKey = buildActiveCompCacheKey(9, 'Spawn', '300');
+  const badAcKey = buildActiveCompCacheKey(9, 'Spawn', '300', FP_NOT_UNDER_TEST);
   assertEq(parseCacheKeyIssueSegment(badPcKeyFull).issue, '300', 'SECTION 3(c) negative control: pc:v1 key with issue 300 parses as "300"');
   assertEq(parseCacheKeyIssueSegment(badPcKeyFull2024).issue, '300', 'SECTION 3(c) negative control: pc:v1 key with issue 300 (2024 year variant) parses as "300"');
   assertEq(parseCacheKeyIssueSegment(badAcKey).issue, '300', 'SECTION 3(c) negative control: ac:v9 key with issue 300 parses as "300"');
@@ -472,7 +481,7 @@ console.log('\n--- Section 2: custody invariant + direct zero-#300 cache proofs 
   // Positive control — an INDEPENDENTLY ELIGIBLE case (not this fixture):
   // the recorded PC and AC keys both parse to issue "351".
   const eligiblePcKey = buildPriceChartingCacheKey(1, 'Spawn', '351', '2024');
-  const eligibleAcKey = buildActiveCompCacheKey(9, 'Spawn', '351');
+  const eligibleAcKey = buildActiveCompCacheKey(9, 'Spawn', '351', FP_NOT_UNDER_TEST);
   assertEq(parseCacheKeyIssueSegment(eligiblePcKey).issue, '351', 'SECTION 3(c) positive control: an independently-eligible PC key parses to issue "351"');
   assertEq(parseCacheKeyIssueSegment(eligibleAcKey).issue, '351', 'SECTION 3(c) positive control: an independently-eligible AC key parses to issue "351"');
 }

@@ -531,8 +531,19 @@ console.log('\nSafeguard 2 (amendment): the real active-comp cache key uses the 
   // The exact real production composition: filterVersion + workingIdentity
   // fields straight into the real exported buildActiveCompCacheKey — not a
   // test-local template-string mirror.
+  //
+  // GrailKey Dispatch 36 — buildActiveCompCacheKey now requires a fourth
+  // filterContextFingerprint segment (Hero for Hire class fix). This
+  // section is about title/issue normalization, not fingerprint
+  // correctness (that's covered in tests/cacheKeys-fingerprint.test.js),
+  // so every call below passes the same fixed sentinel string —
+  // deliberately NOT a real buildFilterContextFingerprint() output, so a
+  // reader immediately sees this dimension isn't under test here.
   const FILTER_VERSION = 9; // matches COMP_FILTER_VERSION (src/lib/compHygiene.js) at time of writing; the real value is read via the export in production, this is just the literal used to construct an equivalent key here
-  const key = buildActiveCompCacheKey(FILTER_VERSION, prepared.workingIdentity.title, prepared.workingIdentity.issue);
+  // GrailKey Dispatch 36 (correction round) — must be valid 64-char hex,
+  // buildActiveCompCacheKey now throws on anything else (fail-closed).
+  const FP_NOT_UNDER_TEST = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const key = buildActiveCompCacheKey(FILTER_VERSION, prepared.workingIdentity.title, prepared.workingIdentity.issue, FP_NOT_UNDER_TEST);
 
   assertTrue(key.includes('Strange Tales|3'), 'the real cache key contains the normalized "Strange Tales|3" segment');
   assertFalse(key.includes('Strange Tales|#3'), 'the real cache key does NOT contain the raw hash form "Strange Tales|#3"');
@@ -546,19 +557,19 @@ console.log('\nSafeguard 2 (amendment): the real active-comp cache key uses the 
   // buildActiveCompCacheKey export, and confirm the assertion patterns
   // above correctly reject both. This proves the check actually catches
   // the confirmed historical failure class, not a hypothetical one.
-  const staleIssueKey = buildActiveCompCacheKey(FILTER_VERSION, prepared.workingIdentity.title, '9'); // the OLD, uncorrected issue
-  assertEq(staleIssueKey, 'v9:Strange Tales|9', 'TEETH-PROOF: reconstructing the stale-issue key shape produces exactly "v9:Strange Tales|9"');
+  const staleIssueKey = buildActiveCompCacheKey(FILTER_VERSION, prepared.workingIdentity.title, '9', FP_NOT_UNDER_TEST); // the OLD, uncorrected issue
+  assertEq(staleIssueKey, 'v9:Strange Tales|9|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'TEETH-PROOF: reconstructing the stale-issue key shape produces exactly "v9:Strange Tales|9|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"');
   assertFalse(staleIssueKey.includes('Strange Tales|3'), 'TEETH-PROOF: the stale-issue key does NOT contain "Strange Tales|3" — confirms the real assertion above (which the corrected key DID pass) is not vacuous');
   assertTrue(staleIssueKey.includes('Strange Tales|9'), 'TEETH-PROOF: the stale-issue key DOES contain "Strange Tales|9" — exactly the shape the real corrected-key assertion above correctly rejects');
 
-  const nullIssueKey = buildActiveCompCacheKey(FILTER_VERSION, prepared.workingIdentity.title, null);
-  assertEq(nullIssueKey, 'v9:Strange Tales|null', 'TEETH-PROOF: reconstructing the historical "title|null" key shape (Commit B.1) produces exactly "v9:Strange Tales|null"');
+  const nullIssueKey = buildActiveCompCacheKey(FILTER_VERSION, prepared.workingIdentity.title, null, FP_NOT_UNDER_TEST);
+  assertEq(nullIssueKey, 'v9:Strange Tales|null|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'TEETH-PROOF: reconstructing the historical "title|null" key shape (Commit B.1) produces exactly "v9:Strange Tales|null|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"');
   assertTrue(nullIssueKey.includes('Strange Tales|null'), 'TEETH-PROOF: the null-issue key DOES contain "Strange Tales|null" — exactly the confirmed historical failure shape the real corrected-key assertion above correctly rejects');
 
   // Confirm the extracted export reproduces the EXACT real inline template
-  // it replaced, byte-for-byte, so this is genuinely the same composition
-  // production uses, not an approximation.
-  assertEq(buildActiveCompCacheKey(9, 'Strange Tales', '3'), 'v9:Strange Tales|3', 'buildActiveCompCacheKey output matches the real production template exactly: `v${filterVersion}:${confirmedTitle}|${confirmedIssue}`');
+  // it replaced (now with its required fingerprint segment), so this is
+  // genuinely the same composition production uses, not an approximation.
+  assertEq(buildActiveCompCacheKey(9, 'Strange Tales', '3', FP_NOT_UNDER_TEST), 'v9:Strange Tales|3|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'buildActiveCompCacheKey output matches the real production template exactly: `v${filterVersion}:${confirmedTitle}|${confirmedIssue}|${filterContextFingerprint}`');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
