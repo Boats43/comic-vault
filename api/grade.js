@@ -8,8 +8,19 @@ import {
 } from "../src/lib/imageSearchIdentity.js";
 import { getOAuthToken } from "./comps.js";
 import { checkRateLimit } from "./rate-limit.js";
+import { computeAnthropicCallCostUsd, getStaticPrefixTokenCount } from "../src/lib/anthropicPricing.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// GrailKey Dispatch 33 (2026-08-08) — audit-only cost/cache logging. This
+// is a separate HTTP request from api/enrich.js (the only place
+// src/lib/scanLog.js writes to KV), so these numbers are console-logged
+// here for the Step 5A prompt-caching audit and NOT persisted into
+// scanLog this week — see PATTERN-LIBRARY.md "GrailKey Dispatch 33" for
+// the cross-request gap this leaves and why it's deliberately not closed
+// yet. process.env.VERCEL_GIT_COMMIT_SHA is Vercel's own system env var —
+// no new version constant to drift out of sync with the deployed prompt.
+const GIT_SHA = process.env.VERCEL_GIT_COMMIT_SHA ?? null;
 
 // A3 ACCESS GATE: T1 invite-only mechanism
 function checkAccessGate(req) {
@@ -456,19 +467,51 @@ const buildImageContent = async (images) => {
   return content;
 };
 
+// GrailKey Dispatch 33 (2026-08-08) — audit-only cost/cache logging for
+// callModel. Never touches `parsed`/`ms` (both already captured by the
+// caller before this runs) and is wrapped in try/catch so any failure
+// here — a bad countTokens call, a pricing-table miss — can never affect
+// a real scan response. Awaited (not fire-and-forget) because Vercel
+// serverless doesn't guarantee an un-awaited background promise survives
+// past the response being sent; the one-time latency this adds (a single
+// countTokens call, only on a cache miss — see anthropicPricing.js's
+// per-model+SHA+prompt-hash cache) is accepted as the cost of getting
+// complete data for the Step 5A prompt-caching audit. This logs to
+// Vercel runtime logs only — NOT persisted into scanLog (that KV write
+// only happens in api/enrich.js, a separate request; see
+// PATTERN-LIBRARY.md "GrailKey Dispatch 33" for the cross-request gap).
+async function logCostAndCacheAudit(model, usage, promptText, systemBlocks) {
+  const cost = computeAnthropicCallCostUsd(model, usage);
+  console.log(
+    `[cost-audit] model=${model} ` +
+    `inputTokens=${usage?.input_tokens ?? 'null'} outputTokens=${usage?.output_tokens ?? 'null'} ` +
+    `cacheCreationTokens=${usage?.cache_creation_input_tokens ?? 'null'} cacheReadTokens=${usage?.cache_read_input_tokens ?? 'null'} ` +
+    `totalCostUsd=${cost ? cost.totalCostUsd.toFixed(6) : 'null'}`
+  );
+  const staticPrefixTokens = await getStaticPrefixTokenCount(client, model, systemBlocks, GIT_SHA);
+  console.log(
+    `[cache-audit] model=${model} staticPrefixTokens=${staticPrefixTokens ?? 'null'} ` +
+    `promptTextCharLength=${promptText.length} (diagnostic only, not a token count) ` +
+    `cacheCreationInputTokens=${usage?.cache_creation_input_tokens ?? 'null'} ` +
+    `cacheReadInputTokens=${usage?.cache_read_input_tokens ?? 'null'} ` +
+    `uncachedInputTokens=${usage?.input_tokens ?? 'null'}`
+  );
+}
+
 // Single-model call. Returns { parsed, ms }.
 const callModel = async (model, imageContent, promptText) => {
   const t0 = Date.now();
   // Prompt caching: Move large static prompts to system with cache_control
   // This caches STANDARD_PROMPT/WATCH_PROMPT/BOOK_PROMPT (~1,500 tokens)
   // Savings: ~96% on prompt portion for batch scans (5-min cache TTL)
+  const systemBlocks = [
+    { type: "text", text: SYSTEM_PROMPT },
+    { type: "text", text: promptText, cache_control: { type: "ephemeral" } }
+  ];
   const message = await client.messages.create({
     model,
     max_tokens: 1024,
-    system: [
-      { type: "text", text: SYSTEM_PROMPT },
-      { type: "text", text: promptText, cache_control: { type: "ephemeral" } }
-    ],
+    system: systemBlocks,
     messages: [{ role: "user", content: imageContent }],
   });
   const text = message.content
@@ -476,7 +519,16 @@ const callModel = async (model, imageContent, promptText) => {
     .map((b) => b.text)
     .join("")
     .trim();
-  return { parsed: parseResponse(text), ms: Date.now() - t0 };
+  const parsed = parseResponse(text);
+  const ms = Date.now() - t0;
+
+  try {
+    await logCostAndCacheAudit(model, message.usage, promptText, systemBlocks);
+  } catch (err) {
+    console.log(`[cost-audit] logging-failed model=${model} err=${err?.message ?? 'unknown'}`);
+  }
+
+  return { parsed, ms };
 };
 
 // Self-correcting watch pipeline: Haiku fast → Haiku self-correct → Opus escalation.

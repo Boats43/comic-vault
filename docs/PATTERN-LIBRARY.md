@@ -4306,3 +4306,349 @@ Full finding history for Comic Vault's identity/pricing pipeline, moved out of C
   so truncation never changes which listings cluster together. No fix
   scoped.
 
+## GrailKey Dispatch 33 (2026-08-08) — Architecture v1.0, Week 1: instrumentation and contracts only
+
+Zero customer-visible behavior change this week. No routing change, no
+new lanes, no barcode decode logic, no agent framework, no prompt
+changes, no `api/enrich.js` control-flow changes (only new
+timer-wrapping/logging around existing calls). Full plan and design
+decisions: `.claude/plans/bright-meandering-reddy.md` (this session).
+
+### Step 0 — eBay legacy Product API urgency check
+
+Grepped the full codebase for `findProducts`, `getProductDetails`, and
+`getProductCompatibilities` — **zero call sites anywhere.** Confirmed via
+eBay's own developer docs
+(`developer.ebay.com/devzone/Product/CallRef/findProducts.html`,
+`.../getProductDetails.html`) that all three are genuinely deprecated and
+scheduled for decommission **2026-08-15** — the secondhand claim that
+triggered this check was accurate, not a rumor. This codebase's actual
+eBay surface: Browse API (`buy/browse/v1`, current, not part of this
+decommission), Trading API (`ws/api.dll` — `AddFixedPriceItem`/`EndItem`,
+a separate legacy API, also not part of this decommission), the legacy
+Finding API (`svcs.ebay.com/FindingService`, already documented dead/
+bypassed in CLAUDE.md's Open Blockers), and Marketplace Insights
+(already documented dead/gated). The `epid` field seen throughout
+`src/lib/imageSearchIdentity.js`/`evidenceEligibility.js` is a Browse API
+response field used as a cross-reference key into PriceCharting lookups
+— not a call to the deprecated Product API. **Conclusion: no migration
+needed, nothing was ever built against the decommissioned surface.**
+
+### Step 1 — two standing invariants for every future evidence source
+
+Recorded here verbatim, per instruction, before any contract code was
+written — the contracts in Step 2 exist to satisfy these, not the other
+way around.
+
+**INVARIANT 1 — MONOTONIC EVIDENCE EXTENSION.** A new evidence source may
+strengthen, contradict, or leave unchanged an existing determination.
+Failure or absence of the new source must not weaken, contaminate,
+constrain, or otherwise alter the established fallback path. Concretely,
+a fast-identity miss may NOT: alter the legacy Vision prompt; alter the
+eBay query; shrink or reorder the candidate pool; populate
+confirmedTitle/issue/year/variant/publisher; contaminate shared request
+state; write a cache entry that affects the legacy route; change grading
+mode. This is stronger than fallback logic — it is monotonic extension:
+the legacy path is the floor, by construction.
+
+**INVARIANT 2 — NO SELF-CORROBORATION.** Evidence derived directly or
+transitively from an authority mechanism cannot count as independent
+corroboration of that same mechanism. Independence is COMPUTED by the
+Authority Resolver (future work, not built this week) from evidence
+lineage (`derivedFromEnvelopeIds`, `sourceIndependenceGroup`) — it is
+NEVER a boolean a worker sets. This covers barcode, catalog, visual
+retrieval, future agents, and sources not yet conceived. See
+`src/lib/evidenceContracts.js`'s closing comment: a stored `independent`
+field would defeat this guard by construction, which is why one does not
+exist anywhere in this codebase and any future addition of one should be
+rejected on sight, not patched around.
+
+### Step 2 — EvidenceEnvelope / SourcePolicy / barcode-ladder contracts (types and tables only)
+
+`src/lib/evidenceContracts.js` — new file, **nothing imports it yet**
+(grep-verified at ship time; re-verify before this claim goes stale).
+Contains: the `EvidenceEnvelope` JSDoc typedef (every field from the
+dispatch spec); `RetentionClass` frozen enum
+(`FIRST_PARTY_PERMANENT`/`LICENSED_PERMANENT`/`TRANSIENT_EXTERNAL`);
+`SOURCE_POLICIES`, one row per source (ebay, pricecharting, comicvine,
+google, gcd) — populated conservatively, `termsCheckedAt: null` + a TODO
+on every row except GCD's (the one row with real, if still incomplete,
+cited terms from Dispatch 17 — CC-BY-SA attribution confirmed required,
+no live query API, no bulk retrieval); `BARCODE_AUTHORITY_LADDER`, a
+plain 3-value enum (`BARCODE_OBSERVED`/`BARCODE_MAPPED`/
+`BARCODE_EDITION_RESOLVED`) with no decode logic behind it.
+
+**Flagged, not fixed:** this ladder needs future reconciliation with the
+*existing* barcode path in `api/enrich.js` (`lookupComicVineByUPC`,
+`identitySource === 'barcode'`) — today that path is an all-or-nothing
+lock (UPC found in ComicVine ⇒ "100% certain," skips `resolveIdentity`
+entirely; UPC not found ⇒ hard 404) with no "observed but unmapped"
+state at all. Wiring the 3-tier ladder into that existing lock is
+deliberately out of scope this week.
+
+### Step 3/4 — instrumentation, threaded through `src/lib/scanLog.js` (additive, no version bump)
+
+Same additive-field convention as Fix 32-C (`visionLowButCorroborated`):
+every new key defaults to `null`/`[]` on absence, `SCAN_LOG_VERSION`
+stays `1`. New top-level keys: `correlationId`, `latency`, `identity`,
+`cost`, `evidence`, `sources`, `barcode`, `eventualCertifiedGrade`.
+
+**correlationId** — reuses `api/enrich.js`'s existing `pipelineTraceId`
+(`randomUUID()` at handler entry, already threaded through
+`out.pipelineAudit.traceId`). No new ID generation, no new plumbing.
+
+**A key architectural fact this instrumentation is built around:**
+`api/grade.js` (Vision identification) and `api/enrich.js` (pricing
+pipeline, the only place `scanLog` writes to KV) are **two separate HTTP
+requests**, not one. There is no shared correlation ID or log sink
+spanning both today. This creates two honest, documented gaps rather
+than fabricated numbers:
+
+- `latency.visionLatencyMs` is always `null` in `scanLog` — Vision's
+  latency is real and measured (`api/grade.js`'s own `mark()`/`ms`
+  timers), just not persisted here.
+- `cost.conditionCostUsd` is always `null` in `scanLog` for the same
+  reason — Vision's per-call cost IS computed and logged (see below),
+  just not joined to the enrich-side record.
+
+Resolved direction (explicit, not a default): compute and
+`console.log` both numbers inside `api/grade.js` (readable via Vercel
+runtime logs for the Step 5A audit) and leave the corresponding
+`scanLog` fields `null` with a code comment. **Do not timestamp-stitch
+the two requests to manufacture a joined per-scan total** — a correlation
+built by matching timestamps between two independent requests is false
+precision, not data. Closing this gap for real needs either a client
+(`App.jsx`) contract change forwarding `correlationId`/measured values
+from `grade.js` into the `enrich.js` request, or a second KV log sink
+inside `grade.js` itself — both are named, scoped-but-not-started
+follow-ups, not started this week.
+
+**latency** (`ebayImageSearchLatencyMs`, `comicvineLatencyMs`,
+`priceChartingLatencyMs`, `compsLatencyMs`, `aiVerifyLatencyMs`,
+`totalLatencyMs`, `visionLatencyMs`) — the first three are new timers
+wrapped around `api/enrich.js`'s own existing eBay-image-search
+(`lookupEbayVisual`), ComicVine (`lookupComicVine`), and PriceCharting
+(`lookupPriceCharting`) calls; `compsLatencyMs`/`aiVerifyLatencyMs`/
+`totalLatencyMs` alias the already-computed `out.timings.comps_ms`/
+`verify_ms`/`total_ms`. **Documented partial coverage:** ComicVine and
+PriceCharting each have multiple call sites in this handler (retries,
+subtitle-stripped fallback, a later re-query path) — only the PRIMARY
+(first, cache-miss) call at each is timed, not summed across every
+retry/fallback. Touching every call site's control flow to sum them was
+judged out of scope for an instrumentation-only week; this is a
+documented gap, not a silent one.
+
+**identity** (`identityRoute`, `identityOwnedEvidenceOnly`,
+`authorityPath`) — all three are derived **read-only** from the existing
+`identitySource` string (`src/lib/identityCore.js`, already documented
+as "KNOWN-FRAGILE" for exact-match callers due to `+`-joined suffix
+mutation). `identityRoute` = `identitySource.split('+')[0]`;
+`authorityPath` = the full split array; `identityOwnedEvidenceOnly` =
+true only when the route is `barcode`/`manual`/`cgc_cert` (the three
+single-source bypass branches in `api/enrich.js`, confirmed via direct
+read of the identity-resolution `if/else if/else` chain). None of this
+mutates `identitySource` itself.
+
+**cost** (`identityCostUsd`, `conditionCostUsd`, `verificationCostUsd`,
+`researchCostUsd`, `totalCostUsd`) — **the four lanes are never blended**
+(explicit design goal: showing identity cost trend toward zero while
+condition cost doesn't requires keeping them apart). Real mapping,
+confirmed by enumerating every `messages.create`/`anthropic.messages`
+call site in `api/enrich.js` (there is exactly one):
+- `verificationCostUsd` ← `verifyCompsTitles`, the AI-verify comp-title-
+  matching pass — the only enrich.js-side Claude call, confirmed against
+  its own prompt text (asks Claude to MATCH/NO_MATCH each eBay comp
+  listing against the identified book). Attached to its return value as
+  a side-channel `_verificationCostUsd` property (same idiom as
+  `api/grade.js`'s existing `_watchPasses`, since arrays are objects in
+  JS and this is invisible to every existing caller) rather than
+  changing the function's return contract.
+- `identityCostUsd` — **always null.** There is no identity-
+  disambiguation LLM call anywhere inside `api/enrich.js` today; identity
+  resolution in this codebase (`resolveIdentity`, `decideFieldAuthority`,
+  the whole issue/year-authority machinery) is pure deterministic JS, not
+  an LLM call. A hypothesized "aiChooseBestProduct" call was searched for
+  and does not exist. This is an honest absence, not an unmapped call —
+  flag it here so a future reader doesn't assume a bug.
+- `conditionCostUsd` — always null in `scanLog` (cross-request gap
+  above); real value computed and logged in `api/grade.js`.
+- `researchCostUsd` — fixed `0.0`, reserved for product-keyed enrichment,
+  never computed per-scan.
+
+**PRICING_USD_PER_MTOK** (`src/lib/anthropicPricing.js`) — one named
+pricing table, verified against Anthropic's official pricing page
+(`platform.claude.com/docs/en/about-claude/pricing`, retrieved
+2026-08-08) rather than assumed from training data. Keyed on the EXACT
+literal model-ID strings this codebase sends — four distinct strings
+across two files, not one: `claude-haiku-4-5-20251001`,
+`claude-sonnet-4-5-20250929`, `claude-opus-4-7` (all three in
+`api/grade.js`), and a fourth, separate **undated alias**
+`claude-haiku-4-5` (`api/enrich.js`'s `verifyCompsTitles`, its own
+distinct literal string, not the same key as the dated Haiku row). A
+table keyed on anything other than what the code actually sends makes
+`computeAnthropicCallCostUsd` return `null` on every call and the whole
+instrumentation logs nothing — silently. (A review pass initially
+flagged `claude-opus-4-7`/`claude-sonnet-4-5-20250929` as stale/invalid
+based on general recall; both were re-confirmed live and non-retired
+directly against the fetched pricing page before proceeding — worth
+recording as a small worked example of why a live source beats memory
+even when the pushback sounds confident.) Cache-write TTL uses the SDK's
+real `usage.cache_creation.{ephemeral_5m_input_tokens,
+ephemeral_1h_input_tokens}` breakdown when present, falling back to
+pricing the flat `cache_creation_input_tokens` as 5-minute-only only
+because source inspection confirms this codebase's one `cache_control`
+call site never sets `ttl: "1h"` — not a general assumption. Static-
+prefix token counts use Anthropic's real `messages.countTokens` API
+(confirmed present in the installed SDK), cached per
+(model, git-SHA, prompt-hash) so it runs once per unique combination,
+not once per scan; `promptText.length` is demoted to a diagnostic-only
+figure, never the cache-eligibility or reported-token signal.
+
+**evidence** (`conditionEvidenceLevel`, `model`, `modelVersion`,
+`promptVersion`) — `conditionEvidenceLevel` hardcoded `'front'` this
+week (no per-scan image-count awareness exists yet — TODO, not inferred).
+`model`/`modelVersion` describe the condition-assessment (Vision) call,
+which happens in `api/grade.js` — always null here, same cross-request
+gap as `conditionCostUsd`. `promptVersion` = `process.env
+.VERCEL_GIT_COMMIT_SHA` (Vercel's own system env var) — chosen explicitly
+over a hand-maintained version constant, since prompt behavior is fully
+determined by the deployed commit and a parallel constant would
+eventually drift silently from what's actually live. Revisit if prompts
+ever move out of this repo.
+
+**sources** (`sourceCalls`, `quotaState`) — `sourceCalls` covers only the
+legs this dispatch actually instrumented (ebay-image-search, comicvine,
+pricecharting, ai-verify) — explicitly not a comprehensive inventory of
+every external call this 10,000+-line handler makes. `quotaState` is
+always null; no external API in this codebase currently surfaces quota
+headers.
+
+**barcode** (`barcodeDetected`, `barcodeRaw`, `barcodeBase`,
+`barcodeSupplementLength`) — capture-only, from the existing opaque
+`barcode` request field. `barcodeSupplementLength` is always null: this
+codebase has no supplement-digit (2-digit/5-digit UPC add-on) concept
+anywhere — the full 12/13-digit scanned or typed string is retained as
+one opaque field end-to-end, confirmed via direct read of the client
+scanner, the request contract, and `lookupComicVineByUPC`.
+
+`scripts/query-scanlog.mjs` updated to aggregate the new fields
+(identityRoute distribution, totalLatencyMs p50/p95, verificationCostUsd
+sum/avg) without breaking `--json` raw-dump mode; tolerates pre-Dispatch-
+33 records that simply lack these keys. `SCAN_LOG_INDEX_KEY` import
+confirmed intact (unchanged by this dispatch — Fix 32-C's actual change
+was the `visionLowButCorroborated` field, not this constant; there was
+never a separate index-key bug to fix here).
+
+### Step 5A — prompt-caching audit (mechanism shipped, real numbers pending data)
+
+`[cost-audit]`/`[cache-audit]` tagged `console.log` lines added at every
+Claude call site in both `api/grade.js` (`callModel`) and
+`api/enrich.js` (`verifyCompsTitles`) — real token counts
+(`message.usage`), real computed cost (`PRICING_USD_PER_MTOK`), and for
+`api/grade.js` specifically, a real Anthropic-token-counted static-prefix
+length (not a character-length proxy) via the cached `countTokens` call
+described above. **No real numbers are reported here yet — that would be
+fabrication.** Pull them from Vercel runtime logs (or, once accumulated,
+`scripts/query-scanlog.mjs` for the `enrich.js`-side lanes) after this
+ships and a real batch of scans runs. Whether Haiku's cache hit rate
+being 0% (if that's what the data shows) is a bug or correct behavior —
+Anthropic's minimum cacheable prefix reportedly differs by model — is
+exactly the open question this logging exists to answer; do not assume
+either way before the data is in.
+
+### Step 5B — Fix 4/4b reachability, traced against the G.I. Joe #303 shape
+
+**Terminology hazard found first:** "Fix 4" is reused for at least four
+unrelated things in this codebase — a Ship #23 UI button
+("Update All Books"), the manual-identity-bypass branch in
+`api/enrich.js`, Ship #14's sanity-threshold tuning
+(`pricingEngine.js`), and a Dispatch-15 margin-gate proposal that was
+never shipped. The mechanism this dispatch actually means is GrailKey
+Dispatch 26's "zero-support unanimous rescue"
+(`src/lib/identityCore.js:2227-2409`,
+`tests/grailkey-dispatch-26-fix4-zero-support-rescue.test.js`) — Fix 4 is
+the issue-axis rescue, Fix 4b its year-axis mirror. Recording this here
+so the name isn't silently re-collided with in a future dispatch.
+
+**The trace.** Fix 4 fires only when six conditions ALL hold (full detail
+in `identityCore.js`'s own comment, `:2240-2290`); the three that matter
+for this shape:
+1. `issueDecision.outcome === 'conflicted'` and `authoritativeForCustody === false` (Rule D already produced a non-authoritative outcome).
+2. Vision's prior isn't independently trusted (never true for a plain Vision guess).
+3. **`isIssueZeroSupport(visionIssueCount, total)`** — raw-pool support for Vision's own issue number is at or below the zero-support ratio floor.
+
+For G.I. Joe #303 (Vision issue = 303, 0/20 raw-pool support, per the
+dispatch's own framing): condition 3 above **would be satisfied** by this
+shape — a 0/20 pool is squarely inside "zero support." But conditions
+4-6 (not reproduced in full here — see the source comment) require
+`evaluateUnanimousConsensusPromotion` AND `evaluateTitleTextIndependence`
+to both pass on the REPLACEMENT candidate — i.e., the family's own issue
+axis must show real, independently-worded unanimous consensus (≥4 unique
+rows, exact unanimity, no runner-up, weightSum≥8, distinct itemId AND
+seller, AND ≥3 distinct Jaccard-clustered title-wording clusters among
+the asserting rows). A genuinely scattered pool — the same
+"no-consensus" shape already documented for the Jetsons #19 precedent
+(Dispatch 03/05 above, ratio below the 60% bar) — would fail this bar and
+correctly DECLINE, not fire.
+
+**Conclusion: Fix 4 is not proven unreachable for this shape.** "Reached
+the zero-support gate and correctly declined for lack of a real
+replacement candidate" is at least as plausible as "never reached at
+all," and the two produce identical observable behavior (Vision's own
+issue stands, unrescued) — which is exactly why this was unresolvable
+from log absence alone before this dispatch's instrumentation. The
+`[commit4.3-zero-support-rescue]` log line already fires on BOTH the fire
+and decline path (never silent) — what's been missing is aggregate
+volume across real scans to tell "reached-and-declines" apart from
+"never reached." That's precisely what `scripts/query-scanlog.mjs`
+exists to answer once enough records accumulate; no code changed here,
+this is a report-only trace per the dispatch's explicit instruction.
+
+### Step 6 — the certification metric (standing gate for every future routing change)
+
+Accuracy alone is the wrong primary metric — a routing change can raise
+raw accuracy while making the WRONG cases worse (confidently wrong more
+often, on fewer but higher-stakes books). A candidate architecture wins
+only if ALL of the following hold, recorded here as the standing bar:
+
+- **PRIMARY — confident-wrong identity rate ↓ toward zero**
+  (`confident_wrong / authoritative_identity_results`). This is the
+  metric that actually matters: a book shipped as confidently,
+  authoritatively identified that is WRONG is worse than one correctly
+  flagged as uncertain.
+- **SECONDARY — correct authoritative resolution rate ↑ or unchanged.**
+  A architecture that reduces confident-wrong purely by resolving fewer
+  books authoritatively isn't winning, it's punting — this metric alone
+  distinguishes real improvement from that failure mode.
+- **GUARD — false refusal rate ↓ or acceptable.** Prevents gaming the
+  primary metric by refusing to resolve everything (a system that never
+  claims authority can trivially hit zero confident-wrong).
+- **ALSO tracked, not gating alone:** fallback parity (the parity harness
+  above), identity-correction rate, grade drift, median + p95 latency,
+  external cost-per-scan.
+- **AND:** no new structural failure class introduced (a genuinely new
+  way to be wrong that didn't exist before, distinct from an existing
+  failure mode simply occurring at a different rate).
+
+Any future routing/fast-lane proposal is evaluated against this exact
+gate, not against raw accuracy alone.
+
+### Step 7 — the parity harness (stub, ships before the shadow lane it will gate)
+
+`tests/grailkey-dispatch-33-parity-harness.test.js` — `assertParity`
+deep-compares `identity`/`variant`/`compPool`/`price`/`decision`/
+`warnings` between a legacy-path result and a new-architecture result;
+anything outside the allowed-diff set (`timing`, `instrumentation`,
+`latency`, `cost`, `correlationId`) that differs is a hard FAIL, with no
+"close enough" exception. Shipped with **zero cases, on purpose, before
+any shadow lane exists** — per explicit instruction, an empty harness
+with a documented contract forces the next phase to have a gate already
+waiting for it, rather than building the gate to fit whatever gets
+written later (which is how parity tests become theater). **Zero cases
+is a LOUD SKIP, not a pass** — same reasoning as this project's other
+intentionally-red suites (CLAUDE.md's "Known stale test suites"
+baseline): an unexplained green reads as coverage to a future session,
+and there is none here yet. The harness exits non-zero with an explicit
+SKIP banner for as long as it has zero cases; it only becomes a real
+pass/fail gate once a future shadow lane adds its first case.
+

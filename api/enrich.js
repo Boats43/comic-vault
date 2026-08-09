@@ -152,8 +152,14 @@ import { randomUUID } from "node:crypto";
 import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
 import { resetTitleStripStats, logTitleStripSummary } from "../src/lib/titleStripStats.js";
 import { writeConfirmed } from "../src/lib/identityWriteLog.js";
+import { computeAnthropicCallCostUsd } from "../src/lib/anthropicPricing.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// GrailKey Dispatch 33 (2026-08-08) — see src/lib/anthropicPricing.js and
+// api/grade.js's matching constant. Vercel's own system env var, no new
+// version constant to drift out of sync with the deployed code.
+const GIT_SHA = process.env.VERCEL_GIT_COMMIT_SHA ?? null;
 
 // A3 ACCESS GATE: T1 invite mechanism
 function checkAccessGate(req) {
@@ -359,6 +365,11 @@ const isTestMarketVariant = (title, issue, variantKey) => {
 const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) => {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   if (!Array.isArray(listings) || listings.length === 0) return null;
+  // GrailKey Dispatch 33 — declared before the try block per this
+  // project's variable-scope-discipline standing rule. Stays null when
+  // no call was made or a call failed before the cost could be attached
+  // to the return value below.
+  let verifyCostUsd = null;
   try {
     const metaParts = [];
     if (title) metaParts.push(String(title).trim());
@@ -393,6 +404,22 @@ const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) =>
       messages: [{ role: "user", content: prompt }],
     });
 
+    // GrailKey Dispatch 33 (2026-08-08) — audit-only, logged immediately
+    // after the call so it fires on every real call regardless of what
+    // happens to the response text afterward (a real call costs money
+    // even if parsing later fails). This is the comp-title AI-verify
+    // pass — maps to the "verificationCostUsd" lane, never blended with
+    // identity/condition/research cost (see PATTERN-LIBRARY.md "GrailKey
+    // Dispatch 33"). No `system`/`cache_control` on this call site, so
+    // there's no cache/static-prefix concept to log here — cost only.
+    const verifyCost = computeAnthropicCallCostUsd("claude-haiku-4-5", message.usage);
+    console.log(
+      `[cost-audit] model=claude-haiku-4-5 lane=verification ` +
+      `inputTokens=${message.usage?.input_tokens ?? 'null'} outputTokens=${message.usage?.output_tokens ?? 'null'} ` +
+      `totalCostUsd=${verifyCost ? verifyCost.totalCostUsd.toFixed(6) : 'null'}`
+    );
+    verifyCostUsd = verifyCost ? verifyCost.totalCostUsd : null;
+
     const text = (message.content || [])
       .filter((b) => b && b.type === "text")
       .map((b) => b.text)
@@ -413,7 +440,14 @@ const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) =>
       );
       return null;
     }
-    return parsed.map((v) => v === true);
+    const result = parsed.map((v) => v === true);
+    // GrailKey Dispatch 33 — side-channel audit field on the returned
+    // array, same idiom as api/grade.js's `_watchPasses` on its parsed
+    // result. Arrays are objects in JS, so this is invisible to every
+    // existing caller (indexing, .map, .length, spread all unaffected)
+    // and does not change this function's return contract.
+    result._verificationCostUsd = verifyCostUsd;
+    return result;
   } catch (err) {
     console.error(`[enrich] AI verify error: ${err?.message || err}`);
     return null;
@@ -2462,9 +2496,13 @@ export default async function handler(req, res) {
 
     // Run eBay visual search alone to determine correct identity
     // FIX 4: Skip image search when manual identity provided
+    // GrailKey Dispatch 33 — wraps the existing call with a timer only;
+    // does not change what's called, its arguments, or its result.
+    const ebayImageSearchStart = Date.now();
     const visualResult = (visualBase64 && !skipImageSearch)
       ? await lookupEbayVisual({ imageBase64: visualBase64, claudeIssue: issueNum }).catch(() => null)
       : null;
+    const ebayImageSearchLatencyMs = (visualBase64 && !skipImageSearch) ? (Date.now() - ebayImageSearchStart) : null;
 
     // Commit C — the category-eligibility filter now runs INSIDE
     // lookupEbayVisual, before this pool is ever parsed (see that
@@ -3875,6 +3913,20 @@ export default async function handler(req, res) {
     // namespace — not a new subsystem.
     const marketCustodyConflicted = !canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority, out.identityProvisionalFields);
 
+    // GrailKey Dispatch 33 — latency for the PRIMARY ComicVine/PriceCharting
+    // lookup call only (set inside the IIFEs below, around the live-query
+    // call, not the cache read or the skip branch). Stays null when the
+    // call was skipped (marketCustodyConflicted) or served from cache.
+    // Does NOT include the PriceCharting subtitle-stripped fallback query
+    // further down this same IIFE, or the separate lookupPriceCharting
+    // call sites elsewhere in this handler (~4445, ~6481) — documented
+    // partial coverage, not a silent gap: summing every retry/fallback
+    // attempt across this handler's several call sites would require
+    // touching each one's control flow, out of scope for an
+    // instrumentation-only week.
+    let comicvineLatencyMs = null;
+    let priceChartingLatencyMs = null;
+
     // Q106 FIX-1 — cgcResult already fetched in Phase 1 (races the visual
     // pool); no longer re-fetched here.
     const [comicVine, priceChartingInitial] = await Promise.all([
@@ -3899,7 +3951,9 @@ export default async function handler(req, res) {
         if (cached) return cached;
         // Track B Phase 0, Commit 4.3 (Section 3) — real call site for the
         // extracted, exported buildComicVineQueryParams.
+        const cvCallStart = Date.now();
         const result = await lookupComicVine(buildComicVineQueryParams(cleanedCVTitle, confirmedIssue, confirmedYear, confirmedPublisher, poolYearHint)).catch(() => null);
+        comicvineLatencyMs = Date.now() - cvCallStart;
         await kvSet(kvKey, result, KV_TTL.CV);
         return result;
       })(),
@@ -3949,7 +4003,9 @@ export default async function handler(req, res) {
         // override, so it's the correct proxy signal here.
         // Track B Phase 0, Commit 4.3 (Section 3) — real call site for the
         // extracted, exported buildPriceChartingQueryParams.
+        const pcCallStart = Date.now();
         let result = await lookupPriceCharting(buildPriceChartingQueryParams(confirmedTitle, confirmedIssue, pcQueryYear, q86PreYearConfidence, eraAdvisory, req.body.variant, out, req.body.pcProductId)).catch(() => null);
+        priceChartingLatencyMs = Date.now() - pcCallStart;
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
@@ -6058,6 +6114,10 @@ export default async function handler(req, res) {
     // Zero conflicts = deterministic data, skip AI entirely
     // Has conflicts = needs AI verification to resolve
     let compsExhausted = false;
+    // GrailKey Dispatch 33 — lifted out of the `if (shouldRunAIVerify)`
+    // block below so it survives to the scanLog write site much further
+    // down this handler; `keepFlags` itself is block-scoped and doesn't.
+    let verificationCostUsd = null;
     const shouldRunAIVerify = allConflicts.length > 0 &&
                                !req.body?.skipClaudeCheck &&
                                out.assetType !== 'book' &&
@@ -6085,6 +6145,7 @@ export default async function handler(req, res) {
         listings: titlesToVerify,
       });
       mark('ai_verify_complete');
+      verificationCostUsd = keepFlags?._verificationCostUsd ?? null;
       if (Array.isArray(keepFlags)) {
         const verifiedSales = rawComps.recentSales.filter(
           (_, i) => keepFlags[i]
@@ -10885,6 +10946,32 @@ export default async function handler(req, res) {
       const scanLogId = req.headers?.['x-vercel-id'] || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const scanLogTs = Date.now();
       const scanLogKey = buildScanLogKey(scanLogTs, scanLogId);
+
+      // GrailKey Dispatch 33 — derived read-only from identitySource, never
+      // mutates it (see the "KNOWN-FRAGILE" warning on identitySource
+      // itself, src/lib/identityCore.js). identityRoute is the base value
+      // before any '+'-joined suffix; authorityPath is every suffix split
+      // out as an ordered list.
+      const identityRouteParts = String(identitySource || '').split('+');
+      const identityRoute = identityRouteParts[0] || null;
+      const identityOwnedEvidenceOnly =
+        identityRoute === 'barcode' || identityRoute === 'manual' || identityRoute === 'cgc_cert';
+
+      // GrailKey Dispatch 33 — verification cost from the AI-verify comp-
+      // title pass above; identity/condition cost lanes are null here (no
+      // identity-disambiguation LLM call exists inside this handler today;
+      // condition/Vision cost is produced in api/grade.js, a separate
+      // request — see PATTERN-LIBRARY.md). researchCostUsd is a fixed
+      // reserved-lane placeholder, never computed per-scan.
+      const totalCostUsd = verificationCostUsd != null ? verificationCostUsd : null;
+
+      const sourceCalls = [
+        { source: 'ebay-image-search', count: ebayImageSearchLatencyMs != null ? 1 : 0, latencyMs: ebayImageSearchLatencyMs, cacheHit: null },
+        { source: 'comicvine', count: comicvineLatencyMs != null ? 1 : 0, latencyMs: comicvineLatencyMs, cacheHit: null },
+        { source: 'pricecharting', count: priceChartingLatencyMs != null ? 1 : 0, latencyMs: priceChartingLatencyMs, cacheHit: null },
+        { source: 'ai-verify', count: out.timings?.verify_ms != null ? 1 : 0, latencyMs: out.timings?.verify_ms ?? null, cacheHit: null },
+      ];
+
       const scanLogRecord = buildScanLogRecord({
         ts: scanLogTs,
         id: scanLogId,
@@ -10912,6 +10999,45 @@ export default async function handler(req, res) {
             }
           : null,
         visionLowButCorroborated: out.visionLowButCorroboratedDiag || null,
+        correlationId: pipelineTraceId,
+        latency: {
+          ebayImageSearchLatencyMs,
+          comicvineLatencyMs,
+          priceChartingLatencyMs,
+          compsLatencyMs: out.timings?.comps_ms ?? null,
+          aiVerifyLatencyMs: out.timings?.verify_ms ?? null,
+          totalLatencyMs: out.timings?.total_ms ?? null,
+          visionLatencyMs: null, // cross-request gap — see PATTERN-LIBRARY.md
+        },
+        identity: {
+          identityRoute,
+          identityOwnedEvidenceOnly,
+          authorityPath: identityRouteParts,
+        },
+        cost: {
+          identityCostUsd: null, // no identity-disambiguation LLM call exists in this handler today
+          conditionCostUsd: null, // cross-request gap — produced in api/grade.js, see PATTERN-LIBRARY.md
+          verificationCostUsd,
+          researchCostUsd: 0.0,
+          totalCostUsd,
+        },
+        evidence: {
+          conditionEvidenceLevel: 'front', // TODO: no per-scan image-count awareness yet
+          model: null, // cross-request gap — condition-assessment model is chosen in api/grade.js
+          modelVersion: null,
+          promptVersion: GIT_SHA,
+        },
+        sources: {
+          sourceCalls,
+          quotaState: null, // no external API in this codebase currently surfaces quota headers
+        },
+        barcode: {
+          barcodeDetected: !!barcode,
+          barcodeRaw: barcode ?? null,
+          barcodeBase: barcode ?? null,
+          barcodeSupplementLength: null, // no supplement-digit concept exists in this codebase yet
+        },
+        eventualCertifiedGrade: null,
       });
       await kvSet(scanLogKey, scanLogRecord, KV_TTL.SCANLOG);
       await kvZAdd(SCAN_LOG_INDEX_KEY, scanLogTs, scanLogKey);

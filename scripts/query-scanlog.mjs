@@ -124,6 +124,23 @@ const byIssueAuthorityStatus = {};
 let assetTypeOverrideEvaluated = 0;
 let assetTypeOverrideFired = 0;
 
+// GrailKey Dispatch 33 (2026-08-08) — additive aggregation for the new
+// scanLog fields (correlationId/latency/identity/cost/evidence/sources/
+// barcode). Records written before this dispatch simply have these keys
+// as `undefined` (buildScanLogRecord's own null-default fields didn't
+// exist yet on old writes) — every accumulator below tolerates that via
+// optional chaining / `!= null` checks rather than assuming presence.
+const byIdentityRoute = {};
+const totalLatencyMsValues = [];
+let verificationCostUsdSum = 0;
+let verificationCostUsdCount = 0;
+
+const percentile = (sortedValues, p) => {
+  if (!sortedValues.length) return null;
+  const idx = Math.min(sortedValues.length - 1, Math.ceil((p / 100) * sortedValues.length) - 1);
+  return sortedValues[Math.max(0, idx)];
+};
+
 for (const r of records) {
   const terminal = r.terminalReason ?? "clean";
   byTerminalReason[terminal] = (byTerminalReason[terminal] || 0) + 1;
@@ -135,7 +152,19 @@ for (const r of records) {
     assetTypeOverrideEvaluated++;
     if (r.assetTypeOverride.fired) assetTypeOverrideFired++;
   }
+
+  const route = r.identity?.identityRoute ?? "unknown (pre-Dispatch-33 record or null route)";
+  byIdentityRoute[route] = (byIdentityRoute[route] || 0) + 1;
+
+  if (r.latency?.totalLatencyMs != null) totalLatencyMsValues.push(r.latency.totalLatencyMs);
+
+  if (r.cost?.verificationCostUsd != null) {
+    verificationCostUsdSum += r.cost.verificationCostUsd;
+    verificationCostUsdCount++;
+  }
 }
+
+totalLatencyMsValues.sort((a, b) => a - b);
 
 console.log(`\n=== scanlog summary (${records.length} records) ===\n`);
 console.log("terminalReason breakdown:");
@@ -147,4 +176,24 @@ for (const [status, count] of Object.entries(byIssueAuthorityStatus).sort((a, b)
   console.log(`  ${status}: ${count}`);
 }
 console.log(`\nFix 5 (assetTypeOverride): evaluated ${assetTypeOverrideEvaluated} times, fired ${assetTypeOverrideFired} times`);
+
+console.log("\nidentityRoute distribution (GrailKey Dispatch 33):");
+for (const [route, count] of Object.entries(byIdentityRoute).sort((a, b) => b[1] - a[1])) {
+  console.log(`  ${route}: ${count}`);
+}
+
+console.log("\ntotalLatencyMs (GrailKey Dispatch 33, records with a value only):");
+if (totalLatencyMsValues.length) {
+  console.log(`  n=${totalLatencyMsValues.length} p50=${percentile(totalLatencyMsValues, 50)}ms p95=${percentile(totalLatencyMsValues, 95)}ms`);
+} else {
+  console.log("  no records with latency.totalLatencyMs in range");
+}
+
+console.log("\nverificationCostUsd (GrailKey Dispatch 33 — the only cost lane this script\ncan currently sum; identityCostUsd has no source in this handler yet,\nconditionCostUsd is produced in api/grade.js, a separate request — see\nPATTERN-LIBRARY.md \"GrailKey Dispatch 33\" for both gaps):");
+if (verificationCostUsdCount) {
+  console.log(`  n=${verificationCostUsdCount} sum=$${verificationCostUsdSum.toFixed(6)} avg=$${(verificationCostUsdSum / verificationCostUsdCount).toFixed(6)}`);
+} else {
+  console.log("  no records with cost.verificationCostUsd in range");
+}
+
 console.log("\nPass --json to print full records instead of this summary.");

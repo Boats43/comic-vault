@@ -63,6 +63,14 @@ export const buildScanLogKey = (ts, id) => `${SCAN_LOG_KEY_PREFIX}:v${SCAN_LOG_V
  * @param {{raw?: number|null, eligible?: number|null, familyMembers?: number|null}|null} fields.poolSizes
  * @param {{evaluated?: boolean, fired?: boolean, blockedBy?: string[]}|null} fields.assetTypeOverride
  * @param {{convergenceTier?: string|null, coherentFamilyCount?: number|null, pcProductIdPresent?: boolean|null, catalogCorroborated?: boolean|null, activePoolCount?: number|null, soldPoolCount?: number|null, fired?: boolean|null}|null} fields.visionLowButCorroborated
+ * @param {string|null} fields.correlationId - GrailKey Dispatch 33. Reuses api/enrich.js's existing `pipelineTraceId` (already threaded through `out.pipelineAudit.traceId`) — no new ID generation.
+ * @param {{ebayImageSearchLatencyMs?: number|null, comicvineLatencyMs?: number|null, priceChartingLatencyMs?: number|null, compsLatencyMs?: number|null, aiVerifyLatencyMs?: number|null, totalLatencyMs?: number|null, visionLatencyMs?: number|null}|null} fields.latency - GrailKey Dispatch 33. `visionLatencyMs` is always null here — Vision runs in api/grade.js, a separate HTTP request from this write site; see PATTERN-LIBRARY.md "GrailKey Dispatch 33" for the cross-request gap.
+ * @param {{identityRoute?: string|null, identityOwnedEvidenceOnly?: boolean|null, authorityPath?: string[]}|null} fields.identity - GrailKey Dispatch 33. Derived read-only from `identitySource` — never mutates it.
+ * @param {{identityCostUsd?: number|null, conditionCostUsd?: number|null, verificationCostUsd?: number|null, researchCostUsd?: number|null, totalCostUsd?: number|null}|null} fields.cost - GrailKey Dispatch 33. Lanes are never blended (see PATTERN-LIBRARY.md). `conditionCostUsd` is always null here (produced in api/grade.js, a separate request — logged separately via console.log there, not persisted here). `researchCostUsd` is fixed at 0.0 — reserved for product-keyed enrichment, never per-scan.
+ * @param {{conditionEvidenceLevel?: string|null, model?: string|null, modelVersion?: string|null, promptVersion?: string|null}|null} fields.evidence - GrailKey Dispatch 33. `conditionEvidenceLevel` is hardcoded 'front' at the call site (no per-scan image-count awareness yet — TODO). `model`/`modelVersion` describe the condition-assessment (Vision) call, which happens in api/grade.js — always null here, same cross-request gap as `conditionCostUsd`. `promptVersion` is `process.env.VERCEL_GIT_COMMIT_SHA`, a deployment-level constant available regardless of the cross-request boundary.
+ * @param {{sourceCalls?: Array<{source: string, count: number, latencyMs: number|null, cacheHit: boolean|null}>, quotaState?: object|null}|null} fields.sources - GrailKey Dispatch 33. `sourceCalls` covers only the legs this dispatch actually instrumented (ebayImageSearch, comicvine, pricecharting, verification) — not a comprehensive inventory of every external call this handler makes.
+ * @param {{barcodeDetected?: boolean|null, barcodeRaw?: string|null, barcodeBase?: string|null, barcodeSupplementLength?: number|null}|null} fields.barcode - GrailKey Dispatch 33, capture-only. `barcodeSupplementLength` is always null — this codebase has no supplement-digit concept today (the full 12/13-digit scanned string is retained as one opaque field end-to-end).
+ * @param {string|null} fields.eventualCertifiedGrade - GrailKey Dispatch 33 placeholder, always null this week.
  * @returns {object}
  */
 export const buildScanLogRecord = ({
@@ -75,6 +83,14 @@ export const buildScanLogRecord = ({
   poolSizes = null,
   assetTypeOverride = null,
   visionLowButCorroborated = null,
+  correlationId = null,
+  latency = null,
+  identity = null,
+  cost = null,
+  evidence = null,
+  sources = null,
+  barcode = null,
+  eventualCertifiedGrade = null,
 } = {}) => ({
   v: SCAN_LOG_VERSION,
   ts,
@@ -130,4 +146,60 @@ export const buildScanLogRecord = ({
         fired: visionLowButCorroborated.fired ?? null,
       }
     : null,
+  // GrailKey Dispatch 33 (2026-08-08) — additive fields, no version bump,
+  // same convention as Fix 32-C above. See PATTERN-LIBRARY.md "GrailKey
+  // Dispatch 33" for the two standing invariants these fields exist to
+  // eventually serve, and for the cross-request gaps noted per-field in
+  // this function's JSDoc.
+  correlationId: correlationId ?? null,
+  latency: latency
+    ? {
+        ebayImageSearchLatencyMs: latency.ebayImageSearchLatencyMs ?? null,
+        comicvineLatencyMs: latency.comicvineLatencyMs ?? null,
+        priceChartingLatencyMs: latency.priceChartingLatencyMs ?? null,
+        compsLatencyMs: latency.compsLatencyMs ?? null,
+        aiVerifyLatencyMs: latency.aiVerifyLatencyMs ?? null,
+        totalLatencyMs: latency.totalLatencyMs ?? null,
+        visionLatencyMs: latency.visionLatencyMs ?? null,
+      }
+    : null,
+  identity: identity
+    ? {
+        identityRoute: identity.identityRoute ?? null,
+        identityOwnedEvidenceOnly: identity.identityOwnedEvidenceOnly ?? null,
+        authorityPath: Array.isArray(identity.authorityPath) ? identity.authorityPath : [],
+      }
+    : null,
+  cost: cost
+    ? {
+        identityCostUsd: cost.identityCostUsd ?? null,
+        conditionCostUsd: cost.conditionCostUsd ?? null,
+        verificationCostUsd: cost.verificationCostUsd ?? null,
+        researchCostUsd: cost.researchCostUsd ?? 0.0,
+        totalCostUsd: cost.totalCostUsd ?? null,
+      }
+    : null,
+  evidence: evidence
+    ? {
+        conditionEvidenceLevel: evidence.conditionEvidenceLevel ?? null,
+        model: evidence.model ?? null,
+        modelVersion: evidence.modelVersion ?? null,
+        promptVersion: evidence.promptVersion ?? null,
+      }
+    : null,
+  sources: sources
+    ? {
+        sourceCalls: Array.isArray(sources.sourceCalls) ? sources.sourceCalls : [],
+        quotaState: sources.quotaState ?? null,
+      }
+    : null,
+  barcode: barcode
+    ? {
+        barcodeDetected: barcode.barcodeDetected ?? null,
+        barcodeRaw: barcode.barcodeRaw ?? null,
+        barcodeBase: barcode.barcodeBase ?? null,
+        barcodeSupplementLength: barcode.barcodeSupplementLength ?? null,
+      }
+    : null,
+  eventualCertifiedGrade: eventualCertifiedGrade ?? null,
 });
