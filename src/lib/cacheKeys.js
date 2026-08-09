@@ -20,6 +20,94 @@
 // the pre-existing one back into api/enrich.js while its three new
 // siblings live here.
 
+import { createHash } from 'node:crypto';
+import { extractNumericFromGrade } from './gradeUtils.js';
+
+// GrailKey Dispatch 36 (P0, Hero for Hire class) — standing invariant:
+// "Cache identity is an authority boundary. A cache key must encode
+// every input capable of changing the cached result, unless the cached
+// object is intentionally input-independent raw evidence." (full text:
+// docs/PATTERN-LIBRARY.md "GrailKey Dispatch 35/36"). The object
+// buildActiveCompCacheKey's key protects (below) is NOT raw evidence —
+// it's the fully filtered, priced pool — so this invariant applies in
+// full.
+//
+// Seven confirmed material dependencies (full filter-chain audit,
+// api/comps.js's applyFilterChain, GrailKey Dispatch 35): grade target,
+// confirmedYear, confirmedVariant, isGraded, labelType, signedConsensus,
+// assetType — labelType and signedConsensus are listed separately, not
+// folded into one axis, because each independently changes filter
+// behavior (Filter 2b) and each independently changes this fingerprint
+// (confirmed by dedicated test cases, tests/cacheKeys-fingerprint.test.js).
+// Two of these seven — numeric grade target and normalized year —
+// are DERIVED values, not raw request fields; the derivation logic here
+// is DELIBERATELY DUPLICATED (not imported) from api/comps.js's own
+// inline normalization (fetchComps, ~line 984-989 for grade, ~line 1020
+// for year) rather than refactoring comps.js to share it, per explicit
+// instruction to scope this fix to the cache-key layer only. Drift risk
+// is low (both are small, stable parsing utilities, not pricing
+// formulas) but real — if either normalization in api/comps.js ever
+// changes, this MUST change identically or the fingerprint silently
+// stops matching what the filter chain actually consumes.
+const deriveNumericGradeTargetForFingerprint = (grade, numericGrade) =>
+  numericGrade != null && !isNaN(Number(numericGrade))
+    ? Number(numericGrade)
+    : grade != null
+    ? extractNumericFromGrade(grade)
+    : null;
+
+const deriveNormalizedYearForFingerprint = (year) => (year ? String(year).trim() : null);
+
+/**
+ * Canonical, deterministic fingerprint over every input that materially
+ * shapes the active-comp filter chain's output, per the standing
+ * invariant above. SHA-256 over a fixed-key-order JSON serialization —
+ * not a convenience hash, per explicit instruction ("cache identity is
+ * an authority boundary").
+ *
+ * Values are taken as the filter chain actually consumes them:
+ * `numericTarget` and the normalized year string are RE-DERIVED here
+ * identically to fetchComps's own inline logic (see note above);
+ * `variant`/`isGraded`/`labelType`/`signedConsensus`/`assetType` are
+ * used exactly as fetchComps receives them — no filter renormalizes
+ * them further before consuming them, so the as-received value already
+ * IS what the filter chain consumes.
+ *
+ * null/undefined are coerced to the literal JSON `null` — their OWN
+ * canonical token — never toward `''` or `false`, so a genuinely-absent
+ * value can never collide with a real empty string or a real boolean
+ * false. `isGraded`/`signedConsensus` are tri-state in this codebase's
+ * actual usage (`true`/`false`/`undefined` only — confirmed via full
+ * filter-chain audit) and each of the three states gets its own
+ * distinct token.
+ *
+ * @param {{grade?: string|null, numericGrade?: number|string|null, year?: string|number|null, variant?: string|null, isGraded?: boolean|null, labelType?: string|null, signedConsensus?: boolean|null, assetType?: string|null}} inputs
+ * @returns {string} 64-character hex SHA-256 digest
+ */
+export const buildFilterContextFingerprint = ({
+  grade = null,
+  numericGrade = null,
+  year = null,
+  variant = null,
+  isGraded = null,
+  labelType = null,
+  signedConsensus = null,
+  assetType = null,
+} = {}) => {
+  const numericTarget = deriveNumericGradeTargetForFingerprint(grade, numericGrade);
+  const normalizedYear = deriveNormalizedYearForFingerprint(year);
+  const canonical = JSON.stringify({
+    numericTarget: numericTarget ?? null,
+    year: normalizedYear ?? null,
+    variant: variant ?? null,
+    isGraded: isGraded === true ? 'true' : isGraded === false ? 'false' : 'null',
+    labelType: labelType ?? null,
+    signedConsensus: signedConsensus === true ? 'true' : signedConsensus === false ? 'false' : 'null',
+    assetType: assetType ?? null,
+  });
+  return createHash('sha256').update(canonical).digest('hex');
+};
+
 // Track B Phase 0, Commit 3, Safeguard 2 amendment — the exact-issue
 // active-comp cache key. Version-salted (a filter fix must not replay
 // pools filtered by an old regex — Evil Ernie class) and NEVER built from
@@ -27,8 +115,27 @@
 // any future request for the same title could collide on, regardless of
 // which, or whether any, issue that later request resolves to — the
 // historical failure class this exact template exists to prevent).
-export const buildActiveCompCacheKey = (filterVersion, confirmedTitle, confirmedIssue) =>
-  `v${filterVersion}:${confirmedTitle}|${confirmedIssue}`;
+//
+// GrailKey Dispatch 36 — `filterContextFingerprint` is REQUIRED and
+// FAIL-CLOSED, not merely "no default value." A required-but-unvalidated
+// parameter is not actually required in JavaScript: a 3-arg call still
+// executes, `filterContextFingerprint` is simply `undefined`, and the
+// template literal below silently coerces that to the literal substring
+// "undefined" — no throw, no warning, a real (if visibly odd) key gets
+// built and cached under. Confirmed live during this dispatch's own test
+// authoring before this validation existed. A parameter being "required"
+// only has teeth if a missing/malformed value throws — this is exactly
+// that enforcement, not a restatement of the earlier comment.
+const FILTER_CONTEXT_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
+export const buildActiveCompCacheKey = (filterVersion, confirmedTitle, confirmedIssue, filterContextFingerprint) => {
+  if (typeof filterContextFingerprint !== 'string' || !FILTER_CONTEXT_FINGERPRINT_PATTERN.test(filterContextFingerprint)) {
+    throw new Error(
+      `buildActiveCompCacheKey: filterContextFingerprint must be a 64-character lowercase hex SHA-256 digest, got ${JSON.stringify(filterContextFingerprint)}. ` +
+      `Pass the return value of buildFilterContextFingerprint(...) — never omitted, never a hand-rolled string.`
+    );
+  }
+  return `v${filterVersion}:${confirmedTitle}|${confirmedIssue}|${filterContextFingerprint}`;
+};
 
 // Track B Phase 0, Commit 4.3 (Matrix C / Precision Clause 3, 2026-07-30)
 // — same buildActiveCompCacheKey precedent, so the real ComicVine cache-

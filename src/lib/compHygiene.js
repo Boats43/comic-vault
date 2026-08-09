@@ -621,7 +621,14 @@ export const ARTIST_FAMILY_STRIP_EXCEPTIONS = new Set(['brett booth']);
 // version bump is still applied per this codebase's standing invariant 9
 // (fresh-MISS before any cache-dependent verdict) rather than relying on
 // the key-string difference alone to guarantee it in every case.
-export const COMP_FILTER_VERSION = 9;
+//
+// GrailKey Dispatch 36 (P0) — bumped 9→10: buildActiveCompCacheKey's
+// template gained a required filterContextFingerprint segment (Hero for
+// Hire class — grade/year/variant/isGraded/labelType/signedConsensus/
+// assetType all previously unkeyed). Old v9 entries have a different key
+// SHAPE (no fingerprint segment) as well as a different version prefix,
+// so they're doubly orphaned, never misread under the new template.
+export const COMP_FILTER_VERSION = 10;
 
 // Q132 dispatch (2026-07-20) — single source of truth for "the title-family
 // override actually succeeded" (as opposed to 'fallback-vision', returned

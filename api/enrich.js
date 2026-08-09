@@ -131,7 +131,7 @@ import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, com
 // own header comment). Imported here for this handler's own internal use
 // AND re-exported (below, near the old definition site) for backward
 // compatibility with existing consumers of this module's namespace.
-import { buildActiveCompCacheKey, buildComicVineCacheKey, buildPriceChartingCacheKey, parseCacheKeyIssueSegment, buildComicVineQueryParams, buildPriceChartingQueryParams, readPriceChartingCache } from "../src/lib/cacheKeys.js";
+import { buildActiveCompCacheKey, buildComicVineCacheKey, buildPriceChartingCacheKey, parseCacheKeyIssueSegment, buildComicVineQueryParams, buildPriceChartingQueryParams, readPriceChartingCache, buildFilterContextFingerprint } from "../src/lib/cacheKeys.js";
 // Ship #21 — Claude Haiku quality check.
 import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // Ship #20a.6.18 — variant identity engine (modern variant consensus from
@@ -2187,7 +2187,7 @@ export {
 // exit in a bare Node/test context — confirmed during implementation).
 // Re-exported here for any other consumer that already imports them from
 // this file's own module namespace.
-export { buildActiveCompCacheKey, buildComicVineCacheKey, buildPriceChartingCacheKey, parseCacheKeyIssueSegment } from "../src/lib/cacheKeys.js";
+export { buildActiveCompCacheKey, buildComicVineCacheKey, buildPriceChartingCacheKey, parseCacheKeyIssueSegment, buildFilterContextFingerprint } from "../src/lib/cacheKeys.js";
 
 export default async function handler(req, res) {
   // A6 BUILD-ID: Inject commit hash header (Vercel auto-injects VERCEL_GIT_COMMIT_SHA)
@@ -5876,7 +5876,28 @@ export default async function handler(req, res) {
             // effectiveIssue -> confirmedTitle/confirmedIssue) was proven
             // up to confirmedIssue but never exercised through to the
             // actual cache key a corrected request would read/write under.
-            const activeKey = buildActiveCompCacheKey(COMP_FILTER_VERSION, confirmedTitle, confirmedIssue);
+            // GrailKey Dispatch 36 (P0, Hero for Hire class) — the cached
+            // object is the fully filtered pool, not raw evidence, so the
+            // key must encode every input the filter chain actually
+            // consumes beyond title/issue (standing invariant,
+            // docs/PATTERN-LIBRARY.md "GrailKey Dispatch 35/36"). Computed
+            // from the SAME seven values passed into fetchComps below —
+            // grade/numericGrade (one conceptual axis, numericTarget),
+            // isGraded, confirmedYear as `year`, confirmedVariant as
+            // `variant`, confirmedLabelType as `labelType`,
+            // confirmedSignedConsensus as `signedConsensus`, out.assetType
+            // — not a separate, potentially-drifting read.
+            const filterContextFingerprint = buildFilterContextFingerprint({
+              grade,
+              numericGrade,
+              year: confirmedYear,
+              variant: confirmedVariant,
+              isGraded,
+              labelType: confirmedLabelType,
+              signedConsensus: confirmedSignedConsensus,
+              assetType: out.assetType,
+            });
+            const activeKey = buildActiveCompCacheKey(COMP_FILTER_VERSION, confirmedTitle, confirmedIssue, filterContextFingerprint);
             // Commit B.1 (Strange Tales dispatch) — no `title|null` keys in
             // the exact-pricing `ac:` cache namespace. A null confirmedIssue
             // means genuinely unresolved identity — a key built from that
