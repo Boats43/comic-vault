@@ -210,6 +210,20 @@ export const classifyCacheEligibility = (estimatedTokens, model) => {
  * cache-eligibility proxy. Real token counts depend on tokenizer
  * behavior a character count doesn't capture.
  *
+ * GrailKey Dispatch 36 — the required `messages` array carries one
+ * placeholder text block (`'.'`, a single non-empty character — the
+ * Anthropic API rejects a literal empty string with HTTP 400
+ * "text content blocks must be non-empty," which is exactly what this
+ * function sent in production, on every call, before this fix). That
+ * placeholder character contributes a trivially small, fixed number of
+ * tokens to the returned `input_tokens` count on top of the real
+ * `system` prefix being measured — it is not zeroed out, just
+ * negligible, and it does not change this function's status as a
+ * diagnostic estimate rather than an authoritative count. Never
+ * reinterpret this function's return value as actual cache usage: a
+ * real call's response `usage` block is the only authority for whether
+ * a given request was actually cached, both before and after this fix.
+ *
  * Never throws: on any countTokens failure, logs once and returns null
  * so a transient API issue against this side-channel audit call can
  * never affect the real (already-completed) model response it's
@@ -232,7 +246,11 @@ export const getEstimatedStaticPrefixTokens = async (client, model, systemBlocks
     const result = await client.messages.countTokens({
       model,
       system: systemBlocks,
-      messages: [{ role: 'user', content: [{ type: 'text', text: '' }] }],
+      // GrailKey Dispatch 36 — non-empty placeholder ('.'), fixing the
+      // HTTP 400 a literal '' triggered on every prior call. See the
+      // docstring above: this contributes a trivial, fixed token count
+      // on top of the real system-prefix measurement, nothing more.
+      messages: [{ role: 'user', content: [{ type: 'text', text: '.' }] }],
     });
     const count = result.input_tokens;
     estimatedStaticPrefixTokenCache.set(cacheKey, count);
