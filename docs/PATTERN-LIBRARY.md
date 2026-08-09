@@ -5090,3 +5090,116 @@ unranked hypothesis, not measurement) — the measured batch is the
 authoritative ranking going forward once available for direct
 cross-check in a future dispatch.
 
+## GrailKey Dispatch 38 (2026-08-09) — third axis of "rejection must not create authority"; Bone root-cause correction; cache-fingerprint certification partial
+
+Post-deploy production evidence (13-book batch against `6f17f63`). Record
+only — no code shipped this dispatch. Pricing-math surfaces named below
+(mega-key floor) are unchanged; any fix requires its own explicit
+greenlight per the standing pricing-math protocol.
+
+### Third axis — mega-key floor re-authorizing price after a structurally weak market path
+
+Extends **Rejection must not create authority** (third standing
+invariant, GrailKey Dispatch 34) with a third concrete instance,
+alongside:
+1. ComicVine fail-open (Hero for Hire, Dispatch 34) — the year-gate
+   rejects every candidate, the rejected population is restored, and a
+   rejected candidate is then selected.
+2. The variant fallback (thin-market comp fallback reintroducing
+   degraded market evidence into pricing) — related, tracked separately
+   in the same invariant family since Dispatch 34.
+3. **The mega-key floor, this dispatch.** The floor can re-authorize a
+   full price after the market-evidence path feeding it has already been
+   assessed as structurally weak (this batch's live case: tier=2,
+   `soldPool=1`, `activePool=2`) — the same shape as the other two: a
+   mechanism upstream demotes or rejects the evidence as insufficient,
+   and a downstream consumer restores full pricing authority from it
+   anyway.
+
+One invariant, three independently-discovered axes (identity, comp-based
+pricing, key-floor pricing) — recorded together so a future fix to any
+one axis doesn't get treated as having closed the general class.
+
+### Bone root-cause correction — Dispatch 36's fingerprint fix does not fix Bone
+
+**Explicit correction to the record, so the blast-radius report isn't
+scoped too narrowly once KV access unblocks it:** the active-comp cache
+fingerprint fix (commit `913cb46`, GrailKey Dispatch 36 P0) corrects
+cache IDENTITY — it stops one grade's filtered pool from being served to
+a different grade's request. It does **not** correct Bone's shipped
+price. As scoped through Dispatch 36 alone, the fix would have corrected
+the specific $19.33 figure implicated in the original cache-collision
+finding — **and Bone would still have shipped $800**, because the $800
+traces through the third axis above (mega-key floor), a structurally
+different mechanism the cache-identity fix never touched. Confirmed live
+post-deploy: Bone is still producing `tier=2 soldPool=1 activePool=2` →
+a LIST_NOW-class output, with the fingerprint fix already in production.
+
+**This is why the blast-radius report (blocked on KV, below) must trace
+the full path — cache key alone is not sufficient evidence of a fix.** A
+report that only checked "did the cache key change under the new
+fingerprint" would have wrongly certified Bone as resolved.
+
+### Cache-fingerprint certification — deployed and discriminating, certification incomplete
+
+13-book batch confirms `buildFilterContextFingerprint` is live and
+producing distinct keys in production, but the certification protocol
+agreed for this dispatch is not yet satisfied:
+
+- **All `ac:v10` lookups MISS across the full batch.** Expected and
+  correct — `COMP_FILTER_VERSION` 9→10 orphans every pre-existing v9
+  entry by design (Dispatch 36). This batch proves the orphaning
+  behavior, nothing more; **the cache HIT path remains unproven** — no
+  entry in this batch was old enough to have a v10 sibling to hit.
+- **Bone scanned at two grades produced distinct fingerprints and
+  distinct pools (2 vs. 22 comps) — but the two scans' titles differed
+  in case.** Title casing is not one of the fingerprint's seven keyed
+  axes, but it IS part of the surrounding cache key's own `confirmedTitle`
+  segment and can independently affect eBay query results upstream of
+  the fingerprint entirely. Because casing varied between the two scans,
+  **`numericTarget` (grade) is not yet isolated as the cause of the
+  2-vs-22 pool difference** — a real, uncontrolled confound, not a
+  disproof of the fingerprint working correctly.
+
+**Certification protocol, not yet run (needs controlled scans, casing
+held constant):**
+1. Same book, same grade, twice → must **HIT**. Proves the cache
+   actually reuses a fingerprint-matched entry, not just that it writes
+   distinct keys.
+2. Same book, different grade, same casing → must **MISS**, with
+   grade-proximity correctly rerunning. Proves the fingerprint's grade
+   axis alone is what drives the miss, with the casing confound removed.
+
+### Working correctly, confirmed by this batch
+
+- Grade-proximity rejection functioning as designed across the batch:
+  ASM #147, Batman #213, Iron Man #126.
+- Classics Illustrated #26 correctly refused to cache on
+  `issueAuthority.status === "conflicted"`, routing to `ID_REQUIRED`
+  instead of caching or pricing a conflicted identity.
+
+### New anomaly flagged, not investigated — Marvel Age #1000
+
+257 log lines, no `[decision]` line emitted at all. **Second occurrence
+of this exact shape** (first occurrence not otherwise detailed in this
+batch's report). Not scoped or root-caused this dispatch — flag for the
+next batch review; if a third occurrence appears, treat as a pattern,
+not a fluke.
+
+### Blocked, unchanged
+
+- **Bone blast-radius report** — still blocked on production KV
+  credentials. Scope confirmed widened by the root-cause correction
+  above: must trace the full mega-key-floor path, not just cache-key
+  identity.
+- **A/B/C cache certification** — needs the two controlled scans above
+  (same book/same grade twice; same book/different grade/same casing),
+  not yet run.
+- **Fix 4** — still blocked on a must-pass anchor (GrailKey Dispatch 34).
+
+### Next by measured frequency, unchanged
+
+Key-authority gap (6/15, 40%), then ComicVine fail-open (4/15, 27%) —
+still pending the KV/certification unblocks above before either gets its
+own dedicated dispatch.
+
