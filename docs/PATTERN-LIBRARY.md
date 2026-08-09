@@ -4688,3 +4688,251 @@ and there is none here yet. The harness exits non-zero with an explicit
 SKIP banner for as long as it has zero cases; it only becomes a real
 pass/fail gate once a future shadow lane adds its first case.
 
+## GrailKey Dispatch 34 (2026-08-08) — ledger consolidation
+
+Analysis-only dispatch except where explicitly noted. Source: two real
+production scans (Hero for Hire, Spawn #351) reviewed against the
+Dispatch 33 instrumentation. One code change authorized and shipped
+(Step 1, timing collision); everything else below is recorded for future
+prioritization, not fixed this dispatch.
+
+### New standing invariant — REJECTION MUST NOT CREATE AUTHORITY
+
+> **Evidence rejected from an authority decision may not regain authority
+> merely because rejection emptied the candidate population.**
+
+Recorded alongside Monotonic Evidence Extension and No Self-Corroboration
+(GrailKey Dispatch 33) as a third standing invariant governing every
+future evidence source.
+
+**Hero for Hire is the concrete violation:**
+```
+[cv-year-strict] REJECT ×12
+[cv-year-strict] would remove all 12 issues — keeping original set
+[comicvine] matched=Luke Cage #1 (vol_id=101484)   ← rejected 2017 volume
+```
+Every ComicVine candidate failed the year gate. The rejected population
+was then restored (the "would remove all 12 — keeping original set"
+fallback), and one of those SAME rejected candidates was subsequently
+selected as the matched ComicVine record. The gate's own rejection
+verdict was silently overridden by the emptiness of its result, not by
+any new evidence — rejection produced authority by default. This is the
+direct violation the invariant exists to name.
+
+**Scope discipline applied to two related-looking mechanisms, per
+explicit instruction — do not conflate:**
+- The single-shot era-gate fallback is tracked as the SAME structural
+  class only if a future source trace confirms rejected evidence can
+  re-enter the same authority axis through it — not asserted here
+  without that trace.
+- The variant fallback (thin-market comp fallback reintroducing degraded
+  market evidence for PRICING) is related but NOT claimed as an instance
+  of this invariant — it risks contaminating a price with weaker
+  evidence, not creating IDENTITY authority from a rejected candidate.
+  Kept in the same broader "fallback risk" family, not asserted as the
+  same violation, absent source-level proof.
+
+**No fix in this dispatch.** Hero for Hire itself is not patched
+individually — the fail-open pattern is tracked below pending frequency
+data from the upcoming batch.
+
+### 22c word-order false positive — counterexample, no code change
+
+No "Q84-AMENDED" label exists verbatim anywhere in this repo's docs
+(checked directly) — the closest actual material is Q84's dual-axis gate
+work threaded through several entries elsewhere in this file (the
+`applyDualAxisGate`/`isBareCreatorTokensOnly` coupling in CLAUDE.md, and
+the coherent-content-lane entries above). Recording this counterexample
+as its own entry, cross-referenced to that material, rather than to a
+label that doesn't exist in this codebase.
+
+Hero for Hire's `22c` log:
+```
+[22c] title rejections:
+ebay="luke cage hero for hire"
+    expected="hero for hire luke cage"
+
+vision="luke cage hero for hire"
+    expected="hero for hire luke cage"
+```
+Same meaningful token set (`luke`, `cage`, `hero`, `for`, `hire`) on both
+sides — only word order differs, and there's no descriptive-token
+injection anywhere in either string. This is a legitimate dual-naming
+case: the catalog series is *Hero for Hire*, the cover/marketing title is
+*Luke Cage, Hero for Hire* — both real, both referring to the same book.
+
+This is the empirical counterexample against ever making `22c` terminal
+purely on "multiple authorities disagree with canonical word order."
+
+**Rule refinement for any future `22c` work:**
+> A unanimous title rejection may justify a revert when the meaningful
+> token SETS differ. Word-order difference alone is insufficient.
+
+`22c` is not modified this dispatch. Counterexample and rule recorded
+only.
+
+### Condition-evidence overreach — priority elevated
+
+Now directly measurable because GrailKey Dispatch 33 records
+`conditionEvidenceLevel` on every scan. Hero for Hire's own record:
+```
+conditionEvidenceLevel = front
+1 photo stored
+Back missing / Spine missing / Pages missing
+```
+yet the condition report asserts:
+```
+"interior pages appear sound"
+"No major tears, stains, or restoration detected."
+```
+Neither claim is supported by a front-cover-only observation. **This is
+a high-risk condition-claim failure, not copy-quality noise** — it's an
+affirmative claim about a surface that was never photographed.
+
+Required conceptual distinction for any future grading-prompt work:
+```
+OBSERVED (front-only evidence level)
+  front-cover corner chipping, front-cover edge wear, visible stamp
+
+NOT OBSERVED
+  interior condition, back-cover condition, spine condition,
+  restoration status beyond visible front evidence
+```
+
+**Also track separately — pseudo-precision:** phrases like *"CGC may
+dock ~1.3 grades"* or *"may dock up to 4 grades"* imply a calibrated
+model backing that specific number. GrailKey must eventually be able to
+name the empirical source/model behind such figures, or stop presenting
+them with that level of implied precision. No grading-prompt change this
+dispatch.
+
+### Fix 4 — synthetic anchor scoping (for the next attempt, not yet built)
+
+Fix 4 (GrailKey Dispatch 26's zero-support unanimous rescue — see
+Dispatch 33's Step 5B trace above) still needs a must-pass anchor. If the
+next 10-15 heterogeneous production scans fail to produce a natural
+qualifying case, a synthetic fixture constructed from the verified source
+predicates is authorized — but two claims must stay separate:
+```
+synthetic fixture PASS  =  the intended code path is executable and
+                            behaves correctly under those exact conditions
+
+does NOT establish        production reachability or frequency
+```
+Production reachability remains an empirical scan-log question, answered
+by aggregating the `[commit4.3-zero-support-rescue]` fire/decline log
+line (already emitted on both paths, per Dispatch 33) — never by a
+synthetic fixture's pass/fail alone. If a synthetic fixture is built in a
+future dispatch, it certifies mechanism correctness, not real-world
+validation, and must be labeled as such everywhere it's cited.
+
+### Virgin/sketch variant class — status corrected
+
+Prior framing (`6/6 failures`) was a stale pre-fix count. **Spawn #351 is
+a real production virgin-variant SUCCESS**, not a failure: virgin
+consensus established, wrong Cover A/B sold rows correctly rejected,
+active virgin pool retained, fallback sold evidence prevented from
+contaminating the variant-specific active anchor.
+
+**Corrected status:** *Historically failing; at least one confirmed
+post-fix production pass; class not yet certified.* Not `UNSOLVED` — that
+label no longer matches the evidence. Continue collecting virgin/sketch
+cases before attempting certification.
+
+### Timing mark collision — SHIPPED (Step 1, `9eb4601`)
+
+Two production scans (Hero for Hire, and one prior) reproduced an
+impossible `phase2_start > phase2_complete` structure. Root cause:
+`mark('phase2_start')` was called at two semantically distinct points in
+`api/enrich.js`'s handler — the real "PHASE 2: DATA FETCHING"
+identity-confirmed lookup window (`identity_fetch_start`/`_complete` as
+of this fix), and separately the Step 2b comps/pricing-fetch gate
+(`comps_pricing_start` as of this fix) that `out.timings.comps_ms`
+actually measures against `comps_fetched`. The second write silently
+overwrote the first in the shared `t` marks object — `comps_ms` itself
+computed the numerically correct duration by last-write-wins coincidence,
+but the raw marks dump lost the ability to show the first phase's true
+boundary at all, and the two labels' final values could read as an
+impossible ordering when compared against each other. Pure rename, one
+downstream key-read updated to match, zero control-flow change — same
+inputs, same identity, same comps, same pricing, same decision. All 8
+documented-baseline test suites (decision-engine, comp-filter-hygiene,
+sold-verification, identity-gate, image-search-extraction, mega-keys,
+pattern-k-dedupe-issue, q-adv397-visual-guard) matched their exact
+recorded failure counts before and after — **NO NEW REGRESSION AGAINST
+DOCUMENTED BASELINE.** Deployed and verified: `dpl_7jQKZ2qxXY1VvFtMs87T8wK1uwgr`,
+commit `9eb4601bccbc9d603346c8f2de3aa718eef67a8b`, READY, target=production,
+SHA-matched against `git log` directly (not certified via alias).
+
+### Open ledger — remaining items, by tier
+
+**Structural, awaiting frequency data (do not patch individually yet):**
+- **ComicVine fail-open** — direct instance of "rejection must not create
+  authority" (Hero for Hire, above). Downstream story-era gate happened
+  to prevent customer-facing contamination on this specific scan — that
+  is not a general guarantee.
+- **Key-event authority gap** — Hero for Hire's raw pool asserted
+  `first-appearance ×3`, `1st App ×2` while structured state stayed
+  `keyIssue: null, major: false, minor: false, mult: 1`. Track as a gap
+  between detected key-event EVIDENCE and structured key KNOWLEDGE. Do
+  NOT auto-promote marketplace phrases into key authority — that would
+  recreate marketplace-SEO contamination (the exact class this project
+  already deleted once, GrailKey Dispatch 32's coherent-content-token
+  lane). The open question is architectural: how does verified key-event
+  knowledge become authoritative without treating seller copy as truth.
+- **Identity provenance/display mismatch** — UI showed `Identity: vision`
+  while the final pipeline's resolved source was
+  `title-family-top-rank-protection`. Unresolved question: does this
+  correctly distinguish "initial identity source" from "final authority
+  path," or is the UI displaying stale/incomplete provenance? Not changed
+  until the ontology is traced.
+- **Story-metadata banner** — do NOT hard-code the previously-quoted
+  `~85%` firing rate; it was an eyeballed count across the incident
+  corpus, not a query result. Let the Dispatch 33 scan-log aggregation
+  establish the real measured rate. Known issue independent of the rate:
+  the warning fires often AND has also been absent on cases where story
+  metadata was genuinely wrong — current information value looks weak in
+  both directions.
+- **External-source latency** — Hero for Hire ~6.0s total (heavy
+  ComicVine/PriceCharting lookup + requery time) vs. Spawn #351 ~2.45s.
+  Two scans is not a distribution — do not generalize. Measure real
+  p50/p95 only after the timing fix above is live (it now is).
+- **22c word-order false positive** — see dedicated entry above.
+
+**Designed but production-unvalidated:**
+- **Fix 4** — needs a must-pass anchor; see scoping entry above.
+- **Fix 6** (`rescueYearFromVisionFallback`, GrailKey Dispatch 19) —
+  still production-unvalidated. Spawn #351 no longer exercises it because
+  upstream year authority now resolves before the rescue would be needed
+  — **Spawn does NOT count as Fix 6 validation.**
+
+**Historically failing / post-fix uncertified:**
+- **Virgin/sketch variant class** — see corrected status entry above.
+- **Cover matcher** — still blocked on rights-safe image corpus/licensing
+  and catalog-import infrastructure (GrailKey Dispatch 17). Explicitly
+  NOT a prerequisite for the current batch.
+
+**Parked — do not reopen this dispatch unless a new scan independently
+reproduces one:**
+key multiplier (prior 1.5× overshot the PC ladder by ~65%, GrailKey
+Dispatch 12-14), stale threshold, first-name split, `dekal`/`spears`,
+floor-on-contaminated-pool (3 historical instances), PriceCharting
+cross-category leak, comp-query degradation, title-family fragmentation
+(GrailKey Dispatch 21 — currently single-book evidence).
+
+### Next execution (per this dispatch)
+
+1. **Step 1 — timing instrumentation.** SHIPPED, this section, above.
+2. **Step 2 — production batch.** 10-15 heterogeneous ORDINARY books, not
+   hand-picked problem cases — a representative operational sample.
+3. **Step 3 — aggregate**, ranked by measured scan-log frequency, not
+   anecdote: (1) ComicVine fail-open, (2) key-authority gap, (3)
+   condition-evidence overreach, (4) identity provenance/display
+   discrepancy, (5) external-source latency, (6) story-metadata warning
+   behavior, (7) Fix 4/4b eligibility/entry/decline, (8) Fix 5 firing
+   frequency, (9) post-fix virgin/sketch success/failure rate.
+
+**Cost data note:** two verification-lane observations so far
+(`$0.000409`, `$0.000434`) — one lane, two data points. Do not average
+these into an architecture conclusion; wait for the batch.
+
