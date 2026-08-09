@@ -39,3 +39,9 @@ dist-ssr
 
 # Debug files
 go collect api.txt
+
+# GrailKey Dispatch 39/41 — Bone recollection: offline pricing fixtures.
+# Frozen local-only capture data (comp pools, prices, decisions), never
+# committed — this is investigation material for an offline predicate
+# replay, not documentation or source.
+/dispatch39-fixtures/

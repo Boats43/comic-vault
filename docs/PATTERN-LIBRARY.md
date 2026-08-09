@@ -5423,3 +5423,125 @@ blocker on Bone dataset recollection.
 Decision-layer non-determinism: new, open, record-only, no fix scoped.
 Holding everything else, unchanged.
 
+## GrailKey Dispatch 41 (2026-08-09) — Gate 1 CLOSED; Marvel Age #1000 settled; sold-pool durability gap; Bone recollection tooling ready
+
+Record only, no production code. Gate 1 access corrected in Dispatch 39
+(Upstash console, not `vercel env pull`) is now live — read-only Upstash
+credentials confirmed working (`dbsize: 330`, real key sample returned,
+matching the certified Dispatch 40 Batman #213 keys exactly). No
+credential value has been printed, echoed, or logged anywhere in this
+investigation at any point.
+
+### Gate 1: CLOSED
+
+Both remaining gates from Dispatch 38/39/40 are now closed. Only the
+Bone recollection work itself remains, tooling for which is below.
+
+### Marvel Age #1000 — settled, first concrete case of the ledger resolving a runtime-log ambiguity
+
+Direct scanlog query (full 90-day window, 141 records scanned) found
+**both** reported occurrences:
+
+| Timestamp (UTC) | Deploy (`promptVersion`) | `terminalReason` | `issueAuthority` | identityRoute |
+|---|---|---|---|---|
+| 2026-08-09 05:08:10 | `4716cef...` (pre-Dispatch-36) | `null` | `null` | `title-family-weighted-consensus` |
+| 2026-08-09 18:05:31 | `6f17f63...` (post-Dispatch-37) | `null` | `null` | `title-family-weighted-consensus` |
+
+Both records show a normal, healthy identity resolution (`familyWeight`
+decision `weighted-consensus`, pool sizes 20/20/16, no error/terminal
+flag). Per Dispatch 22's own write-site placement ("right after
+`out.decision` is computed"), **a record's existence is proof the
+handler reached that point** — both scans terminated normally. **This
+is the first concrete case where the durable scanlog ledger resolved an
+ambiguity the Vercel runtime logs could not**: the "257 log lines, no
+`[decision]` line" symptom is settled as the runtime-log tool failing to
+surface one console line (the exact class of limitation
+`src/lib/scanLog.js`'s own header names as the reason this ledger
+exists), not the backend failing to reach a decision. Second occurrence
+lands on a deploy after the whole cache-fingerprint series shipped —
+confirmed unrelated to that work.
+
+**Limitation recorded alongside the settlement, itself a concrete
+instance of Dispatch 39's pricing auditability gap:** the ledger proves
+decision *computation* happened; its current schema has no
+`decision.action`, price, or pricing-branch field, so it cannot say
+*what* either scan decided — only that it decided something.
+
+### Sold-pool durability — second concrete instance of the pricing auditability gap
+
+Investigated directly via code before any Bone recollection scanning
+started, per explicit instruction not to find this out at replay time.
+**The sold pool is not independently cached in KV under any key, at any
+TTL — verified or raw.** `fetchPricechartingSales`
+(`api/pricecharting-pop.js:560-612`) re-parses `soldComps`/
+`salesByGrade`/`priceLadder` fresh from the shared raw-HTML cache
+(`ph:<productId>`, `KV_TTL.PC_HTML` = 7 days) on **every call** — the
+7-day TTL only protects the raw PriceCharting HTML page, not the parsed
+sales rows. Worse: the actual PRICING-CONSUMED sold data
+(`out.soldComps`, `out.soldCompsRaw`, `out.soldCompDiagnostics` —
+`api/enrich.js:9343-9351`) is the output of `verifySoldComps` running
+fresh on every request against that HTML; this verified/filtered set is
+**never persisted anywhere**, cached nowhere, and exists only in that
+one request's response object.
+
+**Consequence for the fixture contract:** the `ac:v10` KV object (the
+active pool) is the ONLY piece of the fixture contract retrievable from
+KV after the fact, and only within its 1-hour TTL. Everything else the
+contract specifies — sold evidence, request context, output baseline
+(tier/branch, floors fired, decision, warnings) — exists nowhere durable
+at all; it is only ever present in the live `/api/enrich` JSON response
+body for that exact scan. There is no TTL to race for that half of the
+fixture, because there is no cache to race — it must be captured from
+the response itself, not reconstructed afterward from any KV read, no
+matter how quickly that read happens. `scripts/capture-active-cache-entry.mjs`
+(below) is scoped honestly to what KV can actually provide and stubs the
+rest for manual merge from the real response, rather than silently
+omitting or fabricating it.
+
+### Bone recollection tooling — ready, tested against live data
+
+Two throwaway-precedent scripts (same convention as
+`scripts/query-scanlog.mjs`), both tested end-to-end against the live
+Batman #213 entries before any Bone scanning starts:
+
+- **`scripts/watch-active-cache-ttl.mjs`** — single-shot snapshot of every
+  live `ac:v10:*` key with remaining TTL, soonest-expiring first, flags
+  anything under 5 minutes. Verified: correctly listed both live Batman
+  #213 keys with real remaining TTLs.
+- **`scripts/capture-active-cache-entry.mjs "<title>" "<issue>" [label]`**
+  — pulls the matching `ac:v10` object + fingerprint + TTL remaining,
+  infers rough write-age from TTL-remaining-vs-3600s (a proxy for
+  HIT-vs-MISS, since KV alone can't distinguish "just written" from
+  "written earlier, now being read" — only the server's own
+  `[active-cache] HIT/MISS` log line can say that directly), and writes a
+  fixture stub to `dispatch39-fixtures/` (new, gitignored — see
+  `.gitignore`) with the `manualCapture` section explicitly stubbed for
+  the request-context/sold-evidence/output-baseline fields that must come
+  from the real response. Verified: captured both live entries correctly
+  (`activePoolRaw.count` 17 and 9, matching Dispatch 40's certified
+  numbers exactly); test fixtures deleted after verification, directory
+  clean for the real batch.
+
+### Batch composition, confirmed
+
+- 11-15 heterogeneous ordinary books, Bone included in the same batch
+  (not captured separately).
+- **New requirement, recorded:** capture at least one other book that
+  naturally exercises mega-key-floor, if one appears in the batch
+  selection — not manufactured. Bone is currently the only observed
+  instance of floor resurrection; one book cannot distinguish "the floor
+  is wrong for Bone" from "the floor is wrong generally," and the
+  acceptance criterion needs to know which. Recommend deliberately
+  including one additional mega-key-table title (`api/mega-keys.js`, 43
+  entries) in the ordinary-book selection so there's a real chance of
+  observing this — not forcing the floor to fire, just giving it the
+  opportunity a random ordinary sample might not.
+
+### Status
+
+Gate 1: **CLOSED.** Gate 2: **CLOSED** (Dispatch 40). Both certification
+gates closed. Tooling ready and verified. Sold-pool/output-baseline
+capture depends on the real `/api/enrich` response per scan, not KV, per
+the durability finding above — flagged before scanning starts, not
+discovered at replay time. Holding for the go-ahead to begin scanning.
+
