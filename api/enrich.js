@@ -570,10 +570,23 @@ const detectTitleContamination = (title, context = {}) => {
   return { contaminated, signals, severity };
 };
 
+// Dispatch 42 Task 5 — ComicVine disabled, not removed. Both call points
+// (lookupComicVineByUPC, lookupComicVine below) gate on this explicit
+// constant IN ADDITION TO the existing COMICVINE_API_KEY check, so
+// disabling is a one-line, code-reviewable toggle independent of whatever
+// the env var happens to be set to — re-enabling requires a code change,
+// not just restoring a secret. Every consumer of ComicVine-derived fields
+// in this codebase already optional-chains (`comicVine?.X`) per Dispatch 41
+// Part 1(f), so both functions returning null unconditionally is a graceful
+// degradation, not a new failure mode — verified before this flag was set
+// (Dispatch 42 Tasks 1-4: IndexedDB migration, cache fingerprint, barcode
+// fallback, and the era-rescue-loss gate all landed first).
+const COMICVINE_ENABLED = false;
+
 // SPEED-2a — Export for metadata endpoint
 // TRACK A: ComicVine UPC/barcode lookup
 export const lookupComicVineByUPC = async (upc) => {
-  if (!process.env.COMICVINE_API_KEY || !upc) return null;
+  if (!COMICVINE_ENABLED || !process.env.COMICVINE_API_KEY || !upc) return null;
   try {
     const url =
       `https://comicvine.gamespot.com/api/issues/?api_key=${encodeURIComponent(process.env.COMICVINE_API_KEY)}` +
@@ -629,7 +642,7 @@ export const lookupComicVineByUPC = async (upc) => {
 };
 
 export const lookupComicVine = async ({ title, issue, year, publisher, poolYearHint = null }) => {
-  if (!process.env.COMICVINE_API_KEY || !title) return null;
+  if (!COMICVINE_ENABLED || !process.env.COMICVINE_API_KEY || !title) return null;
   try {
     // Prefer explicit issue param, fall back to parsing from title.
     const issueFromTitle = String(title).match(/#\s*(\d+)/);
@@ -2324,18 +2337,31 @@ export default async function handler(req, res) {
     }
 
     // TRACK A: Barcode bypass - lookup identity from ComicVine UPC
+    // Dispatch 42 Task 3 — reading the UPC is deterministic; resolving it
+    // to a title/issue is a separate authority event that can fail (no CV
+    // match, or CV disabled). A miss must not 404 the whole scan: the
+    // identifier itself is retained as observation (out.scannedBarcode,
+    // below) and barcodeIdentity simply stays null, so every downstream
+    // barcodeIdentity?.X read already falls through to whatever other
+    // identity path (Vision/manual/eBay) the request carries. If nothing
+    // else resolves it, the existing identity-gate naturally lands on
+    // ID_REQUIRED/RESEARCH — no separate handling needed here. Note:
+    // lookupComicVineByUPC's return shape has no `.variant` field, so a
+    // resolved barcode never wrote confirmedVariant even before this
+    // change; only confirmedTitle/Issue/Year/Publisher are ever set from
+    // it (below, gated on `if (barcodeIdentity)`), and a null
+    // barcodeIdentity already skips that block untouched — a bare/
+    // unresolved UPC cannot write confirmedIssue either.
     let barcodeIdentity = null;
     if (barcode) {
       mark('barcode_lookup_start');
       barcodeIdentity = await lookupComicVineByUPC(barcode);
       mark('barcode_lookup_complete');
       if (!barcodeIdentity) {
-        console.log('[barcode] UPC not found:', barcode);
-        res.status(404).json({ error: "Barcode not found in ComicVine database" });
-        return;
+        console.log('[barcode] UPC not resolved (no ComicVine match, or ComicVine disabled) — retaining identifier, falling through to normal identity resolution:', barcode);
+      } else {
+        console.log('[barcode] identity resolved:', barcodeIdentity.title, '#' + barcodeIdentity.issue);
       }
-      // Inject barcode identity into pipeline
-      console.log('[barcode] identity resolved:', barcodeIdentity.title, '#' + barcodeIdentity.issue);
     }
 
     // FIX 4: Manual identity bypass (user typed title/issue/year, no camera)
@@ -2434,6 +2460,7 @@ export default async function handler(req, res) {
     // return a few thousand lines below both do). JSON.stringify drops the
     // key entirely when scanId is undefined — no conditional needed here.
     out.scanId = scanId;
+    out.scannedBarcode = barcode || null; // Dispatch 42 Task 3 — identifier observation retained regardless of resolution outcome
 
     // 2026-07-18 (anime/manga poster class) — Vision's own structured
     // assetTypeConfident read. Defaults true when absent (older callers,
@@ -5899,6 +5926,11 @@ export default async function handler(req, res) {
               labelType: confirmedLabelType,
               signedConsensus: confirmedSignedConsensus,
               assetType: out.assetType,
+              // Dispatch 42 Task 2 — same expression fetchComps itself
+              // receives below (cvVolumeStartYear, ~line 6024); duplicated
+              // rather than shared per this file's own scoping precedent
+              // for this fingerprint (see cacheKeys.js header comment).
+              cvVolumeStartYear: comicVine?.startYear || null,
             });
             const activeKey = buildActiveCompCacheKey(COMP_FILTER_VERSION, confirmedTitle, confirmedIssue, filterContextFingerprint);
             // Commit B.1 (Strange Tales dispatch) — no `title|null` keys in

@@ -628,7 +628,14 @@ export const ARTIST_FAMILY_STRIP_EXCEPTIONS = new Set(['brett booth']);
 // assetType all previously unkeyed). Old v9 entries have a different key
 // SHAPE (no fingerprint segment) as well as a different version prefix,
 // so they're doubly orphaned, never misread under the new template.
-export const COMP_FILTER_VERSION = 10;
+//
+// Dispatch 42 Task 2 (Dispatch 41 Part 1(d) finding) — bumped 10→11:
+// buildFilterContextFingerprint now includes cvVolumeStartYear (see
+// src/lib/cacheKeys.js). Old v10 entries were fingerprinted without it —
+// this bump forces a fresh MISS rather than risking a stale v10 pool
+// (cached while ComicVine's volume-label rescue was live) being read back
+// as still valid after ComicVine is disabled (Dispatch 42 Task 5).
+export const COMP_FILTER_VERSION = 11;
 
 // Q132 dispatch (2026-07-20) — single source of truth for "the title-family
 // override actually succeeded" (as opposed to 'fallback-vision', returned

@@ -108,6 +108,37 @@ export const putAnalysis = async (data) => {
   await wrap(store.put({ key: "latest", ...data }));
 };
 
+// Dispatch 42 Task 1 — ComicVine kill, IndexedDB migration. Strips the
+// `comicVine` object from every stored catalogue record so a disabled
+// ComicVine can never resurrect via the App.jsx merge paths' own
+// `enrich.comicVine || cur.comicVine || null` fallback (that pattern
+// otherwise keeps serving pre-kill CV data on every future re-scan,
+// forever — Dispatch 41 Part 1's largest resurrection risk). Only the
+// direct CV object is touched; publisher/year/keyIssue/creators are
+// mixed-provenance (CV was never their sole source) and are left alone.
+// Idempotent via CV_MIGRATION_FLAG — same one-shot idiom as
+// migrateFromLocalStorage below, safe to call on every load.
+const CV_MIGRATION_FLAG = "cv_migration_v1_done";
+
+export const migrateComicVineRemoval = async () => {
+  try {
+    if (localStorage.getItem(CV_MIGRATION_FLAG)) return 0;
+    const items = await getAllComics();
+    let count = 0;
+    for (const item of items) {
+      if (item && Object.prototype.hasOwnProperty.call(item, "comicVine") && item.comicVine) {
+        const { comicVine, ...rest } = item;
+        await putComic(rest);
+        count++;
+      }
+    }
+    localStorage.setItem(CV_MIGRATION_FLAG, "1");
+    return count;
+  } catch {
+    return 0;
+  }
+};
+
 // One-shot migration: if a legacy `cv_catalogue` array exists in localStorage,
 // copy its entries into IndexedDB then drop the key. Safe to call on every load.
 export const migrateFromLocalStorage = async () => {

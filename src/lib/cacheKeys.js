@@ -58,6 +58,17 @@ const deriveNumericGradeTargetForFingerprint = (grade, numericGrade) =>
 
 const deriveNormalizedYearForFingerprint = (year) => (year ? String(year).trim() : null);
 
+// Dispatch 42 Task 2 (Dispatch 41 Part 1(d) finding) — cvVolumeStartYear
+// (api/enrich.js's `comicVine?.startYear`) is consumed by
+// applyEraConsistencyFilter/evaluateEraYearMatch's volume-label rescue
+// (Q128, Harley Quinn #62 class) on the exact same fetchComps call whose
+// result this fingerprint gates — but was never one of the fingerprinted
+// dimensions. Two requests differing only in whether ComicVine corroborated
+// a comp's year could silently share one cached pool. Same normalization
+// style as year, for the same reason (values may arrive as number or string).
+const deriveNormalizedCvVolumeStartYearForFingerprint = (cvVolumeStartYear) =>
+  cvVolumeStartYear ? String(cvVolumeStartYear).trim() : null;
+
 /**
  * Canonical, deterministic fingerprint over every input that materially
  * shapes the active-comp filter chain's output, per the standing
@@ -81,7 +92,7 @@ const deriveNormalizedYearForFingerprint = (year) => (year ? String(year).trim()
  * filter-chain audit) and each of the three states gets its own
  * distinct token.
  *
- * @param {{grade?: string|null, numericGrade?: number|string|null, year?: string|number|null, variant?: string|null, isGraded?: boolean|null, labelType?: string|null, signedConsensus?: boolean|null, assetType?: string|null}} inputs
+ * @param {{grade?: string|null, numericGrade?: number|string|null, year?: string|number|null, variant?: string|null, isGraded?: boolean|null, labelType?: string|null, signedConsensus?: boolean|null, assetType?: string|null, cvVolumeStartYear?: string|number|null}} inputs
  * @returns {string} 64-character hex SHA-256 digest
  */
 export const buildFilterContextFingerprint = ({
@@ -93,9 +104,11 @@ export const buildFilterContextFingerprint = ({
   labelType = null,
   signedConsensus = null,
   assetType = null,
+  cvVolumeStartYear = null,
 } = {}) => {
   const numericTarget = deriveNumericGradeTargetForFingerprint(grade, numericGrade);
   const normalizedYear = deriveNormalizedYearForFingerprint(year);
+  const normalizedCvVolumeStartYear = deriveNormalizedCvVolumeStartYearForFingerprint(cvVolumeStartYear);
   const canonical = JSON.stringify({
     numericTarget: numericTarget ?? null,
     year: normalizedYear ?? null,
@@ -104,6 +117,7 @@ export const buildFilterContextFingerprint = ({
     labelType: labelType ?? null,
     signedConsensus: signedConsensus === true ? 'true' : signedConsensus === false ? 'false' : 'null',
     assetType: assetType ?? null,
+    cvVolumeStartYear: normalizedCvVolumeStartYear ?? null,
   });
   return createHash('sha256').update(canonical).digest('hex');
 };

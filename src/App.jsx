@@ -4,6 +4,7 @@ import {
   putComic,
   deleteComic,
   migrateFromLocalStorage,
+  migrateComicVineRemoval,
   putSnapshot,
   getAllSnapshots,
   getAnalysis,
@@ -10049,6 +10050,7 @@ export default function App() {
 
     (async () => {
       await migrateFromLocalStorage();
+      await migrateComicVineRemoval(); // Dispatch 42 Task 1 — strip stale ComicVine data before first render
       const items = await getAllComics();
       setCatalogue(items.map(normalizeItem)); // STRUCTURAL FIX: normalize on load
       const snaps = await getAllSnapshots();
@@ -10335,7 +10337,7 @@ export default function App() {
                   : (cur.contract ?? null),
                 gradeMultiplier: lowMatch ? cur.gradeMultiplier : (enrich.gradeMultiplier || null),
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
-                comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
+                comicVine: enrich.polybagDetected ? null : (enrich.comicVine || null), // Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection
                 certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
@@ -10436,7 +10438,7 @@ export default function App() {
               const pc = newP !== s.price;
               return {
                 ...s, ...enrich,
-                comicVine: enrich.comicVine || s.comicVine || null,
+                comicVine: enrich.comicVine || null, // Dispatch 42 Task 1 — no s.comicVine fallback, no CV resurrection
                 certNumber: enrich.certNumber || s.certNumber || null, labelType: enrich.labelType || s.labelType || null, labelNotes: enrich.labelNotes || s.labelNotes || null,
                 cgcVerified: enrich.cgcVerified || s.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || s.cgcLabel || null,
@@ -10849,7 +10851,7 @@ export default function App() {
                   listPriceManual: cur.listPriceManual,
                   // Clear pending flag when enrich completes
                   marketPending: false,
-                  comicVine: enrich.comicVine || cur.comicVine || null,
+                  comicVine: enrich.comicVine || null, // Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection
                   certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null,
                   cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                   cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
@@ -10973,7 +10975,7 @@ export default function App() {
                   // Clear pending flag when enrich completes
                   marketPending: false,
                   defectPenalty: enrich.defectPenalty || s.defectPenalty || null,
-                  comicVine: enrich.comicVine || s.comicVine || null,
+                  comicVine: enrich.comicVine || null, // Dispatch 42 Task 1 — no s.comicVine fallback, no CV resurrection
                   certNumber: enrich.certNumber || s.certNumber || null, labelType: enrich.labelType || s.labelType || null, labelNotes: enrich.labelNotes || s.labelNotes || null,
                   cgcVerified: enrich.cgcVerified || s.cgcVerified || false,
                   cgcLabel: enrich.cgcLabel || s.cgcLabel || null,
@@ -11343,7 +11345,7 @@ export default function App() {
                 // Clear pending flag when enrich completes
                 marketPending: false,
                 defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
-                comicVine: enrich.polybagDetected ? null : (enrich.comicVine || cur.comicVine || null),
+                comicVine: enrich.polybagDetected ? null : (enrich.comicVine || null), // Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection
                 certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null,
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
@@ -11885,7 +11887,7 @@ export default function App() {
       marketPending: false,
       gradeMultiplier: enrich.gradeMultiplier || null,
       defectPenalty: enrich.defectPenalty || item.defectPenalty || null,
-      comicVine: enrich.comicVine || item.comicVine || null,
+      comicVine: enrich.comicVine || null, // Dispatch 42 Task 1 — no item.comicVine fallback, no CV resurrection
       certNumber: enrich.certNumber || item.certNumber || null,
       labelType: enrich.labelType || item.labelType || null,
       labelNotes: enrich.labelNotes || item.labelNotes || null,
@@ -12857,7 +12859,7 @@ export default function App() {
                               // 2026-07-18 — fold in identity/asset-type gate (was previously
                               // absent on this duplicate-confirm path).
                               const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
-                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || cur.comicVine || null, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });
