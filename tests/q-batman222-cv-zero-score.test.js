@@ -31,6 +31,30 @@
 // Invoke: node tests/q-batman222-cv-zero-score.test.js
 
 import { lookupComicVine } from '../api/enrich.js';
+import { readFileSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Dispatch 42-A item 2 — this file documents ComicVine-ENABLED matching
+// behavior (the zero-score tiebreaker guard). ComicVine is disabled
+// (Dispatch 42, api/enrich.js COMICVINE_ENABLED), not deleted, and this
+// suite goes live again automatically once it's re-enabled. No new
+// production export is added solely for this check — reads the existing
+// source of truth directly. Assertions below are unmodified; this only
+// short-circuits before any of them run when the adapter is off. Fails
+// OPEN (runs normally) if the flag can't be parsed at all, so a
+// renamed/refactored constant surfaces as a normal test failure rather
+// than a silent permanent skip.
+{
+  const __dirnameGate = path.dirname(fileURLToPath(import.meta.url));
+  const enrichSrcForGate = readFileSync(path.join(__dirnameGate, '..', 'api', 'enrich.js'), 'utf8');
+  const cvEnabledMatch = enrichSrcForGate.match(/const COMICVINE_ENABLED = (true|false);/);
+  const comicVineCurrentlyEnabled = cvEnabledMatch ? cvEnabledMatch[1] === 'true' : true;
+  if (!comicVineCurrentlyEnabled) {
+    console.log('[dispatch-42-gate] SKIPPED — ComicVine disabled (Dispatch 42, api/enrich.js COMICVINE_ENABLED=false). This suite documents pre-kill ComicVine-enabled behavior; it will run again once ComicVine is re-enabled.');
+    process.exit(0);
+  }
+}
 
 let passed = 0;
 let failed = 0;
