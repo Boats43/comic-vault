@@ -32,7 +32,7 @@
 let stats = { rows: 0, changed: 0, unchanged: 0, duplicates: 0 };
 let seenThisRequest = new Set();
 
-export const TITLE_STRIP_DEBUG = process.env.CV_DEBUG_TITLE_STRIP === '1';
+export const TITLE_STRIP_DEBUG = typeof process !== 'undefined' && process.env.CV_DEBUG_TITLE_STRIP === '1';
 
 export function resetTitleStripStats() {
   stats = { rows: 0, changed: 0, unchanged: 0, duplicates: 0 };
