@@ -1,4 +1,5 @@
 import { enforceFloor } from './pricingEngine.js';
+import { parsePriceNumber } from './responseContract.js';
 
 /**
  * Session 2A: Compute best sales channel based on decision + item characteristics
@@ -203,7 +204,24 @@ export function computeDecision(item, context = {}) {
   // System-generated price far above active comps = broken pricing logic
   // EXCEPT: vintage-thin era risk (Golden Age thin pools) may have contaminated active comps
   const activeAvg = item.rawComps?.average;
-  const systemPrice = item.price;
+  // GK-74 (GrailKey Directive E, Task 1) — item.price is a currency STRING
+  // ("$800.00", via fmtUsd()) on nearly every real pricing path by the time
+  // this function runs; every >/< comparison below against a raw numeric
+  // comps value silently evaluated as NaN (thus false) against the raw
+  // string on every real scan. parsePriceNumber (already used identically
+  // in responseContract.js) strips the formatting and returns null for
+  // anything unparseable — null keeps every `if (systemPrice && ...)`
+  // truthy-guard below exactly as safe as it already was for a genuinely
+  // absent price, it does not introduce a new false-becomes-zero path.
+  // Scope note: this coercion is deliberately local to the blocker/warning
+  // CHECKS below (systemPrice and its direct descendants). It does NOT
+  // touch any `decision.price =` computation elsewhere in this function
+  // (those still read the raw item.price string, unchanged) or
+  // computeBestChannel's own separate `item.price` read — both are
+  // independently NaN-prone today and were traced but deliberately left
+  // alone per Directive E's explicit scope boundary; see GK-74's registry
+  // entry and the Directive E handoff for the follow-up this opens.
+  const systemPrice = parsePriceNumber(item.price);
   const eraRisk = item.eraRisk; // computed by ComicAdapter.computeEraRisk()
 
   if (systemPrice && activeAvg && systemPrice > activeAvg * 10) {
@@ -389,10 +407,10 @@ export function computeDecision(item, context = {}) {
 
   // Warning: Recommended price below floor (v0-F)
   // When item.price < floor, decision.price will be raised to floor
-  if (item.price && activeLowest && item.price < activeLowest) {
+  if (systemPrice && activeLowest && systemPrice < activeLowest) {
     decision.warnings.push('recommended-below-floor');
     decision.evidence.recommendedBelowFloor = {
-      recommended: item.price,
+      recommended: systemPrice,
       floor: activeLowest,
       adjusted: activeLowest
     };
@@ -808,7 +826,9 @@ export function computeDecision(item, context = {}) {
   // set decision.action/price is gone.
 
   // Check for bundle opportunity
-  const isLowDollar = item.price < 10;
+  // GK-74 — systemPrice (parsed above) instead of the raw item.price
+  // string; same coercion, same scope note as the blocker checks above.
+  const isLowDollar = systemPrice != null && systemPrice < 10;
   const catalogue = context.catalogue || [];
   const unlistedLowDollar = catalogue.filter(c =>
     c.status !== 'listed' &&
@@ -819,7 +839,7 @@ export function computeDecision(item, context = {}) {
   if (isLowDollar && unlistedLowDollar >= 5) {
     decision.warnings.push('bundle-candidate');
     decision.evidence.bundleOpportunity = {
-      price: item.price,
+      price: systemPrice,
       otherLowDollar: unlistedLowDollar
     };
   }
@@ -960,9 +980,15 @@ export function describeBlocker(slug, item) {
   if (slug === 'manual-review-required') return 'manual review required';
   if (slug === 'mega-key-manual-review') return 'mega-key requires expert appraisal';
   if (slug === 'catastrophic-system-overprice') {
-    const ratio = item.rawComps?.average ? item.price / item.rawComps.average : null;
+    // GK-74 — item.price is a currency string; parse before any numeric
+    // use (division, .toFixed) or this renders "$NaN" once this
+    // previously-dead blocker actually reaches a real scan.
+    const numericPrice = parsePriceNumber(item.price);
+    const ratio = numericPrice != null && item.rawComps?.average
+      ? numericPrice / item.rawComps.average
+      : null;
     return ratio != null
-      ? `system price $${item.price} is ${ratio.toFixed(1)}x active comps`
+      ? `system price $${numericPrice.toFixed(2)} is ${ratio.toFixed(1)}x active comps`
       : 'system price far exceeds active comps';
   }
   if (slug === 'catastrophic-reprint-overprice') return 'reprint/polybag detected with extreme overprice';
@@ -1034,10 +1060,11 @@ export function describeWarning(slug, item) {
   if (slug === 'era-risk-vintage-thin') return 'vintage era thin pool with sold/active conflict';
   if (slug === 'active-avg-far-below') return 'recommended price far above active comps';
   if (slug === 'active-floor-far-below') {
-    const systemPrice = item.price;
+    // GK-74 — same coercion as describeBlocker's catastrophic-system-overprice above.
+    const systemPrice = parsePriceNumber(item.price);
     const activeLowest = item.rawComps?.lowest;
     return systemPrice && activeLowest
-      ? `recommended price $${Number(systemPrice).toFixed(2)} is ${(systemPrice / activeLowest).toFixed(1)}x the active floor $${Number(activeLowest).toFixed(2)}`
+      ? `recommended price $${systemPrice.toFixed(2)} is ${(systemPrice / activeLowest).toFixed(1)}x the active floor $${Number(activeLowest).toFixed(2)}`
       : 'recommended price far above the active floor';
   }
   if (slug === 'sold-comps-stale') {
