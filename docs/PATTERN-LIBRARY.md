@@ -5854,3 +5854,301 @@ SAFE-KILL certified, pushed, deployed, verified READY at the exact
 pushed SHA. Eight defects logged at the operator's explicit instruction
 not to work them. Standing by. GK-39 to be issued separately.
 
+## Dispatch 45 (2026-08-10) — GK-39 confidence-provenance trace, four defects split out
+
+Trace-only, no code (per dispatch instruction). Investigated why the
+`identityAlignment` panel showed identical `90/90/85/100 · VERIFIED`
+across two unrelated books on two different identity sources, and why
+`breakdown.year: 85` rendered next to `confirmedYear: null`.
+
+**Root cause, `authenticationScore`/`breakdown`: hardcoded constants,
+not a computation.** `api/enrich.js:4319-4338` builds the `alignment`
+object as a two-branch literal keyed on a single boolean
+(`identitySource === 'ebay_visual_override'`) — every OTHER
+`identitySource` value (manual, title-family-top-rank-protection,
+barcode, cgc_cert, ...) collapses to the identical
+`90/90/85/100/VERIFIED/needsReview:false` tuple, unconditionally.
+`breakdown.year: 85` is written regardless of what `confirmedYear`
+holds — there is no check being skipped, there is no check.
+
+**The real scorer exists and is dead.** `src/lib/identityAlignment.js`'s
+`alignIdentity()` is a genuine weighted cross-source scorer (title 50% /
+issue 25% / year 15% / publisher 10%, real per-field token-overlap and
+year-match comparisons). `git grep "alignIdentity("` outside test files
+returns exactly one hit — its own definition. It ran in production for
+one day (`44cf43b` 2026-04-30 → `0234ea2` 2026-05-01), then an
+architecture refactor moved identity resolution earlier in the pipeline
+(before eBay/PC/CV data was in scope) and replaced the real call with
+the hardcoded placeholder at the identical call site, under the
+identical `"Ship #24"` comment — confirmed via `git show 0234ea2`. Never
+restored since.
+
+**Persistence gap, found independently:** `identityAlignment` is never
+written to IndexedDB — `git grep identityAlignment src/db.js` = 0 hits,
+and `addToCatalogue`'s `entry` object (`App.jsx:10539-10575`) is an
+explicit ~25-field whitelist that omits it. The one real decision
+consumer — `App.jsx:7506-7510`'s listing-button gate,
+`needsAuthAck = authenticationScore < 80` — reads `item.identityAlignment`
+off `selectedItem`, which for the ordinary "open a saved book" flow is
+catalogue-sourced (`App.jsx:13009/13025`, `catalogue[idx±1]`) and
+therefore undefined. The gate is real code, but only reachable in the
+narrow window right after a fresh scan, before the book is saved.
+
+**Real, live defect found while tracing the "laundering" question:**
+`convergenceSources` (`api/enrich.js`, then lines 4141-4185) sourced
+its `vision` slot from `effectiveTitle`/`effectiveIssue`/`effectiveYear`/
+`effectivePublisher` — which, under `manualIdentity` or a valid
+`manualCorrectionRequest`, carry the operator's typed/corrected value
+(Vision explicitly skipped, `api/enrich.js:2284` comment). That value is
+also `confirmedX`, so in the REAL, unmodified `computeAxisScore`
+(`src/lib/convergenceScore.js` — a legitimate weighted voter, unrelated
+to the fake `identityAlignment` constants), the manual value voted for
+itself under a false `'vision'` label and gained full axis weight
+(85/100 for issue/title/publisher). This is `convergence`, the *other*
+score on the same card — the one that computes honestly everywhere
+except this one caller-side mislabeling.
+
+**Four defects split apart, deliberately not merged (they don't share a
+fix and don't share urgency):**
+- **GK-39** — fabricated `authenticationScore`/`breakdown` constants.
+- **GK-62** — manual value in `convergenceSources`' vision slot,
+  self-corroborates, inflates the real `convergenceScore`.
+- **GK-65** (renumbered from GK-63, Dispatch 46B correction — GK-62 stays
+  with the vision-provenance fix, exactly one defect per number) —
+  `identityAlignment` never persisted; the listing gate at `App.jsx:7506`
+  is unreachable post-save.
+- **GK-64** — `identityAlignment` is a Phase-2 snapshot
+  (`api/enrich.js:4319-4322`, captured before 8 later `writeConfirmed`
+  passes on `confirmedYear` alone, `:4732` through `:7582`), stale
+  relative to the terminal `out.confirmedYear` (`:9558`), unmarked as
+  stale.
+
+### Status
+
+Trace complete, no code this dispatch. GK-62 ordered first the
+following dispatch (below) — fires today on every manual scan and
+corrupts a real scorer; GK-39's constants (65 or 90 against an <80
+gate) have never changed an outcome. GK-39 itself decided
+(next-dispatch note below) but not yet scoped.
+
+## Dispatch 46 (2026-08-10) — GK-62 IMPLEMENTED (working tree, uncommitted): convergence vision-slot no longer accepts manual values
+
+`api/enrich.js` and `tests/grailkey-dispatch-46-gk62-vision-provenance.test.js` — **implemented, sitting in the working tree, no commit, no SHA** as of this dispatch. `src/lib/convergenceScore.js` untouched (re-verified: `SOURCE_WEIGHTS` and `applyIdentityConflictDemotion` byte-identical, checked by the new test itself, Part 0). See Dispatch 46B immediately below for the field-level-exclusion trace, the decision to keep all-or-nothing, and the eventual commit/push record.
+
+### Fix
+
+Four new consts inserted immediately before `convergenceSources`
+(`api/enrich.js:4159-4163`):
+```js
+const visionWasSkipped = manualIdentity === true || manualCorrectionRequest?.valid === true;
+const rawVisionTitle = visionWasSkipped ? null : (title ?? null);
+const rawVisionIssue = visionWasSkipped ? null : (issue ?? null);
+const rawVisionYear = visionWasSkipped ? null : (year ?? null);
+const rawVisionPublisher = visionWasSkipped ? null : (rawPublisher ?? null);
+```
+All four `convergenceSources` axes (title/issue/era/publisher) now read
+`rawVisionX` instead of `effectiveX`. `effectiveX` itself is untouched
+and still drives identity resolution, pricing, cache keys, and
+everything else it always has — this fix touches only the caller-side
+input to `computeAxisScore`'s vision slot. `barcodeIdentity` is
+deliberately never consulted when building `rawVisionX` (its resolved
+fields come from a ComicVine UPC lookup, not Vision — "same treatment"
+per the dispatch instruction), so a barcode scan's genuine Vision
+extraction (if Vision also ran on the same image) still counts, while
+barcode's own resolved values never did and still don't leak in.
+
+### Manual source-class decision: EXCLUDE, not relabel
+
+The dispatch offered two shapes — a peer `'manual'`/`'operator authority'`
+label inside automated convergence, or exclusion from it entirely.
+**Exclusion chosen**, for two reasons: (1) it's the only shape available
+under the dispatch's own constraint not to touch
+`src/lib/convergenceScore.js` — `computeAxisScore` only iterates
+`Object.entries(SOURCE_WEIGHTS[axis])`, so a `'manual'` key in `sources`
+would need a matching weight entry in that file to be counted at all;
+adding one is out of scope this dispatch. (2) it's what the dispatch
+text asked for literally — "must never enter the automated
+denominator," and even an honestly-labeled manual vote would still
+enter `totalWeight`. Operator authority is not un-recorded by this
+choice: `identitySource`/`confirmedSource` (already shipped, already
+surfaced on `out.identityAlignment.confirmedSource` and elsewhere)
+already carries `'manual'` honestly as its own field — this fix doesn't
+duplicate that, it just stops smuggling the same value into a second,
+differently-labeled field.
+
+### `workingIdentity` consumer trace (required before implementing)
+
+`git grep -n "manualCorrectionRequest\|workingIdentity" api/enrich.js`
+— exactly one consumer of `.workingIdentity.*`:
+`effectiveTitle`/`Issue`/`Year`/`Publisher` at `api/enrich.js:2390-2393`.
+The only other `manualCorrectionRequest` reads are `.valid` (control
+flow) and `.validation` (fed to `buildManualCorrectionProvenance` at
+`:10747-10748`, which already tags its output
+`provenanceTrust: 'client-reported'` — honest, not a laundering site).
+No second consumer of `effectiveX` mislabels it as Vision — `git grep`
+for `vision:\s*effective` across the repo returns exactly the four
+lines this fix changed, plus one unrelated hit at `api/enrich.js:4332`
+(`vision: title` inside `alignment.conflicts`, GK-39's dead-constant
+object — explicitly out of scope, untouched).
+
+### Frozen-corpus convergence deltas (real, unmodified `computeConvergenceScore`)
+
+| Scan | OLD | NEW | delta |
+|---|---|---|---|
+| Witching Hour #66 class — manual entry, zero corroboration | 100 | 0 | −100 |
+| Manual correction, issue-only, zero corroboration | 67 | 0 | −67 |
+| Ordinary camera scan, Vision genuinely agrees with eBay | 100 | 100 | +0 |
+| Manual entry WITH real eBay corroboration (manual value happens to be right) | 100 | 75 | −25 |
+
+Every manual-path score drops or holds; camera-scan path is
+byte-identical. No case increases — matches the dispatch's explicit
+"convergence DROPS on manual scans, do not tune it back up." 28/28
+new assertions pass (`tests/grailkey-dispatch-46-gk62-vision-provenance.test.js`),
+including an extract-and-eval of the real shipped
+`visionWasSkipped`/`rawVisionX` source (not a retyped copy, per the
+repo's standing test-design rule) exercised against the frozen corpus.
+
+### Four-category baseline, post-fix
+
+153 PASS → **154** (+1, the new test file itself). 16 PRE-EXISTING FAIL
+→ 16 (unchanged — `git grep` confirmed no existing test asserts the old
+vision-slot behavior; the two candidate files a broad grep flagged,
+`q-trackB-commit4.3.1-retention-decline-fail-closed.test.js` and
+`q117-cv-title-axis-field.test.js`, contain zero references to manual
+identity on inspection — false positives from the OR pattern). 3 GATED
+SKIP → 3 (unchanged, unrelated to this fix — the rate-limit.js interval
+leak and the API-key-gated integration test from GrailKey Dispatch 22-J
+carry over unchanged). 0 NEW FAIL → 0. Total 173, not 172 (+1 new file).
+
+### Status
+
+GK-62 implemented, uncommitted, tests passing, `convergenceScore.js`
+untouched, baseline delta fully explained. **Held for the field-level-
+exclusion question — see Dispatch 46B immediately below before treating
+this as final.** GK-39 stays contained by presentation rule (no code —
+Auth %/breakdown/VERIFIED/needsReview simply don't belong in any
+customer-facing surface going forward), scoping deferred per the
+operator's explicit "not yet scoped" note. GK-65/GK-64 logged, not
+worked, per the same dispatch.
+
+## Dispatch 46B (2026-08-10) — GK-62 correction round: terminology, renumbering, field-level-exclusion trace
+
+**Corrections to Dispatch 46's own record, per direct operator
+correction:** GK-62 was IMPLEMENTED (working tree, uncommitted, no SHA),
+not "shipped" — that word is wrong until a commit exists and was struck
+above. The persistence/listing-gate defect renumbers **GK-63 → GK-65**
+throughout this file and CLAUDE.md, so there is exactly one GK-62 (the
+vision-provenance fix) and no collision.
+
+### Trace — is field-level exclusion possible instead of all-or-nothing?
+
+**a. Does `manualCorrectionRequest` carry field-level information about
+which fields were actually corrected? YES.**
+`validateManualAuthority` (`src/lib/manualCorrection.js:146-178`)
+returns `acceptedFields` (`:171`) — allow-listed fields the client
+claimed AND actually supplied a valid, non-empty value for, this
+request. Threaded through `prepareManualCorrectionRequest`'s return
+(`:268`, the `validation` object) — reachable in `api/enrich.js` as
+`manualCorrectionRequest.validation.acceptedFields`.
+
+**b. For fields NOT corrected, where does `workingIdentity`'s value
+come from? Traced per field — same answer for all four.**
+`buildField` (`manualCorrection.js:255-259`): for a field not in
+`acceptedFields`, `workingIdentity.X = normalizeFieldValue(field,
+body[field]) ?? body[field]` — i.e. whatever the CLIENT sent as
+`body.title`/`issue`/`year`/`publisher` on THIS request. The real,
+production-used request builder — `buildManualCorrectionPayload`
+(`manualCorrection.js:626-639`) — sets an uncorrected field to
+`item.title`/`item.year`/`item.publisher`: **the catalogue item's
+current confirmed value**, not a freshly re-read Vision extraction.
+That value could have originated from Vision, eBay, PriceCharting,
+ComicVine, or an earlier manual correction — nothing tags which. **"Not
+corrected this request" is not the same fact as "genuinely this-request
+Vision observation," and the codebase does not equate them anywhere.**
+
+**c. Does the correction request retain the original raw Vision
+observations anywhere (request, session, cache)? NO, confirmed absent
+for title/year/publisher; partial and still not "vision" for issue.**
+`buildManualCorrectionProvenance`'s own comment
+(`manualCorrectionRequest.js:572-576`, sic — `src/lib/
+manualCorrection.js`): *"Only the 'issue' field currently carries a
+structured prior-source signal (issueAuthority) ... title/year/
+publisher have no equivalent authority object yet in this codebase, so
+their priorSource is honestly null, not guessed."* Even where a source
+tag exists (`priorIdentity.issueAuthority?.source`, issue only), its
+possible values include `'ebay_visual_override'`,
+`'title-family-top-rank-protection'`, etc. — genuinely non-Vision
+sources — so even that one tag would frequently say "not vision" if
+consulted, not confirm safety. `src/lib/scanLog.js:99` records only the
+final `book.title`/`issue`/`year`, no separate raw-Vision snapshot.
+Nowhere in the request, a session object, or the KV cache is a raw,
+this-scan Vision observation retrievable at correction time.
+
+**d. One fixture, real `computeConvergenceScore`, camera identity on
+all four axes → operator corrects issue only (300→301), publisher
+modeled as genuinely Vision-only (no eBay/PC/CV publisher data — the
+exact shape the risk item named):**
+
+| axis | OLD score | CURRENT (all-or-nothing) score | note |
+|---|---|---|---|
+| title | 100 | 100 | unaffected — eBay alone already saturates it |
+| issue | 49 | 0 | the corrected axis — expected to drop |
+| era | 100 | 100 | unaffected — histogram alone saturates it |
+| publisher | 100 | **0, zero votes** | **genuinely lost** — the one axis with no non-Vision corroboration at all |
+| **TOTAL** | **87 (MEDIUM)** | **50 (LOW)** | tier changes, driven entirely by publisher |
+
+Confirms the risk item concretely: an untouched, never-questioned axis
+with only Vision behind it drops from full agreement to zero evidence,
+purely as a side effect of an unrelated field's correction, moving the
+card's tier from MEDIUM to LOW.
+
+### Decision: all-or-nothing exclusion is CORRECT. Not implementing field-level exclusion.
+
+The mechanical rule turns on whether field-level provenance is both
+available AND trustworthy. (a) is available. But the actual question
+the fix needs answered isn't "was this field corrected this request" —
+it's "is this field's CURRENT value genuinely this-request Vision
+output," and (b)+(c) prove that second question has no reliable answer
+anywhere in the system for title/year/publisher, and an unreliable one
+(frequently non-Vision) for issue. Building field-level exclusion on
+top of "acceptedFields says this wasn't touched" would silently
+re-introduce GK-62's exact defect on a narrower set of fields — labeling
+a value 'vision' that has no verified Vision provenance, just because
+nothing this request happened to change it. Per the operator's own
+framing: the information isn't there, so the conservative
+(all-or-nothing) behavior stands. The reduced-evidence cost is real
+(the fixture above) and logged here as a known, accepted tradeoff, not
+silently absorbed — a future fix would need a genuine per-field
+provenance tag (e.g. extending `issueAuthority`-style tracking to
+title/year/publisher, and populating it from actual Vision output, not
+"whichever value happens to be on the card") before field-level
+exclusion could be done safely. Not scoped, not built.
+
+### Status
+
+Terminology and numbering corrected (GK-62 implemented not shipped;
+GK-63→GK-65). Field-level exclusion traced and explicitly rejected —
+all-or-nothing commits as-is. Two commits made:
+`api/enrich.js` + the GK-62 test, then docs. Pushed. See commit/deploy
+record appended at the end of this entry once available.
+
+## Standing invariants (Dispatch 46) — added to the running list started at Dispatch 33
+
+**A safety gate must not disappear because an asset crossed a
+persistence boundary.** (GK-65 — the Ship #24 auth gate is real code
+that can only ever fire in the pre-save window, because the field it
+reads is dropped by every catalogue merge path.) Joins the Dispatch 33
+invariants (Monotonic Evidence Extension, No Self-Corroboration),
+Dispatch 34 (Rejection Must Not Create Authority), Dispatch 37 (Cache
+Correctness Is Authority Correctness), Dispatch 44 (Authority Must Be
+Use-Consistent).
+
+**A value must not vote for itself.** (GK-62 — the mechanism this
+dispatch fixed: a manual value placed in a source-labeled voting slot,
+then compared for agreement against itself.) Distinct from the other
+five: those are about a rejected/stale/incompatible value being read as
+authoritative by a later consumer; this one is about a single value
+appearing on both sides of an agreement check under two different
+identities (the confirmed value, and a "second source" that is secretly
+the same value).
+
