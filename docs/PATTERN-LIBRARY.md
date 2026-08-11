@@ -5545,3 +5545,312 @@ capture depends on the real `/api/enrich` response per scan, not KV, per
 the durability finding above — flagged before scanning starts, not
 discovered at replay time. Holding for the go-ahead to begin scanning.
 
+## GrailKey Dispatch 42 (2026-08-09) — IndexedDB does not preserve `priceDerivationTrace`; preflight target corrected before scanning
+
+Record only, no code changes. Direct consequence of checking, before the
+Bone batch starts, whether the structured `/api/enrich` response carries
+the pricing-branch field the fixture contract needs (`[price-bands]
+source`) without a runtime-log dependency.
+
+### `out.priceBands.source` is present but gets overwritten by the exact mechanism under test
+
+`out.priceBands` (`api/enrich.js:6761-6769`) is trimmed to
+`{quick, market, stretch, source, count, tier, variantAdjusted}` and IS
+threaded through every App.jsx catalogue merge path — confirmed present
+in the persisted IndexedDB record. But when mega-key-floor fires (Bone's
+exact case), `out.priceBands` is **rebuilt** (`api/enrich.js:8891-8899`)
+with `source` hardcoded to the literal string `'mega-key-floor'` — the
+original tier-2 branch name (`tier2_active_dominant_thin_sold`) is gone
+from that field the moment the floor engages. A coarser fallback exists
+(`out.preFloorSource`, set from `out.pricingSource` just before the
+rebuild, mapped through `TIER_SOURCE_MAP` to `'active_ask_derived'` —
+shared with `tier3_active_discounted`, not unique on its own) and IS
+threaded through every merge path, confirmed by direct grep (`preFloorPrice`/
+`preFloorSource` present in all checked App.jsx call sites). Combined
+with `out.priceBands.tier` (also preserved through the rebuild), the
+pair `(tier=2, preFloorSource='active_ask_derived')` does uniquely
+identify the branch — but only by cross-referencing `TIER_SOURCE_MAP`,
+not from a single direct field.
+
+### The actually-correct field exists, survives the floor untouched, and carries the raw per-comp arrays — but IndexedDB drops it
+
+`out.priceDerivationTrace` (`api/enrich.js:6777`, sourced from
+`priceBandsRaw.derivationTrace`, built by `buildDerivationTrace`/
+`buildTraceStep` in `src/lib/priceBands.js:501-507,874-887`) is set
+**before** the mega-key-floor block runs and is **never referenced
+anywhere in that block** — confirmed by reading the full floor-override
+branch (`api/enrich.js:8870-8908`), which touches `priceBands`, `price`,
+`priceLow/High`, `megaKeyFloor*`, `preFloor*`, but not
+`priceDerivationTrace`. For Bone's exact branch, its `operations` array
+carries a step literally named `'active_dominant_thin_sold_discount'`
+(`priceBands.js:880-881`) — the original branch identity, intact,
+regardless of what `out.priceBands.source` gets rebuilt to afterward.
+Its `sold_average`/`active_average` steps carry the **raw
+`soldPrices`/`activePrices` arrays themselves** as `inputValue`
+(`priceBands.js:878-879`) — individual per-comp prices, not aggregates,
+for both pools, on both branches with and without floor override.
+
+**This is the single richest field for the recovery-predicate fixture
+— and it is not persisted to the client catalogue at all.** Grepped
+`priceDerivationTrace` across `src/App.jsx`: zero matches, anywhere, in
+any of the five documented client merge paths. It exists only in the
+raw `/api/enrich` HTTP response body for that one request — computed,
+sent, and then silently dropped by every client-side merge path before
+anything reaches IndexedDB. This is a fourth concrete instance of the
+Dispatch 39 pricing auditability gap, and the most surprising one so
+far: even the one place client-side persistence exists at all (the
+catalogue) doesn't preserve the server's own richest diagnostic output —
+not a TTL problem this time, a merge-path omission.
+
+### Preflight target corrected, before any scanning happened
+
+Originally scoped as "verify the IndexedDB/catalogue object still
+contains the structured response fields needed for replay." **Corrected
+before running it**, per instruction not to proceed on a degraded
+capture path: IndexedDB is confirmed, by direct code inspection (not
+requiring a live scan to establish), to be missing `priceDerivationTrace`
+— the field that both survives the floor override with the original
+branch label intact AND carries the raw per-comp price arrays for both
+pools. Recommended alternative, cheapest available: **capture the raw
+`/api/enrich` HTTP response body directly** (browser DevTools Network
+tab "Copy Response," or direct stdout if scanning via script/API call)
+instead of an IndexedDB export. Strictly a superset of what IndexedDB
+would have offered — everything IndexedDB persists is also in the raw
+response, plus `priceDerivationTrace`. The one live control-book scan
+still specified as a preflight step now validates this corrected target,
+not the original IndexedDB-export plan.
+
+### Status
+
+Preflight target corrected before the first scan, per the explicit
+instruction not to discover a degraded capture path mid-batch. One
+live control-book scan (direct response capture, not IndexedDB export)
+still outstanding before the 11-15-book batch begins. Holding.
+
+## GrailKey Dispatch 43 (2026-08-09) — bulk request cardinality proven from source; deterministic fixture pipeline built, tested against live data
+
+Record only for the source audit; three tooling scripts added (no
+production code touched).
+
+### Bulk request cardinality — source-proven, not inferred from console labels
+
+Read `handleBulkImport` end to end (`src/App.jsx:11110-11290`), per
+explicit instruction not to infer from `[bulk-parallel]`/`[persist-bulk]`
+log labels. **One independent `/api/enrich` request per book, confirmed
+at the call site.** `handleBulkImport` runs a `CONCURRENCY=3` worker
+pool (`processFile(file, index)`, line 11135) — each worker grades one
+file via `/api/grade`, saves it to the catalogue, then fires exactly one
+`fetch("/api/enrich", {..., body: JSON.stringify({title: data.title,
+issue: bulkIssue, grade: data.grade, ...})})` (line 11235) carrying that
+single book's fields, not an array. No batched/multi-book enrich
+endpoint exists anywhere in this call path. **Conclusion: Network-tab
+"Copy Response" per book works unchanged for bulk scans — no adaptation
+to the capture method needed.**
+
+### Deterministic fixture pipeline — three scripts, tested against live data (success and failure paths)
+
+`dispatch39-fixtures/<NN>-<title-slug>-<issue>__<trace8>/` layout, per
+spec. `trace8` sourced from `out.pipelineAudit.traceId`
+(`api/enrich.js:11106-11112`, `src/lib/pipelineAudit.js:77` —
+`traceId: ctx.traceId`, confirmed present on every response, a
+`randomUUID()`).
+
+- **`scripts/ingest-fixture-response.mjs <response.json> [request.json]`**
+  — auto-assigns the next `NN`, builds the directory, copies
+  `response.json` (and `request.json` if given) verbatim, reports
+  structural proof only (soldComps is-Array + length, decision.action,
+  price, priceDerivationTrace present/absent, activeCached.count,
+  megaKeyFloorApplied) — never comp contents.
+- **`scripts/capture-active-cache-entry.mjs --dir "<dir>" "<title>" "<issue>"`**
+  — rewritten from Dispatch 41's flat-file version. Writes
+  `active-cache.json` into the given directory. When multiple live
+  `ac:v10:*` keys match title/issue (same book scanned at different
+  grades, exactly the Batman #213 A/B/C shape), disambiguates by
+  matching `response.json`'s `activeCached.count` against each
+  candidate's live `.count` — if that's still ambiguous, **refuses to
+  guess** and exits non-zero, listing all candidates.
+- **`scripts/merge-fixture.mjs "<dir>"`** — reads `response.json` +
+  `active-cache.json` (+ `request.json` if present), never modifies
+  either source artifact, produces `fixture.json` as the only output.
+  **Custody check, required not optional:** `response.activeCached.count`
+  (`api/enrich.js:9360`, the same object the `ac:v10` KV entry holds)
+  must equal the captured KV value's own `.count` — a mismatch means
+  the KV entry does not correspond to this response, and the script
+  refuses to write `fixture.json` rather than silently merging two
+  unrelated books' evidence. `fixture.json` surfaces
+  `priceDerivationTrace` (Dispatch 42's finding — survives mega-key-floor
+  intact, carries raw per-comp sold/active price arrays) alongside the
+  raw post-rebuild `priceBands.source`, both labeled so a reader can't
+  confuse "current field value" with "original branch identity."
+
+**Tested end-to-end against real live KV data** (the live
+`hero for hire luke cage|1` `ac:v10` entries, two fingerprints, real
+counts 17/19) using a synthetic response.json: full success path
+(ingest → disambiguated capture → custody-check-passed merge) verified
+correct field mapping; failure path (deliberately mismatched count)
+verified the custody check fails loudly and writes no `fixture.json`.
+All test artifacts deleted before commit — `dispatch39-fixtures/` is
+clean for the real batch.
+
+### New gap found while building the merge script — `numericTarget`/`isGraded`/`signedConsensus` absent from the response entirely
+
+`out` is initialized as `const out = {}` (`api/enrich.js:2429`, not
+spread from `req.body`), and direct grep found no `out.isGraded =`,
+`out.numericGrade =`, or `out.signedConsensus =` assignment anywhere in
+the handler — these exist only as local variables during processing,
+never surfaced back to the client. `fixture.json`'s `requestContext`
+falls back to `request.json` (the original request payload, also
+capturable from the Network tab via "Copy request payload," trivially
+alongside "Copy Response") for these three fields, and is explicitly
+`null` if `request.json` wasn't captured — not guessed.
+
+### Status
+
+Bulk cardinality proven. Fixture pipeline built and tested against live
+data, both success and failure paths. Ready for the batch pending
+confirmation on the live `hero for hire luke cage|1` entries currently
+in KV (39min TTL remaining as of this dispatch) — flagged as a real
+opportunity, not a blocker, in case that's the actual preflight scan
+already run.
+
+## GrailKey Dispatch 44 (2026-08-09) — mega-key floor gate root-caused; fifth standing invariant; Bone reframed as two distinct failure modes
+
+Record only. Direct continuation of the Dispatch 43 mega-key-floor
+source audit — root cause confirmed against the actual card, not left
+at "two ranked candidates."
+
+### Root cause confirmed: candidate 1, exactly as scoped
+
+The scanned card shows `Bonnier Carlsen · 1991`. Bone's table entry
+(`api/mega-keys.js:920-935`) requires `publisher: "image"`. `Bonnier
+Carlsen` cannot normalize to `"image"` under any alias — `passesIdentityGates`
+(`api/mega-keys.js:1081-1111`) hard-rejects on the publisher mismatch,
+`getMegaKeyEntry` returns `null`, and the entire mega-key floor block
+(`api/enrich.js:8689-8908`) is skipped **silently, with no log line at
+any stage** — matching the observed symptom exactly (no `[mega-key-floor]`
+line of any kind, not just no "enforced" line). The active-pool-composition
+hypothesis from the prior turn is withdrawn — confirmed, not just
+suspected, to play no role: none of the gates in this block read active-pool
+data at all; active composition only feeds the pre-floor price, which
+was identical ($19.33) in both the scan under audit and the one that
+skipped the floor.
+
+### Fifth standing invariant — AUTHORITY MUST BE USE-CONSISTENT
+
+> **A source rejected as incompatible on an identity axis cannot
+> simultaneously establish that same axis for downstream economic
+> decisions.**
+
+Joining Monotonic Evidence Extension, No Self-Corroboration (Dispatch
+33), Rejection Must Not Create Authority (Dispatch 34, three axes:
+ComicVine fail-open, variant fallback, mega-key floor — Dispatch 38),
+and Cache Correctness Is Authority Correctness (Dispatch 37). **Distinct
+from Rejection Must Not Create Authority** — that invariant is about a
+mechanism restoring REJECTED evidence after rejection empties a
+candidate population; this one is about the SAME value being treated as
+disqualifying by one consumer (ComicVine's own volume-matching, which
+judged `Bonnier Carlsen` publisher-incompatible against the expected
+volume) and simultaneously authoritative by another (the value survives
+as `confirmedPublisher`, which then gates mega-key eligibility). The
+shape is general, not Bone-specific: any pipeline stage that both scores
+a candidate DOWN on an axis and later reads that same axis's SURVIVING
+value as ground truth for an unrelated downstream decision is exposed to
+this class, wherever it recurs.
+
+This is the same underlying mechanism the Pattern Library already named
+once, earlier and narrower: "Mega-key protection defeated by a publisher
+mismatch" (Bone #1, `confirmedPublisher` set to "Bonnier Carlsen" via a
+ComicVine volume-match issue — recorded mid-way through this file's
+history, prior to the GrailKey dispatch numbering). This dispatch
+generalizes that specific observation into the standing invariant above.
+
+### Bone reframed — two distinct, independently real failure modes, not one
+
+```
+HISTORICAL BONE (18:05 scan)
+  thin/suspect market evidence
+    -> $19.33
+    -> mega-key floor RESTORES/AMPLIFIES authority
+    -> $800
+    -> LIST
+
+CURRENT BONE (this dispatch's scan)
+  ComicVine publisher authority leak (rejected on identity axis,
+  adopted as confirmedPublisher anyway)
+    -> mega-key eligibility gate reads confirmedPublisher
+    -> "Bonnier Carlsen" != "image" -> floor silently SKIPPED
+  PLUS, independently:
+  thin/suspect market evidence (soldPool=1, activePool=2)
+    -> price still authorized
+    -> $19.33
+    -> LIST_LOW
+```
+
+Both are real, both are documented, neither supersedes the other. The
+historical $800 path's own precise trigger (which of the two candidates
+from the prior turn — `soldMatchedFloorGuard` vs `isSuspectContaminated`
+— actually fired at 18:05) remains unconfirmed; that scan's data no
+longer exists (`ac:v10` TTL long expired, response body never captured).
+Not re-investigated this dispatch — the current scan's defect is
+sufficient on its own.
+
+### Batch no longer blocked on reproducing $800
+
+**Bone still demonstrates the trust violation this whole exercise exists
+to catch, without the floor firing at all**: thin/suspect market
+evidence (`soldPool=1`, `activePool=2`) ships as an authoritative
+`$19.33`, `LIST_LOW` — the recovery predicate this dispatch chain is
+building has a real defect to test against regardless of which mega-key
+branch fires on any given scan. The $800 reproduction was a "nice to
+have," never a hard requirement — this dispatch retires it as a
+blocker. This scan is being captured through the fixture pipeline as its
+own artifact (a second, distinct Bone failure mode, not a replacement
+for the first).
+
+### Status
+
+Root cause confirmed. New invariant recorded. Bone reframed as two
+independent failure modes, both documented, neither reproduced from
+scratch. Batch unblocked — proceeding without the $800 reproduction
+requirement. Capture of this specific scan (response.json/request.json)
+still pending — files not yet received from the operator side.
+
+## Dispatch 42-I (2026-08-10) — SAFE-KILL certified, Task 6 Identity closed; GK-50–GK-57 logged, NO WORK
+
+Capture 2 (Batman #213, `cv_1786144793823_j1lx5j`, build `1d4c125`,
+`compFilterVersion` 9, `comicVine` 19 keys, `id` 10331, `volumeId` 796)
+executed by hand against a real production record — 7/7 checks PASS
+(1c flag absent, 2c timestamp index present, 2e comicVine present (19),
+2f flag removed, 3g flag present, 3h key exists:false, 3i key
+exists:false). Task 6 Identity closed; ComicVine safe-kill (Dispatch 42
+Tasks 1-5 + 42-A item 2) certified. `9ca0b9a`/`544fb7d`/`cf96d1b` pushed
+to `origin/main` (`b79e4d1..cf96d1b`); Vercel deploy `dpl_97m8pmcLzuC6M3Zx1ySDW96rKvm4`
+confirmed READY/production, `githubCommitSha cf96d1b6f4c397bb9aca38fcecb7b2873f709dc8`,
+aliased live to `comic-vault-rouge.vercel.app`.
+
+**GK-50 through GK-57 — logged verbatim as reported by the operator this
+dispatch. NOT independently investigated, NOT reproduced, NOT fixed —
+explicit instruction was log only.** Each needs its own scoping pass
+before any code is touched.
+
+- **GK-50** — volume-label rescue unobservable in the sold lane.
+- **GK-51** — era filter returns `bypassed:false` while actually bypassing.
+- **GK-52** — `yearCorrected` true when the raw year was empty.
+- **GK-53** — `noImage:true` on scans that had images.
+- **GK-54** — `comicVine:{}` stored on no-match; 3 of 5 production records
+  carry an empty-but-truthy shell (falsy-check consumers would misread
+  this as "present").
+- **GK-56** — the same eBay listing ID present in both the active and
+  sold pools — double-counted as two independent observations.
+- **GK-57** — `[bulk]` "year healed" and `[persist-bulk]` both logged
+  twice for one `savedId`.
+
+(GK-55 already shipped this dispatch — see the `cf96d1b` commit message
+above — and is not re-logged here as open.)
+
+### Status
+
+SAFE-KILL certified, pushed, deployed, verified READY at the exact
+pushed SHA. Eight defects logged at the operator's explicit instruction
+not to work them. Standing by. GK-39 to be issued separately.
+
