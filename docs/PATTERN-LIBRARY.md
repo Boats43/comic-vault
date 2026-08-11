@@ -6152,3 +6152,89 @@ appearing on both sides of an agreement check under two different
 identities (the confirmed value, and a "second source" that is secretly
 the same value).
 
+## Dispatch 47 (2026-08-10) — GK-39A SHIPPED: fabricated confidence removed, no replacement
+
+`api/enrich.js`, `src/App.jsx`,
+`tests/grailkey-dispatch-47-gk39a-remove-fabricated-confidence.test.js`.
+`src/lib/convergenceScore.js`, `src/lib/identityAlignment.js`
+(`alignIdentity()`), `src/lib/decisionEngine.js` all untouched — re-
+verified by the new test, not just asserted.
+
+### What was removed
+
+`authenticationScore`, `breakdown`, `confidence`, `needsReview` deleted
+from both `identityAlignment` construction sites in `api/enrich.js` (the
+`alignment` object and the `out.identityAlignment` copy) — GK-39's own
+finding: these were a hardcoded two-branch literal (65/90,
+UNCERTAIN/VERIFIED), never a computation. `confirmedTitle`,
+`confirmedIssue`, `confirmedYear`, `confirmedSource`, `overrodeVision`,
+`conflicts` are untouched — real, evidence-grounded fields, explicitly
+kept per the dispatch (GK-64's staleness on `confirmedYear` is a
+separate, not-yet-worked defect). No replacement number introduced —
+per the dispatch's explicit instruction and per GK-39's own recorded
+"next dispatch" note (Dispatch 45): the eventual replacement is an
+evidence list, not a percentage, and that's still not this dispatch.
+
+Both render surfaces removed: `App.jsx`'s ResultCard "Auth: X%" badge,
+and CollectionDetail's colored dot + tier word + per-field breakdown
+row. CollectionDetail's `conflicts` rendering — real data, explicitly
+kept — was previously nested INSIDE the now-removed badge's wrapper
+conditional (`authenticationScore != null`); re-gated on its own
+presence (`identityAlignment?.conflicts?.length > 0`) so it isn't
+silently orphaned by the removal of the field it used to piggyback on.
+
+### The listing gate — decided before implementing, per the dispatch's explicit requirement
+
+**Removed outright, not fail-safed.** Reasoning recorded both here and
+at the deletion site in `App.jsx` itself: the moment
+`authenticationScore` no longer exists, `needsAuthAck`'s condition
+becomes permanently `false` regardless of what code surrounds it — the
+only real choice was whether to leave that dead condition in place
+(reading as a live safety gate to a future maintainer, per its own
+comment: "block listing when score < 80") or delete it. Leaving inert
+code that LOOKS like a real gate is the same category of falsehood
+GK-39A exists to remove, just relocated from a displayed number to a
+phantom protection. Deleted the `needsAuthAck` const and its `if` block
+entirely; both the read site and the only write site
+(`onUpdateField(item, 'authenticationConfirmed', true)`) are gone — a
+full removal, not a one-sided orphan. Verified: this gate's own
+constants (65 in the one branch that could ever apply, 90 everywhere
+else, against a `<80` threshold) mean it never fired in production
+regardless — deleting it costs nothing.
+
+### Tests — 46/46 passing
+
+Five parts: (1) source-extraction proof the two `identityAlignment`
+construction sites in `api/enrich.js` carry the real fields and not the
+removed ones; (2) same for `App.jsx`'s render surfaces, plus proof the
+gate's variable/field names are fully gone and the removal-reasoning
+comment survives at the deletion site; (3) `alignIdentity()` still has
+zero call sites, `convergenceScore.js` byte-identical
+(`SOURCE_WEIGHTS`/`applyIdentityConflictDemotion` checked directly); (4)
+`decisionEngine.js` has zero references to either field (true before
+and after this dispatch) plus a direct behavioral proof —
+`computeDecision()` run on the identical fixture with and without the
+fabricated fields produces byte-identical `action`/`blockers`/
+`warnings`; (5) `priceBands.js`/`pricingEngine.js` confirmed to have
+zero references to `identityAlignment` at all, and a `convergenceScore`
+fixture proven deterministic and unaffected.
+
+### Four-category baseline
+
+154 PASS (expected) → **155** (+1, the new test file). 16 PRE-EXISTING
+FAIL → 16, byte-identical file list to the prior sweep. 3 GATED SKIP →
+3, byte-identical. 0 NEW FAIL → 0. `npm run build` clean both after the
+`api/enrich.js` edit and again after the `App.jsx` edits.
+
+### Status
+
+GK-39A shipped. GK-39 itself (the presentation-rule containment from
+Dispatch 45) is now the actual, enforced state, not just a stated
+policy — there is no code left anywhere that can emit or render the
+constants. `convergence` (GK-62's real scorer, honestly fed as of
+`33079e4`) is the only identity-confidence signal left on the card.
+Next queued: GK-38/GK-42 (PriceCharting-ladder-as-passthrough
+labeling defect, same disease — the UI claiming to know something it
+doesn't — scoped together per the operator's own framing, not yet
+started).
+
