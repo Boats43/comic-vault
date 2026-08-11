@@ -2051,6 +2051,13 @@ function ResultCard({ result, enriching }) {
             <span>{ladderExpanded ? '▼' : '▶'}</span>
             <span>PRICE LADDER ({Object.keys(result.priceLadder).length} grades)</span>
           </div>
+          {/* GK-66 (Dispatch 50) — attribution added; sibling panels already
+              do this (App.jsx "Source: PriceCharting market data"). This
+              ladder is an unedited PriceCharting per-grade scrape, not a
+              GrailKey-computed curve. */}
+          <div style={{ fontSize: 10, color: '#666', marginTop: 2, marginLeft: 15 }}>
+            Source: PriceCharting, unedited
+          </div>
           {ladderExpanded && (() => {
             // Ship #21k: Preserve literal grade strings ("raw", "9.8", etc.) — parseFloat("raw") = NaN
             const entries = Object.entries(result.priceLadder)
@@ -4636,6 +4643,13 @@ function CollectionDetail({
             <span>{ladderExpanded ? '▼' : '▶'}</span>
             <span>PRICE LADDER ({Object.keys(item.priceLadder).length} grades)</span>
           </div>
+          {/* GK-66 (Dispatch 50) — attribution added; sibling panels already
+              do this (App.jsx "Source: PriceCharting market data"). This
+              ladder is an unedited PriceCharting per-grade scrape, not a
+              GrailKey-computed curve. */}
+          <div style={{ fontSize: 10, color: '#666', marginTop: 2, marginLeft: 15 }}>
+            Source: PriceCharting, unedited
+          </div>
           {ladderExpanded && (() => {
             // Ship #21k: Preserve literal grade strings ("raw", "9.8", etc.) — parseFloat("raw") = NaN
             const entries = Object.entries(item.priceLadder)
@@ -6073,10 +6087,14 @@ function CollectionDetail({
               : (mcTier || (sc >= 2 ? "HIGH" : cc >= 2 ? "MEDIUM" : hasPriceData ? "MEDIUM" : "LOW"));
             const bg = level === "HIGH" ? "rgba(22,163,106,0.2)" : level === "MEDIUM" ? "rgba(212,175,55,0.2)" : "rgba(220,38,38,0.2)";
             const fg = level === "HIGH" ? "#16a34a" : level === "MEDIUM" ? "#d4af37" : "#dc2626";
+            // GK-49 fix (Dispatch 50) — "~ Similar 93" read as a comp count
+            // next to actual comp-count context; mcScore (api/comps.js:442,
+            // untouched, a 0-100 title/issue/year/variant text-match quality
+            // score) is now explicitly labeled. Score itself unchanged.
             const label = level === "HIGH"
               ? `✓ Verified${mcScore != null ? ` ${mcScore}` : ""}`
               : level === "MEDIUM"
-                ? `~ Similar${mcScore != null ? ` ${mcScore}` : ""}`
+                ? (mcScore != null ? `Match quality: ${mcScore}/100` : "Similar match")
                 : `⚠ Estimate${mcScore != null ? ` ${mcScore}` : ""}`;
             return (
               <span style={{ ...pillStyle, background: bg, color: fg }}>
@@ -6336,11 +6354,17 @@ function CollectionDetail({
                       );
                     })()}
 
-                    {item.blendedAvg && (
-                      <div style={{ color: '#888', marginTop: 4 }}>
-                        → Blend (60/40): <span style={{ color: '#a78bfa' }}>${item.blendedAvg.toFixed(2)}</span>
-                      </div>
-                    )}
+                    {/* GK-67 (Dispatch 50) — "Blend (60/40): $item.blendedAvg"
+                        removed. blendedAvg (api/enrich.js:6642, soldAvg×0.6 +
+                        activeAvg×0.4) is a real, still-used value elsewhere
+                        (keyMultBase, compsAvgForCap) but is NOT what actually
+                        produced the "= Final" price below it whenever pricing
+                        came from priceBands.js's own tier computation (e.g.
+                        tier2_blend_70_30 = soldAvg×0.7 + activeAvg×0.3, a
+                        different formula on different inputs) — rendering it
+                        here as a causal derivation step was false. blendedAvg's
+                        own computation is untouched; only this presentation is
+                        gone. See docs/PATTERN-LIBRARY.md "Dispatch 48/50". */}
 
                     {(item.rawComps?.lowest || item.rawComps?.gradeFilteredLowest) && (
                       <div style={{ color: '#888', marginTop: 6 }}>
@@ -6445,11 +6469,27 @@ function CollectionDetail({
               </div>
             )}
             <div className="muted small" style={{ marginTop: 6, fontStyle: "italic" }}>
-              {item.pricingSource === "pricecharting"
-                ? "Source: PriceCharting market data"
-                : item.pricingSource === "browse_api"
-                  ? "Source: Browse API — active listings"
-                  : "Source: AI estimate"}
+              {/* GK-67-adjacent fix (Dispatch 50) — every TIER_SOURCE_MAP
+                  output (src/lib/priceBands.js) gets its own truthful
+                  label. sold_active_blend_30 is a real 31-comp computation
+                  and must never fall through to "AI estimate" — nor may
+                  any other unmapped value; unknown renders "Source
+                  unavailable", never an invented label. */}
+              {(() => {
+                const PRICING_SOURCE_LABELS = {
+                  pricecharting: "PriceCharting market data",
+                  browse_api: "Browse API — active listings",
+                  verified_sold_recency: "verified sold comps (recency-weighted)",
+                  sold_active_blend_30: "sold + active blend (70/30)",
+                  verified_sold: "verified sold comps",
+                  verified_sold_stale: "verified sold comps (stale)",
+                  active_ask_derived: "active listing asks",
+                  pc_estimate: "PriceCharting estimate",
+                  verified_sold_active_blend: "sold + active blend (verified)",
+                };
+                const label = PRICING_SOURCE_LABELS[item.pricingSource];
+                return label ? `Source: ${label}` : "Source unavailable";
+              })()}
               {Array.isArray(item.soldComps) && item.soldComps.length > 0 && " + eBay sold"}
             </div>
             <div className="muted small" style={{ fontSize: 11 }}>
@@ -7060,10 +7100,34 @@ function CollectionDetail({
                 </div>
                 {/* Source info */}
                 <div style={{ marginTop: 8, fontSize: 11, color: "#888" }}>
-                  {item.priceBands.count > 0 && `Based on ${item.priceBands.count ?? 0} ${
-                    item.priceBands.source === 'verified_sold' ? 'sold' :
-                    item.priceBands.source === 'verified_active' ? 'active' : 'estimated'
-                  } comp${item.priceBands.count === 1 ? '' : 's'}`}
+                  {/* GK-67-adjacent fix (Dispatch 50) — item.priceBands.source
+                      is priceBandsRaw's RAW internal tier name
+                      (src/lib/priceBands.js's PRICE_BANDS_SOURCES, e.g.
+                      "tier2_blend_70_30"), never the literal strings
+                      "verified_sold"/"verified_active" this line compared
+                      against previously — those are TIER_SOURCE_MAP OUTPUT
+                      values (item.pricingSource, a different field). That
+                      made both real branches dead code: every book always
+                      fell through to "estimated" here regardless of its
+                      actual source. Every PRICE_BANDS_SOURCES value now
+                      gets its own truthful label; unmapped falls to
+                      "source-unavailable", never an invented one. */}
+                  {item.priceBands.count > 0 && (() => {
+                    const PRICE_BANDS_SOURCE_LABELS = {
+                      tier1_recency_weighted: 'sold',
+                      tier2_blend_70_30: 'blended sold + active',
+                      tier2_sold_only: 'sold',
+                      tier2_sold_only_active_suspect: 'sold',
+                      tier2_active_dominant_thin_sold: 'active',
+                      verified_sold_stale: 'stale sold',
+                      tier3_active_discounted: 'active',
+                      tier3_active_discounted_over_fallback_sold: 'active',
+                      tier4_pc_estimate: 'PriceCharting-estimated',
+                      variant_fallback_capped: 'active',
+                    };
+                    const label = PRICE_BANDS_SOURCE_LABELS[item.priceBands.source] || 'source-unavailable';
+                    return `Based on ${item.priceBands.count ?? 0} ${label} comp${item.priceBands.count === 1 ? '' : 's'}`;
+                  })()}
                   {item.priceBands.recencyDays != null && ` · Most recent: ${item.priceBands.recencyDays}d ago`}
                 </div>
               </div>
