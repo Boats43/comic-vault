@@ -10334,6 +10334,9 @@ export default function App() {
                 gradeExceedsMap: enrich.gradeExceedsMap === true,
                 gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                 compsExhausted: enrich.compsExhausted === true,
+                // GrailKey Directive B, Task 2 — eBay UNAVAILABLE != EMPTY
+                ebaySourceUnavailable: enrich.ebaySourceUnavailable === true,
+                ebaySourceReason: enrich.ebaySourceReason || null,
                 pop: enrich.pop || cur.pop || null,
                 compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                 // Ship #13 observability
@@ -10842,6 +10845,9 @@ export default function App() {
                   gradeExceedsMap: enrich.gradeExceedsMap === true,
                   gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                   compsExhausted: enrich.compsExhausted === true,
+                  // GrailKey Directive B, Task 2 — eBay UNAVAILABLE != EMPTY
+                  ebaySourceUnavailable: enrich.ebaySourceUnavailable === true,
+                  ebaySourceReason: enrich.ebaySourceReason || null,
                   pop: enrich.pop || cur.pop || null,
                   compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                   // Ship #13 observability
@@ -10967,6 +10973,9 @@ export default function App() {
                   gradeExceedsMap: enrich.gradeExceedsMap === true,
                   gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                   compsExhausted: enrich.compsExhausted === true,
+                  // GrailKey Directive B, Task 2 — eBay UNAVAILABLE != EMPTY
+                  ebaySourceUnavailable: enrich.ebaySourceUnavailable === true,
+                  ebaySourceReason: enrich.ebaySourceReason || null,
                   pop: enrich.pop || s.pop || null,
                   compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                   // Ship #13 observability
@@ -11342,6 +11351,9 @@ export default function App() {
                 gradeExceedsMap: enrich.gradeExceedsMap === true,
                 gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
                 compsExhausted: enrich.compsExhausted === true,
+                // GrailKey Directive B, Task 2 — eBay UNAVAILABLE != EMPTY
+                ebaySourceUnavailable: enrich.ebaySourceUnavailable === true,
+                ebaySourceReason: enrich.ebaySourceReason || null,
                 pop: enrich.pop || cur.pop || null,
                 compEraFilterBypassed: enrich.compEraFilterBypassed === true,
                 // Ship #13 observability
@@ -11885,6 +11897,9 @@ export default function App() {
       gradeExceedsMap: enrich.gradeExceedsMap === true,
       gradeExceedsMapReason: enrich.gradeExceedsMapReason || null,
       compsExhausted: enrich.compsExhausted === true,
+      // GrailKey Directive B, Task 2 — eBay UNAVAILABLE != EMPTY
+      ebaySourceUnavailable: enrich.ebaySourceUnavailable === true,
+      ebaySourceReason: enrich.ebaySourceReason || null,
       pop: enrich.pop || item.pop || null,
       compEraFilterBypassed: enrich.compEraFilterBypassed === true,
       // Ship #13 observability

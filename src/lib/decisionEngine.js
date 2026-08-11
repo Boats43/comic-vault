@@ -428,6 +428,21 @@ export function computeDecision(item, context = {}) {
     };
   }
 
+  // Warning: eBay source unavailable (GrailKey Directive B, Task 2). Distinct
+  // from zero-verified-comps above (that's about sold-comp AI-verification
+  // rejecting everything; this is about the eBay active-listing search never
+  // running at all — missing credentials, no title, or a thrown fetch error).
+  // Escalates via criticalWarnings, same tier as zero-verified-comps: a
+  // price computed from PC/sold data alone, with the primary active-listing
+  // cross-check silently unavailable, is not evidence GrailKey can stand
+  // behind at LIST_NOW confidence.
+  if (item.ebaySourceUnavailable === true) {
+    decision.warnings.push('ebay-source-unavailable');
+    decision.evidence.ebaySourceUnavailable = {
+      reason: item.ebaySourceReason || 'unknown'
+    };
+  }
+
   // Warning: Thin pool anchor
   if (item.thinPoolAnchored === true) {
     decision.warnings.push('thin-pool-anchor');
@@ -718,6 +733,7 @@ export function computeDecision(item, context = {}) {
     'publisher-unresolved',            // Q133 Slice 1c: publisher missing/comp-consensus-only, price still computed
     'issue-consensus-conflict',        // Q140 corrective dispatch: visual-pool issue disagreed with confirmedIssue, locked not overwritten
     'issue-fingerprint-violation',     // Q140 corrective dispatch: pre-pricing/pre-response mismatch — internal consistency failure
+    'ebay-source-unavailable',         // GrailKey Directive B, Task 2: eBay search could not run (outage/config/thrown) — not verified as a genuine zero-market book
   ];
   // Removed: 'content-unverified' (not a price flag — stays LIST_LOW/BUNDLE)
 
@@ -1064,6 +1080,9 @@ export function describeWarning(slug, item) {
       }
     }
     return 'sold comps exist but none verified';
+  }
+  if (slug === 'ebay-source-unavailable') {
+    return `eBay data unavailable this scan (${item.ebaySourceReason || 'unknown reason'}) — not verified as a zero-market book`;
   }
   if (slug === 'recommended-below-floor') {
     const floor = item.rawComps?.lowest;

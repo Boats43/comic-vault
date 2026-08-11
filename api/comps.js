@@ -88,6 +88,7 @@ export {
   hasIssueNumber,
   hasMultipleDistinctIssues,
   detectSeriesMarkers,
+  emptyComps,
 };
 
 import { checkRateLimit } from "./rate-limit.js";
@@ -121,7 +122,14 @@ const formatDate = (iso) => {
   return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
 };
 
-const emptyComps = (query, reason) => ({
+// GrailKey Directive B, Task 2 — `unavailable` distinguishes "the eBay
+// search could not run" (missing credentials, no title to search, a thrown
+// fetch error) from "the eBay search ran and genuinely found nothing"
+// (filters removed every candidate). Both previously collapsed to an
+// identical count===0 shape with no way for anything downstream to tell
+// them apart. Defaults to false so every pre-existing call site that
+// doesn't pass a third argument keeps its current (genuine-zero) meaning.
+const emptyComps = (query, reason, unavailable = false) => ({
   count: 0,
   prices: [],
   recentSales: [],
@@ -132,6 +140,7 @@ const emptyComps = (query, reason) => ({
   query: query || null,
   fellBack: false,
   reason: reason || null,
+  unavailable: unavailable === true,
   source: null,
 });
 
@@ -973,10 +982,10 @@ export const fetchComps = async ({
   issueAuthorityStatus = null,  // Track B Phase 0, Commit 4 — out.issueAuthority?.status ('provisional'/'conflicted'/'confirmed'/null), threaded into evidenceTarget below for the TARGET_ISSUE_PROVISIONAL_AUTHORITY gate
 }) => {
   if (!appId || !certId) {
-    return emptyComps(null, "missing eBay credentials");
+    return emptyComps(null, "missing eBay credentials", true);
   }
   if (!title) {
-    return emptyComps(null, "title required");
+    return emptyComps(null, "title required", true);
   }
 
   // Issue 6 FIX: Extract numeric from grade strings ("GD 2.5" → 2.5, "VF" → 8.0)
@@ -2348,7 +2357,7 @@ export const fetchComps = async ({
     };
   } catch (err) {
     console.error(`[comps] error: ${err?.message || err}`);
-    return { ...emptyComps(query || cleanTitle, err?.message || "fetch failed"), attemptUsed: 0 };
+    return { ...emptyComps(query || cleanTitle, err?.message || "fetch failed", true), attemptUsed: 0 };
   }
 };
 

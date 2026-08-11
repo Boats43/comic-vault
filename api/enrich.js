@@ -17,6 +17,7 @@ import {
   cleanPublisher,
   VARIANT_CONTAM_RE,
   REPRINT_RE,
+  emptyComps,
 } from "./comps.js";
 import {
   fmtUsd,
@@ -6100,7 +6101,17 @@ export default async function handler(req, res) {
             }).catch((err) => {
               console.error('[enrich] comps error stack:', err?.stack);
               console.error(`[enrich] comps error: ${err?.message || err}`);
-              return null;
+              // GrailKey Directive B, Task 2 — this catch used to discard the
+              // failure to a bare `null`, which downstream code (rawComps?.count
+              // === 0 || !rawComps) treated identically to a healthy eBay search
+              // that genuinely found nothing. fetchComps() already catches its
+              // own internal errors and returns an emptyComps(..., true) shape
+              // (api/comps.js:2360) — this is the same shape for whatever
+              // escapes that internal handling (e.g. a rejection thrown before
+              // fetchComps' own try block), so nothing downstream needs to
+              // special-case `rawComps === null` differently from
+              // `rawComps.unavailable === true`.
+              return emptyComps(null, err?.message || 'comps fetch threw', true);
             });
             // FIX: Never cache empty/null active-comps results (prevents cache poisoning)
             // Amazing Adventures #3: bad empty value cached → replayed on every request
@@ -6203,6 +6214,21 @@ export default async function handler(req, res) {
     // same order as recentSales) and filters recentSales by the returned
     // boolean array. Silent fallback: any failure leaves comps unchanged.
     let rawComps = compsFromEbay;
+
+    // GrailKey Directive B, Task 2 — eBay UNAVAILABLE != EMPTY. Stamped
+    // unconditionally, this early, so it's present on `out` regardless of
+    // which pricing tier ultimately fires (PC-based tiers never touch
+    // rawComps at all) — the prior gap wasn't limited to the refuse-to-price
+    // path: a book could ship a fully-priced PC-based result with zero
+    // indication the eBay cross-check never actually ran. rawComps.unavailable
+    // is set at the source (api/comps.js emptyComps()) so this file never
+    // re-classifies reason strings itself — one place decides what counts as
+    // an outage vs a genuine empty search.
+    if (rawComps?.unavailable === true) {
+      out.ebaySourceUnavailable = true;
+      out.ebaySourceReason = rawComps.reason || 'unknown';
+      console.log(`[ebay-source] unavailable — reason="${out.ebaySourceReason}"`);
+    }
 
     // Q58: Issue consensus backfill moved to line 1677 (BEFORE resolveIdentity).
     // Extracts issue from visual pool (parsedVisualRows) instead of comp titles
@@ -9571,7 +9597,14 @@ export default async function handler(req, res) {
       out.priceLow = null;
       out.priceHigh = null;
       out.priceBands = null;
-      out.priceNote = "Insufficient data — no verified comps found";
+      // GrailKey Directive B, Task 2 — don't let "eBay was unreachable" and
+      // "eBay ran and found nothing" refuse-to-price under the same generic
+      // sentence; out.ebaySourceUnavailable was stamped at the source
+      // (api/comps.js emptyComps(), surfaced at :6217 above) before this
+      // block ever runs.
+      out.priceNote = out.ebaySourceUnavailable
+        ? `eBay data unavailable (${out.ebaySourceReason}) — no price could be verified`
+        : "Insufficient data — no verified comps found";
       out.refusedToPrice = true;
       out.pricingSource = "refused";
       out.confidenceLevel = "LOW";
