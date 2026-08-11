@@ -4137,11 +4137,36 @@ export default async function handler(req, res) {
     // Era histogram extracted from visual year distribution (eraLock.decade)
     const { computeConvergenceScore, applyIdentityConflictDemotion } = await import('../src/lib/convergenceScore.js');
 
+    // GK-62 fix (Dispatch 46) — the vision slot below must carry ONLY a
+    // genuine Vision observation, never the operator's typed/corrected
+    // value. effectiveTitle/Issue/Year/Publisher (used for identity
+    // resolution, pricing, cache keys, and everywhere else) intentionally
+    // blend barcode/manual/manual-correction values in — correct for those
+    // consumers, wrong here: computeAxisScore (src/lib/convergenceScore.js,
+    // untouched) labels whatever this holds as 'vision' and lets it vote —
+    // against confirmedX, which for a manual scan IS this same value, so it
+    // self-agrees and gains full axis weight under a false label. Vision is
+    // explicitly skipped for manualIdentity requests (FIX 4, ~line 2284)
+    // and never re-runs for a manualCorrectionRequest (a text-field edit,
+    // no new image). barcodeIdentity is deliberately NOT consulted here —
+    // its resolved fields come from a ComicVine UPC lookup, not Vision, and
+    // effectiveX's `barcodeIdentity?.x ||` fallback must not leak into this
+    // slot the way it does for effectiveX itself. Per-axis null here means
+    // "no Vision data" — computeAxisScore already excludes null sources
+    // from both totalWeight and agreedWeight (convergenceScore.js:58),
+    // so a manual scan's convergence now reflects only genuine eBay/PC/CV
+    // agreement, never a manual value voting for itself.
+    const visionWasSkipped = manualIdentity === true || manualCorrectionRequest?.valid === true;
+    const rawVisionTitle = visionWasSkipped ? null : (title ?? null);
+    const rawVisionIssue = visionWasSkipped ? null : (issue ?? null);
+    const rawVisionYear = visionWasSkipped ? null : (year ?? null);
+    const rawVisionPublisher = visionWasSkipped ? null : (rawPublisher ?? null);
+
     // Build sources object from Phase 1+2 data (PC/CV now available)
     const convergenceSources = {
       title: {
         ebay: visualConsensus?.title || null,
-        vision: effectiveTitle,
+        vision: rawVisionTitle,
         // Q117 dispatch (2026-07-18, Batman #608 "Hush" / #215 "Call Me
         // Master" / Absolute Batman #1 class) — was comicVine?.name, the
         // ComicVine ISSUE record's own `name` field, which per ComicVine's
@@ -4161,19 +4186,19 @@ export default async function handler(req, res) {
       },
       issue: {
         ebay: visualConsensus?.issue || null,
-        vision: effectiveIssue,
+        vision: rawVisionIssue,
         pc: priceChartingInitial?.issue || null,
         cv: comicVine?.issue || null,
       },
       era: {
         histogram: eraLock?.decade ? `${eraLock.decade}s` : null,  // "1960s", "1970s", etc.
-        vision: effectiveYear ? (parseInt(effectiveYear) >= 1985 ? 'modern' : 'vintage') : null,
+        vision: rawVisionYear ? (parseInt(rawVisionYear) >= 1985 ? 'modern' : 'vintage') : null,
         pc: priceChartingInitial?.year ? (parseInt(priceChartingInitial.year) >= 1985 ? 'modern' : 'vintage') : null,
         cv: comicVine?.volume?.startYear ? (parseInt(comicVine.volume.startYear) >= 1985 ? 'modern' : 'vintage') : null,
       },
       publisher: {
         ebay: visualConsensus?.publisher || null,
-        vision: effectivePublisher,
+        vision: rawVisionPublisher,
         pc: priceChartingInitial?.publisher || null,
         cv: comicVine?.volume?.publisher?.name || null,
       },
