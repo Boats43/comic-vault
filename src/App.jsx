@@ -12,6 +12,7 @@ import {
 } from "./db.js";
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 import { getAssetConfirmationBadge } from "./lib/assetConfirmationBadge.js";
+import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLabels.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit } from "./lib/dataQualityGuard.js";
@@ -6470,27 +6471,17 @@ function CollectionDetail({
               </div>
             )}
             <div className="muted small" style={{ marginTop: 6, fontStyle: "italic" }}>
-              {/* GK-67-adjacent fix (Dispatch 50) — every TIER_SOURCE_MAP
-                  output (src/lib/priceBands.js) gets its own truthful
-                  label. sold_active_blend_30 is a real 31-comp computation
-                  and must never fall through to "AI estimate" — nor may
-                  any other unmapped value; unknown renders "Source
-                  unavailable", never an invented label. */}
-              {(() => {
-                const PRICING_SOURCE_LABELS = {
-                  pricecharting: "PriceCharting market data",
-                  browse_api: "Browse API — active listings",
-                  verified_sold_recency: "verified sold comps (recency-weighted)",
-                  sold_active_blend_30: "sold + active blend (70/30)",
-                  verified_sold: "verified sold comps",
-                  verified_sold_stale: "verified sold comps (stale)",
-                  active_ask_derived: "active listing asks",
-                  pc_estimate: "PriceCharting estimate",
-                  verified_sold_active_blend: "sold + active blend (verified)",
-                };
-                const label = PRICING_SOURCE_LABELS[item.pricingSource];
-                return label ? `Source: ${label}` : "Source unavailable";
-              })()}
+              {/* GK-67-adjacent fix (Dispatch 50), completed GrailKey
+                  Directive E Task 3 — every value api/enrich.js can assign
+                  to out.pricingSource now has a truthful label
+                  (src/lib/sourceLabels.js, re-derived directly from every
+                  assignment site, not assumed). An unmapped value echoes
+                  the raw token ("Source: some_token") rather than the word
+                  "unavailable" — that wording is reserved for a real
+                  eBay-outage signal (decisionEngine.js's
+                  ebay-source-unavailable warning, unrelated to this label)
+                  and must never collide with an ordinary labeling gap. */}
+              {getPricingSourceLabel(item.pricingSource)}
               {Array.isArray(item.soldComps) && item.soldComps.length > 0 && " + eBay sold"}
             </div>
             <div className="muted small" style={{ fontSize: 11 }}>
@@ -7101,32 +7092,16 @@ function CollectionDetail({
                 </div>
                 {/* Source info */}
                 <div style={{ marginTop: 8, fontSize: 11, color: "#888" }}>
-                  {/* GK-67-adjacent fix (Dispatch 50) — item.priceBands.source
-                      is priceBandsRaw's RAW internal tier name
-                      (src/lib/priceBands.js's PRICE_BANDS_SOURCES, e.g.
-                      "tier2_blend_70_30"), never the literal strings
-                      "verified_sold"/"verified_active" this line compared
-                      against previously — those are TIER_SOURCE_MAP OUTPUT
-                      values (item.pricingSource, a different field). That
-                      made both real branches dead code: every book always
-                      fell through to "estimated" here regardless of its
-                      actual source. Every PRICE_BANDS_SOURCES value now
-                      gets its own truthful label; unmapped falls to
-                      "source-unavailable", never an invented one. */}
+                  {/* GK-67-adjacent fix (Dispatch 50), completed GrailKey
+                      Directive E Task 3 — item.priceBands.source now covers
+                      every value api/enrich.js can assign, including the 3
+                      it overwrites outside the priceBandsRaw tier system
+                      (mega-key-floor, visual_pool_fallback,
+                      visual_pool_family_isolated — src/lib/sourceLabels.js).
+                      An unmapped value echoes the raw token, never the
+                      "unavailable" wording reserved for a real eBay outage. */}
                   {item.priceBands.count > 0 && (() => {
-                    const PRICE_BANDS_SOURCE_LABELS = {
-                      tier1_recency_weighted: 'sold',
-                      tier2_blend_70_30: 'blended sold + active',
-                      tier2_sold_only: 'sold',
-                      tier2_sold_only_active_suspect: 'sold',
-                      tier2_active_dominant_thin_sold: 'active',
-                      verified_sold_stale: 'stale sold',
-                      tier3_active_discounted: 'active',
-                      tier3_active_discounted_over_fallback_sold: 'active',
-                      tier4_pc_estimate: 'PriceCharting-estimated',
-                      variant_fallback_capped: 'active',
-                    };
-                    const label = PRICE_BANDS_SOURCE_LABELS[item.priceBands.source] || 'source-unavailable';
+                    const label = getPriceBandsSourceLabel(item.priceBands.source);
                     return `Based on ${item.priceBands.count ?? 0} ${label} comp${item.priceBands.count === 1 ? '' : 's'}`;
                   })()}
                   {item.priceBands.recencyDays != null && ` · Most recent: ${item.priceBands.recencyDays}d ago`}

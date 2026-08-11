@@ -13,6 +13,7 @@
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { PRICING_SOURCE_LABELS, PRICE_BANDS_SOURCE_LABELS, getPricingSourceLabel, getPriceBandsSourceLabel } from '../src/lib/sourceLabels.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -81,12 +82,17 @@ console.log('\nPart 1: Blend (60/40) causal-derivation line removed\n');
 console.log('\nPart 2: source labels — no fabricated fallback\n');
 {
   assertTrue(!appSrc.includes('"Source: AI estimate"'), 'the literal "Source: AI estimate" default string is gone');
-  // Extract the PRICING_SOURCE_LABELS lookup verbatim and eval it against
-  // every real TIER_SOURCE_MAP output value.
-  const pricingLabelsMatch = appSrc.match(/const PRICING_SOURCE_LABELS = \{[\s\S]*?\n                \};/);
-  assertTrue(!!pricingLabelsMatch, 'PRICING_SOURCE_LABELS lookup found verbatim in App.jsx');
-  // eslint-disable-next-line no-new-func
-  const PRICING_SOURCE_LABELS = new Function(`${pricingLabelsMatch[0]} return PRICING_SOURCE_LABELS;`)();
+  // GrailKey Directive 2026-08-11-E, Task 3 — the maps moved out of App.jsx
+  // into src/lib/sourceLabels.js (so this suite's own guard, and Task 3's
+  // own guard test, can check them without a fragile eval-the-live-source
+  // trick). Import the real maps instead of extracting them from appSrc
+  // text; still verified against the real shipped App.jsx via the import
+  // statement check below.
+  assertTrue(
+    appSrc.includes('getPricingSourceLabel(item.pricingSource)') &&
+    appSrc.includes("from \"./lib/sourceLabels.js\""),
+    'App.jsx renders the pricing source via the real, imported sourceLabels.js helper, not an inline/retyped copy'
+  );
   const TIER_SOURCE_MAP_OUTPUTS = [
     'verified_sold_recency', 'sold_active_blend_30', 'verified_sold',
     'verified_sold_stale', 'active_ask_derived', 'pc_estimate',
@@ -101,10 +107,6 @@ console.log('\nPart 2: source labels — no fabricated fallback\n');
     'sold_active_blend_30 (a real 31-comp computation) does not render as "estimated" or "AI estimate"'
   );
 
-  const priceBandsLabelsMatch = appSrc.match(/const PRICE_BANDS_SOURCE_LABELS = \{[\s\S]*?\n                    \};/);
-  assertTrue(!!priceBandsLabelsMatch, 'PRICE_BANDS_SOURCE_LABELS lookup found verbatim in App.jsx');
-  // eslint-disable-next-line no-new-func
-  const PRICE_BANDS_SOURCE_LABELS = new Function(`${priceBandsLabelsMatch[0]} return PRICE_BANDS_SOURCE_LABELS;`)();
   const PRICE_BANDS_SOURCES = [
     'tier1_recency_weighted', 'tier2_active_dominant_thin_sold',
     'tier2_sold_only_active_suspect', 'tier2_blend_70_30', 'tier2_sold_only',
@@ -118,8 +120,21 @@ console.log('\nPart 2: source labels — no fabricated fallback\n');
     PRICE_BANDS_SOURCE_LABELS['tier2_blend_70_30'].toLowerCase() !== 'estimated',
     'tier2_blend_70_30 (sold_active_blend_30\'s internal name) does not render as "estimated"'
   );
-  assertTrue(!appSrc.includes("'source-unavailable'") || appSrc.includes('|| \'source-unavailable\''), 'unmapped priceBands.source falls to an honest "source-unavailable" marker, not an invented label');
-  assertTrue(appSrc.includes('return label ? `Source: ${label}` : "Source unavailable";'), 'unmapped pricingSource renders the literal "Source unavailable", never an invented source');
+  // GrailKey Directive 2026-08-11-D/E — the "Source unavailable" /
+  // "source-unavailable" fallback this test previously asserted as correct
+  // was itself found to collide with GK-72's real ebaySourceUnavailable
+  // field (a healthy scan with an unmapped source rendered identically to
+  // a genuine eBay outage). Task 3 replaced both fallbacks with the raw
+  // token instead — asserting that here, superseding the two removed
+  // assertions above that checked for the literal word "unavailable".
+  assertTrue(
+    !/unavailable/i.test(getPricingSourceLabel('some_unmapped_future_token')),
+    'unmapped pricingSource no longer renders the word "unavailable" — echoes the raw token instead (GK-72 collision fix)'
+  );
+  assertTrue(
+    !/unavailable/i.test(getPriceBandsSourceLabel('some_unmapped_future_token')),
+    'unmapped priceBands.source no longer renders "source-unavailable" — echoes the raw token instead (GK-72 collision fix)'
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
