@@ -746,6 +746,45 @@ this stale list.**
 
 Reconcile remaining stale expectations vs code in a dedicated pass.
 
+**Full-suite re-sweep, GrailKey Directive 2026-08-11-C, HEAD `0cb4c38`,
+2026-08-11 — 5 files failing or timing out that were not named anywhere
+above. Enumeration only, per the closeout directive's own scope — none
+investigated or fixed this pass.**
+- **artist-registry-sync.test.js** — 2 failures ("dekal", "spears" —
+  `ARTIST_SURNAME_WORDS` entries that don't trace back to any
+  `ARTIST_PATTERNS` entry).
+- **grailkey-commit-g.test.js** — 1 failure, same shape as the already-
+  documented `grailkey-commit-e.test.js`/`grailkey-commit-f.test.js` Part
+  2 stale-assertion above (reads live `git diff --name-only HEAD`, false-
+  fails whenever other uncommitted changes are present) — a third file
+  with the identical known defect class, just never added to that
+  paragraph by name until now.
+- **grailkey-commit-v1.test.js** — 1 failure (`exactly 24
+  writeConfirmed() call-assignments after the anchor` — expected 24,
+  found 25; a hardcoded count assertion one commit behind current code).
+- **grailkey-dispatch-33-parity-harness.test.js** — exits non-zero by
+  deliberate design, not a defect: `0 passed, 0 failed, 1 skipped` — the
+  Dispatch 33 parity-harness stub intentionally ships with zero cases
+  until a shadow lane exists to compare against (see the Dispatch 33
+  Pattern Library entry). Flagged here only because it wasn't previously
+  named in this list and a naive PASS/FAIL sweep reads its exit code as
+  a failure.
+- **ship26-integration.test.js** — TIMEOUT, confirmed non-deterministic
+  (one run completed clean at ~35s, a second run genuinely hung past
+  40s) — **contradicts the "FIXED... 13/13 passing, removed from this
+  stale list" entry directly above.** Root cause not investigated this
+  pass; the visible symptom is repeated `[Upstash Redis] Redis client
+  was initialized without url or token` lines, consistent with this
+  being a local-environment artifact (no `KV_REST_API_URL`/`TOKEN` set
+  outside Vercel) rather than a genuine code regression, but that is an
+  unverified hypothesis, not a finding.
+- **Checked and ruled out, not added:** `dispatch-42-comicvine-kill.test.js`
+  and `grailkey-commit-m-pc-query-fallback.test.js` both appeared as
+  TIMEOUT under this sweep's own 20s-per-file cutoff, but both complete
+  cleanly (27/27 and 10/10 passing respectively) once re-run with a
+  longer timeout — an artifact of the sweep harness, not a real failure
+  or hang. Noted so a future sweep doesn't re-flag them without checking.
+
 **Performance:**
 - Average scan time: 2.5s (66% improvement from 7.5s baseline)
 - Prompt caching: ~96% savings on Vision (5-min TTL)
