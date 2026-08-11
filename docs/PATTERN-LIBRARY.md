@@ -6445,10 +6445,214 @@ that's a defect or an intentional product choice ("price aggressively for
 liquidity" vs. "never recommend below X") is the operator's call, not
 inferred here. No code touched for GK-68 this dispatch.
 
+### GK-68 — DECIDED (GrailKey — Operator Mode Hold, 2026-08-10)
+
+**Decision: B — no displayed recommendation may contradict a displayed
+floor.** Quick sitting below a floor that protects Market is a real defect
+under this ruling, not an intentional liquidity-pricing choice — recorded
+as decided, not merely traced.
+
+**No code required to enact it right now**: the operator-mode transition to
+real-inventory operation (SCAN → REVIEW → CUSTOMER OUTPUT →
+CORRECTION/OUTCOME LOG) suppresses Quick/Market/Stretch bands entirely from
+the customer deliverable (identity · condition · verified comp evidence ·
+one manually reviewed estimate) — with bands not shown at all, the
+contradiction Decision B forbids cannot currently reach a customer. The
+underlying code defect (the floor guard's tier-1/2/2.5 skip,
+`api/enrich.js:8285-8295`, and `quick` never being cross-checked against
+`rawFloor` in any tier) is unchanged and would resurface the moment bands
+are unsuppressed — tracked as a backlog item against that reopening, not
+closed.
+
 ### Status
 
-GK-66 and GK-67 (+ the GK-49 fold-in) shipped. GK-68 held, semantics
-undecided. GK-69 (pricing-derivation custody gap) logged only, unfixed —
-`priceDerivationTrace`/`blendedAvg` still don't persist; `priceLadder`
-still does (now decision-inert per Commit 1, but still display-persisted).
+GK-66 and GK-67 (+ the GK-49 fold-in) shipped. **GK-68 decided (B), not
+implemented — enacted by suppression, not by code; the underlying floor
+gap remains, backlogged against band re-enablement.** GK-69 (pricing-
+derivation custody gap) logged only, unfixed — `priceDerivationTrace`/
+`blendedAvg` still don't persist; `priceLadder` still does (now
+decision-inert per Commit 1, but still display-persisted).
+
+## GrailKey — Operator Mode Hold (2026-08-10)
+
+Engineering dispatches paused. **`1aa6eb0` is the operating baseline.** No
+pricing/identity/convergence/routing/persistence/UI/provider work without
+a new dispatch; no proactive work on a logged defect merely because it
+looks imperfect.
+
+**Workflow shift, recorded for context:** SCAN → REVIEW → CUSTOMER OUTPUT
+→ CORRECTION/OUTCOME LOG. Customer deliverable narrowed to identity,
+condition, verified comp evidence, and one manually reviewed estimate.
+Price ladder, Quick/Market/Stretch bands, the derivation panel, exit
+strategy, and authentication/per-field percentages are suppressed from
+that deliverable under the new operational process (not via a code
+change this session — no code was touched to enact this hold).
+
+**Reopen triggers, recorded:**
+- Immediate: wrong identity presented as safe; wrong-book comps entering
+  pricing; a price that cannot be explained; any falsehood in the customer
+  deliverable; data loss; a scan that cannot complete.
+- Backlog: everything else, including test-harness friction and invisible
+  persistence gaps (GK-69 and all remaining internal/test/provenance
+  items stay logged and untouched under this rule).
+
+## GrailKey Directive 2026-08-11-A (investigation only, no code)
+
+Five-task investigation batch. Full document published as an artifact this
+session (not reproduced verbatim here — this is the pointer entry per the
+CLAUDE.md size-limit rule). Headline finding: "GK-38" and "GK-42" as named
+in that directive were not new defects — they were the identical Dispatch
+26/48 draft-labeled defects already shipped as GK-66/GK-67 (see Dispatch
+48+50 above), independently re-verified against live HEAD code rather than
+trusted from the docs (quoted the actual removed `HOLD_FOR_CGC` block from
+`git show d07c236`, confirmed zero live references remain, confirmed test
+coverage). Task 4 (source-rights facts) found the ComicVine "restore
+rejected candidates on empty filter" shape at **three** gates (year, token,
+publisher) — broader than the single instance the Pattern Library had
+logged before this — and found `api/comps.js`'s `emptyComps().reason` field
+is computed but never read downstream, meaning an eBay outage was
+indistinguishable from "book has zero real listings" anywhere in the app.
+Both became the two code tasks of Directive B, below. Task 3 (provenance
+sizing) came back INVASIVE for an IndexedDB rights-envelope retrofit — 8
+real merge sites found via direct App.jsx audit, not the 5 CLAUDE.md
+documented; recommended a KV-only Phase 1 first, deferred. Task 5 (secret
+audit): clean across all 1,039 commits of git history and the Vite client
+bundle; found `EBAY_SANDBOX` is documented but dead — nothing in code reads
+it, every environment hits eBay's live production API.
+
+## GrailKey Directive 2026-08-11-B — state reconciliation + fail-open closure (explicit exception to the Operator Mode Hold)
+
+Three tasks, Jimmy-authorized under the standing freeze exception (Tasks 2
+and 3 are code changes; Task 1 is documentation/tooling). Preflight run
+first per the directive's own section 0: HEAD `1aa6eb0`, working tree
+carrying only pre-existing uncommitted docs/tooling changes (not touched
+this session), GK-66/GK-67 confirmed CLOSED at HEAD, the eBay-reason-unread
+and three-gate claims both confirmed VERIFIED (not stale) by direct grep
+before any other work began.
+
+### Task 1 — Ticket registry + CLAUDE.md reconciliation
+
+`docs/TICKET-REGISTRY.md` created: one line per `GK-N` ticket, closed status
+vocabulary (`OPEN`/`CLOSED`/`RENAMED`/`SUPERSEDED`/`DEFERRED`), an absolute
+alias rule (every retired identifier's successor lists it under `aliases:`
+so a grep for a dead number returns the live line, never something
+greppable as OPEN). Populated from `git log` + this file — 37 pre-existing
+`GK-N` tickets found and classified; 5 (`GK-19`, `GK-24`, `GK-47`, `GK-48`,
+`GK-49`) could not be conclusively resolved from evidence in this repo and
+are marked `UNKNOWN`, flagged for Jimmy rather than guessed. CLAUDE.md
+stamped with `IndexedDB merge sites: 8` (was documented as 5 — the 3-site
+undercount Directive A's Task 3 found is now corrected in the canonical
+doc, not just logged as a finding), live/dormant external-source counts,
+and the test baseline, each carrying a verified-against-SHA/verified-date
+stamp. A new standing rule was added: any directive referencing a ticket ID
+or a structural fact must run the preflight against the registry first —
+this is the mechanism fix, not just the one-time correction; the actual
+problem (two directives in one day burning time rediscovering already-
+resolved state) doesn't recur if the lookup is a `grep` instead of a
+re-investigation.
+
+### Task 2 — GK-72: eBay UNAVAILABLE != EMPTY
+
+`api/comps.js`'s `emptyComps(query, reason)` gained a third parameter,
+`unavailable` (default `false`, so every pre-existing call site keeps its
+current meaning unless explicitly reclassified). Three call sites marked
+`true` at the source — the only place that genuinely knows which case it
+is: `"missing eBay credentials"` (:985), `"title required"` (:988, no
+search ever attempted), and the catch-all `"fetch failed"` path (:2360,
+now exported alongside `emptyComps` itself so it's directly testable).
+`api/enrich.js`'s own outer `.catch` around the `fetchComps()` call (used
+to discard a thrown error to a bare `null`, which downstream code —
+`rawComps?.count === 0 || !rawComps` — treated identically to a healthy
+search finding nothing) now returns `emptyComps(null, err?.message ||
+'comps fetch threw', true)` instead, so nothing downstream needs a special
+case for "rawComps is literally null" vs. "rawComps.unavailable is true."
+
+`out.ebaySourceUnavailable` / `out.ebaySourceReason` are stamped
+immediately after `rawComps` is finalized (`api/enrich.js`, right after
+`let rawComps = compsFromEbay;`) — deliberately unconditional, not
+confined to the refuse-to-price path. This closes the specific gap Task 4
+of Directive A named: prior to this fix, a book with eBay genuinely
+unreachable but a PC-based price still computable would ship that price
+with zero indication the eBay cross-check never ran. Now the flag is
+present on `out` regardless of which pricing tier fires. The refuse-to-
+price block's generic `"Insufficient data — no verified comps found"`
+message now branches to `"eBay data unavailable (<reason>) — no price
+could be verified"` when the flag is set, leaving the original message
+byte-identical for the genuine-zero case (no regression there).
+
+`decisionEngine.js` gained a new critical warning, `'ebay-source-
+unavailable'`, added to the existing `criticalWarnings` list alongside its
+closest sibling, `'zero-verified-comps'` (which is about sold-comp AI-
+verification rejecting everything — a different condition; this warning is
+about the eBay active-listing search never running at all). It escalates
+`decision.action` to `RESEARCH` on the same tier as `zero-verified-comps` —
+a price computed from PC/sold data alone, with the primary active-listing
+cross-check silently unavailable, is not evidence this project can stand
+behind at LIST_NOW confidence. `describeWarning` gained the matching
+per-slug sentence. Persisted through the same 5 App.jsx merge sites the
+sibling `compsExhausted` flag already uses (auto-refresh, scan→catalogue,
+scan→selectedItem, bulk-import, refreshMarketData) — the 3 additional
+merge sites Directive A's Task 3 found (duplicate-confirm, reIdentifyBook,
+manual correction) were deliberately NOT touched, matching the "minimal
+blast radius" instruction; noted here so a future full-coverage pass knows
+those 3 still need it if Jimmy wants parity with Task 3's full 8-site
+audit.
+
+Test: `tests/grailkey-directive-b-task2-ebay-unavailable.test.js`, 12/12
+passing — Part A imports the real `emptyComps` and checks its
+classification directly; Part B imports the real `computeDecision` and
+confirms the new warning/escalation; Part C mirrors `api/enrich.js`'s
+refuse-to-price branch (not independently importable, same documented
+constraint as `tests/ship23-consistency.test.js`). Shown failing first
+against the unmodified source (`emptyComps` wasn't exported yet) before any
+edit landed.
+
+### Task 3 — GK-71: Resurrect-Rejected-Evidence pattern, three ComicVine gates
+
+Confirmed all three gates at HEAD before touching anything: year-strict
+(`api/enrich.js:755-774`), token (`:883-915`), publisher (`:917-952`). All
+three shared one shape — `if (filtered.length > 0) { use filtered } else {
+console.log('would remove all... keeping original set') }` — silently
+restoring the pre-filter (rejected) candidate set whenever a gate would
+otherwise empty it. Fixed identically at all three: the `else` branch now
+does `candidates.length = 0` instead, matching the reprint-publisher gate's
+own already-correct sibling in the same function (Q99 ruling, deliberately
+untouched — it already does exactly this). Confirmed via direct code read
+(not assumed) that nothing downstream depends on the restore behavior:
+`let match = null;` is the only value used once `candidates` reaches the
+scoring stage, and it's only overwritten inside the `candidates.length ===
+1` / `> 1` branches — a `candidates.length === 0` array was already handled
+gracefully before this fix, for the reprint gate's case at least; this
+fix makes the other three gates degrade the identical way instead of
+reaching for `candidates[0]` off a set that includes rejected evidence.
+
+Swept for a fourth instance of the shape per the task's own instruction —
+found one, in a different subsystem: `api/comps.js:1803`, the eBay
+grade-proximity comp filter, explicitly comments "When grade filter would
+remove all comps, we fall back to full pool for pricing (to avoid refusing
+to price)." Logged as `GK-70`, deliberately **not** fixed — closing it
+changes which comps enter price computation, crossing into the pricing-math
+boundary this directive's authorization didn't extend to. Two other
+similar-sounding comments were checked and found to already be CORRECT,
+not violations: `api/comps.js:1441` ("pool is no longer restored on
+all-rejected") and `src/lib/categoryClassifier.js:304` ("NEVER let the
+thin-pool safety path restore a hard-rejected row") are both pre-existing
+enforcements of the same invariant, not instances of the bug.
+
+Test: `tests/grailkey-directive-b-task3-resurrect-rejected-evidence.test.js`,
+6/6 passing — mirrors all three real gate predicates plus the untouched
+reprint-gate predicate as a regression control, verbatim against the fixed
+source. Shown failing first via a throwaway scratch script mirroring the
+literal pre-fix `else { return candidates; }` behavior against the same
+three predicates — all 3 failed as expected before any edit, confirming
+the test would have caught the violation.
+
+### Handoff
+
+Full regression baseline (all 177 `tests/*.test.js` files) run in parallel
+with this work; see the closing HANDOFF block reported to Jimmy for the
+exact before/after tallies. `npm run build` clean. Three commits, one per
+task, per the directive's own commit discipline. `docs/TICKET-REGISTRY.md`
+gained 4 new entries this dispatch beyond the 37 backfilled: `GK-70`
+(open, deferred), `GK-71` (closed, Task 3), `GK-72` (closed, Task 2).
 
