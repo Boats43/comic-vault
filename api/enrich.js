@@ -771,7 +771,14 @@ export const lookupComicVine = async ({ title, issue, year, publisher, poolYearH
         candidates.splice(0, candidates.length, ...yearStrictFiltered);
         console.log(`[cv-year-strict] ${beforeYearStrict} → ${candidates.length} issues (±4y cover_date)`);
       } else {
-        console.log(`[cv-year-strict] would remove all ${beforeYearStrict} issues — keeping original set`);
+        // GrailKey Directive B, Task 3 — Rejection Must Not Create Authority.
+        // Every remaining candidate failed the ±4y cover-date gate; silently
+        // restoring them treats rejected evidence as if it had never been
+        // rejected. Empty the set instead — matches the reprint-publisher
+        // gate's own already-correct precedent (Q99 ruling, below) — zero
+        // survivors is UNRESOLVED, not "use the rejected ones anyway."
+        candidates.length = 0;
+        console.log(`[cv-year-strict] ${beforeYearStrict} → 0 issues (all candidates rejected by ±4y cover_date gate — no fallback to the rejected set)`);
       }
     }
 
@@ -910,8 +917,11 @@ export const lookupComicVine = async ({ title, issue, year, publisher, poolYearH
         `[cv-token-gate] ${beforeToken} → ${candidates.length} volumes (token overlap ≥50%)`
       );
     } else {
+      // GrailKey Directive B, Task 3 — Rejection Must Not Create Authority.
+      // See the identical fix + reasoning at [cv-year-strict] above.
+      candidates.length = 0;
       console.log(
-        `[cv-token-gate] would remove all ${beforeToken} volumes — keeping original set`
+        `[cv-token-gate] ${beforeToken} → 0 volumes (all candidates rejected by token-overlap gate — no fallback to the rejected set)`
       );
     }
 
@@ -947,8 +957,11 @@ export const lookupComicVine = async ({ title, issue, year, publisher, poolYearH
         `[cv-pub-gate] ${beforePub} → ${candidates.length} volumes (weak matches without publisher rejected)`
       );
     } else {
+      // GrailKey Directive B, Task 3 — Rejection Must Not Create Authority.
+      // See the identical fix + reasoning at [cv-year-strict] above.
+      candidates.length = 0;
       console.log(
-        `[cv-pub-gate] would remove all ${beforePub} volumes — keeping original set`
+        `[cv-pub-gate] ${beforePub} → 0 volumes (all candidates rejected by publisher gate — no fallback to the rejected set)`
       );
     }
 
