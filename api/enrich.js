@@ -4341,6 +4341,12 @@ export default async function handler(req, res) {
       (identityIsProvisionalOverride ? null : publisher);
 
     // Identity already determined in Phase 1 — construct alignment object
+    // GK-39A (2026-08-10) — confidence/authenticationScore/breakdown/
+    // needsReview removed. They were hardcoded constants keyed on this one
+    // boolean (65/90, VERIFIED/UNCERTAIN, never a real computation — see
+    // docs/PATTERN-LIBRARY.md "Dispatch 45"), not the real weighted scorer
+    // the "Ship #24" comment implied. confirmedTitle/Issue/Year/Source/
+    // overrodeVision/conflicts are real, evidence-grounded fields and stay.
     const alignment = {
       confirmedTitle,
       confirmedIssue,
@@ -4348,9 +4354,6 @@ export default async function handler(req, res) {
       confirmedSource: identitySource,
       overrodeVision: identitySource === 'ebay_visual_override',
       visionWas: identitySource === 'ebay_visual_override' ? title : undefined,
-      confidence: identitySource === 'ebay_visual_override' ? 'UNCERTAIN' : 'VERIFIED',
-      authenticationScore: identitySource === 'ebay_visual_override' ? 65 : 90,
-      breakdown: { title: identitySource === 'ebay_visual_override' ? 65 : 90, issue: 90, year: 85, publisher: 100 },
       conflicts: identitySource === 'ebay_visual_override' ? [{
         field: 'title',
         severity: 'CRITICAL',
@@ -4359,7 +4362,6 @@ export default async function handler(req, res) {
         ebayCount: visualResult?.items?.length || 0,
         message: `eBay image search (${visualResult?.items?.length || 0} results) disagrees with Vision`
       }] : [],
-      needsReview: identitySource === 'ebay_visual_override',
     };
 
     console.log(
@@ -9762,7 +9764,12 @@ export default async function handler(req, res) {
       }
     }
 
-    // Ship #24 — Identity authentication score (0-100 cross-source validation)
+    // Ship #24 — identity provenance (GK-39A, 2026-08-10: authenticationScore/
+    // breakdown/confidence/needsReview removed — those were hardcoded
+    // constants, never a computation; see docs/PATTERN-LIBRARY.md "Dispatch
+    // 45". confirmedTitle/Issue/Year/Source/overrodeVision/conflicts are
+    // real data and stay. No replacement number — display real evidence
+    // (convergence) instead of a fabricated confidence figure.
     if (alignment) {
       out.identityAlignment = {
         confirmedTitle: alignment.confirmedTitle,
@@ -9770,11 +9777,7 @@ export default async function handler(req, res) {
         confirmedYear: alignment.confirmedYear,
         confirmedSource: alignment.confirmedSource,
         overrodeVision: alignment.overrodeVision,
-        confidence: alignment.confidence,
-        authenticationScore: alignment.authenticationScore,
-        breakdown: alignment.breakdown,
         conflicts: alignment.conflicts,
-        needsReview: alignment.needsReview,
       };
       if (alignment.overrodeVision) {
         out.identityAlignment.visionWas = alignment.visionWas;

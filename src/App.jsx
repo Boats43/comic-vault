@@ -4103,21 +4103,10 @@ function CollectionDetail({
         );
       })()}
 
-      {/* Ship #27 WIN 3 — Authentication Score + Identity Source + Pricing Source */}
+      {/* Ship #27 WIN 3 — Identity Source + Pricing Source (Authentication
+          Score badge removed, GK-39A — it was a hardcoded constant, never a
+          real computation; see docs/PATTERN-LIBRARY.md "Dispatch 45"/"47") */}
       <div style={{ fontSize: 11, marginTop: 6, marginBottom: 6 }}>
-        {/* Authentication Score */}
-        {item.identityAlignment?.authenticationScore != null && (
-          <div style={{ marginBottom: 4 }}>
-            <span style={{ color: '#888' }}>Auth: </span>
-            <strong style={{
-              color: item.identityAlignment.authenticationScore >= 85 ? '#22c55e' :
-                     item.identityAlignment.authenticationScore >= 65 ? '#fbbf24' : '#e05656'
-            }}>
-              {item.identityAlignment.authenticationScore}%
-            </strong>
-          </div>
-        )}
-
         {/* Identity Source */}
         {item.identityAlignment?.confirmedSource && (
           <div style={{ marginBottom: 4 }}>
@@ -5732,93 +5721,32 @@ function CollectionDetail({
         </div>
       )}
 
-      {/* Ship #24 — AUTHENTICATION BADGE */}
-      {item.identityAlignment?.authenticationScore != null && (
+      {/* Ship #24 — IDENTITY CONFLICTS (authentication badge + per-field
+          breakdown removed, GK-39A — authenticationScore/breakdown/
+          confidence were hardcoded constants, never a real computation;
+          see docs/PATTERN-LIBRARY.md "Dispatch 45"/"47". conflicts is real,
+          evidence-grounded data (I13 — never suppressed) and stays,
+          re-gated on its own presence now that the score wrapper is gone). */}
+      {item.identityAlignment?.conflicts?.length > 0 && (
         <div style={{
-          background:
-            item.identityAlignment.authenticationScore >= 90
-              ? '#d4edda'
-              : item.identityAlignment.authenticationScore >= 60
-                ? '#fff3cd'
-                : '#f8d7da',
-          border: `1px solid ${
-            item.identityAlignment.authenticationScore >= 90
-              ? '#28a745'
-              : item.identityAlignment.authenticationScore >= 60
-                ? '#ffc107'
-                : '#dc3545'
-          }`,
-          borderRadius: '8px',
-          padding: '12px',
-          marginTop: '12px',
-          fontSize: '13px',
+          fontSize: '11px',
+          color: '#721c24',
+          background: 'rgba(220,53,69,0.1)',
+          padding: '6px 8px',
+          borderRadius: '4px',
+          marginTop: 12,
         }}>
-          <div style={{
-            fontWeight: 700,
-            marginBottom: item.identityAlignment.conflicts?.length > 0 ? 6 : 0,
-            color:
-              item.identityAlignment.authenticationScore >= 90
-                ? '#155724'
-                : item.identityAlignment.authenticationScore >= 60
-                  ? '#856404'
-                  : '#721c24'
-          }}>
-            {item.identityAlignment.authenticationScore >= 90 ? '🟢' :
-             item.identityAlignment.authenticationScore >= 60 ? '🟡' : '🔴'}
-            {' '}
-            {(() => {
-              // Ship #24 Wave 1 Commit 3 (Q122 class) — the free-floating
-              // tier word is consolidated onto the contract when one
-              // exists, so this badge can't assert a confidence claim that
-              // contradicts the contract-driven badges elsewhere on the
-              // same card. authenticationScore/breakdown/conflicts are
-              // untouched real data (I13 — never suppressed), only the
-              // WORD next to the score is unified. When contract says the
-              // identity itself is unresolved (ID_REQUIRED/REFUSED), no
-              // tier word is asserted — the score still renders honestly,
-              // just labeled as subordinate to that unresolved state
-              // rather than echoing a stale independent tier.
-              if (!item.contract) return item.identityAlignment.confidence;
-              return isContractIdentityBlocked(item)
-                ? 'IDENTITY UNRESOLVED'
-                : (getContractConfidenceTier(item) || 'LOW');
-            })()} ({item.identityAlignment.authenticationScore}%)
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            Conflicts ({item.identityAlignment.conflicts.length}):
           </div>
-          {item.identityAlignment.breakdown && (
-            <div style={{
-              fontSize: '11px',
-              opacity: 0.8,
-              marginBottom: item.identityAlignment.conflicts?.length > 0 ? 6 : 0,
-              fontFamily: 'monospace',
-            }}>
-              Title: {item.identityAlignment.breakdown.title}% ·
-              Issue: {item.identityAlignment.breakdown.issue}% ·
-              Year: {item.identityAlignment.breakdown.year}% ·
-              Pub: {item.identityAlignment.breakdown.publisher}%
+          {item.identityAlignment.conflicts.slice(0, 3).map((c, i) => (
+            <div key={i} style={{ marginBottom: 2 }}>
+              • {c.field}: Vision={JSON.stringify(c.vision)} vs {Object.keys(c).filter(k => k !== 'field' && k !== 'vision').map(k => `${k}=${JSON.stringify(c[k])}`).join(', ')}
             </div>
-          )}
-          {item.identityAlignment.conflicts?.length > 0 && (
-            <div style={{
-              fontSize: '11px',
-              color: '#721c24',
-              background: 'rgba(220,53,69,0.1)',
-              padding: '6px 8px',
-              borderRadius: '4px',
-              marginTop: 6,
-            }}>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                Conflicts ({item.identityAlignment.conflicts.length}):
-              </div>
-              {item.identityAlignment.conflicts.slice(0, 3).map((c, i) => (
-                <div key={i} style={{ marginBottom: 2 }}>
-                  • {c.field}: Vision={JSON.stringify(c.vision)} vs {Object.keys(c).filter(k => k !== 'field' && k !== 'vision').map(k => `${k}=${JSON.stringify(c[k])}`).join(', ')}
-                </div>
-              ))}
-              {item.identityAlignment.conflicts.length > 3 && (
-                <div style={{ opacity: 0.7, marginTop: 4 }}>
-                  ...and {item.identityAlignment.conflicts.length - 3} more
-                </div>
-              )}
+          ))}
+          {item.identityAlignment.conflicts.length > 3 && (
+            <div style={{ opacity: 0.7, marginTop: 4 }}>
+              ...and {item.identityAlignment.conflicts.length - 3} more
             </div>
           )}
         </div>
@@ -7503,40 +7431,16 @@ function CollectionDetail({
                   </>
                 );
               }
-              // Ship #24 — Authentication gate (block listing when score < 80)
-              const needsAuthAck =
-                item.identityAlignment?.authenticationScore != null &&
-                item.identityAlignment.authenticationScore < 80 &&
-                !item.authenticationConfirmed;
-              if (needsAuthAck) {
-                const authScore = item.identityAlignment.authenticationScore;
-                const conflicts = item.identityAlignment.conflicts || [];
-                const conflictFields = conflicts.map(c => c.field).join(", ");
-                return (
-                  <>
-                    <div style={{
-                      padding: "8px 10px",
-                      marginBottom: 8,
-                      background: authScore >= 60 ? "rgba(255,193,7,0.1)" : "rgba(218,54,51,0.1)",
-                      border: `1px solid ${authScore >= 60 ? "#ffc107" : "#da3633"}`,
-                      borderRadius: 6,
-                      fontSize: 12,
-                      color: authScore >= 60 ? "#856404" : "#fca5a5",
-                    }}>
-                      {authScore >= 60 ? '⚠️' : '🚨'} LOW AUTHENTICATION ({authScore}%) —
-                      Identity conflicts detected{conflictFields ? ` (${conflictFields})` : ""}.
-                      Cross-source validation shows disagreement. Review data accuracy before listing.
-                    </div>
-                    <button
-                      className="reset-btn"
-                      onClick={() => onUpdateField(item, 'authenticationConfirmed', true)}
-                      style={{ width: "100%", background: authScore >= 60 ? "#ffc107" : "#da3633", color: authScore >= 60 ? "#856404" : "white" }}
-                    >
-                      Acknowledge conflicts and Enable Listing
-                    </button>
-                  </>
-                );
-              }
+              // Ship #24 authentication gate REMOVED (GK-39A, 2026-08-10).
+              // It read authenticationScore, a hardcoded constant that was
+              // 90 in every case but one (65 in the ebay_visual_override
+              // branch, still above no realistic bar this codebase set) —
+              // it never fired in production. Since authenticationScore no
+              // longer exists at all, this gate would become permanently
+              // dead code (condition always false) rather than deleted —
+              // leaving it in place would misrepresent a retired, never-
+              // fired check as a live safety gate. Deleted outright rather
+              // than left inert; see docs/PATTERN-LIBRARY.md "Dispatch 47".
               // Ship #24a-3 (Amendment B) — contract lock gate. Any lock in
               // contract.locks[] hard-disables listing and locks[0].reason
               // renders VERBATIM as the banner. Wires the XMEN1 fields
