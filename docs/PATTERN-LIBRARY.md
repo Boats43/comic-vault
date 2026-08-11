@@ -6233,8 +6233,222 @@ Dispatch 45) is now the actual, enforced state, not just a stated
 policy — there is no code left anywhere that can emit or render the
 constants. `convergence` (GK-62's real scorer, honestly fed as of
 `33079e4`) is the only identity-confidence signal left on the card.
-Next queued: GK-38/GK-42 (PriceCharting-ladder-as-passthrough
-labeling defect, same disease — the UI claiming to know something it
-doesn't — scoped together per the operator's own framing, not yet
-started).
+Next queued: PriceCharting-ladder-as-passthrough labeling defect (same
+disease — the UI claiming to know something it doesn't) — renumbered
+in Dispatch 50 (below) from the collision-prone GK-38/GK-42 draft
+labels used in Dispatch 48 to GK-66/GK-67, since GK-38 and GK-42
+already exist for unrelated Dispatch 26 identity findings.
+
+## Dispatch 48 (2026-08-10) — pricing-truth trace, no code (renumbered in Dispatch 50, below)
+
+Full trace of the executed-vs-displayed pricing path for a tier-2
+(`sold_active_blend_30`) scan. Findings drafted under collision-prone
+placeholder labels (GK-38/GK-41/GK-42, matching draft numbers the
+operator also flagged as guessed) — renumbered to GK-66/67/68/69 in
+Dispatch 50 immediately below; this entry exists only to record what
+Dispatch 48 actually traced, not to re-litigate the numbers.
+
+- **Executed path (tier 2):** `api/enrich.js:6726` →
+  `computePriceBandsFromSold` → `src/lib/priceBands.js:783` — real
+  formula `market = (soldAvg × 0.7) + (activeAvg × 0.3)` (`:841`),
+  `out.price = fmtUsd(priceBandsRaw.market)` (`enrich.js:7982`),
+  `out.pricingSource = 'sold_active_blend_30'` (via `TIER_SOURCE_MAP`,
+  `priceBands.js:79`). `gradeMultiplier` confirmed inert for this tier
+  (reference-only, never multiplied in — `priceBands.js:764-767`'s own
+  comment). `enforceFloorWithCap` confirmed structurally skipped for
+  tier 1/2/2.5 (`enrich.js:8285-8295`) — it protects `market` only,
+  tier 3/4 only, never `quick`, in any tier.
+- **Displayed derivation vs. executed (GK-67, was draft GK-42):** the
+  causal walkthrough panel (`App.jsx:6280-6362`) shows `→ Blend
+  (60/40): $item.blendedAvg` as a step toward "Final." `blendedAvg`
+  (`enrich.js:6636-6654`, `soldAvg×0.6 + activeAvg×0.4`) is a THIRD,
+  independent computation — different formula, different inputs
+  (recency-weighted `soldAvg`, `rawComps?.average` for `activeAvg`)
+  than priceBands.js's own tier-2 `soldAvg`/`activeAvg` (plain means
+  of `verifiedSolds`/`verifiedActive`). Set once, never cleared,
+  regardless of which tier fires. `sold_active_blend_30`'s `_30`
+  confirmed to encode the active-side blend weight (30%), not a
+  recency window or sample threshold. The codebase's own history
+  already fixed the identical bug class once (`enrich.js:6829-6835`'s
+  comment: `priceDerivationTrace` replaced an earlier log line for
+  exactly this "conflated an unrelated tier result with a product
+  never actually computed" reason) — the `App.jsx:6339` line is a
+  surviving, un-migrated instance.
+- **Ladder (GK-66, was draft GK-38):** `extractPriceLadder`
+  (`api/pricecharting-pop.js:384-404`) is a pure regex scrape of
+  PriceCharting's own per-grade table, zero GrailKey math, explicitly
+  documented as non-monotonic-tolerant. UI header bare ("PRICE LADDER
+  (N grades)," `App.jsx:4637`), no source attribution, unlike sibling
+  panels that say "Source: PriceCharting" (`:6449`). Client already
+  flags individual inversions ("⚠ thin data," `:4684-4692`).
+  Independent of GK-67/blendedAvg — disproven relationship, `priceLadder`
+  has zero references anywhere in the pricing stack (`computePriceBands`,
+  `blendedAvg`, floor guards). **New finding beyond the dispatch's own
+  framing: GK-66 is decision-affecting, not display-only.**
+  `decisionEngine.js:783-843` reads `item.priceLadder[nearestGrade]`
+  directly as `cgcValue`, and on threshold can set
+  `decision.action='HOLD_FOR_CGC'` with `decision.price=null` — a
+  noisy/inverted ladder rung (proven present on 2 of 3 frozen
+  specimens) can trigger a real grading recommendation and blank the
+  price.
+- **Quick-band floor (GK-68, was draft GK-41):** confirmed
+  structurally on the current build — see executed-path bullet above.
+- **Fold-in, confirmed still present, current lines:** GK-48
+  (App.jsx, now `:7064-7065`, shifted ~70 lines from this session's own
+  GK-39A/GK-62 edits — unrelated drift) and GK-49
+  (`api/comps.js:442`, unchanged) both reconfirmed live. Related third
+  instance found incidentally: `App.jsx:6448-6452`, a second ternary
+  defaulting unmapped `pricingSource` values to `"Source: AI estimate"`.
+- **Persistence:** `priceBands`/`pricingSource`/`priceNote`/
+  `priceUpdatedAt` all persist (confirmed, 5+ merge sites).
+  `priceDerivationTrace` — zero references anywhere in `App.jsx`, never
+  persisted (same class as GK-65). `blendedAvg` also never persists
+  (zero assignment sites in any merge path) — GK-67's exposure is
+  pre-save-only. `priceLadder` DOES persist — GK-66's `HOLD_FOR_CGC`
+  risk is NOT time-limited, fires on reopened books too.
+
+### Status
+
+Trace complete, no code. Renumbering + smallest-fix proposals recorded
+in Dispatch 50 below.
+
+## Dispatch 50 (2026-08-10) — GK-66/67/68/69 assigned; GK-66 decision authority removed; GK-67 display fixed
+
+### Step 0 — renumbering, grep-verified
+
+`grep -oE "GK-[0-9]+" CLAUDE.md docs/PATTERN-LIBRARY.md | sort -n -u`
+showed the highest number anywhere in this repo's ledger is **GK-65**
+(confirmed GK-63 has zero live references — only "renumbered from"
+historical notes at three lines, per Dispatch 46B). Gaps exist at
+47-49 (already externally assigned — Dispatch 48's own text referred
+to `GK-48`/`GK-49` as pre-existing labels this repo had never logged)
+and at 58-61 (unverifiable from this repo alone — could be externally
+claimed too, no way to confirm). Per the operator's own instruction
+not to guess, assigned sequentially immediately after the highest
+**confirmed** number rather than reusing an ambiguous gap:
+
+```
+GK-66  ladder passthrough + HOLD_FOR_CGC authority       (was draft GK-38)
+GK-67  blendedAvg 60/40 rendered as a step toward a 70/30 final  (was draft GK-42)
+GK-68  Quick band below the floor that protects Market   (was draft GK-41)
+GK-69  PRICING DERIVATION CUSTODY GAP — log only, not fixed
+```
+
+**GK-69, logged, not fixed:** `priceDerivationTrace` and `blendedAvg`
+never persist to IndexedDB; `priceLadder` does. The one field that
+explains the price honestly is dropped on save; the one field that can
+override the price with zero GrailKey computation behind it survives.
+Same class as GK-65 (a safety/explanatory signal disappearing across
+the persistence boundary), but the asymmetry runs the wrong direction
+here — the thing kept is the less-trustworthy one.
+
+Caveat, stated plainly: GK-47/48/49 are referenced in this repo's own
+Dispatch 48 entry above but were never formally logged here before
+now — this dispatch does not backfill full writeups for them, only
+notes their existence so a future renumbering pass doesn't collide
+with them either.
+
+### Commit 1 — GK-66: priceLadder authority removed from decisionEngine.js
+
+`src/lib/decisionEngine.js`, `tests/grailkey-dispatch-50-gk66-ladder-authority-removed.test.js`.
+
+Removed the entire CGC-grading-upside block (`hasAutoKey`/`autoDetectedKey`/
+`keyCharacters` consts, `CGC_ALL_IN_COST`/`CGC_UPSIDE_THRESHOLD`, the whole
+`if (!item.isGraded && item.priceLadder && ...)` branch, and the now-unused
+`GRADE_TO_NUMERIC` import) — the only place `item.priceLadder` had authority
+to set `decision.action`/`decision.price`. No server-side ladder-quality
+heuristic and no mirror of the client-side inversion check were added
+(forbidden this dispatch) — the ladder simply carries zero pricing/decision
+authority now, full stop.
+
+**Degradation, reported before implementing:** the ordinary path
+(LIST_NOW/LIST_LOW/RESEARCH/etc., unchanged, below the removed block) now
+determines the action for every book that would previously have hit
+HOLD_FOR_CGC. **No non-authoritative "potential grading upside" signal
+existed to preserve** — confirmed by grep, not assumed: `decision.evidence.
+gradingUpside` was never read by any UI surface (zero references in
+`App.jsx`), and `GRADE_CANDIDATE` (the action this block's own commentary
+aimed at) is never assigned anywhere in the live codebase — only checked
+(`decisionEngine.js:43`, `App.jsx:317/463`) and referenced in one
+investigation doc. HOLD_FOR_CGC was the sole live implementation. Per the
+dispatch's own instruction, nothing was invented to fill the gap — the
+ordinary action stands.
+
+**Tests: 20/20 passing.** Inverted rung (Witching-Hour/Batman-#213-shaped
+fixture) → no HOLD_FOR_CGC, price not nulled. Clean monotonic ladder with a
+genuine large upside → **still** no HOLD_FOR_CGC (demotion is unconditional,
+not inversion-gated, exactly as specified). Missing/empty ladder →
+unaffected (was already unreachable). Frozen corpus (the three real
+Dispatch 48 specimens) → all three resolve to `LIST_NOW`, `decision.price`
+unchanged at the fixture's base price; nearest rung per book logged
+explicitly (Witching Hour: 8.0=$89.95; Batman #213: 7.0=$63.08; Harley
+Quinn: 6.0=$12).
+
+**Baseline after Commit 1: 156/16/3/0** (155 expected +1 new file).
+`decision-engine.test.js` unchanged at 39 passed/7 failed, same 7 named
+assertions (including the pre-existing, already-broken "High-value grading
+candidate (SYNTHETIC)" test, which checked for `decision.action === 'HOLD'`
+— a string that was never right even before this dispatch, since the old
+code set `'HOLD_FOR_CGC'`, not `'HOLD'`; still fails, now for the additional
+reason that HOLD_FOR_CGC is gone entirely — not a new failure, the same one).
+
+### Commit 2 — GK-67 + fold-in: display truth, zero computation changes
+
+`src/App.jsx`, `tests/grailkey-dispatch-50-gk67-display-truth.test.js`.
+
+- **(a)** `App.jsx:6339-6341`'s `"→ Blend (60/40): $item.blendedAvg"` line
+  deleted from the causal derivation panel. `blendedAvg`'s own computation
+  (`enrich.js:6642`) untouched — still real, still used elsewhere
+  (`keyMultBase`, `compsAvgForCap`). Only the false causal presentation is
+  gone.
+- **(b)** Two source-label ternaries replaced with explicit lookup tables.
+  `App.jsx:6448-6452` (`item.pricingSource`, the `TIER_SOURCE_MAP` output
+  vocabulary — 7 values) now labels every one truthfully
+  (`sold_active_blend_30` → "sold + active blend (70/30)", etc.); unmapped
+  falls to the literal `"Source unavailable"`, never a euphemism.
+  `App.jsx:7064-7065` (`item.priceBands.source`) — **found to be a more
+  severe instance than documented**: it compared against the literal
+  strings `'verified_sold'`/`'verified_active'`, but `item.priceBands.source`
+  is `priceBandsRaw.source`, the RAW internal tier name
+  (`PRICE_BANDS_SOURCES` — e.g. `'tier2_blend_70_30'`), never those two
+  TIER_SOURCE_MAP-output strings. Both real branches were dead code — every
+  book, regardless of actual source, has always fallen to `'estimated'`
+  here. Replaced with a 10-entry lookup covering every `PRICE_BANDS_SOURCES`
+  value; unmapped falls to `'source-unavailable'`.
+- **(c)** Both PRICE LADDER panels (ResultCard + CollectionDetail — same
+  panel, two render sites) now carry `"Source: PriceCharting, unedited"`,
+  matching the attribution sibling panels already carry.
+  `api/pricecharting-pop.js:384-404` untouched.
+- **(d)** `"~ Similar {score}"` (MEDIUM tier only, as named) →
+  `"Match quality: {score}/100"`. `api/comps.js:442` (`computeMatchConfidence`)
+  untouched — score itself unchanged. HIGH (`"✓ Verified {score}"`) and LOW
+  (`"⚠ Estimate {score}"`) tiers share the same ambiguous shape but were
+  left untouched — not named in the dispatch, flagged here as a possible
+  follow-up rather than assumed in scope.
+
+**Tests: 35/35 passing**, including extract-and-eval of both new label
+lookups (verbatim from the shipped source, evaluated against every real
+`TIER_SOURCE_MAP`/`PRICE_BANDS_SOURCES` value) and confirmation that
+`blendedAvg`'s computation, `priceBands.js`'s 70/30 formula, `TIER_SOURCE_MAP`,
+and `decisionEngine.js` are all byte-identical to Commit 1 — this commit
+changed presentation only.
+
+**Baseline after Commit 2: 157/16/3/0** (155 expected +2 new files),
+byte-identical FAIL/TIMEOUT lists to the documented baseline both times.
+
+### HELD, per the operator's explicit instruction — no code
+
+Quick-band floor semantics (GK-68): the trace proves the floor
+(`enforceFloorWithCap`) protects `market` only, tier 3/4 only, never `quick`
+in any tier — structurally confirmed true on the current build. Whether
+that's a defect or an intentional product choice ("price aggressively for
+liquidity" vs. "never recommend below X") is the operator's call, not
+inferred here. No code touched for GK-68 this dispatch.
+
+### Status
+
+GK-66 and GK-67 (+ the GK-49 fold-in) shipped. GK-68 held, semantics
+undecided. GK-69 (pricing-derivation custody gap) logged only, unfixed —
+`priceDerivationTrace`/`blendedAvg` still don't persist; `priceLadder`
+still does (now decision-inert per Commit 1, but still display-persisted).
 
