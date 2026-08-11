@@ -1,5 +1,4 @@
 import { enforceFloor } from './pricingEngine.js';
-import { GRADE_TO_NUMERIC } from './gradeUtils.js';
 
 /**
  * Session 2A: Compute best sales channel based on decision + item characteristics
@@ -745,12 +744,6 @@ export function computeDecision(item, context = {}) {
 
   // PHASE 4: OPPORTUNITY DETECTION
 
-  // BUILD 1: Auto key detection influences grading decisions
-  // Keys with strong auto-detection signal → lean toward CGC/HOLD
-  const autoDetectedKey = item.autoDetectedKey === true;
-  const keyCharacters = item.keyCharacters || [];
-  const hasAutoKey = autoDetectedKey && keyCharacters.length > 0;
-
   // BUILD 2: Market velocity routing from GoCollect
   // Answers "who's the next buyer" — the 2026 market question
   const gcVelocity = item.goCollect?.velocity; // 'HIGH' | 'MEDIUM' | 'LOW' | null
@@ -775,74 +768,28 @@ export function computeDecision(item, context = {}) {
     isStale: isStale
   };
 
-  // FIX 3: CGC grading upside detection (cost-aware, target-grade)
-  // BUILD 1: Lower threshold for auto-detected keys (higher grading priority)
-  const CGC_ALL_IN_COST = 75; // grading + press, economy tier
-  const CGC_UPSIDE_THRESHOLD = hasAutoKey ? 30 : 50; // Lower bar for keys
-
-  if (!item.isGraded && item.priceLadder && item.price != null && item.price > 0) {
-    // Map raw grade to nearest CGC numeric grade (using shared gradeUtils.js)
-    const currentGrade = item.grade || item.rawGrade || 'VG';
-    const targetNumeric = GRADE_TO_NUMERIC[currentGrade] || 6.0;
-    const ladder = item.priceLadder;
-
-    // Find nearest available grade in ladder
-    const ladderGrades = Object.keys(ladder).map(k => parseFloat(k)).sort((a, b) => Math.abs(a - targetNumeric) - Math.abs(b - targetNumeric));
-    const nearestGrade = ladderGrades[0];
-    const cgcValue = ladder[nearestGrade];
-
-    if (cgcValue && cgcValue > 0) {
-      // BUG 1 FIX: Use raw market price (pre-floor) for CGC upside calculation
-      // item.price is floor-enforced final price (e.g., $173)
-      // rawMarketPrice is pre-floor sold avg or PC×gradeMult (e.g., $62)
-      const rawMarketPrice = item.soldCompsAvg
-        || (item.priceCharting?.price && item.gradeMultiplier
-            ? item.priceCharting.price * item.gradeMultiplier
-            : item.price);
-
-      const cgcUpside = cgcValue - rawMarketPrice - CGC_ALL_IN_COST;
-
-      // Debug diagnostic for CGC candidate detection
-      console.log('[cgc-check] floorPrice=', item.price,
-        'rawMarketPrice=', rawMarketPrice,
-        'soldCompsAvg=', item.soldCompsAvg,
-        'pcBase=', item.priceCharting?.price,
-        'gradeMult=', item.gradeMultiplier,
-        'grade=', currentGrade,
-        'mappedGrade=', targetNumeric,
-        'nearestGrade=', nearestGrade,
-        'cgcValue=', cgcValue,
-        'cgcUpside=', cgcUpside,
-        'triggered=', cgcUpside > rawMarketPrice);
-
-      // BUILD 1: Lower threshold for auto-detected keys OR upside exceeds raw market price
-      const meetsThreshold = hasAutoKey ? cgcUpside > CGC_UPSIDE_THRESHOLD : cgcUpside > rawMarketPrice;
-
-      if (meetsThreshold) {
-        decision.action = 'HOLD_FOR_CGC';
-        decision.confidence = hasAutoKey ? 'high' : 'medium';
-        const keyNote = hasAutoKey ? ` (key: ${keyCharacters.join(', ')})` : '';
-        decision.reason = `CGC ${nearestGrade} target: $${cgcValue.toFixed(0)} (+$${cgcUpside.toFixed(0)} after ~$${CGC_ALL_IN_COST} cost)${keyNote}`;
-        decision.nextStep = hasAutoKey
-          ? 'Key issue detected — submit for grading to maximize value'
-          : 'Submit for professional grading — upside exceeds raw value';
-        decision.price = null; // Not listing, grading instead
-        decision.evidence.gradingUpside = {
-          floorEnforcedPrice: item.price,      // $173 floor-enforced (display)
-          rawMarketPrice: rawMarketPrice,      // $62 pre-floor (calculation)
-          targetGrade: nearestGrade,
-          cgcValue: cgcValue,
-          gradingCost: CGC_ALL_IN_COST,
-          netUpside: cgcUpside,
-          rawGrade: currentGrade,
-          autoDetectedKey: hasAutoKey,         // BUILD 1
-          keyCharacters: keyCharacters          // BUILD 1
-        };
-        decision.bestChannel = computeBestChannel(decision, item);
-        return decision;
-      }
-    }
-  }
+  // GK-66 (Dispatch 50, 2026-08-10) — CGC grading-upside detection via
+  // item.priceLadder REMOVED as authority for an automatic HOLD_FOR_CGC
+  // action / price=null override. priceLadder is an unedited PriceCharting
+  // regex scrape (api/pricecharting-pop.js:384-404), documented as
+  // non-monotonic-tolerant, proven inverted on 2 of 3 frozen specimens
+  // (docs/PATTERN-LIBRARY.md "Dispatch 48"), and persists to IndexedDB —
+  // so a single noisy per-grade rung could trigger a real grading
+  // recommendation with a fabricated-looking upside number, on any scan,
+  // including reopened books. No server-side ladder-quality heuristic and
+  // no mirror of the client-side inversion check were added (explicitly
+  // forbidden this dispatch) — we have not certified a grading-upside
+  // model, and validating uncertified data is not the same as certifying
+  // it. Ordinary decision routing (below) now determines the action for
+  // every book that would previously have hit this branch. No replacement
+  // "potential grading upside" signal was added: GRADE_CANDIDATE (the
+  // action this removed block's own commentary aimed at) is never
+  // assigned anywhere in this codebase — HOLD_FOR_CGC was the only live
+  // implementation, and decision.evidence.gradingUpside was never read by
+  // any UI surface — there was no pre-existing, independently-reachable
+  // signal to preserve. item.priceLadder itself is untouched and remains
+  // fully available as reference/display evidence — only its authority to
+  // set decision.action/price is gone.
 
   // Check for bundle opportunity
   const isLowDollar = item.price < 10;
