@@ -10733,6 +10733,27 @@ export default async function handler(req, res) {
         identityConflictCount: out.conflicts?.length || 0,
       });
 
+      // GrailKey Directive G, Task 2 (2026-08-11) -- stamp unconditionally,
+      // not just inside the catalog-ladder-reference branch below.
+      // assessCatalogLadderReference (evidenceEligibility.js:927) only
+      // returns non-null when the raw AND graded pricing pools are BOTH
+      // completely empty -- the opposite of the case that most needs this
+      // signal (Bone #1 class, Directive F Task 1: a real 23-comp pool,
+      // PC anchor drift=5y, out.pcAnchorTrust was never set at all).
+      // assessPcAnchorTrust itself is untouched -- still anchored to
+      // confirmedYear (line above), never poolYearHint, matching
+      // mega-key's passesIdentityGates authority. src/App.jsx's render
+      // gate for Price Ladder/CGC Population/Last Sold reads this field;
+      // when priceCharting is absent or this whole block is skipped
+      // (out.refusedToPrice already true from an earlier reason),
+      // out.pcAnchorTrust stays undefined -- the render gate treats
+      // missing exactly like non-EXACT_EDITION (annotated, never
+      // authoritative), so that narrower scope is safe by construction.
+      if (priceCharting) {
+        out.pcAnchorTrust = pcAnchorTrust;
+        out.pcAnchorYear = priceCharting?.year || null;
+      }
+
       // Same grade-key derivation as before (matches
       // api/pricecharting-pop.js's formatGradeKey exactly): graded books
       // reuse userGradeKeyForSold's ".0"-suffix format verbatim; raw books
@@ -10774,7 +10795,7 @@ export default async function handler(req, res) {
           `clearing all actionable price fields, reference-only`
         );
         out.catalogLadderReference = catalogLadderReference;
-        out.pcAnchorTrust = pcAnchorTrust;
+        // out.pcAnchorTrust already stamped unconditionally above (Directive G Task 2).
         // Reuses the EXISTING refused-price pattern byte-for-byte (same as
         // the Q140 block just above) rather than inventing a second
         // mechanism -- routes responseContract.js's deriveState to

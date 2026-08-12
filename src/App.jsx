@@ -11,6 +11,7 @@ import {
   putAnalysis,
 } from "./db.js";
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
+import { isPcAnchorExact, pcEditionCaveat } from "./lib/pcAnchorAuthority.js";
 import { getAssetConfirmationBadge } from "./lib/assetConfirmationBadge.js";
 import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLabels.js";
 import { runAutoFix } from "./lib/autoFix.js";
@@ -1942,6 +1943,14 @@ function ResultCard({ result, enriching }) {
                       );
                     })()}
                   </div>
+                  {/* GrailKey Directive G, Task 2 — out.soldComps is PriceCharting
+                      sales-history-sourced (api/enrich.js:6183,
+                      fetchPricechartingSales); annotate, never hide (I13). */}
+                  {pcEditionCaveat(result) && (
+                    <div style={{ fontSize: 10, color: '#f59e0b', marginBottom: 4 }}>
+                      ⚠ {pcEditionCaveat(result)}
+                    </div>
+                  )}
                   {(soldListExpanded ? result.soldComps : result.soldComps.slice(0, 3)).map((s, i) => {
                     const mpStyle = (mp) => ({
                       marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
@@ -2060,6 +2069,12 @@ function ResultCard({ result, enriching }) {
           <div style={{ fontSize: 10, color: '#666', marginTop: 2, marginLeft: 15 }}>
             Source: PriceCharting, unedited
           </div>
+          {/* GrailKey Directive G, Task 2 — annotate, never hide (I13). */}
+          {pcEditionCaveat(result) && (
+            <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 2, marginLeft: 15 }}>
+              ⚠ {pcEditionCaveat(result)}
+            </div>
+          )}
           {ladderExpanded && (() => {
             // Ship #21k: Preserve literal grade strings ("raw", "9.8", etc.) — parseFloat("raw") = NaN
             const entries = Object.entries(result.priceLadder)
@@ -3439,9 +3454,13 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
                 const askLow = item.comps?.lowestNum;
                 const askHigh = item.comps?.highestNum;
                 if (!soldLow && !askLow) return null;
+                // GrailKey Directive G, Task 2 — compact tile summary; same
+                // PC-anchored soldLow data as the full Last Sold panel,
+                // annotated here too (not just the expanded views).
+                const soldIsPcRef = soldLow && !!pcEditionCaveat(item);
                 return (
                   <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
-                    {soldLow ? `Last sold $${Math.round(soldLow)}` : ''}
+                    {soldLow ? `Last sold${soldIsPcRef ? ' (ref)' : ''} $${Math.round(soldLow)}` : ''}
                     {soldLow && askLow ? ' · ' : ''}
                     {askLow ? `Asking $${Math.round(askLow)}` : ''}
                     {askHigh && askHigh !== askLow ? `–$${Math.round(askHigh)}` : ''}
@@ -4517,6 +4536,14 @@ function CollectionDetail({
                       );
                     })()}
                   </div>
+                  {/* GrailKey Directive G, Task 2 — item.soldComps is PriceCharting
+                      sales-history-sourced (api/enrich.js:6183,
+                      fetchPricechartingSales); annotate, never hide (I13). */}
+                  {pcEditionCaveat(item) && (
+                    <div style={{ fontSize: 10, color: '#f59e0b', marginBottom: 4 }}>
+                      ⚠ {pcEditionCaveat(item)}
+                    </div>
+                  )}
                   {(soldListExpanded ? item.soldComps : item.soldComps.slice(0, 3)).map((s, i) => {
                     const mpStyle = (mp) => ({
                       marginLeft: 6, padding: "1px 5px", fontSize: 10, borderRadius: 3,
@@ -4652,6 +4679,12 @@ function CollectionDetail({
           <div style={{ fontSize: 10, color: '#666', marginTop: 2, marginLeft: 15 }}>
             Source: PriceCharting, unedited
           </div>
+          {/* GrailKey Directive G, Task 2 — annotate, never hide (I13). */}
+          {pcEditionCaveat(item) && (
+            <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 2, marginLeft: 15 }}>
+              ⚠ {pcEditionCaveat(item)}
+            </div>
+          )}
           {ladderExpanded && (() => {
             // Ship #21k: Preserve literal grade strings ("raw", "9.8", etc.) — parseFloat("raw") = NaN
             const entries = Object.entries(item.priceLadder)
@@ -4920,6 +4953,12 @@ function CollectionDetail({
             <span>{popExpanded ? '▼' : '▶'}</span>
             <span>CGC POPULATION (Total: {item.pop.total.toLocaleString('en-US')})</span>
           </div>
+          {/* GrailKey Directive G, Task 2 — annotate, never hide (I13). */}
+          {pcEditionCaveat(item) && (
+            <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 2, marginLeft: 15 }}>
+              ⚠ {pcEditionCaveat(item)}
+            </div>
+          )}
           {popExpanded && (
             <div style={{
               marginTop: 6,
@@ -5120,7 +5159,8 @@ function CollectionDetail({
             ) : (
               <>
                 {dp > 0 && <span>${dp.toLocaleString('en-US')}</span>}
-                {lastSoldLabel && <span>· Last sold {lastSoldLabel}</span>}
+                {/* GrailKey Directive G, Task 2 — annotate PC-anchored sold data, never hide (I13). */}
+                {lastSoldLabel && <span>· Last sold{pcEditionCaveat(item) ? ' (ref)' : ''} {lastSoldLabel}</span>}
                 {activeRange && <span>· Asking {activeRange}</span>}
               </>
             )}
@@ -10267,6 +10307,8 @@ export default function App() {
                 imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
+                pcAnchorTrust: enrich.pcAnchorTrust ?? cur.pcAnchorTrust ?? null,
+                pcAnchorYear: enrich.pcAnchorYear ?? cur.pcAnchorYear ?? null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                 rawComps: enrich.rawComps || cur.rawComps || null,
@@ -10787,6 +10829,8 @@ export default function App() {
                   imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                   salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                   priceLadder: enrich.priceLadder || cur.priceLadder || null,
+                  pcAnchorTrust: enrich.pcAnchorTrust ?? cur.pcAnchorTrust ?? null,
+                  pcAnchorYear: enrich.pcAnchorYear ?? cur.pcAnchorYear ?? null,
                   salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                   velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                   rawComps: enrich.rawComps || cur.rawComps || null,
@@ -10909,6 +10953,8 @@ export default function App() {
                   imageSearchResults: enrich.imageSearchResults || s.imageSearchResults || null,
                   salesByGrade: enrich.salesByGrade || s.salesByGrade || null,
                   priceLadder: enrich.priceLadder || s.priceLadder || null,
+                  pcAnchorTrust: enrich.pcAnchorTrust ?? s.pcAnchorTrust ?? null,
+                  pcAnchorYear: enrich.pcAnchorYear ?? s.pcAnchorYear ?? null,
                   salesVelocity: enrich.salesVelocity || s.salesVelocity || null,
                   velocityAnalysis: enrich.velocityAnalysis || s.velocityAnalysis || null,
                   rawComps: enrich.rawComps || s.rawComps || null,
@@ -11284,6 +11330,8 @@ export default function App() {
                 imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
+                pcAnchorTrust: enrich.pcAnchorTrust ?? cur.pcAnchorTrust ?? null,
+                pcAnchorYear: enrich.pcAnchorYear ?? cur.pcAnchorYear ?? null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                 rawComps: enrich.rawComps || cur.rawComps || null,
@@ -11826,6 +11874,8 @@ export default function App() {
       imageSearchResults: enrich.imageSearchResults || item.imageSearchResults || null,
       salesByGrade: enrich.salesByGrade || item.salesByGrade || null,
       priceLadder: enrich.priceLadder || item.priceLadder || null,
+      pcAnchorTrust: enrich.pcAnchorTrust ?? item.pcAnchorTrust ?? null,
+      pcAnchorYear: enrich.pcAnchorYear ?? item.pcAnchorYear ?? null,
       salesVelocity: enrich.salesVelocity || item.salesVelocity || null,
       velocityAnalysis: enrich.velocityAnalysis || item.velocityAnalysis || null,
       rawComps: enrich.rawComps || item.rawComps || null,
@@ -12085,6 +12135,8 @@ export default function App() {
       // request above never sends pcProductId); this stores whatever that
       // fresh resolution found, or null if it found nothing / enrich failed.
       pcProductId: enrichData?.pcProductId ?? null,
+      pcAnchorTrust: enrichData?.pcAnchorTrust ?? null,
+      pcAnchorYear: enrichData?.pcAnchorYear ?? null,
       price: enrichData?.price || null,
       priceLow: enrichData?.priceLow || null,
       priceHigh: enrichData?.priceHigh || null,
@@ -12818,7 +12870,7 @@ export default function App() {
                               // 2026-07-18 — fold in identity/asset-type gate (was previously
                               // absent on this duplicate-confirm path).
                               const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
-                              const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? cur.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? cur.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });
