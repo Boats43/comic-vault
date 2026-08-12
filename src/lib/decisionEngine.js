@@ -1112,9 +1112,19 @@ export function describeWarning(slug, item) {
     return `eBay data unavailable this scan (${item.ebaySourceReason || 'unknown reason'}) — not verified as a zero-market book`;
   }
   if (slug === 'recommended-below-floor') {
+    // GrailKey Directive G, Task 1 (2026-08-11) -- reworded from "raised to
+    // $X". Directive F traced the full chain: decisionEngine.js:862-865
+    // computes a floor-raise inside the LIST_LOW branch, but
+    // responseContract.js:741 unconditionally overwrites decision.price
+    // with the pre-floor contract price before the response ships. No
+    // raise has ever reached the operator -- this string must not claim
+    // one did. The underlying gap (nothing enforces rawComps.lowest as a
+    // hard floor on the shipped price) is untouched; see GK-75.
     const floor = item.rawComps?.lowest;
     const floorStr = floor != null && !isNaN(floor) ? floor.toFixed(2) : '?';
-    return `recommended below floor (raised to $${floorStr})`;
+    const systemPrice = parsePriceNumber(item.price);
+    const priceStr = systemPrice != null ? systemPrice.toFixed(2) : '?';
+    return `recommended $${priceStr} is below the $${floorStr} active floor — verify before listing`;
   }
   if (slug === 'comp-pool-contaminated') {
     if (item.variantFallback && item.reprintFallback) return 'comp pool used both variant and reprint fallback — verify edition/cover before listing';
