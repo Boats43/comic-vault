@@ -6656,3 +6656,91 @@ task, per the directive's own commit discipline. `docs/TICKET-REGISTRY.md`
 gained 4 new entries this dispatch beyond the 37 backfilled: `GK-70`
 (open, deferred), `GK-71` (closed, Task 3), `GK-72` (closed, Task 2).
 
+## GrailKey Directive 2026-08-11-G, Task 4 — Authority Propagation Invariant (named, generalizes Rejection Must Not Create Authority)
+
+Directive F (2026-08-11) ran two traces — PriceCharting edition-trust
+render authority, and floor-raise authority — expecting they might land
+on the same defect shape as the standing "Rejection Must Not Create
+Authority" invariant (Dispatch 34) or as separate things entirely. Both
+traces found real, distinct instances, but neither was a clean fit for
+"rejection" specifically: one was a correctly-computed classification
+whose consumer never saw it (a narrower gating problem than rejection);
+the other was a correctly-attempted correction discarded by an
+unconditional overwrite built for an unrelated invariant (single-source-
+of-truth). Sweeping for a third example (Task 3 of this dispatch, the
+22c-title-revote path) turned up a shape that isn't even about a value
+being dropped — a *replacement* value skipping a gate its predecessor was
+required to pass.
+
+**The umbrella invariant, verbatim:**
+
+> **Authority Propagation Invariant.** A value that is computed,
+> classified, rejected, corrected, or replaced must propagate to every
+> downstream consumer whose behavior depends on it. If a later write
+> replaces that value, the replacement must pass the same authority
+> checks before becoming actionable.
+
+Two distinct mechanisms live under it. Keep them separate — a failure
+class that blurs two different bugs into one name stops being useful for
+diagnosis, because the fix shape differs (gate the consumer vs. gate the
+writer).
+
+### (a) Computed-Then-Discarded
+
+The signal is produced correctly and dropped before the consumer that
+needs it. The practical test: *name every consumer of the value. If a
+consumer that depends on it doesn't see the classification, that's (a).*
+
+Eight confirmed instances as of this dispatch:
+
+| Value | Fate | Status |
+|---|---|---|
+| `emptyComps().reason` | unread by the response surface | CLOSED, GK-72 |
+| `assetTypeConfident` | never reached the confirmation badge | CLOSED, Directive E |
+| `assessPcAnchorTrust` verdict (`out.pcAnchorTrust`) | persisted only when the comp pool is completely empty (`evidenceEligibility.js:927`) — the opposite of the case that needs it (a real pool, a merely-plausible PC edition match) | FIXED, Directive G Task 2 — now stamped unconditionally whenever a PC record exists, gated into render at `src/lib/pcAnchorAuthority.js` |
+| `preFloorPrice` | written, never read back downstream | OPEN |
+| `floorFired` | never reaches the render site (`App.jsx`'s "Floor guard" panel reads `rawComps.lowest` directly instead) | OPEN |
+| `decision.price` floor-raise (`decisionEngine.js:862-865`, `enforceFloor(item.price*0.8, floor)`) | unconditionally overwritten by `responseContract.js:741` (`out.decision.price = contract.price`) before the response ships — the raise is computed, never propagates | OPEN (wording-only fix shipped, Directive G Task 1 — the underlying non-enforcement is GK-68/GK-75, still open) |
+| `pcAnchorTrust` persistence gate itself | the gate condition (`evidenceEligibility.js:927`, `rawPricingPoolEmpty && gradedReferencesEmpty`) was inverted relative to the case that needed protection | FIXED, Directive G Task 2 (surfaced the existing verdict; the gate/thresholds inside `assessPcAnchorTrust`/`assessCatalogLadderReference` themselves were correctly left untouched, per explicit non-goal) |
+| PriceCharting `reference-only` classification (`[price-trace]` log label) | no field ever existed to carry an edition-trust signal alongside it — an absence, not a drop | OPEN — `out.pcAnchorTrust`/`out.pcAnchorYear` (Directive G Task 2) are the closest thing to a fix, but the log label itself remains uninformative about edition trust by design (diagnostic text, not a data field) |
+
+### (b) Validation Bypass on Authority Replacement
+
+A new write replaces a validated value without re-running the validation
+that governed the value it replaced. The practical test: *name every
+writer of the value. If a writer skips a gate the previous value was
+required to pass, that's (b).*
+
+One confirmed instance: **GK-76**, the 22c-title-revote path
+(`api/enrich.js:6649-6661`). When `[22c-title-revote]` fires (unanimous
+pool rejection + PC no-match on the original title), the handler
+re-queries PriceCharting against the revoted title and writes
+`out.pcProductId`/`out.pcProductName` from whatever it finds —
+unconditionally. The ORIGINAL PC match, earlier in the same request, had
+to clear `pc-anchor-gate` (`api/enrich.js:5045-5126` — year/name/
+discriminator conflict checks against `poolYearHint` and the winning
+family's own member titles) before its `pcProductId` was allowed to
+stand. The revoted match never runs that gate at all. Not fixed —
+logged, needs its own scoping (whether the revote should re-run the full
+three-axis gate, or a narrower re-check scoped to just the axis that
+triggered the revote, is an open design question, not an implementation
+detail).
+
+### Relationship to the existing invariant list
+
+This umbrella sits above, and does not replace, **Rejection Must Not
+Create Authority** (Dispatch 34) — that invariant is the special case of
+(a) where the specific value being lost is a rejection determination
+(the ComicVine fail-open, the mega-key-floor path, the eBay
+grade-proximity filter at GK-70). Authority Propagation Invariant
+generalizes it to any computed/classified/corrected value, not only
+rejections, and adds mechanism (b) as a genuinely separate shape sitting
+alongside it — not a rewording, a second failure mode that the narrower
+"rejection" framing never covered.
+
+Joins the running list: Dispatch 33 (Monotonic Evidence Extension, No
+Self-Corroboration), Dispatch 34 (Rejection Must Not Create Authority),
+Dispatch 37 (Cache Correctness Is Authority Correctness), Dispatch 44
+(Authority Must Be Use-Consistent), Dispatch 46 (A safety gate must not
+disappear because an asset crossed a persistence boundary; A value must
+not vote for itself).
