@@ -5763,13 +5763,23 @@ function CollectionDetail({
                   borderTop: hasAnyAdvisory ? "1px solid rgba(212,175,55,0.2)" : "none",
                 }}
               >
-                {/* Ship #24 Wave 1 Commit 3 — relabeled "Condition confidence":
-                    this is Claude's grading/condition-assessment confidence,
-                    a genuinely different concept from identity/pricing
-                    confidence (contract.decision.confidence). Same word,
-                    different claim — disambiguated so the two can't read as
-                    contradictory on the same card. */}
-                {confidenceText && <div>Condition confidence: {confidenceText}</div>}
+                {/* GK-79A (GrailKey Directive J, 2026-08-12) — relabeled from
+                    "Condition confidence" to "Image legibility confidence".
+                    item.confidence is Vision's own self-report, scoped by
+                    api/grade.js's STANDARD_PROMPT to "how legible and
+                    complete THIS image is" — it says nothing about whether
+                    enough surfaces (back/spine/interior) were captured to
+                    support the grade, and nothing about condition certainty.
+                    "Condition confidence" overstated that scope; the new
+                    label stays accurate even after addPhotoToComic re-grades
+                    from multiple stored photos, since it never claims to be
+                    front-cover-specific. Wording-only change: formatConfidence's
+                    logic, api/grade.js's prompt, gradeMultiplier, and the
+                    identity-axis authority weighting at api/enrich.js:2983
+                    are all untouched. Still genuinely distinct from
+                    identity/pricing confidence (contract.decision.confidence)
+                    — same disambiguation intent as before, new wording. */}
+                {confidenceText && <div>Image legibility confidence: {confidenceText}</div>}
                 {scannedText && <div>Scanned: {scannedText}</div>}
               </div>
             );
