@@ -6672,18 +6672,20 @@ of-truth). Sweeping for a third example (Task 3 of this dispatch, the
 being dropped — a *replacement* value skipping a gate its predecessor was
 required to pass.
 
-**The umbrella invariant, verbatim:**
+**The umbrella invariant, verbatim (widened, Directive H Item 4 — see the
+note at the end of this section):**
 
 > **Authority Propagation Invariant.** A value that is computed,
 > classified, rejected, corrected, or replaced must propagate to every
 > downstream consumer whose behavior depends on it. If a later write
-> replaces that value, the replacement must pass the same authority
-> checks before becoming actionable.
+> replaces or preserves that value, the preserved or replacing value must
+> still satisfy the authority checks that governed the original before
+> becoming actionable.
 
-Two distinct mechanisms live under it. Keep them separate — a failure
-class that blurs two different bugs into one name stops being useful for
-diagnosis, because the fix shape differs (gate the consumer vs. gate the
-writer).
+Three distinct mechanisms live under it. Keep them separate — a failure
+class that blurs different bugs into one name stops being useful for
+diagnosis, because the fix shape differs (gate the consumer / gate the
+writer / clear on absence).
 
 ### (a) Computed-Then-Discarded
 
@@ -6691,18 +6693,35 @@ The signal is produced correctly and dropped before the consumer that
 needs it. The practical test: *name every consumer of the value. If a
 consumer that depends on it doesn't see the classification, that's (a).*
 
-Eight confirmed instances as of this dispatch:
+**Six confirmed instances** (normalized from an original count of eight —
+Directive H Item 4 folded one duplicate and demoted one non-instance; see
+the note below the table):
 
 | Value | Fate | Status |
 |---|---|---|
 | `emptyComps().reason` | unread by the response surface | CLOSED, GK-72 |
 | `assetTypeConfident` | never reached the confirmation badge | CLOSED, Directive E |
-| `assessPcAnchorTrust` verdict (`out.pcAnchorTrust`) | persisted only when the comp pool is completely empty (`evidenceEligibility.js:927`) — the opposite of the case that needs it (a real pool, a merely-plausible PC edition match) | FIXED, Directive G Task 2 — now stamped unconditionally whenever a PC record exists, gated into render at `src/lib/pcAnchorAuthority.js` |
+| `assessPcAnchorTrust` verdict (`out.pcAnchorTrust`) | persisted only when the comp pool is completely empty (`evidenceEligibility.js:927`, `rawPricingPoolEmpty && gradedReferencesEmpty`) — the opposite of the case that needs it (a real pool, a merely-plausible PC edition match) | FIXED, Directive G Task 2 — now stamped unconditionally whenever a PC record exists (the same gate condition that discarded it is the fix site — value and mechanism are one instance, not two), gated into render at `src/lib/pcAnchorAuthority.js` |
 | `preFloorPrice` | written, never read back downstream | OPEN |
 | `floorFired` | never reaches the render site (`App.jsx`'s "Floor guard" panel reads `rawComps.lowest` directly instead) | OPEN |
 | `decision.price` floor-raise (`decisionEngine.js:862-865`, `enforceFloor(item.price*0.8, floor)`) | unconditionally overwritten by `responseContract.js:741` (`out.decision.price = contract.price`) before the response ships — the raise is computed, never propagates | OPEN (wording-only fix shipped, Directive G Task 1 — the underlying non-enforcement is GK-68/GK-75, still open) |
-| `pcAnchorTrust` persistence gate itself | the gate condition (`evidenceEligibility.js:927`, `rawPricingPoolEmpty && gradedReferencesEmpty`) was inverted relative to the case that needed protection | FIXED, Directive G Task 2 (surfaced the existing verdict; the gate/thresholds inside `assessPcAnchorTrust`/`assessCatalogLadderReference` themselves were correctly left untouched, per explicit non-goal) |
-| PriceCharting `reference-only` classification (`[price-trace]` log label) | no field ever existed to carry an edition-trust signal alongside it — an absence, not a drop | OPEN — `out.pcAnchorTrust`/`out.pcAnchorYear` (Directive G Task 2) are the closest thing to a fix, but the log label itself remains uninformative about edition trust by design (diagnostic text, not a data field) |
+
+**Correction, Directive H Item 4:** the original table also listed
+"`pcAnchorTrust` persistence gate itself" as a separate row from the
+`assessPcAnchorTrust` verdict row directly above it — the same fact
+(the gate at `evidenceEligibility.js:927` was inverted) described from
+two angles, not two instances. Folded into one row.
+
+**Demoted, not an (a) instance:** PriceCharting `reference-only`
+classification (the `[price-trace]` log label at `api/enrich.js:9155`).
+The original table's own text for this row said *"no field ever existed
+to carry an edition-trust signal alongside it — an absence, not a drop"*
+— which, by this section's own definition directly above ("the signal is
+produced correctly and **dropped**"), disqualifies it: nothing was ever
+computed here to be discarded. It is a **design gap**, not a
+Computed-Then-Discarded instance — there was no carrier field for an
+edition-trust signal at that log site until `out.pcAnchorTrust`/
+`out.pcAnchorYear` (Directive G Task 2) gave the codebase one elsewhere.
 
 ### (b) Validation Bypass on Authority Replacement
 
@@ -6726,6 +6745,41 @@ three-axis gate, or a narrower re-check scoped to just the axis that
 triggered the revote, is an open design question, not an implementation
 detail).
 
+### (c) Stale Authority Inheritance (new, Directive H Item 4)
+
+A value outlives the evidence that produced it, because a later write
+path *preserves on absence* instead of clearing — distinct from (a) (a
+consumer never seeing a value at all) and (b) (a replacement value
+skipping a gate): here the value genuinely reached its consumer once,
+correctly, and then survived past the point where the evidence backing
+it stopped existing. The practical test: *for any value, ask what
+happens when the producing evidence disappears on a later write. If the
+old value survives, that's (c).*
+
+Two confirmed instances:
+
+| Value | Fate | Status |
+|---|---|---|
+| `out.ebaySourceUnavailable`/`Reason` | `api/enrich.js:6240-6244` only ever explicitly sets `true` — no `else` branch clears/sets `false` on the healthy path, so a stale `true` from before a correction can survive a correction whose fresh response is genuinely healthy and simply omits the key (GK-73's third finding) | OPEN |
+| `pcAnchorTrust`/`pcAnchorYear` | 6 of 7 explicit `src/App.jsx` merge sites read `enrich.pcAnchorTrust ?? cur.pcAnchorTrust ?? null` — when a later scan's response carries no PC anchor at all, the stale prior verdict (including `EXACT_EDITION`) survived the merge; the 8th site (`buildCorrectedCatalogueItem`, full-spread merge) had the same symptom via a different mechanism (an omitted key is never overwritten by a spread) | FIXED, Directive H Item 1 — the `?? cur.` fallback removed at all 6 explicit sites (matching `reIdentifyBook`'s pre-existing correct pattern); `pcAnchorYear` added to `buildCorrectedCatalogueItem`'s clear-list (`pcAnchorTrust` was already there, added Commit E1, 2026-07-29, before this field existed) |
+
+Fix shapes differ by mechanism, which is why the three classes stay
+separate: **(a)** gate the consumer · **(b)** gate the writer · **(c)**
+clear on absence instead of inheriting.
+
+### Why the invariant statement was widened (Directive H, Item 4)
+
+The original umbrella statement covered only *replacement*: "if a later
+write replaces that value, the replacement must pass the same authority
+checks." Mechanism (c) — a value surviving unchanged because a later
+write *preserves on absence* rather than replacing at all — is not a
+replacement and fell outside that sentence's literal scope, even though
+it is the same underlying failure (a later write producing a value that
+does not deserve the authority it inherits). The statement now covers
+both: "if a later write replaces **or preserves** that value, the
+preserved or replacing value must still satisfy the authority checks
+that governed the original."
+
 ### Relationship to the existing invariant list
 
 This umbrella sits above, and does not replace, **Rejection Must Not
@@ -6733,10 +6787,10 @@ Create Authority** (Dispatch 34) — that invariant is the special case of
 (a) where the specific value being lost is a rejection determination
 (the ComicVine fail-open, the mega-key-floor path, the eBay
 grade-proximity filter at GK-70). Authority Propagation Invariant
-generalizes it to any computed/classified/corrected value, not only
-rejections, and adds mechanism (b) as a genuinely separate shape sitting
-alongside it — not a rewording, a second failure mode that the narrower
-"rejection" framing never covered.
+generalizes it to any computed/classified/corrected/preserved value, not
+only rejections, and adds mechanisms (b) and (c) as genuinely separate
+shapes sitting alongside it — not a rewording, two additional failure
+modes the narrower "rejection" framing never covered.
 
 Joins the running list: Dispatch 33 (Monotonic Evidence Extension, No
 Self-Corroboration), Dispatch 34 (Rejection Must Not Create Authority),
