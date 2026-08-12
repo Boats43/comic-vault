@@ -10307,8 +10307,14 @@ export default function App() {
                 imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
-                pcAnchorTrust: enrich.pcAnchorTrust ?? cur.pcAnchorTrust ?? null,
-                pcAnchorYear: enrich.pcAnchorYear ?? cur.pcAnchorYear ?? null,
+                // GrailKey Directive H, Item 1 (2026-08-11) -- no cur./s./item. fallback.
+                // A stale EXACT_EDITION must not survive a scan where the fresh enrich
+                // response carries no PC anchor at all (out.pcAnchorTrust only stamps
+                // inside `if (priceCharting)`, api/enrich.js). Missing already means
+                // annotated by design (pcEditionCaveat) -- inheriting the old value would
+                // resurrect an authority claim the current scan never re-verified.
+                pcAnchorTrust: enrich.pcAnchorTrust ?? null,
+                pcAnchorYear: enrich.pcAnchorYear ?? null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                 rawComps: enrich.rawComps || cur.rawComps || null,
@@ -10829,8 +10835,14 @@ export default function App() {
                   imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                   salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                   priceLadder: enrich.priceLadder || cur.priceLadder || null,
-                  pcAnchorTrust: enrich.pcAnchorTrust ?? cur.pcAnchorTrust ?? null,
-                  pcAnchorYear: enrich.pcAnchorYear ?? cur.pcAnchorYear ?? null,
+                  // GrailKey Directive H, Item 1 (2026-08-11) -- no cur./s./item. fallback.
+                  // A stale EXACT_EDITION must not survive a scan where the fresh enrich
+                  // response carries no PC anchor at all (out.pcAnchorTrust only stamps
+                  // inside `if (priceCharting)`, api/enrich.js). Missing already means
+                  // annotated by design (pcEditionCaveat) -- inheriting the old value would
+                  // resurrect an authority claim the current scan never re-verified.
+                  pcAnchorTrust: enrich.pcAnchorTrust ?? null,
+                  pcAnchorYear: enrich.pcAnchorYear ?? null,
                   salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                   velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                   rawComps: enrich.rawComps || cur.rawComps || null,
@@ -10953,8 +10965,14 @@ export default function App() {
                   imageSearchResults: enrich.imageSearchResults || s.imageSearchResults || null,
                   salesByGrade: enrich.salesByGrade || s.salesByGrade || null,
                   priceLadder: enrich.priceLadder || s.priceLadder || null,
-                  pcAnchorTrust: enrich.pcAnchorTrust ?? s.pcAnchorTrust ?? null,
-                  pcAnchorYear: enrich.pcAnchorYear ?? s.pcAnchorYear ?? null,
+                  // GrailKey Directive H, Item 1 (2026-08-11) -- no cur./s./item. fallback.
+                  // A stale EXACT_EDITION must not survive a scan where the fresh enrich
+                  // response carries no PC anchor at all (out.pcAnchorTrust only stamps
+                  // inside `if (priceCharting)`, api/enrich.js). Missing already means
+                  // annotated by design (pcEditionCaveat) -- inheriting the old value would
+                  // resurrect an authority claim the current scan never re-verified.
+                  pcAnchorTrust: enrich.pcAnchorTrust ?? null,
+                  pcAnchorYear: enrich.pcAnchorYear ?? null,
                   salesVelocity: enrich.salesVelocity || s.salesVelocity || null,
                   velocityAnalysis: enrich.velocityAnalysis || s.velocityAnalysis || null,
                   rawComps: enrich.rawComps || s.rawComps || null,
@@ -11330,8 +11348,14 @@ export default function App() {
                 imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                 salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                 priceLadder: enrich.priceLadder || cur.priceLadder || null,
-                pcAnchorTrust: enrich.pcAnchorTrust ?? cur.pcAnchorTrust ?? null,
-                pcAnchorYear: enrich.pcAnchorYear ?? cur.pcAnchorYear ?? null,
+                // GrailKey Directive H, Item 1 (2026-08-11) -- no cur./s./item. fallback.
+                // A stale EXACT_EDITION must not survive a scan where the fresh enrich
+                // response carries no PC anchor at all (out.pcAnchorTrust only stamps
+                // inside `if (priceCharting)`, api/enrich.js). Missing already means
+                // annotated by design (pcEditionCaveat) -- inheriting the old value would
+                // resurrect an authority claim the current scan never re-verified.
+                pcAnchorTrust: enrich.pcAnchorTrust ?? null,
+                pcAnchorYear: enrich.pcAnchorYear ?? null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
                 rawComps: enrich.rawComps || cur.rawComps || null,
@@ -11874,8 +11898,14 @@ export default function App() {
       imageSearchResults: enrich.imageSearchResults || item.imageSearchResults || null,
       salesByGrade: enrich.salesByGrade || item.salesByGrade || null,
       priceLadder: enrich.priceLadder || item.priceLadder || null,
-      pcAnchorTrust: enrich.pcAnchorTrust ?? item.pcAnchorTrust ?? null,
-      pcAnchorYear: enrich.pcAnchorYear ?? item.pcAnchorYear ?? null,
+      // GrailKey Directive H, Item 1 (2026-08-11) -- no cur./s./item. fallback.
+      // A stale EXACT_EDITION must not survive a scan where the fresh enrich
+      // response carries no PC anchor at all (out.pcAnchorTrust only stamps
+      // inside `if (priceCharting)`, api/enrich.js). Missing already means
+      // annotated by design (pcEditionCaveat) -- inheriting the old value would
+      // resurrect an authority claim the current scan never re-verified.
+      pcAnchorTrust: enrich.pcAnchorTrust ?? null,
+      pcAnchorYear: enrich.pcAnchorYear ?? null,
       salesVelocity: enrich.salesVelocity || item.salesVelocity || null,
       velocityAnalysis: enrich.velocityAnalysis || item.velocityAnalysis || null,
       rawComps: enrich.rawComps || item.rawComps || null,
@@ -12870,7 +12900,7 @@ export default function App() {
                               // 2026-07-18 — fold in identity/asset-type gate (was previously
                               // absent on this duplicate-confirm path).
                               const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
-                              const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? cur.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? cur.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });

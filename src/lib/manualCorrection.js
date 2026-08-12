@@ -303,6 +303,14 @@ export const getCorrectableFields = (item) => {
 const CLEAR_PC_COMICVINE_GOCOLLECT_IDS = [
   'pcProductId', 'pcProductName', 'pcEbayEpid', 'pcLoosePrice', 'pcGradedPrice',
   'pcLastUpdated', 'pcMatchRejectedForYearConflict', 'pcAnchorTrust',
+  // GrailKey Directive H, Item 1 (2026-08-11) -- pcAnchorYear is new
+  // (Directive G Task 2); pcAnchorTrust was already clear-listed here
+  // since Commit E1 (2026-07-29), but pcAnchorYear didn't exist yet and
+  // was missing. Without this, a stale EXACT_EDITION-supporting year
+  // could survive a correction whose fresh response carries no PC
+  // anchor at all (enrichData simply omits the key; the full spread
+  // below never overwrites an absent key).
+  'pcAnchorYear',
   'comicVine', 'originalComicVine', 'cvCharacterCredits', 'ximilar',
   'goCollect', 'gcId', 'gcFmvLadder', 'gcLastUpdated', 'gcTrend', 'gcVelocity', 'gcDaysToSell',
 ];
