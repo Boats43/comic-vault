@@ -1195,6 +1195,62 @@ export const fetchComps = async ({
     console.log('[comps] Dell Four Color aliases added:', fcAliases);
   }
 
+  // GrailKey Directive O — variant-aware ladder reorder (Sabrina Annual
+  // Spectacular 2024 #1 / Dan Parent NYCC Foil class, Directive N1's
+  // proven Defect A). The image-search attempt (n=-1, Ship #20a.6.7b.3,
+  // pushed unconditionally first at the top of this function) is built
+  // from imageSearchTitle, which is variant-blind by ship12/Q141 design
+  // (buildSanitizedComicSearchTitle takes title+issue+year only — see
+  // that helper's own doc comment). For a book with a confirmed variant,
+  // that generic query is BROADER than attempts 0/1/2 (the only three
+  // built with fullVariant/variantKeyword above), yet ran before them —
+  // and the attempt loop (api/comps.js, below) breaks on the FIRST
+  // attempt with any post-filter survivor, so a broad generic pool
+  // (abundant ordinary copies) could win before the variant-bearing
+  // attempt ever ran. Production evidence: Sabrina scan, confirmedVariant
+  // "Dan Parent NYCC variant" — attempt -1 alone returned 84 raw / 11
+  // final survivors off 1997 generic copies; attempt 0 (which carries
+  // "Dan Parent NYCC variant" in its query text) never executed.
+  //
+  // Fix is ORDER ONLY — no query string changes (ship12/Q141 sanitization
+  // on imageSearchTitle is untouched; fullVariant/variantKeyword
+  // construction above is untouched). When a confirmed variant exists,
+  // move the already-built image-search attempt to run immediately AFTER
+  // the last variant-bearing attempt (n 0-2) instead of unconditionally
+  // first. No variant confirmed, or no variant-bearing attempt exists at
+  // all (e.g. no issue number) → this is a no-op, image-search stays
+  // exactly where Ship #20a.6.7b.3 originally put it (position 0) —
+  // structural non-regression for every no-variant book shape.
+  //
+  // Runs BEFORE the artist-specific / tpb-aware unshift blocks below so
+  // both keep unconditional priority over this reorder: those unshift to
+  // absolute index 0 regardless of what this block already did, so a
+  // known-artist variant or a TPB-marked title still wins the front of
+  // the ladder exactly as before this change.
+  if (variant) {
+    const imgIdx = attempts.findIndex((a) => a.label === 'image-search');
+    if (imgIdx !== -1) {
+      let lastVariantIdx = -1;
+      for (let k = 0; k < attempts.length; k++) {
+        if (k !== imgIdx && typeof attempts[k].n === 'number' && attempts[k].n >= 0 && attempts[k].n <= 2) {
+          lastVariantIdx = k;
+        }
+      }
+      if (lastVariantIdx > imgIdx) {
+        const [imgAttempt] = attempts.splice(imgIdx, 1);
+        // lastVariantIdx was computed pre-removal; imgIdx < lastVariantIdx
+        // means removing imgIdx shifts every later index left by 1, so
+        // re-inserting at lastVariantIdx now lands right after the
+        // (shifted) last variant-bearing attempt.
+        attempts.splice(lastVariantIdx, 0, imgAttempt);
+        console.log(
+          `[comps-ladder] confirmedVariant="${variant}" — moved image-search attempt ` +
+          `behind variant-bearing attempt(s), new position ${lastVariantIdx}`
+        );
+      }
+    }
+  }
+
   // Artist-specific variant priority: when the variant names a known
   // cover artist (Skan virgin, Rapoza virgin, Momoko, etc.), try the
   // EXACT artist+variant comp before falling through to generic-virgin /
@@ -2020,6 +2076,15 @@ export const fetchComps = async ({
         signedRejected = filtered.signedRejected;
         attemptUsed = attempt.n;
         attemptLabel = attempt.label || null;
+        // GrailKey Directive O — explicit winner log. Previously the
+        // winning attempt was only inferable from the last non-empty
+        // "[comps] attempt N ... post-filter=" pair before the loop
+        // stopped logging; this states it directly so a production log
+        // shows which query produced the priced pool without inference.
+        console.log(
+          `[comps-ladder] winner: attempt ${attempt.n}${attempt.label ? ` (${attempt.label})` : ''} ` +
+          `query="${query}" — ${filtered.parsed.length} survivor(s)`
+        );
         break;
       }
       if (i < uniqueAttempts.length - 1) {

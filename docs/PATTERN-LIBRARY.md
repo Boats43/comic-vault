@@ -6798,3 +6798,142 @@ Dispatch 37 (Cache Correctness Is Authority Correctness), Dispatch 44
 (Authority Must Be Use-Consistent), Dispatch 46 (A safety gate must not
 disappear because an asset crossed a persistence boundary; A value must
 not vote for itself).
+
+## GrailKey Directive 2026-08-13-O — comp query ladder ordering fix (Sabrina / Dan Parent NYCC class, Defect A)
+
+Successor to Directive N1's identity-resolution trace, which proved (but
+did not fix, investigation-only) that `api/comps.js`'s comp-query attempt
+ladder was mis-ordered for any book with a confirmed variant. This
+dispatch was explicitly greenlit to trace further and fix that one
+defect only — not the PC-year anchor Directive N1 also flagged
+(Defect B, still unconfirmed as independent — see below), not identity
+resolution, not Q140/Flash #139.
+
+### The defect, traced
+
+`api/comps.js` builds an ordered `attempts` array, most-specific-first by
+design (documented in CLAUDE.md's "Search query construction" section).
+Full ladder as it existed pre-fix, in construction order:
+
+1. **`n=-1`, label `image-search`** (`api/comps.js:1114-1121`, Ship
+   #20a.6.7b.3, commit `6f5b0df`, 2026-04-29) — built from
+   `imageSearchTitle` (the upstream `ship12`/Q141-sanitized title+issue+
+   year string, deliberately variant-blind by design —
+   `buildSanitizedComicSearchTitle` takes three params, no variant).
+   **Pushed unconditionally, always first.**
+2. **`n=0`** (`api/comps.js:1143-1148`) — `cleanTitle #issue fullVariant
+   year publisher`. First attempt that carries the confirmed variant.
+3. **`n=1`** (`1149-1152`) — `cleanTitle #issue variantKeyword year`
+   (short variant keyword, not the full string).
+4. **`n=2`** (`1153-1156`) — `cleanTitle #issue variantKeyword`, no year.
+   Last attempt carrying any variant signal.
+5. **`n=3`** (`1157-1160`) — `cleanTitle year`, no issue, no variant.
+6. **`n=4`** (`1161-1162`) — `cleanTitle` only.
+7. **`n=5`** (`1163-1169`) — first significant word + issue.
+8. Dell Four Color aliases (conditional, `n = attempts.length` — always
+   sort last).
+9. **`unshift`, artist-specific** (`1198-1231`) — when `variant` matches
+   a known `ARTIST_PATTERNS` entry, a dedicated artist+variant query is
+   unshifted to absolute index 0. Genuine precedent for "put a variant-
+   aware query ahead of image-search," but gated on a strict allowlist —
+   "Dan Parent" is not in `ARTIST_PATTERNS` (confirmed by grep), so this
+   mechanism never fired for the Sabrina scan.
+10. **`unshift`, tpb-aware** (`1233-1255`) — same unshift shape, gated on
+    a TPB-format marker in our own title. Also never fired for Sabrina.
+
+The attempt loop (`api/comps.js`, formerly ~1988, now shifted by the
+inserted fix block) breaks on the **first** attempt with
+`filtered.parsed.length > 0` — no minimum count, no quality bar (see
+GK-82 below). Attempt `-1` is *broader* than attempts 0-2 for any book
+with generic copies alongside a real variant, yet ran before all three.
+Production evidence (Sabrina, build `11d70aa`, 16:16 UTC): attempt `-1`
+alone returned 84 raw / 11 final survivors off generic 1997 copies;
+attempts 0-2 (carrying "Dan Parent NYCC variant") never ran at all.
+Priced $9.56 against a real ~$50 book.
+
+**Why attempt `-1` exists, and whether that blocks reordering:** traced
+to commit `6f5b0df` (2026-04-29, "Ship #20a.6.7b — image search wired
+into PC + comp query"). The commit's own stated purpose for the `.3`
+sub-ship: "Pass top image search rawTitle as first comp attempt — Catches
+exact listings Vision might have misread — No pricing-math impact (comp
+filter logic unchanged)." This is a coverage justification (catch cases
+where Vision's own title text is wrong), not a specificity ruling — the
+commit message never asserts image-search must outrank a confirmed
+variant, and grepping `docs/PATTERN-LIBRARY.md` for `attempt -1`/
+`image-search attempt`/`20a.6.7b.3` prior to this dispatch returns zero
+hits, i.e. no later ruling protected this ordering either. **No blocking
+ruling found.** Reordering for the variant-confirmed case does not
+undermine the original "catch a misread listing" purpose — image-search
+still runs, just no longer ahead of a real, confirmed-variant query.
+
+### The fix — order only
+
+`api/comps.js`, inserted between the Dell Four Color alias block and the
+artist-specific `unshift` block (i.e. runs on the fully-built attempts
+0-5 + aliases, before either `unshift` mechanism, so both still win
+absolute index 0 exactly as before): when `variant` is truthy, find the
+last attempt with `n` in `[0, 2]` (the only three that carry variant
+text) and splice the already-built image-search attempt to run
+immediately after it. No variant, or no variant-bearing attempt exists
+at all (e.g. no issue number) → no-op, image-search stays at position 0,
+byte-identical to pre-dispatch behavior. Query string construction for
+every attempt is completely unchanged — this is a pure array-ordering
+change. A second, independent addition: an explicit
+`[comps-ladder] winner: attempt N ...` log line at the break point, so a
+production log states which query produced the priced pool without
+requiring the reader to infer it from the last non-empty attempt/
+post-filter pair.
+
+### Verification
+
+Demonstrated **directly against real code**, not a mirrored predicate —
+the attempt-array construction lives entirely inside `fetchComps`'s
+non-exported body and isn't independently constructible, so the test
+(`tests/grailkey-directive-o-comp-ladder-reorder.test.js`) runs the real,
+exported `fetchComps()` against a query-differentiated mocked eBay Browse
+API (generic-copy pool vs. "Dan Parent" variant pool, keyed off the
+actual outgoing query text). Verified both ways via a `git stash` of
+`api/comps.js` alone: pre-fix (real HEAD `11d70aa` code, stashed fix),
+Scenario A fails exactly as predicted — the generic pool wins, and
+`[comps] attempt 0 query=...` never appears in the log at all (attempt 0
+genuinely never ran). Post-fix (stash popped), all 5 assertions pass:
+the variant pool wins Scenario A; Scenario B confirms the broaden-on-
+failure fall-through still works when the variant query itself returns
+nothing; Scenario C confirms the no-variant case is byte-identical to
+pre-dispatch behavior.
+
+24-file targeted regression — every test file that imports
+`api/comps.js` directly, plus the suites CLAUDE.md documents as covering
+the attempt ladder/artist-pattern/variant-filter mechanisms, plus
+`comp-filter-hygiene.test.js` and `priceBands.test.js` by name per this
+dispatch's own instruction — run individually, both pre-fix (stashed)
+and post-fix, output diffed. **Byte-identical on all 24**, including the
+two suites with pre-existing, already-documented failures
+(`comp-filter-hygiene`: 4 failed both runs, matches CLAUDE.md's
+documented "comp-filter-hygiene (4, Bug 1/2 helpers)"; `priceBands`: 7
+failed both runs, matches the documented "priceBands (7)" baseline) —
+confirming this change touches neither of those pre-existing gaps.
+`npm run build` clean (ESM-parse check + vite build). Test baseline
+re-stamped in the same commit: 166/16/3/185 → 167/16/3/186.
+
+### Findings logged, not fixed (explicit dispatch non-goals)
+
+- **GK-82** (`docs/TICKET-REGISTRY.md`) — the attempt loop's break
+  condition, `filtered.parsed.length > 0`, has no quality/confidence
+  floor beyond nonzero count; a single junk survivor can win an entire
+  attempt. Confirmed directly reading the loop; not touched, per this
+  dispatch's own explicit instruction not to change the break condition
+  unless this exact finding surfaced — it did, so it is reported here and
+  in the registry, not fixed.
+- **Defect B (PC-year anchor) remains unconfirmed as independent of
+  Defect A.** This dispatch did not touch `confirmedYear` or the era
+  filter at all, by design. A future rescan of the real Sabrina book
+  against the now-fixed ladder is the only way to know whether the
+  variant-bearing attempt, once it runs, retrieves real 2024/variant
+  candidates that the `confirmedYear=1997` era anchor then rejects — the
+  documented four-cause proof chain (attempt 0's query itself still too
+  broad/wrong; variant tokens not matching real marketplace wording;
+  attempt 0 returning zero for an unrelated reason; or the year anchor
+  specifically rejecting otherwise-correct candidates) means a generic
+  post-fix pool alone would not, by itself, confirm Defect B. Not
+  investigated further this dispatch — explicitly out of scope.
