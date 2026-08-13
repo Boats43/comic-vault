@@ -7259,18 +7259,35 @@ sites) precisely because there is no legitimate "prior" to protect here.
 
 ### The fix
 
-Presence-aware at all 7 sites: `property absent → preserve prior;
-property present (value or null) → trust the fresh signal`. The six
-`App.jsx` sites use `Object.prototype.hasOwnProperty.call(enrich,
+**7 defective sites fixed, out of 8 audited merge-boundary entries total**
+(the 6 `App.jsx` sites + `manualCorrection.js`'s one site + `mergeConfirmedIdentity`,
+which was independently verified already correct and untouched — the
+primary scan-save merge already spreads its full return, the only one of
+the eight that did). **Corrected here (GrailKey Directive R, Task 3) — not
+one uniform contract, two different correct contracts for two different
+situations:**
+
+```
+6 App.jsx sites:      property absent       → preserve prior
+                       property present      → trust the fresh signal
+                       (value or null)
+manualCorrection.js:   property absent       → null
+(1 site)               property present      → trust the fresh signal
+                       (value or null)         (no prior exists to
+                                                 preserve — the old
+                                                 identity's variant is
+                                                 deliberately cleared
+                                                 before this line runs)
+```
+
+The six `App.jsx` sites use `Object.prototype.hasOwnProperty.call(enrich,
 'variantNote')` inlined directly, not `dataQualityGuard.js`'s private
 `hasKey` (not exported — would export a private internal) and not
 `mergeConfirmedIdentity` (would silently widen those sites' merge
 behavior to title/issue/year/publisher too, fields they don't otherwise
-touch — checked directly: only ONE of the seven affected sites, the
-primary scan-save merge, already spreads `mergeConfirmedIdentity`'s full
-return, and it was independently verified genuinely correct, untouched
-by this dispatch). `manualCorrection.js`'s one site uses a plain `?? null`
-for the reason above.
+touch). `manualCorrection.js`'s one site uses a plain `?? null` — correct
+there specifically because it is the one site among the eight where no
+legitimate "prior" exists to protect.
 
 ### Classification: third confirmed instance of Stale Authority Inheritance
 
@@ -7320,6 +7337,162 @@ file, one repaired file, net PASS-file-count effect +1/+1).
 
 ### Handoff
 
-Pushed and deployed; the Sabrina rescan Directive O/P left pending is now
-cleared to run. Nothing else deferred from this dispatch — all 7 sites
-Task 1 found were fixed, none held back.
+Pushed and deployed. **CORRECTED (GrailKey Directive R) — the rescan-
+cleared claim below was premature.** This dispatch's own Task 1 traced
+client-side merge boundaries only; it inferred, rather than proved, that
+`api/enrich.js`'s two early-return paths safely omitted `variantNote` on
+the server side. ~~The Sabrina rescan Directive O/P left pending is now
+cleared to run.~~ Directive R held the rescan, traced both server-side
+paths directly, found both LIVE DEFECTS (not the safe omissions assumed
+here), and fixed them — see that dispatch's own entry below for the
+actual clearance. Nothing else deferred from this dispatch's own scope —
+all 7 client-side sites Task 1 found were fixed, none held back; the
+server-side gap was a genuinely separate question this dispatch did not
+ask.
+
+## GrailKey Directive 2026-08-13-R — early-return variant omission (server-side, held rescan)
+
+Directive Q's handoff stated the two early-return paths in `api/enrich.js`
+"omit the key entirely — but that's correct behavior under the fixed
+rule (absent → preserve prior), not a gap requiring special-casing." That
+was an inference from the shape of the omission, not a proof against the
+actual control flow — and the line ordering directly contradicts the
+premise: `confirmedVariant` (`:5348`) is computed before both returns
+(`:5911`, `:7394`, pre-Directive-R line numbers), so "no new information
+this request" could not simply be assumed.
+
+### Task 1 — trace, per return
+
+**Return `api/enrich.js:5911` (pre-R), the refused-identity exit
+(`if (identityRefused) { ... return res.status(200).json(finalizeResponse(refusedOut)); }`).**
+`identityRefused` is set at two sites (`:2896`, `:4680`), both well before
+`confirmedVariant`'s declaration — the `if (identityRefused)` branch
+itself doesn't gate anything until `:5701`, so every line of
+`confirmedVariant`'s write chain (`:5348` init through `:5616`) executes
+unconditionally regardless of which path this request eventually takes.
+By the time execution reaches `:5911`, `confirmedVariant` holds its fully
+resolved value — string or `null`, with no separate "unknown" state of
+its own (traced directly: every write site assigns either a real value
+or explicitly falls back to `null`, never leaves it `undefined`).
+`confirmedVariant === null` at this point IS the resolved verdict, not
+an ambiguous absence — this is the exact scenario the directive's
+verdict (C) worried about (`variantConfidence`/`variantStatus` don't
+exist anywhere, confirmed in Directive Q's own trace), but it doesn't
+apply here because `confirmedVariant` was never ambiguous to begin
+with — only the CLIENT's undefined/null conflation (fixed by Directive
+Q) was.
+
+The gap: `refusedOut` (this exit's own, separately-built response
+object) is constructed as `{ ...sanitizeIdentityFields(req.body), ... }`
+plus ~80 lines of explicit fields — read in full. `sanitizeIdentityFields`
+(`src/lib/identityGate.js:110-191`) returns exactly `{ title, issue, year,
+publisher, author, visionConfidence }` — no `variant` field exists in
+that function's output shape at all, structurally. The explicit field
+list that follows carefully treats every other identity-adjacent field
+(`year`/`publisher` get real fallback treatment; `comps`/`comicVine`/
+`priceCharting` get explicit `null`s; even the `isProvisionalFamilyIdentity`
+override block gets `title`/`issue`/`year`/`publisher`) — variant is
+absent from all of it, not even an explicit `null`. Given how
+deliberately every other field here was handled (the object's own
+comments cite Q131, Track B Commit 4.3, and I13 by name for other
+fields), this reads as an asymmetric gap, not a considered design
+choice. **VERDICT: (B), live defect.**
+
+**Return `api/enrich.js:7394` (pre-R), the Q32 merchandise hard gate
+(`if (out.assetType === 'merchandise') { ... return res.json(finalizeResponse(out)); }`).**
+Returns `out` directly, not a separate object. `out.variantNote`'s three
+real write sites — the two `isFromPC`-gated assignments and the Q135
+universal fallback — all sit later in the file than this return (verified
+by direct read: none appear before `:7394`), so `out.variantNote` is
+genuinely `undefined` at this exit, for any request that reaches it.
+`confirmedVariant` itself is unconditionally computed by `:5348` same as
+above, regardless of `assetType`. **VERDICT: (B), live defect.**
+
+**Known production shape check.** The directive named the 21:12 Sabrina
+scan ("ended `ID_REQUIRED` with variant cleared by `[commit4.3]`") as a
+suspected real-world hit on these paths. Checked directly: `ID_REQUIRED`
+is a `decision.action` value, computed by `out.decision =
+computeDecision(out, {...})` at `api/enrich.js:11095` (post-R line
+numbers) — hundreds of lines AFTER both early returns and after the Q135
+fallback (`~10862`). A scan that "ended `ID_REQUIRED`" completed the
+FULL pipeline; it did not hit either of these two branches. That specific
+scan is evidence for the NORMAL-path reachability Directive Q already
+fixed, not for these two paths — named here so a future audit doesn't
+re-cite it as evidence for the wrong mechanism. No production log
+evidence of an actual hit on either `:5911` or `:7394` was found or
+searched for beyond this check (out of scope — both are proven (B) on
+the control-flow trace alone, which doesn't require a production
+sighting to act on).
+
+### Task 2 — fix and tests
+
+Both fixed identically, reproducing the Q135 completion-path contract
+exactly at each exit:
+
+```js
+if (X.variantNote === undefined) {
+  X.variantNote = confirmedVariant || null;
+}
+```
+
+— `X` is `refusedOut` at the refused-identity exit, `out` at the
+merchandise-gate exit. The `=== undefined` guard is the non-clobber
+proof itself: nothing currently sets either field before these points
+(confirmed in Task 1), but the guard means a future write earlier in
+either path would survive untouched rather than being silently
+overwritten by this addition.
+
+`tests/grailkey-directive-r-early-return-variant.test.js` (19
+assertions) — the full `api/enrich.js` handler cannot be invoked
+directly without mocking its entire eBay/PriceCharting/ComicVine
+dependency graph, a different order of effort than this narrow fix
+warrants. Labeled **MIRRORED**, honestly: the test extracts the two
+real, just-committed guard statements from source via regex (Part 1
+confirms they exist verbatim, in the right position relative to their
+returns) and evaluates them with real JS semantics (`new Function`)
+against constructed inputs (Part 2a) — the same "extract and evaluate
+the actual code" discipline as Directive Q's own test, just not a full
+HTTP round-trip. Proves: a stale-prior-plus-fresh-revocation state
+reaches `variantNote: null` as an own-property (not omitted) at both
+sites; a real confirmed value passes through; an already-established
+value is not clobbered. Part 2b chains this dispatch's server-side proof
+to Directive Q's own already-proven client merge (re-extracted from the
+current source, not re-asserted) and Directive P's unchanged render
+guards, proving the full path end to end: server revocation →
+`variantNote: null` → client merge → `variant: null` → no confirmed
+`Variant:` label renders — the exact render assertion Directive Q
+required but never demonstrated end to end.
+
+### Task 3 — record corrections
+
+Folded into Directive Q's own entries above (CLAUDE.md and this file)
+rather than left as separate errata: (a) merge-boundary count corrected
+to "8 audited entries / 7 defective" (was ambiguously "all 7" in a way
+that dropped `mergeConfirmedIdentity` from the total); (b) the false "all
+7 fixed to genuine presence-awareness" claim corrected — six `App.jsx`
+sites are presence-aware (absent → preserve prior), `manualCorrection.js`'s
+one site is not and should not be (absent → `null`, no prior exists
+there to preserve, by design); (c) a stale "20/20" reference for
+Directive P's test (already repaired to 19/19 within Directive Q's own
+commit) corrected where it was left standing elsewhere in CLAUDE.md.
+
+### Regression
+
+`grailkey-dispatch-19-fix5-asset-type-override` (13),
+`q141c-marketplace-category-rejection` (47), `pipeline-audit` (38),
+`q110-intake-nonblocking` (38), `q131-systemic-audit-fixes` (18) — every
+test file referencing `refusedOut`/the Q32 merchandise gate — plus
+`q140-issue-consensus-corrective` (124, the Flash #139 regression guard,
+re-run on principle since `api/enrich.js` was touched) — re-run directly,
+byte-identical, 0 new failures. `npm run build` clean. Test baseline
+re-stamped: 169/16/3/188 → 170/16/3/189 (one new file, 19/19 clean).
+
+### Handoff
+
+Both early-return paths proved (B), both fixed with the exact Q135
+contract, both tested (merge outcomes AND the full render chain).
+**Neither is (C) — no ambiguous authority state found.** Pushed and
+deployed. The Sabrina rescan is genuinely cleared this time — both the
+client-side custody (Directive Q) and the server-side response-shape
+gap (this dispatch) that could each independently have caused stale-
+variant resurrection are now closed and tested end to end.

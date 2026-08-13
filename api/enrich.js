@@ -5906,6 +5906,26 @@ export default async function handler(req, res) {
         preResponseOk: (refusedOut.issue ?? null) === (confirmedIssue ?? null),
         decision: null,
       });
+      // GrailKey Directive R, Task 1 — refusedOut is built from
+      // sanitizeIdentityFields(req.body) (title/issue/year/publisher/
+      // author/visionConfidence only — no variant field exists in that
+      // shape) plus an explicit field list that, unlike every other
+      // identity-adjacent field here, never mentioned variant at all —
+      // not even an explicit null the way comps/comicVine/priceCharting
+      // get. confirmedVariant (declared api/enrich.js:5348, unconditional
+      // handler-scope `let`, not gated by identityRefused) is fully
+      // computed by this point regardless of this branch's other
+      // provisional/refused handling, and — unlike out.variantNote's
+      // pre-Directive-Q client-side undefined/null conflation — has no
+      // separate "unknown" state of its own to worry about: whatever it
+      // holds here (string or null) IS the resolved verdict. Reproduces
+      // the exact same guarded assignment the normal completion path
+      // uses (api/enrich.js Q135 fallback, ~10862) so this refused exit
+      // carries the same contract every other response shape does,
+      // rather than silently omitting the key.
+      if (refusedOut.variantNote === undefined) {
+        refusedOut.variantNote = confirmedVariant || null;
+      }
       // Ship #24a-2: refusedOut retired as a separate SHAPE — same fields
       // flow, plus the canonical contract block.
       return res.status(200).json(finalizeResponse(refusedOut));
@@ -7390,6 +7410,22 @@ export default async function handler(req, res) {
         preResponseOk: (out.issue ?? null) === (confirmedIssue ?? null),
         decision: out.decision,
       });
+      // GrailKey Directive R, Task 1 — this is the Q32 merchandise hard
+      // gate. Unlike the refused-identity exit above (which builds a
+      // separate refusedOut object), this returns `out` directly — but
+      // all three existing out.variantNote writers (the two isFromPC-
+      // gated assignments plus the Q135 universal fallback, ~10862) sit
+      // further down the handler than this early return, so out.variantNote
+      // is genuinely never touched before this point (confirmed by direct
+      // read — none of the three write sites appear before this line).
+      // confirmedVariant (api/enrich.js:5348) is fully computed by here
+      // regardless of assetType, and — same reasoning as the refused-exit
+      // fix above — has no separate "unknown" state distinct from its
+      // resolved value. Reproduces the normal Q135 fallback contract
+      // rather than silently omitting the key on this exit too.
+      if (out.variantNote === undefined) {
+        out.variantNote = confirmedVariant || null;
+      }
       // Ship #24a-2: contract state=LOCKED via DO_NOT_LIST hard lock
       return res.json(finalizeResponse(out)); // STOP — no pricing, return early
     }
