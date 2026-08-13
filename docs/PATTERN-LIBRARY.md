@@ -7139,10 +7139,18 @@ companion status/confidence field (unlike `identityConfident`/
 `assetTypeConfident`, which do have one) — grep-confirmed zero
 `variantConfidence`/`variantStatus`-shaped fields anywhere. When a
 variant is invalidated server-side, `confirmedVariant` is nulled and
-`out.variantNote` correctly resolves to `null` — the client's existing
+`out.variantNote` correctly resolves to `null` — ~~the client's existing
 "only render if truthy" pattern already, correctly, shows nothing in
 that case (satisfies "no false variant label" by the existing absence
-convention, not a new mechanism). What the client CANNOT do is show "a
+convention, not a new mechanism)~~. **FALSE, corrected by GrailKey
+Directive Q (2026-08-13) — see that dispatch's own Pattern Library entry
+below.** The merge that fed the truthy check (`?? prev.variant` / `||
+cur.variant || null`) converted that server null BACK into the stale
+prior string before the truthy check ever ran — the check itself was
+never wrong, but it never actually saw a null on this path, because the
+merge upstream of it silently discarded the server's authoritative
+clear. This was P's own shipped defect, not a pre-existing condition P
+correctly described. What the client CANNOT do is show "a
 variant was claimed but could not be confirmed" as a distinguishable
 state from "no variant was ever claimed" — per the directive's explicit
 instruction, this is reported as a propagation gap, not built around
@@ -7182,3 +7190,136 @@ blockers (a genuinely rank-free family-strength signal would need to be
 designed from scratch — not requested, not built this dispatch), then a
 live Sabrina rescan for Task 3's visual confirmation and Defect B's own
 four-cause proof chain, per Directive O's still-open instructions.
+
+## GrailKey Directive 2026-08-13-Q — corrective: variant null custody (third Stale Authority Inheritance instance)
+
+Directive P shipped a variant-custody fix that was itself backwards. This
+dispatch corrects it — same file, same merge boundaries, opposite defect
+class from what P set out to fix.
+
+### The defect
+
+P's own shipped code, at both `setResult` merge sites:
+
+```js
+variant: enrich.variantNote ?? prev.variant
+```
+
+with a comment claiming `??` (not `||`) lets an honest server null
+override a stale guess. **Backwards.** `??` falls through on `undefined`
+**and** explicit `null` alike:
+
+| `enrich.variantNote` | Result | Correct? |
+|---|---|---|
+| `"Dan Parent NYCC variant"` | that value | correct |
+| `undefined` (field absent) | `prev.variant` | correct |
+| `null` (server revoked it) | `prev.variant` | **wrong — resurrected** |
+
+The four pre-existing catalogue-merge sites (`enrich.variantNote ||
+cur.variant || null` / `|| item.variant || null`), which P's own trace
+called "already correct," have the identical defect (`||` falls through
+on null, undefined, AND empty string alike) — P's trace was wrong about
+these, not just silent on them.
+
+**Confirmed reachable, not hypothetical.** `out.variantNote` is an
+own-property on every response from the NORMAL (non-early-return)
+completion path — `api/enrich.js`'s Q135 universal fallback
+(`~10862-10863`, `if (out.variantNote === undefined) { out.variantNote =
+confirmedVariant || null; }`) always fires exactly once per request on
+that path, always assigning either a string or an explicit `null`. Any
+ordinary rescan where Vision's fresh read doesn't re-detect a variant it
+previously caught (different angle, subtler cover marking missed a
+second time — no special "invalidation" mechanism required) produces
+`confirmedVariant = null` → `out.variantNote: null` as a real,
+serialized own-property, reaching every one of P's six defective merges.
+Two early-return paths (`api/enrich.js:5911` "refused",
+`api/enrich.js:7394` "STOP — no pricing") DO omit the key entirely —
+traced directly, `out.variantNote` is never assigned before either
+`return`. That is not a bug: the corrected rule's own "absent → preserve
+prior" arm is the CORRECT behavior for those paths (no new information
+this request, keep whatever the card showed), so no special-casing was
+needed for them.
+
+### A 7th, differently-shaped defect, found in the same audit
+
+`buildCorrectedCatalogueItem` (`src/lib/manualCorrection.js`) — `variant`
+is in `IDENTITY_DEPENDENT_FIELDS_TO_CLEAR` (unconditionally nulled on
+every manual correction, by design — a correction changes identity, and
+the old variant shouldn't survive under a new one), but the generic
+`{ ...cleared, ...enrichData }` spread never renames `enrichData`'s own
+`variantNote` field to `variant` — no other field in this merge needs a
+rename, `variant` is the one exception, and it was missing. Result:
+`merged.variant` was **unconditionally `null` on every manual
+correction**, regardless of what the server actually determined — not a
+resurrection (nothing to resurrect; "prior" is deliberately cleared
+here), a straightforward, silent, 100%-rate data loss. Fixed with one
+explicit line, `merged.variant = enrichData?.variantNote ?? null;` — a
+bare `??` is correct in this one specific context (unlike the other six
+sites) precisely because there is no legitimate "prior" to protect here.
+
+### The fix
+
+Presence-aware at all 7 sites: `property absent → preserve prior;
+property present (value or null) → trust the fresh signal`. The six
+`App.jsx` sites use `Object.prototype.hasOwnProperty.call(enrich,
+'variantNote')` inlined directly, not `dataQualityGuard.js`'s private
+`hasKey` (not exported — would export a private internal) and not
+`mergeConfirmedIdentity` (would silently widen those sites' merge
+behavior to title/issue/year/publisher too, fields they don't otherwise
+touch — checked directly: only ONE of the seven affected sites, the
+primary scan-save merge, already spreads `mergeConfirmedIdentity`'s full
+return, and it was independently verified genuinely correct, untouched
+by this dispatch). `manualCorrection.js`'s one site uses a plain `?? null`
+for the reason above.
+
+### Classification: third confirmed instance of Stale Authority Inheritance
+
+Per the directive's own instruction, promotion required proving
+production reachability first, not assuming the shape — done above
+(`out.variantNote: null` is a genuine own-property on the normal
+completion path, not merely structurally possible). Joins `ebaySourceUnavailable`
+(GK-73) and `pcAnchorTrust`/`pcAnchorYear` (Directive H, Item 1) — same
+file, same merge layer, same shape: a value outlives the evidence that
+produced it because the write path preserves on absence rather than
+clearing. **Deliberately not merged with the "Hidden Actionable
+Identity" candidate pattern** (Directive P, single observation, not
+promoted) — that candidate is about authority never reaching the
+operator at all; this is a different mechanism, old authority surviving
+past the point newer authority revoked it. Blurring the two is exactly
+the failure mode the candidate/doctrine separation exists to prevent.
+
+### Why the test didn't catch it
+
+`tests/grailkey-directive-p-task3-variant-on-card.test.js` passed 20/20
+while this defect shipped — it verified source structure and string
+placement (`Variant: {item.variant}` appears near the title; the rename
+text exists), never a merge OUTCOME. Same class as Directive H, Item 2:
+structure passing for behavior. The corrective test
+(`tests/grailkey-directive-q-variant-null-custody.test.js`, 49
+assertions) extracts each real merge expression from source via regex
+and actually evaluates it (`new Function`) against constructed
+`{variantNote: ...}` / prior-object inputs, asserting the real output for
+all three cases at all seven sites — plus `buildCorrectedCatalogueItem`,
+imported and called directly (a real `src/lib/` module, not App.jsx).
+Part 1 proves the pre-fix defect directly against `ef7cf53` (`git show`
+for the six App.jsx sites; `git stash` + real import for
+`manualCorrection.js`), not a mirror. P's own test was repaired in the
+same commit (its Part 1 pinned to bare `HEAD`, which silently stopped
+proving the pre-fix state once HEAD moved past `ef7cf53` — repinned to
+that exact SHA; Part 2/3's exact-string checks updated to match the
+corrected expressions) rather than left permanently red.
+
+### Regression
+
+`q-trackB-commit3-manual-correction` (466 assertions),
+`q-trackB-commit4-adoption-provisional` (152), `grailkey-directive-h-item1-stale-pc-anchor`
+(6) — every suite importing `manualCorrection.js` — re-run directly, byte-
+identical, 0 new failures. `npm run build` clean. Zero `api/*.js` files
+touched. Test baseline re-stamped: 168/16/3/187 → 169/16/3/188 (one new
+file, one repaired file, net PASS-file-count effect +1/+1).
+
+### Handoff
+
+Pushed and deployed; the Sabrina rescan Directive O/P left pending is now
+cleared to run. Nothing else deferred from this dispatch — all 7 sites
+Task 1 found were fixed, none held back.

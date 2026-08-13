@@ -9820,10 +9820,28 @@ function WatchMode({ onStop }) {
                 // but ResultCard reads `result.variant` — a plain spread
                 // never renames it, so the card stayed frozen on Vision's
                 // pre-enrich guess even when enrich.js confirmed/corrected
-                // a different variant. `??` (not `||`) so an honest
-                // server null still overrides a stale prior guess, same
-                // convention as mergeConfirmedIdentity (dataQualityGuard.js).
-                setResult((prev) => prev ? { ...prev, ...enrich, variant: enrich.variantNote ?? prev.variant, image: prev.image, _enriching: false } : prev);
+                // a different variant.
+                // GrailKey Directive Q, Task 2 (corrective) — P's own `??
+                // prev.variant` was backwards: `??` falls through on BOTH
+                // undefined AND explicit null, so a real server-side
+                // revocation (out.variantNote sent as an own-property
+                // `null` — confirmed reachable on every normal, non-early-
+                // return response, api/enrich.js:10862-10863) resurrected
+                // the stale prior guess instead of clearing it — the exact
+                // "conflicted/unconfirmed never rendered as confirmed"
+                // case P's own acceptance requirement named. Presence-aware
+                // instead, same contract as mergeConfirmedIdentity
+                // (dataQualityGuard.js) but inlined here rather than
+                // widening that helper's scope to fields this site doesn't
+                // otherwise use: key absent -> preserve prior; key present
+                // (value or null) -> trust the fresh signal.
+                setResult((prev) => prev ? {
+                  ...prev,
+                  ...enrich,
+                  variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : prev.variant,
+                  image: prev.image,
+                  _enriching: false,
+                } : prev);
               })
               .catch(() => {});
           } catch {
@@ -10366,7 +10384,13 @@ export default function App() {
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
                 goCollect: enrich.goCollect || cur.goCollect || null,
-                variant: enrich.variantNote || cur.variant || null,
+                // GrailKey Directive Q, Task 2 (corrective) — was `enrich.variantNote || cur.variant || null`.
+                // `||` falls through on null, undefined, AND empty string —
+                // an authoritative server-side revocation (variantNote sent
+                // as an own-property null) silently resurrected the stale
+                // catalogue value. Presence-aware: key absent -> preserve
+                // cur.variant; key present (value or null) -> trust it.
+                variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                 variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
                 premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
@@ -10798,8 +10822,17 @@ export default function App() {
                 // GrailKey Directive P, Task 3 — same rename as the other
                 // setResult merge above: `...enrich` alone leaves
                 // result.variant frozen on Vision's pre-enrich guess.
+                // GrailKey Directive Q, Task 2 (corrective) — presence-aware,
+                // not `??` — see the other setResult merge's comment for the
+                // full rationale (`??` resurrects a stale guess on an
+                // authoritative server-side null).
                 setResult((prev) =>
-                  prev ? { ...prev, ...enrich, variant: enrich.variantNote ?? prev.variant, image: prev.image } : prev
+                  prev ? {
+                    ...prev,
+                    ...enrich,
+                    variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : prev.variant,
+                    image: prev.image,
+                  } : prev
                 );
               }
             );
@@ -11410,7 +11443,13 @@ export default function App() {
                 cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
                 cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
                 goCollect: enrich.goCollect || cur.goCollect || null,
-                variant: enrich.variantNote || cur.variant || null,
+                // GrailKey Directive Q, Task 2 (corrective) — was `enrich.variantNote || cur.variant || null`.
+                // `||` falls through on null, undefined, AND empty string —
+                // an authoritative server-side revocation (variantNote sent
+                // as an own-property null) silently resurrected the stale
+                // catalogue value. Presence-aware: key absent -> preserve
+                // cur.variant; key present (value or null) -> trust it.
+                variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant,
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                 variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
                 premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
@@ -11965,7 +12004,9 @@ export default function App() {
       cgcVerified: enrich.cgcVerified || item.cgcVerified || false,
       cgcLabel: enrich.cgcLabel || item.cgcLabel || null,
       goCollect: enrich.goCollect || item.goCollect || null,
-      variant: enrich.variantNote || item.variant || null,
+      // GrailKey Directive Q, Task 2 (corrective) — presence-aware, see the
+      // other three catalogue-merge sites' comment for the full rationale.
+      variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : item.variant,
       variantMultiplier: enrich.variantMultiplier || item.variantMultiplier || null,
       variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || item.variantMultiplierEstimated === true,
       premiumVariantIsolated: enrich.premiumVariantIsolated === true || item.premiumVariantIsolated === true,
@@ -12935,7 +12976,7 @@ export default function App() {
                               // 2026-07-18 — fold in identity/asset-type gate (was previously
                               // absent on this duplicate-confirm path).
                               const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
-                              const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, variant: enrich.variantNote || cur.variant || null, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                              const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
                               putComic(updated).catch(() => {});
                               return prev.map((x) => x.id === savedId ? updated : x);
                             });

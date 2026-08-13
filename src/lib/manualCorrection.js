@@ -531,6 +531,24 @@ export const buildCorrectedCatalogueItem = (oldItem, enrichData) => {
 
   const merged = { ...cleared, ...(enrichData || {}) };
 
+  // GrailKey Directive Q, Task 2 (corrective) — found while auditing every
+  // variant/variantNote merge boundary in the repo (Directive P shipped a
+  // different variant-custody bug at the App.jsx sites; this one is
+  // separate). `variant` IS in IDENTITY_DEPENDENT_FIELDS_TO_CLEAR (line
+  // ~399, `cleared.variant` unconditionally null above), but `enrichData`'s
+  // own field name is `variantNote`, not `variant` — the generic
+  // `{...cleared, ...enrichData}` spread never renames it, so `merged.variant`
+  // stayed null on EVERY manual correction regardless of what the server
+  // actually determined (unlike Directive Q's other 6 fixes, which resurrect
+  // a stale value on null — this site was silently discarding a real value
+  // unconditionally, a distinct and more severe defect). No presence-check
+  // needed here specifically: `cleared.variant` is already, deliberately,
+  // always null (a correction discards the old identity's variant by
+  // design, per this function's own clear-list contract), so there is no
+  // "prior" to accidentally resurrect — `?? null` alone is correct in this
+  // one context, unlike the App.jsx sites where a real prior value exists.
+  merged.variant = enrichData?.variantNote ?? null;
+
   for (const field of IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE) {
     merged[field] = oldItem[field];
   }

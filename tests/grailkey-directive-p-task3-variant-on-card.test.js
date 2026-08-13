@@ -53,15 +53,23 @@ console.log('\n=== GrailKey Directive P, Task 3 — variant identity on the oper
 // ═══════════════════════════════════════════════════════════════════════
 // Part 1 — actual pre-fix committed source (git show, not retyped).
 // ═══════════════════════════════════════════════════════════════════════
-console.log('Part 1: actual prior behavior (git show HEAD:src/App.jsx)\n');
+// GrailKey Directive Q corrective note (2026-08-13) — this was originally
+// `git show HEAD:src/App.jsx`. HEAD moved past this dispatch's own commit
+// (ef7cf53) once later dispatches landed, so a bare HEAD reference would
+// silently stop proving what it was written to prove — pinned to the exact
+// pre-Directive-P commit instead, permanently meaningful regardless of how
+// many commits land after it (same class of staleness Directive K's own
+// correction already named for a different pair of tests).
+const PRE_DIRECTIVE_P_SHA = 'e95b9a9';
+console.log(`Part 1: actual prior behavior (git show ${PRE_DIRECTIVE_P_SHA}:src/App.jsx)\n`);
 {
   let priorAppSrc = null;
   try {
-    priorAppSrc = execSync('git show HEAD:src/App.jsx', { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1024 * 1024 * 50 });
+    priorAppSrc = execSync(`git show ${PRE_DIRECTIVE_P_SHA}:src/App.jsx`, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1024 * 1024 * 50 });
   } catch (e) {
     priorAppSrc = null;
   }
-  assertTrue(!!priorAppSrc, 'git show HEAD:src/App.jsx succeeded (repo has a committed prior version)');
+  assertTrue(!!priorAppSrc, `git show ${PRE_DIRECTIVE_P_SHA}:src/App.jsx succeeded (repo has a committed prior version)`);
 
   if (priorAppSrc) {
     // Defect 1: the fresh-scan `result` state spreads never renamed the field.
@@ -98,15 +106,18 @@ console.log('\nPart 2: current source — custody fixed, title-adjacent render\n
 {
   const appSrc = readFileSync(path.join(repoRoot, 'src/App.jsx'), 'utf8');
 
-  // Custody: both setResult merge sites now rename the field, using `??`
-  // (not `||`) so an honest server null still overrides a stale guess.
+  // Custody: both setResult merge sites now rename the field. GrailKey
+  // Directive Q corrective note — originally checked for `?? prev.variant`
+  // here; Q proved that operator resurrects a stale value on an
+  // authoritative server null and replaced it with a presence-aware check
+  // (see tests/grailkey-directive-q-variant-null-custody.test.js for the
+  // behavioral proof). This assertion now checks for the rename existing
+  // at all, not which operator performs it — the operator-level behavioral
+  // guarantee lives in Directive Q's own test, not duplicated here.
+  const setResultRenameCount = (appSrc.match(/variant:\s*(?:enrich\.variantNote\s*\?\?\s*prev\.variant|Object\.prototype\.hasOwnProperty\.call\(enrich,\s*'variantNote'\)\s*\?\s*enrich\.variantNote\s*:\s*prev\.variant)/g) || []).length;
   assertTrue(
-    appSrc.includes("setResult((prev) => prev ? { ...prev, ...enrich, variant: enrich.variantNote ?? prev.variant, image: prev.image, _enriching: false } : prev);"),
-    'PASSING (post-fix): gradeBlob\'s first setResult merge renames enrich.variantNote -> variant'
-  );
-  assertTrue(
-    appSrc.includes('prev ? { ...prev, ...enrich, variant: enrich.variantNote ?? prev.variant, image: prev.image } : prev'),
-    'PASSING (post-fix): gradeBlob\'s second setResult merge renames enrich.variantNote -> variant'
+    setResultRenameCount === 2,
+    `PASSING (post-fix): both gradeBlob setResult merges rename enrich.variantNote -> variant (found ${setResultRenameCount})`
   );
 
   // ResultCard: title-adjacent variant, positioned before the grade badge
@@ -184,10 +195,15 @@ console.log('\nPart 3: scope check — no pricing math, no new authority field\n
 
   // Every pre-existing four merge-site renames (duplicate-confirm,
   // reIdentifyBook-shaped paths, add-photo, save-another-copy) still
-  // present and unmodified in count.
-  const renameCount = (appSrc.match(/variant: enrich\.variantNote \|\| cur\.variant \|\| null,/g) || []).length
-    + (appSrc.match(/variant: enrich\.variantNote \|\| item\.variant \|\| null,/g) || []).length;
-  assertTrue(renameCount === 4, `all 4 pre-existing enrich.variantNote merge-site renames still present, unmodified (found ${renameCount})`);
+  // present in count. GrailKey Directive Q corrective note — originally
+  // matched the literal `|| cur.variant || null` / `|| item.variant ||
+  // null` text; Q proved that operator resurrects a stale value on an
+  // authoritative server null and replaced all four with a presence-aware
+  // check. This now counts renames by either operator so it keeps proving
+  // "still 4 sites, none silently dropped" across both P's and Q's forms.
+  const renameCount = (appSrc.match(/variant:\s*(?:enrich\.variantNote\s*\|\|\s*cur\.variant\s*\|\|\s*null|Object\.prototype\.hasOwnProperty\.call\(enrich,\s*'variantNote'\)\s*\?\s*enrich\.variantNote\s*:\s*cur\.variant)/g) || []).length
+    + (appSrc.match(/variant:\s*(?:enrich\.variantNote\s*\|\|\s*item\.variant\s*\|\|\s*null|Object\.prototype\.hasOwnProperty\.call\(enrich,\s*'variantNote'\)\s*\?\s*enrich\.variantNote\s*:\s*item\.variant)/g) || []).length;
+  assertTrue(renameCount === 4, `all 4 pre-existing enrich.variantNote merge-site renames still present (found ${renameCount})`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
