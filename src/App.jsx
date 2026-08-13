@@ -1522,6 +1522,16 @@ function ResultCard({ result, enriching }) {
         {result.publisher && result.year && /^\d{4}$/.test(String(result.year).trim()) ? " · " : ""}
         {/^\d{4}$/.test(String(result.year || "").trim()) ? result.year : ""}
       </div>
+      {/* GrailKey Directive P, Task 3 — variant is title-adjacent, not buried
+          below grade/key-box. Same authoritative value (result.variant) the
+          card always read; only its position changed, plus the custody fix
+          in gradeBlob so this field reflects enrich's confirmed value, not
+          just Vision's pre-enrich guess (see setResult merge sites). */}
+      {result.variant && (
+        <div style={{ color: "#FFD700", fontSize: 13, marginTop: 2, fontWeight: "bold" }}>
+          Variant: {result.variant}
+        </div>
+      )}
       {!result.image && (
         <div className="muted small" style={{ fontStyle: "italic" }}>
           No cover photo — rescan for image
@@ -1536,11 +1546,6 @@ function ResultCard({ result, enriching }) {
         const keyText = displayKeyIssue(result);
         return keyText ? <div className="key-box">⭐ {keyText}</div> : null;
       })()}
-      {result.variant && (
-        <div style={{ color: "#FFD700", fontSize: 13, marginTop: 4, fontWeight: "bold" }}>
-          ⚡ {result.variant}
-        </div>
-      )}
       {result.restoration && (
         <div style={{ background: "#ff000022", border: "1px solid #ff4444", borderRadius: 6, padding: "8px 12px", marginTop: 8, color: "#ff6666" }}>
           ⚠️ RESTORED: {result.restoration}
@@ -4191,12 +4196,23 @@ function CollectionDetail({
       <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
         {item.title || "Unknown"}{item.issue && !/unknown/i.test(String(item.issue)) && !String(item.title || "").includes('#' + item.issue) ? ` #${item.issue}` : ''}
       </div>
-      <div className="muted small" style={{ marginBottom: 12 }}>
+      <div className="muted small" style={{ marginBottom: item.variant ? 2 : 12 }}>
         {item.publisher}
         {item.publisher && item.year ? " · " : ""}
         {item.year}
         {item.grade && ` · ${gradeBadgeText}`}
       </div>
+      {/* GrailKey Directive P, Task 3 — variant title-adjacent, same
+          authoritative value the card always read (item.variant), just
+          moved up from ~1400 lines further down the card into the header
+          where an identity-shaping value belongs. Governing invariant: if a
+          facet is authoritative enough to shape search/filtering/pricing,
+          it is authoritative enough to be visible to the operator. */}
+      {item.variant && (
+        <div style={{ color: "#FFD700", fontSize: 13, fontWeight: "bold", marginBottom: 12 }}>
+          Variant: {item.variant}
+        </div>
+      )}
 
       {/* Ship #21f: Identity provenance line (Rule 21-0: always render post-Phase-1) */}
       {(() => {
@@ -5587,11 +5603,9 @@ function CollectionDetail({
           )}
         </div>
       )}
-      {item.variant && (
-        <div style={{ color: "#FFD700", fontSize: 13, marginTop: 4, fontWeight: "bold" }}>
-          ⚡ {item.variant}
-        </div>
-      )}
+      {/* GrailKey Directive P, Task 3 — variant render moved to the title
+          block (see "2. TITLE BLOCK" above); this duplicate mid-card copy
+          removed rather than left showing the same value twice. */}
 
       {/* 3b. RESTORATION WARNING */}
       {item.restoration && (
@@ -9801,7 +9815,15 @@ function WatchMode({ onStop }) {
               .then((r) => (r.ok ? r.json() : null))
               .then((enrich) => {
                 if (!enrich || cancelled) return;
-                setResult((prev) => prev ? { ...prev, ...enrich, image: prev.image, _enriching: false } : prev);
+                // GrailKey Directive P, Task 3 — the raw `...enrich` spread
+                // brings in `enrich.variantNote` (the server field name),
+                // but ResultCard reads `result.variant` — a plain spread
+                // never renames it, so the card stayed frozen on Vision's
+                // pre-enrich guess even when enrich.js confirmed/corrected
+                // a different variant. `??` (not `||`) so an honest
+                // server null still overrides a stale prior guess, same
+                // convention as mergeConfirmedIdentity (dataQualityGuard.js).
+                setResult((prev) => prev ? { ...prev, ...enrich, variant: enrich.variantNote ?? prev.variant, image: prev.image, _enriching: false } : prev);
               })
               .catch(() => {});
           } catch {
@@ -10773,8 +10795,11 @@ export default function App() {
                 // Explicitly preserve the cover image from the initial
                 // grade response in case enrich ever returns its own
                 // image field.
+                // GrailKey Directive P, Task 3 — same rename as the other
+                // setResult merge above: `...enrich` alone leaves
+                // result.variant frozen on Vision's pre-enrich guess.
                 setResult((prev) =>
-                  prev ? { ...prev, ...enrich, image: prev.image } : prev
+                  prev ? { ...prev, ...enrich, variant: enrich.variantNote ?? prev.variant, image: prev.image } : prev
                 );
               }
             );

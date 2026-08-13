@@ -192,11 +192,16 @@ const run = async () => {
   } else {
     console.log(`✗ ${failed} test(s) failed (${passed} passed)`);
     failures.forEach((f) => console.log(f));
-    process.exitCode = 1;
   }
   console.log('━'.repeat(59));
 
   globalThis.fetch = originalFetch;
+  // fetchComps' kv-cache layer initializes an Upstash Redis client with a
+  // keep-alive HTTP agent even when unconfigured (fails closed per-call,
+  // but the client object itself lingers) — explicit exit so this script
+  // terminates instead of hanging on a dangling handle. Same convention as
+  // tests/q141-v0i-slab-exclusion.test.js.
+  process.exit(failed === 0 ? 0 : 1);
 };
 
-run();
+await run();

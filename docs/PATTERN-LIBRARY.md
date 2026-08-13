@@ -6937,3 +6937,248 @@ re-stamped in the same commit: 166/16/3/185 → 167/16/3/186.
   specifically rejecting otherwise-correct candidates) means a generic
   post-fix pool alone would not, by itself, confirm Defect B. Not
   investigated further this dispatch — explicitly out of scope.
+
+## GrailKey Directive 2026-08-13-P — corroborated title-family adoption (Task 1 BLOCKED, Task 3 SHIPPED)
+
+Third consecutive Sabrina scan producing a wrong identity while the
+correct one sat at ranks 1 and 2 of the pool. Two-task dispatch: Task 1/2
+traced and (conditionally) fixed the `top-rank-guard`/weighted-consensus
+overlap veto; Task 3, independent of 1/2, fixed variant visibility on the
+operator card.
+
+### Task 1 — the trace
+
+Production evidence, 21:16 scan, build `e95b9a9`: ranks 1 and 2 of the
+image-search pool are both the real book (`Sabrina Annual Spectaculer
+2024 #1 Dan Parent NYCC Foil Variant`, `$50.00`; `Sabrina Annual
+Spectacular #1 Dan Parent NYCC PINK LAVA FOIL Variant`, `$109.95`). The
+weighted-consensus family containing both (`weight 9.0, 2 members`)
+outweighs the generic runner-up (`weight 5.0, 7 members`) — genuine
+aggregate evidence, not a single-row override — yet the pipeline still
+fell all the way back to Vision's bare `"Sabrina the Teenage Witch"`.
+
+**Mechanism, traced precisely.** `selectTitleFamilyCandidate`
+(`src/lib/imageSearchIdentity.js`) runs two, not one, overlap gates in
+sequence for this scan's shape: `top-rank-guard`'s own bidirectional
+check (`~2440-2448`, forward ≥50% of Vision's tokens / reverse ≥40% of
+the candidate's tokens — two genuinely different denominators, not the
+same bar twice) falls through when forward overlap is 25% (1/4 shared
+tokens); execution then reaches the separate `weighted-consensus`
+branch's own overlap gate (`OVERLAP_THRESHOLD = 0.4`, `~2511`,
+`sharedTokens / min(topFamily.tokens.length, visionTokens.length)`),
+which independently also measures ~25% here and returns
+`decision: 'fallback-vision'` (`~2774-2784`, the literal
+`"Top family weak overlap (X/Y tokens = Z% < 40%) — preserve Vision"`
+reason string in the production log). `familyCandidate.decision ===
+'fallback-vision'` leaves `confirmedTitle` untouched by the family branch
+entirely (`identityCore.js` — the branch this decision reaches never
+reassigns it), so `confirmedTitle` stays whatever Vision's own read
+already set it to.
+
+**Why the guard fires backwards, confirmed as designed, not a bug in
+itself.** Both overlap gates measure the candidate FAMILY against
+VISION's own tokens — the more a family extends past what Vision could
+read off the cover (exactly the shape of a genuine correction), the
+lower its overlap with Vision, the more likely both gates reject it. This
+is the standing "measuring coherence against the wrong population"
+disease class, applied to a mechanism (title-family selection) that
+hasn't previously been named as an instance of it.
+
+**Not Flash #139 territory, confirmed directly, not asserted.** Issue is
+not in dispute (Vision `#1`, family `#1`); `resolveFamilyIssueConsensus`/
+Q140 is never reached by this trace at all — the whole failure happens
+inside title-family SELECTION, a structurally separate mechanism from
+issue-CONSENSUS adoption. The directive's proposed corroboration rule
+(≥2 unique rows + issue agreement + cross-source variant corroboration,
+never rank/position as an input) does not conflict with the Flash #139
+invariant as literally stated.
+
+**Two independent blockers, each alone sufficient — Task 2 did not ship.**
+
+1. **`weightSum` is rank by construction, not merely correlated with it.**
+   `scoreTitleFamilies`'s `getRankWeight(idx)` (`imageSearchIdentity.js:
+   1195-1202`) is a literal per-array-index lookup table (rank 1→5, rank
+   2→4, rank 3→3, ranks 4-10→1, ranks 11-20→0.5, else 0);
+   `weightSum = family.indices.reduce((sum, idx) => sum + getRankWeight(idx), 0)`
+   (`:1206`). For this scan's family (members at index 0 and 1):
+   `5 + 4 = 9.0` — exactly the logged figure. The directive's own stated
+   test (Blocker 3) — "what would the winner be under a rank-free
+   signal?" — resolves against the proposed fix: a bare row count (2 vs
+   7) flips the answer entirely, meaning "the family won the weighted
+   vote" is not independent evidence separate from rank; it currently IS
+   rank, restated as a sum. Adopting on this signal, even gated behind
+   additional corroboration conditions, would still be adopting because
+   the correct rows happened to rank first — the precise shape Flash #139
+   forbids, even though the ISSUE axis itself is untouched.
+2. **`confirmedVariant` does not exist yet at the decision point.**
+   `selectTitleFamilyCandidate` is called at `api/enrich.js:2867`;
+   `confirmedVariant` isn't declared until `api/enrich.js:5348` (`let
+   confirmedVariant = writeConfirmed(...)`), ~2700 lines and several
+   pipeline phases later. Confirmed directly against the real production
+   log timestamps: guard decision at `21:16:07.402`, `confirmedVariant`
+   write at `21:16:07.442` — 40ms AFTER the guard has already returned.
+   No legal corroboration variant signal exists at the guard's call site
+   as the pipeline is currently phased; `req.body.variant` (the raw,
+   pre-confirmation value) is explicitly not a substitute per the
+   directive's own instruction — it can be invalidated/cleared downstream
+   (`[commit4.3] variant provenance invalidated ... clearing
+   req.body.variant`, a real log line from a nearby scan) and using it
+   early would bypass the exact confirmation process this campaign
+   exists to enforce.
+
+Both logged as blocking findings per the directive's own gating
+structure (item 6 / Blocker 2, item 5 / Blocker 3); **GK-83** records
+Blocker 2 specifically as a standing architectural fact for any future
+dispatch attempting a similarly-shaped early-phase corroboration check.
+
+**A third, non-blocking but load-bearing finding, for whenever Task 2 is
+revisited.** Even with both blockers cleared, the directive's proposed
+"≥2 unique rows" floor would collide with the pre-existing `Q38` gate
+(`imageSearchIdentity.js:2760`, commit `6e35aa8`, "Require ≥3 members for
+weighted-consensus override") — a real, production-evidence-justified
+rule (a 1-member family with an internally mismatched issue number, title
+said #157, family extracted #201, silently overrode Vision before this
+gate existed). If a future corroboration bypass is implemented as a
+modification INSIDE the existing `weighted-consensus` branch rather than
+as its own structurally separate decision path with its own return, a
+2-member family would fall through into `Q38`'s gate and be blocked
+there regardless of corroboration — the fix would need its own explicit,
+new decision type (analogous to how `top-rank-protection` and
+`weighted-consensus` are already two distinct decision types with two
+distinct gate sets), not a threshold change inside Q38's own branch.
+Interesting, not yet resolved: the directive's proposed corroboration
+bar (2 rows + mandatory issue agreement + cross-source variant
+corroboration) is arguably STRICTER on the axes Q38's own real failure
+case exposed (issue coherence, external corroboration) than Q38's bare
+"3 members, ≥40% overlap" bar — Q38's single-member failure would have
+been caught by the issue-agreement condition alone — but this is a
+design argument for Jimmy to weigh, not a decision made here.
+
+**No prior ruling directly forbids the bypass (item 2).** Traced to
+commit `6f5b0df` (2026-04-29) for the OTHER investigated mechanism
+(image-search attempt ordering, Directive O) — not directly relevant
+here. No commit or Pattern Library entry found asserting `top-rank-guard`
+or the weighted-consensus overlap gate must never yield to
+cross-source corroboration; the blockers above are structural (rank
+embedding, temporal unavailability), not a standing ruling against the
+concept itself.
+
+**Test suites in this mechanism's blast radius (30 files, grep-confirmed)
+— named so a future implementation's regression sweep has a starting
+list**: `q-trackB-commit4.3-winning-family-authority`,
+`q-trackB-commit4.3.1-retention-decline-fail-closed`,
+`q144a-family-discriminator-gate`, `grailkey-dispatch-32-frozen-corpus`,
+`q140-coherent-content-token-lane`, `q133-slice1b-eom-registry`,
+`grailkey-dispatch-25-fix2c-axis-check`, `grailkey-commit-s`,
+`ship26-integration`, `grailkey-commit-t`,
+`q-trackB-commit4-adoption-provisional`, `grailkey-commit-p`,
+`grailkey-commit-d1-d2-printing-axis-injection`,
+`grailkey-commit-b1-q84-issue-corroboration`,
+`q140-at-vision-zero-support-skip`,
+`q-trackB-commit4.2-fingerprint-year-restamp`,
+`q-trackB-commit4.1-spawn-visual-family-merge`,
+`q131-refused-identity-conflict-provisional`,
+`q133-slice2-identityrefused-promotion`,
+`q134-provisional-override-boolean`,
+`q132-layers-1-2-year-conflict-resolution`,
+`q132-david-nakayama-family-recovery`, `q131-systemic-audit-fixes`,
+`q130-john-giang-artist`, `q119-compound-title-consolidation`,
+`family-clustering`, `q-pc-requery-gate`, `q85-compact-key`,
+`q84-dual-axis`, `pattern-k-dedupe-issue`. `q140-issue-consensus-
+corrective` (the Flash #139 regression guard) re-run directly this
+dispatch: 124/0, unchanged — confirmed byte-identical since zero
+`src/lib`/`api` files were touched.
+
+### Task 3 — variant identity on the operator card, SHIPPED
+
+Independent of Task 1/2 — display and custody only, zero pricing math.
+Production evidence proved the value is computed, confirmed, and
+consumed correctly server-side (shapes the comp query, rejects
+mismatched sold comps) but never reached the person looking at the card.
+
+**Custody trace, hop by hop.** `confirmedVariant` → `out.variantNote`
+(`api/enrich.js:~10862-10863`, a pre-existing Q135-dispatch universal
+fallback, unconditional, confirmed unchanged) → four pre-existing
+catalogue-merge sites already correctly rename it to `item.variant`
+(`enrich.variantNote || cur.variant || null`, `App.jsx:10347/11388/
+11943/12913`) → the PRIMARY scan-save merge does too, via a shared
+helper (`mergeConfirmedIdentity`, `src/lib/dataQualityGuard.js`,
+presence-aware `hasKey(enrich, 'variantNote') ? enrich.variantNote :
+prior?.variant`, spread into the merge at `App.jsx:10931`). All of this
+was ALREADY correct — not touched.
+
+**Two real, distinct gaps found and fixed:**
+
+1. **The live, fresh-scan `result` state never picked up the confirmed
+   value at all.** `gradeBlob`'s two `setResult` merges did a bare
+   `{ ...prev, ...enrich, ... }` spread — this brings `enrich.variantNote`
+   into `result` under the SERVER's field name, but `ResultCard` (the
+   very first thing an operator sees, before any save) reads
+   `result.variant`, a different key a plain spread never populates from
+   `variantNote`. `result.variant` therefore stayed frozen at whatever
+   Vision's own PRE-enrich guess was (`data.variant`, set once when the
+   scan started), never updated even when enrich.js's own identity
+   resolution corrected or enriched the variant text afterward. Fixed:
+   both `setResult` call sites now do `variant: enrich.variantNote ??
+   prev.variant` (same `??`-over-honest-null convention `mergeConfirmedIdentity`
+   already established for the catalogue path, not `||`).
+2. **Even where `item.variant` WAS correctly populated (`CollectionDetail`,
+   the saved-book view), it rendered ~1,400 lines below the title block**
+   — after grading, pricing, comps, and a "known keys" expandable section
+   — not adjacent to title/issue/year as an identity-shaping value
+   deserves. Moved to directly under the title/publisher/year header for
+   both `ResultCard` and `CollectionDetail`; the old, buried duplicate
+   removed (not left rendering the same value twice); the separate,
+   compact collection-LIST-tile badge (a different, earlier component,
+   space-constrained by design) deliberately left untouched — not the
+   surface this dispatch targets.
+
+**Unconfirmed/invalidated state does not reach the client today, checked
+directly.** `out.variantNote` is a single string-or-null field with no
+companion status/confidence field (unlike `identityConfident`/
+`assetTypeConfident`, which do have one) — grep-confirmed zero
+`variantConfidence`/`variantStatus`-shaped fields anywhere. When a
+variant is invalidated server-side, `confirmedVariant` is nulled and
+`out.variantNote` correctly resolves to `null` — the client's existing
+"only render if truthy" pattern already, correctly, shows nothing in
+that case (satisfies "no false variant label" by the existing absence
+convention, not a new mechanism). What the client CANNOT do is show "a
+variant was claimed but could not be confirmed" as a distinguishable
+state from "no variant was ever claimed" — per the directive's explicit
+instruction, this is reported as a propagation gap, not built around
+with a new field.
+
+**Candidate pattern recorded, single observation, not promoted:**
+**"Hidden actionable identity is a product defect."** If a facet is
+authoritative enough to change search, filtering, pricing, or listing
+behavior, it is authoritative enough to be visible to the operator.
+Distinct from Computed-Then-Discarded (the value here is never
+discarded — it reaches every intended consumer correctly; it simply
+never reaches the one consumer, the operator, that was never wired as a
+recipient at all).
+
+**Test baseline correction folded in, same commit.** Directive O's own
+`grailkey-directive-o-comp-ladder-reorder.test.js` was missing the
+explicit `process.exit()` call every `fetchComps`-importing test in this
+suite requires (the Upstash client leaves a dangling handle even when
+unconfigured) — it exited 124 (TIMEOUT under a naive sweep) despite its
+5 assertions passing cleanly both pre- and post-fix. Fixed in this
+commit rather than left as a stamp that would read false to the next
+automated sweep. 167/16/3/186 → 168/16/3/187 (one new file,
+`grailkey-directive-p-task3-variant-on-card`, 20/20 clean, Part 1 proving
+both pre-fix defects against real `git show HEAD:src/App.jsx`, not a
+mirror).
+
+### Handoff
+
+Task 2 (title-family corroboration bypass) not shipped — two independent
+blockers, reported per the directive's own gating instructions, both
+logged (`GK-83` for the temporal one; the rank-embedded-weight finding
+is structural, not a ticket). Task 3 shipped and pushed. `confirmedYear`
+untouched, as instructed — Defect B (from Directive O) remains open and
+unwaived; this dispatch made no attempt to resolve it. Next: Jimmy rules
+on whether/how to pursue title-family corroboration given the two
+blockers (a genuinely rank-free family-strength signal would need to be
+designed from scratch — not requested, not built this dispatch), then a
+live Sabrina rescan for Task 3's visual confirmation and Defect B's own
+four-cause proof chain, per Directive O's still-open instructions.
