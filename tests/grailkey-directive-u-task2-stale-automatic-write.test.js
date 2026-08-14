@@ -144,14 +144,21 @@ console.log('Part 0: pre-fix vulnerability, reproduced against real CURRENT_SCAN
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\nPart 1: wasSupersededByCorrection predicate (DIRECT)\n');
 {
-  const scanClosure = { scanId: 'scan-A', generation: 1, kind: 'scan' };
+  // NOTE (GrailKey Directive V, Task 2, GK-88): itemId is included here,
+  // same item on both sides, since Directive V scoped the predicate to
+  // same-item comparisons (fixing an item-blind cross-item kill switch
+  // this file's own scope never exercised — see
+  // grailkey-directive-v-task2-ownership-perimeter.test.js Part 0/1/2 for
+  // that fix and its cross-item control). This file's own scope is
+  // unchanged: same-item correction-supersession behavior.
+  const scanClosure = { scanId: 'scan-A', generation: 1, kind: 'scan', itemId: 'item-A' };
 
   assertTrue(
-    wasSupersededByCorrection(scanClosure, { scanId: 'correction-B', generation: 2, kind: 'correction' }),
-    'true — active is a DIFFERENT correction'
+    wasSupersededByCorrection(scanClosure, { scanId: 'correction-B', generation: 2, kind: 'correction', itemId: 'item-A' }),
+    'true — active is a DIFFERENT correction, SAME item'
   );
   assertTrue(
-    !wasSupersededByCorrection(scanClosure, { scanId: 'scan-C', generation: 2, kind: 'scan' }),
+    !wasSupersededByCorrection(scanClosure, { scanId: 'scan-C', generation: 2, kind: 'scan', itemId: 'item-A' }),
     'false — active is a DIFFERENT scan (not a correction) — scan-vs-scan must stay unaffected'
   );
   assertTrue(
@@ -163,7 +170,7 @@ console.log('\nPart 1: wasSupersededByCorrection predicate (DIRECT)\n');
     'false — no active ownership at all'
   );
   assertTrue(
-    !wasSupersededByCorrection(scanClosure, { scanId: 'scan-A', generation: 1, kind: 'scan' }),
+    !wasSupersededByCorrection(scanClosure, { scanId: 'scan-A', generation: 1, kind: 'scan', itemId: 'item-A' }),
     'false — active matches closure exactly (same scanId), even though it is a plain object, not the same reference'
   );
 }
@@ -180,9 +187,11 @@ const modeFor = (closure, active) =>
 
 {
   // Scenario A — correction supersedes: the stale scan write must be
-  // REJECTED. This is the directive's core GIVEN/WHEN/THEN.
-  const scanClosure = { scanId: 'scan-A', generation: 5, kind: 'scan' };
-  const correctionActive = { scanId: 'correction-B', generation: 6, kind: 'correction' };
+  // REJECTED. This is the directive's core GIVEN/WHEN/THEN. Same item on
+  // both sides (Directive V, GK-88, scoped this predicate to same-item —
+  // cross-item behavior is that dispatch's own test's responsibility).
+  const scanClosure = { scanId: 'scan-A', generation: 5, kind: 'scan', itemId: 'item-A' };
+  const correctionActive = { scanId: 'correction-B', generation: 6, kind: 'correction', itemId: 'item-A' };
   const staleResponse = { scanId: 'scan-A', title: 'stale automatic identity', price: '$4.99' };
 
   let transientWrote = false;
@@ -216,8 +225,8 @@ const modeFor = (closure, active) =>
   // correction: must NOT change behavior. Still SHADOW, still writes
   // through, exactly as every gradeBlob write did before this dispatch —
   // proves the fix does not flip CURRENT_SCAN_OWNERSHIP_MODE globally.
-  const scanClosureA = { scanId: 'scan-A', generation: 5, kind: 'scan' };
-  const scanActiveC = { scanId: 'scan-C', generation: 7, kind: 'scan' };
+  const scanClosureA = { scanId: 'scan-A', generation: 5, kind: 'scan', itemId: 'item-A' };
+  const scanActiveC = { scanId: 'scan-C', generation: 7, kind: 'scan', itemId: 'item-A' };
   const staleResponse = { scanId: 'scan-A', title: 'stale, but superseded by another scan, not a correction' };
 
   let wrote = false;
@@ -233,8 +242,8 @@ const modeFor = (closure, active) =>
 {
   // Scenario C (control 2) — the directive's own required control: a
   // NON-superseded automatic response still writes normally.
-  const scanClosure = { scanId: 'scan-A', generation: 5, kind: 'scan' };
-  const stillActive = { scanId: 'scan-A', generation: 5, kind: 'scan' };
+  const scanClosure = { scanId: 'scan-A', generation: 5, kind: 'scan', itemId: 'item-A' };
+  const stillActive = { scanId: 'scan-A', generation: 5, kind: 'scan', itemId: 'item-A' };
   const freshResponse = { scanId: 'scan-A', title: 'fresh, un-superseded identity' };
 
   let wrote = false;
@@ -252,8 +261,8 @@ const modeFor = (closure, active) =>
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\nPart 3: rejection is observably logged (DIRECT)\n');
 {
-  const scanClosure = { scanId: 'scan-A', generation: 5, kind: 'scan' };
-  const correctionActive = { scanId: 'correction-B', generation: 6, kind: 'correction' };
+  const scanClosure = { scanId: 'scan-A', generation: 5, kind: 'scan', itemId: 'item-A' };
+  const correctionActive = { scanId: 'correction-B', generation: 6, kind: 'correction', itemId: 'item-A' };
   const staleResponse = { scanId: 'scan-A' };
 
   const originalLog = console.log;
@@ -287,10 +296,15 @@ console.log('\nPart 4: gradeBlob is wired to the mechanism above (source proof, 
   const appSrc = readFileSync(path.join(repoRoot, 'src/App.jsx'), 'utf8');
 
   assertTrue(appSrc.includes("wasSupersededByCorrection"), 'wasSupersededByCorrection is imported/used in App.jsx');
-  assertTrue(appSrc.includes("const scanOwnership = { scanId, generation, kind: 'scan' };"), "gradeBlob's own ownership object is tagged kind:'scan'");
+  // GrailKey Directive V, Task 2 (GK-88) added itemId to both ownership
+  // objects (real, intentional shape change) — this file's own scope
+  // (kind tagging) is unaffected, so these checks now match on the
+  // kind-tag substring rather than the full literal (which V's itemId
+  // addition legitimately changed).
+  assertTrue(appSrc.includes("kind: 'scan', itemId: null };"), "gradeBlob's own ownership object is tagged kind:'scan' (itemId added by Directive V, GK-88)");
   assertTrue(
-    appSrc.includes("generation: nextGeneration(scanGenerationRef), kind: 'correction' };"),
-    "submitManualCorrection's ownership object is tagged kind:'correction'"
+    appSrc.includes("kind: 'correction', itemId: item.id };"),
+    "submitManualCorrection's ownership object is tagged kind:'correction' (itemId added by Directive V, GK-88)"
   );
 
   // Three real call sites: grade-stage transient, enrich-stage transient,

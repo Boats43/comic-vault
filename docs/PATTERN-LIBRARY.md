@@ -7968,3 +7968,219 @@ left for the next dispatch to discover after crossing it. Directive S's
 STOP GATE is now fully closed (all of GK-85/86/87 addressed) — S resumes
 at its own Task 2 (build the picker) next, per this directive's own
 closing instruction. Do not propose the next directive.
+
+## GrailKey Directive 2026-08-14-V — ownership perimeter
+
+**S REMAINS BLOCKED** at the start of this dispatch (GK-88 open). Mode:
+enumerate first, guard second.
+
+### Compaction gate
+
+`CLAUDE.md` measured 148,847 chars at preflight — within ~1,150 of the
+150,000-char P0 load limit (GK-92). Compacted BEFORE Task 1, per the
+directive's own explicit instruction, docs-only commit (`8d8af44`): the
+Pattern Library dispatch-index section (was 64,116 of 148,847 chars, 43%
+of the file) compressed to name + one-clause result + pointer per entry,
+since every entry already has a full writeup in this file (verified by
+direct grep, dispatch by dispatch, before touching anything — nothing
+lost). Every named standing invariant preserved so it stays greppable.
+Doctrine, rules, the test baseline, Open Blockers, and Handoff Pointers
+verified byte-identical before/after via direct diff on both the
+untouched head and tail of the file. 148,847 → 98,875 chars (-34%).
+
+**Self-correction during this same compaction pass**: the first attempt
+at re-stamping the test baseline line accidentally deleted its own
+"Standing rule: any dispatch that adds or removes a `tests/*.test.js`
+file must re-stamp this line in the same commit" sentence while
+trimming it for length — caught before commit and restored. Recorded
+here as a caution for future compaction passes: trimming doctrine text
+down to "just the facts" can silently drop the RULE embedded inside a
+fact-heavy paragraph if it isn't checked for after the edit.
+
+### Task 1 — the async writer table
+
+Full trace, not by function name — by tracing every `setCatalogue`/
+`setSelectedItem`/`putComic` call site in `src/App.jsx` back to its
+enclosing async producer (per the directive's own instruction: "A
+perimeter enumerated by function name will miss a wrapper").
+
+| producer | async boundary | state written | target item/key | ownership mechanism (before this dispatch) | can finish after correction begins? | same-item overlap possible? | superseded today (pre-fix)? | atomic write group |
+|---|---|---|---|---|---|---|---|---|
+| `gradeBlob` | `/api/grade` then fire-and-forget `/api/enrich` | full identity + pricing + comps + evidence | new item (savedId, known only after `addToCatalogue`) | `scanOwnership`/`activeScanRef` (Directive U) | YES | YES (item-BLIND pre-fix — see finding below) | YES, but item-blind (would wrongly reject/accept for wrong item) | setResult (×2, transient) + setCatalogue+setSelectedItem (persisted, 1 unit) |
+| `submitManualCorrection` | `/api/enrich` | full identity + pricing + comps + evidence, `identityAuthority` | existing item, known immediately | `correctionOwnership`/`activeScanRef` ENFORCE (Directive T) | N/A (this IS the correction) | N/A | N/A | putComic+setCatalogue+setSelectedItem, 1 unit |
+| `refreshMarketData` | `/api/enrich` | pricing + comps + evidence (not identity) + duplicate-sync to title/issue/year-matched items | existing item + any duplicate-matched items | `activeCardEnrichIdRef` only (self-consistency, zero relation to `activeScanRef`) | YES | YES | **NO — unguarded** (GK-88 original finding) | putComic+setCatalogue(primary+dup-sync)+setSelectedItem, 1 unit |
+| `reIdentifyBook` | `/api/grade` then `/api/enrich` (sequential) | full identity + pricing + comps + evidence | existing item, known immediately | none | YES | YES | **NO — unguarded** | putComic+setCatalogue+setSelectedItem, 1 unit |
+| `addPhotoToComic` | `/api/grade` | full identity + pricing + evidence | existing item, known immediately | none | YES | YES | **NO — unguarded** | putComic+setCatalogue+setSelectedItem, 1 unit (2 branches: normal + quota-fallback) |
+| duplicate-confirm ("Save Another Copy", inline JSX handler) | fire-and-forget `/api/enrich` | full pricing + comps + evidence (title/issue/year already fixed at creation) | new item (savedId, known after `addToCatalogue`) | none | YES | YES (low-frequency — brand-new item) | **NO — unguarded** | setCatalogue, 1 unit |
+| `handleBulkImport`'s `processFile` (×`CONCURRENCY=3` workers) | fire-and-forget `/api/enrich` per file | full pricing + comps + evidence | new item per file (savedId, known after `addToCatalogue`) | in-flight dedup `Set` only (prevents duplicate SAME-book races, not staleness) | YES | YES, but MULTIPLE items concurrently by design | **NO — unguarded, and NOT fixed this dispatch** (see reasoning below) | setCatalogue, 1 unit, per file |
+| auto-refresh (`useEffect` queue, `MAX_CONCURRENT=2`) | fire-and-forget `/api/enrich` per stale item | pricing + comps + evidence (not identity) | multiple existing items in the "missing source" queue | `AbortController` per fetch, all aborted on `selectedItem` change | **NO — proven unreachable** | N/A (structurally excluded) | N/A | setCatalogue per item |
+| `listOnEbay` | `/api/list-ebay` | `status`/`ebayUrl`/`ebayItemId`/`listedAt` (spreads STALE closed-over `item`, not fresh state) | existing item, known immediately | none | YES | YES | **NO — unguarded, different defect shape (GK-94)** | putComic+setCatalogue+setSelectedItem, 1 unit |
+| `syncEbayStatus` | `/api/list-ebay` (status check) | `status`/`soldPrice`/`soldAt`/`endedAt` (same stale-closure pattern) | existing item, known immediately | none | YES | YES | **NO — unguarded, GK-94** | putComic+setCatalogue+setSelectedItem, 1 unit |
+| `listBundleOnEbay` | `/api/list-ebay` (bundle) | `status`/`ebayUrl`/`ebayItemId`/`bundleId` ONLY, via a fresh `prev.map` read (NOT a stale closure) | multiple existing items | none | YES | YES | Confirmed SAFE already — fresh-read base means no collateral identity/pricing overwrite; only listing-status fields, out of this invariant's stated scope | setCatalogue, 1 unit |
+| `updateComicField` | none (synchronous; `putComic` is fire-and-forget, no state write depends on it) | single field (e.g. list price) | existing item | N/A — no async window before the state write | N/A | N/A | Confirmed NOT REACHABLE | N/A |
+| `handleImport` (JSON collection restore) | `file.text()`/`JSON.parse` (no network) | new/pre-existing ids, full collection restore | many, brand-new or explicit-id | none | technically yes, but page reloads immediately after (`window.location.reload()`) | N/A | Confirmed NOT REACHABLE in practice | N/A |
+| `createTradePile` / trade-pile delete handler | none (synchronous, `putComic` per item awaited inline) | `inTradePile`/`tradePileId`/`tradeValue` only | multiple existing items | N/A — no network round-trip | N/A | N/A | Confirmed NOT REACHABLE | N/A |
+| `refreshAnalysis` | `/api/manage` | `analysis` (a SEPARATE collection-wide object, no per-item identity/pricing/comp/evidence state) | none (not per-item) | none | N/A | N/A | Out of scope — different state entirely | N/A |
+
+**Reachability, with evidence, not inference:**
+
+- **Auto-refresh — NOT reachable.** Confirmed by direct read of the
+  effect's cleanup and dependency array (`src/App.jsx`): `for (const c of
+  autoRefreshAbortersRef.current) c.abort();` runs in the `useEffect`
+  cleanup, and the effect's own dependency array includes `selectedItem`
+  — meaning the cleanup fires and aborts every in-flight fetch the
+  instant a card opens (any card, not just the one being corrected), well
+  before a correction could begin. The gate condition `if (selectedItem)
+  return;` additionally means the queue never even LAUNCHES while a card
+  is open. Stronger than a rejection-based guard: the response never
+  resolves at all.
+- **`handleImport`, trade-pile functions, `updateComicField` — NOT
+  reachable.** No real async network boundary exists between the
+  operator's action and the state write (either fully synchronous, or
+  the only "async" step is a local file read with no server round-trip).
+- **`refreshAnalysis` — out of scope.** Writes a wholly separate
+  collection-wide `analysis` object, never per-item identity/pricing/
+  comp/evidence state.
+- **`refreshMarketData`, `reIdentifyBook`, `addPhotoToComic`,
+  duplicate-confirm — REACHABLE, and now guarded** (see Task 2).
+- **`handleBulkImport`'s `processFile` — REACHABLE, deliberately NOT
+  guarded this dispatch** — see the GK-88 registry entry for the full
+  reasoning (concurrent multi-item producer, incompatible with the
+  single-slot `activeScanRef` even with the itemId fix).
+- **`listOnEbay`/`syncEbayStatus` — REACHABLE, a DIFFERENT defect shape
+  (GK-94), not fixed this dispatch** (stale-closure collateral overwrite,
+  not a missing-ownership-check gap — see registry).
+- **`listBundleOnEbay` — REACHABLE but confirmed SAFE already**, checked
+  directly: its `setCatalogue` updater spreads `{...x, status, ...}`
+  where `x` comes from the live `prev` array (a fresh read), not the
+  stale closed-over `items` argument — so even if superseded, it can
+  never resurrect stale identity/pricing fields, and the fields it DOES
+  write (`status`/`ebayUrl`/`ebayItemId`/`bundleId`) are out of this
+  invariant's stated scope (identity/pricing/comp/evidence).
+
+### The item-blindness finding (the central discovery of this dispatch)
+
+Directive U's shipped `wasSupersededByCorrection` (commit `a734483`) had
+NO item concept at all: `!!active && active.kind === 'correction' &&
+active.scanId !== closure?.scanId`. This meant a correction on ANY comic
+would supersede a stale `gradeBlob` write for ANY OTHER comic — a global
+kill switch, not a guard, exactly the shape this directive's mandatory
+cross-item control test exists to catch. Proven DIRECTLY against the
+real `a734483` source (`tests/grailkey-directive-v-task2-ownership-
+perimeter.test.js` Part 0): extracted the exact pre-fix predicate body
+verbatim via `git show`, ran it against a genuine cross-item scenario
+(item B's stale scan closure vs. item A's active correction), and
+confirmed both that the predicate wrongly returns `true` and that the
+real `applyScanOwnershipGuard` consequently drops item B's legitimate
+write.
+
+**Fix**: `itemId` added to the ownership objects — same `{scanId,
+generation, kind}` shape, one more field, not a new mechanism.
+`wasSupersededByCorrection` now additionally requires `closure.itemId ===
+active.itemId` (both non-null) before rejecting. `gradeBlob`'s
+`scanOwnership` starts `itemId: null` (the item doesn't exist yet before
+`addToCatalogue` resolves) and is mutated to `savedId` once known — this
+means the grade-stage transient write (fires before `savedId` exists)
+is NEVER eligible for the correction-supersession special case, which is
+the semantically correct answer: a scan preview for a not-yet-saved
+comic cannot conflict with a correction on an already-saved one.
+`submitManualCorrection`'s `correctionOwnership` carries `itemId:
+item.id` from the start (always known).
+
+Verified via the directive's own mandatory cross-item control (Part 2 of
+the same test file): item B's async work in flight, a correction begins
+for item A, item B's response still writes normally. Also verified the
+inverse controls: same-item correction still rejects correctly (Part 1/3),
+and scan-vs-scan staleness (not a correction at all) is completely
+unaffected — no global SHADOW→ENFORCE flip anywhere.
+
+### Task 2 — guards applied
+
+`refreshMarketData`, `reIdentifyBook`, `addPhotoToComic`, and the
+duplicate-confirm handler each mint their own ownership object at the
+start of their async flow, using the exact same `mintScanId`/
+`nextGeneration(scanGenerationRef)`/`activeScanRef` primitives every
+other producer already uses — `itemId: item.id` (or `savedId` once known,
+for the two new-item producers) set immediately, since (unlike
+`gradeBlob`) these all operate on an item whose identity is known from
+the start. Each threads `scanId` into its own outgoing request body (so
+the server-echo verification stays meaningful, matching the established
+pattern) and wraps its persisted write in `applyScanOwnershipGuard` with
+the same dynamic-mode expression Directive U introduced:
+
+```
+wasSupersededByCorrection(ownership, activeScanRef.current)
+  ? SCAN_OWNERSHIP_MODE.ENFORCE
+  : CURRENT_SCAN_OWNERSHIP_MODE
+```
+
+**One superseded response = zero writes, preserved exactly**:
+`refreshMarketData`'s guard wraps `putComic` + the primary `setCatalogue`
+write + the duplicate-sync `setCatalogue` write + `setSelectedItem` as
+ONE unit inside a single `applyScanOwnershipGuard` call — none of it
+partially applies. `addPhotoToComic`'s supersession check runs ONCE,
+before either of its two write branches (normal + quota-fallback), so a
+superseded response can't fall through to the fallback branch either.
+`reIdentifyBook` and the duplicate-confirm handler follow the same
+one-unit discipline. `reIdentifyBook` and `addPhotoToComic` `throw` when
+superseded (matching `submitManualCorrection`'s own established
+convention) rather than silently returning, so their callers' existing
+try/catch error-surfacing paths correctly report "didn't apply" instead
+of silently treating a discarded response as success.
+
+### Tests
+
+`tests/grailkey-directive-v-task2-ownership-perimeter.test.js`, 36
+assertions, 0 failed:
+- **Part 0 (DIRECT)** — the pre-fix cross-item bug, reproduced against
+  the real `a734483` source via `git show` (not retyped), proving both
+  the predicate's wrong verdict and the real `applyScanOwnershipGuard`'s
+  consequent dropped write.
+- **Part 1 (DIRECT)** — the post-fix itemId-scoped predicate against 5
+  cases (same-item correction, different-item correction, null closure
+  itemId, null active itemId, same-item non-correction).
+- **Part 2 (DIRECT)** — the MANDATORY cross-item control: item B's
+  response still writes normally while item A's correction is active.
+- **Part 3 (DIRECT)** — the directive's own required same-item
+  GIVEN/WHEN/THEN shape (zero transient write, zero persisted write,
+  corrected state stays authoritative, rejection logged) plus the
+  required non-superseded control, run against the real shared mechanism.
+- **Part 4 (MIRRORED)** — auto-refresh's `AbortController`+`selectedItem`
+  protection reconfirmed unchanged in the real source.
+- **Part 5 (MIRRORED)** — structural proof every one of the 4 newly-
+  guarded sites, plus `gradeBlob`/`submitManualCorrection`'s itemId
+  retrofit, is actually wired correctly in the real committed
+  `src/App.jsx` — ownership minting, `scanId` threading, guard calls,
+  and the throw-on-supersession convention, all checked by exact source
+  substring, not assumed from the diff.
+
+`tests/grailkey-directive-u-task2-stale-automatic-write.test.js` repaired
+in the same commit — its own fixtures needed `itemId` added (same-item on
+both sides) to keep exercising the same-item scenarios it was written to
+test, since the bare predicate now requires it; two literal-string
+assertions in Part 4 updated to match the real (intentionally changed)
+object-literal text. Still 33/33, same scope as before, no assertion
+removed.
+
+### Regression
+
+Every suite from Directive U's own regression list re-run directly:
+35 `App.jsx`/`scanOwnership`-referencing files, `q-trackB-commit3-manual-
+correction` (466/0), `q-trackB-commit4-adoption-provisional` (152/0),
+`grailkey-directive-h-item1-stale-pc-anchor` (6/0), `slice7-scan-
+ownership` (15/0), `q140-issue-consensus-corrective` (124/0, byte-
+identical as required). All clean except the three already-logged,
+already-diagnosed pre-existing failures (GK-89/90/91) — each re-confirmed
+identical to their Directive U state, none new, none worsened.
+
+### Handoff
+
+GK-88: mostly closed, kept explicitly OPEN for `handleBulkImport`'s
+concurrent worker pool (named, with its own trigger, not silently folded
+into "done"). GK-92: closed (compaction). GK-93 (residual same-slot risk
+between two different single-flow producers) and GK-94 (`listOnEbay`/
+`syncEbayStatus` stale-closure risk) logged as new, distinctly-shaped
+findings, not fixed. S's Task 2 remains blocked on GK-88's full closure,
+per the directive's own explicit gate — the bulk-import gap, while
+lower-frequency than the gap this dispatch closed, is real and
+enumerated, not swept under a "mostly done" label.

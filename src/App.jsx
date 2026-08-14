@@ -20,7 +20,7 @@ import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeCo
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
-import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE, wasSupersededByCorrection } from "./lib/scanOwnership.js";
+import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE, wasSupersededByCorrection, logStaleScanResponse } from "./lib/scanOwnership.js";
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 
@@ -10657,7 +10657,13 @@ export default function App() {
       // sites below distinguish "superseded by another scan" (stays under
       // CURRENT_SCAN_OWNERSHIP_MODE, unchanged) from "superseded by a
       // correction" (must reject regardless — wasSupersededByCorrection).
-      const scanOwnership = { scanId, generation, kind: 'scan' };
+      // GrailKey Directive V, Task 2 (GK-88) — itemId starts null (this
+      // comic doesn't exist in the catalogue yet) and is set once savedId
+      // is known, below. wasSupersededByCorrection never fires while
+      // itemId is null — there is no item identity yet to compare, so the
+      // transient grade-stage write below is never eligible for the
+      // correction-supersession special case, only CURRENT_SCAN_OWNERSHIP_MODE.
+      const scanOwnership = { scanId, generation, kind: 'scan', itemId: null };
       activeScanRef.current = scanOwnership;
       setError(null);
       setResult(null);
@@ -10757,6 +10763,14 @@ export default function App() {
         );
         setLoading(false);
         const savedId = (save && !isDuplicate) ? await addToCatalogue({ ...data, issue: issueNum }, b64) : null;
+        // GrailKey Directive V, Task 2 (GK-88) — the item now exists;
+        // mutate the SAME ownership object already stored in
+        // activeScanRef.current (not a new one) so the enrich-stage
+        // transient/persisted writes below can be scoped to this item.
+        // No-op if a newer scan/correction already replaced this closure
+        // in activeScanRef — that replacement is a different object and is
+        // untouched by this assignment.
+        scanOwnership.itemId = savedId;
 
         // Fire-and-forget enrichment pass — merges into the card when ready.
         // Buyer mode skips `images` to bypass Ximilar visual search (saves
@@ -11872,6 +11886,18 @@ export default function App() {
     const enrichId = `${item.id}-${Date.now()}`;
     activeCardEnrichIdRef.current = enrichId;
     console.log(`[enrich] refresh start id=${enrichId} title=${item.title}`);
+    // GrailKey Directive V, Task 2 (GK-88, ownership perimeter) — mints
+    // its own ownership using the SAME shared activeScanRef/
+    // scanGenerationRef gradeBlob/submitManualCorrection already use, no
+    // new mechanism. itemId is known immediately (this always targets an
+    // existing, already-open catalogue item) so this is eligible for the
+    // correction-supersession check from the start, unlike gradeBlob's
+    // pre-save transient window. Independent of activeCardEnrichIdRef
+    // above, which only protects against a NEWER refreshMarketData call
+    // for the SAME item — this is the cross-producer (correction vs.
+    // refresh) layer that guard doesn't cover.
+    const refreshOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'scan', itemId: item.id };
+    activeScanRef.current = refreshOwnership;
 
     // Ship v0-G — Defense-in-depth: minimal frontend sanitization before refresh.
     // Backend sanitizer (api/enrich.js) is authoritative, but this prevents obvious
@@ -11932,6 +11958,9 @@ export default function App() {
           // different product that merely scores higher on THIS request's
           // text match (Captain America #25 Steranko-vs-Young class).
           pcProductId: item.pcProductId || null,
+          // GrailKey Directive V, Task 2 (GK-88) — echoed back by
+          // /api/enrich as out.scanId, same as gradeBlob's request.
+          scanId: refreshOwnership.scanId,
         }),
         signal: controller.signal,
       });
@@ -12111,45 +12140,61 @@ export default function App() {
       updated = autofixed;
     }
 
-    await putComic(updated);
-    setCatalogue((prev) => prev.map((x) => {
-      if (x.id === item.id) return updated;
-      // Sync duplicate copies with same title + issue + year.
-      if (x.title?.toLowerCase() === item.title?.toLowerCase()
-        && x.issue === item.issue
-        && x.year === item.year) {
-        // Ship #20a.6.4 — duplicate sync respects idGated.
-        const synced = idGatedRM
-          ? {
-              ...x,
-              price: null,
-              priceLow: null,
-              priceHigh: null,
-              comps: enrich.comps ?? x.comps,
-              pricingSource: enrich.pricingSource ?? x.pricingSource,
-              priceNote: enrich.priceNote ?? null,
-              gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier,
-              identityConfident: false,
-              identityMissingFields: enrich.identityMissingFields ?? null,
-              identityReasons: enrich.identityReasons ?? null,
-            }
-          : {
-              ...x,
-              price: enrich.price ?? x.price,
-              priceLow: enrich.priceLow ?? x.priceLow,
-              priceHigh: enrich.priceHigh ?? x.priceHigh,
-              comps: enrich.comps ?? x.comps,
-              pricingSource: enrich.pricingSource ?? x.pricingSource,
-              priceNote: enrich.priceNote ?? null,
-              gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier,
-              identityConfident: enrich.identityConfident ?? x.identityConfident ?? true,
-            };
-        putComic(synced).catch(() => {});
-        return synced;
+    // GrailKey Directive V, Task 2 (GK-88) — the primary write
+    // (putComic + setCatalogue + duplicate-sync + setSelectedItem) is
+    // gated as ONE unit: if a correction has superseded this item since
+    // refreshOwnership was minted, none of it runs. enrich itself already
+    // carries a scanId (echoed above); applyScanOwnershipGuard verifies it.
+    applyScanOwnershipGuard(
+      'refresh-market-data',
+      enrich,
+      refreshOwnership,
+      activeScanRef.current,
+      wasSupersededByCorrection(refreshOwnership, activeScanRef.current)
+        ? SCAN_OWNERSHIP_MODE.ENFORCE
+        : CURRENT_SCAN_OWNERSHIP_MODE,
+      () => {
+        putComic(updated).catch(() => {});
+        setCatalogue((prev) => prev.map((x) => {
+          if (x.id === item.id) return updated;
+          // Sync duplicate copies with same title + issue + year.
+          if (x.title?.toLowerCase() === item.title?.toLowerCase()
+            && x.issue === item.issue
+            && x.year === item.year) {
+            // Ship #20a.6.4 — duplicate sync respects idGated.
+            const synced = idGatedRM
+              ? {
+                  ...x,
+                  price: null,
+                  priceLow: null,
+                  priceHigh: null,
+                  comps: enrich.comps ?? x.comps,
+                  pricingSource: enrich.pricingSource ?? x.pricingSource,
+                  priceNote: enrich.priceNote ?? null,
+                  gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier,
+                  identityConfident: false,
+                  identityMissingFields: enrich.identityMissingFields ?? null,
+                  identityReasons: enrich.identityReasons ?? null,
+                }
+              : {
+                  ...x,
+                  price: enrich.price ?? x.price,
+                  priceLow: enrich.priceLow ?? x.priceLow,
+                  priceHigh: enrich.priceHigh ?? x.priceHigh,
+                  comps: enrich.comps ?? x.comps,
+                  pricingSource: enrich.pricingSource ?? x.pricingSource,
+                  priceNote: enrich.priceNote ?? null,
+                  gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier,
+                  identityConfident: enrich.identityConfident ?? x.identityConfident ?? true,
+                };
+            putComic(synced).catch(() => {});
+            return synced;
+          }
+          return x;
+        }));
+        setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
       }
-      return x;
-    }));
-    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
+    );
     // SPEED-2a: Load deferred metadata asynchronously
     // Metadata now bundled in enrich response (no separate fetch)
   }, []);
@@ -12183,6 +12228,13 @@ export default function App() {
     }
     const b64 = item.images[0];
 
+    // GrailKey Directive V, Task 2 (GK-88, ownership perimeter) — mints
+    // its own ownership using the SAME shared activeScanRef/
+    // scanGenerationRef every other producer uses, no new mechanism.
+    // itemId is known immediately (always an existing catalogue item).
+    const reidentifyOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'scan', itemId: item.id };
+    activeScanRef.current = reidentifyOwnership;
+
     // Step 1: Re-grade with stored image
     // FIX 2: Force regrade bypasses grade lock (user explicitly requested re-identification)
     const gradeRes = await fetch("/api/grade", {
@@ -12200,6 +12252,7 @@ export default function App() {
         gradeConfidence: item.confidence?.toUpperCase(),
         gradeLocked: item.gradeLocked || false,
         forceRegrade: true, // FIX 2: Bypass grade lock for explicit re-identification
+        scanId: reidentifyOwnership.scanId,
       }),
     });
     if (!gradeRes.ok) throw new Error("Failed to re-grade book");
@@ -12239,6 +12292,7 @@ export default function App() {
           isReprint: gradeData.isReprint,
           editionType: gradeData.editionType,
           images: [b64],
+          scanId: reidentifyOwnership.scanId,
         }),
       });
       if (!enrichRes.ok) {
@@ -12308,9 +12362,32 @@ export default function App() {
       }
     }
 
-    await putComic(finalUpdated);
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(finalUpdated) : x)));
-    setSelectedItem(finalUpdated);
+    // GrailKey Directive V, Task 2 (GK-88) — putComic + setCatalogue +
+    // setSelectedItem gated as ONE unit. A synthetic response object
+    // carries scanId since neither /api/grade nor a failed /api/enrich
+    // guarantees a real echoed response to check here (the Vision-only
+    // fallback branch has no enrichData at all) — the correctness this
+    // check provides comes from the closure-vs-active comparison, not
+    // server-side echo verification, for this producer.
+    let applied = false;
+    applyScanOwnershipGuard(
+      'reidentify',
+      { scanId: reidentifyOwnership.scanId },
+      reidentifyOwnership,
+      activeScanRef.current,
+      wasSupersededByCorrection(reidentifyOwnership, activeScanRef.current)
+        ? SCAN_OWNERSHIP_MODE.ENFORCE
+        : CURRENT_SCAN_OWNERSHIP_MODE,
+      () => {
+        putComic(finalUpdated).catch(() => {});
+        setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(finalUpdated) : x)));
+        setSelectedItem(finalUpdated);
+        applied = true;
+      }
+    );
+    if (!applied) {
+      throw new Error('Re-identify superseded by a newer operation — not applied.');
+    }
 
     return finalUpdated;
   }, []);
@@ -12354,7 +12431,14 @@ export default function App() {
     // confirmed identity beside a stale generic price panel" shape
     // (the Bone-class defect a picker built on the T-only state would
     // have silently produced).
-    const correctionOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'correction' };
+    //
+    // GrailKey Directive V, Task 2 (GK-88) — itemId: item.id makes the
+    // supersession check ITEM-SCOPED: this correction only supersedes an
+    // older producer that was writing to this SAME comic, never an
+    // unrelated in-flight scan/refresh for a different one. Corrections
+    // always know their target item from the start (never null, unlike
+    // gradeBlob's transient pre-save window).
+    const correctionOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'correction', itemId: item.id };
     activeScanRef.current = correctionOwnership;
 
     // Track B Phase 0, Commit 3, Safeguard 5 — buildManualCorrectionPayload
@@ -12410,6 +12494,12 @@ export default function App() {
     if (existingPhotos.length >= 4) {
       throw new Error("Maximum 4 photos reached");
     }
+    // GrailKey Directive V, Task 2 (GK-88, ownership perimeter) — mints
+    // its own ownership using the SAME shared activeScanRef/
+    // scanGenerationRef every other producer uses, no new mechanism.
+    const addPhotoOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'scan', itemId: item.id };
+    activeScanRef.current = addPhotoOwnership;
+
     const rawB64 = await fileToBase64(file);
     const newThumb = await makeThumbnail(rawB64, 1200, 0.85);
     const nextPhotos = [...existingPhotos, newThumb];
@@ -12417,7 +12507,7 @@ export default function App() {
     const res = await fetch("/api/grade", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
-      body: JSON.stringify({ images: nextPhotos }),
+      body: JSON.stringify({ images: nextPhotos, scanId: addPhotoOwnership.scanId }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to re-analyze");
@@ -12456,6 +12546,13 @@ export default function App() {
       // from an older record — `images` is the source of truth now.
       image: undefined,
     };
+    // GrailKey Directive V, Task 2 (GK-88) — checked ONCE, before either
+    // write branch below, so a superseded response applies neither the
+    // normal write nor the quota-fallback write.
+    if (wasSupersededByCorrection(addPhotoOwnership, activeScanRef.current)) {
+      logStaleScanResponse('add-photo', { scanId: addPhotoOwnership.scanId }, addPhotoOwnership, activeScanRef.current, 'scanid-mismatch', SCAN_OWNERSHIP_MODE.ENFORCE);
+      throw new Error('Add photo superseded by a newer operation — not applied.');
+    }
     try {
       await putComic(updated);
     } catch {
@@ -13022,6 +13119,12 @@ export default function App() {
                       setPendingDuplicate(null);
                       setDuplicateWarning(null);
                       if (savedId) {
+                        // GrailKey Directive V, Task 2 (GK-88, ownership
+                        // perimeter) — same shape as gradeBlob's own
+                        // fire-and-forget enrich: itemId known only once
+                        // savedId resolves, same shared activeScanRef.
+                        const dupOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'scan', itemId: savedId };
+                        activeScanRef.current = dupOwnership;
                         // Fire enrichment for the newly saved copy
                         fetch("/api/enrich", {
                           method: "POST",
@@ -13037,21 +13140,33 @@ export default function App() {
                             foreignEdition: data.foreignEdition,
                             isReprint: data.isReprint,
                             editionType: data.editionType,
+                            scanId: dupOwnership.scanId,
                           }),
                         })
                           .then((r) => r.ok ? r.json() : null)
                           .then((enrich) => {
                             if (!enrich) return;
-                            setCatalogue((prev) => {
-                              const cur = prev.find((x) => x.id === savedId);
-                              if (!cur) return prev;
-                              // 2026-07-18 — fold in identity/asset-type gate (was previously
-                              // absent on this duplicate-confirm path).
-                              const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
-                              const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
-                              putComic(updated).catch(() => {});
-                              return prev.map((x) => x.id === savedId ? updated : x);
-                            });
+                            applyScanOwnershipGuard(
+                              'duplicate-confirm',
+                              enrich,
+                              dupOwnership,
+                              activeScanRef.current,
+                              wasSupersededByCorrection(dupOwnership, activeScanRef.current)
+                                ? SCAN_OWNERSHIP_MODE.ENFORCE
+                                : CURRENT_SCAN_OWNERSHIP_MODE,
+                              () => {
+                                setCatalogue((prev) => {
+                                  const cur = prev.find((x) => x.id === savedId);
+                                  if (!cur) return prev;
+                                  // 2026-07-18 — fold in identity/asset-type gate (was previously
+                                  // absent on this duplicate-confirm path).
+                                  const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
+                                  const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                                  putComic(updated).catch(() => {});
+                                  return prev.map((x) => x.id === savedId ? updated : x);
+                                });
+                              }
+                            );
                           })
                           .catch(() => {});
                       }

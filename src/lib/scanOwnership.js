@@ -142,8 +142,32 @@ export const logStaleScanResponse = (stage, response, closure, active, reason, m
 // ('scan' | 'correction') on the ownership object set by the two callers
 // that mint one (gradeBlob, submitManualCorrection) — the same
 // {scanId, generation} shape plus one field, not a parallel mechanism.
+//
+// CORRECTED, GrailKey Directive V, Task 2 (GK-88, ownership perimeter) —
+// the version above was item-BLIND: it rejected on ANY correction,
+// anywhere in the app, regardless of which comic it targeted. Proven live
+// against the real, already-shipped Directive U code (Part 0 of this
+// dispatch's test, DIRECT): a correction on comic A would wrongly discard
+// a completely unrelated, still-valid gradeBlob/refreshMarketData/etc.
+// response for comic B — a global kill switch, not a guard, exactly the
+// shape this directive's mandatory cross-item control test exists to
+// catch. `itemId` (a plain field on the SAME ownership object, not a new
+// mechanism) now scopes the check: rejection fires ONLY when the active
+// correction targets the SAME item the stale closure was writing to.
+// itemId is `null` for gradeBlob's transient grade-stage closure specifically
+// (the item doesn't exist yet — addToCatalogue hasn't resolved) and for
+// any producer whose target item isn't yet known; in that state the
+// correction-supersession special case never fires (there is no item
+// identity to compare), and the write falls back to whatever
+// CURRENT_SCAN_OWNERSHIP_MODE already governs — never a behavior change
+// for that case, since it was never eligible for ENFORCE to begin with.
 export const wasSupersededByCorrection = (closure, active) =>
-  !!active && active.kind === 'correction' && active.scanId !== closure?.scanId;
+  !!active
+  && active.kind === 'correction'
+  && active.scanId !== closure?.scanId
+  && closure?.itemId != null
+  && active.itemId != null
+  && closure.itemId === active.itemId;
 
 // The single orchestration point BOTH gradeBlob's write sites (App.jsx)
 // and this feature's tests call — the exact same function, not a
