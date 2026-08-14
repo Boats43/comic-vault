@@ -8339,3 +8339,45 @@ stays OPEN, bulk import remains the named blocker. Test baseline
 re-stamped 173/19/3/195 → 174/19/3/196 (one new file). S's Task 2 is
 narrower than it was: one of its two confirmed blockers (GK-94) is now
 closed; the other (bulk import, needs its own mechanism) remains.
+
+## Standing-rule violation record — same-commit test-baseline re-stamp
+
+The standing rule (CLAUDE.md, "Directive preflight requirement" /
+test-baseline paragraph): **the test baseline is re-stamped in the same
+commit that adds or removes a `tests/*.test.js` file.** Two confirmed
+violations, recorded here so a rule violated twice and recorded once
+does not read as decorative.
+
+**Instance 1 — Directive J / Directive K (2026-08-12).** Directive J
+added `tests/grailkey-directive-j-gk79a-relabel.test.js` in commit
+`1d827e7` without re-stamping the baseline line in the same commit; the
+re-stamp landed separately in `aef558a` ("re-stamp test baseline
+165/16/3/184 → 166/16/3/185"). Directive K's commit (`8514b3d`) states
+it recorded this violation via "the missing CLAUDE.md dispatch-index
+entry for Directive J... including an explicit record that the standing
+same-commit re-stamp rule was violated." **That CLAUDE.md entry could
+not be located in the current file** as of this record (2026-08-14,
+Directive AC) — grepped for "Directive J" and "Directive K" across
+`CLAUDE.md` and this file, zero hits for either as a dispatch-index
+bullet. Most likely cause: Directive V's CLAUDE.md compaction pass
+(2026-08-14, `8d8af44`, 148,847→98,875 chars) compressed or dropped the
+entry along with the rest of the Pattern Library dispatch-index section
+it targeted — that compaction's own commit claims "nothing lost,"
+verified only against sections with a full Pattern Library writeup to
+fall back on, which Directive K's docs-only, no-writeup commit never
+had. Not re-investigated further here (out of this dispatch's docs+
+CLAUDE.md-only, non-expanding scope) — flagged as a gap, not silently
+assumed still present. The commit messages of `1d827e7`, `aef558a`, and
+`8514b3d` themselves remain the durable, un-losable record of instance 1.
+
+**Instance 2 — Directive AB (2026-08-14).** Added
+`tests/grailkey-directive-ab-evidence-applicability.test.js` in commit
+`cb987d1` (implementation + tests) without re-stamping the baseline line
+in the same commit; the re-stamp landed separately in `378b45e`
+(registry + docs close-out). The baseline value itself (176/19/3/198)
+is correct and was fully cross-checked against the documented stale
+list before being committed — this is a commit-placement violation, not
+a data error, identical in shape to instance 1.
+
+The rule is not amended or softened by either instance — it remains
+"same commit," not "same push" or "same dispatch."
