@@ -53,11 +53,14 @@ const assertFalse = (cond, label) => assertEq(!!cond, false, label);
 console.log('\n=== Track B Phase 0, Commit 3 — manual identity correction ===\n');
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Sanity — no overlap between the two lists, allow-list is exactly 4 fields
+// Sanity — no overlap between the two lists, allow-list is exactly 5 fields
+// (GrailKey Directive T, Task 4 — added 'variant' to the original four;
+// see tests/grailkey-directive-t-task4-variant-correction.test.js for the
+// dedicated coverage of that addition)
 // ══════════════════════════════════════════════════════════════════════════════
 console.log('Sanity: list invariants\n');
 {
-  assertEq(MANUAL_CORRECTION_ALLOWED_FIELDS.slice().sort(), ['issue', 'publisher', 'title', 'year'], 'MANUAL_CORRECTION_ALLOWED_FIELDS is exactly title/issue/year/publisher');
+  assertEq(MANUAL_CORRECTION_ALLOWED_FIELDS.slice().sort(), ['issue', 'publisher', 'title', 'variant', 'year'], 'MANUAL_CORRECTION_ALLOWED_FIELDS is exactly title/issue/year/publisher/variant');
   const overlap = IDENTITY_DEPENDENT_FIELDS_TO_CLEAR.filter((f) => IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE.includes(f));
   assertEq(overlap, [], 'zero overlap between the clear-list and the preserve-list');
   assertTrue(IDENTITY_DEPENDENT_FIELDS_TO_CLEAR.includes('decision'), 'clear-list includes decision (never inherit stale routing state)');

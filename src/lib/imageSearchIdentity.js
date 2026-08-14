@@ -418,6 +418,14 @@ export const extractIdentityFromImageSearch = (items) => {
       leafCategoryIds: Array.isArray(it?.leafCategoryIds) ? it.leafCategoryIds : [],
       buyingOptions: Array.isArray(it?.buyingOptions) ? it.buyingOptions : [],
       sellerUsername: it?.seller?.username || null,
+      // GK-86 (GrailKey Directive T, Task 2) — one normalized cover-image
+      // URL per row. The raw Browse API itemSummaries response carries one
+      // (image.imageUrl, with thumbnailImages as a fallback shape some
+      // listings use instead); this parse step never captured it, so no
+      // consumer of this row shape — including a future candidate picker,
+      // the reason this is being added — could render a cover thumbnail.
+      // One normalized field only, not the raw thumbnailImages array.
+      imageUrl: it?.image?.imageUrl ?? it?.thumbnailImages?.[0]?.imageUrl ?? null,
     };
     return parsed;
   });

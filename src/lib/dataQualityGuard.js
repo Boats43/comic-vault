@@ -199,13 +199,64 @@ export function applyProvisionalIdentity(enrich, prior) {
  * @returns {object} title/issue/year/publisher/variant merged by presence
  */
 export function mergeConfirmedIdentity(enrich, prior) {
+  const authority = mergeIdentityAuthority(enrich, prior);
+  // GK-85 (GrailKey Directive T, Task 3) — a facet locked OPERATOR_CONFIRMED
+  // keeps the PRIOR value regardless of what this response's own presence
+  // check would otherwise accept. This is the live-defect fix: before this,
+  // mergeConfirmedIdentity had zero awareness of a manual correction ever
+  // having happened, so the next routine automatic enrich (a plain rescan,
+  // auto-refresh, bulk re-import — none of them "manual") silently
+  // overwrote it. Per-field, not per-item (Directive T's own design
+  // rationale): a locked title/issue does not block year from still being
+  // filled by fresh catalog corroboration when year carries no lock.
+  const pick = (field, enrichField) =>
+    authority[field] === 'OPERATOR_CONFIRMED'
+      ? prior?.[field]
+      : (hasKey(enrich, enrichField) ? enrich[enrichField] : prior?.[field]);
   return {
-    title: hasKey(enrich, 'title') ? enrich.title : prior?.title,
-    issue: hasKey(enrich, 'issue') ? enrich.issue : prior?.issue,
-    year: hasKey(enrich, 'year') ? enrich.year : prior?.year,
-    publisher: hasKey(enrich, 'publisher') ? enrich.publisher : prior?.publisher,
-    variant: hasKey(enrich, 'variantNote') ? enrich.variantNote : prior?.variant,
+    title: pick('title', 'title'),
+    issue: pick('issue', 'issue'),
+    year: pick('year', 'year'),
+    publisher: pick('publisher', 'publisher'),
+    variant: pick('variant', 'variantNote'),
+    identityAuthority: authority,
   };
+}
+
+/**
+ * GK-85 (GrailKey Directive T, Task 3) — the authority carrier's own
+ * custody, governed by the SAME presence-aware discipline as the identity
+ * values it protects (the governing invariant this dispatch exists to
+ * enforce): a field ABSENT from `enrich.identityAuthority` preserves
+ * whatever authority `prior.identityAuthority` already held for it; a
+ * field PRESENT with a value (e.g. 'OPERATOR_CONFIRMED') replaces it;  a
+ * field PRESENT with an explicit `null` CLEARS that facet's lock. Never
+ * `||`/`??` at the whole-object level — that would either drop every
+ * existing lock the moment ANY enrich response omits the key (a bare
+ * `enrich.identityAuthority || prior.identityAuthority` fallback), or
+ * make a lock impossible to ever explicitly revoke (a bare `??`). The
+ * object itself can be entirely absent from `enrich` (the overwhelmingly
+ * common case — only a valid manual-correction response sets it at all,
+ * api/enrich.js's `manualCorrectionRequest?.valid` block) — that case
+ * preserves `prior.identityAuthority` unchanged, field for field.
+ *
+ * @param {object} enrich - enrich API response
+ * @param {object} prior - the existing stored record
+ * @returns {object} facet -> 'OPERATOR_CONFIRMED' map, merged by presence
+ */
+export function mergeIdentityAuthority(enrich, prior) {
+  const priorAuthority = (prior && typeof prior.identityAuthority === 'object' && prior.identityAuthority) || {};
+  if (!hasKey(enrich, 'identityAuthority')) return { ...priorAuthority };
+  const incoming = (enrich.identityAuthority && typeof enrich.identityAuthority === 'object') ? enrich.identityAuthority : {};
+  const merged = { ...priorAuthority };
+  for (const field of Object.keys(incoming)) {
+    if (incoming[field] === null) {
+      delete merged[field];
+    } else {
+      merged[field] = incoming[field];
+    }
+  }
+  return merged;
 }
 
 /**

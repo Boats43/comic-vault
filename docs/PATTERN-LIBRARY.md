@@ -7496,3 +7496,221 @@ deployed. The Sabrina rescan is genuinely cleared this time — both the
 client-side custody (Directive Q) and the server-side response-shape
 gap (this dispatch) that could each independently have caused stale-
 variant resurrection are now closed and tested end to end.
+
+## GrailKey Directive 2026-08-14-T — picker foundation (GK-85/86/87)
+
+Directive S's own trace stopped at a STOP GATE it discovered, not
+re-derived here: three gaps (GK-85, GK-86, GK-87) that would have made
+building a candidate picker on top of them "produce a correction that
+silently reverts." T closes all three, with GK-85 reframed correctly per
+Jimmy's own instruction: it is a live defect in the ALREADY-SHIPPED
+manual-correction feature, not picker-specific plumbing — manual
+correction has never held durably against a subsequent automatic rescan.
+
+### Task 1 — GK-84 corrected, registry committed first
+
+`UploadSiteHostedPictures` specifically decommissions 2026-09-30 (Media
+API `createImageFromFile`/`createImageFromUrl` is the migration target);
+`AddFixedPriceItem`/`GetItem`/`EndItem` have no announced Trading-API-wide
+sunset. Implementation target 2026-09-01. Committed and pushed
+(`d58a697`) before any code changed, per the directive's own ordering.
+
+### Task 2 (GK-86) — one normalized `imageUrl` field
+
+`extractIdentityFromImageSearch`'s parsed row shape
+(`src/lib/imageSearchIdentity.js:402-423`) gained exactly one field:
+`imageUrl: it?.image?.imageUrl ?? it?.thumbnailImages?.[0]?.imageUrl ?? null`.
+Checked all 8 files importing this function for exact-shape/deep-equal
+assertions that an added key could break — none found; every consumer
+reads via field access or destructuring. `tests/grailkey-directive-t-
+task2-imageurl.test.js` (12 assertions) proves the pre-fix absence
+directly against `git show d58a697:...` and the post-fix presence via
+real import — both the `image.imageUrl` and `thumbnailImages[0].imageUrl`
+shapes, plus the no-image case (null, not a crash).
+
+### Task 3 (GK-85) — per-field `identityAuthority`, the live-defect fix
+
+**The mechanism.** `identityAuthority: { [facet]: 'OPERATOR_CONFIRMED' }`,
+governed by the identical presence-aware discipline Directive Q already
+established for identity VALUES: `mergeIdentityAuthority` (new export,
+`src/lib/dataQualityGuard.js`) treats a facet absent from
+`enrich.identityAuthority` as "preserve whatever `prior` already held,"
+a facet present with a value as "replace," and a facet present with an
+explicit `null` as "clear that facet's lock" (own-property deleted, not
+set to null — verified directly in the test). Never `||`/`??` at the
+whole-object level, per the directive's own governing invariant — either
+would have reproduced exactly the Stale Authority Inheritance class this
+whole campaign (GK-73, GK-80, Directives H/Q/R) keeps finding in this
+merge layer.
+
+**`mergeConfirmedIdentity` is the single choke point.** It is the merge
+function spread at 5 of `App.jsx`'s identity-writing call sites
+(`captureAndGrade`, `gradeBlob`'s scan→catalogue and scan→selectedItem
+siblings, `handleBulkImport`, `refreshMarketData`) — fixing it once
+fixes all 5 for free, since every call site just spreads its return.
+Per-field, not per-item: `pick(field, enrichField)` returns `prior[field]`
+when `authority[field] === 'OPERATOR_CONFIRMED'`, otherwise falls through
+to the existing presence-aware accept-or-preserve logic unchanged. The
+acceptance test this design choice hinges on (title/issue locked, year
+unresolved, a fresh automatic response conflicts on title/issue but
+supplies a genuinely new year): title and issue survive; year is
+accepted. A whole-item lock would have blocked year too — strictly
+WORSE than today's behavior for a partial correction, the reason
+Directive T's own text named for choosing per-field over per-item.
+
+**Server side.** `api/enrich.js`'s existing `if (manualCorrectionRequest?.valid)`
+block (the same block that already writes the write-only
+`out.manualCorrection` historical record) now ALSO sets
+`out.identityAuthority = Object.fromEntries(validation.acceptedFields.map(f
+=> [f, 'OPERATOR_CONFIRMED']))` — only the fields the operator actually
+corrected THIS request get locked; anything left uncorrected stays
+fillable by future automatic resolution. `out.manualCorrection` itself
+is untouched — deliberately NOT repurposed as the authority carrier, per
+the directive's explicit instruction (conflating a write-only audit
+record with an authority gate would have made neither reliable).
+
+**`buildCorrectedCatalogueItem`'s own custody gap, found while wiring
+this in.** `identityAuthority` is correctly NOT added to
+`IDENTITY_DEPENDENT_FIELDS_TO_CLEAR` (a correction to one facet must not
+wipe a DIFFERENT facet's lock from an earlier correction) — but that
+means the raw `{...cleared, ...enrichData}` spread would otherwise
+WHOLESALE REPLACE the whole map with only this correction's newly-locked
+field(s), silently dropping every other previously-locked facet. Fixed
+with an explicit `merged.identityAuthority =
+mergeIdentityAuthority(enrichData, oldItem);` line, same shape as
+Directive Q's own `merged.variant` fix at this exact function for the
+same underlying reason (a raw spread is not a merge).
+
+**Tests** (`tests/grailkey-directive-t-task3-identity-authority.test.js`,
+18 assertions, all DIRECT real function calls — these are pure,
+independently importable functions): the acceptance case; a manual
+correction surviving a later, unrelated automatic enrich end to end;
+the carrier's own absent-preserves and present-null-clears behavior;
+and a full reload-durability proof through `buildCorrectedCatalogueItem`
+itself — an earlier correction's lock (issue) and a new correction's
+lock (title) both surviving together, then a SUBSEQUENT simulated
+automatic rescan still failing to override either.
+
+**Regression:** `q-trackB-commit3-manual-correction` (466),
+`q-trackB-commit4-adoption-provisional` (152),
+`grailkey-directive-h-item1-stale-pc-anchor` (6),
+`q140-issue-consensus-corrective` (124, byte-identical as required) —
+all re-run directly, 0 new failures.
+
+### Task 4 — `variant` joins the correction path
+
+`MANUAL_CORRECTION_ALLOWED_FIELDS` grew from 4 to 5 fields (the ONE
+addition the directive authorized, not a general widening) — threaded
+through a new `normalizeManualVariant` (trim, empty→null, same shape as
+title/publisher — no numeric/date format to validate, unlike issue/year),
+`NORMALIZERS`, `normalizeFieldValue`, `validateManualAuthority`'s
+`fieldValues` destructure, `prepareManualCorrectionRequest`'s
+`workingIdentity` object, and `buildManualCorrectionPayload` (both the
+outgoing `variant` field and the `priorIdentity.variant` snapshot).
+Server side: `confirmedVariant`'s init (`api/enrich.js:5348` area) now
+checks whether a valid manual correction accepted `variant` and, if so,
+seeds directly from `manualCorrectionRequest.workingIdentity.variant` —
+bypassing `safeVariantForConfirmed` (Vision's printing-claim-filtered
+read) entirely, the same treatment `effectiveTitle`/`Issue`/`Year`/
+`Publisher` already get at `~2404-2407`. Later `confirmedVariant`
+rewrites (CGC-cert, eBay-image-consensus, edition-warning-printing,
+canonical-projection-residue) are reasoned, not exhaustively re-verified,
+to be structurally unable to fire on a manual-correction request — each
+depends on data (Vision's read, image-search results) that
+`skipVision`/`skipImageSearch` already prevent from existing at all on
+this request shape. Flagged as inferred-safe-by-construction, not
+independently proven line-by-line for every one of those ~5 sites.
+
+**One pre-existing test broke as a direct, anticipated consequence** —
+`q-trackB-commit3-manual-correction.test.js`'s own exact-array sanity
+check (`MANUAL_CORRECTION_ALLOWED_FIELDS` == exactly 4 fields) — updated
+to expect 5, still 466/466 clean. Not a regression; the premise
+intentionally changed.
+
+**Tests:** `tests/grailkey-directive-t-task4-variant-correction.test.js`
+(16 assertions, DIRECT) — the allow-list itself, `validateManualAuthority`
+accepting a variant correction while still rejecting an unrelated
+unlisted field (proving the widening is exactly one field, not
+open-ended), `workingIdentity.variant` in both the corrected-this-request
+and Safeguard-2-parity (present-but-not-corrected) cases,
+`buildManualCorrectionPayload`, and `getCorrectableFields` (already
+generic, confirmed to need no code change).
+
+### Task 5 (GK-87, correction-flow scope) — revision token
+
+**Scope, stated precisely, not overstated.** S found TWO race gaps: the
+persisted catalogue write is unconditional by explicit design, and even
+where the ownership guard IS wired (`gradeBlob`'s transient `setResult`
+sites), `CURRENT_SCAN_OWNERSHIP_MODE = SHADOW` means it never blocks
+anything in production. The directive's explicit non-goal forbids a
+global SHADOW→ENFORCE flip. This dispatch wires the CORRECTION flow
+specifically into the existing primitives (`src/lib/scanOwnership.js` —
+`mintScanId`, `nextGeneration`, `applyScanOwnershipGuard`, all reused
+verbatim, no new mechanism invented), narrowly ENFORCE-gated at exactly
+one new call site: `submitManualCorrection` mints a fresh `{scanId,
+generation}` and updates the SAME shared `activeScanRef`/
+`scanGenerationRef` refs `gradeBlob` already closes over (both are
+`useCallback`s in the same component — no new plumbing needed to share
+them). Starting a correction therefore immediately supersedes any older
+in-flight `gradeBlob` closure's ownership identity. The correction's own
+response is gated: `applyScanOwnershipGuard('correction', enrichData,
+correctionOwnership, activeScanRef.current, SCAN_OWNERSHIP_MODE.ENFORCE,
+() => {...})` — the write callback only runs if nothing newer has begun
+since; otherwise `submitManualCorrection` throws rather than silently
+no-oping.
+
+**What this does NOT cover, deliberately, logged against GK-87 (not
+re-opened as a new ticket — the same finding, now partially resolved):**
+`gradeBlob`'s own PRE-EXISTING automatic-scan persisted-write path (the
+`setCatalogue` updater inside its `.then((enrich) => {...})` block) still
+has no generation check of its own — a stale automatic response can
+still write there. Deferred, not fixed: it is a separate, larger, riskier
+change to a different, already-live, heavily-used code path, and
+critically, **Task 3's per-field `identityAuthority` check already
+protects the specific class of bug this whole campaign has been
+chasing** (an operator-locked identity FACET surviving a stale automatic
+overwrite) on that exact path, independent of race timing — because
+`mergeConfirmedIdentity` reads whatever `cur`/`prior` state is freshest
+at the moment its own `setCatalogue` callback actually executes,
+regardless of which response arrived first. The remaining exposure on
+that path is for UN-locked fields (price, comps, etc.), not identity
+authority. A real, correctly-scoped remaining gap — not hand-waved away,
+named precisely in the registry for a future dispatch to close with its
+own dedicated pass.
+
+**Tests** (`tests/grailkey-directive-t-task5-revision-token.test.js`, 15
+assertions): Part 1 DIRECT (`buildManualCorrectionPayload` threading
+`scanId`). Parts 2-3 DIRECT, using the real, already-independently-tested
+`scanOwnership.js` primitives (not re-testing them, `slice7-scan-
+ownership.test.js` already does) in the exact shape
+`submitManualCorrection` now calls them — a stale correction superseded
+by a newer operation is rejected (`scanid-mismatch`, checked before
+generation per the file's own documented order) and its write callback
+never runs; an un-superseded correction is accepted and its callback
+does run. Part 4 MIRRORED, honestly labeled: a structural proof against
+the real committed `App.jsx` source that `submitManualCorrection` is
+actually wired to call this mechanism correctly (mints via the shared
+refs, gates ENFORCE specifically — verified as a call-site argument, not
+merely absent from prose — throws on rejection) — the function itself
+isn't independently invocable outside the full React tree, the same
+constraint every `App.jsx`-touching test in this repo works under.
+
+### Regression, full dispatch
+
+Every suite named per-task above, plus a full rebuild (`npm run build`
+clean after every task), plus `q140-issue-consensus-corrective` re-run
+directly and confirmed byte-identical (124/0) — the Flash #139 guard,
+required unchanged by this dispatch's own non-goals, since none of
+Tasks 1-5 touch issue consensus.
+
+### Handoff
+
+Test baseline re-stamped: 170/16/3/189 → 174/16/3/193 (four new files,
+one repaired). GK-84 corrected and closed as a record-only ticket
+(no migration built, per non-goals). GK-85 CLOSED — the live defect is
+fixed and tested. GK-86 CLOSED. GK-87 PARTIALLY ADDRESSED — correction-
+flow scope closed, `gradeBlob`'s own automatic-scan persisted-write path
+remains open, precisely scoped in the registry for a future dispatch.
+Directive S's STOP GATE is cleared for the scope this dispatch closed;
+S resumes at its own Task 2 (build the picker) next — its Task 1 trace
+is not to be re-run, per this directive's own explicit instruction.

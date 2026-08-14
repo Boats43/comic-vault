@@ -20,7 +20,7 @@ import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeCo
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
-import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE } from "./lib/scanOwnership.js";
+import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE } from "./lib/scanOwnership.js";
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 
@@ -12300,13 +12300,27 @@ export default function App() {
   // this time on the correction path — a blessed-but-stale corrected card
   // would be strictly worse than the original wrong one.
   const submitManualCorrection = useCallback(async (item, correctedValues, correctedFields) => {
+    // GrailKey Directive T, Task 5 (GK-87, correction-flow scope) — mint a
+    // fresh ownership identity the moment a correction begins, using the
+    // SAME shared refs gradeBlob already relies on (activeScanRef/
+    // scanGenerationRef, src/lib/scanOwnership.js — no new plumbing). This
+    // immediately supersedes any older in-flight gradeBlob response: its
+    // own captured `scanOwnership` closure no longer matches
+    // activeScanRef.current from this point on. The correction's OWN
+    // response is gated ENFORCE at this one call site only —
+    // CURRENT_SCAN_OWNERSHIP_MODE (the global constant governing
+    // gradeBlob's own two call sites) is untouched, per this dispatch's
+    // explicit "no global SHADOW -> ENFORCE flip" constraint.
+    const correctionOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef) };
+    activeScanRef.current = correctionOwnership;
+
     // Track B Phase 0, Commit 3, Safeguard 5 — buildManualCorrectionPayload
     // (src/lib/manualCorrection.js) constructs the exact request body,
     // including the real four-condition manual-entry contract (Safeguard 1)
     // and the client-supplied priorIdentity snapshot (Safeguard 3) — the
     // same function this feature's tests call directly, rather than a
     // hand-built payload the tests only mirror.
-    const payload = buildManualCorrectionPayload(item, correctedValues, correctedFields);
+    const payload = buildManualCorrectionPayload(item, correctedValues, correctedFields, correctionOwnership.scanId);
 
     const enrichRes = await fetch("/api/enrich", {
       method: "POST",
@@ -12319,7 +12333,22 @@ export default function App() {
     }
     const enrichData = await enrichRes.json();
 
-    const finalUpdated = buildCorrectedCatalogueItem(item, enrichData);
+    let applied = false;
+    let finalUpdated = null;
+    applyScanOwnershipGuard(
+      'correction',
+      enrichData,
+      correctionOwnership,
+      activeScanRef.current,
+      SCAN_OWNERSHIP_MODE.ENFORCE,
+      () => {
+        finalUpdated = buildCorrectedCatalogueItem(item, enrichData);
+        applied = true;
+      }
+    );
+    if (!applied) {
+      throw new Error('Correction superseded by a newer operation — not applied.');
+    }
 
     await putComic(finalUpdated);
     // replaceCatalogueItemById (src/lib/manualCorrection.js) — pure

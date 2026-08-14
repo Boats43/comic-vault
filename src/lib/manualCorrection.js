@@ -37,6 +37,7 @@
 //    helpers.
 
 import { normalizeIssueFormat } from './compHygiene.js';
+import { mergeIdentityAuthority } from './dataQualityGuard.js';
 
 // ─────────────────────────── validation ───────────────────────────
 
@@ -46,7 +47,13 @@ import { normalizeIssueFormat } from './compHygiene.js';
 // manualAuthority.correctedFields. Exported so a client can build its own
 // correction UI against the same authoritative list rather than
 // hand-duplicating it.
-export const MANUAL_CORRECTION_ALLOWED_FIELDS = ['title', 'issue', 'year', 'publisher'];
+// GrailKey Directive T, Task 4 — added 'variant'. The operator could
+// previously only set the four fields below via a correction; Directive
+// Q had already fixed variant *repopulation* from the server's own
+// response (buildCorrectedCatalogueItem), but nothing let the operator
+// *set* it. Required for the picker foundation (Directive S) to have
+// anywhere to put a selected candidate's variant facet at all.
+export const MANUAL_CORRECTION_ALLOWED_FIELDS = ['title', 'issue', 'year', 'publisher', 'variant'];
 
 const YEAR_MIN = 1930;
 const YEAR_MAX_SLACK = 1; // allow next calendar year (solicitation/cover-date lead)
@@ -103,11 +110,22 @@ const normalizeManualPublisher = (raw) => {
   return trimmed || null;
 };
 
+// GrailKey Directive T, Task 4 — same shape as title/publisher (free
+// text, trim, empty -> null). No format constraint beyond that: unlike
+// issue/year, a variant descriptor has no canonical numeric/date shape
+// to validate against.
+const normalizeManualVariant = (raw) => {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim();
+  return trimmed || null;
+};
+
 const NORMALIZERS = {
   title: normalizeManualTitle,
   issue: normalizeManualIssue,
   year: (raw) => normalizeManualYear(raw),
   publisher: normalizeManualPublisher,
+  variant: normalizeManualVariant,
 };
 
 // Field-keyed normalization, tolerant of a currentYear override — used by
@@ -119,6 +137,7 @@ const normalizeFieldValue = (field, rawValue, currentYear) => {
   if (field === 'year') return normalizeManualYear(rawValue, currentYear);
   if (field === 'title') return normalizeManualTitle(rawValue);
   if (field === 'publisher') return normalizeManualPublisher(rawValue);
+  if (field === 'variant') return normalizeManualVariant(rawValue);
   return rawValue ?? null;
 };
 
@@ -231,7 +250,7 @@ export const isValidManualAuthorityRequestContract = (body) =>
  *   error: string|null,
  *   contractOk: boolean,
  *   validation: Object|null,
- *   workingIdentity: {title, issue, year, publisher}|null,
+ *   workingIdentity: {title, issue, year, publisher, variant}|null,
  * }}
  */
 export const prepareManualCorrectionRequest = (body, currentYear) => {
@@ -245,7 +264,7 @@ export const prepareManualCorrectionRequest = (body, currentYear) => {
 
   const validation = validateManualAuthority(
     body.manualAuthority,
-    { title: body.title, issue: body.issue, year: body.year, publisher: body.publisher },
+    { title: body.title, issue: body.issue, year: body.year, publisher: body.publisher, variant: body.variant },
     currentYear
   );
   if (!validation.valid) {
@@ -263,6 +282,7 @@ export const prepareManualCorrectionRequest = (body, currentYear) => {
     issue: buildField('issue'),
     year: buildField('year'),
     publisher: buildField('publisher'),
+    variant: buildField('variant'),
   };
 
   return { valid: true, error: null, contractOk: true, validation, workingIdentity };
@@ -549,6 +569,20 @@ export const buildCorrectedCatalogueItem = (oldItem, enrichData) => {
   // one context, unlike the App.jsx sites where a real prior value exists.
   merged.variant = enrichData?.variantNote ?? null;
 
+  // GK-85 (GrailKey Directive T, Task 3) — identityAuthority is NOT in
+  // IDENTITY_DEPENDENT_FIELDS_TO_CLEAR (a correction to one facet must not
+  // wipe out a lock on a DIFFERENT facet from an earlier correction), so
+  // `cleared.identityAuthority` above is simply `oldItem.identityAuthority`,
+  // untouched. But the raw `{...cleared, ...enrichData}` spread two lines
+  // up would then WHOLESALE REPLACE it with `enrichData.identityAuthority`
+  // (only the field(s) THIS correction just set) the moment the server
+  // response carries the key at all — silently dropping every other
+  // previously-locked facet. mergeIdentityAuthority (src/lib/
+  // dataQualityGuard.js) is the presence-aware, per-field merge that
+  // avoids this: this correction's newly-locked field(s) are added,
+  // everything else oldItem already had stays.
+  merged.identityAuthority = mergeIdentityAuthority(enrichData, oldItem);
+
   for (const field of IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE) {
     merged[field] = oldItem[field];
   }
@@ -647,24 +681,35 @@ export const buildManualCorrectionProvenance = (validation, priorIdentity) => {
  * @param {Object} item - the existing catalogue item being corrected
  * @param {Object} correctedValues - { [field]: newValue } for only the fields the user actually changed
  * @param {string[]} correctedFields - which fields correctedValues covers
+ * @param {string} [scanId] - GrailKey Directive T, Task 5 — the ownership
+ *   identity minted when this correction began (src/lib/scanOwnership.js).
+ *   Echoed back verbatim on the response (api/enrich.js:2476, the same
+ *   generic mechanism gradeBlob already relies on), letting the caller
+ *   detect whether a newer operation has superseded this one by the time
+ *   the response returns. Optional so existing callers/tests that don't
+ *   care about ownership are unaffected.
  * @returns {Object} the request body for POST /api/enrich
  */
-export const buildManualCorrectionPayload = (item, correctedValues, correctedFields) => ({
+export const buildManualCorrectionPayload = (item, correctedValues, correctedFields, scanId) => ({
   manualIdentity: true,
   skipVision: true,
   skipImageSearch: true,
   identitySource: 'manual',
   confidence: 'HIGH',
+  ...(scanId ? { scanId } : {}),
   title: correctedValues.title ?? item.title,
   issue: correctedValues.issue ?? item.issue,
   year: correctedValues.year ?? item.year,
   publisher: correctedValues.publisher ?? item.publisher,
+  // GrailKey Directive T, Task 4 — same convention as the four fields above.
+  variant: correctedValues.variant ?? item.variant,
   manualAuthority: { correctedBy: 'user', correctedFields },
   priorIdentity: {
     title: item.title ?? null,
     issue: item.issue ?? null,
     year: item.year ?? null,
     publisher: item.publisher ?? null,
+    variant: item.variant ?? null,
     issueAuthority: item.issueAuthority ?? null,
   },
 });

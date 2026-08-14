@@ -5345,7 +5345,18 @@ export default async function handler(req, res) {
     // real variant untouched. If extractConfirmedVariant (below) finds a
     // pool-derived consensus, it overwrites this null with THAT — pool-
     // derived or honestly-null, never the overruled source.
-    let confirmedVariant = writeConfirmed('confirmedVariant', null, identityIsProvisionalOverride ? null : safeVariantForConfirmed, 'unknown', 'vision', 'ship-20a.6.18-init');
+    // GrailKey Directive T, Task 4 — a valid manual correction that
+    // included 'variant' in its accepted fields seeds confirmedVariant
+    // directly from the operator's own value, same treatment
+    // effectiveTitle/Issue/Year/Publisher already get at ~line 2404-2407.
+    // Bypasses safeVariantForConfirmed (Vision's printing-claim-filtered
+    // read) entirely — the operator's explicit correction is not subject
+    // to a check designed to catch Vision's own free-text overreach.
+    const manualVariantAccepted = manualCorrectionRequest?.valid
+      && manualCorrectionRequest.validation.acceptedFields.includes('variant');
+    let confirmedVariant = manualVariantAccepted
+      ? writeConfirmed('confirmedVariant', null, manualCorrectionRequest.workingIdentity.variant, 'unknown', 'user', 'grailkey-directive-t-task4-manual-variant')
+      : writeConfirmed('confirmedVariant', null, identityIsProvisionalOverride ? null : safeVariantForConfirmed, 'unknown', 'vision', 'ship-20a.6.18-init');
     let variantIdentitySource = 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
@@ -10881,6 +10892,22 @@ export default async function handler(req, res) {
       if (provenance.issueAuthority) {
         out.issueAuthority = provenance.issueAuthority;
       }
+      // GK-85 (GrailKey Directive T, Task 3) — out.manualCorrection above
+      // is a write-only historical record (grep-confirmed zero read sites
+      // anywhere in this file); nothing before this dispatch ever
+      // consulted it, so a correction survived reload but not the NEXT
+      // routine automatic enrich. out.identityAuthority is the actual
+      // authority carrier: mergeConfirmedIdentity (src/lib/
+      // dataQualityGuard.js) reads it client-side and refuses to let a
+      // later automatic response overwrite a facet locked here.
+      // acceptedFields is already the validated, allow-listed set
+      // (MANUAL_CORRECTION_ALLOWED_FIELDS) — only fields the operator
+      // actually corrected THIS request get locked; a field left
+      // unmentioned stays unlocked and remains fillable by future
+      // automatic resolution (Directive T's per-field design rationale).
+      out.identityAuthority = Object.fromEntries(
+        manualCorrectionRequest.validation.acceptedFields.map((f) => [f, 'OPERATOR_CONFIRMED'])
+      );
     }
 
     // Q135 dispatch — out.variantNote (the field the client actually
