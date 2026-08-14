@@ -652,7 +652,11 @@ export const COMP_FILTER_VERSION = 12;
 // each kept their own inline copy of this exact array before this fix,
 // the same "drifted duplicate constant" class this session already found
 // twice elsewhere (Q119 title whitelists, Q128 era-year tolerances).
-export const FAMILY_OVERRIDE_DECISIONS = ['top-rank-protection', 'weighted-consensus'];
+// GrailKey Directive AF (GK-98) — 'discriminative-corroboration' added.
+// A third genuine family-override outcome (imageSearchIdentity.js), same
+// standing as the two existing ones: a real title was selected from the
+// visual pool, not a Vision fallback/refusal.
+export const FAMILY_OVERRIDE_DECISIONS = ['top-rank-protection', 'weighted-consensus', 'discriminative-corroboration'];
 
 // Q85 — Compact title key: lowercase, strip everything non-alphanumeric.
 // Equality fallback for compound/spacing/hyphen variants that token-level

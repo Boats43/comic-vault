@@ -23,7 +23,7 @@
 // Function count stays at 12/12.
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
-import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate, resolveFamilyYearConsensus, isIssueZeroSupport } from './identityCore.js';
+import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate, resolveFamilyYearConsensus, resolveFamilyIssueConsensus, isIssueZeroSupport } from './identityCore.js';
 import { ARTIST_PATTERNS, ARTIST_FAMILY_STRIP_EXCEPTIONS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms, NON_GENUINE_COPY_RE, LOT_RE, REPRINT_RE, SLAB_RE, GRADED_RE, SIGNED_RE, TPB_MARKER_RE, extractArtist, hasContaminatedMember, isCompetingFamilyTooStrong, FAMILY_OVERRIDE_DECISIONS } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
@@ -2400,6 +2400,192 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     }
     return gate;
   };
+
+  // GrailKey Directive AF (GK-98) — discriminative-corroboration override.
+  // "Measuring coherence against the wrong population" (this campaign's
+  // named disease, docs/PATTERN-LIBRARY.md) at the identity layer: a
+  // generic franchise family's weightSum is a population count (itself
+  // rank-restated — GK-83, docs/TICKET-REGISTRY.md) and must not veto a
+  // specific edition candidate purely because it has more listings. Runs
+  // BEFORE the top-rank-guard/weighted-consensus branches below so it can
+  // preempt EITHER path — production evidence (Sabrina) showed the generic
+  // family can win via top-rank-protection (occupying rank 0) just as
+  // easily as via weighted-consensus (highest weightSum), so a fix scoped
+  // to only one of those two branches would leave the other open.
+  //
+  // C4 (directive): the specificity bonus is earned ONLY from tokens
+  // opts.visionVariant (the raw Vision-supplied variant read — the SAME
+  // req.body.variant proxy already used throughout api/enrich.js's PC/CV
+  // lookups, e.g. api/enrich.js:3927, before confirmedVariant resolves,
+  // GK-83's own temporal-blocker note) independently corroborates. An
+  // uncorroborated ride-along descriptor ("Foil") describes the candidate
+  // but earns it nothing — it is simply absent from opts.visionVariant, so
+  // it can never appear in `corroborated` below.
+  //
+  // C2 (directive, the Flash #139 invariant, unrelaxed): a candidate's own
+  // issue signal must not CONTRADICT Vision's — reuses
+  // resolveFamilyIssueConsensus (identityCore.js) exactly as the directive
+  // named it in Task 1a, deliberately NOT extractIssueFromTitle (which
+  // suppresses a bare "#1" as marketingContext — confirmed empirically:
+  // "Annual"/"Spectaculer" nearby "#1" triggers that suppression, which
+  // would silently defeat this exact fixture — resolveFamilyIssueConsensus
+  // already deliberately skips that suppression for a family-scoped vote,
+  // per its own doc comment). Does NOT require resolveFamilyIssueConsensus's
+  // own >=3-row adoption bar to treat a THIN family's agreement as usable
+  // corroboration — that bar answers "can this family's issue vote stand
+  // ALONE against a DIFFERENT prior," a different question from "does this
+  // candidate's own issue signal, however thin, fail to contradict Vision's
+  // independently-supplied issue." A single row agreeing with Vision is not
+  // "establishing issue against Vision" (C2's own wording) — disagreement
+  // is what C2 forbids adopting through.
+  // RAW tokenizer, deliberately NOT tokenizeTitleFamily: that function
+  // exists to strip exactly the vocabulary corroboration needs to see
+  // (extractSeriesTitle removes convention/finish CATEGORY_BLOCKS tokens
+  // like "NYCC"/"Foil" outright, and the artist-strip pass removes any
+  // creator name NOT in the small ARTIST_FAMILY_STRIP_EXCEPTIONS allowlist
+  // — confirmed empirically: "Dan Parent" survives only because it happens
+  // to be on that list, "InHyuk Lee" does not survive at all). Using
+  // tokenizeTitleFamily here would silently narrow this fix to allowlisted
+  // creators only. Same tokenization convention as tokenizeTitleFamily's
+  // own final step (lowercase, strip punctuation, length>=2), applied to
+  // the untouched raw text instead.
+  const rawCorroborationTokenize = (text) => String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+
+  let discriminativeCandidate = null;
+  let discriminativeConflict = false;
+  {
+    const visionVariantRaw = String(opts.visionVariant || '').trim();
+    const visionVariantTokens = visionVariantRaw ? rawCorroborationTokenize(visionVariantRaw) : [];
+    // Generic words that would trivially "corroborate" against almost any
+    // candidate and must never count as discriminative on their own.
+    const GENERIC_CORROBORATION_STOPWORDS = new Set(['variant', 'cover', 'edition', 'exclusive', 'comic', 'comics']);
+
+    if (visionVariantTokens.length > 0 && visionIssue) {
+      // Per-member corroboration — buildTitleFamilies clusters by overall
+      // title-token Jaccard similarity, which can merge two DIFFERENT named
+      // variants of the same base series into ONE family (confirmed
+      // empirically: an "NYCC" row and a disagreeing "SDCC" row of the same
+      // "Sabrina Annual Spectaculer 2024 #1" base title cluster together).
+      // Checking only the top-ranked member's rawTitle would be blind to
+      // that internal split. Every member's own raw title is checked
+      // independently; a family is eligible only when its members' non-empty
+      // corroboration sets all AGREE (no member corroborates a token set
+      // disjoint from another member's) — an internally split family is
+      // itself a conflict source, not a clean candidate.
+      const corroborateRaw = (raw) => rawCorroborationTokenize(raw).filter(
+        (t) => visionVariantTokens.includes(t) && !GENERIC_CORROBORATION_STOPWORDS.has(t)
+      );
+
+      const eligible = [];
+      const conflictSources = [];
+      for (const family of scored) {
+        const perMember = (family.indices || [])
+          .map((idx) => {
+            const item = items[idx];
+            const raw = typeof item === 'string' ? item : (item?.rawTitle || item?.title || '');
+            return corroborateRaw(raw);
+          })
+          .filter((c) => c.length > 0);
+
+        const familyInternallySplit = perMember.some((a, i) => perMember.some((b, j) => i !== j
+          && !a.some((t) => b.includes(t))));
+        if (familyInternallySplit) {
+          conflictSources.push({ family, corroborated: [...new Set(perMember.flat())] });
+          continue;
+        }
+
+        // Union across members (order-stable, deduped) — the family's
+        // overall corroborated-token claim once internal agreement is
+        // confirmed above.
+        const corroborated = [...new Set(perMember.flat())];
+        // C4 — multiple independently corroborated tokens, not one
+        // coincidental word (e.g. a lone shared "annual" is not enough).
+        if (corroborated.length < 2) continue;
+
+        const issueCheck = resolveFamilyIssueConsensus(String(visionIssue), items, family.indices);
+        const issueAgrees = issueCheck.mode === 'corroborated'
+          || (issueCheck.mode === 'no-consensus' && issueCheck.winner === String(visionIssue));
+        const issueContradicts = issueCheck.mode === 'conflict-locked'
+          || (issueCheck.winner != null && issueCheck.winner !== String(visionIssue));
+        if (issueContradicts) continue; // C2 — never adopt against a disagreeing issue signal
+        if (!issueAgrees) continue; // no usable issue corroboration at all
+
+        eligible.push({ family, corroborated, issueCheck });
+      }
+
+      if (conflictSources.length > 0) {
+        // An internally-split family already IS the conflict — no need to
+        // also compare across separate scored[] families.
+        discriminativeConflict = true;
+        console.log(
+          `[discriminative-corroboration] CONFLICT — internally split family: ` +
+          `${conflictSources.map((c) => `"${c.family.title}" members corroborate disjoint tokens [${c.corroborated.join(',')}]`).join('; ')}`
+        );
+      } else if (eligible.length === 1) {
+        discriminativeCandidate = eligible[0];
+      } else if (eligible.length > 1) {
+        // C5 — two independently-corroborated specific candidates (now in
+        // DIFFERENT scored[] families, each internally self-consistent)
+        // whose corroborated-token sets are DISJOINT describe genuinely
+        // different editions in conflict; candidates whose corroborated
+        // tokens overlap are fragments of the same edition, not a real
+        // disagreement, and the more-corroborated fragment is preferred.
+        const disjoint = eligible.some((a, i) => eligible.some((b, j) => i !== j
+          && !a.corroborated.some((t) => b.corroborated.includes(t))));
+        if (disjoint) {
+          discriminativeConflict = true;
+          console.log(
+            `[discriminative-corroboration] CONFLICT — ${eligible.length} independently-corroborated ` +
+            `candidates disagree: ${eligible.map((e) => `"${e.family.title}" [${e.corroborated.join(',')}]`).join(' vs ')}`
+          );
+        } else {
+          eligible.sort((a, b) => b.corroborated.length - a.corroborated.length);
+          discriminativeCandidate = eligible[0];
+        }
+      }
+
+      if (discriminativeCandidate) {
+        console.log(
+          `[discriminative-corroboration] candidate="${discriminativeCandidate.family.title}" ` +
+          `corroborated=[${discriminativeCandidate.corroborated.join(',')}] issueMode=${discriminativeCandidate.issueCheck.mode}`
+        );
+      }
+    }
+  }
+
+  if (discriminativeConflict) {
+    return {
+      decision: 'refused-identity-conflict',
+      selectedTitle: null,
+      rawTitle: null,
+      reason: 'Two independently Vision-corroborated discriminative candidates disagree with each other — conflicted, not adopted',
+      topFamily,
+      runnerUp,
+      families: scored,
+    };
+  }
+
+  if (discriminativeCandidate) {
+    const { family, corroborated, issueCheck } = discriminativeCandidate;
+    const titleSource = family.title;
+    const cleaned = sanitizeSeriesTitle(titleSource);
+    const sanitizedTitle = sanitizeSelectedTitle(dedupeIssueToken(cleaned, visionIssue));
+    logFamilyEvidence('discriminative-corroboration', family);
+    return {
+      decision: 'discriminative-corroboration',
+      selectedTitle: sanitizedTitle,
+      rawTitle: family.rawTitle,
+      reason: `Discriminative corroboration (${corroborated.length} Vision-corroborated tokens: ${corroborated.join(', ')}; issue #${visionIssue} ${issueCheck.mode})`,
+      topFamily: family,
+      runnerUp: topFamily !== family ? topFamily : runnerUp,
+      families: scored,
+      admittedVariantTokens: [],
+    };
+  }
 
   // Q43 A1: Top-rank-protection identity guard — three-layer filter prevents
   // lot/run/collection listings, subtitle junk, and low-overlap contamination

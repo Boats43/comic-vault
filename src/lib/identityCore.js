@@ -598,10 +598,12 @@ export const titleOverlapsProduct = (confirmedTitle, productName, threshold = 0.
  * layer itself already flags uncertain (isProvisionalOverride=true,
  * surfaced downstream as identityProvisional) precisely because it
  * represents an unresolved CONFLICT with Vision, not agreement. A
- * different epistemic status than the two FAMILY_OVERRIDE_DECISIONS
- * sources, which only ever fire when a real consensus bar (count/overlap
- * thresholds inside buildTitleFamilies/scoreTitleFamilies) was actually
- * cleared. Also excludes 'ebay_visual_override'/'vision_numeric_protection'
+ * different epistemic status than the FAMILY_OVERRIDE_DECISIONS sources
+ * (GrailKey Directive AF, GK-98, added a third: 'discriminative-corroboration'),
+ * which only ever fire when a real consensus bar (count/overlap thresholds
+ * inside buildTitleFamilies/scoreTitleFamilies, or — for the third source —
+ * corroborated-token + issue-agreement thresholds inside
+ * selectTitleFamilyCandidate) was actually cleared. Also excludes 'ebay_visual_override'/'vision_numeric_protection'
  * (a different mechanism — pool-wide title-vote overriding Vision, not
  * title-family clustering) and plain 'vision' (uncorroborated) — q141-a
  * may still correct any of these, unchanged from before this commit.

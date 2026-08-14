@@ -2866,6 +2866,12 @@ export default async function handler(req, res) {
       // both said "the flash", arc family "flash year one" overrode both).
       ? selectTitleFamilyCandidate(visualResult.items, title, issueNum, year, {
           ebayConsensusTitle: visualConsensus?.title || null,
+          // GrailKey Directive AF (GK-98) — the raw Vision-supplied variant
+          // read, the SAME req.body.variant proxy already used throughout
+          // this file's own PC/CV lookups before confirmedVariant resolves
+          // (GK-83's temporal-blocker note). Feeds the discriminative-
+          // corroboration override; absent/empty is a complete no-op there.
+          visionVariant: req.body.variant || null,
         })
       : null;
     mark('family_candidate_complete');
@@ -4500,7 +4506,12 @@ export default async function handler(req, res) {
     // has no consensus opinion" and "PC's match is still right for our
     // CURRENT identity" are not the same claim, and conflating them let a
     // wrong PC match survive whenever the pool consensus was rejected/thin.
-    const familyCandidateAccepted = familyCandidate && ['top-rank-protection', 'weighted-consensus'].includes(familyCandidate.decision);
+    // GrailKey Directive AF (GK-98) — uses the shared FAMILY_OVERRIDE_DECISIONS
+    // constant (compHygiene.js) rather than its own literal copy, so
+    // 'discriminative-corroboration' (and any future addition) is
+    // recognized here automatically, not silently missed by a second,
+    // independently-maintained list.
+    const familyCandidateAccepted = familyCandidate && FAMILY_OVERRIDE_DECISIONS.includes(familyCandidate.decision);
     const imageConsensusTitle = (visualConsensus || familyCandidateAccepted)
       ? (familyCandidate?.selectedTitle || visualConsensus?.title || getImageSearchConsensusTitle(visualResult))
       : null;

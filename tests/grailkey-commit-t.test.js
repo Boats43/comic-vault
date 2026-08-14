@@ -248,7 +248,14 @@ console.log('\nStatic wiring guard\n');
 
   // FAMILY_OVERRIDE_DECISIONS reuse confirmation (T1's own instruction:
   // "Do not invent a source enum — use what identityCore.js already sets").
-  assertEq(FAMILY_OVERRIDE_DECISIONS, ['top-rank-protection', 'weighted-consensus'], 'WIRING: isCorroboratedIdentitySource\'s corroborated set is derived from the real, existing FAMILY_OVERRIDE_DECISIONS, not a new list');
+  // GrailKey Directive AF (GK-98) added a third member,
+  // 'discriminative-corroboration' — updated forward, not amended, matching
+  // this project's own "correcting forward" convention (see e.g. dispatch-42-
+  // comicvine-kill.test.js's COMP_FILTER_VERSION assertion, Directive AE).
+  // isCorroboratedIdentitySource derives from this constant directly (no
+  // second, independently-maintained list), so the new source is correctly,
+  // automatically treated as equally corroborated.
+  assertEq(FAMILY_OVERRIDE_DECISIONS, ['top-rank-protection', 'weighted-consensus', 'discriminative-corroboration'], 'WIRING: isCorroboratedIdentitySource\'s corroborated set is derived from the real, existing FAMILY_OVERRIDE_DECISIONS, not a new list');
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
