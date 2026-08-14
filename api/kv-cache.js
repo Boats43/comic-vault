@@ -162,8 +162,14 @@ export const KV_TTL = {
  * shape itself changed (variant segment added, see cacheKeys.js) — old v1
  * entries never carried a variant differentiator and must not be read back
  * as if they did.
+ *
+ * Bumped 2->3 (2026-08-14, GrailKey Directive AE, GK-107): the key shape
+ * changed again (publisher segment added, see cacheKeys.js) — old v2
+ * entries never carried a publisher differentiator; a publisher-only
+ * manual correction (GK-99) could otherwise reuse a PC anchor fetched
+ * under the wrong publisher.
  */
-export const PC_FILTER_VERSION = 2;
+export const PC_FILTER_VERSION = 3;
 
 /**
  * GrailKey Dispatch 03 prerequisite (2026-08-06) — CV cache version salt.

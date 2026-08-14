@@ -3922,7 +3922,9 @@ export default async function handler(req, res) {
     // buildComicVineCacheKey (cacheKeys.js): confirmedVariant isn't
     // resolved yet at this point in the handler (see Q108 CHANGE 2 note
     // below), req.body.variant is the same established proxy.
-    const pcKey = `${subtitleStripped}|${confirmedIssue}|${pcQueryYear || ''}|${req.body.variant || ''}`;
+    // GrailKey Directive AE (GK-107) — publisher segment added (confirmedPublisher
+    // IS already resolved by this point, unlike confirmedVariant above).
+    const pcKey = `${subtitleStripped}|${confirmedIssue}|${confirmedPublisher || ''}|${pcQueryYear || ''}|${req.body.variant || ''}`;
     const now = Date.now();
 
     // Track B Phase 0, Commit 4.3.1 (Section B) — RETENTION-DECLINE
@@ -4029,7 +4031,8 @@ export default async function handler(req, res) {
         // untouched for up to 24h (Wonder Woman #75 class).
         // Track B Phase 0, Commit 4.3 — real call site for the extracted,
         // exported buildPriceChartingCacheKey (invariant 10).
-        const fullTitleKey = buildPriceChartingCacheKey(PC_FILTER_VERSION, confirmedTitle, confirmedIssue, pcQueryYear, req.body.variant);
+        // GrailKey Directive AE (GK-107) — publisher argument added.
+        const fullTitleKey = buildPriceChartingCacheKey(PC_FILTER_VERSION, confirmedTitle, confirmedIssue, pcQueryYear, req.body.variant, confirmedPublisher);
         const strippedTitleKey = `pc:v${PC_FILTER_VERSION}:${pcKey}`;
 
         // Track B Phase 0, Commit 4.3 (IMPLEMENTATION PACKET HOLD — FINAL
@@ -6012,6 +6015,10 @@ export default async function handler(req, res) {
               // rather than shared per this file's own scoping precedent
               // for this fingerprint (see cacheKeys.js header comment).
               cvVolumeStartYear: comicVine?.startYear || null,
+              // GrailKey Directive AE (GK-107) — publisher added to the
+              // material-dependency set (see buildFilterContextFingerprint's
+              // own doc comment for the full trace).
+              publisher: confirmedPublisher || null,
             });
             const activeKey = buildActiveCompCacheKey(COMP_FILTER_VERSION, confirmedTitle, confirmedIssue, filterContextFingerprint);
             // Commit B.1 (Strange Tales dispatch) — no `title|null` keys in

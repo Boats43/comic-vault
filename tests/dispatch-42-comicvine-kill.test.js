@@ -40,7 +40,10 @@ console.log('\n=== Dispatch 42 — ComicVine safe-kill regression suite ===\n');
 // ═══════════════════════════════════════════════════════════════════════
 console.log('Task 2: cvVolumeStartYear fingerprint gap\n');
 {
-  assertEq(COMP_FILTER_VERSION, 11, 'COMP_FILTER_VERSION bumped 10 -> 11');
+  // GrailKey Directive AE (GK-107) bumped this again, 11 -> 12 (publisher
+  // added to the fingerprint) — updated forward, not amended, matching
+  // this file's own "correcting forward" convention elsewhere.
+  assertEq(COMP_FILTER_VERSION, 12, 'COMP_FILTER_VERSION bumped 11 -> 12 (GrailKey Directive AE, GK-107)');
 
   const base = { grade: 'FN/VF 7.0', year: '1976', isGraded: false, assetType: 'comic' };
   const withCv = buildFilterContextFingerprint({ ...base, cvVolumeStartYear: 1976 });
@@ -54,8 +57,8 @@ console.log('Task 2: cvVolumeStartYear fingerprint gap\n');
   // constructs — proven two independent ways: version prefix AND fingerprint.
   const oldV10Key = `v10:Witching Hour|66|${withoutCv}`;
   const realKey = buildActiveCompCacheKey(COMP_FILTER_VERSION, 'Witching Hour', '66', withoutCv);
-  assertTrue(realKey.startsWith('v11:'), 'real active-comp cache key now uses the v11 prefix');
-  assertTrue(realKey !== oldV10Key, 'a v10-shaped key can never match the real v11 key');
+  assertTrue(realKey.startsWith('v12:'), 'real active-comp cache key now uses the v12 prefix (GK-107)');
+  assertTrue(realKey !== oldV10Key, 'a v10-shaped key can never match the real current-version key');
 
   // Regression guard: existing fingerprint behavior (7-field semantics)
   // must be unaffected when cvVolumeStartYear is omitted on both sides —

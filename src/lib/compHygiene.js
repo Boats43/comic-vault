@@ -635,7 +635,13 @@ export const ARTIST_FAMILY_STRIP_EXCEPTIONS = new Set(['brett booth']);
 // this bump forces a fresh MISS rather than risking a stale v10 pool
 // (cached while ComicVine's volume-label rescue was live) being read back
 // as still valid after ComicVine is disabled (Dispatch 42 Task 5).
-export const COMP_FILTER_VERSION = 11;
+//
+// GrailKey Directive AE (GK-107), bumped 11→12: buildFilterContextFingerprint
+// now includes publisher (src/lib/cacheKeys.js). Old v11 entries were
+// fingerprinted without it — this bump forces a fresh MISS rather than
+// risking a stale v11 pool (fetched/filtered under a since-corrected wrong
+// publisher) being read back as still valid for the corrected identity.
+export const COMP_FILTER_VERSION = 12;
 
 // Q132 dispatch (2026-07-20) — single source of truth for "the title-family
 // override actually succeeded" (as opposed to 'fallback-vision', returned

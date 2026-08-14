@@ -92,7 +92,21 @@ const deriveNormalizedCvVolumeStartYearForFingerprint = (cvVolumeStartYear) =>
  * filter-chain audit) and each of the three states gets its own
  * distinct token.
  *
- * @param {{grade?: string|null, numericGrade?: number|string|null, year?: string|number|null, variant?: string|null, isGraded?: boolean|null, labelType?: string|null, signedConsensus?: boolean|null, assetType?: string|null, cvVolumeStartYear?: string|number|null}} inputs
+ * GrailKey Directive AE (GK-107) — `publisher` ADDED. Confirmed real gap:
+ * this fingerprint (and therefore the ac: cache key, which never encoded
+ * publisher any other way) omitted the ONE identity axis that also
+ * appears as outgoing eBay search-query text (`pubKeyword`, api/comps.js
+ * Attempt 0's `title #issue variant year publisher` template) and as an
+ * era/publisher-consistency filter input — a publisher-only manual
+ * correction (GK-99) previously produced a byte-identical ac: key and
+ * could return the fully-filtered, PRICED pool fetched under the OLD,
+ * wrong publisher's query terms, sourced `active_ask_derived`/
+ * `verified_active` (EXACT_CURRENT-tier) — a live route to a false READY
+ * verdict through the correction path GK-99 just made reachable. Raw
+ * value, not normalized (matches how `variant`/`labelType` are already
+ * treated here — no new normalization logic).
+ *
+ * @param {{grade?: string|null, numericGrade?: number|string|null, year?: string|number|null, variant?: string|null, isGraded?: boolean|null, labelType?: string|null, signedConsensus?: boolean|null, assetType?: string|null, cvVolumeStartYear?: string|number|null, publisher?: string|null}} inputs
  * @returns {string} 64-character hex SHA-256 digest
  */
 export const buildFilterContextFingerprint = ({
@@ -105,6 +119,7 @@ export const buildFilterContextFingerprint = ({
   signedConsensus = null,
   assetType = null,
   cvVolumeStartYear = null,
+  publisher = null,
 } = {}) => {
   const numericTarget = deriveNumericGradeTargetForFingerprint(grade, numericGrade);
   const normalizedYear = deriveNormalizedYearForFingerprint(year);
@@ -118,6 +133,7 @@ export const buildFilterContextFingerprint = ({
     signedConsensus: signedConsensus === true ? 'true' : signedConsensus === false ? 'false' : 'null',
     assetType: assetType ?? null,
     cvVolumeStartYear: normalizedCvVolumeStartYear ?? null,
+    publisher: publisher ?? null,
   });
   return createHash('sha256').update(canonical).digest('hex');
 };
@@ -259,8 +275,22 @@ export const buildComicVineCacheKey = (cleanedTitle, confirmedIssue, confirmedPu
   return `cv:v${cvFilterVersion}:${cleanedTitle}|${confirmedIssue}|${confirmedPublisher}|${comicYear ?? 'null'}|${activePoolYearHint ?? 'null'}`;
 };
 
-export const buildPriceChartingCacheKey = (filterVersion, title, confirmedIssue, year, variant = null) =>
-  `pc:v${filterVersion}:${title}|${confirmedIssue}|${year || ''}|${variant || ''}`;
+// GrailKey Directive AE (GK-107) — `publisher` ADDED, positioned right
+// after issue (matching buildComicVineCacheKey's title|issue|publisher|...
+// convention above). Confirmed real gap: this key never encoded publisher
+// at all, so a publisher-only manual correction (GK-99) produced a
+// byte-identical key on BOTH the full-title and stripped-title (`pcKey`,
+// api/enrich.js) variants, reusing a PC anchor fetched under the wrong
+// publisher assumption. Traced not directly actionable toward READY on
+// its own (PC-sourced isFromPC variant/key multipliers only apply to
+// VARIANT_MULT_ELIGIBLE_SOURCES = {pricecharting, pc_estimate,
+// browse_api}, none of which are EXACT_CURRENT_SOURCES) but still a real
+// stale-authority-inheritance gap and a contributing input to
+// resolveYear() (api/enrich.js, runs unconditionally regardless of
+// identitySource) — fixed alongside the ac: key fix (both keys share the
+// same root cause), not left half-closed.
+export const buildPriceChartingCacheKey = (filterVersion, title, confirmedIssue, year, variant = null, publisher = null) =>
+  `pc:v${filterVersion}:${title}|${confirmedIssue}|${publisher || ''}|${year || ''}|${variant || ''}`;
 
 // Track B Phase 0, Commit 4.3 (Precision Clause 3) — the zero-#300
 // assertions must not depend on capitalization or one literal, incomplete

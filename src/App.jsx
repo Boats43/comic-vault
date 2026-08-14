@@ -7630,6 +7630,40 @@ function CollectionDetail({
                   </div>
                 );
               }
+              // GrailKey Directive AE (GK-108) — an identity correction is
+              // pending or was submitted and failed (submitManualCorrection's
+              // pending lock, App.jsx, never reverted on failure). Takes
+              // precedence over EVERYTHING below, including BOTH Q41
+              // acknowledge paths — found during this dispatch's own trace:
+              // Directive AD's correctionSubmitting gate only covered the
+              // researchAckNeeded/List-button path. The OTHER Q41 path (the
+              // `item.contract.locks.length > 0` branch just below, "Engine
+              // could not verify a price...") reads item.priceOverridden/
+              // item.q41Ack independently — priceOverridden flips true on
+              // every keystroke in the List price input (unconditionally,
+              // not gated by correctionSubmitting at all), and that button's
+              // own onUpdateField write is not gated either — together they
+              // reach a fresh q41Ack that unlocks the List button even after
+              // correctionSubmitting resets to false. correctionSubmitting
+              // alone cannot close this (it's only true during the fetch);
+              // listingHardLockReason persists exactly as long as the
+              // pending state itself does, closing both the in-flight
+              // window and the post-failure window in one check.
+              if (item.listingHardLockReason === 'correction-pending') {
+                return (
+                  <div style={{
+                    padding: "10px 12px",
+                    marginBottom: 8,
+                    background: "rgba(212,175,55,0.10)",
+                    border: "1px solid rgba(212,175,55,0.6)",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: "#fde68a",
+                  }}>
+                    ⏳ {item.listingHardLockBanner || 'Identity correction submitted — recalculating market evidence…'}
+                  </div>
+                );
+              }
               // ANY mega-key floor (verified or estimated) requires user
               // acknowledgment before listing — mega-keys are volatile and
               // $100K+ decisions warrant explicit one-tap confirmation.
