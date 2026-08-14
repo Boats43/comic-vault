@@ -20,7 +20,7 @@ import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeCo
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
-import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE } from "./lib/scanOwnership.js";
+import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE, wasSupersededByCorrection } from "./lib/scanOwnership.js";
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 
@@ -10653,7 +10653,11 @@ export default function App() {
       // any scan already in flight is superseded from this point on.
       const scanId = mintScanId();
       const generation = nextGeneration(scanGenerationRef);
-      const scanOwnership = { scanId, generation };
+      // GrailKey Directive U, Task 2 (GK-87) — kind:'scan' lets the write
+      // sites below distinguish "superseded by another scan" (stays under
+      // CURRENT_SCAN_OWNERSHIP_MODE, unchanged) from "superseded by a
+      // correction" (must reject regardless — wasSupersededByCorrection).
+      const scanOwnership = { scanId, generation, kind: 'scan' };
       activeScanRef.current = scanOwnership;
       setError(null);
       setResult(null);
@@ -10734,16 +10738,21 @@ export default function App() {
         // stale/superseded scan's grade response overwriting a later
         // scan's preview (src/lib/scanOwnership.js). SHADOW mode (the
         // production default) still performs this write unconditionally
-        // and only logs what ENFORCE mode would have blocked. The
-        // persisted catalogue write below is UNCONDITIONAL regardless of
-        // this guard either way — it is already independently safe
-        // (savedId-keyed, find-by-id) and must remain so.
+        // and only logs what ENFORCE mode would have blocked, EXCEPT when
+        // the superseding operation is specifically a correction
+        // (GrailKey Directive U, Task 2, GK-87) — that case always
+        // enforces, regardless of CURRENT_SCAN_OWNERSHIP_MODE, since an
+        // operator-confirmed correction must never be overwritten by a
+        // stale automatic response. The persisted catalogue write below
+        // has the same correction-supersession guard applied separately.
         applyScanOwnershipGuard(
           'grade',
           data,
           scanOwnership,
           activeScanRef.current,
-          CURRENT_SCAN_OWNERSHIP_MODE,
+          wasSupersededByCorrection(scanOwnership, activeScanRef.current)
+            ? SCAN_OWNERSHIP_MODE.ENFORCE
+            : CURRENT_SCAN_OWNERSHIP_MODE,
           () => setResult({ ...data, issue: issueNum, image: b64 })
         );
         setLoading(false);
@@ -10805,16 +10814,21 @@ export default function App() {
             // response overwriting a later scan's preview
             // (src/lib/scanOwnership.js). SHADOW mode (the production
             // default) still performs this write unconditionally and only
-            // logs what ENFORCE mode would have blocked. The persisted
-            // catalogue write below is UNCONDITIONAL regardless of this
-            // guard either way — it is already independently safe
-            // (savedId-keyed, find-by-id) and must remain so.
+            // logs what ENFORCE mode would have blocked, EXCEPT when the
+            // superseding operation is specifically a correction
+            // (GrailKey Directive U, Task 2, GK-87) — that case always
+            // enforces regardless of CURRENT_SCAN_OWNERSHIP_MODE. The
+            // persisted catalogue write below has the same
+            // correction-supersession guard applied separately, as one
+            // unit (setCatalogue + setSelectedItem never split).
             applyScanOwnershipGuard(
               'enrich',
               enrich,
               scanOwnership,
               activeScanRef.current,
-              CURRENT_SCAN_OWNERSHIP_MODE,
+              wasSupersededByCorrection(scanOwnership, activeScanRef.current)
+                ? SCAN_OWNERSHIP_MODE.ENFORCE
+                : CURRENT_SCAN_OWNERSHIP_MODE,
               () => {
                 // Explicitly preserve the cover image from the initial
                 // grade response in case enrich ever returns its own
@@ -10843,6 +10857,22 @@ export default function App() {
             // (otherwise the detail view would keep rendering the stale
             // pre-enrich entry until they close and reopen it).
             if (savedId) {
+              // GrailKey Directive U, Task 2 (GK-87) — both persisted
+              // writes below (setCatalogue + setSelectedItem) are gated as
+              // ONE unit: if a correction has superseded this scan,
+              // neither runs. A stale automatic response is discarded, not
+              // selectively merged. Scan-vs-scan staleness is unaffected —
+              // still unconditional under CURRENT_SCAN_OWNERSHIP_MODE=
+              // SHADOW, exactly as before this dispatch.
+              applyScanOwnershipGuard(
+                'enrich-persist',
+                enrich,
+                scanOwnership,
+                activeScanRef.current,
+                wasSupersededByCorrection(scanOwnership, activeScanRef.current)
+                  ? SCAN_OWNERSHIP_MODE.ENFORCE
+                  : CURRENT_SCAN_OWNERSHIP_MODE,
+                () => {
               // Use setCatalogue updater to get the CURRENT state (avoids
               // stale closure — catalogue from gradeBlob call time won't
               // contain the item that addToCatalogue just inserted).
@@ -11130,6 +11160,8 @@ export default function App() {
               });
               // SPEED-2a: Load deferred metadata asynchronously
               // Metadata now bundled in enrich response (no separate fetch)
+                }
+              );
             }
           })
           .catch(() => {
@@ -12311,7 +12343,18 @@ export default function App() {
     // CURRENT_SCAN_OWNERSHIP_MODE (the global constant governing
     // gradeBlob's own two call sites) is untouched, per this dispatch's
     // explicit "no global SHADOW -> ENFORCE flip" constraint.
-    const correctionOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef) };
+    //
+    // GrailKey Directive U, Task 2 (GK-87, closing the remaining gap) —
+    // T's supersession above was previously observable but not enforced:
+    // gradeBlob's own write sites logged the mismatch in SHADOW mode but
+    // still wrote through. `kind: 'correction'` here lets those write
+    // sites (src/lib/scanOwnership.js, wasSupersededByCorrection) detect
+    // that they were specifically superseded BY A CORRECTION and reject
+    // regardless of CURRENT_SCAN_OWNERSHIP_MODE — closing the "operator-
+    // confirmed identity beside a stale generic price panel" shape
+    // (the Bone-class defect a picker built on the T-only state would
+    // have silently produced).
+    const correctionOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'correction' };
     activeScanRef.current = correctionOwnership;
 
     // Track B Phase 0, Commit 3, Safeguard 5 — buildManualCorrectionPayload

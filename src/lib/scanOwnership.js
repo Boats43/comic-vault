@@ -129,6 +129,22 @@ export const logStaleScanResponse = (stage, response, closure, active, reason, m
   );
 };
 
+// GrailKey Directive U, Task 2 (GK-87, closing the picker-required race
+// scope) — a correction changing activeScanRef must reject a stale
+// gradeBlob write REGARDLESS of CURRENT_SCAN_OWNERSHIP_MODE. That constant
+// stays SHADOW for every other staleness cause (scan-vs-scan included) —
+// flipping it wholesale is explicitly out of scope, pending the shadow-
+// window read the rollout plan requires first. shouldAcceptScanResponse
+// already returns accepted:false (reason 'scanid-mismatch') the moment a
+// correction has superseded a scan's closure; what's missing is a way for
+// a call site to choose ENFORCE specifically for THAT cause while every
+// other cause still defers to the shared constant. `kind` is a plain tag
+// ('scan' | 'correction') on the ownership object set by the two callers
+// that mint one (gradeBlob, submitManualCorrection) — the same
+// {scanId, generation} shape plus one field, not a parallel mechanism.
+export const wasSupersededByCorrection = (closure, active) =>
+  !!active && active.kind === 'correction' && active.scanId !== closure?.scanId;
+
 // The single orchestration point BOTH gradeBlob's write sites (App.jsx)
 // and this feature's tests call — the exact same function, not a
 // test-local reimplementation, so a test that exercises this function

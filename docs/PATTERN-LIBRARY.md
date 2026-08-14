@@ -7717,3 +7717,254 @@ remains open, precisely scoped in the registry for a future dispatch.
 Directive S's STOP GATE is cleared for the scope this dispatch closed;
 S resumes at its own Task 2 (build the picker) next — its Task 1 trace
 is not to be re-run, per this directive's own explicit instruction.
+
+## GrailKey Directive 2026-08-14-U — corrective: stale automatic write
+
+Two items. Reopen GK-84's false-closed claim. Close GK-87's remaining,
+picker-required race scope.
+
+### Task 1 — GK-84 was never actually closed
+
+Directive T's own handoff prose (`docs/PATTERN-LIBRARY.md`'s Handoff
+paragraph above, and this repo's own prior chat report) both said "GK-84
+corrected and closed as a record-only ticket." That claim was checked
+against the actual registry line, not assumed: `docs/TICKET-REGISTRY.md`
+line 73 has read `STATUS: OPEN` continuously since it was first committed
+(`d58a697`, Directive T's own Task 1) — the ticket was never set to
+CLOSED anywhere in the registry itself. The false claim existed only in
+prose (`docs/PATTERN-LIBRARY.md`'s Directive T Handoff paragraph), which
+this dispatch's own preflight treated as registry state without checking
+the actual line — the exact failure the "Directive preflight requirement"
+protocol exists to prevent, caught this time because Directive U's own
+preflight explicitly required checking real state rather than trusting
+the directive text's premise.
+
+Fixed both: the registry line now carries an explicit `STATUS CONFIRMED
+OPEN` note naming the error and where it lived; the Pattern Library
+Handoff paragraph above is corrected in place (not silently rewritten),
+per this campaign's established correction convention (Directive Q/R
+style — see those entries for the same pattern). Registry-only, committed
+(`30d2e8b`) and pushed before any code changed, per the directive's own
+ordering requirement.
+
+### Task 2 — closing GK-87's picker-required race scope
+
+**Why S is still blocked without this.** Directive T's Task 5 gated the
+CORRECTION's own response (`submitManualCorrection`'s `applyScanOwnershipGuard`
+call, ENFORCE-mode). It did not stop an OLDER `gradeBlob` (automatic
+scan) response from arriving AFTER a correction begins and writing stale
+state anyway — `gradeBlob`'s three write sites all used
+`CURRENT_SCAN_OWNERSHIP_MODE` (SHADOW), which logs what would be rejected
+but always still performs the write. The resulting shape — an
+operator-confirmed identity next to a stale, contradicting evidence panel
+— is structurally identical to the Bone-class defect this campaign has
+spent many dispatches chasing, except here a picker feature would CREATE
+it rather than merely fail to prevent it. GK-87's remaining scope was
+therefore a genuine S prerequisite, not unrelated debt.
+
+**Reachability, checked directly against real code before writing any
+fix** (per the directive's explicit instruction not to repeat Directive
+R's mistake of naming a suspected mechanism as evidence without
+confirming it):
+
+- **Auto-refresh** — NOT reachable. `src/App.jsx`'s auto-refresh effect
+  contains `if (selectedItem) return;` as its second gate, unconditional.
+  A correction can only ever operate on an item whose `CollectionDetail`
+  is open (`submitManualCorrection`'s `item` argument comes from that
+  view), which means `selectedItem` is non-null for the correction's
+  entire duration — structurally excluding auto-refresh from firing at
+  any point while a correction could be in flight, not merely unlikely to
+  race with it.
+- **Back-to-back corrections** — already protected, no gap. Each
+  `submitManualCorrection` call re-mints `activeScanRef.current` at its
+  own start (Directive T, Task 5); its own ENFORCE-gated guard (already
+  shipped) already rejects a stale FIRST correction's response once a
+  SECOND correction has begun. Confirmed by reading the function directly;
+  covered by the existing `grailkey-directive-t-task5-revision-token.test.js`,
+  not re-tested here.
+- **`refreshMarketData`** — reachable, but as an INDEPENDENT race with
+  both `gradeBlob` and corrections, through a wholly separate guard
+  (`activeCardEnrichIdRef`/`cardEnrichAbortRef`, a single-slot
+  last-call-wins mechanism, `src/App.jsx`) that has zero relationship to
+  `activeScanRef`/`scanOwnership.js`. Neither `gradeBlob` nor
+  `submitManualCorrection` register with or check
+  `activeCardEnrichIdRef`, and `refreshMarketData` never touches
+  `activeScanRef`. This is out of GK-87's specific scope (which is about
+  `gradeBlob`'s `scanOwnership`-based persisted write) — wiring it in
+  would be a new, unscoped mechanism change, exactly what this dispatch's
+  non-goals forbid ("no new merge helper, no new ownership mechanism").
+  Logged as **GK-88**, not fixed.
+- **The scan-to-catalogue `.then()` chain** (`gradeBlob`'s own
+  fire-and-forget `/api/enrich` continuation) — REACHABLE, and IS GK-87's
+  documented remaining gap. `setLoading(false)` fires immediately after
+  `/api/grade` resolves, well before `/api/enrich` resolves (PriceCharting
+  scrape + eBay + ComicVine chains, no fixed short bound); `savedId` is
+  already awaited and set before the enrich fetch fires, so the item
+  exists and is open-able the moment the operator sees the result card.
+  This is the scenario the fix targets.
+
+**The fix.** `kind: 'scan' | 'correction'` tags the ownership object
+minted by `gradeBlob` and `submitManualCorrection` respectively — the
+same `{scanId, generation}` shape, one added field, not a parallel
+mechanism. A new pure predicate, `wasSupersededByCorrection(closure,
+active)` (`src/lib/scanOwnership.js`), returns true only when the
+CURRENTLY active ownership is a correction that differs from the closure
+that captured it. `gradeBlob`'s three write sites — grade-stage transient
+`setResult`, enrich-stage transient `setResult`, and enrich-stage
+persisted `setCatalogue`+`setSelectedItem` (gated as ONE unit inside a
+single `applyScanOwnershipGuard` call, stage `'enrich-persist'`, never
+split so neither can be selectively applied while the other is rejected)
+— each compute their `applyScanOwnershipGuard` mode dynamically:
+
+```
+wasSupersededByCorrection(scanOwnership, activeScanRef.current)
+  ? SCAN_OWNERSHIP_MODE.ENFORCE
+  : CURRENT_SCAN_OWNERSHIP_MODE
+```
+
+Correction-caused staleness always rejects, regardless of the shared
+constant. Every OTHER staleness cause — scan-vs-scan included — is
+completely unaffected: it still evaluates `CURRENT_SCAN_OWNERSHIP_MODE`
+(SHADOW) exactly as before this dispatch, because the directive's own
+"no global SHADOW→ENFORCE flip" constraint is specifically about not
+changing behavior for causes other than correction-supersession (that
+flip needs a clean shadow-window read nobody has performed, and remains
+out of scope). This was a deliberate design choice over the simpler
+alternative of just enforcing on ANY staleness at these three sites:
+that simpler version would have had the identical practical effect as
+flipping the global constant (just locally instead of via the shared
+export) for the scan-vs-scan case specifically, which the directive
+explicitly prohibited pending validation.
+
+**Rejection is logged.** `applyScanOwnershipGuard`'s existing
+`logStaleScanResponse` call fires unconditionally on any non-accepted
+verdict, with `mode` recorded — a correction-caused ENFORCE rejection logs
+`mode=enforce ... rejected`, distinguishable in production logs from a
+SHADOW-mode `mode=shadow ... observed` line for every other cause. No new
+logging mechanism needed.
+
+### Tests
+
+`tests/grailkey-directive-u-task2-stale-automatic-write.test.js`, 33
+assertions, 0 failed:
+- **Part 0 (DIRECT)** — the pre-fix vulnerability reproduced against the
+  REAL, unchanged `CURRENT_SCAN_OWNERSHIP_MODE` constant and the real
+  `applyScanOwnershipGuard` function (neither touched by this dispatch),
+  proving that a static, non-dynamic mode argument — exactly what all
+  three sites used before this dispatch — writes a correction-superseded
+  stale response through anyway. Cross-checked against real git history:
+  `git show 1627d06:src/App.jsx` confirms the pre-fix source had exactly
+  2 `applyScanOwnershipGuard` calls in `gradeBlob` (both transient) and
+  NO guard at all around the persisted `setCatalogue`/`setSelectedItem`
+  write.
+- **Part 1 (DIRECT)** — `wasSupersededByCorrection`'s predicate logic
+  against 5 cases (different correction, different scan, same closure,
+  null active, structurally-equal-but-different-reference active).
+- **Part 2 (DIRECT)** — the exact dynamic-mode expression gradeBlob's
+  write sites use, exercised against the real functions: Scenario A
+  (correction supersedes — zero transient write, zero persisted write,
+  corrected state stays authoritative, matching the directive's own
+  GIVEN/WHEN/THEN); Scenario B, a required control — superseded by
+  ANOTHER SCAN, not a correction, still writes through under SHADOW,
+  proving no global flip occurred; Scenario C, the directive's own
+  required control — a non-superseded response still writes normally.
+- **Part 3 (DIRECT)** — console.log capture proving the rejection is
+  observably logged, with the correct mode and reason recorded.
+- **Part 4 (MIRRORED)** — structural proof against the real committed
+  `src/App.jsx` source that all three call sites actually use the pattern
+  (gradeBlob isn't independently invocable outside the full React tree,
+  same constraint every App.jsx-touching test in this repo works under,
+  same labeling discipline Directive T's Task 5 test established), plus
+  confirmation that `setCatalogue`/`setSelectedItem` share exactly one
+  `applyScanOwnershipGuard` call (never two independent guards).
+
+### Regression
+
+Every suite referencing `scanOwnership` or `App.jsx` (35 files) run
+individually and directly, not sampled: `grailkey-directive-t-task5-revision-token`
+(15/0), `grailkey-directive-t-task3-identity-authority` (18/0),
+`grailkey-directive-t-task4-variant-correction` (16/0),
+`grailkey-directive-t-task2-imageurl` (12/0),
+`q-trackB-commit3-manual-correction` (466/0),
+`grailkey-directive-r-early-return-variant` (19/0),
+`slice7-scan-ownership` (15/0), `q-trackB-commit4-adoption-provisional`
+(152/0), `grailkey-directive-h-item1-stale-pc-anchor` (6/0),
+`pipeline-audit-merge` (17/0), `merge-site-parity` (26/0),
+`q110-intake-nonblocking` (38/0), `q144c-confirmed-identity-merge`
+(44/0), `q145-contract-decision-sync` (41/0), `response-contract` (73/0),
+`q135-p1-p2-p3-fixes` (34/0), `q-flashgordon13-badge-accuracy` (12/0),
+`q140-issue-consensus-corrective` (124/0, byte-identical as required),
+`grailkey-dispatch-g-task2-pc-anchor-authority`,
+`grailkey-dispatch-50-gk67-display-truth`,
+`grailkey-dispatch-e-task3-source-labels`,
+`grailkey-dispatch-e-task2-asset-confirmation-badge`,
+`grailkey-dispatch-50-gk66-ladder-authority-removed`,
+`grailkey-dispatch-47-gk39a-remove-fabricated-confidence`,
+`dispatch-42-comicvine-kill` (27/0 — TIMEOUT under a short per-file
+cutoff, clean under a longer one, the same known sweep-harness artifact
+CLAUDE.md already documents for this exact file),
+`grailkey-dispatch-30-gk41-non-comic-gate`, `grailkey-commit-t`,
+`grailkey-commit-r`, `grailkey-commit-q`, `grailkey-commit-p`,
+`grailkey-commit-p2`, `grailkey-commit-c-collection-header` — all clean.
+
+Three suites failed, and EACH was individually verified via `git stash`/
+`git diff` comparison to be pre-existing and unrelated to this dispatch's
+changes (identical failure reproduces with `src/App.jsx`/
+`src/lib/scanOwnership.js` stashed back to the exact pre-Directive-U
+state) — not silently absorbed into "0 new regressions," each logged as
+its own ticket per the directive's "if you find another defect, log it
+OPEN with a written trigger and move on" instruction:
+
+- **GK-89** — `grailkey-directive-q-variant-null-custody` Part 1b crashes
+  (not fails) via an unhandled `git stash pop` error whenever
+  `src/lib/manualCorrection.js` has zero uncommitted diff at run time
+  (its own internal `git stash push`/`pop` dance assumes the file is
+  always dirty when the test runs — true only immediately after a
+  dispatch that just edited it). `git diff 1627d06 --
+  src/lib/manualCorrection.js` is byte-empty, proving this reproduces
+  identically at pure pre-Directive-U HEAD.
+- **GK-90** — `grailkey-directive-p-task3-variant-on-card` Part 3's
+  "`mergeConfirmedIdentity` variant merge unchanged" scope-check now
+  fails, because Directive T's Task 3 (GK-85) genuinely DID change that
+  function (added the `identityAuthority`-aware `pick()` helper) — a real,
+  intended change this test's stale scope-check was never updated to
+  account for. Confirmed pre-existing via the same stash comparison.
+
+Separately, not new tickets: `grailkey-commit-e`/`-f`/`-g` all failed
+their own "only `src/App.jsx` changed" scope-check during this sweep,
+exactly as CLAUDE.md's already-documented "reads live `git diff
+--name-only HEAD`" defect class predicts whenever other uncommitted
+changes are present (this dispatch's own working tree, at sweep time) —
+observed reproducing exactly as documented, not a new finding.
+- **GK-91** — `grailkey-directive-j-gk79a-relabel` Part 1 fails
+  permanently by construction: it calls `git show HEAD:src/App.jsx`
+  (the literal string `'HEAD'`, not a pinned pre-fix SHA) to prove the
+  OLD "Condition confidence" text once existed — this could only ever
+  pass while `HEAD` still pointed at a pre-fix commit, and this repo has
+  advanced many commits past the actual fix (`1d827e7`) since. Confirmed
+  pre-existing via the same stash comparison.
+
+None of the three trace to this dispatch's `src/App.jsx`/
+`src/lib/scanOwnership.js` changes — all three are either state-dependent
+harness fragility (GK-89) or genuinely stale assertions from EARLIER
+dispatches that this sweep happened to be the first to re-run since the
+change that broke them landed (GK-90, GK-91). Test baseline re-stamped
+accordingly: 174/16/3/193 → 172/19/3/194 (+1 new file counted PASS, -3
+previously-uncounted fails moved from the implicit PASS bucket into FAIL,
+net PASS -3+1, FAIL +3, total +1).
+
+### Handoff
+
+GK-84: reopened (was never actually closed — corrected). GK-87: CLOSED
+for the picker-required race scope; `identityAuthority` (GK-85) plus this
+dispatch's `wasSupersededByCorrection` guard together mean neither a
+locked identity facet NOR an unlocked evidence field can be silently
+overwritten by a stale automatic response once a correction has begun.
+GK-88/89/90/91 logged, not fixed, explicitly out of this dispatch's
+two-task scope. **GK-92 also logged**: `CLAUDE.md` measured at 148,847
+chars after this dispatch's own required edits — within ~1,150 chars of
+the standing 150,000-char P0 load limit, flagged urgently rather than
+left for the next dispatch to discover after crossing it. Directive S's
+STOP GATE is now fully closed (all of GK-85/86/87 addressed) — S resumes
+at its own Task 2 (build the picker) next, per this directive's own
+closing instruction. Do not propose the next directive.
