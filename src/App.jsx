@@ -17,7 +17,7 @@ import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLab
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit } from "./lib/dataQualityGuard.js";
-import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById } from "./lib/manualCorrection.js";
+import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE, wasSupersededByCorrection, logStaleScanResponse } from "./lib/scanOwnership.js";
@@ -3697,6 +3697,15 @@ function CollectionDetail({
   const [correctionValues, setCorrectionValues] = useState({});
   const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
   const [correctionError, setCorrectionError] = useState(null);
+  // GrailKey Directive AD (GK-99) — a confidently-resolved-but-WRONG
+  // identity has identityMissingFields=[] and identityProvisionalFields=[]
+  // (nothing flagged), so getCorrectableFields(item) returns [] and the
+  // form above stays permanently unreachable — the exact GK-99 gap. This
+  // toggle exposes the SAME form, reusing MANUAL_CORRECTION_ALLOWED_FIELDS
+  // as the full five-facet field list, only when the operator explicitly
+  // asks for it — never auto-exposed (unlike the ID_REQUIRED/provisional
+  // case, which keeps its existing auto-expose behavior unchanged).
+  const [showManualCorrectionForAll, setShowManualCorrectionForAll] = useState(false);
   // Ship #20a.6.1 — collapsible drawer for soldCompDiagnostics rejected samples.
   const [soldDrawerOpen, setSoldDrawerOpen] = useState(false);
   // Q-audit COMMIT 1 — full-list toggles for sold/active rows (previously
@@ -6133,16 +6142,50 @@ function CollectionDetail({
             // are ever offered — getCorrectableFields (src/lib/manualCorrection.js)
             // is the single source of truth this render site and this
             // feature's own tests both call directly (invariant 10).
-            const correctableFields = getCorrectableFields(item);
+            const autoCorrectableFields = getCorrectableFields(item);
 
-            if (correctableFields.length === 0 || !onManualCorrect) return null;
+            if (!onManualCorrect) return null;
 
-            const fieldLabel = { title: 'Title', issue: 'Issue #', year: 'Year', publisher: 'Publisher' };
+            // GrailKey Directive AD (GK-99) — reachability. When nothing is
+            // flagged missing/provisional (the confidently-wrong shape this
+            // ticket exists to fix), the auto-exposed form above has no
+            // fields to offer at all. Fall back to an explicit operator
+            // toggle offering all five MANUAL_CORRECTION_ALLOWED_FIELDS —
+            // never auto-exposed for this case, unlike ID_REQUIRED/
+            // provisional, which keep their existing unconditional expose.
+            const correctableFields = autoCorrectableFields.length > 0
+              ? autoCorrectableFields
+              : (showManualCorrectionForAll ? MANUAL_CORRECTION_ALLOWED_FIELDS : []);
+
+            if (correctableFields.length === 0) {
+              return (
+                <button
+                  onClick={() => setShowManualCorrectionForAll(true)}
+                  style={{
+                    marginTop: 10, fontSize: 12, padding: "6px 12px", background: "transparent",
+                    color: "#d4af37", border: "1px solid #d4af37", borderRadius: 4, fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  ✏️ Correct identity
+                </button>
+              );
+            }
+
+            const fieldLabel = { title: 'Title', issue: 'Issue #', year: 'Year', publisher: 'Publisher', variant: 'Variant' };
 
             return (
               <div style={{ marginTop: 10, padding: 10, background: "rgba(255,255,255,0.03)", border: "1px solid #333", borderRadius: 6 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#ddd", marginBottom: 6 }}>
-                  Correct identity
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#ddd", marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>Correct identity</span>
+                  {autoCorrectableFields.length === 0 && (
+                    <button
+                      onClick={() => { setShowManualCorrectionForAll(false); setCorrectionValues({}); setCorrectionError(null); }}
+                      style={{ fontSize: 11, color: "#888", background: "transparent", border: "none", cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
                 {correctableFields.map((field) => (
                   <input
@@ -6186,6 +6229,7 @@ function CollectionDetail({
                       for (const f of correctedFields) correctedValues[f] = correctionValues[f];
                       await onManualCorrect(item, correctedValues, correctedFields);
                       setCorrectionValues({});
+                      setShowManualCorrectionForAll(false);
                     } catch (err) {
                       setCorrectionError(err.message || 'Correction failed');
                     } finally {
@@ -7882,7 +7926,7 @@ function CollectionDetail({
                     </div>
                     <button
                       className="reset-btn"
-                      disabled={!(q41EffectivePrice > 0)}
+                      disabled={!(q41EffectivePrice > 0) || correctionSubmitting}
                       onClick={() => {
                         const payload = {
                           title: item.title,
@@ -7905,13 +7949,22 @@ function CollectionDetail({
                 );
               }
 
-              const listLocked = item.contract
+              // GrailKey Directive AD (GK-99), C4 — belt-and-suspenders for
+              // the sub-render-cycle window: submitManualCorrection's own
+              // pendingItem write (forces contract.listable=false) already
+              // covers this once React applies it, but correctionSubmitting
+              // is true from the moment the button is clicked, one tick
+              // earlier. Item-scoped already (this component remounts per
+              // selected item, key={selectedItem?.id}).
+              const listLocked = correctionSubmitting || (item.contract
                 ? (!item.contract.listable && !q41Unlocked)
                 : (item.matchConfidence?.tier === 'LOW' &&
-                   (item.soldComps?.length || 0) + (item.comps?.count || 0) < 3);
-              const listLockedLabel = item.contract
-                ? `🔒 List locked — ${item.contract.decision?.action || 'review'} recommended first`
-                : `🔒 List locked — verify data quality first`;
+                   (item.soldComps?.length || 0) + (item.comps?.count || 0) < 3));
+              const listLockedLabel = correctionSubmitting
+                ? '⏳ Recalculating after identity correction…'
+                : item.contract
+                  ? `🔒 List locked — ${item.contract.decision?.action || 'review'} recommended first`
+                  : `🔒 List locked — verify data quality first`;
 
               return (
                 <button
@@ -12625,6 +12678,39 @@ export default function App() {
     // gradeBlob's transient pre-save window).
     const correctionOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'correction', itemId: item.id };
     activeScanRef.current = correctionOwnership;
+
+    // GrailKey Directive AD (GK-99), C4 — atomic presentation / no mixed
+    // identity+evidence state. Between Submit and the corrected /api/enrich
+    // response, the OLD price/comps/decision/actionAuthority must not
+    // remain an actionable transaction verdict for this item — otherwise an
+    // operator who just declared the identity wrong could still tap List
+    // and transact against evidence for the wrong book. Reuses the
+    // EXISTING listingHardLocked mechanism (Q110 dispatch) rather than a
+    // new one, and forces contract.listable=false directly (the field the
+    // List/Q41 buttons actually read) since a stale q41Ack on the OLD price
+    // would otherwise still satisfy q41Unlocked and bypass a bare
+    // listingHardLocked flag. Deliberately written via putComic/setState
+    // BEFORE the fetch — and deliberately NOT reverted if the fetch fails
+    // below (see the catch-less design: this function only ever advances
+    // to buildCorrectedCatalogueItem's fresh contract, or leaves the item
+    // locked). A previously-READY item does not become freely listable
+    // again just because the correction that declared it wrong failed.
+    const pendingItem = {
+      ...item,
+      listingHardLocked: true,
+      listingHardLockReason: 'correction-pending',
+      listingHardLockBanner: 'Identity correction submitted — recalculating market evidence…',
+      contract: item.contract ? { ...item.contract, listable: false } : item.contract,
+      // A pre-existing Q41 acknowledgment was bound to the OLD price/locks
+      // and must not silently keep unlocking the button under this pending
+      // state (q41Unlocked checks q41Ack.price against the still-unchanged
+      // display price, which the correction hasn't touched yet).
+      q41Ack: null,
+      priceOverridden: false,
+    };
+    await putComic(pendingItem);
+    setCatalogue((prev) => replaceCatalogueItemById(prev, normalizeItem(pendingItem)));
+    setSelectedItem(pendingItem);
 
     // Track B Phase 0, Commit 3, Safeguard 5 — buildManualCorrectionPayload
     // (src/lib/manualCorrection.js) constructs the exact request body,
