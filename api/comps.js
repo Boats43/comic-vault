@@ -578,8 +578,17 @@ export const computeMatchConfidence = (comps, opts = {}) => {
  */
 export const applyVariantPreferenceFilter = (pool, variant) => {
   const before = pool.length;
+  // GrailKey Directive AB (GK-101) — `matched` is the evidence-applicability
+  // signal: null when there's no confirmedVariant to check the pool
+  // against at all (not applicable — a normal no-variant book); false when
+  // a variant WAS confirmed and this function checked the pool against it
+  // but could not confirm any comp actually matches (the "keeping all"
+  // fallback, whatever produced it); true only when the returned pool was
+  // genuinely narrowed to variant-matching comps. Consumed downstream by
+  // deriveMarketStanding (src/lib/actionAuthority.js) to floor EXACT_CURRENT
+  // when a pool never confirmed applicability to the book's own edition.
   if (!variant || pool.length === 0) {
-    return { pool, isolated: false, matchMode: 'none' };
+    return { pool, isolated: false, matchMode: 'none', matched: variant ? false : null };
   }
 
   const orMatch = (words) => pool.filter(it => {
@@ -604,7 +613,11 @@ export const applyVariantPreferenceFilter = (pool, variant) => {
   const varWords = String(variant).toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['variant', 'cover', 'print', 'edition'].includes(w));
 
   if (specificWords.length === 0 && varWords.length === 0) {
-    return { pool, isolated: false, matchMode: 'none' };
+    // A variant WAS confirmed but nothing checkable could be extracted from
+    // it — no honest "matched" signal exists, so this counts as unverified
+    // (false), not not-applicable (null): a confirmedVariant is present and
+    // the pool was never confirmed to match it.
+    return { pool, isolated: false, matchMode: 'none', matched: false };
   }
 
   let variantMatches;
@@ -658,10 +671,10 @@ export const applyVariantPreferenceFilter = (pool, variant) => {
   const minMatches = isolatedOnSpecific ? 1 : 2;
   if (variantMatches.length >= minMatches) {
     console.log(`[comps] variant preference filter: before=${before} after=${variantMatches.length} kept=${variantMatches.length} (match "${variant}", mode=${matchMode}${isolatedOnSpecific ? ', premium-variant isolation' : ''})`);
-    return { pool: variantMatches, isolated: isolatedOnSpecific, matchMode };
+    return { pool: variantMatches, isolated: isolatedOnSpecific, matchMode, matched: true };
   }
   console.log(`[comps] variant preference filter: before=${before} after=${pool.length} (only ${variantMatches.length} match, mode=${matchMode} — keeping all)`);
-  return { pool, isolated: false, matchMode };
+  return { pool, isolated: false, matchMode, matched: false };
 };
 
 // FIX B: Expanded modern relaunch marker detection. Reject listings with
@@ -889,7 +902,10 @@ export const applyArtistPreferenceNarrowing = (result, variant, artistOverride =
   const ARTIST_NARROWING_FLOOR = 1; // reuses Filter 1c's own premium-isolation floor, see docstring above
   if (artistMatched.length >= ARTIST_NARROWING_FLOOR) {
     console.log(`[comps] artist-preference narrowing: before=${before} after=${artistMatched.length} kept=${artistMatched.length} (artist "${ourArtist}")`);
-    return { pool: artistMatched, isolated: true, matchMode: `${result.matchMode}+artist` };
+    // GK-101: preserve `matched` from Filter 1c rather than dropping it —
+    // artist narrowing is a distinct (creator) axis layered on top, not a
+    // replacement for the variant-applicability signal.
+    return { pool: artistMatched, isolated: true, matchMode: `${result.matchMode}+artist`, matched: result.matched };
   }
   console.log(`[comps] artist-preference narrowing: before=${before} after=${result.pool.length} (0 artist matches — keeping Filter 1c's result unchanged)`);
   return result;
@@ -1330,6 +1346,14 @@ export const fetchComps = async ({
   let reprintFallback = false;
   let variantFallback = false;
   let premiumVariantIsolated = false;
+  // GrailKey Directive AB (GK-101) — evidence applicability custody.
+  // null = no confirmedVariant to check against (not applicable);
+  // 'CONFIRMED' = the winning attempt's pool was narrowed to comps that
+  // actually matched confirmedVariant; 'UNVERIFIED' = confirmedVariant was
+  // present and checked, but Filter 1c fell back to the broader,
+  // variant-blind pool ("keeping all") -- see applyVariantPreferenceFilter's
+  // `matched` field below, the source of truth this is copied from.
+  let variantApplicability = null;
   let fellBack = false;
   let eraFilterBypassed = false;
   let eraRejectedReferenceRows = [];  // Track B Phase 0, Commit 2 — I13 reference bucket for era-rejected rows
@@ -1356,6 +1380,7 @@ export const fetchComps = async ({
       let _reprintFallback = false;
       let _variantFallback = false;
       let _premiumVariantIsolated = false;
+      let _variantApplicability = null; // GrailKey Directive AB (GK-101)
       let _fellBack = false;
       let _eraFilterBypassed = false;
       let _eraExcludedVariantCount = 0;
@@ -1559,6 +1584,15 @@ export const fetchComps = async ({
         const artistResult = applyArtistPreferenceNarrowing(varPrefResult, variant, artistOverride);
         p = artistResult.pool;
         if (artistResult.isolated) _premiumVariantIsolated = true;
+        // GrailKey Directive AB (GK-101) — capture the variant-preference
+        // filter's own applicability verdict here, at the ONE place it's
+        // computed, instead of letting it die with this block (the
+        // Computed-Then-Discarded shape this dispatch exists to close).
+        // Read from varPrefResult (Filter 1c itself), not artistResult —
+        // artist narrowing is an independent creator-match axis and must
+        // not be able to promote an unmatched variant to matched.
+        if (varPrefResult.matched === true) _variantApplicability = 'CONFIRMED';
+        else if (varPrefResult.matched === false) _variantApplicability = 'UNVERIFIED';
       }
 
       // Filter 1d: cover-letter matching. Cover A, B, C, D are separate
@@ -2003,6 +2037,7 @@ export const fetchComps = async ({
         reprintFallback: _reprintFallback,
         variantFallback: _variantFallback,
         premiumVariantIsolated: _premiumVariantIsolated,
+        variantApplicability: _variantApplicability, // GrailKey Directive AB (GK-101)
         fellBack: _fellBack,
         eraFilterBypassed: _eraFilterBypassed,
         eraRejectedReferenceRows: _eraRejectedReferenceRows,
@@ -2067,6 +2102,7 @@ export const fetchComps = async ({
         reprintFallback = filtered.reprintFallback;
         variantFallback = filtered.variantFallback;
         premiumVariantIsolated = filtered.premiumVariantIsolated;
+        variantApplicability = filtered.variantApplicability; // GrailKey Directive AB (GK-101)
         fellBack = filtered.fellBack;
         eraFilterBypassed = filtered.eraFilterBypassed;
         eraRejectedReferenceRows = filtered.eraRejectedReferenceRows || [];
@@ -2400,6 +2436,7 @@ export const fetchComps = async ({
       reprintFallback,
       variantFallback,
       premiumVariantIsolated,
+      variantApplicability, // GrailKey Directive AB (GK-101) — CONFIRMED | UNVERIFIED | null
       eraFilterBypassed,
       variantCompsExcludedByEra,
       artistFallback,

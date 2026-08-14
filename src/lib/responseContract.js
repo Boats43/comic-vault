@@ -252,6 +252,28 @@ export function deriveLocks(out) {
     });
   }
 
+  // GrailKey Directive AB (GK-101) — evidence applicability custody.
+  // deriveMarketStanding already floors EXACT_CURRENT to SIMILAR_ONLY when
+  // out.variantApplicability === 'UNVERIFIED' (the actual gating power —
+  // READY requires marketStanding === 'EXACT_CURRENT', so this alone
+  // routes the book through deriveActionAuthority's existing REVIEW
+  // fallthrough, no parallel denial path). This lock adds ONLY the
+  // specific, explicable reason code (VARIANT_UNMATCHED_POOL) for that
+  // demotion — same additive, independent-of-the-other-standing-locks
+  // pattern as market-standing-fallback-only/none and
+  // identity-standing-conflicted above (preStandingLockCount gate keeps a
+  // stronger integrity lock from being diluted by a generic insufficiency
+  // reason; independent of those two so a book that is BOTH e.g.
+  // FALLBACK_ONLY and variant-unmatched surfaces both reason codes).
+  if (preStandingLockCount === 0 && out.variantApplicability === 'UNVERIFIED') {
+    locks.push({
+      code: 'market-standing-variant-unmatched',
+      reason: 'No comps in the pricing pool matched the confirmed variant/edition — price reflects a broader pool that may be the wrong edition',
+      hard: false,
+      class: 'insufficiency',
+    });
+  }
+
   // identityStanding CONFLICTED (identityProvisional / identity-unresolved
   // as BARE fields) previously fed the client-side "Identity provisional"
   // badge but produced no lock at all unless out.listingHardLocked was

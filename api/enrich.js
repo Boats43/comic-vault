@@ -5937,6 +5937,15 @@ export default async function handler(req, res) {
       if (refusedOut.variantNote === undefined) {
         refusedOut.variantNote = confirmedVariant || null;
       }
+      // GrailKey Directive AB (GK-101) — same guarded-assignment shape as
+      // variantNote immediately above: this exit never fetches comps, so
+      // there is no applicability signal to compute (genuinely not
+      // applicable, not merely unset) — explicit null keeps the key an
+      // own-property so App.jsx's presence-aware merge doesn't fall back
+      // to a stale prior scan's value.
+      if (refusedOut.variantApplicability === undefined) {
+        refusedOut.variantApplicability = null;
+      }
       // Ship #24a-2: refusedOut retired as a separate SHAPE — same fields
       // flow, plus the canonical contract block.
       return res.status(200).json(finalizeResponse(refusedOut));
@@ -7437,6 +7446,12 @@ export default async function handler(req, res) {
       if (out.variantNote === undefined) {
         out.variantNote = confirmedVariant || null;
       }
+      // GrailKey Directive AB (GK-101) — same reasoning as the refused-exit
+      // fix above: no comps fetched on this exit, so no applicability
+      // signal exists yet. Explicit null, not omission.
+      if (out.variantApplicability === undefined) {
+        out.variantApplicability = null;
+      }
       // Ship #24a-2: contract state=LOCKED via DO_NOT_LIST hard lock
       return res.json(finalizeResponse(out)); // STOP — no pricing, return early
     }
@@ -8267,6 +8282,23 @@ export default async function handler(req, res) {
     if (rawComps?.premiumVariantIsolated) {
       out.premiumVariantIsolated = true;
     }
+
+    // GrailKey Directive AB (GK-101) — evidence applicability custody.
+    // api/comps.js's Filter 1c (applyVariantPreferenceFilter) computes,
+    // per winning attempt, whether the pool it returned actually matched
+    // confirmedVariant or fell back to the broader, variant-blind pool
+    // ("keeping all"). That fact was previously computed and discarded at
+    // the filter — never reaching marketStanding (src/lib/actionAuthority.js),
+    // which could then read a variant-blind pool as EXACT_CURRENT purely
+    // because pricingSource looked current (the Sabrina NYCC-foil P0).
+    // Set unconditionally (never gated behind truthiness) so this key is
+    // ALWAYS an own-property of `out` — App.jsx's merge sites rely on
+    // presence, not truthiness, to distinguish "this scan computed no
+    // signal" (null — a normal no-variant book) from "enrich didn't run
+    // this field at all" (key absent), the same Stale Authority Inheritance
+    // guard GrailKey Directive Q already established for `variant`/
+    // `variantNote`.
+    out.variantApplicability = rawComps?.variantApplicability ?? null;
 
     // Filter bypass flag — set in both pricing branches (PC + browse).
     // Universal flag: era filter (comics) or set filter (cards) bypassed.

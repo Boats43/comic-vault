@@ -10532,6 +10532,7 @@ export default function App() {
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                 variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
                 premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
+                variantApplicability: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicability') ? enrich.variantApplicability : cur.variantApplicability, // GrailKey Directive AB (GK-101) — presence-aware, same Stale Authority Inheritance guard as the 'variant' merge above
                 year: enrich.polybagDetected && enrich.year
                   ? enrich.year
                   : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
@@ -11111,6 +11112,7 @@ export default function App() {
                   variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                 variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
                 premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
+                variantApplicability: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicability') ? enrich.variantApplicability : cur.variantApplicability, // GrailKey Directive AB (GK-101) — presence-aware, same Stale Authority Inheritance guard as the 'variant' merge above
                   // Mega-key floor flags (Tier 0 hotfix — persist from enrich)
                   megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
                   // Q90 — floor suppressed for slab-grade-matched sold pools
@@ -11247,6 +11249,7 @@ export default function App() {
                   variantMultiplier: enrich.variantMultiplier || s.variantMultiplier || null,
                   variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || s.variantMultiplierEstimated === true,
                   premiumVariantIsolated: enrich.premiumVariantIsolated === true || s.premiumVariantIsolated === true,
+                  variantApplicability: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicability') ? enrich.variantApplicability : s.variantApplicability, // GrailKey Directive AB (GK-101) — presence-aware, same Stale Authority Inheritance guard as the 'variant' merge above
                   // Mega-key floor flags
                   megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
                   // Q90 — floor suppressed for slab-grade-matched sold pools
@@ -11637,6 +11640,7 @@ export default function App() {
                 variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                 variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
                 premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
+                variantApplicability: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicability') ? enrich.variantApplicability : cur.variantApplicability, // GrailKey Directive AB (GK-101) — presence-aware, same Stale Authority Inheritance guard as the 'variant' merge above
                 year: enrich.polybagDetected && enrich.year
                   ? enrich.year
                   : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
@@ -12251,6 +12255,7 @@ export default function App() {
       variantMultiplier: enrich.variantMultiplier || item.variantMultiplier || null,
       variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || item.variantMultiplierEstimated === true,
       premiumVariantIsolated: enrich.premiumVariantIsolated === true || item.premiumVariantIsolated === true,
+      variantApplicability: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicability') ? enrich.variantApplicability : item.variantApplicability, // GrailKey Directive AB (GK-101) — presence-aware, same Stale Authority Inheritance guard as the 'variant' merge above
       year: enrich.polybagDetected && enrich.year
         ? enrich.year
         : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : item.year),

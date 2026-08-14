@@ -63,7 +63,24 @@ export function deriveMarketStanding(out) {
   if (FALLBACK_ONLY_SOURCES.has(source)) return 'FALLBACK_ONLY';
   if (SIMILAR_ONLY_SOURCES.has(source)) return 'SIMILAR_ONLY';
   if (STALE_SOURCES.has(source)) return 'EXACT_STALE';
-  if (EXACT_CURRENT_SOURCES.has(source)) return 'EXACT_CURRENT';
+  if (EXACT_CURRENT_SOURCES.has(source)) {
+    // GrailKey Directive AB (GK-101) — evidence applicability custody.
+    // pricingSource alone says the pool is CURRENT; it says nothing about
+    // whether the pool is evidence for the confirmed EDITION. When a
+    // variant was confirmed and api/comps.js's Filter 1c could not confirm
+    // any comp in the winning pool actually matches it (fell back to the
+    // broader, variant-blind "keeping all" pool — out.variantApplicability
+    // === 'UNVERIFIED', computed once at the filter and carried here
+    // untouched, never re-derived), EXACT_CURRENT is unreachable: the pool
+    // is current for SOME edition of this book, not confirmed current for
+    // THIS one. Floors to SIMILAR_ONLY, never lower — this is a
+    // revocation of standing the source string alone would have granted,
+    // not fabrication of worse evidence (C1). No confirmedVariant at all
+    // (out.variantApplicability === null) is a normal, unaffected book —
+    // EXACT_CURRENT stays fully reachable.
+    if (out?.variantApplicability === 'UNVERIFIED') return 'SIMILAR_ONLY';
+    return 'EXACT_CURRENT';
+  }
   // Unrecognized source string — conservative default, never silently
   // treated as current market evidence.
   return 'NONE';
@@ -115,6 +132,7 @@ const LOCK_CODE_TO_REASON = {
   'market-standing-fallback-only': 'FALLBACK_ONLY_PRICING',
   'market-standing-none': 'NO_MARKET_EVIDENCE',
   'identity-standing-conflicted': 'IDENTITY_CONFLICT',
+  'market-standing-variant-unmatched': 'VARIANT_UNMATCHED_POOL', // GrailKey Directive AB (GK-101)
 };
 
 const lockToReasonCode = (lock) => {

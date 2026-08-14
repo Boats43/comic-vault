@@ -793,6 +793,15 @@ export default async function handler(req, res) {
       pricingSource: item.pricingSource || null,
       matchConfidence: item.matchConfidence || null,
       rawComps: item.rawComps || null,
+      // GrailKey Directive AB (GK-101) — out.rawComps is a narrowed
+      // reconstruction (api/enrich.js, average/lowest/highest/count/prices
+      // only — see that file's Ship v0-B comment) that never carried
+      // comps.js's other computed flags either (premiumVariantIsolated,
+      // variantCompsExcludedByEra, etc. are all separate top-level out.*
+      // fields for the same reason) — variantApplicability is threaded
+      // through the same way, as its own top-level synthetic field, not
+      // nested under rawComps.
+      variantApplicability: item.variantApplicability || null,
       // item.soldComps arrives as a bare COUNT (App.jsx sends
       // item.soldComps.length, not the array itself) — deriveLocks'
       // low-tier-thin-pool check only reads .length, so a same-length
