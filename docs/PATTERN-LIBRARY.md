@@ -7706,8 +7706,11 @@ Tasks 1-5 touch issue consensus.
 ### Handoff
 
 Test baseline re-stamped: 170/16/3/189 → 174/16/3/193 (four new files,
-one repaired). GK-84 corrected and closed as a record-only ticket
-(no migration built, per non-goals). GK-85 CLOSED — the live defect is
+one repaired). **GK-84 CORRECTION (Directive U, 2026-08-14): the line
+above ("GK-84 corrected and closed as a record-only ticket") was wrong.
+The registry line was never actually set to CLOSED — it read OPEN in
+`d58a697` and still does; only this prose overstated it. GK-84 remains
+OPEN, migration NOT BUILT.** GK-85 CLOSED — the live defect is
 fixed and tested. GK-86 CLOSED. GK-87 PARTIALLY ADDRESSED — correction-
 flow scope closed, `gradeBlob`'s own automatic-scan persisted-write path
 remains open, precisely scoped in the registry for a future dispatch.
