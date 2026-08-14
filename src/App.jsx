@@ -11744,16 +11744,27 @@ export default function App() {
     if (!res.ok || !data.listingUrl) {
       throw new Error(data.error || "Failed to create eBay listing");
     }
-    const updated = {
-      ...item,
-      status: "listed",
-      ebayUrl: data.listingUrl,
-      ebayItemId: data.listingId || null,
-      listedAt: Date.now(),
-    };
-    await putComic(updated);
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updated) : x)));
-    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
+    // GK-94 (Directive X) — was `{...item, ...}`, spreading the CLOSED-OVER
+    // pre-request item back into catalogue state; if a correction landed on
+    // this same item while the listing request was in flight, that stale
+    // spread silently reverted the corrected title/issue/year/variant/
+    // price/comps, with only the 4 listing fields below reflecting anything
+    // new. Matches listBundleOnEbay's already-correct pattern (this file):
+    // read the CURRENT item fresh from `prev`/`cur` at write time, apply
+    // only the fields this handler actually mutates. Reads above (the
+    // request body) are unaffected — this only changes the write.
+    const listedAt = Date.now();
+    const ebayUrl = data.listingUrl;
+    const ebayItemId = data.listingId || null;
+    setCatalogue((prev) => prev.map((x) => {
+      if (x.id !== item.id) return x;
+      const updated = { ...x, status: "listed", ebayUrl, ebayItemId, listedAt };
+      putComic(updated).catch(() => {});
+      return normalizeItem(updated);
+    }));
+    setSelectedItem((cur) => (cur && cur.id === item.id
+      ? normalizeItem({ ...cur, status: "listed", ebayUrl, ebayItemId, listedAt })
+      : cur));
   }, []);
 
   const listBundleOnEbay = useCallback(async (items) => {
@@ -11824,25 +11835,29 @@ export default function App() {
       throw new Error(data.error || "Failed to check eBay status");
     }
 
-    // Update item with new status
-    const updates = {
-      ...item,
-      status: data.status, // "sold", "ended", or "active"
-    };
-
+    // GK-94 (Directive X) — status-field-only patch, same fresh-read
+    // discipline as listOnEbay above: never spread the closed-over
+    // pre-request `item` back into catalogue state.
+    const statusFields = { status: data.status }; // "sold", "ended", or "active"
     if (data.status === "sold") {
-      updates.soldPrice = data.soldPrice;
-      updates.soldAt = data.soldAt;
+      statusFields.soldPrice = data.soldPrice;
+      statusFields.soldAt = data.soldAt;
       if (data.buyerFeedback != null) {
-        updates.buyerFeedback = data.buyerFeedback;
+        statusFields.buyerFeedback = data.buyerFeedback;
       }
     } else if (data.status === "ended") {
-      updates.endedAt = data.endedAt;
+      statusFields.endedAt = data.endedAt;
     }
 
-    await putComic(updates);
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updates) : x)));
-    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updates) : cur));
+    setCatalogue((prev) => prev.map((x) => {
+      if (x.id !== item.id) return x;
+      const updated = { ...x, ...statusFields };
+      putComic(updated).catch(() => {});
+      return normalizeItem(updated);
+    }));
+    setSelectedItem((cur) => (cur && cur.id === item.id
+      ? normalizeItem({ ...cur, ...statusFields })
+      : cur));
 
     return data;
   }, []);

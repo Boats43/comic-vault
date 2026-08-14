@@ -8184,3 +8184,158 @@ findings, not fixed. S's Task 2 remains blocked on GK-88's full closure,
 per the directive's own explicit gate — the bulk-import gap, while
 lower-frequency than the gap this dispatch closed, is real and
 enumerated, not swept under a "mostly done" label.
+
+## GrailKey Directive 2026-08-14-W — reachability only, no code
+
+Investigation-only, requested twice (sent verbatim a second time; the
+repeat was flagged, HEAD/registry state reconfirmed unchanged, and the
+same answer stood without re-deriving it). Answered three questions
+about whether V's two deferred findings (bulk import, GK-94) actually
+block Directive S's Task 2, distinct from whether the *mechanism* V
+identified could safely fix them.
+
+**Q1 — bulk import same-item overlap: YES, reachable.** `addToCatalogue`
+(`src/App.jsx:10583-10645`) calls `setCatalogue(...)` synchronously at
+line 10643, before returning `savedId` — the item is selectable and
+therefore correctable in the UI the instant that resolves, which is
+*before* `processFile`'s own fire-and-forget `/api/enrich` for that same
+item is even sent (`src/App.jsx:11354`), let alone before it resolves.
+Confirmed as a genuine S blocker — but the reason V didn't fix it stands
+independently: tracing what happens if `processFile` were naively wired
+into the shared `activeScanRef` slot (same pattern as every other
+guarded producer) shows a NEW failure mode — a second, unrelated bulk
+worker touching the slot after a correction would silently erase that
+correction's protection for a third item's stale response, a real
+regression risk, not merely an inconvenience. Two separate facts, not
+one: bulk import needs same-item protection (blocks S) AND the existing
+single-slot mechanism cannot safely provide it (needs its own,
+out-of-scope fix).
+
+**Q2 — GK-94 same-item stale closure: YES, reachable.** `listOnEbay`
+(`src/App.jsx:11747-11756` at the time) and `syncEbayStatus`
+(`:11828-11845`) both spread the closed-over, pre-request `item` back
+into catalogue state on write — a correction landing on the same item
+mid-flight gets silently reverted the moment the listing/status response
+resolves, with only the listing-status fields reflecting anything real.
+Confirmed as a genuine S blocker, and — unlike bulk import — the fix
+needs no new mechanism at all.
+
+**Q3 — what those handlers actually need:** neither requires the whole
+captured item for its WRITE (only for building the outgoing request,
+which is unaffected). `listOnEbay` writes exactly
+`status`/`ebayUrl`/`ebayItemId`/`listedAt`; `syncEbayStatus` writes
+`status` plus conditional sold/ended fields. `listBundleOnEbay`
+(`:11778-11793`, same file) already does the safe version of this exact
+write — read fresh `x` from `prev`, merge only the mutated fields — so
+the fix is applying an existing, proven-safe pattern to two more sites,
+not designing something new.
+
+**Revised S blocker list**: both bulk import and GK-94 confirmed
+blocking, for different reasons — bulk import needs a mechanism that
+doesn't exist yet (deferred, GK-88 stays open for it specifically);
+GK-94 needs no new mechanism (closeable immediately). Registry edits
+were proposed in the report only, per the directive's explicit
+constraint — not applied in this dispatch. Directive X (below) applies
+the GK-94 half.
+
+## GrailKey Directive 2026-08-14-X — GK-94 CLOSED
+
+Straight implementation of the fix Directive W's Q3 already specified:
+no redesign, no new mechanism, no ownership tokens — a closure fix.
+
+**`listOnEbay`** (`src/App.jsx`) — was:
+```js
+const updated = { ...item, status: "listed", ebayUrl: data.listingUrl,
+  ebayItemId: data.listingId || null, listedAt: Date.now() };
+await putComic(updated);
+setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updated) : x)));
+setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
+```
+Now:
+```js
+const listedAt = Date.now();
+const ebayUrl = data.listingUrl;
+const ebayItemId = data.listingId || null;
+setCatalogue((prev) => prev.map((x) => {
+  if (x.id !== item.id) return x;
+  const updated = { ...x, status: "listed", ebayUrl, ebayItemId, listedAt };
+  putComic(updated).catch(() => {});
+  return normalizeItem(updated);
+}));
+setSelectedItem((cur) => (cur && cur.id === item.id
+  ? normalizeItem({ ...cur, status: "listed", ebayUrl, ebayItemId, listedAt })
+  : cur));
+```
+The spread base moved from the closed-over `item` to the fresh `x`/`cur`
+read at write time — matching `listBundleOnEbay`'s own pattern in this
+file exactly, down to the fire-and-forget `putComic(...).catch(() => {})`
+(was previously `await`ed before the state write; now consistent with
+the reference implementation). `listOnEbay`'s reads (the outgoing
+request body: `q41Override`/`title`/`publisher`/`year`/`grade`/
+`keyIssue`/`price`/`priceLow`/`priceHigh`/`reason`/`coverPhoto`) are
+untouched — this only changes the write.
+
+**`syncEbayStatus`** — identical restructuring: the sold/ended
+conditional field logic is unchanged in substance, just collected into a
+`statusFields` object first, then merged onto fresh `x`/`cur` instead of
+spread onto the closed-over `item`.
+
+**"If the id no longer exists in catalogue at write time, write
+nothing"** — satisfied by construction: `prev.map`'s `if (x.id !== item.id)
+return x` branch means no match → the array returns unchanged and the
+`putComic` call (inside the matched branch only) never fires.
+`setSelectedItem`'s equivalent guard behaves the same way.
+
+**`listBundleOnEbay` untouched** — not just unedited, verified
+byte-identical: the test's Part 5 extracts the function body from both
+`git show f39e392:src/App.jsx` (immediately pre-fix) and the current
+source, normalizes CRLF/LF (the on-disk checkout is CRLF, git's stored
+blob is LF — this normalization was necessary to get an accurate content
+comparison, not just an EOL-noise "difference"), and asserts exact
+string equality.
+
+### Tests
+
+`tests/grailkey-directive-x-gk94-stale-closure-listing.test.js`, 37
+assertions, 0 failed:
+- **Part 0 (DIRECT)** — the pre-fix defect, extracted verbatim via `git
+  show f39e392:src/App.jsx` (both handlers' literal `...item,` spread
+  confirmed present in the real historical source, not asserted from
+  memory), then that exact re-derived merge logic run against a
+  constructed same-item correction race — proves the stale title/
+  variant/price are what actually get written, diverging from what the
+  catalogue had already been corrected to.
+- **Part 1/2 (DIRECT)** — the post-fix fresh-read merge for both
+  handlers (including syncEbayStatus's sold AND ended branches),
+  confirming the corrected identity survives and a value-by-value diff
+  shows only the intended fields changed.
+- **Part 3 (DIRECT)** — the required control: with no intervening
+  correction, both handlers still write normally.
+- **Part 4 (DIRECT)** — the explicit "id no longer exists" constraint:
+  zero `putComic` calls, catalogue array returned unchanged.
+- **Part 5 (MIRRORED)** — structural proof against the real committed
+  source that both handlers are wired to the fresh-read pattern, plus
+  the `listBundleOnEbay` byte-identical proof described above.
+
+### Regression
+
+Every suite from the standing App.jsx/scanOwnership regression list
+re-run directly: `slice7-scan-ownership`, `q-trackB-commit3-manual-
+correction` (466/0), `q-trackB-commit4-adoption-provisional` (152/0),
+`grailkey-directive-h-item1-stale-pc-anchor` (6/0), `grailkey-directive-
+v-task2-ownership-perimeter` (36/0), `grailkey-directive-u-task2-stale-
+automatic-write` (33/0), `grailkey-directive-t-task5-revision-token`
+(15/0), `q140-issue-consensus-corrective` (124/0, byte-identical as
+required), plus the rest of the merge/contract-adjacent suites — all
+clean. `grailkey-directive-p-task3-variant-on-card` (GK-90) reconfirmed
+in its same known pre-existing failing state, untouched by this
+dispatch (neither `dataQualityGuard.js` nor `mergeConfirmedIdentity` was
+touched here). GK-89/91 unchanged.
+
+### Handoff
+
+GK-94: CLOSED. GK-88: untouched (explicit non-goal — "No GK-88 work"),
+stays OPEN, bulk import remains the named blocker. Test baseline
+re-stamped 173/19/3/195 → 174/19/3/196 (one new file). S's Task 2 is
+narrower than it was: one of its two confirmed blockers (GK-94) is now
+closed; the other (bulk import, needs its own mechanism) remains.
