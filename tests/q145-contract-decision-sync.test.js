@@ -89,9 +89,19 @@ console.log('Part 0: source-level guards on App.jsx\n');
     /const notListable = items\.filter\(\(c\) => !passesContractGate\(c\)\);/.test(appSrc),
     'submitBundle gates on passesContractGate (contract.listable), not just ID_REQUIRED/DO_NOT_LIST/blockers'
   );
+  // GrailKey Directive Z — identityConfirmed now PREFERS
+  // item.contract.actionAuthority.identityStanding (computed server-side,
+  // before the client-merge boundary that strips the raw fields below)
+  // when present, falling back to the pre-Z three-way check (identical
+  // text, still verified below) only for legacy items scanned before
+  // actionAuthority existed.
   assertTrue(
-    /const isProvisional = !isUnresolved && \(\s*\n\s*item\.identityProvisional === true \|\|\s*\n\s*item\.listingHardLockReason === 'identity-unresolved' \|\|\s*\n\s*\(item\.contract\?\.locks \|\| \[\]\)\.some\(\(l\) => l\.code === 'identity-unresolved'\)/.test(appSrc),
-    'identityConfirmed tri-state checks identityProvisional/listingHardLockReason AND the reliable contract.locks proxy'
+    /const authority = item\.contract\?\.actionAuthority;/.test(appSrc),
+    'identityConfirmed reads item.contract.actionAuthority when present (GrailKey Directive Z)'
+  );
+  assertTrue(
+    /isProvisional = !isUnresolved && \(\s*\n\s*authority\s*\n\s*\? authority\.identityStanding === 'CONFLICTED'\s*\n\s*: \(\s*\n\s*item\.identityProvisional === true \|\|\s*\n\s*item\.listingHardLockReason === 'identity-unresolved' \|\|\s*\n\s*\(item\.contract\?\.locks \|\| \[\]\)\.some\(\(l\) => l\.code === 'identity-unresolved'\)/.test(appSrc),
+    'identityConfirmed tri-state falls back to checking identityProvisional/listingHardLockReason AND the reliable contract.locks proxy for legacy (no-authority) items'
   );
   // The discovery made while implementing FIX 4: neither raw field is
   // actually merged into the client catalogue anywhere in this file.

@@ -443,11 +443,25 @@ const getListingReadiness = (item) => {
       // merged on every path (see the `contract:` field in each catalogue
       // merge object). Falls back to the raw fields for a legacy/no-
       // contract item in case a future merge-path fix adds them.
-      const isUnresolved = decision.action === 'ID_REQUIRED' || (hasBlockers && blockers.includes('identity-not-confident'));
+      // GrailKey Directive Z — item.contract.actionAuthority.identityStanding
+      // (responseContract.js) is computed server-side on `out`, BEFORE the
+      // client-merge boundary this comment's own investigation found strips
+      // item.identityProvisional/listingHardLockReason entirely — it does
+      // not have the gap the fallback below works around, so it's preferred
+      // whenever present. Falls back to the pre-Z local re-derivation only
+      // for legacy items scanned before actionAuthority existed.
+      const authority = item.contract?.actionAuthority;
+      const isUnresolved = authority
+        ? authority.identityStanding === 'UNRESOLVED'
+        : decision.action === 'ID_REQUIRED' || (hasBlockers && blockers.includes('identity-not-confident'));
       const isProvisional = !isUnresolved && (
-        item.identityProvisional === true ||
-        item.listingHardLockReason === 'identity-unresolved' ||
-        (item.contract?.locks || []).some((l) => l.code === 'identity-unresolved')
+        authority
+          ? authority.identityStanding === 'CONFLICTED'
+          : (
+            item.identityProvisional === true ||
+            item.listingHardLockReason === 'identity-unresolved' ||
+            (item.contract?.locks || []).some((l) => l.code === 'identity-unresolved')
+          )
       );
       return {
         status: isUnresolved ? 'fail' : isProvisional ? 'caution' : 'pass',
@@ -461,13 +475,37 @@ const getListingReadiness = (item) => {
       label: 'Price ready',
       required: true
     },
-    decisionSafe: {
-      status: decision.action === 'LIST_NOW' || decision.action === 'LIST_LOW' ? 'pass' :
-              decision.action === 'RESEARCH' || decision.action === 'GRADE_CANDIDATE' ? 'caution' :
-              'fail',
-      label: 'Decision safe',
-      required: true
-    },
+    decisionSafe: (() => {
+      // GrailKey Directive Z (GK-96) — a field labeled "safe" whose
+      // negative branch was unreachable for every LIST_LOW is fabricated
+      // assurance, not cosmetic wording (a GK-39-class defect, third
+      // instance). Reads item.contract.actionAuthority.state (the one
+      // transaction verdict every listability consumer now derives
+      // from, responseContract.js) rather than decision.action directly
+      // -- decision.action alone can no longer render "safe": a
+      // thin/stale/tier-4 (pc_estimate) book with decision.action=
+      // LIST_LOW now correctly reads REVIEW/LOCKED here, not 'pass'.
+      // Falls back to the pre-Z action-only heuristic ONLY for legacy
+      // catalogue entries scanned before this field existed
+      // (actionAuthority === undefined, not any other falsy value).
+      const authority = item.contract?.actionAuthority;
+      if (authority) {
+        return {
+          status: authority.state === 'READY' ? 'pass' :
+                  authority.state === 'REVIEW' ? 'caution' :
+                  'fail',
+          label: 'Decision safe',
+          required: true
+        };
+      }
+      return {
+        status: decision.action === 'LIST_NOW' || decision.action === 'LIST_LOW' ? 'pass' :
+                decision.action === 'RESEARCH' || decision.action === 'GRADE_CANDIDATE' ? 'caution' :
+                'fail',
+        label: 'Decision safe',
+        required: true
+      };
+    })(),
     marketEvidence: {
       // Commit B.2 (Strange Tales dispatch) — must reflect ZERO exact
       // evidence, not just raw comp-pool population. A pool population
@@ -1876,6 +1914,48 @@ function ResultCard({ result, enriching }) {
           </div>
         </div>
       )}
+
+      {/* GrailKey Directive Z (Task 2f) — transaction authority summary,
+          fresh-scan card. Same block as CollectionDetail's — see that
+          site's comment for the full rationale. Pure display, reads
+          result.contract.actionAuthority only. */}
+      {result.contract?.actionAuthority && (() => {
+        const authority = result.contract.actionAuthority;
+        const stateColor =
+          authority.state === 'READY' ? '#3fb950' :
+          authority.state === 'REVIEW' ? '#f59e0b' : '#ef4444';
+        const stateIcon =
+          authority.state === 'READY' ? '✅' :
+          authority.state === 'REVIEW' ? '⚠️' : '🔒';
+        return (
+          <div
+            style={{
+              marginTop: 8,
+              marginBottom: 4,
+              padding: "10px 12px",
+              borderRadius: 8,
+              border: `1px solid ${stateColor}55`,
+              background: `${stateColor}14`,
+              fontSize: 12,
+            }}
+          >
+            <div style={{ fontWeight: 700, color: stateColor, marginBottom: 6 }}>
+              {stateIcon} ACTION AUTHORITY: {authority.state}
+            </div>
+            <div style={{ color: '#aaa', marginBottom: 2 }}>
+              Identity standing: <span style={{ fontWeight: 600, color: '#ddd' }}>{authority.identityStanding}</span>
+            </div>
+            <div style={{ color: '#aaa' }}>
+              Market standing: <span style={{ fontWeight: 600, color: '#ddd' }}>{authority.marketStanding}</span>
+            </div>
+            {Array.isArray(authority.reasonCodes) && authority.reasonCodes.length > 0 && (
+              <div style={{ color: '#888', marginTop: 6, fontSize: 11 }}>
+                {authority.reasonCodes.join(' · ')}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* MARKET EVIDENCE — Q-audit DISPATCH. Consolidates Verified Sold,
           Price Ladder, Price History, and Full Comp Pool under one
@@ -5132,6 +5212,52 @@ function CollectionDetail({
         </div>
       )}
 
+      {/* GrailKey Directive Z (Task 2f) — transaction authority summary.
+          Confidence answers "how sure are we?" (matchConfidence, rendered
+          elsewhere); authority answers "are we allowed to transact?" —
+          this is that second, independent answer, always shown whenever
+          the contract carries it. Three lines: identityStanding,
+          marketStanding, and the combined actionAuthority.state, plus its
+          reasonCodes when not READY. Pure display — reads
+          item.contract.actionAuthority only, never recomputes it. */}
+      {item.contract?.actionAuthority && (() => {
+        const authority = item.contract.actionAuthority;
+        const stateColor =
+          authority.state === 'READY' ? '#3fb950' :
+          authority.state === 'REVIEW' ? '#f59e0b' : '#ef4444';
+        const stateIcon =
+          authority.state === 'READY' ? '✅' :
+          authority.state === 'REVIEW' ? '⚠️' : '🔒';
+        return (
+          <div
+            style={{
+              marginTop: 8,
+              marginBottom: 4,
+              padding: "10px 12px",
+              borderRadius: 8,
+              border: `1px solid ${stateColor}55`,
+              background: `${stateColor}14`,
+              fontSize: 12,
+            }}
+          >
+            <div style={{ fontWeight: 700, color: stateColor, marginBottom: 6 }}>
+              {stateIcon} ACTION AUTHORITY: {authority.state}
+            </div>
+            <div style={{ color: '#aaa', marginBottom: 2 }}>
+              Identity standing: <span style={{ fontWeight: 600, color: '#ddd' }}>{authority.identityStanding}</span>
+            </div>
+            <div style={{ color: '#aaa' }}>
+              Market standing: <span style={{ fontWeight: 600, color: '#ddd' }}>{authority.marketStanding}</span>
+            </div>
+            {Array.isArray(authority.reasonCodes) && authority.reasonCodes.length > 0 && (
+              <div style={{ color: '#888', marginTop: 6, fontSize: 11 }}>
+                {authority.reasonCodes.join(' · ')}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* 2a. STATS BAR */}
       {(() => {
         // Ship #24 Wave 1 Commit 1 (Harley Quinn #62 fix) \u2014 lastSold reads
@@ -8346,15 +8472,27 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   // pre-existing decision/blockers-only check, unchanged.
   const passesContractGate = (c) => (c.contract ? c.contract.listable === true : true);
 
+  // GrailKey Directive Z, Task 2d/C2 — decision.action loses independent
+  // gating power. contract.listable (now a pure projection of
+  // actionAuthority.state === 'READY', responseContract.js) already
+  // REQUIRES decision.action.startsWith('LIST') AND zero locks as part
+  // of its own derivation — re-checking decision.action/blockers here for
+  // contract-bearing items was a second, redundant (and inconsistent —
+  // it excluded LIST_LOW, which contract.listable can legitimately
+  // permit) path to the same answer. Legacy items with no contract field
+  // still fall back to the pre-Z decision/blockers-only check, unchanged
+  // — passesContractGate's own fallback (`c.contract ? ... : true`)
+  // would otherwise pass every legacy item unconditionally.
   const getListableBooks = (aiTagsSnapshot) =>
     catalogue.filter(
       (c) =>
         c.status !== "listed" &&
         getDisplayPrice(c) > 0 &&
-        (c.decision?.action === 'LIST_NOW' || c.decision?.action === 'LIST_HIGH') &&
-        (c.decision?.blockers?.length || 0) === 0 &&
         c.identityConfident !== false &&
-        passesContractGate(c)
+        (c.contract
+          ? passesContractGate(c)
+          : (c.decision?.action === 'LIST_NOW' || c.decision?.action === 'LIST_HIGH') &&
+            (c.decision?.blockers?.length || 0) === 0)
     );
 
   const getEligibleForTrade = () =>
@@ -11738,6 +11876,33 @@ export default function App() {
         priceHigh: item.priceHigh,
         reason: item.reason,
         image: coverPhoto,
+        // GrailKey Directive Z, C3 — raw evidence fields for the server's
+        // OWN independent re-derivation (api/list-ebay.js), never a
+        // pre-computed verdict. The server never reads actionAuthority/
+        // contract.listable from this payload at all; it recomputes both
+        // from these fields via the same pure functions responseContract.js
+        // already uses. A client that forged actionAuthority:{state:
+        // 'READY'} here would have zero effect, since nothing on the
+        // server ever looks at that field.
+        pricingSource: item.pricingSource || null,
+        matchConfidence: item.matchConfidence || null,
+        rawComps: item.rawComps ? { count: item.rawComps.count ?? 0 } : null,
+        soldComps: Array.isArray(item.soldComps) ? item.soldComps.length : 0,
+        decision: item.decision ? { action: item.decision.action || null, blockers: item.decision.blockers || [] } : null,
+        identityConfident: item.identityConfident,
+        refusedToPrice: item.refusedToPrice === true,
+        manualReviewRequired: item.manualReviewRequired === true,
+        gradeExceedsMap: item.gradeExceedsMap === true,
+        claudeCheckBlocker: item.claudeCheckBlocker || null,
+        tier0Locked: item.tier0Locked === true,
+        // Known limitation (see docs/PATTERN-LIBRARY.md, Directive Z): the
+        // raw identityProvisional/listingHardLockReason booleans are not
+        // reliably present on the client catalogue item (never merged at
+        // any App.jsx merge site) -- item.contract.locks IS reliably
+        // merged and already encodes the same signal from the last real
+        // enrich response, so it's echoed here as the best available
+        // proxy, not a raw independently-verifiable field.
+        priorLockCodes: (item.contract?.locks || []).map((l) => l.code),
       }),
     });
     const data = await res.json();

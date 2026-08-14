@@ -5,6 +5,14 @@
 // assembly — finalizeResponse() must be the last call before res.json().
 //
 // Design doc: docs/SHIP24_CONTRACT.md (greenlit 2026-07-11, incl. Layer B 24c)
+//
+// GrailKey Directive Z — deriveActionAuthority/deriveMarketStanding/
+// deriveIdentityStanding (src/lib/actionAuthority.js) are the transaction-
+// authority boundary; contract.listable is now a pure projection of
+// contract.actionAuthority.state === 'READY', not an independently
+// re-derived formula. See that module's own header for the full design.
+
+import { deriveActionAuthority, deriveMarketStanding, deriveIdentityStanding } from './actionAuthority.js';
 
 /**
  * Parse any price representation the pipeline produces into a number.
@@ -203,6 +211,57 @@ export function deriveLocks(out) {
     locks.push({
       code: 'low-tier-thin-pool',
       reason: 'Match confidence LOW with under 3 comps — verify before listing',
+      hard: false,
+      class: 'insufficiency',
+    });
+  }
+
+  // GrailKey Directive Z — the market-standing / identity-standing
+  // transaction-authority axes (GK-95/96 fix). Soft ('insufficiency'):
+  // the existing Q41 acknowledge-override flow already handles this
+  // class correctly (operator sets and verifies their own price, takes
+  // responsibility) -- these are NOT integrity failures, they're evidence
+  // gaps. `low-tier-thin-pool` above only fires when matchConfidence
+  // itself reads LOW; this is the fix for the case Directive Y found --
+  // a thin/stale/tier-4 book that scores MEDIUM confidence from the
+  // start clears that check untouched. marketStanding is derived from
+  // pricingSource alone (deriveMarketStanding, src/lib/actionAuthority.js)
+  // -- matchConfidence itself is never read or mutated here.
+  //
+  // Both new checks below are gated on the count BEFORE either of them
+  // ran (captured once, not re-read after each push) -- deliberately
+  // independent of EACH OTHER so a book that's simultaneously
+  // CONFLICTED and FALLBACK_ONLY surfaces BOTH reason codes, while
+  // still deferring to any of the 9 ORIGINAL, more specific locks above
+  // (a REFUSED/qualified-label/manual-review book already carries a
+  // stronger integrity lock; stacking a generic reason on top would mix
+  // insufficiency into an all-integrity lock set and change the Q41
+  // UI's acknowledge-eligibility read, locks.every(l =>
+  // l.class==='insufficiency'), without adding real information).
+  const preStandingLockCount = locks.length;
+
+  const marketStanding = deriveMarketStanding(out);
+  if (preStandingLockCount === 0 && (marketStanding === 'FALLBACK_ONLY' || marketStanding === 'NONE')) {
+    locks.push({
+      code: marketStanding === 'NONE' ? 'market-standing-none' : 'market-standing-fallback-only',
+      reason: marketStanding === 'NONE'
+        ? 'No current market evidence available — cannot authorize listing'
+        : 'Price is a PriceCharting estimate only — no current verified market comps',
+      hard: false,
+      class: 'insufficiency',
+    });
+  }
+
+  // identityStanding CONFLICTED (identityProvisional / identity-unresolved
+  // as BARE fields) previously fed the client-side "Identity provisional"
+  // badge but produced no lock at all unless out.listingHardLocked was
+  // ALSO independently true -- contract.listable could be true while the
+  // badge showed a caution.
+  const identityStanding = deriveIdentityStanding(out);
+  if (preStandingLockCount === 0 && identityStanding === 'CONFLICTED') {
+    locks.push({
+      code: 'identity-standing-conflicted',
+      reason: 'Identity is provisional or the visual pool disagreed with Vision — verify before listing',
       hard: false,
       class: 'insufficiency',
     });
@@ -442,11 +501,14 @@ export function assembleContract(out) {
         nextStep: '',
       };
 
-  const listable =
-    locks.length === 0 &&
-    (state === 'PRICED' || state === 'ESTIMATED') &&
-    typeof decision.action === 'string' &&
-    decision.action.startsWith('LIST');
+  // GrailKey Directive Z — actionAuthority is the ONE transaction verdict;
+  // listable is now a pure projection of it, not an independently
+  // re-derived formula (C2: no parallel notion of "safe"). `decision`
+  // here is the already-resolved snapshot above (handles the early-exit
+  // synthesis case), passed through explicitly so deriveActionAuthority
+  // never has to re-derive it from a possibly-absent out.decision.
+  const actionAuthority = deriveActionAuthority(out, locks, decision);
+  const listable = actionAuthority.state === 'READY';
 
   const contract = {
     version: 1,
@@ -459,6 +521,7 @@ export function assembleContract(out) {
     decision,
     bestChannel: d?.bestChannel ?? (listable ? null : 'blocked'),
     listable,
+    actionAuthority,
     locks,
     fields: deriveFields(out), // Wave 1 Commit 2 — per-field provenance (I13)
     violations: [],

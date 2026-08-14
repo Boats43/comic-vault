@@ -19,6 +19,15 @@
 //    picture URL, then include that URL in <PictureDetails> on the
 //    AddFixedPriceItem call.
 
+// GrailKey Directive Z, C3 — server-side, INDEPENDENT re-derivation of
+// transaction authority. Neither function is ever handed a client-
+// computed verdict (item.actionAuthority is never read anywhere in this
+// file) — both are recomputed here from the raw evidence fields the
+// client echoes in the request, using the SAME pure functions
+// api/enrich.js's finalizeResponse already uses at enrich time.
+import { deriveLocks } from "../src/lib/responseContract.js";
+import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
+
 const EBAY_ENDPOINT = "https://api.ebay.com/ws/api.dll";
 const COMPAT_LEVEL = "1193";
 const SITE_ID = "0"; // US
@@ -758,6 +767,68 @@ export default async function handler(req, res) {
         flags: item.claudeCheck?.flags || []
       });
       return;
+    }
+
+    // GrailKey Directive Z (GK-95/96) — the transaction-authority gate.
+    // Independently RE-DERIVED from raw evidence fields (never a client-
+    // computed verdict — item.actionAuthority is never read at all). A
+    // synthetic `out`-shaped object is assembled from exactly the fields
+    // the client sent above; deriveLocks/deriveActionAuthority are the
+    // SAME pure functions responseContract.js runs at enrich time.
+    //
+    // Known, documented limitation (not silently glossed over): raw
+    // identityProvisional/listingHardLockReason booleans aren't reliably
+    // present client-side (never merged at any App.jsx merge site — see
+    // src/lib/actionAuthority.js's own header). item.priorLockCodes (the
+    // LAST real enrich response's own contract.locks codes, which IS
+    // reliably merged) is checked as defense-in-depth alongside the
+    // freshly-recomputed locks, not as a substitute for them — READY
+    // requires BOTH the fresh re-derivation to agree AND the last known
+    // snapshot to have carried zero locks. This is genuine independent
+    // re-derivation for pricingSource/decision/matchConfidence/comp-count
+    // /refusal/manual-review/grade-exceeds-map/claude-gate/tier0 — not
+    // yet for the two fields flagged above, which remains open (logged).
+    const syntheticOut = {
+      decision: item.decision || null,
+      pricingSource: item.pricingSource || null,
+      matchConfidence: item.matchConfidence || null,
+      rawComps: item.rawComps || null,
+      // item.soldComps arrives as a bare COUNT (App.jsx sends
+      // item.soldComps.length, not the array itself) — deriveLocks'
+      // low-tier-thin-pool check only reads .length, so a same-length
+      // placeholder array reproduces that check exactly without needing
+      // the full sold-comp payload over the wire.
+      soldComps: new Array(typeof item.soldComps === 'number' ? item.soldComps : 0).fill({}),
+      identityConfident: item.identityConfident,
+      refusedToPrice: item.refusedToPrice === true,
+      manualReviewRequired: item.manualReviewRequired === true,
+      gradeExceedsMap: item.gradeExceedsMap === true,
+      claudeCheckBlocker: item.claudeCheckBlocker || null,
+      tier0Locked: item.tier0Locked === true,
+    };
+    const freshLocks = deriveLocks(syntheticOut);
+    const priorLockCodes = Array.isArray(item.priorLockCodes) ? item.priorLockCodes : [];
+    const authority = deriveActionAuthority(syntheticOut, freshLocks, syntheticOut.decision);
+    const serverReady = authority.state === 'READY' && priorLockCodes.length === 0;
+
+    if (!serverReady) {
+      // Q41 acknowledged-override: an operator who explicitly set and
+      // verified their own price may still list a non-READY book — the
+      // EXISTING, already-shipped recovery path (App.jsx Q41 UI), now
+      // genuinely server-checked rather than merely logged. Requires a
+      // real acknowledgment payload with a manually-set price, not a bare
+      // flag.
+      const hasValidAck = item.q41Override?.priceOverridden === true &&
+        typeof item.q41Override?.manualPrice === 'number' &&
+        item.q41Override.manualPrice > 0;
+      if (!hasValidAck) {
+        res.status(403).json({
+          error: 'ACTION_AUTHORITY_NOT_READY',
+          message: 'Transaction authority is not READY — insufficient identity/market standing to list without acknowledgment.',
+          actionAuthority: authority,
+        });
+        return;
+      }
     }
 
     // T2-1: Multi-image upload for singles (up to 12 images)
