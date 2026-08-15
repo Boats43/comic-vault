@@ -462,11 +462,33 @@ export const checkAssemblyIntegrity = (visionTitle, assembledTitle, compTitles =
  * Pure predicate, extracted for direct regression-testability (same
  * rationale as Fix 2/3 above and Q111's applyVariantPreferenceFilter).
  *
+ * GrailKey Directive AG (GK-98, kill path 3) — 'discriminative-corroboration'
+ * added, same reasoning as 'refused-identity-conflict' above, not a new
+ * exemption class. Production evidence, Sabrina Anniversary Spectacular #1:
+ * a genuinely thin (1-member) discriminative family is corroborated by
+ * Vision's OWN variant field (creator name + convention + issue agreement —
+ * AF, GK-98) and departs from Vision's TITLE by design (that departure IS
+ * the corrected edition, not an assembly bug) — but Rule 1's zero-support
+ * carve-out (checkAssemblyIntegrity above) requires compTitles.length >= 3
+ * to even evaluate whether the missing Vision tokens are legitimately
+ * unsupported, and a 1-member family can never clear that floor. The
+ * carve-out mechanism is correct on its own terms; it simply cannot reach
+ * a verdict for a family this thin, and 22e's conservative default (force
+ * Vision) is exactly wrong for a candidate whose departure from Vision was
+ * already independently justified before 22e ever ran. Confirmed via
+ * direct trace: for a 1-member family, Rule 2 (excess-non-consensus-tokens,
+ * requires the same compTitles.length>=3) and the compound-whitelist rule
+ * can never fire either, so skipping this whole check has identical
+ * practical effect to skipping Rule 1 alone for this shape — same
+ * true-no-op guarantee as the refused-identity-conflict case: when
+ * discriminative-corroboration didn't fire (thin/no topFamily), this
+ * function is never even reached with that value.
+ *
  * @param {string|null|undefined} familyDecision - familyCandidate?.decision
  * @returns {boolean} true when the 22e assembly-integrity check should be skipped
  */
 export const shouldSkipAssemblyIntegrityCheck = (familyDecision) =>
-  familyDecision === 'refused-identity-conflict';
+  familyDecision === 'refused-identity-conflict' || familyDecision === 'discriminative-corroboration';
 
 /**
  * Q131 systemic-audit follow-up (2026-07-19, Eternus #2 class) — after

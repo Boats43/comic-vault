@@ -8340,6 +8340,202 @@ re-stamped 173/19/3/195 → 174/19/3/196 (one new file). S's Task 2 is
 narrower than it was: one of its two confirmed blockers (GK-94) is now
 closed; the other (bulk import, needs its own mechanism) remains.
 
+## GrailKey Directive 2026-08-14-AG — GK-98 kill path 3: the 22e veto
+
+AF's `discriminative-corroboration` resolver works correctly in
+production — confirmed again directly in this dispatch. A downstream,
+independent consumer overwrote its result 3ms later. This dispatch is
+one narrow fix plus the enumeration AF's own trace should have done and
+didn't.
+
+### The standing rule this dispatch adds
+
+**A trace that enumerates kill paths for a changed value must enumerate
+every CONSUMER of that value — every place downstream code reads or acts
+on it — not only competing BRANCHES within the module that produces it.**
+AF's trace was thorough about the two ways `selectTitleFamilyCandidate`
+itself could pick the wrong family (`top-rank-protection` vs.
+`weighted-consensus`) and correctly fixed both. It then wrote "ADDITIONAL
+KILL PATHS: none beyond those two" — a true statement about branches
+*inside* the function that produces `familyCandidate.decision`, and a
+false statement about the value's fate once it leaves that function.
+`checkAssemblyIntegrity` ("22e," `src/lib/identityCore.js`) is a
+completely separate module, called from two sites in `api/enrich.js`,
+that reads `confirmedTitle` (derived from `familyCandidate` inside
+`resolveIdentity`) and can silently overwrite it back to Vision's raw
+value. It was never a "branch" of AF's resolver — it is a consumer AF's
+trace never looked for, because the trace's search scope was "how does
+this function decide" rather than "who reads what this function
+decided." This is the reason a green test suite (AF's own 25/25) shipped
+a product that still failed on the real book. Future dispatches
+extending a resolver's decision space must grep for every reader of the
+field being changed (`identitySource`, `confirmedTitle`,
+`familyCandidate.decision`, whatever the specific value is) across the
+whole file/module graph, not just verify the producing function's own
+branches are correct.
+
+### Root cause
+
+`checkAssemblyIntegrity`'s Rule 1 (missing-vision-tokens) has a
+zero-support-defer carve-out (`src/lib/identityCore.js:325-354`,
+pre-existing, correctly reasoned on its own terms) that requires
+`compTitles.length >= 3` to activate at all. The population it checks
+against — `winningFamilyTitles`, the winning family's own member
+rawTitles (a Q142-era fix, itself correct: checking against the
+member population rather than the full ambiguous pool) — is exactly 1
+row for a genuinely thin `discriminative-corroboration` family (the
+Sabrina fixture: one Dan Parent NYCC row out of nine). A 1-member family
+can never clear the `>= 3` floor, so the carve-out never gets to render
+a verdict, and 22e's conservative default — force Vision — fires
+unconditionally for the exact shape AF exists to rescue. Two correct
+mechanisms (the carve-out's floor, the winning-family-scoped population)
+interact to produce a wrong outcome for a case neither was designed
+against. Confirmed via real production log timestamps (10.524 AF wins,
+10.532 `[22e] FORCED` reverts) and reproduced directly against real
+committed pre-AG source in the acceptance test below.
+
+### Fix
+
+`shouldSkipAssemblyIntegrityCheck` (`src/lib/identityCore.js`) extended
+by one disjunct:
+```js
+export const shouldSkipAssemblyIntegrityCheck = (familyDecision) =>
+  familyDecision === 'refused-identity-conflict' || familyDecision === 'discriminative-corroboration';
+```
+`checkAssemblyIntegrity` itself, both its call sites' surrounding logic,
+`FAMILY_OVERRIDE_DECISIONS`, `resolveIdentity`, and
+`selectTitleFamilyCandidate` are all untouched. `api/enrich.js`'s
+Phase-1 skip log line was made dynamic (names whichever decision
+actually triggered the skip) since it previously hardcoded language
+naming only the old `refused-identity-conflict` case.
+
+### Consumer enumeration (the directive's actual ask)
+
+Every downstream reader of `familyCandidate`/`confirmedTitle` between
+family-selection and the outgoing Phase-2 query was checked, not
+assumed:
+- **Phase-1 22e** (`api/enrich.js:3468-3537`) — the failing consumer,
+  fixed above.
+- **Phase-2 22e** (`api/enrich.js` ~6550-6590) — only evaluates Rule 2
+  (excess-non-consensus-tokens), never Rule 1 (the failing rule for this
+  shape); does not call `shouldSkipAssemblyIntegrityCheck` at all today.
+  No change needed for this specific defect — recorded, not silently
+  assumed safe forever.
+- **Q141-A PC-anchor-projection** (`api/enrich.js` ~5195-5217) — already
+  gated by `isCorroboratedIdentitySource(identitySource)`
+  (`src/lib/identityCore.js`), which checks
+  `identitySource === 'title-family-' + decision` for every decision in
+  `FAMILY_OVERRIDE_DECISIONS`. Since AF already added
+  `'discriminative-corroboration'` to that shared constant, this
+  consumer was automatically protected as a side effect of AF's own
+  work — zero new code required, confirmed by reading the gate directly
+  rather than assumed from the pattern.
+- `confirmedTitle = sanitized` (contamination-gated) and the Q58-TITLE
+  backfill (`backfillFromComps`-gated) were traced and found gated on
+  conditions this identity path doesn't trigger — low-risk, not
+  independently re-verified against a live Sabrina rescan (that
+  verification is the user's physical-book acceptance test, not this
+  dispatch's).
+
+### Tests
+
+`tests/grailkey-directive-ag-22e-provenance-exemption.test.js`, 32/32:
+- **Fixture 1 (ship-blocking)** — the corrected version of AF's own
+  Fixture 7, which claimed PASS on a route production never took (it
+  stopped at `selectTitleFamilyCandidate`'s own output and never touched
+  `resolveIdentity` or 22e at all). This fixture chains the REAL
+  functions in the REAL order (`selectTitleFamilyCandidate` →
+  `resolveIdentity` → the 22e population/skip/`checkAssemblyIntegrity`
+  logic) — labeled precisely: DIRECT for the four real exported function
+  calls, MIRRORED for the inline `api/enrich.js:3468-3537` orchestration
+  glue between them (not an exported function, reproduced byte-faithful
+  and cited by line number) and for the outgoing Phase-2 query (built
+  from the documented Attempt-0 formula, since `fetchComps` makes a live
+  HTTP call and cannot run offline). Demonstrates PRE-AG forced revert
+  against real committed source, POST-AG survival, and prints the actual
+  outgoing query string.
+- **Fixture 2** — `shouldSkipAssemblyIntegrityCheck` checked directly
+  against 7 decision values; confirms the exemption is exactly 2 values,
+  not a general disable.
+- **Fixture 3 (ship-blocking negative control)** — Flash #139 pool
+  reproduced verbatim from the q140 fixture; confirms AG introduces no
+  new route into `discriminative-corroboration` for this pool and that
+  AG's predicate agrees with the pre-AG predicate for whatever decision
+  this pool actually produces.
+- **Fixture 4** — a corroborated-but-issue-contradicting candidate does
+  not reach `discriminative-corroboration` (AF's own C2/C5, unaffected
+  by AG).
+- **Fixture 5** — direct source-text assertion that the skip branch is
+  exactly a `console.log`, no `writeConfirmed`/`out.*` write.
+
+### Regression
+
+Full unfiltered sweep, all 202 `tests/*.test.js` files (201 existing + 1
+new), 20s-per-file cutoff: 19 FAIL / 3 TIMEOUT, byte-identical by name to
+the documented baseline (`CLAUDE.md`) — every one of the 19 FAIL files
+(`artist-registry-sync`, `batch1-fixes`, `comp-filter-hygiene`,
+`decision-engine`, `grailkey-commit-e/f/g/v1`,
+`grailkey-directive-j-gk79a-relabel` [GK-91],
+`grailkey-directive-p-task3-variant-on-card` [GK-90],
+`grailkey-directive-q-variant-null-custody` [GK-89],
+`grailkey-dispatch-33-parity-harness`, `identity-gate`,
+`image-search-extraction`, `mega-keys`, `pattern-k-dedupe-issue`,
+`priceBands`, `q-adv397-visual-guard`, `sold-verification`) and all 3
+TIMEOUT files (`dispatch-42-comicvine-kill`,
+`grailkey-commit-m-pc-query-fallback`, `ship26-integration`) cross-
+checked by name against the registry/CLAUDE.md's own documented list —
+zero unexplained. `grailkey-commit-v1.test.js`'s specific failure
+additionally re-verified via `git stash`/`git stash pop`: identical
+failure with AG's changes removed, confirming it is pre-existing and
+unrelated. `tests/q140-issue-consensus-corrective.test.js` re-run,
+byte-identical (124/0, the Flash #139 invariant unrelaxed).
+`node --input-type=module --check` clean on both modified files;
+`npm run build` clean.
+
+### WATCH — traced, NOT fixed (explicit directive non-goal)
+
+What happens when the surviving discriminative title reaches
+PriceCharting matching downstream: **1997 can still reappear, through a
+different, independent mechanism than the one this dispatch fixes.**
+Logged as **GK-109** (`docs/TICKET-REGISTRY.md`) rather than left as
+prose only, since it is a concrete, source-confirmed risk, not a
+hypothetical:
+1. `lookupPriceCharting`'s `mainToken` overlap check
+   (`api/enrich.js:1808-1823`) validates only the FIRST tokenize()'d
+   word of the query series name — "sabrina" for this book — which the
+   wrong generic 1997 product also contains. "annual"/"spectaculer"/
+   "dan"/"parent" are never checked by this gate at all.
+2. The year-gap validation (`api/enrich.js:1787-1798`) is skipped
+   entirely when `comicYear` is null — which it genuinely is here, since
+   neither AF nor AG touch year (C3, deliberate) and this book's year is
+   correctly left unresolved.
+3. `assessPcAnchorTrust` (`src/lib/evidenceEligibility.js:979-999`), the
+   gate that stamps `out.pcAnchorTrust`, is a pure price+year function
+   with zero title/discriminator comparison of its own; when
+   `confirmedYear` is null it returns `'COMPATIBLE_REFERENCE'` (not
+   `'REJECTED'`), granting usable trust to a match it never verified
+   against the title at all.
+Net effect: a `discriminative-corroboration`-resolved book whose year
+stays unresolved (the normal case for this decision path) can still have
+its PRICE anchored to PriceCharting's wrong generic product even though
+its TITLE is now correct — a FAILURE by this directive's own acceptance
+criteria. Not fixed — pricing-math/PC-matching boundary, explicitly out
+of this dispatch's scope; needs its own greenlight.
+
+### Handoff
+
+GK-98: CLOSED (corrected — AF alone was insufficient, AG's fix is what
+actually closes it; full corrective history in the registry line, not
+duplicated here). GK-110: CLOSED (this dispatch). GK-109: OPEN, logged,
+not fixed. Test baseline unchanged in category (19/3), file count
+201→202. Physical-book acceptance (rescan Sabrina, confirm the
+Annual/Spectacular/Dan-Parent/NYCC identity survives with year
+unresolved or independently-supported-non-1997, and separately confirm
+the price does NOT anchor to the wrong 1997 PriceCharting product per
+the GK-109 finding above) is the user's own next step, not verified by
+this dispatch's test suite (which proves the code path, not a live
+scan). Do not propose the next directive.
+
 ## Standing-rule violation record — same-commit test-baseline re-stamp
 
 The standing rule (CLAUDE.md, "Directive preflight requirement" /

@@ -3475,10 +3475,11 @@ export default async function handler(req, res) {
       // zero-support fix) — gives checkAssemblyIntegrity's zero-support
       // carve-out real, EARLY data instead of being permanently inert here.
       console.log(`[22e] checking integrity: vision="${effectiveTitle}" assembled="${confirmedTitle}"`);
-      // Q131 follow-up — see shouldSkipAssemblyIntegrityCheck docstring
-      // (identityCore.js) for why refused-identity-conflict is exempt.
+      // Q131 follow-up / GrailKey Directive AG — see shouldSkipAssemblyIntegrityCheck
+      // docstring (identityCore.js) for why refused-identity-conflict and
+      // discriminative-corroboration are both exempt.
       if (shouldSkipAssemblyIntegrityCheck(familyCandidate?.decision)) {
-        console.log(`[22e] SKIPPED — refused-identity-conflict provisional identity is intentionally divergent from Vision, not an assembly bug`);
+        console.log(`[22e] SKIPPED — decision=${familyCandidate?.decision} identity is intentionally divergent from Vision, not an assembly bug`);
       } else {
         // Q142 dispatch (2026-07-22, Adventure Time Summer Special / SDCC
         // class) — Rule 2 ("excess non-consensus tokens," 22e-LOSS below)
