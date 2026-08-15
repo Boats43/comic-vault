@@ -99,9 +99,9 @@ console.log('\nPart 1: Fixture 1 — Detective Comics #1107 split-brain\n');
     'Batman Beyond Compendium TPB',
     'Batman Funko Pop Figure',
     'Batman T-Shirt Large',
-    'Detective Comics #1107 Corner Box Variant Jorge Jimenez CGC 9.8',
+    'Detective Comics #1107 Corner Box Variant Jorge Jimenez NM',
     'Detective Comics #1107 Corner Box Variant Jorge Jimenez NM Unread',
-    'Detective Comics #1107 Corner Box Variant Jorge Jimenez CGC 9.6 White Pages',
+    'Detective Comics #1107 Corner Box Variant Jorge Jimenez VF White Pages',
   ]);
   const identity = resolveIdentity(vision, ebay, family, { ebayResultCount: visualItems.length, visualItems });
 

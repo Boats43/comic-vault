@@ -8982,3 +8982,195 @@ its own ~6 direct writers, not traced or touched here; Vision's guessed
 variant will still win over visual/slab-label evidence until a future
 dispatch extends this same eligibility+evidence approach to the variant
 facet. Do not propose the next directive.
+
+## GrailKey Directive 2026-08-15-AJ — Slice 1 acceptance: reconciler reachability (GK-117/118)
+
+Directive AI's own handoff claimed the visual-first mechanism was wired
+in. It wasn't — not for the case that mattered most.
+
+### Proof 1's finding: the reconciler was never called
+
+Direct trace (grep for `reconcileIssue`/`createEvidenceSet`/`addEvidence`/
+`reportConflict` across `identityCore.js`, `api/enrich.js`,
+`imageSearchIdentity.js`) returned **zero hits**. `identityReconciler.js`'s
+evidence API existed only as exported, unit-tested pure functions,
+invoked exclusively by AI's own test file — never by `resolveIdentity`
+itself. The shipped branch reimplemented the same five guards ad hoc,
+directly in `identityCore.js`, gated on `confirmedIssue == null` — a
+rescue path for the case where nothing upstream resolved a value, not
+the visual-first authority mechanism the directive specified.
+
+The practical consequence: a book where Vision confidently (even if
+wrongly) asserted an issue, and the raw pool had merely WEAK — not zero —
+support for it, never reached the new mechanism at all. The
+`vision-zero-support` block that would otherwise re-examine the value
+requires the support ratio to fall below `ISSUE_ZERO_SUPPORT_RATIO_FLOOR`
+(10%) before it even runs; anything above that, `confirmedIssue` sails
+through unchanged with `firstEligibleVisual` never consulted. This is
+precisely "a confidently wrong value the evidence system never gets to
+examine" — the disease this entire campaign exists to close, reproduced
+inside the campaign's own fix.
+
+### The fix: unconditional reconciliation, evidence-based precedence
+
+`resolveIdentity` now builds an issue evidence set and calls
+`reconcileIssue` on **every** issue resolution — not gated on null.
+Concretely, right before the function's final return:
+
+- Vision's own asserted value becomes evidence: `addEvidence` if the
+  pipeline never explicitly rejected it, `reportConflict` if it did
+  (confirmedIssue is null here despite Vision having supplied a value —
+  zero-support ESCALATE, or a title-family branch that refused to trust
+  it). The distinction matters: a rejected value must be visible as
+  conflict context without being fallback-worthy corroboration.
+- A genuine upstream RESOLUTION (family-consensus adopted/corroborated/
+  conflict-locked/rescue, or a zero-support OVERRIDE) becomes
+  `'family-consensus'`-tier evidence at whatever value it settled on —
+  computed via `issueHasUpstreamAuthority`, which checks EITHER that
+  `confirmedIssue` differs from Vision's own value (something changed
+  it) OR that `familyIssueConsensusResult.mode` is a genuine verdict
+  (covers Flash #139's `conflict-locked`, where the value happens to
+  equal Vision's own — still a real resolution, not a passthrough, and
+  must carry top precedence so a disagreeing visual cluster can never
+  outrank it).
+- `firstEligibleVisual`'s candidate becomes `'first-eligible-visual'`-tier
+  evidence, subject to all five of AI's original guards — now understood
+  as gates on WHETHER this evidence enters the set, not on whether the
+  reconciler runs at all.
+- `reconcileIssue(evidenceSet)` is called unconditionally. A
+  `[reconcile-issue]` decision log (value/source/authority/justifiedBy/
+  conflicts) fires on every single call — the artifact Proof 1 requires
+  assertions to target, so reachability is provable independent of the
+  outcome.
+
+Demotion (`identityProvisionalFromVisualFirst`) fires precisely when the
+WINNING evidence source is `'first-eligible-visual'` AND its value
+differs from Vision's own (present or absent) — never merely because
+first-eligible-visual happened to win precedence while agreeing with
+Vision. This is what keeps an ordinary book (ambient visual match
+confirms Vision) from being wrongly flagged provisional.
+
+### Fixture P1 — the case that actually mattered
+
+Vision keeps issue "#3" (real production shape: Venom's own vision
+read). The raw pool has WEAK but NONZERO support for "#3" (15%, above
+the 10% zero-support floor) — the pre-existing zero-support block never
+runs, so under AI's original code `confirmedIssue` stays "3" untouched,
+full stop. Under the fix: the evidence set gets `{vision:"3"}` (not
+rejected — zero-support never fired) and `{first-eligible-visual:"1"}`
+(the pool's own top eligible row). No family-consensus evidence exists.
+Precedence picks `first-eligible-visual` over bare `vision` — the
+reconciler overturns Vision's confidently-wrong "3" to the correctly-
+supported "1", CONTESTED, demoted. `tests/grailkey-directive-aj-
+reconciler-reachability.test.js`'s Fixture P1 asserts on the
+`[reconcile-issue]` log line's `source`/`justifiedBy`/`conflicts`/
+`authority` fields directly — not merely that the final value looks
+right, which the old, still-broken code could also have produced by
+coincidence on a different input.
+
+### Proof 2 — Flash #139 is protected by precedence, verified in isolation
+
+The canonical Flash #139 fixture's own pool text happens to contain
+"Anniversary" (`The Flash #170 Anniversary Giant-Size...`) — meaning BOTH
+the marketing-flavor guard (Guard 3) AND family-consensus precedence
+independently protect it, and running the canonical fixture alone cannot
+tell which mechanism actually did the work. A second fixture, identical
+except for stripping "Anniversary" from the #170 cluster's text, confirms
+precedence ALONE is sufficient: `first-eligible-visual="170"` DOES enter
+the evidence set in that variant (Guard 3 no longer blocks it), and
+family-consensus still wins — `confirmedIssue` stays "139",
+`identityProvisionalFromVisualFirst` stays `false`, and the disagreeing
+"170" is recorded in `conflicts` rather than silently discarded.
+Authority on the canonical fixture reads `CORROBORATED` (marketing-guard
+suppressed the competing candidate entirely, so no conflict is even
+recorded); on the no-"Anniversary" variant it reads `CONTESTED` (the
+competing candidate IS recorded, just outranked) — both are honest,
+neither is a value change, and Flash #139's actual required invariant
+(`confirmedIssue === "139"`, no demotion) holds in both.
+
+### Guard 6 — contamination, found on the very first post-fix regression sweep
+
+Making the reconciler reachable on non-null Vision values immediately
+exposed a case AI's fixtures never reached:
+`tests/q-trackB-commit4.3-winning-family-authority.test.js`'s "CONTROL
+C" — a naturally-formed family mixing a raw listing with a slabbed "CGC
+9.8" member, Vision issue present and untouched (zero-support never ran,
+no `ebay.agreement` at all). With the reconciler now reachable, the
+contaminated family's own first-eligible-visual candidate ("7," from
+"Zap #7 NM") could win by precedence over bare `vision` evidence — the
+CORRECT visual-first behavior GK-117 exists to enable, except this
+specific family is one `hasContaminatedMember` (LOT_RE/REPRINT_RE/
+SLAB_RE/GRADED_RE/SIGNED_RE/IDENTITY_TPB_MARKER_RE) already flags as
+untrustworthy for the SAME reason `familyAuthorityBaseConditions` refuses
+it for retention/rescue. Fixed by reusing the identical signal:
+`hasContaminatedMember(opts.visualItems, family?.topFamily?.indices)` now
+also suppresses first-eligible-visual evidence. Safe with no `topFamily`
+at all (Detective/Venom's own fixtures) — `indices` defaults to `[]`
+internally, returns `false`, never a false suppression.
+
+Building the fix surfaced a related, non-code finding: this dispatch's
+OWN Detective test fixtures (both the unit-level file and the new
+HTTP-handler file below) originally mixed CGC-graded rows into the
+corroborating set to satisfy the >=3-row floor — which legitimately
+tripped this SAME new guard for a realistic "multiple graded copies of a
+hot recent book" shape. Not a bug in the guard; the fixtures were
+corrected to use plain condition words (NM/VF) instead.
+
+### Proof 3 — the real HTTP handler, not just the unit level
+
+AG's lesson (a unit-level fix silently reverted 3ms later by an untested
+downstream consumer) is now a repeatedly-confirmed class in this
+codebase. This environment has no live EBAY_APP_ID/EBAY_CERT_ID/
+COMICVINE_API_KEY/PRICECHARTING_TOKEN; a bounded probe confirmed the
+unmodified handler already degrades gracefully to a clean 200/ID_REQUIRED
+with zero visual-pool data when no credentials exist at all (every
+external source's own early `if (!token) return null` guard fires before
+any network call). To exercise the identity path specifically, fake
+EBAY_APP_ID/EBAY_CERT_ID values were set so `lookupEbayVisual`'s guard
+passes, and ONLY the network calls it and `getOAuthToken`/`api/comps.js`'s
+own comp-search actually make (`oauth2/token`, `search_by_image`,
+`item_summary/search`) were intercepted with canned responses shaped
+like the Detective/Venom fixtures already proven at the unit level.
+Every other external call (ComicVine/PriceCharting/Ximilar/sold-history)
+was left exactly as this environment already produces it — no
+credentials, no call, graceful null — so nothing about the actual
+identity-resolution CODE PATH (`resolveIdentity`, `selectTitleFamilyCandidate`,
+`reconcileIssue`, the `api/enrich.js` consumption sites) was mocked,
+patched, or bypassed.
+
+Both fixtures pass end to end through the real handler: Detective's
+`out.issue` resolves to `"1107"` (not reported missing), `out.
+identityProvisional`/`listingHardLocked` are set through the real
+consumption site, and the creator surfaces correctly as `"Jorge
+Jimenez"` — though as a SINGLETON (`creatorFromCompsSingleton`, hits=1),
+not consensus, because `api/comps.js`'s own dedup filter (unrelated to
+this dispatch) collapses this mock's four near-identical corroborating
+titles down to one survivor before `extractCreatorsFromComps` ever sees
+them; the unit-level fixture's combined consensus+singleton check was
+reused rather than asserting on consensus alone. Venom's `out.issue`
+resolves to `"1"` (not Vision's rejected "3"), `identityProvisional` is
+set, and `decision.action` is confirmed to never reach `LIST_NOW`. One
+honest, NOT-fixed divergence found and documented rather than papered
+over: Detective's `listingHardLockBanner` TEXT (not its lock STATE) gets
+overwritten later in the pipeline by a different, pre-existing mechanism
+(the `refused-identity-conflict` promotion path, which independently and
+correctly ALSO fires for this exact book) once real comp data flows —
+both banners are accurate; which of two independently-correct messages
+wins display precedence is a pre-existing, unrelated question this
+dispatch did not scope in to fix.
+
+### Handoff
+
+GK-117/118 CLOSED. GK-113/114 corrected from CLOSED to OPEN/SHIPPED —
+closure requires Jimmy's own physical scans (Detective, Sabrina,
+Dell'Otto, Venom), not a BUILDING deploy or unit-level fixtures; this
+directive's own preflight named that standard and this dispatch holds to
+it. GK-115/116/109/112/98 remain untouched, per this dispatch's own
+non-goals. Test baseline 182/19/3/204 → 183/19/4/206 (two new files; the
+4th TIMEOUT is this dispatch's own HTTP-handler test, a documented,
+re-verified-clean artifact of the sweep harness's 25s cutoff, not a
+failure — see CLAUDE.md's stamp for the full accounting). Slice 2 (the
+remaining ~37 direct writers across title/year/publisher/variant/
+creator) and Slice 3 (convergence) are unstarted — this dispatch closed
+a mechanism gap inside Slice 1, it did not begin Slice 2. Do not propose
+the next directive.
