@@ -266,12 +266,61 @@ export function deriveLocks(out) {
   // reason; independent of those two so a book that is BOTH e.g.
   // FALLBACK_ONLY and variant-unmatched surfaces both reason codes).
   if (preStandingLockCount === 0 && out.variantApplicability === 'UNVERIFIED') {
-    locks.push({
-      code: 'market-standing-variant-unmatched',
-      reason: 'No comps in the pricing pool matched the confirmed variant/edition — price reflects a broader pool that may be the wrong edition',
-      hard: false,
-      class: 'insufficiency',
-    });
+    // GrailKey Directive AH (GK-111) — two independent mechanisms can
+    // produce variantApplicability==='UNVERIFIED' (api/comps.js Filter 1c
+    // on the active pool, AB/GK-101; src/lib/soldVerification.js's variant
+    // fallback on the sold pool, this dispatch) and they earn different,
+    // more specific reason codes rather than being flattened to one
+    // generic message — out.variantApplicabilitySoldFallback (own-property,
+    // set unconditionally alongside variantApplicability) distinguishes
+    // which one actually fired for THIS price. Mutually exclusive by
+    // construction (only one branch below can push), same
+    // preStandingLockCount gating as every other soft standing lock here.
+    if (out.variantApplicabilitySoldFallback === true) {
+      locks.push({
+        code: 'market-standing-sold-variant-fallback',
+        reason: 'The sold comps behind this price matched on grade only, not the confirmed variant/edition — the real sold price for this exact variant is unverified',
+        hard: false,
+        class: 'insufficiency',
+      });
+    } else {
+      locks.push({
+        code: 'market-standing-variant-unmatched',
+        reason: 'No comps in the pricing pool matched the confirmed variant/edition — price reflects a broader pool that may be the wrong edition',
+        hard: false,
+        class: 'insufficiency',
+      });
+    }
+  }
+
+  // GrailKey Directive AH (GK-111) — sufficiency, not applicability. A
+  // marketStanding of EXACT_CURRENT says the pool IS current and (per the
+  // lock above) confirmed applicable to this edition — it says nothing
+  // about whether there is ENOUGH of it to authorize an unattended
+  // transaction. deriveMarketStanding deliberately stays honest (a single
+  // genuinely exact/current comp IS exact and current — demoting the
+  // LABEL to make it lie would be worse than gating separately) — this
+  // lock is the gate. Distinct from low-tier-thin-pool above: that one
+  // requires matchConfidence.tier==='LOW' AND totalComps<3 (an
+  // identity-confidence axis); a MEDIUM/HIGH-confidence book with a
+  // single-comp EXACT_CURRENT pool clears low-tier-thin-pool untouched
+  // (score=59/tier=LOW *did* happen to also be this dispatch's own
+  // production case, at totalComps===3 exactly — one comp above that
+  // lock's own <3 floor) and needs its own, tier-independent floor. N<2 is
+  // the floor: a single comp is definitionally unable to establish a
+  // market by itself; N=2 is the smallest population that can. Not
+  // claimed to be more defensible than that — stated plainly, not dressed
+  // up as a calibrated threshold.
+  if (preStandingLockCount === 0 && marketStanding === 'EXACT_CURRENT') {
+    const exactCurrentPoolSize = (out.soldComps?.length || 0) + (out.rawComps?.count || 0);
+    if (exactCurrentPoolSize < 2) {
+      locks.push({
+        code: 'single-comp-pool',
+        reason: `Only ${exactCurrentPoolSize} comp${exactCurrentPoolSize === 1 ? '' : 's'} back this "current market" price — too thin to authorize an automatic listing`,
+        hard: false,
+        class: 'insufficiency',
+      });
+    }
   }
 
   // identityStanding CONFLICTED (identityProvisional / identity-unresolved

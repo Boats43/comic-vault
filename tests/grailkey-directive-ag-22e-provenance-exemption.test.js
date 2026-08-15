@@ -30,7 +30,18 @@ import { readFileSync } from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
-const PRE_AG_SHA = 'HEAD'; // AG's fix is uncommitted working-tree state; HEAD is genuinely pre-AG (post-AF).
+// GrailKey Directive AH regression sweep (2026-08-15) — this was 'HEAD' at
+// AG-authoring time, when AG's own fix was still uncommitted working-tree
+// state and HEAD genuinely resolved to pre-AG (post-AF). Once AG itself
+// was committed, HEAD became a moving target that resolves to POST-AG
+// content forever after — the exact same "designed-to-go-stale-by-
+// construction" defect already named for GK-91
+// (grailkey-directive-j-gk79a-relabel.test.js: `git show HEAD:...` to
+// prove OLD text existed, which only works while HEAD hasn't moved past
+// the fix). Pinned to the real immutable parent commit (AF, the last SHA
+// before AG's fix landed) so this proof never goes stale regardless of
+// how many commits follow.
+const PRE_AG_SHA = '7d0d434';
 
 let passed = 0;
 let failed = 0;

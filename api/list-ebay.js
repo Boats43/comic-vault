@@ -802,6 +802,14 @@ export default async function handler(req, res) {
       // through the same way, as its own top-level synthetic field, not
       // nested under rawComps.
       variantApplicability: item.variantApplicability || null,
+      // GrailKey Directive AH (GK-111) — same raw-evidence-field trust
+      // boundary as variantApplicability itself (GK-103's own documented,
+      // deliberately-unfixed gap: the server trusts client-SENT evidence,
+      // never a client-sent VERDICT — this is the former, not the latter).
+      // Reason-code precision only: gating already happens via
+      // variantApplicability==='UNVERIFIED' above regardless of this
+      // field's value, identically to the enrich-time path.
+      variantApplicabilitySoldFallback: item.variantApplicabilitySoldFallback === true,
       // item.soldComps arrives as a bare COUNT (App.jsx sends
       // item.soldComps.length, not the array itself) — deriveLocks'
       // low-tier-thin-pool check only reads .length, so a same-length

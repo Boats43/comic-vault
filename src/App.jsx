@@ -10620,6 +10620,7 @@ export default function App() {
                 variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
                 premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
                 variantApplicability: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicability') ? enrich.variantApplicability : cur.variantApplicability, // GrailKey Directive AB (GK-101) — presence-aware, same Stale Authority Inheritance guard as the 'variant' merge above
+                variantApplicabilitySoldFallback: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicabilitySoldFallback') ? enrich.variantApplicabilitySoldFallback : cur.variantApplicabilitySoldFallback, // GrailKey Directive AH (GK-111) — same presence-aware pattern, sibling field to variantApplicability above
                 year: enrich.polybagDetected && enrich.year
                   ? enrich.year
                   : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
@@ -11200,6 +11201,7 @@ export default function App() {
                 variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
                 premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
                 variantApplicability: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicability') ? enrich.variantApplicability : cur.variantApplicability, // GrailKey Directive AB (GK-101) — presence-aware, same Stale Authority Inheritance guard as the 'variant' merge above
+                variantApplicabilitySoldFallback: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicabilitySoldFallback') ? enrich.variantApplicabilitySoldFallback : cur.variantApplicabilitySoldFallback, // GrailKey Directive AH (GK-111) — same presence-aware pattern, sibling field to variantApplicability above
                   // Mega-key floor flags (Tier 0 hotfix — persist from enrich)
                   megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
                   // Q90 — floor suppressed for slab-grade-matched sold pools
@@ -11337,6 +11339,7 @@ export default function App() {
                   variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || s.variantMultiplierEstimated === true,
                   premiumVariantIsolated: enrich.premiumVariantIsolated === true || s.premiumVariantIsolated === true,
                   variantApplicability: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicability') ? enrich.variantApplicability : s.variantApplicability, // GrailKey Directive AB (GK-101) — presence-aware, same Stale Authority Inheritance guard as the 'variant' merge above
+                  variantApplicabilitySoldFallback: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicabilitySoldFallback') ? enrich.variantApplicabilitySoldFallback : s.variantApplicabilitySoldFallback, // GrailKey Directive AH (GK-111) — same presence-aware pattern, sibling field to variantApplicability above
                   // Mega-key floor flags
                   megaKeyFloorApplied: enrich.megaKeyFloorApplied === true,
                   // Q90 — floor suppressed for slab-grade-matched sold pools
@@ -11728,6 +11731,7 @@ export default function App() {
                 variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || cur.variantMultiplierEstimated === true,
                 premiumVariantIsolated: enrich.premiumVariantIsolated === true || cur.premiumVariantIsolated === true,
                 variantApplicability: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicability') ? enrich.variantApplicability : cur.variantApplicability, // GrailKey Directive AB (GK-101) — presence-aware, same Stale Authority Inheritance guard as the 'variant' merge above
+                variantApplicabilitySoldFallback: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicabilitySoldFallback') ? enrich.variantApplicabilitySoldFallback : cur.variantApplicabilitySoldFallback, // GrailKey Directive AH (GK-111) — same presence-aware pattern, sibling field to variantApplicability above
                 year: enrich.polybagDetected && enrich.year
                   ? enrich.year
                   : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : cur.year),
@@ -11979,6 +11983,18 @@ export default function App() {
         matchConfidence: item.matchConfidence || null,
         rawComps: item.rawComps ? { count: item.rawComps.count ?? 0 } : null,
         soldComps: Array.isArray(item.soldComps) ? item.soldComps.length : 0,
+        // GrailKey Directive AH (GK-111) — found while tracing the server
+        // boundary for this dispatch's own new signal: variantApplicability
+        // (GK-101/Directive AB) was NEVER included in this request body at
+        // all, despite api/list-ebay.js's syntheticOut already reading
+        // `item.variantApplicability` since Z/AB shipped — every single-item
+        // listing request has silently sent `undefined` for it (`|| null` at
+        // the server), meaning AB's own server-side protection has never
+        // actually been reachable through this path. Fixed alongside this
+        // dispatch's new field, same raw-evidence-field convention as every
+        // other line here (never a client-computed verdict).
+        variantApplicability: item.variantApplicability ?? null,
+        variantApplicabilitySoldFallback: item.variantApplicabilitySoldFallback === true,
         decision: item.decision ? { action: item.decision.action || null, blockers: item.decision.blockers || [] } : null,
         identityConfident: item.identityConfident,
         refusedToPrice: item.refusedToPrice === true,
@@ -12343,6 +12359,7 @@ export default function App() {
       variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || item.variantMultiplierEstimated === true,
       premiumVariantIsolated: enrich.premiumVariantIsolated === true || item.premiumVariantIsolated === true,
       variantApplicability: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicability') ? enrich.variantApplicability : item.variantApplicability, // GrailKey Directive AB (GK-101) — presence-aware, same Stale Authority Inheritance guard as the 'variant' merge above
+      variantApplicabilitySoldFallback: Object.prototype.hasOwnProperty.call(enrich, 'variantApplicabilitySoldFallback') ? enrich.variantApplicabilitySoldFallback : item.variantApplicabilitySoldFallback, // GrailKey Directive AH (GK-111) — same presence-aware pattern, sibling field to variantApplicability above
       year: enrich.polybagDetected && enrich.year
         ? enrich.year
         : (enrich.yearCorrected && enrich.confirmedYear ? enrich.confirmedYear : item.year),

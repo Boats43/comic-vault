@@ -8317,7 +8317,23 @@ export default async function handler(req, res) {
     // this field at all" (key absent), the same Stale Authority Inheritance
     // guard GrailKey Directive Q already established for `variant`/
     // `variantNote`.
-    out.variantApplicability = rawComps?.variantApplicability ?? null;
+    // GrailKey Directive AH (GK-111) — sold-path sibling to the active-path
+    // fix directly above. api/comps.js's Filter 1c (active pool) and
+    // src/lib/soldVerification.js's variant fallback (sold pool) are two
+    // INDEPENDENT applicability-relaxation mechanisms feeding the SAME
+    // pricing derivation — AB wired only the first into this field. Custody
+    // (C5): the fact "did THIS tier's price actually consume a variant-
+    // fallback sold pool" is computed once, inside computePriceBandsFromSold
+    // itself (src/lib/priceBands.js), scoped to real consumption not mere
+    // upstream existence (soldPoolFallbackConsumed, false whenever the
+    // fallback pool was demoted to a reference annotation or overridden by
+    // the divergence cap) — carried here, never re-derived. Reuses AB's
+    // own field/gate rather than inventing a parallel one (C1: revocation
+    // only — UNVERIFIED can only ever be equal-or-stronger than whatever
+    // the active side alone would have produced, never weaker).
+    const soldFallbackConsumed = priceBandsRaw?.soldPoolFallbackConsumed === true;
+    out.variantApplicability = soldFallbackConsumed ? 'UNVERIFIED' : (rawComps?.variantApplicability ?? null);
+    out.variantApplicabilitySoldFallback = soldFallbackConsumed;
 
     // Filter bypass flag — set in both pricing branches (PC + browse).
     // Universal flag: era filter (comics) or set filter (cards) bypassed.

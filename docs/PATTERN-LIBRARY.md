@@ -8536,6 +8536,199 @@ the GK-109 finding above) is the user's own next step, not verified by
 this dispatch's test suite (which proves the code path, not a live
 scan). Do not propose the next directive.
 
+## GrailKey Directive 2026-08-15-AH — third false-READY (GK-111)
+
+A third, independent false-READY, different tier than GK-96 (tier-4) and
+GK-101 (tier-3 active) — this one tier-2 blend. Two additive locks, no
+pricing math touched (C2).
+
+### The defect
+
+Production, 2026-08-15 00:33, build `f52c92f`: the operator's actual book
+(a $24.99 SOLD listing whose title genuinely says "NYCC Foil LTD 50...Dan
+Parent") was rejected by `src/lib/soldVerification.js`'s own variant
+fallback (filters 7/8, `variantMismatch:user_has_comp_none` on the
+coverType axis) as not matching the confirmed variant, then silently
+re-admitted (`variantVerified:false`, grade-matched only) and blended 70/30
+against a single active ask for a DIFFERENT, more expensive book ($109.95,
+"Pink Lava Foil...LTD 5") that `api/comps.js`'s Filter 1c matched via a
+single bare-substring token, "nycc" — `actionAuthority.state:READY`, a live
+$65.88 List button.
+
+### Root cause 1 — the sold-path applicability signal was never stamped
+
+AB (GK-101) wired ONE applicability-relaxation mechanism — the active
+pool's Filter 1c fallback — into `out.variantApplicability`, which
+`deriveMarketStanding` (`src/lib/actionAuthority.js`) already floors
+EXACT_CURRENT on. `verifySoldComps`'s OWN, entirely independent variant
+fallback (the sold-pool sibling of the exact same disease) was never wired
+into anything — `out.priceBands.variantAdjusted` existed and was already
+computed, but was consumed only for a display string
+(`priceNoteBase += ' · variant-adjusted (verify premium)'`,
+`api/enrich.js:8146`) — Computed-Then-Discarded, confirmed by direct read
+before writing a line of fix code.
+
+The fix could not just wire `variantAdjusted` straight through: that flag
+is TRUE whenever the fallback fired ANYWHERE upstream, even when the tier
+that ultimately won demoted the fallback pool to a reference annotation
+rather than pricing off it (`soldPoolTooThinToOverride`, GK-34's own
+active-dominant branch) — wiring it unscoped would violate this dispatch's
+own C5 (custody) and C1 (revocation only, never a global "fallback exists
+anywhere" rule) at once. `soldPoolFallbackConsumed`
+(`src/lib/priceBands.js`, computed once inside `computePriceBands` where
+the tier decision and the fallback fact are both already in scope, carried
+— never re-derived — into `api/enrich.js`) is TRUE only for the tier-2
+sub-branches whose own `market` value genuinely folds `soldAvg` in
+(blend, sold-only, sold-only-active-suspect), FALSE for
+`soldPoolTooThinToOverride` and explicitly re-zeroed (not merely
+inherited via spread) inside `applyVariantFallbackDivergenceCap`'s
+override branch, where the fallback-sourced sold data is discarded
+entirely in favor of an already-vetted (`MIN_POOL_FOR_OVERRIDE`-gated)
+active anchor. Fixture 3b is the required proof this scoping is real, not
+asserted: an identical fallback-fired setup that the tier engine does NOT
+consume produces zero demotion.
+
+Folded into AB's own `out.variantApplicability` field (not a parallel
+signal) — `deriveMarketStanding` needed zero changes. A new
+`out.variantApplicabilitySoldFallback` own-property exists purely so
+`src/lib/responseContract.js` can emit a precise, distinct reason code
+(`SOLD_VARIANT_FALLBACK_POOL`) instead of collapsing two structurally
+different causes into AB's original `VARIANT_UNMATCHED_POOL` — Fixture 6
+proves the two stay correctly discriminated and neither cross-fires.
+
+### Root cause 2 — EXACT_CURRENT has no sufficiency floor
+
+`marketStanding` answers "is this evidence current and applicable"; it
+never answered "is there enough of it." A single genuinely exact/current
+comp is honestly EXACT_CURRENT — demoting the LABEL to force a lock would
+make the diagnostic dishonest to manufacture a desired outcome, the same
+discipline AB itself observed (floor `EXACT_CURRENT` to `SIMILAR_ONLY`,
+never fabricate a worse label than the evidence supports). A new,
+tier-independent `single-comp-pool` soft lock (`SINGLE_COMP_POOL`) is the
+gate instead — fires whenever an EXACT_CURRENT-standing price rests on
+fewer than 2 total comps, deliberately NOT keyed to
+`matchConfidence.tier` the way the pre-existing `low-tier-thin-pool` lock
+is: this dispatch's own production case scored `matchConfidence.tier=LOW`
+at `totalComps===3`, ONE comp above that lock's own `<3` floor — the
+same MEDIUM-tier-slips-through shape GK-96 already named (HIGH-only cap,
+LOW-only lock), reproduced on a completely different axis. The floor
+itself (N<2) is stated plainly as what the code can defend, not dressed
+up as calibrated: a single comp cannot definitionally establish a market
+by itself; two is the smallest population that can.
+
+### Server boundary (1f) — found while tracing, not chased for its own sake
+
+`api/list-ebay.js`'s synthetic re-derivation has read
+`item.variantApplicability` since Z/AB shipped — but `src/App.jsx`'s
+single-item listing request body (the `fetch("/api/list-ebay", ...)` call,
+`listOnEbay`) never actually included that field at all. Every listing
+request has silently sent `undefined` for it since AB shipped, meaning
+GK-101's server-side protection was never reachable through the normal
+UI at all — the SAME shape this campaign has chased repeatedly (GK-103's
+own framing: "a new signal the client never sends is a signal the server
+never sees" — except here the signal wasn't even new, it just never
+actually made the trip). Fixed alongside this dispatch's own two new
+fields, same raw-evidence-field convention, GK-103's own trust-boundary
+scope (server trusts client-SENT evidence, never a client-sent VERDICT)
+untouched and unwidened. Without this fix, Fixture 7 could not have
+passed regardless of anything else in this dispatch — the server would
+have kept deriving off `null` applicability forever.
+
+### Deferred, logged not chased (C6)
+
+GK-112: the active-pool matcher itself (`api/comps.js`'s Filter 1c) is a
+pure substring match whose registry (`classifyVariantTokens`,
+`src/lib/imageSearchIdentity.js`) never recognized "Dan"/"Parent" as
+variant-taxonomy tokens at all (a creator name, not a member of that
+registry) — for `confirmedVariant="Dan Parent NYCC variant"` the entire
+match reduced to a single generic token, bare "nycc". Print-run tokens
+("LTD 5"/"LTD 50") and finish-descriptor tokens are absent from the
+registry entirely, and — more fundamentally — never populated into
+`confirmedVariant` by Vision's capture in the first place, so even a
+token-exact rewrite of the same matcher could not have distinguished the
+two books. This is the layer GK-111's authority-side fix demotes standing
+on, not corrects: GK-111 stops a wrong-population price from reaching
+READY; it cannot fix which population the price is drawn from. Needs its
+own scoping (Vision capture + a genuinely discriminative matcher design),
+explicitly out of this dispatch.
+
+### Tests
+
+`tests/grailkey-directive-ah-sold-fallback-authority.test.js`, 54/54 —
+Fixture 1 (ship-blocking, real `verifySoldComps`→`computePriceBands`
+chain reproducing the exact production numbers, PRE-AH/POST-AH), Fixture
+2 (sufficiency floor isolated, `marketStanding` stays honestly
+EXACT_CURRENT), Fixture 3 (fallback demotion isolated from sufficiency,
+many-comp pool), Fixture 3b (ship-blocking negative control — unconsumed
+fallback must not fire, the scoping proof for root cause 1), Fixture 4
+(four-way monotonicity including a demonstrated upward route — without
+which this would be a wall, not a boundary), Fixture 5 (no over-fire on
+an ordinary healthy book), Fixture 6 (AB's original lock unregressed and
+correctly discriminated from the new one), Fixture 7 (ship-blocking,
+server-side independent denial via the real `deriveLocks`/
+`deriveActionAuthority`, forged client `actionAuthority:{state:'READY'}`
+proven to have zero effect).
+
+### Regression
+
+Full 203-file sweep initially surfaced ONE unexpected regression:
+`tests/grailkey-directive-ag-22e-provenance-exemption.test.js` (AG's own
+acceptance test, shipped clean 32/32 at AG-close) started failing —
+traced directly, not assumed: AG's Fixture 1 pinned its "pre-AG" git-show
+comparison to the literal string `'HEAD'`, which correctly resolved to
+AF's commit (genuinely pre-AG) at the moment AG was written and committed,
+but silently starts resolving to AG's OWN post-fix commit the instant AG
+itself becomes HEAD — the identical "designed-to-go-stale-by-construction"
+defect already named for GK-91
+(`grailkey-directive-j-gk79a-relabel.test.js`), a SECOND, independent
+instance of the same class, not previously connected to it. Fixed forward
+in this dispatch's own commit (pinned to the real immutable SHA `7d0d434`
+instead of the moving target `'HEAD'`) rather than left failing — same
+"correcting forward" convention as `grailkey-commit-t.test.js` (AF) and
+`dispatch-42-comicvine-kill.test.js` (AE). Full sweep re-run clean after:
+19 FAIL / 3 TIMEOUT, byte-identical by name to the documented baseline
+(203 files, one new). `q140-issue-consensus-corrective` 124/0 unchanged.
+`priceBands.test.js` (7 failures) and `tests/sold-verification.test.js`
+(5 failures) re-checked individually against `src/lib/priceBands.js`'s
+real diff — same named failures, same counts, confirmed pre-existing
+(this dispatch never touched `src/lib/soldVerification.js` at all, and
+`priceBands.js`'s new code is additive, not a rewrite of anything those
+7 failures already depended on).
+
+### Pattern Library — the standing rule this finding confirms, not a new one
+
+Root cause 1 is the disease class this campaign has now named four times
+independently (GK-83/98's "measuring coherence against the wrong
+population," Dispatch 25's four intra-family instances, this one) —
+recorded here as a fifth confirmation, not a new taxonomy entry: TWO
+structurally similar evidence-relaxation mechanisms (active Filter 1c,
+sold-verify's own fallback) existed in the SAME pricing pipeline, and
+fixing the first one (AB) created no structural reason to assume the
+second was also covered — it wasn't, and nothing short of directly
+tracing every mechanism that can relax the SAME kind of evidence (not
+just the first one found) would have caught it. The Computed-Then-
+Discarded count in `docs/TICKET-REGISTRY.md` (GK-101's own entry) is now
+at its 8th instance with this dispatch's server-boundary finding (the
+listing request body silently dropping `variantApplicability`) — a NINTH,
+if the sold-fallback-to-`variantApplicability` wiring itself is counted
+separately from the request-body gap it depends on.
+
+### Handoff
+
+GK-111: CLOSED. GK-112: OPEN, logged, deferred. GK-109 remains OPEN,
+untouched by this dispatch (PC base-entry preference/year ordering is a
+different layer, explicitly out of scope, C6). Test baseline
+180/19/3/202 → 181/19/3/203 (one new file; the AG test-file regression
+described above was found and fixed in the SAME commit as this stamp,
+not left for a future dispatch to discover). Physical-book acceptance —
+rescan Sabrina, confirm MARKET STANDING reads SIMILAR_ONLY (or better, if
+the operator's real book now clears the pool cleanly), ACTION AUTHORITY
+reads REVIEW with `SOLD_VARIANT_FALLBACK_POOL` and/or `SINGLE_COMP_POOL`
+among the reason codes, Decision safe does NOT pass, and the List button
+is disabled, with year 1971/GK-109 still expected and explicitly out of
+scope — is the user's own next step, not verified by this dispatch's
+suite. Do not propose the next directive.
+
 ## Standing-rule violation record — same-commit test-baseline re-stamp
 
 The standing rule (CLAUDE.md, "Directive preflight requirement" /

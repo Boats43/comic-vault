@@ -133,6 +133,8 @@ const LOCK_CODE_TO_REASON = {
   'market-standing-none': 'NO_MARKET_EVIDENCE',
   'identity-standing-conflicted': 'IDENTITY_CONFLICT',
   'market-standing-variant-unmatched': 'VARIANT_UNMATCHED_POOL', // GrailKey Directive AB (GK-101)
+  'market-standing-sold-variant-fallback': 'SOLD_VARIANT_FALLBACK_POOL', // GrailKey Directive AH (GK-111)
+  'single-comp-pool': 'SINGLE_COMP_POOL', // GrailKey Directive AH (GK-111)
 };
 
 const lockToReasonCode = (lock) => {

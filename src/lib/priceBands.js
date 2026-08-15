@@ -601,6 +601,13 @@ function applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjust
     tier: Math.max(result.tier, 3),
     variantFallbackCapped: true,
     variantFallbackCapReason: `sold-fallback market $${result.market.toFixed(2)} exceeded active-avg×2 ($${(activeAvg * 2).toFixed(2)})`,
+    // GrailKey Directive AH (GK-111) — the cap REPLACES market with
+    // activeAvg entirely (an already MIN_POOL_FOR_OVERRIDE-gated active
+    // anchor); the fallback-sourced sold average no longer feeds the
+    // returned price at all, so any soldPoolFallbackConsumed the pre-cap
+    // `result` carried is stale and must be overridden false here, not
+    // inherited via the ...result spread above.
+    soldPoolFallbackConsumed: false,
     ...(cappedTrace && { derivationTrace: cappedTrace }),
   };
 }
@@ -826,6 +833,23 @@ export function computePriceBands({
     // side is too thin to have earned that trust.
     const soldPoolTooThinToOverride = activePoolSuspect && soldPrices.length < MIN_POOL_FOR_OVERRIDE;
 
+    // GrailKey Directive AH (GK-111) — evidence applicability custody,
+    // sold-path sibling to AB's active-path fix (GK-101). soldVerifyResult's
+    // variant fallback (verifySoldComps, src/lib/soldVerification.js) can
+    // re-admit sold comps that never matched the confirmed variant/edition
+    // at all — soldPoolIsAllVariantFallback is true when every surviving
+    // sold row is one of those re-admitted rows. That fact alone is not
+    // enough to demote authority (C5/2a): it must be SCOPED to whether THIS
+    // tier's own `market` value actually consumed the fallback-sourced sold
+    // average, not just "a fallback pool exists somewhere upstream" (the
+    // global rule this dispatch explicitly rejects — Fixture 3b). Within
+    // Tier 2, `soldPoolTooThinToOverride` is the one sub-branch where sold
+    // is demoted to a reference annotation and `market` is computed from
+    // activeAvg alone (I13: still shown, never used as pricing evidence) —
+    // every other sub-branch (blend, sold-only, sold-only-active-suspect)
+    // genuinely folds soldAvg into `market`.
+    const soldPoolFallbackConsumed = soldPoolIsAllVariantFallback && !soldPoolTooThinToOverride;
+
     const blendApplies = !activePoolSuspect && activeAvg > 0;
     let market;
     let quickBase;
@@ -861,6 +885,11 @@ export function computePriceBands({
       count: soldPrices.length + verifiedActive.length,
       tier: 2,
       variantAdjusted: variantAdjusted || false,
+      // GrailKey Directive AH (GK-111) — own-property, unconditional (same
+      // presence-aware convention AB established for variantApplicability):
+      // true only when THIS tier's market value actually consumed a
+      // variant-fallback sold pool, never merely "one existed upstream."
+      soldPoolFallbackConsumed,
       activePoolSuspect: activePoolSuspect || false,
       activePoolSuspectReason: activePoolSuspect
         ? `active avg $${activeAvg.toFixed(2)} / low $${activeLow.toFixed(2)} < 25% of sold avg $${soldAvg.toFixed(2)} / low $${soldLow.toFixed(2)}`
