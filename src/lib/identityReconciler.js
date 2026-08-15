@@ -218,19 +218,53 @@ const sortEvidence = (list) =>
 
 // Source precedence for the issue facet, highest first. Deliberately
 // SHORT and conservative (Slice 1's own contract, D1) — this does not
-// attempt to reproduce every existing writer's precedence, only the two
-// sources this dispatch's integration point ever feeds it:
-//   'family-consensus'      resolveFamilyIssueConsensus's own result,
-//                            already computed upstream (adopted/
-//                            corroborated/conflict-locked) — when present,
-//                            it is authoritative and this reconciler is
-//                            not consulted at all (see identityCore.js's
-//                            integration comment; Flash #139 safety).
-//   'first-eligible-visual'  this dispatch's new mechanism — the fallback
-//                            candidate when nothing else resolved a value.
+// attempt to reproduce every existing writer's precedence, only the
+// sources this dispatch's integration point ever feeds it.
+//
+// GrailKey Directive 2026-08-15-AK — 'family-consensus' was split into
+// two DELIBERATELY DIFFERENT-PRECEDENCE sources after a real Sabrina-
+// shaped fixture proved a single unified 'family-consensus' tier let a
+// large GENERIC population (resolveFamilyIssueConsensus's own 'adopted'
+// mode — no prior existed, a raw vote filled the gap) outrank a specific,
+// corroborated firstEligibleVisual candidate purely on member count, no
+// discriminative corroboration, no hard contradiction. The governing
+// rule this precedence table must encode: "visual decides what the
+// object is; corroboration decides how strongly to stand behind that
+// answer; population alone corroborates or contradicts, it never
+// REPLACES." A name that reads as generic "consensus" authority is
+// exactly how this policy quietly reverts in a future dispatch — the
+// split below is deliberately named after WHAT KIND of family evidence
+// it is, not merely THAT family evidence exists.
+//
+//   'family-corroborated'   resolveFamilyIssueConsensus's 'corroborated'/
+//                            'conflict-locked'/'unanimous-zero-support-
+//                            rescue' modes — each represents a genuine
+//                            relationship to an EXISTING prior value
+//                            (the family agrees with it, or a locked
+//                            contradiction preserves it verbatim — Flash
+//                            #139) — never a population vote replacing a
+//                            value that was never there to begin with.
+//                            Also covers the raw-pool zero-support
+//                            OVERRIDE mechanism (ebay.issue adopted when
+//                            Vision's own value has zero pool support) —
+//                            a separate, already load-bearing, already-
+//                            tested mechanism this split does not touch
+//                            or reclassify.
+//   'first-eligible-visual'  this dispatch's mechanism — the specific,
+//                            eligible, corroborated visual candidate.
+//   'family-population'      resolveFamilyIssueConsensus's 'adopted' mode
+//                            SPECIFICALLY — no prior existed, a family's
+//                            own raw member-count vote filled the gap.
+//                            Demoted below first-eligible-visual: a pure
+//                            population fill may still corroborate (when
+//                            it agrees) or be recorded as a disagreeing
+//                            conflict, but must not outrank a specific
+//                            candidate on count alone. Still usable as a
+//                            fallback when no first-eligible-visual
+//                            candidate exists at all.
 //   'vision'                 Vision's own asserted value, recorded as
 //                            conflict evidence when it disagrees.
-const ISSUE_SOURCE_PRECEDENCE = ['family-consensus', 'first-eligible-visual', 'vision'];
+const ISSUE_SOURCE_PRECEDENCE = ['family-corroborated', 'first-eligible-visual', 'family-population', 'vision'];
 
 // reconcileIssue — pure, deterministic. Same evidence set in, same result
 // out, regardless of call order (D1/D4).

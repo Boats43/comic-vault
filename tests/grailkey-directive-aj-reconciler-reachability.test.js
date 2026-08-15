@@ -137,9 +137,14 @@ console.log('\nGuards re-run through the reconciler (each: log fired + correct o
   const { result: identity, logs } = captureReconcileLogs(() =>
     resolveIdentity(vision, ebay, family, { ebayResultCount: 5, visualItems })
   );
-  assertTrue(logs.length >= 1, 'Flash #139: [reconcile-issue] log fired (reachable even though family-consensus wins)');
-  assertEq(logs[logs.length - 1].source, 'family-consensus', 'Flash #139: winning source is family-consensus (precedence, not erasure)');
-  assertEq(logs[logs.length - 1].authority, 'CORROBORATED', 'Flash #139: authority is CORROBORATED — family-consensus matches vision, no demotion needed');
+  assertTrue(logs.length >= 1, 'Flash #139: [reconcile-issue] log fired (reachable even though family-corroborated wins)');
+  // GrailKey Directive AK — renamed from the single 'family-consensus'
+  // tier to 'family-corroborated' specifically (conflict-locked mode: a
+  // genuine relationship to an existing prior, not a population vote
+  // replacing one — see identityReconciler.js's ISSUE_SOURCE_PRECEDENCE
+  // doc comment).
+  assertEq(logs[logs.length - 1].source, 'family-corroborated', 'Flash #139: winning source is family-corroborated (precedence, not erasure)');
+  assertEq(logs[logs.length - 1].authority, 'CORROBORATED', 'Flash #139: authority is CORROBORATED — family-corroborated matches vision, no demotion needed');
   assertEq(identity.confirmedIssue, '139', 'Flash #139: value byte-identical to the pre-AJ baseline');
   assertEq(identity.identityProvisionalFromVisualFirst, false, 'Flash #139: not demoted — the winning source is family-consensus, not first-eligible-visual');
 }

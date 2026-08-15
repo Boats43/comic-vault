@@ -9174,3 +9174,184 @@ remaining ~37 direct writers across title/year/publisher/variant/
 creator) and Slice 3 (convergence) are unstarted — this dispatch closed
 a mechanism gap inside Slice 1, it did not begin Slice 2. Do not propose
 the next directive.
+
+## GrailKey Directive 2026-08-15-AK — the population-precedence gate (GK-119)
+
+Slice 1's last policy bug: the precedence table AJ shipped to make the
+reconciler reachable was itself carrying Sabrina's original disease,
+just moved one layer down.
+
+### The question, and why it wasn't rhetorical
+
+AJ's precedence order was `family-consensus > first-eligible-visual >
+vision`. A single evidence tier named `'family-consensus'` covers every
+mode `resolveFamilyIssueConsensus` can return — including `'adopted'`,
+which fires specifically when NO prior issue existed and a family's own
+raw member-count vote filled the gap. Nothing in AJ's design asked
+whether that vote came from genuine corroboration of something already
+known, or from nothing more than "more listings said this than anything
+else." The governing rule this whole campaign operates under —
+**"visual decides what the object is; corroboration decides how
+strongly to stand behind that answer; population alone corroborates or
+contradicts, it never replaces"** — was violated by construction the
+moment `'adopted'` mode was folded into the SAME tier as `'corroborated'`
+and `'conflict-locked'`.
+
+### The fixture, and what it proved on first run
+
+A Sabrina-shaped fixture: `firstEligibleVisual` is a specific, eligible,
+title-agreeing candidate ("Sabrina Annual Spectacular #1, Dan Parent,
+NYCC, Foil"), corroborated by 3 unique rows. Competing against it: a
+LARGER, GENERIC "Sabrina the Teenage Witch" population (6 unique rows)
+that clears `resolveFamilyIssueConsensus`'s own adoption bar for "#5"
+(4/6 = 67%, clear lead over a "#12" runner-up) — no prior to compare
+against (Vision supplied no issue at all), no discriminative
+corroboration (no `opts.visionVariant` token match — the case AF's own
+GK-98 fix does NOT cover), no hard contradiction.
+
+**The fixture failed.** `[reconcile-issue] value=5 source=family-
+consensus authority=CORROBORATED justifiedBy=[{"source":"family-
+consensus","value":"5"}]` — `first-eligible-visual`'s own correct "1"
+never even entered the winner's `justifiedBy`; it lost purely on
+precedence rank, not on any evidentiary comparison. `confirmedIssue`
+resolved to `"5"` — the generic population's own vote, not the specific
+physical book actually in hand. Exactly the shape the directive
+predicted: "fourteen generic rows outranking the specific physical
+match — now with a single writer faithfully executing the wrong
+policy."
+
+### The fix: two tiers instead of one, split by WHAT KIND of evidence it is
+
+`identityCore.js` now tags family issue evidence with one of two
+differently-precedenced sources, never a single unified label:
+
+- **`'family-population'`** — `resolveFamilyIssueConsensus`'s own
+  `'adopted'` mode, identified specifically by the ABSENCE of an
+  `outcome` field (see below for why that field is the reliable
+  discriminator). A bare vote filling an empty gap. Demoted BELOW
+  `'first-eligible-visual'` — it may still corroborate (when it agrees)
+  or be recorded as a disagreeing conflict, but cannot outrank a
+  specific candidate purely on count.
+- **`'family-corroborated'`** — every mode that represents a genuine
+  relationship to an EXISTING prior: `'corroborated'` (the family agrees
+  with a present value), `'conflict-locked'` (a locked contradiction
+  that preserves the prior verbatim — Flash #139), `'unanimous-zero-
+  support-rescue'` (Dispatch 26 Fix 4 — a materially higher bar than
+  population: unanimity PLUS independent-posting verification via
+  `evaluateTitleTextIndependence`, not mere count), and the raw-pool
+  zero-support OVERRIDE mechanism (a separate, already load-bearing,
+  already-tested path this split does not touch). Keeps top precedence,
+  unconditionally outranking a disagreeing visual cluster.
+
+`ISSUE_SOURCE_PRECEDENCE` becomes `['family-corroborated',
+'first-eligible-visual', 'family-population', 'vision']`.
+
+### The regression the fix itself caused, and the discriminator that closes it
+
+The naive version of this fix — "demote every `mode==='adopted'`
+result" — broke `tests/q-trackB-commit4.3-winning-family-authority.
+test.js` on the very first regression pass. Its Spawn #351 fixture ALSO
+legacy-maps to `mode: 'adopted'` (`legacyModeFor`'s own mapping:
+`decision.outcome === 'adopted' || 'provisionally-corrected'` both
+collapse to the string `'adopted'` for backward compatibility with
+pre-Commit-4.3 consumers) — but that "adopted" means something entirely
+different: Vision's own LOW-CONFIDENCE "301" being corrected by a
+5/5-unanimous, dominance-verified family via `decideFieldAuthority`, a
+confidence-AWARE correction of an existing prior, not a bare count vote
+filling an empty gap.
+
+The two cases are structurally distinguishable: `resolveFamilyIssueConsensus`'s
+raw output (from the title-family override / refused-identity-conflict
+branches, where Sabrina's real population-only case originates) never
+carries an `outcome` field. The retention branch's `decideFieldAuthority`-
+derived result (Spawn #351's shape) always does — `outcome` and
+`authoritativeForCustody` are explicit fields on that object
+(`identityCore.js` ~line 2211). `isRawPopulationAdoption =
+familyIssueConsensusResult?.mode === 'adopted' && familyIssueConsensusResult?.outcome
+== null` is the exact, reliable test: `outcome == null` means the vote
+is genuinely bare; `outcome != null` means it already passed through a
+confidence-aware authority decision and belongs in the corroborated
+tier regardless of its legacy-mapped mode string.
+
+### A second regression, found on the SAME full sweep: demotion was asking the wrong question
+
+Fixing the tier split surfaced a second, independent bug in the SAME
+commit, on the SAME first regression pass:
+`tests/q-trackB-commit4.1-spawn-visual-family-merge.test.js`'s own live
+Spawn #351 fixture (a genuinely different fixture than
+`q-trackB-commit4.3`'s — this one exercises the title-family override
+path directly, a bare `resolveFamilyIssueConsensus` 'adopted' result
+with NO `outcome` field, i.e. exactly the `'family-population'` tier
+this dispatch demotes) failed on `identitySource`: the expected
+`'title-family-weighted-consensus'` had grown an unwanted
+`+first_eligible_visual_contested` suffix.
+
+Root cause: AJ's original demotion condition was `reconciledIssue.source
+=== 'first-eligible-visual' && vision.issue !== reconciledIssue.value`
+— it only ever asked whether VISION agreed with the winner. In Spawn
+#351's real production shape, Vision supplied no issue at all
+(`vision.issue === null`), and the family's own unanimous 5/5 vote
+("351") happens to match what `firstEligibleVisual` independently reads
+from the pool's own top row — genuine, real corroboration from a SECOND
+source (family-population), just not from Vision specifically. The old
+condition couldn't see it: `null !== "351"` is true regardless of
+whether anything else agrees, so it demoted a value that was actually
+well-corroborated.
+
+Fixed by asking the more general, more correct question: does
+`reconciledIssue.justifiedBy.length === 1`? `justifiedBy` already
+collects every corroborating entry matching the winning value,
+regardless of source — Vision, family-population, or anything future.
+Length 1 means the winner is supported ONLY by itself; length 2+ means a
+genuinely independent second source agrees, and demotion must not fire.
+This is not merely a bugfix but a better-formed version of the original
+rule: demotion was never really about "population vs. specific
+candidate" or "does Vision agree" — it has always been about "how much
+independent corroboration does the FINAL winning value actually have."
+Re-verified against every existing fixture: Detective (justifiedBy
+length 1, alone — demoted, unchanged), Venom and Fixture P1 (length 1,
+Vision's conflicting value doesn't count as agreement — demoted,
+unchanged), Fixture 7 (length 2, Vision agrees — not demoted,
+unchanged), the AK blocking fixture itself (length 1, family-population
+conflicts rather than agrees — demoted, unchanged), and this dispatch's
+own third control (a pool where every row belongs to the same generic
+family, so family-population and first-eligible-visual necessarily
+agree) — REVISED, from "still demoted" to "correctly not demoted,"
+during the same fix, once the more principled rule made clear that two
+independently-computed signals reaching the same answer IS real
+corroboration even when they trace back to the same underlying pool
+text.
+
+### Controls, beyond the blocking fixture
+
+- **Population agrees with the specific candidate** — resolves cleanly
+  to the agreed value, non-contested, no demotion side effect beyond
+  what agreement already implies.
+- **No independent candidate exists at all** (every row in the pool
+  belongs to the same generic family) — population-only evidence is
+  still usable as a fallback (never made permanently unusable), and is
+  STILL correctly flagged provisional — not because it's "population,"
+  but because the winning value has no independent corroboration at
+  all, the same "single unverified visual source" treatment Detective's
+  own AI-dispatch fixture already established. Demotion in this
+  reconciler was never really about "is this population or specific,"
+  it has always been about "does the winning value have anything
+  independent standing behind it" — this fixture just makes that
+  precise instead of assumed.
+- **The Spawn #351 class stays undemoted** — proven directly against the
+  `outcome`-field discriminator, and confirmed via the full regression
+  sweep re-passing `q-trackB-commit4.3-winning-family-authority.test.js`
+  at 266/266.
+
+### Handoff
+
+GK-119 CLOSED. GK-113/114 remain OPEN/SHIPPED — still pending Jimmy's
+physical scans, unaffected by this dispatch's own scope (it fixes a
+policy bug inside the mechanism those tickets depend on, it does not
+itself constitute physical acceptance). Flash #139 and every other
+guard (Adventure Time SDCC, Eternus #2, `zeroSupportRescueDeclined`,
+Guard 6/contamination) re-verified byte-identical to their AJ-era
+outcomes — this dispatch changed WHICH tier family evidence enters at,
+not any of the guards that decide whether it enters at all.
+`tests/grailkey-directive-ak-population-precedence.test.js`, 11/11. Do
+not propose the next directive.

@@ -2849,20 +2849,65 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // for this field) — recorded as CONFLICT evidence (visible, never
   // fallback-worthy), not corroboration.
   const visionIssueRejectedUpstream = visionIssuePresent && preReconcileConfirmedIssue == null;
-  // A genuine upstream RESOLUTION (not a bare Vision passthrough) — either
-  // confirmedIssue was actually changed from Vision's own value (an
-  // override/rescue/retention assignment fired), or a family-consensus
-  // mechanism reached a real verdict (adopted/corroborated/conflict-locked/
-  // rescue) even when that verdict happens to equal Vision's value
-  // (Flash #139: conflict-locked, value stays "139" — still a genuine
-  // family-consensus resolution, not a passthrough, and must carry
-  // 'family-consensus' precedence so a disagreeing visual cluster can
-  // never outrank it).
-  const issueHasUpstreamAuthority = preReconcileConfirmedIssue != null && (
-    String(preReconcileConfirmedIssue) !== String(vision.issue ?? '')
-    || (familyIssueConsensusResult != null
-      && ['adopted', 'corroborated', 'conflict-locked', 'unanimous-zero-support-rescue'].includes(familyIssueConsensusResult.mode))
-  );
+  // GrailKey Directive 2026-08-15-AK — a genuine upstream RESOLUTION (not
+  // a bare Vision passthrough) is tagged with ONE of two DIFFERENT-
+  // PRECEDENCE evidence sources, never a single unified "family-
+  // consensus" tier (see identityReconciler.js's own doc comment on
+  // ISSUE_SOURCE_PRECEDENCE for the full rationale — a real Sabrina-
+  // shaped fixture proved a unified tier let a large generic population
+  // outrank a specific, corroborated firstEligibleVisual candidate on
+  // member count alone):
+  //   'family-population'    resolveFamilyIssueConsensus's 'adopted' mode
+  //                           SPECIFICALLY — no prior existed, a raw
+  //                           member-count vote filled the gap. Demoted
+  //                           below first-eligible-visual: population
+  //                           alone corroborates or contradicts, it does
+  //                           not replace a specific candidate.
+  //   'family-corroborated'  every OTHER genuine resolution — a family
+  //                           mode that reached a real verdict IN
+  //                           RELATION TO AN EXISTING PRIOR
+  //                           ('corroborated' agrees with it,
+  //                           'conflict-locked' preserves it verbatim
+  //                           despite disagreement — Flash #139 — and
+  //                           'unanimous-zero-support-rescue' clears a
+  //                           materially higher independence bar than
+  //                           plain population, Dispatch 26 Fix 4) — or
+  //                           confirmedIssue was changed by a mechanism
+  //                           outside resolveFamilyIssueConsensus
+  //                           entirely (the raw-pool zero-support
+  //                           OVERRIDE, ebay.issue adopted — a separate,
+  //                           already load-bearing, already-tested
+  //                           mechanism this split does not touch or
+  //                           reclassify). Keeps top precedence,
+  //                           unconditionally outranking a disagreeing
+  //                           visual cluster.
+  // 'adopted' mode is ALSO the legacy-compatibility label the retention
+  // branch's own legacyModeFor (~line 2211) maps BOTH its 'adopted' and
+  // 'provisionally-corrected' decideFieldAuthority outcomes onto — a
+  // CONFIDENCE-AWARE correction of a low-confidence prior (Spawn #351:
+  // Vision's own low-confidence "301" corrected by a 5/5-unanimous,
+  // dominance-verified family), not a bare population vote filling an
+  // empty gap. That branch's familyIssueConsensusResult carries `outcome`/
+  // `authoritativeForCustody` fields the raw resolveFamilyIssueConsensus
+  // output (from the title-family override / refused-identity-conflict
+  // branches, where Sabrina's real population-only case actually
+  // originates) never does — `outcome == null` is the reliable signal
+  // that 'adopted' here means a bare vote with nothing to correct or
+  // confirm against, not a verified correction.
+  const isRawPopulationAdoption = familyIssueConsensusResult?.mode === 'adopted' && familyIssueConsensusResult?.outcome == null;
+  let familyIssueEvidenceSource = null;
+  if (preReconcileConfirmedIssue != null) {
+    if (isRawPopulationAdoption) {
+      familyIssueEvidenceSource = 'family-population';
+    } else if (
+      familyIssueConsensusResult != null
+      && ['adopted', 'corroborated', 'conflict-locked', 'unanimous-zero-support-rescue'].includes(familyIssueConsensusResult.mode)
+    ) {
+      familyIssueEvidenceSource = 'family-corroborated';
+    } else if (String(preReconcileConfirmedIssue) !== String(vision.issue ?? '')) {
+      familyIssueEvidenceSource = 'family-corroborated';
+    }
+  }
 
   const issueEvidence = createEvidenceSet();
   if (visionIssuePresent) {
@@ -2872,8 +2917,8 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
       addEvidence(issueEvidence, 'issue', 'vision', vision.issue);
     }
   }
-  if (issueHasUpstreamAuthority) {
-    addEvidence(issueEvidence, 'issue', 'family-consensus', preReconcileConfirmedIssue);
+  if (familyIssueEvidenceSource) {
+    addEvidence(issueEvidence, 'issue', familyIssueEvidenceSource, preReconcileConfirmedIssue);
   }
 
   // Guard 6 (contaminated family) — found on the full regression sweep
@@ -2926,11 +2971,26 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     `conflicts=${JSON.stringify(reconciledIssue.conflicts)}`
   );
 
+  // GrailKey Directive AK (found while fixing GK-119) — demotion must ask
+  // "does the winning value have ANY independent corroboration at all,"
+  // not merely "does it match Vision." The original check
+  // (`vision.issue !== reconciled.value`) missed a real case: a
+  // genuinely agreeing 'family-population' vote (e.g. Spawn #351, 5/5
+  // unanimous, Vision supplied no issue) still demoted the result purely
+  // because Vision itself was absent — even though the value was
+  // independently corroborated by the family. `justifiedBy.length === 1`
+  // means the winner has EXACTLY ONE supporting entry (itself) and
+  // nothing else — vision, family-population, or otherwise — agrees
+  // with it; that is the honest "single unverified source" shape
+  // Detective's own fixture requires demotion for. Any second agreeing
+  // entry (Fixture 7: vision agrees; Spawn #351: family-population
+  // agrees) means real, independent corroboration exists and demotion
+  // must not fire.
   let identityProvisionalFromVisualFirst = false;
   confirmedIssue = reconciledIssue.value;
   if (
     reconciledIssue.source === 'first-eligible-visual'
-    && String(vision.issue ?? '') !== String(reconciledIssue.value ?? '')
+    && reconciledIssue.justifiedBy.length === 1
   ) {
     identitySource = `${identitySource}+first_eligible_visual_contested`;
     matchConfidenceDemote = true;
