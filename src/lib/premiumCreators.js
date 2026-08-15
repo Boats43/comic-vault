@@ -98,7 +98,17 @@ export const PREMIUM_CREATORS = [
   { canonical: 'Travis Charest',     aliases: ['charest'],          tier: 'modern-premium', role: 'artist' },
   { canonical: 'Doug Mahnke',        aliases: ['mahnke'],           tier: 'modern-premium', role: 'artist' },
   { canonical: 'Jim Cheung',         aliases: ['cheung'],           tier: 'modern-premium', role: 'artist' },
-  { canonical: 'Phil Jimenez',       aliases: ['jimenez'],          tier: 'modern-premium', role: 'artist' },
+  // GrailKey Directive 2026-08-15-AI (Detective Comics #1107 class) —
+  // 'jimenez' was previously a bare, unambiguous alias resolving only to
+  // Phil Jimenez, despite Jorge Jimenez (current Batman/Detective Comics
+  // artist) being a comparably prominent DC creator sharing the same bare
+  // surname — a real production case had Vision/visual evidence say
+  // "Jorge Jimenez" and this registry silently overwrote it with "Phil
+  // Jimenez" via the surname-only alias match. Moved into the documented
+  // ambiguous-surname policy (see file header) alongside Adams/Lee/Miller:
+  // both entries now require full-name match, empty aliases.
+  { canonical: 'Phil Jimenez',       aliases: [],                   tier: 'modern-premium', role: 'artist' },
+  { canonical: 'Jorge Jimenez',      aliases: [],                   tier: 'modern-premium', role: 'artist' },
   { canonical: 'Bryan Hitch',        aliases: ['hitch'],            tier: 'modern-premium', role: 'artist' },
   { canonical: 'David Finch',        aliases: ['finch'],            tier: 'modern-premium', role: 'artist' },
   { canonical: 'Esad Ribic',         aliases: ['ribic'],            tier: 'modern-premium', role: 'artist' },

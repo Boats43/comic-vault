@@ -8770,3 +8770,215 @@ a data error, identical in shape to instance 1.
 
 The rule is not amended or softened by either instance — it remains
 "same commit," not "same push" or "same dispatch."
+
+## GrailKey Directive 2026-08-15-AI — visual-first identity authority (Slice 1)
+
+The disease this dispatch names once, structurally, instead of patching a
+fifth branch: **a physical-identity fact with two meanings and more than
+one writer.** Four earlier dispatches (AF, AB, GK-109, and this campaign's
+own PC-year class) each independently produced a variant of the same
+shape — a value computed in one place, discarded or contradicted in
+another, with no single arbiter. This dispatch is Slice 1 of a
+three-slice plan to make identity resolution single-writer and
+order-independent; it deliberately does not attempt Slices 2 or 3.
+
+### The defect, two shapes
+
+**Detective Comics #1107 (split-brain).** Vision returns "Batman #null" —
+no issue at all. The visual pool's top-ranked, most-specific result is
+"Detective Comics #1107 · Corner Box Variant · Jorge Jimenez." The
+existing top-rank-guard (`selectTitleFamilyCandidate`,
+`imageSearchIdentity.js`) requires forward token overlap between the
+candidate and Vision's own title before trusting it — "batman" shares no
+tokens with "detective comics 1107 corner box variant jorge jimenez," so
+the guard rejects it and falls through toward Vision's own (empty) value.
+`confirmedIssue` stays null. Separately, `api/comps.js`'s own `issueNum`
+derivation (`issue ? String(issue).trim() : extractIssueNumber(title)`)
+re-parses the SAME "#1107" straight out of `confirmedTitle`'s raw text
+(which `sanitizeSeriesTitle` never strips issue tokens from) and uses it
+to build the comp-search query and `evidenceTarget.issue` — the pipeline
+searches the market for #1107 while telling the operator the issue is
+unknown. Two genuinely separate variables (`confirmedIssue`,
+`issueNum`), not one read twice — confirmed by direct trace, not
+assumed.
+
+**Venom (value vs. authority false binary).** Vision reads "Venom:
+Separation Anxiety #3." The raw pool has zero support for "#3" (8
+distinct issue numbers extracted across 20 rows, best agreement 30%) and
+no adoptable pool-wide alternate — the existing vision-zero-support
+ESCALATE branch (`identityCore.js`) correctly does what it was built to
+do: null `confirmedIssue`, force `ID_REQUIRED`. But the top-ranked visual
+result plainly says "Venom Separation Anxiety #1 · Trade Variant Cover."
+Erasing it to null throws away real evidence (I13); silently adopting
+"#1" as confirmed would repeat the Flash #139 mistake in reverse
+(confident and possibly wrong). Neither answer is correct — the right
+answer is a THIRD state this pipeline had no vocabulary for: adopt the
+value, demote the authority.
+
+### The fix — eligibility, then a narrow, guarded gap-fill
+
+`src/lib/identityReconciler.js` (new file) provides two independent
+pieces, both deliberately general enough to outlive this one dispatch:
+
+1. **Eligibility filtering** (`isEligibleVisualRow`,
+   `selectFirstEligibleVisual`) — a lot/bundle listing or a seller
+   "variation group" placeholder ("Sabrina the Teenage Witch comics
+   select an issue," a picker with no single book identity) is excluded
+   from candidacy BEFORE any rank or weight-based selection runs, not
+   filtered after. Wired into `selectTitleFamilyCandidate`
+   (`imageSearchIdentity.js`) by filtering `scored` (the ranked family
+   list) the moment it's built — `families: scored` downstream, `topFamily
+   = scored[0]`, `item0Family = scored.find(...)`, everything else in the
+   function is unchanged, now simply operating on the eligibility-filtered
+   list. Index numbering into the original `items` array is untouched —
+   whole families are removed from candidacy, nothing is renumbered, so
+   every consumer of `family.indices` downstream keeps working unmodified.
+   Text-pattern heuristic, not structural (GK-115) — eBay's Browse API
+   `itemGroupType`/`SELLER_DEFINED_VARIATIONS` marker is never captured
+   anywhere in this codebase's parsed visual-pool rows (grep-confirmed
+   zero hits across `api/enrich.js`/`api/comps.js`/`imageSearchIdentity.js`),
+   so a normal variant cover cannot always be distinguished from a
+   variation-group placeholder by text alone — logged as its own gap, not
+   fixed here.
+
+2. **A Slice-1-scoped evidence/reconcile API**, issue facet only —
+   `createEvidenceSet`/`addEvidence`/`proposeRefinement`/`reportConflict`
+   (write evidence, never canonical state) and `reconcileIssue` (the
+   pure, deterministic derivation — same evidence set in, same result out,
+   regardless of call order; D1/D4). This is genuinely new machinery, but
+   Slice 1 wires it into exactly ONE integration point:
+   `resolveIdentity`'s new last-resort branch (`identityCore.js`), placed
+   after every existing family-consensus/vision-zero-support branch. It
+   fires only when `confirmedIssue` is STILL null after everything else
+   has run — meaning it is structurally a no-op for every case an
+   existing mechanism already resolved, including Flash #139's
+   `conflict-locked` mode (which leaves `confirmedIssue` non-null by
+   construction). Title/year/publisher/variant/creator keep their
+   existing ~37 direct writers untouched this dispatch — Slice 2's job,
+   not invented here.
+
+### Five guards, all found regression-testing against this codebase's own existing fixtures
+
+A naive "adopt the first eligible visual row's issue whenever nothing
+else did" over-fired on four different pre-existing, deliberately-encoded
+"honest null" precedents before converging on the following:
+
+1. **No-new-information** — if the candidate's issue equals the value
+   Vision already asserted (the value the raw-pool zero-support check
+   JUST rejected for lack of support), adopting it back is not
+   corroboration, it's the same unsupported number restated
+   (`tests/q140-at-vision-zero-support-skip.test.js`, "Test 5b":
+   vision.issue="1", zero raw-pool support, first eligible visual row
+   also reads "#1").
+2. **Respect an already-considered margin decline** —
+   `isNearMissMarginDecline`/`isNearMissConflictActive` mean a family WAS
+   evaluated against the real adoption bar and explicitly fell short
+   (`tests/q140-coherent-content-token-lane.test.js`'s Adventure Time
+   Summer Special/SDCC near-miss: topFamily weightSum 14 vs required 15
+   — this codebase's own named, repeated "honest null" ruling, not a gap
+   to route around).
+3. **Marketing-flavored single row** — a narrowed keyword filter
+   (`isMarketingFlavoredRow`, `anniversary|special|collector|limited|
+   exclusive` — deliberately WITHOUT "variant," which merely describes a
+   cover print and does not cast doubt on the issue number the way a
+   renumbered-one-shot signal does) rejects a lone row whose "#N" sits
+   next to marketing language, matching the same Adventure Time
+   precedent. Excluding "variant" specifically was required to keep
+   Venom's own "Trade Variant Cover" row eligible.
+4. **Minimum corroboration floor** (`countCorroboratingEligibleRows`,
+   `MINIMUM_CORROBORATING_ROWS = 3`) — the SAME >=3-unique-row floor
+   `resolveFamilyIssueConsensus` already enforces everywhere else in this
+   codebase (`tests/q131-refused-identity-conflict-provisional.test.js`'s
+   Eternus #2 fixture: even 2 unique rows at 100% self-agreement stays
+   below the floor). A flat count, not a percentage of the total pool —
+   a large pool full of unrelated eligible rows (TPB listings, apparel)
+   diluting a ratio would make a genuinely strong candidate artificially
+   harder to adopt as pool size grows. This guard alone also resolved
+   `tests/q-trackB-commit4.3-winning-family-authority.test.js`'s "CONTROL
+   E" (Quux Anthology) fixture without needing to treat it as an accepted
+   behavioral delta — a pool of 3 identical duplicate rows dedupes to 1
+   unique row, below the floor.
+5. **Respect an already-considered rescue decline** — the SAME "already
+   evaluated and declined" principle as guard 2, applied to Dispatch 26
+   Fix 4's unanimous-zero-support-rescue mechanism specifically. Found on
+   the FIRST full regression sweep (not caught by unit-level testing
+   against the four fixtures above): `zeroSupportRescueDeclined`, hoisted
+   to function scope and set whenever that mechanism's own `if` condition
+   is entered but `rescueEligible` is false, gates the new branch — two
+   of `tests/grailkey-dispatch-26-fix4-zero-support-rescue.test.js`'s own
+   control fixtures require ESCALATE to stand unmodified when that
+   mechanism evaluates and declines (weightSum too thin; title collapsed
+   to one cluster).
+
+Only guard 5 was found by the full sweep rather than by direct fixture
+construction — recorded here as a reminder that a family of related
+"already decided, don't second-guess" mechanisms in one file is easy to
+enumerate incompletely by inspection alone; the sweep is what catches the
+member you missed.
+
+### Authority demotion — no new mechanism
+
+`identityProvisionalFromVisualFirst` (the new branch's own output flag)
+is consumed by `api/enrich.js` to set `out.identityProvisional = true` +
+`out.listingHardLocked = true` + `out.listingHardLockReason =
+'identity-unresolved'` — the EXACT mechanism Q133 Slice 2 already
+established for a different provisional-identity shape.
+`deriveIdentityStanding` (`src/lib/actionAuthority.js`) already reads
+`out.identityProvisional === true` as `CONFLICTED`, never `CONFIRMED`;
+`deriveActionAuthority` already cannot reach `READY` off a non-CONFIRMED
+`identityStanding` — verified directly (Fixture 4B: `identityProvisional:
+true` + an EXACT_CURRENT-tier `pricingSource` still derives
+`actionAuthority.state: REVIEW`, never `READY`). No change to
+`actionAuthority.js` itself. The operator-facing detail text
+(`out.listingHardLockBanner`, naming both numbers when Vision asserted
+one) reaches the card through the equally pre-existing `deriveLocks`
+mechanism (`responseContract.js:142-153`, `out.listingHardLocked` →
+`contract.locks[].reason` → rendered generically at
+`item.contract.locks?.[0]?.reason`, `src/App.jsx`) — no client-side
+render code needed at all.
+
+### Creator registry gap (GK-114) and the shared 999 cap (GK-116)
+
+Detective Comics' own fixture required a second, independent fix: the
+card's "CREATOR CREDITS" section (`item.creatorFromComps`, driven by
+`extractCreatorsFromComps`, `src/lib/premiumCreators.js`) resolved bare
+"jimenez" unconditionally to Phil Jimenez even when the pool/visual text
+carried the full, different name "Jorge Jimenez" — never added to the
+file's own documented ambiguous-surname set (Adams/Lee/Miller/Wood/
+Davis/Ross) despite qualifying by the same standard (two real,
+comparably-prominent creators sharing one bare surname). Fixed by
+splitting into two full-name-only entries — the registry gap was the
+entire defect; `extractCreatorsFromComps` itself needed no change.
+
+Building the fix also surfaced `extractIssueCandidate`'s (`identityCore.js`)
+shared 999 cap on both its hash- and bare-number branches — Detective
+Comics' real #1107 (DC's restored legacy numbering, reached #1107 by
+2022) would silently fail to extract through the function every OTHER
+consumer in this codebase relies on, including `resolveFamilyIssueConsensus`
+itself. Not widened at the shared site (19+ dependent test files, unknown
+blast radius on the bare-number branch's year-collision guards,
+deliberately out of scope) — this dispatch's new mechanism uses a
+separate, narrow, hash-prefixed-only, uncapped extractor
+(`extractHashIssueNumber`) instead. Logged as GK-116 for a future
+dispatch to widen the shared function properly.
+
+### Handoff
+
+GK-113/114 CLOSED. GK-115 OPEN (partial — text-heuristic shipped,
+structural `itemGroupType` capture not). GK-116 OPEN, logged, deferred.
+GK-98/109/112 remain explicitly untouched, per this dispatch's own
+non-goals. Test baseline 181/19/3/203 → 182/19/3/204 (one new file; a
+real regression the first full sweep surfaced — guard 5 above — was
+found and fixed in the SAME commit as this stamp, not left for a future
+dispatch to discover, matching the standing same-commit rule this
+campaign has twice violated before). Physical-book acceptance (per the
+directive: Detective Comics, Sabrina, Dell'Otto, Venom, one scan each, no
+correction) is the user's own next step, not verified by this dispatch's
+suite — this dispatch's own test file exercises `resolveIdentity`/
+`selectTitleFamilyCandidate`/the reconciler directly, not the full
+`/api/enrich` HTTP handler end to end. Dell'Otto (Fixture 3) is
+explicitly OUT of this dispatch's scope — variant-facet resolution has
+its own ~6 direct writers, not traced or touched here; Vision's guessed
+variant will still win over visual/slab-label evidence until a future
+dispatch extends this same eligibility+evidence approach to the variant
+facet. Do not propose the next directive.

@@ -24,6 +24,7 @@
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
 import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate, resolveFamilyYearConsensus, resolveFamilyIssueConsensus, isIssueZeroSupport } from './identityCore.js';
+import { isEligibleVisualRow } from './identityReconciler.js';
 import { ARTIST_PATTERNS, ARTIST_FAMILY_STRIP_EXCEPTIONS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms, NON_GENUINE_COPY_RE, LOT_RE, REPRINT_RE, SLAB_RE, GRADED_RE, SIGNED_RE, TPB_MARKER_RE, extractArtist, hasContaminatedMember, isCompetingFamilyTooStrong, FAMILY_OVERRIDE_DECISIONS } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
@@ -2322,9 +2323,9 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   // touched existing branch. A pool with no qualifying fragmentation
   // returns `scoredRaw` completely unchanged (see the function's own
   // no-op guarantee).
-  const scored = mergeFragmentedTitleFamilies(scoredRaw, items);
+  const scoredAll = mergeFragmentedTitleFamilies(scoredRaw, items);
 
-  if (scored.length === 0) {
+  if (scoredAll.length === 0) {
     return {
       decision: 'refused-identity-conflict',
       selectedTitle: null,
@@ -2333,6 +2334,33 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
       topFamily: null,
       runnerUp: null,
       families: [],
+    };
+  }
+
+  // GrailKey Directive 2026-08-15-AI, Rule 1 / C1 — eligibility precedes
+  // rank. Strip families whose representative row is not a single
+  // physical-book identity (lot/bundle listing, or a seller "variation
+  // group" placeholder like "Sabrina the Teenage Witch comics select an
+  // issue") BEFORE any rank/weight-based selection logic below runs, so an
+  // ineligible listing can never win top-rank-protection OR
+  // weighted-consensus purely by occupying rank 0 or having the largest
+  // raw cluster (GK-115). Index numbering into `items` is untouched — this
+  // only removes whole families from candidacy, never renumbers anything,
+  // so every downstream consumer of `family.indices` (resolveIdentity,
+  // resolveFamilyIssueConsensus, buildFamilyEvidenceRows, etc.) keeps
+  // working against the same original `items` array unchanged.
+  const scored = scoredAll.filter((f) => isEligibleVisualRow(f.rawTitle));
+
+  if (scored.length === 0) {
+    console.log('[eligibility] all candidate families were ineligible (lot/bundle/variation-group) — falling back to Vision');
+    return {
+      decision: 'refused-identity-conflict',
+      selectedTitle: null,
+      rawTitle: null,
+      reason: 'No eligible title families (all candidates were lot/bundle/variation-group listings)',
+      topFamily: null,
+      runnerUp: null,
+      families: scoredAll,
     };
   }
 

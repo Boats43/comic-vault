@@ -3450,8 +3450,39 @@ export default async function handler(req, res) {
             ? `Vision read issue #${identity.visionZeroSupport.visionIssue}, but the comp pool shows zero support for that number — corrected to #${identity.visionZeroSupport.adoptedIssue}. Please verify.`
             : identity.visionZeroSupport.mode === 'rescue'
             ? `Vision read issue #${identity.visionZeroSupport.visionIssue}, but neither the comp pool nor the matching listings support it — corrected to #${identity.visionZeroSupport.adoptedIssue} from a unanimous, independently-worded group of listings. Please verify.`
+            // GrailKey Directive 2026-08-15-AI — 'visual-first-contested':
+            // no erasure this time (contrast the plain 'escalate' mode
+            // below) — the first eligible visual row's own issue is
+            // adopted as a CANDIDATE. Wording names both numbers when
+            // Vision asserted one (Venom class); names only the adopted
+            // number when Vision supplied none at all (Detective class).
+            : identity.visionZeroSupport.mode === 'visual-first-contested'
+            ? (identity.visionZeroSupport.visionIssue != null
+                ? `Vision read issue #${identity.visionZeroSupport.visionIssue}, but the comp pool doesn't support it — the top matching listing suggests #${identity.visionZeroSupport.adoptedIssue} instead. Neither is confirmed — please verify.`
+                : `Vision could not read an issue number — the top matching listing suggests #${identity.visionZeroSupport.adoptedIssue}. Not confirmed — please verify.`)
             : `Vision read issue #${identity.visionZeroSupport.visionIssue}, but the comp pool shows zero support and no adoptable alternate — identity requires manual verification.`,
         };
+      }
+
+      // GrailKey Directive 2026-08-15-AI (D3, C2) — a visual-first-adopted
+      // issue is a CANDIDATE, never confirmed identity. Reuses the SAME
+      // out.identityProvisional + out.listingHardLocked mechanism Q133
+      // Slice 2 already established (src/lib/actionAuthority.js's
+      // deriveIdentityStanding already reads out.identityProvisional===true
+      // as CONFLICTED, never CONFIRMED — so actionAuthority.state cannot
+      // reach READY off this alone) rather than inventing a parallel lock.
+      // Deliberately does not force listingHardLockReason down the
+      // ID_REQUIRED/'identity-unresolved' hard-wall path any further than
+      // that existing reason string already does — the operator can still
+      // reach the correction form (GK-99/Directive AD reachability),
+      // exactly as the directive's own acceptance criteria requires.
+      if (identity.identityProvisionalFromVisualFirst === true) {
+        out.identityProvisional = true;
+        out.listingHardLocked = true;
+        out.listingHardLockReason = 'identity-unresolved';
+        out.listingHardLockBanner = identity.visionZeroSupport?.visionIssue != null
+          ? `Issue is contested: AI read #${identity.visionZeroSupport.visionIssue}, top visual match suggests #${identity.visionZeroSupport.adoptedIssue} — verify before listing`
+          : `Issue not confirmed by AI — top visual match suggests #${identity.visionZeroSupport?.adoptedIssue} — verify before listing`;
       }
 
       // Q-FIX-B — same surfacing for the new publisher zero-support check.

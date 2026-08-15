@@ -24,6 +24,7 @@ import { normalizeOptionalYear } from './yearEvidence.js';
 // compHygiene.js/responseContract.js/yearEvidence.js, none of which import
 // identityCore.js.
 import { evaluateUnanimousConsensusPromotion, evaluateUnanimousYearConsensusPromotion, evaluateTitleTextIndependence } from './issueAuthority.js';
+import { selectFirstEligibleVisual, extractHashIssueNumber, isMarketingFlavoredRow, countCorroboratingEligibleRows, MINIMUM_CORROBORATING_ROWS } from './identityReconciler.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
 // source of truth for "publisher name is legitimately PART of the series
@@ -1821,6 +1822,16 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   let identityEscalation = null;
   let matchConfidenceDemote = false;
   let visionZeroSupport = null;
+  // GrailKey Directive 2026-08-15-AI — hoisted so the new visual-first
+  // gap-fill branch (near the end of this function) can tell whether the
+  // zero-support-unanimous-rescue mechanism (Dispatch 26 Fix 4, below)
+  // was specifically EVALUATED for this book and explicitly DECLINED
+  // (weightSum too thin, title collapsed to one cluster, etc.) — a
+  // considered "no" that mechanism already made, which the new branch
+  // must respect rather than second-guess (same shape as the
+  // isNearMissMarginDecline/isNearMissConflictActive guards it already
+  // honors).
+  let zeroSupportRescueDeclined = false;
 
   // Ship 26.2 — Family candidate overrides when top-rank-protection or
   // weighted-consensus selected. Takes precedence over visualConsensus
@@ -2357,6 +2368,8 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
           poolTotal: ebay?.agreement?.total ?? null,
         };
         identitySource = `${identitySource}+zero_support_unanimous_rescue`;
+      } else {
+        zeroSupportRescueDeclined = true;
       }
     }
 
@@ -2768,6 +2781,135 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     }
   }
 
+  // GrailKey Directive 2026-08-15-AI (Rule 4/5, C1-C4, D3) — the residual
+  // gap every branch above leaves: nothing filled confirmedIssue at all.
+  // Covers BOTH split-brain shapes the directive traced:
+  //   - Detective Comics class: Vision supplied no issue at all
+  //     (vision.issue null) and no family/consensus branch above produced
+  //     one either — the vision-zero-support block above is gated on
+  //     `vision.issue != null` and never even runs for this shape.
+  //   - Venom class: Vision's issue WAS present ("#3") but the
+  //     vision-zero-support ESCALATE branch above just nulled it (no
+  //     raw-pool alternate reached ebay.issue's own consensus bar).
+  // Deliberately placed LAST, after every existing family-consensus/
+  // vision-zero-support branch — Flash #139's 'conflict-locked' mode
+  // (resolveFamilyIssueConsensus, untouched above) already leaves
+  // confirmedIssue = '139' non-null by the time execution reaches here,
+  // so this branch is structurally a no-op for that fixture and every
+  // other case an existing branch already resolved (C4 / no-over-fire).
+  //
+  // Reuses selectFirstEligibleVisual (identityReconciler.js — the same
+  // eligibility filter selectTitleFamilyCandidate now runs upstream) so a
+  // lot/variation-group placeholder row can't become an issue candidate
+  // here either.
+  //
+  // The adopted value is a CANDIDATE, not confirmed identity (D3): it may
+  // drive further research (comp search, catalog lookup) but must not
+  // read as strong identity downstream. `identityProvisionalFromVisualFirst`
+  // below is consumed by api/enrich.js to set the SAME out.identityProvisional
+  // + out.listingHardLocked mechanism Q133 Slice 2 already established
+  // (src/lib/actionAuthority.js's deriveIdentityStanding already treats
+  // out.identityProvisional===true as CONFLICTED, never CONFIRMED) — no
+  // new downstream authority mechanism invented, per this dispatch's own
+  // Task 1 recommendation to extend existing machinery.
+  //
+  // identityEscalation is explicitly RESET to null when this fires — the
+  // Q-ADV397 invariant this codebase already fixed once ("confirmedIssue
+  // is null exactly when resolveIdentity's zero-support check escalated")
+  // must hold in both directions: confirmedIssue is no longer null here,
+  // so identityEscalation must not still claim ID_REQUIRED (that exact
+  // shape — an escalation flag alongside a populated issue — is the
+  // "confidently wrong, not missing" bug Q-ADV397 fixed; reintroducing it
+  // here for a different reason would be the same defect again).
+  // Two guards found while regression-testing against this codebase's own
+  // existing near-miss/thin-family fixtures — without them this branch
+  // over-fires on cases that are NOT the split-brain shape it exists to
+  // fix:
+  //   Guard 1 (no-new-information) — if the candidate's issue is the SAME
+  //   value Vision already asserted (the value the raw-pool zero-support
+  //   check JUST rejected for lack of support), adopting it back is not
+  //   new evidence — it is the identical weak signal restated. Real
+  //   production shape this guards (tests/q140-at-vision-zero-support-
+  //   skip.test.js, "Test 5b"): vision.issue="1", zero raw-pool support,
+  //   and the first eligible visual row also happens to read "#1" — that
+  //   is not corroboration, it's the same unsupported number.
+  //   Guard 2 (respect an already-considered decline) — isNearMissMarginDecline
+  //   / isNearMissConflictActive mean a family WAS evaluated against the
+  //   real adoption bar and explicitly fell short (margin miss) — a
+  //   deliberate, considered "honest null" this codebase has repeatedly
+  //   ruled correct (tests/q140-coherent-content-token-lane.test.js, the
+  //   Adventure Time Summer Special/SDCC near-miss: topFamily weightSum
+  //   14 vs required 15 — "not the wrong pool-wide vote, not a fabricated
+  //   guess either"). A crude single-row grab must not second-guess a
+  //   decision that already looked at this exact family and said no.
+  //   Guard 3 (marketing-flavored single row, below via isMarketingFlavoredRow)
+  //   and Guard 4 (minimum corroboration floor, below via
+  //   countCorroboratingEligibleRows/MINIMUM_CORROBORATING_ROWS) apply to
+  //   the candidate ITSELF, not the family/rescue machinery — see each
+  //   helper's own doc comment (identityReconciler.js) for the fixtures
+  //   that required them (Adventure Time Summer Special/SDCC; Eternus #2).
+  //   Guard 5 (zeroSupportRescueDeclined, hoisted above) — the SAME
+  //   "respect an already-considered decline" principle as Guard 2,
+  //   applied to Dispatch 26 Fix 4's unanimous-zero-support-rescue
+  //   mechanism specifically (tests/grailkey-dispatch-26-fix4-zero-
+  //   support-rescue.test.js — two of its own control fixtures explicitly
+  //   require ESCALATE to stand unmodified when that mechanism evaluates
+  //   and declines).
+  let identityProvisionalFromVisualFirst = false;
+  if (confirmedIssue == null && !isGraded && !isNearMissMarginDecline && !isNearMissConflictActive && !zeroSupportRescueDeclined) {
+    const firstEligible = selectFirstEligibleVisual(opts.visualItems);
+    // extractHashIssueNumber first (GK-116 — uncapped, handles legacy
+    // numbering like Detective Comics #1107 that extractIssueCandidate's
+    // shared 999 cap would silently drop); extractIssueCandidate as a
+    // fallback for the rare eligible row with no "#N" token at all.
+    const candidate = firstEligible
+      ? (extractHashIssueNumber(firstEligible.rawTitle) || extractIssueCandidate(firstEligible.rawTitle))
+      : null;
+    // Guard 3 (marketing-flavored single row) — see isMarketingFlavoredRow's
+    // own doc comment (identityReconciler.js). A lone row whose "#N" sits
+    // next to anniversary/special/exclusive/collector/limited language is
+    // not trustworthy on its own (Adventure Time Summer Special/SDCC
+    // class) — this codebase's own repeated, named "honest null" ruling
+    // for exactly that shape. "variant" is deliberately excluded from
+    // this check (Venom's "Trade Variant Cover" must still qualify).
+    const isMarketingFlavored = firstEligible ? isMarketingFlavoredRow(firstEligible.rawTitle) : false;
+    // Guard 4 (minimum corroboration floor) — see countCorroboratingEligibleRows'
+    // own doc comment. A single eligible row (or two) is exactly the
+    // "too little evidence" shape tests/q131-refused-identity-conflict-
+    // provisional.test.js's Eternus fixture already rules must stay null
+    // — this dispatch's mechanism must not adopt on less evidence than
+    // the rest of the codebase already requires.
+    const corroboratingRows = candidate?.issue != null
+      ? countCorroboratingEligibleRows(
+          opts.visualItems,
+          candidate.issue,
+          (rawTitle) => extractHashIssueNumber(rawTitle) || extractIssueCandidate(rawTitle)
+        )
+      : 0;
+    if (
+      candidate?.issue != null
+      && String(candidate.issue) !== String(vision.issue ?? '')
+      && !isMarketingFlavored
+      && corroboratingRows >= MINIMUM_CORROBORATING_ROWS
+    ) {
+      confirmedIssue = candidate.issue;
+      identitySource = `${identitySource}+first_eligible_visual_contested`;
+      matchConfidenceDemote = true;
+      identityEscalation = null;
+      identityProvisionalFromVisualFirst = true;
+      visionZeroSupport = {
+        mode: 'visual-first-contested',
+        visionIssue: vision.issue ?? null,
+        adoptedIssue: candidate.issue,
+        poolTotal: opts.ebayResultCount || null,
+      };
+      console.log(
+        `[first-eligible-visual] adopting issue="${candidate.issue}" from first eligible visual row ` +
+        `("${firstEligible.rawTitle}") — Vision issue was ${vision.issue == null ? 'absent' : `"${vision.issue}" (rejected upstream)`} — CONTESTED, not confirmed`
+      );
+    }
+  }
+
   // Sanitize confirmedTitle to canonical series name for comp matching
   const sanitizedTitle = sanitizeSeriesTitle(confirmedTitle);
 
@@ -2783,6 +2925,7 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     visionZeroSupport,
     visionPublisherZeroSupport,
     isProvisionalOverride,
+    identityProvisionalFromVisualFirst,
     familyIssueConsensus: familyIssueConsensusResult,
     // Track B Phase 0, Commit 4.1
     familyYearConsensus: familyYearConsensusResult,
