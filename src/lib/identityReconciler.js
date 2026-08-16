@@ -328,3 +328,175 @@ export const reconcileIssue = (evidenceSet) => {
 export const reconcileIdentity = (evidenceSet) => ({
   issue: reconcileIssue(evidenceSet),
 });
+
+// ── Variant facet (GrailKey Directive 2026-08-16-AL continuation, 4a) ──
+//
+// GOVERNING MODEL: VALUE != AUTHORITY. first-eligible-visual supplies the
+// physical variant candidate; Vision alone is evidence only and cannot
+// establish the canonical value by itself; Vision (or any other non-
+// sole-authority source) gains canonical standing only with independent,
+// applicable corroboration from a DIFFERENT source; a disagreement stays
+// conflict evidence forever, never adopted, never erased.
+//
+// Unlike the issue facet (where raw values are already canonical 4-5
+// digit numbers, directly string-comparable), variant text is free-form
+// — two entries can describe the SAME physical attribute without matching
+// string-for-string ("Mike Mayhew Virgin" vs "Mayhew"). This module stays
+// extraction-agnostic (same convention countCorroboratingEligibleRows
+// already established above for `extractIssue`) — `valuesAgree` is an
+// INJECTED pure comparator, not something this file computes itself. This
+// is deliberate, not merely stylistic: imageSearchIdentity.js (the module
+// that owns the richest variant-taxonomy classifier) already imports THIS
+// file for `isEligibleVisualRow` — importing anything variant-domain-
+// specific back from imageSearchIdentity.js here would be a genuine
+// import cycle. The default comparator (exact, case-insensitive string
+// equality) is intentionally dumb; real callers (identityCore.js's
+// reconcileVariantFacet) inject a creator-registry/variant-taxonomy-aware
+// comparator built from modules that are safe for THEM to import.
+const defaultValuesAgree = (a, b) =>
+  a != null && b != null && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+// Sources that may win outright without needing independent agreement
+// from a second source — each already represents a genuine, independent
+// verification/corroboration mechanism (physical visual evidence, an
+// explicit operator correction, a CGC cert lookup, a real eBay pool
+// consensus), never a bare, unverified claim. 'vision' (and any other
+// source not listed here — edition-warning text, promoted title residue,
+// family/publisher routing) is deliberately NOT sole-authority: those
+// still require a second, independent source agreeing on the same value
+// to be adopted as canonical (the directive's "Vision alone... cannot
+// establish canonical value" rule). Order is precedence among sole-
+// authority sources when more than one is present and they disagree.
+const VARIANT_SOLE_AUTHORITY_PRECEDENCE = ['user', 'first-eligible-visual', 'cgc_cert', 'ebay_image_consensus'];
+
+// reconcileVariant — pure, deterministic, mirrors reconcileIssue's shape
+// (value/source/authority/justifiedBy/conflicts). Same D1/D4 guarantees:
+// same evidence set in, same result out, regardless of call order.
+export const reconcileVariant = (evidenceSet, valuesAgree = defaultValuesAgree) => {
+  const entries = sortEvidence(evidenceSet?.variant || []);
+  const corroborations = entries.filter((e) => e.type !== 'conflict');
+  const conflicts = entries.filter((e) => e.type === 'conflict');
+
+  if (corroborations.length === 0) {
+    return {
+      value: null,
+      source: null,
+      authority: 'NONE',
+      justifiedBy: [],
+      conflicts: conflicts.map((c) => ({ source: c.source, value: c.value })),
+    };
+  }
+
+  let winner = null;
+  for (const src of VARIANT_SOLE_AUTHORITY_PRECEDENCE) {
+    winner = corroborations.find((e) => e.source === src);
+    if (winner) break;
+  }
+
+  // No sole-authority source present. A non-sole-authority claim (e.g.
+  // bare 'vision') can still be adopted, but only when a DIFFERENT source
+  // independently agrees with it on the same value — a bare, uncorrobo-
+  // rated claim is never winnable on its own under this branch.
+  if (!winner) {
+    for (const candidate of corroborations) {
+      const agreeing = corroborations.filter(
+        (e) => e !== candidate && e.source !== candidate.source && valuesAgree(e.value, candidate.value)
+      );
+      if (agreeing.length > 0) { winner = candidate; break; }
+    }
+  }
+
+  if (!winner) {
+    // Every corroboration is a lone, uncorroborated claim — nothing wins.
+    // Facet stays unresolved; every claim remains visible as evidence,
+    // none of them promoted to canonical (C1/C3: never hidden, never
+    // adopted without standing).
+    return {
+      value: null,
+      source: null,
+      authority: 'NONE',
+      justifiedBy: [],
+      conflicts: [
+        ...conflicts.map((c) => ({ source: c.source, value: c.value })),
+        ...corroborations.map((e) => ({ source: e.source, value: e.value })),
+      ],
+    };
+  }
+
+  const disagreeingConflicts = conflicts.filter((c) => !valuesAgree(c.value, winner.value));
+  const disagreeingCorroborations = corroborations.filter(
+    (e) => e !== winner && !valuesAgree(e.value, winner.value)
+  );
+  const isContested = disagreeingConflicts.length > 0 || disagreeingCorroborations.length > 0;
+
+  return {
+    value: winner.value,
+    source: winner.source,
+    authority: isContested ? 'CONTESTED' : 'CORROBORATED',
+    justifiedBy: corroborations
+      .filter((e) => e === winner || valuesAgree(e.value, winner.value))
+      .map((e) => ({ source: e.source, value: e.value })),
+    conflicts: [
+      ...disagreeingConflicts.map((c) => ({ source: c.source, value: c.value })),
+      ...disagreeingCorroborations.map((e) => ({ source: e.source, value: e.value })),
+    ],
+  };
+};
+
+// ── Physical year facet (GrailKey Directive 2026-08-16-AL continuation, 4e) ──
+//
+// Separates three things Directive AL's trace found conflated into one at
+// the N2 re-anchor site: a PHYSICAL year candidate (from the first
+// eligible visual row's own raw title, when explicit — independent of
+// any catalog match), a CATALOG year candidate (the selected PC anchor's
+// own `year` field — a reference/corroboration signal, never itself
+// physical-book authority), and the derived year AUTHORITY. A catalog
+// candidate must never silently become the physical-year value merely
+// because it is the only value a downstream re-anchor step happens to
+// have on hand (the Sabrina production bug: N2 re-anchored to a genuinely
+// correct 2022 variant candidate, then let that candidate's own catalog
+// year become "confirmedYear" outright, discarding the operator's own
+// book's real 2024 cover date that was sitting right there in the visual
+// pool the whole time).
+//
+// extractFirstEligibleYearCandidate — companion to extractHashIssueNumber
+// above (same file, same "first, not best" discipline: the FIRST plausible
+// year token in the row's own raw text, never ranked/scored across
+// candidates). Bounded to a realistic comic-publication range (1930-2039)
+// so an unrelated 4-digit number (a price, a print-run count, a grade-
+// adjacent number) isn't misread as a year.
+export const extractFirstEligibleYearCandidate = (rawTitle) => {
+  const text = String(rawTitle || '');
+  const m = text.match(/\b(19[3-9]\d|20[0-3]\d)\b/);
+  return m ? m[1] : null;
+};
+
+// reconcilePhysicalYear — pure. Returns { value, source, authority,
+// catalogYear, contested }.
+//   authority: 'NONE' | 'CATALOG_ONLY' | 'CONTESTED' | 'CORROBORATED'
+//   CATALOG_ONLY: no physical candidate exists at all — the catalog year
+//     is returned as a usable, but explicitly non-physical-corroborated,
+//     value (never silently promoted to CORROBORATED) so callers aren't
+//     forced into an outright null when it is genuinely the only signal
+//     available. Callers requiring physical confirmation before granting
+//     exact-match trust must check authority === 'CORROBORATED' — a
+//     CATALOG_ONLY year is a reference, not a confirmed physical fact.
+export const reconcilePhysicalYear = (physicalYearCandidate, catalogYearCandidate) => {
+  const physical = physicalYearCandidate != null ? String(physicalYearCandidate) : null;
+  const catalog = catalogYearCandidate != null ? String(catalogYearCandidate) : null;
+
+  if (physical == null && catalog == null) {
+    return { value: null, source: null, authority: 'NONE', catalogYear: null, contested: false };
+  }
+  if (physical == null) {
+    return { value: catalog, source: 'catalog', authority: 'CATALOG_ONLY', catalogYear: catalog, contested: false };
+  }
+  const contested = catalog != null && catalog !== physical;
+  return {
+    value: physical,
+    source: 'first-eligible-visual',
+    authority: contested ? 'CONTESTED' : 'CORROBORATED',
+    catalogYear: catalog,
+    contested,
+  };
+};

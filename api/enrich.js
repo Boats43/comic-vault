@@ -54,7 +54,15 @@ import {
   resolveFamilyIssueConsensus,
   isCorroboratedIdentitySource,
   normalizeVisionConfidence,
+  reconcileVariantFacet,
 } from "../src/lib/identityCore.js";
+// GrailKey Directive 2026-08-16-AL continuation (4a/4e) — direct import,
+// not re-exported through identityCore.js's own list above (that list
+// mirrors identityCore.js's public surface as of the prior dispatch;
+// these three are identityReconciler.js's own exports, imported directly
+// to avoid widening identityCore.js's re-export surface for a one-call-
+// site need).
+import { selectFirstEligibleVisual, extractFirstEligibleYearCandidate, reconcilePhysicalYear } from "../src/lib/identityReconciler.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
 // price/decision fields after it.
@@ -5419,6 +5427,16 @@ export default async function handler(req, res) {
     let variantIdentitySource = 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
+    // GrailKey Directive 2026-08-16-AL continuation (4a/4e) — hoisted so
+    // the post-pipeline reconciliation step (after the cgcIdentityConfirmed
+    // if/else below) can reach the same variant-scoped visual pool the
+    // pool-consensus mechanism itself used, without recomputing family/
+    // issue filtering a second time. Stays null on the CGC-identity path
+    // (that path never touches the visual pool at all, Q106 FIX-1 Step 3)
+    // — the reconciliation step below degrades safely to "no first-
+    // eligible-visual evidence available" in that case, same as any other
+    // genuinely evidence-free case.
+    let variantSourceItemsForReconciliation = null;
     // Slice C (2026-07-22) — pool-corroborated "the market has signed
     // copies of this book" signal (Giang MegaCon Secret Drop class, where
     // Vision's own prompt is deliberately barred from writing signing
@@ -5491,6 +5509,7 @@ export default async function handler(req, res) {
     const variantSourceItems = suppressVariantForYearConflict
       ? []
       : filterItemsByIssue(variantSourceItemsPreIssueFilter, confirmedIssue, familyCandidateAccepted);
+    variantSourceItemsForReconciliation = variantSourceItems;
 
     // Q127 — skip recomputation entirely on an UNRESOLVED year-hint
     // conflict: both the override AND backfill paths would otherwise
@@ -5669,6 +5688,46 @@ export default async function handler(req, res) {
       console.log(`[strip1-variant-routing] routed publisher/imprint/event tokens to confirmedVariant: "${routedVariant}"`);
     }
 
+    // GrailKey Directive 2026-08-16-AL continuation (4a, GK-120) —
+    // variant single-writer reconciliation. Deliberately scoped to fire
+    // ONLY when the ~250-line pipeline above concluded with confirmedVariant
+    // still exactly at its bare, never-corrected Vision init value
+    // (variantIdentitySource === 'vision') — every other mechanism above
+    // (CGC cert, eBay pool consensus, edition-warning printing, canonical-
+    // projection residue, family/publisher/imprint routing, manual
+    // correction) already represents its own independently-verified
+    // correction/confirmation and is left completely untouched here. See
+    // reconcileVariantFacet's own doc comment (identityCore.js) for the
+    // full scope rationale and the regression this narrow scope avoids.
+    //
+    // Production case this closes: Venom Separation Anxiety #1,
+    // confirmedVariant="Tyler Kirkham variant" (zero pool support — none
+    // of the 6 other mechanisms above fired, since nothing corroborates
+    // OR contradicts Kirkham through THEIR own gates) reaching the PC
+    // anchor, cache keys, and the eBay comp query unchallenged. When the
+    // scan's own first-eligible-visual row independently names a
+    // DIFFERENT, real creator/variant signal (Mike Mayhew), that physical
+    // evidence now overrides the uncorroborated Vision guess — Kirkham is
+    // demoted to recorded conflict evidence (visible in
+    // out.variantReconciliation), never canonical, never silently erased.
+    if (variantIdentitySource === 'vision' && confirmedVariant) {
+      const firstEligibleForVariant = selectFirstEligibleVisual(variantSourceItemsForReconciliation || []);
+      const { reconciled: variantReconciled } = reconcileVariantFacet(
+        confirmedVariant,
+        variantIdentitySource,
+        firstEligibleForVariant?.rawTitle || null
+      );
+      out.variantReconciliation = variantReconciled;
+      if (variantReconciled.source === 'first-eligible-visual' && variantReconciled.value !== confirmedVariant) {
+        console.log(
+          `[reconcile-variant] overriding confirmedVariant "${confirmedVariant}" -> "${variantReconciled.value}" ` +
+          `(source=first-eligible-visual, authority=${variantReconciled.authority}, row="${firstEligibleForVariant?.rawTitle}")`
+        );
+        confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, variantReconciled.value, variantIdentitySource, 'first-eligible-visual', 'grailkey-directive-al-4a-variant-reconcile');
+        variantIdentitySource = 'first-eligible-visual';
+      }
+    }
+
     // GrailKey Commit N2 (2026-08-03, Spawn Brett Booth PC-anchor class)
     // — re-anchor the PC product once confirmedVariant is known, when the
     // initial anchor deprioritized a genuine variant-descriptor product in
@@ -5741,29 +5800,84 @@ export default async function handler(req, res) {
         // anchor-swap re-derivation and must not be silently overwritten.
         const reanchoredPcYear = priceCharting.year ? parseInt(priceCharting.year, 10) : null;
         if (reanchoredPcYear !== pcYear && String(confirmedYear ?? '') === String(pcYear ?? '')) {
-          const reanchoredYearResolution = resolveYear(
-            yearForResolution,
-            reanchoredPcYear,
-            cvYear,
-            ebayYearAuthoritative,
-            { keyIssue: keyIssueStr }
-          );
-          const oldConfirmedYear = confirmedYear;
-          confirmedYear = writeConfirmed(
-            'confirmedYear', confirmedYear, reanchoredYearResolution.confirmedYear,
-            yearSource, reanchoredYearResolution.yearSource, 'n2-reanchor-year-reproject'
-          );
-          yearSource = reanchoredYearResolution.yearSource;
-          yearOverrideRejected = reanchoredYearResolution.yearOverrideRejected;
-          out.confirmedYearMeta = {
-            value: confirmedYear || null,
-            source: reanchoredYearResolution.yearSource,
-            confidence: reanchoredYearResolution.yearConfidence,
-          };
+          // GrailKey Directive 2026-08-16-AL continuation (4e) — physical
+          // vs catalog year custody. The version of this block shipped
+          // last dispatch let resolveYear's own documented gap (CLAUDE.md
+          // "Year override guard," branches (c)/(d): PC wins unconditionally,
+          // zero plausibility check, whenever no user/vision year exists)
+          // adopt the NEW anchor's catalog year outright — the Sabrina
+          // production defect: confirmedYear became 2022 (the NYCC Parent
+          // candidate's own PC year) with no attempt to check whether the
+          // scan's own visual pool already had a real PHYSICAL year
+          // candidate (2024) sitting in it. Physical evidence now gets
+          // first look: extractFirstEligibleYearCandidate reads a
+          // plausible year token directly from the first eligible visual
+          // row's own raw title — independent of any catalog match.
+          // reconcilePhysicalYear treats the catalog year as a reference/
+          // corroboration signal, never itself physical-book authority.
+          const firstEligibleForYear = selectFirstEligibleVisual(variantSourceItemsForReconciliation || []);
+          const physicalYearCandidate = extractFirstEligibleYearCandidate(firstEligibleForYear?.rawTitle || null);
+          const yearFacet = reconcilePhysicalYear(physicalYearCandidate, reanchoredPcYear != null ? String(reanchoredPcYear) : null);
+          out.physicalYearFacet = yearFacet;
           console.log(
-            `[n2-reanchor] year re-projected from new anchor: pcYear ${pcYear ?? 'null'} -> ${reanchoredPcYear ?? 'null'}, ` +
-            `confirmedYear "${oldConfirmedYear ?? 'null'}" -> "${confirmedYear ?? 'null'}" (source=${yearSource})`
+            `[reconcile-year] value=${yearFacet.value ?? 'null'} source=${yearFacet.source ?? 'none'} ` +
+            `authority=${yearFacet.authority} catalogYear=${yearFacet.catalogYear ?? 'null'} contested=${yearFacet.contested}`
           );
+
+          if (yearFacet.authority === 'CORROBORATED' || yearFacet.authority === 'CONTESTED') {
+            // A real physical candidate exists — it wins outright over
+            // the catalog year, contested or not (C7: physical evidence
+            // outranks catalog projection for physical facets). The
+            // catalog year stays visible via out.physicalYearFacet.catalogYear
+            // — never silently promoted, never discarded.
+            const oldConfirmedYear = confirmedYear;
+            confirmedYear = writeConfirmed(
+              'confirmedYear', confirmedYear, yearFacet.value,
+              yearSource, 'first-eligible-visual', 'grailkey-directive-al-4e-physical-year'
+            );
+            yearSource = 'first-eligible-visual';
+            yearOverrideRejected = false;
+            out.confirmedYearMeta = {
+              value: confirmedYear || null,
+              source: 'first-eligible-visual',
+              confidence: yearFacet.contested ? 'contested' : 'proven',
+            };
+            console.log(
+              `[n2-reanchor] year re-projected from PHYSICAL evidence: pcYear ${pcYear ?? 'null'} -> catalog ${reanchoredPcYear ?? 'null'} (retained as reference), ` +
+              `confirmedYear "${oldConfirmedYear ?? 'null'}" -> "${confirmedYear ?? 'null'}" (source=first-eligible-visual)`
+            );
+          } else {
+            // No physical candidate at all (CATALOG_ONLY / NONE) — fall
+            // through to the existing resolveYear policy exactly as
+            // before. Honest "no better signal available" case, not a
+            // regression: resolveYear's own documented gap is a
+            // pre-existing, separately-tracked limitation (CLAUDE.md
+            // "Year override guard"), not something this dispatch's
+            // scope extends to closing generally.
+            const reanchoredYearResolution = resolveYear(
+              yearForResolution,
+              reanchoredPcYear,
+              cvYear,
+              ebayYearAuthoritative,
+              { keyIssue: keyIssueStr }
+            );
+            const oldConfirmedYear = confirmedYear;
+            confirmedYear = writeConfirmed(
+              'confirmedYear', confirmedYear, reanchoredYearResolution.confirmedYear,
+              yearSource, reanchoredYearResolution.yearSource, 'n2-reanchor-year-reproject'
+            );
+            yearSource = reanchoredYearResolution.yearSource;
+            yearOverrideRejected = reanchoredYearResolution.yearOverrideRejected;
+            out.confirmedYearMeta = {
+              value: confirmedYear || null,
+              source: reanchoredYearResolution.yearSource,
+              confidence: reanchoredYearResolution.yearConfidence,
+            };
+            console.log(
+              `[n2-reanchor] year re-projected from new anchor (no physical evidence available): pcYear ${pcYear ?? 'null'} -> ${reanchoredPcYear ?? 'null'}, ` +
+              `confirmedYear "${oldConfirmedYear ?? 'null'}" -> "${confirmedYear ?? 'null'}" (source=${yearSource})`
+            );
+          }
         }
       } else {
         console.log(

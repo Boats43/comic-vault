@@ -15,7 +15,7 @@
  * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
 
-import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership, tokenizeTitle } from './compHygiene.js';
+import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership, tokenizeTitle, extractVariantTokensByAxis } from './compHygiene.js';
 import { normalizeOptionalYear } from './yearEvidence.js';
 // GrailKey Dispatch 26, Fix 4 (2026-08-08) — zero-support unanimous
 // rescue reuses Fix 2's own promotion predicate (evaluateUnanimousConsensusPromotion)
@@ -24,7 +24,7 @@ import { normalizeOptionalYear } from './yearEvidence.js';
 // compHygiene.js/responseContract.js/yearEvidence.js, none of which import
 // identityCore.js.
 import { evaluateUnanimousConsensusPromotion, evaluateUnanimousYearConsensusPromotion, evaluateTitleTextIndependence } from './issueAuthority.js';
-import { selectFirstEligibleVisual, extractHashIssueNumber, isMarketingFlavoredRow, countCorroboratingEligibleRows, MINIMUM_CORROBORATING_ROWS, createEvidenceSet, addEvidence, reportConflict, reconcileIssue } from './identityReconciler.js';
+import { selectFirstEligibleVisual, extractHashIssueNumber, isMarketingFlavoredRow, countCorroboratingEligibleRows, MINIMUM_CORROBORATING_ROWS, createEvidenceSet, addEvidence, reportConflict, reconcileIssue, reconcileVariant, reconcilePhysicalYear, extractFirstEligibleYearCandidate } from './identityReconciler.js';
 import { matchCreatorCanonicals } from './premiumCreators.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
@@ -822,6 +822,158 @@ export const selectBestVariantCandidate = (candidates, confirmedVariant) => {
     }
   }
   return bestScore > 0 ? best : null;
+};
+
+// ── GrailKey Directive 2026-08-16-AL continuation, 4a — variant single- ──
+// ── writer reconciliation (Venom Kirkham-vs-Mayhew class)              ──
+//
+// Extends Slice 1's evidence architecture (identityReconciler.js) to the
+// variant facet, per the directive's own governing model: first-eligible-
+// visual supplies the physical variant candidate; a bare Vision claim is
+// evidence only and cannot itself establish canonical standing; only
+// independent, applicable corroboration (a second, different source
+// agreeing on the same physical attribute) promotes it.
+//
+// "Applicable" corroboration, concretely: two variant claims are treated
+// as describing the SAME attribute when they share a registered creator
+// (matchCreatorCanonicals, premiumCreators.js's 80-creator registry) OR
+// share at least one SPECIFIC (non-generic) variant-taxonomy token
+// (extractVariantTokensByAxis, compHygiene.js — distribution/coverLetter/
+// printing/artist axes). Sharing ONLY a GENERIC coverType/finish token
+// (foil/virgin/sketch alone) is deliberately NOT sufficient — the same
+// "specific beats generic" rule Filter 1c's AND-match already enforces
+// (compHygiene.js, Q111) — otherwise "Tyler Kirkham variant" and
+// "[Mayhew Virgin]" would wrongly "agree" on the bare word "virgin,"
+// exactly the false corroboration this reconciler exists to refuse.
+const VARIANT_GENERIC_AXES = new Set(['coverType']);
+
+const variantSpecificTokens = (text) => {
+  const byAxis = extractVariantTokensByAxis(text || '');
+  const tokens = [];
+  for (const axis of Object.keys(byAxis)) {
+    if (VARIANT_GENERIC_AXES.has(axis)) continue;
+    tokens.push(...byAxis[axis]);
+  }
+  return tokens;
+};
+
+const variantValuesAgree = (a, b) => {
+  const textA = String(a || '').trim();
+  const textB = String(b || '').trim();
+  if (!textA || !textB) return false;
+  if (textA.toLowerCase() === textB.toLowerCase()) return true;
+  const creatorsA = matchCreatorCanonicals(textA);
+  const creatorsB = matchCreatorCanonicals(textB);
+  if (creatorsA.length && creatorsB.length && creatorsA.some((c) => creatorsB.includes(c))) return true;
+  const specificA = variantSpecificTokens(textA);
+  const specificB = variantSpecificTokens(textB);
+  if (specificA.length && specificB.length && specificA.some((t) => specificB.includes(t))) return true;
+  return false;
+};
+
+/**
+ * extractFirstEligibleVariantCandidate — companion to extractHashIssueNumber
+ * (identityReconciler.js), same "extract from the row's own raw text, no
+ * ranking/scoring" discipline. Builds a clean, human-readable variant
+ * descriptor from whatever recognized creator/variant-taxonomy signal is
+ * actually present in the first eligible visual row's own title — never
+ * the row's full raw title text (too noisy for a canonical facet value:
+ * issue numbers, publisher, condition, price-like tokens).
+ *
+ * Returns null when nothing recognized is present — a row with no known
+ * creator and no known variant-taxonomy token supplies no candidate at
+ * all (honest absence, not a fabricated one).
+ */
+export const extractFirstEligibleVariantCandidate = (rawTitle) => {
+  const text = String(rawTitle || '');
+  if (!text.trim()) return null;
+  const creators = matchCreatorCanonicals(text);
+  const specific = variantSpecificTokens(text);
+  const byAxis = extractVariantTokensByAxis(text);
+  const generic = byAxis.coverType || [];
+  const seen = new Set();
+  const parts = [];
+  for (const p of [...creators, ...specific, ...generic]) {
+    const key = String(p).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    parts.push(p);
+  }
+  return parts.length > 0 ? parts.join(' ') : null;
+};
+
+/**
+ * reconcileVariantFacet — pure. Builds the variant evidence set and calls
+ * reconcileVariant (identityReconciler.js) with a creator/taxonomy-aware
+ * comparator. Deliberately conservative in scope (regression-safety
+ * driven, documented honestly rather than silently narrowed):
+ *
+ *   - Only intervenes when `pipelineSource` is exactly 'vision' — i.e.
+ *     api/enrich.js's existing ~250-line, 7-mechanism confirmedVariant
+ *     pipeline (CGC cert, eBay pool consensus, edition-warning printing
+ *     text, canonical-projection residue, family/publisher/imprint
+ *     routing, manual correction) ran to completion and NONE of those
+ *     already-tested, already-gated mechanisms touched Vision's raw init
+ *     value. Each of those 6 other mechanisms is left completely
+ *     untouched by this function — re-litigating their own, independently
+ *     hard-won correctness (Q106, Q116, Commit N1, GrailKey D03, Directive
+ *     T Task 4) is explicitly out of this dispatch's scope, and treating
+ *     any of them as "just more Vision-tier evidence" would risk nulling
+ *     out correct values those mechanisms already verified through their
+ *     own gates.
+ *   - When first-eligible-visual evidence exists and DISAGREES with the
+ *     bare Vision value, first-eligible-visual wins outright (sole
+ *     authority) — Vision's claim becomes recorded conflict evidence,
+ *     never canonical, never silently dropped (the Venom Kirkham-vs-
+ *     Mayhew fix).
+ *   - When first-eligible-visual evidence exists and AGREES, the result
+ *     is CORROBORATED — same value, stronger standing.
+ *   - When NO first-eligible-visual evidence exists at all (nothing
+ *     recognized in the row's own text, or no eligible row at all), this
+ *     function returns the reconciler's honest NONE/uncorroborated
+ *     result for visibility (`reconciled.authority`), but the CALLER
+ *     (api/enrich.js) keeps the existing pipeline value rather than
+ *     nulling it out — a bare Vision claim with nothing to corroborate OR
+ *     contradict it is left exactly as every currently-passing test
+ *     already expects, rather than introducing a new null-everything
+ *     failure mode with no acceptance criterion actually requiring it.
+ *     This is a deliberate scope boundary, not silent narrowing — see the
+ *     Pattern Library entry for this dispatch.
+ *
+ * @param {string|null} pipelineValue - confirmedVariant after the existing pipeline
+ * @param {string} pipelineSource - variantIdentitySource after the existing pipeline
+ * @param {string|null} firstEligibleRawTitle - the first eligible visual row's own raw title, or null
+ * @returns {{reconciled: object, candidate: string|null}}
+ */
+export const reconcileVariantFacet = (pipelineValue, pipelineSource, firstEligibleRawTitle) => {
+  const evidence = createEvidenceSet();
+  if (pipelineValue) {
+    addEvidence(evidence, 'variant', pipelineSource === 'vision' ? 'vision' : pipelineSource, pipelineValue);
+  }
+  const candidate = firstEligibleRawTitle ? extractFirstEligibleVariantCandidate(firstEligibleRawTitle) : null;
+  // A candidate built from ONLY a generic coverType/finish token (e.g.
+  // bare "foil," no creator, no specific-axis token) is too thin to be
+  // sole-authority evidence — it must not be able to outrank a richer,
+  // more specific pipeline value on the strength of a single generic
+  // word alone (found regression-testing the Sabrina shape: Vision's own
+  // "Dan Parent NYCC Foil variant" would otherwise be degraded to a bare
+  // "foil" candidate, since neither "Dan Parent" nor "NYCC" nor "LTD 50"
+  // is recognized by any registry this extractor consults — an honest
+  // absence of RECOGNIZED signal, not evidence that the row disagrees).
+  // Require at least one recognized creator OR specific-axis token before
+  // this candidate is admitted as evidence at all.
+  const candidateHasDiscriminativeSignal = candidate != null
+    && (matchCreatorCanonicals(candidate).length > 0 || variantSpecificTokens(candidate).length > 0);
+  if (candidate && candidateHasDiscriminativeSignal) {
+    addEvidence(evidence, 'variant', 'first-eligible-visual', candidate);
+  }
+  const reconciled = reconcileVariant(evidence, variantValuesAgree);
+  console.log(
+    `[reconcile-variant] value=${reconciled.value ?? 'null'} source=${reconciled.source ?? 'none'} ` +
+    `authority=${reconciled.authority} justifiedBy=${JSON.stringify(reconciled.justifiedBy)} ` +
+    `conflicts=${JSON.stringify(reconciled.conflicts)}`
+  );
+  return { reconciled, candidate: candidateHasDiscriminativeSignal ? candidate : null };
 };
 
 /**

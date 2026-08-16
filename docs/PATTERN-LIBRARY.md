@@ -9552,3 +9552,208 @@ untouched, explicitly not closed by this dispatch. The variant
 evidence-reconciler (item 4a) and the eBay comp-query consumer gap
 named above are the next scoped piece, not yet built. Do not propose
 the next directive.
+
+## GrailKey Directive 2026-08-16-AL continuation — 4a variant reconciler + 4e physical-year custody
+
+**Mission:** finish the two items the first AL dispatch's DECISION GATE
+deferred — a genuine variant single-writer reconciler (not just a PC-
+anchor-scoped veto) and physical-vs-catalog year custody at the N2
+reprojection site.
+
+### §0 — corrections to the prior handoff
+
+The prior dispatch graded B3 "PASS with caveat." Wrong: the blocking
+fixture's stated requirement was "no Kirkham anywhere in the outgoing
+eBay comp query," the caveat itself admitted Kirkham was still
+reachable there, and a blocking fixture whose stated requirement is
+unmet is FAIL, not a pass with an asterisk. Re-graded B3: FAIL in both
+CLAUDE.md and `docs/TICKET-REGISTRY.md`. GK-109/GK-120 status text
+itself was already correctly OPEN/partial — only the B3 grade was
+wrong.
+
+### 4a — variant single-writer reconciliation
+
+**Why not just extend `reconcileIdentity`.** Slice 1's `reconcileIssue`
+(`identityReconciler.js`) is the model, but the variant facet's real
+writers live entirely in `api/enrich.js` (~250 lines, 7 independent
+mechanisms: Ship #20a.6.18 raw Vision init, Q106 CGC cert, eBay pool
+consensus, Q116 edition-warning printing text, Commit N1 canonical-
+projection residue, GrailKey D03 Strip 1 family/publisher/imprint
+routing, Directive T Task 4 manual correction) — unlike the issue
+facet, which is centralized in one function. Ripping out and replacing
+all 7 would be a large, high-blast-radius rewrite touching several
+independently hard-won, already-tested fixes. Scoped instead to the
+ACTUAL failure shape: `reconcileVariantFacet` (`identityCore.js`) only
+intervenes when the pipeline concluded at its bare, never-corrected
+Vision value (`variantIdentitySource === 'vision'`, meaning literally
+none of the other 6 mechanisms fired) — every other mechanism is left
+completely untouched.
+
+**Root cause, one level deeper than the first AL dispatch found.** Why
+does the eBay-pool-consensus mechanism (`extractConfirmedVariant`,
+`src/lib/variantIdentity.js`) never self-correct Kirkham → Mayhew even
+though the directive's own Venom evidence describes 19 pool rows
+mentioning Mike Mayhew? Traced directly: `extractConfirmedVariant` uses
+`ARTIST_PATTERNS` (`compHygiene.js`) for pool-artist detection — and
+"mayhew" is not in that registry at all (confirmed: `grep -in mayhew
+compHygiene.js` returns nothing; it IS in `premiumCreators.js`'s
+broader 80-creator registry, added by the first AL dispatch for a
+different purpose). No pool consensus can form around a name the
+extractor can't see, so Vision's raw claim survives the entire pipeline
+unchallenged. This is the SAME class of gap GK-112 already names for a
+different consumer (`applyVariantPreferenceFilter`'s "Dan Parent" gap)
+— now confirmed as a THIRD instance, in a third consumer
+(`extractConfirmedVariant`). Not fixed directly (adding "mayhew" to
+`ARTIST_PATTERNS` would help but doesn't produce the directive's
+required evidence-based decision log or D1/D4 purity guarantees) —
+`reconcileVariantFacet` closes the concrete production case via the
+proper architecture instead, using `premiumCreators.js`'s broader
+registry for its own extraction.
+
+**Import-cycle-safe design.** `imageSearchIdentity.js` (owner of the
+richest variant-taxonomy classifier, `classifyVariantTokens`) already
+imports `identityReconciler.js` for `isEligibleVisualRow` — importing
+anything variant-domain-specific back from `imageSearchIdentity.js`
+into `identityReconciler.js` would be a genuine cycle. Two decisions
+that avoid it entirely: (1) `identityReconciler.js`'s new
+`reconcileVariant` takes an INJECTED comparator (`valuesAgree`, default
+exact string equality) rather than importing any classifier itself —
+same "extraction-agnostic" convention the file already established for
+`countCorroboratingEligibleRows`'s injected `extractIssue`. (2) the
+real comparator (creator-registry + specific-token overlap) is built in
+`identityCore.js`, which already safely imports `premiumCreators.js`
+(no cycle) and gained a new import from `compHygiene.js`
+(`extractVariantTokensByAxis` — also cycle-safe, narrower than
+`imageSearchIdentity.js`'s taxonomy but sufficient and already the
+correct architectural home per this project's own "compHygiene.js:
+shared regex + helpers" convention).
+
+**"Specific beats generic" — reused, not reinvented.** Two variant
+claims are judged to "agree" (same physical attribute) when they share
+a registered creator OR at least one SPECIFIC (non-generic:
+distribution/coverLetter/printing/artist axis) token — sharing ONLY a
+GENERIC coverType/finish token (foil/virgin/sketch alone) is NOT
+sufficient, the same rule Filter 1c's AND-match already enforces
+(compHygiene.js, Q111). Without this, "Tyler Kirkham variant" and
+"Venom Separation Anxiety [Mayhew Virgin] #1" would wrongly "agree" on
+the bare word "virgin" — exactly the false corroboration this
+reconciler exists to refuse.
+
+**Real regression caught and fixed forward in this same dispatch,
+before shipping.** The first design let a first-eligible-visual
+candidate win outright whenever it was non-null, however thin. Testing
+against the Sabrina production shape directly (not assumed) surfaced
+the defect: her own scan's first-eligible-visual row extracts to bare
+"foil" (neither "Dan Parent," "NYCC," nor "LTD 50" is recognized by
+`matchCreatorCanonicals` or `extractVariantTokensByAxis`), which would
+have DEGRADED her Vision's own correct, richer "Dan Parent NYCC Foil
+variant" claim down to "foil" — a real harm the directive explicitly
+warns against ("Do not install Virgin merely because PC offers
+[Mayhew Virgin]"). Fixed: a first-eligible-visual candidate is only
+admitted as evidence at all when it carries a recognized creator or
+specific-axis token — generic-only extraction (an honest absence of
+RECOGNIZED signal, not evidence of disagreement) is discarded, and the
+existing pipeline value is kept unchanged.
+
+**Real pre-existing bug found and fixed along the way.**
+`compHygiene.js`'s `extractVariantTokensByAxis` matched the distribution
+axis's "ratio" token with no word boundary (`/1:\d+|ratio|incentive/`)
+— false-positived inside "Sep**aratio**n," i.e. Venom **Separ­ation**
+Anxiety's own real title. Same collision class as Q131's ARTIST_PATTERNS
+fix (bare `/lim/i` matching inside "limited"). Fixed with `\b` anchors
+on "ratio"/"incentive"; "1:\d+" is already structurally specific, left
+unanchored. Found by running the actual production title through the
+new code before wiring it in, not assumed safe.
+
+**Proof — a real mocked-eBay-network test, not a mirrored predicate.**
+Same discipline as `tests/grailkey-directive-o-comp-ladder-reorder.test.js`:
+mock `global.fetch`, call the REAL `fetchComps()` (`api/comps.js`), and
+capture the actual outgoing query URLs. CONTROL run (raw
+`confirmedVariant="Tyler Kirkham variant"`) shows the artist-specific
+attempt firing (`ARTIST_PATTERNS` DOES recognize bare "kirkham") and
+Kirkham reaching the query text directly — the production defect,
+reproduced. POST-FIX run (`confirmedVariant="Mike Mayhew virgin"`, the
+reconciled value) shows the artist-specific attempt NOT firing (Mayhew
+isn't in `ARTIST_PATTERNS` either — a known, documented, unclosed gap
+in that separate registry) but Attempt-0's full-variant-string embed
+still carrying "Mike Mayhew" — Kirkham absent, Mayhew present, in the
+literal query string sent. Source-text wiring confirmed separately: the
+reconciliation block sits before `fetchComps`'s call site
+(`variant: confirmedVariant`) in file order, and `confirmedVariant` is
+the SAME `let` variable both read — no shadow/parallel variable.
+
+### 4e — physical vs catalog year custody
+
+`reconcilePhysicalYear`/`extractFirstEligibleYearCandidate`
+(`identityReconciler.js`, no new imports, cycle-safe by construction)
+separate three things the first AL dispatch's own fix conflated at the
+N2 reprojection site: a PHYSICAL year candidate (from the first
+eligible visual row's own raw text, independent of any catalog match),
+a CATALOG year candidate (the PC anchor's own `year` field — a
+reference/corroboration signal, never itself physical-book authority),
+and the derived year AUTHORITY (`NONE` / `CATALOG_ONLY` / `CONTESTED` /
+`CORROBORATED`). Scoped narrowly to the N2 reprojection site specifically
+(where the concrete Sabrina bug lives) rather than rewriting the much
+broader, separately-established initial `resolveYear` call — that
+call's own documented gap (CLAUDE.md "Year override guard," branches
+(c)/(d): PC wins unconditionally with zero plausibility check when no
+user year exists) is a pre-existing, separately-tracked limitation, not
+something this dispatch's scope extends to closing generally. Sabrina's
+`confirmedYear` now resolves to 2024 (physical, from the scan's own
+visual pool) instead of 2022 (catalog-because-PC-anchor-said-so); 2022
+is retained, visible, via `out.physicalYearFacet.catalogYear` — never
+silently discarded. Falls back to the exact pre-existing `resolveYear`
+call, unregressed, only when no physical candidate exists at all
+(`CATALOG_ONLY`/`NONE`).
+
+### R5 — era-filter null-year semantics, stated precisely
+
+Traced directly against `applyEraConsistencyFilter` (`api/comps.js:
+759-762`): `if (!yearNum || !Number.isFinite(yearNum) || assetType ===
+'book') return { pool, bypassed: false, ... }` — a full early return.
+Confirmed: rejects nothing (the original pool passes through
+unmodified), confirms nothing (no row is evaluated against
+`evaluateEraYearMatch` at all), and every non-era filter (title/issue/
+variant/format/lot/sanity — Filter 0c/1/1b/1c/1d/1e/1f/1g/2/2b/3/3b/4/5)
+is a structurally separate function in the comp filter chain, never
+called from inside this one — unaffected by this early return by
+construction. **Named, not hidden**: the null-year path reports
+`bypassed: false` — the identical flag value a genuine "every row
+explicitly checked and matched" outcome also reports. No downstream
+consumer of `bypassed` (decisionEngine.js's `filter-bypass-detected`
+warning, `api/enrich.js`'s matchConfidence LOW-cap) can currently
+distinguish "year was positively verified" from "year was never
+checked" using this flag alone. Not a live confidence/authority BOOST
+today (both cases already read as "no penalty," so nothing newly
+promotes) — but a real semantic gap for any FUTURE consumer that wants
+to grant extra trust specifically for positive year verification.
+Reported per this dispatch's own R5 framing (non-blocking); not fixed.
+
+### Regression
+
+`tests/grailkey-directive-al-4a-4e-variant-year-custody.test.js`, 37/37
+— Parts 1-2 unit + real-network-mocked query-construction proof (4a),
+Part 3 source-text wiring, Parts 4-5 (4e/R5) direct + source-text proof,
+Part 6 confirms `tests/q140-issue-consensus-corrective.test.js` is
+byte-identical to HEAD (`git diff --stat` empty) — B5 unaffected, this
+is a different subsystem (variant/year-axis reconciliation, not issue-
+axis). Full unfiltered sweep re-run; see CLAUDE.md's re-stamped test
+baseline line for the file-level before/after comparison.
+
+### Handoff
+
+GK-109/GK-120 remain OPEN — this continuation closes the concrete
+production defects (B3-R, B6) but physical-scan confirmation (Sabrina,
+Venom, Detective, Dell'Otto) is still the closing evidence, per this
+repo's standing bar. GK-112 (variant matcher underspecification, a
+DIFFERENT consumer than the two this dispatch touches) remains OPEN,
+untouched. Known still-open gaps, honestly scoped: `ARTIST_PATTERNS`
+(compHygiene.js, used for query-building/artist-specific attempts) does
+not recognize "Mayhew" — the reconciled value still reaches the eBay
+query correctly via Attempt-0's full-string embed regardless, but the
+artist-specific attempt optimization doesn't fire for this creator; the
+6 other `confirmedVariant` pipeline mechanisms were deliberately not
+re-audited for the same class of defect this dispatch found in
+`extractConfirmedVariant`'s pool-consensus mechanism specifically — a
+genuinely full audit of all 7 writers is future work, not this
+dispatch's scope. Do not propose the next directive.

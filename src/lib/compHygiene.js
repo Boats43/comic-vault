@@ -1411,7 +1411,13 @@ export const extractVariantTokensByAxis = (str) => {
   const distribution = [];
   if (/newsstand/.test(s)) distribution.push('newsstand');
   if (/exclusive|excl\./.test(s)) distribution.push('exclusive');
-  if (/1:\d+|ratio|incentive/.test(s)) distribution.push('ratio');
+  // GrailKey Directive 2026-08-16-AL continuation (4a) — \b-anchored "ratio"/
+  // "incentive" (was bare substring, same collision class as Q131's
+  // ARTIST_PATTERNS fix: "ratio" matched inside "Separation" — Venom
+  // Separation Anxiety's own title — a real false positive found wiring
+  // this extractor into the new variant-evidence reconciler). "1:\d+" is
+  // already structurally specific, left unanchored.
+  if (/1:\d+|\bratio\b|\bincentive\b/.test(s)) distribution.push('ratio');
 
   // Q48: "Cover B/C/D" detection — must NOT match artist-name + "cover"
   // descriptors. Pattern requires a letter IMMEDIATELY after "cover"
