@@ -56,10 +56,27 @@ const check = (cond, label) => {
 console.log('\n=== GrailKey Directive AL continuation — 4a variant + 4e year custody ===\n');
 
 // ─── Part 1: 4a reconcileVariantFacet, direct ──────────────────────────────
-console.log('Part 1a: Venom production shape — bare vision Kirkham vs first-eligible-visual Mayhew row');
+// GrailKey Directive AL continuation — PROVENANCE CORRECTION (post-B3-R
+// audit). The original version of this fixture invented its own row text
+// ("...Mike Mayhew Virgin Variant Cover..."), synthesized by this test's
+// author, NOT sourced from any real scan. It happened to contain the word
+// "virgin" — which does NOT appear anywhere in the real production log
+// (2026-08-16 01:59)'s actual first-processed row. That was provenance
+// laundering: a fabricated string labeled `first-eligible-visual` and
+// treated as if it were physical visual evidence it never was. Replaced
+// with the VERBATIM real production row. Confirmed directly (see this
+// dispatch's own audit): running the extractor on the real text drops
+// "Signed" entirely (compHygiene.js's extractVariantTokensByAxis has no
+// authentication axis) — the reconciled candidate is "Mike Mayhew," not
+// "Mike Mayhew signed." This is a REAL, newly-found gap, reported honestly
+// below (Part 1a-ii) rather than hidden by continuing to use fabricated
+// input that happened not to expose it.
+console.log('Part 1a: Venom REAL production row (verbatim, 2026-08-16 01:59 log) — bare vision Kirkham vs first-eligible-visual Mayhew row');
 {
-  const venomRow = 'Venom Separation Anxiety #1 Mike Mayhew Virgin Variant Cover Marvel Comics 2024';
+  const venomRow = 'Mike Mayhew Signed Venom Separation Anxiety Variant Cover Marvel Comic NM';
   const { reconciled, candidate } = reconcileVariantFacet('Tyler Kirkham variant', 'vision', venomRow);
+  console.log(`  [first-eligible-visual] title="${venomRow}"`);
+  console.log(`  [first-eligible-visual] extractedVariant=${JSON.stringify(candidate)}`);
   console.log(`  [decision log] ${JSON.stringify(reconciled)}`);
   check(reconciled.source === 'first-eligible-visual', 'winner is first-eligible-visual, not vision');
   check(String(reconciled.value).toLowerCase().includes('mayhew'), 'canonical value names Mayhew');
@@ -69,6 +86,15 @@ console.log('Part 1a: Venom production shape — bare vision Kirkham vs first-el
     'Kirkham is retained as recorded conflict evidence — visible, never erased'
   );
   check(candidate != null, 'a real candidate was extracted (not the thin-generic-only case)');
+  // NOT a pass condition — a deliberately FAILING-would-be-wrong check kept
+  // visible so this gap can't silently regress into a false "fixed" claim:
+  console.log(
+    `  [FINDING, not asserted as a defect in THIS test] candidate="${candidate}" does not include "signed" — ` +
+    `extractVariantTokensByAxis (compHygiene.js) has no authentication axis, so a real, physically-present ` +
+    `"Signed" attribute is silently dropped from the reconciled variant. Not fixed this dispatch (would require ` +
+    `extending a shared function with other consumers — soldVerification.js, evidenceEligibility.js — outside ` +
+    `this narrow audit's scope); reported for explicit scoping, not silently patched or silently ignored.`
+  );
 }
 
 console.log('\nPart 1b: Venom shape with NO first-eligible-visual evidence at all — Kirkham NOT promoted, but NOT hidden either');
@@ -144,14 +170,23 @@ const runPart2 = async () => {
     'CONTROL: with the raw, uncorroborated Vision value, "kirkham" DOES reach the outgoing eBay comp query — this is the production defect'
   );
 
-  console.log('\nPart 2b: POST-FIX — reconciled confirmedVariant ("Mike Mayhew virgin") reaches the outgoing eBay query instead, Kirkham absent');
+  // PROVENANCE FIX: the variant passed to fetchComps here MUST be the
+  // reconciler's own real output on the VERBATIM production row — not a
+  // separately hand-typed string. Recomputed here (not imported from Part
+  // 1's block scope) so this file has exactly ONE place that decides what
+  // "the reconciled value" is; Part 1's own assertion on `reconciled.value`
+  // and this call are provably reading the same computation, not two
+  // independently-asserted guesses that could silently drift apart.
+  const venomRow = 'Mike Mayhew Signed Venom Separation Anxiety Variant Cover Marvel Comic NM';
+  const { reconciled: part2Reconciled } = reconcileVariantFacet('Tyler Kirkham variant', 'vision', venomRow);
+  console.log(`\nPart 2b: POST-FIX — reconciled confirmedVariant ("${part2Reconciled.value}", the reconciler's REAL output on the verbatim production row) reaches the outgoing eBay query instead, Kirkham absent`);
   capturedQueries = [];
   globalThis.fetch = makeCapturingMockFetch();
-  await fetchComps({ ...venomBaseParams, variant: 'Mike Mayhew virgin' });
+  await fetchComps({ ...venomBaseParams, variant: part2Reconciled.value });
   console.log(`  [outgoing queries] ${JSON.stringify(capturedQueries, null, 2)}`);
   check(
     !capturedQueries.some((q) => q.toLowerCase().includes('kirkham')),
-    'B3-R: no outgoing eBay comp query contains "kirkham" once confirmedVariant carries the reconciled value'
+    'B3-R: no outgoing eBay comp query contains "kirkham" once confirmedVariant carries the reconciler\'s REAL output'
   );
   check(
     capturedQueries.some((q) => q.toLowerCase().includes('mayhew')),

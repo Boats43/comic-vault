@@ -9756,4 +9756,64 @@ artist-specific attempt optimization doesn't fire for this creator; the
 re-audited for the same class of defect this dispatch found in
 `extractConfirmedVariant`'s pool-consensus mechanism specifically — a
 genuinely full audit of all 7 writers is future work, not this
-dispatch's scope. Do not propose the next directive.
+dispatch's scope.
+
+### Post-B3-R provenance audit (same day, user-directed) — a real fixture defect, caught before it could ship as false confidence
+
+B3-R's original proof used a `first-eligible-visual` row this dispatch's
+author WROTE, not one pulled from any real scan: `"Venom Separation
+Anxiety #1 Mike Mayhew Virgin Variant Cover Marvel Comics 2024"`. It was
+never verified against the actual production log this whole dispatch is
+built on. Asked directly to print the provenance artifact (title +
+extracted facets) and justify it against the real 2026-08-16 01:59 row,
+the fabrication became obvious immediately: the real row is `"Mike
+Mayhew Signed Venom Separation Anxiety Variant Cover Marvel Comic NM"`
+— it says **Signed**, never **Virgin**. The fixture's "virgin" had no
+source anywhere in the evidence chain; it was invented by the test
+author and then labeled `first-eligible-visual`, exactly the
+"provenance laundering" this whole campaign exists to catch — a
+fabricated value dressed as physical evidence. This is the same failure
+class GK-98/GK-101/GK-111 were built to close for PRODUCTION code,
+now caught in a TEST by the same discipline: don't trust a label,
+verify the source.
+
+**What survived the correction.** Re-run against the verbatim real row,
+`extractFirstEligibleVariantCandidate` returns `"Mike Mayhew"` (creator
+recognized; no coverType/distribution/coverLetter/printing/artist token
+present in the real text at all — "virgin" was never there to extract).
+`reconcileVariantFacet` still resolves to `source: 'first-eligible-
+visual', value: 'Mike Mayhew'`, Kirkham still demoted to conflict
+evidence, and the real mocked-`fetchComps()` query-construction proof
+(Part 2, rebuilt to consume the reconciler's ACTUAL output rather than a
+second independently hand-typed string) still shows Kirkham absent and
+Mayhew present in the literal outgoing query. B3-R's core claim was
+never false — the EVIDENCE FOR IT was fabricated, a distinct and equally
+serious problem, now fixed: the test computes the reconciled value ONCE
+and both the decision-log assertion and the query-construction call
+read that same computation, so the two can no longer silently drift
+apart the way the original two independently-typed strings did.
+
+**What the correction surfaced (GK-122).** Running the real row through
+the extractor exposed a genuine, previously-unknown gap: "Signed" is
+completely invisible to `extractVariantTokensByAxis` (`compHygiene.js`)
+— it has coverType/distribution/coverLetter/printing/artist axes, no
+authentication axis at all. The reconciled candidate silently drops a
+real, physically-present, price-relevant attribute (this project's own
+standing Q-SS open item names exactly why "signed" matters: an SS book
+priced against non-SS comps is a real, already-documented risk). This
+does not invalidate B3-R (Kirkham/Mayhew both still resolve correctly)
+but is a real information-loss defect in the SAME mechanism this
+dispatch shipped. Not fixed — `extractVariantTokensByAxis` has other
+consumers (`soldVerification.js`, `evidenceEligibility.js` per its own
+header) and adding an authentication axis needs its own scoping/
+regression pass, not a same-breath patch under an audit already in
+progress. Logged as GK-122.
+
+**Standing lesson, recorded for future dispatches**: a fixture string
+that "looks plausible" is not evidence. When a directive names a real
+production log line, the ONLY safe input is the verbatim line — printed
+alongside its extracted facets, per this dispatch's own now-established
+`[first-eligible-visual] title=... extractedVariant=...` artifact
+convention — before it is trusted as proof of anything.
+
+Do not propose the next directive.
