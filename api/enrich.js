@@ -5427,16 +5427,6 @@ export default async function handler(req, res) {
     let variantIdentitySource = 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
-    // GrailKey Directive 2026-08-16-AL continuation (4a/4e) — hoisted so
-    // the post-pipeline reconciliation step (after the cgcIdentityConfirmed
-    // if/else below) can reach the same variant-scoped visual pool the
-    // pool-consensus mechanism itself used, without recomputing family/
-    // issue filtering a second time. Stays null on the CGC-identity path
-    // (that path never touches the visual pool at all, Q106 FIX-1 Step 3)
-    // — the reconciliation step below degrades safely to "no first-
-    // eligible-visual evidence available" in that case, same as any other
-    // genuinely evidence-free case.
-    let variantSourceItemsForReconciliation = null;
     // Slice C (2026-07-22) — pool-corroborated "the market has signed
     // copies of this book" signal (Giang MegaCon Secret Drop class, where
     // Vision's own prompt is deliberately barred from writing signing
@@ -5509,7 +5499,6 @@ export default async function handler(req, res) {
     const variantSourceItems = suppressVariantForYearConflict
       ? []
       : filterItemsByIssue(variantSourceItemsPreIssueFilter, confirmedIssue, familyCandidateAccepted);
-    variantSourceItemsForReconciliation = variantSourceItems;
 
     // Q127 — skip recomputation entirely on an UNRESOLVED year-hint
     // conflict: both the override AND backfill paths would otherwise
@@ -5700,31 +5689,75 @@ export default async function handler(req, res) {
     // reconcileVariantFacet's own doc comment (identityCore.js) for the
     // full scope rationale and the regression this narrow scope avoids.
     //
-    // Production case this closes: Venom Separation Anxiety #1,
-    // confirmedVariant="Tyler Kirkham variant" (zero pool support — none
-    // of the 6 other mechanisms above fired, since nothing corroborates
-    // OR contradicts Kirkham through THEIR own gates) reaching the PC
-    // anchor, cache keys, and the eBay comp query unchallenged. When the
-    // scan's own first-eligible-visual row independently names a
-    // DIFFERENT, real creator/variant signal (Mike Mayhew), that physical
-    // evidence now overrides the uncorroborated Vision guess — Kirkham is
-    // demoted to recorded conflict evidence (visible in
-    // out.variantReconciliation), never canonical, never silently erased.
+    // GrailKey Directive 2026-08-16-AM (F-1) — CORRECTIVE. The prior
+    // version of this block computed `firstEligibleForVariant` from
+    // `variantSourceItemsForReconciliation`, which is the FAMILY-NARROWED
+    // pool (Ship 26.3B: only members of whichever family the title-family
+    // resolver already selected, api/enrich.js ~5462-5467). That is
+    // provenance laundering BY THIS CODE ITSELF: if the family resolver
+    // picked the WRONG family (Vision's own hallucinated variant tokens
+    // can feed that decision — see selectTitleFamilyCandidate's
+    // `visionVariant` param, GK-98/AF), the "first eligible visual" label
+    // could only ever be bound to a row WITHIN that wrong family — never
+    // the scan's genuinely first, physically-eligible row. Real production
+    // case (Venom Separation Anxiety #1, 2026-08-16 10:54): the true
+    // rank-1 visual row is a Mike Mayhew Separation Anxiety listing, but
+    // the family resolver selected "Venom: Lethal Protector" (a DIFFERENT
+    // book), narrowing the pool before this code ever ran — the label
+    // then landed on a Mico Suayan Lethal Protector row instead. Fixed:
+    // `firstEligibleForVariant` is now computed from `parsedVisualRows`
+    // (the SAME full, unbiased, pre-family-decision pool the ISSUE
+    // facet's own first-eligible-visual mechanism already correctly uses,
+    // src/lib/identityCore.js:3126, `opts.visualItems` — this file's own
+    // `parsedVisualRows` IS that value, see the `visualItems:
+    // parsedVisualRows` call site above) — never narrowed by a family
+    // decision that may itself be wrong. The label is bound ONCE, from
+    // the scan's own eligibility-filtered pool in its own returned order
+    // (identityReconciler.js's `selectFirstEligibleVisual` — first
+    // survivor, never ranked/scored), independent of anything the title-
+    // family resolver, Vision, or the PC anchor later decide.
+    //
+    // GrailKey Directive 2026-08-16-AM (F-3) — CORRECTIVE. The prior
+    // version only overwrote confirmedVariant when the reconciler's
+    // winner was 'first-eligible-visual'; a NONE result (no independent
+    // evidence either way) left Vision's original, uncorroborated claim
+    // standing untouched — "Computed-Then-Discarded," the reconciler's
+    // own output silently ignored. A sole writer whose null result is
+    // ignored is not a sole writer (C8: a populated-but-uncorroborated
+    // candidate is not authority — already this project's own standing
+    // rule for the PC-anchor veto; applied inconsistently to Vision's own
+    // claim until now). Fixed: authority NONE now CLEARS confirmedVariant
+    // — the prior Vision write does not survive a null reconciliation —
+    // and the comp ladder/query proceed variant-less rather than on an
+    // uncorroborated guess. Demonstrated on the Sabrina shape (B4-2):
+    // her own reconciler NONE result (thin, generic-only first-eligible-
+    // visual extraction — GK-122's "Signed"/registry-gap class) now
+    // clears "Dan Parent NYCC Foil variant" too, not merely Kirkham's
+    // case — same rule, applied uniformly, not carved out per-book.
     if (variantIdentitySource === 'vision' && confirmedVariant) {
-      const firstEligibleForVariant = selectFirstEligibleVisual(variantSourceItemsForReconciliation || []);
+      const firstEligibleForVariant = selectFirstEligibleVisual(parsedVisualRows);
       const { reconciled: variantReconciled } = reconcileVariantFacet(
         confirmedVariant,
         variantIdentitySource,
         firstEligibleForVariant?.rawTitle || null
       );
       out.variantReconciliation = variantReconciled;
+      out.variantReconciliationRowIndex = firstEligibleForVariant?.index ?? null;
       if (variantReconciled.source === 'first-eligible-visual' && variantReconciled.value !== confirmedVariant) {
         console.log(
           `[reconcile-variant] overriding confirmedVariant "${confirmedVariant}" -> "${variantReconciled.value}" ` +
-          `(source=first-eligible-visual, authority=${variantReconciled.authority}, row="${firstEligibleForVariant?.rawTitle}")`
+          `(source=first-eligible-visual, authority=${variantReconciled.authority}, row[${firstEligibleForVariant?.index}]="${firstEligibleForVariant?.rawTitle}")`
         );
         confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, variantReconciled.value, variantIdentitySource, 'first-eligible-visual', 'grailkey-directive-al-4a-variant-reconcile');
         variantIdentitySource = 'first-eligible-visual';
+      } else if (variantReconciled.authority === 'NONE') {
+        console.log(
+          `[reconcile-variant] CLEARING confirmedVariant "${confirmedVariant}" -> null ` +
+          `(authority=NONE — no independent evidence corroborates or contradicts the bare Vision claim, ` +
+          `a populated-but-uncorroborated value is not authority, C8)`
+        );
+        confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, null, variantIdentitySource, 'reconciler-cleared', 'grailkey-directive-am-f3-null-clears');
+        variantIdentitySource = 'reconciler-cleared';
       }
     }
 
@@ -5815,7 +5848,12 @@ export default async function handler(req, res) {
           // row's own raw title — independent of any catalog match.
           // reconcilePhysicalYear treats the catalog year as a reference/
           // corroboration signal, never itself physical-book authority.
-          const firstEligibleForYear = selectFirstEligibleVisual(variantSourceItemsForReconciliation || []);
+          // GrailKey Directive 2026-08-16-AM (F-1) — same fix as the 4a
+          // variant block above: uses parsedVisualRows (the full, unbiased,
+          // pre-family-decision pool), not the family-narrowed
+          // variantSourceItemsForReconciliation — see that block's own
+          // comment for the full provenance-laundering rationale.
+          const firstEligibleForYear = selectFirstEligibleVisual(parsedVisualRows);
           const physicalYearCandidate = extractFirstEligibleYearCandidate(firstEligibleForYear?.rawTitle || null);
           const yearFacet = reconcilePhysicalYear(physicalYearCandidate, reanchoredPcYear != null ? String(reanchoredPcYear) : null);
           out.physicalYearFacet = yearFacet;

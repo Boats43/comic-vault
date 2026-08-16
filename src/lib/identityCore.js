@@ -847,6 +847,58 @@ export const selectBestVariantCandidate = (candidates, confirmedVariant) => {
 // exactly the false corroboration this reconciler exists to refuse.
 const VARIANT_GENERIC_AXES = new Set(['coverType']);
 
+// GrailKey Directive 2026-08-16-AM (GK-122, partial — B4-4) — four axes
+// extractVariantTokensByAxis (compHygiene.js) does not cover at all:
+// event/convention, print-run/limitation numbering, color-finish, and
+// authentication. Added HERE, identityCore.js-local, deliberately NOT in
+// the shared compHygiene.js function — extending that function has other
+// consumers (soldVerification.js, evidenceEligibility.js per its own
+// header comment) and needs its own scoping/regression pass, per GK-122's
+// own existing note. This is a narrow, task-specific extension for THIS
+// reconciler's own candidate-extraction, not a general taxonomy expansion.
+// Real production row this closes (Directive AM, USM/Dell'Otto class):
+// "ULTIMATE SPIDER-MAN #1 CGC 9.8 INHYUK LEE FAN EXPO PHILLY WHITE
+// VARIANT LE 800" — pre-fix, only "Inhyuk Lee" survived extraction;
+// "Fan Expo Philly," "White," and "LE 800" were silently dropped.
+const EVENT_RE = /\b(nycc|sdcc|c2e2|megacon|wondercon|emerald\s*city|fan\s*expo(?:\s+\w+)?|heroes\s*con|awa)\b/i;
+const PRINT_RUN_RE = /\ble\s*\d+\b|\b\d+\s*\/\s*\d+\b/i;
+// Color-finish: bare color words collide far too broadly on their own
+// (character names, unrelated adjectives — "Black Panther," "Red Hood")
+// to match standalone. Context-gated to immediately precede "variant" or
+// "cover," same discipline this codebase already applies to other
+// collision-prone bare words (e.g. compHygiene.js's Q48 cover-letter
+// gate, ARTIST_PATTERNS' \b-anchored entries).
+const COLOR_FINISH_RE = /\b(white|black|gold|silver|red|blue|green|purple|pink)\s+(?:variant|cover)\b/i;
+// Same SIGNED_RE precedent as compHygiene.js (CLAUDE.md): bare "SS"
+// deliberately omitted — false-positive risk (SS-Squadron and other
+// unrelated acronyms).
+const AUTHENTICATION_RE = /\b(signed|remarked|autographed?|signature\s+series)\b/i;
+
+// Event/print-run/authentication are genuinely specific/discriminative
+// signals (same standing as distribution/printing/artist) — returned
+// separately from color-finish so callers can include the former in
+// "specific" comparisons and the latter only in display text.
+const extractEventPrintRunAuth = (text) => {
+  const s = String(text || '');
+  const found = [];
+  const eventMatch = s.match(EVENT_RE);
+  if (eventMatch) found.push(eventMatch[0].trim().toLowerCase());
+  const printRunMatch = s.match(PRINT_RUN_RE);
+  if (printRunMatch) found.push(printRunMatch[0].trim().toLowerCase());
+  const authMatch = s.match(AUTHENTICATION_RE);
+  if (authMatch) found.push(authMatch[0].toLowerCase());
+  return found;
+};
+
+// Color-finish: display-only, deliberately never "specific" — a bare
+// color word is closer to a cosmetic descriptor (same category as
+// coverType/foil/virgin) than a discriminative fact, and must not alone
+// be able to grant sole-authority standing.
+const extractColorFinish = (text) => {
+  const m = String(text || '').match(COLOR_FINISH_RE);
+  return m ? m[1].toLowerCase() : null;
+};
+
 const variantSpecificTokens = (text) => {
   const byAxis = extractVariantTokensByAxis(text || '');
   const tokens = [];
@@ -854,6 +906,7 @@ const variantSpecificTokens = (text) => {
     if (VARIANT_GENERIC_AXES.has(axis)) continue;
     tokens.push(...byAxis[axis]);
   }
+  tokens.push(...extractEventPrintRunAuth(text));
   return tokens;
 };
 
@@ -891,9 +944,10 @@ export const extractFirstEligibleVariantCandidate = (rawTitle) => {
   const specific = variantSpecificTokens(text);
   const byAxis = extractVariantTokensByAxis(text);
   const generic = byAxis.coverType || [];
+  const colorFinish = extractColorFinish(text);
   const seen = new Set();
   const parts = [];
-  for (const p of [...creators, ...specific, ...generic]) {
+  for (const p of [...creators, ...specific, ...generic, ...(colorFinish ? [colorFinish] : [])]) {
     const key = String(p).toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -967,7 +1021,32 @@ export const reconcileVariantFacet = (pipelineValue, pipelineSource, firstEligib
   if (candidate && candidateHasDiscriminativeSignal) {
     addEvidence(evidence, 'variant', 'first-eligible-visual', candidate);
   }
-  const reconciled = reconcileVariant(evidence, variantValuesAgree);
+  let reconciled = reconcileVariant(evidence, variantValuesAgree);
+  // GrailKey Directive 2026-08-16-AM — on CORROBORATED agreement (the
+  // extracted first-eligible-visual candidate and Vision's own claim
+  // describe the same physical attribute, per variantValuesAgree), prefer
+  // VISION'S own text as the displayed/canonical value, not the extracted
+  // candidate. The extractor's job is to VERIFY, not to REPLACE — it is
+  // necessarily a subset of recognized tokens (creator/event/print-run/
+  // auth/specific-axis registries), while Vision's free text is typically
+  // richer and, once corroborated, there is no reason to discard the
+  // extra, unrecognized-but-real detail it carries (found regression-
+  // testing the Sabrina shape: recognizing "NYCC" as an event token newly
+  // let first-eligible-visual corroborate Vision's claim, but naively
+  // adopting the WINNER's own thin extracted text — "nycc foil" — would
+  // have silently dropped "Dan Parent" and "LTD 50" from a value that was
+  // just POSITIVELY VERIFIED as correct, a regression the null-clears
+  // fix (F-3) must not create as its own side effect). Only applies on
+  // genuine agreement — a CONTESTED result (first-eligible-visual
+  // disagreeing with Vision, e.g. Kirkham vs Mayhew) keeps the extracted
+  // candidate as the value exactly as before, since in that case Vision's
+  // text is the thing being overridden, not corroborated.
+  if (reconciled.authority === 'CORROBORATED' && reconciled.source === 'first-eligible-visual') {
+    const visionAgrees = reconciled.justifiedBy.find((e) => e.source === 'vision');
+    if (visionAgrees) {
+      reconciled = { ...reconciled, value: visionAgrees.value };
+    }
+  }
   console.log(
     `[reconcile-variant] value=${reconciled.value ?? 'null'} source=${reconciled.source ?? 'none'} ` +
     `authority=${reconciled.authority} justifiedBy=${JSON.stringify(reconciled.justifiedBy)} ` +

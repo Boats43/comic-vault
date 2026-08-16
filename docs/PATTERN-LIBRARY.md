@@ -9817,3 +9817,207 @@ alongside its extracted facets, per this dispatch's own now-established
 convention — before it is trusted as proof of anything.
 
 Do not propose the next directive.
+
+## GrailKey Directive 2026-08-16-AM — GK-120: variant custody made real
+
+**Mission:** a physical rescan disproved the prior dispatch's implicit
+"closed" framing. Two production-demonstrated defects in the SAME
+reconciler mechanism, both real, both found by tracing actual code
+rather than trusting the mechanism's own name.
+
+### F-1 — provenance laundering by the pipeline itself
+
+The disease this whole campaign exists to stop (a fabricated value
+labeled as physical evidence) was found INSIDE the mechanism built to
+stop it, not merely in a test fixture this time. `firstEligibleVisual`
+(the variant/year reconciliation call sites, `api/enrich.js`) was
+computed from `variantSourceItemsForReconciliation` — the FAMILY-
+NARROWED pool (Ship 26.3B: only members of whichever family
+`selectTitleFamilyCandidate` already selected). When that resolver
+picks the WRONG family — and it can: `selectTitleFamilyCandidate`
+receives `visionVariant: req.body.variant || null`, the RAW, pre-
+reconciliation Vision text, and Directive AF's own discriminative-
+corroboration mechanism (GK-98) can let a hallucinated creator name
+corroborate a genuinely-matching-but-wrong population if the pool
+happens to contain real listings for that wrong book too — the
+reconciler could then only ever bind "first eligible visual" to a row
+FROM that wrong family. Real production instance: Venom Separation
+Anxiety #1, true rank-1 visual row is a Mike Mayhew listing, but the
+family resolver selected "Venom: Lethal Protector" (driven by Vision's
+own "Tyler Kirkham" tokens), narrowing the pool before reconciliation
+ever ran — the label landed on a Mico Suayan Lethal Protector row
+instead. Card: identified and priced as a completely different book's
+market.
+
+**Fixed**: both reconciliation call sites (4a variant, 4e year) now
+read `parsedVisualRows` — the exact same full, unbiased, pre-family-
+decision pool the ISSUE facet's own first-eligible-visual mechanism
+already correctly used (`identityCore.js:3126`, `opts.visualItems` —
+confirmed by direct comparison that this file's own `parsedVisualRows`
+IS that value, same call site, `visualItems: parsedVisualRows`). The
+label is now bound once, from the scan's own eligibility-filtered pool
+in its own returned order, independent of any family decision made
+before or after it. Proven mechanically: `selectFirstEligibleVisual` on
+the full pool `[MayhewRow, SuayanRow]` returns the Mayhew row; on a
+wrong-family-narrowed pool `[SuayanRow]` (simulating the pre-fix
+narrowing) it can only ever return the Suayan row — same function, two
+different pools, two different labels. The pool choice, not the row
+content, was the defect.
+
+### F-3 — Computed-Then-Discarded, reconciler edition
+
+The reconciler's own null result was being ignored. The prior dispatch
+only overwrote `confirmedVariant` when the winner was `first-eligible-
+visual`; a `NONE` authority result (no independent evidence either way)
+left Vision's original, uncorroborated claim standing — the reconciler
+computed a real answer and the old writer stayed operative regardless.
+This is the ninth instance of Computed-Then-Discarded (docs/TICKET-
+REGISTRY.md's own running count) — this time the discarded computation
+is the reconciler ITSELF. "Sole canonical writer" was true in name only:
+a sole writer whose output is optional is not sole.
+
+**Fixed**: `authority === 'NONE'` now clears `confirmedVariant` to
+`null`, tagged `reconciler-cleared` / `grailkey-directive-am-f3-null-
+clears` for audit. This is C8 ("a populated-but-uncorroborated
+candidate is not authority") applied consistently — it was already the
+standing rule for the PC-anchor veto (prior AL dispatch) but had never
+been applied to Vision's own bare claim until now.
+
+### A real regression this same pass caught before shipping
+
+Extending recognition to include event/convention tokens (GK-122, see
+below) means "NYCC" is now recognized — which flips Sabrina's own
+reconciliation from `NONE` to `CORROBORATED` (both Vision's claim and
+the first-eligible-visual row now share the specific "nycc" token).
+Naively adopting the WINNING side's own extracted text as the canonical
+value — "nycc foil" — would have DEGRADED Sabrina's rich, correct
+Vision claim ("Dan Parent NYCC Foil variant") down to two recognized
+words, discarding "Dan Parent" and "LTD 50" from a value that had just
+been POSITIVELY VERIFIED as correct. Caught by re-running the prior
+dispatch's own regression suite before shipping, not assumed safe.
+Fixed: on genuine `CORROBORATED` agreement, Vision's own (typically
+richer) text is preserved as the canonical value; the extracted
+candidate's role is to VERIFY, not to REPLACE. A `CONTESTED` result
+(disagreement, e.g. Kirkham vs Mayhew) is unaffected by this change —
+in that case Vision's text is the thing being overridden, not
+corroborated, so the extracted candidate remains the value exactly as
+before.
+
+### GK-122 extended — four new axes, local not shared
+
+`extractVariantTokensByAxis` (compHygiene.js) covers coverType/
+distribution/coverLetter/printing/artist only. Four more axes added —
+event/convention, print-run/limitation numbering, color-finish
+(context-gated to precede "variant"/"cover," bare color words collide
+too broadly to match standalone), and authentication (same bare-"SS"
+exclusion precedent as compHygiene.js's own `SIGNED_RE`) — deliberately
+LOCAL to `identityCore.js`, not merged into the shared compHygiene.js
+function, which has other consumers (`soldVerification.js`,
+`evidenceEligibility.js`) that would need their own scoping/regression
+pass first. Proven against the real verbatim USM/Dell'Otto row
+("ULTIMATE SPIDER-MAN #1 CGC 9.8 INHYUK LEE FAN EXPO PHILLY WHITE
+VARIANT LE 800"): all four facets (Inhyuk Lee, Fan Expo Philly, White,
+LE 800) now retained where the prior extractor dropped everything but
+the creator name. The original GK-122 finding ("Signed" dropped) is
+also independently closed by the new authentication axis, confirmed
+against this dispatch's own real verbatim Venom row ("...Virgin
+Signed/Remarked by Mike Mayhew...").
+
+### GK-121 upgraded — no longer cosmetic
+
+Production demonstrated the SAME outlier-row mechanism on a second,
+independent book: Vision said "Amazing Spider-Man #1" (a Dell'Otto
+cover), the pool held a 9-member Dell'Otto/Gabriele family, but a
+single Ultimate Spider-Man / Inhyuk Lee row won because "inhyuk, lee,
+virgin" tokens counted as discriminative corroboration (GK-98/AF's own
+mechanism) — the reconciler then blessed that outlier as first-
+eligible-visual. Card: "Ultimate Spider-Man Red #1 · Inhyuk Lee virgin"
+instead of the physical Dell'Otto book. Stayed safe only because
+pricing separately refused a thin pool — identity custody itself never
+caught it. F-1's fix removes the AUTHORITY-BEARING half of this
+disease: the reconciler can no longer relabel an outlier row as
+first-eligible after the fact, regardless of which family the resolver
+selected. It does NOT fix why the wrong family won in the first place —
+that is title-family SELECTION, GK-121's own remaining, deliberately
+deferred work (a scoring rewrite, explicitly out of this dispatch's
+non-goals).
+
+### What was traced and NOT fixed — reported honestly, not papered over
+
+B4-1's own acceptance bar names "family = Lethal Protector" as
+FORBIDDEN. This dispatch's fixes do not achieve that specific sub-
+requirement, and this is stated plainly rather than claimed. Root
+cause, confirmed by direct source read: `selectTitleFamilyCandidate`
+receives raw `req.body.variant` (via `visionVariant`) and scores family
+candidates BEFORE this reconciler runs at all — a genuine chicken-and-
+egg problem, since the reconciler's own physical-evidence extraction
+(post F-1) is now independent of family selection, but family selection
+itself still runs first and cannot consume the reconciler's output
+before it exists. A "does Vision's variant have zero pool support
+anywhere" pre-gate was considered and rejected: `selectTitleFamilyCandidate`'s
+own C4 corroboration bar already requires 2+ tokens shared with POOL
+MEMBERS' own text (not Vision's claim alone) before a family can win via
+this path — meaning if "Lethal Protector" genuinely won in production,
+its own member rows likely DID contain real textual overlap with
+Vision's hallucinated tokens (a coincidentally-matching but wrong
+population, not a zero-support hallucination this dispatch's evidence
+can rule out). A token-presence pre-gate would not reliably have
+prevented this, and the real pool rows (5, 14) were never quoted
+verbatim in this directive — only summarized — so a fixture built to
+"prove" this specific sub-case would necessarily be fabricated,
+repeating the exact provenance-laundering mistake this dispatch's own
+predecessor was corrected for. Declined rather than faked.
+
+### T5 — cache, traced and found not to need a code change
+
+The PC lookup's cache key (`pc:v3:...`) is still built from raw
+`req.body.variant` at the INITIAL query (unchanged, pre-existing,
+Q108's own documented design — confirmedVariant isn't resolved yet at
+that point in the handler). Confirmed this remains harmless: PC's own
+API returns the full `deferredVariantCandidates` list regardless of
+which text drove the initial query/selection; only WHICH candidate gets
+chosen as the anchor differs, and the existing N2 re-anchor mechanism
+(prior AL dispatch) already re-scores using the live, POST-
+reconciliation `confirmedVariant` — now correctly unbiased thanks to
+F-1. `fetchPricechartingPop`/`fetchPricechartingSales` key off
+`priceCharting.id`, read fresh after N2 reassigns it. No wrong PRODUCT
+is ever cached or served under the Kirkham-keyed cache slot; the key
+text itself containing "Kirkham" is a harmless query descriptor, not an
+identity assertion.
+
+### GK-109 CLOSED
+
+Per the directive's own instruction, based on Jimmy's physical rescan
+of Sabrina (2026-08-16): physical year 2024, catalog year 2022 retained
+as reference (`out.physicalYearFacet.catalogYear`), operator's own book
+present in its own comp pool. Banked as directed.
+
+### Regression
+
+`tests/grailkey-directive-am-variant-custody-real.test.js`, 28/28 — F-1
+mechanical proof, full reconciliation on the real verbatim Venom row,
+outgoing-query capture (Kirkham absent), F-3 null-clears (synthetic
+zero-evidence control, clearly labeled as such — not claimed as
+production text), the real Sabrina-corroborates-not-nulls finding
+(reported explicitly as a behavior evolution from this directive's own
+log excerpt, not silently reconciled away), order proof (T2/T5),
+USM/Dell'Otto verbatim retention (GK-122), and the q140/Flash #139
+byte-identical regression check. The prior dispatch's own test
+(`grailkey-directive-al-4a-4e-variant-year-custody.test.js`) required 3
+assertion updates once EVENT_RE recognized "NYCC" — relocated forward
+per the Q22/GK-19 precedent (flip the assertion to the new, correct
+behavior, do not delete), not silently patched around. Full sweep
+re-run; see CLAUDE.md's re-stamped baseline for the file-level count.
+
+### Handoff
+
+GK-109 CLOSED. GK-120 stays OPEN — F-1/F-3 shipped and proven, but the
+title-family-selection half (B4-1's "family = Lethal Protector"
+sub-requirement) is UNVERIFIED, honestly reported as such. GK-121
+upgraded to a confirmed identity-authority defect, its own selection-
+level fix still open. GK-122 substantially extended (4 new axes,
+verbatim-retention proven on two real rows) but still not merged into
+the shared `compHygiene.js` function. GK-112 (Detective) unchanged,
+not re-traced this dispatch. No pricing, `actionAuthority`/Z-verdict,
+or listing-boundary code touched — confirmed by diff, not merely
+claimed. Do not propose the next directive.

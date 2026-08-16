@@ -110,13 +110,29 @@ console.log('\nPart 1b: Venom shape with NO first-eligible-visual evidence at al
   );
 }
 
-console.log('\nPart 1c: Sabrina production shape — vision "Dan Parent NYCC Foil" must NOT be false-vetoed by a thin generic-only candidate');
+// GrailKey Directive 2026-08-16-AM — SUPERSEDED, relocated forward per the
+// Q22/GK-19 "relocate, don't retire" precedent (CLAUDE.md). This test used
+// to assert that "NYCC" is unrecognized (candidate === null, NONE). GK-122
+// (Directive AM) added an event/convention recognition axis specifically
+// because B4-4 (USM/Dell'Otto real production row) requires it — "NYCC"
+// is now a genuinely recognized, SPECIFIC token, same registry gap this
+// dispatch was built to close for a DIFFERENT event ("Fan Expo Philly").
+// The assertion is flipped to the new, correct behavior: this pairing now
+// CORROBORATES (both sides independently name "nycc"), and — per the
+// Directive AM fix that keeps richness on agreement — the CANONICAL VALUE
+// is Vision's own fuller text, not the thinner extracted candidate. The
+// original test's PURPOSE (Sabrina's rich claim must not be degraded to a
+// bare "foil") still holds, just via a different, now-CORROBORATED path.
+console.log('\nPart 1c: Sabrina production shape — vision "Dan Parent NYCC Foil" corroborates via the shared "nycc" event token, preserving the full text (not degraded to "foil")');
 {
   const sabrinaRow = 'Sabrina Annual Spectaculer 2024 #1 Dan Parent NYCC Foil LTD 50';
   const { reconciled, candidate } = reconcileVariantFacet('Dan Parent NYCC Foil variant', 'vision', sabrinaRow);
   console.log(`  [decision log] ${JSON.stringify(reconciled)}`);
-  check(candidate === null, 'first-eligible-visual extraction for this row is generic-only ("foil") — correctly NOT admitted as evidence (neither "Dan Parent" nor "NYCC" nor "LTD 50" is recognized by any registry this extractor consults)');
-  check(reconciled.value === null && reconciled.authority === 'NONE', 'reconciler itself reports NONE — the CALLER (api/enrich.js) is responsible for keeping the existing pipeline value in this case, proven in Part 3');
+  check(candidate === 'nycc foil', 'first-eligible-visual extraction now recognizes "nycc" (GK-122 event axis) alongside generic "foil" — no longer a bare generic-only candidate');
+  check(
+    reconciled.value === 'Dan Parent NYCC Foil variant' && reconciled.authority === 'CORROBORATED',
+    'reconciler CORROBORATES (shared "nycc" specific token) and preserves Vision\'s own richer text as the canonical value, not the thinner extracted candidate ("nycc foil") — the original test\'s intent (never degrade Sabrina\'s rich claim) still holds'
+  );
 }
 
 console.log('\nPart 1d: cgc_cert (already sole-authority) is completely untouched by this mechanism');
@@ -252,7 +268,11 @@ console.log('\nPart 4d: source-text wiring — N2 year reprojection reads physic
   const enrichSrc = fs.readFileSync(new URL('../api/enrich.js', import.meta.url), 'utf8');
   const idx = enrichSrc.indexOf('GrailKey Directive 2026-08-16-AL continuation (4e)');
   check(idx >= 0, '4e block present in api/enrich.js');
-  const block = idx >= 0 ? enrichSrc.slice(idx, idx + 4000) : '';
+  // Widened from 4000 (GrailKey Directive AM) — the F-1 fix added a
+  // documentation comment ahead of this block, pushing resolveYear(
+  // further from the marker; widened rather than trimming the new
+  // comment, since the comment documents a real, load-bearing fix.
+  const block = idx >= 0 ? enrichSrc.slice(idx, idx + 5000) : '';
   check(block.includes("yearFacet.authority === 'CORROBORATED' || yearFacet.authority === 'CONTESTED'"), 'physical evidence (CORROBORATED or CONTESTED) wins outright over the catalog year when present');
   check(block.includes("'grailkey-directive-al-4e-physical-year'"), 'the physical-year override write is tagged with this dispatch\'s own site name for audit');
   check(block.includes('resolveYear('), 'the pre-existing resolveYear policy remains the documented, unregressed fallback when no physical candidate exists at all');
