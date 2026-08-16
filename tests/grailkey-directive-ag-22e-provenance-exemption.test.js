@@ -63,9 +63,18 @@ console.log('\n=== GrailKey Directive AG — 22e provenance exemption (GK-98 kil
 // (tests/grailkey-directive-af-discriminative-corroboration.test.js) —
 // reused deliberately, not re-authored, so this fixture inherits AF's
 // already-verified corroboration behavior rather than risking drift.
+// GrailKey Directive 2026-08-16-AN (GK-121) — REORDERED, same fix and
+// same rationale as AF's own Fixture 1: kept in sync deliberately, per
+// this file's own stated intent ("inherit AF's already-verified
+// corroboration behavior"). AN's physical-corroboration gate requires
+// the frozen rank-1 row (identityReconciler.js's selectFirstEligibleVisual
+// — first eligible row in the pool's own order) to carry the
+// corroborating text; the real, independently-verified Sabrina
+// production pool has the NYCC row at rank 1, not the generic Archie
+// row — reordered to match.
 const sabrinaItems = [
-  { rawTitle: 'Sabrina the Teenage Witch #1 1997 Archie Comics VF' },
   { rawTitle: 'Sabrina Annual Spectaculer 2024 #1 Dan Parent NYCC Foil Variant VF' },
+  { rawTitle: 'Sabrina the Teenage Witch #1 1997 Archie Comics VF' },
   { rawTitle: 'Sabrina the Teenage Witch #1 1997 NM Archie' },
   { rawTitle: 'Sabrina the Teenage Witch #1 (1997) Archie Comics FN' },
   { rawTitle: 'Sabrina the Teenage Witch #1 1997 VG Archie Comics' },

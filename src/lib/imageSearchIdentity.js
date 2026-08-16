@@ -24,7 +24,7 @@
 
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
 import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate, resolveFamilyYearConsensus, resolveFamilyIssueConsensus, isIssueZeroSupport } from './identityCore.js';
-import { isEligibleVisualRow } from './identityReconciler.js';
+import { isEligibleVisualRow, selectFirstEligibleVisual } from './identityReconciler.js';
 import { ARTIST_PATTERNS, ARTIST_FAMILY_STRIP_EXCEPTIONS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms, NON_GENUINE_COPY_RE, LOT_RE, REPRINT_RE, SLAB_RE, GRADED_RE, SIGNED_RE, TPB_MARKER_RE, extractArtist, hasContaminatedMember, isCompetingFamilyTooStrong, FAMILY_OVERRIDE_DECISIONS } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
@@ -2493,6 +2493,46 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     const GENERIC_CORROBORATION_STOPWORDS = new Set(['variant', 'cover', 'edition', 'exclusive', 'comic', 'comics']);
 
     if (visionVariantTokens.length > 0 && visionIssue) {
+      // GrailKey Directive 2026-08-16-AN (GK-121) — corroboration must be
+      // PHYSICAL. Prior to this fix, a token counted toward discriminative-
+      // corroboration whenever it appeared in BOTH Vision's own variant
+      // guess AND a family member's own raw title text — but that member
+      // could be an entirely different, coincidentally-matching wrong
+      // product, never the item actually in hand. Two independent
+      // production instances: Venom wfvvb-1786903446411 ("Tyler Kirkham"
+      // corroborated only by a "Venom: Lethal Protector" listing elsewhere
+      // in the pool — a real marketplace fact about a DIFFERENT book, not
+      // evidence about the physical Mayhew Separation Anxiety item being
+      // priced) and Dell'Otto dzq9h-1786903446411 ("Inhyuk Lee" similarly
+      // corroborated by an unrelated Ultimate Spider-Man listing). Fixed:
+      // a token now ALSO must appear in the frozen rank-1 eligible visual
+      // row — F-1's own mechanism (identityReconciler.js's
+      // selectFirstEligibleVisual), called here on the SAME `items` array
+      // F-1 uses downstream (api/enrich.js), so this is byte-for-byte the
+      // same frozen row, never a second, independently-computed one. Vision
+      // may AGREE with a physically-present token; Vision alone may not
+      // supply one, and neither may a different, unrelated pool member.
+      // No second gate: the reconciled variant facet (identityCore.js) is
+      // deliberately NOT consulted here — family selection runs before
+      // variant reconciliation on the affected path, and admitting that as
+      // an alternative authority source would create an ordering
+      // dependency this dispatch does not scope. Threshold (C4, >=2 tokens,
+      // below) is unchanged — this gates WHICH tokens are eligible to be
+      // counted, not how many are required.
+      const frozenFirstEligible = selectFirstEligibleVisual(items);
+      const frozenRawTitle = frozenFirstEligible?.rawTitle || '';
+      const frozenTokens = new Set(rawCorroborationTokenize(frozenRawTitle));
+      const isPhysicallyPresent = (t) => frozenTokens.has(t);
+      const visionOnlyExcluded = visionVariantTokens.filter(
+        (t) => !GENERIC_CORROBORATION_STOPWORDS.has(t) && !isPhysicallyPresent(t)
+      );
+      if (visionOnlyExcluded.length > 0) {
+        console.log(
+          `[discriminative-corroboration] vision-only tokens excluded (absent from frozen rank-1 row ` +
+          `"${frozenRawTitle}"): [${visionOnlyExcluded.join(',')}]`
+        );
+      }
+
       // Per-member corroboration — buildTitleFamilies clusters by overall
       // title-token Jaccard similarity, which can merge two DIFFERENT named
       // variants of the same base series into ONE family (confirmed
@@ -2505,7 +2545,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
       // disjoint from another member's) — an internally split family is
       // itself a conflict source, not a clean candidate.
       const corroborateRaw = (raw) => rawCorroborationTokenize(raw).filter(
-        (t) => visionVariantTokens.includes(t) && !GENERIC_CORROBORATION_STOPWORDS.has(t)
+        (t) => visionVariantTokens.includes(t) && !GENERIC_CORROBORATION_STOPWORDS.has(t) && isPhysicallyPresent(t)
       );
 
       const eligible = [];

@@ -10021,3 +10021,168 @@ the shared `compHygiene.js` function. GK-112 (Detective) unchanged,
 not re-traced this dispatch. No pricing, `actionAuthority`/Z-verdict,
 or listing-boundary code touched — confirmed by diff, not merely
 claimed. Do not propose the next directive.
+
+## GrailKey Directive 2026-08-16-AN — GK-121: corroboration must be physical
+
+**Mission:** close GK-121 for real. "Vision-corroborated" had come to mean
+"present in Vision's output" — this dispatch makes it mean "present in
+the physical item actually in hand."
+
+### Record correction, first (§0)
+
+A prior investigative trace (AM-continuation-2, same session) constructed
+a "Venom Lethal Protector" Vision-title input to explain ktl2r's
+misidentification via `selectTitleFamilyCandidate`'s fallback-vision
+weak-overlap guard — a well-reasoned, EXECUTABLE hypothesis, explicitly
+flagged at the time as unconfirmed pending the real Vision-title value.
+Checked against the actual production log: refuted. ktl2r's real Vision
+title was "Venom," the family resolver correctly reached
+`weighted-consensus`, identity resolved correctly. ktl2r's real defect
+was GK-120's Kirkham-poisoning of the PC variant path, already closed.
+The fallback-vision mechanism itself remains a real, plausible risk —
+logged, not fixed, no scoring rewrite authorized from refuted evidence.
+Recorded here per standing practice: a hypothesis built honestly from
+incomplete data, later refuted by better data, is not a mistake to hide
+— it is the process working as intended, and the correction belongs in
+the same permanent record as the original claim.
+
+### The confirmed mechanism
+
+Two independent production instances, same session, same underlying
+defect:
+
+**Venom (`wfvvb-1786903446411`)**: Vision guessed "Tyler Kirkham virgin
+variant" for a book whose real rank-1 visual row was "Venom - Separation
+Anxiety 1 Virgin Signed/Remarked by Mike Mayhew w/Poker Chip." Neither
+"Tyler" nor "Kirkham" appears anywhere on that row. Yet
+`[discriminative-corroboration] candidate="venom lethal protector"
+corroborated=[virgin, tyler, kirkham]` fired — because a DIFFERENT,
+2-member family (a genuine "Venom: Lethal Protector (2022) #1" listing,
+apparently naming a real Kirkham-drawn variant of a DIFFERENT book) had
+its own member text checked against Vision's tokens, and matched. The
+operator's own Mayhew book was priced as an entirely different comic.
+
+**Dell'Otto (`dzq9h-1786903446411`)**: same shape. Vision guessed "Inhyuk
+Lee virgin variant" against a real rank-1 row reading "Amazing Spider-Man
+60: CGC 9.8 Dell Otto Virgin Variant-SS Gabriele Dell Otto." Neither
+"Inhyuk" nor "Lee" appears on it. A 1-member "Ultimate Spider-Man"
+family, containing a row that genuinely mentioned Inhyuk Lee, beat the
+correct 9-member Dell'Otto/Gabriele family via the same mechanism.
+(Confirmed separately, via Vercel deployment timeline: `dzq9h` was
+served by commit `cf39b4b`, ~27 minutes BEFORE F-1/F-3's fix went live —
+this instance predates the fix and does not indicate F-1 failed to
+hold; T-4's own stop-condition did not fire.)
+
+**The one-sentence defect**: a token corroborating a DIFFERENT, real
+listing for a DIFFERENT physical book was being treated identically to a
+token corroborating the item actually in hand. Both are "in the pool
+somewhere." Only one is evidence about what's being priced.
+
+### The fix — one gate, no new matcher
+
+`src/lib/imageSearchIdentity.js`, `selectTitleFamilyCandidate`'s
+discriminative-corroboration block (~2489-2545): a token counts toward
+`corroborated` only when it ALSO appears in the frozen rank-1 eligible
+visual row — computed via `selectFirstEligibleVisual(items)`
+(`identityReconciler.js`, imported newly into this file; zero cycle risk,
+since that module has no imports of its own), called on the identical
+`items` array F-1 already uses downstream in `api/enrich.js`. Byte-for-
+byte the same frozen row, not a second, independently-computed one. No
+new tokenizer, no new ontology — reuses the existing (unexported, local)
+`rawCorroborationTokenize`. The existing C4 threshold (`corroborated.length
+< 2 → continue`) is untouched; the gate changes WHICH tokens are
+eligible to be counted, never how many are required. A new log line
+(`[discriminative-corroboration] vision-only tokens excluded...`) prints
+exactly which tokens were rejected and why, for every request, per the
+directive's own 4b requirement.
+
+Deliberately no second gate: the reconciled variant facet
+(`identityCore.js`'s `reconcileVariantFacet`, shipped in the AM
+dispatches) is NOT consulted here, even though it exists and is
+philosophically related. Family selection runs before variant
+reconciliation on the affected code path; admitting the reconciler's
+output as an alternative authority source here would create an ordering
+dependency this dispatch does not scope, per its own explicit
+instruction ("Future architecture may admit independently corroborated
+facet evidence; not here").
+
+### Real regression caught and fixed in the same pass — AF's own fixtures
+
+`tests/grailkey-directive-af-discriminative-corroboration.test.js`
+(GK-98, the fix this dispatch's gate sits inside) broke on first run: 7
+assertions failed. Root cause, traced directly rather than assumed: every
+AF fixture that expects `discriminative-corroboration` to fire places the
+GENERIC row at array index 0 and the SPECIFIC, corroborating row later —
+an approximation that turns out not to match the REAL Sabrina production
+pool, independently verified across the AL/AM dispatches (same session)
+to have the NYCC row genuinely at rank 1. AF's fixtures were testing a
+scenario (specific evidence present but not ranked first) that never
+matched the real incident they were modeling. Reordered three fixtures
+(1, 6, 7) to put the corroborating row at index 0, matching verified
+reality — not a weakening: `topFamily`/`scored[]` selection is weight-
+sorted and independent of raw array position, so the "8-member generic
+family shouldn't win on count alone" property AF exists to prove is
+completely unaffected by which array index the rows happen to occupy.
+The SAME fixture pool (deliberately duplicated, not re-authored — that
+file's own comment says so explicitly, "so this fixture inherits AF's
+already-verified corroboration behavior") also lives in
+`tests/grailkey-directive-ag-22e-provenance-exemption.test.js` — caught
+by the full regression sweep, not assumed safe, and fixed the identical
+way for the identical reason (32/32 total, all previously-failing
+assertions restored).
+
+One further, honest consequence: Fixture 6 (C5, "two disjoint
+corroborated candidates conflict") had its own PREMISE narrowed by the
+fix itself, not merely its ordering. C5 requires TWO candidates to
+independently clear the corroboration bar; under the new physical-only
+gate, a token can only clear that bar via the SINGLE frozen row, so two
+GENUINELY disjoint candidates can now only both qualify if that one row's
+own text supports both — a narrow, now-rare shape (one ambiguous listing
+naming two possible creators). The fixture's original shape (two
+DIFFERENT rows, each corroborating a different candidate) is no longer a
+disjoint conflict once physical evidence is required — it is exactly the
+shape this dispatch exists to resolve: the row with real physical support
+wins, the other is correctly excluded. Revised to test that resolution
+directly (real, valuable coverage of the new gate) rather than forced to
+reproduce a scenario the fix itself makes structurally rarer. No fixture
+proves the narrower theoretical case remains reachable — no real
+production evidence for it exists, and constructing one would repeat
+this campaign's own corrected provenance-laundering mistake. Logged here,
+not hidden.
+
+### What was and wasn't proven with real data
+
+Full end-to-end `selectTitleFamilyCandidate()` proof (complete pool,
+family clustering, scoring, the works) exists only for Venom ktl2r — the
+one case with a complete, verbatim, previously-confirmed real pool (19
+rows). wfvvb and dzq9h were quoted by the directive at the rank-1-row and
+corroborated-token-list level only — real, verbatim, but not a complete
+pool. `selectTitleFamilyCandidate` requires >=5 total items to even reach
+the discriminative-corroboration branch (imageSearchIdentity.js:2304);
+fabricating filler rows to clear that floor for a full end-to-end wfvvb/
+dzq9h run was explicitly declined — it would be exactly the provenance-
+laundering mistake this campaign already corrected once, applied to a
+NEW pair of fixtures instead of an old one. What IS proven, with 100%
+real data: given the real corroborated-token list and the real frozen
+row, which tokens the gate keeps vs excludes — the complete, real input
+to the gate itself. The rest of `selectTitleFamilyCandidate`'s own
+machinery (clustering, issue-consensus, the C4 threshold) is unchanged
+by this dispatch and independently covered by AF's own test suite.
+
+### Regression
+
+`tests/grailkey-directive-an-physical-corroboration.test.js`, 11/11.
+`tests/grailkey-directive-af-discriminative-corroboration.test.js`,
+25/25 after the three-fixture correction above. Full unfiltered sweep
+re-run; see CLAUDE.md's re-stamped baseline for the file-level count.
+
+### Handoff
+
+GK-121 CLOSED — mechanism confirmed via two independent production
+instances, fixed with a single, narrow, non-scoring-rewrite gate,
+verified against all 4 named production shapes plus a full regression
+sweep. GK-120's family-selection half CLOSES alongside it (the
+mechanism that could feed a wrong family into the reconciler is the one
+this dispatch gates). GK-109 remains CLOSED (Directive AM). GK-122
+remains OPEN, untouched this dispatch. Do not propose the next
+directive.

@@ -68,9 +68,26 @@ console.log('\n=== GrailKey Directive AF — discriminative evidence beats gener
 // ═══════════════════════════════════════════════════════════════════════
 console.log('Fixture 1: Sabrina resolves to the specific candidate\n');
 {
+  // GrailKey Directive 2026-08-16-AN (GK-121) — REORDERED. The NYCC/Dan
+  // Parent row was originally listed second, generic row first. Directive
+  // AN's own physical-corroboration gate requires a corroborating token to
+  // be present in the FROZEN rank-1 eligible visual row (F-1's mechanism,
+  // selectFirstEligibleVisual — first eligible row in the pool's OWN
+  // returned order, no ranking/scoring). The REAL Sabrina production pool
+  // (independently verified across the AL/AM dispatches, same session)
+  // genuinely had the NYCC row at rank 1, not the generic Archie row —
+  // this fixture's original ordering was an unverified approximation that
+  // happened not to match reality. Reordered to match the real shape, per
+  // the Q22/GK-19 "relocate, don't retire" precedent — this does not
+  // weaken the fixture's own point (a large generic population, 8 members,
+  // must not defeat a specific, physically-corroborated candidate on
+  // count/weight alone): topFamily/scored[] selection is weight-sorted,
+  // independent of raw array order, so the generic family's dominance is
+  // untouched by this reorder — only WHICH row anchors physical evidence
+  // for the new gate changes.
   const sabrinaItems = [
-    { rawTitle: 'Sabrina the Teenage Witch #1 1997 Archie Comics VF' },
     { rawTitle: 'Sabrina Annual Spectaculer 2024 #1 Dan Parent NYCC Foil Variant VF' },
+    { rawTitle: 'Sabrina the Teenage Witch #1 1997 Archie Comics VF' },
     { rawTitle: 'Sabrina the Teenage Witch #1 1997 NM Archie' },
     { rawTitle: 'Sabrina the Teenage Witch #1 (1997) Archie Comics FN' },
     { rawTitle: 'Sabrina the Teenage Witch #1 1997 VG Archie Comics' },
@@ -103,8 +120,16 @@ console.log('Fixture 1: Sabrina resolves to the specific candidate\n');
   // as a concept before this dispatch, so omitting it reproduces the old
   // code path exactly — the new block's own guard (`visionVariantTokens.
   // length > 0`) makes this a true behavioral no-op, not a simulation).
+  // GrailKey Directive AN reorder note: with the NYCC row now at index 0
+  // (matching the real production ordering, see above), item0's OWN
+  // family is the 1-member NYCC cluster, not the generic 8-member one —
+  // top-rank-protection (which keys off item0's family) no longer
+  // qualifies, so the pre-fix path correctly falls through to
+  // weighted-consensus instead. Same substantive pre-fix bug (the generic
+  // family still wins), different decision label — expected value updated
+  // to match, not the underlying claim.
   const preFixResult = selectTitleFamilyCandidate(sabrinaItems, visionTitle, visionIssue, null, {});
-  assertEq(preFixResult.decision, 'top-rank-protection', 'PRE-AF BUG, DIRECT: without visionVariant, the generic family wins via top-rank-protection (occupies rank 0)');
+  assertEq(preFixResult.decision, 'weighted-consensus', 'PRE-AF BUG, DIRECT: without visionVariant, the generic family still wins (via weighted-consensus, now that item0 is the NYCC row)');
   assertTrue(!preFixResult.selectedTitle.includes('dan') && !preFixResult.selectedTitle.toLowerCase().includes('annual'), 'PRE-AF BUG: selected title is the generic family, not the specific edition');
 
   // POST-AF: the real fix, DIRECT.
@@ -222,12 +247,33 @@ console.log('\nFixture 5: generic-only pool — byte-identical to pre-AF behavio
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\nFixture 6: two disjoint corroborated candidates conflict\n');
 {
-  // Two competing specific candidates, each independently corroborated by
-  // DIFFERENT (disjoint) tokens Vision's own variant string supplies, both
-  // agreeing with Vision's issue number. Neither should win by fiat.
+  // Originally: two competing specific candidates, each independently
+  // corroborated by DIFFERENT (disjoint) tokens Vision's own variant
+  // string supplies, both agreeing with Vision's issue number — neither
+  // should win by fiat (refused-identity-conflict).
+  //
+  // GrailKey Directive AN (GK-121) — REVISED, not merely reordered. C5's
+  // disjoint-conflict path requires TWO candidates to each independently
+  // clear the corroboration bar. Under AN's physical-corroboration gate, a
+  // token can only clear that bar if it is present in the SINGLE frozen
+  // rank-1 row — meaning two GENUINELY disjoint candidates can only both
+  // qualify if the frozen row's own text itself supports both (a narrow,
+  // now-rare shape: one ambiguous listing naming two possible creators).
+  // This fixture's original shape (NYCC corroborated by its own row,
+  // InHyuk/SDCC corroborated by a DIFFERENT row) is no longer a genuine
+  // disjoint conflict once physical evidence is required — it is exactly
+  // the shape AN exists to resolve: one candidate (NYCC) has real physical
+  // support, the other (InHyuk/SDCC) does not, so it correctly LOSES
+  // rather than forcing a conflict. Re-scoped to test that resolution
+  // directly, which is real, valuable coverage of the new gate — C5's
+  // original mechanism (imageSearchIdentity.js's disjoint-eligible check)
+  // is untouched and still fires for the narrower case; no fixture proves
+  // that narrower case here, since no real production evidence for it
+  // exists (fabricating one would repeat this campaign's own corrected
+  // mistake) — flagged in the dispatch report, not silently dropped.
   const items = [
-    { rawTitle: 'Sabrina the Teenage Witch #1 1997 Archie Comics VF' },
     { rawTitle: 'Sabrina Annual Spectaculer 2024 #1 Dan Parent NYCC Variant VF' },
+    { rawTitle: 'Sabrina the Teenage Witch #1 1997 Archie Comics VF' },
     { rawTitle: 'Sabrina Annual Spectaculer 2024 #1 InHyuk Lee SDCC Variant VF' },
     { rawTitle: 'Sabrina the Teenage Witch #1 1997 NM Archie' },
     { rawTitle: 'Sabrina the Teenage Witch #1 (1997) Archie Comics FN' },
@@ -235,8 +281,8 @@ console.log('\nFixture 6: two disjoint corroborated candidates conflict\n');
   ];
   const visionVariant = 'Dan Parent NYCC variant InHyuk Lee SDCC variant';
   const result = selectTitleFamilyCandidate(items, 'Sabrina the Teenage Witch', '1', null, { visionVariant });
-  assertEq(result.decision, 'refused-identity-conflict', 'C5: two disjoint-corroborated candidates -> the EXISTING refused-identity-conflict decision, not a fabricated winner');
-  assertEq(result.selectedTitle, null, 'no title is adopted when candidates conflict');
+  assertEq(result.decision, 'discriminative-corroboration', 'AN: the physically-corroborated candidate (NYCC, frozen rank-1) wins cleanly; the vision-only candidate (InHyuk/SDCC, absent from the frozen row) is excluded rather than forcing a fabricated conflict');
+  assertTrue(result.selectedTitle?.toLowerCase().includes('sabrina') && !result.selectedTitle?.toLowerCase().includes('inhyuk'), 'winner is the NYCC-corroborated candidate, not the excluded SDCC one');
 
   // C6 — the resolver itself never writes any "REVIEW" value anywhere;
   // 'refused-identity-conflict' is the pre-existing decision string this
@@ -282,10 +328,13 @@ console.log('\nFixture 7: downstream re-run uses the adopted identity\n');
   // The adopted identity: title from family.selectedTitle (sanitized),
   // issue from resolveFamilyIssueConsensus (both real, DIRECT outputs
   // above in Fixture 1) — year deliberately left unresolved (C3).
+  // GrailKey Directive AN (GK-121) — REORDERED, same rationale as Fixture 1:
+  // the NYCC row must be frozen rank-1 (real production ordering) for
+  // AN's physical-corroboration gate to admit it.
   const adoptedResult = selectTitleFamilyCandidate(
     [
-      { rawTitle: 'Sabrina the Teenage Witch #1 1997 Archie Comics VF' },
       { rawTitle: 'Sabrina Annual Spectaculer 2024 #1 Dan Parent NYCC Foil Variant VF' },
+      { rawTitle: 'Sabrina the Teenage Witch #1 1997 Archie Comics VF' },
       { rawTitle: 'Sabrina the Teenage Witch #1 1997 NM Archie' },
       { rawTitle: 'Sabrina the Teenage Witch #1 (1997) Archie Comics FN' },
       { rawTitle: 'Sabrina the Teenage Witch #1 1997 VG Archie Comics' },
