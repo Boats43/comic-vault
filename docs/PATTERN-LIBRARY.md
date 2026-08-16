@@ -10186,3 +10186,101 @@ mechanism that could feed a wrong family into the reconciler is the one
 this dispatch gates). GK-109 remains CLOSED (Directive AM). GK-122
 remains OPEN, untouched this dispatch. Do not propose the next
 directive.
+
+## GrailKey Directive 2026-08-16-AN acceptance-correction pass
+
+**Mission:** before any physical scan, two corrections and one full
+end-to-end re-verification with data that had been missing.
+
+### Correction 1 — registry status
+
+The handoff closed GK-121 and GK-120's family half on unit-fixture
+evidence alone. This repo's own standing evidence bar — set explicitly
+at GK-113/114 and re-affirmed at every closure since — requires
+physical production confirmation, not unit tests, before a ticket
+closes. Reverted both to OPEN, annotated SHIPPED-PENDING PHYSICAL.
+Worth naming as its own lesson: strong unit-level proof (verbatim
+quoted data, real function execution) is not the same evidence class as
+a physical rescan, and the gap between them is exactly where a shipped
+fix can still hide a surprise — which this same pass then found one.
+
+### Correction 2 — "never supplied" was false
+
+The prior handoff stated wfvvb/dzq9h's complete 20-row pools "were
+never supplied" and proved the fix at the token-gate level only as a
+result. That claim was wrong — both complete pools existed in
+`comic-vault-log-export-2026-08-16T19-05-10.csv` the entire time; they
+simply hadn't been handed over yet. The REFUSAL to fabricate filler
+rows in their absence was correct process and is not what's being
+corrected — only the factual claim that the data didn't exist. Recorded
+here per this campaign's own standing practice: a limitation stated
+honestly, later found to be a temporary gap rather than a permanent
+one, gets corrected in the same permanent record as the original claim.
+
+### Full end-to-end re-verification, both complete real pools
+
+**dzq9h (Dell'Otto ASM) — clean PASS.** `selectTitleFamilyCandidate`
+against the real 20-row pool, real Vision inputs (`"Amazing Spider-Man"
+#1`, `visionVariant="Inhyuk Lee virgin variant"`): `decision:
+weighted-consensus`, `selectedTitle: "amazing spider man dell otto
+gabriele"` — the correct 7-member Dell'Otto/Gabriele family (weight
+9.0, occupying rank 0 too). `[discriminative-corroboration] vision-only
+tokens excluded... [inhyuk,lee]` fires exactly as designed. Ultimate
+Spider-Man never appears as a contender. GK-121's fix works completely
+correctly for this book.
+
+**wfvvb (Venom Separation Anxiety) — GK-121's fix works, GK-123 found
+underneath it.** Same real function, real 20-row pool, real Vision
+inputs (`"Venom" #1`, `visionVariant="Tyler Kirkham virgin variant"`).
+`[discriminative-corroboration] vision-only tokens excluded...
+[tyler,kirkham]` fires correctly — "Venom: Lethal Protector" never wins
+via discriminative-corroboration, exactly GK-121's own target. But the
+pool then falls through to `weighted-consensus`, which selects **"ariel
+diaz venom carnage"** — a 3-member cluster of "Ariel Diaz Artbook-Venom
+& Carnage" listings (a companion art-print/portfolio product, not a
+comic printing of the physical item at all) — beating the single real
+Mayhew Separation Anxiety row on a razor-thin weight margin (5.5 vs
+5.0, since the real book has only ONE listing in this particular pool,
+unlike the later ktl2r scan's 11-listing dominant cluster for the same
+book).
+
+**Why this was never seen before**: the pre-GK-121 Lethal Protector bug
+fired FIRST, before weighted-consensus ever got a chance to run — a
+worse defect completely masking a milder, always-latent one. Fixing the
+loud bug exposed the quiet one underneath. This is worth naming as its
+own pattern: killing one wrong-selection mechanism does not prove no
+other one exists on the same pool — it can only prove the ones that
+would have fired AFTER the one just fixed.
+
+**Root cause, traced not fixed**: neither of the two functions that
+gate what enters family clustering excludes an artbook/companion-print
+listing. `isEligibleVisualRow` (`identityReconciler.js`) only excludes
+lot/bundle/variation-group listings. `buildTitleFamilies`'s own
+`NON_GENUINE_COPY_RE` filter (`compHygiene.js`, via `identityCore.js`)
+only excludes photocopy/USB/digital-archive/scan-disc listings —
+neither pattern was ever written with "companion art print, not a
+printing of the comic itself" in mind. Logged as GK-123. Not fixed —
+per the directive's own explicit instruction to report a new finding
+and stop rather than fold it in silently; a real fix needs more
+collected real examples before a regex can be scoped without either
+over- or under-matching.
+
+### What did NOT change
+
+No new test file committed — the wfvvb/dzq9h E2E runs used a temporary
+investigative script (written, run, then deleted), since the finding
+documents a real DEFECT (the wrong behavior), not a shippable
+assertion of correct behavior. Adding a test that asserts "ariel diaz
+venom carnage wins" would be enshrining a bug as expected behavior.
+Baseline test count unchanged at 188/19/4/211 — nothing regenerated it.
+
+### Handoff
+
+GK-121 and GK-120's family half: SHIPPED-PENDING PHYSICAL, both
+corrected from an earlier over-eager CLOSED. GK-123 (artbook clustering
+gap) logged OPEN, its own future scoping. dzq9h ready for physical
+confirmation with high confidence (clean E2E pass); wfvvb's physical
+scan will very likely still show the CORRECT book now (Kirkham/Lethal
+Protector genuinely dead), but the underlying pool's own weighted-
+consensus fallback is confirmed fragile on this exact request shape —
+worth watching, not blocking. Do not propose the next directive.
