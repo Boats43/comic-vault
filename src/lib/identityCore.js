@@ -25,6 +25,7 @@ import { normalizeOptionalYear } from './yearEvidence.js';
 // identityCore.js.
 import { evaluateUnanimousConsensusPromotion, evaluateUnanimousYearConsensusPromotion, evaluateTitleTextIndependence } from './issueAuthority.js';
 import { selectFirstEligibleVisual, extractHashIssueNumber, isMarketingFlavoredRow, countCorroboratingEligibleRows, MINIMUM_CORROBORATING_ROWS, createEvidenceSet, addEvidence, reportConflict, reconcileIssue } from './identityReconciler.js';
+import { matchCreatorCanonicals } from './premiumCreators.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
 // source of truth for "publisher name is legitimately PART of the series
@@ -751,6 +752,25 @@ export const variantTokenOverlapScore = (confirmedVariant, productName) => {
 };
 
 /**
+ * GrailKey Directive 2026-08-16-AL (GK-120, C4) — is `productName` a hard
+ * negative against `confirmedVariant`? True only when BOTH sides name a
+ * registered creator (premiumCreators.js) AND those creator sets are
+ * completely disjoint — e.g. confirmedVariant="Tyler Kirkham variant" vs
+ * productName="[Mayhew Virgin] #1 (2024)": two different, both-recognized
+ * creators claiming the same variant slot is a contradiction no amount of
+ * shared "virgin"/"foil"/year tokens can outweigh. A candidate naming NO
+ * recognized creator at all is never vetoed by this check (nothing to
+ * contradict) — it still has to clear the plain score floor below.
+ */
+const hasCreatorConflict = (confirmedVariant, productName) => {
+  const variantCreators = matchCreatorCanonicals(confirmedVariant);
+  if (variantCreators.length === 0) return false;
+  const productCreators = matchCreatorCanonicals(productName);
+  if (productCreators.length === 0) return false;
+  return !productCreators.some((c) => variantCreators.includes(c));
+};
+
+/**
  * Q-PC-VARIANT-SCORE — pick the best bracket-variant PC candidate.
  *
  * When confirmedVariant is populated (Vision's direct read, or Class A's
@@ -762,30 +782,46 @@ export const variantTokenOverlapScore = (confirmedVariant, productName) => {
  *
  * When confirmedVariant is null, returns candidates[0] — IDENTICAL to the
  * prior "arbitrary, API order" behavior; this helper changes nothing for
- * that case.
+ * that case (nothing to score against).
  *
- * Ties (including all-zero, i.e. no candidate matches confirmedVariant at
- * all) keep the first-encountered candidate — same graceful degradation
- * as today's single-candidate fallback.
+ * GrailKey Directive 2026-08-16-AL (GK-109/GK-120, C4) — CHANGED: this
+ * used to always return a "best" candidate even at a genuine, all-zero
+ * non-match ("no refusal on zero score" was the prior, explicit design —
+ * see q-pc-variant-score.test.js's original Test 4). Production evidence
+ * (Venom Separation Anxiety #1: confirmedVariant="Tyler Kirkham variant"
+ * scored 0 against every real deferred candidate, including
+ * "[Mayhew Virgin] #1 (2024)", yet still won and anchored pricing/cache
+ * keys/comp queries to a hallucinated creator) proved best-of-bad is
+ * unsafe once confirmedVariant is populated. Two-stage now: (1) any
+ * candidate with a hard creator conflict (hasCreatorConflict, above) is
+ * removed from consideration outright, regardless of any other token
+ * overlap; (2) among the survivors, the highest variantTokenOverlapScore
+ * must be > 0 to be accepted — a genuine zero-signal match returns null
+ * (NO_VARIANT_MATCH) instead of an arbitrary candidate. A populated-but-
+ * uncorroborated candidate is not authority (C8) — the caller falls back
+ * to "no PC anchor" rather than a confidently wrong one.
  *
  * @param {Array<{productName: string}>} candidates - bracket-variant PC candidates, in API order
  * @param {string|null} confirmedVariant - confirmed variant name, or null
- * @returns {object|null} the selected candidate, or null if candidates is empty
+ * @returns {object|null} the selected candidate, null if candidates is empty, or null if none clear the floor
  */
 export const selectBestVariantCandidate = (candidates, confirmedVariant) => {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
   if (!confirmedVariant) return candidates[0];
 
-  let best = candidates[0];
-  let bestScore = variantTokenOverlapScore(confirmedVariant, candidates[0].productName);
-  for (let i = 1; i < candidates.length; i++) {
-    const score = variantTokenOverlapScore(confirmedVariant, candidates[i].productName);
+  const survivors = candidates.filter((c) => !hasCreatorConflict(confirmedVariant, c.productName));
+  if (survivors.length === 0) return null;
+
+  let best = survivors[0];
+  let bestScore = variantTokenOverlapScore(confirmedVariant, survivors[0].productName);
+  for (let i = 1; i < survivors.length; i++) {
+    const score = variantTokenOverlapScore(confirmedVariant, survivors[i].productName);
     if (score > bestScore) {
-      best = candidates[i];
+      best = survivors[i];
       bestScore = score;
     }
   }
-  return best;
+  return bestScore > 0 ? best : null;
 };
 
 /**

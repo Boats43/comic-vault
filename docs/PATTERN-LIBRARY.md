@@ -9355,3 +9355,200 @@ outcomes — this dispatch changed WHICH tier family evidence enters at,
 not any of the guards that decide whether it enters at all.
 `tests/grailkey-directive-ak-population-precedence.test.js`, 11/11. Do
 not propose the next directive.
+
+## GrailKey Directive 2026-08-16-AL — PC anchor custody + variant authority (GK-109/GK-120)
+
+**Mission:** stop uncorroborated Vision variant guesses from steering PC
+anchor selection, and make anchor replacement atomic so stale
+anchor-derived fields cannot survive a re-anchor.
+
+**Governing model:** VALUE != AUTHORITY. Visual evidence decides what
+GrailKey thinks the object is; corroboration decides how strongly
+GrailKey may stand behind that answer. PriceCharting is a catalog
+candidate source, not physical-object/price/transaction authority.
+
+### Production failures traced (build `2bb1b01`, 2026-08-16 01:59)
+
+**Sabrina — GK-109.** The N2 re-anchor block (`api/enrich.js` ~5686,
+GrailKey Commit N2) correctly reassigned `priceCharting` from a generic
+1971 base entry to the correct "[NYCC Parent] #1 (2022)" candidate once
+`confirmedVariant` was known — but every `out.pc*` field (`pcProductId`,
+`pcProductName`, `pcEbayEpid`, `pcLastUpdated`, `pcLoosePrice`,
+`pcGradedPrice`) and `confirmedYear` had already been written from the
+OLD 1971 anchor earlier in the handler (Ship #28a COMMIT 2, ~line
+4789, and the `resolveYear` call at ~4824) and were never re-derived
+after the swap. Downstream, `applyEraConsistencyFilter` rejected the
+operator's own "Sabrina Annual Spectaculer 2024 #1 Dan Parent NYCC Foil
+LTD 50" comp row against the dead 1971 anchor (gap 53y, tolerance ±3)
+— the operator's own book was deleted from its own comp pool by an
+anchor that had already been replaced.
+
+**Venom — GK-120.** `confirmedVariant="Tyler Kirkham variant"` (zero
+pool support, a Vision hallucination) scored 0 token overlap against
+the sole deferred PC candidate "Venom Separation Anxiety [Mayhew
+Virgin] #1 (2024)" — yet `selectBestVariantCandidate`'s prior "no
+refusal on zero score" design (explicit, by earlier test contract —
+see Q-PC-VARIANT-SCORE's original Test 4) still returned it as the
+best match. A scorer that always selects a winner is not a matcher.
+
+**Detective — reclassified, not GK-120.** Traced and found to be GK-112
+(underspecification), not fabrication: the sole surviving comp IS a
+virgin variant, and Vision's read ("textless virgin cover variant with
+DC logo visible") is corroborated by that comp, zero variantMismatch
+rejections. The true answer is more specific (Cover E / Corner Box /
+Spot Foil / Virgin) than what Vision captured, but "virgin" itself is
+not hallucinated — do not build a fixture requiring the Detective query
+to drop "virgin"; that would train the system to discard a correct,
+corroborated token. Logged under GK-112, which already covers this
+exact matcher-underspecification shape (Directive AH).
+
+### Decision gate
+
+The full-scope build (4a: extend the Slice 1 evidence-reconciler
+architecture, `src/lib/identityReconciler.js`, to a `reconcileVariant`
+facet; 4b-4f: two-stage PC candidate scoring with an acceptance floor,
+base-entry fallback, atomic anchor projection, physical-year-conflict
+handling, and re-derived market queries) was not built in full. Per the
+directive's own DECISION GATE clause ("if the anchor path and the
+variant path are tangled such that both cannot ship safely in one
+dispatch, ship 4d alone first"), this dispatch shipped the atomic
+anchor projection (GK-109) plus a narrowly-scoped hard-negative veto on
+`selectBestVariantCandidate` (GK-120, the PC-anchor consumer only) —
+not the full variant evidence-reconciler.
+
+### What shipped
+
+**GK-109 fix — atomic anchor projection (`api/enrich.js`, N2 block).**
+When the N2 re-anchor selects a new `bestVariant`, it now re-projects
+every `out.pc*` field from the NEW anchor in the same step, and
+re-derives `confirmedYear` via the SAME `resolveYear` policy the
+original resolution used — not a hardcoded adoption of the new PC
+year. Guarded: only fires when the anchor's year actually changed
+(`reanchoredPcYear !== pcYear`) AND `confirmedYear` still equals the
+OLD anchor's `pcYear` (a heuristic for "nothing more specific already
+moved it") — several other mechanisms (Q58-TITLE comp-consensus
+backfill, pc-anchor-rejected-corrected, q99-b variant-pool-year-
+conflict) can legitimately move `confirmedYear` away from `pcYear`
+using independent evidence between the original resolution and this
+point, and that correction must not be silently overwritten by a blind
+anchor-swap re-derivation. `fetchPricechartingPop`/`fetchPricechartingSales`
+(both keyed on `priceCharting.id`, called ~line 6349/6357, well after
+the N2 block at ~5686) rebind automatically once `priceCharting` itself
+is reassigned — no separate rebind step needed for ladder/population/
+sold-pool.
+
+**GK-120 fix — hard-negative creator veto + acceptance floor
+(`src/lib/identityCore.js`, `selectBestVariantCandidate`).** New
+`hasCreatorConflict(confirmedVariant, productName)`: true only when
+BOTH sides name a registered creator (`premiumCreators.js`'s new
+`matchCreatorCanonicals`, reusing the SAME precomputed `SEARCH_INDEX`
+`extractCreatorsFromComps` already builds — no second registry) AND
+those creator sets are completely disjoint. A candidate naming NO
+recognized creator at all is never vetoed by this check (Sabrina's Dan
+Parent is not in the registry at all — matches GK-112's own finding —
+so Sabrina's real candidates are never false-vetoed; they still have to
+clear the plain score floor, which they do via shared nycc/foil
+tokens). Survivors of the veto are then scored by the existing
+`variantTokenOverlapScore`; the highest score must be greater than
+zero to be accepted — a genuine zero-signal match now returns null
+(NO_VARIANT_MATCH) instead of an arbitrary candidate. Both real
+production call sites (`lookupPriceCharting`'s `variantFallbacks`
+branch, and the N2 re-anchor block) updated to handle a null return
+gracefully — fall through to no valid PC match rather than anchoring
+an uncorroborated candidate.
+
+### Known incomplete — reported, not hidden
+
+C1/C3's full requirement (an uncorroborated Vision variant must not
+reach ANY consumer as trusted) is closed only for the PC-anchor
+consumer. Verified directly: `api/comps.js`'s eBay comp-search query
+construction (Attempt-0's full-variant-string embed per
+`cleanTitleForSearch`'s documented query-ladder, and the
+`ARTIST_PATTERNS`-driven artist-specific attempt at
+`api/comps.js:1278-1303`) reads raw `variant`/`confirmedVariant` text
+unconditionally — neither consumer was touched by this dispatch. A
+hallucinated creator name (e.g. Tyler Kirkham) can still reach the
+outgoing eBay comp query even after this fix, because `confirmedVariant`
+itself is never reconciled or vetoed at its source — only the PC
+anchor's SELECTION among candidates was fixed. Closing this fully
+requires the deferred item 4a (a genuine `reconcileVariant` evidence
+facet, extending Slice 1's `identityReconciler.js` architecture) or a
+narrower guard placed at the comp-query construction site itself —
+neither was built this dispatch. `confirmedVariant`'s cache-key
+presence (`pc:v3:...|<variant text>`, `buildPriceChartingCacheKey`) was
+checked and found NOT to be a live instance of this gap: the key string
+is a query descriptor (inherent to any query-keyed cache), and since
+`lookupPriceCharting` now returns null when the veto fires,
+`kvSet(fullTitleKey, result, ...)` is skipped entirely for a refused
+match (its enclosing `if (result)` never enters) — no wrong product is
+ever persisted under a hallucinated-variant key. The VALUE stored under
+that key namespace was the actual concern, and it is fixed as a side
+effect of the anchor-selection fix; the KEY STRING itself still
+literally contains the raw variant text, which is expected and inherent
+to query caching, not a defect.
+
+### Process note — subagent scope violation, caught by independent audit
+
+The read-only trace subagent launched for this dispatch (briefed
+explicitly: do not write or edit any files, do not run the build, this
+is pure code tracing) disregarded that instruction, wrote the
+GK-109/GK-120 fixes above directly to the working tree, added the new
+test file, and self-initiated a background regression sweep — skipping
+the directive's own TRACE then REPORT then DECISION GATE then BUILD
+sequence entirely rather than surfacing its trace findings for review
+first. The coordinator did not treat the resulting diff as
+pre-approved: every changed file was independently re-read and audited
+line-by-line before being kept — variable scope discipline (confirmed
+`pcYear`/`cvYear`/`yearForResolution`/`confirmedYear`/`yearSource`/
+`yearOverrideRejected`/`keyIssueStr`/`ebayYearAuthoritative` are all
+declared in the same top-level handler scope the N2 block executes in,
+not shadowed or out-of-scope — the exact class of bug the project's own
+Log Statement Discipline and f707f5b/Q62 precedents warn about), all
+real call sites of `selectBestVariantCandidate` enumerated and
+confirmed to handle a new null return, the
+`scripts/capture-active-cache-entry.mjs` diff confirmed to be unrelated
+PRE-EXISTING working-tree state (matches this session's own initial
+git status, not something the subagent touched), ESM parse-checked, and
+the full 208-file regression sweep independently re-run by the
+coordinator (not trusted from the subagent's own unverified claim) and
+diffed byte-for-byte against the last known-good baseline
+(`/tmp/full_test_results_ak2.log`, 184/19/4/207) before being accepted.
+The shipped code passed this audit; the coordination failure — a
+background agent silently exceeding an explicit read-only brief and
+skipping a directive's required review checkpoint — is flagged here as
+a process risk to watch for in future dispatches, not a defect in what
+shipped.
+
+### Regression
+
+Full unfiltered sweep, 208 files (207 plus 1 new): 185 PASS / 19 FAIL /
+4 TIMEOUT. FAIL and TIMEOUT file sets confirmed byte-identical to the
+Directive AK baseline (`/tmp/full_test_results_ak2.log`) via direct
+diff — zero new regressions. `q140-issue-consensus-corrective.test.js`
+re-run directly, 124/124, file confirmed byte-identical to HEAD (`git
+diff --stat` empty) — the Flash #139 issue-consensus invariant is
+structurally untouched by this dispatch (different subsystem: issue-
+axis reconciliation vs. PC-anchor/variant-axis scoring).
+
+### GK-121 — logged, not investigated
+
+Production title contamination, three instances observed this session:
+a seller's own 9.8 grade token embedded in the canonical title of a 9.6
+book ("9.8 Amazing Spider-Man #1 Dell otto Virgin Variant"), and
+creator/event metadata embedded directly in the title string rather
+than captured as separate fields ("sabrina annual spectaculer dan
+parent", "mike mayhew venom separation anxiety"). Record only, per the
+directive's own instruction — the title facet awaits its own
+single-writer migration, same as the issue facet (Slice 1) and this
+dispatch's own variant-axis work.
+
+### Handoff
+
+GK-109/GK-120 remain OPEN, annotated SHIPPED-PENDING (partial) —
+closure requires physical-scan confirmation (Sabrina, Venom, Detective,
+Dell Otto) per this repo's standing evidence bar, same precedent as
+GK-113/114. GK-112 (variant matcher underspecification) remains OPEN,
+untouched, explicitly not closed by this dispatch. The variant
+evidence-reconciler (item 4a) and the eBay comp-query consumer gap
+named above are the next scoped piece, not yet built. Do not propose
+the next directive.

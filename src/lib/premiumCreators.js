@@ -153,6 +153,25 @@ const SEARCH_INDEX = PREMIUM_CREATORS.map((c) => {
   return { creator: c, patterns };
 });
 
+// GrailKey Directive 2026-08-16-AL (GK-120) — single-text creator lookup,
+// reusing the SAME precomputed SEARCH_INDEX extractCreatorsFromComps
+// already builds (no second registry, no duplicated regex work). Returns
+// the set of canonical creator names matched anywhere in one string —
+// used by identityCore.js's selectBestVariantCandidate to detect a
+// contradictory-creator hard negative (e.g. confirmedVariant says "Tyler
+// Kirkham" but a PC candidate's own product name says "[Mayhew Virgin]" —
+// two different, both-registered creators naming the SAME variant slot is
+// a hard veto, not a token-overlap tiebreak).
+export const matchCreatorCanonicals = (text) => {
+  const lower = String(text || '').toLowerCase();
+  if (!lower) return [];
+  const out = [];
+  for (const { creator, patterns } of SEARCH_INDEX) {
+    if (patterns.some((re) => re.test(lower))) out.push(creator.canonical);
+  }
+  return out;
+};
+
 // Scan an array of comp listing titles and return consensus + singleton
 // detections. Same shape as Ship #12a's extractKeyFromComps.
 //

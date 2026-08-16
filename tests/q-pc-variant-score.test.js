@@ -95,15 +95,56 @@ console.log('\nTest 3: Existing Q108 null-variant case (Wonder Woman #75) — un
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-console.log('\nTest 4: Only ONE bracket-variant candidate (no confirmedVariant match possible) — falls through gracefully');
+// GrailKey Directive 2026-08-16-AL (GK-109/GK-120, C4) — SUPERSEDED. This
+// test used to assert the OLD "no refusal on zero score" design (a lone
+// candidate always won, even at zero token overlap). Real production
+// evidence (Venom Separation Anxiety #1: confirmedVariant="Tyler Kirkham
+// variant" scored 0 against every real deferred candidate — including
+// "[Mayhew Virgin] #1 (2024)" — yet still won and anchored pricing/cache
+// keys/comp queries to a hallucinated creator) proved that design unsafe.
+// This is the SAME shape as this fixture (a lone, zero-overlap, opposing-
+// creator candidate) — kept in place, assertion flipped to the new,
+// directive-mandated behavior, per this codebase's established pattern of
+// correcting a superseded test forward rather than deleting it (see
+// CLAUDE.md's Q22/GK-19 "relocate, don't retire" precedent).
+console.log('\nTest 4: Only ONE bracket-variant candidate, hard creator conflict — refused, not best-of-bad');
 {
   const candidates = [
     { id: 3442358, productName: 'Captain America [Steranko] #25 (2017)', price: 2.27 },
   ];
 
-  const best = selectBestVariantCandidate(candidates, 'SKOTTIE YOUNG'); // no match possible — only one option
-  assertEq(best.id, 3442358, 'single candidate returned regardless of match — same as today\'s single-candidate behavior');
-  assertEq(variantTokenOverlapScore('SKOTTIE YOUNG', candidates[0].productName), 0, 'sanity check: score is genuinely 0 (no match), yet still selected — no refusal on zero score');
+  const best = selectBestVariantCandidate(candidates, 'SKOTTIE YOUNG'); // Young vs Steranko: both registered, disjoint — hard veto
+  assertEq(best, null, 'a lone candidate naming a DIFFERENT registered creator is refused (NO_VARIANT_MATCH), not accepted by default');
+  assertEq(variantTokenOverlapScore('SKOTTIE YOUNG', candidates[0].productName), 0, 'sanity check: score is genuinely 0 (no token overlap) — floor would also reject this on score alone');
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+console.log('\nTest 4b: lone candidate, zero score, NEITHER side names a registered creator — still refused by the floor');
+{
+  // No creator-conflict veto possible here (neither side matches the
+  // registry) — this isolates the plain score>0 floor from the creator
+  // hard-negative check, proving both mechanisms independently enforce
+  // C4's "no candidate clearing the floor -> NO_VARIANT_MATCH."
+  const candidates = [
+    { id: 999, productName: 'Some Random Series [Unregistered Artist] #1 (2019)', price: 3.00 },
+  ];
+  const best = selectBestVariantCandidate(candidates, 'a totally unrelated descriptor');
+  assertEq(best, null, 'zero-overlap, no-creator-recognized-on-either-side candidate is refused by the plain score floor');
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+console.log('\nTest 4c: the real Venom production shape — Kirkham vs Mayhew, both registered, disjoint');
+{
+  // Venom-shaped: confirmedVariant names a creator with zero pool support
+  // (hallucinated), the sole deferred candidate names a DIFFERENT,
+  // genuinely-corroborated creator. The conflicting candidate must be
+  // excluded even though it might otherwise share incidental tokens
+  // (e.g. "virgin") — Directive AL's explicit acceptance criterion (B3).
+  const candidates = [
+    { id: 1, productName: 'Venom Separation Anxiety [Mayhew Virgin] #1 (2024)', price: 40 },
+  ];
+  const best = selectBestVariantCandidate(candidates, 'Tyler Kirkham variant');
+  assertEq(best, null, 'Mayhew candidate is hard-vetoed against confirmedVariant="Tyler Kirkham variant" — no best-of-bad anchor (the real Venom production shape)');
 }
 
 // ─────────────────────────────────────────────────────────────────────────

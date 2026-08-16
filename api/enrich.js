@@ -1954,14 +1954,27 @@ const lookupPriceCharting = async ({ title, issue, year, yearConfidence = 'prove
       // candidates[0] — identical to the prior arbitrary/first-
       // encountered behavior, unchanged.
       if (variantFallbacks.length > 0) {
+        // GrailKey Directive 2026-08-16-AL (GK-109/GK-120, C4/C5) —
+        // selectBestVariantCandidate now returns null when every
+        // candidate either hard-conflicts on creator or scores 0 token
+        // overlap against `variant` (see its own doc comment). No base
+        // entry existed in this branch at all, so a refused variant match
+        // means NO usable PC data — fall through to "no valid match"
+        // rather than anchoring an uncorroborated candidate (C8: a
+        // populated-but-unmatched candidate is not authority).
         const fb = selectBestVariantCandidate(variantFallbacks, variant);
-        console.log(
-          variant
-            ? `[pc-anchor] variant-scored: "${fb.productName}" best matches confirmedVariant="${variant}" (of ${variantFallbacks.length} candidates)`
-            : `[pc-anchor] no base entry found — falling back to variant entry "${fb.productName}"`
-        );
-        console.log(`[pc-accept] "${fb.productName}" — reason=variant-fallback`);
-        return { ...fb, variantFallback: true };
+        if (fb) {
+          console.log(
+            variant
+              ? `[pc-anchor] variant-scored: "${fb.productName}" best matches confirmedVariant="${variant}" (of ${variantFallbacks.length} candidates)`
+              : `[pc-anchor] no base entry found — falling back to variant entry "${fb.productName}"`
+          );
+          console.log(`[pc-accept] "${fb.productName}" — reason=variant-fallback`);
+          return { ...fb, variantFallback: true };
+        }
+        if (variant) {
+          console.log(`[pc-anchor] no variant candidate clears the acceptance floor for confirmedVariant="${variant}" (of ${variantFallbacks.length} candidates) — refusing to anchor`);
+        }
       }
       console.log(`[pricecharting] no valid match in ${products.length} results — all ${products.length} candidate(s) rejected, see [pc-reject] lines above`);
       return null;
@@ -5671,9 +5684,24 @@ export default async function handler(req, res) {
     // no base entry survives at all — reused here, not reimplemented, for
     // the case a base entry DID survive and won only by default.
     if (confirmedVariant && priceCharting?.deferredVariantCandidates?.length > 0) {
+      // GrailKey Directive 2026-08-16-AL (GK-109, C6) — atomic anchor
+      // projection. Before this fix, reassigning `priceCharting` here
+      // rebound ladder/population/sold-pool (fetchPricechartingPop/
+      // fetchPricechartingSales key off priceCharting.id fresh, further
+      // down) but left `pcYear`/`confirmedYear`/`out.confirmedYear`/
+      // `out.pcProductId`/`out.pcProductName` (all const/already-written
+      // above, from the OLD anchor at lines ~4779/4789) permanently stale
+      // — the Sabrina production case: N2 correctly reanchored to
+      // "[NYCC Parent] #1 (2022)" but confirmedYear stayed 1971 (the old
+      // base entry's year), and the era filter then rejected the
+      // operator's OWN book (2024) against that dead 1971 anchor. Every
+      // field this dispatch's own trace found derived from the anchor is
+      // now recomputed in the SAME step the anchor itself changes — never
+      // a separate, skippable pass.
+      const oldAnchorProductId = priceCharting.id;
       const bestVariant = selectBestVariantCandidate(priceCharting.deferredVariantCandidates, confirmedVariant);
-      const variantScore = bestVariant ? variantTokenOverlapScore(confirmedVariant, bestVariant.productName) : 0;
-      if (bestVariant && variantScore > 0) {
+      if (bestVariant) {
+        const variantScore = variantTokenOverlapScore(confirmedVariant, bestVariant.productName);
         console.log(
           `[n2-reanchor] re-anchoring PC product: "${priceCharting.productName}" (id=${priceCharting.id}) -> ` +
           `"${bestVariant.productName}" (id=${bestVariant.id}) — confirmedVariant="${confirmedVariant}" ` +
@@ -5681,10 +5709,66 @@ export default async function handler(req, res) {
         );
         priceCharting = { ...bestVariant, variantReanchored: true };
         out.pcVariantReanchored = true;
+
+        // Re-project every out.pc* field the OLD anchor wrote (Ship #28a
+        // COMMIT 2's own block, lines ~4789-4796) from the NEW anchor —
+        // otherwise the response ships id/name from a product that no
+        // longer backs the price at all.
+        out.pcProductId = priceCharting.id || null;
+        out.pcProductName = priceCharting.productName || null;
+        out.pcEbayEpid = null;
+        out.pcLastUpdated = null;
+        out.pcLoosePrice = priceCharting.loosePrice || priceCharting['loose-price'] || null;
+        out.pcGradedPrice = priceCharting.cibPrice || priceCharting['cib-price'] || priceCharting.gradedPrice || null;
+        console.log(`[n2-reanchor] out.pc* fields re-projected: id ${oldAnchorProductId} -> ${out.pcProductId}`);
+
+        // Re-derive confirmedYear from the NEW anchor's year using the
+        // EXACT SAME policy (resolveYear) the original resolution used —
+        // never a hardcoded adoption of the new PC year (C7). If the
+        // physical/user year still disagrees with the new pcYear by more
+        // than resolveYear's own tolerance, its existing branch (e) keeps
+        // the physical year and marks yearOverrideRejected, same safety
+        // net as the first resolution — this call does not weaken it.
+        //
+        // Guarded on confirmedYear still equalling the OLD anchor's pcYear
+        // (String comparison — both are the "resolve-year"/Q86-tolerated
+        // branches that adopt pcYear verbatim): several OTHER mechanisms
+        // between the original resolution and this point (Q58-TITLE comp-
+        // consensus backfill, pc-anchor-rejected-corrected, q99-b variant-
+        // pool-year-conflict) can also have legitimately moved confirmedYear
+        // away from pcYear using their own independent evidence — if one
+        // already did, that correction is more specific than a blind
+        // anchor-swap re-derivation and must not be silently overwritten.
+        const reanchoredPcYear = priceCharting.year ? parseInt(priceCharting.year, 10) : null;
+        if (reanchoredPcYear !== pcYear && String(confirmedYear ?? '') === String(pcYear ?? '')) {
+          const reanchoredYearResolution = resolveYear(
+            yearForResolution,
+            reanchoredPcYear,
+            cvYear,
+            ebayYearAuthoritative,
+            { keyIssue: keyIssueStr }
+          );
+          const oldConfirmedYear = confirmedYear;
+          confirmedYear = writeConfirmed(
+            'confirmedYear', confirmedYear, reanchoredYearResolution.confirmedYear,
+            yearSource, reanchoredYearResolution.yearSource, 'n2-reanchor-year-reproject'
+          );
+          yearSource = reanchoredYearResolution.yearSource;
+          yearOverrideRejected = reanchoredYearResolution.yearOverrideRejected;
+          out.confirmedYearMeta = {
+            value: confirmedYear || null,
+            source: reanchoredYearResolution.yearSource,
+            confidence: reanchoredYearResolution.yearConfidence,
+          };
+          console.log(
+            `[n2-reanchor] year re-projected from new anchor: pcYear ${pcYear ?? 'null'} -> ${reanchoredPcYear ?? 'null'}, ` +
+            `confirmedYear "${oldConfirmedYear ?? 'null'}" -> "${confirmedYear ?? 'null'}" (source=${yearSource})`
+          );
+        }
       } else {
         console.log(
-          `[n2-reanchor] confirmedVariant="${confirmedVariant}" known, but no deferred candidate scored a match — ` +
-          `keeping base entry "${priceCharting.productName}"`
+          `[n2-reanchor] confirmedVariant="${confirmedVariant}" known, but no deferred candidate cleared the ` +
+          `acceptance floor (score>0, no creator conflict) — keeping base entry "${priceCharting.productName}"`
         );
       }
     }
