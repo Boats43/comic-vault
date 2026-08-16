@@ -50,14 +50,43 @@ export const LOT_OR_BUNDLE_RE = /\b(?:lot|bundle|complete\s*set|full\s*run|comic
 
 export const VARIATION_GROUP_RE = /\bselect\s+an?\s+issue\b|\bpick\s+your\s+issue\b|\bchoose\s+(?:your|an?)\s+issue\b|\bselect\s+(?:your\s+)?(?:variant|option)s?\b/i;
 
+// GrailKey Directive 2026-08-16-AO (GK-123) — companion-product exclusion.
+// A third known-ineligible shape, found tracing the real wfvvb production
+// pool: a companion art-print/portfolio product (not a printed comic edition
+// of the item at all) reaching family election and defeating the actual
+// physical book on member count alone ("Ariel Diaz Artbook-Venom & Carnage,"
+// 3 near-duplicate listings, weight 5.5, beat a single genuine Mayhew
+// Separation Anxiety row, weight 5.0, via weighted-consensus — the
+// pre-existing Lethal Protector bug had always fired first and masked this
+// completely; fixing GK-121 exposed it). Same governing rule as the two
+// existing classes above: a listing with no single-COMIC-book identity is
+// ineligible, rank/weight has no authority over it. Explicit tokens only
+// (art book/artbook, art print, portfolio, sketchbook, poster) — bare "art"
+// is deliberately excluded (would false-positive on real comic titles like
+// "Art Ops" or "Art of War"). Comic-identity-scoped by construction, not
+// merely by convention: isEligibleVisualRow has no assetType parameter and
+// is called only from this codebase's comic identity-resolution pipeline
+// (selectFirstEligibleVisual, countCorroboratingEligibleRows,
+// selectTitleFamilyCandidate's Rule 1/C1 filter) — there is no other asset-
+// type pipeline yet (Session 4B's BookAdapter/CardAdapter are roadmap-only,
+// unbuilt) that would ever need an artbook to BE the identity target through
+// this same function.
+export const COMPANION_PRODUCT_RE = /\bart\s*books?\b|\bart\s*prints?\b|\bportfolios?\b|\bsketchbooks?\b|\bposters?\b/i;
+
 // A normal variant cover ("Cover B", "Jim Lee Variant") is NOT rejected by
-// either pattern above — it names a specific book. Only a listing with no
-// single-book identity at all (a picker, a bundle) is ineligible.
+// any pattern above — it names a specific book. Only a listing with no
+// single-comic-book identity at all (a picker, a bundle, a companion
+// non-comic product) is ineligible.
 export const isEligibleVisualRow = (rawTitle) => {
   const text = String(rawTitle || '');
   if (!text.trim()) return false;
   if (LOT_OR_BUNDLE_RE.test(text)) return false;
   if (VARIATION_GROUP_RE.test(text)) return false;
+  const companionMatch = text.match(COMPANION_PRODUCT_RE);
+  if (companionMatch) {
+    console.log(`[eligibility] reason=COMPANION_PRODUCT token="${companionMatch[0]}" rejected: "${text}"`);
+    return false;
+  }
   return true;
 };
 

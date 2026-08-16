@@ -10278,9 +10278,119 @@ Baseline test count unchanged at 188/19/4/211 — nothing regenerated it.
 
 GK-121 and GK-120's family half: SHIPPED-PENDING PHYSICAL, both
 corrected from an earlier over-eager CLOSED. GK-123 (artbook clustering
-gap) logged OPEN, its own future scoping. dzq9h ready for physical
-confirmation with high confidence (clean E2E pass); wfvvb's physical
-scan will very likely still show the CORRECT book now (Kirkham/Lethal
-Protector genuinely dead), but the underlying pool's own weighted-
-consensus fallback is confirmed fragile on this exact request shape —
-worth watching, not blocking. Do not propose the next directive.
+gap) logged OPEN, blocking Venom acceptance until its own fix lands.
+
+**CORRECTED (Directive AO, same day)**: the line above previously
+speculated the wfvvb physical scan "will very likely still show the
+CORRECT book." Struck as a category error, not merely optimistic —
+acceptance runs against the KNOWN FAILING production shape (F2-E2E on
+the verbatim wfvvb pool), not against whether a live rescan happens to
+avoid it. A different live pool succeeding on the day of a rescan would
+prove nothing about whether the documented, reproducible failure mode
+is fixed. See the Directive AO entry for the actual fix and its
+acceptance evidence.
+
+## GrailKey Directive 2026-08-16-AO — GK-123: companion products are not identity evidence
+
+**Mission:** one eligibility fix, no scoring changes. A 3-row art-print
+cluster had defeated the rank-1 physical comic in family election, 5.5
+to 5.0 — the fix is upstream eligibility, not downstream weighting.
+
+### The fix
+
+`src/lib/identityReconciler.js`'s `isEligibleVisualRow` gains a third
+rejection class, `COMPANION_PRODUCT_RE`, alongside the two AI-dispatch
+classes (lot/bundle, variation-group picker) already there. Explicit
+tokens only: art book/artbook, art print, portfolio, sketchbook,
+poster. Deliberately NOT bare "art" — verified directly against two
+real, published comic titles ("Art Ops" — Vertigo, Shawn McManus; "The
+Art of War," a real one-shot) that a bare-"art" pattern would have
+wrongly excluded. Because `isEligibleVisualRow` is already the single
+shared eligibility predicate — called from `selectFirstEligibleVisual`
+(F-1's freeze), `countCorroboratingEligibleRows` (the issue-consensus
+floor), and `selectTitleFamilyCandidate`'s own Rule 1/C1 post-clustering
+family filter — one change propagates to all three consumers without
+touching any of them individually.
+
+### Trace findings worth keeping
+
+**No asset-type context exists at this layer, and none is needed.**
+`isEligibleVisualRow` takes a bare `rawTitle` string; there is no
+`assetType` parameter anywhere in `identityReconciler.js`. The entire
+visual-identity pipeline this function serves (issue-facet resolution,
+title-family clustering) is comic-only today — Session 4B's
+BookAdapter/CardAdapter are roadmap-only, unbuilt. A future request to
+scan an artbook AS the primary asset would use a different adapter
+entirely, not this pipeline — so scoping the exclusion inside this
+function is comic-identity-scoped by construction, not merely by
+convention, and there is no live or documented code path this fix could
+break by being "too global."
+
+**A genuine sibling-path finding, verified sufficient without unifying
+it.** `buildTitleFamilies` (`imageSearchIdentity.js`) runs its OWN,
+separate pre-clustering filter (`NON_GENUINE_COPY_RE`, `compHygiene.js`
+— photocopy/USB/digital-archive/scan-disc only) BEFORE `isEligibleVisualRow`'s
+new class ever sees a row. The artbook rows still individually cluster
+into their own family internally; they are excluded only at the LATER,
+post-clustering stage (`selectTitleFamilyCandidate`'s Rule 1/C1 filter,
+which checks each family's own representative `rawTitle`). Verified
+directly this is sufficient for the concrete defect — the artbook
+family disappears from the final `families` list entirely, confirmed
+by printing the full result object — but the two filters remain
+genuinely independent mechanisms. Not unified this dispatch, per its
+own C1/C3 minimal-scope instruction; logged for anyone who later finds
+a companion-product row corrupting a REAL family's own Jaccard cluster
+(not observed here — "ariel diaz venom carnage" shares only the single
+token "venom" with the real Mayhew family, far below the 0.4 clustering
+threshold, so no contamination occurred in this case).
+
+### Acceptance, against the real wfvvb pool
+
+With the artbook rows excluded, `selectTitleFamilyCandidate` on the
+real 20-row pool lands on `decision=fallback-vision, selectedTitle=null`
+— not a selected Mayhew family. This is the CORRECT, honest outcome
+per the directive's own acceptance bar, not a shortfall: Mayhew's own
+row is a single, thin listing (weight 5, "top-rank-guard: subtitle-junk
+detected, 1/8 = 13% overlap with Vision's bare 'Venom' guess") that
+does not clear the SEPARATE weak-overlap threshold that decides whether
+weighted-consensus is willing to override Vision's own title at all —
+a different, pre-existing mechanism (the very one AM-continuation-2's
+refuted T4/T5 hypothesis investigated, still a known, unfixed risk in
+general, just not what fired here). The important property this
+dispatch is responsible for — a WRONG, confidently-selected identity
+(the artbook, or Lethal Protector) — does not happen. Downstream, this
+means the card would fall back to Vision's own raw "Venom" guess rather
+than any specific, wrong sub-series title, which is exactly the
+"honest contested/refused" branch the directive's own acceptance
+criteria explicitly permits as a PASS.
+
+### Record corrections, same pass
+
+Struck a prior handoff line that speculated the wfvvb physical rescan
+"will very likely still show the correct book." This was flagged
+correctly by the next directive as a category error: acceptance runs
+against the documented, reproducible failing pool (the actual wfvvb
+data), not against whether a live rescan happens to avoid the same
+shape by chance. GK-121 and GK-120's family half reconfirmed
+SHIPPED-PENDING PHYSICAL (an earlier CLOSED claim had already been
+corrected once before this dispatch; restated here for the standing
+record, not re-litigated).
+
+### Regression
+
+`tests/grailkey-directive-ao-companion-product-eligibility.test.js`,
+19/19 — B1-B5 all covered with real data (complete verbatim wfvvb/dzq9h
+pools, this session's own already-verified Sabrina row, two real
+published comic titles for the false-positive boundary). AI's own
+Rule-1 fixtures (`grailkey-directive-ai-visual-first-identity.test.js`,
+55/55) and AF/AG/AN's own suites (25/25, 32/32, 11/11) re-run directly,
+unaffected. Full unfiltered sweep re-run; see CLAUDE.md's re-stamped
+baseline for the file-level count.
+
+### Handoff
+
+GK-123 SHIPPED-PENDING PHYSICAL. GK-121/GK-120-family stay
+SHIPPED-PENDING PHYSICAL alongside it — all three close together on
+Jimmy's physical rescans (Venom, Dell'Otto, Sabrina), not before. No
+scoring, weight, threshold, or clustering-algorithm change anywhere in
+this dispatch. Do not propose the next directive.
