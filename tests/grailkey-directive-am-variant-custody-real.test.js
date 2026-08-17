@@ -76,8 +76,20 @@ console.log('\nPart 1b [F-1 wiring]: api/enrich.js now sources first-eligible-vi
     !enrichSrc.includes('selectFirstEligibleVisual(variantSourceItemsForReconciliation'),
     'the family-narrowed variantSourceItemsForReconciliation call is gone, not merely supplemented'
   );
+  // GrailKey Directive AT (GK-135) legitimately adds a THIRD call site
+  // reading the same unbiased parsedVisualRows pool — the new
+  // unconditional year-evidence reconciliation (identityReconciler.js's
+  // reconcileYear, wired immediately after resolveYear, independent of
+  // AL-4e's own narrow N2-triggered physical-year mechanism this file's
+  // Part 1a/1b are actually about). This is the SAME correct pattern
+  // this test exists to enforce (unbiased pool, never a family-narrowed
+  // one), extended to a new facet — not a regression of F-1's own fix.
+  // Floor changed from a hardcoded 2 to >=2 so this test still catches a
+  // genuine regression (a call site silently reverting to the narrowed
+  // pool) without breaking every time a future dispatch adds another
+  // correct consumer of the same fix.
   const matches = enrichSrc.match(/selectFirstEligibleVisual\(parsedVisualRows\)/g) || [];
-  check(matches.length === 2, `both the variant AND year reconciliation call sites use the fix (found ${matches.length})`);
+  check(matches.length >= 2, `at least the variant AND year reconciliation call sites use the fix (found ${matches.length})`);
 }
 
 console.log('\nPart 1c [B4-1 core]: full reconciliation on the REAL verbatim row — Kirkham demoted, Mayhew wins');

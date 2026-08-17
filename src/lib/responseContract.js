@@ -328,6 +328,23 @@ export function deriveLocks(out) {
     });
   }
 
+  // GrailKey Directive 2026-08-17-AT (GK-135) — the year-facet sibling to
+  // AR's own variant-contested lock immediately above, same additive/
+  // independent pattern. out.yearAuthority is custodied from api/
+  // enrich.js's reconcileYear call (src/lib/identityReconciler.js) —
+  // never re-derived here. A CONTESTED year means a value WAS adopted
+  // (the wall that used to force ID_REQUIRED here is gone) but at least
+  // one independent signal (pool consensus, catalog anchor, Vision,
+  // the frozen row's own year token) disagrees with it.
+  if (preStandingLockCount === 0 && out.yearAuthority === 'CONTESTED') {
+    locks.push({
+      code: 'market-standing-year-contested',
+      reason: 'The publication year on this scan is contested — independent evidence disagrees with the adopted value — price is not confirmed for the exact year',
+      hard: false,
+      class: 'insufficiency',
+    });
+  }
+
   // GrailKey Directive AH (GK-111) — sufficiency, not applicability. A
   // marketStanding of EXACT_CURRENT says the pool IS current and (per the
   // lock above) confirmed applicable to this edition — it says nothing

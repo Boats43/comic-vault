@@ -11766,3 +11766,167 @@ of the Venom Mayhew book, alongside the still-pending Absolute Batman
 Sabrina control rescans. Committed locally, NOT pushed -- report and ask
 before pushing, since the push deploys production. Do not propose the
 next directive.
+
+## GrailKey Directive AT -- GK-135: year joins the evidence system
+
+"The last legacy hard-gate falls." Year-missing produced 3 of 4 locks in
+a real session while the year sat in the evidence on every card. Issue
+got the candidate-always-enters treatment in AS (GK-132); year ran the
+old policy until this dispatch.
+
+### The rule
+
+Year candidates always enter the year evidence set -- from the frozen
+rank-1 row, pool year-consensus, and catalog anchors, unconditionally. A
+reconciled year at CONTESTED authority prices at REVIEW -- it does not
+block. Year-driven ID_REQUIRED fires only when no candidate exists
+anywhere.
+
+### The defect
+
+Production, 2026-08-17 14:28, build 48a14c5:
+
+```
+VENOM       "Venom #1 - Mike Mayhew signed virgin" -- issue adopted (AS),
+            variant adopted (AM/AR) -- then LOCKED: "year missing."
+            The pool's own rows say 2024.
+
+DELL'OTTO   Creator detected (Gabriele Dell'Otto, 3 sources). Pool = the
+            genuine $100-295 Dell'Otto CGC market. Price bands COMPUTED
+            ($170 / $196.92 / $226.45) -- then Recommended "--", LOCKED:
+            "year missing." The comps carry 2018.
+
+DETECTIVE   rank-1 row: "...#1107 ... (2026)". LOCKED: issue+year missing.
+```
+
+`src/lib/identityGate.js`'s `assessIdentityConfidence` treats `year` as
+a plain required field -- `if (!sanitized?.[field])`, no candidate/
+authority concept at all, identical treatment to `issue` before AS.
+`resolveYear` (`identityCore.js`) has its own well-documented gap (see
+this file's "Year override guard" section, CLAUDE.md): when Vision, PC,
+and CV all come up empty -- routine for modern covers, which frequently
+print no year at all -- it returns null outright, with no path to the
+pool's own year evidence.
+
+The one existing mechanism that DOES read pool year evidence,
+`reconcilePhysicalYear` (`identityReconciler.js`, AL continuation 4e),
+is real and correctly built -- but only ever invoked from the narrow N2
+PC-re-anchor block (`api/enrich.js`, gated on a PC variant re-anchor
+actually firing AND the new anchor's year differing from the old one
+AND `confirmedYear` still matching the old anchor's year). For a scan
+with no PC anchor match at all, or no variant re-anchor trigger, that
+mechanism never runs -- `confirmedYear` falls through entirely to
+`resolveYear`'s own gap.
+
+A second real signal, `poolYearHint` (`api/enrich.js` ~line 2761,
+"`[cv-pool-year-hint]`") -- computed unconditionally from the FULL,
+unbiased `parsedVisualRows` pool, requiring >=3 year-bearing rows and
+>=50% agreement -- exists and is genuinely computed on every scan, but
+was fed to exactly one consumer (ComicVine query construction) and
+never to year reconciliation at all.
+
+### Why this dispatch is safe
+
+Directive AR (same day, `ee03e5a`) already guarantees a CONTESTED facet
+can never satisfy `EXACT_CURRENT` or reach `READY`. AL's 4e already
+separates physical year from catalog year. The hard gate's real safety
+job now exists downstream of it; the gate itself only ever destroyed
+information.
+
+### The fix
+
+`reconcileYear` (`src/lib/identityReconciler.js`) -- new, structurally
+identical to `reconcileIssue` (same evidence-set shape, same D1/D4
+purity/order-independence guarantees, same `{value, source, authority,
+justifiedBy, conflicts}` return, `authority: 'NONE'|'CONTESTED'|
+'CORROBORATED'`). Precedence `['user', 'first-eligible-visual',
+'pool-consensus', 'catalog', 'vision']` -- an operator correction
+outranks everything; the frozen row's own physical evidence outranks a
+pool-wide or catalog signal (matching AL/AM's own "physical evidence
+wins outright" rule for this same facet); pool consensus outranks a
+bare catalog year, which outranks Vision's guess.
+
+Deliberately does NOT replace `resolveYear` -- `reconcilePhysicalYear`
+and the whole N2 mechanism are untouched too. Wired in `api/enrich.js`
+immediately after `resolveYear`'s own call (identical inputs
+`yearForResolution`/`pcYear`/`cvYear` already computed there, PLUS
+`poolYearHint` and a fresh `extractFirstEligibleYearCandidate` read on
+`parsedVisualRows`, PLUS a `manualCorrectionRequest`-derived `'user'`
+entry mirroring AQ's own `issueOperatorConfirmed` pattern exactly): each
+raw signal enters as INDEPENDENT evidence, never `resolveYear`'s own
+fused output (which would be circular). Two outcomes:
+
+1. `confirmedYear` was null (resolveYear found nothing) AND
+   `reconcileYear` found a candidate -- THE rescue. Adopted as the real
+   identity value at whatever authority the evidence earns.
+2. `confirmedYear` already had a value -- kept exactly as `resolveYear`
+   produced it (no re-derivation, no risk to its own tested precedence);
+   only `out.yearAuthority` is computed and reported, honestly
+   reflecting whether the independent raw signals actually agree with
+   the value `resolveYear` already chose.
+
+`out.yearAuthority==='CONTESTED'` floors `deriveMarketStanding` to
+`SIMILAR_ONLY` (`actionAuthority.js`) -- AR's per-facet law (exact
+standing requires CORROBORATED/operator-confirmed on every facet the
+pool was filtered by) extended from variant to year, verbatim pattern.
+Own reason code `YEAR_CONTESTED` (`responseContract.js`), distinct from
+and mutually exclusive with `VARIANT_CONTESTED_EDITION`.
+
+`applyEraConsistencyFilter` (`api/comps.js`) gains a 5th parameter,
+`yearIsContested` (default `false` -- every pre-existing caller/test
+byte-identical). When `true`, the era-year-mismatch branch (Q128
+dispatch's `evaluateEraYearMatch` check) no longer hard-rejects -- it
+keeps the row and logs `[era-filter] ADVISORY (year contested, not
+rejected)`, counted separately (`advisoryYearMismatchCount`) so an
+advisory is never conflated with a genuine rejection in a production
+trace. The modern-relaunch-marker check (a different, independent
+signal, not contingent on year confidence) is unchanged, still a hard
+reject regardless. This is the fix for the "1971 disease" risk
+(Directive AL's own named incident: a re-anchored catalog year almost
+era-filtered the operator's own real comps) generalized to every
+CONTESTED year, not just the one N2 re-anchor path that originally
+surfaced it.
+
+### Real regression, found and fixed forward
+
+`tests/grailkey-directive-am-variant-custody-real.test.js` (AM/F-1's own
+regression suite) asserted `selectFirstEligibleVisual(parsedVisualRows)`
+appears EXACTLY twice in `api/enrich.js` (the variant 4a and physical-
+year 4e call sites) -- a hardcoded count, not a floor. This dispatch's
+own new year-evidence block legitimately adds a THIRD call site doing
+the exact same correct thing (reading the unbiased pool, never a
+family-narrowed one) for a new facet. Floor changed to `>= 2` -- the
+assertion still catches a genuine regression (a call site reverting to
+the narrowed pool) without breaking every time a future dispatch adds
+another correct consumer of the same F-1 fix.
+
+### Tests
+
+`tests/grailkey-directive-at-year-evidence.test.js`, 31/31 -- includes a
+DIRECT proof through the real `/api/enrich` HTTP handler for the Venom
+production shape (verbatim mocked pool, `[reconcile-year] RESCUE` fires,
+`[identity-gate] missing=[]`, `statusCode=200`, `year=2024`) captured in
+this dispatch's own trace and reproduced at the reconciler/
+actionAuthority level for a fast deterministic regression; a Dell'Otto-
+shaped fixture proving the LOCKED->REVIEW transition with its own
+derivation chain printed; a genuine no-candidate control (ID_REQUIRED
+survives); the CONTESTED-cannot-price-exact law with its own upward-
+route sanity check; and the era-filter advisory negative control
+(hard-reject baseline vs. advisory-survives, plus default-`false`
+backward compatibility). Full 218-file regression sweep re-run clean:
+195 PASS / 19 FAIL / 4 TIMEOUT, byte-identical FAIL/TIMEOUT file list to
+the prior baseline (194/19/4/217) -- the only delta is the one new,
+fully-passing test file.
+
+### Handoff
+
+GK-135 SHIPPED-PENDING PHYSICAL. Closure reserved for Jimmy's post-
+deploy rescans of Venom, Dell'Otto, and Detective Comics #1107 -- all
+three should show a price at REVIEW (with `YEAR_CONTESTED` where the
+year is genuinely disputed) and a correction form offering the year
+field alone, never a full ID_REQUIRED wall. Sabrina's own AL-4e
+mechanism confirmed byte-identical (37/37, untouched code). No pricing
+math, no Z rewrite, no GK-133 (title facet) work -- explicitly out of
+this dispatch's scope. Committed locally, NOT pushed -- report and ask
+before pushing, since the push deploys production. Do not propose the
+next directive.

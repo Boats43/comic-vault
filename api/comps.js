@@ -756,14 +756,29 @@ const MODERN_RELAUNCH_RE = /\b(n52|new\s*52|rebirth|infinite\s*frontier|legacy|p
  * @returns {{pool: Array, bypassed: boolean, excludedVariantCount: number,
  *   excludedVariantSamples: string[], rejectedReferenceRows: Array<{title, price, reason}>}}
  */
-export const applyEraConsistencyFilter = (pool, yearNum, assetType, cvVolumeStartYear) => {
+// GrailKey Directive 2026-08-17-AT (GK-135, C4) — yearIsContested defaults
+// to false, so every pre-existing caller/test (which passes the old
+// 4-arg shape) is byte-identical. When true (out.yearAuthority===
+// 'CONTESTED', threaded from api/enrich.js), the era-year-mismatch branch
+// (Q128 dispatch's evaluateEraYearMatch check, below) switches to
+// ADVISORY: it must not hard-reject a comp against a year the system
+// itself marks disputed — the operator's own book's real comps, sitting
+// right there in the pool, must not be deleted on an anchor the
+// reconciler itself flagged as contested (the "1971 disease" this
+// constraint exists to keep dead — GrailKey Directive AL's own N2
+// re-anchor incident). The modern-relaunch-marker check just below is
+// UNCHANGED regardless of yearIsContested — it is an independent signal
+// (a relaunch marker is strong evidence on its own terms, not contingent
+// on how confident we are in confirmedYear) and stays a hard reject.
+export const applyEraConsistencyFilter = (pool, yearNum, assetType, cvVolumeStartYear, yearIsContested = false) => {
   if (!yearNum || !Number.isFinite(yearNum) || assetType === 'book') {
-    return { pool, bypassed: false, excludedVariantCount: 0, excludedVariantSamples: [], rejectedReferenceRows: [] };
+    return { pool, bypassed: false, excludedVariantCount: 0, excludedVariantSamples: [], rejectedReferenceRows: [], advisoryYearMismatchCount: 0 };
   }
 
   const tolerance = getEraYearTolerance(yearNum);
   const beforeEra = pool.length;
   let excludedVariantCount = 0;
+  let advisoryYearMismatchCount = 0;
   const excludedVariantSamples = [];
   const rejectedReferenceRows = [];
 
@@ -804,6 +819,20 @@ export const applyEraConsistencyFilter = (pool, yearNum, assetType, cvVolumeStar
     // specific book's own resolved volume, not any arbitrary nearby year.
     const { keep, matchedVia } = evaluateEraYearMatch(ly, yearNum, tolerance, cvVolumeStartYear);
     if (!keep) {
+      // GrailKey Directive AT (GK-135, C4) — advisory mode. yearIsContested
+      // means confirmedYear itself is a disputed candidate, not a
+      // confirmed fact — a hard reject here would delete real comps
+      // (potentially the operator's own book) on the strength of a value
+      // the system already knows might be wrong. Keep the row; log
+      // distinctly from a genuine rejection so the two are never
+      // conflated in production traces.
+      if (yearIsContested) {
+        console.log('[era-filter] ADVISORY (year contested, not rejected):',
+          titleStr.slice(0, 55),
+          `(year ${ly} vs ${yearNum}, tol ±${tolerance})`);
+        advisoryYearMismatchCount++;
+        return true;
+      }
       console.log('[era-filter] rejected:',
         titleStr.slice(0, 55),
         `(year ${ly} vs ${yearNum}, tol ±${tolerance})`);
@@ -838,7 +867,7 @@ export const applyEraConsistencyFilter = (pool, yearNum, assetType, cvVolumeStar
   } else if (eraFiltered.length < beforeEra) {
     console.log(`[comps] era filter removed ${beforeEra - eraFiltered.length}`);
   }
-  return { pool: eraFiltered, bypassed, excludedVariantCount, excludedVariantSamples, rejectedReferenceRows };
+  return { pool: eraFiltered, bypassed, excludedVariantCount, excludedVariantSamples, rejectedReferenceRows, advisoryYearMismatchCount };
 };
 
 /**
@@ -996,6 +1025,7 @@ export const fetchComps = async ({
   // used to collapse to the identical bare `null` before this correction.
   issueAuthorityPresent = false,
   issueAuthorityStatus = null,  // Track B Phase 0, Commit 4 — out.issueAuthority?.status ('provisional'/'conflicted'/'confirmed'/null), threaded into evidenceTarget below for the TARGET_ISSUE_PROVISIONAL_AUTHORITY gate
+  yearIsContested = false,  // GrailKey Directive 2026-08-17-AT (GK-135) — out.yearAuthority==='CONTESTED' from api/enrich.js's reconcileYear custody. Threaded into Filter 0c (applyEraConsistencyFilter) below to switch it to advisory mode.
 }) => {
   if (!appId || !certId) {
     return emptyComps(null, "missing eBay credentials", true);
@@ -1525,7 +1555,7 @@ export const fetchComps = async ({
       if (year && assetType !== 'book') {
         const yearNum = parseInt(String(year), 10);
         if (!isNaN(yearNum)) {
-          const eraResult = applyEraConsistencyFilter(p, yearNum, assetType, cvVolumeStartYear);
+          const eraResult = applyEraConsistencyFilter(p, yearNum, assetType, cvVolumeStartYear, yearIsContested);
           p = eraResult.pool;
           if (eraResult.bypassed) _eraFilterBypassed = true;
           _eraExcludedVariantCount += eraResult.excludedVariantCount;

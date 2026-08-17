@@ -111,6 +111,19 @@ export function deriveMarketStanding(out) {
     // at $48.86, the card's own "SIMILAR listings, not exact matches"
     // warning contradicting its own action-authority verdict.
     if (out?.variantApplicability === 'CONTESTED') return 'SIMILAR_ONLY';
+    // GrailKey Directive 2026-08-17-AT (GK-135) — AR's per-facet law
+    // extended to year: exact standing requires CORROBORATED (or
+    // operator-confirmed) authority on every facet the pool was filtered
+    // by, year included. out.yearAuthority is custodied, not re-derived,
+    // from api/enrich.js's own reconcileYear call (src/lib/
+    // identityReconciler.js) — the ONE place that reconciliation runs.
+    // A CONTESTED year still prices (this dispatch's own point — the
+    // wall this replaces was worse, a hard ID_REQUIRED with nothing
+    // priced at all) but cannot claim EXACT_CURRENT: the comp pool was
+    // matched/era-filtered against a year the system itself marks
+    // disputed. Floors to SIMILAR_ONLY, never lower — same revocation-
+    // only principle as AB/AP/AR's own sibling floors.
+    if (out?.yearAuthority === 'CONTESTED') return 'SIMILAR_ONLY';
     return 'EXACT_CURRENT';
   }
   // Unrecognized source string — conservative default, never silently
@@ -169,6 +182,7 @@ const LOCK_CODE_TO_REASON = {
   'single-comp-pool': 'SINGLE_COMP_POOL', // GrailKey Directive AH (GK-111)
   'market-standing-variant-unresolved': 'VARIANT_UNRESOLVED_EDITION', // GrailKey Directive AP (GK-124)
   'market-standing-variant-contested': 'VARIANT_CONTESTED_EDITION', // GrailKey Directive AR (GK-129)
+  'market-standing-year-contested': 'YEAR_CONTESTED', // GrailKey Directive AT (GK-135)
 };
 
 const lockToReasonCode = (lock) => {

@@ -358,11 +358,92 @@ export const reconcileIssue = (evidenceSet) => {
   };
 };
 
+// ── Year facet (GrailKey Directive 2026-08-17-AT, GK-135) ──────────────
+//
+// "Year candidates always enter the year evidence set — unconditionally."
+// The last legacy hard-gate: resolveYear (identityCore.js) has no path to
+// the frozen rank-1 row's own year token, the raw eBay visual pool's own
+// year-consensus, or an honest CONTESTED state — it either finds a value
+// through its own precedence chain or returns null outright, and null
+// there was, until this dispatch, indistinguishable from "no evidence
+// exists anywhere" even when the pool the scan itself returned carried a
+// year in plain text. reconcileYear does not replace resolveYear (C6's
+// own scope: this is the rescue/authority layer for the path resolveYear
+// leaves uncovered, not a rewrite of its own already-tested precedence)
+// — it is fed the SAME raw signals resolveYear already receives
+// (Vision's year, the catalog anchor's year, the pool's own year-
+// consensus, the frozen row's own year token, an operator correction)
+// as independent evidence, and answers two questions resolveYear's own
+// binary output cannot: (1) when resolveYear found nothing, is there
+// still an honest candidate elsewhere in the evidence — the true GK-135
+// rescue; (2) regardless of whether resolveYear found a value, do the
+// independent raw signals actually AGREE — the authority resolveYear's
+// own confidence label never separately expressed.
+//
+// Precedence mirrors ISSUE_SOURCE_PRECEDENCE's own shape (an operator
+// correction outranks everything; the frozen row's own physical evidence
+// outranks a pool-wide or catalog signal, matching AL/AM's own already-
+// established "physical evidence wins outright" rule for this exact
+// facet; a genuine pool-wide consensus is stronger than a single
+// catalog-anchor's own year, which is itself stronger than Vision's bare
+// guess). Same D1/D4 guarantees as reconcileIssue: pure, order-
+// independent.
+const YEAR_SOURCE_PRECEDENCE = ['user', 'first-eligible-visual', 'pool-consensus', 'catalog', 'vision'];
+
+// reconcileYear — pure, deterministic. Same shape as reconcileIssue:
+//   { value, source, authority, justifiedBy, conflicts }
+//   authority: 'NONE' | 'CONTESTED' | 'CORROBORATED'
+export const reconcileYear = (evidenceSet) => {
+  const entries = sortEvidence(evidenceSet?.year || []);
+  const corroborations = entries.filter((e) => e.type !== 'conflict');
+  const conflicts = entries.filter((e) => e.type === 'conflict');
+
+  if (corroborations.length === 0) {
+    return {
+      value: null,
+      source: null,
+      authority: 'NONE',
+      justifiedBy: [],
+      conflicts: conflicts.map((c) => ({ source: c.source, value: c.value })),
+    };
+  }
+
+  let winner = null;
+  for (const src of YEAR_SOURCE_PRECEDENCE) {
+    winner = corroborations.find((e) => e.source === src);
+    if (winner) break;
+  }
+  if (!winner) winner = corroborations[0];
+
+  const disagreeingConflicts = conflicts.filter((c) => String(c.value) !== String(winner.value));
+  const disagreeingCorroborations = corroborations.filter(
+    (e) => e !== winner && String(e.value) !== String(winner.value)
+  );
+  const isContested = disagreeingConflicts.length > 0 || disagreeingCorroborations.length > 0;
+
+  return {
+    value: winner.value,
+    source: winner.source,
+    authority: isContested ? 'CONTESTED' : 'CORROBORATED',
+    justifiedBy: corroborations
+      .filter((e) => e === winner || String(e.value) === String(winner.value))
+      .map((e) => ({ source: e.source, value: e.value })),
+    conflicts: [
+      ...disagreeingConflicts.map((c) => ({ source: c.source, value: c.value })),
+      ...disagreeingCorroborations.map((e) => ({ source: e.source, value: e.value })),
+    ],
+  };
+};
+
 // reconcileIdentity — Slice 1 covers the issue facet only (see module
-// header). Deliberately not extended to title/year/publisher/variant/
+// header). Deliberately not extended to title/publisher/variant/
 // creator this dispatch — those facets' existing direct writers are left
 // untouched, per the directive's own non-goals ("no complete precedence
-// rules", "no deletion of existing producer code").
+// rules", "no deletion of existing producer code"). Year (reconcileYear)
+// is a SEPARATE, independently-wired mechanism (GrailKey Directive AT) —
+// not folded into this function, since its caller (api/enrich.js) needs
+// it at a different point in the pipeline (after PC/CV catalog lookups
+// resolve), not alongside the issue facet's own resolveIdentity-time call.
 export const reconcileIdentity = (evidenceSet) => ({
   issue: reconcileIssue(evidenceSet),
 });

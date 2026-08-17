@@ -62,7 +62,7 @@ import {
 // these three are identityReconciler.js's own exports, imported directly
 // to avoid widening identityCore.js's re-export surface for a one-call-
 // site need).
-import { selectFirstEligibleVisual, extractFirstEligibleYearCandidate, reconcilePhysicalYear } from "../src/lib/identityReconciler.js";
+import { selectFirstEligibleVisual, extractFirstEligibleYearCandidate, reconcilePhysicalYear, reconcileYear, createEvidenceSet, addEvidence } from "../src/lib/identityReconciler.js";
 // Ship #24 — canonical response contract. finalizeResponse must be the LAST
 // call before res.json() on every substantive exit; nothing writes
 // price/decision fields after it.
@@ -4850,6 +4850,106 @@ export default async function handler(req, res) {
     yearSource = yearResolution.yearSource;
     let yearOverrideRejected = yearResolution.yearOverrideRejected;
 
+    // GrailKey Directive 2026-08-17-AT (GK-135) — "year candidates always
+    // enter." resolveYear (just above) is left completely untouched —
+    // same inputs, same precedence, same tests. This block is the rescue/
+    // authority layer resolveYear structurally cannot provide: it has no
+    // path to the frozen rank-1 row's own year token or the raw visual
+    // pool's own year-consensus, and its binary output (a value, or null)
+    // cannot separately express "the raw signals actually agree" vs "one
+    // signal happened to win by precedence while others disagree." Every
+    // raw signal resolveYear itself was fed, PLUS the two it was never
+    // given, enters as INDEPENDENT evidence — never resolveYear's own
+    // fused output, which would be circular. `yearForResolution`/`pcYear`/
+    // `cvYear` are the exact identifiers resolveYear's own call above
+    // already computed; `poolYearHint` (line ~2761) and `parsedVisualRows`
+    // (identity-resolution's own visual pool, already in scope) are
+    // pre-existing signals that previously fed everything EXCEPT this
+    // reconciliation. `manualCorrectionRequest` mirrors the exact
+    // '(GK-127, issue facet)' pattern already established at the
+    // resolveIdentity call site above — same operator-correction
+    // authority, scoped to the year field.
+    const yearEvidence = createEvidenceSet();
+    if (yearForResolution != null) {
+      addEvidence(yearEvidence, 'year', 'vision', yearForResolution);
+    }
+    const catalogYearForEvidence = pcYear ?? cvYear ?? null;
+    if (catalogYearForEvidence != null) {
+      addEvidence(yearEvidence, 'year', 'catalog', catalogYearForEvidence);
+    }
+    if (poolYearHint?.year != null) {
+      addEvidence(yearEvidence, 'year', 'pool-consensus', poolYearHint.year);
+    }
+    const firstEligibleForYearEvidence = selectFirstEligibleVisual(parsedVisualRows);
+    const physicalYearCandidateForEvidence = extractFirstEligibleYearCandidate(firstEligibleForYearEvidence?.rawTitle || null);
+    if (physicalYearCandidateForEvidence != null) {
+      addEvidence(yearEvidence, 'year', 'first-eligible-visual', physicalYearCandidateForEvidence);
+    }
+    const yearOperatorConfirmed = manualCorrectionRequest?.valid === true
+      && Array.isArray(manualCorrectionRequest.validation?.acceptedFields)
+      && manualCorrectionRequest.validation.acceptedFields.includes('year');
+    if (yearOperatorConfirmed && confirmedYear != null) {
+      addEvidence(yearEvidence, 'year', 'user', confirmedYear);
+    }
+    const reconciledYear = reconcileYear(yearEvidence);
+    out.yearReconciliation = reconciledYear;
+    console.log(
+      `[reconcile-year] value=${reconciledYear.value ?? 'null'} source=${reconciledYear.source ?? 'none'} ` +
+      `authority=${reconciledYear.authority} justifiedBy=${JSON.stringify(reconciledYear.justifiedBy)} ` +
+      `conflicts=${JSON.stringify(reconciledYear.conflicts)}`
+    );
+
+    if (confirmedYear == null && reconciledYear.value != null) {
+      // THE rescue (GK-135's own named defect): resolveYear found nothing
+      // at all — Vision supplied no year, PC/CV had no match, eBay-
+      // consensus year was absent — while the reconciler's own evidence
+      // (pool-consensus and/or the frozen row's own year token) had a
+      // real candidate the whole time. Adopted as a genuine identity
+      // value at whatever authority the evidence itself earns (CONTESTED
+      // if independent signals disagree, CORROBORATED if not) — never
+      // silently promoted to look more certain than the evidence
+      // supports (C2).
+      const oldConfirmedYear = confirmedYear;
+      confirmedYear = writeConfirmed(
+        'confirmedYear', confirmedYear, reconciledYear.value,
+        yearSource, reconciledYear.source, 'grailkey-directive-at-year-evidence'
+      );
+      yearSource = reconciledYear.source;
+      yearOverrideRejected = false;
+      out.confirmedYearMeta = {
+        value: confirmedYear || null,
+        source: reconciledYear.source,
+        confidence: reconciledYear.authority === 'CONTESTED' ? 'contested' : 'proven',
+      };
+      console.log(
+        `[reconcile-year] RESCUE: resolveYear found nothing — confirmedYear "${oldConfirmedYear ?? 'null'}" -> ` +
+        `"${confirmedYear ?? 'null'}" (source=${reconciledYear.source}, authority=${reconciledYear.authority})`
+      );
+    }
+    // Honest authority, independent of whether the RESCUE branch fired
+    // (C2's own requirement — a facet resolveYear already resolved can
+    // still be CONTESTED if the reconciler's independent evidence
+    // disagrees with it; resolveYear's own precedence choosing a winner
+    // is not the same claim as "nothing else disagrees"). Consumed by
+    // the identity-gate (2b) and the era filter's advisory mode (2c) —
+    // never re-derived at either site, per C6's single-writer rule.
+    out.yearAuthority = (() => {
+      if (confirmedYear == null) return 'NONE';
+      if (reconciledYear.value != null && String(reconciledYear.value) === String(confirmedYear)) {
+        return reconciledYear.authority;
+      }
+      // resolveYear settled on a value the reconciler's own precedence
+      // winner disagrees with, OR the reconciler found nothing at all
+      // (a value resolveYear alone produced, e.g. from ebayYearAuthoritative,
+      // that never entered yearEvidence as a distinct source) — a real
+      // value exists either way, so 'NONE' would be dishonest; treat as
+      // CORROBORATED only when the reconciler recorded no disagreement
+      // with it, CONTESTED when it did.
+      const disagrees = (reconciledYear.conflicts || []).some((c) => String(c.value) !== String(confirmedYear))
+        || (reconciledYear.value != null && String(reconciledYear.value) !== String(confirmedYear));
+      return disagrees ? 'CONTESTED' : 'CORROBORATED';
+    })();
+
     // Q86: structured year provenance on the response — {value, source,
     // confidence}. Scalar out.confirmedYear stays for every existing
     // consumer; the meta lets the UI and future gates distinguish a
@@ -6446,6 +6546,14 @@ export default async function handler(req, res) {
               // both primitives are actually used together.
               issueAuthorityPresent: out.issueAuthority != null,
               issueAuthorityStatus: out.issueAuthority?.status ?? null,  // Track B Phase 0, Commit 4 — TARGET_ISSUE_PROVISIONAL_AUTHORITY gate (evidenceEligibility.js)
+              // GrailKey Directive 2026-08-17-AT (GK-135, C4) — out.yearAuthority
+              // is already custodied above (right after resolveYear), never
+              // re-derived here. When CONTESTED, Filter 0c (applyEraConsistencyFilter)
+              // runs in advisory mode: it must not hard-reject comps against a
+              // year the system itself marks disputed (the "1971 disease," C4's
+              // own named negative control) — the operator's own book's real
+              // comps must survive even when the anchor year is uncertain.
+              yearIsContested: out.yearAuthority === 'CONTESTED',
             }).catch((err) => {
               console.error('[enrich] comps error stack:', err?.stack);
               console.error(`[enrich] comps error: ${err?.message || err}`);
