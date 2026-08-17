@@ -293,6 +293,23 @@ export function deriveLocks(out) {
     }
   }
 
+  // GrailKey Directive 2026-08-16-AP (GK-124) — cleared variant != base
+  // edition. Same additive, independent-of-the-other-standing-locks
+  // pattern as the UNVERIFIED branch above — this is the ONLY new reason
+  // code, distinguished from market-standing-variant-unmatched (a variant
+  // WAS confirmed, comps just didn't match it) because here no variant
+  // was ever confirmed at all — Vision's own claim was cleared for lack
+  // of corroboration, and that clearing itself is the evidence that this
+  // is not a plain base edition.
+  if (preStandingLockCount === 0 && out.variantApplicability === 'UNRESOLVED') {
+    locks.push({
+      code: 'market-standing-variant-unresolved',
+      reason: 'A specific variant/edition was indicated by the scan but could not be confirmed — price reflects a broader pool that may be the wrong edition',
+      hard: false,
+      class: 'insufficiency',
+    });
+  }
+
   // GrailKey Directive AH (GK-111) — sufficiency, not applicability. A
   // marketStanding of EXACT_CURRENT says the pool IS current and (per the
   // lock above) confirmed applicable to this edition — it says nothing

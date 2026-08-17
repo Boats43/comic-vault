@@ -79,6 +79,18 @@ export function deriveMarketStanding(out) {
     // (out.variantApplicability === null) is a normal, unaffected book —
     // EXACT_CURRENT stays fully reachable.
     if (out?.variantApplicability === 'UNVERIFIED') return 'SIMILAR_ONLY';
+    // GrailKey Directive 2026-08-16-AP (GK-124) — a variant CLEARED by the
+    // reconciler for lack of corroboration (out.variantReconciliation,
+    // authority=NONE, a recorded conflict) is not the same state as a
+    // variant that was NEVER claimed at all. Both currently collapse to
+    // `out.variantApplicability === null` at the custody site
+    // (api/enrich.js) unless evidenced otherwise — 'UNRESOLVED' is that
+    // "otherwise": edition specificity was evidenced, never confirmed.
+    // Same floor as UNVERIFIED (SIMILAR_ONLY, never lower) — this is a
+    // revocation of standing the pricingSource string alone would have
+    // granted, not fabrication of worse evidence (C1), same principle AB
+    // already established for the sibling case.
+    if (out?.variantApplicability === 'UNRESOLVED') return 'SIMILAR_ONLY';
     return 'EXACT_CURRENT';
   }
   // Unrecognized source string — conservative default, never silently
@@ -135,6 +147,7 @@ const LOCK_CODE_TO_REASON = {
   'market-standing-variant-unmatched': 'VARIANT_UNMATCHED_POOL', // GrailKey Directive AB (GK-101)
   'market-standing-sold-variant-fallback': 'SOLD_VARIANT_FALLBACK_POOL', // GrailKey Directive AH (GK-111)
   'single-comp-pool': 'SINGLE_COMP_POOL', // GrailKey Directive AH (GK-111)
+  'market-standing-variant-unresolved': 'VARIANT_UNRESOLVED_EDITION', // GrailKey Directive AP (GK-124)
 };
 
 const lockToReasonCode = (lock) => {

@@ -8599,7 +8599,31 @@ export default async function handler(req, res) {
     // only — UNVERIFIED can only ever be equal-or-stronger than whatever
     // the active side alone would have produced, never weaker).
     const soldFallbackConsumed = priceBandsRaw?.soldPoolFallbackConsumed === true;
-    out.variantApplicability = soldFallbackConsumed ? 'UNVERIFIED' : (rawComps?.variantApplicability ?? null);
+    // GrailKey Directive 2026-08-16-AP (GK-124) — cleared variant != base
+    // edition. `applyVariantPreferenceFilter` (api/comps.js:590-591)
+    // returns `matched: null` both when NO variant was ever claimed (a
+    // genuine base edition) AND when a variant WAS claimed but the
+    // reconciler cleared it for lack of corroboration (edition
+    // specificity is evidenced, just unresolved WHICH edition) — `null`
+    // itself cannot distinguish the two, and `rawComps?.variantApplicability`
+    // collapses to the same falsy value either way. Custody, not
+    // recomputation (C4): `out.variantReconciliation` was already written,
+    // unconditionally, at the ONE place the clear itself happens
+    // (~line 5744, the reconciler's own decision log) — its `conflicts[]`
+    // is the cheapest, most direct signal that edition specificity was
+    // evidenced (Vision asserted a value; something disagreed or nothing
+    // corroborated it) without re-scanning any evidence here. A cleared
+    // variant with a recorded conflict is unambiguous; carried forward as
+    // a NEW, distinct 'UNRESOLVED' state — not reused as 'UNVERIFIED',
+    // which specifically means Filter 1c ran a real match and failed it;
+    // here Filter 1c never even attempted a check, since by the time it
+    // ran there was nothing left to check against.
+    const variantWasClearedWithEvidence = out.variantReconciliation?.authority === 'NONE'
+      && Array.isArray(out.variantReconciliation?.conflicts)
+      && out.variantReconciliation.conflicts.length > 0;
+    out.variantApplicability = soldFallbackConsumed
+      ? 'UNVERIFIED'
+      : (rawComps?.variantApplicability ?? (variantWasClearedWithEvidence ? 'UNRESOLVED' : null));
     out.variantApplicabilitySoldFallback = soldFallbackConsumed;
 
     // Filter bypass flag — set in both pricing branches (PC + browse).

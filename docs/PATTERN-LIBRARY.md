@@ -10394,3 +10394,137 @@ SHIPPED-PENDING PHYSICAL alongside it — all three close together on
 Jimmy's physical rescans (Venom, Dell'Otto, Sabrina), not before. No
 scoring, weight, threshold, or clustering-algorithm change anywhere in
 this dispatch. Do not propose the next directive.
+
+## GrailKey Directive 2026-08-16-AP — GK-124: cleared variant != base edition
+
+Fourth false-READY. Production: Amazing Spider-Man #1, Dell'Otto virgin
+variant, CGC Signature Series 9.6 (2026-08-16 20:23, build ab9e1c6).
+actionAuthority=READY, marketStanding=EXACT_CURRENT, a live $120.06
+List button — against a 4-comp pool (Kith 60th Anniversary variant / a
+"Spider-Man #1 Variants" lot / Clayton Crain CGC SS / a base-edition
+CGC 9.8) containing zero Dell'Otto comps.
+
+### The kill path
+
+reconcileVariantFacet (src/lib/identityCore.js, AL-continuation/AM's
+F-3) did exactly what it was built to do: Vision's bare "virgin variant"
+claim had no first-eligible-visual row corroborating or contradicting
+it, so it correctly CLEARED -- authority: 'NONE',
+conflicts: [{source:'vision', value:'virgin variant'}]. The clear
+itself was correct. The defect is one layer downstream: with
+confirmedVariant now null, every consumer that reads a null variant
+reads it as "this is a base edition" -- because a genuinely-absent
+variant and a variant that was CLAIMED-then-CLEARED both collapse to
+the identical out.variantApplicability === null value at the custody
+site (api/enrich.js, AB/Directive AB's own field). deriveMarketStanding
+(src/lib/actionAuthority.js) has no way to distinguish "nobody ever
+claimed a variant" from "somebody claimed a variant and we could not
+confirm which one" -- both read as ordinary EXACT_CURRENT eligibility.
+
+Fourth instance of the same disease class: GK-96 (tier-4 pc_estimate,
+Directive Z), GK-101 (tier-3 active, zero Filter-1c match, Directive AB),
+GK-111 (tier-2 sold-fallback consumption, Directive AH), now GK-124 (a
+cleared-not-absent variant). AB's and AH's locks both require a
+CONFIRMED variant to exist as their trigger condition -- clearing the
+variant walks under both without tripping either.
+
+### The fix -- revocation only, no reconciler change, no pricing math
+
+out.variantReconciliation was already being written, unconditionally,
+at the one place the clear happens (api/enrich.js ~line 5744, F-3's own
+log site) -- this dispatch's job was custody, not new computation.
+api/enrich.js (~line 8602-8627) now checks
+out.variantReconciliation?.authority === 'NONE' AND a non-empty
+conflicts[] array -- the cheapest, most direct signal that edition
+specificity was evidenced (something was claimed, nothing corroborated
+or contradicted it) -- and sets out.variantApplicability = 'UNRESOLVED'
+instead of leaving it null. A brand-new, third value alongside AB's
+existing 'CONFIRMED'/'UNVERIFIED', deliberately not reused: 'UNVERIFIED'
+specifically means Filter 1c ran a real comp-pool match and failed it;
+'UNRESOLVED' means Filter 1c never got a variant to check against in
+the first place, because reconciliation had already zeroed it out
+upstream.
+
+deriveMarketStanding floors 'UNRESOLVED' to SIMILAR_ONLY -- the
+identical floor AB already applies to 'UNVERIFIED', same principle
+(a revocation of standing the pricingSource string alone would have
+granted, never a fabrication of worse evidence). A new reason code,
+VARIANT_UNRESOLVED_EDITION (src/lib/responseContract.js), makes the
+soft lock explicable. Because actionAuthority=READY already requires
+marketStanding===EXACT_CURRENT, the book falls through to REVIEW
+via Directive Z's EXISTING state machine -- no parallel denial path, no
+new mechanism.
+
+Genuinely unaffected, verified directly: a real base-edition book (no
+variant ever claimed, variantIdentitySource!=='vision' guard in
+api/enrich.js means reconcileVariantFacet never even runs, so
+out.variantReconciliation stays fully absent, not present-with-null)
+computes variantApplicability=null exactly as before and reaches
+EXACT_CURRENT/READY untouched. The reconciler itself (F-3's clearing
+logic) is byte-for-byte unchanged -- this dispatch reads its output, it
+does not alter when or how the clear fires. api/list-ebay.js's
+server-side synthetic re-derivation (Directive Z's C3 boundary) inherits
+the fix with zero code change: item.variantApplicability || null
+already passes any truthy string through untouched, so 'UNRESOLVED'
+reaches the server's own deriveLocks/deriveActionAuthority call
+identically to how the client-side path does -- single writer, both
+paths converge on the same functions.
+
+### Acceptance
+
+tests/grailkey-directive-ap-variant-unresolved-authority.test.js,
+37/37. B1 (SHIP-BLOCKING) uses the REAL reconcileVariantFacet, fed the
+real production pool shape (a first-eligible-visual row naming none of
+Vision's claimed creator/specific tokens), to produce a genuine
+authority:'NONE' result -- then proves PRE-AP (variantApplicability
+computed the old way) reaches READY and POST-AP (the real custody
+expression) does not, DIRECT against the real
+deriveMarketStanding/deriveLocks/deriveActionAuthority. B2
+(SHIP-BLOCKING) proves a genuine base edition still reaches EXACT_CURRENT
++ READY normally -- the rule does not over-fire. B3 isolates cleared vs.
+absent as a structural (not incidental) distinction. B4 proves all four
+monotonicity directions, including a DIRECT demonstration that a
+genuinely corroborating first-eligible-visual row (naming the real
+creator, e.g. "Dell'Otto") escapes the NONE clear and the resulting
+CONFIRMED variant reaches EXACT_CURRENT/READY -- the upward route is real,
+not merely asserted. B5 confirms AB's and AH's own fixtures are
+unregressed and get their own distinct reason codes, never the new one.
+B6 confirms actionAuthority(after) <= actionAuthority(before) across
+every fixture. A final block reproduces api/list-ebay.js's own
+syntheticOut construction to prove the server boundary denies READY
+independently.
+
+### Regression
+
+Full unfiltered sweep, 213 files (190 PASS / 19 FAIL / 4 TIMEOUT),
+byte-identical FAIL/TIMEOUT file list to the prior AO stamp (189/19/4/212)
+plus this dispatch's own new file, which passes cleanly. Every test
+importing actionAuthority.js/responseContract.js (23 files) and
+every reconciler-adjacent AI/AF/AG/AL/AM/AN/AO suite re-run directly and
+confirmed unaffected -- identityCore.js/identityReconciler.js were
+not touched by this dispatch at all (only api/enrich.js,
+src/lib/actionAuthority.js, src/lib/responseContract.js).
+
+### Handoff
+
+GK-124 SHIPPED-PENDING PHYSICAL -- closure reserved for Jimmy's post-deploy
+rescan of the Dell'Otto ASM book (expect SIMILAR_ONLY/REVIEW/
+VARIANT_UNRESOLVED_EDITION, List button disabled, identity may still read
+plain "Amazing Spider-Man #1" -- GK-125, expected, not this ticket's scope)
+plus a Sabrina regression check (expect unchanged LIST_LOW/REVIEW,
+identity and 2024 year intact). Clears the false-READY halt on deploy.
+Does NOT itself close GK-121/GK-123/GK-120's family half -- those remain
+HOLD on their own separate physical-scan evidence, per this campaign's
+standing rule that closure requires physical production confirmation,
+not unit-fixture proof alone. Two new findings logged, not fixed:
+GK-125 (the winning title-family's own discriminator, e.g.
+"dell otto gabriele," is dropped at canonicalization -- a secondary
+contributor to this production shape, independent of and not required
+by this fix) and GK-126 (AH's single-comp-pool >=2-comp floor means a
+book whose entire eBay presence is one listing can structurally never
+reach EXACT_CURRENT authority -- sibling gap to GK-123's companion-product
+class, not yet traced against a real instance). What authority still
+cannot detect: a wrong-but-confident identity where every facet
+(title/issue/year/publisher/variant) independently resolves cleanly
+remains GK-98's own open scope, untouched by this dispatch. Do not
+propose the next directive.
