@@ -36,13 +36,21 @@
 //
 // THE FIX (revocation/consolidation only, no reconciler-rule changes):
 //
-//   (2a) out.issueAuthority is now written EXACTLY ONCE, immediately after
-//   resolveIdentity returns, as a pure projection of identity.reconciledIssue
-//   (reconcileIssue's own verdict) via projectIssueAuthority
-//   (src/lib/issueAuthority.js). Seven post-reconciler writer sites removed
-//   or reclassified: the commit4 ('adopted' mode), commit4-rescue
-//   (zero-support-rescue), and commit4.3 (retention-branch) blocks in
-//   api/enrich.js no longer derive or write out.issueAuthority at all;
+// CORRECTED (AQ-follow-up, same day): "written EXACTLY ONCE" below
+// overclaimed. Normal visual-resolution custody projects issue authority
+// once from reconciledIssue; three separately-scoped exceptional
+// mutation paths remain (writers 5/6/7 below) and are explicitly tracked,
+// not silently folded into a false single-writer claim. A validator that
+// executes out.issueAuthority = ... is a writer regardless of its name.
+//
+//   (2a) out.issueAuthority is now projected, in the normal visual-
+//   resolution path, immediately after resolveIdentity returns, as a
+//   pure projection of identity.reconciledIssue (reconcileIssue's own
+//   verdict) via projectIssueAuthority (src/lib/issueAuthority.js).
+//   Seven post-reconciler writer sites removed or reclassified: the
+//   commit4 ('adopted' mode), commit4-rescue (zero-support-rescue), and
+//   commit4.3 (retention-branch) blocks in api/enrich.js no longer
+//   derive or write out.issueAuthority at all;
 //   checkCrossPopulationPromotionGuard's one real write site (a genuine
 //   value comparison already, unlike the others) is reclassified explicitly
 //   as a defensive validator/safety-net, kept as a last-resort write since

@@ -10584,12 +10584,24 @@ agrees with top; the real dissent is the minority "300," which plurality
 discards by construction), and also reverted -- logged as GK-128 rather
 than shipped half-working.
 
-### The fix -- single writer, zero cross-facet path
+### The fix -- improved custody, not completed single-writer custody
 
-out.issueAuthority is now written EXACTLY ONCE, in api/enrich.js,
-immediately after resolveIdentity returns, as a pure projection of
-identity.reconciledIssue (reconcileIssue's own already-computed verdict)
-via projectIssueAuthority (src/lib/issueAuthority.js) -- mirroring the
+CORRECTED (AQ-follow-up, same day): the framing below originally read
+"out.issueAuthority is now written EXACTLY ONCE." That overclaimed.
+Normal visual-resolution custody projects issue authority once from
+reconciledIssue; three separately-scoped exceptional mutation paths
+remain (escalateIssueAuthorityOnConflict, manual-correction provenance,
+checkCrossPopulationPromotionGuard) and are explicitly tracked below as
+Slice 2 work-order items, not silently absorbed into a false "one
+writer" claim. A validator that executes out.issueAuthority = ... is a
+writer regardless of its name -- writer 7's own reclassification (below)
+does not make it stop being an assignment site.
+
+out.issueAuthority is now written, in the NORMAL visual-resolution path,
+in api/enrich.js, immediately after resolveIdentity returns, as a pure
+projection of identity.reconciledIssue (reconcileIssue's own
+already-computed verdict) via projectIssueAuthority (src/lib/
+issueAuthority.js) -- mirroring the
 exact pattern Directive Z already established for
 contract.listable-from-actionAuthority. Seven post-reconciler writer
 sites enumerated and resolved individually, not uniformly:
@@ -10720,6 +10732,11 @@ provisional (152/152).
 
 ### Handoff
 
+**SUPERSEDED same day by the AQ-follow-up section immediately below --
+the "not a live safety hole today" classification in this paragraph was
+wrong.** Retained verbatim for the historical record of what this
+dispatch itself believed at close; do not treat it as current status.
+
 GK-127 SHIPPED-PENDING PHYSICAL -- closure reserved for Jimmy's
 post-deploy rescan of the Wolverine #90 book (expect CV/PC research to
 proceed, honest pricing or thin-pool REVIEW, never
@@ -10743,5 +10760,124 @@ reconcilePhysicalYear (a different, narrower mechanism, physical-vs-
 catalog year custody, not general year-facet authority) plus the
 still-orphaned retention-conflict branch this dispatch neutralized but
 did not rehome; variant has Slice-1's reconcileVariantFacet (AL
-continuation) already largely following the single-writer pattern. Do not
-propose the next directive.
+continuation) already largely following the single-writer pattern.
+
+## GrailKey Directive AQ-follow-up -- GK-128 proven live, documentation corrected
+
+Two items, evidence-first, per the directive's own explicit instruction:
+no further code until item 1 reported.
+
+### Item 1 -- the transaction-boundary test
+
+AQ's own close-out classified GK-128 "not a live safety hole today" on
+the strength of identity.familyIssueConsensus's own outcome/reason
+fields still correctly reading 'conflicted' for a genuine near-miss
+conflict. That reasoning was never checked against the actual
+transaction boundary (assembleContract, src/lib/responseContract.js) --
+it assumed a signal recorded in a data structure reaches the consumers
+that gate listing. It does not.
+
+Built the real near-miss shape end to end, reusing tests/
+grailkey-dispatch-25-fix2c-axis-check.test.js Section 5's own
+already-certified construction verbatim (real title-family clustering
+machinery -- buildTitleFamilies/scoreTitleFamilies/
+mergeFragmentedTitleFamilies/selectTitleFamilyCandidate, row POSITIONS
+feeding the real rank-weight formula, never hand-set weights): top
+family plurality = 213 (unanimous), runner-up population = 213/213/300
+(genuine live internal dissent), actual dissent = "300." Ran the full
+pipeline through resolveIdentity -> projectIssueAuthority ->
+canUseExactIssuePricingCache -> assembleContract (the real, unmodified
+production functions, DIRECT, not mirrored) and printed every stage:
+
+    reconcileIssue.authority     : CORROBORATED
+    reconcileIssue.justifiedBy   : family-corroborated="213", vision="213"
+    reconcileIssue.conflicts     : [] -- the "300" dissent appears NOWHERE
+    out.issueAuthority           : null (trusted)
+    identityStanding             : CONFIRMED
+    marketStanding                : EXACT_CURRENT
+    actionAuthority.state         : READY
+    actionAuthority.reasonCodes   : []
+    contract.locks                : []
+    contract.listable             : true
+    CV exact lookup allowed?      : true
+    PC exact lookup allowed?      : true
+
+identity.familyIssueConsensus itself DOES correctly compute
+outcome='conflicted', reason='retention-margin-decline-conflict' for
+this exact shape -- proving the signal exists and is computed correctly.
+It also proves the signal is discarded: nothing in deriveIdentityStanding,
+deriveMarketStanding, deriveActionAuthority, deriveLocks, or
+canUseExactIssuePricingCache ever reads familyIssueConsensus. "Remembered
+in a log [structure]" is not custody -- a signal the transaction boundary
+never receives is a signal that doesn't exist, exactly as AB's own
+precedent (evidence applicability custody, GK-101) already established
+for a different facet. GK-128 is upgraded from "logged, not fixed,
+evidence-set completeness gap" to CONFIRMED LIVE -- the fifth false-READY
+sibling (GK-96, GK-101, GK-111, GK-124, now GK-128), same disease class,
+same structural shape: a real gate exists somewhere in the pipeline, and
+a downstream consumer never reads it.
+
+Fix traced, not built, per the directive's own instruction to report and
+wait for greenlight. Two candidates evaluated:
+
+  - REJECTED as dishonest: have projectIssueAuthority additionally
+    consume familyIssueConsensus.outcome==='conflicted' as an
+    independent demotion input. This resurrects GK-127 verbatim --
+    Wolverine #90's own real shape ALSO carries outcome='conflicted'
+    despite genuine value agreement (the near-miss branch sets that flag
+    from axisAgreement/margin-decline provenance, not from a value
+    comparison); consuming it directly would re-demote the exact book
+    this dispatch just un-blocked.
+  - PROPOSED, narrowest, revocation-only: when the near-miss branch
+    fires, feed the runner-up's own NON-WINNING asserted issue value(s)
+    (runnerUpAssertedIssues filtered to exclude whatever matches
+    confirmedIssue) into issueEvidence as genuine reportConflict entries
+    -- for this fixture, exactly "300." Both inputs (runnerUpAssertedIssues,
+    confirmedIssue) are already computed at the point the near-miss
+    branch runs; no new plumbing. Verified by hand against both shapes
+    this dispatch already built: Wolverine #90's own runner-up has zero
+    internal dissent (a single clean "90" row), so the filtered set is
+    empty and nothing changes for that book; Section 5's runner-up
+    (213/213/300) yields exactly "300," which would correctly demote
+    reconcileIssue's own authority to CONTESTED via its EXISTING conflict
+    logic -- no new authority-derivation mechanism, just a missing
+    evidence input. Deliberately scoped to the RUNNER-UP's dissent only,
+    never the TOP family's own internal minority (Wolverine #90's top
+    family itself contains a dissenting "91" row among four "90" rows) --
+    feeding top-family dissent would re-trigger GK-127's own false
+    conflict on the book this dispatch exists to fix. NOT IMPLEMENTED.
+
+### Item 2 -- documentation correction
+
+Every instance of "out.issueAuthority is now written EXACTLY ONCE" (or
+equivalent single-writer-completed framing) in CLAUDE.md, docs/
+TICKET-REGISTRY.md, and this file corrected in the same commit as this
+section, per the directive's own instruction. Replaced with: normal
+visual-resolution custody projects issue authority once from
+reconciledIssue; three separately-scoped exceptional mutation paths
+remain (escalateIssueAuthorityOnConflict, manual-correction provenance,
+checkCrossPopulationPromotionGuard) and are explicitly tracked as Slice 2
+work-order items, with their eventual destination named (evidence ->
+reconciler -> projection, or a pre-reconciler entry path terminating in
+the same owner) rather than left as an open question. The correction
+applies uniformly -- a validator that executes out.issueAuthority = ...
+is a writer regardless of its name; writer 7's own reclassification as a
+"safety-net validator" does not exempt it from this accounting.
+
+### Regression
+
+No code changed by this follow-up -- item 1 is an investigation (a
+throwaway script exercising only real, already-shipped functions,
+deleted after use, not committed), item 2 is docs-only. Baseline
+unchanged at 191/19/4/214.
+
+### Handoff
+
+GK-127 stays SHIPPED-PENDING PHYSICAL. GK-124/AP stays SHIPPED-PENDING
+PHYSICAL -- the false-READY halt remains active independently of this
+finding; the Dell'Otto production acceptance has not run. **GK-128
+reclassified OPEN, proven live** -- the halt covers it too now. Nothing
+lists until GK-128's own fix is greenlit, built, and accepted, in
+addition to both physical rescans already pending. Do not propose the
+next directive. Do not implement GK-128's traced fix without explicit
+greenlight.

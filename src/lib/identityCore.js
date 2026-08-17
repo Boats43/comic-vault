@@ -3366,10 +3366,19 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     // GrailKey Directive 2026-08-16-AQ (GK-127) — the Slice-1 reconciler's
     // own, single, canonical verdict for the issue facet (value/source/
     // authority/justifiedBy/conflicts). api/enrich.js's projectIssueAuthority
-    // (src/lib/issueAuthority.js) is the ONLY thing permitted to derive
-    // out.issueAuthority from this — a pure projection, never independent
-    // reinterpretation of familyIssueConsensus/familyYearConsensus's own
-    // mode/outcome flags.
+    // (src/lib/issueAuthority.js) is the normal visual-resolution path's
+    // out.issueAuthority writer, deriving it as a pure projection of this
+    // value — never independent reinterpretation of familyIssueConsensus/
+    // familyYearConsensus's own mode/outcome flags. CORRECTED (AQ-follow-up,
+    // same day): not the ONLY writer of out.issueAuthority overall — three
+    // separately-scoped exceptional mutation paths (escalateIssueAuthorityOnConflict,
+    // manual-correction provenance, checkCrossPopulationPromotionGuard)
+    // still write it independently; see docs/PATTERN-LIBRARY.md's
+    // AQ-follow-up section for the full accounting and their Slice-2
+    // destinations. GK-128 (proven live): this reconciler's own evidence
+    // set does not yet see a genuine near-miss runner-up's dissenting
+    // value, so a real conflict can compute CORROBORATED here — fix
+    // traced, not built, awaiting greenlight.
     reconciledIssue,
   };
 };

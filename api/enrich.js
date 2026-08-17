@@ -3435,11 +3435,18 @@ export default async function handler(req, res) {
       // internal-unanimity noise, with no check that the underlying VALUES
       // actually disagreed (current=#90 vs family consensus=#90 — a
       // provenance tag mistaken for a value conflict). The single
-      // projectIssueAuthority call above is now the ONLY writer of
-      // out.issueAuthority — it already reads identity.reconciledIssue
+      // projectIssueAuthority call above is the writer for the NORMAL
+      // visual-resolution path — it already reads identity.reconciledIssue
       // (Slice 1's own verdict, correctly CORROBORATED for this exact
-      // shape) and needs no fallback here. See src/lib/issueAuthority.js's
-      // projectIssueAuthority doc comment for the full mapping.
+      // shape) and needs no fallback here. CORRECTED (AQ-follow-up, same
+      // day): this is not the only out.issueAuthority writer in the file —
+      // escalateIssueAuthorityOnConflict, manual-correction provenance, and
+      // checkCrossPopulationPromotionGuard each still write it for their
+      // own separately-scoped reasons (grep out.issueAuthority\s*= — 4 real
+      // assignment sites remain, each individually justified, see
+      // docs/PATTERN-LIBRARY.md's AQ-follow-up section). See
+      // src/lib/issueAuthority.js's projectIssueAuthority doc comment for
+      // the full mapping.
       //
       // GrailKey Directive 2026-08-16-AQ (GK-127) — the YEAR-only half of
       // the removed block preserved on its OWN facet, never on issue
