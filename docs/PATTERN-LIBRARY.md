@@ -8340,6 +8340,327 @@ re-stamped 173/19/3/195 → 174/19/3/196 (one new file). S's Task 2 is
 narrower than it was: one of its two confirmed blockers (GK-94) is now
 closed; the other (bulk import, needs its own mechanism) remains.
 
+## GrailKey Directive Y (`b449980`, 2026-08-13) — P0 false-READY trace, GK-95 through GK-99 logged
+
+**Audit note (Directive AS-followup compaction, 2026-08-17): this section
+was missing from the Pattern Library entirely until this pass — CLAUDE.md
+carried the only writeup, with no dedicated home here, discovered while
+auditing the Pattern Library index for fallback coverage before compacting
+it. Migrated verbatim from CLAUDE.md's own Directive Y bullet, cross-
+checked against `docs/TICKET-REGISTRY.md`'s GK-95 through GK-99 entries
+and the real commit (`b449980`) before being written here — not
+reconstructed from memory.**
+
+Investigation-only, no code. Traced a real production incident: Sabrina
+The Teenage Witch #1 misidentification reached `decision.action=LIST_LOW`,
+zero blockers, an enabled List button — on a book that was actually a Dan
+Parent NYCC foil variant Annual, not the generic base edition the pool was
+priced from.
+
+Root cause: `decisionEngine.js` had zero `pc_estimate`-tier awareness
+(GK-95). The existing confidence-demotion cap only ever demoted
+HIGH→MEDIUM, and the one thin-pool lock only fired when
+`matchConfidence.tier==='LOW'` — leaving a MEDIUM-scoring thin/stale/
+tier-4 book able to clear both existing defenses at once (GK-96, the P0
+root cause this directive exists to name).
+
+Also logged, not fixed, this dispatch: a cross-publisher variant-token
+collision with no publisher check (GK-97); title-family selection with no
+internal-coherence check (GK-98 — related to but distinct from the
+"measuring coherence against the wrong population" disease class AF later
+names and closes); and the correction form's `getCorrectableFields` gate
+never firing for a confidently-wrong (not missing/provisional) identity
+(GK-99, closed later by Directive AD).
+
+### Handoff
+
+GK-95/96/97/98/99 all logged in `docs/TICKET-REGISTRY.md`. GK-95/96 fixed
+next, same day, by Directive Z. GK-98 and GK-99 each took their own later
+directive (AF and AD respectively) to close.
+
+## GrailKey Directive Z (`fb8bc3c`, 2026-08-13) — transaction authority boundary, GK-95/96 fixed
+
+**Audit note (Directive AS-followup compaction, 2026-08-17): same gap as
+Directive Y above — migrated from CLAUDE.md, no prior Pattern Library
+home, verified against the real commit and `tests/grailkey-directive-z-
+transaction-authority.test.js` before being written here.**
+
+Greenlit fix for GK-95/GK-96 (Directive Y). Built `src/lib/
+actionAuthority.js`: two independent axes, `identityStanding` and
+`marketStanding`, both derived from real underlying fields — never from
+`matchConfidence`, which answers "how sure are we this is the right
+book," a genuinely different question from "is there enough evidence to
+transact." The two axes combine into one verdict, `actionAuthority.state`
+(READY/REVIEW/LOCKED), which becomes the SOLE listing gate:
+`contract.listable` is a pure projection of it, and `decisionSafe`/
+`identityConfirmed`/`getListableBooks` (previously all independently
+reading `decision.action`) are rewired onto it instead.
+
+`/api/list-ebay` independently RE-DERIVES `actionAuthority` server-side
+from raw evidence fields before allowing a single-item listing — it never
+trusts a client-sent verdict, closing the actual transaction-boundary gap
+GK-96 was about. The pre-existing Q41 acknowledge-override path is
+preserved and now genuinely server-checked rather than a client-only
+gate. Card rendering added on both `ResultCard` and `CollectionDetail`:
+IDENTITY STANDING / MARKET STANDING / ACTION AUTHORITY plus reason codes,
+so an operator sees the same signal the server enforces.
+
+Verified: the Sabrina regression from Directive Y's own trace, four
+required monotonicity directions (raising grade/price/adding a negative
+signal must never raise authority; a genuinely corroborated fix is the
+only upward route), and a server-side forged-READY rejection test — all
+in `tests/grailkey-directive-z-transaction-authority.test.js`, 45/45.
+
+Known gap, logged not fixed: the bundle-listing branch of `/api/
+list-ebay` has no equivalent server-side re-derivation at all (GK-100,
+still open as of this compaction pass). GK-98 (a wrong-but-confident
+identity itself, as opposed to a thin/stale one) remains explicitly
+untouched, as directed — that is Directive AF's own later scope.
+
+### Handoff
+
+GK-95/96 CLOSED. GK-100/GK-98 logged, deferred to their own later work.
+`src/lib/actionAuthority.js` becomes the shared transaction-authority
+module every subsequent false-READY dispatch in this campaign (AB, AH,
+AP, AR, and beyond) builds on directly — this is the section those later
+entries mean when they say "Z's existing state machine."
+
+## GrailKey Directive AB (`cb987d1`/`378b45e`, 2026-08-14) — evidence applicability custody, GK-101 CLOSED
+
+**Audit note (Directive AS-followup compaction, 2026-08-17): same gap —
+migrated from CLAUDE.md, no prior Pattern Library home, verified against
+both real commits and `tests/grailkey-directive-ab-evidence-
+applicability.test.js` before being written here.**
+
+Second false-READY, a different path than GK-96: tier-3
+(`active_ask_derived`), not tier-4 (`pc_estimate`). `deriveMarketStanding`
+read `pricingSource` alone, so a pool that reached "current" tier could
+still be granted `EXACT_CURRENT` even when Filter 1c
+(`applyVariantPreferenceFilter`, `api/comps.js`) found zero comps
+matching `confirmedVariant` and silently fell back to the broader,
+variant-blind pool — the 7th confirmed instance of the Computed-Then-
+Discarded mechanism this campaign keeps finding. Production instance:
+Sabrina Anniversary Spectacular #1, Dan Parent NYCC Foil — 14 generic
+1997 comps, zero matching the confirmed foil variant,
+`actionAuthority.state: READY` anyway.
+
+Fixed by threading a new signal (`matched`/`out.variantApplicability`,
+values `CONFIRMED`/`UNVERIFIED`/`null`) from the ONE place it's actually
+computed (Filter 1c) through `api/comps.js` → `api/enrich.js` →
+`deriveMarketStanding` (floors `EXACT_CURRENT`→`SIMILAR_ONLY` on
+`UNVERIFIED`, never lower) → Z's EXISTING state machine (no parallel
+denial path) → a new soft `market-standing-variant-unmatched` lock. No
+pricing math touched; `mode=any` keeping-all preserved; sold-path variant
+enforcement (`variantMismatch:comp_has_user_none`) verified untouched.
+
+GK-102 traced and found narrower than initially framed: the NEEDS REVIEW
+badge already derives from `actionAuthority.state` when present — the
+observed contradiction WAS GK-101 itself, not a second, separate bug; the
+residual gap is scoped to pre-Z legacy items only. GK-98 (identityStanding
+CONFIRMED on this same wrong-but-confident book) remains explicitly
+untouched — still Directive AF's scope.
+
+`tests/grailkey-directive-ab-evidence-applicability.test.js`, 35/35.
+
+**Standing-rule record:** the same-commit baseline rule was violated by
+this dispatch — the new test file landed in `cb987d1` while the baseline
+re-stamp landed in the separate docs commit `378b45e`. The baseline value
+(176/19/3/198) is correct and was fully cross-checked; only the commit
+placement was not. Second occurrence of this violation — see the
+"Standing-rule violation record" section later in this file for the
+first.
+
+### Handoff
+
+GK-101 CLOSED. GK-102 narrowed, not a live gap. GK-98 remains open,
+deferred to AF.
+
+## GrailKey Directive AD (`ba5b130`, 2026-08-14) — always-reachable identity recovery, GK-99 SHIPPED
+
+**Audit note (Directive AS-followup compaction, 2026-08-17): same gap —
+migrated from CLAUDE.md, no prior Pattern Library home, verified against
+the real commit and `tests/grailkey-directive-ad-identity-recovery.
+test.js` before being written here.**
+
+A confidently-resolved-but-WRONG identity (`identityMissingFields=[]`,
+`identityProvisionalFields=[]` — nothing flags it as uncertain) had no
+operator recovery path except "Re-identify Book," which reruns the SAME
+automatic pipeline that produced the wrong answer in the first place —
+GK-99, logged by Directive Y.
+
+Traced first, both stop gates cleared before any code was written: the
+five-facet correction machinery (`MANUAL_CORRECTION_ALLOWED_FIELDS`/
+`prepareManualCorrectionRequest`/`validateManualAuthority`/
+`buildCorrectedCatalogueItem`/`mergeIdentityAuthority`/the scan-ownership
+race guard) already existed and already ran a FULL `/api/enrich` on
+correction — a confirmed identity feeds `fetchComps` directly
+(`api/enrich.js:6116-6126`) — and the `ac:`/`cv:`/`pc:` cache keys already
+key on identity fields, so a corrected identity cannot hit a stale entry.
+
+**Corrected by Directive AE, GK-107, the same day: this claim was too
+broad.** Proven true for title/issue/year (all three keys) and variant
+(`ac:`/`pc:`); proven FALSE for publisher — `ac:`/`pc:` never encoded it
+at all (only `cv:` did), a real, stale-cache-reachable gap AE closed. See
+Directive AE's own section below for the full trace.
+
+Only `src/App.jsx` changed, in two places: (1) reachability —
+`getCorrectableFields([],[])=[]` (the exact GK-99 predicate — a
+confidently-wrong identity has nothing in either array, so the existing
+correction UI's own trigger condition never fires for it) now falls back
+to an explicit "✏️ Correct identity" toggle offering all five
+`MANUAL_CORRECTION_ALLOWED_FIELDS`, reusing the one existing form/render
+site rather than building a second correction UI; (2) atomic presentation
+(C4) — `submitManualCorrection` now writes an optimistic pending-lock
+(`listingHardLocked`/`contract.listable=false`/cleared `q41Ack`) BEFORE
+the fetch, deliberately never reverted on failure. This closes a real gap
+the trace found: a previously-READY item stayed freely listable after a
+FAILED correction that had just declared its own identity wrong — it now
+requires the same Q41 acknowledge-override every other REVIEW item
+requires, not automatic reactivation. Flagged explicitly per the
+directive's own instruction, not hidden inside a green test suite.
+
+No resolver, pricing, comp-filter, or diff-logic changes (C6). GK-103
+noted as widened in scope (reachability only, not fixed).
+
+`tests/grailkey-directive-ad-identity-recovery.test.js`, 48/48 — includes
+a MIRRORED pre-AD reproduction (`git show 45b0515`) and a printed
+before/after outgoing comp-query-string proof (World's Finest #74, chosen
+per the directive's own instruction not to reuse Sabrina's disputed year)
+that a correction is a genuine re-enrich, not a relabel.
+
+**Corrected by Directive AE, Task 3b, the same day:** this specific
+fixture only proved a changed field triggers re-enrich — not that a fully
+coherent identity survives all the way to the comp query. The fixture
+corrected title+issue but left year=1990 stale, so both "#74" and "#1"
+appeared in the printed outgoing query. A genuinely coherent re-run (all
+5 facets corrected) requires the operator's own supplied true identity
+values for the acceptance book — explicitly not to be sourced from model
+recall, the same discipline that caught Sabrina's own disputed year.
+Recorded as PENDING at the time; not confirmed re-run as of this
+compaction pass.
+
+### Handoff
+
+GK-99 SHIPPED (not CLOSED — production acceptance is the operator's own
+to run). GK-103 widened, not fixed. GK-107 opened by this dispatch's own
+correction, closed by Directive AE next.
+
+## GrailKey Directive AE (`a501ded`, 2026-08-14) — cache-key identity coverage + Q41 atomicity, GK-107 CLOSED / GK-108 partial
+
+**Audit note (Directive AS-followup compaction, 2026-08-17): same gap —
+migrated from CLAUDE.md, no prior Pattern Library home, verified against
+the real commit and `tests/grailkey-directive-ae-cache-identity-
+atomicity.test.js` before being written here.**
+
+Corrects two claims from Directive AD's own acceptance record rather than
+reopening AD itself.
+
+**GK-107 CLOSED:** `pc:`/`ac:` cache keys never encoded publisher — only
+`cv:` did. Confirmed actionable specifically via the `ac:` route: it
+caches the fully filtered, PRICED active-comp pool, so a publisher-only
+correction could return a pool fetched under the OLD publisher's eBay
+query text, sourced at EXACT_CURRENT tier, reaching READY for a
+population that was never actually queried under the corrected identity.
+Fixed by adding `publisher` to `buildFilterContextFingerprint` (`ac:`)
+and `buildPriceChartingCacheKey` (`pc:`), version-bumped
+(`COMP_FILTER_VERSION` 11→12, `PC_FILTER_VERSION` 2→3) so old cache
+entries can't be silently misread as valid under the new key shape.
+
+**GK-108: client half CLOSED, server half a deliberate STOP GATE.** A
+second, independent Q41 acknowledge path — distinct from the one AD's
+`correctionSubmitting` flag already covered — could bypass a pending or
+failed correction's lock entirely: typing a price flips
+`priceOverridden` unconditionally, and that path's own button sets
+`q41Ack` unconditionally, neither gated by `correctionSubmitting`, both
+surviving past the in-flight window. Fixed with one top-of-render guard
+on `item.listingHardLockReason === 'correction-pending'` (a field AD
+already introduced), placed before both Q41 paths and the List button —
+closes the in-flight AND post-failure windows with one check, no new
+mechanism needed. Server-side: `/api/list-ebay`'s `syntheticOut` has zero
+visibility into this client-only state at all — confirmed to be the SAME
+underlying shape as GK-103 (client-only state at the trust boundary), and
+deliberately NOT fixed this dispatch, per its own explicit instruction not
+to accept a new client-supplied lock boolean as a substitute for real
+server ownership.
+
+`tests/grailkey-directive-ae-cache-identity-atomicity.test.js`, 31/31.
+
+The GK-99 false-READY halt (Directive Y/AD) remains cleared — confirmed
+against the live `45b0515`/`ba5b130` evidence, not reopened by this
+correction. GK-99 stays SHIPPED, not CLOSED — production acceptance
+remains the operator's own to run.
+
+### Handoff
+
+GK-107 CLOSED. GK-108 half-closed (client), server half deliberately
+deferred (needs real server-side ownership of correction-pending state,
+not a client-supplied boolean).
+
+## GrailKey Directive AF (`7d0d434`, 2026-08-14) — discriminative evidence beats generic population, GK-98 CLOSED
+
+**Audit note (Directive AS-followup compaction, 2026-08-17): same gap —
+migrated from CLAUDE.md, no prior Pattern Library home, verified against
+the real commit and `tests/grailkey-directive-af-discriminative-
+corroboration.test.js` before being written here. Note this predates and
+is the direct prerequisite for the already-well-documented Directive AG
+section immediately below, which itself references "AF's own trace" —
+this section is that trace.**
+
+Closes GK-98 (logged by Directive Y, left explicitly untouched by both Z
+and AB): "measuring coherence against the wrong population" at the
+identity layer. A generic franchise title-family's `weightSum` — a
+population count, itself rank-restated per GK-83 — was defeating a
+specific edition candidate that Vision had independently corroborated on
+multiple discriminative tokens.
+
+Direct execution against a realistic Sabrina-shaped fixture found TWO
+independent kill paths, not one: the generic family can win either via
+`top-rank-protection` (by occupying rank 0) or via `weighted-consensus`
+(by having the highest raw `weightSum`) — so the fix (in
+`selectTitleFamilyCandidate`, `src/lib/imageSearchIdentity.js`) had to
+preempt both branches, not just the one that happened to fire in the
+first reproduction.
+
+Adoption requires, per the directive's own numbered constraints: (C4) at
+least 2 tokens independently corroborated by `opts.visionVariant` (the
+raw Vision-supplied variant text, the same `req.body.variant` proxy used
+elsewhere before `confirmedVariant` resolves) — an uncorroborated
+descriptor like "Foil" earns nothing on its own — using a genuinely RAW
+tokenizer, deliberately NOT the existing `tokenizeTitleFamily` (which
+strips exactly the creator-name/convention/finish vocabulary
+corroboration needs — confirmed empirically it silently narrows matching
+to allowlisted creators only); AND (C2, the Flash #139 invariant,
+unrelaxed) the candidate's own issue signal must not contradict Vision's,
+checked via `resolveFamilyIssueConsensus` and deliberately NOT
+`extractIssueFromTitle` (which suppresses this exact title shape's own
+"#1" as marketing context, also confirmed empirically).
+
+Per-member corroboration (not just the top-ranked row) catches an
+internal split within one Jaccard-merged family — found during testing
+that `buildTitleFamilies` can cluster two genuinely DIFFERENT named
+variants under one family purely by title-token similarity. Two
+disjoint-corroborated candidates yield the EXISTING `refused-identity-
+conflict` decision (C5/C6) — no new REVIEW write, no new mechanism.
+`FAMILY_OVERRIDE_DECISIONS` extended by one string so `resolveIdentity`'s
+existing override gate and downstream comp-query construction pick up the
+new decision automatically — verified DIRECT via source trace, not
+re-wired by hand.
+
+Flash #139 confirmed unaffected — no `visionVariant` in that scenario, so
+the new branch is a structural no-op for it. No pricing, comp-filter,
+`actionAuthority`, AD correction-path, or AE cache-key changes.
+
+`tests/grailkey-directive-af-discriminative-corroboration.test.js`,
+25/25. GK-99 production acceptance still pending, untouched by this
+dispatch.
+
+### Handoff
+
+GK-98 CLOSED, code-complete. Immediately followed same day by Directive
+AG below, which found and closed a downstream consumer (`checkAssembly
+Integrity`, "22e") that silently reverted THIS fix's result 3ms after it
+ran — read AG's own section for the full kill-path-3 trace.
+
 ## GrailKey Directive 2026-08-14-AG — GK-98 kill path 3: the 22e veto
 
 AF's `discriminative-corroboration` resolver works correctly in
