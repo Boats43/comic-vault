@@ -25,6 +25,7 @@
 // Q43 A1.a — Import sanitizeSeriesTitle for top-rank identity cleanup
 import { sanitizeSeriesTitle, COMPOUND_TITLE_WHITELIST, extractIssueCandidate, resolveFamilyYearConsensus, resolveFamilyIssueConsensus, isIssueZeroSupport } from './identityCore.js';
 import { isEligibleVisualRow, selectFirstEligibleVisual } from './identityReconciler.js';
+import { checkDistinctItemIdAndSeller } from './issueAuthority.js';
 import { ARTIST_PATTERNS, ARTIST_FAMILY_STRIP_EXCEPTIONS, compactTitleKey, IDENTITY_TPB_MARKER_RE, normalizeAcronyms, NON_GENUINE_COPY_RE, LOT_RE, REPRINT_RE, SLAB_RE, GRADED_RE, SIGNED_RE, TPB_MARKER_RE, extractArtist, hasContaminatedMember, isCompetingFamilyTooStrong, FAMILY_OVERRIDE_DECISIONS } from './compHygiene.js';
 
 // ─────────────────────────── token catalogs ───────────────────────────
@@ -1453,6 +1454,67 @@ const recoverAdjacentCreatorTokens = (nonCreatorTokens, poolArtistTokens, family
   return recovered;
 };
 
+// GrailKey Directive 2026-08-17-AR (GK-130) — physical corroboration
+// bypass. ARTIST_PATTERNS (feeding poolArtistTokens via
+// extractPoolArtistTokens above) may INFORM which added tokens are already
+// known creator names; it must never be the ONLY path to that conclusion.
+// Production evidence, Absolute Batman #19, Ben Oliver Variant Cover, DC
+// 2026 (2026-08-17 03:58, build d3e2816): the physical book's own cover
+// artist is unregistered in ARTIST_PATTERNS, so poolArtistTokens never
+// contained 'ben'/'oliver' no matter how many independent pool listings
+// named him — Q84 vetoed a correctly-identified, 10-member family purely
+// on registry absence ("[Q84] override-blocked reason=non-creator
+// additions [ben,oliver]"), pricing the book from the generic pool.
+//
+// This earns an added token the SAME standing a registered creator name
+// gets from poolArtistTokens (added unconditionally, no independence check
+// at all) from two things instead: (a) the token is physically present on
+// the FROZEN rank-1 eligible visual row — the item actually in hand, not a
+// coincidentally-matching different listing elsewhere in the pool, same
+// discipline Directive AN (GK-121) established for discriminative-
+// corroboration (identityReconciler.js's selectFirstEligibleVisual, reused
+// here byte-for-byte, not a second independently-computed frozen row), AND
+// (b) at least PHYSICAL_CORROBORATION_MIN_INDEPENDENT independent family
+// members (by unique seller, checkDistinctItemIdAndSeller —
+// issueAuthority.js's existing anti-injection distinct-seller guard,
+// already reused by coverType-consensus; not reinvented here) also name
+// it. A single seller relisting the same book under several item IDs is
+// not independent corroboration — same standing this project already
+// requires for issue-axis unanimous-consensus promotion.
+//
+// Scope boundary, stated plainly: this checks whether ALL candidateTokens
+// clear both bars together — a family where only SOME added tokens are
+// physically corroborated falls through to the narrower, registry-based
+// recoverAdjacentCreatorTokens/event-routing/blocked chain below,
+// unchanged. Partial physical corroboration is not handled by this
+// function; that is a real, narrower gap than the one this fix closes, not
+// hidden.
+const PHYSICAL_CORROBORATION_MIN_INDEPENDENT = 3;
+const rawWordTokenize = (text) => String(text || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9\s]/g, ' ')
+  .split(/\s+/)
+  .filter(Boolean);
+const findPhysicallyCorroboratedTokens = (candidateTokens, familyIndices, items) => {
+  const corroborated = new Set();
+  if (!Array.isArray(familyIndices) || familyIndices.length === 0 || !Array.isArray(items)) return corroborated;
+  const frozenRow = selectFirstEligibleVisual(items);
+  const frozenTokens = new Set(rawWordTokenize(frozenRow?.rawTitle || ''));
+  if (frozenTokens.size === 0) return corroborated;
+  for (const t of candidateTokens) {
+    if (!frozenTokens.has(t)) continue;
+    const matchingIndices = familyIndices.filter((idx) => {
+      const item = items[idx];
+      const raw = typeof item === 'string' ? item : (item?.rawTitle || item?.title || '');
+      return rawWordTokenize(raw).includes(t);
+    });
+    if (matchingIndices.length < PHYSICAL_CORROBORATION_MIN_INDEPENDENT) continue;
+    const { uniqueSellerCount } = checkDistinctItemIdAndSeller(matchingIndices, items);
+    if (uniqueSellerCount >= PHYSICAL_CORROBORATION_MIN_INDEPENDENT) corroborated.add(t);
+  }
+  return corroborated;
+};
+
 // GrailKey Dispatch 32 (2026-08-08) — DELETED: the Q140 coherent-content-
 // token lane (2026-07-22, Adventure Time SDCC / Invincible Returns class),
 // which admitted a blocked non-creator addition into confirmedTitle
@@ -1591,7 +1653,7 @@ const matchKnownPublisherImprintEventTokens = (tokens) => {
 // only read allowed/reason. provenance is the new explicit field 22c and
 // isBareCreatorTokensOnly read directly, retiring their reason-string
 // parses (see CLAUDE.md "applyDualAxisGate reason-string coupling").
-export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, familyRawText = null, familyMemberTokens = null) => {
+export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, familyRawText = null, familyMemberTokens = null, familyIndices = null, items = null) => {
   const drop = (t) => ARTICLE_TOKENS.has(t) || NEUTRAL_ADDITION_TOKENS.has(t);
   const fam = (familyTokens || []).filter((t) => !drop(t));
   const agreed = (agreedTokens || []).filter((t) => !drop(t));
@@ -1663,6 +1725,33 @@ export const applyDualAxisGate = (familyTokens, agreedTokens, poolArtistTokens, 
   }
   const nonCreator = added.filter((t) => !(poolArtistTokens && poolArtistTokens.has(t)));
   if (nonCreator.length > 0) {
+    // GrailKey Directive 2026-08-17-AR (GK-130) — see
+    // findPhysicallyCorroboratedTokens' own doc comment above. A registry
+    // miss is not treated as noise when EVERY non-creator addition is
+    // independently physically corroborated (frozen rank-1 row +
+    // >=3 unique-seller family members) — checked before the narrower
+    // registry-adjacency recovery below, since it is the more general
+    // corroboration principle and, when it fully clears the addition,
+    // makes that narrower check unnecessary. A family where only SOME
+    // added tokens clear this bar falls through unchanged to the existing
+    // chain (recoverAdjacentCreatorTokens, then event/imprint routing,
+    // then blocked) — deliberately not handled here (see that function's
+    // scope-boundary comment).
+    const physicallyCorroborated = findPhysicallyCorroboratedTokens(nonCreator, familyIndices, items);
+    if (nonCreator.length > 0 && nonCreator.every((t) => physicallyCorroborated.has(t))) {
+      return {
+        allowed: true,
+        reason: `physically-corroborated additions [${addedStr}] (frozen rank-1 row + >=${PHYSICAL_CORROBORATION_MIN_INDEPENDENT} independent sellers)`,
+        // 'creator-lane-physical-corroboration' — starts with 'creator-lane'
+        // (buildGatedTitleSource's own prefix check picks it up correctly)
+        // but is not 'creator-lane-direct', so isBareCreatorTokensOnly's
+        // extra issue-corroboration check does not apply to it either — this
+        // branch carries its own independent physical evidence, same
+        // exemption 'creator-lane-adjacent-recovery' already gets below.
+        provenance: 'creator-lane-physical-corroboration',
+        admittedTitleTokens: added, admittedVariantTokens: [], agreedTokens: agreed,
+      };
+    }
     // Q132 — bounded recovery: a non-creator token immediately PRECEDING a
     // recognized surname in the family's own raw listing text (e.g. "david"
     // directly before "nakayama") is a stranded first name, not noise. Once
@@ -2418,9 +2507,14 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
     return ka.length >= 4 && ka === kb;
   })();
   const poolArtistTokens = dualAxisAgreed ? extractPoolArtistTokens(items) : null;
-  const q84Gate = (familyTokens, familyRawText = null, familyMemberTokens = null) => {
+  const q84Gate = (familyTokens, familyRawText = null, familyMemberTokens = null, familyIndices = null) => {
     if (!dualAxisAgreed) return { allowed: true, reason: 'no dual-axis agreement' };
-    const gate = applyDualAxisGate(familyTokens, visionTokens, poolArtistTokens, familyRawText, familyMemberTokens);
+    // GrailKey Directive AR (GK-130) — `items` is this closure's own
+    // parameter (selectTitleFamilyCandidate's), the same array F-1/AN's
+    // discriminative-corroboration already reads a few hundred lines below
+    // — passed through so applyDualAxisGate's physical-corroboration check
+    // can reuse the identical frozen rank-1 row, never a second one.
+    const gate = applyDualAxisGate(familyTokens, visionTokens, poolArtistTokens, familyRawText, familyMemberTokens, familyIndices, items);
     if (gate.allowed) {
       console.log(`[Q84] override-allowed reason=${gate.reason}`);
     } else {
@@ -2728,7 +2822,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
         // already reject junk. Removing token threshold unblocks clean canonical
         // titles (Batman, Avengers, The Mighty Thor) from top-rank-protection.
         // Q84-AMENDED: dual-axis token-class gate on top-rank-protection.
-        const q84TopRank = q84Gate(item0Family.tokens, item0Family.rawTitle, item0Family.memberTokens);
+        const q84TopRank = q84Gate(item0Family.tokens, item0Family.rawTitle, item0Family.memberTokens, item0Family.indices);
         if (issueMatch && familyWeightOk && hasVisionOverlap && !competingFamilyTooStrong && q84TopRank.allowed) {
           // A1.a: Route through sanitizeSeriesTitle to remove creator names,
           // cover descriptors, condition words, embedded years, seller noise.
@@ -2851,7 +2945,7 @@ export const selectTitleFamilyCandidate = (items, visionTitle, visionIssue, visi
   // familyMemberTokens, is both simpler and behaviorally identical to the
   // two-phase version's real effect on title admission.
   const q84Consensus = (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily)
-    ? q84Gate(topFamily.tokens, topFamily.rawTitle, topFamily.memberTokens)
+    ? q84Gate(topFamily.tokens, topFamily.rawTitle, topFamily.memberTokens, topFamily.indices)
     : { allowed: true, reason: 'gate not reached' };
   if (topFamily.count >= 3 && overlapRatio >= OVERLAP_THRESHOLD && !isLotFamily && !q84Consensus.allowed) {
     // Q119 — before falling all the way back to bare Vision, check whether

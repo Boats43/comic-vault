@@ -8630,9 +8630,30 @@ export default async function handler(req, res) {
     const variantWasClearedWithEvidence = out.variantReconciliation?.authority === 'NONE'
       && Array.isArray(out.variantReconciliation?.conflicts)
       && out.variantReconciliation.conflicts.length > 0;
+    // GrailKey Directive 2026-08-17-AR (GK-129) — CONTESTED variant
+    // authority (src/lib/identityReconciler.js's reconcileVariant: a
+    // candidate value was adopted, but at least one independent source
+    // disagrees with it) must reach exact-standing custody even when
+    // api/comps.js's Filter 1c found comps matching the contested value
+    // (rawComps?.variantApplicability === 'CONFIRMED') — a pool that
+    // matches a DISPUTED guess is not evidence the guess is right.
+    // Custody, not recomputation (B-T2): out.variantReconciliation was
+    // already written unconditionally at the one place the reconciler
+    // runs (~line 5748) — read here, never re-derived. Placed ABOVE the
+    // Filter 1c read so CONTESTED overrides even a 'CONFIRMED' pool match;
+    // still below soldFallbackConsumed, which stays the strongest signal
+    // (an actually-consumed fallback pool is evidence about what priced
+    // this specific card, not about facet identity). Production case:
+    // Venom Separation Anxiety #1, Mike Mayhew — Filter 1c matched comps
+    // fine against the contested "signed" value, so the pre-fix custody
+    // (rawComps?.variantApplicability ?? ...) read straight through as
+    // 'CONFIRMED'/null and never surfaced the underlying identity dispute.
+    const variantIsContested = out.variantReconciliation?.authority === 'CONTESTED';
     out.variantApplicability = soldFallbackConsumed
       ? 'UNVERIFIED'
-      : (rawComps?.variantApplicability ?? (variantWasClearedWithEvidence ? 'UNRESOLVED' : null));
+      : (variantIsContested
+          ? 'CONTESTED'
+          : (rawComps?.variantApplicability ?? (variantWasClearedWithEvidence ? 'UNRESOLVED' : null)));
     out.variantApplicabilitySoldFallback = soldFallbackConsumed;
 
     // Filter bypass flag — set in both pricing branches (PC + browse).

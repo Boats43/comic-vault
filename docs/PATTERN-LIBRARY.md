@@ -11034,3 +11034,189 @@ book if one is reproducible in production (GK-128), and Dell'Otto ASM #1
 pushed -- per instruction, report and ask before pushing, since the push
 carries both commits together and deploys production. Do not propose the
 next directive.
+
+## GrailKey Directive AR -- GK-129 + GK-130: evidence outranks lists, CONTESTED cannot price EXACT
+
+One law, two tickets: authority is earned from evidence. It is never
+granted by list membership, and never retained by an unresolved contest.
+
+### Part A -- GK-130, the pattern-list veto
+
+Production evidence, Absolute Batman #19, Ben Oliver Variant Cover, 1st
+Scarecrow, DC 2026 (2026-08-17 03:58, build d3e2816):
+
+```
+rank-1 visual row:  "Absolute Batman#19 - Ben Oliver Variant Cover - 1st
+                     Scarcrow - DC Comics 2026"
+top family:         "absolute batman ben oliver 1st dc" -- weight 14.5,
+                     10 members
+[Q84] override-blocked reason=non-creator additions [ben,oliver]
+[price] $6.35 from the generic pool -- RESEARCH
+```
+
+`Ben Oliver` is not in ARTIST_PATTERNS (src/lib/compHygiene.js), so
+extractPoolArtistTokens (src/lib/imageSearchIdentity.js) never populated
+poolArtistTokens with 'ben'/'oliver' no matter how many independent pool
+listings named him. applyDualAxisGate's non-creator branch vetoed the
+addition purely on registry absence -- a hardcoded list acting as the
+ONLY path to "this is a creator name," not merely informing it.
+
+Rule installed: a hardcoded pattern list may inform token classification;
+it may never veto a token corroborated by (a) the frozen rank-1 eligible
+visual row AND (b) >= 3 independent family members.
+
+Trace findings:
+- A-T1: the veto site is imageSearchIdentity.js's applyDualAxisGate,
+  the `nonCreator.length > 0` branch (poolArtistTokens membership test).
+- A-T2: Q84 did not see family-member support counts at decision time --
+  applyDualAxisGate's signature carried familyTokens/familyMemberTokens
+  but never the raw items/indices needed to check physical presence or
+  seller independence.
+- A-T3: no structural pattern ("<Name> Variant Cover") existed anywhere
+  in the variant-extraction path either -- extractFirstEligibleVariantCandidate
+  (identityCore.js) and matchCreatorCanonicals (premiumCreators.js) are
+  both registry-lookup-only. List-only confirmed.
+- A-T4: reused, not reinvented -- checkDistinctItemIdAndSeller
+  (issueAuthority.js), the same anti-injection unique-seller guard
+  coverType-consensus already relies on.
+- A-T5: ARTIST_PATTERNS consumers enumerated (extractPoolArtistTokens,
+  recoverAdjacentCreatorTokens's adjacency check, extractFirstEligibleVariantCandidate
+  via matchCreatorCanonicals) -- none of the other consumers were touched;
+  this dispatch is scoped to applyDualAxisGate's veto only.
+
+Fix: `findPhysicallyCorroboratedTokens` (imageSearchIdentity.js) checks,
+for every non-creator added token, whether it is present on the frozen
+rank-1 row (identityReconciler.js's selectFirstEligibleVisual, reused
+byte-for-byte -- Directive AN's own discipline) AND supported by >= 3
+family members whose unique-seller count also clears 3
+(checkDistinctItemIdAndSeller). When ALL non-creator tokens clear both
+bars, the addition is allowed under a new provenance,
+'creator-lane-physical-corroboration' -- starts with 'creator-lane' so
+buildGatedTitleSource's prefix check picks it up correctly, but is not
+'creator-lane-direct', so isBareCreatorTokensOnly's extra issue-
+corroboration check does not apply (this branch carries its own
+independent physical evidence, same exemption 'creator-lane-adjacent-
+recovery' already gets). Checked BEFORE the narrower registry-adjacency
+recovery chain -- when it fully clears the addition, the narrower check
+is unnecessary; a family where only SOME added tokens clear the physical
+bar falls through unchanged to that existing chain, a deliberate scope
+boundary, not hidden.
+
+`applyDualAxisGate`/`q84Gate` signatures extended with two new,
+defaulted-null trailing params (`familyIndices`, `items`) -- both call
+sites (top-rank-protection, weighted-consensus) updated to pass
+`family.indices` and the closure's own `items`. Every pre-existing call
+shape (the old positional arg count, used throughout
+tests/q84-dual-axis.test.js) is structurally unaffected -- the new
+branch simply never fires without the new args, reproducing exact
+pre-fix behavior.
+
+Verified via three negative controls (all still correctly vetoed):
+below-floor independent-seller count (2 of 3 members), a token present
+in 3+ members but ABSENT from the frozen row itself (the same "physical,
+not merely marketplace-coincidental" discipline Directive AN established
+for discriminative-corroboration), and same-seller relisting (3 rows,
+1 unique seller -- the anti-injection guard doing its job).
+
+### Part B -- GK-129, CONTESTED cannot price EXACT
+
+Production evidence, Venom Separation Anxiety #1, Mike Mayhew
+(2026-08-17 03:21, build d3e2816):
+
+```
+[reconcile-variant] value="Mike Mayhew signed" authority=CONTESTED
+card: EXACT_CURRENT -- READY -- List on eBay -- $48.86
+card, same screen: "Exact match not found -- AI estimate.
+                    These are SIMILAR listings, not exact matches."
+```
+
+The sixth false-READY sibling (after GK-96, GK-101, GK-111, GK-124,
+GK-128). `reconcileVariant` (identityReconciler.js) correctly computed
+CONTESTED -- a candidate value was adopted, but at least one independent
+source (a different, disagreeing first-eligible-visual candidate) still
+disagreed with it. api/enrich.js's custody of out.variantApplicability
+(the field deriveMarketStanding reads) only ever distinguished
+UNVERIFIED (Filter 1c mismatch) / UNRESOLVED (AP's cleared-with-evidence
+case) / null -- CONTESTED fell straight through to whatever
+rawComps?.variantApplicability said, which was genuinely 'CONFIRMED'
+(Filter 1c found comps matching the disputed value). A pool that matches
+a disputed guess is not evidence the guess is right.
+
+Trace findings:
+- B-T1: derivation site is api/enrich.js, ~line 8611-8636 (the
+  out.variantApplicability custody block) -- CONTESTED mapped to
+  'CONFIRMED'/applicable before this fix, confirmed.
+- B-T2: custody, not recomputation -- the fix reads
+  out.variantReconciliation.authority (already written unconditionally
+  at the one place the reconciler runs, ~line 5748) rather than
+  re-deriving anything; deriveMarketStanding itself never re-reads
+  out.variantReconciliation, only the already-custodied
+  out.variantApplicability string, same discipline AB/AP established.
+- B-T3: the issue facet already conforms (GK-128's own fix blocks a
+  CONTESTED issue from reaching exact standing via a different path --
+  CV/PC exact-lookup gates). Variant is the only other facet feeding
+  exact-standing custody today.
+
+Fix: api/enrich.js custodies `out.variantReconciliation.authority===
+'CONTESTED'` into `out.variantApplicability='CONTESTED'`, placed ABOVE
+the Filter-1c read (so CONTESTED overrides even a CONFIRMED pool match)
+and below `soldFallbackConsumed` (the strongest, most-specific signal,
+unchanged). `deriveMarketStanding` (actionAuthority.js) floors
+'CONTESTED' to SIMILAR_ONLY -- same floor as AB's UNVERIFIED and AP's
+UNRESOLVED, own reason code VARIANT_CONTESTED_EDITION
+(responseContract.js) so the operator sees why, distinct from and
+mutually exclusive with the AB/AP codes. Falls through Z's EXISTING
+state machine to REVIEW -- no parallel denial path, no price cleared
+(I13/C1: this is a revocation of standing, not a fabrication of worse
+evidence -- the 4-comp pool and $48.86 price stay fully visible).
+Server boundary (api/list-ebay.js) inherits the fix with zero code
+change (`item.variantApplicability || null` passes the truthy
+'CONTESTED' string through unchanged, same C6 single-writer pattern
+every prior false-READY fix has used).
+
+The upward route (corroborated variant reaches EXACT_CURRENT normally)
+and the operator escape hatch (a GK-85 OPERATOR_CONFIRMED correction
+never runs through reconcileVariantFacet at all -- that function's own
+guard requires pipelineSource==='vision' -- so out.variantReconciliation
+stays absent, not CONTESTED, for an operator-confirmed variant) are both
+demonstrated directly, not merely asserted.
+
+### Integration
+
+The two parts compose on one book: Absolute Batman's Ben Oliver axis
+(Part A) can be corroborated while a DIFFERENT axis (e.g. printing) is
+independently CONTESTED -- Part B still denies EXACT_CURRENT/READY even
+though the right variant identity is now on the card. Proven with a
+combined fixture (reconcileVariantFacet fed a genuinely disagreeing
+printing signal on top of the Ben Oliver candidate) -- marketStanding
+stays non-EXACT_CURRENT, authority stays non-READY, price still
+displays. Full end-to-end wiring through api/comps.js's sold-filter/
+Filter-1c chain for the "ben oliver"-corrected query string is NOT
+exercised by this unit-level suite -- that would require a live or
+large synthetic eBay pool beyond what a pure-function test constructs;
+reported as a real scope boundary, not hidden.
+
+### Tests
+
+tests/grailkey-directive-ar-evidence-authority.test.js, 42/42 -- DIRECT
+calls throughout (real applyDualAxisGate, real selectTitleFamilyCandidate,
+real reconcileVariantFacet, real deriveMarketStanding/deriveActionAuthority/
+deriveLocks), PRE-vs-POST proofs on the real production shapes for both
+parts, negative controls, sibling-fixture mutual exclusivity, no-new-READY
+sweeps, the server re-derivation boundary, and the combined integration
+fixture. Full regression sweep re-run across all 216 test files (see
+CLAUDE.md's baseline stamp for the re-verified counts) -- zero new
+regressions attributed to this dispatch's changes.
+
+### Handoff
+
+GK-129/GK-130 SHIPPED-PENDING PHYSICAL per this registry's standing
+evidence bar. GK-131 (the "1st Scarecrow" key-issue-signal-present-but-
+keyIssue=null gap surfaced while tracing GK-130) logged, explicitly NOT
+fixed -- pricing-math-adjacent territory (key multiplier machinery),
+needs its own greenlight, out of this dispatch's authorized scope.
+Closure reserved for Jimmy's post-deploy rescans of the Absolute Batman
+#19 and Venom Mayhew books, alongside the three rescans GK-127/GK-124/
+GK-128 already have pending. Committed locally, NOT pushed -- report and
+ask before pushing, since the push deploys production. Do not propose
+the next directive.

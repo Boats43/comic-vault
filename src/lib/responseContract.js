@@ -310,6 +310,24 @@ export function deriveLocks(out) {
     });
   }
 
+  // GrailKey Directive 2026-08-17-AR (GK-129) — distinct from the
+  // UNRESOLVED lock above (a variant was cleared for lack of ANY
+  // corroboration) and from UNVERIFIED (a variant was confirmed but the
+  // pool didn't match it): CONTESTED means a variant value WAS adopted but
+  // at least one independent source disagrees with it — the pool may match
+  // that disputed value perfectly and still not be evidence for the right
+  // edition. Own reason code (VARIANT_CONTESTED_EDITION) so the operator
+  // sees WHY, same additive/independent pattern as every other standing
+  // lock in this block.
+  if (preStandingLockCount === 0 && out.variantApplicability === 'CONTESTED') {
+    locks.push({
+      code: 'market-standing-variant-contested',
+      reason: 'The variant/edition on this scan is contested — independent evidence disagrees with the adopted value — price is not confirmed for the exact edition',
+      hard: false,
+      class: 'insufficiency',
+    });
+  }
+
   // GrailKey Directive AH (GK-111) — sufficiency, not applicability. A
   // marketStanding of EXACT_CURRENT says the pool IS current and (per the
   // lock above) confirmed applicable to this edition — it says nothing

@@ -91,6 +91,26 @@ export function deriveMarketStanding(out) {
     // granted, not fabrication of worse evidence (C1), same principle AB
     // already established for the sibling case.
     if (out?.variantApplicability === 'UNRESOLVED') return 'SIMILAR_ONLY';
+    // GrailKey Directive 2026-08-17-AR (GK-129) — a CONTESTED variant
+    // facet (src/lib/identityReconciler.js's reconcileVariant: a candidate
+    // value exists, but at least one independent source disagrees with it)
+    // is UNRESOLVED for exact-standing purposes, same as AP's NONE-cleared
+    // case above — even when api/comps.js's Filter 1c found comps that
+    // genuinely match the CONTESTED value (rawComps?.variantApplicability
+    // === 'CONFIRMED'), that match is only ever a match against a disputed
+    // guess, not a corroborated edition. Custody only (C1/B-T2): api/
+    // enrich.js already writes out.variantApplicability = 'CONTESTED' from
+    // out.variantReconciliation.authority at the ONE place that reconciler
+    // result is produced (~line 5748) — this function never re-reads
+    // out.variantReconciliation directly, same "read the custodied signal,
+    // don't recompute it" discipline AB/AP already established. Floors to
+    // SIMILAR_ONLY, never lower — revocation of standing, not fabrication
+    // of worse evidence. Production instance: Venom Separation Anxiety #1,
+    // Mike Mayhew — "signed" vs a disagreeing "remarked"/axis claim left
+    // the facet CONTESTED while the pool still priced EXACT_CURRENT/READY
+    // at $48.86, the card's own "SIMILAR listings, not exact matches"
+    // warning contradicting its own action-authority verdict.
+    if (out?.variantApplicability === 'CONTESTED') return 'SIMILAR_ONLY';
     return 'EXACT_CURRENT';
   }
   // Unrecognized source string — conservative default, never silently
@@ -148,6 +168,7 @@ const LOCK_CODE_TO_REASON = {
   'market-standing-sold-variant-fallback': 'SOLD_VARIANT_FALLBACK_POOL', // GrailKey Directive AH (GK-111)
   'single-comp-pool': 'SINGLE_COMP_POOL', // GrailKey Directive AH (GK-111)
   'market-standing-variant-unresolved': 'VARIANT_UNRESOLVED_EDITION', // GrailKey Directive AP (GK-124)
+  'market-standing-variant-contested': 'VARIANT_CONTESTED_EDITION', // GrailKey Directive AR (GK-129)
 };
 
 const lockToReasonCode = (lock) => {
