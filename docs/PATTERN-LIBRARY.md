@@ -10881,3 +10881,156 @@ lists until GK-128's own fix is greenlit, built, and accepted, in
 addition to both physical rescans already pending. Do not propose the
 next directive. Do not implement GK-128's traced fix without explicit
 greenlight.
+
+## GrailKey Directive AQ-follow-up (build) -- GK-128 CLOSED, evidence-set completeness
+
+Greenlit build on top of e7c0eac. The rule installed: every materially
+asserted issue value in an eligible conflicting family must reach the
+issue evidence set -- a family's plurality winner is not a substitute
+for its dissenting evidence.
+
+### The fix
+
+src/lib/identityCore.js, two sites, both inside the existing near-miss
+margin-decline branch:
+
+1. familyIssueConsensusResult (the near-miss object) now carries the
+   runner-up TITLE FAMILY's own full asserted-issue set,
+   runnerUpAssertedIssues -- already computed by the pre-existing
+   axis-check (runnerUpIssueMeasurement.assertedIssues), just not
+   previously carried forward. Distinct from the `runnerUp`/
+   `runnerUpSupport` fields already on the object via the
+   `...issueMeasurement` spread, which are the TOP family's own internal
+   runner-up-candidate-value fields -- a different thing entirely,
+   confirmed by direct trace to avoid reusing the wrong field name.
+
+2. At the evidence-set builder (issueEvidence, same function, ~150 lines
+   later), when the near-miss branch fired
+   (isNearMissConflictActive), every value in runnerUpAssertedIssues that
+   does NOT match preReconcileConfirmedIssue (the value actually being
+   preserved/adopted) is fed into issueEvidence via reportConflict,
+   tagged 'family-runnerup-dissent'. reconcileIssue's own EXISTING
+   conflict logic (identityReconciler.js, unchanged) then correctly
+   computes CONTESTED -- no new authority-derivation mechanism, a missing
+   evidence input restored.
+
+Scoped to the RUNNER-UP's own dissent only, never the TOP family's own
+internal minority. This is not a convenience simplification -- verified
+required by direct execution: Wolverine #90's own real shape has
+TOP-family dissent (a genuine "91" among four "90" rows) with a
+completely clean, unanimous runner-up. Feeding top-family dissent here
+would have fed "91" as conflict evidence and resurrected GK-127's exact
+false conflict on the book that fix was built to close. The "eligible
+conflicting family" the rule names is the runner-up specifically -- the
+family competing against, never becoming, the adopted value; the top
+family's own minority noise is the ordinary texture of a real population
+that still produced a genuine majority, not itself in conflict with
+anything.
+
+Two alternatives considered and rejected, both recorded so they are not
+silently re-attempted:
+
+  - Feed the runner-up's own PLURALITY (winner) instead of its dissent.
+    Already tried and reverted TWICE in this campaign (once in AQ's
+    original build, once implicitly re-derivable from the same mistake)
+    -- wrong value for exactly this shape: plurality "213" agrees with
+    top, the real dissent is the minority "300," which plurality
+    discards by construction. The trap this dispatch's own instruction
+    named explicitly.
+  - Have projectIssueAuthority consume familyIssueConsensus.outcome
+    directly as an authority-demotion input, bypassing the evidence set
+    entirely. Rejected as dishonest: Wolverine #90's own real shape ALSO
+    carries outcome:'conflicted' (the near-miss branch sets that flag
+    from axisAgreement/margin-decline provenance, not a value
+    comparison) -- consuming it directly would re-demote the exact book
+    GK-127 exists to keep unblocked, resurrecting that bug verbatim
+    under a different name.
+
+### Item 2 -- null-defaults-to-trusted audit
+
+Traced per the directive's own instruction: "What does every downstream
+consumer do with a null issueAuthority today? If null defaults to
+trusted anywhere, close it the same way." Two candidate shapes checked,
+both found already safe via independent, pre-existing mechanisms --
+no additional live gap, no further code:
+
+  1. A lone, uncorroborated 'family-population' winner (no prior
+     existed). projectIssueAuthority's own existing
+     isLoneFamilyPopulationWinner check (shipped in AQ's original build)
+     already demotes this to 'provisional' unless
+     evaluateUnanimousConsensusPromotion clears a materially stricter
+     bar. Unaffected by this dispatch.
+
+  2. A lone, uncorroborated 'first-eligible-visual' winner.
+     identityCore.js's OWN pre-existing, pre-AQ mechanism
+     (identityProvisionalFromVisualFirst, source-verified at
+     api/enrich.js ~line 3509-3516) already sets
+     out.identityProvisional=true whenever this exact shape occurs.
+     deriveIdentityStanding (src/lib/actionAuthority.js) already reads
+     out.identityProvisional===true as CONFLICTED, never CONFIRMED --
+     actionAuthority.state cannot reach READY off this alone, via a
+     SEPARATE axis (identityStanding), independent of out.issueAuthority
+     entirely. Verified by direct source read of both the write site and
+     the read site; not re-run end to end in this dispatch since neither
+     site was touched.
+
+The specific symptom the boundary test demonstrated (null flowing to
+identityStanding=CONFIRMED / actionAuthority=READY) was entirely caused
+by the evidence-set completeness gap this fix closes. No other live
+"null defaults to trusted" path was found.
+
+### Acceptance
+
+tests/grailkey-directive-aq-followup-gk128-evidence-completeness.test.js,
+23/23. B1 (SHIP-BLOCKING) runs the full real chain (resolveIdentity ->
+projectIssueAuthority -> canUseExactIssuePricingCache ->
+computeIssueAuthorityContractPatch -> assembleContract, all real,
+unmodified production functions) on the real Batman #213/#300 near-miss
+fixture (reused verbatim from grailkey-dispatch-25-fix2c-axis-check.test.js
+Section 5's own already-certified construction). PRE-FIX is reproduced
+MIRRORED -- the exact reconciledIssue shape captured via direct
+execution before this fix landed (this dispatch's own investigation,
+preserved in commit e7c0eac's history), since the evidence-set builder
+that produced it no longer exists in that form to re-run live. POST-FIX
+is DIRECT, the real resolveIdentity output through the unmodified
+downstream chain: issue candidate retained ("213"), authority CONTESTED
+with conflicts=[300] and honest provenance, CV/PC exact lookups both
+blocked, marketStanding=NONE (!=EXACT_CURRENT), actionAuthority=LOCKED
+(!=READY), contract.listable=false -- every acceptance criterion the
+directive specified, proven on the real transaction boundary, not
+asserted against a mock. The Wolverine #90 control (SHIP-BLOCKING) proves
+no self-conflict regression through the SAME full chain: authority stays
+CORROBORATED, out.issueAuthority stays null, CV/PC lookups stay allowed.
+tests/grailkey-directive-aq-canonical-facet-authority.test.js's own B1b
+(previously asserting the KNOWN GAP as expected behavior) updated to
+assert the fixed CONTESTED/conflicts=[170] outcome for its own,
+differently-shaped fixture (a single-row, unanimous-but-differing
+runner-up, distinct from Section 5's internally-split shape) -- both
+shapes now correctly close under the same fix.
+
+### Regression
+
+Full unfiltered sweep, 215 files (192 PASS / 19 FAIL / 4 TIMEOUT),
+byte-identical FAIL/TIMEOUT list to the AQ stamp (191/19/4/214) plus one
+new file. Every blocking control named in the directive re-run directly
+and confirmed byte-identical: q140-issue-consensus-corrective.test.js
+(124/124, Flash #139 genuine conflict still locks exactly as before),
+grailkey-dispatch-25-fix2c-axis-check.test.js (60/60, Section 5's own
+"P0 hole closed" safety property fully intact -- this fix operates one
+layer downstream of that test's own axisAgreement/unanimity logic,
+never touching it), q-trackB-commit4.3.1-retention-decline-fail-closed.test.js
+(73/73), q-trackB-commit4.3-winning-family-authority.test.js (263/263),
+grailkey-directive-ap-variant-unresolved-authority.test.js (37/37, AP
+fixtures unchanged).
+
+### Handoff
+
+GK-128 CLOSED, code-complete, P0 SHIPPED-PENDING PHYSICAL. GK-127 and
+GK-124/AP remain SHIPPED-PENDING PHYSICAL, unaffected by this dispatch.
+The halt now covers three physical rescans before any ticket moves off
+SHIPPED-PENDING PHYSICAL: Wolverine #90 (GK-127), a genuine near-miss
+book if one is reproducible in production (GK-128), and Dell'Otto ASM #1
+(GK-124). Nothing lists. Committed locally on top of e7c0eac, NOT
+pushed -- per instruction, report and ask before pushing, since the push
+carries both commits together and deploys production. Do not propose the
+next directive.

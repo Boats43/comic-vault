@@ -169,15 +169,24 @@ console.log('\n=== B1: Wolverine #90, production shape (identical values ruled a
   assertTrue(sameValueAgreement, 'q140-terminal: same-value-agreement fires — current="90" and family consensus="90" are identical');
 }
 
-console.log('\n=== B1b: genuine near-miss conflict (real disagreement) unregressed ===');
+console.log('\n=== B1b: genuine near-miss conflict (real disagreement) — GK-128 FIXED (AQ-follow-up) ===');
 {
+  // UPDATED (AQ-follow-up, GK-128 fix): this fixture previously asserted
+  // the KNOWN GAP (reconciledIssue.authority stayed CORROBORATED despite
+  // real disagreement) as expected, unfixed behavior. The evidence-set
+  // completeness fix (identityCore.js's runnerUpAssertedIssues wiring)
+  // closes it: the runner-up's own single, unanimous, genuinely-differing
+  // value ("170") is now fed as real conflict evidence, same mechanism
+  // that closes the internally-split-runner-up shape (213/213/300) in
+  // tests/grailkey-directive-aq-followup-gk128-evidence-completeness.test.js.
   const { candidate, parsedRows } = buildWolverineCandidate('Wolverine 170 Slabbed Universal Blue Label Auction Listing');
   const VISION = { title: 'Wolverine', issue: '90', year: '2023', publisher: 'Marvel', confidence: 'high' };
   const EBAY = { title: 'wolverine', issue: '90', year: null, publisher: null, agreement: { visionIssueCount: 4, total: 18 } };
   const identity = resolveIdentity(VISION, EBAY, candidate, { ebayResultCount: 18, overlapThreshold: 0.2, isGraded: false, visualItems: parsedRows });
   assertEq(identity.familyIssueConsensus?.winner, '90', 'sanity: family winner still "90"');
-  assertTrue(identity.confirmedIssue === identity.familyIssueConsensus?.winner, 'DISPLAY: same-value-agreement condition (current===family.winner) still holds even when the runner-up genuinely disagrees — GK-128 (evidence-set completeness for this shape) logged, not fixed, per this dispatch\'s own honest scope note');
-  assertEq(identity.reconciledIssue?.authority, 'CORROBORATED', 'known gap (GK-128, logged): reconcileIssue does not yet see the runner-up\'s dissenting value as conflict evidence — unaffected by this dispatch either way, not a regression it introduces');
+  assertEq(identity.reconciledIssue?.authority, 'CONTESTED', 'GK-128 FIXED: reconcileIssue now sees the runner-up\'s genuinely-differing value ("170") as real conflict evidence');
+  assertTrue((identity.reconciledIssue?.conflicts || []).some((c) => c.value === '170' && c.source === 'family-runnerup-dissent'), 'GK-128 FIXED: the dissenting value "170" is recorded with honest provenance (family-runnerup-dissent), not silently dropped');
+  assertEq(identity.confirmedIssue, '90', 'the CANDIDATE value is unchanged — GK-128\'s fix revokes authority, it does not alter the value (C1: revocation only)');
 }
 
 console.log('\n=== B2: Revenge cross-facet — year disagreement must not touch issue authority — SHIP-BLOCKING ===');

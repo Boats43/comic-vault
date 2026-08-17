@@ -2867,6 +2867,21 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
         outcome: 'conflicted',
         authoritativeForCustody: false,
         reason: 'retention-margin-decline-conflict',
+        // GrailKey Directive AQ-follow-up (GK-128) — the runner-up TITLE
+        // FAMILY's own full asserted-issue set (distinct from `runnerUp`/
+        // `runnerUpSupport` above, which are the TOP family's own internal
+        // runner-up-candidate-value fields via the `...issueMeasurement`
+        // spread — a different thing). Carried so the evidence-set builder
+        // below can compute the runner-up's genuinely DISSENTING values
+        // (every asserted value that does not match the value actually
+        // being preserved/adopted) and report them as real conflict
+        // evidence. Every materially asserted issue value in an eligible
+        // conflicting family must reach the issue evidence set — a
+        // family's plurality winner is not a substitute for its
+        // dissenting evidence (the exact gap GK-128 proved live: a
+        // runner-up split 213/213/300 let reconcileIssue compute
+        // CORROBORATED, because "300" never reached it).
+        runnerUpAssertedIssues,
       };
       identitySource = `${identitySource}+family_margin_decline_conflict`;
 
@@ -3231,31 +3246,46 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   if (familyIssueEvidenceSource) {
     addEvidence(issueEvidence, 'issue', familyIssueEvidenceSource, preReconcileConfirmedIssue);
   }
-  // GK-128, logged not fixed (GrailKey Directive 2026-08-16-AQ) — a
-  // GENUINE near-miss conflict (axisAgreement false for a real reason,
-  // e.g. Batman #213 Section 5's own shape: runner-up internally split
-  // 2x#213/1x#300) still only feeds preReconcileConfirmedIssue (the
-  // preserved prior) as 'family-corroborated' evidence here — the
-  // DISSENTING value itself (e.g. the runner-up's minority "#300") never
-  // reaches issueEvidence. reconcileIssue would compute CORROBORATED,
-  // not CONTESTED, on a genuinely unresolved near-miss conflict — the
-  // mirror-image of GK-127's own bug, on the evidence-set side rather
-  // than the authority-projection side. A first attempt at feeding
-  // runnerUpIssueMeasurement.winner (the runner-up's own PLURALITY) as
-  // conflict evidence was built and reverted in this same dispatch: it
-  // fed the WRONG value for Section 5's shape (plurality "213" agrees
-  // with top, the real dissent is the minority "300", which plurality
-  // discards) — a naive fix that would have silently fed non-conflicting
-  // "evidence" as if it were a conflict. The correct fix needs to
-  // identify and feed the actual DISSENTING value(s), not either side's
-  // plurality — deliberately not attempted under this dispatch's time
-  // budget; out.issueAuthority's own downstream consumers are UNAFFECTED
-  // by this gap (identity.familyIssueConsensus's own outcome/reason
-  // still correctly reports 'conflicted' for this shape, independent of
-  // reconcileIssue — confirmed by the unmodified
-  // grailkey-dispatch-25-fix2c-axis-check.test.js Section 5 still
-  // passing), so this is an evidence-set completeness gap, not a live
-  // safety hole.
+  // GrailKey Directive AQ-follow-up (GK-128 FIX) — every materially
+  // asserted issue value in an eligible CONFLICTING family must reach the
+  // issue evidence set; a family's plurality winner is not a substitute
+  // for its dissenting evidence. Proven live via a real end-to-end
+  // assembleContract run (Batman #213 class, runner-up split
+  // 213/213/300): the "300" dissent never reached issueEvidence,
+  // reconcileIssue computed CORROBORATED instead of CONTESTED, and the
+  // false trust propagated all the way to actionAuthority=READY/
+  // contract.listable=true — the fifth false-READY sibling.
+  //
+  // Scoped to the RUNNER-UP's own internal dissent only, deliberately
+  // NOT the top family's own internal minority. The "eligible conflicting
+  // family" this rule is about is the runner-up — the family competing
+  // against (never becoming) the adopted value; the top family's own
+  // minority noise is not itself in conflict with anything, it is the
+  // ordinary texture of a real population that still produced a genuine
+  // majority. Verified this asymmetry is required, not a convenience:
+  // Wolverine #90's own real shape has TOP-family dissent (a lone "91"
+  // among four "90" rows) with a completely clean, unanimous runner-up —
+  // feeding top-family dissent here would reintroduce GK-127's exact
+  // false conflict on the book that fix was built to close. A prior
+  // attempt in this same campaign fed the runner-up's own PLURALITY
+  // (winner) as the "conflict" value instead of its dissent — wrong for
+  // this exact shape (plurality "213" agrees with top; the real dissent
+  // is the minority "300", which plurality discards by construction) —
+  // logged as GK-128 and reverted before landing. This fix feeds the
+  // ACTUAL non-winning value(s), not the winner.
+  if (isNearMissConflictActive && Array.isArray(familyIssueConsensusResult?.runnerUpAssertedIssues)) {
+    const runnerUpDissentingValues = familyIssueConsensusResult.runnerUpAssertedIssues
+      .filter((v) => String(v) !== String(preReconcileConfirmedIssue));
+    for (const dissentingValue of runnerUpDissentingValues) {
+      reportConflict(issueEvidence, 'issue', 'family-runnerup-dissent', dissentingValue);
+    }
+    if (runnerUpDissentingValues.length > 0) {
+      console.log(
+        `[gk128-fix] runner-up dissenting value(s) fed as real conflict evidence: ${JSON.stringify(runnerUpDissentingValues)} ` +
+        `(runnerUpAssertedIssues=${JSON.stringify(familyIssueConsensusResult.runnerUpAssertedIssues)}, preserved=${preReconcileConfirmedIssue})`
+      );
+    }
+  }
 
   // Guard 6 (contaminated family) — found on the full regression sweep
   // (tests/q-trackB-commit4.3-winning-family-authority.test.js "CONTROL
