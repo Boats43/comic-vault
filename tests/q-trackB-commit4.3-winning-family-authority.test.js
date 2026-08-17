@@ -1155,12 +1155,22 @@ assertTrue(true, 'CONTROL 7: documented via full regression suite re-runs — se
   // this hold's own investigation found (deriveIssueAuthorityFromAdoption
   // was correct but never reached from the real call site) can never
   // silently regress back in without this test failing.
-  // FINAL T6(c) COMPLETION (2026-07-31) — assignment-presence anchors
-  // added alongside the presence/position anchors above. Without these,
-  // the pin above would pass even if the real call site computed
-  // retentionConflictDerived and then DISCARDED it (never assigning
-  // .issueAuthority/.identityProvisionalFields onto out) — a real,
-  // distinct failure mode "presence + position" alone cannot catch.
+  // UPDATED (GrailKey Directive 2026-08-16-AQ, GK-127) — the mechanism
+  // this control anchors on changed, the safety OUTCOME it proves did
+  // not. Before AQ: the commit4.3 retention-branch wrote out.issueAuthority
+  // directly from familyIssueConsensus/familyYearConsensus's own mode/
+  // outcome flags — the exact class of bug AQ closes (Wolverine #90:
+  // identical values ruled a conflict because a provenance tag was
+  // compared as if it were a value). After AQ: out.issueAuthority is
+  // written EXACTLY ONCE, immediately after resolveIdentity returns, as a
+  // pure projection of identity.reconciledIssue (reconcileIssue's own
+  // already-computed verdict, src/lib/identityReconciler.js) via
+  // projectIssueAuthority (src/lib/issueAuthority.js) — never re-derived
+  // from familyIssueConsensus's mode/outcome flags directly. This control
+  // now anchors on THAT single writer and proves the same downstream
+  // ordering property the original test proved: the write reaches
+  // out.issueAuthority before anything reads it for cache/pricing/listing
+  // purposes, and that state is what actually ships in the response.
   // Anchor uniqueness verified (grep -c after comment-stripping, exactly
   // 1 each) before trusting any of these as an indexOf position anchor,
   // per rider R1 — including the exact-cache eligibility production CALL
@@ -1168,29 +1178,20 @@ assertTrue(true, 'CONTROL 7: documented via full regression suite re-runs — se
   // which is non-unique across the import line and this one call site).
   const enrichSourceForT6 = readFileSync(new URL('../api/enrich.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const enrichCodeOnlyForT6 = enrichSourceForT6.split('\n').map((line) => line.replace(/\/\/.*/, '')).join('\n');
-  const wiringGuardIdx = enrichCodeOnlyForT6.indexOf('if (out.issueAuthority == null) {');
-  const retentionConflictCallIdx = enrichCodeOnlyForT6.indexOf('deriveIssueAuthorityFromAdoption(identity.familyIssueConsensus, identity.familyYearConsensus)');
-  const issueAuthorityAssignIdx = enrichCodeOnlyForT6.indexOf('out.issueAuthority = retentionConflictDerived.issueAuthority;');
-  const provisionalFieldsAssignIdx = enrichCodeOnlyForT6.indexOf('out.identityProvisionalFields = retentionConflictDerived.identityProvisionalFields;');
+  const issueAuthorityAssignIdx = enrichCodeOnlyForT6.indexOf('out.issueAuthority = projectIssueAuthority(identity.reconciledIssue, {');
+  const provisionalFieldsAssignIdx = enrichCodeOnlyForT6.indexOf(`out.identityProvisionalFields = [...(Array.isArray(out.identityProvisionalFields) ? out.identityProvisionalFields : []), 'issue'];`);
   const exactCacheEligibilitySiteIdx = enrichCodeOnlyForT6.indexOf('const exactPricingCacheEligible = canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority, out.identityProvisionalFields)');
   const contractPatchSiteIdx = enrichCodeOnlyForT6.indexOf('const authorityPatch = computeIssueAuthorityContractPatch(out.issueAuthority, out, out.identityProvisionalFields);');
   const finalizeResponseIdx = enrichCodeOnlyForT6.indexOf('res.status(200).json(finalizeResponse(out));');
   assertTrue(
-    wiringGuardIdx !== -1 && retentionConflictCallIdx !== -1 && issueAuthorityAssignIdx !== -1 && provisionalFieldsAssignIdx !== -1
+    issueAuthorityAssignIdx !== -1 && provisionalFieldsAssignIdx !== -1
       && exactCacheEligibilitySiteIdx !== -1 && contractPatchSiteIdx !== -1 && finalizeResponseIdx !== -1,
-    'CONTROL T6(c): all seven anchor points (the out.issueAuthority==null guard, the retention-conflict deriveIssueAuthorityFromAdoption call, the two real out.* assignments, the exact-cache eligibility site, the pricing/listing contract site, the terminal finalizeResponse call) found in api/enrich.js source, comments stripped'
+    'CONTROL T6(c) [GK-127]: the single projectIssueAuthority write, its identityProvisionalFields sibling, the exact-cache eligibility site, the pricing/listing contract site, and the terminal finalizeResponse call all found in api/enrich.js source, comments stripped'
   );
-  assertTrue(wiringGuardIdx < retentionConflictCallIdx, 'CONTROL T6(c): the out.issueAuthority==null guard genuinely wraps (precedes) the deriveIssueAuthorityFromAdoption call it guards');
-  // ASSIGNMENT — the derivation result is not merely computed, it is
-  // actually written onto out.* — the assertion this exact scenario
-  // (requirement: "must fail if the derivation result is computed but
-  // discarded") targets directly.
-  assertTrue(retentionConflictCallIdx < issueAuthorityAssignIdx, 'CONTROL T6(c) ASSIGNMENT PIN: retentionConflictDerived.issueAuthority is assigned into out.issueAuthority AFTER the derivation call — the result is not discarded');
-  assertTrue(retentionConflictCallIdx < provisionalFieldsAssignIdx, 'CONTROL T6(c) ASSIGNMENT PIN: retentionConflictDerived.identityProvisionalFields is assigned into out.identityProvisionalFields AFTER the derivation call — the result is not discarded');
-  assertTrue(issueAuthorityAssignIdx < exactCacheEligibilitySiteIdx, 'CONTROL T6(c) WIRING PIN: the out.issueAuthority assignment runs BEFORE the unique exact-cache eligibility production site (canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority, out.identityProvisionalFields)) — the gate reads a genuinely-populated value, never a stale null');
-  assertTrue(provisionalFieldsAssignIdx < exactCacheEligibilitySiteIdx, 'CONTROL T6(c) WIRING PIN: the out.identityProvisionalFields assignment runs BEFORE the unique exact-cache eligibility production site');
-  assertTrue(issueAuthorityAssignIdx < contractPatchSiteIdx, 'CONTROL T6(c) WIRING PIN: the out.issueAuthority assignment runs BEFORE the pricing/listing contract site (computeIssueAuthorityContractPatch)');
-  assertTrue(provisionalFieldsAssignIdx < contractPatchSiteIdx, 'CONTROL T6(c) WIRING PIN: the out.identityProvisionalFields assignment runs BEFORE the pricing/listing contract site');
+  assertTrue(issueAuthorityAssignIdx < exactCacheEligibilitySiteIdx, 'CONTROL T6(c) WIRING PIN [GK-127]: the out.issueAuthority projection runs BEFORE the unique exact-cache eligibility production site (canUseExactIssuePricingCache(confirmedIssue, out.issueAuthority, out.identityProvisionalFields)) — the gate reads a genuinely-populated value, never a stale null');
+  assertTrue(provisionalFieldsAssignIdx < exactCacheEligibilitySiteIdx, 'CONTROL T6(c) WIRING PIN [GK-127]: the out.identityProvisionalFields append runs BEFORE the unique exact-cache eligibility production site');
+  assertTrue(issueAuthorityAssignIdx < contractPatchSiteIdx, 'CONTROL T6(c) WIRING PIN [GK-127]: the out.issueAuthority projection runs BEFORE the pricing/listing contract site (computeIssueAuthorityContractPatch)');
+  assertTrue(provisionalFieldsAssignIdx < contractPatchSiteIdx, 'CONTROL T6(c) WIRING PIN [GK-127]: the out.identityProvisionalFields append runs BEFORE the pricing/listing contract site');
   assertTrue(exactCacheEligibilitySiteIdx < contractPatchSiteIdx, 'CONTROL T6(c) WIRING PIN: the exact-cache eligibility site runs BEFORE the pricing/listing contract site');
   assertTrue(contractPatchSiteIdx < finalizeResponseIdx, 'CONTROL T6(c) WIRING PIN: the pricing/listing contract site runs BEFORE the terminal finalizeResponse(out) call — the cleared/locked state computeIssueAuthorityContractPatch produces is what actually ships in the response, never overwritten or bypassed afterward');
 }

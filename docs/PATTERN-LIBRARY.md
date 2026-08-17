@@ -10528,3 +10528,220 @@ cannot detect: a wrong-but-confident identity where every facet
 (title/issue/year/publisher/variant) independently resolves cleanly
 remains GK-98's own open scope, untouched by this dispatch. Do not
 propose the next directive.
+
+## GrailKey Directive 2026-08-16-AQ — GK-127: canonical facet authority, one-commit-boundary consolidation
+
+Wolverine #90, build ab9e1c6: unanimous real evidence (Vision #90, visual
+12/16 #90, family 5/7 #90) still reached ISSUE_AUTHORITY_CONFLICTED,
+locking listing and blocking CV/PC research on a correctly-identified
+book. reconcileIssue (Slice 1, identityReconciler.js) already correctly
+computed authority=CORROBORATED for this exact shape -- the defect lived
+entirely in a separate, older, parallel authority system (Track B Phase 0
+Commit 3/4/4.1/4.3, issueAuthority.js + api/enrich.js, predating Slice 1)
+that independently re-derived out.issueAuthority from
+familyIssueConsensus's own mode/outcome/authoritativeForCustody flags and
+overwrote CORROBORATED with 'conflicted'.
+
+### The corrected hypothesis -- a real course-correction mid-build
+
+The initial trace (preflight report) hypothesized the root cause was
+axisAgreement's internal-unanimity test (identityCore.js's near-miss
+margin-decline branch, ~line 2793) -- requiring BOTH competing title
+families to be literally 100% internally unanimous before calling their
+issue values "agreed," rather than merely comparing their plurality
+winners. A plurality-only rewrite (comparing topWinner/runnerUpWinner
+instead of topAssertedIssues.length===1/runnerUpAssertedIssues.length===1)
+was drafted, verified against a synthetic Wolverine #90 fixture (built via
+real title-family clustering machinery -- buildTitleFamilies/
+scoreTitleFamilies/mergeFragmentedTitleFamilies/selectTitleFamilyCandidate,
+never hand-set weights), and appeared to work. It was then run against
+the full regression suite BEFORE commit, per this campaign's own standing
+discipline -- and tests/grailkey-dispatch-25-fix2c-axis-check.test.js
+Section 5 ("P0 hole closed") failed: a runner-up family internally split
+2x#213/1x#300 (a genuine, live dissenting row) must still flag a conflict
+even though its own PLURALITY ("213") agrees with the top family. That
+test's own header comment records that Fix 2c (Dispatch 25, the same
+file) already tried and explicitly REJECTED a plurality-only comparison
+mid-dispatch, for precisely this reason -- documented, not rediscovered.
+
+Re-examining the evidence-feeding path (resolveIdentity's
+familyIssueEvidenceSource logic) resolved the tension: it already adds
+preReconcileConfirmedIssue (the preserved prior) as 'family-corroborated'
+evidence whenever familyIssueConsensus.mode is 'conflict-locked' --
+INDEPENDENT of why axisAgreement went false. For Wolverine #90 specifically
+(prior="90", family plurality="90"), this means reconcileIssue was already
+computing the correct CORROBORATED verdict today, unaffected by
+axisAgreement's own internal logic either way -- confirmed directly
+against the real production log the directive itself quoted
+("[reconcile-issue] value=90 ... authority=CORROBORATED"). The
+plurality-only rewrite was reverted in full before commit: axisAgreement,
+topUnanimous/runnerUpUnanimous, and Fix 2c's own established behavior are
+byte-identical to pre-AQ. A companion attempt to feed a near-miss
+conflict's runner-up value into the evidence set as genuine conflict
+evidence (competingRunnerUpValue) was drafted, tested, found to feed the
+WRONG value for Section 5's own shape (the runner-up's plurality "213"
+agrees with top; the real dissent is the minority "300," which plurality
+discards by construction), and also reverted -- logged as GK-128 rather
+than shipped half-working.
+
+### The fix -- single writer, zero cross-facet path
+
+out.issueAuthority is now written EXACTLY ONCE, in api/enrich.js,
+immediately after resolveIdentity returns, as a pure projection of
+identity.reconciledIssue (reconcileIssue's own already-computed verdict)
+via projectIssueAuthority (src/lib/issueAuthority.js) -- mirroring the
+exact pattern Directive Z already established for
+contract.listable-from-actionAuthority. Seven post-reconciler writer
+sites enumerated and resolved individually, not uniformly:
+
+- Writers 1-2 (commit4, mode==='adopted') and 3 (commit4-rescue,
+  zero-support-rescue) -- REMOVED. Each independently re-derived
+  out.issueAuthority from familyIssueConsensus's own mode, redundant with
+  what the evidence set (already correctly fed for these modes) produces
+  via the single projection. The surrounding YEAR-axis promotion,
+  visualReferenceEvidence construction, and [family-evidence] structured
+  logging in these same branches are UNTOUCHED -- unrelated to issue
+  authority, out of scope.
+- Writer 4 (commit4.3, the `if (out.issueAuthority == null)` retention
+  fallback) -- REMOVED. This was Wolverine #90's exact culprit: it called
+  deriveIssueAuthorityFromAdoption(familyIssueConsensus, familyYearConsensus)
+  whenever nothing else had already set out.issueAuthority, converting a
+  provenance tag (mode='conflict-locked', reason='retention-margin-decline-
+  conflict') into a competing 'conflicted' authority object with zero value
+  comparison.
+- q140-terminal (out.issueConsensusConflict construction) -- became a
+  post-commit VALIDATOR. normalize(current)===normalize(family) is now
+  checked before constructing the conflict object; identical values log
+  "[q140-terminal] same-value-agreement" and surface nothing; genuine
+  inequality (Flash #139's own shape, current!=family plurality) still
+  surfaces exactly as before. Never writes out.issueAuthority.
+- The YEAR-axis retention-conflict branch (formerly issueAuthority.js:
+  613-624, reached only via the removed writer-4 call site, now orphaned
+  and unreachable from the real pipeline -- deliberately not migrated to
+  a proper year-facet reconciler, C6's own scope boundary reserves that
+  for Slice 2) -- its genuine identityProvisionalFields:['year'] side
+  effect (needed so computeIssueAuthorityContractPatch's own year-only
+  gate still fires) is preserved via a small, targeted inline check in
+  api/enrich.js using the identical trigger condition
+  (familyYearConsensus.outcome==='conflicted' &&
+  authoritativeForCustody===false), touching ONLY the year facet -- zero
+  path to out.issueAuthority. This is the "Wolverine Revenge" cross-facet
+  shape closed: a year disagreement can no longer demote a different
+  facet's authority.
+- Writer 5 (escalateIssueAuthorityOnConflict) and writer 6 (manual-
+  correction provenance, api/enrich.js line ~11253) -- KEPT, both
+  deliberately. Writer 5 fires on a LATER-arriving pool-wide eBay
+  consensus genuinely unavailable at initial reconciliation time, and is
+  the ONLY issueAuthority mechanism reachable at all for barcode/manual-
+  identity/CGC-cert scans (all three bypass resolveIdentity/reconcileIssue
+  entirely via their own separate branches earlier in api/enrich.js).
+  Writer 6 is the directive's own explicit ruling: "Operator correction is
+  evidence ... It is NOT a bypass write" -- a validated correction
+  triggers a genuine full re-enrich (Directive AD's own path), which is
+  legitimate new evidence arriving, not a competing writer re-interpreting
+  stale state.
+- Writer 7 (checkCrossPopulationPromotionGuard, api/enrich.js line
+  ~11455) -- KEPT, explicitly RECLASSIFIED as a defensive validator/
+  safety-net rather than a peer authority-deriving mechanism. Unlike
+  writers 1-4, this one already does a genuine String(a)!==String(b)
+  value comparison against confirmedIssue -- sound by construction. Under
+  the new evidence-based system it should be structurally unreachable (a
+  genuine mismatch should already have produced CONTESTED authority
+  upstream); its log line now reads "[commit4.3-validator] SAFETY-NET
+  FIRED (should be unreachable under GK-127's evidence-based system --
+  flag for investigation)" specifically so a future trace can distinguish
+  "the new system is working, this fired redundantly" from "the new
+  system has a real gap."
+
+### Operator-correction evidence weighting
+
+GK-85's OPERATOR_CONFIRMED now enters the issue evidence set at maximum
+weight: 'user' added to ISSUE_SOURCE_PRECEDENCE's top slot
+(identityReconciler.js, mirroring the existing variant-facet precedent,
+VARIANT_SOLE_AUTHORITY_PRECEDENCE), threaded via a new
+resolveIdentity(..., opts.issueOperatorConfirmed) flag, set only when
+manualCorrectionRequest.validation.acceptedFields includes 'issue'.
+Deliberately scoped to the issue facet ONLY (C6) -- vision.source/
+priorIndependentlyTrusted, which drive title/year/near-miss/rescue gating
+far more broadly, are untouched, avoiding any cross-facet side effect on
+an operator correction of a DIFFERENT field.
+
+### Acceptance
+
+tests/grailkey-directive-aq-canonical-facet-authority.test.js, 31/31. B1
+(SHIP-BLOCKING) builds the real Wolverine #90 fixture via real clustering
+machinery and proves PRE-AQ (the real, still-existing
+deriveIssueAuthorityFromAdoption, called exactly as the removed writer 4
+did) reaches a non-null 'conflicted' issueAuthority, while POST-AQ
+(projectIssueAuthority, real) returns null (trusted) -- DIRECT, not
+mirrored, since deriveIssueAuthorityFromAdoption itself was deliberately
+left untouched (still exported, still correct as a pure function, simply
+unwired from the real pipeline). B1b confirms a genuine near-miss
+conflict (real runner-up disagreement) is unaffected by this dispatch
+either way, and names GK-128 honestly rather than silently. B2
+(SHIP-BLOCKING) proves the Revenge cross-facet shape: a year-only
+conflict appends 'year' to identityProvisionalFields, never touches
+issueAuthority, contrasted against the real deriveIssueAuthorityFromAdoption
+proving the OLD code DID cross-contaminate for this exact shape. B3
+proves operator-correction evidence weighting end to end. A
+source-presence block confirms exactly 4 justified out.issueAuthority
+assignment sites remain (the projection, and writers 5/6/7 each
+individually justified) and that no call to deriveIssueAuthorityFromAdoption
+remains in api/enrich.js.
+
+### Test updates -- one of the three named tests, not all three
+
+The directive's ruling named three tests as testing the legacy
+implementation. Investigation found only one actually needed a rewrite:
+tests/q-trackB-commit4.3-winning-family-authority.test.js's CONTROL T6(c)
+(4 assertions, source-position anchors proving the old wiring was live)
+was rewritten to anchor on the new single-projection call site instead of
+the removed deriveIssueAuthorityFromAdoption call -- same safety property
+proven (the write reaches out.issueAuthority before every downstream
+consumer that reads it), new mechanism. tests/q-trackB-commit4.3.1-
+retention-decline-fail-closed.test.js and tests/grailkey-dispatch-25-
+fix2c-axis-check.test.js needed NO changes -- both test resolveIdentity's
+own pure output (familyIssueConsensus's mode/outcome/reason), which this
+dispatch left completely untouched; both re-verified passing
+byte-identical (73/73 and 60/60) after every change in this dispatch,
+including the drafted-then-reverted axisAgreement rewrite.
+
+### Regression
+
+Full unfiltered sweep, 214 files (191 PASS / 19 FAIL / 4 TIMEOUT),
+byte-identical FAIL/TIMEOUT file list to the prior AP stamp (190/19/4/213)
+plus this dispatch's own new file, which passes cleanly. Every identity/
+issue-authority-adjacent suite re-run directly at multiple points during
+this dispatch (including immediately after the axisAgreement rewrite AND
+again after its reversion): q140-issue-consensus-corrective (124/124,
+Flash #139 byte-identical throughout), q140-at-vision-zero-support-skip
+(25/25), grailkey-commit-p/p2 (59/59, 44/44), q-trackB-commit4-adoption-
+provisional (152/152).
+
+### Handoff
+
+GK-127 SHIPPED-PENDING PHYSICAL -- closure reserved for Jimmy's
+post-deploy rescan of the Wolverine #90 book (expect CV/PC research to
+proceed, honest pricing or thin-pool REVIEW, never
+ISSUE_AUTHORITY_CONFLICTED on unanimous evidence) plus a Sabrina
+regression check. GK-128 logged, not fixed: a GENUINE near-miss conflict
+(Section 5's own shape, or a real Wolverine-vs-different-issue near-miss)
+still only feeds the preserved prior as corroborating evidence into
+reconcileIssue's evidence set -- the actual dissenting value never
+reaches it, so reconcileIssue can compute CORROBORATED on a genuinely
+unresolved conflict. Not a live safety hole today (familyIssueConsensus's
+own separate outcome/reason signal, untouched by this dispatch, still
+correctly flags these cases for its own existing consumers) -- an
+evidence-set completeness gap for a future dispatch, needing its own
+design for identifying and feeding genuine per-family dissenting values
+(not either side's plurality winner, which was tried and reverted here).
+Remaining competing writers enumerated for Slice 2's own work order (per
+the directive's own request): title, year, and variant facets each still
+lack the single-commit-boundary treatment this dispatch gave issue --
+title has no reconciler at all yet; year has AL-continuation's
+reconcilePhysicalYear (a different, narrower mechanism, physical-vs-
+catalog year custody, not general year-facet authority) plus the
+still-orphaned retention-conflict branch this dispatch neutralized but
+did not rehome; variant has Slice-1's reconcileVariantFacet (AL
+continuation) already largely following the single-writer pattern. Do not
+propose the next directive.

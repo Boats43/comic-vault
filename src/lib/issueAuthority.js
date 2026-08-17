@@ -646,6 +646,102 @@ export function deriveIssueAuthorityFromAdoption(familyIssueConsensus, familyYea
 }
 
 /**
+ * projectIssueAuthority — GrailKey Directive 2026-08-16-AQ (GK-127). The
+ * ONLY function permitted to derive out.issueAuthority in the real
+ * pipeline (api/enrich.js). Pure projection of reconcileIssue's own
+ * already-computed verdict (identity.reconciledIssue, src/lib/
+ * identityReconciler.js/identityCore.js's resolveIdentity) — never an
+ * independent reinterpretation of familyIssueConsensus/familyYearConsensus
+ * mode/outcome flags. Mirrors the exact pattern Directive Z already
+ * established for contract.listable-from-actionAuthority: one canonical
+ * upstream verdict, one pure downstream projection, no competing writer.
+ *
+ * Why this exists (GK-127, Wolverine #90): before this dispatch, at least
+ * four separate call sites (api/enrich.js's commit4/commit4-rescue/
+ * commit4.3 blocks) independently re-derived out.issueAuthority from
+ * familyIssueConsensus's raw mode/outcome/authoritativeForCustody flags —
+ * flags computed by an OLDER, pre-Slice-1 mechanism that could disagree
+ * with reconcileIssue's own verdict even when the underlying VALUES
+ * agreed (a provenance tag, 'family_margin_decline_conflict', treated as
+ * if it were a value disagreement). reconcileIssue already ran, already
+ * produced the canonical answer (value/authority/justifiedBy/conflicts) —
+ * this function's only job is presenting that answer in the pre-existing
+ * out.issueAuthority shape every downstream consumer
+ * (canUseExactIssuePricingCache, computeIssueAuthorityContractPatch, the
+ * CV/PC exact-lookup gates) already reads.
+ *
+ * Mapping:
+ *   authority='CONTESTED'   -> {status:'conflicted'} — a real, independently-
+ *                              sourced disagreement exists in the evidence
+ *                              set (reconciledIssue.conflicts is non-empty
+ *                              by construction whenever this fires).
+ *   authority='CORROBORATED', source='family-population', a LONE winner
+ *                           (justifiedBy.length===1, i.e. nothing else in
+ *                           the evidence set agrees) -> the SAME stricter
+ *                              bar Commit 4 always required for a bare
+ *                              population fill (deriveIssueAuthorityFromAdoption's
+ *                              own documented invariant: "absence of
+ *                              contradiction is not corroboration") is
+ *                              preserved here as a QUALITY-SIGNAL input
+ *                              (evaluateUnanimousConsensusPromotion), never
+ *                              a competing authority object — {status:
+ *                              'provisional'} until promotion clears,
+ *                              null (fully trusted) once it does.
+ *   Everything else (real independent corroboration — 2+ agreeing sources,
+ *   e.g. Vision AND family both present and agreeing; or the operator-
+ *   confirmed 'user' source) -> null (no gate — the existing "no
+ *   issueAuthority object at all" convention for a trusted book,
+ *   functionally identical to status:'confirmed' at every consumer:
+ *   canUseExactIssuePricingCache's own `if (issueAuthority == null) return
+ *   true`).
+ *
+ * @param {{value: any, source: string|null, authority: 'NONE'|'CONTESTED'|'CORROBORATED', justifiedBy: Array, conflicts: Array}|null} reconciledIssue
+ * @param {{familyIssueConsensus?: Object|null, familyCandidate?: Object|null, visualItems?: Array}} [opts]
+ * @returns {{source: string, status: string, confidence: string, supportRatio: number|null, reasons: string[], priorObservations: Array}|null}
+ */
+export function projectIssueAuthority(reconciledIssue, opts = {}) {
+  if (!reconciledIssue || reconciledIssue.value == null) return null;
+
+  if (reconciledIssue.authority === 'CONTESTED') {
+    return {
+      source: 'marketplace',
+      status: 'conflicted',
+      confidence: 'low',
+      supportRatio: null,
+      reasons: ['issue-evidence-contested'],
+      priorObservations: (reconciledIssue.conflicts || []).map((c) => ({
+        value: c.value,
+        source: c.source,
+        status: 'conflicted',
+        provenanceTrust: c.source,
+      })),
+    };
+  }
+
+  // CORROBORATED (or NONE with a value present — should not occur given
+  // reconcileIssue's own contract, but handled the same conservative way:
+  // a lone winner with nothing else backing it gets the stricter bar).
+  const isLoneFamilyPopulationWinner = reconciledIssue.source === 'family-population'
+    && Array.isArray(reconciledIssue.justifiedBy)
+    && reconciledIssue.justifiedBy.length === 1;
+  if (isLoneFamilyPopulationWinner) {
+    const fic = opts.familyIssueConsensus;
+    const promotion = fic ? evaluateUnanimousConsensusPromotion(fic, opts.familyCandidate, opts.visualItems) : { promote: false };
+    if (promotion.promote) return null; // clears the unanimity bar — fully trusted
+    return {
+      source: 'marketplace',
+      status: 'provisional',
+      confidence: mapConfidenceRatioToTier(fic?.ratio ?? 0),
+      supportRatio: fic ? Number((fic.ratio ?? 0).toFixed(2)) : null,
+      reasons: ['marketplace-only-adoption'],
+      priorObservations: [],
+    };
+  }
+
+  return null; // real, independent corroboration (2+ agreeing sources) or operator-confirmed — trusted
+}
+
+/**
  * Escalates a marketplace-only-adopted 'provisional' issueAuthority to
  * 'conflicted' when a LATER marketplace population disagrees with it
  * (api/enrich.js's own visual-pool issue-divergence check, surfaced as

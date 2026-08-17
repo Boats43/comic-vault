@@ -293,7 +293,16 @@ const sortEvidence = (list) =>
 //                            candidate exists at all.
 //   'vision'                 Vision's own asserted value, recorded as
 //                            conflict evidence when it disagrees.
-const ISSUE_SOURCE_PRECEDENCE = ['family-corroborated', 'first-eligible-visual', 'family-population', 'vision'];
+// GrailKey Directive 2026-08-16-AQ (GK-127) — 'user' added, top precedence.
+// An operator-confirmed issue (GK-85's OPERATOR_CONFIRMED, threaded in as
+// evidence source='user' by resolveIdentity's opts.issueOperatorConfirmed,
+// api/enrich.js's manual-correction re-enrich path) is genuine, independent,
+// maximum-weight evidence — the same standing this project already grants
+// 'user' for the variant facet (identityCore.js's VARIANT_SOLE_AUTHORITY_
+// PRECEDENCE). A lone 'user' entry wins outright; it is demoted to CONTESTED
+// (never silently promoted away) only if something else in the evidence set
+// still disagrees — visible, never hidden (C1/C3, AQ's own governing rule).
+const ISSUE_SOURCE_PRECEDENCE = ['user', 'family-corroborated', 'first-eligible-visual', 'family-population', 'vision'];
 
 // reconcileIssue — pure, deterministic. Same evidence set in, same result
 // out, regardless of call order (D1/D4).

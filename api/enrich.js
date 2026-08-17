@@ -134,7 +134,7 @@ import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } f
 // authority validation (allow-list + normalization), never trusting the
 // client's correctedFields claim alone.
 import { prepareManualCorrectionRequest, buildManualCorrectionProvenance } from "../src/lib/manualCorrection.js";
-import { deriveIssueAuthorityFromAdoption, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint, buildIdentityProvisionalYearDetail, deriveProvisionalYearBackfill, rescueYearFromVisionFallback, evaluateUnanimousConsensusPromotion, evaluateUnanimousYearConsensusPromotion } from "../src/lib/issueAuthority.js";
+import { escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch, canUseExactIssuePricingCache, appendYearToProvisionalFields, buildVisualReferenceEvidence, restampVisualReferenceEvidenceYear, checkCrossPopulationPromotionGuard, buildRejectedCandidateFingerprint, buildIdentityProvisionalYearDetail, deriveProvisionalYearBackfill, rescueYearFromVisionFallback, evaluateUnanimousYearConsensusPromotion, projectIssueAuthority } from "../src/lib/issueAuthority.js";
 // Track B Phase 0, Commit 4.3 (revision round 2) — cache-key builders,
 // relocated to src/lib/cacheKeys.js for import-safety (see that file's
 // own header comment). Imported here for this handler's own internal use
@@ -3017,6 +3017,18 @@ export default async function handler(req, res) {
           // EX-7 fold-in — same pool resolveIdentity uses to compute
           // agreement.visionIssueCount, reused for reprint-dominance gating.
           visualItems: parsedVisualRows,
+          // GrailKey Directive 2026-08-16-AQ (GK-127) — true only when this
+          // request is a validated operator correction of the issue field
+          // specifically (Directive AD's re-enrich path, GK-85's
+          // OPERATOR_CONFIRMED authority). Tags the issue-facet evidence
+          // source='user' (identityCore.js/identityReconciler.js) — sole-
+          // authority precedence, the same standing this project already
+          // grants 'user' for the variant facet. Scoped to the issue facet
+          // only (C6) — does not touch vision.source/priorIndependentlyTrusted
+          // or any other facet's gating.
+          issueOperatorConfirmed: manualCorrectionRequest?.valid === true
+            && Array.isArray(manualCorrectionRequest.validation?.acceptedFields)
+            && manualCorrectionRequest.validation.acceptedFields.includes('issue'),
         }
       );
       confirmedTitle = identity.confirmedTitle;
@@ -3026,6 +3038,34 @@ export default async function handler(req, res) {
       identitySource = identity.identitySource;
       identityIsProvisionalOverride = identity.isProvisionalOverride === true;
       pricingIssue = confirmedIssue;
+
+      // GrailKey Directive 2026-08-16-AQ (GK-127) — SINGLE canonical write
+      // of out.issueAuthority, sourced exclusively from reconcileIssue's
+      // own already-computed verdict (identity.reconciledIssue, src/lib/
+      // identityReconciler.js via identityCore.js's resolveIdentity). Runs
+      // ONCE, here, before the commit4/commit4-rescue/commit4.3 branches
+      // below — those branches still run for their OTHER legitimate side
+      // effects (year-axis promotion, visualReferenceEvidence, [family-
+      // evidence] logging) but no longer independently derive or write
+      // issue authority from familyIssueConsensus/familyYearConsensus's
+      // own mode/outcome flags (each removed write site is marked inline
+      // with a pointer back here). See src/lib/issueAuthority.js's
+      // projectIssueAuthority doc comment for the full mapping and the
+      // Wolverine #90 root cause this consolidation closes.
+      out.issueAuthority = projectIssueAuthority(identity.reconciledIssue, {
+        familyIssueConsensus: identity.familyIssueConsensus,
+        familyCandidate,
+        visualItems: parsedVisualRows,
+      });
+      if (out.issueAuthority) {
+        out.identityProvisionalFields = [...(Array.isArray(out.identityProvisionalFields) ? out.identityProvisionalFields : []), 'issue'];
+      }
+      console.log(
+        `[issue-authority-projection] reconciledIssue: value=${identity.reconciledIssue?.value ?? 'null'} ` +
+        `source=${identity.reconciledIssue?.source ?? 'none'} authority=${identity.reconciledIssue?.authority ?? 'n/a'} ` +
+        `justifiedBy=${JSON.stringify(identity.reconciledIssue?.justifiedBy || [])} conflicts=${JSON.stringify(identity.reconciledIssue?.conflicts || [])} -> ` +
+        `out.issueAuthority=${out.issueAuthority ? JSON.stringify({ status: out.issueAuthority.status, reasons: out.issueAuthority.reasons }) : 'null (trusted)'}`
+      );
 
       // Q140 corrective dispatch (2026-07-23, review fix) — surface the
       // FAMILY-vs-prior issue conflict (resolveFamilyIssueConsensus's
@@ -3040,6 +3080,28 @@ export default async function handler(req, res) {
       // overwritten.
       if (identity.familyIssueConsensus?.mode === 'conflict-locked') {
         const fic = identity.familyIssueConsensus;
+        // GrailKey Directive 2026-08-16-AQ (GK-127) — q140-terminal is now
+        // a POST-COMMIT VALIDATOR (it verifies, it never alters). mode==
+        // 'conflict-locked' alone is a provenance/routing label, not proof
+        // of a value disagreement — normalize both sides first.
+        // normalize(current)===normalize(family) is same-value-agreement,
+        // never a conflict, regardless of what upstream mode/reason string
+        // produced this branch (Wolverine #90's own shape: fic.winner and
+        // confirmedIssue both "90"). A genuine inequality here means the
+        // conflict evidence was already fed into the evidence set
+        // pre-commit (identityCore.js's competingRunnerUpValue wiring, or
+        // resolveFamilyIssueConsensus's own conflict-locked contract,
+        // which never returns that mode except on a real disagreement) —
+        // this block only ever surfaces/logs it, never derives authority
+        // from it (out.issueAuthority is exclusively projectIssueAuthority's
+        // job now, see below).
+        if (String(confirmedIssue) === String(fic.winner)) {
+          console.log(
+            `[q140-terminal] same-value-agreement: current=#${confirmedIssue} (${identitySource}) ` +
+            `and family consensus=#${fic.winner} are the identical value — mode='conflict-locked' was a provenance ` +
+            `label (reason=${fic.reason || 'n/a'}), not an actual disagreement; no conflict surfaced`
+          );
+        } else {
         out.issueConsensusConflict = {
           currentIssue: String(confirmedIssue),
           consensusIssue: String(fic.winner),
@@ -3091,6 +3153,7 @@ export default async function handler(req, res) {
             console.log(nearMissEvidenceLog.logLine);
           }
         }
+        }
       } else if (identity.familyIssueConsensus?.mode === 'adopted') {
         // Track B Phase 0, Commit 4 (2026-07-29) — a marketplace/pool-only
         // adoption (resolveFamilyIssueConsensus's 'adopted' mode is only
@@ -3098,72 +3161,19 @@ export default async function handler(req, res) {
         // to corroborate or conflict with) is ALWAYS provisional, never
         // silently promoted to a confirmed value just because nothing
         // contradicted it. Absence of contradiction is not corroboration.
-        // Real call site for the extracted, exported
-        // deriveIssueAuthorityFromAdoption (src/lib/issueAuthority.js) —
-        // see that file's doc comment for the full invariant and the
-        // documented, deliberate absence of a "no contradiction still
-        // confirmed" carve-out.
-        const fic = identity.familyIssueConsensus;
-        // GrailKey Commit P (P1) — familyCandidate/parsedVisualRows passed
-        // through so deriveIssueAuthorityFromAdoption can additionally
-        // check whether the SAME family driving this adoption clears the
-        // high-confidence marketplace-consensus bar (issueAuthority.js).
-        // Does not change status ('provisional' either way) — only adds a
-        // flag consumed later by computeIssueAuthorityContractPatch.
-        const derived = deriveIssueAuthorityFromAdoption(fic, undefined, familyCandidate, parsedVisualRows);
-        out.issueAuthority = derived.issueAuthority;
-        out.identityProvisionalFields = derived.identityProvisionalFields;
-        console.log(
-          `[commit4] issueAuthority=provisional (marketplace-only-adoption): ` +
-          `issue=#${fic.winner} support=${fic.support}/${fic.uniqueRows}=${(fic.ratio * 100).toFixed(0)}% — ` +
-          `no prior Vision/user issue existed to corroborate against` +
-          (derived.issueAuthority?.highConfidenceMarketplaceConsensus ? ' — [commit-p] high-confidence marketplace consensus qualifies (price will not be nulled at the terminal gate)' : '')
-        );
-        // GrailKey Dispatch 25 (2026-08-07) — Fix 2, issue-axis unanimous-
-        // consensus promotion. Runs immediately after out.issueAuthority is
-        // set to 'provisional' above — never silently, always logged on
-        // both the promote and decline path. Only ever fires when
-        // out.issueAuthority is non-null (fic.mode was genuinely 'adopted'
-        // — the only mode deriveIssueAuthorityFromAdoption returns a real
-        // issueAuthority object for). Terminal invariant
-        // (computeIssueAuthorityContractPatch) and the cache gate
-        // (canUseExactIssuePricingCache) are both untouched — they already
-        // treat status==='confirmed' as satisfying, by design, since
-        // before this dispatch (CACHE_SAFE_ISSUE_AUTHORITY_STATUSES =
-        // new Set(['confirmed'])).
-        if (out.issueAuthority) {
-          const promotion = evaluateUnanimousConsensusPromotion(fic, familyCandidate, parsedVisualRows);
-          if (promotion.promote) {
-            out.issueAuthority.status = 'confirmed';
-            // V4 fix (2026-08-07, same dispatch, pre-push review) —
-            // provenance, not a loosened status check. Stamped onto the
-            // EXISTING reasons array — this file's own already-live
-            // provenance mechanism (escalateIssueAuthorityOnConflict
-            // already gates on reasons.includes('marketplace-only-
-            // adoption'); manualCorrection.js's real 'other confirmed
-            // route', source:'user'/reasons:['user-correction'], proves
-            // this array is genuinely how provenance is tracked here) —
-            // rather than a new parallel field that could drift from it.
-            // Read by escalateIssueAuthorityOnConflict below to scope
-            // conflict-escalation to promoted rows specifically, never to
-            // a catalog/user-confirmed identity arriving via any other
-            // route.
-            out.issueAuthority.reasons = [...(out.issueAuthority.reasons || []), 'unanimous-marketplace-consensus'];
-            console.log(
-              `[commit4-promote] PROMOTE issue=#${fic.winner} uniqueRows=${promotion.inputs.uniqueRows} ` +
-              `support=${promotion.inputs.support} runnerUp=${promotion.inputs.runnerUp} weightSum=${promotion.inputs.weightSum} ` +
-              `uniqueItemIdCount=${promotion.inputs.uniqueItemIdCount}/${promotion.inputs.itemIdCount} ` +
-              `uniqueSellerCount=${promotion.inputs.uniqueSellerCount}/${promotion.inputs.sellerCount} — ` +
-              `issueAuthority.status: provisional -> confirmed (reasons += 'unanimous-marketplace-consensus')`
-            );
-          } else {
-            console.log(
-              `[commit4-promote] DECLINE predicate=${promotion.declineReason} issue=#${fic.winner} ` +
-              `uniqueRows=${promotion.inputs.uniqueRows} support=${promotion.inputs.support} runnerUp=${promotion.inputs.runnerUp} ` +
-              `weightSum=${promotion.inputs.weightSum} — issueAuthority.status stays provisional`
-            );
-          }
-        }
+        // GrailKey Directive 2026-08-16-AQ (GK-127) — this branch no
+        // longer derives or writes out.issueAuthority/the 'issue' entry of
+        // out.identityProvisionalFields (formerly deriveIssueAuthorityFromAdoption
+        // + evaluateUnanimousConsensusPromotion, called directly here).
+        // That responsibility moved to the single projectIssueAuthority
+        // call immediately after resolveIdentity returns, above — it
+        // reads the SAME evaluateUnanimousConsensusPromotion internally,
+        // just sourced from identity.reconciledIssue (Slice 1's own
+        // verdict) rather than re-deriving from familyIssueConsensus's
+        // mode/outcome flags independently. Everything below this point in
+        // the 'adopted' branch (year-axis promotion, visualReferenceEvidence,
+        // [family-evidence] logging) is unrelated to issue authority and
+        // untouched.
         // Track B Phase 0, Commit 4.1 — same field, same union machinery
         // Commit 3 already shipped (getCorrectableFields,
         // manualCorrection.js) — 'year' is added ONLY when
@@ -3372,23 +3382,17 @@ export default async function handler(req, res) {
         // pre-existing asymmetry, flagged here, deliberately NOT touched
         // (out of scope for this diff; Fix 2 already shipped and this
         // branch doesn't reuse its code path).
-        const fic = identity.familyIssueConsensus;
-        out.issueAuthority = {
-          source: 'marketplace',
-          status: 'confirmed',
-          confidence: 'high',
-          supportRatio: Number((fic.ratio ?? 1).toFixed(2)),
-          reasons: ['unanimous-marketplace-consensus-zero-support-rescue'],
-          priorObservations: issueNum != null
-            ? [{ value: issueNum, source: 'vision', status: 'conflicted', provenanceTrust: 'vision-zero-support' }]
-            : [],
-        };
-        console.log(
-          `[commit4-rescue] issueAuthority=confirmed (zero-support-unanimous-rescue): ` +
-          `issue=#${fic.issue ?? fic.winner} visionIssue=#${issueNum ?? 'null'} — ` +
-          `Vision's own issue had zero support in both the raw pool and the winning family`
-        );
-
+        // GrailKey Directive 2026-08-16-AQ (GK-127) — this branch no
+        // longer writes out.issueAuthority directly (formerly a hardcoded
+        // status:'confirmed' object built from familyIssueConsensus
+        // alone). The single projectIssueAuthority call above already
+        // reads identity.reconciledIssue — this rescue mode feeds evidence
+        // as 'family-corroborated' (identityCore.js's familyIssueEvidenceSource
+        // logic, mode included in its whitelist), which the projection
+        // treats as genuine independent corroboration (not a lone
+        // population winner), landing on null/trusted exactly as this
+        // branch's own former 'confirmed' status intended.
+        //
         // GrailKey Dispatch 26, Fix 4b (2026-08-08) — HARD CONSTRAINT: an
         // issue rescue must never silently open the pricing path on a year
         // we don't trust. `identity.familyYearConsensus?.mode ===
@@ -3421,39 +3425,37 @@ export default async function handler(req, res) {
       }
 
       // Track B Phase 0, Commit 4.3 (PRODUCTION AUTHORITY-CONTEXT
-      // INTEGRATION HOLD, item 3, 2026-07-31) — wires the retention-branch
-      // conflict containment (deriveIssueAuthorityFromAdoption's outcome/
-      // authoritativeForCustody-driven branches) into the REAL
-      // out.issueAuthority/out.identityProvisionalFields fields the
-      // pricing/listing gates below actually read. Runs independently of
-      // the mode==='conflict-locked'/mode==='adopted' chain above —
-      // composes with it (out.issueConsensusConflict, the pre-existing
-      // Q140 mechanism, is untouched; the mode==='adopted' branch's own
-      // provisional object is untouched via the out.issueAuthority==null
-      // guard) rather than replacing anything. Without this, a rule-D
-      // 'conflicted' issue outcome (mode maps to 'conflict-locked', which
-      // ONLY sets out.issueConsensusConflict, an informational field) or a
-      // year-only conflict (issue mode 'corroborated'/other — matches
-      // NEITHER existing branch above at all) left out.issueAuthority at
-      // its initialized null — and the terminal pricingCustodyCheck below
-      // (checkCrossPopulationPromotionGuard) only fires on a genuine
-      // MISMATCH when authoritativeForCustody===true, which is never the
-      // case for an unresolved conflict (authoritativeForCustody===false
-      // by definition) — so NEITHER mechanism actually blocked cache/
-      // pricing/listing for this exact scenario despite Controls T1/T6
-      // proving the underlying function correct in isolation. Confirmed
-      // via direct trace before writing this fix, not assumed.
-      if (out.issueAuthority == null) {
-        const retentionConflictDerived = deriveIssueAuthorityFromAdoption(identity.familyIssueConsensus, identity.familyYearConsensus);
-        if (retentionConflictDerived.issueAuthority != null) {
-          out.issueAuthority = retentionConflictDerived.issueAuthority;
-          out.identityProvisionalFields = retentionConflictDerived.identityProvisionalFields;
-          console.log(
-            `[commit4.3] retention-branch authority conflict wired to out.issueAuthority: ` +
-            `status=${out.issueAuthority.status} reasons=${JSON.stringify(out.issueAuthority.reasons)} ` +
-            `identityProvisionalFields=${JSON.stringify(out.identityProvisionalFields)}`
-          );
-        }
+      // GrailKey Directive 2026-08-16-AQ (GK-127) — REMOVED. This was the
+      // Wolverine #90 root-cause writer: it independently re-derived
+      // out.issueAuthority from familyIssueConsensus/familyYearConsensus's
+      // raw mode/outcome/authoritativeForCustody flags whenever the
+      // projection above hadn't already set one — including the near-miss
+      // margin-decline shape (identityCore.js), which used to mark
+      // outcome:'conflicted'/authoritativeForCustody:false purely from
+      // internal-unanimity noise, with no check that the underlying VALUES
+      // actually disagreed (current=#90 vs family consensus=#90 — a
+      // provenance tag mistaken for a value conflict). The single
+      // projectIssueAuthority call above is now the ONLY writer of
+      // out.issueAuthority — it already reads identity.reconciledIssue
+      // (Slice 1's own verdict, correctly CORROBORATED for this exact
+      // shape) and needs no fallback here. See src/lib/issueAuthority.js's
+      // projectIssueAuthority doc comment for the full mapping.
+      //
+      // GrailKey Directive 2026-08-16-AQ (GK-127) — the YEAR-only half of
+      // the removed block preserved on its OWN facet, never on issue
+      // authority (cross-facet contamination — the "Wolverine Revenge"
+      // shape this dispatch also closes: a year disagreement must not
+      // demote a different facet's authority). Same trigger condition the
+      // removed code used (identityCore.js's decideFieldAuthority/
+      // legacyModeFor rule D, the ONLY place outcome/authoritativeForCustody
+      // are ever set on familyYearConsensus), writes ONLY to
+      // identityProvisionalFields — zero path to out.issueAuthority.
+      if (identity.familyYearConsensus?.outcome === 'conflicted' && identity.familyYearConsensus?.authoritativeForCustody === false) {
+        out.identityProvisionalFields = [...(Array.isArray(out.identityProvisionalFields) ? out.identityProvisionalFields : []), 'year'];
+        console.log(
+          `[year-facet-evidence] year retention conflict recorded (GK-127) — identityProvisionalFields += 'year', ` +
+          `zero path to issue authority (was a cross-facet out.issueAuthority write before this dispatch)`
+        );
       }
 
       // P0 (Q-VISION-ZERO-SUPPORT) — surface the loud override/escalate
@@ -11462,14 +11464,33 @@ export default async function handler(req, res) {
       // issueAuthority-shaped object only when out.issueAuthority isn't
       // already provisional/conflicted (avoids double-writing reasons
       // when both signals fire for the same underlying cause).
+      // GrailKey Directive 2026-08-16-AQ (GK-127) — RECLASSIFIED, explicitly,
+      // as a validator/safety-net rather than an independent authority
+      // writer. Unlike the removed commit4.3 retention-branch write (which
+      // inferred conflict from familyIssueConsensus's mode/outcome flags
+      // alone), this check already does a genuine VALUE comparison
+      // (checkCrossPopulationPromotionGuard's own String(a)!==String(b),
+      // issueAuthority.js) against confirmedIssue — sound by construction,
+      // not the false-conflict bug this dispatch closes. Under the new
+      // evidence-based system (projectIssueAuthority, sourced from
+      // identity.reconciledIssue) this should be structurally unreachable —
+      // a genuine mismatch between the winning family's resolvedValue and
+      // confirmedIssue should already have been fed into the evidence set
+      // as conflict evidence, producing CONTESTED authority upstream. If
+      // this DOES fire, it means the evidence set missed a real custody
+      // mismatch — kept as a defensive last-resort write (never removed
+      // for a check this safety-relevant), but logged distinctly so a
+      // future trace can tell "the new system is working, this is
+      // redundant" from "the new system has a gap."
       const pricingCustodyCheck = checkCrossPopulationPromotionGuard(
         identity?.familyIssueConsensus, { confirmedIssue }
       );
       if (!pricingCustodyCheck.allowed
         && out.issueAuthority?.status !== 'provisional' && out.issueAuthority?.status !== 'conflicted') {
         console.log(
-          `[commit4.3] authoritative-pricing custody blocked: selectedFamilyIssue=${pricingCustodyCheck.conflict.selectedFamilyIssue} ` +
-          `confirmedIssue=${pricingCustodyCheck.conflict.mismatchedValue}`
+          `[commit4.3-validator] SAFETY-NET FIRED (should be unreachable under GK-127's evidence-based system — ` +
+          `flag for investigation): authoritative-pricing custody blocked: ` +
+          `selectedFamilyIssue=${pricingCustodyCheck.conflict.selectedFamilyIssue} confirmedIssue=${pricingCustodyCheck.conflict.mismatchedValue}`
         );
         out.issueAuthority = {
           source: 'marketplace', status: 'conflicted', confidence: 'low', supportRatio: null,

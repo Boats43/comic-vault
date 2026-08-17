@@ -2041,8 +2041,15 @@ export const buildStandardVisionAuthorityContext = (rawVisionConfidence) => ({
  * @param {Object} vision - Vision result { title, issue, year, publisher }
  * @param {Object} ebay - eBay visual consensus { title, issue, year, publisher }
  * @param {Object} family - Family candidate { selectedTitle, decision }
- * @param {Object} opts - { ebayResultCount, overlapThreshold }
- * @returns {Object} { confirmedTitle, confirmedIssue, confirmedYear, confirmedPublisher, identitySource }
+ * @param {Object} opts - { ebayResultCount, overlapThreshold, issueOperatorConfirmed }
+ *   issueOperatorConfirmed (GrailKey Directive AQ, GK-127) — true only when
+ *   vision.issue arrives from a validated operator correction of the issue
+ *   field specifically (api/enrich.js: manualCorrectionRequest.validation.
+ *   acceptedFields.includes('issue')). Tags the issue-facet evidence
+ *   source='user' (sole-authority precedence) instead of 'vision' — scoped
+ *   to the issue facet only, does not touch vision.source/
+ *   priorIndependentlyTrusted or any other facet's gating.
+ * @returns {Object} { confirmedTitle, confirmedIssue, confirmedYear, confirmedPublisher, identitySource, reconciledIssue }
  */
 export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   const { ebayResultCount = 0, overlapThreshold = 0.2, isGraded = false } = opts;
@@ -2785,6 +2792,33 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     const runnerUpAssertedIssues = runnerUpIssueMeasurement?.assertedIssues || [];
     const topUnanimous = topAssertedIssues.length === 1;
     const runnerUpUnanimous = runnerUpAssertedIssues.length === 1;
+    // GrailKey Directive 2026-08-16-AQ (GK-127) — INVESTIGATED, NOT
+    // CHANGED. A plurality-only comparison (topWinner/runnerUpWinner) was
+    // drafted here and then reverted before push: Fix 2c (Dispatch 25,
+    // this exact file, comment above) already tried and explicitly
+    // REJECTED that approach mid-dispatch, for a real, documented reason —
+    // "a 3-row runner-up with two rows asserting #213 and one asserting
+    // #300 has .winner==='213', which would have suppressed a GENUINE
+    // conflict on live dissent." Confirmed by direct execution
+    // (tests/grailkey-dispatch-25-fix2c-axis-check.test.js Section 5,
+    // "P0 hole closed") that a plurality-only rewrite regresses exactly
+    // that fixture. Wolverine #90's own false-conflict bug (GK-127) does
+    // NOT require changing this unanimity test at all: the evidence-set
+    // feed a few hundred lines below (familyIssueEvidenceSource) already
+    // adds preReconcileConfirmedIssue as 'family-corroborated' evidence
+    // whenever familyIssueConsensusResult.mode is 'conflict-locked' —
+    // independent of WHY axisAgreement went false — so reconcileIssue
+    // (identityReconciler.js) already computes the correct CORROBORATED
+    // verdict for Wolverine #90's real shape today (confirmed against the
+    // real production log: "[reconcile-issue] value=90 ... authority=
+    // CORROBORATED"), unaffected by this test either way. The actual bug
+    // was entirely in a SEPARATE, now-removed mechanism (api/enrich.js's
+    // former commit4.3 writer) that derived out.issueAuthority from this
+    // mode/outcome flag directly instead of from reconcileIssue's own
+    // verdict — see src/lib/issueAuthority.js's projectIssueAuthority and
+    // api/enrich.js's q140-terminal same-value-agreement validator, both
+    // of which correctly suppress the false DISPLAY/authority write
+    // without touching this unanimity-based conflict TEST.
     const axisAgreement = topUnanimous && runnerUpUnanimous
       && topAssertedIssues[0] === runnerUpAssertedIssues[0];
     // Per-family dissent tally for the log — mirrors resolveFamilyIssueConsensus's
@@ -3177,16 +3211,51 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   }
 
   const issueEvidence = createEvidenceSet();
+  // GrailKey Directive 2026-08-16-AQ (GK-127) — an operator correction of
+  // the issue field (opts.issueOperatorConfirmed, set by api/enrich.js only
+  // when manualCorrectionRequest.validation.acceptedFields includes
+  // 'issue') is genuine, independent, maximum-weight evidence — tagged
+  // 'user', matching this project's existing variant-facet convention
+  // (writeConfirmed(..., 'user', ...) at the manual-correction call site).
+  // Scoped to the issue facet ONLY (C6) — vision.source/priorIndependently
+  // Trusted, which drive title/year/near-miss/rescue gating far more
+  // broadly, are deliberately left untouched.
+  const issueEvidenceSource = opts.issueOperatorConfirmed ? 'user' : 'vision';
   if (visionIssuePresent) {
     if (visionIssueRejectedUpstream) {
-      reportConflict(issueEvidence, 'issue', 'vision', vision.issue);
+      reportConflict(issueEvidence, 'issue', issueEvidenceSource, vision.issue);
     } else {
-      addEvidence(issueEvidence, 'issue', 'vision', vision.issue);
+      addEvidence(issueEvidence, 'issue', issueEvidenceSource, vision.issue);
     }
   }
   if (familyIssueEvidenceSource) {
     addEvidence(issueEvidence, 'issue', familyIssueEvidenceSource, preReconcileConfirmedIssue);
   }
+  // GK-128, logged not fixed (GrailKey Directive 2026-08-16-AQ) — a
+  // GENUINE near-miss conflict (axisAgreement false for a real reason,
+  // e.g. Batman #213 Section 5's own shape: runner-up internally split
+  // 2x#213/1x#300) still only feeds preReconcileConfirmedIssue (the
+  // preserved prior) as 'family-corroborated' evidence here — the
+  // DISSENTING value itself (e.g. the runner-up's minority "#300") never
+  // reaches issueEvidence. reconcileIssue would compute CORROBORATED,
+  // not CONTESTED, on a genuinely unresolved near-miss conflict — the
+  // mirror-image of GK-127's own bug, on the evidence-set side rather
+  // than the authority-projection side. A first attempt at feeding
+  // runnerUpIssueMeasurement.winner (the runner-up's own PLURALITY) as
+  // conflict evidence was built and reverted in this same dispatch: it
+  // fed the WRONG value for Section 5's shape (plurality "213" agrees
+  // with top, the real dissent is the minority "300", which plurality
+  // discards) — a naive fix that would have silently fed non-conflicting
+  // "evidence" as if it were a conflict. The correct fix needs to
+  // identify and feed the actual DISSENTING value(s), not either side's
+  // plurality — deliberately not attempted under this dispatch's time
+  // budget; out.issueAuthority's own downstream consumers are UNAFFECTED
+  // by this gap (identity.familyIssueConsensus's own outcome/reason
+  // still correctly reports 'conflicted' for this shape, independent of
+  // reconcileIssue — confirmed by the unmodified
+  // grailkey-dispatch-25-fix2c-axis-check.test.js Section 5 still
+  // passing), so this is an evidence-set completeness gap, not a live
+  // safety hole.
 
   // Guard 6 (contaminated family) — found on the full regression sweep
   // (tests/q-trackB-commit4.3-winning-family-authority.test.js "CONTROL
@@ -3294,6 +3363,14 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     familyIssueConsensus: familyIssueConsensusResult,
     // Track B Phase 0, Commit 4.1
     familyYearConsensus: familyYearConsensusResult,
+    // GrailKey Directive 2026-08-16-AQ (GK-127) — the Slice-1 reconciler's
+    // own, single, canonical verdict for the issue facet (value/source/
+    // authority/justifiedBy/conflicts). api/enrich.js's projectIssueAuthority
+    // (src/lib/issueAuthority.js) is the ONLY thing permitted to derive
+    // out.issueAuthority from this — a pure projection, never independent
+    // reinterpretation of familyIssueConsensus/familyYearConsensus's own
+    // mode/outcome flags.
+    reconciledIssue,
   };
 };
 
