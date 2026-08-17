@@ -15,7 +15,7 @@
  * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
 
-import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership, tokenizeTitle, extractVariantTokensByAxis } from './compHygiene.js';
+import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership, tokenizeTitle, extractVariantTokensByAxis, IDENTITY_TPB_MARKER_RE } from './compHygiene.js';
 import { normalizeOptionalYear } from './yearEvidence.js';
 // GrailKey Dispatch 26, Fix 4 (2026-08-08) — zero-support unanimous
 // rescue reuses Fix 2's own promotion predicate (evaluateUnanimousConsensusPromotion)
@@ -3295,12 +3295,218 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   // (LOT_RE/REPRINT_RE/SLAB_RE/GRADED_RE/SIGNED_RE/IDENTITY_TPB_MARKER_RE
   // membership) — a contaminated cluster is unreliable for ANY adoption,
   // not merely the family-consensus/rescue paths that already checked it.
-  // Safe with no topFamily at all (Detective/Venom fixtures): indices
-  // defaults to [] internally, returns false, never a false suppression.
-  const isFamilyContaminated = hasContaminatedMember(opts.visualItems, family?.topFamily?.indices);
+  //
+  // GrailKey Directive 2026-08-17-AS (GK-132) — REFINED, not replaced.
+  // Production evidence, Venom Separation Anxiety #1, Mike Mayhew signed/
+  // remarked w/Poker Chip (2026-08-17 19:40, build ee03e5a): the frozen
+  // rank-1 row IS the family here (family.topFamily.count===1, the same
+  // row hasContaminatedMember would check), and it is genuinely "Signed/
+  // Remarked" — a real attribute of the physical book. hasContaminatedMember's
+  // ANY-match semantics (unchanged, correct, and STILL APPLIED VERBATIM
+  // whenever the family has >=2 members — CONTROL C's genuine RAW+GRADED
+  // *mixture*, re-verified passing) flagged this SINGLE, coherent row as
+  // "contaminated" purely for being signed — a category error: with one
+  // member there is no mixture to detect, "mixture" being structurally
+  // impossible at n=1. Below 2 members, this guard now evaluates false
+  // (nothing to mix) rather than running the same any-match check on a
+  // lone row — the second of two independent gates that were blocking
+  // GK-132's production case (the first, MINIMUM_CORROBORATING_ROWS as an
+  // entry floor, is fixed just below). The shared hasContaminatedMember
+  // function itself is completely unchanged, and every other call site
+  // (the qualified-family-authority retention gate just below,
+  // issueAuthority.js's P1 predicate, imageSearchIdentity.js's
+  // mergeFragmentedTitleFamilies) is untouched (C7).
+  //
+  // This does NOT reach True Believers-class reprints: that shape has no
+  // family at all (family=null in the real fixture) and is caught by the
+  // NEW, separate own-row isReprintOrTpbFlavored check below instead —
+  // family-mixture contamination and single-row reprint/TPB unreliability
+  // are two different concerns, and conflating them into one check (an
+  // earlier draft of this fix did exactly that, tried and reverted before
+  // landing) broke both the CONTROL C regression AND left the reprint case
+  // unguarded, since REPRINT_RE genuinely needs to run against the
+  // CANDIDATE'S OWN row, not the family cluster.
+  const familyMemberCount = Array.isArray(family?.topFamily?.indices) ? family.topFamily.indices.length : 0;
+  const isFamilyContaminated = familyMemberCount >= 2
+    ? hasContaminatedMember(opts.visualItems, family?.topFamily?.indices)
+    : false;
+  // Guard 7 (a family-level "no-consensus" verdict already examined this
+  // exact pool and explicitly declined) — GrailKey Directive 2026-08-17-AS
+  // (GK-132/GK-126), found regression-testing against tests/q131-refused-
+  // identity-conflict-provisional.test.js's Eternus #2 fixture (Q140
+  // corrective dispatch, 2026-07-23). The 'refused-identity-conflict'
+  // decision branch (~line 2244 above) already runs
+  // resolveFamilyIssueConsensus — a MORE SOPHISTICATED, family-aware
+  // consensus mechanism (60%+ agreement, clear-lead-over-runner-up, its
+  // OWN >=3-unique-row floor) — against this exact visual pool, and for
+  // Eternus's real 2-row, 100%-agreeing-but-still-below-that-floor shape
+  // reaches mode='no-consensus' (with its own winner='2' recorded purely
+  // for diagnostics, per that dispatch's own explicit ruling: 2 unique
+  // rows is not enough even at full agreement). Without this guard the
+  // simpler first-eligible-visual mechanism below re-derives the SAME "2"
+  // from the SAME 2 rows via a cruder, count-only path and silently
+  // overrides that considered refusal.
+  //
+  // Scoped to 'no-consensus' SPECIFICALLY, not "any non-null verdict" — an
+  // earlier draft of this guard blocked on bare non-null
+  // familyIssueConsensusResult and broke Directive AK's own population-
+  // precedence fixture (tests/grailkey-directive-ak-population-precedence.
+  // test.js): a bare 'adopted' (population-only, outcome==null) vote is
+  // NOT a refusal — it is a weak, demotable-by-design corroboration
+  // (identityReconciler.js's ISSUE_SOURCE_PRECEDENCE already ranks
+  // 'family-population' below 'first-eligible-visual' for exactly this
+  // reason, "population corroborates or contradicts, never replaces") and
+  // must still be allowed to ENTER so the reconciler's own precedence
+  // logic can correctly demote it under a specific, corroborated candidate
+  // — blocking entry entirely would have defeated AK's whole mechanism.
+  // 'no-consensus' is different in kind: it means the family-level
+  // mechanism could not even clear ITS OWN adoption floor on this pool at
+  // all — a genuine, considered "not enough evidence" verdict, not a weak
+  // corroboration waiting to be out-ranked.
+  //
+  // Confirmed via direct trace (not assumed) this does NOT reintroduce
+  // GK-132's own production gap: the real Venom shape's family.decision is
+  // 'fallback-vision' (imageSearchIdentity.js's Q38 branch, topFamily.count
+  // 1-2), which never calls resolveFamilyIssueConsensus at all —
+  // familyIssueConsensusResult stays null there (confirmed by direct
+  // execution against the real production fixture), so this guard never
+  // fires for the case this dispatch exists to fix.
+  //
+  // CORRECTED (found running tests/grailkey-directive-aj-http-handler.
+  // test.js — the real /api/enrich handler, not a hand-built unit fixture
+  // — the same "AG lesson" this campaign keeps re-learning: a unit-level
+  // fix silently broken by a downstream consumer the fix wasn't traced
+  // against): `mode==='no-consensus'` is NOT unique to the 'refused-
+  // identity-conflict' branch's own considered refusal. `resolveFamilyIssueConsensus`
+  // is ALSO called for a genuinely SUCCESSFUL title-family adoption (the
+  // top-rank-protection/weighted-consensus branch, ~line 2158) — checking
+  // issue agreement AMONG the winning family's OWN members, a completely
+  // different question ("does this already-won family agree on an issue
+  // number") than Eternus's ("is this thin, refused family strong enough
+  // to win AT ALL"). AI's own Fixture 4 (Venom, real handler pool: 4
+  // different issue numbers split across the winning "venom separation
+  // anxiety" family's 5 members, none reaching 60% — genuinely
+  // mode='no-consensus' too) needs the SAME first-eligible-visual rescue
+  // this whole dispatch exists to unblock, and the bare mode check wrongly
+  // deferred to it, leaving Vision's own unchallenged, weakly-corroborated
+  // "3" standing (out.issue='3' instead of '1', identityProvisional never
+  // set). Scoped now to the ACTUAL branch this guard was built for:
+  // family?.decision === 'refused-identity-conflict' AND mode==='no-consensus'
+  // together — the 'refused-identity-conflict' branch is the one that
+  // computed its OWN considered refusal on a family that never won
+  // anything at all; a successfully-adopted family's internal issue split
+  // is a different question this guard was never meant to touch.
+  //
+  // GENERALIZED (found running tests/q-trackB-commit4.3-winning-family-
+  // authority.test.js's own CONTROL 3 — a THIRD branch, Commit 4.3's
+  // qualified-family-authority RETENTION gate, also computes a considered
+  // 'no-consensus'-shaped verdict for a family.decision==='fallback-vision'
+  // request when its own coherence-floor/retention conditions qualify,
+  // completely independent of 'refused-identity-conflict'). Rather than
+  // enumerate every branch that can produce a considered "not enough
+  // evidence" verdict one at a time (a drifted-duplicate-constant risk this
+  // codebase has been burned by before), gate on the one thing that
+  // actually distinguishes "a family ALREADY WON and this is asking about
+  // ITS OWN internal issue split" (AI Fixture 4 / Venom, decision=
+  // 'weighted-consensus', must NOT defer) from "a family did NOT win and
+  // something already examined its issue evidence" (Eternus, CONTROL 3,
+  // both decision != a real win, must defer): FAMILY_OVERRIDE_DECISIONS
+  // (compHygiene.js, already imported — the SAME closed set
+  // imageSearchIdentity.js's own override gate and identityCore.js's own
+  // qualified-family-authority predicate already treat as "a real title
+  // win"). Not in that set + a 'no-consensus' verdict already exists =
+  // defer.
+  //
+  // CORRECTED again (found running the SAME AJ http-handler file's own
+  // Detective case — a THIRD, more subtle interaction with the exact same
+  // root cause GK-116 already named): resolveFamilyIssueConsensus's own
+  // issue extractor is capped at 999 (identityReconciler.js's
+  // extractIssueCandidate, the shared, OLDER extractor — NOT the uncapped
+  // extractHashIssueNumber this dispatch's own mechanism uses first,
+  // specifically because of legacy numbering like #1107). For Detective's
+  // real 4-row, 100%-unanimous "#1107" family, resolveFamilyIssueConsensus
+  // genuinely cannot SEE "1107" at all (>999) — it reports mode=
+  // 'no-consensus' with assertedIssues=[] (empty — nothing parsed, not
+  // "parsed but disagreed"), a false negative caused by the same 999-cap
+  // gap GK-116 already logged, not a genuine "not enough evidence"
+  // verdict like Eternus's real assertedIssues=['2','2']. Deferring here
+  // would have silently reintroduced the exact split-brain Directive AI
+  // was built to close (Detective Comics #1107 itself — the ORIGINAL named
+  // fixture this whole mechanism exists for). Guard 7 now additionally
+  // requires assertedIssues to be genuinely non-empty — the family-level
+  // mechanism must have actually SEEN and weighed real values before its
+  // refusal to adopt counts as a considered verdict this guard defers to.
+  const isFamilyIssueConsensusAlreadyDecided = !FAMILY_OVERRIDE_DECISIONS.includes(family?.decision)
+    && familyIssueConsensusResult?.mode === 'no-consensus'
+    && Array.isArray(familyIssueConsensusResult?.assertedIssues)
+    && familyIssueConsensusResult.assertedIssues.length > 0;
+  // Guard 8 (a real, eligible, non-contaminated family exists but was
+  // refused for TITLE-OVERLAP weakness, not merely a thin member count) —
+  // GrailKey Directive 2026-08-17-AS, found regression-testing against
+  // tests/q-trackB-commit4.3-winning-family-authority.test.js's own
+  // CONTROL E ("Quux Anthology #9" pool, Vision title "Something Else
+  // Entirely" — zero relationship to the pool at all). Q38
+  // (imageSearchIdentity.js, "Top family has only N members (need >=3 for
+  // consensus override) — preserve Vision") and a weak-title-overlap
+  // refusal ("Top family weak overlap") both produce family.decision===
+  // 'fallback-vision' with a real, non-null topFamily — count alone
+  // (familyMemberCount, used above for the contamination guard) cannot
+  // distinguish "a thin cluster of the SAME book" (Venom: 1 member, still
+  // genuinely "Venom") from "a real cluster of a DIFFERENT book Vision's
+  // own title shares nothing with" (Quux: 3 members, unrelated to
+  // "Something Else Entirely"). Trusting the frozen row's own issue number
+  // in the second case risks adopting evidence from the wrong book
+  // entirely — a materially different risk than a thin-but-genuine match.
+  // family.reason's own wording already distinguishes the two (Q38's
+  // literal "members (need" substring, stable and independently pinned by
+  // tests/q132-variant-year-family-corroboration.test.js:90's own fixture)
+  // — matched here rather than re-deriving the distinction from scratch.
+  // Detective's own fixture (topFamily===null, no family found at all —
+  // familyMemberCount===0) is unaffected: this guard requires a REAL
+  // family to exist before it can distrust it for overlap reasons.
+  //
+  // CORRECTED (found running tests/grailkey-directive-aj-http-handler.
+  // test.js's real /api/enrich pipeline — the SAME "AG lesson" as Guard
+  // 7's own correction above): Detective's REAL pool, through the real
+  // handler, does NOT have topFamily===null the way AI's own hand-built
+  // unit fixture assumed — a genuine 4-member "Detective Comics #1107..."
+  // cluster forms and gets refused for weak/zero overlap with Vision's
+  // "Batman" (zero shared TOKENS — "Batman" the character never appears
+  // in "Detective Comics" the series title) — structurally identical to
+  // CONTROL E's shape by the reason-string check alone. Blocking on
+  // family.reason wording this way silently regressed the very Fixture 1
+  // this whole campaign is built around. The real, principled difference:
+  // Detective's raw POOL (not just the winning cluster) also contains
+  // "Batman Funko Pop Figure" / "Batman T-Shirt Large" / "Batman Beyond
+  // Compendium TPB" — Vision's own word "Batman" genuinely appears
+  // SOMEWHERE in this pool, even though not in the winning cluster's own
+  // title. Quux's pool contains nothing resembling "Something", "Else", or
+  // "Entirely" ANYWHERE. hasAnyPoolWideVisionTitleOverlap checks the WHOLE
+  // raw pool, not just the winning family — a much weaker, more permissive
+  // bar than family-level overlap, but enough to separate "this pool is
+  // plausibly about the right subject, just not via the winning cluster's
+  // own exact title" from "this pool shares literally nothing with what
+  // Vision read."
+  const hasAnyPoolWideVisionTitleOverlap = (visionTitle, visualItems) => {
+    const stop = new Set(['the', 'a', 'an', 'of', 'and', 'or', 'in', 'on', 'at', 'to', 'for', 'with', 'comic', 'comics']);
+    const visionTokens = String(visionTitle || '')
+      .toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+      .filter((t) => t.length >= 3 && !stop.has(t));
+    if (visionTokens.length === 0) return true; // nothing to check against — don't distrust on an empty/generic title
+    const poolText = (Array.isArray(visualItems) ? visualItems : [])
+      .map((it) => String(typeof it === 'string' ? it : (it?.rawTitle || it?.title || '')))
+      .join(' ').toLowerCase();
+    return visionTokens.some((t) => poolText.includes(t));
+  };
+  const familyRefusedForMemberCountOnly = typeof family?.reason === 'string' && /members\s*\(need/i.test(family.reason);
+  const isFamilyOverlapRefused = familyMemberCount > 0
+    && family?.decision === 'fallback-vision'
+    && !familyRefusedForMemberCountOnly
+    && !hasAnyPoolWideVisionTitleOverlap(vision.title, opts.visualItems);
   let firstEligible = null;
   let candidate = null;
-  if (!isGraded && !isNearMissMarginDecline && !isNearMissConflictActive && !zeroSupportRescueDeclined && !isFamilyContaminated) {
+  let candidateCorroboratingRows = 0;
+  if (!isGraded && !isNearMissMarginDecline && !isNearMissConflictActive && !zeroSupportRescueDeclined && !isFamilyContaminated && !isFamilyIssueConsensusAlreadyDecided && !isFamilyOverlapRefused) {
     firstEligible = selectFirstEligibleVisual(opts.visualItems);
     // extractHashIssueNumber first (GK-116 — uncapped, handles legacy
     // numbering like Detective Comics #1107 that extractIssueCandidate's
@@ -3310,6 +3516,40 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
       ? (extractHashIssueNumber(firstEligible.rawTitle) || extractIssueCandidate(firstEligible.rawTitle))
       : null;
     const isMarketingFlavored = firstEligible ? isMarketingFlavoredRow(firstEligible.rawTitle) : false;
+    // GrailKey Directive 2026-08-17-AS (GK-132) — True Believers class.
+    // isEligibleVisualRow (identityReconciler.js) filters lot/variation-
+    // group/companion-product rows but NEVER checked REPRINT_RE or
+    // IDENTITY_TPB_MARKER_RE — a facsimile reprint (which routinely
+    // renumbers to "#1" regardless of the original issue) or a TPB
+    // (collects multiple issues, no single issue number applies) can
+    // legitimately become `firstEligible`. Found regression-testing this
+    // exact dispatch's own MINIMUM_CORROBORATING_ROWS removal against
+    // tests/q-vision-zero-support.test.js's own pre-existing "True
+    // Believers" control (Test 7) — removing the row-count floor let a
+    // reprint's own repeatedly-relisted "#1" claim through where the old
+    // floor had accidentally also caught it (every row shared one
+    // identical rawTitle with no itemId, so countCorroboratingEligibleRows'
+    // dedup collapsed the whole 20-row pool to corroboratingRows=1, which
+    // was <3 by coincidence, not by REPRINT_RE ever having been checked).
+    // A per-row property check, not a count — a single genuine reprint
+    // listing is exactly as disqualifying as twenty identical ones.
+    const isReprintOrTpbFlavored = firstEligible
+      ? (REPRINT_RE.test(firstEligible.rawTitle) || IDENTITY_TPB_MARKER_RE.test(firstEligible.rawTitle))
+      : false;
+    // GrailKey Directive 2026-08-17-AS (GK-132/GK-126) — this count is no
+    // longer an ENTRY gate (see the removed `corroboratingRows >=
+    // MINIMUM_CORROBORATING_ROWS` condition below) — MINIMUM_CORROBORATING_
+    // ROWS/countCorroboratingEligibleRows themselves are UNCHANGED and stay
+    // fully load-bearing everywhere else (resolveFamilyIssueConsensus's own
+    // uniqueRows>=3 bar, the retention/rescue branches above, the title-
+    // family Q38 "need >=3 for consensus override" floor in
+    // imageSearchIdentity.js) — this is the ONE consumer where the floor
+    // used to also gate whether a LONE physical candidate could enter the
+    // evidence set at all, which is a different question from whether it
+    // can win a CONSENSUS vote against competing values (C4). Kept computed
+    // for diagnostic visibility (threaded into visionZeroSupport below,
+    // I13) — a thin-corroboration candidate is still visibly thin, it is
+    // simply no longer invisible.
     const corroboratingRows = candidate?.issue != null
       ? countCorroboratingEligibleRows(
           opts.visualItems,
@@ -3317,14 +3557,40 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
           (rawTitle) => extractHashIssueNumber(rawTitle) || extractIssueCandidate(rawTitle)
         )
       : 0;
+    candidateCorroboratingRows = corroboratingRows;
     const isEchoOfRejectedVision = visionIssueRejectedUpstream
       && candidate?.issue != null
       && String(candidate.issue) === String(vision.issue);
+    // GrailKey Directive 2026-08-17-AS (GK-132) — "the candidate always
+    // enters." Production evidence, Venom Separation Anxiety #1, Mike
+    // Mayhew (2026-08-17 19:40, build ee03e5a): the frozen rank-1 row was
+    // the ONLY eligible row in a 20-row pool asserting issue "1"
+    // (corroboratingRows=1 < MINIMUM_CORROBORATING_ROWS=3) — the candidate
+    // never entered issueEvidence at all, reconcileIssue saw only Vision's
+    // own rejected "150" as conflict evidence with nothing to corroborate
+    // against, authority=NONE, value=null, and vision-zero-support's
+    // earlier ESCALATE (confirmedIssue=null, identityEscalation=
+    // 'ID_REQUIRED', ~line 3024-3033) was never cleared because the
+    // line-3363 clear only fires when reconcileIssue's own winning source
+    // is 'first-eligible-visual' — which required entry first. Safe to
+    // remove the row-count floor from ENTRY specifically because of what
+    // shipped between here and Fix 6 (AI, this dispatch's own precedent)
+    // and AR (2026-08-17, earlier today): a first-eligible-visual-sourced
+    // winner disagreeing with Vision always computes CONTESTED authority
+    // (reconcileIssue's own isContested logic) or, on a genuine Vision-
+    // absent scan, still demotes via justifiedBy.length===1 below — and
+    // AR's actionAuthority/deriveMarketStanding gates already guarantee
+    // CONTESTED can never reach EXACT_CURRENT/READY (VARIANT_CONTESTED_
+    // EDITION and GK-128's issue-authority gate). A lone-row candidate is
+    // no longer a false-confidence risk; it is an honest REVIEW card
+    // instead of a wall. isEchoOfRejectedVision, isMarketingFlavored, and
+    // isReprintOrTpbFlavored (properties of the candidate's own row, not a
+    // count) are unchanged/new-but-still-per-row, not per-count.
     if (
       candidate?.issue != null
       && !isEchoOfRejectedVision
       && !isMarketingFlavored
-      && corroboratingRows >= MINIMUM_CORROBORATING_ROWS
+      && !isReprintOrTpbFlavored
     ) {
       addEvidence(issueEvidence, 'issue', 'first-eligible-visual', candidate.issue);
     }
@@ -3367,6 +3633,11 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
       visionIssue: vision.issue ?? null,
       adoptedIssue: reconciledIssue.value,
       poolTotal: opts.ebayResultCount || null,
+      // GrailKey Directive AS (GK-132) — diagnostic only, not a gate (I13):
+      // how many independent eligible rows corroborated this issue number
+      // in the raw pool. A thin candidate (< MINIMUM_CORROBORATING_ROWS,
+      // identityReconciler.js) is visible on the card now, not withheld.
+      corroboratingRows: candidateCorroboratingRows,
     };
     console.log(
       `[first-eligible-visual] adopting issue="${reconciledIssue.value}" from first eligible visual row ` +

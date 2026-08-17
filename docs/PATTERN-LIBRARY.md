@@ -11220,3 +11220,228 @@ Closure reserved for Jimmy's post-deploy rescans of the Absolute Batman
 GK-128 already have pending. Committed locally, NOT pushed -- report and
 ask before pushing, since the push deploys production. Do not propose
 the next directive.
+
+## GrailKey Directive AS -- GK-132/GK-126: the candidate always enters
+
+Rule installed: first-eligible-visual evidence always enters the issue
+evidence set -- every scan, unconditionally. A refuted Vision value
+cannot force ID_REQUIRED while an eligible rank-1 physical candidate
+exists. The candidate is adopted CONTESTED; the refuted value becomes
+conflict evidence; Z/AR derive REVIEW. ID_REQUIRED is reserved for scans
+with genuinely no candidate. The >=3-member family floor governs
+CONSENSUS OVERRIDE only -- it may not erase the frozen rank-1
+candidate's standing as the identity value.
+
+### The defect
+
+Production, Venom Separation Anxiety #1, Mike Mayhew signed/remarked
+w/Poker Chip (2026-08-17 19:40, build ee03e5a):
+
+```
+rank-1 frozen row:  'Venom - Separation Anxiety 1 Virgin Signed/Remarked
+                     by Mike Mayhew w/Poker Chip'
+Vision:             "Venom" #150 -- 0/20 pool support
+
+[title-family] Top family has only 1 members (need >=3) -- preserve Vision
+[vision-zero-support] ESCALATE: Vision issue="150" has 0/20 pool support
+                      and no adoptable alternate -- forcing ID_REQUIRED
+[reconcile-issue] value=null source=none authority=NONE
+                  conflicts=[{vision:"150"}]
+-> "Venom" #null LOCKED ID_REQUIRED
+```
+
+Every guard built in prior dispatches worked correctly (artbook out,
+Crain tokens excluded, Lethal Protector impossible via AN's physical-
+corroboration gate). Two LEGACY gates, both older than this campaign's
+own evidence-reconciliation architecture, compounded on top:
+
+1. `MINIMUM_CORROBORATING_ROWS` (identityReconciler.js,
+   `countCorroboratingEligibleRows`) gated ENTRY into the issue evidence
+   set at 3 unique corroborating rows -- not merely whether a candidate
+   could win a consensus vote. The Venom pool had exactly 1 genuinely
+   eligible, genuinely corroborating row (the frozen row itself); every
+   other row was either ineligible (AO's companion-product filter caught
+   the artbook) or simply didn't mention an issue number at all.
+2. `hasContaminatedMember` (compHygiene.js) flags ANY member matching
+   LOT/REPRINT/SLAB/GRADED/SIGNED/TPB, with no requirement that the
+   family actually be a MIXTURE of types. Applied to the issue-evidence
+   builder's own Guard 6 (Directive AJ's GK-118), this meant a
+   genuinely-signed 1-member family was flagged "contaminated" purely
+   for being signed -- a category error, since mixture is structurally
+   impossible with one member.
+
+Directive AI's own Fixture 4 (tests/grailkey-directive-ai-visual-first-
+identity.test.js) already covers "Vision issue wrong, first-eligible
+says the right one, adopt CONTESTED" -- but its own fixture happens to
+clear MINIMUM_CORROBORATING_ROWS (3 different-titled rows all
+coincidentally say "#1"), so it never actually tested the arrival path
+for a thin, single-corroboration pool. The fixture asserted the
+reconciler's behavior GIVEN the evidence; it never asserted the
+evidence's ARRIVAL. Same class as the AJ reachability finding
+(Directive AJ, GK-117).
+
+### Why this dispatch could relax these floors safely
+
+Directive AR (earlier the same day, `ee03e5a`) already closed the loop:
+a CONTESTED facet can never reach EXACT_CURRENT or READY
+(`VARIANT_CONTESTED_EDITION` for variant, GK-128's issue-authority gate
+for issue). Adopting a thin, single-row candidate now produces an
+honest REVIEW card with the correction form reachable -- never a
+confident wrong listing. Before AR shipped, this same relaxation would
+have been a real regression risk; after, it is a strict improvement
+(a book that used to hard-wall now gets an honest, correctable answer).
+
+### The fix (src/lib/identityCore.js, the same unconditional issue-
+### evidence builder Directive AJ's Proof 1 already made run
+### unconditionally)
+
+1. `corroboratingRows >= MINIMUM_CORROBORATING_ROWS` removed from the
+   evidence-entry condition. `MINIMUM_CORROBORATING_ROWS`/
+   `countCorroboratingEligibleRows` themselves are UNCHANGED and remain
+   fully load-bearing everywhere else (resolveFamilyIssueConsensus's own
+   >=3-unique-row bar, the retention/rescue branches, the title-family
+   Q38 "need >=3 for consensus override" floor) -- this was the ONE
+   consumer conflating "can this candidate enter the evidence set" with
+   "can this candidate win a consensus vote," two genuinely different
+   questions. `corroboratingRows` stays computed, now purely diagnostic,
+   threaded into `visionZeroSupport.corroboratingRows` (I13 -- a thin
+   candidate is visibly thin, no longer invisible).
+2. Guard 6 (family contamination) now requires `>=2` family members
+   before running the FULL, unchanged `hasContaminatedMember` check --
+   mixture is structurally impossible at n=1. The shared function and
+   its two OTHER call sites (identityCore.js's own qualified-family-
+   authority retention gate; issueAuthority.js's P1 predicate;
+   imageSearchIdentity.js's mergeFragmentedTitleFamilies) are completely
+   untouched.
+
+### Three new guards, each found and refined by running the FULL
+### existing regression suite after every change -- not merely the
+### fixtures this directive named
+
+The build did not stop at "the two named production blockers are
+fixed." Each incremental relaxation broke a real, pre-existing,
+deliberately-designed test somewhere else in the suite; each break was
+traced to its actual root cause (never patched around) before the next
+attempt:
+
+- **Own-row REPRINT_RE/IDENTITY_TPB_MARKER_RE check.** `isEligibleVisualRow`
+  filters lot/variation-group/companion-product rows but never checked
+  reprint or TPB markers -- a facsimile reprint (which routinely
+  renumbers to "#1" regardless of the true issue) or a TPB (no single
+  issue number applies) could become `firstEligible`. Found regression-
+  testing against tests/q-vision-zero-support.test.js's own pre-existing
+  "True Believers" control (Test 7, a 2026-07-era fixture): removing the
+  row-count floor let a reprint's own repeated "#1" claim through, where
+  the OLD floor had accidentally also blocked it (every row shared one
+  identical rawTitle with no itemId, so the dedup-by-title logic in
+  `countCorroboratingEligibleRows` collapsed the whole 20-row pool to
+  corroboratingRows=1 -- coincidence, not design). Fixed with a per-row
+  property check on the candidate's OWN text, independent of any count.
+- **Deference to a genuine prior 'no-consensus' verdict** --
+  `resolveFamilyIssueConsensus` (identityCore.js) is called from at
+  least two structurally different places: the 'refused-identity-
+  conflict' branch's own considered refusal (Eternus #2,
+  tests/q131-refused-identity-conflict-provisional.test.js, Q140
+  corrective dispatch precedent: 2 unique rows below the family's own
+  >=3-row floor, even at 100% agreement, must stay null), AND a
+  genuinely SUCCESSFUL title-family adoption's own internal issue-split
+  check (AI's own Fixture 4, run through the real handler in
+  tests/grailkey-directive-aj-http-handler.test.js: 4 different issue
+  numbers split across "venom separation anxiety"'s 5 winning members,
+  correctly mode='no-consensus' too, but here the candidate MUST still
+  win). A first attempt (defer whenever familyIssueConsensusResult is
+  non-null) broke AK's own population-precedence fixture (tests/
+  grailkey-directive-ak-population-precedence.test.js: a bare
+  'adopted'/outcome==null population vote is a weak, DEMOTABLE
+  corroboration by design, not a refusal -- blocking its entry defeated
+  the whole point of AK's own precedence ordering). A second attempt
+  (defer only inside 'refused-identity-conflict') broke CONTROL 3
+  (tests/q-trackB-commit4.3-winning-family-authority.test.js: Commit
+  4.3's qualified-family-authority retention gate ALSO produces a
+  considered 'no-consensus' verdict for a `fallback-vision` decision,
+  independent of 'refused-identity-conflict' entirely). Generalized to
+  `family.decision` NOT IN `FAMILY_OVERRIDE_DECISIONS` (compHygiene.js's
+  own closed set of "this was a real title win") -- but this STILL broke
+  Detective Comics #1107 itself, run through the real `/api/enrich`
+  handler (tests/grailkey-directive-aj-http-handler.test.js): the
+  'refused-identity-conflict' branch's OWN `resolveFamilyIssueConsensus`
+  call uses the OLDER, 999-capped issue extractor (identityReconciler.js's
+  `extractIssueCandidate`, not the uncapped `extractHashIssueNumber` GK-116
+  added specifically for legacy numbering like #1107) -- it genuinely
+  cannot SEE "1107" at all, producing `assertedIssues: []` and a FALSE
+  'no-consensus' (nothing parsed, not "parsed but insufficient"). Final
+  fix: additionally require `assertedIssues.length > 0` -- the family-
+  level mechanism must have actually SEEN and weighed real values before
+  its refusal counts as a considered verdict this guard defers to.
+- **Pool-wide Vision-title-overlap check.** A real, non-contaminated,
+  count-sufficient family can still be about the WRONG BOOK relative to
+  Vision's own read (tests/q-trackB-commit4.3-winning-family-authority.
+  test.js's own CONTROL E: "Quux Anthology #9" pool, Vision title
+  "Something Else Entirely" -- zero relationship anywhere). Winning-
+  family-only overlap checking is too narrow, though: Detective's own
+  real pool (same http-handler test) has a winning "Detective Comics
+  #1107..." cluster sharing NOTHING with Vision's "Batman" either, yet
+  Detective genuinely IS about the right book -- "Batman" appears
+  elsewhere in the SAME raw pool (Funko Pop Figure, T-Shirt, Compendium
+  TPB rows), just not in the winning cluster's own title. Fixed by
+  checking the WHOLE raw pool, not just the winning family, for ANY
+  shared Vision-title token -- a much weaker, more permissive bar than
+  family-level overlap, exactly wide enough to separate "plausibly the
+  right subject, wrong cluster" from "shares literally nothing."
+
+### Registry correction
+
+This directive's own preflight described GK-126 as "the >=3-member
+floor discards a 1-member correct family" -- checked against
+docs/TICKET-REGISTRY.md directly (the mandatory preflight step) and
+found FALSE: GK-126 is an already-registered, unrelated ticket
+(`responseContract.js`'s `single-comp-pool` pricing floor, Directive
+AP, 2026-08-16). The defect this dispatch actually fixes is filed
+under GK-132 alone; GK-126 is untouched, still open, still about its
+own original single-comp-pool scope. Flagged per the directive-
+preflight protocol's own purpose -- catching exactly this class of
+stale/misattributed ticket reference before work proceeds on a false
+premise.
+
+### What was traced but deliberately not built (Task 2d)
+
+The TITLE facet has its own, separate default (`confirmedTitle =
+vision.title`, only overridden by a REAL family adoption --
+top-rank-protection/weighted-consensus/discriminative-corroboration/
+refused-identity-conflict's own provisional branch). Q38's plain
+"1-2 members, need >=3" `fallback-vision` decision is none of those, so
+on the real Venom production shape `confirmedTitle` stays Vision's own
+raw "Venom" even after `confirmedIssue` is correctly rescued to "1" --
+the two facets are resolved by genuinely independent code paths,
+confirmed by direct trace (tests/grailkey-directive-as-candidate-
+always-enters.test.js's own B5), not assumed. Per the directive's own
+instruction ("do not build a second canonicalization"), this is
+reported, not fixed -- logged as GK-133.
+
+### Tests
+
+tests/grailkey-directive-as-candidate-always-enters.test.js, 31/31 --
+DIRECT proof on the real production shape (with a PRE-fix demonstration
+that the lone Signed/Remarked member would have tripped the old,
+unscoped `hasContaminatedMember` check), Detective Comics #1107 and AI
+Fixture 4 regressions re-verified unregressed (including an "arrival
+path" assertion -- corroboratingRows is a real computed artifact, not
+merely an asserted reconciler output), a genuine no-candidate control
+(ID_REQUIRED survives when literally no eligible row exists), the
+title-facet floor (Q38) confirmed untouched by direct execution, Flash
+#139 unaffected, and no-listing-unlock derivation chains verified
+through the real `actionAuthority` machinery. Full 217-file regression
+sweep re-run clean: 194 PASS / 19 FAIL / 4 TIMEOUT, byte-identical
+FAIL/TIMEOUT file list to the prior baseline -- the only delta is this
+one new, fully-passing test file.
+
+### Handoff
+
+GK-132 SHIPPED-PENDING PHYSICAL. GK-126 untouched (registry correction
+above). GK-133 (title-facet gap) logged, not fixed, deliberately out of
+this dispatch's scope. Closure reserved for Jimmy's post-deploy rescan
+of the Venom Mayhew book, alongside the still-pending Absolute Batman
+#19 (GK-130), Dell'Otto ASM (GK-124/AP), Wolverine #90 (GK-127/128), and
+Sabrina control rescans. Committed locally, NOT pushed -- report and ask
+before pushing, since the push deploys production. Do not propose the
+next directive.
