@@ -4215,6 +4215,13 @@ export default async function handler(req, res) {
     // GrailKey Dispatch 34 — renamed from 'phase2_complete', paired with
     // 'identity_fetch_start' above. See that mark's comment for why.
     mark('identity_fetch_complete');
+    // GRAILKEY PERF-1 (2026-08-18) — measurement-only. Brackets the
+    // post-PC/CV identity-finalization span (convergence scoring, year/
+    // variant reconciliation, the conditional pc_requery sub-call already
+    // separately timed via pc_requery_start/complete) that runs before the
+    // comps/pricing fetch below. Coarser than a pure "reconciliation"
+    // phase — see docs/PATTERN-LIBRARY.md PERF-1 entry for the caveat.
+    mark('reconciliation_start');
 
     // Ship #22c: AXIS VOTING convergence score
     // Computes identity confidence from multi-source voting per axis.
@@ -4610,6 +4617,14 @@ export default async function handler(req, res) {
     // every non-conflicted request.
     if (needsRequery && !marketCustodyConflicted) {
       mark('pc_requery_start');
+      // GRAILKEY PERF-1 STAGE 1 (2026-08-18) — measurement-only outcome
+      // instrumentation, per the PERF-1A pre-flight (Q3) and the lwfv4
+      // reconciliation. Snapshot the PRE-requery anchor before
+      // `priceCharting` is reassigned below, so the post-requery values can
+      // be diffed against it. Zero behavior change — read-only capture.
+      const preRequeryPcId = priceCharting?.id ?? null;
+      const preRequeryPcYear = priceCharting?.year ?? null;
+      const preRequeryPcPrice = priceCharting?.price ?? null;
       const gateSource = familyCandidateAccepted
         ? `family-candidate ${familyCandidate.decision}`
         : (imageConsensusTitle ? 'visualConsensus' : 'confirmedTitle-vs-pc-match');
@@ -4639,6 +4654,43 @@ export default async function handler(req, res) {
       if (priceCharting) {
         console.log(`[pc-requery] matched: "${priceCharting.productName}"`);
       }
+      // GRAILKEY PERF-1 STAGE 1 (2026-08-18) — measurement-only. Boundary
+      // for pc_requery_elapsed_ms is explicit: gate entry (mark
+      // 'pc_requery_start', immediately above the pre-snapshot) to
+      // lookupPriceCharting()'s resolution (mark 'pc_requery_complete',
+      // immediately above). This span includes the single PC search fetch
+      // PLUS the local candidate-scoring loop inside lookupPriceCharting
+      // (api/enrich.js:1596-2019) — that function does not expose an
+      // internal network-only timestamp on its return value or via pcDiag,
+      // so a true fetch-only "external_ms" cannot be split out without
+      // adding instrumentation inside lookupPriceCharting itself — out of
+      // Stage 1 scope (PERF-1A directive: "If it doesn't [expose
+      // sufficient timestamps], do NOT expand scope — one field, boundary
+      // stated in the log"). Reading that function directly: after its one
+      // `await fetch(...)` resolves, the remainder is a synchronous loop
+      // over up to ~100 short candidate strings (regex/tokenize checks,
+      // no further network calls) — negligible against network latency,
+      // so pc_requery_elapsed_ms is, in practice, almost entirely the PC
+      // fetch's own wall-clock time, without a hard guarantee.
+      // pc_requery_changed_pc_price is labeled PROXY per the directive —
+      // a changed PC price is not itself a claim that price bands or the
+      // shipped decision changed; that requires re-deriving pricing under
+      // the counterfactual anchor, deliberately out of scope here (see the
+      // PERF-1A Q3 answer on changed_price_band/changed_decision cost).
+      const pcRequeryElapsedMs = (t.pc_requery_complete != null && t.pc_requery_start != null)
+        ? t.pc_requery_complete - t.pc_requery_start
+        : null;
+      const pcRequeryChangedAnchor = (priceCharting?.id ?? null) !== preRequeryPcId;
+      const pcRequeryChangedYear = (priceCharting?.year ?? null) !== preRequeryPcYear;
+      const pcRequeryChangedPcPriceProxy = (priceCharting?.price ?? null) !== preRequeryPcPrice;
+      console.log(
+        `[perf] phase=pc-requery ms=${pcRequeryElapsedMs} tag=serial-external ` +
+        `boundary="pc_requery_start(gate entry)->pc_requery_complete(lookupPriceCharting resolved)" ` +
+        `pc_requery_changed_anchor=${pcRequeryChangedAnchor} ` +
+        `pc_requery_changed_year=${pcRequeryChangedYear} ` +
+        `pc_requery_changed_pc_price=${pcRequeryChangedPcPriceProxy} ` +
+        `note="changed_pc_price is a PROXY — not a price-band or decision-change claim"`
+      );
     } else if (marketCustodyConflicted) {
       console.log(
         confirmedIssue == null
@@ -6042,6 +6094,9 @@ export default async function handler(req, res) {
     // comps/pricing-fetch window that out.timings.comps_ms measures
     // against 'comps_fetched' below — same pairing, same value, correct
     // name now.
+    // GRAILKEY PERF-1 (2026-08-18) — measurement-only, closes
+    // 'reconciliation_start' above.
+    mark('reconciliation_complete');
     mark('comps_pricing_start');
 
     // Ship 26.2 — Gate Phase 2 when identity refused
@@ -6597,6 +6652,15 @@ export default async function handler(req, res) {
         ? numericGrade
         : "raw";
 
+    // GRAILKEY PERF-1 (2026-08-18) — measurement-only per-arm latency taps
+    // on the Promise.all below. Each tap is a pass-through .then() that
+    // records elapsed ms into an outer-scope var and returns the original
+    // resolved value unchanged — no behavior change, matches the existing
+    // comicvineLatencyMs/priceChartingLatencyMs pattern above.
+    const compsPromiseStart = Date.now();
+    let activeCompsFetchLatencyMs = null;
+    let pcPopFetchLatencyMs = null;
+    let pcSalesFetchLatencyMs = null;
     const [
       compsFromEbay,
       soldResult,
@@ -6604,7 +6668,7 @@ export default async function handler(req, res) {
       pcPop,
       pcSalesResult,
     ] = await Promise.all([
-      compsPromise,
+      compsPromise.then((r) => { activeCompsFetchLatencyMs = Date.now() - compsPromiseStart; return r; }),
       // fetchSold (api/sold.js) currently dormant: eBay Marketplace
       // Insights API requires a gated scope unavailable to indie devs.
       // Returns [] gracefully. Kept in the pipeline so a future scope
@@ -6614,17 +6678,19 @@ export default async function handler(req, res) {
       // Q25 FIX — GoCollect removed (100% timeout, 4.5s tax, zero returns).
       // Return null immediately instead of waiting 4.5s per scan.
       Promise.resolve(null),
-      priceCharting?.id
+      (priceCharting?.id
         ? fetchPricechartingPop(priceCharting.id, req.body?.grade).catch(() => null)
-        : Promise.resolve(null),
-      useBookCompsCache
+        : Promise.resolve(null)
+      ).then((r) => { pcPopFetchLatencyMs = Date.now() - compsPromiseStart; return r; }),
+      (useBookCompsCache
         ? (async () => {
             // Use cached sold comps from book record
             return { soldComps: req.body.soldCompsRawCached || [], salesByGrade: {} };
           })()
         : priceCharting?.id
         ? fetchPricechartingSales(priceCharting.id, userGradeForSales).catch(() => null)
-        : Promise.resolve(null),
+        : Promise.resolve(null)
+      ).then((r) => { pcSalesFetchLatencyMs = Date.now() - compsPromiseStart; return r; }),
     ]);
     const pcSales = pcSalesResult || { soldComps: [], salesByGrade: {} };
     mark('comps_fetched');
@@ -7019,6 +7085,12 @@ export default async function handler(req, res) {
             ? `${numericGrade}.0`
             : String(numericGrade))
         : 'raw';
+    // GRAILKEY PERF-1 (2026-08-18) — measurement-only. verifySoldComps is
+    // synchronous CPU work (filter chain over rawSoldRows), not a network
+    // call — the actual sold-comp FETCH already completed inside the
+    // Promise.all above (mark('comps_fetched')), running concurrently with
+    // the active-comps fetch. This bracket times the verify step only.
+    mark('sold_verify_start');
     const soldVerifyResult = verifySoldComps(rawSoldRows, {
       title: confirmedTitle,
       issue: confirmedIssue,
@@ -7045,6 +7117,12 @@ export default async function handler(req, res) {
       issueAuthorityPresent: out.issueAuthority != null,
       issueAuthorityStatus: out.issueAuthority?.status ?? null,  // Track B Phase 0, Commit 4 — TARGET_ISSUE_PROVISIONAL_AUTHORITY gate (evidenceEligibility.js), same field name as the fetchComps call site
     });
+    // GRAILKEY PERF-1 (2026-08-18) — measurement-only, closes
+    // 'sold_verify_start' above; opens 'pricing_derivation_start' (sanity/
+    // floor guards/mega-key/price-bands/decision-engine span through
+    // 'claude_check_start').
+    mark('sold_verify_complete');
+    mark('pricing_derivation_start');
     const filteredSold = soldVerifyResult.verified;
     if (rawSoldRows.length > 0) {
       const d = soldVerifyResult.diagnostics;
@@ -10549,6 +10627,9 @@ export default async function handler(req, res) {
     // on every refresh. After fix: verify fires ONCE per book, zero on refresh.
     // Projected savings: 90%+ Sonnet spend eliminated.
     const isRefresh = req.body?.skipClaudeCheck === true || req.body?.claudeCheckCached != null;
+    // GRAILKEY PERF-1 (2026-08-18) — measurement-only, closes
+    // 'pricing_derivation_start' above.
+    mark('pricing_derivation_complete');
     mark('claude_check_start');
     let claudeCheck;
     // Q44-B: Count only CRITICAL-severity conflicts before AI gate.
@@ -10947,6 +11028,45 @@ export default async function handler(req, res) {
       marks: t,
     };
     console.log('[timing] summary:', JSON.stringify(out.timings));
+
+    // GRAILKEY PERF-1 (2026-08-18) — measurement-only phase-timing report.
+    // Zero behavior change: pure console.log derived from marks/latencies
+    // that already exist above (the pre-existing `mark()`/`t` framework,
+    // plus this same directive's new marks and per-arm Promise.all taps).
+    // Does not write to `out` (the API response shape is untouched) —
+    // server logs only. tag: serial-external = waits on a third-party API,
+    // serial-internal = CPU-bound in this process, parallelizable-candidate
+    // = a call NOT already inside one of the two existing Promise.all
+    // groups that could in principle run alongside them (none identified
+    // this pass — see docs/PATTERN-LIBRARY.md PERF-1 entry). n/a = phase
+    // does not occur inside api/enrich.js (identification/grading happen
+    // in the separate api/grade.js request).
+    (() => {
+      const dur = (endLabel, startLabel) =>
+        (t[endLabel] != null && t[startLabel] != null) ? t[endLabel] - t[startLabel] : null;
+      const phases = [
+        { name: 'vision-analysis', ms: null, tag: 'n/a', note: 'identification happens in api/grade.js, a separate request' },
+        { name: 'ebay-image-search', ms: ebayImageSearchLatencyMs, tag: 'serial-external' },
+        { name: 'visual-eligibility+family', ms: dur('phase1_complete', 'phase1_start') != null && ebayImageSearchLatencyMs != null ? dur('phase1_complete', 'phase1_start') - ebayImageSearchLatencyMs : dur('phase1_complete', 'phase1_start'), tag: 'serial-internal', note: `family_candidate sub-span=${dur('family_candidate_complete', 'family_candidate_start')}ms` },
+        { name: 'reconciliation(issue/variant/year)', ms: dur('reconciliation_complete', 'reconciliation_start'), tag: 'mixed', note: `includes pc_requery sub-span=${dur('pc_requery_complete', 'pc_requery_start')}ms (serial-external, conditional)` },
+        { name: 'cv-lookup', ms: comicvineLatencyMs, tag: 'serial-external', note: 'already parallel with pc-lookup-initial (Promise.all #1)' },
+        { name: 'pc-lookup-initial', ms: priceChartingLatencyMs, tag: 'serial-external', note: 'already parallel with cv-lookup (Promise.all #1)' },
+        { name: 'comps-fetch(active)', ms: activeCompsFetchLatencyMs, tag: 'serial-external', note: 'already parallel with pc-lookup-pop/sales/sold-fetch (Promise.all #2)' },
+        { name: 'pc-lookup-pop', ms: pcPopFetchLatencyMs, tag: 'serial-external', note: 'already parallel with comps-fetch(active) (Promise.all #2)' },
+        { name: 'sold-fetch', ms: pcSalesFetchLatencyMs, tag: 'serial-external', note: 'already parallel with comps-fetch(active) (Promise.all #2); this IS the sold-comp source (PC sales-history scrape)' },
+        { name: 'sold-verify', ms: dur('sold_verify_complete', 'sold_verify_start'), tag: 'serial-internal', note: 'synchronous filter chain over rawSoldRows, not a network call' },
+        { name: 'era/variant-filters', ms: null, tag: 'opaque-external', note: 'runs inside fetchComps (api/comps.js) attempt loop, not separately visible/timeable from enrich.js' },
+        { name: 'pricing-derivation', ms: dur('pricing_derivation_complete', 'pricing_derivation_start'), tag: 'serial-internal', note: 'sanity/floor-guards/mega-key/price-bands/decision-engine, coarse bucket' },
+        { name: 'grade', ms: null, tag: 'n/a', note: 'grading happens in api/grade.js, a separate request' },
+        // response-assembly is NOT included here — mark('response_sent')
+        // hasn't fired yet at this point in the handler (it's the very
+        // last mark, right before res.json). Logged separately below,
+        // right after that mark, once both endpoints of the span exist.
+      ];
+      for (const p of phases) {
+        console.log(`[perf] phase=${p.name} ms=${p.ms} tag=${p.tag}${p.note ? ' note="' + p.note + '"' : ''}`);
+      }
+    })();
 
     // Ship v0-B — Decision Engine integration.
     // Normalize fields for decision engine (field mapping from Step 0):
@@ -11827,6 +11947,9 @@ export default async function handler(req, res) {
     // Previously these were stripped and fetched via separate /api/metadata call (SPEED-2a).
     // Eliminates duplicate CV/PC/GoCollect API calls and second HTTP round-trip.
     mark('response_sent');
+    // GRAILKEY PERF-1 (2026-08-18) — measurement-only, completes the
+    // phase report started above (final_response → response_sent span).
+    console.log(`[perf] phase=response-assembly ms=${(t.response_sent != null && t.final_response != null) ? t.response_sent - t.final_response : null} tag=serial-internal`);
     // Ship #24a-2: single-writer boundary — contract assembled here, nothing
     // may write price/decision fields after this call.
     res.status(200).json(finalizeResponse(out));
