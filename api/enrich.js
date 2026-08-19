@@ -5595,21 +5595,27 @@ export default async function handler(req, res) {
     // eBay-pool consensus is the ONLY source for a raw signed book).
     let confirmedSignedConsensus = false;
 
-    // Q106 FIX-1 Step 3 — on the CGC-identity path, variant resolution never
-    // touches the visual pool. Prefer cgc-lookup's own variant text (when the
-    // scraper parses one — not yet implemented, see Q106 report) else fall
-    // back to Vision's variant field. The Q100 FIX-A auth-token strip is
-    // applied downstream in fetchComps/api/comps.js using confirmedLabelType.
-    if (cgcIdentityConfirmed) {
-      confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, cgcResult.variant || safeVariantForConfirmed || null, variantIdentitySource, cgcResult.variant ? 'cgc_cert' : 'vision', 'q106-fix1-cgc');
-      variantIdentitySource = cgcResult.variant ? 'cgc_cert' : 'vision';
-      console.log(`[cgc-variant] source=${cgcResult.variant ? 'cgc' : 'vision'} value="${confirmedVariant || ''}"`);
-    } else {
-
     // Ship 26.3B — Restrict variant extraction to selected title family when
     // family candidate fires. Prevents wrong-family variant contamination.
     // Catwoman/Gotham War: previously variant pool was 20 mixed items, electing
     // Artgerm from Catwoman Uncovered family. Now uses Gotham War family subset only.
+    //
+    // GrailKey Directive AU (GK-136), fix-forward — HOISTED here (was
+    // declared inside the Q106 FIX-1 `else` block below, which closes
+    // before the later AM-F-3 corrective block that also needs to read
+    // it — the original scoping caused a real production 500,
+    // ReferenceError: variantSourceItems is not defined, confirmed live
+    // on build 1d23069). Moved, not duplicated — every identifier this
+    // computation references (familyCandidate, FAMILY_OVERRIDE_DECISIONS,
+    // visualResult, suppressVariantForYearConflict, confirmedIssue,
+    // familyCandidateAccepted, filterItemsByIssue) was verified in scope
+    // at this exact point via brace-depth analysis of the real file
+    // before this edit, not assumed. filterItemsByIssue is a pure
+    // function (no console/log side effects, per its own doc comment) —
+    // computing this unconditionally, including on the cgcIdentityConfirmed
+    // path that never previously computed it, introduces no new log
+    // lines and no behavior change on that path (the value is simply
+    // never read there, exactly as before).
     const variantSourceItemsPreIssueFilter = (familyCandidate &&
       FAMILY_OVERRIDE_DECISIONS.includes(familyCandidate.decision) &&
       familyCandidate.topFamily?.indices &&
@@ -5621,35 +5627,9 @@ export default async function handler(req, res) {
     // an artist-name match can structurally never come from a different
     // issue, so filter to items whose OWN extracted issue number matches
     // our confirmed issue BEFORE extractConfirmedVariant computes artist/
-    // exclusive/limitation/year consensus from them. Was: the Ship 26.3B
-    // family-narrowing above only fires for 'top-rank-protection'/
-    // 'weighted-consensus' — when title-family clustering falls back to
-    // Vision (decision='fallback-vision', e.g. a genuinely incoherent
-    // pool), the FULL unfiltered visualResult.items reached this function
-    // untouched. Confirmed production case: Batman #608 (2002, Jim Lee,
-    // Hush) — 0/20 pool items were actually issue #608 (a mix of Superman/
-    // Batman #657, Absolute Batman #19, Detective Comics #1000, Batman #1
-    // reprints, even unrelated Marvel Venomverse listings, sharing only
-    // eBay's own visual-similarity confusion around Dell'Otto's painted-
-    // cover style across his many DIFFERENT DC variant covers). 4/20
-    // mentioned "Dell'Otto" — correctly scored as a MINORITY (20%, under
-    // the 70% distinguishing-ratio threshold) by the existing artist gate,
-    // which is exactly the signal shape this feature treats as a genuine
-    // distinguishing variant subset — except these aren't a variant
-    // subset of OUR book, they're different books entirely. The gate
-    // has no way to tell those apart without knowing whether the items
-    // are even the same issue — this filter gives it that fact directly,
-    // fixing the root mechanism rather than flagging the bad output after
-    // the fact. Each item's `.issue` field is already computed by
-    // extractIdentityFromImageSearch/extractIssueFromTitle — same value
-    // the `[visual] extracted issues: [...]` log line already draws from,
-    // no new extraction logic. A facsimile/artist-variant mixed into a
-    // pool for the SAME issue (the scenario this feature was originally
-    // built for — e.g. a Skottie Young facsimile among Captain America
-    // #25 originals) is unaffected: those listings still say "#25," so
-    // they survive this filter untouched. filterItemsByIssue lives in
-    // src/lib/variantIdentity.js (single source of truth, directly
-    // regression-testable).
+    // exclusive/limitation/year consensus from them. filterItemsByIssue
+    // lives in src/lib/variantIdentity.js (single source of truth,
+    // directly regression-testable).
     //
     // Q144 Item 1 (final scope) — familyCandidateAccepted passed through so
     // filterItemsByIssue can corroborate (not infer) a row whose own
@@ -5660,6 +5640,23 @@ export default async function handler(req, res) {
     const variantSourceItems = suppressVariantForYearConflict
       ? []
       : filterItemsByIssue(variantSourceItemsPreIssueFilter, confirmedIssue, familyCandidateAccepted);
+
+    // Q106 FIX-1 Step 3 — on the CGC-identity path, variant resolution never
+    // touches the visual pool. Prefer cgc-lookup's own variant text (when the
+    // scraper parses one — not yet implemented, see Q106 report) else fall
+    // back to Vision's variant field. The Q100 FIX-A auth-token strip is
+    // applied downstream in fetchComps/api/comps.js using confirmedLabelType.
+    if (cgcIdentityConfirmed) {
+      confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, cgcResult.variant || safeVariantForConfirmed || null, variantIdentitySource, cgcResult.variant ? 'cgc_cert' : 'vision', 'q106-fix1-cgc');
+      variantIdentitySource = cgcResult.variant ? 'cgc_cert' : 'vision';
+      console.log(`[cgc-variant] source=${cgcResult.variant ? 'cgc' : 'vision'} value="${confirmedVariant || ''}"`);
+    } else {
+
+    // variantSourceItemsPreIssueFilter / variantSourceItems: GrailKey
+    // Directive AU fix-forward hoisted both declarations above the
+    // cgcIdentityConfirmed if/else (see that comment block for the full
+    // reasoning) — this branch now reads the outer-scoped values computed
+    // once, unchanged in effect, no longer re-declared here.
 
     // Q127 — skip recomputation entirely on an UNRESOLVED year-hint
     // conflict: both the override AND backfill paths would otherwise
