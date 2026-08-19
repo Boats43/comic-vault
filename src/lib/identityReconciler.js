@@ -390,6 +390,37 @@ export const reconcileIssue = (evidenceSet) => {
 // independent.
 const YEAR_SOURCE_PRECEDENCE = ['user', 'first-eligible-visual', 'pool-consensus', 'catalog', 'vision'];
 
+// GrailKey Directive 2026-08-18-AU (GK-137), 4b, C4 — "CATALOG-source year:
+// single-source ceiling" (C4's own wording names catalog specifically, not
+// every non-physical source — confirmed against a real conflict found
+// regression-testing this fix, see below). Physical/operator sources are
+// genuine direct observation and may win CORROBORATED entirely alone,
+// matching AL/AM's already-established "physical evidence wins outright"
+// rule for this exact facet (unchanged, same list shape as
+// VARIANT_SOLE_AUTHORITY_PRECEDENCE above). 'pool-consensus' ALSO stays
+// sole-authority-capable — it is not a single, fragile claim the way one
+// catalog product-page's embedded year is: poolYearHint (api/enrich.js) is
+// already an aggregate computed from >=3 independent raw-pool year mentions
+// at >=50% agreement before it ever becomes a candidate at all, so a lone
+// 'pool-consensus' entry already represents multi-source agreement, not a
+// single opinion. Confirmed by a real pre-existing conflict: this fix's
+// first draft put 'pool-consensus' in the SAME non-sole-authority bucket as
+// 'catalog', which broke tests/grailkey-directive-at-year-evidence.js's own
+// "POST: single, uncontested [pool-consensus] source — CORROBORATED"
+// assertion (AT's own prior, deliberate design for that exact source).
+// Only 'catalog' and 'vision' are NOT sole-authority: standing completely
+// alone, with nothing independently agreeing AND nothing disagreeing, they
+// may still win (a real value beats no value) but land CONTESTED, not
+// CORROBORATED. Production evidence (ghmn7): confirmedYear=1963 came ONLY
+// from PriceCharting's catalog match (justifiedBy=[{catalog:1963}], nothing
+// else in the evidence set at all) and still reached CORROBORATED — the era
+// filter then hard-rejected the book's own 2022 market against that
+// single-source year. This does not touch YEAR_SOURCE_PRECEDENCE (which
+// source wins is unchanged) or the existing disagreement handling below
+// (still CONTESTED, unchanged) — it only adds a floor under how much trust
+// a lone catalog or vision-only source earns.
+const YEAR_SOLE_AUTHORITY_PRECEDENCE = ['user', 'first-eligible-visual', 'pool-consensus'];
+
 // reconcileYear — pure, deterministic. Same shape as reconcileIssue:
 //   { value, source, authority, justifiedBy, conflicts }
 //   authority: 'NONE' | 'CONTESTED' | 'CORROBORATED'
@@ -421,10 +452,18 @@ export const reconcileYear = (evidenceSet) => {
   );
   const isContested = disagreeingConflicts.length > 0 || disagreeingCorroborations.length > 0;
 
+  // GK-137, C4 — a lone non-sole-authority winner (nothing disagrees, but
+  // also nothing independently agrees) is provisional, not fully trusted.
+  const isSoleAuthority = YEAR_SOLE_AUTHORITY_PRECEDENCE.includes(winner.source);
+  const hasIndependentAgreement = corroborations.some(
+    (e) => e !== winner && e.source !== winner.source && String(e.value) === String(winner.value)
+  );
+  const singleSourceCeiling = !isContested && !isSoleAuthority && !hasIndependentAgreement;
+
   return {
     value: winner.value,
     source: winner.source,
-    authority: isContested ? 'CONTESTED' : 'CORROBORATED',
+    authority: (isContested || singleSourceCeiling) ? 'CONTESTED' : 'CORROBORATED',
     justifiedBy: corroborations
       .filter((e) => e === winner || String(e.value) === String(winner.value))
       .map((e) => ({ source: e.source, value: e.value })),

@@ -997,9 +997,23 @@ export const extractFirstEligibleVariantCandidate = (rawTitle) => {
  * @param {string|null} pipelineValue - confirmedVariant after the existing pipeline
  * @param {string} pipelineSource - variantIdentitySource after the existing pipeline
  * @param {string|null} firstEligibleRawTitle - the first eligible visual row's own raw title, or null
+ * @param {string[]} [otherEligibleRawTitles] - GrailKey Directive AU (GK-136), 4a-ii — raw
+ *   titles of the REMAINING eligible pool rows (same population the caller's own
+ *   pipeline already scoped to family+issue, EXCLUDING firstEligibleRawTitle —
+ *   caller's responsibility, this function does not re-derive eligibility).
+ *   Each row is extracted and admitted with its OWN per-row evidence entry —
+ *   no ≥2-same-value consensus pre-gate (that aggregate gate, at
+ *   variantIdentity.js:972-991, stays exactly where it is and keeps feeding
+ *   pipelineValue unchanged; this is an ADDED entry path, not a lowered one).
+ *   reconcileVariant's own existing corroboration search (identityReconciler.js)
+ *   then does what it already does for every other facet: two or more rows
+ *   independently naming the same creator corroborate each other; a lone
+ *   dissenting row stands as visible, non-winning conflict evidence, never
+ *   silently dropped (same "never hidden, never adopted without standing"
+ *   rule the reconciler already applies everywhere else).
  * @returns {{reconciled: object, candidate: string|null}}
  */
-export const reconcileVariantFacet = (pipelineValue, pipelineSource, firstEligibleRawTitle) => {
+export const reconcileVariantFacet = (pipelineValue, pipelineSource, firstEligibleRawTitle, otherEligibleRawTitles = []) => {
   const evidence = createEvidenceSet();
   if (pipelineValue) {
     addEvidence(evidence, 'variant', pipelineSource === 'vision' ? 'vision' : pipelineSource, pipelineValue);
@@ -1020,6 +1034,32 @@ export const reconcileVariantFacet = (pipelineValue, pipelineSource, firstEligib
     && (matchCreatorCanonicals(candidate).length > 0 || variantSpecificTokens(candidate).length > 0);
   if (candidate && candidateHasDiscriminativeSignal) {
     addEvidence(evidence, 'variant', 'first-eligible-visual', candidate);
+  }
+  // GrailKey Directive AU (GK-136), 4a-ii — the third entry path. Same
+  // extraction + same discriminative-signal gate as the first-eligible row
+  // above (reused, not forked), applied per-row to the rest of the eligible
+  // pool. Each row gets its OWN uniquely-suffixed source ('ebay-pool-row-N')
+  // rather than one shared source string — reconcileVariant's own agreement
+  // search requires `e.source !== candidate.source` (identityReconciler.js),
+  // so two genuinely corroborating pool rows naming the same creator MUST
+  // carry distinct sources to be able to agree with each other at all; a
+  // shared source would silently prevent exactly the multi-row corroboration
+  // this entry path exists to enable. No de-duplication by candidate TEXT
+  // either, for the same reason — two rows independently saying "Gabriele
+  // Dell'Otto" is the corroboration signal, not noise to collapse away.
+  // Source is deliberately NOT in VARIANT_SOLE_AUTHORITY_PRECEDENCE — a
+  // single pool row can never win outright alone, only by independently
+  // agreeing with another source (first-eligible-visual, a sibling pool
+  // row, or a corroborating pipeline value).
+  let poolRowIndex = 0;
+  for (const rawTitle of (Array.isArray(otherEligibleRawTitles) ? otherEligibleRawTitles : [])) {
+    if (!rawTitle || rawTitle === firstEligibleRawTitle) continue;
+    const poolCandidate = extractFirstEligibleVariantCandidate(rawTitle);
+    if (poolCandidate == null) continue;
+    const hasSignal = matchCreatorCanonicals(poolCandidate).length > 0 || variantSpecificTokens(poolCandidate).length > 0;
+    if (!hasSignal) continue;
+    addEvidence(evidence, 'variant', `ebay-pool-row-${poolRowIndex}`, poolCandidate);
+    poolRowIndex++;
   }
   let reconciled = reconcileVariant(evidence, variantValuesAgree);
   // GrailKey Directive 2026-08-16-AM — on CORROBORATED agreement (the

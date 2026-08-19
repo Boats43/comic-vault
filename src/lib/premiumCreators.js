@@ -153,6 +153,99 @@ const SEARCH_INDEX = PREMIUM_CREATORS.map((c) => {
   return { creator: c, patterns };
 });
 
+// GrailKey Directive 2026-08-18-AU (GK-136), 4a-i — bounded, explicit
+// spelling/truncation tolerance for creator-name matching. Fallback ONLY:
+// the exact SEARCH_INDEX regex pass above stays the primary, unchanged
+// path, byte-identical for every case it already covers. This layer never
+// adds a new creator or alias (C1/C2: no registry expansion) — it only
+// widens HOW an existing alias may be spelled in seller-written listing
+// text, for the same fixed set of canonicals already in PREMIUM_CREATORS.
+//
+// Production evidence (Directive AU, ghmn7): a single artist's name
+// appeared in the SAME pool spelled five different ways — "Dellotto",
+// "Dell'Otto", "DELL'OTTO" (all three already matched the old regex),
+// "DELL OTTO" (space where the regex expected an optional apostrophe —
+// did not match) and "DEL O'TT" (single L, truncated/mangled suffix,
+// space AND misplaced apostrophe — did not match). Two of five real
+// spellings in one production pool were invisible to exact matching.
+//
+// Rules, stated explicitly (per C2):
+//   1. NORMALIZE by stripping every character that is not a-z0-9,
+//      lowercased. "Dell'Otto" / "Dellotto" / "DELL OTTO" all collapse to
+//      the identical string "dellotto" under this rule ALONE — zero
+//      fuzziness needed for the apostrophe/space class.
+//   2. For an alias whose normalized form is >= MIN_FUZZY_ALIAS_LEN (6)
+//      characters, ALSO accept a bounded Levenshtein edit-distance match
+//      (<= FUZZY_MAX_DISTANCE, 2) against any contiguous 1-to-3-word
+//      window of the candidate text (each window normalized the same
+//      way) — this is what additionally covers "Del'Otto" (distance 1:
+//      one missing L) and "DEL O'TT" (distance 2: one missing L, one
+//      missing trailing O).
+//   3. The length floor is the B2 safety boundary: a short alias (e.g.
+//      "lee", "cho", 3-5 chars) never reaches the 6-char floor, so it can
+//      NEVER be fuzzy-matched — only the already-long, already-
+//      distinctive aliases get truncation tolerance, and only within 2
+//      edits of THEIR OWN specific spelling, not a general similarity
+//      search across all creators. See
+//      tests/grailkey-directive-au-fuzzy-creator-match.test.js for the
+//      exhaustive pairwise-distance proof that no two distinct
+//      PREMIUM_CREATORS aliases fall within FUZZY_MAX_DISTANCE of each
+//      other (the actual no-false-merge guarantee, not just hand-picked
+//      examples).
+const MIN_FUZZY_ALIAS_LEN = 6;
+const FUZZY_MAX_DISTANCE = 2;
+const MAX_FUZZY_WINDOW_WORDS = 3;
+
+const normalizeCreatorText = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Standard DP Levenshtein — single-insertion/deletion/substitution edit
+// distance. Bounded by short inputs (creator surnames / 1-3 word windows,
+// never a whole title) so this is always cheap.
+const levenshteinDistance = (a, b) => {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = a[i - 1] === b[j - 1]
+        ? prev[j - 1]
+        : 1 + Math.min(prev[j - 1], prev[j], cur[j - 1]);
+    }
+    prev = cur;
+  }
+  return prev[n];
+};
+
+// Word-tokenize the same way rawWordTokenize (imageSearchIdentity.js,
+// GrailKey Directive AN) already does — strip punctuation to whitespace,
+// lowercase, split. Reusing that established shape rather than inventing
+// a second tokenizer, per C2's "extend it, don't fork it."
+const wordTokenize = (text) => String(text || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9\s]/g, ' ')
+  .split(/\s+/)
+  .filter(Boolean);
+
+const fuzzyAliasMatches = (candidateText, alias) => {
+  const normalizedAlias = normalizeCreatorText(alias);
+  if (normalizedAlias.length < MIN_FUZZY_ALIAS_LEN) return false;
+  const words = wordTokenize(candidateText);
+  for (let start = 0; start < words.length; start++) {
+    for (let span = 1; span <= MAX_FUZZY_WINDOW_WORDS && start + span <= words.length; span++) {
+      const window = normalizeCreatorText(words.slice(start, start + span).join(''));
+      if (!window) continue;
+      // Cheap pre-filter before paying for full Levenshtein: a window
+      // whose length differs from the alias by more than the max distance
+      // can never be within that distance.
+      if (Math.abs(window.length - normalizedAlias.length) > FUZZY_MAX_DISTANCE) continue;
+      if (levenshteinDistance(window, normalizedAlias) <= FUZZY_MAX_DISTANCE) return true;
+    }
+  }
+  return false;
+};
+
 // GrailKey Directive 2026-08-16-AL (GK-120) — single-text creator lookup,
 // reusing the SAME precomputed SEARCH_INDEX extractCreatorsFromComps
 // already builds (no second registry, no duplicated regex work). Returns
@@ -162,12 +255,25 @@ const SEARCH_INDEX = PREMIUM_CREATORS.map((c) => {
 // Kirkham" but a PC candidate's own product name says "[Mayhew Virgin]" —
 // two different, both-registered creators naming the SAME variant slot is
 // a hard veto, not a token-overlap tiebreak).
+//
+// GrailKey Directive AU, 4a-i — exact SEARCH_INDEX pass runs first,
+// unchanged. Only when it finds nothing for a given creator does the
+// bounded fuzzy fallback (above) get a chance, tested against that same
+// creator's own canonical + aliases. Byte-identical output for every
+// text where the exact pass already matched.
 export const matchCreatorCanonicals = (text) => {
   const lower = String(text || '').toLowerCase();
   if (!lower) return [];
   const out = [];
   for (const { creator, patterns } of SEARCH_INDEX) {
-    if (patterns.some((re) => re.test(lower))) out.push(creator.canonical);
+    if (patterns.some((re) => re.test(lower))) {
+      out.push(creator.canonical);
+      continue;
+    }
+    const names = [creator.canonical, ...(Array.isArray(creator.aliases) ? creator.aliases : [])];
+    if (names.some((n) => fuzzyAliasMatches(text, n))) {
+      out.push(creator.canonical);
+    }
   }
   return out;
 };

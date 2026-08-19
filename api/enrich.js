@@ -5897,10 +5897,19 @@ export default async function handler(req, res) {
     // case — same rule, applied uniformly, not carved out per-book.
     if (variantIdentitySource === 'vision' && confirmedVariant) {
       const firstEligibleForVariant = selectFirstEligibleVisual(parsedVisualRows);
+      // GrailKey Directive AU (GK-136), 4a-ii — the same family+issue-scoped
+      // population extractConfirmedVariant already consumes (variantSourceItems,
+      // computed above) also feeds the per-row entry path, so a row that
+      // couldn't clear the aggregate ≥2-same-artist gate can still enter as
+      // its own visible evidence and corroborate/be corroborated individually.
+      const otherEligibleRawTitlesForVariant = Array.isArray(variantSourceItems)
+        ? variantSourceItems.map((it) => it?.rawTitle).filter(Boolean)
+        : [];
       const { reconciled: variantReconciled } = reconcileVariantFacet(
         confirmedVariant,
         variantIdentitySource,
-        firstEligibleForVariant?.rawTitle || null
+        firstEligibleForVariant?.rawTitle || null,
+        otherEligibleRawTitlesForVariant
       );
       out.variantReconciliation = variantReconciled;
       out.variantReconciliationRowIndex = firstEligibleForVariant?.index ?? null;
