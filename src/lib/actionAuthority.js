@@ -124,6 +124,18 @@ export function deriveMarketStanding(out) {
     // disputed. Floors to SIMILAR_ONLY, never lower — same revocation-
     // only principle as AB/AP/AR's own sibling floors.
     if (out?.yearAuthority === 'CONTESTED') return 'SIMILAR_ONLY';
+    // GrailKey Directive 2026-08-20-AV (GK-133) — AR/AT's per-facet law
+    // extended to the title facet, last of the four (variant/year/issue/
+    // title) that can now be adopted CONTESTED. out.titleAuthority is
+    // custodied, not re-derived, from api/enrich.js's own
+    // reconcileTitleFacet call (src/lib/identityCore.js) — the ONE place
+    // that reconciliation runs. A CONTESTED title still prices (the whole
+    // point of this dispatch — the void this replaces left the book
+    // ID_REQUIRED with nothing priced at all) but cannot claim
+    // EXACT_CURRENT: PC/CV were queried against a title the system itself
+    // marks disputed. Floors to SIMILAR_ONLY, never lower — same
+    // revocation-only principle as AB/AP/AR/AT's own sibling floors.
+    if (out?.titleAuthority === 'CONTESTED') return 'SIMILAR_ONLY';
     return 'EXACT_CURRENT';
   }
   // Unrecognized source string — conservative default, never silently
@@ -183,6 +195,7 @@ const LOCK_CODE_TO_REASON = {
   'market-standing-variant-unresolved': 'VARIANT_UNRESOLVED_EDITION', // GrailKey Directive AP (GK-124)
   'market-standing-variant-contested': 'VARIANT_CONTESTED_EDITION', // GrailKey Directive AR (GK-129)
   'market-standing-year-contested': 'YEAR_CONTESTED', // GrailKey Directive AT (GK-135)
+  'market-standing-title-contested': 'TITLE_CONTESTED', // GrailKey Directive AV (GK-133)
 };
 
 const lockToReasonCode = (lock) => {

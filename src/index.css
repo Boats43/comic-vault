@@ -363,6 +363,12 @@ body,
   color: white;
 }
 
+.pill-mega-unresolved {
+  background: #d29922;
+  color: black;
+  border: 1px dashed rgba(0, 0, 0, 0.35);
+}
+
 .pill-exceeds-map {
   background: #d17105;
   color: white;

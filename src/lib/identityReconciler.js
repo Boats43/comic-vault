@@ -474,6 +474,74 @@ export const reconcileYear = (evidenceSet) => {
   };
 };
 
+// ── Title facet (GrailKey Directive 2026-08-20-AV, GK-133) ─────────────
+//
+// "The candidate always enters" (AS/GK-132's own law) extended to the last
+// facet without candidate custody. Issue, variant, and year all adopt a
+// physical candidate from the family-clustering pipeline's own eligible
+// pool when the pipeline's normal election refuses to promote one; title
+// was the sole remaining facet that just silently kept Vision's bare
+// default in that exact void. Mirrors reconcileIssue's shape exactly —
+// title values are free-form strings, same as variant, but unlike variant
+// this facet does not need a fuzzy comparator: a family-clustering
+// candidate and Vision's own title are either the same normalized series
+// name or they are the genuinely-disagreeing case this mechanism exists to
+// surface (never silently discarded, never silently promoted to
+// uncontested — see reconcileTitle's isContested logic below).
+//
+// 'first-eligible-visual' is sole-authority (same standing this project
+// already grants it for variant/year — physical/pool evidence wins
+// outright without needing a second agreeing source) so a lone,
+// disagreeing candidate still adopts, landing CONTESTED rather than
+// invisible. 'user' (an operator's own manual title correction) outranks
+// everything, matching every other facet's precedent.
+const TITLE_SOURCE_PRECEDENCE = ['user', 'first-eligible-visual', 'vision'];
+
+// reconcileTitle — pure, deterministic. Same shape as reconcileIssue:
+//   { value, source, authority, justifiedBy, conflicts }
+//   authority: 'NONE' | 'CONTESTED' | 'CORROBORATED'
+export const reconcileTitle = (evidenceSet) => {
+  const entries = sortEvidence(evidenceSet?.title || []);
+  const corroborations = entries.filter((e) => e.type !== 'conflict');
+  const conflicts = entries.filter((e) => e.type === 'conflict');
+
+  if (corroborations.length === 0) {
+    return {
+      value: null,
+      source: null,
+      authority: 'NONE',
+      justifiedBy: [],
+      conflicts: conflicts.map((c) => ({ source: c.source, value: c.value })),
+    };
+  }
+
+  let winner = null;
+  for (const src of TITLE_SOURCE_PRECEDENCE) {
+    winner = corroborations.find((e) => e.source === src);
+    if (winner) break;
+  }
+  if (!winner) winner = corroborations[0];
+
+  const disagreeingConflicts = conflicts.filter((c) => String(c.value) !== String(winner.value));
+  const disagreeingCorroborations = corroborations.filter(
+    (e) => e !== winner && String(e.value) !== String(winner.value)
+  );
+  const isContested = disagreeingConflicts.length > 0 || disagreeingCorroborations.length > 0;
+
+  return {
+    value: winner.value,
+    source: winner.source,
+    authority: isContested ? 'CONTESTED' : 'CORROBORATED',
+    justifiedBy: corroborations
+      .filter((e) => e === winner || String(e.value) === String(winner.value))
+      .map((e) => ({ source: e.source, value: e.value })),
+    conflicts: [
+      ...disagreeingConflicts.map((c) => ({ source: c.source, value: c.value })),
+      ...disagreeingCorroborations.map((e) => ({ source: e.source, value: e.value })),
+    ],
+  };
+};
+
 // reconcileIdentity — Slice 1 covers the issue facet only (see module
 // header). Deliberately not extended to title/publisher/variant/
 // creator this dispatch — those facets' existing direct writers are left

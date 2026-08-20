@@ -101,6 +101,7 @@ import {
   getMegaKeyFloor,
   normalizeTitle,
   isPublisherYearPlausible,
+  isMegaKeyIdentityCorroborated,
 } from "./mega-keys.js";
 import { extractCreatorsFromComps } from "../src/lib/premiumCreators.js";
 import { extractIssueFromEbayResults } from "../src/lib/identityAlignment.js";
@@ -2949,6 +2950,17 @@ export default async function handler(req, res) {
     // Stays false for barcode/manual/cgc-identity paths — none of those
     // ever go through resolveIdentity's provisional branch.
     let identityIsProvisionalOverride = false;
+    // GrailKey Directive 2026-08-20-AV (GK-133) — hoisted for the same
+    // reason as identityIsProvisionalOverride directly above: both 22e
+    // integrity checks (Phase 1 ~line 3542, Phase 2 ~line 7030) need to
+    // know "did the title facet reconciler adopt a CONTESTED candidate"
+    // before they run, not after — a title that legitimately diverges
+    // from Vision on purpose (verified via reconcileTitleFacet,
+    // identityCore.js) is not an assembly bug and must not be silently
+    // reverted by either check. Stays false for barcode/manual/cgc-
+    // identity paths and for every resolveIdentity call where the void
+    // never applied (family won outright, or no candidate existed).
+    let identityTitleAdoptedContested = false;
     // Q140 corrective dispatch (2026-07-23, review fix) — pre-pricing
     // fingerprint checkpoint. Captured at the end of EACH identity branch
     // below (barcode/manual/cgc/resolveIdentity), so it reflects exactly
@@ -3038,6 +3050,15 @@ export default async function handler(req, res) {
       identitySource = identity.identitySource;
       identityIsProvisionalOverride = identity.isProvisionalOverride === true;
       pricingIssue = confirmedIssue;
+      // GrailKey Directive 2026-08-20-AV (GK-133) — title facet authority,
+      // single-writer, mirrors out.issueAuthority's own pattern directly
+      // below. null (not written) when the fallback-vision void never
+      // applied — a normal, unaffected book with no title-facet reconciler
+      // involvement at all.
+      identityTitleAdoptedContested = identity.titleAdoptedContested === true;
+      if (identity.reconciledTitle) {
+        out.titleAuthority = identity.reconciledTitle.authority;
+      }
 
       // GrailKey Directive 2026-08-16-AQ (GK-127) — SINGLE canonical write
       // of out.issueAuthority, sourced exclusively from reconcileIssue's
@@ -3539,8 +3560,17 @@ export default async function handler(req, res) {
       // Q131 follow-up / GrailKey Directive AG — see shouldSkipAssemblyIntegrityCheck
       // docstring (identityCore.js) for why refused-identity-conflict and
       // discriminative-corroboration are both exempt.
-      if (shouldSkipAssemblyIntegrityCheck(familyCandidate?.decision)) {
-        console.log(`[22e] SKIPPED — decision=${familyCandidate?.decision} identity is intentionally divergent from Vision, not an assembly bug`);
+      // GrailKey Directive 2026-08-20-AV (GK-133/T-2) — a CONTESTED title
+      // adopted by reconcileTitleFacet (identityCore.js) IS an
+      // intentionally-divergent-from-Vision identity, the exact class
+      // shouldSkipAssemblyIntegrityCheck already exists to exempt — just
+      // reached via a new, third mechanism alongside refused-identity-
+      // conflict and discriminative-corroboration. Without this OR clause,
+      // 22e would revert the adoption before PC/CV ever see it (traced
+      // live, not hypothetical — this is what makes the Venom fixture work
+      // end to end).
+      if (shouldSkipAssemblyIntegrityCheck(familyCandidate?.decision) || identityTitleAdoptedContested) {
+        console.log(`[22e] SKIPPED — decision=${familyCandidate?.decision} identityTitleAdoptedContested=${identityTitleAdoptedContested} identity is intentionally divergent from Vision, not an assembly bug`);
       } else {
         // Q142 dispatch (2026-07-22, Adventure Time Summer Special / SDCC
         // class) — Rule 2 ("excess non-consensus tokens," 22e-LOSS below)
@@ -7027,7 +7057,12 @@ export default async function handler(req, res) {
     const phase2CompTitles = phase2UseFamily
       ? winningFamilyTitles
       : (rawComps?.prices?.length >= 3 ? rawComps.prices.map(p => p?.title).filter(Boolean) : null);
-    if (!out.assemblyIntegrityFailed && phase2CompTitles && phase2CompTitles.length >= 3 && identitySource !== 'vision') {
+    // GrailKey Directive 2026-08-20-AV (GK-133/T-2) — same reasoning as
+    // the Phase 1 skip above: a CONTESTED title-facet adoption suffixes
+    // identitySource (still != 'vision' literally), so the bare string
+    // check alone would let this Phase 2 check re-revert the exact
+    // adoption Phase 1 was just taught to leave alone.
+    if (!out.assemblyIntegrityFailed && phase2CompTitles && phase2CompTitles.length >= 3 && identitySource !== 'vision' && !identityTitleAdoptedContested) {
       console.log(
         `[22e-population] Phase 2 mode=${phase2UseFamily ? 'winning-family' : 'full-pool'} ` +
         `count=${phase2CompTitles.length}`
@@ -8927,7 +8962,19 @@ export default async function handler(req, res) {
     //   2. compsExhausted: AI verify rejected 100% of comps. `rawComps.lowest`
     //      is null but `compsFromEbay.lowest` still holds the pre-verify
     //      contaminated lowest — same untrusted data the sanity block skips.
-    isMegaKeyForFloor = !!getMegaKeyEntry(title, confirmedIssue, confirmedPublisher, confirmedYear || year);
+    // GrailKey Directive 2026-08-20-AV (GK-139) — a mega-key match with
+    // uncorroborated identity must not suppress the NORMAL floor/sanity
+    // guards this flag exists to gate around either — if the floor itself
+    // is about to stand down (see the post-pricing guard below), those
+    // guards are exactly what should produce the honest pre-floor
+    // derivation, not be skipped in favor of a floor that never fires.
+    isMegaKeyForFloor = !!getMegaKeyEntry(title, confirmedIssue, confirmedPublisher, confirmedYear || year)
+      && isMegaKeyIdentityCorroborated({
+        identitySource,
+        yearAuthority: out.yearAuthority,
+        variantApplicability: out.variantApplicability,
+        isCorroboratedIdentitySourceFn: isCorroboratedIdentitySource,
+      });
 
     // #20b-FIX2 [P0]: Gate legacy ask-floor when tier path active.
     // Tier pricing owns floor enforcement (priceBands.quick = verified-sold low).
@@ -9412,7 +9459,36 @@ export default async function handler(req, res) {
     // Schema version stamped on response for K2 rules-version tracking.
     out.megaKeysSchemaVersion = MEGA_KEYS_SCHEMA_VERSION;
     {
-      const megaKeyEntry = getMegaKeyEntry(title, confirmedIssue, confirmedPublisher, confirmedYear || year);
+      const megaKeyEntryRaw = getMegaKeyEntry(title, confirmedIssue, confirmedPublisher, confirmedYear || year);
+      // GrailKey Directive 2026-08-20-AV (GK-139) — "the floor that
+      // believed a ghost." MEGA_KEYS_FLOOR/getMegaKeyEntry are UNTOUCHED
+      // (name/issue/publisher/year value-match, unchanged) — this is a
+      // firing-condition gate, not a table change. A name/issue match with
+      // an uncorroborated title, a CONTESTED year, or a CONTESTED variant
+      // (a modern-edition facet actively disputing a claimed-vintage year)
+      // is treated as absent FOR FLOOR PURPOSES ONLY: no floor, no manual-
+      // review lock, no GRADE EXCEEDS MAP — the honest pre-floor
+      // derivation (already computed above) stands, and the match is
+      // retained as a visible, non-pricing advisory instead. A genuinely
+      // corroborated key is completely unaffected (isMegaKeyIdentityCorroborated
+      // returns true) — the floor still fires, full force.
+      const megaKeyIdentityOk = !megaKeyEntryRaw || isMegaKeyIdentityCorroborated({
+        identitySource,
+        yearAuthority: out.yearAuthority,
+        variantApplicability: out.variantApplicability,
+        isCorroboratedIdentitySourceFn: isCorroboratedIdentitySource,
+      });
+      if (megaKeyEntryRaw && !megaKeyIdentityOk) {
+        out.megaKeyIdentityUnresolved = true;
+        out.megaKeyIdentityUnresolvedName = `${megaKeyEntryRaw.title || title} #${confirmedIssue}`;
+        console.log(
+          `[mega-key-floor] STOOD DOWN — identity not corroborated ` +
+          `(identitySource=${identitySource}, yearAuthority=${out.yearAuthority || 'null'}, ` +
+          `variantApplicability=${out.variantApplicability || 'null'}) — possible mega-key match ` +
+          `"${out.megaKeyIdentityUnresolvedName}" retained as advisory only, price left at honest pre-floor derivation`
+        );
+      }
+      const megaKeyEntry = megaKeyIdentityOk ? megaKeyEntryRaw : null;
       // Ship 1.3.1 — mega-key floor must yield to edition warning.
       // Reprints/facsimiles/later-prints of mega-keys (e.g., B&B #28
       // Loot Crate polybag) must NOT receive 1st-print floor pricing.

@@ -24,7 +24,7 @@ import { normalizeOptionalYear } from './yearEvidence.js';
 // compHygiene.js/responseContract.js/yearEvidence.js, none of which import
 // identityCore.js.
 import { evaluateUnanimousConsensusPromotion, evaluateUnanimousYearConsensusPromotion, evaluateTitleTextIndependence } from './issueAuthority.js';
-import { selectFirstEligibleVisual, extractHashIssueNumber, isMarketingFlavoredRow, countCorroboratingEligibleRows, MINIMUM_CORROBORATING_ROWS, createEvidenceSet, addEvidence, reportConflict, reconcileIssue, reconcileVariant, reconcilePhysicalYear, extractFirstEligibleYearCandidate } from './identityReconciler.js';
+import { selectFirstEligibleVisual, extractHashIssueNumber, isMarketingFlavoredRow, countCorroboratingEligibleRows, MINIMUM_CORROBORATING_ROWS, createEvidenceSet, addEvidence, reportConflict, reconcileIssue, reconcileVariant, reconcileTitle, reconcilePhysicalYear, extractFirstEligibleYearCandidate } from './identityReconciler.js';
 import { matchCreatorCanonicals } from './premiumCreators.js';
 
 // Q119 dispatch (2026-07-18, Captain Marvel #17 class) — single canonical
@@ -954,6 +954,49 @@ export const extractFirstEligibleVariantCandidate = (rawTitle) => {
     parts.push(p);
   }
   return parts.length > 0 ? parts.join(' ') : null;
+};
+
+/**
+ * reconcileTitleFacet — pure. GrailKey Directive 2026-08-20-AV (GK-133).
+ * Builds the title evidence set and calls reconcileTitle
+ * (identityReconciler.js). Deliberately narrow, same discipline as
+ * reconcileVariantFacet: this does not re-litigate family election's own
+ * WIN conditions (Q38's >=3-member floor, Q84's dual-axis gate, AN's
+ * physical-corroboration token gate) — those still decide when a family
+ * candidate is promoted to confirmedTitle directly, byte-identical. This
+ * function only fires in the void those mechanisms leave when they
+ * refuse: `family.topFamily` (the same candidate Q38 already scored and
+ * blocked from promotion) becomes TITLE EVIDENCE rather than being
+ * silently discarded in favor of Vision's bare default.
+ *
+ * @param {string|null} visionTitle - Vision's own raw title
+ * @param {object|null} familyCandidate - the title-family clustering result
+ *   (imageSearchIdentity.js's selectTitleFamilyCandidate return value)
+ * @returns {{reconciled: object, candidate: string|null}}
+ */
+export const reconcileTitleFacet = (visionTitle, familyCandidate) => {
+  const evidence = createEvidenceSet();
+  if (visionTitle) {
+    addEvidence(evidence, 'title', 'vision', visionTitle);
+  }
+  // topFamily.title (NOT topFamily.rawTitle) — imageSearchIdentity.js's own
+  // token-consensus-cleaned candidate (buildTitleFamilies rebuilds it from
+  // noise-filtered member tokens; extractSeriesTitle already stripped
+  // slab/parenthetical/hash-issue/price/ratio/variant-category noise at
+  // parse time, before family-clustering ever sees it). .rawTitle is the
+  // UNTOUCHED raw listing string ("Venom - Separation Anxiety 1 Virgin
+  // Signed/Remarked by Mike Mayhew w/Poker Chip") — using it directly would
+  // adopt seller boilerplate as the title, not a series name. Family
+  // tokens are lowercase by construction; title-cased for display only,
+  // same convention titleCaseKeyPhrase (api/enrich.js) already applies to
+  // comp-derived phrases elsewhere in this codebase.
+  const candidateFamilyTitle = familyCandidate?.topFamily?.title || null;
+  if (candidateFamilyTitle) {
+    const titleCased = candidateFamilyTitle.replace(/\b\w/g, (c) => c.toUpperCase());
+    addEvidence(evidence, 'title', 'first-eligible-visual', titleCased);
+  }
+  const reconciled = reconcileTitle(evidence);
+  return { reconciled, candidate: reconciled.value };
 };
 
 /**
@@ -2356,6 +2399,65 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     console.log(`[phase1] eBay visual insufficient (${ebayResultCount} results), using Vision title`);
   }
 
+  // ── Title facet (GrailKey Directive 2026-08-20-AV, GK-133) ────────────
+  // "The candidate always enters" — last identity facet without candidate
+  // custody, given the same law issue (AS/GK-132), variant (AM/AU), and
+  // year (AT/GK-135) already have. Fires ONLY in the genuine void: family
+  // election refused promotion (decision==='fallback-vision') AND nothing
+  // above (a family-override branch, or the eBay-visual-consensus branch)
+  // already assigned a real title — confirmedTitle/identitySource are
+  // still exactly Vision's own bare default at this point. topFamily is
+  // the SAME family-clustering candidate the Q38 floor
+  // (imageSearchIdentity.js, "need >=3 for consensus override") already
+  // scored and blocked from promotion — reused here as title EVIDENCE,
+  // never re-derived. Adopted CONTESTED, never CORROBORATED-by-fiat
+  // (reconcileTitle demotes any disagreement with Vision to CONTESTED by
+  // construction — see that function, identityReconciler.js). C3's
+  // downstream floor (out.titleAuthority==='CONTESTED' -> SIMILAR_ONLY,
+  // src/lib/actionAuthority.js) is what keeps this from ever reading as a
+  // clean, confirmed identity. Q38/Q84/AN's own token/discriminative-
+  // corroboration gates are completely untouched by this block — it does
+  // not change when family election WINS; it only stops the title from
+  // silently defaulting to Vision's bare guess when election refuses and
+  // a real candidate was sitting right there the whole time.
+  // Q84-dual-axis-blocked exclusion (found regression-testing this
+  // dispatch against tests/q140-coherent-content-token-lane.test.js's own
+  // Adventure Time Summer Special/SDCC control) — family.titleAxisOnlyBlock
+  // is set at EXACTLY ONE return site (imageSearchIdentity.js's Q84 dual-
+  // axis gate) and means something structurally different from every other
+  // fallback-vision cause this block targets: a family that DID clear the
+  // >=3-member/overlap floor, where Vision+eBay already AGREE on a bare
+  // stem title, and Q84 deliberately rejected only the family's own
+  // NON-CONSENSUS additions ("Summer Special"/"SDCC") — confirmedTitle is
+  // already the correct, deliberately-agreed value by the time this block
+  // runs. topFamily.title there is the family's full cleaned cluster text
+  // (INCLUDING the rejected additions) — adopting it here would silently
+  // reintroduce exactly the pollution Q84/Q142/AG were built to keep out.
+  // This mechanism exists only for the genuine void (Q38's <3-member
+  // floor, weak pool-overlap, <5-item pool) — never for a qualified
+  // family whose own content was deliberately, correctly trimmed.
+  let reconciledTitle = null;
+  let titleAdoptedContested = false;
+  if (family?.decision === 'fallback-vision' && !family?.titleAxisOnlyBlock && identitySource === 'vision' && family?.topFamily?.title) {
+    const titleFacet = reconcileTitleFacet(vision.title, family);
+    reconciledTitle = titleFacet.reconciled;
+    if (reconciledTitle.source === 'first-eligible-visual' && reconciledTitle.value) {
+      confirmedTitle = reconciledTitle.value;
+      titleAdoptedContested = reconciledTitle.authority === 'CONTESTED';
+      identitySource = `${identitySource}+title_first_eligible_visual_${titleAdoptedContested ? 'contested' : 'corroborated'}`;
+      console.log(
+        `[reconcile-title] value="${reconciledTitle.value}" source=${reconciledTitle.source} ` +
+        `authority=${reconciledTitle.authority} justifiedBy=${JSON.stringify(reconciledTitle.justifiedBy)} ` +
+        `conflicts=${JSON.stringify(reconciledTitle.conflicts)}`
+      );
+      console.log(
+        `[title-first-eligible-visual] adopting title="${confirmedTitle}" from the family's own top ` +
+        `cluster ("${family.topFamily.rawTitle}") — Vision title was "${vision.title || 'null'}" — ` +
+        `${titleAdoptedContested ? 'CONTESTED, not confirmed' : 'CORROBORATED'}`
+      );
+    }
+  }
+
   // Track B Phase 0, Commit 4.3 (Section A/B/C, revised 2026-07-30) —
   // family issue/year authority, decoupled from the title-projection
   // decision above. Q84's title-safety gate (which can leave the branches
@@ -3721,6 +3823,13 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     // value, so a real conflict can compute CORROBORATED here — fix
     // traced, not built, awaiting greenlight.
     reconciledIssue,
+    // GrailKey Directive 2026-08-20-AV (GK-133) — the title facet's own
+    // reconciler verdict, same shape/contract as reconciledIssue above.
+    // null when the fallback-vision void never applied (family won
+    // outright, or no candidate existed at all) — api/enrich.js only
+    // reads this inside the same branch that produced it.
+    reconciledTitle,
+    titleAdoptedContested,
   };
 };
 

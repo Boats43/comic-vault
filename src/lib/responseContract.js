@@ -345,6 +345,22 @@ export function deriveLocks(out) {
     });
   }
 
+  // GrailKey Directive 2026-08-20-AV (GK-133) — the title-facet sibling to
+  // AR/AT's own contested locks immediately above, same additive/
+  // independent pattern. out.titleAuthority is custodied from api/
+  // enrich.js's reconcileTitleFacet call (src/lib/identityCore.js) —
+  // never re-derived here. A CONTESTED title means family-clustering's
+  // own candidate was adopted (the void this replaces left the book
+  // ID_REQUIRED, nothing priced) but Vision's own claim disagrees with it.
+  if (preStandingLockCount === 0 && out.titleAuthority === 'CONTESTED') {
+    locks.push({
+      code: 'market-standing-title-contested',
+      reason: 'The title/series on this scan is contested — the visual pool\'s own candidate disagrees with the initial read — price is not confirmed for the exact title',
+      hard: false,
+      class: 'insufficiency',
+    });
+  }
+
   // GrailKey Directive AH (GK-111) — sufficiency, not applicability. A
   // marketStanding of EXACT_CURRENT says the pool IS current and (per the
   // lock above) confirmed applicable to this edition — it says nothing

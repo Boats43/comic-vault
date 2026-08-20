@@ -6304,6 +6304,26 @@ function CollectionDetail({
                 </span>
               );
             }
+            // GrailKey Directive 2026-08-20-AV (GK-139) — a mega-key NAME
+            // match with uncorroborated identity (contested year/variant)
+            // is retained as a visible advisory rather than a price
+            // (api/enrich.js's isMegaKeyIdentityCorroborated gate) — the
+            // operator sees "possible mega-key, verify identity" instead
+            // of either a fabricated floor price or a silently-dropped
+            // match. Mutually exclusive with megaKeyFloorApplied above by
+            // construction (the floor only ever applies when this gate
+            // passed).
+            if (item.megaKeyIdentityUnresolved) {
+              return (
+                <span
+                  className="pill pill-mega-unresolved"
+                  title={`${item.megaKeyIdentityUnresolvedName || "Possible mega-key"} — identity not yet corroborated (year/variant contested); price shown is the honest pre-floor estimate, not the mega-key floor`}
+                  style={pillStyle}
+                >
+                  🔑 VERIFY IDENTITY
+                </span>
+              );
+            }
             // Default: matchConfidence tier (for non-mega-key books).
             // Ship #24 Wave 1 Commit 3 (Q122 class) — contract now wins
             // OUTRIGHT once present (previously mcTier was checked first

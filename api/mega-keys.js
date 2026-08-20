@@ -1133,6 +1133,57 @@ export const getMegaKeyEntry = (title, issue, publisher, year) => {
   return entry;
 };
 
+// GrailKey Directive 2026-08-20-AV (GK-139) — "the floor that believed a
+// ghost." passesIdentityGates (above) is pure title+issue+publisher+year
+// VALUE/tolerance matching — it has zero awareness of whether that value
+// was ever actually CORROBORATED. A real production case (Dell'Otto
+// Amazing Spider-Man #1, a modern virgin variant) matched the 1963 grail
+// entry on name/issue alone and enforced a $300,000 floor against a book
+// whose own year facet was CONTESTED (reconcileYear, src/lib/
+// identityReconciler.js) and whose own variant facet asserted a modern
+// edition (variantApplicability==='CONTESTED') — an entire comp pool of
+// 2018/2022 listings averaging ~$16. Safety held (the card still surfaced
+// LOCKED/DO_NOT_LIST downstream) but the FLOOR NUMBER itself was a
+// fabrication the rest of the card's own evidence directly contradicted.
+//
+// This gate is deliberately separate from getMegaKeyEntry/passesIdentityGates
+// (MEGA_KEYS_FLOOR itself, and the value-match logic, are UNTOUCHED — this
+// adds a firing-condition check, not a table change). Three conditions,
+// all required, using signals api/enrich.js already custodies by the time
+// the floor site runs:
+//   1. identitySource is genuinely corroborated (isCorroboratedIdentitySource,
+//      src/lib/identityCore.js) — not a bare/contested Vision-sourced title.
+//   2. yearAuthority is CORROBORATED (or absent entirely, e.g. a manual/
+//      barcode/cgc-cert path that never runs the reconciler at all — those
+//      are independently authoritative by construction and must not be
+//      penalized for having no reconciler output to check).
+//   3. variantApplicability does not actively CONTEST the edition — a
+//      CONTESTED modern-variant facet on a claimed-vintage book is exactly
+//      the era-contest this gate exists to catch.
+// When this returns false, the caller must treat the mega-key match as
+// absent for FLOOR purposes (null it out) — the honest pre-floor price
+// stands, and the match is retained only as a visible advisory, never a
+// price. A genuinely corroborated vintage key (the negative control this
+// gate must never break) still floors, full force — see
+// tests/mega-keys.test.js's own corroborated-identity fixture.
+export const isMegaKeyIdentityCorroborated = ({ identitySource, yearAuthority, variantApplicability, isCorroboratedIdentitySourceFn }) => {
+  // Manual/barcode/cgc-cert identity paths never produce a title-family
+  // identitySource string at all ('manual'/'barcode'/'cgc_cert') — those
+  // bypass resolveIdentity/family-clustering entirely and are
+  // independently authoritative by construction, not "uncorroborated."
+  // Checked unconditionally (not only as a fallback) so injecting the
+  // real isCorroboratedIdentitySource (which only recognizes title-family-*
+  // sources) can never mistakenly fail these three paths.
+  const isAuthoritativeIdentityPath =
+    identitySource === 'manual' || identitySource === 'barcode' || identitySource === 'cgc_cert';
+  const isCorroboratedTitle = isAuthoritativeIdentityPath
+    || (typeof isCorroboratedIdentitySourceFn === 'function' && isCorroboratedIdentitySourceFn(identitySource));
+  if (!isCorroboratedTitle) return false;
+  if (yearAuthority === 'CONTESTED') return false;
+  if (variantApplicability === 'CONTESTED') return false;
+  return true;
+};
+
 // Return the floor value + priceHigh + exceedsMap flag for a
 // title+issue+publisher+year+grade combination.
 //

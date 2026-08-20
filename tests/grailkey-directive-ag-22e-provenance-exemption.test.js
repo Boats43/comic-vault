@@ -272,7 +272,15 @@ console.log('\nFixture 4: issue contradiction still blocks adoption (AF\'s C2, u
 console.log('\nFixture 5: 22e skip branch writes no new authority state\n');
 {
   const enrichSrc = readFileSync(path.join(repoRoot, 'api', 'enrich.js'), 'utf8');
-  const skipBlockMatch = enrichSrc.match(/if \(shouldSkipAssemblyIntegrityCheck\(familyCandidate\?\.decision\)\) \{\r?\n([\s\S]*?)\r?\n\s*\} else \{/);
+  // GrailKey Directive 2026-08-20-AV (GK-133) — the skip CONDITION gained
+  // an additional `|| identityTitleAdoptedContested` OR-clause (a third,
+  // independent reason to skip 22e, alongside familyDecision's own two —
+  // see identityCore.js's shouldSkipAssemblyIntegrityCheck doc comment and
+  // the enrich.js call site's own AV comment). The condition text is no
+  // longer a single bare function call; the regex now tolerates any
+  // trailing `|| ...` on the same `if (...)` line while still anchoring on
+  // the exact skip-branch BODY this fixture actually verifies.
+  const skipBlockMatch = enrichSrc.match(/if \(shouldSkipAssemblyIntegrityCheck\(familyCandidate\?\.decision\)(?:[^{]*)\) \{\r?\n([\s\S]*?)\r?\n\s*\} else \{/);
   assertTrue(!!skipBlockMatch, 'found the current shouldSkipAssemblyIntegrityCheck skip branch in api/enrich.js');
   if (skipBlockMatch) {
     const skipBody = skipBlockMatch[1];

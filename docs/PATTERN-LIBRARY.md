@@ -11930,3 +11930,203 @@ math, no Z rewrite, no GK-133 (title facet) work -- explicitly out of
 this dispatch's scope. Committed locally, NOT pushed -- report and ask
 before pushing, since the push deploys production. Do not propose the
 next directive.
+
+## GrailKey Directive AV -- GK-133/GK-139: the last facet, and the floor that believed a ghost
+
+Two defects, one dispatch, both from the 2026-08-20 21:18 production
+session on build `fdc240c` -- the same session that proved AU working
+end to end.
+
+### Part A -- GK-133, the title facet
+
+Title was the last identity facet without candidate custody. Issue
+(AS/GK-132), variant (AM/AU), and year (AT/GK-135) all adopt the
+family-clustering pipeline's own frozen candidate when normal election
+refuses to promote it. Title still silently kept Vision's bare default
+in that exact void: `resolveIdentity` (`identityCore.js`) initializes
+`confirmedTitle = vision.title` and only overwrites it inside an
+if/else-if chain (family override / `refused-identity-conflict` with
+>=2 members / eBay-consensus agreement). A `fallback-vision` decision
+(Q38's <3-member floor, `imageSearchIdentity.js`) falls through all
+three branches untouched, even though `family.topFamily` -- the SAME
+candidate Q38 already scored and blocked from promotion -- was sitting
+right there.
+
+Production trace, Venom Separation Anxiety #1 (Mike Mayhew): rank-1
+row correctly resolved issue (`#1`, AS mechanism) and variant (Mayhew
+signed virgin, AM/AU mechanism) on the same request, but
+`[title-family] decision=fallback-vision selected=null` left
+`confirmedTitle="Venom"` -- generic. The PC lookup that followed asked
+about "Venom" and anchored to an unrelated product ("Anti-Venom,
+Horrifying Healer #1"), producing no usable year candidate.
+`assessIdentityConfidence` (`identityGate.js`) requires
+`['title','issue','year','publisher']` all present; with year null,
+`identityConfident=false` and the whole book fell to `ID_REQUIRED` --
+not because title was "wrong," but because the missing year cascaded
+from asking PC/CV the wrong question.
+
+Fix: `reconcileTitle` (new, `identityReconciler.js`, mirrors
+`reconcileIssue`'s exact shape: value/source/authority/justifiedBy/
+conflicts, `TITLE_SOURCE_PRECEDENCE = ['user','first-eligible-visual',
+'vision']`, first-eligible-visual sole-authority). `reconcileTitleFacet`
+(new, `identityCore.js`) builds the evidence set from `vision.title`
+and `family.topFamily.title` -- verified via direct inspection of
+`buildTitleFamilies`/`extractSeriesTitle` that `.title` (NOT
+`.rawTitle`) is the pipeline's own token-consensus-cleaned candidate;
+`.rawTitle` is unstripped seller boilerplate ("Venom - Separation
+Anxiety 1 Virgin Signed/Remarked by Mike Mayhew w/Poker Chip") and
+would have polluted the adopted title with noise. Wired into
+`resolveIdentity` right after the family/eBay-title if/else-if chain
+closes, gated on `family.decision==='fallback-vision' &&
+identitySource==='vision' && family.topFamily.title` -- i.e. only in
+the genuine void, never re-litigating Q38/Q84/AN's own win conditions.
+
+Regression found and fixed mid-build: the first version gated only on
+`decision==='fallback-vision'`, which also fires for a completely
+different shape -- Q84's dual-axis gate deliberately blocking a
+QUALIFIED family (>=3 members, Vision+eBay agreement on a bare stem)
+from adding non-consensus tokens (`family.titleAxisOnlyBlock===true`
+-- the Adventure Time Summer Special/SDCC class). In that shape
+`confirmedTitle` is already the correct, deliberately-trimmed value by
+the time this block runs; adopting `topFamily.title` (the family's
+FULL cleaned cluster text, including the rejected additions) silently
+reintroduced exactly the pollution Q84/Q142/AG exist to keep out.
+Caught by `tests/q140-coherent-content-token-lane.test.js`'s own
+Adventure Time control. Fixed by excluding `titleAxisOnlyBlock` from
+the gate.
+
+C3 (per-facet law, fourth and last facet): `out.titleAuthority` written
+alongside `out.issueAuthority` (single-writer, same pattern).
+`deriveMarketStanding` (`actionAuthority.js`) floors
+`titleAuthority==='CONTESTED'` to `SIMILAR_ONLY`, never
+`EXACT_CURRENT` -- AR/AT's law extended. `responseContract.js` gains a
+`market-standing-title-contested` lock / `TITLE_CONTESTED` reason code,
+same additive pattern as the variant/year siblings.
+
+22e interaction (found by trace, not in the original directive text):
+two independent revert paths could have undone the adoption before it
+ever reached PC/CV -- Phase 1 `22e` (`shouldSkipAssemblyIntegrityCheck`
+doesn't cover `fallback-vision`) and Phase 2 `22e-LOSS` (gated on bare
+`identitySource !== 'vision'`, which the new suffixed source would
+satisfy and thus NOT skip). Both call sites gained an added
+`|| identityTitleAdoptedContested` OR-guard -- a new hoisted flag, same
+lifecycle as `identityIsProvisionalOverride`. Deliberately did NOT
+touch `shouldSkipAssemblyIntegrityCheck`'s exported signature (avoids
+blast radius on its own direct unit tests); the OR-clause lives at the
+two call sites instead.
+
+q141-a (traced, deliberately not coded around, per the directive's own
+instruction): `isCorroboratedIdentitySource` only whitelists
+`title-family-*` sources; a CONTESTED-adopted title's suffixed
+`identitySource` (`vision+title_first_eligible_visual_contested`)
+correctly evaluates as NOT corroborated, so q141-a's existing PC-anchor
+overwrite protection does not extend to it -- a real, live GK-125-class
+risk (a wrong PC anchor could still overwrite a CONTESTED title). Not
+fixed this dispatch, per the directive's explicit "report, don't code
+around" instruction for this specific interaction. Did not manifest on
+the Venom fixture (the adopted title anchored PC correctly), but
+remains open as a named risk.
+
+### Part B -- GK-139, the mega-key floor
+
+`getMegaKeyEntry`/`passesIdentityGates` (`api/mega-keys.js`) are pure
+title+issue+publisher+year VALUE/tolerance matching -- confirmed via
+direct trace to have zero awareness of `out.yearAuthority`,
+`out.variantApplicability`, or identity corroboration of any kind.
+
+Production trace: a real Dell'Otto Amazing Spider-Man #1 (a modern
+virgin variant) matched the `"amazing spider man|1"` entry (43-entry
+`MEGA_KEYS_FLOOR`, 1963, grade 9.4 -> $300,000) even though
+`reconcileYear` graded the year CONTESTED (AU/GK-137's own
+single-source ceiling -- a lone PriceCharting catalog match, no
+independent agreement) and `reconcileVariantFacet` graded the variant
+CONTESTED (AU/GK-136 -- a modern virgin variant physically
+corroborated against the frozen rank-1 row, contradicting the claimed
+1963 original). The pre-floor derivation (`pc_estimate`, ~$6,661) was
+overwritten to $300,000 by pure name+issue+publisher+year string/value
+match. Safety held downstream (the card still surfaced
+LOCKED/DO_NOT_LIST) but the floor NUMBER itself was a fabrication the
+rest of the card's own evidence directly contradicted -- a
+$300,000-vs-~$16-actual-market gap the operator would have seen as the
+displayed price.
+
+Fix: new `isMegaKeyIdentityCorroborated` (`api/mega-keys.js`), called
+at both existing firing sites (`api/enrich.js ~8930` for
+`isMegaKeyForFloor`, `~9415` for the real floor). Three conditions, all
+required: (1) title identity corroborated -- `isCorroboratedIdentitySource`,
+OR an independently-authoritative `manual`/`barcode`/`cgc_cert`
+identity path (these never produce a `title-family-*` source string at
+all and must not be mistaken for uncorroborated); (2)
+`yearAuthority !== 'CONTESTED'`; (3) `variantApplicability !==
+'CONTESTED'`. `MEGA_KEYS_FLOOR`/`getMegaKeyEntry`/`passesIdentityGates`
+themselves are completely untouched -- this is a firing-condition gate,
+not a table change (C5). `isMegaKeyForFloor` itself is gated on the
+same check, so a stood-down mega-key match no longer suppresses the
+NORMAL floor/sanity guards it exists to skip around -- the honest
+pre-floor derivation is what those guards then produce, not a second
+silent gap.
+
+On failure: `out.megaKeyIdentityUnresolved` + `megaKeyIdentityUnresolvedName`
+set (the match is retained as a visible advisory, never silently
+dropped -- I13), `[mega-key-floor] STOOD DOWN` logged with the specific
+reason, and the honest pre-floor price stands.
+
+C5 negative control (must never break): a genuinely corroborated 1963
+ASM #1 (manual identity, CORROBORATED year, no contested variant) still
+floors at $300,000, full force -- proven via the real handler, not
+merely the unit-level gate function.
+
+### Verification
+
+Both parts verified end to end through the real `/api/enrich` handler
+(GK-138 protocol) via `tests/grailkey-directive-av-handler-smoke.test.js`
+(28/28): Venom's title adoption reaches PC/CV and prices at REVIEW,
+never `ID_REQUIRED`; the Dell'Otto ghmn7 pool (reused verbatim from
+`grailkey-directive-au-handler-smoke.test.js`) prices at $6,661.46 with
+`[mega-key-floor] STOOD DOWN` logged, never $300,000; the genuine
+mega-key negative control still floors at $300,000. Unit-level coverage
+in `tests/grailkey-directive-av-title-megakey-authority.test.js`
+(28/28): `reconcileTitle` pure-function behavior, `resolveIdentity`
+title adoption against the real (verified via direct inspection, not
+guessed) `selectTitleFamilyCandidate` output shape, the C3
+market-standing floor, the no-candidate control, and
+`isMegaKeyIdentityCorroborated`'s three independently-sufficient block
+conditions plus the manual/barcode/cgc_cert carve-out.
+
+Full 222-file regression sweep: 199 PASS / 19 FAIL / 4 TIMEOUT, same 19
+named FAIL files as the prior 220-file baseline (197/19/4/220) plus the
+two new, fully-passing files. Three previously-undocumented pre-existing
+failures found and confirmed unrelated (failing identically with this
+dispatch's changes stashed out): `grailkey-directive-j-gk79a-relabel.test.js`,
+`grailkey-directive-p-task3-variant-on-card.test.js`,
+`grailkey-directive-q-variant-null-custody.test.js`. One sweep-harness
+timeout-proximity artifact ruled out the same way CLAUDE.md already
+documents for two other files: `q-trackB-commit4.3-winning-family-authority.test.js`
+flagged FAIL once under the 20s-per-file sweep cutoff (13.2s actual
+runtime), passed cleanly (263/263) on two direct re-runs.
+
+Two real regressions found and fixed before shipping (both caught by
+running the full suite, not just the fixtures the directive named): the
+`titleAxisOnlyBlock` exclusion above, and a brittle source-text regex
+in `tests/grailkey-directive-ag-22e-provenance-exemption.test.js` that
+matched the old bare `shouldSkipAssemblyIntegrityCheck(...)` condition
+literally -- updated to tolerate the new
+`|| identityTitleAdoptedContested` OR-clause while still verifying the
+skip branch's own body (no `writeConfirmed`, no `out.*` write) is
+unchanged.
+
+### Handoff
+
+GK-133/GK-139 SHIPPED-PENDING PHYSICAL. Closure reserved for Jimmy's
+post-deploy rescans: Venom should carry "Separation Anxiety" on the
+card, price at REVIEW; Dell'Otto should show a sane price from its own
+market plus an advisory chip, still LOCKED pending identity, no $300K
+ghost; a genuine vintage mega-key (if one is rescanned) should be
+unaffected. Sabrina (discriminative-corroboration path, untouched by
+this dispatch) is the standing control. GK-125-class risk at q141-a
+(traced, not fixed, per the directive's own instruction) remains open
+-- flag if a wrong PC anchor is ever observed overwriting a
+CONTESTED-adopted title in production. GK-131 (key-issue detection)
+remains untouched, own greenlight required. Committed locally, NOT
+pushed -- report and ask before pushing, since the push deploys
+production. Do not propose the next directive.
