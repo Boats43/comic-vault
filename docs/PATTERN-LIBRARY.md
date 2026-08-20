@@ -12286,9 +12286,12 @@ dispatch cannot do: make PriceCharting's own product lookup actually
 fire for the Venom fixture, or trace why `api/comps.js`'s own 4
 post-filter survivors don't reach `out.rawComps` -- both are real,
 observed gaps, but neither is a title-cruft problem, and both are
-outside GK-140's own scope (C7). If Jimmy's real-world rescan of Venom
-still shows no price at all (not merely a thin-market REVIEW), that is
-the concrete next investigation, not a GK-140 regression. GK-125's
+outside GK-140's own scope (C7). Logged as **GK-141** (OPEN,
+docs/TICKET-REGISTRY.md) with the fixture evidence attached, rather
+than left as a footnote here alone. If Jimmy's real-world rescan of
+Venom still shows no price at all (not merely a thin-market REVIEW),
+that is GK-141's own concrete next investigation, not a GK-140
+regression. GK-125's
 family-name-collapse half and DATA-0 remain separately scoped, untouched.
 Committed locally, NOT pushed -- report and ask before pushing, since
 the push deploys production. Do not propose the next directive.
