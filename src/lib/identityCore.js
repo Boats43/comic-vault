@@ -15,7 +15,7 @@
  * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
 
-import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership, tokenizeTitle, extractVariantTokensByAxis, IDENTITY_TPB_MARKER_RE } from './compHygiene.js';
+import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership, tokenizeTitle, extractVariantTokensByAxis, IDENTITY_TPB_MARKER_RE, VARIANT_CONTAM_RE, SLAB_RE } from './compHygiene.js';
 import { normalizeOptionalYear } from './yearEvidence.js';
 // GrailKey Dispatch 26, Fix 4 (2026-08-08) — zero-support unanimous
 // rescue reuses Fix 2's own promotion predicate (evaluateUnanimousConsensusPromotion)
@@ -956,8 +956,207 @@ export const extractFirstEligibleVariantCandidate = (rawTitle) => {
   return parts.length > 0 ? parts.join(' ') : null;
 };
 
+// GrailKey Directive 2026-08-20-AW (GK-140) — "the adopted title asks a
+// clean question." AV made the rank-1 candidate win; production
+// immediately showed the cost of winning VERBATIM: the raw seller row
+// ("Venom - Separation Anxiety 1 Virgin Signed/Remarked by Mike Mayhew
+// w/Poker Chip") over-narrows the PC/CV/comps queries built from it (no
+// catalog product matches a seller's flourish — the SAME physical book
+// resolved cleanly to "Venom Separation Anxiety" on a cooperative scan and
+// priced normally) and pollutes the card display.
+//
+// Strip-only, never substitute (C1) — no series-name list, no guessing.
+// Each cruft class below is a structural pattern (an attribution clause,
+// a "w/" merch clause, a parenthetical, a grade token, a leading issue
+// number, a trailing publisher+year suffix) confirmed against the RAW
+// row text, which still carries these structural markers — unlike
+// `family.topFamily.title` (buildTitleFamilies' own naive token-consensus
+// cleaning), which has already destroyed them by the time it reaches this
+// function (that gap is exactly why "by mike mayhew poker chip" survived:
+// tokenizeTitleFamily's ARTIST_PATTERNS strip, compHygiene.js, has no
+// "Mayhew" entry — a real, traceable coverage gap, not a mystery).
+//
+// Attribution-clause stripping is confirmed via `matchCreatorCanonicals`
+// (premiumCreators.js) — the SAME registry that already populates the
+// variant facet's evidence (reconcileVariantFacet/
+// extractFirstEligibleVariantCandidate) — so what this function strips
+// from the title is provably the same set already attributed to variant
+// (C2), never an independent guess about what counts as a "creator."
+// Reuses compHygiene.js's own already-proven regexes wherever one exists
+// (SLAB_RE for grade tokens, VARIANT_CONTAM_RE for generic finish/
+// descriptor words like "virgin"/"foil"/"exclusive") rather than a
+// second, independently-drifting copy of the pattern itself.
+//
+// Deliberately NOT built at module top level. Two real bugs found doing
+// it that way, both caught by running the full suite before shipping,
+// neither hypothetical:
+//   (1) TDZ hazard — `new RegExp(SLAB_RE.source, ...)` evaluated at this
+//       module's OWN top level depends on compHygiene.js having already
+//       finished initializing SLAB_RE by the time this line runs. That
+//       held for some test entry points and threw
+//       "Cannot access 'SLAB_RE' before initialization" for others,
+//       purely as a function of which module a given test file imports
+//       first — a real, fragile ordering hazard, not a coincidence.
+//   (2) Global-regex statefulness — a shared, global-flagged RegExp
+//       object mutates its own `lastIndex` on every `.test()` call; a
+//       module-level singleton reused across many `canonicalizeTitleCandidate`
+//       calls (many scans, many test fixtures in one process) risks a
+//       LATER call silently missing a match at the start of its string
+//       because `lastIndex` was left non-zero by an EARLIER call on a
+//       different string.
+// applyStrip (below) builds a fresh RegExp from a `.source`/string each
+// call and uses `.match()` (which the spec resets to lastIndex=0
+// regardless) instead of `.test()` + a second `.match()` — both hazards
+// closed at once, not patched around.
+const applyStrip = (text, sourceOrRegex, className, strippedLog) => {
+  const source = typeof sourceOrRegex === 'string' ? sourceOrRegex : sourceOrRegex.source;
+  const re = new RegExp(source, 'gi');
+  const matches = text.match(re);
+  if (!matches || matches.length === 0) return text;
+  strippedLog.push({ class: className, text: matches.join(' ') });
+  return text.replace(new RegExp(source, 'gi'), ' ');
+};
+
+// SLAB_RE requires a grading-COMPANY prefix (cgc/cbcs/...); real eBay
+// titles routinely carry a bare condition word with no company at all
+// ("NM Marvel Comic Book") or a bare decimal grade-scale number ("9.4"
+// with no "CGC" anywhere). Two narrow, additive patterns for exactly
+// those two shapes — bare condition abbreviations, and a bare single-
+// digit.single-digit number (grade scale; excludes 4-digit years like
+// "2099"/"1994" by construction). Plain (non-'g') source strings — the
+// 'g' flag is added fresh inside applyStrip, never carried here.
+const TITLE_CANON_BARE_CONDITION_SRC = '\\b(?:nm|vf|fn|vg|gd|fr|pr|mt)[+-]?\\b';
+const TITLE_CANON_BARE_GRADE_NUMBER_SRC = '\\b\\d\\.\\d\\b';
+const TITLE_CANON_SELLER_NOISE_SRC = '\\b(?:check\\s*photos?|ships?\\s*free|hot!*|ltd\\s*\\d+|limited(?:\\s*to)?\\s*\\d+)\\b';
+const TITLE_CANON_PAREN_SRC = '\\([^)]*\\)';
+const TITLE_CANON_PUBLISHER_YEAR_SUFFIX_RE = /\b(?:marvel|dc)(?:\s+comics)?\s*(?:\d{4})?\s*$/i;
+
+// Strip a trailing/leading attribution clause ("by/signed by/remarked by
+// <creator clause>") — only when the clause actually contains a
+// registry-recognized creator (matchCreatorCanonicals), so a real title
+// phrase that happens to contain the word "by" is never falsely stripped
+// (C6). Returns { text, strippedText } or null when no attribution clause
+// with a confirmed creator was found.
+const stripAttributionClause = (text) => {
+  const m = text.match(/\b(?:signed\/?\s*remarked|remarked\/?\s*signed|signed|remarked)?\s*(?:by)\s+.+$/i);
+  if (!m) return null;
+  const clause = m[0];
+  if (matchCreatorCanonicals(clause).length === 0) return null;
+  return { text: text.slice(0, m.index).trim(), strippedText: clause.trim() };
+};
+
+// Strip a trailing "w/ <object>" merch/packaging clause ("w/Poker Chip",
+// "w/COA", "w/ Gemini mailer"). Structural marker only — no object list,
+// so it cannot mistake a real title word for merch on its own; it only
+// fires on the literal "w/" construction.
+const stripMerchClause = (text) => {
+  const m = text.match(/\bw\/\s*.+$/i);
+  if (!m) return null;
+  return { text: text.slice(0, m.index).trim(), strippedText: m[0].trim() };
+};
+
+// Strip a standalone bare issue number that duplicates the already-
+// adopted issue facet ("1107 Detective Comics..." / "Venom ... 1 Virgin"
+// when the issue is #1107 / #1) — the issue already has its own facet/
+// display; a duplicate bare number anywhere in the title candidate is
+// noise, not part of the series name. Bounded to the SPECIFIC resolved
+// issue value only (never strips an arbitrary number) and only the FIRST
+// standalone occurrence — a real numeric title word ("2099", "X-Men 2099")
+// never collides with this unless the issue itself happens to equal that
+// exact number, in which case it genuinely is the same duplicate token.
+const stripStandaloneIssueNumber = (text, issueValue) => {
+  if (issueValue == null) return null;
+  const escaped = String(issueValue).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(^|\\s)#?${escaped}(?=\\s|$)`, 'i');
+  if (!re.test(text)) return null;
+  return { text: text.replace(re, '$1').replace(/\s{2,}/g, ' ').trim(), strippedText: String(issueValue) };
+};
+
 /**
- * reconcileTitleFacet — pure. GrailKey Directive 2026-08-20-AV (GK-133).
+ * canonicalizeTitleCandidate — pure, strip-only (C1). GrailKey Directive
+ * AW (GK-140). Takes the frozen rank-1 row's own VERBATIM raw text and
+ * strips known cruft classes (attribution, merch/w-clause, parenthetical
+ * noise, grade/condition tokens, seller noise, a leading duplicate issue
+ * number, a trailing bare publisher+year suffix) — never adds, guesses,
+ * or substitutes. C6 over-strip guard: if stripping collapses the
+ * candidate to nothing (or a single stopword), the lightly-whitespace-
+ * cleaned ORIGINAL is returned instead — an honest, un-canonicalized
+ * question beats no question at all.
+ *
+ * @param {string} rawTitle - the frozen rank-1 row's own verbatim text
+ * @param {{issueValue?: string|number|null}} [opts]
+ * @returns {{value: string, overStripped: boolean, strippedLog: Array<{class: string, text: string}>}}
+ */
+export const canonicalizeTitleCandidate = (rawTitle, opts = {}) => {
+  const original = String(rawTitle || '');
+  const strippedLog = [];
+  let s = original;
+
+  const attribution = stripAttributionClause(s);
+  if (attribution) { s = attribution.text; strippedLog.push({ class: 'attribution', text: attribution.strippedText }); }
+
+  const merch = stripMerchClause(s);
+  if (merch) { s = merch.text; strippedLog.push({ class: 'merch', text: merch.strippedText }); }
+
+  s = applyStrip(s, TITLE_CANON_PAREN_SRC, 'parenthetical', strippedLog);
+  s = applyStrip(s, SLAB_RE.source, 'grade', strippedLog);
+  // Generic finish/descriptor words (VARIANT_CONTAM_RE: virgin/foil/
+  // exclusive/sketch/ratio/etc.) — reused verbatim from compHygiene.js
+  // (C2: the same words the variant/creator machinery already
+  // recognizes, never a new independent list).
+  s = applyStrip(s, VARIANT_CONTAM_RE.source, 'finish-descriptor', strippedLog);
+  // Deliberately NO bare "signed"/"remarked" strip (SIGNED_RE) beyond the
+  // attribution clause above — a bare SIGNED_RE match anywhere in the
+  // string is indistinguishable from a real title phrase ("Batman: The
+  // Signed Edition"), and the attribution-clause stripper above already
+  // handles the actual production shape ("Signed/Remarked by <creator>")
+  // via the SAME word, in the position it's actually cruft. Found and
+  // reverted during fixture testing — the bare version broke exactly the
+  // C6 negative control it exists to protect.
+  s = applyStrip(s, TITLE_CANON_BARE_CONDITION_SRC, 'grade', strippedLog);
+  s = applyStrip(s, TITLE_CANON_BARE_GRADE_NUMBER_SRC, 'grade', strippedLog);
+  s = applyStrip(s, TITLE_CANON_SELLER_NOISE_SRC, 'seller-noise', strippedLog);
+  // Space-surrounded dash/pipe/colon ("Venom - Separation Anxiety") is
+  // listing punctuation, collapsed to a single space — a word-internal
+  // hyphen with no surrounding spaces ("Spider-Man", "X-Men") is never
+  // touched by this pattern.
+  s = s.replace(/\s+[-–—|]+\s+/g, ' ').replace(/[-–—:|]+\s*$/, '').replace(/\s{2,}/g, ' ').trim();
+
+  const standaloneIssue = stripStandaloneIssueNumber(s, opts.issueValue);
+  if (standaloneIssue) { s = standaloneIssue.text; strippedLog.push({ class: 'standalone-issue', text: standaloneIssue.strippedText }); }
+
+  if (TITLE_CANON_PUBLISHER_YEAR_SUFFIX_RE.test(s)) {
+    strippedLog.push({ class: 'publisher-year-suffix', text: (s.match(TITLE_CANON_PUBLISHER_YEAR_SUFFIX_RE) || []).join(' ') });
+    s = s.replace(TITLE_CANON_PUBLISHER_YEAR_SUFFIX_RE, '').trim();
+  }
+
+  s = s.replace(/[-–—:|,]+\s*$/, '').replace(/\s{2,}/g, ' ').trim();
+
+  // C6 — over-strip guard. Two different protections are actually in
+  // play here, not one: attribution/merch/parenthetical/publisher-year-
+  // suffix only match STRUCTURAL positions (trailing "by <creator>",
+  // trailing "w/...", a bare trailing "marvel/dc [+ year]") — a real
+  // title word in the middle of the string is never a match target for
+  // those. Grade/finish-descriptor/signed-leftover (SLAB_RE/
+  // VARIANT_CONTAM_RE/SIGNED_RE) match a SPECIFIC, bounded vocabulary
+  // anywhere in the string — real title collision risk there is
+  // structurally small (none of "virgin/foil/exclusive/sketch/signed/
+  // remarked/etc." are real comic series names) but not zero, so this
+  // final guard is the actual backstop: if stripping still empties the
+  // candidate or leaves a single stopword, the original wins outright.
+  const STOP_ONLY = new Set(['the', 'a', 'an', 'of', 'and', 'or']);
+  const tokens = s.split(/\s+/).filter(Boolean);
+  const overStripped = tokens.length === 0 || (tokens.length === 1 && STOP_ONLY.has(tokens[0].toLowerCase()));
+  if (overStripped) {
+    return { value: original.replace(/\s{2,}/g, ' ').trim(), overStripped: true, strippedLog: [] };
+  }
+  return { value: s, overStripped: false, strippedLog };
+};
+
+/**
+ * reconcileTitleFacet — pure. GrailKey Directive 2026-08-20-AV (GK-133),
+ * canonicalization added by Directive AW (GK-140).
+ *
  * Builds the title evidence set and calls reconcileTitle
  * (identityReconciler.js). Deliberately narrow, same discipline as
  * reconcileVariantFacet: this does not re-litigate family election's own
@@ -969,6 +1168,15 @@ export const extractFirstEligibleVariantCandidate = (rawTitle) => {
  * blocked from promotion) becomes TITLE EVIDENCE rather than being
  * silently discarded in favor of Vision's bare default.
  *
+ * AW correction: the candidate source is now `topFamily.rawTitle` (the
+ * frozen row's own VERBATIM text), run through canonicalizeTitleCandidate
+ * — not `topFamily.title` (buildTitleFamilies' own naive token-consensus
+ * cleaning, which had already destroyed the structural markers
+ * canonicalizeTitleCandidate needs and left real cruft like "by mike
+ * mayhew poker chip" behind — see that function's own header for the
+ * full trace). The verbatim row is preserved as `verbatim` evidence
+ * metadata (C3) — never discarded, only no longer the DISPLAY value.
+ *
  * @param {string|null} visionTitle - Vision's own raw title
  * @param {object|null} familyCandidate - the title-family clustering result
  *   (imageSearchIdentity.js's selectTitleFamilyCandidate return value)
@@ -979,21 +1187,23 @@ export const reconcileTitleFacet = (visionTitle, familyCandidate) => {
   if (visionTitle) {
     addEvidence(evidence, 'title', 'vision', visionTitle);
   }
-  // topFamily.title (NOT topFamily.rawTitle) — imageSearchIdentity.js's own
-  // token-consensus-cleaned candidate (buildTitleFamilies rebuilds it from
-  // noise-filtered member tokens; extractSeriesTitle already stripped
-  // slab/parenthetical/hash-issue/price/ratio/variant-category noise at
-  // parse time, before family-clustering ever sees it). .rawTitle is the
-  // UNTOUCHED raw listing string ("Venom - Separation Anxiety 1 Virgin
-  // Signed/Remarked by Mike Mayhew w/Poker Chip") — using it directly would
-  // adopt seller boilerplate as the title, not a series name. Family
-  // tokens are lowercase by construction; title-cased for display only,
-  // same convention titleCaseKeyPhrase (api/enrich.js) already applies to
-  // comp-derived phrases elsewhere in this codebase.
-  const candidateFamilyTitle = familyCandidate?.topFamily?.title || null;
-  if (candidateFamilyTitle) {
-    const titleCased = candidateFamilyTitle.replace(/\b\w/g, (c) => c.toUpperCase());
-    addEvidence(evidence, 'title', 'first-eligible-visual', titleCased);
+  const candidateRawTitle = familyCandidate?.topFamily?.rawTitle || null;
+  if (candidateRawTitle) {
+    // Issue candidate from the SAME row's own text, self-contained (no
+    // dependency on the outer resolveIdentity call's own issue-facet
+    // timing — that reconciliation runs later in the function) — used
+    // only to strip a duplicate standalone issue number from the title
+    // candidate, never to establish canonical issue identity itself
+    // (AS/GK-132 owns that, unchanged).
+    const rowIssueCandidate = extractHashIssueNumber(candidateRawTitle) || extractIssueCandidate(candidateRawTitle);
+    const canon = canonicalizeTitleCandidate(candidateRawTitle, { issueValue: rowIssueCandidate?.issue ?? null });
+    for (const strip of canon.strippedLog) {
+      console.log(`[title-canon] stripped=${strip.class}:"${strip.text}"`);
+    }
+    if (canon.overStripped) {
+      console.log(`[title-canon] over-strip guard fired — falling back to lightly-cleaned original: "${canon.value}"`);
+    }
+    addEvidence(evidence, 'title', 'first-eligible-visual', canon.value, { verbatim: candidateRawTitle });
   }
   const reconciled = reconcileTitle(evidence);
   return { reconciled, candidate: reconciled.value };

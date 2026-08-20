@@ -12130,3 +12130,165 @@ CONTESTED-adopted title in production. GK-131 (key-issue detection)
 remains untouched, own greenlight required. Committed locally, NOT
 pushed -- report and ask before pushing, since the push deploys
 production. Do not propose the next directive.
+
+## GrailKey Directive AW -- GK-140: the adopted title asks a clean question
+
+AV made the rank-1 title candidate win in the fallback-vision void.
+Production immediately showed the cost of winning it VERBATIM: the
+adopted candidate was raw seller text ("Venom Separation Anxiety By
+Mike Mayhew Poker Chip"), which over-narrows the PC/CV/comps queries
+built from it -- no catalog product matches a seller's flourish -- and
+pollutes the card display. The SAME physical book resolved cleanly on
+a cooperative (weighted-consensus) scan in the same session, proving
+the identity itself was never the problem; the QUESTION asked of
+external sources was.
+
+### The fix
+
+`canonicalizeTitleCandidate` (new, `src/lib/identityCore.js`) is
+strip-only (C1) -- it removes known cruft classes and never adds,
+guesses, or substitutes. Seven classes, each a structural pattern
+confirmed against the frozen row's own VERBATIM text:
+
+- attribution clause ("by/signed by/remarked by <clause>") -- only
+  strips when `matchCreatorCanonicals` (premiumCreators.js, the SAME
+  registry the variant facet already uses) confirms a real creator name
+  is present, so a real title phrase containing "by" is never falsely
+  stripped
+- merch/packaging "w/ <object>" trailing clause
+- parenthetical noise
+- grade/condition tokens -- SLAB_RE (compHygiene.js, company-prefixed)
+  plus two narrow additive patterns for bare condition words ("NM") and
+  bare grade-scale decimals ("9.4") SLAB_RE doesn't cover alone
+- generic finish/descriptor words -- VARIANT_CONTAM_RE
+  (compHygiene.js: virgin/foil/exclusive/sketch/etc.), reused verbatim
+- a standalone bare issue number duplicating the already-adopted issue
+  facet, anywhere in the string (not just leading)
+- a trailing bare publisher(+year) suffix
+
+Deliberately reuses compHygiene.js's/premiumCreators.js's own
+already-proven registries throughout (SLAB_RE, VARIANT_CONTAM_RE,
+matchCreatorCanonicals) rather than a second, independently-drifting
+copy of any pattern -- C2's own requirement follows directly from this:
+whatever the title strips as a creator name is provably the SAME set
+the variant facet already keeps, because both read the same registry.
+
+Wired into `reconcileTitleFacet` at the exact adoption site: the
+evidence-set candidate is now `canonicalizeTitleCandidate(topFamily.
+rawTitle, {issueValue})`, not `topFamily.title` (buildTitleFamilies'
+own naive token-consensus cleaning, which had ALREADY destroyed every
+structural marker this function needs -- confirmed directly: `.title`
+for the real Venom row was "venom separation anxiety by mike mayhew
+poker chip," with "by mike mayhew poker chip" surviving because
+tokenizeTitleFamily's own ARTIST_PATTERNS strip, compHygiene.js, has no
+"Mayhew" entry -- a real, traceable coverage gap, not a mystery). The
+verbatim raw row is preserved as `verbatim` evidence metadata (C3) and
+flows through into `reconcileTitle`'s own `justifiedBy` array
+(identityReconciler.js) -- never discarded, only no longer the DISPLAY
+value.
+
+C4/C5 unchanged by construction: `reconcileTitle`'s CONTESTED/
+CORROBORATED logic doesn't know or care whether its input was
+canonicalized; the function only fires when
+`family.decision==='fallback-vision'`, so weighted-consensus and
+discriminative-corroboration paths never call it at all (proven
+byte-identical via a direct fixture, not merely assumed).
+
+### Two real bugs found and fixed mid-build
+
+Neither named in the directive's own text -- both caught by running the
+FULL suite after building, the same discipline every prior GrailKey
+dispatch has required, not by the dispatch's own named fixtures alone.
+
+**TDZ circular-import hazard.** The first version built
+`new RegExp(SLAB_RE.source, 'gi')` etc. at identityCore.js's own MODULE
+TOP LEVEL. This depends on compHygiene.js having already finished
+initializing `SLAB_RE`/`VARIANT_CONTAM_RE` by the time that line runs --
+true for some test entry points, false for others, purely as a function
+of which module a given file imports first (imageSearchIdentity.js
+imports FROM identityCore.js, which is why identityCore.js cannot
+import back from imageSearchIdentity.js either -- the same import-cycle
+discipline `reconcileVariantFacet`'s own doc comment already names).
+`tests/grailkey-directive-at-year-evidence.test.js` threw
+`ReferenceError: Cannot access 'SLAB_RE' before initialization` on a
+fresh run; several other files that happened to import compHygiene.js
+first did not. Fixed by deferring every such read inside the function
+body -- `applyStrip` (new) reads `SLAB_RE.source`/`VARIANT_CONTAM_RE.
+source` only at CALL time, well after all modules have finished
+loading.
+
+**Global-regex `lastIndex` statefulness.** The same first version used
+module-level, `g`-flagged RegExp singletons with `.test()` followed by
+a separate `.match()` call. A global-flagged RegExp mutates its own
+`lastIndex` on every `.test()` match; a shared singleton reused across
+many `canonicalizeTitleCandidate` calls (many scans, many test fixtures
+in one process) risks a LATER call silently missing a match at the
+start of ITS string because `lastIndex` was left non-zero by an
+EARLIER call against a completely different string. Not hypothetical --
+verified directly by running the same fixture batch twice in one
+process before and after the fix (identical results only after).
+`applyStrip` closes this the same way it closes the TDZ hazard: a fresh
+RegExp object built from a `.source` string every call, and `.match()`
+(which the spec resets to `lastIndex=0` regardless of prior state)
+instead of `.test()` + a second `.match()`.
+
+### C6 -- what does and doesn't survive
+
+Verified directly, not assumed: "Batman: The Signed Edition" survives
+intact (a bare, un-clause-attached "signed"/"remarked" strip was
+prototyped, found to break exactly this fixture, and removed -- the
+attribution-clause stripper already handles the real production shape,
+"Signed/Remarked by <creator>," via the same word in the position it's
+actually cruft); "What If? Spider-Man" and "Marvel Comics Presents"
+(publisher words INSIDE a real title) both survive, since the
+publisher-year-suffix pattern only matches a BARE trailing "marvel/dc
+[+year]" with nothing else following; "Spider-Man 2099" survives, since
+the standalone-issue-number strip is bounded to the SPECIFIC resolved
+issue value, never an arbitrary number.
+
+### Verification
+
+`tests/grailkey-directive-aw-title-canonicalization.test.js` (24/24) --
+canonicalizeTitleCandidate unit coverage (the real Venom row, the C6
+negative-control set, a Detective Comics/Corner-Box/Jorge-Jimenez
+class fixture), reconcileTitleFacet facet-level proof (clean candidate,
+verbatim preserved, still CONTESTED), and the cooperative-path
+byte-identity control (B3). `tests/grailkey-directive-aw-handler-smoke.
+test.js` (16/16, GK-138 real-handler proof) -- the SAME thin,
+fallback-vision-triggering image-search pool as AV's own qf5c6 fixture,
+paired with a SEPARATE, richer eBay-text-search comps pool (what a real
+search for the CLEAN query would actually return): `[comps] title=
+Venom Separation Anxiety ... cleanTitle= Venom Separation Anxiety`
+confirms the query itself is clean, and `[comps] browse
+itemSummaries=8` proves it reaches a real, non-empty pool -- a stark
+contrast to the pre-fix shape where the same query carried "By Mike
+Mayhew Poker Chip" and would have matched nothing. Diagnosed directly
+(a dedicated stubbed-fetch run with an unmatched-URL logger, not
+assumed) that PriceCharting's own product lookup never fires at all in
+this specific fixture and that `api/comps.js`'s own 4 post-filter
+survivors do not end up populating the final `out.rawComps` either --
+both are pre-existing pipeline behavior this dispatch does not touch
+(C7 explicitly excludes pricing-math plumbing), so the test asserts the
+comps-query-reaches-real-data claim this dispatch is actually
+responsible for, not a specific final price. Full 224-file regression
+sweep: 201 PASS / 19 FAIL / 4 TIMEOUT, byte-identical FAIL/TIMEOUT set
+to the prior 222-file baseline (199/19/4/222) -- the only delta is the
+two new, fully-passing files.
+
+### Handoff
+
+GK-140 SHIPPED-PENDING PHYSICAL. Closure reserved for Jimmy's
+post-deploy rescan of the Venom poker-chip photo (card should read
+"Venom Separation Anxiety," not "...By Mike Mayhew Poker Chip") and
+Detective (#1107, readable title). Sabrina remains the standing
+cooperative-path control -- byte-identical, button still lit. What this
+dispatch cannot do: make PriceCharting's own product lookup actually
+fire for the Venom fixture, or trace why `api/comps.js`'s own 4
+post-filter survivors don't reach `out.rawComps` -- both are real,
+observed gaps, but neither is a title-cruft problem, and both are
+outside GK-140's own scope (C7). If Jimmy's real-world rescan of Venom
+still shows no price at all (not merely a thin-market REVIEW), that is
+the concrete next investigation, not a GK-140 regression. GK-125's
+family-name-collapse half and DATA-0 remain separately scoped, untouched.
+Committed locally, NOT pushed -- report and ask before pushing, since
+the push deploys production. Do not propose the next directive.

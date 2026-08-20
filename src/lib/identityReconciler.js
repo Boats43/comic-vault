@@ -532,9 +532,18 @@ export const reconcileTitle = (evidenceSet) => {
     value: winner.value,
     source: winner.source,
     authority: isContested ? 'CONTESTED' : 'CORROBORATED',
+    // GrailKey Directive 2026-08-20-AW (GK-140), C3 — "the raw row stays
+    // in justifiedBy verbatim; the canonicalized form is the candidate
+    // value." reconcileTitleFacet (identityCore.js) attaches `verbatim`
+    // as evidence-entry metadata (the frozen row's own untouched text)
+    // when the winning value is a canonicalized candidate — carried
+    // through here, alongside source/value, never in place of them. Other
+    // facets' justifiedBy shape is untouched (this mapping is local to
+    // reconcileTitle, not shared with reconcileIssue/reconcileVariant/
+    // reconcileYear).
     justifiedBy: corroborations
       .filter((e) => e === winner || String(e.value) === String(winner.value))
-      .map((e) => ({ source: e.source, value: e.value })),
+      .map((e) => ({ source: e.source, value: e.value, ...(e.verbatim != null ? { verbatim: e.verbatim } : {}) })),
     conflicts: [
       ...disagreeingConflicts.map((c) => ({ source: c.source, value: c.value })),
       ...disagreeingCorroborations.map((e) => ({ source: e.source, value: e.value })),
