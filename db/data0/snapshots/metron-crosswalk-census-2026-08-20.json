@@ -1,0 +1,17 @@
+{
+  "_comment": "DATA-0 crosswalk-yield census (originally Q4 in this session's DATA-0 pre-flight report — not GK-141, a mislabel corrected in docs/DATA-0-METRON-CENSUS.md's own header). Real Metron API sample, Bearer-token auth (METRON_API_TOKEN, pulled from Vercel Development env, never committed/logged/printed). No row DATA content stored here — aggregate counts only. Sequential, paced ~17 req/min (well under the documented 20/min burst, 5000/day sustained limits) — 541 total requests (1 count probe + 30 list pages + 510 detail fetches), 0 failures. Full write-up: docs/DATA-0-METRON-CENSUS.md.",
+  "totalMetronIssues": 176199,
+  "sampleSize": 510,
+  "failedFetches": 0,
+  "candidatesAttempted": 510,
+  "gcdIdNonNull": 471,
+  "cvIdNonNull": 505,
+  "bothNonNull": 470,
+  "eitherNonNull": 506,
+  "gcdCoveragePct": 92.35,
+  "cvCoveragePct": 99.02,
+  "bothCoveragePct": 92.16,
+  "eitherCoveragePct": 99.22,
+  "method": "Random sample across ~30 randomly-chosen list pages spread over the full issue ID space, ~17 issues picked per sampled page, each fetched individually via the issue DETAIL endpoint (gcd_id/cv_id only exist there, confirmed not present on the list endpoint).",
+  "sampledAt": "2026-08-21T00:54:51.272Z"
+}

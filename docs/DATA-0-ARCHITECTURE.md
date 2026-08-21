@@ -173,7 +173,8 @@ PriceCharting, and any future provider via the same `source` column — no
 per-provider table. `match_method` and `verification_state` exist
 because not all crosswalk links carry the same confidence: Metron's own
 `gcd_id`/`cv_id` fields (confirmed real and queryable during the
-pre-flight, coverage % unmeasured — GK-141's own open question) are
+pre-flight; coverage now measured at ~92%/~99% — see §9 and
+`docs/DATA-0-METRON-CENSUS.md`) are
 `match_method = 'source-native-crosswalk'`, `verification_state =
 'automated'` by default; a link this project derives itself (fuzzy
 title+issue+year matching across two providers with no native
@@ -272,10 +273,17 @@ operational decision, not designed further here.
   on the answer, but nothing past it can proceed without one.
 - **Metron bootstrap export + commercial terms** (pending Metron's
   response) — gates DATA-0C (real Metron sync), same reasoning.
-- **Crosswalk yield is genuinely unmeasured** (GK-141) — the DDL's
-  `external_map.verification_state` distinction exists in anticipation of
-  this, but the actual coverage number needs a real API sample once
-  credentials exist, not an assumption baked into the schema now.
+- **Crosswalk yield — now measured, resolved.** A real Metron API census
+  (2026-08-20, `docs/DATA-0-METRON-CENSUS.md`, n=510 random sample):
+  **`gcd_id` populated on ~92.35% of Metron issues, `cv_id` on ~99.02%.**
+  The `external_map.verification_state` distinction (`0001_generic_
+  substrate.sql`) was built in anticipation of a mostly-fuzzy-matching
+  reality; the real number says the opposite for the GCD/Metron pair —
+  the bulk of `external_map` population for `source='metron'` rows is
+  "read Metron's own crosswalk fields" (`match_method=
+  'source-native-crosswalk'`), with fuzzy matching needed only for the
+  remaining ~1-8% gap. Materially de-risks DATA-0D's own scope; see the
+  census doc's own "What this means for DATA-0D" section.
 - **`comic_creator` as a parallel sequence vs. its own `asset_class`** —
   flagged in `0002_comic_projection.sql`'s own comment, not decided.
   Modeling a creator AS a `catalog_entity` (asset_class = 'creator')
