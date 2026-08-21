@@ -13,5 +13,277 @@
   "bothCoveragePct": 92.16,
   "eitherCoveragePct": 99.22,
   "method": "Random sample across ~30 randomly-chosen list pages spread over the full issue ID space, ~17 issues picked per sampled page, each fetched individually via the issue DETAIL endpoint (gcd_id/cv_id only exist there, confirmed not present on the list endpoint).",
-  "sampledAt": "2026-08-21T00:54:51.272Z"
+  "sampledAt": "2026-08-21T00:54:51.272Z",
+  "populationExact": {
+    "_note": "Exact population-wide counts via Metron server-side filters (missing_gcd_id / missing_cv_id), not sampled. This is the number DATA-0D scope is built on, not the sample estimate above.",
+    "totalIssues": 176199,
+    "gcdIdNonNull": 162739,
+    "cvIdNonNull": 173364,
+    "gcdCoveragePct": 92.36,
+    "cvCoveragePct": 98.39,
+    "buckets": {
+      "both": {
+        "count": 161568,
+        "pct": 91.7
+      },
+      "gcdOnly": {
+        "count": 1171,
+        "pct": 0.66
+      },
+      "cvOnly": {
+        "count": 11796,
+        "pct": 6.69
+      },
+      "neither": {
+        "count": 1664,
+        "pct": 0.94
+      }
+    },
+    "neitherExamples": [
+      {
+        "id": 174221,
+        "series": "100 Bullets: The US of Anger",
+        "volume": 1,
+        "year_began": 2026,
+        "number": "3",
+        "cover_date": "2026-11-01"
+      },
+      {
+        "id": 174821,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2496",
+        "cover_date": "2026-08-01"
+      },
+      {
+        "id": 176562,
+        "series": "30 Days of Night: Night, Again",
+        "volume": 1,
+        "year_began": 2011,
+        "number": "2",
+        "cover_date": "2011-06-01"
+      },
+      {
+        "id": 174296,
+        "series": "51",
+        "volume": 1,
+        "year_began": 2026,
+        "number": "5",
+        "cover_date": "2026-09-01"
+      },
+      {
+        "id": 170188,
+        "series": "Abattoir",
+        "volume": 1,
+        "year_began": 2010,
+        "number": "1",
+        "cover_date": "2010-10-01"
+      },
+      {
+        "id": 170189,
+        "series": "Abattoir",
+        "volume": 1,
+        "year_began": 2010,
+        "number": "2",
+        "cover_date": "2010-11-22"
+      },
+      {
+        "id": 170190,
+        "series": "Abattoir",
+        "volume": 1,
+        "year_began": 2010,
+        "number": "3",
+        "cover_date": "2011-03-01"
+      },
+      {
+        "id": 170191,
+        "series": "Abattoir",
+        "volume": 1,
+        "year_began": 2010,
+        "number": "4",
+        "cover_date": "2011-04-01"
+      },
+      {
+        "id": 170192,
+        "series": "Abattoir",
+        "volume": 1,
+        "year_began": 2010,
+        "number": "5",
+        "cover_date": "2011-06-01"
+      },
+      {
+        "id": 170193,
+        "series": "Abattoir",
+        "volume": 1,
+        "year_began": 2010,
+        "number": "6",
+        "cover_date": "2011-08-20"
+      }
+    ],
+    "gcdOnlyExamples": [
+      {
+        "id": 169714,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2481",
+        "cover_date": "2026-05-06"
+      },
+      {
+        "id": 170053,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2482",
+        "cover_date": "2026-05-13"
+      },
+      {
+        "id": 170268,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2483",
+        "cover_date": "2026-05-20"
+      },
+      {
+        "id": 170733,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2484",
+        "cover_date": "2026-05-27"
+      },
+      {
+        "id": 170958,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2485",
+        "cover_date": "2026-06-01"
+      },
+      {
+        "id": 171297,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2486",
+        "cover_date": "2026-06-01"
+      },
+      {
+        "id": 170957,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2489",
+        "cover_date": "2026-07-01"
+      },
+      {
+        "id": 172202,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2491",
+        "cover_date": "2026-07-01"
+      },
+      {
+        "id": 172229,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2492",
+        "cover_date": "2026-07-01"
+      },
+      {
+        "id": 172670,
+        "series": "2000 AD",
+        "volume": 1,
+        "year_began": 2001,
+        "number": "2494",
+        "cover_date": "2026-08-01"
+      }
+    ],
+    "cvOnlyExamples": [
+      {
+        "id": 162586,
+        "series": "10 Ton Tales: Free Comic Book Day 2022",
+        "volume": 1,
+        "year_began": 2022,
+        "number": "1",
+        "cover_date": "2022-05-01"
+      },
+      {
+        "id": 38645,
+        "series": "10 Years To Death",
+        "volume": 1,
+        "year_began": 2021,
+        "number": "1",
+        "cover_date": "2021-09-01"
+      },
+      {
+        "id": 132907,
+        "series": "13 Coins",
+        "volume": 1,
+        "year_began": 2014,
+        "number": "1",
+        "cover_date": "2014-10-01"
+      },
+      {
+        "id": 132908,
+        "series": "13 Coins",
+        "volume": 1,
+        "year_began": 2014,
+        "number": "2",
+        "cover_date": "2014-12-01"
+      },
+      {
+        "id": 132909,
+        "series": "13 Coins",
+        "volume": 1,
+        "year_began": 2014,
+        "number": "3",
+        "cover_date": "2015-01-01"
+      },
+      {
+        "id": 132910,
+        "series": "13 Coins",
+        "volume": 1,
+        "year_began": 2014,
+        "number": "4",
+        "cover_date": "2015-02-01"
+      },
+      {
+        "id": 132911,
+        "series": "13 Coins",
+        "volume": 1,
+        "year_began": 2014,
+        "number": "5",
+        "cover_date": "2015-03-01"
+      },
+      {
+        "id": 132916,
+        "series": "13 Coins",
+        "volume": 1,
+        "year_began": 2014,
+        "number": "6",
+        "cover_date": "2015-04-01"
+      },
+      {
+        "id": 174927,
+        "series": "2000 AD's Greatest: Celebrating 40 Years of Thrill-Power!",
+        "volume": 1,
+        "year_began": 2017,
+        "number": "1",
+        "cover_date": "2017-02-01"
+      },
+      {
+        "id": 118203,
+        "series": "2020 Ironheart",
+        "volume": 1,
+        "year_began": 2020,
+        "number": "1",
+        "cover_date": "2020-07-01"
+      }
+    ]
+  }
 }

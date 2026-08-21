@@ -68,40 +68,99 @@ conversation.
    sequential throughout (no parallel pagination, per Metron's own
    stated guidance). Zero failed requests, zero rate-limit errors.
 
-## Result
+## Result — sample (n=510) vs population (n=176,199)
 
-| | count | of sample (n=510) |
+**Correction, made explicit rather than left ambiguous:** the first
+draft of this doc reported 99.02% as "the" `cv_id` coverage figure
+without distinguishing that it was a SAMPLE statistic. It was the
+correct figure *for the 510-issue sample* — but Metron's API turned out
+to expose exact server-side null-filters (`missing_gcd_id`,
+`missing_cv_id`), which were used afterward to get the REAL,
+population-wide count directly, no sampling involved. The two numbers
+are both real and both reported below; **the population figure is the
+one every downstream design decision should use.**
+
+| | sample (n=510) | population (n=176,199, exact) |
 |---|---:|---:|
-| `gcd_id` non-null | 471 | **92.35%** |
-| `cv_id` non-null | 505 | **99.02%** |
-| both non-null | 470 | 92.16% |
-| either non-null | 506 | 99.22% |
+| `gcd_id` non-null | 471 / 92.35% | 162,739 / **92.36%** |
+| `cv_id` non-null | 505 / **99.02%** | 173,364 / **98.39%** |
+| both non-null | 470 / 92.16% | 161,568 / 91.70% |
 
-This is DATA-0's single biggest previously-unknown number, now real:
-**Metron's own crosswalk to GCD is already ~92% complete** on a random
-sample, and its crosswalk to ComicVine is ~99% complete. For n=510 at
-p≈0.92, the rough 95% confidence interval on the `gcd_id` figure is
-approximately ±2.4 percentage points (roughly 90-95%) — a reasonably
-tight estimate for planning purposes, not a number that needs a larger
-follow-up sample before DATA-0D can use it as its working "expected
-auto-map rate."
+The `gcd_id` figures agree to two decimal places (92.35% vs 92.36%) —
+the sample was a good estimator there. The `cv_id` figures diverge more
+(99.02% vs 98.39%, a 0.63-point gap) — well within the sample's own
+statistical noise at n=510 for a rare-miss category (5 misses observed
+vs. an expected ~8.2 at the true population rate), but a real reminder
+that a 510-sample is an ESTIMATE, and the exact population query,
+once discovered to be possible, is strictly better evidence. Use
+**98.39%**, not 99.02%, as the working `cv_id` coverage figure going
+forward.
 
-## What this means for DATA-0D
+## Population-wide exact four-way bucket
 
-The original planning assumption implicitly treated crosswalk-building
-as unknown-cost, possibly-large-effort work (fuzzy matching across two
-independent catalogs with no native linkage). The real number says the
-opposite for the GCD/Metron pair specifically: **DATA-0D's own
-`external_map` population job for `source='metron'` rows can be almost
-entirely "read Metron's own `gcd_id`/`cv_id` fields and write
-`match_method='source-native-crosswalk'`, `verification_state=
-'automated'`" for ~92-99% of records** — the fuzzy-matching path
-(`match_method='automated-fuzzy'`, `verification_state='unverified'`,
-per `db/data0/0001_generic_substrate.sql`'s own taxonomy) is only
-needed for the remaining ~1-8% gap, not the bulk of the catalog. This
-meaningfully de-risks DATA-0D's own scope — worth carrying forward as
-the corrected planning assumption, the same way DATA-0B-1 corrected the
-`gcd_issue` row-count assumption.
+Derived directly from Metron's own server-side filters (`missing_gcd_id`
+× `missing_cv_id`, all four combinations queried independently and
+cross-checked for consistency), not sampled:
+
+```
+both      161,568 / 91.70%
+GCD only    1,171 /  0.66%
+CV only    11,796 /  6.69%
+neither     1,664 /  0.94%
+total     176,199   (sums exactly)
+```
+
+**This is the number DATA-0D's own scope is built on**, not the sample
+estimate. Real named examples of the residual categories (via the same
+filters, genuine current Metron issues — see
+`db/data0/snapshots/metron-crosswalk-census-2026-08-20.json` for the
+full pulled set):
+
+- **`neither`** (1,664 issues) clusters on very recent/upcoming cover
+  dates (2026) and small-press/indie titles (e.g. *Abattoir* #1-6,
+  2010-11) — crosswalk lag and thin-catalog coverage, not a structural
+  gap.
+- **`GCD only`** (1,171 issues) is dominated in the pulled sample by
+  *2000 AD*, a weekly UK anthology (#2481-2496, 2026 cover dates) — GCD
+  linkage exists, ComicVine linkage hasn't caught up yet for a
+  high-frequency series.
+- **`CV only`** (11,796 issues, pulled for completeness though not the
+  question asked) skews indie/small-press/one-shot (*13 Coins* #1-6,
+  *10 Ton Tales: FCBD 2022*, *2020 Ironheart* one-shot).
+
+## What this means for DATA-0D — two strategic readings
+
+**1. Direction matters.** 92.36% means "92.36% of Metron's own issue
+records carry a GCD ID" — it does **not** mean "Metron covers 92% of
+GCD." Those are different denominators. DATA-0B-1's own estimate put
+`gcd_issue` at ~1.39M rows (a planning figure Task B's exact
+`COUNT(*)` will replace); against that figure, Metron's 162,739
+GCD-linked issues reach roughly **~11.7% of the GCD universe** (an
+upper bound — pending Task B's exact GCD count, and pending whether
+every Metron-side `gcd_id` actually resolves to a real GCD row, which
+is exactly DATA-0D's own "present vs. valid" distinction). **GCD is the
+catalog spine; Metron is the structured enrichment + crosswalk layer on
+top of a slice of it — not a parallel, comparably-sized catalog.** That
+was always the architectural assumption; this is the first time it has
+numbers attached.
+
+**2. The residual has a shape, and it's a favorable one.** The `neither`
+bucket (0.94% population-wide) clusters on (a) very recent/upcoming
+releases — a lag that self-heals as Metron's own linkage catches up
+over time, not a permanent gap, and (b) small-press/indie titles —
+genuinely thin coverage, but a small fraction of total volume. GrailKey's
+own scan traffic skews modern exclusives/variants (per this project's
+own production evidence throughout the GrailKey dispatch series) — which
+is exactly the population Metron is *strongest* on, not the recent/
+indie residual it's weakest on. **The reconciliation residual is both
+small and disproportionately NOT where GrailKey's customers actually
+scan.** `external_map` population for `source='metron'` rows can be
+almost entirely "read Metron's own crosswalk fields" for the large
+majority of records that matter to this project's actual traffic; the
+fuzzy-matching path (`match_method='automated-fuzzy'`,
+`verification_state='unverified'`, per `db/data0/0001_generic_
+substrate.sql`'s own taxonomy) exists for the named residual, not the
+bulk of the catalog.
 
 ## What this does NOT tell us
 
@@ -109,9 +168,17 @@ the corrected planning assumption, the same way DATA-0B-1 corrected the
   this census measures Metron's OWN crosswalk fields, not whether those
   linked GCD/CV records are themselves correct or complete for THIS
   project's purposes.
-- Sample is random across Metron's full issue space, not stratified by
-  publisher/era/obscurity — a systematic skew (e.g. major-publisher
-  issues more likely to be cross-referenced than small-press) is
-  plausible but not measured here. Worth a stratified follow-up if
-  DATA-0D's own planning needs that level of precision; not needed to
-  unblock the current design work.
+- **"Present" is not "valid" is not "correct."** A non-null `gcd_id` on
+  a Metron record says Metron BELIEVES it points at a real GCD row —
+  it does not yet prove the ID resolves, resolves uniquely (no
+  duplicate-mapping collisions), or points at a title/issue/year/
+  publisher that actually agrees with the GCD row it names. That
+  three-way distinction (present / referentially valid / semantically
+  correct) is DATA-0D's own job, not measured here — see
+  `docs/DATA-0B-2-*` for where this dispatch defines that contract.
+- Named examples above are real, current Metron issues pulled via the
+  exact filters — not necessarily the SAME specific rows that fell into
+  the original 510-sample's smaller buckets (that per-issue identity
+  was never persisted from the sample run). They are genuine, current
+  members of the same population-wide category, which is the more
+  useful fact for understanding what the residual looks like.
