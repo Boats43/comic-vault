@@ -1,0 +1,44 @@
+{
+  "_comment": "DATA-0B-1 intake record. NOT a source_snapshot DB row (no database exists yet) — this is the repo-committed provenance record for the ONE bulk file this dispatch handles, in the shape the future source_snapshot.payload/source_uri/ingestion_run fields (db/data0/0001_generic_substrate.sql, 0A-r2) are designed to hold once real ingestion exists. NO IMPORT has happened. This file records intake only.",
+  "source": "gcd",
+  "source_record_id": "bulk-dump-full",
+  "source_uri": "https://www.comics.org/download/ (comics.org bulk data export, free-account-gated)",
+  "artifact": {
+    "original_path": "C:\\Users\\matam\\Downloads\\current.zip",
+    "staged_copy_path": "C:\\grailkey-data\\gcd\\current.zip",
+    "copy_method": "copy, not move — original left untouched at original_path",
+    "size_bytes": 729453389,
+    "size_mb": 695.66,
+    "sha256": "3B0383AAA215B0E670980C3B5DF83327759750F7D6DB8E1857059B385679300F",
+    "original_last_write_time_utc": "2026-08-20T23:40:51.3842961Z"
+  },
+  "retrieved_at": "2026-08-20T23:40:51.3842961Z",
+  "source_version": "2026-08-15",
+  "source_version_note": "Confirmed directly from the archive's own contents, not assumed: the zip contains exactly one file, named `2026-08-15.sql` (3633.8MB uncompressed, the plain-text MySQL dump). GCD's own docs state a bi-weekly regeneration cadence; this filename is that cadence's own version stamp.",
+  "extracted": {
+    "staging_path": "C:\\grailkey-data\\gcd\\staging\\2026-08-15.sql",
+    "uncompressed_size_mb": 3633.8,
+    "compression_ratio_pct": 19.1
+  },
+  "license": "cc-by-sa-4.0-metadata-only",
+  "rights_classification": "metadata-only",
+  "rights_note": "GCD metadata is CC BY-SA 4.0; cover images are explicitly excluded from that license per GCD's own docs (confirmed during the DATA-0 pre-flight) — this intake handles the metadata dump only, no image extraction performed or planned. The ShareAlike scope question (does a derivative catalog DB trigger the same-license obligation) remains open, pending counsel — see docs/DATA-0-ARCHITECTURE.md §9. This intake record exists regardless of that answer; it does not constitute ingestion.",
+  "ingestion_run": {
+    "run_kind": "bulk-load",
+    "status": "partial",
+    "status_note": "Intake + schema recon complete (checksum, copy, extract, stream-parse for structure). No rows imported. No database exists yet. Import (0B-2) is a separate, ungreenlit step. Full findings: docs/DATA-0B-1-SCHEMA-RECON.md.",
+    "started_at": "2026-08-20T23:40:00Z",
+    "completed_at": "2026-08-21T00:11:00Z"
+  },
+  "schema_recon": {
+    "report": "docs/DATA-0B-1-SCHEMA-RECON.md",
+    "structural_metadata": "db/data0/snapshots/gcd-2026-08-15-schema-recon.json",
+    "table_count": 77,
+    "total_estimated_rows_all_tables": 29278235,
+    "gcd_issue_estimated_rows": 1392268,
+    "gcd_issue_estimate_note": "Corrected planning number — the brief's own working figure was 2.2M; the dump's real gcd_issue table estimates to ~1.39M. See report for method.",
+    "declared_charset_connection": "utf8mb4",
+    "declared_charset_table_storage": "utf8mb3",
+    "charset_note": "Real mismatch, load-bearing per GK-143 — see report's 'Anything surprising' section."
+  }
+}

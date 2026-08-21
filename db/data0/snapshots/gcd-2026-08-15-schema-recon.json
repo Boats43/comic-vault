@@ -1,0 +1,2504 @@
+{
+  "_note": "DATA-0B-1 schema recon. Structural metadata only (table/column/key names, ESTIMATED row counts) — never the actual row data/payload. Derived by streaming db/data0/snapshots/../schema-recon.mjs (script not repo-committed, ad hoc) over the extracted gcd/2026-08-15.sql dump. Row counts are estimates (see _rowEstimateMethod), not exact counts — NO IMPORT has occurred, this is intake-only recon.",
+  "_rowEstimateMethod": "tuple count in the FIRST INSERT statement per table * total INSERT statement count for that table. mysqldump uses a consistent extended-insert batch size except typically the final statement per table, so this may overcount slightly for tables with few INSERT statements.",
+  "dumpHeader": {
+    "mysqlDumpVersion": "10.13 Distrib 8.0.46",
+    "sourceHost": "mysql0a.comics.org",
+    "sourceDatabase": "gcd",
+    "serverVersion": "8.0.46-0ubuntu0.22.04.3",
+    "connectionCharset": "utf8mb4 (SET NAMES utf8mb4 in dump header, and before every CREATE TABLE)",
+    "sqlMode": "NO_AUTO_VALUE_ON_ZERO"
+  },
+  "tableCount": 77,
+  "totalEstimatedRowsAllTables": 29278235,
+  "charsetsObserved": [
+    "utf8mb4",
+    "utf8mb3"
+  ],
+  "tables": {
+    "gcd_award": {
+      "columnCount": 6,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(200) NOT NULL",
+        "`created` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`notes` longtext NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 377,
+      "insertStatements": 1
+    },
+    "gcd_biblio_entry": {
+      "columnCount": 5,
+      "columns": [
+        "`story_ptr_id` int NOT NULL",
+        "`page_began` int DEFAULT NULL",
+        "`page_ended` int DEFAULT NULL",
+        "`abstract` longtext NOT NULL",
+        "`doi` longtext NOT NULL"
+      ],
+      "primaryKey": "`story_ptr_id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_biblio_entry_story_ptr_id_d8f3d929_fk_gcd_story_id",
+          "column": "story_ptr_id",
+          "refTable": "gcd_story",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 8671,
+      "insertStatements": 1
+    },
+    "gcd_brand": {
+      "columnCount": 17,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL",
+        "`year_began` int DEFAULT NULL",
+        "`year_ended` int DEFAULT NULL",
+        "`notes` longtext NOT NULL",
+        "`url` varchar(255) NOT NULL",
+        "`issue_count` int NOT NULL DEFAULT '0'",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL DEFAULT '0'",
+        "`year_began_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`year_ended_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`year_overall_began` int DEFAULT NULL",
+        "`year_overall_began_uncertain` tinyint(1) NOT NULL",
+        "`year_overall_ended` int DEFAULT NULL",
+        "`year_overall_ended_uncertain` tinyint(1) NOT NULL",
+        "`generic` tinyint(1) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 16776,
+      "insertStatements": 2
+    },
+    "gcd_brand_emblem_group": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`brand_id` int NOT NULL",
+        "`brandgroup_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "gcd_brand_emblem_group_brand_id_4dd3b49d7f79dbe3_uniq",
+          "columns": "`brand_id`,`brandgroup_id`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "brand_id_refs_id_499c2f828021a0a5",
+          "column": "brand_id",
+          "refTable": "gcd_brand",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "brandgroup_id_refs_id_3d239edd15609953",
+          "column": "brandgroup_id",
+          "refTable": "gcd_brand_group",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 13281,
+      "insertStatements": 1
+    },
+    "gcd_brand_group": {
+      "columnCount": 17,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL",
+        "`year_began` int DEFAULT NULL",
+        "`year_ended` int DEFAULT NULL",
+        "`year_began_uncertain` tinyint(1) NOT NULL",
+        "`year_ended_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`url` varchar(255) NOT NULL",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`parent_id` int NOT NULL",
+        "`issue_count` int NOT NULL",
+        "`year_overall_began` int DEFAULT NULL",
+        "`year_overall_began_uncertain` tinyint(1) NOT NULL",
+        "`year_overall_ended` int DEFAULT NULL",
+        "`year_overall_ended_uncertain` tinyint(1) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "parent_id_refs_id_37eff265bd014aa2",
+          "column": "parent_id",
+          "refTable": "gcd_publisher",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 16528,
+      "insertStatements": 2
+    },
+    "gcd_brand_use": {
+      "columnCount": 10,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`publisher_id` int NOT NULL",
+        "`emblem_id` int NOT NULL",
+        "`year_began` int DEFAULT NULL",
+        "`year_ended` int DEFAULT NULL",
+        "`year_began_uncertain` tinyint(1) NOT NULL",
+        "`year_ended_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "emblem_id_refs_id_66e921df4498a093",
+          "column": "emblem_id",
+          "refTable": "gcd_brand",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "publisher_id_refs_id_4bf8142e98fbb94c",
+          "column": "publisher_id",
+          "refTable": "gcd_publisher",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 22314,
+      "insertStatements": 2
+    },
+    "gcd_character": {
+      "columnCount": 13,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`sort_name` varchar(255) NOT NULL",
+        "`disambiguation` varchar(255) NOT NULL",
+        "`year_first_published` int DEFAULT NULL",
+        "`year_first_published_uncertain` tinyint(1) NOT NULL",
+        "`description` longtext NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`language_id` int NOT NULL",
+        "`universe_id` int DEFAULT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_character_language_id_a766f96d_fk_stddata_language_id",
+          "column": "language_id",
+          "refTable": "stddata_language",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_character_universe_id_1058453c_fk_gcd_universe_id",
+          "column": "universe_id",
+          "refTable": "gcd_universe",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 84220,
+      "insertStatements": 20
+    },
+    "gcd_character_name_detail": {
+      "columnCount": 8,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`sort_name` varchar(255) NOT NULL",
+        "`character_id` int NOT NULL",
+        "`is_official_name` tinyint(1) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_character_name_d_character_id_a0aa1b65_fk_gcd_chara",
+          "column": "character_id",
+          "refTable": "gcd_character",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 91548,
+      "insertStatements": 9
+    },
+    "gcd_character_relation": {
+      "columnCount": 7,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`from_character_id` int NOT NULL",
+        "`relation_type_id` int NOT NULL",
+        "`to_character_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_character_relati_from_character_id_f632780f_fk_gcd_chara",
+          "column": "from_character_id",
+          "refTable": "gcd_character",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_character_relati_relation_type_id_4cfe6f07_fk_gcd_chara",
+          "column": "relation_type_id",
+          "refTable": "gcd_character_relation_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_character_relati_to_character_id_e08d735a_fk_gcd_chara",
+          "column": "to_character_id",
+          "refTable": "gcd_character",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 37986,
+      "insertStatements": 3
+    },
+    "gcd_character_relation_type": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`type` varchar(50) NOT NULL",
+        "`reverse_type` varchar(50) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 6,
+      "insertStatements": 1
+    },
+    "gcd_character_role": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(50) NOT NULL",
+        "`sort_code` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "name",
+          "columns": "`name`"
+        },
+        {
+          "name": "sort_code",
+          "columns": "`sort_code`"
+        }
+      ],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 6,
+      "insertStatements": 1
+    },
+    "gcd_creator": {
+      "columnCount": 24,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`gcd_official_name` varchar(255) NOT NULL",
+        "`whos_who` varchar(200) DEFAULT NULL",
+        "`birth_country_uncertain` tinyint(1) NOT NULL",
+        "`birth_province` varchar(50) NOT NULL",
+        "`birth_province_uncertain` tinyint(1) NOT NULL",
+        "`birth_city` varchar(200) NOT NULL",
+        "`birth_city_uncertain` tinyint(1) NOT NULL",
+        "`death_country_uncertain` tinyint(1) NOT NULL",
+        "`death_province` varchar(50) NOT NULL",
+        "`death_province_uncertain` tinyint(1) NOT NULL",
+        "`death_city` varchar(200) NOT NULL",
+        "`death_city_uncertain` tinyint(1) NOT NULL",
+        "`bio` longtext NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`birth_country_id` int DEFAULT NULL",
+        "`birth_date_id` int DEFAULT NULL",
+        "`death_country_id` int",
+        "`death_date_id` int",
+        "`sort_name` varchar(255) NOT NULL",
+        "`disambiguation` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_crea_birth_country_id_763042865119b661_fk_stddata_country_id",
+          "column": "birth_country_id",
+          "refTable": "stddata_country",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_crea_death_country_id_564f5820f21e9ede_fk_stddata_country_id",
+          "column": "death_country_id",
+          "refTable": "stddata_country",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_birth_date_id_78325325e7e05e56_fk_stddata_date_id",
+          "column": "birth_date_id",
+          "refTable": "stddata_date",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_death_date_id_192a573e76c2f1cd_fk_stddata_date_id",
+          "column": "death_date_id",
+          "refTable": "stddata_date",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 69930,
+      "insertStatements": 21
+    },
+    "gcd_creator_art_influence": {
+      "columnCount": 8,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`influence_name` varchar(200) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`creator_id` int NOT NULL",
+        "`influence_link_id` int"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_creator_art_infl_influence_link_id_7ffc0a72_fk_gcd_creat",
+          "column": "influence_link_id",
+          "refTable": "gcd_creator",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_art_influence_creator_id_af97901f_fk_gcd_creator_id",
+          "column": "creator_id",
+          "refTable": "gcd_creator",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 4228,
+      "insertStatements": 1
+    },
+    "gcd_creator_degree": {
+      "columnCount": 10,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`degree_year` smallint unsigned DEFAULT NULL",
+        "`degree_year_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`creator_id` int NOT NULL",
+        "`degree_id` int NOT NULL",
+        "`school_id` int"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_creator_degree_creator_id_2d1a7e1b51ae365d_fk_gcd_creator_id",
+          "column": "creator_id",
+          "refTable": "gcd_creator",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_degree_degree_id_25975d216f588700_fk_gcd_degree_id",
+          "column": "degree_id",
+          "refTable": "gcd_degree",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_degree_school_id_34e8b4f567e05b8c_fk_gcd_school_id",
+          "column": "school_id",
+          "refTable": "gcd_school",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 799,
+      "insertStatements": 1
+    },
+    "gcd_creator_membership": {
+      "columnCount": 12,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`organization_name` varchar(200) NOT NULL",
+        "`membership_year_began` smallint unsigned DEFAULT NULL",
+        "`membership_year_began_uncertain` tinyint(1) NOT NULL",
+        "`membership_year_ended` smallint unsigned DEFAULT NULL",
+        "`membership_year_ended_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`creator_id` int NOT NULL",
+        "`membership_type_id` int"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gc_membership_type_id_214046281e0da56a_fk_gcd_membership_type_id",
+          "column": "membership_type_id",
+          "refTable": "gcd_membership_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_member_creator_id_4ed99850c0c56535_fk_gcd_creator_id",
+          "column": "creator_id",
+          "refTable": "gcd_creator",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 1008,
+      "insertStatements": 1
+    },
+    "gcd_creator_name_detail": {
+      "columnCount": 12,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`creator_id` int NOT NULL",
+        "`type_id` int",
+        "`sort_name` varchar(255) NOT NULL",
+        "`is_official_name` tinyint(1) NOT NULL",
+        "`in_script_id` int NOT NULL",
+        "`family_name` varchar(255) NOT NULL",
+        "`given_name` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_creator_name_d_creator_id_6fb7edba0f224837_fk_gcd_creator_id",
+          "column": "creator_id",
+          "refTable": "gcd_creator",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_name_det_in_script_id_b7560492_fk_stddata_s",
+          "column": "in_script_id",
+          "refTable": "stddata_script",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_name_detail_type_id_cce05647_fk_gcd_name_type_id",
+          "column": "type_id",
+          "refTable": "gcd_name_type",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 173196,
+      "insertStatements": 18
+    },
+    "gcd_creator_non_comic_work": {
+      "columnCount": 12,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`publication_title` varchar(200) NOT NULL",
+        "`employer_name` varchar(200) NOT NULL",
+        "`work_title` varchar(255) NOT NULL",
+        "`work_urls` longtext NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`creator_id` int NOT NULL",
+        "`work_role_id` int",
+        "`work_type_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd__work_type_id_3bc189b3f6be8a38_fk_gcd_non_comic_work_type_id",
+          "column": "work_type_id",
+          "refTable": "gcd_non_comic_work_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_c_work_role_id_98df94d341f6000_fk_gcd_non_comic_work_role_id",
+          "column": "work_role_id",
+          "refTable": "gcd_non_comic_work_role",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_non_co_creator_id_2bf5eba03c4340b4_fk_gcd_creator_id",
+          "column": "creator_id",
+          "refTable": "gcd_creator",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 3682,
+      "insertStatements": 1
+    },
+    "gcd_creator_relation": {
+      "columnCount": 8,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`notes` longtext NOT NULL",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`from_creator_id` int NOT NULL",
+        "`relation_type_id` int NOT NULL",
+        "`to_creator_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_cr_relation_type_id_6b325352f7711cf6_fk_gcd_relation_type_id",
+          "column": "relation_type_id",
+          "refTable": "gcd_relation_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_re_from_creator_id_12353b87e0ffa85_fk_gcd_creator_id",
+          "column": "from_creator_id",
+          "refTable": "gcd_creator",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_rel_to_creator_id_5893caf404626fdc_fk_gcd_creator_id",
+          "column": "to_creator_id",
+          "refTable": "gcd_creator",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 5912,
+      "insertStatements": 1
+    },
+    "gcd_creator_relation_creator_name": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`creatorrelation_id` int NOT NULL",
+        "`creatornamedetail_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "gcd_creator_relation_cre_creatorrelation_id_creat_953af27b_uniq",
+          "columns": "`creatorrelation_id`,`creatornamedetail_id`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_creator_relation_creatornamedetail_id_4675e7fc_fk_gcd_creat",
+          "column": "creatornamedetail_id",
+          "refTable": "gcd_creator_name_detail",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_relation_creatorrelation_id_d48c32dc_fk_gcd_creat",
+          "column": "creatorrelation_id",
+          "refTable": "gcd_creator_relation",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 1027,
+      "insertStatements": 1
+    },
+    "gcd_creator_school": {
+      "columnCount": 11,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`school_year_began` smallint unsigned DEFAULT NULL",
+        "`school_year_began_uncertain` tinyint(1) NOT NULL",
+        "`school_year_ended` smallint unsigned DEFAULT NULL",
+        "`school_year_ended_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`creator_id` int NOT NULL",
+        "`school_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_creator_school_creator_id_2525d2f8e697f937_fk_gcd_creator_id",
+          "column": "creator_id",
+          "refTable": "gcd_creator",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_creator_school_school_id_532eb68322363260_fk_gcd_school_id",
+          "column": "school_id",
+          "refTable": "gcd_school",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 3284,
+      "insertStatements": 1
+    },
+    "gcd_creator_signature": {
+      "columnCount": 8,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`generic` tinyint(1) NOT NULL",
+        "`creator_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_creator_signature_creator_id_063b6789_fk_gcd_creator_id",
+          "column": "creator_id",
+          "refTable": "gcd_creator",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 34602,
+      "insertStatements": 3
+    },
+    "gcd_credit_type": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(50) NOT NULL",
+        "`sort_code` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "name",
+          "columns": "`name`"
+        },
+        {
+          "name": "sort_code",
+          "columns": "`sort_code`"
+        }
+      ],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 14,
+      "insertStatements": 1
+    },
+    "gcd_degree": {
+      "columnCount": 2,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`degree_name` varchar(200) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 9,
+      "insertStatements": 1
+    },
+    "gcd_feature": {
+      "columnCount": 13,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`sort_name` varchar(255) NOT NULL",
+        "`genre` varchar(255) NOT NULL",
+        "`year_first_published` int DEFAULT NULL",
+        "`year_first_published_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`feature_type_id` int NOT NULL",
+        "`language_id` int NOT NULL",
+        "`disambiguation` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_feature_feature_type_id_0bd38e4d_fk_gcd_feature_type_id",
+          "column": "feature_type_id",
+          "refTable": "gcd_feature_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_feature_language_id_f6ca9801_fk_stddata_language_id",
+          "column": "language_id",
+          "refTable": "stddata_language",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 55467,
+      "insertStatements": 9
+    },
+    "gcd_feature_logo": {
+      "columnCount": 12,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`sort_name` varchar(255) NOT NULL",
+        "`year_began` int DEFAULT NULL",
+        "`year_ended` int DEFAULT NULL",
+        "`year_began_uncertain` tinyint(1) NOT NULL",
+        "`year_ended_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`generic` tinyint(1) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 14462,
+      "insertStatements": 2
+    },
+    "gcd_feature_logo_2_feature": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`featurelogo_id` int NOT NULL",
+        "`feature_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "gcd_feature_logo_2_featu_featurelogo_id_feature_i_26489bce_uniq",
+          "columns": "`featurelogo_id`,`feature_id`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_feature_logo_2_f_featurelogo_id_3e696cd6_fk_gcd_featu",
+          "column": "featurelogo_id",
+          "refTable": "gcd_feature_logo",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_feature_logo_2_feature_feature_id_8ec96fc1_fk_gcd_feature_id",
+          "column": "feature_id",
+          "refTable": "gcd_feature",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 8450,
+      "insertStatements": 1
+    },
+    "gcd_feature_relation": {
+      "columnCount": 7,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`from_feature_id` int NOT NULL",
+        "`relation_type_id` int NOT NULL",
+        "`to_feature_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_feature_relation_from_feature_id_25e36fdf_fk_gcd_feature_id",
+          "column": "from_feature_id",
+          "refTable": "gcd_feature",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_feature_relation_relation_type_id_09ba4ac7_fk_gcd_featu",
+          "column": "relation_type_id",
+          "refTable": "gcd_feature_relation_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_feature_relation_to_feature_id_e5a20bdf_fk_gcd_feature_id",
+          "column": "to_feature_id",
+          "refTable": "gcd_feature",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 25422,
+      "insertStatements": 2
+    },
+    "gcd_feature_relation_type": {
+      "columnCount": 4,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL",
+        "`description` varchar(255) NOT NULL",
+        "`reverse_description` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 1,
+      "insertStatements": 1
+    },
+    "gcd_feature_type": {
+      "columnCount": 2,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 4,
+      "insertStatements": 1
+    },
+    "gcd_group": {
+      "columnCount": 13,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`sort_name` varchar(255) NOT NULL",
+        "`disambiguation` varchar(255) NOT NULL",
+        "`year_first_published` int DEFAULT NULL",
+        "`year_first_published_uncertain` tinyint(1) NOT NULL",
+        "`description` longtext NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`language_id` int NOT NULL",
+        "`universe_id` int DEFAULT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_group_language_id_e0935a36_fk_stddata_language_id",
+          "column": "language_id",
+          "refTable": "stddata_language",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_group_universe_id_e32b55ff_fk_gcd_universe_id",
+          "column": "universe_id",
+          "refTable": "gcd_universe",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 3196,
+      "insertStatements": 1
+    },
+    "gcd_group_character": {
+      "columnCount": 8,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`story_id` int NOT NULL",
+        "`universe_id` int DEFAULT NULL",
+        "`group_name_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_group_character_group_name_id_a01b83b2_fk_gcd_group",
+          "column": "group_name_id",
+          "refTable": "gcd_group_name_detail",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_group_character_story_id_4aedac36_fk_gcd_story_id",
+          "column": "story_id",
+          "refTable": "gcd_story",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_group_character_universe_id_34fdd9e7_fk_gcd_universe_id",
+          "column": "universe_id",
+          "refTable": "gcd_universe",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 71442,
+      "insertStatements": 6
+    },
+    "gcd_group_membership": {
+      "columnCount": 11,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`year_joined` smallint unsigned DEFAULT NULL",
+        "`year_joined_uncertain` tinyint(1) NOT NULL",
+        "`year_left` smallint unsigned DEFAULT NULL",
+        "`year_left_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`character_id` int NOT NULL",
+        "`group_id` int NOT NULL",
+        "`membership_type_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_group_membership_character_id_ce34b6e6_fk_gcd_character_id",
+          "column": "character_id",
+          "refTable": "gcd_character",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_group_membership_group_id_ee6c8c22_fk_gcd_group_id",
+          "column": "group_id",
+          "refTable": "gcd_group",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_group_membership_membership_type_id_32854b66_fk_gcd_group",
+          "column": "membership_type_id",
+          "refTable": "gcd_group_membership_type",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 28893,
+      "insertStatements": 3
+    },
+    "gcd_group_membership_type": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`type` varchar(50) NOT NULL",
+        "`reverse_type` varchar(50) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 3,
+      "insertStatements": 1
+    },
+    "gcd_group_name_detail": {
+      "columnCount": 8,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`sort_name` varchar(255) NOT NULL",
+        "`is_official_name` tinyint(1) NOT NULL",
+        "`group_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_group_name_detail_group_id_f6a401d7_fk_gcd_group_id",
+          "column": "group_id",
+          "refTable": "gcd_group",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 3583,
+      "insertStatements": 1
+    },
+    "gcd_group_relation": {
+      "columnCount": 7,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`from_group_id` int NOT NULL",
+        "`relation_type_id` int NOT NULL",
+        "`to_group_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_group_relation_from_group_id_e865b8f6_fk_gcd_group_id",
+          "column": "from_group_id",
+          "refTable": "gcd_group",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_group_relation_relation_type_id_ab30bd40_fk_gcd_group",
+          "column": "relation_type_id",
+          "refTable": "gcd_group_relation_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_group_relation_to_group_id_454ce47f_fk_gcd_group_id",
+          "column": "to_group_id",
+          "refTable": "gcd_group",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 903,
+      "insertStatements": 1
+    },
+    "gcd_group_relation_type": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`type` varchar(50) NOT NULL",
+        "`reverse_type` varchar(50) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 5,
+      "insertStatements": 1
+    },
+    "gcd_indicia_printer": {
+      "columnCount": 18,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`year_began` int DEFAULT NULL",
+        "`year_ended` int DEFAULT NULL",
+        "`year_began_uncertain` tinyint(1) NOT NULL",
+        "`year_ended_uncertain` tinyint(1) NOT NULL",
+        "`year_overall_began` int DEFAULT NULL",
+        "`year_overall_ended` int DEFAULT NULL",
+        "`year_overall_began_uncertain` tinyint(1) NOT NULL",
+        "`year_overall_ended_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`url` varchar(255) NOT NULL",
+        "`issue_count` int NOT NULL",
+        "`country_id` int NOT NULL",
+        "`parent_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_indicia_printer_country_id_7721a445_fk_stddata_country_id",
+          "column": "country_id",
+          "refTable": "stddata_country",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_indicia_printer_parent_id_530af9b7_fk_gcd_printer_id",
+          "column": "parent_id",
+          "refTable": "gcd_printer",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 2792,
+      "insertStatements": 1
+    },
+    "gcd_indicia_publisher": {
+      "columnCount": 19,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL",
+        "`parent_id` int NOT NULL",
+        "`country_id` int NOT NULL",
+        "`year_began` int DEFAULT NULL",
+        "`year_ended` int DEFAULT NULL",
+        "`is_surrogate` tinyint(1) NOT NULL DEFAULT '0'",
+        "`notes` longtext NOT NULL",
+        "`url` varchar(255) NOT NULL",
+        "`issue_count` int NOT NULL DEFAULT '0'",
+        "`created` datetime NOT NULL",
+        "`modified` datetime NOT NULL",
+        "`deleted` tinyint(1) NOT NULL DEFAULT '0'",
+        "`year_began_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`year_ended_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`year_overall_began` int DEFAULT NULL",
+        "`year_overall_began_uncertain` tinyint(1) NOT NULL",
+        "`year_overall_ended` int DEFAULT NULL",
+        "`year_overall_ended_uncertain` tinyint(1) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_indicia_publisher_ibfk_1",
+          "column": "parent_id",
+          "refTable": "gcd_publisher",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_indicia_publisher_ibfk_2",
+          "column": "country_id",
+          "refTable": "stddata_country",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 14000,
+      "insertStatements": 2
+    },
+    "gcd_issue": {
+      "columnCount": 42,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`number` varchar(50) NOT NULL",
+        "`volume` varchar(50) NOT NULL DEFAULT ''",
+        "`no_volume` tinyint(1) NOT NULL DEFAULT '0'",
+        "`display_volume_with_number` tinyint(1) NOT NULL DEFAULT '0'",
+        "`series_id` int NOT NULL",
+        "`indicia_publisher_id` int DEFAULT NULL",
+        "`indicia_pub_not_printed` tinyint(1) NOT NULL",
+        "`brand_id` int DEFAULT NULL",
+        "`no_brand` tinyint(1) NOT NULL",
+        "`publication_date` varchar(255) NOT NULL",
+        "`key_date` varchar(10) NOT NULL",
+        "`sort_code` int NOT NULL",
+        "`price` varchar(255) NOT NULL",
+        "`page_count` decimal(10,3) DEFAULT NULL",
+        "`page_count_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`indicia_frequency` varchar(255) NOT NULL DEFAULT ''",
+        "`no_indicia_frequency` tinyint(1) NOT NULL DEFAULT '0'",
+        "`editing` longtext NOT NULL",
+        "`no_editing` tinyint(1) NOT NULL DEFAULT '0'",
+        "`notes` longtext NOT NULL",
+        "`created` datetime NOT NULL DEFAULT '1901-01-01 00:00:00'",
+        "`modified` datetime NOT NULL DEFAULT '1901-01-01 00:00:00'",
+        "`deleted` tinyint(1) NOT NULL DEFAULT '0'",
+        "`is_indexed` tinyint(1) NOT NULL DEFAULT '0'",
+        "`isbn` varchar(32) NOT NULL DEFAULT ''",
+        "`valid_isbn` varchar(13) NOT NULL DEFAULT ''",
+        "`no_isbn` tinyint(1) NOT NULL DEFAULT '0'",
+        "`variant_of_id` int DEFAULT NULL",
+        "`variant_name` varchar(255) NOT NULL DEFAULT ''",
+        "`barcode` varchar(38) NOT NULL DEFAULT ''",
+        "`no_barcode` tinyint(1) NOT NULL DEFAULT '0'",
+        "`title` varchar(255) NOT NULL DEFAULT ''",
+        "`no_title` tinyint(1) NOT NULL DEFAULT '0'",
+        "`on_sale_date` varchar(10) NOT NULL",
+        "`on_sale_date_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`rating` varchar(255) NOT NULL",
+        "`no_rating` tinyint(1) NOT NULL",
+        "`volume_not_printed` tinyint(1) NOT NULL",
+        "`indicia_printer_not_printed` tinyint(1) NOT NULL",
+        "`variant_cover_status` int NOT NULL",
+        "`indicia_printer_sourced_by` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "series_id_sort_code",
+          "columns": "`series_id`,`sort_code`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_issue_ibfk_1",
+          "column": "series_id",
+          "refTable": "gcd_series",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_issue_ibfk_2",
+          "column": "indicia_publisher_id",
+          "refTable": "gcd_indicia_publisher",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_issue_ibfk_3",
+          "column": "brand_id",
+          "refTable": "gcd_brand",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_issue_ibfk_4",
+          "column": "variant_of_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 1392268,
+      "insertStatements": 524
+    },
+    "gcd_issue_brand_emblem": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`issue_id` int NOT NULL",
+        "`brand_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "gcd_issue_brand_emblem_issue_id_brand_id_494f6346_uniq",
+          "columns": "`issue_id`,`brand_id`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_issue_brand_emblem_brand_id_4b9b4e20_fk_gcd_brand_id",
+          "column": "brand_id",
+          "refTable": "gcd_brand",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_issue_brand_emblem_issue_id_c2a07a32_fk_gcd_issue_id",
+          "column": "issue_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 981990,
+      "insertStatements": 18
+    },
+    "gcd_issue_credit": {
+      "columnCount": 13,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`is_credited` tinyint(1) NOT NULL",
+        "`uncertain` tinyint(1) NOT NULL",
+        "`credited_as` varchar(255) NOT NULL",
+        "`credit_name` varchar(255) NOT NULL",
+        "`creator_id` int NOT NULL",
+        "`credit_type_id` int NOT NULL",
+        "`issue_id` int NOT NULL",
+        "`is_sourced` tinyint(1) NOT NULL",
+        "`sourced_by` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_issue_credit_creator_id_d23239af_fk_gcd_creat",
+          "column": "creator_id",
+          "refTable": "gcd_creator_name_detail",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_issue_credit_credit_type_id_85428160_fk_gcd_credit_type_id",
+          "column": "credit_type_id",
+          "refTable": "gcd_credit_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_issue_credit_issue_id_928f51d6_fk_gcd_issue_id",
+          "column": "issue_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 1363076,
+      "insertStatements": 143
+    },
+    "gcd_issue_indicia_printer": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`issue_id` int NOT NULL",
+        "`indiciaprinter_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "gcd_issue_indicia_printe_issue_id_indiciaprinter__f9448194_uniq",
+          "columns": "`issue_id`,`indiciaprinter_id`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_issue_indicia_pr_indiciaprinter_id_c0f3b842_fk_gcd_indic",
+          "column": "indiciaprinter_id",
+          "refTable": "gcd_indicia_printer",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_issue_indicia_printer_issue_id_2965892e_fk_gcd_issue_id",
+          "column": "issue_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 212380,
+      "insertStatements": 4
+    },
+    "gcd_membership_type": {
+      "columnCount": 2,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`type` varchar(100) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 3,
+      "insertStatements": 1
+    },
+    "gcd_multiverse": {
+      "columnCount": 6,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`mainstream_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_multiverse_mainstream_id_9a3651b8_fk_gcd_universe_id",
+          "column": "mainstream_id",
+          "refTable": "gcd_universe",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 4,
+      "insertStatements": 1
+    },
+    "gcd_name_type": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`description` longtext NOT NULL",
+        "`type` varchar(50) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 14,
+      "insertStatements": 1
+    },
+    "gcd_non_comic_work_role": {
+      "columnCount": 2,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`role_name` varchar(200) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 11,
+      "insertStatements": 1
+    },
+    "gcd_non_comic_work_type": {
+      "columnCount": 2,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`type` varchar(100) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 12,
+      "insertStatements": 1
+    },
+    "gcd_non_comic_work_year": {
+      "columnCount": 4,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`work_year` smallint unsigned DEFAULT NULL",
+        "`work_year_uncertain` tinyint(1) NOT NULL",
+        "`non_comic_work_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "D0189e80e31281a6ea56ca3b1b0c7cde",
+          "column": "non_comic_work_id",
+          "refTable": "gcd_creator_non_comic_work",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 6518,
+      "insertStatements": 1
+    },
+    "gcd_printer": {
+      "columnCount": 18,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`year_began` int DEFAULT NULL",
+        "`year_ended` int DEFAULT NULL",
+        "`year_began_uncertain` tinyint(1) NOT NULL",
+        "`year_ended_uncertain` tinyint(1) NOT NULL",
+        "`year_overall_began` int DEFAULT NULL",
+        "`year_overall_ended` int DEFAULT NULL",
+        "`year_overall_began_uncertain` tinyint(1) NOT NULL",
+        "`year_overall_ended_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`url` varchar(255) NOT NULL",
+        "`indicia_printer_count` int NOT NULL",
+        "`issue_count` int NOT NULL",
+        "`country_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_printer_country_id_889421fa_fk_stddata_country_id",
+          "column": "country_id",
+          "refTable": "stddata_country",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 1362,
+      "insertStatements": 1
+    },
+    "gcd_publisher": {
+      "columnCount": 20,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL",
+        "`country_id` int NOT NULL",
+        "`year_began` int DEFAULT NULL",
+        "`year_ended` int DEFAULT NULL",
+        "`notes` longtext NOT NULL",
+        "`url` varchar(255) NOT NULL",
+        "`brand_count` int NOT NULL DEFAULT '0'",
+        "`indicia_publisher_count` int NOT NULL DEFAULT '0'",
+        "`series_count` int NOT NULL DEFAULT '0'",
+        "`created` datetime NOT NULL DEFAULT '1901-01-01 00:00:00'",
+        "`modified` datetime NOT NULL DEFAULT '1901-01-01 00:00:00'",
+        "`issue_count` int NOT NULL DEFAULT '0'",
+        "`deleted` tinyint(1) NOT NULL DEFAULT '0'",
+        "`year_began_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`year_ended_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`year_overall_began` int DEFAULT NULL",
+        "`year_overall_began_uncertain` tinyint(1) NOT NULL",
+        "`year_overall_ended` int DEFAULT NULL",
+        "`year_overall_ended_uncertain` tinyint(1) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_publisher_ibfk_1",
+          "column": "country_id",
+          "refTable": "stddata_country",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 15966,
+      "insertStatements": 3
+    },
+    "gcd_received_award": {
+      "columnCount": 12,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`object_id` int unsigned DEFAULT NULL",
+        "`award_name` varchar(255) NOT NULL",
+        "`no_award_name` tinyint(1) NOT NULL",
+        "`award_year` smallint unsigned DEFAULT NULL",
+        "`award_year_uncertain` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`award_id` int DEFAULT NULL",
+        "`content_type_id` int DEFAULT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_received_award_award_id_a1daee53_fk_gcd_award_id",
+          "column": "award_id",
+          "refTable": "gcd_award",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_received_award_content_type_id_76c10020_fk_django_co",
+          "column": "content_type_id",
+          "refTable": "django_content_type",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 15660,
+      "insertStatements": 2
+    },
+    "gcd_relation_type": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`type` varchar(50) NOT NULL",
+        "`reverse_type` varchar(50) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 9,
+      "insertStatements": 1
+    },
+    "gcd_reprint": {
+      "columnCount": 8,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`origin_id` int DEFAULT NULL",
+        "`target_id` int DEFAULT NULL",
+        "`notes` longtext NOT NULL",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`origin_issue_id` int NOT NULL",
+        "`target_issue_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_reprint_origin_id_48220c89_fk_gcd_story_id",
+          "column": "origin_id",
+          "refTable": "gcd_story",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_reprint_origin_issue_id_35ba9bf2_fk_gcd_issue_id",
+          "column": "origin_issue_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_reprint_target_id_44bd71ce_fk_gcd_story_id",
+          "column": "target_id",
+          "refTable": "gcd_story",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_reprint_target_issue_id_c4c7d013_fk_gcd_issue_id",
+          "column": "target_issue_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 1659232,
+      "insertStatements": 152
+    },
+    "gcd_school": {
+      "columnCount": 2,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`school_name` varchar(200) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 902,
+      "insertStatements": 1
+    },
+    "gcd_series": {
+      "columnCount": 39,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL",
+        "`sort_name` varchar(255) NOT NULL",
+        "`format` varchar(255) NOT NULL DEFAULT ''",
+        "`year_began` int NOT NULL",
+        "`year_began_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`year_ended` int DEFAULT NULL",
+        "`year_ended_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`publication_dates` varchar(255) NOT NULL DEFAULT ''",
+        "`first_issue_id` int DEFAULT NULL",
+        "`last_issue_id` int DEFAULT NULL",
+        "`is_current` tinyint(1) NOT NULL DEFAULT '0'",
+        "`publisher_id` int NOT NULL",
+        "`country_id` int NOT NULL",
+        "`language_id` int NOT NULL",
+        "`tracking_notes` longtext NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`has_gallery` tinyint(1) NOT NULL DEFAULT '0'",
+        "`issue_count` int NOT NULL",
+        "`created` datetime NOT NULL DEFAULT '1901-01-01 00:00:00'",
+        "`modified` datetime NOT NULL DEFAULT '1901-01-01 00:00:00'",
+        "`deleted` tinyint(1) NOT NULL DEFAULT '0'",
+        "`has_indicia_frequency` tinyint(1) NOT NULL DEFAULT '1'",
+        "`has_isbn` tinyint(1) NOT NULL DEFAULT '1'",
+        "`has_barcode` tinyint(1) NOT NULL DEFAULT '1'",
+        "`has_issue_title` tinyint(1) NOT NULL DEFAULT '0'",
+        "`has_volume` tinyint(1) NOT NULL DEFAULT '1'",
+        "`is_comics_publication` tinyint(1) NOT NULL DEFAULT '1'",
+        "`color` varchar(255) NOT NULL",
+        "`dimensions` varchar(255) NOT NULL",
+        "`paper_stock` varchar(255) NOT NULL",
+        "`binding` varchar(255) NOT NULL",
+        "`publishing_format` varchar(255) NOT NULL",
+        "`has_rating` tinyint(1) NOT NULL",
+        "`publication_type_id` int",
+        "`is_singleton` tinyint(1) NOT NULL",
+        "`has_about_comics` tinyint(1) NOT NULL",
+        "`has_indicia_printer` tinyint(1) NOT NULL",
+        "`has_publisher_code_number` tinyint(1) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_series_ibfk_2",
+          "column": "publisher_id",
+          "refTable": "gcd_publisher",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_series_ibfk_3",
+          "column": "country_id",
+          "refTable": "stddata_country",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_series_ibfk_4",
+          "column": "language_id",
+          "refTable": "stddata_language",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_series_ibfk_5",
+          "column": "first_issue_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_series_ibfk_6",
+          "column": "last_issue_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "publication_type_id_refs_id_2c468df7974b9efa",
+          "column": "publication_type_id",
+          "refTable": "gcd_series_publication_type",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 157418,
+      "insertStatements": 62
+    },
+    "gcd_series_bond": {
+      "columnCount": 8,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`origin_id` int NOT NULL",
+        "`target_id` int NOT NULL",
+        "`origin_issue_id` int DEFAULT NULL",
+        "`target_issue_id` int DEFAULT NULL",
+        "`bond_type_id` int NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`reserved` tinyint(1) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "bond_type_id_refs_id_74608925967dca7d",
+          "column": "bond_type_id",
+          "refTable": "gcd_series_bond_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "origin_id_refs_id_2e5ee5bcc36327a6",
+          "column": "origin_id",
+          "refTable": "gcd_series",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "origin_issue_id_refs_id_14846e21180392d7",
+          "column": "origin_issue_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "target_id_refs_id_2e5ee5bcc36327a6",
+          "column": "target_id",
+          "refTable": "gcd_series",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "target_issue_id_refs_id_14846e21180392d7",
+          "column": "target_issue_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 6767,
+      "insertStatements": 1
+    },
+    "gcd_series_bond_type": {
+      "columnCount": 4,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL",
+        "`description` longtext NOT NULL",
+        "`notes` longtext NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 7,
+      "insertStatements": 1
+    },
+    "gcd_series_publication_type": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL",
+        "`notes` longtext NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 3,
+      "insertStatements": 1
+    },
+    "gcd_story": {
+      "columnCount": 31,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`title` varchar(255) NOT NULL DEFAULT ''",
+        "`title_inferred` tinyint(1) NOT NULL DEFAULT '0'",
+        "`feature` varchar(255) NOT NULL",
+        "`sequence_number` int NOT NULL",
+        "`page_count` decimal(10,3) DEFAULT NULL",
+        "`issue_id` int NOT NULL",
+        "`script` longtext NOT NULL",
+        "`pencils` longtext NOT NULL",
+        "`inks` longtext NOT NULL",
+        "`colors` longtext NOT NULL",
+        "`letters` longtext NOT NULL",
+        "`editing` longtext NOT NULL",
+        "`genre` varchar(255) NOT NULL DEFAULT ''",
+        "`characters` longtext NOT NULL",
+        "`synopsis` longtext NOT NULL",
+        "`reprint_notes` longtext NOT NULL",
+        "`created` datetime NOT NULL DEFAULT '1901-01-01 00:00:00'",
+        "`modified` datetime NOT NULL DEFAULT '1901-01-01 00:00:00'",
+        "`notes` longtext NOT NULL",
+        "`no_script` tinyint(1) NOT NULL DEFAULT '0'",
+        "`no_pencils` tinyint(1) NOT NULL DEFAULT '0'",
+        "`no_inks` tinyint(1) NOT NULL DEFAULT '0'",
+        "`no_colors` tinyint(1) NOT NULL DEFAULT '0'",
+        "`no_letters` tinyint(1) NOT NULL DEFAULT '0'",
+        "`no_editing` tinyint(1) NOT NULL DEFAULT '0'",
+        "`page_count_uncertain` tinyint(1) NOT NULL DEFAULT '0'",
+        "`type_id` int NOT NULL",
+        "`job_number` varchar(25) NOT NULL DEFAULT ''",
+        "`deleted` tinyint(1) NOT NULL DEFAULT '0'",
+        "`first_line` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_story_ibfk_1",
+          "column": "issue_id",
+          "refTable": "gcd_issue",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_ibfk_2",
+          "column": "type_id",
+          "refTable": "gcd_story_type",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 3959637,
+      "insertStatements": 1067
+    },
+    "gcd_story_arc": {
+      "columnCount": 12,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`sort_name` varchar(255) NOT NULL",
+        "`disambiguation` varchar(255) NOT NULL",
+        "`description` longtext NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`language_id` int NOT NULL",
+        "`year_first_published` int DEFAULT NULL",
+        "`year_first_published_uncertain` tinyint(1) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_story_arc_language_id_4880d4a7_fk_stddata_language_id",
+          "column": "language_id",
+          "refTable": "stddata_language",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 568,
+      "insertStatements": 1
+    },
+    "gcd_story_arc_relation": {
+      "columnCount": 7,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`from_story_arc_id` int NOT NULL",
+        "`relation_type_id` int NOT NULL",
+        "`to_story_arc_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_story_arc_relati_from_story_arc_id_54a3fed9_fk_gcd_story",
+          "column": "from_story_arc_id",
+          "refTable": "gcd_story_arc",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_arc_relati_relation_type_id_fe1e25d8_fk_gcd_story",
+          "column": "relation_type_id",
+          "refTable": "gcd_story_arc_relation_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_arc_relati_to_story_arc_id_5f72f57a_fk_gcd_story",
+          "column": "to_story_arc_id",
+          "refTable": "gcd_story_arc",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 21,
+      "insertStatements": 1
+    },
+    "gcd_story_arc_relation_type": {
+      "columnCount": 4,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(255) NOT NULL",
+        "`description` varchar(255) NOT NULL",
+        "`reverse_description` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 2,
+      "insertStatements": 1
+    },
+    "gcd_story_character": {
+      "columnCount": 13,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`is_flashback` tinyint(1) NOT NULL",
+        "`is_origin` tinyint(1) NOT NULL",
+        "`is_death` tinyint(1) NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`character_id` int NOT NULL",
+        "`role_id` int DEFAULT NULL",
+        "`story_id` int NOT NULL",
+        "`universe_id` int DEFAULT NULL",
+        "`group_universe_id` int DEFAULT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_story_character_character_id_eac50f28_fk_gcd_chara",
+          "column": "character_id",
+          "refTable": "gcd_character_name_detail",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_character_group_universe_id_1660ef69_fk_gcd_unive",
+          "column": "group_universe_id",
+          "refTable": "gcd_universe",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_character_role_id_f7883e66_fk_gcd_character_role_id",
+          "column": "role_id",
+          "refTable": "gcd_character_role",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_character_story_id_13ce6388_fk_gcd_story_id",
+          "column": "story_id",
+          "refTable": "gcd_story",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_character_universe_id_a98c97a2_fk_gcd_universe_id",
+          "column": "universe_id",
+          "refTable": "gcd_universe",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 2059788,
+      "insertStatements": 204
+    },
+    "gcd_story_character_group": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`storycharacter_id` int NOT NULL",
+        "`group_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "gcd_story_character_grou_storycharacter_id_group__630fc99e_uniq",
+          "columns": "`storycharacter_id`,`group_id`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_story_character__storycharacter_id_1cab539d_fk_gcd_story",
+          "column": "storycharacter_id",
+          "refTable": "gcd_story_character",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_character_group_group_id_191387e6_fk_gcd_group_id",
+          "column": "group_id",
+          "refTable": "gcd_group",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 163980,
+      "insertStatements": 3
+    },
+    "gcd_story_credit": {
+      "columnCount": 16,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`is_credited` tinyint(1) NOT NULL",
+        "`is_signed` tinyint(1) NOT NULL",
+        "`uncertain` tinyint(1) NOT NULL",
+        "`signed_as` varchar(255) NOT NULL",
+        "`credited_as` varchar(255) NOT NULL",
+        "`credit_name` varchar(255) NOT NULL",
+        "`creator_id` int NOT NULL",
+        "`credit_type_id` int NOT NULL",
+        "`story_id` int NOT NULL",
+        "`signature_id` int DEFAULT NULL",
+        "`is_sourced` tinyint(1) NOT NULL",
+        "`sourced_by` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_story_credit_creator_id_7c632a78_fk_gcd_creat",
+          "column": "creator_id",
+          "refTable": "gcd_creator_name_detail",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_credit_credit_type_id_2b1eda8a_fk_gcd_credit_type_id",
+          "column": "credit_type_id",
+          "refTable": "gcd_credit_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_credit_signature_id_0c4a25cd_fk_gcd_creat",
+          "column": "signature_id",
+          "refTable": "gcd_creator_signature",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_credit_story_id_7b35c2b5_fk_gcd_story_id",
+          "column": "story_id",
+          "refTable": "gcd_story",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 12302433,
+      "insertStatements": 1287
+    },
+    "gcd_story_feature_logo": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`story_id` int NOT NULL",
+        "`featurelogo_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "gcd_story_feature_logo_story_id_featurelogo_id_5a345f8c_uniq",
+          "columns": "`story_id`,`featurelogo_id`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_story_feature_lo_featurelogo_id_169a1ec3_fk_gcd_featu",
+          "column": "featurelogo_id",
+          "refTable": "gcd_feature_logo",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_feature_logo_story_id_41377b84_fk_gcd_story_id",
+          "column": "story_id",
+          "refTable": "gcd_story",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 149286,
+      "insertStatements": 3
+    },
+    "gcd_story_feature_object": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`story_id` int NOT NULL",
+        "`feature_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "gcd_story_feature_object_story_id_feature_id_e2de9a4d_uniq",
+          "columns": "`story_id`,`feature_id`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_story_feature_object_feature_id_fea4dbf9_fk_gcd_feature_id",
+          "column": "feature_id",
+          "refTable": "gcd_feature",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_feature_object_story_id_0393a434_fk_gcd_story_id",
+          "column": "story_id",
+          "refTable": "gcd_story",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 2859789,
+      "insertStatements": 59
+    },
+    "gcd_story_story_arc": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`story_id` int NOT NULL",
+        "`storyarc_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "gcd_story_story_arc_story_id_storyarc_id_f9adf1b5_uniq",
+          "columns": "`story_id`,`storyarc_id`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_story_story_arc_story_id_406c134b_fk_gcd_story_id",
+          "column": "story_id",
+          "refTable": "gcd_story",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_story_arc_storyarc_id_4b052401_fk_gcd_story_arc_id",
+          "column": "storyarc_id",
+          "refTable": "gcd_story_arc",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 4374,
+      "insertStatements": 1
+    },
+    "gcd_story_type": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(50) NOT NULL",
+        "`sort_code` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "name",
+          "columns": "`name`"
+        },
+        {
+          "name": "sort_code",
+          "columns": "`sort_code`"
+        }
+      ],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 29,
+      "insertStatements": 1
+    },
+    "gcd_story_universe": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`story_id` int NOT NULL",
+        "`universe_id` int NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "gcd_story_universe_story_id_universe_id_3a74cf57_uniq",
+          "columns": "`story_id`,`universe_id`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_story_universe_story_id_6cbde435_fk_gcd_story_id",
+          "column": "story_id",
+          "refTable": "gcd_story",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "gcd_story_universe_universe_id_d3185012_fk_gcd_universe_id",
+          "column": "universe_id",
+          "refTable": "gcd_universe",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 113616,
+      "insertStatements": 2
+    },
+    "gcd_universe": {
+      "columnCount": 12,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`created` datetime(6) NOT NULL",
+        "`modified` datetime(6) NOT NULL",
+        "`deleted` tinyint(1) NOT NULL",
+        "`multiverse` varchar(255) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`designation` varchar(255) NOT NULL",
+        "`year_first_published` int DEFAULT NULL",
+        "`year_first_published_uncertain` tinyint(1) NOT NULL",
+        "`description` longtext NOT NULL",
+        "`notes` longtext NOT NULL",
+        "`verse_id` int DEFAULT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [
+        {
+          "constraint": "gcd_universe_verse_id_b2ae21fa_fk_gcd_multiverse_id",
+          "column": "verse_id",
+          "refTable": "gcd_multiverse",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 974,
+      "insertStatements": 1
+    },
+    "stddata_country": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`code` varchar(10) NOT NULL",
+        "`name` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "code_2",
+          "columns": "`code`"
+        }
+      ],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 273,
+      "insertStatements": 1
+    },
+    "stddata_date": {
+      "columnCount": 7,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`year` varchar(4) NOT NULL",
+        "`month` varchar(2) NOT NULL",
+        "`day` varchar(2) NOT NULL",
+        "`year_uncertain` tinyint(1) NOT NULL",
+        "`month_uncertain` tinyint(1) NOT NULL",
+        "`day_uncertain` tinyint(1) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 923076,
+      "insertStatements": 22
+    },
+    "stddata_language": {
+      "columnCount": 4,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`code` varchar(10) NOT NULL",
+        "`name` varchar(255) NOT NULL",
+        "`native_name` varchar(255) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "code_2",
+          "columns": "`code`"
+        }
+      ],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 163,
+      "insertStatements": 1
+    },
+    "stddata_script": {
+      "columnCount": 4,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`code` varchar(4) NOT NULL",
+        "`number` smallint unsigned NOT NULL",
+        "`name` varchar(64) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "code",
+          "columns": "`code`"
+        },
+        {
+          "name": "number",
+          "columns": "`number`"
+        }
+      ],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 84,
+      "insertStatements": 1
+    },
+    "taggit_tag": {
+      "columnCount": 3,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`name` varchar(100) NOT NULL",
+        "`slug` varchar(100) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "slug",
+          "columns": "`slug`"
+        }
+      ],
+      "foreignKeys": [],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": 108324,
+      "insertStatements": 4
+    },
+    "taggit_taggeditem": {
+      "columnCount": 7,
+      "columns": [
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`tag_id` int NOT NULL",
+        "`object_id` int NOT NULL",
+        "`content_type_id` int NOT NULL",
+        "`id` int NOT NULL AUTO_INCREMENT",
+        "`app_label` varchar(100) NOT NULL",
+        "`model` varchar(100) NOT NULL"
+      ],
+      "primaryKey": "`id`",
+      "uniqueKeys": [
+        {
+          "name": "taggit_taggeditem_content_type_id_object_id_tag_id_4bb97a8e_uniq",
+          "columns": "`content_type_id`,`object_id`,`tag_id`"
+        },
+        {
+          "name": "app_label",
+          "columns": "`app_label`,`model`"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "constraint": "taggit_taggeditem_ibfk_1",
+          "column": "content_type_id",
+          "refTable": "django_content_type",
+          "refColumn": "id"
+        },
+        {
+          "constraint": "taggit_taggeditem_ibfk_2",
+          "column": "tag_id",
+          "refTable": "taggit_tag",
+          "refColumn": "id"
+        }
+      ],
+      "engine": "InnoDB",
+      "tableCharset": "utf8mb3",
+      "estimatedRows": null,
+      "insertStatements": null
+    }
+  }
+}
