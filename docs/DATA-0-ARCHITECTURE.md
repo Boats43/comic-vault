@@ -52,7 +52,7 @@ persists the one that's already shipped.
 | resolving a facet's canonical value | `reconcileTitle` / `reconcileIssue` / `reconcileYear` / `reconcileVariant` | same |
 | `*_authority` column (cache) | the `authority` field a `reconcileX` call returns (`NONE`\|`CONTESTED`\|`CORROBORATED`) | same |
 | `external_map` | provider ID mappings (GCD/Metron/ComicVine/PriceCharting) — **never** identity itself | new, no direct runtime analog yet — `api/mega-keys.js`'s own publisher/year matching is the closest existing precedent for "external value used to gate, not define, identity" |
-| `alias` | recognized canonical/source/market aliases | `src/lib/premiumCreators.js`'s creator alias arrays, `src/lib/pedigreeRegistry.js`'s alias lookups — same shape, generalized |
+| `alias.kind` (0A-r2: `canonical_alias`\|`catalog_alias`\|`source_alias`\|`market_observed_alias`\|`operator_alias`) | recognized canonical/source/market aliases — `source_alias`/`market_observed_alias` are the DEL O'TT lesson as data (see `0001_generic_substrate.sql`'s own header comment on `alias`) | `src/lib/premiumCreators.js`'s creator alias arrays, `src/lib/pedigreeRegistry.js`'s alias lookups — same shape, generalized |
 | typed comic projection (`comic_issue` etc.) | a fast materialized cache of what the reconciler would compute live | no direct runtime analog — this is new, and exists purely for query speed; see THE REBUILD RULE (§5) for why that's the only reason it's allowed to exist |
 
 The one deliberate asymmetry: `reconcileTitle`'s own sole-authority
@@ -117,6 +117,17 @@ GrailKey truth." Fields and why each exists:
   This mirrors AM/AU's own "verbatim survives as evidence" rule (GK-140's
   `justifiedBy[].verbatim`) one layer down, at the ingestion boundary
   instead of the reconciliation boundary.
+- **0A-r2 additions — `source_uri` and `ingestion_run_id`.** `source_uri`
+  is the literal URL/file path this specific record was fetched from
+  (the GCD dump's own path, or the exact Metron endpoint+query called) —
+  "where did this come from" as a re-fetchable fact, not something
+  reconstructed from memory later. `ingestion_run_id` (a new
+  `ingestion_run` table — id/source/run_kind/started_at/completed_at/
+  status/notes) is batch-level lineage: which RUN of the sync worker
+  produced this fetch, distinct from the per-record `retrieved_at`
+  timestamp already on this table. Answers "did run N complete" or
+  "re-process everything run N ingested" without scanning every
+  `source_snapshot` row for a timestamp window.
 
 `claim.source_snapshot_id` ties every derived claim back to the exact
 fetch that produced it — "why do we believe this" always terminates at a
@@ -206,7 +217,52 @@ to author the very query that's supposed to independently check it.
 Neither lane exists as code in DATA-0A. Both require the catalog itself
 (DATA-0B/C) and real ingested data before there's anything to query.
 
-## 8. Risks / open questions
+## 8. Deployment topology (0A-r2)
+
+New fact from the DATA-0 pre-flight and the GCD file itself: Neon's free
+tier caps at **0.5GB storage**; the actual GCD dump (`current.zip`,
+verified 2026-08-20) is **695MB compressed** — uncompressed, a MySQL dump
+regularly runs several times that. Neither fits in, nor belongs in, a
+0.5GB serverless Postgres tier meant for fast operational lookups.
+
+**Decision: raw source data never enters Neon.** Concretely:
+
+- **`source_snapshot` (§4) — including its `payload` column, the full
+  raw fetched record — lives in LOCAL staging only** (Docker Postgres, or
+  even flat files during DATA-0B before any Postgres exists at all — see
+  `db/data0/snapshots/`). This is the ONLY table in the substrate that
+  holds bulk raw data, and it is deliberately the one excluded from the
+  hosted tier.
+- **Neon holds the canonical typed projection (all `comic_*` tables),
+  `external_map` (crosswalk — small, one row per external ID, not per
+  raw record), and a bounded set of `claim` rows** — the claims that
+  currently justify a typed row's resolved value and authority, not an
+  unbounded historical ledger of every claim ever observed from every
+  re-sync. A claim superseded by a newer observation from the SAME
+  source moves to local archive alongside its originating
+  `source_snapshot`; Neon's own `claim` table stays sized to "what's
+  live," not "everything that ever happened."
+- This does **not** weaken THE REBUILD RULE (§5) — it narrows what the
+  rule is checked against. Neon's own typed projection must still be
+  fully reproducible from Neon's own current `claim` set + the
+  reconciliation rules; the full historical evidence ledger (every claim
+  ever observed, including superseded ones) is a SEPARATE, stronger
+  guarantee that exists locally for audit purposes, never conflated with
+  the hosted rebuild property.
+
+**Upgrade trigger.** Monitor combined size of `comic_*` + `external_map`
++ live `claim` on Neon. When that total approaches roughly 350-400MB
+(leaving real headroom under the 500MB free cap, not running it to the
+edge), either: (a) upgrade to Neon's usage-based paid tier — per the
+DATA-0 pre-flight's own Q1 finding, this is a genuinely small cost at
+this project's scale (storage alone was estimated at ~$0.35/GB-month,
+i.e. low single-digit dollars for the overflow, not a re-architecture);
+or (b) prune further — archive claims for facets whose authority hasn't
+changed across N sync cycles to local-only, keeping Neon's live set
+tighter. Both are viable; which one fires first is a DATA-0B/C-era
+operational decision, not designed further here.
+
+## 9. Risks / open questions
 
 - **GCD CC BY-SA 4.0 ShareAlike scope** (pending counsel) — does a
   derivative catalog database built FROM GCD metadata trigger the

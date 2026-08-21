@@ -61,6 +61,25 @@ CREATE TABLE facet (
   name  TEXT NOT NULL
 );
 
+-- GrailKey Directive 0A-r2 — one run of one ingestion process (a GCD bulk
+-- load, a Metron modified_gt poll). Batch-level lineage, distinct from
+-- source_snapshot's own per-record lineage: "which run produced this
+-- fetch" is a different question from "when was this specific record
+-- fetched," and the former is needed to answer "did run N ever complete"
+-- or "re-run everything ingested by run N" without scanning every
+-- source_snapshot row for a timestamp range.
+CREATE TABLE ingestion_run (
+  id            BIGSERIAL PRIMARY KEY,
+  source        TEXT NOT NULL,             -- 'gcd' | 'metron' | ...
+  run_kind      TEXT NOT NULL CHECK (run_kind IN ('bulk-load','incremental-sync')),
+  started_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at  TIMESTAMPTZ,               -- NULL while running or if it never finished
+  status        TEXT NOT NULL DEFAULT 'running'
+                  CHECK (status IN ('running','completed','failed','partial')),
+  notes         TEXT
+);
+CREATE INDEX ON ingestion_run (source, started_at);
+
 -- A snapshot of one FETCH from one external source at one point in time
 -- — the thing a claim is DERIVED FROM, never the claim itself. GCD and
 -- Metron never write catalog_entity/claim directly; they produce
@@ -73,6 +92,11 @@ CREATE TABLE source_snapshot (
   source              TEXT NOT NULL,          -- 'gcd' | 'metron' | 'comicvine' | 'pricecharting' | ...
   source_record_id    TEXT NOT NULL,          -- the source's own primary key for this record
   source_version      TEXT,                   -- e.g. GCD dump date, Metron's own modified_gt timestamp
+  source_uri          TEXT,                   -- 0A-r2: the literal URL/file path this record was fetched
+                                               -- from (the GCD dump's own path/URL, or the exact Metron
+                                               -- API endpoint+query string called) — "where did this come
+                                               -- from, precisely" as a re-fetchable fact, not a memory.
+  ingestion_run_id    BIGINT REFERENCES ingestion_run(id),  -- 0A-r2: which run produced this fetch
   retrieved_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   source_modified_at  TIMESTAMPTZ,            -- the source's own claimed last-modified time, when exposed
   payload             JSONB NOT NULL,         -- the raw fetched record, verbatim
@@ -86,6 +110,13 @@ CREATE TABLE source_snapshot (
 CREATE UNIQUE INDEX ON source_snapshot (source, source_record_id, source_version);
 CREATE INDEX ON source_snapshot (source, retrieved_at);
 CREATE INDEX ON source_snapshot (source, source_record_id) WHERE deleted_at IS NULL;
+CREATE INDEX ON source_snapshot (ingestion_run_id);
+-- 0A-r2 note: license/rights_classification/superseded_by/deleted_at
+-- (above) were already present in the r1 draft this amends — verified,
+-- not re-added. This table is the ONLY place `payload` (the full raw
+-- record) is stored; see docs/DATA-0-ARCHITECTURE.md's new "Deployment
+-- topology" section for why that fact drives where this table actually
+-- gets deployed (local staging, not Neon, on current sizing).
 
 -- Persisted evidence entry. One row per (source, facet, value)
 -- observation for one catalog_entity — the DB shape of
@@ -133,16 +164,64 @@ CREATE INDEX ON external_map (catalog_entity_id);
 -- alias, or a creator-name alias migrated from premiumCreators.js's own
 -- alias arrays in a later dispatch); entity-scoped (facet_id NULL) when
 -- it's a whole-entity alternate identity.
+--
+-- GrailKey Directive 0A-r2 — `kind` becomes an explicit, closed taxonomy
+-- instead of a freeform example list. THE DEL O'TT LESSON, AS DATA
+-- (GK-136, docs/PATTERN-LIBRARY.md "GrailKey Directive AU"): the real
+-- production defect this taxonomy exists to prevent from recurring at
+-- the schema level was a creator name observed in FIVE different raw
+-- spellings across a pool ("DEL O'TT" space-separated, "DEL OTT"
+-- collapsed, etc.) — the fix was a bounded fuzzy-match FALLBACK
+-- (matchCreatorCanonicals, premiumCreators.js) that needed those raw,
+-- mangled spellings to exist as real input, not a canonicalization step
+-- that silently corrected or discarded them before the matcher ever saw
+-- them. This table's whole reason for existing is to make that the
+-- default: a raw spelling variant is ALWAYS recorded verbatim as evidence
+-- — never destructively normalized away at ingestion time — regardless
+-- of which tier of trust it carries.
+--   canonical_alias        this project's own accepted alternate name for
+--                          the SAME entity (e.g. a title-change/rename
+--                          this project has decided are the same series).
+--   catalog_alias          an alternate name a REFERENCE CATALOG source
+--                          itself records (GCD/Metron/ComicVine's own
+--                          alternate indexing/reprint title) — catalog-
+--                          authored, not observed in the wild.
+--   source_alias           a raw spelling variant observed VERBATIM in
+--                          any source's own text, exactly as encountered
+--                          — the DEL O'TT-class row. Never corrected.
+--   market_observed_alias  a spelling/naming variant observed specifically
+--                          in MARKETPLACE listing text (eBay comps, etc.)
+--                          — kept distinct from source_alias because
+--                          marketplace text is noisier/less authoritative
+--                          than a reference catalog, and this is exactly
+--                          the population the fuzzy-match/variant-taxonomy
+--                          machinery (compHygiene.js/imageSearchIdentity.js)
+--                          already draws its own real-world spelling
+--                          variance from.
+--   operator_alias         a human-entered/manually-confirmed alias —
+--                          highest trust tier, mirrors this project's own
+--                          'user' sole-authority precedence already
+--                          established in the runtime reconciler (GK-85
+--                          OPERATOR_CONFIRMED, GK-127's 'user' issue-facet
+--                          precedence).
 CREATE TABLE alias (
   id                 BIGSERIAL PRIMARY KEY,
   catalog_entity_id  BIGINT REFERENCES catalog_entity(id),
   facet_id           INT REFERENCES facet(id),
-  value              TEXT NOT NULL,
-  kind               TEXT,                    -- 'title-variant' | 'creator-alias' | 'market-name' | ...
+  value              TEXT NOT NULL,           -- verbatim — never destructively normalized (see header)
+  kind               TEXT NOT NULL
+                       CHECK (kind IN ('canonical_alias','catalog_alias','source_alias',
+                                        'market_observed_alias','operator_alias')),
+  source             TEXT,                    -- which literal source/observation this came from, when
+                                               -- kind is source_alias/market_observed_alias — required
+                                               -- for those two kinds to actually be traceable back to
+                                               -- the row that produced them; NULL for canonical_alias/
+                                               -- operator_alias, which don't originate from a source.
   CHECK (catalog_entity_id IS NOT NULL OR facet_id IS NOT NULL)
 );
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX ON alias USING gin (value gin_trgm_ops);
+CREATE INDEX ON alias (kind);
 
 -- Seed data — comics as data, never as table shape (the whole point).
 INSERT INTO asset_class (code, name) VALUES ('comic', 'Comic Book');
