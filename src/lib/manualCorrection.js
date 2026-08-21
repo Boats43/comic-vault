@@ -697,6 +697,7 @@ export const buildManualCorrectionPayload = (item, correctedValues, correctedFie
   identitySource: 'manual',
   confidence: 'HIGH',
   ...(scanId ? { scanId } : {}),
+  collectionItemId: item.id, // GK-145 (GrailKey Dispatch 2026-08-21) — correction always targets an existing collection record
   title: correctedValues.title ?? item.title,
   issue: correctedValues.issue ?? item.issue,
   year: correctedValues.year ?? item.year,

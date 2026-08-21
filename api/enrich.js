@@ -2322,6 +2322,7 @@ export default async function handler(req, res) {
       manualAuthority, // Track B Phase 0, Commit 3 — { correctedBy, correctedFields }, present only on a card-correction request
       priorIdentity,   // Track B Phase 0, Commit 3 — { title, issue, year, publisher, issueAuthority } snapshot of the card BEFORE correction, client-supplied (server has no other way to know the prior state)
       scanId,          // Slice 7 — client-minted per-scan ownership identifier (src/lib/scanOwnership.js), echoed back verbatim so App.jsx's gradeBlob can verify this response belongs to the scan that requested it. Absent on requests from older clients or non-gradeBlob call sites (e.g. refreshMarketData) — always optional.
+      collectionItemId, // GK-145 (GrailKey Dispatch 2026-08-21) — the IndexedDB collection record's own item.id, threaded through by App.jsx on collection-originated requests only (refreshMarketData, auto-refresh, reIdentifyBook, submitManualCorrection, bulk import, gradeBlob/duplicate-confirm post-save). Null on a free-standing scan not yet saved to the collection. MEASUREMENT-ONLY: read here solely to snapshot into the scanlog record below (src/lib/scanLog.js) — this value drives no identity, pricing, or decision logic in this handler and never will without a separate, explicit greenlight. Not proof of physical-copy identity — see scanLog.js's own JSDoc on this field.
     } = req.body || {};
 
     // Track B Phase 0, Commit 3 — Safeguards 1+2. prepareManualCorrectionRequest
@@ -11991,7 +11992,33 @@ export default async function handler(req, res) {
           barcodeSupplementLength: null, // no supplement-digit concept exists in this codebase yet
         },
         eventualCertifiedGrade: null,
+        // GK-145 (GrailKey Dispatch 2026-08-21) — see req.body destructure
+        // comment above and scanLog.js's own JSDoc for the collectionItemId
+        // != gkAssetId distinction. Read-only pass-through, no derivation.
+        collectionItemId: collectionItemId ?? null,
+        // GK-146 (GrailKey Dispatch 2026-08-21) — snapshot of already-
+        // computed `out.*` fields, purely observational. Does NOT make the
+        // pricing derivation reconstructable (comp pool, priceDerivationTrace,
+        // and full rationale are still discarded at response time — see
+        // scanLog.js's own JSDoc on this field and docs/DATA-1-READINESS.md).
+        outcome: {
+          decisionAction: out.decision?.action ?? null,
+          pricingSource: out.pricingSource ?? null,
+          price: out.price ?? null,
+          gradeMultiplier: out.gradeMultiplier ?? null,
+        },
       });
+      // GK-145/GK-146 — diagnostic line, same convention as [decision]/
+      // [commit-p] above: proves the two new fields actually reached the
+      // built record (not just that buildScanLogRecord defaults them),
+      // without requiring a real KV write to inspect the persisted value.
+      console.log(
+        `[scanlog] collectionItemId=${scanLogRecord.collectionItemId} ` +
+        `outcome.decisionAction=${scanLogRecord.outcome?.decisionAction} ` +
+        `outcome.pricingSource=${scanLogRecord.outcome?.pricingSource} ` +
+        `outcome.price=${scanLogRecord.outcome?.price} ` +
+        `outcome.gradeMultiplier=${scanLogRecord.outcome?.gradeMultiplier}`
+      );
       await kvSet(scanLogKey, scanLogRecord, KV_TTL.SCANLOG);
       await kvZAdd(SCAN_LOG_INDEX_KEY, scanLogTs, scanLogKey);
     } catch (err) {

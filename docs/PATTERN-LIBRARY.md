@@ -12295,3 +12295,154 @@ regression. GK-125's
 family-name-collapse half and DATA-0 remain separately scoped, untouched.
 Committed locally, NOT pushed -- report and ask before pushing, since
 the push deploys production. Do not propose the next directive.
+
+## GrailKey Dispatch 2026-08-21 — DATA-1 readiness interrogation, GK-145/146/147
+
+**Not a fix dispatch — the first readiness/measurement pass for the
+locked product decision: GrailKey is an asset management system (take a
+picture -> know what it is -> know its actual value -> manage it as an
+asset), built first, everything else downstream.** Two prior artifacts
+this dispatch builds on: the DATA-0 catalog contract (design-only,
+GrailKey Dispatch 16 onward) and the interrogation report itself
+(five parallel research passes, Sections A-E, folded into
+`docs/DATA-1-READINESS.md`).
+
+### What the interrogation found
+
+The gap between "shows a price" and "manages an asset" was total, not
+partial. No persisted event linked two scans of the same physical book
+(scanLog had no item-correlation field at all). No persisted event
+explained *why* a price was what it was a month later — the comp pool,
+grade multiplier, pricing branch, and `priceDerivationTrace` are all
+computed mid-request and discarded at response time; scanLog (pre this
+dispatch) captured identity/latency/cost telemetry but nothing about the
+outcome itself. No server-side photo storage exists anywhere in the
+stack — photos live only as base64 strings inside the same flat
+IndexedDB record as everything else. The corrections log
+(`buildManualCorrectionProvenance`) builds a real before/after/reason
+object per request but is never persisted — `identityAuthority`
+(GK-85's per-field lock map) is the only thing that survives, and it's a
+lock STATE, not an accumulating HISTORY.
+
+Two structural findings feed directly into DATA-1's future schema work:
+
+1. **The collection record was never split by record class.** Catalog
+   identity, physical-copy state, valuation, decision, and ownership
+   economics (cost basis, FMV overrides — genuinely new ground, no
+   representation anywhere in `0001`/`0002`) all coexist as
+   undifferentiated siblings on one flat object. `docs/DATA-0-ARCHITECTURE.md`
+   gained a new §10 stating the law this implies (physical copy
+   REFERENCES canonical identity, never IS it) plus the five-way split,
+   since an earlier readiness pass had cited a "gkAssetId boundary
+   section" that turned out not to exist yet — corrected by writing the
+   section for real, not by silently patching the citation.
+2. **`identityAuthority` is two concepts sharing one name.** The
+   collection record's per-field `OPERATOR_CONFIRMED` lock map (GK-85)
+   and the reconciler's own evidence-corroboration authority
+   (`NONE`/`CONTESTED`/`CORROBORATED`, `reconcileTitle`/`reconcileIssue`/
+   etc.) are independent axes — a field can be operator-locked with weak
+   evidence, or evidence-corroborated with no lock at all. Named
+   explicitly (`operator_lock` vs. `authority`) in the new §10 so no
+   future schema merges them.
+
+Also confirmed: KV (Upstash, `api/kv-cache.js`) is disqualified for
+ledger data by its own contract — every write requires a mandatory TTL
+and `kvGet`/`kvSet`/`kvDel` fail silently by design (a deliberate
+best-effort-cache contract, not a bug). DATA-1's asset tables belong in
+Neon. Rough estimate: 5-15KB/asset with a modest event history, ~30K-100K
+assets in the 0.5GB free tier — shared with DATA-0B-2's canonical-catalog
+subset, so real numbers need both measured together.
+
+### GK-145 — collection-record correlation wiring (SHIPPED, this dispatch, LOCAL ONLY)
+
+`collectionItemId` (the IndexedDB collection record's own `item.id`, e.g.
+`cv_<ts>_<rand>` from `addToCatalogue`, `App.jsx`) now threads through
+every collection-originated `/api/enrich` request into
+`buildScanLogRecord` (`src/lib/scanLog.js`). All nine `fetch("/api/enrich"...)`
+call sites in `App.jsx` were individually classified and wired: five
+collection-originated sites pass the real `item.id` or a just-resolved
+`savedId` (auto-refresh, `refreshMarketData`, `reIdentifyBook`,
+`submitManualCorrection` via `buildManualCorrectionPayload` in
+`src/lib/manualCorrection.js`, bulk import, gradeBlob's post-save
+fire-and-forget, duplicate-confirm) and two free-standing-scan sites
+(Watch Mode preview, barcode identify) pass `null` explicitly and
+correctly — this is the designed behavior, not a gap.
+
+**The one rule this ticket exists to enforce, stated in the field's own
+JSDoc and the `api/enrich.js` destructure comment: `collectionItemId !=
+gkAssetId` and `collectionItemId` is NOT proof of physical-copy
+identity.** It is temporary client-record correlation only — a pointer
+into the Collection's own IndexedDB, nothing more. It answers "which
+saved record did this request come from," not "is this the same
+physical book as some other record." DATA-1's `gkAssetId` is a different,
+durable, evidence-backed concept that does not exist yet.
+
+### GK-146 — scanLog outcome/valuation measurement fields (SHIPPED, this dispatch, LOCAL ONLY)
+
+`scanLog` records now snapshot `out.decision.action`, `out.pricingSource`,
+`out.price` (the raw `fmtUsd()` currency string, same shape as every
+other price read in this codebase per GK-74 — deliberately not parsed
+here), and `out.gradeMultiplier` under a new `outcome` object. Additive,
+**no version bump** — `SCAN_LOG_VERSION` stays `1`, following the file's
+own established convention (Fix 32-C, GrailKey Dispatch 33: a purely
+additive, optional, default-null field does not require a version bump;
+a version bump is reserved for reshaping an EXISTING field's meaning).
+
+This makes the "Picture-to-Action" outcome-class denominator
+(`docs/DATA-1-READINESS.md` E1) measurable from real production data
+going forward — before this dispatch, zero artifacts in this repo could
+answer what fraction of scans reach ID_REQUIRED/DO_NOT_LIST/RESEARCH/
+LOCKED/tier-4-NO-DATA, because `scanLog`'s only "decision"-shaped field
+was the unrelated `familyWeight.decision` (title-family clustering, not
+the outcome action).
+
+**Explicit, deliberate non-claim, stated in the field's own JSDoc:** this
+does NOT make a scan's pricing decision reconstructable a month later.
+The comp-pool snapshot, `priceDerivationTrace`, and the full pricing
+rationale are still computed mid-request and discarded at response time
+— captured nowhere, before or after this dispatch. GK-146 answers "what
+did it decide and via which pricing source"; it does not answer "why did
+it say $X." That gap is explicitly DATA-1's problem, not something this
+measurement-only wiring closes.
+
+### GK-147 — domain-leakage debt (REPORT-ONLY, no fixes)
+
+Confirmed comic-specific assumptions leaking into modules CLAUDE.md
+documents as already-universal (AssetCore): `decisionEngine.js:137-151`
+hard-gates identity completeness on `issue`/`publisher` presence with a
+comment admitting it outright; `pricingEngine.js:126` carries a live
+"comic-specific — revisit in ComicAdapter Step 5" TODO, contradicting
+its own :7-8 domain-agnostic header claim; `pricingEngine.js:111`
+hardcodes the 1956 Silver Age boundary inside a claimed-domain-agnostic
+module; `pricingEngine.js:46,183` exposes `isMegaKey` as if it were a
+universal pricing primitive. No fixes — the ticket exists so DATA-1's
+future generic asset layer (a second vertical, per the DATA-0
+architecture doc's own §1) does not inherit this list by accident when
+it's built.
+
+### Verification (GK-138 applies — api/enrich.js request/wiring touched)
+
+`tests/grailkey-dispatch-2026-08-21-gk145-gk146-measurement.test.js`,
+27/27 — Part 1 unit-covers `buildScanLogRecord`'s two new fields
+directly (default-null, pass-through, version unchanged); Part 2 is a
+real `/api/enrich` handler invocation (stubbed fetch, no KV credentials,
+same pattern as the AW/AV handler-smoke tests) proving `collectionItemId`
+from the request body reaches the exact scanlog record the handler
+builds, unchanged, and that `outcome.decisionAction`/`outcome.price`
+in that record match the SAME request's own `out.decision.action`/
+`out.price` — not a stale or independently-derived snapshot; Part 3
+proves a free-standing scan (no `collectionItemId` supplied) still
+completes cleanly with a legitimate `null`, not a thrown error or an
+`undefined` leak. `npm run build` clean. Full 225-file regression sweep
+(224 prior + this one new file) run against the documented 201/19/4/224
+baseline — see this dispatch's own return-format report for the exact
+delta.
+
+### Handoff
+
+DATA-1's architecture is a joint session, not designed unilaterally in
+this dispatch or its predecessor interrogation — it converges once
+DATA-0B-2 (the canonical catalog load, separately blocked on a local
+Docker install) has landed and enough real GK-145/GK-146 telemetry has
+accumulated to say something real about the E1 denominator. Nothing
+pushed this dispatch — committed locally only, per explicit instruction.

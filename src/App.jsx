@@ -10055,6 +10055,7 @@ function WatchMode({ onStop }) {
                 isReprint: data.isReprint,
                 editionType: data.editionType,
                 images: [b64],
+                collectionItemId: null, // GK-145 — Watch Mode fire-and-forget preview, not yet saved to the collection
               }),
             })
               .then((r) => (r.ok ? r.json() : null))
@@ -10480,6 +10481,7 @@ export default function App() {
             // PriceCharting: anchor to the previously-resolved product id
             // instead of re-running fuzzy q= search on every auto-refresh.
             pcProductId: item.pcProductId || null,
+            collectionItemId: item.id, // GK-145 — auto-refresh targets an existing collection record
           }),
           signal: controller.signal,
         })
@@ -11053,6 +11055,7 @@ export default function App() {
           isReprint: data.isReprint,
           editionType: data.editionType,
           scanId,
+          collectionItemId: savedId, // GK-145 — null when not saved (buyer-mode preview / duplicate not yet confirmed), the item's own id otherwise
         };
         if (!buyerMode) enrichBody.images = [b64];
         fetch("/api/enrich", {
@@ -11464,6 +11467,7 @@ export default function App() {
           barcode,
           title: "Barcode scan",  // placeholder
           skipVision: true,
+          collectionItemId: null, // GK-145 — barcode identify pass, not yet saved to the collection
         }),
       });
       if (!enrichRes.ok) throw new Error("Barcode lookup failed");
@@ -11641,6 +11645,7 @@ export default function App() {
             isReprint: data.isReprint,
             editionType: data.editionType,
             images: [b64],
+            collectionItemId: savedId, // GK-145 — item already saved above via addToCatalogue
           }),
         })
           .then((r) => (r.ok ? r.json() : null))
@@ -12268,6 +12273,7 @@ export default function App() {
           // GrailKey Directive V, Task 2 (GK-88) — echoed back by
           // /api/enrich as out.scanId, same as gradeBlob's request.
           scanId: refreshOwnership.scanId,
+          collectionItemId: item.id, // GK-145 — refresh always targets an existing collection record
         }),
         signal: controller.signal,
       });
@@ -12602,6 +12608,7 @@ export default function App() {
           editionType: gradeData.editionType,
           images: [b64],
           scanId: reidentifyOwnership.scanId,
+          collectionItemId: item.id, // GK-145 — re-identify always targets an existing collection record
         }),
       });
       if (!enrichRes.ok) {
@@ -13483,6 +13490,7 @@ export default function App() {
                             isReprint: data.isReprint,
                             editionType: data.editionType,
                             scanId: dupOwnership.scanId,
+                            collectionItemId: savedId, // GK-145 — item already saved above via addToCatalogue
                           }),
                         })
                           .then((r) => r.ok ? r.json() : null)

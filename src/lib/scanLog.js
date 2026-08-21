@@ -71,6 +71,8 @@ export const buildScanLogKey = (ts, id) => `${SCAN_LOG_KEY_PREFIX}:v${SCAN_LOG_V
  * @param {{sourceCalls?: Array<{source: string, count: number, latencyMs: number|null, cacheHit: boolean|null}>, quotaState?: object|null}|null} fields.sources - GrailKey Dispatch 33. `sourceCalls` covers only the legs this dispatch actually instrumented (ebayImageSearch, comicvine, pricecharting, verification) — not a comprehensive inventory of every external call this handler makes.
  * @param {{barcodeDetected?: boolean|null, barcodeRaw?: string|null, barcodeBase?: string|null, barcodeSupplementLength?: number|null}|null} fields.barcode - GrailKey Dispatch 33, capture-only. `barcodeSupplementLength` is always null — this codebase has no supplement-digit concept today (the full 12/13-digit scanned string is retained as one opaque field end-to-end).
  * @param {string|null} fields.eventualCertifiedGrade - GrailKey Dispatch 33 placeholder, always null this week.
+ * @param {string|null} fields.collectionItemId - GK-145 (GrailKey Dispatch 2026-08-21). The IndexedDB collection record's own `item.id` (`cv_<ts>_<rand>`, `src/App.jsx`'s `addToCatalogue`), threaded through from a collection-originated `/api/enrich` request body when one exists. **This is temporary correlation evidence only — a client-record pointer, NOT proof of physical-copy identity, and NOT `gkAssetId`.** It exists so two scans of the same collection record can be linked pre-DATA-1 (see `docs/DATA-1-READINESS.md` B2); it says nothing about whether two DIFFERENT `collectionItemId`s are actually the same physical book, or whether a rescanned book was correctly matched to the right record. Null on every free-standing scan that hasn't been saved to the collection yet (Watch Mode passes, barcode-identify passes, buyer-mode previews) — this is legitimate and expected, not a gap.
+ * @param {{decisionAction?: string|null, pricingSource?: string|null, price?: string|null, gradeMultiplier?: number|null}|null} fields.outcome - GK-146 (GrailKey Dispatch 2026-08-21). Snapshots of the already-computed runtime result (`out.decision.action`, `out.pricingSource`, `out.price` — a `fmtUsd()` currency STRING, same shape as every other price read in this codebase per GK-74 — and `out.gradeMultiplier`), captured for outcome-frequency measurement (the "Picture-to-Action denominator," `docs/DATA-1-READINESS.md` E1). **Explicitly NOT a reconstructable valuation event** — the comp pool, `priceDerivationTrace`, and full pricing rationale are still discarded at response time and captured nowhere. Do not treat this field as answering "why did it say $X" — it only answers "what did it say and via which pricing source."
  * @returns {object}
  */
 export const buildScanLogRecord = ({
@@ -91,6 +93,8 @@ export const buildScanLogRecord = ({
   sources = null,
   barcode = null,
   eventualCertifiedGrade = null,
+  collectionItemId = null,
+  outcome = null,
 } = {}) => ({
   v: SCAN_LOG_VERSION,
   ts,
@@ -202,4 +206,19 @@ export const buildScanLogRecord = ({
       }
     : null,
   eventualCertifiedGrade: eventualCertifiedGrade ?? null,
+  // GK-145/GK-146 (GrailKey Dispatch 2026-08-21) — additive fields, no
+  // version bump, same convention as Fix 32-C and Dispatch 33 above (this
+  // file's own established rule: a purely additive, optional, default-null
+  // field does not require a version bump — only a reshape of an EXISTING
+  // field's meaning does). See each field's own JSDoc above for scope and
+  // explicit limitations.
+  collectionItemId: collectionItemId ?? null,
+  outcome: outcome
+    ? {
+        decisionAction: outcome.decisionAction ?? null,
+        pricingSource: outcome.pricingSource ?? null,
+        price: outcome.price ?? null,
+        gradeMultiplier: outcome.gradeMultiplier ?? null,
+      }
+    : null,
 });
