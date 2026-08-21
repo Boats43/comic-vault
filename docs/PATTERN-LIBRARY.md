@@ -12446,3 +12446,114 @@ DATA-0B-2 (the canonical catalog load, separately blocked on a local
 Docker install) has landed and enough real GK-145/GK-146 telemetry has
 accumulated to say something real about the E1 denominator. Nothing
 pushed this dispatch — committed locally only, per explicit instruction.
+
+## GrailKey Dispatch 2026-08-21 (urgent trace + fix) — GK-148 SHIPPED-PENDING PHYSICAL, GK-149 NOT CONFIRMED
+
+Creepy #1 scan, 2026-08-21 01:23 — two suspected blockers reported on a
+correctly-priced book. TRACE-REPORT-THEN-BUILD mode: both tickets traced
+and reported first; GK-148 greenlit and built in the same session,
+GK-149 needs more evidence before it can go further.
+
+### GK-148 — "the publisher is not the artist"
+
+`[reconcile-variant]` produced "Frank Frazetta Erik Larsen" with
+`justifiedBy=[{ebay-pool-row-0: "Erik Larsen"}]` against a pool row
+titled "Creepy #1 CGC 7.0 (Warren 1964)..." — Erik Larsen appears
+nowhere in the pool. Root cause, confirmed by trace: `reconcileVariantFacet`
+(`src/lib/identityCore.js`) passes the ENTIRE raw pool-row title into
+`matchCreatorCanonicals` (`src/lib/premiumCreators.js`) with no field
+isolation — the publisher parenthetical rides along with everything
+else. The exact-match regex pass correctly fails on "warren," but AU's
+own 4a-i fuzzy fallback (`fuzzyAliasMatches`) then word-tokenizes the
+WHOLE title and slides a window across it — the single-word window
+"warren" hits Erik Larsen's registered alias `'larsen'` at Levenshtein
+distance 2, both exactly 6 characters, clearing `MIN_FUZZY_ALIAS_LEN`
+with zero margin and landing exactly at `FUZZY_MAX_DISTANCE`, not a
+near-miss. A fuzzy hit promotes to the creator's FULL canonical name,
+explaining why the log shows "Erik Larsen" from a match against a
+publisher's name. AU's own B2 pairwise proof
+(`tests/grailkey-directive-au-dellotto-1963.test.js`) only ever tested
+registry-alias-vs-registry-alias collisions — it had no way to catch a
+publisher name landing in the same distance/length window as a real
+creator alias, since the fuzzy fallback has zero awareness of what KIND
+of word it's looking at.
+
+**Fixed:** `PUBLISHER_STOP_LIST` (`premiumCreators.js`, ~70 comic
+publisher/imprint names spanning Golden through Modern age, normalized
+the same way as everything else in the file) is checked inside
+`fuzzyAliasMatches`'s window loop BEFORE the Levenshtein distance is
+even computed — a window that IS a stop-listed token can never win a
+fuzzy match, at any distance. Scoped narrowly: does not touch the exact
+`SEARCH_INDEX` regex pass at all (AU's own C1 guarantee preserved,
+verified byte-identical), and does not touch fuzzy matching for any
+window that isn't itself stop-listed — the Dell'Otto class (a genuine
+creator alias mangled by a seller, e.g. "DEL O'TT") is structurally
+unaffected, since neither "del" nor "ott" is a publisher name.
+
+**B2-extended found two MORE real collisions beyond the one reported,
+previously unknown, now closed by the same fix:** "Boom"/"Boom Studios"
+↔ John Broome's alias `'broome'`, and "Disney" ↔ Will Eisner's alias
+`'eisner'` and Simon Bisley's alias `'bisley'` (all distance ≤2). These
+were not hypothesized in the dispatch — they surfaced from building a
+real 70-publisher × 140-alias corpus rather than testing only the one
+reported case.
+
+**Verified as a genuine, non-vacuous proof** — not just "the test
+passes," but confirmed the SAME test suite genuinely FAILS (12
+failures, all three publisher classes named explicitly) with the fix
+reverted via `git stash`, then passes clean (12/12) restored.
+`tests/grailkey-gk148-publisher-stoplist.test.js`: Part 1 direct repro
+against the real Creepy #1 row text (`extractFirstEligibleVariantCandidate`/
+`reconcileVariantFacet`, zero Larsen, genuine Frazetta credit
+unaffected — the fix does not over-suppress); Part 2 B2-extended (210
+checks across 70 publisher names × three realistic listing shapes each,
+zero false merges, plus a hand-verified Levenshtein-distance corpus scan
+proving the test exercises the real mechanism, not a vacuous check —
+the known warren/larsen distance-2 pair is explicitly asserted present
+in the corpus); Part 3 real `/api/enrich` handler smoke (GK-138) — no
+exception escapes, HTTP 200, zero "Larsen" anywhere in the final JSON
+response or in any captured log line. `npm run build` clean. Full
+226-file regression sweep: 203 PASS / 19 FAIL / 4 TIMEOUT, byte-identical
+FAIL/TIMEOUT list to the prior 225-file baseline (202/19/4) — delta is
+exactly the one new, fully-passing file.
+
+SHIPPED-PENDING PHYSICAL per this registry's standing evidence bar —
+closure reserved for Jimmy's post-deploy rescan of the actual Creepy #1
+book (card should show Frazetta only, no Larsen anywhere).
+
+### GK-149 — collector's-edition false positive, NOT CONFIRMED
+
+The hypothesized defect (a sanity check convicting the operator's own
+book off a COMP/pool listing's title text, violating the AN doctrine
+that corroboration must be physical) does not match what the code
+actually does. Traced: the one live mechanism capable of producing
+"'COLLECTOR'S EDITION' — not the original" text is `detectEditionWarning`
+(`api/grade.js:179-215`, `not-original` pattern at `:188`), called from
+`api/enrich.js:2440` as `detectEditionWarning(req.body?.reason)`.
+`req.body.reason` is Vision's OWN free-form condition-report text about
+the physically scanned book — generated before any eBay/comp-pool fetch
+happens in the pipeline, so Vision never sees comp listings at all. This
+is legitimate physical evidence per the AN doctrine (classification (a),
+not (c)), and the check tests ONE string once — it does not loop over
+comp/pool rows, frozen-rank-1 or otherwise, at all. Cross-checked
+`REPRINT_RE` (`compHygiene.js:38`, the actual comp/pool-title reprint
+filter used in `api/comps.js` Filter 1) — it only matches
+`collector'?s?\s+box` (a subscription-box product line), not bare
+"collector's edition"/"collector issue," and would not have matched
+either title the dispatch cited.
+
+**No fix proposable against the code as it exists.** Two live
+possibilities, neither traced further: (1) Vision's own `reason` text
+for this specific scan genuinely contained "collector's edition"/"not
+the original" wording — a Vision-transcription-accuracy question (did
+the physical book actually say that, or did Vision misread/hallucinate),
+not a wrong-evidence-source bug; (2) the dispatch's flag description
+was a paraphrase conflating two separate things on the card. Awaiting
+the actual raw Vision `reason` string from this specific scan before
+any further trace or fix can be scoped.
+
+### Handoff
+
+GK-148 committed locally, NOT pushed — report and ask before pushing.
+GK-149 stands as logged (`docs/TICKET-REGISTRY.md`), no code changed,
+blocked on evidence from Jimmy.

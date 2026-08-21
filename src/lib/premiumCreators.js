@@ -198,6 +198,57 @@ const MAX_FUZZY_WINDOW_WORDS = 3;
 
 const normalizeCreatorText = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
+// GK-148 (2026-08-21) — non-creator stop-list, fuzzy-fallback ONLY.
+//
+// Production evidence: Creepy #1, "Creepy #1 CGC 7.0 (Warren 1964)..." —
+// the publisher parenthetical "Warren" (Warren Publishing, the book's
+// REAL publisher) fuzzy-matched Erik Larsen's registered alias "larsen"
+// at Levenshtein distance 2 (w->l, r->s), both exactly 6 chars — clears
+// MIN_FUZZY_ALIAS_LEN with zero margin, lands exactly at
+// FUZZY_MAX_DISTANCE, not a near-miss. AU's own B2 pairwise proof
+// (tests/grailkey-directive-au-dellotto-1963.test.js) only checks
+// registry-alias-vs-registry-alias collisions — it has no way to catch a
+// PUBLISHER name (or any other cross-domain token) landing inside the
+// same distance/length window as a real creator alias, because the
+// fuzzy fallback tests every word/phrase window in an ENTIRE pool-row
+// title (extractFirstEligibleVariantCandidate passes the whole raw
+// title, identityCore.js) with zero awareness of what kind of word it's
+// looking at.
+//
+// Fix shape: a bounded, explicit stop-list of comic publisher/imprint
+// names (normalized the same way as everything else in this file) that
+// can NEVER win a fuzzy match, checked before the Levenshtein distance
+// is even computed. This does NOT touch the exact SEARCH_INDEX regex
+// pass (AU's own C1 guarantee: byte-identical for every case it already
+// covers) and does NOT touch fuzzy matching for any window that isn't
+// itself a stop-listed token — the Dell'Otto class (a genuine creator
+// alias mangled by a seller, e.g. "DEL O'TT") is unaffected, since
+// neither "del" nor "ott" is a publisher name.
+//
+// Scope: publisher/imprint names only, not a general "common words"
+// filter — a broader stop-list is a different, unscoped change. If the
+// creator roster ever grows to include someone whose surname legitimately
+// collides with one of these publisher tokens, that would need its own
+// resolution (this list wins outright today; there is no such collision
+// in the current PREMIUM_CREATORS roster, checked by hand against every
+// entry below at the time this list was written).
+const PUBLISHER_STOP_LIST = new Set(
+  [
+    'warren', 'marvel', 'marvelcomics', 'image', 'imagecomics', 'darkhorse',
+    'dc', 'dccomics', 'archie', 'archiecomics', 'fawcett', 'charlton',
+    'goldkey', 'harvey', 'harveycomics', 'atlas', 'ec', 'eccomics',
+    'quality', 'idw', 'boom', 'boomstudios', 'dynamite', 'valiant', 'dell',
+    'kingcomics', 'skybound', 'avatar', 'awa', 'aftershock', 'vertigo',
+    'wildstorm', 'homage', 'topcow', 'timely', 'nationalcomics',
+    'nationalperiodical', 'acg', 'prizecomics', 'standard', 'centaur',
+    'novelty', 'hillman', 'ace', 'levgleason', 'tower', 'milestone',
+    'malibu', 'defiant', 'continuity', 'eternity', 'now', 'eclipse',
+    'first', 'comico', 'pacific', 'americomics', 'renegade', 'caliber',
+    'antarctic', 'aircel', 'innovation', 'gladstone', 'whitman', 'western',
+    'kingfeatures', 'disney', 'seaboard', 'atlasseaboard', 'zenith',
+  ].map(normalizeCreatorText)
+);
+
 // Standard DP Levenshtein — single-insertion/deletion/substitution edit
 // distance. Bounded by short inputs (creator surnames / 1-3 word windows,
 // never a whole title) so this is always cheap.
@@ -236,6 +287,10 @@ const fuzzyAliasMatches = (candidateText, alias) => {
     for (let span = 1; span <= MAX_FUZZY_WINDOW_WORDS && start + span <= words.length; span++) {
       const window = normalizeCreatorText(words.slice(start, start + span).join(''));
       if (!window) continue;
+      // GK-148 — a window that IS a recognized publisher/imprint token
+      // can never win a fuzzy match, regardless of edit distance. Checked
+      // before the length pre-filter/Levenshtein so it applies uniformly.
+      if (PUBLISHER_STOP_LIST.has(window)) continue;
       // Cheap pre-filter before paying for full Levenshtein: a window
       // whose length differs from the alias by more than the max distance
       // can never be within that distance.
