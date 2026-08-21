@@ -317,3 +317,75 @@ operational decision, not designed further here.
   failure observability, Vercel lifecycle survival) is a prerequisite for
   either shadow lane reaching production, not just for moving the
   existing scanlog write.
+
+## 10. The gkAssetId boundary (added post-interrogation, GrailKey Dispatch 2026-08-21)
+
+This section did not exist prior to 2026-08-21 — an earlier readiness
+report referenced a "gkAssetId boundary section" here that had never
+actually been written; that was an overstatement, corrected by writing
+the section for real rather than by silently fixing the citation. The
+DATA-1 readiness interrogation (`docs/DATA-1-READINESS.md`) found the
+current runtime's collection record has no structural boundary at all —
+identity, physical-copy state, valuation, and decision fields coexist as
+undifferentiated siblings in one flat object. This section states the
+boundary DATA-1's tables must enforce, for reference when that design
+work happens (a joint session, not unilateral — see
+`docs/DATA-1-READINESS.md`'s closing note).
+
+**The law: a physical copy REFERENCES canonical identity — it is never
+a second copy of it.** A `comic_asset` row (or whatever DATA-1 names it)
+points at a `catalog_entity` id in the typed comic projection (§2); it
+never carries its own `title`/`issue_number`/`cover_year` columns that
+could drift out of sync with the catalog row they're supposed to mean.
+This is the identical discipline §5's REBUILD RULE already applies to
+the typed catalog projection itself, one layer up: a physical asset's
+identity fields must be as reproducible from "which catalog entity does
+this point at" as a typed row is reproducible from its claims.
+
+**The five-way record-class split**, per `docs/DATA-1-READINESS.md`'s D1
+finding — every field in today's flat collection record belongs to
+exactly one of these, and DATA-1's schema must keep them in structurally
+separate tables, not separate-in-name-only columns on one row:
+
+1. **Catalog identity** — title, issue, year, publisher, variant, printing.
+   Belongs to `comic_series`/`comic_issue`/`comic_publisher`/
+   `comic_variant`/`comic_printing` (§2). A physical asset REFERENCES a
+   row here; it does not restate the values.
+2. **Physical-copy state** — grade, condition report, defect flags,
+   photos, population/census position. Describes THIS specific copy,
+   not the catalog entity. No landing table exists for this class
+   anywhere in `0001`/`0002` today — this is DATA-1's actual job.
+3. **Valuation event** — value, method, comp-pool snapshot reference,
+   grade assumption, timestamp, build SHA. A point-in-time fact ABOUT
+   the physical copy, not a property of it — many valuation events can
+   exist per asset over its lifetime; none of them mutate the asset
+   record itself.
+4. **Decision (advisory)** — action/blockers/warnings. Non-authoritative
+   guidance computed FROM the other three classes, at a point in time;
+   never a fact to persist as if it were identity or condition.
+5. **Ownership economics** — operator-entered cost basis, FMV overrides.
+   Neither catalog identity nor a derived valuation event — these are
+   facts the OPERATOR asserts about their own transaction, not facts
+   the system computes or observes. New ground: no representation of
+   this class exists anywhere in `0001`/`0002` today.
+
+**The `identityAuthority` namespace collision — record explicitly so no
+future schema merges these.** Two genuinely different concepts currently
+share one name in the runtime (`item.identityAuthority`, GK-85's
+per-field `OPERATOR_CONFIRMED` lock map, `src/lib/dataQualityGuard.js`):
+
+- **`operator_lock`** — "has a human told the system not to overwrite
+  this field automatically." A permission/lock state. This is what
+  today's `identityAuthority` actually is.
+- **`authority`** — "does the evidence corroborate this value" (`NONE` /
+  `CONTESTED` / `CORROBORATED`, per `reconcileTitle`/`reconcileIssue`/
+  `reconcileYear`/`reconcileVariant`, §2's own table). This is what
+  `0002_comic_projection.sql`'s `*_authority` columns actually mean.
+
+A field can be operator-locked with weak evidence authority (a human
+confirmed a value the pool doesn't corroborate) or evidence-corroborated
+with no operator lock at all (the reconciler agrees, nobody has touched
+it) — these are independent axes, and collapsing them into one column
+or one name would silently lose one of the two facts. DATA-1's tables
+must carry both, named distinctly (`operator_lock` and `authority`, or
+equivalent), on every facet that needs either.
