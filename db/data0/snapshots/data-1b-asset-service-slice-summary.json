@@ -1,0 +1,68 @@
+{
+  "dispatch": "GrailKey Dispatch 2026-08-22 -- DATA-1B: The Durable Asset Service",
+  "mode": "bounded-build",
+  "preflight_corrections": [
+    "Dispatch cited 'Ruling 27 (modular monolith, hard module boundaries)' -- Ruling 27's real, ratified content (ADR-API-001) is 'structured errors, always correlation-traceable' -- no ratified ruling under any number establishes a module-boundary mandate anywhere in this repo (grepped). Module boundary built anyway as sound engineering, not attributed to a nonexistent ruling.",
+    "Dispatch described the event envelope as 'correlation/causation/principal' -- Ruling 21's ratified envelope and the live domain_event table both carry correlation_id only, no causation_id. Implemented as ratified; no causation_id invented."
+  ],
+  "task1_design": {
+    "design_doc": "docs/adr/DATA-1B-ASSET-SERVICE-DESIGN.md",
+    "module_placement": "src/modules/assets/ (index.js public; service.js orchestrates; repository.js/db.js/idempotency.js private)",
+    "driver_chosen": "pg (node-postgres), not @neondatabase/serverless -- evidence: real interactive multi-statement transactions with intermediate-result branching (createPhysicalAsset's conditional insert-then-maybe-select), already proven against this exact database by DATA-1A's own lib.mjs; module not yet wired into any Vercel Function this dispatch, so serverless/edge driver concerns don't yet apply -- flagged for re-evaluation when DATA-1D or later wires this into api/",
+    "connection_string": "GRAILKEY_CATALOG_DATABASE_URL (pooled, via Neon PgBouncer) -- same env var lib.mjs already used"
+  },
+  "task2_implementation": {
+    "files_created": [
+      "src/modules/assets/index.js", "src/modules/assets/service.js", "src/modules/assets/repository.js",
+      "src/modules/assets/db.js", "src/modules/assets/idempotency.js", "src/modules/assets/errors.js",
+      "db/data0/0005_data1b_idempotency.sql", "tests/assets-module-boundary.test.js"
+    ],
+    "new_dependency": "pg ^8.23.0 (package.json/package-lock.json)",
+    "schema_change": {
+      "file": "db/data0/0005_data1b_idempotency.sql",
+      "new_table": "idempotency_key",
+      "existing_tables_touched": 0,
+      "reason": "6 of 9 service operations have no natural dedup key of their own (unlike createPhysicalAsset, whose mint idempotency is already structural via entity_mint_basis) -- reported for ruling per the dispatch's own 'never an inline alteration' constraint, applied to data1_dev as additive-only"
+    },
+    "live_schema_verified_not_assumed": "queried information_schema.tables directly -- 13 tables live (matches DATA-1A's own count); gk_organization/gk_membership/custody_event/condition_observation exist only in the 0004 DESIGN DRAFT, never applied -- this service references none of them; asset_identity_assignment.catalog_entity_id confirmed bare/FK-less (catalog_entity does not exist in this schema at all)",
+    "api_files_touched": 0
+  },
+  "task3_proof_suite": {
+    "S3-1_create_reload": { "result": "PASS", "assertions": "11/11", "real_scan_used": "G.I. Joe #5 Tyler Kirkham 616 virgin, correlationId 5cdmw-1787382486651-206fb6db836b (2026-08-22 07:08:06 scan, this same session's own GK-153/154/155/156 trace)" },
+    "S3-2_identity_correction": { "result": "PASS", "assertions": "9/9" },
+    "S3-3_duplicate_copies": { "result": "PASS", "assertions": "5/5" },
+    "S3-4_mint_idempotency": { "result": "PASS", "assertions": "9/9", "evidence": "3 calls with an identical captureBasis: gk_asset/entity_mint_basis counts grew by exactly 1 (not 3); ownership_event/domain_event['asset.minted'] counts also grew by exactly 1 (service.js only performs first-mint side effects on outcome==='minted-new')" },
+    "S3-5_ownership_transfer": { "result": "PASS", "assertions": "10/10", "buyer_principal_reused": "T3-5 Test Buyer (01a0283d-7798-7d66-8ddb-db3c9172a5d1), seeded by DATA-1A's own T3-5 script" },
+    "S3-6_valuation_history": { "result": "PASS", "assertions": "10/10" },
+    "S3-7_event_envelope": { "result": "PASS", "assertions": "5/5", "coverage": "one of every mutating operation (8 total) on a single asset, every domain_event row checked field-by-field against Ruling 21's ratified envelope shape" },
+    "S3-8_ten_step_service_edition": { "result": "PASS", "assertions": "4/4", "real_scan_used": "Creepy #1 (1964), correlationId 3b2593e4-ed14-489f-bc6c-379bd1045f83 -- the same Jimmy-confirmed real book DATA-1A's own T3-8 used, this time entirely through the service contract" },
+    "S3-9_idempotency_key_replay": { "result": "PASS", "assertions": "8/8", "evidence": "3 recordValuation calls, same idempotencyKey, each with DIFFERENT payload values -- exactly 1 valuation_event row exists, holding call 1's ORIGINAL values; a different idempotencyKey correctly produces a genuinely new row" },
+    "S3-10_authorization_parameter": { "result": "PASS", "assertions": "13/13", "evidence": "a bogus principalId is rejected (AuthorizationFailedError) before any write on all 7 mutating operations that reference an existing asset, zero new rows in gk_asset/entity_mint_basis/domain_event/idempotency_key; a missing principalId is caught even earlier (ValidationFailedError, before the DB is touched at all)" },
+    "S3-11_module_boundary": { "result": "PASS", "assertions": "17/17", "location": "tests/assets-module-boundary.test.js (repo-tracked, no DB needed)", "verified_non_vacuous": "a deliberately introduced violator file was confirmed to fail the check, then removed" },
+    "mutating_proof_scripts_location": "C:\\grailkey-data\\data-1\\service-proof\\ (local scratch, not committed -- matches the DATA-1A/DATA-0E-PILOT precedent)"
+  },
+  "crawl_status_at_dispatch_end": {
+    "pid_in_record": 21428,
+    "process_alive": false,
+    "last_checkpoint_write": "2026-08-22T07:46:03Z",
+    "checked_at": "2026-08-22T18:16:15Z (approx, session-local time)",
+    "staleness": "~10.5 hours",
+    "phase_at_last_write": "enumerating-candidates",
+    "candidate_ids_collected": 138000,
+    "list_pages_done": "1380/1628",
+    "results_fetched": 1116,
+    "rolling_window_at_stop": "1020/3500 (not rate-limited -- died for an unlogged reason, stderr.log is empty)",
+    "watchdog_status": "never armed as a persistent safeguard -- watchdog.log shows exactly one DryRun invocation from before the PID 21828->21428 restart, no Scheduled Task was ever successfully registered (blocked by this session's sandboxed permissions, per DATA-1A's own note)",
+    "action_taken_this_dispatch": "none -- reported only, per 'crawl untouched except through the service's own operations' constraint"
+  },
+  "constraints_honored": [
+    "no production/scanner wiring",
+    "no public endpoint (GK-151 remains OPEN/HARD-GATE)",
+    "no object storage",
+    "no outbox dispatcher",
+    "no IndexedDB migration",
+    "no api/ file touched",
+    "crawl process not restarted or modified",
+    "data1_dev's existing 13 tables touched only through new service-layer INSERTs, never altered"
+  ]
+}
