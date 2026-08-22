@@ -25,16 +25,33 @@ Separately, the pilot conflated several genuinely distinct concepts under one ha
 
 **Generation is never a passive column `DEFAULT`.** Even though the underlying primitive is database-native, invoking it is an application-orchestrated act, gated by the mint idempotency check (Ruling 3/A3) — a bare `DEFAULT uuidv7()` on the column would generate a fresh ID on every `INSERT` regardless of whether the candidate already has one, defeating idempotent minting outright. The mint script computes (or requests) the UUID at the exact moment a NEW mint is confirmed, and the `INSERT` supplies it explicitly. This satisfies amendment A6's "app-side generation ⇒ DDL requires explicit UUIDs, no silent v4 defaults" in spirit even though generation is native, not JS-computed: the operative concern A6 names is an uncontrolled default, not the location of the RNG.
 
-**Ruling 2 — four distinct concepts, four distinct fields, never conflated:**
+**Ruling 2 — corrected in the Phase-1 final micro-correction (C2-v2) to match `db/data0/0003_uuidv7_identity_and_mint_ledger.sql`'s own current design exactly.** The binding invariant, stated identically in both this ADR and that DDL file (the two must never drift apart):
+
+> **entity ID ≠ mint basis ≠ basis/rule version ≠ reconciliation version**
+
+Four distinct concepts, four distinct fields (or field-groups), never conflated:
 
 | Concept | What it is | Stability |
 |---|---|---|
 | **Entity ID** | The `UUID` (`gkIssueId` etc.) — the permanent, external-facing identity of a catalog entity. | Permanent. Never changes once minted, survives merge/split/supersession per Rulings 6–8. |
 | **Derivation key** | The canonical, normalized string built from a candidate's AGREED claim values (e.g. `normalizePublisherKey` + `compactTitleKey` + normalized issue number + year) — used to search for an EXISTING match before minting. | Recomputed every time from current claims; not stored as a permanent identity, may change if normalization rules improve. |
-| **Reconciliation version** | A version tag on the reconciliation RULES (`identityReconciler.js`'s own logic, or a future formalized version) that produced a given claim's resolution. | Changes when the rules change; lets a rebuild distinguish "this claim was resolved under rule-set v3" from v4, without needing to guess. |
-| **Mint idempotency key** | A separate stable key, scoped specifically to "have I already minted for this exact candidate/claim-set" — distinct from the derivation key because two different claim combinations can legitimately derive the same canonical name (e.g. two different sample runs both concluding "Amazing Spider-Man, Marvel, #52, 2021") and must still resolve to one mint, not two. | Stable per mint attempt; consumed by the ledger's own conflict-free check (Ruling 3, A3). |
+| **Mint basis** | `entity_mint_basis`'s own `(basis_namespace, basis_key)` tuple — the permanent, first-party, provider-independent PAIR whose uniqueness is the sole mint-idempotency gate (Ruling 3). Distinct from derivation key: a derivation key is recomputed fresh every search; a mint basis, once claimed, is permanent and immutable. **Basis-key stability clause**: `basis_key` must identify a durable mint basis or invocation and may never be recomputed from ordinary mutable canonical attributes — title, year, publisher spelling, condition, grade, value, or reconciliation output. For DATA-0E-FULL, `namespace='comic:gcd-issue'`, `key='<GCD issue ID>'` is one legitimate source-backed basis type; this does not make the external ID GrailKey's own entity ID. Future basis types requiring no external provider at all are equally valid: `operator:manual-canonical-mint`, `claim-cluster:<strategy>`. The mechanism is GrailKey-owned; GCD is merely one basis type among possibly many. | Permanent once claimed; immutable; superseded only via the basis-supersession/alias mechanism (never widened, never mutated in place). |
+| **Basis/rule version** | `basis_schema_version` + `mint_policy_version` — PROVENANCE/INTERPRETATION METADATA recorded alongside a mint-basis row. Tracks what schema `basis_key`'s own format followed, and what AUTO-MINT/REVIEW/RESIDUAL policy was in effect, at mint time — for audit/debugging only. **Explicitly excluded from the uniqueness tuple** (this is the C2-v2 correction itself — an earlier draft of Ruling 3 included version in the unique index; found wrong before any row existed, because it would silently mint a second entity for the same real-world basis on every policy/schema update). | Changes freely across mint events; never triggers a new basis row for the same `(namespace, key)`, and never participates in the uniqueness check. |
+| **Reconciliation version** | A version tag on the identity-RECONCILIATION RULES (`identityReconciler.js`'s own logic, or a future formalized version) that produced a given CLAIM's resolution. A different axis from basis/rule version above: this one governs claim interpretation upstream of minting; basis/rule version governs how the basis key itself was computed/interpreted at mint time. | Changes when the reconciliation rules change; lets a rebuild distinguish "this claim was resolved under rule-set v3" from v4, without needing to guess. |
 
-The DATA-0E pilot's single SHA-256 hash was simultaneously standing in for entity ID AND derivation key AND (implicitly) idempotency key — workable for a one-shot pilot proof, not workable as a permanent scheme once merge/split/re-derivation enter the picture.
+The DATA-0E pilot's single SHA-256 hash was simultaneously standing in for entity ID AND derivation key AND (implicitly) mint basis — workable for a one-shot pilot proof, not workable as a permanent scheme once merge/split/re-derivation enter the picture. The first correction pass (C2-v1) fixed the provider-dependency half of this (external_map's own uniqueness standing in for mint basis); this second pass (C2-v2) fixed the remaining conflation (basis/rule version leaking into the uniqueness tuple).
+
+**Basis supersession/alias mechanism** (`basis_supersession` table, C2-v2): if a future schema change genuinely alters what a given `(namespace, key)` tuple MEANS — not just how it's interpreted, but which real-world thing it identifies — that is handled by an explicit supersession edge from the superseded basis row to a superseding one, resolved through at lookup time, never by widening the uniqueness tuple and never by mutating the existing row's own namespace/key in place. This is the same append-only, resolve-through-a-record discipline Rulings 6–8 already require at the entity level, applied here at the basis level — a genuinely different granularity (a basis can be superseded without its entity ever merging/splitting, and vice versa).
+
+**Required proof table** (C2-v2, demonstrating the corrected `(basis_namespace, basis_key)`-only invariant against the five cases it must handle):
+
+| # | Scenario | Outcome |
+|---|---|---|
+| 1 | Same namespace+key, same version | Same entity, zero new rows |
+| 2 | Same namespace+key, newer policy/schema version | Same entity, zero new rows, new interpretation metadata only (`basis_schema_version`/`mint_policy_version` updated on the existing basis row; no new basis row, no new entity) |
+| 3 | Different namespace, same key | Independent basis — may mint (a different namespace means a structurally different kind of claim, even if the key string happens to collide) |
+| 4 | Concurrent same-basis race | `UNIQUE (basis_namespace, basis_key)` gate — exactly one entity, zero orphan basis or entity rows (Ruling 3's transactional contract) |
+| 5 | Mint ledger destroyed | Backup/restore event, never remint (re-running the mint script against a lost ledger would silently mint a second, different set of entity IDs for the same real-world candidates — see the durability contract in `0003_uuidv7_identity_and_mint_ledger.sql`) |
 
 **Rulings 3–5 (mint ledger, entity_resolution_event, catalog_entity revision):** field-level design is drafted in Task C (`docs/adr/DATA-0E-FULL-DESIGN-DRAFT.md`), not finalized in this ADR — this ADR states the INVARIANTS the ledger design must satisfy; the concrete schema is a design artifact, not itself a ruling.
 
@@ -51,6 +68,7 @@ None of these operations may ever cause an entity ID that has been externally re
 2. No `catalog_entity`/`comic_*` primary key is ever a bare sequence or a bare hash serving double duty as idempotency key.
 3. Merge/split/supersession never delete or silently repoint an entity ID with existing external references.
 4. Generation of a new UUID never happens without a prior, explicit idempotency check against the mint ledger.
+5. **(C2-v2)** If the mint ledger (`entity_mint_basis` + `mint_event`) is ever lost, recovery is exclusively via backup/restore of those tables — never by re-running the mint script against the candidate population again. A re-run against a lost ledger has no prior basis rows to conflict against and would silently mint a second, different set of entity IDs for the same real-world candidates, defeating Invariant 1.
 
 ## Consequences
 

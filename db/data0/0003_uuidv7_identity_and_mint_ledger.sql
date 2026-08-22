@@ -81,58 +81,143 @@ ALTER TABLE claim ALTER COLUMN catalog_entity_id TYPE UUID USING NULL;
 ALTER TABLE external_map ALTER COLUMN catalog_entity_id TYPE UUID USING NULL;
 
 -- ---------------------------------------------------------------------
--- Ruling 3 (ADR-ID-001) + amendment A3, REDESIGNED in review (C2).
+-- Ruling 3 (ADR-ID-001) + amendment A3, REDESIGNED in review (C2), then
+-- CORRECTED A SECOND TIME in the Phase-1 final micro-correction (C2-v2).
 --
--- REJECTED (found in review, before any row existed): the original draft
--- of this file used external_map's own UNIQUE (source, external_id)
--- index as the mint-idempotency primitive. That is wrong at the
--- architecture level, not just as an implementation detail: it would
--- place an EXTERNAL PROVIDER'S identity underneath GrailKey's own
--- first-party permanent identity — the exact dependency this entire
--- architecture exists to remove. It breaks for every case that isn't
--- "an entity with exactly one clean external mapping": an entity
--- synthesized from multiple agreeing claims with no single external ID
--- to key on, a manual entity with no external provider at all, a future
--- vertical with no GCD-analog whatsoever, or a corrected/re-pointed
--- provider mapping (which would silently look like a brand-new,
--- unrelated mint attempt under the old design, since the OLD external_id
--- row would no longer be the one the new claim carries). Caught at zero
--- cost tonight; would have been a migration crisis after real rows
--- existed.
+-- REJECTED, round 1 (found in review, before any row existed): the
+-- original draft of this file used external_map's own
+-- UNIQUE (source, external_id) index as the mint-idempotency primitive.
+-- That is wrong at the architecture level, not just as an implementation
+-- detail: it would place an EXTERNAL PROVIDER'S identity underneath
+-- GrailKey's own first-party permanent identity — the exact dependency
+-- this entire architecture exists to remove. It breaks for every case
+-- that isn't "an entity with exactly one clean external mapping": an
+-- entity synthesized from multiple agreeing claims with no single
+-- external ID to key on, a manual entity with no external provider at
+-- all, a future vertical with no GCD-analog whatsoever, or a
+-- corrected/re-pointed provider mapping (which would silently look like
+-- a brand-new, unrelated mint attempt under the old design, since the
+-- OLD external_id row would no longer be the one the new claim carries).
+-- Caught at zero cost; would have been a migration crisis after real
+-- rows existed.
 --
--- CORRECTED: entity_mint_basis is a first-party, provider-independent
--- uniqueness primitive. Its UNIQUE (namespace, key, version) constraint
--- is the ONLY thing "have I already minted for this" is ever checked
--- against — never external_map directly. External identifiers (GCD id,
--- Metron id, ...) may still participate as CONTENT of a basis key's
--- VALUE for the specific use cases that have them (0E-FULL's own
--- GCD+Metron-agreement case is exactly this — see comment below), but
--- the table/constraint enforcing uniqueness is always this one,
--- first-party, table — never external_map's own index. An entity with
--- zero external references (a manual entry, a synthesized-consensus
+-- REJECTED, round 2 (C2-v2, found in the SAME review pass as round 1's
+-- fix, before this design was ever committed to `main`): the first
+-- correction made entity_mint_basis first-party, but its uniqueness
+-- tuple was UNIQUE (namespace, key, version) — including a version
+-- component. That is also wrong, for a related but distinct reason: it
+-- means a policy/schema update to how a basis key is COMPUTED OR
+-- INTERPRETED (e.g. promoting one of the 35 REVIEW-tier convention
+-- classes to AUTO-MINT) would silently mint a SECOND, DIFFERENT entity
+-- for what is still the same real-world basis — an "entity ID ≠ basis
+-- version" violation in the opposite direction from round 1's mistake:
+-- round 1 let an external provider's key stand in for GrailKey's own
+-- identity; round 2 let GrailKey's own INTERPRETATION metadata leak into
+-- what should be a pure identity key.
+--
+-- CORRECTED (current design): entity_mint_basis's PERMANENT uniqueness
+-- invariant is UNIQUE (basis_namespace, basis_key) ONLY. Nothing else —
+-- not a schema version, not a policy version, not a reconciliation-rule
+-- version — ever participates in this constraint. This is the ONLY
+-- thing "have I already minted for this" is ever checked against —
+-- never external_map directly, and never widened to include a version
+-- axis. External identifiers (GCD id, Metron id, ...) may still
+-- participate as CONTENT of a basis key's VALUE for the specific use
+-- cases that have them (0E-FULL's own GCD-issue-id case is exactly this
+-- — see comment below), but the table/constraint enforcing uniqueness is
+-- always this one, first-party, table, on this one two-column tuple —
+-- never external_map's own index, never a three-column tuple. An entity
+-- with zero external references (a manual entry, a synthesized-consensus
 -- entity, a future non-GCD-analog vertical) mints under its own
 -- namespace with a basis key built entirely from first-party content —
 -- permanent mint semantics never REQUIRE an external ID to exist.
 --
--- mint_basis_version ties to a reconciliation/contract version
--- (ADR-ID-001 Ruling 2) — a basis key computed under a different
--- version is a DIFFERENT basis row on purpose, so a future normalizer
--- change (e.g. promoting one of the 35 REVIEW-tier convention classes)
--- never silently collides with or reuses a basis claimed under the old
--- rules.
+-- BINDING INVARIANT (stated here per C2-v2's own requirement, and
+-- restated in ADR-ID-001 Ruling 2 — the two statements must never
+-- drift apart):
+--
+--     entity ID  ≠  mint basis  ≠  basis/rule version  ≠  reconciliation version
+--
+-- Four distinct concepts, four distinct fields, never conflated and
+-- never collapsed into one column or one constraint:
+--   - entity ID       — catalog_entity.id (UUID). Permanent, external-
+--                        facing, never recomputed.
+--   - mint basis       — (basis_namespace, basis_key). The permanent,
+--                        provider-independent uniqueness tuple. Claimed
+--                        once, immutable thereafter (see the basis-key
+--                        stability clause below).
+--   - basis/rule version — basis_schema_version + mint_policy_version
+--                        (below). Provenance/interpretation METADATA
+--                        recorded alongside a basis row. Free to change
+--                        across mint events; NEVER triggers a new basis
+--                        row for the same (namespace, key), and NEVER
+--                        participates in the uniqueness check.
+--   - reconciliation version — a separate axis entirely (ADR-ID-001
+--                        Ruling 2's own "Reconciliation version" row):
+--                        the version of the identity-RECONCILIATION
+--                        RULES (identityReconciler.js's own logic) that
+--                        produced a given CLAIM's resolution. Governs
+--                        claim interpretation upstream of minting, not
+--                        basis uniqueness — a different concern from
+--                        basis/rule version, which governs how the basis
+--                        KEY ITSELF was computed/interpreted at mint
+--                        time.
+--
+-- BASIS-KEY STABILITY CLAUSE (binding, C2-v2): basis_key must identify a
+-- durable mint basis or invocation, and may NEVER be recomputed from
+-- ordinary mutable canonical attributes — title, year, publisher
+-- spelling, condition, grade, value, or reconciliation output. Those can
+-- all legitimately change without the underlying real-world entity
+-- changing; a basis key built from them would silently re-derive to a
+-- DIFFERENT string on a routine correction and orphan the original
+-- mint. For DATA-0E-FULL, namespace='comic:gcd-issue', key='<GCD issue
+-- ID>' is one legitimate source-backed basis type — GCD's own issue ID
+-- is durable, first-party-to-GCD, and never recomputed from a comic's
+-- mutable descriptive attributes. This does NOT make the external ID
+-- GrailKey's own entity ID — it is merely the CONTENT of one basis
+-- key's VALUE, under a GrailKey-owned mechanism. Future mint paths
+-- requiring NO external provider at all are equally valid basis types,
+-- e.g. namespace='operator:manual-canonical-mint' (key = an
+-- operator-issued stable token) or namespace='claim-cluster:<strategy>'
+-- (key = a stable synthesized-consensus identifier for a strategy-named
+-- clustering of agreeing claims with no single external anchor). The
+-- mint-basis mechanism is GrailKey-owned; GCD is merely one basis type
+-- among possibly many, never a dependency of the mechanism itself.
+--
+-- BASIS SUPERSESSION / ALIAS MECHANISM (C2-v2): if a future schema
+-- change genuinely alters what a given (namespace, key) tuple MEANS —
+-- not just how it's interpreted, but which real-world thing it
+-- identifies — that is never handled by widening the uniqueness tuple
+-- (round 2's mistake) and never by mutating the existing basis row's own
+-- namespace/key in place (would violate basis-key stability). Instead,
+-- basis_supersession (below) records an explicit edge from the
+-- superseded basis row to a superseding basis row; any future basis
+-- lookup for the same (namespace, key) resolves through this table to
+-- whichever basis row is currently authoritative, walking at most one
+-- hop per superseded row (a chain, not a DAG — see the UNIQUE index on
+-- superseded_basis_id below) until it reaches a basis row with no
+-- outgoing supersession edge. The ORIGINAL basis row and its mint_event
+-- history are never deleted or edited — this is the same append-only,
+-- resolve-through-a-record discipline Rulings 6-8 already require at the
+-- ENTITY level, applied here at the BASIS level, which is a genuinely
+-- different granularity (a basis can be superseded without its entity
+-- ever merging/splitting, and vice versa).
 --
 -- TRANSACTIONAL / RACE CONTRACT (stated explicitly, per C2's own
 -- requirement — this is a DDL file, so this is the invariant the schema
 -- is designed to support; the actual transaction-wrapping is application
 -- code in the eventual mint script, not expressible in DDL alone):
 --   1. BEGIN.
---   2. INSERT INTO entity_mint_basis (namespace, key, version, ...)
---      VALUES (...) — if this violates the UNIQUE constraint (another
---      transaction already claimed this exact basis, concurrently or in
---      the past), catch the conflict, SELECT the existing basis row's
---      entity_id, record a mint_event with outcome='resolved-existing'
---      pointing at it, COMMIT. No new catalog_entity is ever created in
---      this branch.
+--   2. INSERT INTO entity_mint_basis (basis_namespace, basis_key, ...)
+--      VALUES (...) — if this violates the UNIQUE (basis_namespace,
+--      basis_key) constraint (another transaction already claimed this
+--      exact basis, concurrently or in the past), catch the conflict,
+--      SELECT the existing basis row's entity_id, record a mint_event
+--      with outcome='resolved-existing' pointing at it, COMMIT. No new
+--      catalog_entity is ever created in this branch — regardless of
+--      whether this attempt's basis_schema_version/mint_policy_version
+--      differ from the existing row's (they never do — version is
+--      metadata, not a re-mint trigger).
 --   3. If the INSERT in step 2 succeeded (this transaction won the
 --      race), THEN — in the SAME transaction — INSERT the new
 --      catalog_entity row and its typed comic_publisher/comic_series/
@@ -144,41 +229,90 @@ ALTER TABLE external_map ALTER COLUMN catalog_entity_id TYPE UUID USING NULL;
 --      is ever left pointing at an entity that failed to be created,
 --      and no catalog_entity is ever left unclaimed by a basis row.
 -- Net effect: the same mint basis, whether attempted concurrently or
--- repeated later, always resolves to exactly ONE entity, and no orphan
+-- repeated later, or under a newer basis_schema_version/mint_policy_
+-- version, always resolves to exactly ONE entity, and no orphan
 -- catalog_entity or entity_mint_basis row can ever exist in a
 -- successfully-committed state.
 -- ---------------------------------------------------------------------
 CREATE TABLE entity_mint_basis (
   id                    UUID PRIMARY KEY,
   entity_id             UUID NOT NULL REFERENCES catalog_entity(id),
-  -- Namespace examples: 'comic-gcd-metron-agreement' (0E-FULL's own use
-  -- case — see below), 'manual-entry', 'derived-consensus' (synthesized
-  -- from multiple agreeing claims with no single external anchor),
-  -- future non-comic-vertical namespaces with no GCD analog at all.
-  mint_basis_namespace  TEXT NOT NULL,
+  -- Namespace examples: 'comic:gcd-issue' (0E-FULL's own use case — key
+  -- = the GCD issue ID, see comment below), 'operator:manual-canonical-
+  -- mint' (key = an operator-issued stable token, no external provider
+  -- involved), 'claim-cluster:<strategy>' (key = a stable synthesized-
+  -- consensus identifier, strategy-named, for claims with no single
+  -- external anchor), future non-comic-vertical namespaces with no GCD
+  -- analog at all.
+  basis_namespace       TEXT NOT NULL,
   -- The normalized, first-party-computed key within that namespace. For
-  -- 0E-FULL specifically, this MAY be built from external ids as VALUE
-  -- content (e.g. 'gcd:1914289|metron:1191', sorted/normalized for
-  -- order-independence, matching ADR-ID-001 Ruling 2's derivation-key
-  -- discipline) — external identifiers participate as supporting
-  -- uniqueness evidence for the use case that has them, per the review's
-  -- own instruction, WITHOUT the constraint mechanism itself living on
-  -- external_map. A manual-entry or derived-consensus basis key contains
-  -- no external id at all and is equally valid.
-  mint_basis_key        TEXT NOT NULL,
-  mint_basis_version    TEXT NOT NULL,
+  -- 'comic:gcd-issue', this is the GCD issue ID itself — a durable,
+  -- GCD-first-party identifier, never recomputed from this comic's own
+  -- mutable descriptive attributes (basis-key stability clause above).
+  -- A manual-entry or claim-cluster basis key contains no external id at
+  -- all and is equally valid. External identifiers participate as VALUE
+  -- content for the basis types that have them — the constraint
+  -- mechanism itself never lives on external_map.
+  basis_key             TEXT NOT NULL,
+  -- --- Everything below this line is PROVENANCE/INTERPRETATION
+  -- METADATA. Neither column participates in entity_mint_basis_unique.
+  -- Both are free to change on a later re-read of the SAME basis row
+  -- (an UPDATE to these two columns only, never to basis_namespace/
+  -- basis_key) without that ever constituting a new mint. ---
+  -- The schema/format version basis_key's own encoding followed when
+  -- this row was written (e.g. did the GCD-issue-id key format include
+  -- a checksum suffix at the time). Audit/debugging only.
+  basis_schema_version  TEXT NOT NULL,
+  -- The AUTO-MINT/REVIEW/RESIDUAL tier policy version in effect at mint
+  -- time (e.g. which DATA-0D/0E-PILOT convention-class ruleset decided
+  -- this candidate was eligible). Audit/debugging only — a later policy
+  -- version reviewing the SAME (namespace, key) never re-mints; it may
+  -- only update this metadata column and/or record a new mint_event with
+  -- outcome='resolved-existing'.
+  mint_policy_version   TEXT NOT NULL,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX entity_mint_basis_unique ON entity_mint_basis (mint_basis_namespace, mint_basis_key, mint_basis_version);
+CREATE UNIQUE INDEX entity_mint_basis_unique ON entity_mint_basis (basis_namespace, basis_key);
 CREATE INDEX ON entity_mint_basis (entity_id);
 
+-- Basis supersession/alias mechanism — see the comment block above.
+-- Records that `superseded_basis_id` is no longer the authoritative
+-- basis row for whatever it identifies; lookups resolve forward to
+-- `superseding_basis_id`. The UNIQUE index on superseded_basis_id keeps
+-- resolution a simple chain (each basis row supersedes at most once) —
+-- a basis row that has never been superseded simply has no matching row
+-- here, and IS the authoritative end of its own chain.
+CREATE TABLE basis_supersession (
+  id                    UUID PRIMARY KEY,
+  superseded_basis_id   UUID NOT NULL REFERENCES entity_mint_basis(id),
+  superseding_basis_id  UUID NOT NULL REFERENCES entity_mint_basis(id),
+  occurred_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  reason                TEXT NOT NULL,
+  CHECK (superseded_basis_id <> superseding_basis_id)
+);
+CREATE UNIQUE INDEX basis_supersession_superseded_unique ON basis_supersession (superseded_basis_id);
+CREATE INDEX ON basis_supersession (superseding_basis_id);
+
+-- DURABILITY CONTRACT (proof-table row 5, ADR-ID-001): mint_event and
+-- entity_mint_basis are the permanent record of every mint decision ever
+-- made. If this ledger is ever lost (storage failure, accidental drop,
+-- ...), recovery is EXCLUSIVELY via backup/restore of these tables —
+-- never by re-running the mint script against the candidate population
+-- again. Re-running against a lost ledger would re-derive basis rows via
+-- fresh UNIQUE-constraint checks with no prior rows to conflict against,
+-- silently minting a SECOND, DIFFERENT set of entity IDs for the same
+-- real-world candidates — the exact non-reproducibility this whole
+-- design exists to prevent. This is an operational discipline this DDL
+-- cannot itself enforce (no schema constraint can require "restore,
+-- don't reprocess") — recorded here, and in ADR-ID-001's own invariants,
+-- as the binding operational rule.
 CREATE TABLE mint_event (
   id                     UUID PRIMARY KEY,           -- its own UUIDv7, generated the same way as any entity id
   occurred_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   contract_version       TEXT NOT NULL,               -- e.g. 'grailkey-0e-full-v1' (ADR-ID-001's CONTRACT_VERSION concept, formalized)
   candidate_snapshot     JSONB NOT NULL,               -- the claim data considered (e.g. the GCD row + Metron row, matching the DATA-0E-PILOT's own provenance.agreeingClaims shape)
   mint_basis_id          UUID REFERENCES entity_mint_basis(id), -- the first-party basis row this attempt matched or created (C2's own mechanism, NOT a raw external-id-derived key) — NULL only for queued-review/residual-no-mint outcomes where no basis was ever claimed
-  derivation_key         TEXT,                        -- the canonical normalized name used for candidate matching (ADR-ID-001 Ruling 2) — recorded for audit, distinct from mint_basis_key, never the identity itself
+  derivation_key         TEXT,                        -- the canonical normalized name used for candidate matching (ADR-ID-001 Ruling 2) — recorded for audit, distinct from basis_key, never the identity itself
   outcome                TEXT NOT NULL CHECK (outcome IN ('minted-new', 'resolved-existing', 'queued-review', 'residual-no-mint')),
   entity_id              UUID REFERENCES catalog_entity(id), -- NULL for queued-review/residual-no-mint outcomes
   review_convention_class TEXT                        -- populated only when outcome='queued-review' (e.g. 'gcd-legacy-parenthetical-numbering', matching DATA-0D/0E-PILOT's own 3 classes)
