@@ -733,6 +733,18 @@ export const COMPOUND_WHITELIST = new Set([
   'marvel two-in-one', 'marvel spotlight', 'marvel feature', 'marvel fanfare',
   'talespin', 'walt disney',  // thin-token titles
   'captain marvel', 'ms. marvel', 'ms marvel',  // Q120
+  // GK-153 (2026-08-22, G.I. Joe #5 Kirkham virgin) — 'joe' is a bare
+  // first name in LEGACY_CREATOR_NOISE_WORDS (identityCore.js, added for
+  // creator credits like "Joe Jusko"/"Joe Casey"), and sanitizeSeriesTitle
+  // strips it as a standalone word wherever it appears — including inside
+  // "G.I. Joe" itself, the exact same bug class as GK-143's "jim" inside
+  // "Jiménez" but hitting a real franchise title, not a coincidental
+  // substring. Confirmed via direct execution: sanitizeSeriesTitle("g i
+  // joe") === "g i" before this fix. Every punctuation/spacing form the
+  // pipeline actually produces is listed — Vision/family-key tokenization
+  // strips periods to spaces ("g i joe"), other paths keep the raw
+  // spelling ("g.i. joe") or the seller-common concatenation ("gi joe").
+  'g i joe', 'g.i. joe', 'gi joe',
 ]);
 
 // Q42 C-A3: Abbreviation expansion map (single source of truth).

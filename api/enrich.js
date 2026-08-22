@@ -2665,7 +2665,20 @@ export default async function handler(req, res) {
         // Q63: Extract year tokens adjacent to issue numbers (#1 1998, 1998 #1, etc.)
         // or standalone cover years. Prefer years NEAR issue tokens (cover years),
         // ignore years far from title core (listing metadata).
-        const titleLower = (r.title || '').toLowerCase();
+        // GK-156 (2026-08-22) — was `r.title`, which on a parsedVisualRows
+        // row is extractSeriesTitle(rawTitle) (imageSearchIdentity.js), a
+        // SANITIZED series-name projection that strips most of the
+        // descriptive text a year token actually lives in — not the raw
+        // listing text this extraction was designed to scan. Confirmed via
+        // direct execution against a real 20-item pool (G.I. Joe #5
+        // Kirkham virgin, 2026-08-22 07:08 production scan): 5/20 raw
+        // titles carry an explicit year, but only 2/20 survive in the
+        // sanitized `.title` field — silently starving this block below
+        // its own >=3 floor on every affected scan. `r.rawTitle` is the
+        // correct field — already used correctly elsewhere in this same
+        // file (e.g. the pc-anchor-gate discriminator check a few
+        // thousand lines below).
+        const titleLower = (r.rawTitle || '').toLowerCase();
 
         // Pattern 1: year near issue marker (#1 1998, #1 (1998), 1998 #1)
         const nearIssue = titleLower.match(/#\s*\d+[^\d]*(19\d{2}|20\d{2})|(\b19\d{2}|20\d{2})[^\d]*#\s*\d+/);
@@ -2738,6 +2751,14 @@ export default async function handler(req, res) {
             console.log(`[22a] era-unlocked: consensus=${(ratio * 100).toFixed(0)}% < 50% threshold`);
           }
         }
+      } else {
+        // GK-156 — this branch previously had no log at all (silent no-op
+        // below its own >=3 floor), the same visibility gap that let the
+        // r.title/r.rawTitle bug (fixed above) go undetected across every
+        // affected scan. Logged unconditionally now so a thin/empty
+        // extraction is visible from here on, not just inferred from its
+        // absence.
+        console.log(`[22a] SKIPPED — only ${totalWithYear}/${parsedVisualRows.length} pool rows carry a parseable cover year (need >=3)`);
       }
     }
 
@@ -2766,7 +2787,13 @@ export default async function handler(req, res) {
     if (parsedVisualRows && parsedVisualRows.length >= 3) {
       const poolYearCounts = {};
       parsedVisualRows.forEach((r) => {
-        const titleLower = (r.title || '').toLowerCase();
+        // GK-156 (2026-08-22) — was `r.title`, the same wrong-field bug as
+        // eraLock above (extractSeriesTitle's sanitized series name, not
+        // the raw listing text a year token actually lives in). Same real
+        // production case: 5/20 raw titles carry "(2025)", only 2/20
+        // survived in `.title` — silently starving this block below its
+        // own >=3 floor on every affected scan. `r.rawTitle` is correct.
+        const titleLower = (r.rawTitle || '').toLowerCase();
         const yearsInTitle = new Set(
           [...titleLower.matchAll(/\b(19\d{2}|20\d{2})\b/g)].map((m) => parseInt(m[1], 10))
         );
@@ -2781,7 +2808,13 @@ export default async function handler(req, res) {
         if (agreement >= 0.50) {
           poolYearHint = { year: parseInt(topYearStr, 10), agreement, sampleSize: poolTotalWithYear };
           console.log(`[cv-pool-year-hint] year=${poolYearHint.year} agreement=${(agreement * 100).toFixed(0)}% (${topCount}/${poolTotalWithYear})`);
+        } else {
+          // GK-156 — previously silent (no log at all) below the 50% bar;
+          // same visibility gap as the >=3 floor below.
+          console.log(`[cv-pool-year-hint] SKIPPED — top year ${topYearStr} only ${(agreement * 100).toFixed(0)}% agreement (${topCount}/${poolTotalWithYear}, need >=50%)`);
         }
+      } else {
+        console.log(`[cv-pool-year-hint] SKIPPED — only ${poolTotalWithYear}/${parsedVisualRows.length} pool rows carry a parseable year (need >=3)`);
       }
     }
 
@@ -4961,9 +4994,62 @@ export default async function handler(req, res) {
     const yearForResolution = (identityIsProvisionalOverride || identity?.familyYearConsensus?.mode === 'unanimous-year-zero-support-rescue')
       ? confirmedYear
       : year;
+
+    // GK-154 Fix 4 (2026-08-22, narrow) — "a rejected anchor is rejected
+    // everywhere, its year enters only as conflict evidence." q141-a
+    // (below, ~line 5510) already computes whether an ACCEPTED PC
+    // anchor's own projected title conflicts with a corroborated
+    // confirmedTitle — when it does, q141-a treats the anchor as
+    // untrustworthy for TITLE purposes ("evidence the ANCHOR is wrong,
+    // not the title") and skips the title write. Before this fix, the
+    // exact same untrustworthy anchor's YEAR was still adopted
+    // unconditionally by resolveYear, ~500 lines earlier, with no
+    // cross-facet check at all — real production case (G.I. Joe #5
+    // Kirkham virgin, 2026-08-22 07:08): PC matched "G.I. Joe Special
+    // Missions #5 (1987)," an unrelated Marvel mini-series sharing only
+    // the base "G.I. Joe" name; year became 1987, and q141-a
+    // independently rejected the exact same anchor for title purposes
+    // moments later.
+    //
+    // This runs the SAME predicate q141-a runs
+    // (projectCanonicalTitleFromAnchor + isCorroboratedIdentitySource),
+    // early, so its verdict can gate pcYear's entry into resolveYear too
+    // — not just title. Deliberately narrow: does NOT touch q141-a
+    // itself (title projection logic, its own log lines, and its own
+    // confirmedTitle write are all byte-identical, untouched) — this is
+    // a second, independent consumer of the same pure check, not a
+    // refactor of it. When the anchor is rejected, pcYear is withheld
+    // from resolveYear (passed as null, same as "PC has no year"), so
+    // resolveYear falls through to its own existing, unmodified
+    // precedence (CV, then eBay-consensus, then nothing) instead of
+    // adopting the rejected anchor's year — and if resolveYear then
+    // finds nothing at all, reconcileYear's own existing RESCUE branch
+    // (below, GK-135/AT) can supply a real year from independent pool
+    // evidence instead (GK-156's r.rawTitle fix is what makes
+    // poolYearHint a real candidate here, rather than always null). The
+    // catalog year itself is UNCHANGED as conflict evidence:
+    // catalogYearForEvidence (below) still reads the real, un-gated
+    // pcYear, so the rejected anchor's year remains visible to
+    // reconcileYear as a disagreeing 'catalog' source — never silently
+    // discarded, per I13.
+    const pcAnchorTitleRejectedForYear = !!(
+      priceCharting?.productName &&
+      isCorroboratedIdentitySource(identitySource) &&
+      (() => {
+        const anchorCanonicalTitle = projectCanonicalTitleFromAnchor(priceCharting.productName);
+        return anchorCanonicalTitle && anchorCanonicalTitle !== confirmedTitle;
+      })()
+    );
+    if (pcAnchorTitleRejectedForYear) {
+      console.log(
+        `[year-anchor-gate] withholding pcYear=${pcYear} from resolveYear — anchor "${priceCharting.productName}" ` +
+        `already fails title corroboration against confirmedTitle "${confirmedTitle}" (same predicate as q141-a); ` +
+        `year still recorded as conflict evidence only, never adopted from this anchor`
+      );
+    }
     const yearResolution = resolveYear(
       yearForResolution,
-      pcYear,
+      pcAnchorTitleRejectedForYear ? null : pcYear,
       cvYear,
       ebayYearAuthoritative,
       { keyIssue: keyIssueStr }

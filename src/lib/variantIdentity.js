@@ -1044,16 +1044,27 @@ export const extractConfirmedVariant = (
     ? evaluateTitleTextIndependence(coverTypeTally.assertingRows.map((r) => r.rawTitle))
     : { pass: false, assertingRows: 0, distinctClusters: 0, largestClusterSize: 0, maxPairwiseJaccard: null, minPairwiseJaccard: null, clusters: [] };
   const coverTypeEligible = coverTypePromotion.promote && coverTypeIndependence.pass;
+  // GK-155 (2026-08-22) — the independence fields above are a FALLBACK
+  // placeholder, not a computed result, whenever coverTypePromotion.promote
+  // is false: the ternary never calls evaluateTitleTextIndependence in
+  // that case. Printing "independence.pass=false" next to a real
+  // declineReason (e.g. runnerUp-present) read as two separate reasons
+  // for decline when only one ever ran. Logged as "skipped=promotion-
+  // declined" instead of the placeholder stats when independence was
+  // never evaluated, so it no longer reads as a failed check.
+  const independenceSection = coverTypePromotion.promote
+    ? `independence.pass=${coverTypeIndependence.pass} assertingRows=${coverTypeIndependence.assertingRows} ` +
+      `distinctClusters=${coverTypeIndependence.distinctClusters} largestClusterSize=${coverTypeIndependence.largestClusterSize} ` +
+      `maxPairwiseJaccard=${coverTypeIndependence.maxPairwiseJaccard ?? 'n/a'} minPairwiseJaccard=${coverTypeIndependence.minPairwiseJaccard ?? 'n/a'} ` +
+      `clusters=${JSON.stringify(coverTypeIndependence.clusters)}`
+    : `independence=skipped(promotion-declined)`;
   console.log(
     `[coverType-consensus] ${coverTypeEligible ? 'FIRE' : 'DECLINE'} ` +
     `winner=${coverTypeTally.winner ?? 'null'} support=${coverTypeTally.support}/${coverTypeTally.uniqueRows} ` +
     `runnerUp=${coverTypeTally.runnerUp ?? 'null'} promotion.declineReason=${coverTypePromotion.declineReason ?? 'none'} ` +
     `uniqueItemIdCount=${coverTypePromotion.inputs.uniqueItemIdCount ?? 'n/a'}/${coverTypePromotion.inputs.itemIdCount ?? 'n/a'} ` +
     `uniqueSellerCount=${coverTypePromotion.inputs.uniqueSellerCount ?? 'n/a'}/${coverTypePromotion.inputs.sellerCount ?? 'n/a'} ` +
-    `independence.pass=${coverTypeIndependence.pass} assertingRows=${coverTypeIndependence.assertingRows} ` +
-    `distinctClusters=${coverTypeIndependence.distinctClusters} largestClusterSize=${coverTypeIndependence.largestClusterSize} ` +
-    `maxPairwiseJaccard=${coverTypeIndependence.maxPairwiseJaccard ?? 'n/a'} minPairwiseJaccard=${coverTypeIndependence.minPairwiseJaccard ?? 'n/a'} ` +
-    `clusters=${JSON.stringify(coverTypeIndependence.clusters)}`
+    `${independenceSection}`
   );
   if (coverTypeEligible) {
     consensus.coverType = coverTypeTally.winner;
@@ -1161,17 +1172,40 @@ export const extractConfirmedVariant = (
     }
   }
 
+  // GK-155 (2026-08-22) — token-set idempotent build. Before this fix,
+  // `parts` pushed effectiveVisionVariant WHOLESALE and then separately
+  // pushed each corroborating consensus field with no check for whether
+  // that word was already present in the Vision string — a pool that
+  // independently corroborates "exclusive"/"limited" alongside a Vision
+  // read that already SAYS "exclusive limited signed virgin" produced
+  // "exclusive limited signed virgin exclusive limited" (byte-identical
+  // real production case, G.I. Joe #5 Kirkham virgin, 2026-08-22). The
+  // duplicated text reached the live eBay search query and the active-
+  // comp cache key, not just the display string. Fixed by tracking
+  // already-added tokens (case-insensitive, whole-word) and only
+  // appending the NEW words each phrase contributes — first occurrence
+  // wins, relative phrase order is preserved, a phrase contributing
+  // nothing new is dropped entirely rather than appended as an empty
+  // string.
+  const seenVariantTokens = new Set();
   const parts = [];
-  if (!isBackfill && effectiveVisionVariant) parts.push(String(effectiveVisionVariant).trim());
+  const pushDedupedVariantPhrase = (phrase) => {
+    if (!phrase) return;
+    const words = String(phrase).trim().split(/\s+/).filter(Boolean);
+    const newWords = words.filter((w) => !seenVariantTokens.has(w.toLowerCase()));
+    newWords.forEach((w) => seenVariantTokens.add(w.toLowerCase()));
+    if (newWords.length > 0) parts.push(newWords.join(' '));
+  };
+  if (!isBackfill && effectiveVisionVariant) pushDedupedVariantPhrase(String(effectiveVisionVariant).trim());
   // GrailKey Dispatch 27, Fix 27-A — coverType placed first among the
   // consensus tokens (base physical-product classifier; convention/
   // exclusive/artist/limitation are additional distinguishing facts
   // layered on top of it, not alternatives to it).
-  if (consensus.coverType) parts.push(consensus.coverType);
-  if (consensus.convention) parts.push(consensus.convention);
-  if (consensus.exclusive) parts.push(consensus.exclusive);
-  if (consensus.artist) parts.push(consensus.artist);
-  if (consensus.limitation) parts.push(consensus.limitation);
+  pushDedupedVariantPhrase(consensus.coverType);
+  pushDedupedVariantPhrase(consensus.convention);
+  pushDedupedVariantPhrase(consensus.exclusive);
+  pushDedupedVariantPhrase(consensus.artist);
+  pushDedupedVariantPhrase(consensus.limitation);
 
   const confirmedVariant = parts.join(' ');
 
