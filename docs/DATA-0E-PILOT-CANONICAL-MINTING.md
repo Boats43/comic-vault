@@ -1,10 +1,21 @@
-# DATA-0E — The Locked Canonical Minting Contract
+# DATA-0E-PILOT — The Locked Canonical Minting Contract (Pilot Execution)
+
+> ## STATUS: PILOT / NON-PRODUCTION / NON-BINDING
+> **Every ID minted by this execution (commit `111e620`) is SUPERSEDED BY SUMMIT RULING 1 (UUIDv7).** This document, and the artifacts it describes, record a genuine proof-of-mechanism pilot — determinism, collision-freedom, and provenance were proven against a real sample using a stable-hash-to-BIGINT scheme, and that proof stands. But the ID *scheme itself* (SHA-256 → 63-bit signed BIGINT) is **not** the production scheme. The Master Architecture Summit ratified UUIDv7 as the permanent identity mechanism (`docs/adr/ADR-ID-001-permanent-identity.md`). No application code, no downstream tooling, and no future dispatch should treat any `gkPublisherId`/`gkSeriesId`/`gkIssueId` value produced by this pilot as a real, durable identifier. Production minting will re-run in full under DATA-0E-FULL (design drafted, not yet executed — see `docs/adr/`'s Task C artifacts) using the UUIDv7 scheme.
+>
+> **Blockers found by this pilot, now resolved by the summit:**
+> - **ID-1** (this document's own original "DETERMINISM SCHEME" finding — `BIGSERIAL` cannot satisfy "drop-and-remint produces identical IDs"): **RESOLVED-BY-SUMMIT.** See `docs/adr/ADR-ID-001-permanent-identity.md`, Ruling 1 (UUIDv7 as the permanent scheme) and Ruling 2 (entity ID ≠ derivation key ≠ reconciliation version ≠ mint idempotency key — the four-way distinction this pilot's single stable-hash conflated).
+> - **ID-2** (this document's own original caveat — explicit-id `catalog_entity` inserts mixed with a live `BIGSERIAL` sequence risk a future collision): **RESOLVED-BY-SUMMIT.** See `docs/adr/ADR-ID-001-permanent-identity.md`, Ruling 1 (UUIDv7 has no sequence to collide with) and the mint ledger design (Rulings 3–4, A3's permanent mint-idempotency mechanism) — a real mint ledger, not raw sequence/hash values, is now the first-party source of identity truth.
+>
+> The determinism/collision/provenance findings BELOW remain accurate as a record of what this pilot actually did and proved — read them as pilot history, not as the standing scheme.
+
+---
 
 **Scope executed:** mint `gkPublisherId` → `gkSeriesId` → `gkIssueId` for the AUTO-MINT tier population identified by `docs/DATA-0D-CROSSWALK-VALIDATION.md` — the 1,081 `SAME_COMIC` pairs from DATA-0D's own 1,116-issue stratified sample. Printings/variants deferred to post-summit DATA-1, as specified. **Local staging artifacts only. No Neon connection. No production/runtime wiring. No shadow lookup (0F waits for the summit's async-layer design).**
 
 ---
 
-## DETERMINISM SCHEME — stable hash, not sequence (stated and defended)
+## DETERMINISM SCHEME (PILOT-ONLY, superseded) — stable hash, not sequence (stated and defended)
 
 **A real tension was found and resolved, not silently picked around.** `db/data0/0002_comic_projection.sql` (a design-only, never-applied DDL artifact) declares `gk_publisher_id`/`gk_series_id`/`gk_issue_id` as `BIGINT REFERENCES catalog_entity(id)`, and `0001_generic_substrate.sql` declares `catalog_entity.id` as `BIGSERIAL` — an auto-increment sequence. **A sequence cannot satisfy this dispatch's own explicit requirement** ("drop-and-remint produces identical IDs"): its output is a function of insertion order and table state, not of the claims themselves. Two independent mint runs over the identical claim set could assign different numeric IDs to the same logical series/issue purely as a function of which claim record happened to be processed first — parallelism, retry ordering, or a partial rerun would all be able to produce a different result. This is flagged here as a genuine correction needed to DATA-0A's own schema-assumption comment ("Stable IDs … are `catalog_entity.id` under the hood") — for the summit's attention, not edited in that file by this dispatch (out of scope; that DDL belongs to a different, prior dispatch).
 
@@ -94,7 +105,7 @@ No collision within any single ID space, and no cross-space collision either (a 
 
 ## THE 35 REVIEW-TIER FOUNDING FIXTURES
 
-Per the dispatch's own instruction, these become the gate: **`tests/data-0e-review-tier-numbering-fixtures.test.js`, committed to the real repo test suite** (not local scratch — these gate future code, so they belong where future code will be reviewed against them). Contains all 35 cases verbatim from DATA-0D's own sample, with a `NORMALIZERS` registration point currently empty. Running it now:
+Per the dispatch's own instruction, these become the gate: **`tests/data-0e-pilot-review-tier-numbering-fixtures.test.js`, committed to the real repo test suite** (not local scratch — these gate future code, so they belong where future code will be reviewed against them). Contains all 35 cases verbatim from DATA-0D's own sample, with a `NORMALIZERS` registration point currently empty. Running it now:
 
 ```
 === 1 passed, 0 failed, 35 skipped-pending-normalizer ===
@@ -119,9 +130,9 @@ This is a direct, checkable answer to "why does this ID exist" — never a bare 
 ## ARTIFACTS
 
 **Committed** (this dispatch):
-- `docs/DATA-0E-CANONICAL-MINTING.md` — this document
-- `db/data0/snapshots/data-0e-mint-summary.json` — aggregate counts, determinism checksums, collision audit (summary only, matching the DATA-0D precedent of keeping bulk derived data local-only)
-- `tests/data-0e-review-tier-numbering-fixtures.test.js` — the 35 founding fixtures + promotion gate
+- `docs/DATA-0E-PILOT-CANONICAL-MINTING.md` — this document
+- `db/data0/snapshots/data-0e-pilot-mint-summary.json` — aggregate counts, determinism checksums, collision audit (summary only, matching the DATA-0D precedent of keeping bulk derived data local-only)
+- `tests/data-0e-pilot-review-tier-numbering-fixtures.test.js` — the 35 founding fixtures + promotion gate
 
 **Local scratch only** (bulk derived data, not committed, per this project's established convention):
 - `C:\grailkey-data\data-0e\mint-output.json` — full mint output, all 1,081 issue rows + 140 series + 28 publishers, each with full provenance (1.1MB)

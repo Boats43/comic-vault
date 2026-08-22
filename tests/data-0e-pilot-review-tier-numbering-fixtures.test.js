@@ -1,13 +1,20 @@
-// tests/data-0e-review-tier-numbering-fixtures.test.js
+// tests/data-0e-pilot-review-tier-numbering-fixtures.test.js
 //
-// DATA-0E — REVIEW tier founding fixtures. These are the 35
+// DATA-0E-PILOT — REVIEW tier founding fixtures. These are the 35
 // SAME_SERIES_DIFFERENT_ISSUE pairs DATA-0D found in its 1,116-issue
 // stratified sample (docs/DATA-0D-CROSSWALK-VALIDATION.md) — real GCD/
 // Metron pairs describing the identical physical comic, where only the
 // ISSUE NUMBER STRING differs because of a systematic GCD numbering
 // convention (never genuine identity confusion — see the DATA-0D doc's
-// own accounting). DATA-0E queues these as REVIEW tier: labeled with a
-// convention class, no gkIssueId minted.
+// own accounting). DATA-0E-PILOT queues these as REVIEW tier: labeled
+// with a convention class, no gkIssueId minted.
+//
+// NOTE (Summit Phase 1): these fixtures are number-matching data, not
+// minted IDs — they are NOT superseded by Ruling 1 (UUIDv7) the way the
+// pilot's own gkIssueId/gkSeriesId/gkPublisherId values are
+// (docs/DATA-0E-PILOT-CANONICAL-MINTING.md). The gate this file defines
+// remains valid and reusable under DATA-0E-FULL regardless of which ID
+// scheme eventually does the minting.
 //
 // This file is the GATE the dispatch specified: "the numbering normalizer
 // that eventually promotes them must pass all 35 with their documented
@@ -28,10 +35,10 @@
 //      by whatever comparison the normalizer itself defines) before the
 //      promotion is considered proven — not "most," not "the common
 //      shape," all 35.
-//   4. Only then does DATA-0E's own mint script gain a new comparison
+//   4. Only then does DATA-0E-FULL's own mint script gain a new comparison
 //      tier for that convention class.
 //
-// Invoke: node tests/data-0e-review-tier-numbering-fixtures.test.js
+// Invoke: node tests/data-0e-pilot-review-tier-numbering-fixtures.test.js
 
 // ---- Registration point for future normalizers. Empty until built. ----
 const NORMALIZERS = {
@@ -88,7 +95,7 @@ const assertTrue = (cond, label) => {
   else { failed++; const msg = `  ✗ ${label}`; failures.push(msg); console.log(msg); }
 };
 
-console.log(`\n=== DATA-0E REVIEW-tier founding fixtures: ${FIXTURES.length} cases ===\n`);
+console.log(`\n=== DATA-0E-PILOT REVIEW-tier founding fixtures: ${FIXTURES.length} cases ===\n`);
 assertTrue(FIXTURES.length === 35, `exactly 35 founding fixtures present (DATA-0D's own count) — got ${FIXTURES.length}`);
 
 const byClass = {};
