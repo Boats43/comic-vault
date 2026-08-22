@@ -17,10 +17,12 @@
 //   8. claim the idempotency key (if one was supplied)
 //   9. COMMIT (or ROLLBACK on any thrown error, in a catch)
 
+import { createHash } from 'node:crypto';
 import * as repo from './repository.js';
 import { acquireConnection } from './db.js';
 import { checkIdempotencyReplay, claimIdempotencyKey } from './idempotency.js';
 import { NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError } from './errors.js';
+import * as media from '../media/index.js';
 
 const CONTRACT_VERSION = 'grailkey-data1b-asset-service-v1';
 const BASIS_SCHEMA_VERSION = 'asset-capture-event-v1';
@@ -256,6 +258,97 @@ export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields,
       });
 
       const result = { mediaId };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// attachMedia — DATA-1C, Task 3. Real bytes in, a real stored object +
+// a real media row out. Distinct from attachMediaMetadata (DATA-1B,
+// above), which only ever recorded metadata a CALLER already resolved
+// elsewhere — this function is the one that actually calls the storage
+// adapter.
+//
+// Three independent idempotency/dedupe layers, per C4 — never conflated:
+//   1. Blob-level dedupe (src/modules/media/) — same bytes anywhere in
+//      the whole store resolve to ONE object, regardless of asset/role.
+//   2. Evidence-row dedupe (repo.findMediaByAssetRoleHash, C4) — same
+//      (asset, role, content) never produces two media rows, whether or
+//      not an idempotencyKey was supplied.
+//   3. Explicit idempotencyKey replay (checkIdempotencyReplay, same
+//      mechanism every other operation in this file already uses) —
+//      an exact repeated call returns the ORIGINAL result verbatim.
+//
+// captureRole maps directly onto the live media.media_type column
+// (ADR-MEDIA-001's vocabulary IS this schema's media_type CHECK
+// constraint — capture-photo/grading-photo/document; not a second,
+// parallel vocabulary).
+// ─────────────────────────────────────────────────────────────────────
+export async function attachMedia({ principalId, gkAssetId, bytes, contentType, captureRole, idempotencyKey, correlationId } = {}) {
+  requireFields({ principalId, gkAssetId, bytes, contentType, captureRole }, ['principalId', 'gkAssetId', 'bytes', 'contentType', 'captureRole']);
+  requireEnum(captureRole, ['capture-photo', 'grading-photo', 'document'], 'captureRole');
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+    throw new ValidationFailedError('bytes must be a non-empty Buffer/Uint8Array');
+  }
+
+  // C5 — the SERVICE computes the hash from the actual received bytes.
+  // This is the value that gets written to media.content_hash; the media
+  // adapter's own internal hash check (src/modules/media/) is a second,
+  // independent computation from the same real bytes — defense in depth,
+  // never a caller-declared value trusted for storage.
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+
+  // Storage I/O happens BEFORE the DB transaction opens — object storage
+  // isn't transactional with Postgres, and content-addressing makes an
+  // orphaned-but-unreferenced object harmless (the same bytes stored
+  // twice resolve to the same object; nothing is ever overwritten). If
+  // the DB half below fails/rolls back, the object may already exist
+  // with nothing pointing at it yet — a real, disclosed, harmless gap,
+  // not silently different from how every other content-addressed store
+  // (git, IPFS) already accepts this exact tradeoff.
+  const stored = await media.put({ bytes, contentType, sha256 });
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'attachMedia';
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      await assertAssetExists(client, gkAssetId);
+
+      const existingRow = await repo.findMediaByAssetRoleHash(client, {
+        assetId: gkAssetId, mediaType: captureRole, contentHash: sha256,
+      });
+      let mediaId, outcome;
+      if (existingRow) {
+        mediaId = existingRow.id;
+        outcome = 'existing-row';
+      } else {
+        mediaId = await repo.insertMedia(client, {
+          assetId: gkAssetId, mediaType: captureRole, contentHash: sha256,
+          objectUri: stored.objectUri, recordedByPrincipalId: principalId,
+        });
+        outcome = stored.created ? 'created' : 'existing-blob-new-row';
+        await repo.writeDomainEvent(client, {
+          eventType: 'media.attached', actorPrincipalId: principalId, actorKind: 'user',
+          subjectType: 'gk_asset', subjectId: gkAssetId,
+          payload: { mediaId, captureRole, sha256, objectUri: stored.objectUri, outcome },
+          correlationId: correlationId || await newCorrelationId(client),
+        });
+      }
+
+      const result = { mediaId, objectUri: stored.objectUri, sha256, outcome };
       await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
       await client.query('COMMIT');
       return result;

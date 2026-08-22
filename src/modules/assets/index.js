@@ -13,6 +13,7 @@ export {
   assignIdentity,
   correctIdentity,
   attachMediaMetadata,
+  attachMedia,
   transferOwnership,
   recordAcquisition,
   recordValuation,

@@ -1,0 +1,77 @@
+{
+  "dispatch": "GrailKey Dispatch 2026-08-23 -- DATA-1C: Media -- The Pixels Become Permanent",
+  "mode": "bounded-build",
+  "executed_as": "Part A (original dispatch) as amended by Part B (C0-C8, binding) and Part C (Outcome Ledger / Strategy / capture-order law)",
+  "c0_predecessor_proof": {
+    "module_files_confirmed": ["index.js", "service.js", "repository.js", "db.js", "idempotency.js", "errors.js"],
+    "service_contract_matches_report": true,
+    "s3_suite_present": "C:\\grailkey-data\\data-1\\service-proof\\ -- s3-1 through s3-10, all 10 scripts present",
+    "data1_dev_reachable": "PostgreSQL 18.6 (3484359) on aarch64-unknown-linux-gnu, confirmed via verify-pg-connection.mjs",
+    "live_table_count": 14,
+    "live_tables": ["acquisition_event", "asset_identity_assignment", "current_owner", "decision_event", "domain_event", "entity_mint_basis", "gk_asset", "gk_principal", "idempotency_key", "media", "mint_event", "outbox", "ownership_event", "valuation_event"],
+    "gk_asset_row_count_at_start": 21,
+    "media_row_count_at_start": 7,
+    "correction_to_part_a": "Part A's dispatch text named 'the Sabrina and Creepy (the two real DATA-1A assets)' -- Creepy #1 1964 WAS a real, already-minted asset (01a02aae-23bc-7d51-a759-961c5ff4b4a1); Sabrina was NOT (zero sabrina-containing basis_key in entity_mint_basis before this dispatch) -- minted for real this dispatch from a real scanlog record rather than silently substituted"
+  },
+  "task1_vendor_ruling": {
+    "design_doc": "docs/adr/DATA-1C-MEDIA-DESIGN.md, Task 1",
+    "primary_recommended": "Vercel Blob (private access, addRandomSuffix:false + no allowOverwrite = real create-if-absent primitive, native to this stack's Pro plan)",
+    "provisioned_today": false,
+    "evidence_for_not_provisioned": "no BLOB_READ_WRITE_TOKEN in any of 5 .env* files, no @vercel/blob dependency, no MCP tool available to create a store, Vercel CLI not installed",
+    "plan_confirmed": "Pro (team_qEx0TMOh3Wv0ugpc8mstYN0a, via list_teams MCP call)",
+    "driver_actually_exercised_this_dispatch": "localfs only"
+  },
+  "task2_adapter": {
+    "module_placement": "src/modules/media/ (index.js public; driver-localfs.js/driver-vercel-blob.js/contentAddress.js private)",
+    "files_created": [
+      "src/modules/media/index.js", "src/modules/media/errors.js", "src/modules/media/contentAddress.js",
+      "src/modules/media/driver-localfs.js", "src/modules/media/driver-vercel-blob.js",
+      "tests/media-module-boundary.test.js"
+    ],
+    "content_addressing": "sha256/<first2hexchars>/<fullhash>, content-type deliberately excluded from the key",
+    "delete_api": "none -- removed from v1 per C3; structurally verified absent by the boundary test",
+    "immutability_mechanism": "fs.open(path,'wx') for localfs (proven); @vercel/blob's default non-overwrite put() for the spec'd driver (not yet exercised live)"
+  },
+  "task3_service_integration": {
+    "files_modified": ["src/modules/assets/service.js", "src/modules/assets/repository.js", "src/modules/assets/index.js"],
+    "new_export": "attachMedia",
+    "new_repository_query": "findMediaByAssetRoleHash",
+    "idempotency_layers": ["blob-level content dedupe (media module)", "evidence-row dedupe (asset+role+content_hash)", "explicit idempotencyKey replay"],
+    "api_files_touched": 0
+  },
+  "task4_proof_suite": {
+    "script_location": "C:\\grailkey-data\\data-1\\m4-media-proof.mjs (local scratch, not committed)",
+    "result": "26/26 assertions passing",
+    "c6_disclosure": "substitute image bytes used (1x1 public-domain PNG, tagged per-book) -- real Creepy/Sabrina photos are browser-IndexedDB-only, never reach this server-side environment, confirmed via docs/DATA-1-READINESS.md section A1/A3 and direct scanlog record inspection",
+    "creepy_asset_id": "01a02aae-23bc-7d51-a759-961c5ff4b4a1",
+    "creepy_media_object_uri": "localfs://sha256/0c/0c4459ddb5bb6f626de7084af7d8e9d203182bb5b6a40acb88e20489260fd990",
+    "creepy_sha256": "0c4459ddb5bb6f626de7084af7d8e9d203182bb5b6a40acb88e20489260fd990",
+    "sabrina_asset_id": "01a02bd8-fd28-745d-92a5-198583e21817",
+    "sabrina_mint_source": "real scanlog record, correlationId 15594457-47b2-4e4e-b862-afdf576aef98, minted-new this dispatch",
+    "sabrina_media_object_uri": "localfs://sha256/e2/e2a5b3122d9e45782c5fdd4f8310e069e510220aca223c20232ab072daff6c75",
+    "sabrina_sha256": "e2a5b3122d9e45782c5fdd4f8310e069e510220aca223c20232ab072daff6c75",
+    "m4_1": "PASS 6/6", "m4_2": "PASS 2/2", "m4_3": "PASS 4/4", "m4_4": "PASS 6/6",
+    "m4_5": "PASS 3/3", "m4_6": "PASS 3/3", "m4_7": "PASS 11/11 (separate test file)", "m4_8": "PASS 3/3"
+  },
+  "additions": {
+    "outcome_ledger": "design + draft migration only, db/data0/0006_outcome_ledger.sql (NOT applied), docs/adr/DATA-1-OUTCOME-LEDGER-DESIGN.md",
+    "strategy_doc": "docs/GRAILKEY-STRATEGY.md committed, closing-line wording correction applied per this document's own claims policy",
+    "capture_order_law": "recorded in docs/adr/DATA-1C-MEDIA-DESIGN.md Addition 3 and docs/TICKET-REGISTRY.md GK-162"
+  },
+  "crawl_status_at_dispatch": {
+    "pid": 16696,
+    "process_alive": true,
+    "process_name": "node",
+    "started": "2026-08-22T16:21:08 (local)",
+    "phase": "fetching-details",
+    "rate_limit_observed_at": "2026-08-22T23:34:38.333Z",
+    "sustained_remaining": 729,
+    "burst_remaining": 3,
+    "action_taken_this_dispatch": "none -- read-only PID/checkpoint check only"
+  },
+  "constraints_honored": [
+    "no production/scanner wiring", "no UI changes", "no public upload endpoint (GK-151 remains OPEN/HARD-GATE)",
+    "no api/enrich.js changes", "zero api/ files touched", "crawl process not restarted or modified",
+    "commit local only, not pushed to origin"
+  ]
+}
