@@ -223,8 +223,9 @@ console.log('\n=== Source-presence: single writer, validator reclassification, c
   assertTrue(!codeOnly.includes("out.issueAuthority = {\n          source: 'marketplace',\n          status: 'confirmed',"), 'commit4-rescue no longer hand-writes a confirmed issueAuthority object');
   assertTrue(codeOnly.includes('[commit4.3-validator] SAFETY-NET FIRED'), 'checkCrossPopulationPromotionGuard\'s remaining write site is explicitly reclassified as a validator/safety-net in its own log line');
   assertTrue(codeOnly.includes("[q140-terminal] same-value-agreement:"), 'q140-terminal carries the same-value-agreement validator branch');
-  // Exactly 4 real assignment sites remain, each independently justified
-  // (T-1's writers 1-4 removed; 5-7 kept, per the directive's own ruling):
+  // Exactly 5 real assignment sites remain, each independently justified
+  // (T-1's writers 1-4 removed; 5-7 kept per the directive's own ruling;
+  // GK-152 adds an 8th, 2026-08-22):
   //   1. the single projectIssueAuthority projection (2a)
   //   2. escalateIssueAuthorityOnConflict (writer #5) -- kept: fires on a
   //      LATER-arriving pool-wide eBay consensus not available at initial
@@ -236,12 +237,20 @@ console.log('\n=== Source-presence: single writer, validator reclassification, c
   //      not a bypass write.
   //   4. checkCrossPopulationPromotionGuard's reclassified safety-net
   //      (writer #7) -- kept, real value comparison, defensive last resort.
+  //   5. GK-152's comps-pool issue rescue (writer #8) -- new, 2026-08-22:
+  //      a SECOND call to the SAME projectIssueAuthority projection (not a
+  //      new competing authority-derivation mechanism), reached only when
+  //      confirmedIssue was null and a later, comps-stage unanimous
+  //      consensus rescues it -- fires strictly after Phase 1's own
+  //      resolveIdentity/reconcileIssue already ran and left issueAuthority
+  //      null, never overwriting a real projection result.
   const assignmentLines = codeOnly.split('\n').filter((l) => /out\.issueAuthority\s*=[^=]/.test(l) && !l.includes('${out.issueAuthority'));
-  assertEq(assignmentLines.length, 4, 'exactly 4 remaining out.issueAuthority assignment sites (projection + 3 independently-justified kept writers)');
-  assertTrue(assignmentLines.some((l) => l.includes('projectIssueAuthority')), 'includes the single projection');
+  assertEq(assignmentLines.length, 5, 'exactly 5 remaining out.issueAuthority assignment sites (projection + 3 independently-justified kept writers + GK-152\'s new comps-pool rescue)');
+  assertTrue(assignmentLines.filter((l) => l.includes('projectIssueAuthority')).length === 2, 'exactly 2 call sites use the single projection function -- Phase 1\'s normal-path write and GK-152\'s later comps-pool rescue -- never a competing hand-rolled shape');
   assertTrue(assignmentLines.some((l) => l.includes('escalated')), 'includes escalateIssueAuthorityOnConflict\'s write (writer #5, kept)');
   assertTrue(assignmentLines.some((l) => l.includes('provenance.issueAuthority')), 'includes manual-correction provenance (writer #6, kept, not a bypass)');
   assertTrue(assignmentLines.some((l) => l.trim() === 'out.issueAuthority = {') && codeOnly.includes("'custody-invariant-violation'"), 'includes checkCrossPopulationPromotionGuard\'s reclassified safety-net (writer #7, kept)');
+  assertTrue(assignmentLines.some((l) => l.includes('gk152Rescue.reconciledIssue')), 'includes GK-152\'s comps-pool rescue (writer #8, new)');
 }
 
 console.log('\n=== B3: operator correction — issue evidence at maximum weight (source=user) ===');

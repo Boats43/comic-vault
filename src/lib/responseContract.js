@@ -361,6 +361,24 @@ export function deriveLocks(out) {
     });
   }
 
+  // GK-152 (2026-08-22) — the issue-facet sibling to AR/AT/AV's own
+  // contested locks immediately above, same additive/independent pattern.
+  // out.issueAuthority is custodied from api/enrich.js's own
+  // rescueIssueFromCompsPoolConsensus rescue (src/lib/identityCore.js) —
+  // never re-derived here. status==='conflicted' is projectIssueAuthority's
+  // own vocabulary for a CONTESTED reconciledIssue.authority — a value WAS
+  // adopted (the void this replaces left the book TARGET_ISSUE_UNRESOLVED/
+  // PRICING_REFUSED, nothing priced) but the evidence for it is a later-
+  // stage comps-pool consensus, not full independent corroboration.
+  if (preStandingLockCount === 0 && out.issueAuthority?.status === 'conflicted') {
+    locks.push({
+      code: 'market-standing-issue-contested',
+      reason: 'The issue number on this scan is contested — adopted from a unanimous comps-pool consensus, not independently corroborated — price is not confirmed for the exact issue',
+      hard: false,
+      class: 'insufficiency',
+    });
+  }
+
   // GrailKey Directive AH (GK-111) — sufficiency, not applicability. A
   // marketStanding of EXACT_CURRENT says the pool IS current and (per the
   // lock above) confirmed applicable to this edition — it says nothing

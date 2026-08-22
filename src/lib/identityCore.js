@@ -2457,6 +2457,82 @@ export const buildStandardVisionAuthorityContext = (rawVisionConfidence) => ({
  *   priorIndependentlyTrusted or any other facet's gating.
  * @returns {Object} { confirmedTitle, confirmedIssue, confirmedYear, confirmedPublisher, identitySource, reconciledIssue }
  */
+
+/**
+ * rescueIssueFromCompsPoolConsensus — GK-152 (Absolute Wonder Woman #16
+ * Talavera virgin, 2026-08-22). A NEW, later-stage rescue, deliberately
+ * independent of resolveIdentity's own Phase-1 issue-facet logic above
+ * (vision-zero-support ESCALATE, Guard 7 / isFamilyIssueConsensusAlready
+ * Decided, reconcileIssue's first-eligible-visual entry) — it does not
+ * touch, replace, or re-run any of that. Those mechanisms correctly
+ * defer to a family-level 'no-consensus' verdict when the RAW, unclustered
+ * visual-search pool is genuinely ambiguous (e.g. a mix of different
+ * issues' variant covers by different artists, all visually similar
+ * enough for eBay's own image search to conflate) — that deferral is by
+ * design (AI Fixture 4/Venom, Eternus, Detective/GK-116, Quux CONTROL E)
+ * and is NOT the defect this function exists to fix.
+ *
+ * The real gap: by the time comps are fetched and filtered (api/comps.js's
+ * own variant/cover-letter/multi-issue/lot/slab chain — a materially
+ * stronger, more specific signal than the raw family clustering, since it
+ * is keyed on the actual comp LISTINGS being priced, not a coarse visual-
+ * similarity cluster), the SURVIVING pool can be unanimous on a single
+ * issue number even when the earlier, coarser pool never was — and that
+ * later, stronger evidence never fed back into the issue facet before
+ * this fix. Confirmed production case: 5/5 real, price-eligible comps
+ * unanimously "#16" while confirmedIssue stayed null; Commit B's own
+ * market-evidence gate (api/enrich.js) then discarded a real, already-
+ * computed price and hard-locked the card (TARGET_ISSUE_UNRESOLVED /
+ * PRICING_REFUSED) despite the unanimous evidence sitting right there in
+ * rawComps.
+ *
+ * Deliberately conservative: unanimity only (no partial-majority credit —
+ * matches the dispatch's own "5/5" bar, not a lower ratio), a real row-
+ * count floor (MINIMUM_CORROBORATING_ROWS, the same floor this codebase
+ * already uses elsewhere for "is this actually corroboration or a single
+ * lucky row"), and authority is ALWAYS 'CONTESTED' — never 'CORROBORATED'
+ * — from this path, so AR/AT/AV's own deriveMarketStanding per-facet law
+ * (extended to issue alongside this fix, src/lib/actionAuthority.js)
+ * floors standing to SIMILAR_ONLY, never EXACT_CURRENT/READY. A genuinely
+ * empty or non-unanimous comps pool returns null — confirmedIssue stays
+ * null and the existing ID_REQUIRED/LOCKED path is completely unchanged
+ * (GrailKey Directive AS's own C3: ID_REQUIRED survives when no candidate
+ * exists anywhere).
+ *
+ * @param {string|number|null} confirmedIssue - the issue value resolveIdentity already settled on (null is the only case this function can act on)
+ * @param {Object|null} rawComps - the FINAL, filtered pricing-eligible comps pool (api/enrich.js's own `rawComps`, same shape as out.rawComps is built from — { prices: [{ title, ... }, ...] })
+ * @param {Object} [opts]
+ * @param {boolean} [opts.isGraded] - mirrors vision-zero-support's own carve-out; graded books never route through this rescue
+ * @returns {{ issue: string, reconciledIssue: Object } | null}
+ */
+export function rescueIssueFromCompsPoolConsensus(confirmedIssue, rawComps, opts = {}) {
+  if (confirmedIssue != null) return null; // nothing to rescue
+  if (opts.isGraded) return null;
+
+  const prices = Array.isArray(rawComps?.prices) ? rawComps.prices : [];
+  if (prices.length < MINIMUM_CORROBORATING_ROWS) return null;
+
+  const issues = prices.map((p) => {
+    const title = String(p?.title || '');
+    const candidate = extractHashIssueNumber(title) || extractIssueCandidate(title);
+    return candidate?.issue != null ? String(candidate.issue) : null;
+  });
+  if (issues.some((i) => i == null)) return null; // every survivor must carry a real issue number — no partial-unanimity credit
+
+  const distinct = new Set(issues);
+  if (distinct.size !== 1) return null; // unanimity only, not a majority
+
+  const issue = issues[0];
+  const reconciledIssue = {
+    value: issue,
+    source: 'comps-pool-consensus',
+    authority: 'CONTESTED',
+    justifiedBy: prices.map((p) => ({ source: 'comps-pool-consensus', value: issue, title: p?.title || null })),
+    conflicts: [],
+  };
+  return { issue, reconciledIssue };
+}
+
 export const resolveIdentity = (vision, ebay, family, opts = {}) => {
   const { ebayResultCount = 0, overlapThreshold = 0.2, isGraded = false } = opts;
 

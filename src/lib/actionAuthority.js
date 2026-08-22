@@ -136,6 +136,23 @@ export function deriveMarketStanding(out) {
     // marks disputed. Floors to SIMILAR_ONLY, never lower — same
     // revocation-only principle as AB/AP/AR/AT's own sibling floors.
     if (out?.titleAuthority === 'CONTESTED') return 'SIMILAR_ONLY';
+    // GK-152 (2026-08-22) — AR/AT/AV's per-facet law extended to issue,
+    // the fourth of the four facets this comment block already named
+    // (variant/year/issue/title) but that had never actually been wired
+    // here. out.issueAuthority is a custodied OBJECT (projectIssueAuthority,
+    // src/lib/issueAuthority.js), not a bare string like the sibling
+    // facets — status:'conflicted' is its own vocabulary for the same
+    // CONTESTED concept (reconciledIssue.authority === 'CONTESTED' in,
+    // status:'conflicted' out). Real production gap this closes: GK-152's
+    // comps-pool issue rescue (api/enrich.js, src/lib/identityCore.js's
+    // rescueIssueFromCompsPoolConsensus) sets exactly this shape when a
+    // unanimous comps-pool consensus rescues confirmedIssue from null —
+    // without this floor, that rescued price would ship EXACT_CURRENT
+    // (potentially READY) despite issue authority being explicitly
+    // CONTESTED, never CORROBORATED. Floors to SIMILAR_ONLY, never lower —
+    // same revocation-only principle as AB/AP/AR/AT/AV's own sibling
+    // floors above.
+    if (out?.issueAuthority?.status === 'conflicted') return 'SIMILAR_ONLY';
     return 'EXACT_CURRENT';
   }
   // Unrecognized source string — conservative default, never silently
@@ -196,6 +213,7 @@ const LOCK_CODE_TO_REASON = {
   'market-standing-variant-contested': 'VARIANT_CONTESTED_EDITION', // GrailKey Directive AR (GK-129)
   'market-standing-year-contested': 'YEAR_CONTESTED', // GrailKey Directive AT (GK-135)
   'market-standing-title-contested': 'TITLE_CONTESTED', // GrailKey Directive AV (GK-133)
+  'market-standing-issue-contested': 'ISSUE_CONTESTED', // GK-152 (2026-08-22)
 };
 
 const lockToReasonCode = (lock) => {

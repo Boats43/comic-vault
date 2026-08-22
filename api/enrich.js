@@ -56,6 +56,7 @@ import {
   normalizeVisionConfidence,
   reconcileVariantFacet,
   deriveSeriesCoreQuery,
+  rescueIssueFromCompsPoolConsensus,
 } from "../src/lib/identityCore.js";
 // GrailKey Directive 2026-08-16-AL continuation (4a/4e) — direct import,
 // not re-exported through identityCore.js's own list above (that list
@@ -11225,6 +11226,37 @@ export default async function handler(req, res) {
           }))
         : [],
     } : { count: 0 };
+
+    // GK-152 (Absolute Wonder Woman #16 Talavera virgin, 2026-08-22) —
+    // comps-pool issue rescue. Runs exactly once, right after out.rawComps
+    // is finalized and before anything downstream (the Q140-terminal
+    // out.issue write ~line 11344, Commit B's market-evidence gate) reads
+    // confirmedIssue. See rescueIssueFromCompsPoolConsensus's own doc
+    // comment (src/lib/identityCore.js) for the full defect trace — does
+    // NOT touch vision-zero-support / Guard 7 / reconcileIssue's own
+    // Phase-1 logic, which stays correct for the case it already handles
+    // (a genuinely ambiguous raw visual pool). This is later-stage
+    // evidence Phase 1 never had access to. Sets out.identityFromConsensus
+    // so the Q140-terminal fingerprint invariant (~line 11362) treats this
+    // as the same class of sanctioned post-hoc correction the existing
+    // Q83 ebay_comp_consensus rescue already established, not a violation.
+    if (confirmedIssue == null) {
+      const gk152Rescue = rescueIssueFromCompsPoolConsensus(confirmedIssue, out.rawComps, { isGraded: !!out.isGraded });
+      if (gk152Rescue) {
+        confirmedIssue = gk152Rescue.issue;
+        out.identityFromConsensus = true;
+        out.issueAuthority = projectIssueAuthority(gk152Rescue.reconciledIssue, {});
+        console.log(
+          `[gk152-comps-issue-rescue] RESCUED: confirmedIssue=null -> #${confirmedIssue} from ` +
+          `${out.rawComps.prices.length} unanimous comps-pool survivors (authority=CONTESTED)`
+        );
+      } else {
+        console.log(
+          '[gk152-comps-issue-rescue] no rescue: confirmedIssue stays null ' +
+          '(too few comps, non-unanimous, or no issue number extractable from any survivor)'
+        );
+      }
+    }
 
     // 2. compPoolContaminated: universal flag for variant/reprint fallback
     // Q110 dispatch Part 3 (2026-07-18) — out.variantFallback/reprintFallback
