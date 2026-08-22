@@ -1,0 +1,107 @@
+{
+  "_comment": "DATA-0D summary artifact. Aggregate metrics only, committed. Full per-issue raw comparison data (1,116 rows) stays local scratch only, per this project convention (raw bulk data never enters the repo) - see docs/DATA-0D-CROSSWALK-VALIDATION.md for the referenced local paths.",
+  "generatedAt": "2026-08-22T04:26:59.658Z",
+  "sampleSize": 1116,
+  "referential": {
+    "sampleSize": 1116,
+    "hitRate": 100,
+    "hits": 1116,
+    "missingCount": 0,
+    "duplicateMappingsWithinSample": 0
+  },
+  "semantic": {
+    "totalCompared": 1116,
+    "verdictCounts": {
+      "SAME_COMIC": 1081,
+      "SAME_SERIES_DIFFERENT_ISSUE": 35
+    },
+    "verdictCountsPct": {
+      "SAME_COMIC": 96.86,
+      "SAME_SERIES_DIFFERENT_ISSUE": 3.14
+    },
+    "byStratum": {
+      "2010s|marvel-dc": {
+        "total": 51,
+        "verdicts": {
+          "SAME_COMIC": 50,
+          "SAME_SERIES_DIFFERENT_ISSUE": 1
+        }
+      },
+      "2000s|marvel-dc": {
+        "total": 75,
+        "verdicts": {
+          "SAME_COMIC": 72,
+          "SAME_SERIES_DIFFERENT_ISSUE": 3
+        }
+      },
+      "60s-70s|marvel-dc": {
+        "total": 101,
+        "verdicts": {
+          "SAME_COMIC": 97,
+          "SAME_SERIES_DIFFERENT_ISSUE": 4
+        }
+      },
+      "80s-90s|marvel-dc": {
+        "total": 82,
+        "verdicts": {
+          "SAME_COMIC": 81,
+          "SAME_SERIES_DIFFERENT_ISSUE": 1
+        }
+      },
+      "pre-1960|marvel-dc": {
+        "total": 136,
+        "verdicts": {
+          "SAME_COMIC": 136
+        }
+      },
+      "2020s+|marvel-dc": {
+        "total": 67,
+        "verdicts": {
+          "SAME_COMIC": 60,
+          "SAME_SERIES_DIFFERENT_ISSUE": 7
+        }
+      },
+      "2020s+|other": {
+        "total": 119,
+        "verdicts": {
+          "SAME_COMIC": 116,
+          "SAME_SERIES_DIFFERENT_ISSUE": 3
+        }
+      },
+      "pre-1960|other": {
+        "total": 50,
+        "verdicts": {
+          "SAME_COMIC": 50
+        }
+      },
+      "60s-70s|other": {
+        "total": 85,
+        "verdicts": {
+          "SAME_COMIC": 83,
+          "SAME_SERIES_DIFFERENT_ISSUE": 2
+        }
+      },
+      "2010s|other": {
+        "total": 135,
+        "verdicts": {
+          "SAME_COMIC": 124,
+          "SAME_SERIES_DIFFERENT_ISSUE": 11
+        }
+      },
+      "2000s|other": {
+        "total": 111,
+        "verdicts": {
+          "SAME_COMIC": 109,
+          "SAME_SERIES_DIFFERENT_ISSUE": 2
+        }
+      },
+      "80s-90s|other": {
+        "total": 104,
+        "verdicts": {
+          "SAME_COMIC": 103,
+          "SAME_SERIES_DIFFERENT_ISSUE": 1
+        }
+      }
+    }
+  }
+}
