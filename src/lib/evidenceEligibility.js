@@ -297,13 +297,7 @@ export const classifyEvidenceRow = (row, target = {}) => {
     // (unlike the branch above) but its ONLY authority is a marketplace-
     // only adoption (issueAuthority.status, src/lib/issueAuthority.js)
     // that has not been corroborated by anything outside the marketplace
-    // pool itself. Every row is demoted to reference-only regardless of
-    // whether ITS OWN title happens to match target.issue — a row
-    // matching an unconfirmed number is not evidence the number is
-    // correct, it's just more of the same un-corroborated marketplace
-    // signal that produced the adoption in the first place. Same
-    // "absence of evidence is not evidence of correctness" reasoning as
-    // TARGET_ISSUE_UNRESOLVED just above, one authority tier up.
+    // pool itself.
     //
     // Fail-closed (review round), not fail-open: an earlier version checked
     // `=== 'provisional' || === 'conflicted'` — an ALLOWLIST inversion bug
@@ -332,14 +326,50 @@ export const classifyEvidenceRow = (row, target = {}) => {
     // never threads it) skips this branch entirely regardless of whatever
     // stray `issueAuthorityStatus` value might otherwise be present —
     // presence is the gate, not status alone.
-    rejectionCodes.push('TARGET_ISSUE_PROVISIONAL_AUTHORITY');
-    rejectionDetails.push({
-      code: 'TARGET_ISSUE_PROVISIONAL_AUTHORITY',
-      predicate: `target.issueAuthorityPresent=true, target.issueAuthorityStatus="${target.issueAuthorityStatus}" !== "confirmed" — ` +
-        `row demoted to reference-only regardless of title/variant match (hasIssueNumber was never evaluated for this row)`,
-    });
-    identityEligible = false;
-    comparabilityStatus = 'PROVISIONAL_ISSUE_REFERENCE';
+    //
+    // GK-158 (2026-08-22) — was an unconditional blanket demotion: EVERY
+    // row was pushed to reference-only regardless of whether its own
+    // title matched target.issue at all (hasIssueNumber was never even
+    // evaluated). That discarded genuinely corroborating evidence: a
+    // comps pool whose rows are UNANIMOUS on the same (still-provisional)
+    // issue number — e.g. GK-152's own rescueIssueFromCompsPoolConsensus
+    // shape, or any other path that lands out.issueAuthority.status at
+    // 'conflicted'/'provisional' via projectIssueAuthority BEFORE this
+    // gate runs — is real, usable pricing evidence for that reading; it
+    // simply hasn't cleared the bar for CONFIRMED. hasIssueNumber is now
+    // evaluated even in this branch: a row whose OWN title disagrees with
+    // the contested value is still rejected outright (WRONG_ISSUE — it
+    // corroborates nothing, disagreeing with an unconfirmed guess is not
+    // "more of the same signal," it's a genuine conflict on top of an
+    // already-uncertain read). A row that AGREES is now identity-
+    // ELIGIBLE, tagged PROVISIONAL_ISSUE_MATCH — never silently promoted
+    // to look as trustworthy as a confirmed-issue row: deriveMarketStanding's
+    // own per-facet CONTESTED floor (GK-152, actionAuthority.js) is
+    // completely untouched by this change and still independently floors
+    // standing to SIMILAR_ONLY whenever out.issueAuthority reads
+    // conflicted/contested — this fix only decides whether a MATCHING row
+    // may contribute to the price at all, never how confident the
+    // resulting card is allowed to look. commit4-terminal's own listing
+    // lock (computeIssueAuthorityContractPatch, issueAuthority.js) is
+    // likewise untouched — it gates the LISTING action on
+    // issueAuthority.status directly, independent of which rows fed the
+    // price.
+    if (!hasIssueNumber(title, target.issue, target.seriesTitle || null)) {
+      rejectionCodes.push('WRONG_ISSUE');
+      rejectionDetails.push({
+        code: 'WRONG_ISSUE',
+        predicate: `hasIssueNumber(title, target.issue="${target.issue}", target.seriesTitle="${target.seriesTitle}") === false ` +
+          `(target issue authority is provisional: issueAuthorityStatus="${target.issueAuthorityStatus}")`,
+      });
+      identityEligible = false;
+    } else {
+      // Identity-eligible: this row's own title agrees with the
+      // contested value. Deliberately NOT setting identityEligible=false
+      // here — an agreeing row may still reach rawPricingEligible/
+      // pricing, per the reasoning above. comparabilityStatus records
+      // WHY, for I13 display/diagnostics, without gating anything itself.
+      comparabilityStatus = 'PROVISIONAL_ISSUE_MATCH';
+    }
   } else if (!hasIssueNumber(title, target.issue, target.seriesTitle || null)) {
     rejectionCodes.push('WRONG_ISSUE');
     rejectionDetails.push({

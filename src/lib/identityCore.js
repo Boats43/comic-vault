@@ -173,18 +173,60 @@ export const sanitizeSeriesTitle = (rawTitle) => {
 
   // Q70 — Q54 COMPOUND_WHITELIST protection FIRST (before regex stripping)
   // Prevents "X-Men" → "Men", "Marvel Tales" → "Tales" when regex strips "x" or "marvel"
-  // Prefix matching: "x-men angel" starts with "x-men " → return "X-Men" verbatim
-  const protectedHit = Array.from(COMPOUND_WHITELIST).find(entry =>
-    bareTitle === entry || bareTitle.startsWith(entry + ' ')
-  );
+  //
+  // GK-157 (2026-08-22) — was prefix-only (`bareTitle === entry ||
+  // bareTitle.startsWith(entry + ' ')`), so a compound anywhere OTHER than
+  // the very start of the string was invisible to this check — the exact
+  // gap GK-153's own registry entry flagged as "known, not fixed" (a
+  // family-reconstruction string like "616 gi joe cobra commander," where
+  // the compound sits mid-string behind a leading "616," never matched,
+  // and "joe" fell through to the LEGACY_CREATOR_NOISE_WORDS strip below
+  // and got destroyed). Generalized to a word-boundary match ANYWHERE in
+  // the string — prefix is checked FIRST and wins on a tie (preserves
+  // every existing prefix-based fixture byte-identical, since a prefix
+  // match is inherently also the leftmost possible match); only when no
+  // prefix hit exists does this fall through to a leftmost-anywhere
+  // search. Word-boundary via the same Unicode-aware lookaround discipline
+  // GK-143 already established (\p{L}/\p{N} boundaries, not ASCII-only
+  // \b) — a compound containing punctuation ("g.i. joe") still needs a
+  // real non-letter/digit boundary on each side, not a coincidental
+  // substring hit inside a longer word.
+  const escapeRegExpLiteral = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let protectedHit = null;
+  let protectedHitIndex = -1;
+  for (const entry of COMPOUND_WHITELIST) {
+    if (bareTitle === entry || bareTitle.startsWith(entry + ' ')) {
+      protectedHit = entry;
+      protectedHitIndex = 0;
+      break; // prefix match is always leftmost-possible — no need to keep scanning
+    }
+  }
+  if (!protectedHit) {
+    let earliestIndex = Infinity;
+    for (const entry of COMPOUND_WHITELIST) {
+      const re = new RegExp(`(?<![\\p{L}\\p{N}_])(${escapeRegExpLiteral(entry)})(?![\\p{L}\\p{N}_])`, 'iu');
+      const m = bareTitle.match(re);
+      if (m && m.index < earliestIndex) {
+        earliestIndex = m.index;
+        protectedHit = entry;
+        protectedHitIndex = m.index;
+      }
+    }
+  }
 
   if (protectedHit) {
-    // Q70 — Extract ONLY the protected compound from the title, drop trailing noise
-    // "The X-Men Angel Red Raven #44" → "X-Men" (strips "Angel Red Raven")
-    const protectedPortion = rawTitle.slice(
-      rawTitle.toLowerCase().indexOf(protectedHit),
-      rawTitle.toLowerCase().indexOf(protectedHit) + protectedHit.length
-    );
+    // Q70 — Extract ONLY the protected compound from the title, drop
+    // surrounding noise on BOTH sides now (not just trailing) — e.g.
+    // "616 gi joe cobra commander" → "gi joe" (drops the leading "616"
+    // AND the trailing "cobra commander"), matching the same "extract
+    // only the compound" behavior the prefix case already had. Same
+    // plain-indexOf extraction the original prefix-only code already
+    // used (finds the compound's position directly in the ORIGINAL,
+    // unstripped rawTitle — bareTitle's own article-stripping never
+    // needs to be un-done here, since we're searching for the compound
+    // text itself, not reusing bareTitle's own index).
+    const startIdx = rawTitle.toLowerCase().indexOf(protectedHit);
+    const protectedPortion = rawTitle.slice(startIdx, startIdx + protectedHit.length);
     console.log(`[Q70] compound-protected: "${rawTitle}" → "${protectedPortion}" (matched "${protectedHit}")`);
     return protectedPortion;
   }
@@ -2615,7 +2657,30 @@ export const resolveIdentity = (vision, ebay, family, opts = {}) => {
     const rawFamilyTitle = family.selectedTitle;
     const sanitizedFamilyTitle = sanitizeSeriesTitle(rawFamilyTitle);
 
-    confirmedTitle = sanitizedFamilyTitle;
+    // GK-157 (2026-08-22) — an elected (family-WON) title only ever
+    // received sanitizeSeriesTitle's narrower noise-word cleanup;
+    // canonicalizeTitleCandidate's richer pipeline (attribution clause,
+    // merch/W-clause, parenthetical, grade/condition, generic finish-
+    // descriptor, standalone issue, publisher+year suffix — AV/AW,
+    // GK-133/GK-140) was reachable ONLY via reconcileTitleFacet's
+    // fallback-vision branch below (family.decision==='fallback-vision')
+    // — never applied when the family election actually WON. Applied
+    // here as an ADDITIONAL, idempotent pass over the already-GATED
+    // sanitizedFamilyTitle (never over raw topFamily/pool text, which
+    // would bypass Q84/Q119/Q142's own non-consensus-token exclusion —
+    // this call sees only what those gates already admitted). Confirmed
+    // safe on already-clean input (canonicalizeTitleCandidate("g i joe")
+    // is a no-op) and on a real attribution-clause shape (strips "by
+    // <creator>" cleanly) — see tests/gk157-*.test.js. C6's own over-
+    // strip guard (identityCore.js, canonicalizeTitleCandidate) means
+    // this can never make the title WORSE than sanitizedFamilyTitle
+    // already was; it can only remove additional real noise the older
+    // pipeline didn't recognize.
+    const familyTitleCanon = canonicalizeTitleCandidate(sanitizedFamilyTitle, { issueValue: vision?.issue ?? null });
+    if (familyTitleCanon.value !== sanitizedFamilyTitle && !familyTitleCanon.overStripped) {
+      console.log(`[title-canon] elected family title canonicalized: "${sanitizedFamilyTitle}" → "${familyTitleCanon.value}"`);
+    }
+    confirmedTitle = familyTitleCanon.overStripped ? sanitizedFamilyTitle : familyTitleCanon.value;
     // Q140 corrective dispatch (2026-07-23, Flash #139/#128, Adventure Time,
     // Immortal Hulk #44, Wonder Woman #1 class) — family-scoped issue
     // adoption, aggregated across every member row of the winning family

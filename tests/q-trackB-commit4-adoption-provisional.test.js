@@ -209,9 +209,11 @@ console.log('\nEight joint assertions: pool-only-adoption fixture\n');
   assertTrue(out.contract.listable === false, '(6a) contract.listable === false — listing is locked');
   assertTrue(out.listingHardLocked === true, '(6b) out.listingHardLocked === true');
 
-  // (7) — the adopting marketplace rows are absent from every
-  // pricing-eligible population, kept only as reference-only custody with
-  // source/reason (I13). Real target shape via the REAL evidenceEligibility
+  // (7) — GK-158 (2026-08-22) CORRECTED: a row textually matching the
+  // provisional/contested value is now identity-ELIGIBLE (real,
+  // corroborating pricing evidence for that reading — it just hasn't
+  // cleared the bar for CONFIRMED), tagged PROVISIONAL_ISSUE_MATCH rather
+  // than blanket-demoted. Real target shape via the REAL evidenceEligibility
   // exports (classifyEvidenceRow/buildEvidencePopulations/
   // buildPricingEligibleRows) — the SAME functions api/comps.js and
   // soldVerification.js's real call sites invoke, with issueAuthorityStatus
@@ -225,18 +227,25 @@ console.log('\nEight joint assertions: pool-only-adoption fixture\n');
     issueAuthorityStatus: out.issueAuthority.status,
   };
   const classifications = compPool.map((row) => classifyEvidenceRow(row, evidenceTarget));
-  assertTrue(classifications.every((c) => c.rejectionCodes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY')), '(7a) every adopting-marketplace row carries the TARGET_ISSUE_PROVISIONAL_AUTHORITY reason code, despite genuinely matching #12 by title');
-  assertTrue(classifications.every((c) => c.rawPricingEligible === false), '(7b) every adopting-marketplace row is rawPricingEligible=false');
+  assertTrue(classifications.every((c) => !c.rejectionCodes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY')), '(7a) GK-158: a row genuinely matching #12 no longer carries TARGET_ISSUE_PROVISIONAL_AUTHORITY at all — hasIssueNumber is now evaluated even under provisional authority');
+  assertTrue(classifications.every((c) => c.comparabilityStatus === 'PROVISIONAL_ISSUE_MATCH'), '(7a2) GK-158: each matching row is tagged PROVISIONAL_ISSUE_MATCH — eligible, but honestly labeled as resting on an unconfirmed issue value');
+  assertTrue(classifications.every((c) => c.rawPricingEligible === true), '(7b) GK-158: every adopting-marketplace row (genuinely matching #12) is now rawPricingEligible=true — real evidence, usable for pricing');
   const populations = buildEvidencePopulations(compPool, evidenceTarget);
-  assertEq(populations.rawPricingPool.length, 0, '(7c) zero adopting-marketplace rows in the pricing-eligible population');
-  assertEq(populations.provisionalAuthorityReferences.length, 3, '(7d) all 3 rows land in provisionalAuthorityReferences — reference-only custody, not deleted');
-  assertTrue(
-    populations.provisionalAuthorityReferences.every((r) => r.comparabilityStatus === 'PROVISIONAL_ISSUE_REFERENCE' && r.rejectionCodes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY')),
-    '(7e) each reference-only row carries its source/reason (comparabilityStatus + rejectionCodes), never a bare silent drop'
-  );
+  assertEq(populations.rawPricingPool.length, 3, '(7c) GK-158: all 3 matching rows land in the pricing-eligible population');
+  assertEq(populations.provisionalAuthorityReferences.length, 0, '(7d) GK-158: nothing lands in provisionalAuthorityReferences for this fixture — every row matched and became pricing-eligible instead of reference-only');
   const pricingEligibleRows = buildPricingEligibleRows(compPool, evidenceTarget);
-  assertEq(pricingEligibleRows.length, 0, '(7f) buildPricingEligibleRows (the real api/comps.js/soldVerification.js gate) excludes all 3 rows');
-  assertTrue(PRICING_GATE_CODES.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY'), '(7g) TARGET_ISSUE_PROVISIONAL_AUTHORITY is a real pricing-math gate code, not display-only');
+  assertEq(pricingEligibleRows.length, 3, '(7f) GK-158: buildPricingEligibleRows (the real api/comps.js/soldVerification.js gate) now includes all 3 matching rows');
+  assertTrue(PRICING_GATE_CODES.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY'), '(7g) TARGET_ISSUE_PROVISIONAL_AUTHORITY remains a real pricing-math gate code — it still fires for a row that does NOT match (see the negative control below), just no longer unconditionally for every row');
+
+  // (7h) NEGATIVE CONTROL (GK-158) — a row whose own title does NOT match
+  // the contested value (#9, not #12) is still rejected outright, even
+  // under the exact same provisional/contested authority. Proves the fix
+  // narrows the gate (mismatches still reject) rather than disabling it
+  // (nothing rejects anymore).
+  const nonMatchingRow = { title: 'Test Family Comics #9 raw copy', price: 12, marketState: 'active' };
+  const nonMatchingClassification = classifyEvidenceRow(nonMatchingRow, evidenceTarget);
+  assertTrue(nonMatchingClassification.rejectionCodes.includes('WRONG_ISSUE'), '(7h) GK-158 negative control: a row textually disagreeing with the contested value (#9 vs target #12) is rejected as WRONG_ISSUE, not silently admitted');
+  assertFalse(nonMatchingClassification.rawPricingEligible, '(7h) GK-158 negative control: the non-matching row is NOT rawPricingEligible');
 
   // (8) — exact-cache read/write ineligible via the real exported guard.
   assertFalse(canUseExactIssuePricingCache(out.issue, out.issueAuthority), '(8) canUseExactIssuePricingCache returns false — exact-pricing cache read/write ineligible');
@@ -340,9 +349,9 @@ console.log('\nFull-result 10x determinism\n');
   assertEq(results[0].issueAuthority.status, 'provisional', 'the shared full result has status=provisional');
   assertEq(results[0].issueAuthority.reasons, ['marketplace-only-adoption'], 'the shared full result has the expected reasons array, in order');
   assertEq(results[0].issueAuthority.supportRatio, 0.8, 'the shared full result has the expected supportRatio');
-  assertEq(results[0].contractState, 'ID_REQUIRED', 'the shared full result has the expected contract state');
-  assertEq(results[0].pricingEligiblePoolSize, 0, 'the shared full result has the expected pricing-eligible pool size');
-  assertEq(results[0].cacheEligible, false, 'the shared full result has the expected cache eligibility');
+  assertEq(results[0].contractState, 'ID_REQUIRED', 'the shared full result has the expected contract state — GK-158 changes evidence-eligibility only, commit4-terminal\'s own contract/listing lock (driven purely by out.issueAuthority.status) is untouched');
+  assertEq(results[0].pricingEligiblePoolSize, 3, 'GK-158: the shared full result now has pricingEligiblePoolSize=3 — the 3 adopting-marketplace rows genuinely match #12 and are real, usable evidence even while the card itself stays ID_REQUIRED/unlisted (evidence-eligibility and the contract lock are independent questions)');
+  assertEq(results[0].cacheEligible, false, 'the shared full result has the expected cache eligibility — canUseExactIssuePricingCache (issueAuthority.js) is untouched by this fix, still ineligible for a provisional status');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -444,11 +453,24 @@ console.log('\nFail-closed inversion: unknown/future issueAuthority.status value
   assertTrue(canUseExactIssuePricingCache('12', undefined), 'canUseExactIssuePricingCache: no issueAuthority at all (legacy shape) stays eligible — allowlist, not a blanket new restriction');
   assertTrue(canUseExactIssuePricingCache('12', { status: 'confirmed' }), 'canUseExactIssuePricingCache: status=confirmed stays eligible');
 
+  // GK-158 (2026-08-22) — CORRECTED. "Fail-closed" here means: an
+  // unrecognized status must still receive a REAL evaluation (never
+  // silently skip the gate as if it were the safe 'confirmed' case) — it
+  // does NOT mean "must always reject regardless of title match," which
+  // was the over-broad behavior GK-158 fixes. row (matching #12) now
+  // correctly becomes ELIGIBLE under an unrecognized status too — the gate
+  // still ran a real check (hasIssueNumber), it just found agreement.
+  // rowMismatch (below) is the genuine fail-closed proof: even an
+  // unrecognized status still REJECTS a row that actually disagrees.
   const row = { title: 'Test Family Comics #12 raw copy', price: 40, marketState: 'active' };
+  const rowMismatch = { title: 'Test Family Comics #9 raw copy', price: 12, marketState: 'active' };
   const targetUnknownAuthority = { issue: '12', seriesTitle: 'Test Family Comics', assetType: 'comic', issueAuthorityPresent: true, issueAuthorityStatus: 'pending-external-review' };
   const cUnknown = classifyEvidenceRow(row, targetUnknownAuthority);
-  assertTrue(cUnknown.rejectionCodes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY'), 'classifyEvidenceRow: an unrecognized issueAuthorityStatus value (present=true) is gated (fail-closed), not silently treated as confirmed');
-  assertFalse(cUnknown.rawPricingEligible, 'classifyEvidenceRow: unrecognized status -> rawPricingEligible=false');
+  assertFalse(cUnknown.rejectionCodes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY'), 'GK-158: classifyEvidenceRow: a row matching #12 is no longer tagged TARGET_ISSUE_PROVISIONAL_AUTHORITY, even under an unrecognized status value — it matched, so it is real evidence');
+  assertTrue(cUnknown.rawPricingEligible, 'GK-158: classifyEvidenceRow: unrecognized status + matching row -> rawPricingEligible=true');
+  const cUnknownMismatch = classifyEvidenceRow(rowMismatch, targetUnknownAuthority);
+  assertTrue(cUnknownMismatch.rejectionCodes.includes('WRONG_ISSUE'), 'FAIL-CLOSED PROOF: an unrecognized status value still genuinely evaluates the row — a real mismatch (#9 vs #12) is rejected as WRONG_ISSUE, never silently waved through because the status was unrecognized');
+  assertFalse(cUnknownMismatch.rawPricingEligible, 'FAIL-CLOSED PROOF: the mismatching row stays ineligible under an unrecognized status');
 
   // Presence-threading correction's own reason for existing: an authority
   // object that GENUINELY EXISTS (issueAuthorityPresent=true) but whose own
@@ -456,11 +478,18 @@ console.log('\nFail-closed inversion: unknown/future issueAuthority.status value
   // gated — NOT treated the same as "no authority tracking at all." Before
   // this correction, both cases collapsed to the identical bare `null` one
   // layer up (api/enrich.js's `out.issueAuthority?.status || null`) and
-  // were indistinguishable by the time they reached this function.
+  // were indistinguishable by the time they reached this function. GK-158
+  // narrows what "gated" means (a matching row is now eligible-but-tagged,
+  // not blanket-demoted) but presence-vs-absence is still the thing that
+  // decides whether this branch (vs. the ordinary WRONG_ISSUE-only branch)
+  // runs at all.
   const targetPresentButStatusless = { issue: '12', seriesTitle: 'Test Family Comics', assetType: 'comic', issueAuthorityPresent: true, issueAuthorityStatus: null };
   const cPresentStatusless = classifyEvidenceRow(row, targetPresentButStatusless);
-  assertTrue(cPresentStatusless.rejectionCodes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY'), 'classifyEvidenceRow: issueAuthorityPresent=true with a null/malformed status is gated — presence alone (not status) is what distinguishes this from the truly-absent case');
-  assertFalse(cPresentStatusless.rawPricingEligible, 'classifyEvidenceRow: present-but-statusless -> rawPricingEligible=false');
+  assertEq(cPresentStatusless.comparabilityStatus, 'PROVISIONAL_ISSUE_MATCH', 'GK-158: classifyEvidenceRow: issueAuthorityPresent=true with a null/malformed status + a matching row -> PROVISIONAL_ISSUE_MATCH (still runs THIS branch\'s own real check, distinct from the truly-absent case)');
+  assertTrue(cPresentStatusless.rawPricingEligible, 'GK-158: classifyEvidenceRow: present-but-statusless + matching row -> rawPricingEligible=true');
+  const cPresentStatuslessMismatch = classifyEvidenceRow(rowMismatch, targetPresentButStatusless);
+  assertTrue(cPresentStatuslessMismatch.rejectionCodes.includes('WRONG_ISSUE'), 'present-but-statusless + a genuinely mismatching row -> still WRONG_ISSUE, not silently allowed');
+  assertFalse(cPresentStatuslessMismatch.rawPricingEligible, 'present-but-statusless + mismatching row -> rawPricingEligible=false');
 
   const targetNoAuthority = { issue: '12', seriesTitle: 'Test Family Comics', assetType: 'comic' };
   const cNone = classifyEvidenceRow(row, targetNoAuthority);
@@ -608,7 +637,8 @@ console.log('\nResponse-shape completeness: EVIDENCE_RESPONSE_BUCKETS on both ac
   for (const bucket of EVIDENCE_RESPONSE_BUCKETS) {
     assertTrue(Array.isArray(activeEvidence[bucket]), `activeEvidence.${bucket} is an array (never undefined/missing) — matches App.jsx's real item.activeEvidence?.${bucket} read`);
   }
-  assertEq(activeEvidence.provisionalAuthorityReferences.length, 3, 'activeEvidence.provisionalAuthorityReferences carries the 3 adopting-marketplace rows');
+  assertEq(activeEvidence.provisionalAuthorityReferences.length, 0, 'GK-158: activeEvidence.provisionalAuthorityReferences is now empty — the 3 adopting-marketplace rows genuinely match #12 and became pricing-eligible instead of reference-only');
+  assertEq(populations.rawPricingPool.length, 3, 'GK-158: the same 3 rows landed in rawPricingPool (real evidence), confirming they were not silently lost, just reclassified');
   assertEq(activeEvidence.eraRejectedReferenceRows.length, 1, 'activeEvidence.eraRejectedReferenceRows carries the era-rejected sample passed in separately');
 
   // soldEvidence shape — soldVerification.js's real construction (`evidence:
@@ -625,7 +655,7 @@ console.log('\nResponse-shape completeness: EVIDENCE_RESPONSE_BUCKETS on both ac
   }
   assertEq(soldEvidence.eraRejectedReferenceRows, undefined, 'soldEvidence has no eraRejectedReferenceRows field at all — documented absence (no sold-side era pre-filter stage), not a silent gap');
   assertEq(soldEvidence.similarTitleReferences, [], 'soldEvidence.similarTitleReferences present and empty for this fixture (no TARGET_ISSUE_UNRESOLVED rows) — confirms the pre-existing App.jsx-consumed field was never actually missing on the sold side');
-  assertEq(soldEvidence.provisionalAuthorityReferences.length, 3, 'soldEvidence.provisionalAuthorityReferences carries the 3 adopting-marketplace rows — identical population, both shapes agree');
+  assertEq(soldEvidence.provisionalAuthorityReferences.length, 0, 'GK-158: soldEvidence.provisionalAuthorityReferences is now empty — identical population to activeEvidence, both shapes agree the matching rows became pricing-eligible');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -682,6 +712,18 @@ const GENUINE_ROWS_C4 = [
   { title: 'Test Family Comics #12 near mint 2001', price: 50 },
 ];
 
+// GK-158 negative control — the SAME pool shape, but every row genuinely
+// disagrees with the target issue (#9, not #12). Used to prove the
+// zero-eligible early-return path (and the underlying WRONG_ISSUE
+// rejection) still fires correctly under provisional/contested authority
+// when nothing actually matches — GK-158 narrows the gate, it does not
+// disable it.
+const MISMATCHED_ROWS_C4 = [
+  { title: 'Test Family Comics #9 (2001) Test Publisher', price: 10 },
+  { title: 'Test Family Comics #9 2001 raw copy', price: 12 },
+  { title: 'Test Family Comics #9 near mint 2001', price: 14 },
+];
+
 const originalFetchC4 = globalThis.fetch;
 
 // Sorted structured comparison — ordering through classification/population
@@ -702,63 +744,68 @@ const runFetchCompsIntegration = async () => {
   assertTrue(resultControl.count > 0, 'CONTROL: issueAuthorityPresent=false -> genuine pool prices normally (count > 0), proving the fixture is a real, otherwise-valid comp pool');
   assertEq(resultControl.evidence.provisionalAuthorityReferences.length, 0, 'CONTROL: evidence.provisionalAuthorityReferences is empty — the gate never fires without a present, non-confirmed authority');
 
-  // --- Provisional case: SAME pool, issueAuthorityPresent:true +
-  // issueAuthorityStatus:'provisional' — every row demoted, count collapses
-  // to 0 via the real zero-eligible early return (Fix 1's own target),
-  // evidence preserved (not dropped).
+  // --- Provisional case (GK-158 CORRECTED): SAME pool, genuinely matching
+  // #12, issueAuthorityPresent:true + issueAuthorityStatus:'provisional' —
+  // the rows are now real, usable pricing evidence (count=3), never
+  // demoted just because the issue authority itself is unconfirmed.
   globalThis.fetch = makeMockFetchC4(GENUINE_ROWS_C4);
   const resultProvisional = await fetchComps({ ...baseParamsC4, issueAuthorityPresent: true, issueAuthorityStatus: 'provisional' });
-  assertEq(resultProvisional.count, 0, 'PROVISIONAL: same genuine pool -> count=0 through the real TARGET_ISSUE_PROVISIONAL_AUTHORITY gate, via the real fetchComps zero-eligible early return');
-  assertTrue(resultProvisional.evidence !== undefined, 'PROVISIONAL: evidence is present on the zero-eligible early return (Fix 1) — was previously dropped entirely by the bare emptyComps() spread');
-  // Item 1 (evidence-only completion pass) — EXACT response assertions,
-  // not just count/length. emptyComps() itself always sets prices/
-  // recentSales to bare empty arrays; asserted explicitly here (not just
-  // inferred from count===0) so a future regression that repopulated
-  // either from the wrong pool would be caught directly.
-  assertEq(resultProvisional.prices, [], 'PROVISIONAL: resultProvisional.prices is exactly []');
-  assertEq(resultProvisional.recentSales, [], 'PROVISIONAL: resultProvisional.recentSales is exactly []');
-  assertEq(resultProvisional.evidence.provisionalAuthorityReferences.length, 3, 'PROVISIONAL: provisionalAuthorityReferences contains exactly the three input rows (count)');
+  assertEq(resultProvisional.count, 3, 'GK-158: PROVISIONAL: a genuinely matching pool now prices normally (count=3) even under provisional issue authority');
+  assertTrue(resultProvisional.count > 0 && resultProvisional.prices.length === 3, 'GK-158: PROVISIONAL: real prices flow through, not emptyComps()');
   assertEq(
-    sortedTitlePrice(resultProvisional.evidence.provisionalAuthorityReferences),
-    sortedTitlePrice(GENUINE_ROWS_C4),
-    'PROVISIONAL: provisionalAuthorityReferences carries the exact input titles AND exact numeric prices (sorted structured comparison — ordering is not asserted as contractual)'
+    resultProvisional.prices.map((p) => p.price).sort((a, b) => a - b),
+    [40, 45, 50],
+    'GK-158: PROVISIONAL: the exact input prices are used, not silently substituted'
   );
-  assertTrue(
-    resultProvisional.evidence.provisionalAuthorityReferences.every((r) => r.rejectionCodes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY') && r.comparabilityStatus === 'PROVISIONAL_ISSUE_REFERENCE'),
-    'PROVISIONAL: every preserved row carries both TARGET_ISSUE_PROVISIONAL_AUTHORITY (rejectionCodes) and PROVISIONAL_ISSUE_REFERENCE (comparabilityStatus)'
-  );
+  assertEq(resultProvisional.evidence.provisionalAuthorityReferences.length, 0, 'GK-158: PROVISIONAL: provisionalAuthorityReferences is empty — every row matched and became pricing-eligible instead of reference-only');
   for (const bucket of EVIDENCE_RESPONSE_BUCKETS) {
-    assertTrue(Array.isArray(resultProvisional.evidence[bucket]), `PROVISIONAL: evidence.${bucket} is present as an array on the real fetchComps zero-eligible return — full bucket set, not a partial object`);
+    assertTrue(Array.isArray(resultProvisional.evidence[bucket]), `PROVISIONAL: evidence.${bucket} is present as an array on the real fetchComps return — full bucket set, not a partial object`);
   }
 
-  // --- Conflicted case: same mechanism, different status value.
+  // --- Provisional + MISMATCHED pool (GK-158 negative control): every row
+  // genuinely disagrees with the contested value (#9 vs target #12).
+  // NOTE: this pool is caught by api/comps.js's own, EARLIER per-attempt
+  // "issue# filter" (Filter 0a, on the raw title text against the query's
+  // own issue number) before evidenceEligibility.js's classification ever
+  // runs at all — confirmed via the real [comps] log output, not assumed —
+  // so this proves the end-to-end OUTCOME (a genuinely mismatching pool
+  // never prices) without asserting on evidenceEligibility's own bucket
+  // shape, which a different, out-of-scope early filter already resolved
+  // by the time this pool would have reached it. The classifyEvidenceRow/
+  // verifySoldComps unit-level negative controls (below and above) exercise
+  // evidenceEligibility.js's own WRONG_ISSUE branch directly, bypassing
+  // that earlier filter, and DO assert on its bucket shape.
+  globalThis.fetch = makeMockFetchC4(MISMATCHED_ROWS_C4);
+  const resultProvisionalMismatch = await fetchComps({ ...baseParamsC4, issueAuthorityPresent: true, issueAuthorityStatus: 'provisional' });
+  assertEq(resultProvisionalMismatch.count, 0, 'GK-158 negative control: PROVISIONAL + genuinely mismatching pool -> count=0 — a mismatching pool never prices, provisional authority or not');
+
+  // --- Conflicted case: same mechanism, different status value, genuinely matching pool.
   globalThis.fetch = makeMockFetchC4(GENUINE_ROWS_C4);
   const resultConflicted = await fetchComps({ ...baseParamsC4, issueAuthorityPresent: true, issueAuthorityStatus: 'conflicted' });
-  assertEq(resultConflicted.count, 0, 'CONFLICTED: same gate fires for status=conflicted');
-  assertEq(resultConflicted.evidence.provisionalAuthorityReferences.length, 3, 'CONFLICTED: all 3 rows preserved as reference-only');
+  assertEq(resultConflicted.count, 3, 'GK-158: CONFLICTED: a genuinely matching pool prices normally (count=3) under conflicted authority too — same rule as provisional');
+  assertEq(resultConflicted.evidence.provisionalAuthorityReferences.length, 0, 'GK-158: CONFLICTED: nothing left in provisionalAuthorityReferences — all 3 rows matched and priced');
+
+  // --- Conflicted + mismatched pool: same negative control, conflicted status.
+  globalThis.fetch = makeMockFetchC4(MISMATCHED_ROWS_C4);
+  const resultConflictedMismatch = await fetchComps({ ...baseParamsC4, issueAuthorityPresent: true, issueAuthorityStatus: 'conflicted' });
+  assertEq(resultConflictedMismatch.count, 0, 'GK-158 negative control: CONFLICTED + mismatching pool -> count=0, same as provisional');
 
   // --- Presence-threading control, through the real HTTP-layer function:
   // issueAuthorityPresent=true with a null status (a malformed present
-  // record) must ALSO collapse to count=0 — the exact new distinction this
-  // correction introduces, proven end-to-end, not just at the
-  // classifyEvidenceRow unit level above.
+  // record) runs the SAME real hasIssueNumber check as provisional/
+  // conflicted — presence, not status, is what selects this branch; GK-158
+  // means a matching row is eligible here too, exactly like the other two.
   globalThis.fetch = makeMockFetchC4(GENUINE_ROWS_C4);
   const resultPresentStatusless = await fetchComps({ ...baseParamsC4, issueAuthorityPresent: true, issueAuthorityStatus: null });
-  assertEq(resultPresentStatusless.count, 0, 'PRESENT-BUT-STATUSLESS: issueAuthorityPresent=true with a null status also collapses to count=0 through the real fetchComps — presence alone, not status, drives the gate');
-  // Item 1 (evidence-only completion pass) — essential empty-pricing
-  // assertions repeated for this case too, not just count/length.
-  assertEq(resultPresentStatusless.prices, [], 'PRESENT-BUT-STATUSLESS: resultPresentStatusless.prices is exactly []');
-  assertEq(resultPresentStatusless.recentSales, [], 'PRESENT-BUT-STATUSLESS: resultPresentStatusless.recentSales is exactly []');
-  assertEq(resultPresentStatusless.evidence.provisionalAuthorityReferences.length, 3, 'PRESENT-BUT-STATUSLESS: all 3 rows preserved as reference-only, same as the provisional/conflicted cases');
-  assertEq(
-    sortedTitlePrice(resultPresentStatusless.evidence.provisionalAuthorityReferences),
-    sortedTitlePrice(GENUINE_ROWS_C4),
-    'PRESENT-BUT-STATUSLESS: provisionalAuthorityReferences carries the exact input titles AND exact numeric prices (sorted structured comparison)'
-  );
-  assertTrue(
-    resultPresentStatusless.evidence.provisionalAuthorityReferences.every((r) => r.rejectionCodes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY') && r.comparabilityStatus === 'PROVISIONAL_ISSUE_REFERENCE'),
-    'PRESENT-BUT-STATUSLESS: every preserved row carries both TARGET_ISSUE_PROVISIONAL_AUTHORITY and PROVISIONAL_ISSUE_REFERENCE'
-  );
+  assertEq(resultPresentStatusless.count, 3, 'GK-158: PRESENT-BUT-STATUSLESS: a genuinely matching pool prices normally (count=3) through the real fetchComps — presence alone, not status, selects this branch, and a match is eligible here too');
+  assertEq(resultPresentStatusless.evidence.provisionalAuthorityReferences.length, 0, 'GK-158: PRESENT-BUT-STATUSLESS: nothing left in provisionalAuthorityReferences');
+
+  // --- Presence-threading control + mismatched pool: negative control.
+  // Same earlier-filter caveat as the provisional/conflicted mismatch
+  // controls above — outcome-only assertion here.
+  globalThis.fetch = makeMockFetchC4(MISMATCHED_ROWS_C4);
+  const resultPresentStatuslessMismatch = await fetchComps({ ...baseParamsC4, issueAuthorityPresent: true, issueAuthorityStatus: null });
+  assertEq(resultPresentStatuslessMismatch.count, 0, 'GK-158 negative control: PRESENT-BUT-STATUSLESS + mismatching pool -> count=0');
 
   globalThis.fetch = originalFetchC4;
 };
@@ -784,6 +831,11 @@ console.log('\nItem 3: execute the real verifySoldComps production path\n');
     { title: 'Test Family Comics #12 2001 raw copy', price: 45, endTime: '2026-06-05' },
     { title: 'Test Family Comics #12 near mint 2001', price: 50, endTime: '2026-06-10' },
   ];
+  const MISMATCHED_SOLD_ROWS = [
+    { title: 'Test Family Comics #9 (2001) Test Publisher', price: 10, endTime: '2026-06-01' },
+    { title: 'Test Family Comics #9 2001 raw copy', price: 12, endTime: '2026-06-05' },
+    { title: 'Test Family Comics #9 near mint 2001', price: 14, endTime: '2026-06-10' },
+  ];
   const baseCtx = {
     title: 'Test Family Comics', issue: '12', variant: null, publisher: 'Test Publisher',
     bookYear: '2001', userGradeKey: 'raw', assessedGrade: 'NM 9.4',
@@ -796,35 +848,36 @@ console.log('\nItem 3: execute the real verifySoldComps production path\n');
   assertEq(resultLegacy.diagnostics.verifiedCount, 3, 'LEGACY CONTROL: absent authority — all 3 rows verified/eligible under the existing sold rules, unaffected by this commit');
   assertEq(resultLegacy.evidence.provisionalAuthorityReferences.length, 0, 'LEGACY CONTROL: evidence.provisionalAuthorityReferences is empty — the gate never fires without a present, non-confirmed authority');
 
-  // Case A — issueAuthorityPresent:true, issueAuthorityStatus:'provisional'.
+  // Case A (GK-158 CORRECTED) — issueAuthorityPresent:true,
+  // issueAuthorityStatus:'provisional', genuinely matching rows: now real,
+  // verified pricing evidence, not blanket reference-only.
   const resultA = verifySoldComps(SOLD_ROWS, { ...baseCtx, issueAuthorityPresent: true, issueAuthorityStatus: 'provisional' });
-  assertEq(resultA.diagnostics.verifiedCount, 0, 'CASE A (provisional): no row enters the verified/pricing output');
-  assertEq(resultA.verified.length, 0, 'CASE A (provisional): verified array is exactly empty');
-  assertEq(resultA.evidence.provisionalAuthorityReferences.length, 3, 'CASE A (provisional): every input row survives in evidence.provisionalAuthorityReferences');
-  assertEq(
-    sortedTitlePrice(resultA.evidence.provisionalAuthorityReferences),
-    sortedTitlePrice(SOLD_ROWS),
-    'CASE A (provisional): provisionalAuthorityReferences carries the exact input titles AND exact numeric prices (sorted structured comparison)'
-  );
+  assertEq(resultA.diagnostics.verifiedCount, 3, 'GK-158: CASE A (provisional): all 3 genuinely-matching rows now enter the verified/pricing output');
+  assertEq(resultA.verified.length, 3, 'GK-158: CASE A (provisional): verified array carries all 3 rows');
+  assertEq(resultA.evidence.provisionalAuthorityReferences.length, 0, 'GK-158: CASE A (provisional): provisionalAuthorityReferences is empty — every row matched and was verified instead');
+
+  // Case A negative control — genuinely mismatching sold rows still rejected.
+  const resultAMismatch = verifySoldComps(MISMATCHED_SOLD_ROWS, { ...baseCtx, issueAuthorityPresent: true, issueAuthorityStatus: 'provisional' });
+  assertEq(resultAMismatch.diagnostics.verifiedCount, 0, 'GK-158 negative control: CASE A mismatch: no row enters the verified/pricing output when the rows genuinely disagree (#9 vs target #12)');
+  assertEq(resultAMismatch.verified.length, 0, 'GK-158 negative control: CASE A mismatch: verified array is exactly empty');
   assertTrue(
-    resultA.evidence.provisionalAuthorityReferences.every((r) => r.rejectionCodes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY') && r.comparabilityStatus === 'PROVISIONAL_ISSUE_REFERENCE'),
-    'CASE A (provisional): rejection code (TARGET_ISSUE_PROVISIONAL_AUTHORITY) and comparability status (PROVISIONAL_ISSUE_REFERENCE) preserved on every row'
+    resultAMismatch.evidence.incompatibleEditionReferences.every((r) => r.rejectionCodes.includes('WRONG_ISSUE')),
+    'GK-158 negative control: CASE A mismatch: every mismatching row carries WRONG_ISSUE, landing in incompatibleEditionReferences'
   );
 
-  // Case B — issueAuthorityPresent:true, issueAuthorityStatus:null (present
-  // but malformed/statusless).
+  // Case B (GK-158 CORRECTED) — issueAuthorityPresent:true,
+  // issueAuthorityStatus:null (present but malformed/statusless).
   const resultB = verifySoldComps(SOLD_ROWS, { ...baseCtx, issueAuthorityPresent: true, issueAuthorityStatus: null });
-  assertEq(resultB.diagnostics.verifiedCount, 0, 'CASE B (present-but-statusless): no row enters the verified/pricing output');
-  assertEq(resultB.verified.length, 0, 'CASE B (present-but-statusless): verified array is exactly empty');
-  assertEq(resultB.evidence.provisionalAuthorityReferences.length, 3, 'CASE B (present-but-statusless): every input row survives in evidence.provisionalAuthorityReferences');
-  assertEq(
-    sortedTitlePrice(resultB.evidence.provisionalAuthorityReferences),
-    sortedTitlePrice(SOLD_ROWS),
-    'CASE B (present-but-statusless): provisionalAuthorityReferences carries the exact input titles AND exact numeric prices (sorted structured comparison)'
-  );
+  assertEq(resultB.diagnostics.verifiedCount, 3, 'GK-158: CASE B (present-but-statusless): all 3 genuinely-matching rows now enter the verified/pricing output');
+  assertEq(resultB.verified.length, 3, 'GK-158: CASE B (present-but-statusless): verified array carries all 3 rows');
+  assertEq(resultB.evidence.provisionalAuthorityReferences.length, 0, 'GK-158: CASE B (present-but-statusless): provisionalAuthorityReferences is empty');
+
+  // Case B negative control.
+  const resultBMismatch = verifySoldComps(MISMATCHED_SOLD_ROWS, { ...baseCtx, issueAuthorityPresent: true, issueAuthorityStatus: null });
+  assertEq(resultBMismatch.diagnostics.verifiedCount, 0, 'GK-158 negative control: CASE B mismatch: no row enters the verified/pricing output');
   assertTrue(
-    resultB.evidence.provisionalAuthorityReferences.every((r) => r.rejectionCodes.includes('TARGET_ISSUE_PROVISIONAL_AUTHORITY') && r.comparabilityStatus === 'PROVISIONAL_ISSUE_REFERENCE'),
-    'CASE B (present-but-statusless): rejection code and comparability status preserved on every row'
+    resultBMismatch.evidence.incompatibleEditionReferences.every((r) => r.rejectionCodes.includes('WRONG_ISSUE')),
+    'GK-158 negative control: CASE B mismatch: every mismatching row carries WRONG_ISSUE'
   );
 }
 
