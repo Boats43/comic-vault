@@ -1,0 +1,39 @@
+# DATA-0B-2 — local-only GCD staging database.
+#
+# Purpose: stage 1 of DATA-0B-2 (docs/DATA-0B-1-SCHEMA-RECON.md, "Import
+# path recommendation") — get the raw GCD mysqldump into a real, queryable
+# MySQL 8.0.46 instance so structural ESTIMATES become exact SELECT COUNT(*)
+# values. This is staging only: no transform, no writes to source_snapshot/
+# claim/external_map, no Neon connection of any kind.
+#
+# Local-only by construction: bound to 127.0.0.1, non-default port, no
+# restart policy (never auto-starts), named volume scoped to this compose
+# project so `docker compose down -v` fully removes it.
+services:
+  gcd-staging-mysql:
+    image: mysql:8.0.46
+    container_name: grailkey-gcd-staging-mysql
+    restart: "no"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${GCD_STAGING_MYSQL_ROOT_PASSWORD:?set GCD_STAGING_MYSQL_ROOT_PASSWORD in .env, see .env.example}
+      MYSQL_DATABASE: gcd
+    ports:
+      - "127.0.0.1:3316:3306"
+    volumes:
+      - gcd_staging_mysql_data:/var/lib/mysql
+      - C:/grailkey-data/gcd/staging:/staging:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=256M
+      - --local-infile=0
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+volumes:
+  gcd_staging_mysql_data:
+    name: grailkey_gcd_staging_mysql_data
