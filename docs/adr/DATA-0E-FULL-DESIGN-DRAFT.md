@@ -6,9 +6,9 @@
 
 ## Mint ledger design (Rulings 3–5, A3, A4)
 
-Full DDL: `db/data0/0003_uuidv7_identity_and_mint_ledger.sql` (design-only, additive, `0001_`/`0002_` untouched per A5).
+Full DDL: `db/data0/0003_uuidv7_identity_and_mint_ledger.sql` (design-only, additive, `0001_`/`0002_` untouched per A5, **catalog permanent identity only — `gk_asset`/`asset_identity_assignment` removed to the DATA-1 Foundation dispatch, per the correction pass's C1 ruling**).
 
-- **`mint_event`** (Ruling 3 + A3): idempotency mechanism reuses `external_map`'s own existing `UNIQUE (source, external_id)` index as the real duplication constraint. A candidate's known external references are checked against `external_map` first; any existing resolution means no new mint. `mint_idempotency_key` is derived from the SORTED set of the candidate's `(source, external_id)` pairs — order-independent, so the same real pair of external references always produces the same idempotency key regardless of which order they were discovered in.
+- **`entity_mint_basis` + `mint_event`** (Ruling 3 + A3, **redesigned in review, C2**): the mint-idempotency primitive is a first-party `entity_mint_basis` table (`UNIQUE (mint_basis_namespace, mint_basis_key, mint_basis_version)`), NOT `external_map`'s own index — using an external provider's own uniqueness as the permanent-identity idempotency mechanism would place that provider underneath GrailKey's first-party identity, breaking for a synthesized-consensus entity, a manual entity, a future vertical with no GCD-analog, or a corrected provider mapping. External identifiers may still participate as VALUE content within a basis key for the use cases that have them (0E-FULL's own GCD+Metron-agreement candidates, specifically), but the constraint itself is always first-party. Transactional contract: basis-row insertion and entity creation happen in one transaction — a UNIQUE-constraint conflict on the basis row means no new entity is created (resolves to the existing one); if entity/typed-row creation fails after a successful basis claim, the whole transaction rolls back, so no orphan basis row or unclaimed entity can ever exist in a committed state. Same mint basis, concurrent or repeated, always resolves to exactly one entity.
 - **`entity_resolution_event` + `entity_resolution_member`** (Ruling 4, A4): member-row shape (not a fixed old-id/new-id column pair) handles 2→1, 1→N, and genuine N→M without redesign — a resolution event's own `source`/`target` member rows describe any shape uniformly.
 - **`catalog_entity` revision** (Ruling 5): `id BIGSERIAL` → `id UUID`, no `DEFAULT` — generation is always explicit, post-idempotency-check (ADR-ID-001).
 
@@ -23,6 +23,17 @@ Restated from `docs/adr/ADR-ID-001-permanent-identity.md`, which is where this w
 - Target database has zero existing tables — confirmed live, not assumed (A5).
 
 ## DATA-0E-FULL execution plan (A7)
+
+### Acquisition gate (checked FIRST, before the crawl plan below is authorized to start)
+
+Before any crawl begins, two things are checked, in order:
+
+1. **Is an authorized Metron bulk/export/elevated-quota path available today?** Jimmy's bootstrap-export request to the Metron project is already sent and, as of this correction pass, unanswered — recorded here as the standing open alternative, not assumed resolved either way. **Expected result today: no bulk path yet** (the email is pending, not granted) — under that expectation, the conservative per-item crawl below is what starts, not a hypothetical bulk import.
+2. **Can any durably-held response artifact be reused instead of re-fetching?** DATA-0E-PILOT's own 1,116-issue stratified sample already holds real, previously-fetched detail responses for that subset of candidates — the crawl should check for and skip any candidate already present in a durably-held artifact before spending a live request on it. (The pilot's sample was stratified by representative year, not a uniform random subset of the full 162,775, so the overlap is real but partial — exact dedup accounting is crawl-implementation work, not resolved in this design draft.)
+
+**Standing override, binding on whichever path is active:** if an authorized Metron bulk/export path is granted AFTER the crawl has already started, the crawl aborts cleanly at its next checkpoint boundary and the bulk path supersedes it — same referential/semantic gates, same contract, no extrapolation on either path. A granted export is never treated as a reason to relax the AUTO-MINT criteria or accept a lower evidence bar than the crawl path would have required; it changes ACQUISITION mechanics only, never the canonical contract.
+
+**Authorization:** if the gate above resolves to "no bulk path exists today" (the expected outcome), the checkpointed 3,500/day crawl described below is authorized to start — but only after this correction pass is itself approved and pushed, and not within this dispatch (per the summit's own "No DATA-0E-FULL... in this dispatch" instruction, which this correction pass does not lift).
 
 ### Candidate population
 
@@ -88,3 +99,4 @@ The script tracks its own daily request count against the recommended 3,500/day 
 - Does not apply `0003_uuidv7_identity_and_mint_ledger.sql` anywhere.
 - Does not begin the 162,775-candidate Metron pull.
 - Does not decide the canonical-subset question DATA-0E-PILOT's own Task 5 draft already scoped as options (A/B/C) — that remains a summit decision, informed by whatever DATA-0E-FULL's real mint counts turn out to be once it eventually runs.
+- Does not resolve the acquisition-gate question above — Jimmy's Metron bootstrap-export request stays pending and unanswered as of this correction pass; this draft states what happens under either outcome, it does not itself check for or wait on a reply.

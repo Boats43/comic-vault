@@ -66,7 +66,7 @@ Each level's own ID feeds the next level's canonical name as its namespace (iden
 | 2020s+ \| marvel-dc | 60 |
 | 2020s+ \| other | 116 |
 
-**REVIEW queue by convention class** (an automated classifier applied to DATA-0D's own 35 cases — see the fixture file below for the exact per-case breakdown, which differs slightly in class boundaries from the manual read in the DATA-0D doc but sums to the same 35):
+**REVIEW queue by convention class** (an automated classifier applied to DATA-0D's own 35 cases — see the fixture file below for the exact per-case breakdown. **Reconciled, Summit Phase 1 C3**: this table's 15/10/10 is the authoritative classification; `docs/DATA-0D-CROSSWALK-VALIDATION.md`'s own original 15/9/11 has been corrected in place to match, with the historical figures preserved struck through — the single `Alvin #1 → [1]` fixture was the one case DATA-0D's stricter exact-match categorization misclassified):
 
 | Convention class | Count |
 |---|---:|

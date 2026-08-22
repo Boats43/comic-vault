@@ -83,11 +83,13 @@ Every single `gcd_id` in the sample resolved to a real `gcd_issue` row. No colli
 
 **`SAME_SERIES_DIFFERENT_ISSUE` (35 total) — every one traces to a systematic GCD numbering convention, not genuine identity confusion:**
 
-| Pattern | Count | Example |
+**Correction (Summit Phase 1, C3, 2026-08-22) — reconciled against DATA-0E-PILOT's own automated classification.** The table below originally read 15 / 9 / 11. DATA-0E-PILOT's `classifyReviewConvention` function, built independently while minting the AUTO-MINT tier, produced 15 / 10 / 10 for the identical 35 fixtures. The discrepancy traces to exactly one fixture: **`Alvin #1` → GCD `[1]`**, which this document's own prose had already (inconsistently, in hindsight) used as the illustrative *example* for the bracket-placeholder row above — while the counting script that produced this table's *numbers* used a strict `gcd.number === '[nn]'` equality check, which `"[1]"` does not satisfy, and silently fell through to "other" instead. The pilot's classifier used a broader, more correct rule (`/^\[.*\]$/` — any bracket-wrapped content, not only the literal string `"nn"`), which correctly recognizes `[1]` as the same GCD bracket-annotation convention as `[nn]` (both are GCD flagging an issue's own number as non-standard/reconstructed via square brackets — the specific content inside the brackets isn't the load-bearing part of the pattern). **The broader rule is authoritative.** `Alvin` moves from "alternate-numbering-axis" to "nn-bracket-placeholder," matching where this document's own example already, correctly, put it. Total stays 35; no normalizer was implemented as part of this correction — this is a reclassification of existing fixture data, not new resolution logic. The original 15/9/11 figures are preserved below, struck through, as the historical record of what this document first reported — not deleted, per this project's own established correction convention.
+
+| Pattern | Count (~~original~~ → corrected) | Example |
 |---|---:|---|
-| GCD's legacy sequential number appended in parens ("52 (853)") | 15 | Metron `Amazing Spider-Man #52` → GCD `52 (853)` |
-| GCD's `[nn]`/`[N]` bracket placeholder for numberless issues/one-shots | 9 | Metron `Alvin #1` → GCD `[1]` |
-| GCD uses a different numbering axis entirely (annual-by-year, collector's-edition prefix, "N / seq" reprint numbering) | 11 | Metron `2000 AD Annual #2` → GCD `1979`; Metron `All New Collectors' Edition #55` → GCD `C-55`; Metron `Adventure Comics #1` → GCD `1 / 504` |
+| GCD's legacy sequential number appended in parens ("52 (853)") | ~~15~~ → **15** (unchanged) | Metron `Amazing Spider-Man #52` → GCD `52 (853)` |
+| GCD's `[nn]`/`[N]` bracket placeholder for numberless issues/one-shots | ~~9~~ → **10** | Metron `Alvin #1` → GCD `[1]` |
+| GCD uses a different numbering axis entirely (annual-by-year, collector's-edition prefix, "N / seq" reprint numbering) | ~~11~~ → **10** | Metron `2000 AD Annual #2` → GCD `1979`; Metron `All New Collectors' Edition #55` → GCD `C-55`; Metron `Adventure Comics #1` → GCD `1 / 504` |
 
 This is a clean, actionable finding for 0E: these 35 are the same physical comics, correctly cross-referenced by `gcd_id` — the mismatch is entirely in **how each source spells the issue number**, not in *which* issue is being pointed at.
 
