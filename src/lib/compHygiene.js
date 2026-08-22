@@ -91,15 +91,20 @@ export const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:
 
 // GK-142 (Phase 0.3, 2026-08-21) — cover-position/no-premium descriptor
 // tokens ("Corner Box", "Cover A/B/C/D", etc.), for QUERY-PROJECTION use
-// only (src/lib/identityCore.js's deriveSeriesCoreQuery). Deliberately a
-// synced COPY, not an import, of api/enrich.js's own `NO_PREMIUM` array
-// (the Variant multipliers pricing gate, CLAUDE.md "NO_PREMIUM list") —
-// that array is pricing math (never modified without explicit greenlight
-// per the standing pricing-math-greenlight protocol) and stays exactly
-// where it is, untouched, doing exactly what it already does. This list
-// must be kept token-identical to that one if either changes; it exists
-// so a query-string strip can reuse an already-vetted vocabulary instead
-// of hand-growing a new one (A5), without touching the pricing file at all.
+// only (src/lib/identityCore.js's deriveSeriesCoreQuery). A SEPARATE
+// literal from api/enrich.js's own `NO_PREMIUM` array (the Variant
+// multipliers pricing gate, CLAUDE.md "NO_PREMIUM list") — NOT centralized
+// into one shared, imported constant, because doing so would require
+// editing NO_PREMIUM's own declaration site inside enrich.js's protected
+// pricing block, which the standing pricing-math-greenlight protocol
+// requires explicit sign-off for (never given this dispatch), even for a
+// byte-identical-behavior mechanical hoist. Silent vocabulary drift between
+// the two lists is prevented mechanically, not by convention: see
+// `tests/grailkey-gk142-no-premium-parity.test.js`, which reads
+// api/enrich.js's actual source text, extracts the live NO_PREMIUM array
+// literal, and fails the moment it diverges from this one in either
+// direction. If that test ever fails, fix THIS array to match
+// api/enrich.js's — never the reverse, and never edit the parity test.
 export const NO_PREMIUM_COVER_DESCRIPTORS = [
   'corner box', 'masterpieces', 'design variant', 'headshot',
   'trading card', 'cover a', 'cover b', 'cover c', 'cover d',

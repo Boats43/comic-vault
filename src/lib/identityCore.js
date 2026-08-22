@@ -1187,9 +1187,10 @@ export const canonicalizeTitleCandidate = (rawTitle, opts = {}) => {
  *  (2) NO_PREMIUM_COVER_DESCRIPTORS (compHygiene.js) — cover-position
  *      terms ("Corner Box", "Cover A/B/C/D", etc.) VARIANT_CONTAM_RE does
  *      not cover, reused from the already-vetted pricing NO_PREMIUM
- *      vocabulary (see that constant's own header — a synced copy, not an
- *      import, of api/enrich.js's pricing-math array, which stays
- *      untouched).
+ *      vocabulary (see that constant's own header — a separate literal,
+ *      not an import, from api/enrich.js's pricing-math array, which
+ *      stays untouched; drift between the two is caught mechanically by
+ *      tests/grailkey-gk142-no-premium-parity.test.js, not by convention).
  *
  * Same C6-style over-strip guard as canonicalizeTitleCandidate: if the
  * projection empties or collapses to a single stopword, falls back to the
