@@ -972,6 +972,66 @@ export function computeIssueAuthorityContractPatch(issueAuthority, priorOut, ide
     };
   }
 
+  // GK-159 (2026-08-22) — per-facet parity: floor, don't clear. Every
+  // sibling contested facet (variant AR/GK-129, year AT/GK-135, title
+  // AV/GK-133, and issue itself via GK-152's own deriveMarketStanding
+  // floor, actionAuthority.js) already lands a CONTESTED-but-priced book
+  // at marketStanding=SIMILAR_ONLY / actionAuthority.state=REVIEW — price
+  // stays visible, only READY/listing is withheld. commit4-terminal was
+  // the one remaining facet still CLEARING instead of flooring: it
+  // unconditionally nulled price/bands and forced ID_REQUIRED the instant
+  // issueAuthority.status was 'conflicted', regardless of whether a real
+  // price had already been computed from a genuinely comps-corroborated
+  // read (e.g. GK-152's own rescueIssueFromCompsPoolConsensus shape,
+  // GK-158's own provisional-issue-match admission). Two compounding
+  // effects: the clear itself, AND — even on a hypothetical future call
+  // site that ignored the clear — overwriting pricingSource with the
+  // literal 'refused-issue-authority-conflicted' string would make
+  // deriveMarketStanding's own `/^refused/` short-circuit return NONE
+  // before the GK-152 conflicted-issue floor below it ever got a chance
+  // to run, silently defeating that floor a second, independent way.
+  //
+  // Fix, scoped narrowly to issueConflicted ONLY (issueProvisional and
+  // yearOnlyProvisional are unchanged — a bare marketplace ADOPTION with
+  // no external corroboration at all is a materially weaker read than a
+  // GENUINE DISAGREEMENT the pool itself already priced through; widening
+  // this to those two cases is a separate decision, not made here): when
+  // priorOut already carries a real, computed price, return a patch that
+  // touches NOTHING price-related (price/priceLow/priceHigh/priceBands/
+  // matchConfidence/pricingSource/confidenceLevel all stay exactly as the
+  // pipeline computed them — the "honest floored source," never the
+  // synthetic refused-* string) and does NOT set identityConfident=false/
+  // refusedToPrice=true/listingHardLocked. Deliberately NOT setting
+  // listingHardLocked here: that flag always produces a hard, 'integrity'-
+  // class lock (responseContract.js deriveLocks), which unconditionally
+  // forces actionAuthority.state to LOCKED regardless of marketStanding
+  // (Q41's own law, untouched) — the opposite of the REVIEW outcome this
+  // fix exists to produce. Listing stays gated anyway: marketStanding
+  // never reaches EXACT_CURRENT while issueAuthority.status is
+  // 'conflicted' (GK-152's own floor), so deriveActionAuthority's READY
+  // condition (identityStanding CONFIRMED && marketStanding EXACT_CURRENT
+  // && zero locks) can never be met — state lands at REVIEW, listable
+  // stays false, without a hard lock's help. responseContract.js's own
+  // pre-existing 'market-standing-issue-contested' soft (insufficiency-
+  // class) lock (also GK-152) fires on exactly this shape and supplies
+  // the ISSUE_CONTESTED-class card banner — nothing new needed here to
+  // surface it, only the absence of a preceding hard lock that would
+  // otherwise suppress it (that lock is itself gated on
+  // `preStandingLockCount === 0`).
+  //
+  // `marketStandingFloored: true` is a pure logging/diagnostic marker
+  // (api/enrich.js's call site branches on it to log a fix-specific line
+  // distinct from both the hard-clear and the P1 commit-p carve-out) —
+  // it carries no pricing/eligibility meaning of its own and nothing
+  // downstream reads it for a gating decision.
+  //
+  // Genuine no-price scans (priorOut has no computed price at all) are
+  // completely unchanged — falls through to the existing hard-clear
+  // branch below exactly as before this fix.
+  if (issueConflicted && parsePriceNumber(priorOut?.price) != null) {
+    return { marketStandingFloored: true };
+  }
+
   let pricingSource, priceNote, listingHardLockReason, listingHardLockBanner;
   if (issueConflicted) {
     pricingSource = 'refused-issue-authority-conflicted';

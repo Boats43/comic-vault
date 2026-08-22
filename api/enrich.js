@@ -12017,7 +12017,23 @@ export default async function handler(req, res) {
         // message for this case would itself be an I13 violation (log
         // must match what actually happened) of exactly the shape this
         // whole audit was commissioned to find.
-        if (authorityPatch.refusedToPrice === true) {
+        //
+        // GK-159 (2026-08-22) — a third, distinct shape: `marketStandingFloored`
+        // is a pure logging marker (computeIssueAuthorityContractPatch's own
+        // doc comment, src/lib/issueAuthority.js) checked FIRST — it never
+        // sets refusedToPrice either (touches nothing price-related at all),
+        // but logging it under the commit-p branch below would misreport
+        // an issueConflicted floor as a "provisional... high-confidence
+        // consensus" carve-out — the exact I13 mismatch class this whole
+        // if/else already exists to avoid for the other two shapes.
+        if (authorityPatch.marketStandingFloored === true) {
+          scanLogTerminalReason = 'commit4-terminal-floored';
+          console.log(
+            `[commit4-terminal] issueAuthority.status="conflicted" but a real price was already computed — ` +
+            `flooring to marketStanding=SIMILAR_ONLY/actionAuthority.state=REVIEW (ISSUE_CONTESTED), preserving ` +
+            `price and pricingSource="${out.pricingSource}" untouched, listing still not listable pending verification`
+          );
+        } else if (authorityPatch.refusedToPrice === true) {
           scanLogTerminalReason = out.issueAuthority?.status ? 'commit4-terminal' : 'commit4.1-terminal';
           console.log(
             out.issueAuthority?.status

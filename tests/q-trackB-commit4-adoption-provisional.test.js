@@ -398,17 +398,33 @@ console.log('\nContradiction-detector-fired case: escalates to conflicted, prese
   const notEscalated = escalateIssueAuthorityOnConflict(derived.issueAuthority, null);
   assertTrue(notEscalated === derived.issueAuthority, 'no issueConsensusConflict -> no escalation -> same reference returned (referential no-op)');
 
-  // Full pipeline for the escalated (conflicted) case — contract still blocks.
+  // Full pipeline for the escalated (conflicted) case.
+  //
+  // GK-159 (2026-08-22) — buildOutFixture (this file, ~line 110) has
+  // ALWAYS carried a real, already-computed price (pricingSource=
+  // 'active_ask_derived', price='$45.00') — this fixture represents
+  // exactly the shape GK-159 targets: the pipeline ran normally and
+  // priced the book BEFORE the conflict escalation above happened. Before
+  // GK-159, commit4-terminal cleared that price and forced ID_REQUIRED
+  // regardless; the assertions below UPDATED to reflect the new,
+  // INTENDED behavior — floor to SIMILAR_ONLY/REVIEW, preserve the price,
+  // never clear it — matching every sibling contested facet's own
+  // per-facet floor (AR/AT/AV/GK-152). The genuine no-price control
+  // (commit4-terminal's OTHER, byte-identical-unchanged branch) is
+  // covered separately by tests/gk159-commit4-terminal-floor.test.js
+  // Part 1/4 — not duplicated here.
   const out = buildOutFixture({ issueAuthority: escalated, identityProvisionalFields: ['issue'] });
   const patch = computeIssueAuthorityContractPatch(out.issueAuthority, out);
   assertTrue(patch !== null, 'conflicted status also produces a patch');
-  assertEq(patch.pricingSource, 'refused-issue-authority-conflicted', 'pricingSource reflects the conflicted-specific slug');
-  assertEq(patch.listingHardLockReason, 'issue-authority-conflicted', 'listingHardLockReason reflects the conflicted-specific slug');
+  assertEq(patch, { marketStandingFloored: true }, 'GK-159: with a real price already computed, the patch is the floor marker only — no pricingSource/listingHardLock fields, nothing price-related touched');
   Object.assign(out, patch);
   out.decision = computeDecision(out, { source: 'test', timestamp: 1753747200000 });
   finalizeResponse(out);
-  assertEq(out.contract.state, 'ID_REQUIRED', 'conflicted case also routes to the ID_REQUIRED-class contract state');
-  assertEq(out.contract.price, null, 'conflicted case also nulls price');
+  assertEq(out.contract.price, 45, 'GK-159: conflicted case with a real prior price now PRESERVES it (45), never nulls it');
+  assertTrue(out.contract.state !== 'ID_REQUIRED' && out.contract.state !== 'REFUSED', `GK-159: contract.state is neither ID_REQUIRED nor REFUSED (actual: ${out.contract.state})`);
+  assertEq(out.contract.actionAuthority?.marketStanding, 'SIMILAR_ONLY', 'GK-159: floors to marketStanding=SIMILAR_ONLY (GK-152\'s own floor)');
+  assertEq(out.contract.actionAuthority?.state, 'REVIEW', 'GK-159: actionAuthority.state=REVIEW, never LOCKED/ID_REQUIRED/READY');
+  assertEq(out.contract.listable, false, 'GK-159: still not listable — READY is never reachable while issueAuthority is conflicted');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

@@ -56,6 +56,8 @@ import {
 import { kvGet, kvSet } from '../api/kv-cache.js';
 import { computeConvergenceScore } from '../src/lib/convergenceScore.js';
 import { computeDecision } from '../src/lib/decisionEngine.js';
+import { deriveMarketStanding, deriveActionAuthority } from '../src/lib/actionAuthority.js';
+import { deriveLocks, assembleContract } from '../src/lib/responseContract.js';
 import { readFileSync } from 'node:fs';
 
 let passed = 0;
@@ -251,24 +253,52 @@ console.log('\n--- Section 5: issueAuthority derivation + terminal contract ---\
   const cacheEligible = canUseExactIssuePricingCache(identity.confirmedIssue, derivedIssueAuthority, terminalProvisionalFields);
   assertFalse(cacheEligible, 'exact-issue pricing cache is NOT eligible');
 
-  const patch = computeIssueAuthorityContractPatch(derivedIssueAuthority, { price: 42.0, refusedToPrice: false }, terminalProvisionalFields);
-  assertEq(patch.price, null, 'price is null');
-  assertEq(patch.priceBands, null, 'priceBands is null');
-  assertEq(patch.refusedToPrice, true, 'refusedToPrice is true');
-  assertEq(patch.listingHardLocked, true, 'listingHardLocked is true');
-  assertEq(patch.identityConfident, false, 'identityConfident is false');
-  assertEq(patch.hypotheticalReferenceEstimate, 42.0, 'I13: the computed price is relabeled, never silently deleted — proves a real active/sold reference does NOT unlock pricing, it is demoted to a hypothetical estimate');
+  // GK-159 (2026-08-22) — this fixture supplies a real, already-computed
+  // price (42.0, refusedToPrice:false) alongside issueAuthority.status=
+  // 'conflicted'. Before GK-159, commit4-terminal cleared price/bands and
+  // hard-locked listing unconditionally the instant status was
+  // 'conflicted'; GK-159 changes this INTENTIONALLY for exactly this
+  // shape — a real price already existed, so it is now FLOORED
+  // (marketStanding=SIMILAR_ONLY/actionAuthority.state=REVIEW), never
+  // cleared, matching every sibling contested facet's own per-facet
+  // floor. Assertions below updated to reflect the new, intended
+  // behavior (not a regression) — see tests/gk159-commit4-terminal-floor.test.js
+  // for the dedicated, exhaustive coverage of this mechanism.
+  const priorOutWithPrice = { price: 42.0, refusedToPrice: false, pricingSource: 'active_ask_derived' };
+  const patch = computeIssueAuthorityContractPatch(derivedIssueAuthority, priorOutWithPrice, terminalProvisionalFields);
+  assertEq(patch, { marketStandingFloored: true }, 'GK-159: the patch is the floor marker only — no price/priceBands/refusedToPrice/listingHardLocked/identityConfident fields, nothing price-related touched');
 
-  // Item 3 — real computeDecision, not a doc-comment claim.
+  const mergedOut = { ...priorOutWithPrice, ...patch };
+  assertEq(mergedOut.price, 42.0, 'GK-159: price stays 42.0 — preserved, never relabeled to a hypotheticalReferenceEstimate (that relabeling only happens on the hard-clear path, which this shape no longer takes)');
+
+  const contestedMarketStanding = deriveMarketStanding({ ...mergedOut, issueAuthority: derivedIssueAuthority });
+  assertEq(contestedMarketStanding, 'SIMILAR_ONLY', 'GK-159: marketStanding floors to SIMILAR_ONLY (GK-152\'s own floor, untouched)');
+
+  // Item 3 — real computeDecision, not a doc-comment claim. computeDecision
+  // (decisionEngine.js) itself has no awareness of out.issueAuthority at
+  // all — it reacts only to identity-completeness/manual-review/blocker
+  // fields, none of which this patch sets anymore. It is NOT the layer
+  // that gates listing for a contested-issue book; deriveActionAuthority/
+  // assembleContract (below) is — same established precedent as the
+  // pre-existing P1 commit-p carve-out, which likewise never touches
+  // identityConfident and lets computeDecision run independently.
   const decisionItem = {
-    ...patch,
+    ...mergedOut,
     title: 'Spawn', issue: '1', identityComplete: true,
     identityMissingFields: [],
     identityProvisional: false,
     identityVisionLowButCorroborated: false,
   };
   const decision = computeDecision(decisionItem, { source: 'test', timestamp: 0 });
-  assertEq(decision.action, 'ID_REQUIRED', 'REAL computeDecision (decisionEngine.js) resolves this exact patch shape to ID_REQUIRED — not asserted from a doc comment');
+  assertEq(decision.action, 'LIST_NOW', 'GK-159: REAL computeDecision (decisionEngine.js), given a real price and no completeness blockers, resolves to LIST_NOW — it is not the gate for this case');
+
+  const finalOut = { ...decisionItem, issueAuthority: derivedIssueAuthority, decision };
+  const locks = deriveLocks(finalOut);
+  const actionAuthority = deriveActionAuthority(finalOut, locks, decision);
+  assertTrue(actionAuthority.state !== 'READY', 'GK-159 SHIP-BLOCKING: actionAuthority.state is never READY despite decision.action=LIST_NOW — marketStanding=SIMILAR_ONLY makes READY unreachable regardless of the decision layer');
+  assertEq(actionAuthority.state, 'REVIEW', 'GK-159: actionAuthority.state=REVIEW');
+  const contract = assembleContract(finalOut);
+  assertEq(contract.listable, false, 'GK-159 SHIP-BLOCKING: contract.listable=false — listing stays gated at the transaction-authority layer regardless of decision.action text');
 }
 
 console.log('\n--- Section 6: zero-#300/#351 cache-key custody + convergence non-contribution ---\n');

@@ -179,7 +179,15 @@ console.log('\n=== B1: Batman #213/#300 near-miss, full transaction-boundary cha
   assertFalse(post.cvPcAllowed, 'POST-FIX: PC exact lookup blocked (same gate)');
   assertTrue(post.contract.actionAuthority.marketStanding !== 'EXACT_CURRENT', 'POST-FIX: marketStanding != EXACT_CURRENT');
   assertTrue(post.contract.actionAuthority.state !== 'READY', 'POST-FIX: actionAuthority != READY');
-  assertEq(post.contract.actionAuthority.state, 'LOCKED', 'POST-FIX: actionAuthority.state=LOCKED');
+  // GK-159 (2026-08-22) — this fixture (runFullChain's buildOut('active_ask_derived'))
+  // carries a real, already-computed price. Before GK-159, commit4-terminal
+  // cleared it and forced a hard listingHardLocked (state=LOCKED) the
+  // instant issueAuthority went conflicted, regardless of that price.
+  // GK-159 changes this INTENTIONALLY: floor to REVIEW instead, matching
+  // every sibling contested facet's own per-facet floor — the price is
+  // preserved, never listable, but not hard-LOCKED either. Updated to
+  // reflect the new, intended behavior (not a regression).
+  assertEq(post.contract.actionAuthority.state, 'REVIEW', 'POST-FIX (GK-159): actionAuthority.state=REVIEW — floored, not hard-locked, now that a real price exists');
   assertEq(post.contract.listable, false, 'POST-FIX: contract.listable=false');
 }
 function assertFalse(cond, label) { return assertEq(!!cond, false, label); }

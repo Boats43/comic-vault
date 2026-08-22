@@ -120,6 +120,7 @@ import {
 // returns null, kvSet resolves undefined) — no network reaches the wire.
 // Verified via direct, standalone execution before being relied on here.
 import { kvGet, kvSet } from '../api/kv-cache.js';
+import { deriveMarketStanding } from '../src/lib/actionAuthority.js';
 // MUTATION 8c — source-presence proof at the real api/enrich.js call site
 // (text read, not a module import; see Section 7 for rationale).
 import { readFileSync } from 'node:fs';
@@ -893,11 +894,23 @@ assertTrue(true, 'CONTROL 7: documented via full regression suite re-runs — se
   assertEq(derivedAuth.issueAuthority?.status, 'conflicted', 'CONTROL T1: the real issueAuthority derivation produces a non-null, status="conflicted" object for this retention-branch conflict — not the silent null default designed for an unrelated pre-existing shape');
   const cacheEligible = canUseExactIssuePricingCache(result.confirmedIssue, derivedAuth.issueAuthority, derivedAuth.identityProvisionalFields);
   assertFalse(cacheEligible, 'CONTROL T1: exact-issue cache access is BLOCKED');
+  // GK-159 (2026-08-22) — this fixture supplies a real, already-computed
+  // price (50, refusedToPrice:false). Before GK-159, commit4-terminal
+  // cleared it unconditionally; GK-159 changes this INTENTIONALLY for
+  // exactly this shape — floors to marketStanding=SIMILAR_ONLY instead of
+  // clearing, matching every sibling contested facet's own per-facet
+  // floor. Updated to reflect the new, intended behavior (not a
+  // regression) — see tests/gk159-commit4-terminal-floor.test.js for the
+  // dedicated, exhaustive coverage of this mechanism. Listing readiness
+  // is still BLOCKED — just via the SIMILAR_ONLY floor at the
+  // deriveActionAuthority layer (READY requires EXACT_CURRENT), not via
+  // a hard listingHardLocked — asserted directly below rather than
+  // re-checking the removed hard-lock fields.
   const contractPatch = computeIssueAuthorityContractPatch(derivedAuth.issueAuthority, { price: 50, refusedToPrice: false }, derivedAuth.identityProvisionalFields);
   assertTrue(contractPatch != null, 'CONTROL T1: a real contract patch fires for the conflicted authority');
-  assertEq(contractPatch.price, null, 'CONTROL T1: authoritative pricing is BLOCKED — price nulled');
-  assertEq(contractPatch.refusedToPrice, true, 'CONTROL T1: refusedToPrice is true');
-  assertEq(contractPatch.listingHardLocked, true, 'CONTROL T1: listing readiness is BLOCKED — listingHardLocked true');
+  assertEq(contractPatch, { marketStandingFloored: true }, 'CONTROL T1 (GK-159): the patch is the floor marker only — price/refusedToPrice/listingHardLocked untouched');
+  const t1MarketStanding = deriveMarketStanding({ price: 50, pricingSource: 'active_ask_derived', issueAuthority: derivedAuth.issueAuthority });
+  assertEq(t1MarketStanding, 'SIMILAR_ONLY', 'CONTROL T1 (GK-159): marketStanding floors to SIMILAR_ONLY — listing readiness stays blocked at the transaction-authority layer, price preserved');
 
   // Required real-call-site proof (item 1, re-verify #3) — the companion
   // LOW-confidence case reaches resolveIdentity as LOW via the SAME real
@@ -1113,19 +1126,23 @@ assertTrue(true, 'CONTROL 7: documented via full regression suite re-runs — se
   assertEq(finalProvisionalFields, ['year'], 'CONTROL T6: appendYearToProvisionalFields is idempotent here — "year" was already present, not duplicated, and the year is never additionally labeled "adopted" anywhere in this path');
   const cacheEligible = canUseExactIssuePricingCache(result.confirmedIssue, derivedAuth.issueAuthority, finalProvisionalFields);
   assertFalse(cacheEligible, 'CONTROL T6: exact cache access is BLOCKED — no actionable PC/CV-derived price may be cached under the disputed year');
+  // GK-159 (2026-08-22) — this fixture supplies a real, already-computed
+  // price (75, refusedToPrice:false). Before GK-159, commit4-terminal
+  // cleared it unconditionally the instant issueAuthority.status was
+  // 'conflicted' — true here too, even though this is fundamentally a
+  // YEAR-axis conflict represented through the same shared status field
+  // (per this test's own established, disclosed reuse — see the comment
+  // below). GK-159's fix is scoped purely to `status==='conflicted'`, so
+  // it applies identically here: floors to marketStanding=SIMILAR_ONLY
+  // instead of clearing, matching every sibling contested facet's own
+  // per-facet floor. Updated to reflect the new, intended behavior (not
+  // a regression) — see tests/gk159-commit4-terminal-floor.test.js for
+  // the dedicated, exhaustive coverage of this mechanism.
   const contractPatch = computeIssueAuthorityContractPatch(derivedAuth.issueAuthority, { price: 75, refusedToPrice: false }, finalProvisionalFields);
   assertTrue(contractPatch != null, 'CONTROL T6: a real contract patch fires for the year-only conflict');
-  assertEq(contractPatch.price, null, 'CONTROL T6: authoritative pricing is BLOCKED — price nulled; no actionable PC/CV-derived price may be returned under the disputed year');
-  assertEq(contractPatch.refusedToPrice, true, 'CONTROL T6: refusedToPrice is true');
-  assertEq(contractPatch.listingHardLocked, true, 'CONTROL T6: listing is LOCKED');
-  // Reuses the EXISTING Commit 4 `issueConflicted` message copy verbatim
-  // (per the directive: "Use the existing Commit 4 containment mechanism.
-  // Do not invent a broad Commit 6 consumer contract.") — the banner text
-  // itself is issue-phrased ("issue number") even though THIS conflict is
-  // year-specific; the machine-readable `reasons` array is what actually
-  // distinguishes the axis (asserted above). Not a defect — a deliberate,
-  // narrowly-scoped reuse, disclosed here rather than silently accepted.
-  assertEq(contractPatch.pricingSource, 'refused-issue-authority-conflicted', 'CONTROL T6: reuses the existing conflicted pricingSource verbatim (documented reuse, not a new contract)');
+  assertEq(contractPatch, { marketStandingFloored: true }, 'CONTROL T6 (GK-159): the patch is the floor marker only — price/refusedToPrice/listingHardLocked/pricingSource untouched');
+  const t6MarketStanding = deriveMarketStanding({ price: 75, pricingSource: 'active_ask_derived', issueAuthority: derivedAuth.issueAuthority });
+  assertEq(t6MarketStanding, 'SIMILAR_ONLY', 'CONTROL T6 (GK-159): marketStanding floors to SIMILAR_ONLY — listing readiness stays blocked at the transaction-authority layer under the disputed year, price preserved');
 
   // MUTATION — proving the year-conflict wiring is load-bearing. Ignoring
   // the year decision entirely (a naive deriveIssueAuthorityFromAdoption
