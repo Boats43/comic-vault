@@ -132,17 +132,25 @@ full pulled set):
 
 **1. Direction matters.** 92.36% means "92.36% of Metron's own issue
 records carry a GCD ID" — it does **not** mean "Metron covers 92% of
-GCD." Those are different denominators. DATA-0B-1's own estimate put
-`gcd_issue` at ~1.39M rows (a planning figure Task B's exact
-`COUNT(*)` will replace); against that figure, Metron's 162,739
-GCD-linked issues reach roughly **~11.7% of the GCD universe** (an
-upper bound — pending Task B's exact GCD count, and pending whether
-every Metron-side `gcd_id` actually resolves to a real GCD row, which
-is exactly DATA-0D's own "present vs. valid" distinction). **GCD is the
-catalog spine; Metron is the structured enrichment + crosswalk layer on
-top of a slice of it — not a parallel, comparably-sized catalog.** That
-was always the architectural assumption; this is the first time it has
-numbers attached.
+GCD." Those are different denominators. **Corrected 2026-08-22 (DATA-0B-2,
+commit `6ea422c`): `gcd_issue` is exactly 2,608,777 rows** (a real
+`SELECT COUNT(*)` against the fully-loaded local staging database) — this
+supersedes the ~1.39M figure this section previously carried, which was
+itself DATA-0B-1's own structural-recon ESTIMATE (tuple-count-in-first-
+INSERT × INSERT-statement-count, not a real count) and turned out to
+undercount `gcd_issue` by **+87.4%** (1,392,268 estimated vs. 2,608,777
+exact — the largest of the 8 headline-table corrections DATA-0B-2 found;
+see `docs/DATA-0B-2-STAGING.md`). Against the real, exact figure, Metron's
+162,739 GCD-linked issues reach roughly **6.24%** of the GCD universe —
+not ~11.7%, which was computed against the now-superseded estimate and is
+retired, not carried forward as a range or an upper bound. DATA-0D's own
+Task 4 (reverse coverage) computes and reports this figure definitively,
+stratified by decade and publisher class; this paragraph's number is a
+plain re-derivation (162,739 / 2,608,777), not an independent measurement.
+**GCD is the catalog spine; Metron is the structured enrichment + crosswalk
+layer on top of a slice of it — not a parallel, comparably-sized catalog.**
+That was always the architectural assumption; this is the first time it has
+real numbers attached.
 
 **2. The residual has a shape, and it's a favorable one.** The `neither`
 bucket (0.94% population-wide) clusters on (a) very recent/upcoming

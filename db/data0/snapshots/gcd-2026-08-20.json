@@ -38,7 +38,7 @@
     "total_estimated_rows_all_tables": 29278235,
     "total_exact_rows_all_78_tables": 30624436,
     "gcd_issue_estimated_rows": 1392268,
-    "gcd_issue_estimate_note": "Corrected planning number — the brief's own working figure was 2.2M; the dump's real gcd_issue table estimates to ~1.39M. See report for method.",
+    "gcd_issue_estimate_note": "SUPERSEDED, not corrected — see gcd_issue_exact_rows below. At the time this was written (DATA-0B-1) it looked like the corrected planning number relative to the brief's own working figure of 2.2M; DATA-0B-2's real SELECT COUNT(*) later showed this estimate itself undercounted by +87.4%. Retained verbatim as the historical DATA-0B-1 record, not rewritten.",
     "gcd_issue_exact_rows": 2608777,
     "gcd_issue_exact_note": "DATA-0B-2 (2026-08-21): the ESTIMATE above was itself off by +87.4% — the largest correction of the 8 headline tables. 2,608,777 is a real SELECT COUNT(*), not an estimate. See docs/DATA-0B-2-STAGING.md.",
     "declared_charset_connection": "utf8mb4",

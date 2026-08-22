@@ -47,16 +47,28 @@ unique keys, foreign keys, engine, per-table charset, estimated row
 count) committed at `db/data0/snapshots/gcd-2026-08-15-schema-recon.json`.
 Highlights:
 
-**Row count reality check — genuinely measured, not assumed.** The
-brief's own working figure was "2.2M-issue catalog." The dump's actual
-`gcd_issue` table estimates to **~1,392,268 rows** (524 INSERT
-statements × ~2,657 tuples/statement) — real, but meaningfully lower
-than 2.2M. Worth carrying forward as the corrected planning number
-rather than silently keeping the old one. (Estimation method: tuple
-count in each table's first INSERT statement × total INSERT statement
-count for that table — labeled ESTIMATE throughout, not an exact
-`SELECT COUNT(*)`, which requires an actual database and is DATA-0B-2
-work.)
+**Row count reality check — genuinely measured, not assumed, but itself
+superseded — see the correction immediately below before citing any
+number in this section.** The brief's own working figure was "2.2M-issue
+catalog." The dump's actual `gcd_issue` table estimated to **~1,392,268
+rows** (524 INSERT statements × ~2,657 tuples/statement) — lower than
+2.2M, and at the time this looked like the corrected planning number.
+(Estimation method: tuple count in each table's first INSERT statement ×
+total INSERT statement count for that table — labeled ESTIMATE throughout,
+not an exact `SELECT COUNT(*)`, which requires an actual database and was
+DATA-0B-2's own job.)
+
+**SUPERSEDED 2026-08-22 (DATA-0B-2, commit `6ea422c`) — do not cite
+1,392,268 as "the corrected planning number" going forward; it is not
+corrected, it is superseded.** The real `SELECT COUNT(*)` against the
+fully-loaded database is **2,608,777** — the estimate above undercounted
+by **+87.4%**, the largest miss of the 8 headline tables DATA-0B-2
+checked. `gcd_issue` is not exceptional among this recon's estimates —
+`gcd_series` also missed by +47.4% (157,418 estimated vs. 232,103 exact)
+— but it is the single largest correction found. Full exact figures for
+all 78 tables (not 77 — this recon's own regex scan also missed
+`django_content_type`, a Django-framework table, confirmed present in the
+raw dump directly): `docs/DATA-0B-2-STAGING.md`.
 
 **Largest tables by estimated rows:**
 
@@ -67,7 +79,7 @@ work.)
 | `gcd_story_feature_object` | 2,859,789 | story-to-feature/character linkage |
 | `gcd_story_character` | 2,059,788 | character appearances per story |
 | `gcd_reprint` | 1,659,232 | reprint/origin-target story and issue linkage |
-| `gcd_issue` | 1,392,268 | **the core "issue" table — the corrected planning number, see above** |
+| `gcd_issue` | 1,392,268 (ESTIMATE, SUPERSEDED — exact is 2,608,777, +87.4% miss, see above) | the core "issue" table |
 | `gcd_issue_credit` | 1,363,076 | issue-level (not story-level) creator credits |
 | `gcd_series` | 157,418 | series/title records |
 
