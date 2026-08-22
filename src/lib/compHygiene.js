@@ -89,6 +89,23 @@ export const applyRawGradedSeparationFilter = (items, { rawOnly, gradedOnly, ass
 // filter and as a guard inside creator/artist match.
 export const VARIANT_CONTAM_RE = /\bvariant\b|\bvirgin\b|\bfoil\b|\bratio\b|\b1:\d+\b|\bincentive\b|\bnewsstand\b|\bwhitman\b|\bprice\s+variant\b|\btype\s+1|\bexclusive\b|\bsketch\b|\bexcl\.?\b/i;
 
+// GK-142 (Phase 0.3, 2026-08-21) — cover-position/no-premium descriptor
+// tokens ("Corner Box", "Cover A/B/C/D", etc.), for QUERY-PROJECTION use
+// only (src/lib/identityCore.js's deriveSeriesCoreQuery). Deliberately a
+// synced COPY, not an import, of api/enrich.js's own `NO_PREMIUM` array
+// (the Variant multipliers pricing gate, CLAUDE.md "NO_PREMIUM list") —
+// that array is pricing math (never modified without explicit greenlight
+// per the standing pricing-math-greenlight protocol) and stays exactly
+// where it is, untouched, doing exactly what it already does. This list
+// must be kept token-identical to that one if either changes; it exists
+// so a query-string strip can reuse an already-vetted vocabulary instead
+// of hand-growing a new one (A5), without touching the pricing file at all.
+export const NO_PREMIUM_COVER_DESCRIPTORS = [
+  'corner box', 'masterpieces', 'design variant', 'headshot',
+  'trading card', 'cover a', 'cover b', 'cover c', 'cover d',
+  'marvel legacy', 'legacy',
+];
+
 // Signed / SS / yellow-label / green-label / remarked / autographed.
 // Skips bare "SS" (false-positive risk: SS-Squadron, Steel & Soul).
 // Multi-word "signature series" catches CGC SS slabs. Blue label omitted

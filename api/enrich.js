@@ -55,6 +55,7 @@ import {
   isCorroboratedIdentitySource,
   normalizeVisionConfidence,
   reconcileVariantFacet,
+  deriveSeriesCoreQuery,
 } from "../src/lib/identityCore.js";
 // GrailKey Directive 2026-08-16-AL continuation (4a/4e) — direct import,
 // not re-exported through identityCore.js's own list above (that list
@@ -3969,9 +3970,30 @@ export default async function handler(req, res) {
     const subtitleStripped = hasSubtitle ? stripSubtitle(confirmedTitle) : confirmedTitle;
     const pcInitialTitle = subtitleStripped; // Title used for initial PC query
 
+    // GK-142 (Phase 0.3, 2026-08-21) — query-ONLY projection of
+    // confirmedTitle for PC/CV/comps search strings (creator-name and
+    // cover-position/no-premium descriptor noise stripped). Never mutates
+    // confirmedTitle/display identity (A5) — falls back to the un-projected
+    // confirmedTitle verbatim whenever stripping would empty the candidate
+    // or leave only a stopword. See src/lib/identityCore.js's
+    // deriveSeriesCoreQuery for the full mechanism/trace (r5v6b: "Detective
+    // Comics Batman Corner Box Jorge Jiménez" over-narrowing PC/CV/comps
+    // queries to zero results).
+    const seriesCoreQueryResult = deriveSeriesCoreQuery(confirmedTitle, confirmedIssue);
+    const seriesCoreQuery = seriesCoreQueryResult.value;
+    if (seriesCoreQueryResult.overStripped) {
+      console.log(`[series-core-query] over-strip guard fired — using un-projected title: "${confirmedTitle}"`);
+    } else if (seriesCoreQuery !== confirmedTitle) {
+      console.log(`[series-core-query] "${confirmedTitle}" -> "${seriesCoreQuery}"`);
+    }
+
     // Ship 26.3C-2 — Clean confirmedTitle before passing to ComicVine to prevent
     // artist/variant noise from matching wrong volumes (Catwoman/Gotham War class).
-    const cleanedCVTitle = cleanTitleForComicVine(confirmedTitle, req.body.variant);
+    // GK-142: fed seriesCoreQuery (creator/cover-descriptor noise already
+    // stripped) rather than raw confirmedTitle — complementary to, not a
+    // replacement for, cleanTitleForComicVine's own bespoke character/
+    // publisher-filler stripping below.
+    const cleanedCVTitle = cleanTitleForComicVine(seriesCoreQuery, req.body.variant);
 
     // Q131 systemic-audit follow-up (2026-07-19, Eternus #2 class) — the
     // bare `year` (destructured from req.body at the top of the handler,
@@ -4209,6 +4231,23 @@ export default async function handler(req, res) {
                 `against "${subtitleStripped}" (would poison ${strippedTitleKey} for future requests)`
               );
             }
+          }
+        }
+
+        // GK-142 (Phase 0.3, 2026-08-21) — full title AND subtitle-stripped
+        // title both returned zero results; try the series-core query
+        // projection (creator/cover-descriptor noise stripped) as a last
+        // resort. Only engaged after the two existing tiers already
+        // failed, so no currently-working case's query changes. No durable
+        // KV write for this tier — fullTitleKey/strippedTitleKey are keyed
+        // on confirmedTitle/subtitleStripped specifically (Commit T's own
+        // cache-poisoning guard); a new cache-key scheme for this third
+        // tier is a separate, undecided design question, not assumed here.
+        if (!result && seriesCoreQuery && seriesCoreQuery !== confirmedTitle && seriesCoreQuery !== subtitleStripped) {
+          console.log(`[pc-query] stripped title zero results — fallback to series-core: "${seriesCoreQuery}"`);
+          result = await lookupPriceCharting(buildPriceChartingQueryParams(seriesCoreQuery, confirmedIssue, pcQueryYear, q86PreYearConfidence, eraAdvisory, req.body.variant, out, req.body.pcProductId)).catch(() => null);
+          if (result) {
+            console.log(`[pc-query] series-core title matched: "${result.productName}"`);
           }
         }
 
@@ -6604,7 +6643,15 @@ export default async function handler(req, res) {
               // Ship 26.3A — propagate confirmedTitle (Ship 26.2 override) into comps query.
               // Previously used original req.body.title, bypassing title-family correction.
               // Catwoman/Gotham War: confirmedTitle resolved to Gotham War, but comps queried Catwoman Uncovered.
-              title: confirmedTitle,
+              // GK-142 (Phase 0.3, 2026-08-21): seriesCoreQuery, not raw
+              // confirmedTitle — creator-name/cover-descriptor noise
+              // stripped before it seeds comps.js's own attempt ladder
+              // (comps.js's internal query-construction/filter logic is
+              // untouched; only this caller's base title input changes).
+              // Falls back to confirmedTitle verbatim whenever nothing
+              // needed stripping or the over-strip guard fired (A5) — zero
+              // behavior change for the common case.
+              title: seriesCoreQuery,
               issue: confirmedIssue,
               grade,
               isGraded,

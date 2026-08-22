@@ -15,7 +15,7 @@
  * Ship #22e: Assembly integrity check (Q54 compounds survive final title)
  */
 
-import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership, tokenizeTitle, extractVariantTokensByAxis, IDENTITY_TPB_MARKER_RE, VARIANT_CONTAM_RE, SLAB_RE } from './compHygiene.js';
+import { COMPOUND_WHITELIST, REPRINT_RE, FAMILY_OVERRIDE_DECISIONS, normalizeAcronyms, NON_GENUINE_COPY_RE, hasContaminatedMember, familyDominatesRunnerUp, hasValidFamilyMembership, tokenizeTitle, extractVariantTokensByAxis, IDENTITY_TPB_MARKER_RE, VARIANT_CONTAM_RE, SLAB_RE, NO_PREMIUM_COVER_DESCRIPTORS } from './compHygiene.js';
 import { normalizeOptionalYear } from './yearEvidence.js';
 // GrailKey Dispatch 26, Fix 4 (2026-08-08) — zero-support unanimous
 // rescue reuses Fix 2's own promotion predicate (evaluateUnanimousConsensusPromotion)
@@ -223,7 +223,16 @@ export const sanitizeSeriesTitle = (rawTitle) => {
   const NOISE_PATTERNS = [
     // Creator names that bleed into titles — see LEGACY_CREATOR_NOISE_WORDS
     // (module scope, exported) for the source list.
-    new RegExp(`\\b(${LEGACY_CREATOR_NOISE_WORDS.join('|')})\\b`, 'gi'),
+    //
+    // GK-143 (2026-08-21): plain `\b...\b` uses JS's ASCII-only \w definition,
+    // so a non-ASCII letter (e.g. "é") reads as a word BOUNDARY, not a word
+    // character — "jim" (from "Jim Lee") false-positive-matched inside
+    // "Jiménez" ("Jim|énez") and got stripped, corrupting "Jorge Jiménez" to
+    // "Jorge énez". Unicode-aware lookaround boundaries (\p{L}/\p{N}, 'u' flag)
+    // treat "é" as a word character, so "m"→"é" is no longer a boundary and
+    // the false match cannot occur, while genuine bare-word matches ("Jim Lee")
+    // are unaffected.
+    new RegExp(`(?<![\\p{L}\\p{N}_])(${LEGACY_CREATOR_NOISE_WORDS.join('|')})(?![\\p{L}\\p{N}_])`, 'giu'),
     // Cover descriptors
     /\b(classic|vintage|original|key|issue|cover|homage|parody|takeoff|beatles|art|lesson)\b/gi,
     // Condition/grade words
@@ -1151,6 +1160,109 @@ export const canonicalizeTitleCandidate = (rawTitle, opts = {}) => {
     return { value: original.replace(/\s{2,}/g, ' ').trim(), overStripped: true, strippedLog: [] };
   }
   return { value: s, overStripped: false, strippedLog };
+};
+
+/**
+ * deriveSeriesCoreQuery — GK-142 (Phase 0.3, 2026-08-21). A QUERY
+ * PROJECTION of the adopted/confirmed title, for PC/CV/comps search
+ * strings ONLY — never the display/adopted identity (A5, mandatory:
+ * seriesCoreQuery is a query projection, never a second identity; the
+ * caller's own `confirmedTitle`/display value is never reassigned from
+ * this function's output).
+ *
+ * Traced cause (GK-142, production request r5v6b): `[reconcile-title]
+ * value="Detective Comics Batman Corner Box Jorge Jiménez"` — over-narrow
+ * PC/CV/comps queries built directly from the adopted title, because
+ * neither the creator name nor the "Corner Box" cover-descriptor got
+ * stripped by canonicalizeTitleCandidate (GK-140) before this dispatch.
+ * Two additions on top of that function's existing pipeline (reused, not
+ * reimplemented):
+ *  (1) An UNCONDITIONAL matchCreatorCanonicals-driven creator-name strip.
+ *      canonicalizeTitleCandidate's own stripAttributionClause requires
+ *      the literal word "by" before a recognized creator name; the r5v6b
+ *      row names the creator with no "by" marker, so it survives
+ *      untouched. This strips any registry-recognized creator name found
+ *      anywhere in the string, regardless of a "by" marker — for QUERY
+ *      purposes only; stripAttributionClause itself is not touched.
+ *  (2) NO_PREMIUM_COVER_DESCRIPTORS (compHygiene.js) — cover-position
+ *      terms ("Corner Box", "Cover A/B/C/D", etc.) VARIANT_CONTAM_RE does
+ *      not cover, reused from the already-vetted pricing NO_PREMIUM
+ *      vocabulary (see that constant's own header — a synced copy, not an
+ *      import, of api/enrich.js's pricing-math array, which stays
+ *      untouched).
+ *
+ * Same C6-style over-strip guard as canonicalizeTitleCandidate: if the
+ * projection empties or collapses to a single stopword, falls back to the
+ * UN-PROJECTED input verbatim (A5's mandatory fallback) — a broader query
+ * beats an empty or wrong one.
+ *
+ * @param {string} confirmedTitle - the adopted/display title (read-only; never mutated by this function)
+ * @param {string|number|null} [confirmedIssue] - passed through to canonicalizeTitleCandidate's own standalone-issue-number strip
+ * @returns {{value: string, overStripped: boolean}}
+ */
+export const deriveSeriesCoreQuery = (confirmedTitle, confirmedIssue = null) => {
+  const original = String(confirmedTitle || '');
+  if (!original.trim()) return { value: original, overStripped: false };
+
+  const strippedLog = [];
+  let s = original;
+
+  // canonicalizeTitleCandidate's own pipeline FIRST (attribution, merch,
+  // parenthetical, grade/condition, seller-noise, standalone-issue,
+  // publisher+year-suffix) — reused, not reimplemented. Order matters:
+  // this must run BEFORE the unconditional creator strip below, or a real
+  // "by <creator> w/<merch>" clause loses its creator name to the strip
+  // first and stripAttributionClause's own matchCreatorCanonicals(clause)
+  // check (which confirms the clause is worth stripping AT ALL) then finds
+  // nothing and leaves an orphaned "by ... poker chip" tail behind —
+  // caught by testing this exact case (the AW/GK-140 Venom production
+  // shape) before shipping.
+  const canon = canonicalizeTitleCandidate(s, { issueValue: confirmedIssue });
+  s = canon.overStripped ? s : canon.value;
+
+  // (1) unconditional creator-name strip — same registry
+  // stripAttributionClause already trusts, just without requiring "by".
+  // Catches whatever creator mention canonicalizeTitleCandidate's own
+  // "by"-gated stripper couldn't (the r5v6b shape: no "by" marker at all).
+  //
+  // GK-143-consistent safety: matchCreatorCanonicals may return a
+  // canonical registry form (e.g. "Jorge Jimenez") that is not byte-
+  // identical to what the source text actually contains (e.g. "Jorge
+  // Jiménez") — searching for the canonical form directly would silently
+  // find nothing. NFD-decompose + strip combining marks gives a same-
+  // length, position-corresponding ASCII-folded view for ordinary Latin
+  // diacritics (one base letter replaces one accented letter, 1:1), so a
+  // found index maps directly back onto the original string; the
+  // `folded.length === s.length` guard skips the strip entirely (leaves
+  // `s` untouched, safe no-op) for any input where that 1:1 correspondence
+  // doesn't hold, rather than guessing at an offset the way GK-143's own
+  // bug did.
+  const foldDiacritics = (str) => str.normalize('NFD').replace(/\p{Mn}/gu, '');
+  for (const creator of matchCreatorCanonicals(s)) {
+    const folded = foldDiacritics(s).toLowerCase();
+    const target = foldDiacritics(creator).toLowerCase();
+    if (folded.length !== s.length) continue;
+    const idx = folded.indexOf(target);
+    if (idx === -1) continue;
+    s = (s.slice(0, idx) + ' ' + s.slice(idx + target.length)).replace(/\s{2,}/g, ' ').trim();
+    strippedLog.push({ class: 'creator-name', text: creator });
+  }
+
+  // (2) cover-position / no-premium descriptor tokens.
+  const coverDescSrc = `\\b(?:${NO_PREMIUM_COVER_DESCRIPTORS
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'))
+    .join('|')})\\b`;
+  s = applyStrip(s, coverDescSrc, 'cover-descriptor', strippedLog);
+
+  s = s.replace(/[-–—:|,]+\s*$/, '').replace(/\s{2,}/g, ' ').trim();
+
+  const STOP_ONLY_QUERY = new Set(['the', 'a', 'an', 'of', 'and', 'or']);
+  const tokens = s.split(/\s+/).filter(Boolean);
+  const overStripped = tokens.length === 0 || (tokens.length === 1 && STOP_ONLY_QUERY.has(tokens[0].toLowerCase()));
+  if (overStripped) {
+    return { value: original.replace(/\s{2,}/g, ' ').trim(), overStripped: true };
+  }
+  return { value: s, overStripped: false };
 };
 
 /**
