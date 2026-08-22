@@ -1,0 +1,78 @@
+{
+  "dispatch": "GrailKey Dispatch 2026-08-22 -- DATA-1 Foundation: The Durable Physical Asset",
+  "mode": "design-then-bounded-build",
+  "home_ruling": {
+    "target": "separate Postgres schema 'data1_dev' within the already-verified Neon instance (GRAILKEY_CATALOG_NEON_PROJECT_ID)",
+    "why_not_true_neon_branch": "no NEON_API_KEY or neonctl available in this session -- real branch provisioning requires the Neon management API/console, not reachable from here",
+    "isolation_guarantee": "production runtime touches zero Postgres today (Upstash Redis + IndexedDB only) -- data1_dev is additionally isolated at the schema level from the empty 'public' schema 0001-0003 target",
+    "evidence": {
+      "postgres_version": "PostgreSQL 18.6 (aarch64-unknown-linux-gnu)",
+      "uuidv7_confirmed": true,
+      "pre_existing_schemas": ["pg_toast", "public"]
+    }
+  },
+  "task0_crawl_hardening": {
+    "watchdog": {
+      "implemented": true,
+      "dry_run_branches_tested": ["live-node-pid-no-action", "stale-pid-resumes", "missing-pid-file-resumes", "phase-done-no-action", "abort-sentinel-no-action"],
+      "scheduled_task_registered": false,
+      "registration_blocker": "Access denied from this session's tool execution context (both Register-ScheduledTask and schtasks.exe) -- requires the user's own interactive session"
+    },
+    "quota_window_fix": {
+      "prior_assumption": "UTC-calendar-day reset, matching Metron docs' illustrative example",
+      "real_evidence": "live probe at 2026-08-22T06:29:43Z returned sustained-reset=2026-08-23T02:49:51Z (not a UTC midnight) -- confirms a genuine rolling 24h window (DRF SimpleRateThrottle default)",
+      "fix": "primary gate = server-reported X-RateLimit-Sustained-Remaining/-Reset headers (authoritative); secondary gate = a genuine rolling 24h self-imposed request log capped at 3500",
+      "crawl_restarted": true,
+      "old_pid": 21828,
+      "new_pid": 21428,
+      "restart_justification": "algorithm change, not a config value -- no hot-reload path existed"
+    }
+  },
+  "task1_design": {
+    "design_doc": "docs/adr/DATA-1-FOUNDATION-DESIGN.md",
+    "ddl_draft": "db/data0/0004_data1_foundation.sql",
+    "adrs_cited": ["ADR-AUTH-001", "ADR-ASSET-001", "ADR-MEDIA-001", "ADR-EVIDENCE-001", "ADR-EVENT-001", "ADR-ASYNC-001", "ADR-ID-001"],
+    "open_items_named": [
+      "delegation_event (Ruling 15, requires GK-151's auth chain first)",
+      "object-storage vendor selection (ADR-MEDIA-001)",
+      "outbox dispatcher/worker/DLQ (ADR-ASYNC-001 Ruling 23)",
+      "IndexedDB import path",
+      "device/offline app-side UUIDv7 (future ADR-ID-001 supersession candidate)"
+    ]
+  },
+  "task2_implementation": {
+    "schema": "data1_dev",
+    "tables_created": [
+      "entity_mint_basis", "mint_event", "gk_principal", "gk_asset",
+      "ownership_event", "current_owner", "media", "asset_identity_assignment",
+      "acquisition_event", "valuation_event", "decision_event", "domain_event", "outbox"
+    ],
+    "tables_deliberately_not_built_this_slice": ["gk_organization", "gk_membership", "custody_event", "condition_observation", "delegation_event"],
+    "seeded_principal": "Jimmy (operator) -- 01a0283a-b1b6-7f90-9b41-9c06bee6ecba",
+    "uuidv7_generation": "database-native uuidv7(), invoked explicitly at mint time, per ADR-ID-001"
+  },
+  "task3_proof_suite": {
+    "T3-1_mint_reload": { "result": "PASS", "real_scan_used": "Sabrina Annual Spectacular (Dan Parent), correlationId 15594457-47b2-4e4e-b862-afdf576aef98" },
+    "T3-2_identity_correction": { "result": "PASS" },
+    "T3-3_duplicate_copies": { "result": "PASS" },
+    "T3-4_mint_idempotency": { "result": "PASS", "evidence": "gk_asset count held at 5 across 1 mint + 3 reruns of the identical basis; entity_mint_basis count identically held at 5; 3/3 reruns returned outcome=resolved-existing with the same gkAssetId" },
+    "T3-5_ownership": { "result": "PASS" },
+    "T3-6_valuation_history": { "result": "PASS" },
+    "T3-7_event_envelope": { "result": "PASS" },
+    "T3-8_ten_step_script": {
+      "result": "PASS",
+      "real_scan_used": "Creepy #1 (1964), correlationId 3b2593e4-ed14-489f-bc6c-379bd1045f83 -- the book Jimmy physically confirmed as the genuine 1964 original, GK-148/149",
+      "gkAssetId_minted": "01a0283d-8b9a-7a6c-8fdc-7e7688f3b373"
+    },
+    "all_scripts_location": "C:\\grailkey-data\\data-1\\ (local scratch, not committed -- matches the DATA-0E-PILOT precedent for raw mint scripts/output)"
+  },
+  "constraints_honored": [
+    "no production/scanner wiring",
+    "no api/ file touched",
+    "no auth implementation (GK-151 remains OPEN/HARD-GATE)",
+    "no object-storage vendor decision",
+    "no outbox dispatcher",
+    "no IndexedDB migration",
+    "no 0F / knowledge-lane minting"
+  ]
+}
