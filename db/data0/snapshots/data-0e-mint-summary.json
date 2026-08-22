@@ -1,0 +1,52 @@
+{
+  "_comment": "DATA-0E mint summary artifact. Aggregate counts + provenance only, committed. Full mint output (1,081 issue rows, 2,162 claim rows, the SQL artifact) stays local scratch only, per this project convention (bulk derived data never enters the repo) - see docs/DATA-0E-CANONICAL-MINTING.md for the referenced local paths.",
+  "contractVersion": "grailkey-0e-v1",
+  "determinismScheme": "stable-hash (SHA-256 of canonical claim-derived name, first 8 bytes as u64, sign bit cleared for BIGINT compatibility) — NOT sequence/auto-increment. See docs/DATA-0E-CANONICAL-MINTING.md for the full defense.",
+  "mintCounts": {
+    "publishers": 28,
+    "series": 140,
+    "issues": 1081
+  },
+  "mintCountsByStratum": {
+    "2010s|marvel-dc": 50,
+    "2000s|marvel-dc": 72,
+    "60s-70s|marvel-dc": 97,
+    "80s-90s|marvel-dc": 81,
+    "pre-1960|marvel-dc": 136,
+    "2020s+|marvel-dc": 60,
+    "2020s+|other": 116,
+    "pre-1960|other": 50,
+    "60s-70s|other": 83,
+    "2010s|other": 124,
+    "2000s|other": 109,
+    "80s-90s|other": 103
+  },
+  "collisions": 0,
+  "reviewQueueCount": 35,
+  "reviewByClass": {
+    "gcd-alternate-numbering-axis": 10,
+    "gcd-legacy-parenthetical-numbering": 15,
+    "gcd-nn-bracket-placeholder": 10
+  },
+  "determinismProof": {
+    "method": "two independent process runs, byte-for-byte diff + SHA-256 checksum comparison of full mint-output.json",
+    "run1Sha256": "62ab6f1716b7c42b8a2dbaee0abf2d3e51c8d045c22121de7a7c71a42840704c",
+    "run2Sha256": "62ab6f1716b7c42b8a2dbaee0abf2d3e51c8d045c22121de7a7c71a42840704c",
+    "identical": true
+  },
+  "collisionAudit": {
+    "gkPublisherId": {
+      "total": 28,
+      "unique": 28
+    },
+    "gkSeriesId": {
+      "total": 140,
+      "unique": 140
+    },
+    "gkIssueId": {
+      "total": 1081,
+      "unique": 1081
+    },
+    "crossSpaceUnique": 1249
+  }
+}
