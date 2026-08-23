@@ -10,6 +10,8 @@
 export {
   createPhysicalAsset,
   getPhysicalAsset,
+  listMyAssets,
+  getMediaById,
   assignIdentity,
   correctIdentity,
   attachMediaMetadata,

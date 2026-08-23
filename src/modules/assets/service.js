@@ -63,6 +63,30 @@ async function assertAssetExists(client, gkAssetId) {
   return asset;
 }
 
+// DATA-1D, T2 — the authorization chain: authenticated principal ->
+// OWNED/AUTHORIZED asset -> authorized action. Ruling 13 steps 2-4 were
+// explicitly deferred by DATA-1B ("reserved for DATA-1D") — this closes
+// step 2 (asset authorization) using the ownership model that already
+// exists (current_owner, materialized from ownership_event since
+// DATA-1A). In the current single-operator era every asset's owner IS
+// the one operator principal (createPhysicalAsset always sets the
+// minting principal as initial owner) — this check always passes today,
+// but it is a REAL, enforced query against current_owner, never a
+// rubber stamp, so it is already correct the moment a second principal
+// exists. A bootstrap-parameter caller (a valid gk_principal row that
+// simply isn't THIS asset's owner) is rejected here, not silently
+// allowed through — the exact gap DATA-1B's own "parameter contract, not
+// an auth system" note named as future work.
+async function assertPrincipalOwnsAsset(client, principalId, gkAssetId) {
+  const ownerId = await repo.getAssetOwner(client, gkAssetId);
+  if (!ownerId) {
+    throw new AuthorizationFailedError(`gk_asset ${gkAssetId} has no current_owner row — cannot authorize any principal`);
+  }
+  if (ownerId !== principalId) {
+    throw new AuthorizationFailedError(`principalId ${principalId} is not authorized for gk_asset ${gkAssetId} (not the current owner)`);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // createPhysicalAsset
 // ─────────────────────────────────────────────────────────────────────
@@ -134,7 +158,48 @@ export async function getPhysicalAsset({ principalId, gkAssetId } = {}) {
   const client = await acquireConnection();
   try {
     await assertPrincipalActive(client, principalId);
+    await assertAssetExists(client, gkAssetId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
     return await repo.getAssetGraph(client, gkAssetId);
+  } finally {
+    client.release();
+  }
+}
+
+// DATA-1D, T3 — list every asset the authenticated principal owns
+// (cross-device retrieval needs a "what's mine" entry point, not just
+// "fetch this one gkAssetId I already somehow know"). A thin,
+// authorization-scoped read: repo.listAssetsByOwner is itself already
+// scoped to principalId — there is no unauthorized branch to guard
+// against here the way single-asset reads need (a caller can only ever
+// list THEIR OWN principalId's assets, by construction of the query).
+export async function listMyAssets({ principalId } = {}) {
+  requireFields({ principalId }, ['principalId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    return await repo.listAssetsByOwner(client, principalId);
+  } finally {
+    client.release();
+  }
+}
+
+// DATA-1D, T3 — fetch one media row's real object_uri, authorization-
+// checked against the media's OWNING asset (not the media row's own
+// recorded_by_principal_id, which is provenance, not authorization).
+// The one new read this dispatch's asset-media endpoint needs — media
+// bytes themselves are never fetched here (that's src/modules/media/'s
+// job, called directly by the endpoint after this authorizes the read).
+export async function getMediaById({ principalId, mediaId } = {}) {
+  requireFields({ principalId, mediaId }, ['principalId', 'mediaId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const mediaRow = await repo.getMediaById(client, mediaId);
+    if (!mediaRow) throw new NotFoundError(`media ${mediaId} does not exist`);
+    await assertAssetExists(client, mediaRow.asset_id);
+    await assertPrincipalOwnsAsset(client, principalId, mediaRow.asset_id);
+    return mediaRow;
   } finally {
     client.release();
   }
@@ -158,6 +223,7 @@ export async function assignIdentity({ principalId, gkAssetId, catalogEntityId =
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const assignmentId = await repo.insertIdentityAssignment(client, {
         assetId: gkAssetId, catalogEntityId, authority: evidence.authority, source: evidence.source,
       });
@@ -199,6 +265,7 @@ export async function correctIdentity({ principalId, gkAssetId, newCatalogEntity
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const priorLive = await repo.getLiveIdentityAssignment(client, gkAssetId);
       if (!priorLive) {
         throw new ConflictError(`gk_asset ${gkAssetId} has no live identity assignment to correct — use assignIdentity for a first assignment`);
@@ -246,9 +313,10 @@ export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields,
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const mediaId = await repo.insertMedia(client, {
         assetId: gkAssetId, mediaType: mediaFields.mediaType, contentHash: mediaFields.contentHash,
-        objectUri: mediaFields.objectUri, recordedByPrincipalId: principalId,
+        objectUri: mediaFields.objectUri, contentType: mediaFields.contentType, recordedByPrincipalId: principalId,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'media.recorded', actorPrincipalId: principalId, actorKind: 'user',
@@ -334,6 +402,7 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
   try {
     await assertPrincipalActive(preflight, principalId);
     await assertAssetExists(preflight, gkAssetId);
+    await assertPrincipalOwnsAsset(preflight, principalId, gkAssetId);
   } finally {
     preflight.release();
   }
@@ -379,10 +448,11 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
       // the asset could have changed state in the window between the
       // preflight read and this transactional write.
       await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
 
       const mediaId = await repo.insertMedia(client, {
         assetId: gkAssetId, mediaType: captureRole, contentHash: sha256,
-        objectUri: stored.objectUri, recordedByPrincipalId: principalId,
+        objectUri: stored.objectUri, contentType, recordedByPrincipalId: principalId,
       });
       const outcome = stored.created ? 'created' : 'existing-blob-new-row';
       await repo.writeDomainEvent(client, {
@@ -429,6 +499,7 @@ export async function transferOwnership({ principalId, gkAssetId, toPrincipalId,
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const toExists = await repo.assertPrincipalExists(client, toPrincipalId);
       if (!toExists) throw new NotFoundError(`toPrincipalId ${toPrincipalId} does not resolve to a real gk_principal row`);
 
@@ -477,6 +548,7 @@ export async function linkCollectionItem({ principalId, collectionItemId, gkAsse
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const existing = await repo.getCollectionItemLink(client, { collectionItemId });
       if (existing) {
         if (existing.gk_asset_id !== gkAssetId) {
@@ -513,13 +585,19 @@ export async function linkCollectionItem({ principalId, collectionItemId, gkAsse
 }
 
 // Read-only, no transaction — mirrors getPhysicalAsset's own shape.
+// DATA-1D, T2: a link resolving to an asset the CALLER doesn't own
+// returns null (as if the link didn't exist) rather than leaking "this
+// collectionItemId belongs to someone's real asset" cross-principal.
 export async function resolveCollectionItemLink({ principalId, collectionItemId } = {}) {
   requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
   const client = await acquireConnection();
   try {
     await assertPrincipalActive(client, principalId);
     const link = await repo.getCollectionItemLink(client, { collectionItemId });
-    return link ? { gkAssetId: link.gk_asset_id } : null;
+    if (!link) return null;
+    const ownerId = await repo.getAssetOwner(client, link.gk_asset_id);
+    if (ownerId !== principalId) return null;
+    return { gkAssetId: link.gk_asset_id };
   } finally {
     client.release();
   }
@@ -542,6 +620,7 @@ export async function recordAcquisition({ principalId, gkAssetId, costAmount, co
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const acquisitionEventId = await repo.insertAcquisitionEvent(client, {
         assetId: gkAssetId, costAmount, costCurrency, source, lotReference, recordedByPrincipalId: principalId,
       });
@@ -582,6 +661,7 @@ export async function recordValuation({ principalId, gkAssetId, valueAmount, val
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const valuationEventId = await repo.insertValuationEvent(client, {
         assetId: gkAssetId, valueAmount, valueCurrency, method, compSnapshotRef, gradeAssumption, buildSha,
         recordedByPrincipalId: principalId,
@@ -622,6 +702,7 @@ export async function recordDecision({ principalId, gkAssetId, recommendation, r
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const decisionEventId = await repo.insertDecisionEvent(client, {
         assetId: gkAssetId, recommendation, reasonCodes, valuationEventId,
       });

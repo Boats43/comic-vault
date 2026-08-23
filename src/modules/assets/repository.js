@@ -74,6 +74,39 @@ export async function getAssetById(client, assetId) {
   return res.rows[0] || null;
 }
 
+// DATA-1D, T2 — the authorization chain's one real query: who currently
+// owns this asset. current_owner is the materialized, rebuild-on-write
+// projection of ownership_event (0004) — never an independent write
+// path, so this is always reading the SAME truth transferOwnership
+// itself writes.
+export async function getAssetOwner(client, assetId) {
+  const res = await client.query('SELECT owner_principal_id FROM current_owner WHERE asset_id = $1', [assetId]);
+  return res.rows[0]?.owner_principal_id || null;
+}
+
+// DATA-1D, T3 — cross-device retrieval's "what's mine" entry point.
+// Scoped to the principal by construction (WHERE clause, not a filter
+// applied after a broader read) — there is no unauthorized branch here
+// to guard against.
+export async function listAssetsByOwner(client, principalId) {
+  const res = await client.query(
+    `SELECT ga.* FROM gk_asset ga
+     JOIN current_owner co ON co.asset_id = ga.id
+     WHERE co.owner_principal_id = $1
+     ORDER BY ga.created_at`,
+    [principalId]
+  );
+  return res.rows;
+}
+
+// DATA-1D, T3 — one media row by id, asset_id included so the service
+// layer can authorize against the OWNING asset (never the media row's
+// own recorded_by_principal_id, which is provenance, not authorization).
+export async function getMediaById(client, mediaId) {
+  const res = await client.query('SELECT * FROM media WHERE id = $1', [mediaId]);
+  return res.rows[0] || null;
+}
+
 export async function insertOwnershipEvent(client, { assetId, ownerPrincipalId, reason, recordedByPrincipalId }) {
   const id = await uuidv7(client);
   await client.query(
@@ -120,12 +153,12 @@ export async function getLiveIdentityAssignment(client, assetId) {
   return res.rows[0] || null;
 }
 
-export async function insertMedia(client, { assetId, mediaType, contentHash, objectUri, recordedByPrincipalId }) {
+export async function insertMedia(client, { assetId, mediaType, contentHash, objectUri, contentType, recordedByPrincipalId }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO media (id, asset_id, media_type, content_hash, object_uri, recorded_by_principal_id)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [id, assetId, mediaType, contentHash, objectUri ?? null, recordedByPrincipalId]
+    `INSERT INTO media (id, asset_id, media_type, content_hash, object_uri, content_type, recorded_by_principal_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, assetId, mediaType, contentHash, objectUri ?? null, contentType ?? null, recordedByPrincipalId]
   );
   return id;
 }

@@ -96,7 +96,7 @@ const indexSrc = readFileSync(path.join(MODULE_DIR, 'index.js'), 'utf8');
 const REQUIRED_EXPORTS = [
   'createPhysicalAsset', 'getPhysicalAsset', 'assignIdentity', 'correctIdentity',
   'attachMediaMetadata', 'attachMedia', 'transferOwnership', 'recordAcquisition', 'recordValuation', 'recordDecision',
-  'linkCollectionItem', 'resolveCollectionItemLink',
+  'linkCollectionItem', 'resolveCollectionItemLink', 'listMyAssets', 'getMediaById',
   'AssetServiceError', 'NotFoundError', 'ConflictError', 'IdempotentReplayError', 'ValidationFailedError', 'AuthorizationFailedError',
 ];
 for (const name of REQUIRED_EXPORTS) {
