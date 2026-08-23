@@ -12683,3 +12683,228 @@ locally, NOT pushed. One item still blocks any push of this lane: H5/H6
 — Vercel CLI login + Production `GRAILKEY_*` env-var confirmation +
 Preview round-trip, none of which were possible from this environment
 this pass.
+
+## Standing constraints — full narratives (moved from CLAUDE.md, CLAUDE-COMPACT-1, 2026-08-23)
+
+The three subsections below are the complete, verbatim narrative
+CLAUDE.md's own `### Issue-consensus guard`, `### Year override guard`,
+and `### applyDualAxisGate reason-string coupling` subsections carried
+before the CLAUDE-COMPACT-1 compaction pass. CLAUDE.md keeps a compressed
+form of each (the standing rule + the Flash #139 precedent, which are
+DO-NOT-TOUCH — their wording carries operational meaning and must never
+be silently reworded) plus a pointer here for the investigative narrative
+behind them. Nothing below is new; it is relocated, not rewritten.
+
+### Issue-consensus guard (`resolveFamilyIssueConsensus`, `src/lib/identityCore.js`) — full narrative
+
+**Q51/Jetsons note (2026-08-06, GrailKey Dispatch 03):** the Jetsons #19
+misfire (real production request `cnvm8-1786031045100-377b3eb920d3`,
+2026-08-06 15:44 UTC) is a DIFFERENT shape than Flash #139 — Vision's issue
+("19") had **zero** pool support at all (not present-but-outnumbered), and
+the winning title family's own issue consensus was `mode: 'no-consensus'`
+(ratio=0.20, below the 60% bar) while the true answer (#32) was the
+plurality candidate. `familyAuthoritySkip`
+(`identityCore.js:2147-2150`) was checked directly against this shape and
+already correctly requires `mode ∈ {'adopted','corroborated'}` before
+skipping the raw-pool zero-support check — `'no-consensus'` does NOT
+qualify, by explicit design (`identityCore.js:2132-2136` comment). A
+"vision-zero-support skips on family authority without checking issue
+consensus" hypothesis was tested against this exact code path and
+**falsified** — the mode-check already exists.
+
+**CORRECTED (Q54, GrailKey Dispatch 05, 2026-08-07) — the "root cause
+closed" ruling immediately below was wrong about generalizing "not the
+cause of the #19/#16 pair" to "not a real cause at all."** The `titleOk`
+derivation it contains is still correct **for that specific scan pair
+only**; the "ruling out" clause is retracted — see the correction that
+follows.
+
+**Root cause closed (Q54, GrailKey Dispatch 04, 2026-08-06):** confirmed via
+direct log evidence (`[phase1] eBay visual: N results, consensus=YES/NO`,
+`api/enrich.js:2477`) that `visionIssueCount` was **0** for Vision's issue
+in BOTH the failing scan ("19") and the correctly-blocked rescan ("16") —
+~~ruling out the initially-suspected cause (a nonzero, coincidental pool
+mention of Vision's own issue number silently disabling the safety
+net)~~ — **this clause is false, see the correction below.**
+With `visionIssueCount===0` and `issueOk===false` fixed identically across
+both scans (the latter directly evidenced today by the ESCALATE firing at
+all — `noIssueConsensus` is exactly `!issueOk` — and implied yesterday by
+the shipped value being Vision's raw, unmodified guess with no OVERRIDE
+logged), `extractConsensus`'s own early-return gate
+(`imageSearchIdentity.js:646-648`) reduces to a single live term:
+```
+zeroSupportNoAdoption = titleOk && !issueOk && visionIssueNorm!=null && visionIssueCount===0
+returnsNull          = !titleOk || (!issueOk && !zeroSupportNoAdoption)
+```
+substituting the two fixed-true terms collapses `returnsNull` to exactly
+`!titleOk`. `visionIssueNorm` was non-null both scans (Vision always
+supplies *some* issue guess) and is not the discriminator either. `titleOk`
+(`imageSearchIdentity.js:625`, `titleResult.count/total >= 0.3` — raw-pool
+title-string agreement, computed over `parsedVisualRows`, upstream of and
+independent from `resolveFamilyIssueConsensus`'s own family-scoped ratio)
+is the term that flipped, false→true, between THIS pair of scans. When
+`titleOk` was false, `extractConsensus` returned `null` outright —
+collapsing `ebay` to `null` for the entire `resolveIdentity` call — so the
+`ebay?.agreement?.visionIssueCount === 0` guard (`identityCore.js:2171`)
+evaluated `undefined === 0` (false) and the whole OVERRIDE/ESCALATE branch
+was silently skipped, with no log line at all. `confirmedIssue` was left
+standing at whatever `identityCore.js:1651` had already assigned earlier in
+the same call — Vision's own "19", preserved verbatim by
+`resolveFamilyIssueConsensus`'s `'no-consensus'` mode (explicit by design,
+per that function's own comment: "this only affects the CONFIDENCE LABEL,
+never the value"). No downstream re-hydration and no `isGraded`
+short-circuit were needed to explain THIS scan pair's miss.
+
+**What Dispatch 04 got wrong (Q54, GrailKey Dispatch 05, 2026-08-07):**
+generalizing "not the cause of the #19/#16 pair" to "not a cause at all."
+A third, separate same-day scan (Vision issue "10") proves the
+originally-dismissed hypothesis correct on its own terms:
+`[visual] extracted issues: [...,'10',...]` shows "10" present once out of
+19 raw-pool rows — one unrelated listing ("Jetsons 10 Gold Key Comic 1964
+Hanna-Barbera... W/TOUCHE TURTLE"). `visionIssueCount = 1`, so
+`zeroSupportNoAdoption` is false; combined with `issueOk` false (no 50%+
+winner anywhere in this pool either), `extractConsensus`'s early return
+fires on its OTHER disjunct (`!issueOk && !zeroSupportNoAdoption`, both
+true) — not on `!titleOk`. Confirmed directly, not inferred: the
+`[extractConsensus] returning null — titleOk failed` instrumentation
+(added Dispatch 04, live in production for this exact scan) did **not**
+fire on it — its absence is itself the evidence `titleOk` was NOT this
+scan's cause, unlike the #19/#16 pair above.
+
+| Scan | Vision issue | In raw pool? | `extractConsensus` null via | Outcome |
+|---|---|---|---|---|
+| Aug 6, scan A | #19 | no (0/N) | `!titleOk` | shipped $2.89, wrong book |
+| Aug 6, scan B | #16 | no (0/20) | — stayed non-null; ESCALATE fired | correctly blocked, ID_REQUIRED |
+| Aug 6/7, scan C | #10 | **yes (1/19)** | `!issueOk && !zeroSupportNoAdoption` (visionIssueCount≠0) | shipped $6.46, wrong book (real answer: #32, Oct 1969) |
+
+**Both mechanisms are real, independent, and each alone is sufficient to
+silently disable the OVERRIDE/ESCALATE safety net** (`identityCore.js:2171`,
+gated on `ebay?.agreement?.visionIssueCount === 0`, which never evaluates
+true when `ebay` is null regardless of which of `extractConsensus`'s two
+return-null disjuncts fired). `titleOk` is **one of at least two
+independently-sufficient failure paths** into the identical silent-skip
+outcome, not the sole discriminator — correct that framing wherever this
+finding is cited going forward.
+
+**Real underlying defect, investigated but NOT yet scoped (item 2,
+Dispatch 05, 2026-08-07):** `zeroSupportNoAdoption` requires Vision's issue
+to have **literally zero** occurrences anywhere in the raw pool
+(`visionIssueCount === 0`, `imageSearchIdentity.js:646`) — an equality
+test, not a threshold. Scan C shows 1 occurrence out of 19 (~5%) was
+sufficient to disable the check entirely. On any long-running series, a
+large raw pool will contain most issue numbers *somewhere* purely by
+chance — meaning this protection can structurally almost never fire on
+exactly the books most likely to need it (long runs with many candidate
+issues genuinely in circulation on eBay). Proposed direction, not yet
+scoped or coded: replace the `=== 0` equality with a support-RATIO floor
+(candidate: Vision's issue below roughly 10% of pool support counts as
+zero-support for this purpose) — one change would cover both the
+literal-zero case (scan B) and the near-zero case (scan C's 1/19). This
+reaches directly into `extractConsensus`'s issue-consensus math — Flash
+#139 constraint territory, same standing rule as every other adjustment
+in this section — requires explicit scoping and greenlight before any
+implementation. No code written against this yet.
+
+**Standing finding, independent of either fix — title-coherence gates the
+issue-safety net (still true, now known to be one of two gating paths):**
+`extractConsensus`'s `titleOk` gate (raw eBay-pool title-string agreement,
+≥30%) was designed as a basic "is there even a coherent pool here"
+precondition for computing ANY consensus field. It was not designed with
+the awareness that dropping below it also silently disables
+`zeroSupportNoAdoption`/`noIssueConsensus` — the specific mechanism built
+to catch a Vision issue number with zero (or, per the finding above, near-
+zero) pool support. A pool whose TITLE text is too scattered to reach 30%
+agreement (for any reason — noisy query, contaminated results, genuinely
+mixed listings) currently forfeits the issue-zero-support protection
+entirely, silently — a gap now closed by the Dispatch 04 instrumentation,
+which distinguishes "title too incoherent to check" from "checked and
+found fine." This coupling is real and general, not specific to the
+Jetsons pool — flag it before scoping any fix to the issue-safety path
+itself, since a fix that touches `zeroSupportNoAdoption`/
+`noIssueConsensus` without also addressing BOTH the `titleOk` gate it sits
+behind AND the equality-vs-ratio defect above will not close this class.
+
+### Year override guard (`resolveYear`) — full narrative
+
+**The `(!userYear || …)` clause in (c)/(d) is a real gap, not a typo:**
+when the request carries no Vision/user year at all (manual entry without
+a year, or Vision declining to guess), branches (c)/(d) accept PC/CV's
+year **unconditionally, with zero plausibility check** — (e), the
+documented safeguard, is unreachable in that case. There is no
+issue-number-vs-year plausibility check anywhere in the codebase (e.g.
+"issue #608 of a monthly series can't be the same year the series
+launched") as a last-resort catch. Era-specific keyIssue detection (silver
+age/bronze age/etc., previously documented as branch (a)) does not exist
+in `resolveYear` — dead variable at the `api/enrich.js` call site, marked
+"currently unused" in its own comment (Phase-3 stub).
+
+**`cvYear` itself** (fed into `resolveYear` as the 3rd argument) is
+computed by `deriveCvYear(comicVine)` (`identityCore.js`) from the matched
+issue's own `coverDate` field ("YYYY-MM-DD") — **never** from
+`comicVine.startYear` (the matched ComicVine *volume*'s launch year; fixed
+2026-07-18, Q112 dispatch, Batman #608 class). No
+fallback to `startYear` when `coverDate` is missing; `deriveCvYear` returns
+`null` in that case and `resolveYear` falls through to its other sources.
+
+`out.confirmedYear` + `out.yearCorrected` surfaced. App.jsx enrich callbacks heal `item.year` when `yearCorrected === true`.
+
+**Queued follow-up (not yet done, 2026-07-18):** a second, independent
+safety net — the era-gate at `api/enrich.js` ~2893-2909 — was specifically
+built to reject a CV year >10y outside an eBay-visual-pool-derived
+`eraLock`, but reads `comicVine?.volume?.startYear`, a shape that never
+resolves (`comicVine.volume` is a flat string, not an object with a
+`startYear`) — this guard has silently never fired. The identical shape
+bug also breaks the CV convergence-score axes (`title`/`issue`/`era`/
+`publisher` reject checks, ~2811/2817/2823) and CV-based publisher
+backfill (~3332-3335) — three more always-false dead-code paths, all
+sharing this one root cause. Deliberately NOT bundled into the `deriveCvYear`
+fix above: reactivating all three simultaneously has unknown interaction
+effects on cases that have been running without them for however long
+this has been broken, and deserves its own dedicated investigation and
+regression pass rather than a bundled fix. `deriveCvYear` alone fully and
+independently resolves the Batman #608 class — this follow-up is
+additional defense-in-depth, not a dependency.
+
+**Fix 6, SHIPPED (GrailKey Dispatch 19, 2026-08-07) — vision-fallback
+downgrade rescue, corrected from the original poolYearHint design.** The
+Dispatch 15/16 design (thread `poolYearHint` into branch (e)) was
+built on a misread of a real log line and was never shipped as designed
+— `poolYearHint` is NOT consumed by the fix that actually landed. Real
+production evidence (Spawn #351, 2026-08-07 20:40:36 UTC) showed Commit
+4.1's family-scoped year adoption (`identity.familyYearConsensus`,
+year=2024, support=3/4=75%) being silently overwritten by `resolveYear`
+falling through to Vision's own literal `"Unknown"` string
+(`yearSource='vision-fallback'`) — a DIFFERENT signal than
+`poolYearHint`, which was 2020 at 3/6 on that same scan and wrong.
+`rescueYearFromVisionFallback` (`src/lib/issueAuthority.js`, called from
+`api/enrich.js` right after the existing commit-p2 block, log tag
+`[commit-p3]`) fires whenever `resolveYear`'s own `yearSource` resolves
+to exactly `'vision-fallback'` AND a family-scoped year was adopted
+(`identity.familyYearConsensus.mode === 'adopted'`, `support >= 3` — the
+same floor commit-p2 already enforces, validated by this real 3/4=75%
+case) — restoring the adopted year instead of letting it downgrade to
+Vision's placeholder. Deliberately independent of commit-p2's own
+`highConfidenceMarketplaceConsensus` P1 gate: an adopted family-scoped
+year is always a better answer than `resolveYear`'s weakest fallback,
+regardless of whether the stricter P1 price-carve-out bar also cleared
+(on this exact scan it did not — see the "commit-p near-miss" entry,
+GrailKey Dispatch 19, elsewhere in this file). `yearSource =
+'family-consensus-vision-fallback-rescue'`, `confidence: 'provisional'`.
+Never overrides any real corroboration (PC, CV, eBay-consensus, or even
+the rejected-override case) — only the bare fallback. 25-assertion
+regression: `tests/grailkey-dispatch-19-fix6-year-rescue.test.js`.
+
+### `applyDualAxisGate` reason-string coupling (`src/lib/imageSearchIdentity.js`) — full narrative
+
+Found during GrailKey Dispatch 03 (2026-08-06) while scoping Strip 2 —
+confirmed the second instance of this exact shape in one file (the first:
+22c's `[22c-title-revote]` guard also originally read a rejection-detail
+shape before Q48 confirmed `convergence.axes[axis].rejections` is
+structured data, not string-only). Two independent load-bearing
+string-parses in the same file is a pattern, not a coincidence — **when
+`applyDualAxisGate` gains an explicit `provenance` field (queued, GrailKey
+Dispatch 03 Strip 2+1 combined work), convert `isBareCreatorTokensOnly` to
+read `provenance` directly and retire this regex.** Until then, any edit
+to `applyDualAxisGate`'s `reason` strings must grep
+`isBareCreatorTokensOnly`'s two patterns first and confirm they still
+match the intended branches.
