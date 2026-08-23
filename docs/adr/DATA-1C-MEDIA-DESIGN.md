@@ -16,6 +16,85 @@ public upload endpoint (`GK-151` hard gate stands), no `api/enrich.js`
 changes. Zero files under `api/` touched. Crawl and prior lanes untouched
 except for a read-only liveness check (see CRAWL, below).
 
+---
+
+**CORRECTION PASS (2026-08-23, "DATA-1C REVIEW — CORE PASS, PUSH HOLD"),
+applied on top of the original build described below — `4336e3e`.** Eight
+findings (D1–D8), all real, all fixed or accurately relabeled in this same
+correction commit:
+
+- **D1 — M4-1 relabeled `BLOCKED-ON-SOURCE-ACCESS`, not `PASS`.** The
+  original build's own "THE FIRST PERMANENT EVIDENCE" framing was wrong to
+  apply to substitute bytes — that label is earned only by genuine
+  historical pixels. The real, useful part of M4-1 (both `gkAsset` rows are
+  real, the DB write is real, the local storage service genuinely accepted
+  and round-tripped test media) is preserved and reported separately,
+  never conflated with the unmet historical-pixel criterion. See the
+  corrected Task 4 section below.
+- **D2 — M4-6 relabeled `BLOCKED-ON-PRIMARY-PROVISIONING`, not `PASS`.**
+  The adapter-swap MECHANISM and the honest-failure behavior are real and
+  proven; the full storage-contract suite has not run against a live
+  Vercel Blob store, so the milestone itself cannot be `PASS`. Vercel Blob
+  stays a provisional-primary candidate, audited against Task 1's
+  comparison table, until it actually runs.
+- **D3 — C4 evidence semantics corrected.** `sha256` dedupes the STORED
+  OBJECT only (`src/modules/media/`'s content addressing) — it never
+  dedupes the EVIDENCE ROW. The original build's `findMediaByAssetRoleHash`
+  automatically collapsed any second `attachMedia` call for the same
+  `(asset, role, content)` into the existing row, which would have silently
+  discarded a genuinely separate capture/evidence event (two grading
+  sessions that happen to photograph the identical page are two legitimate
+  rows, not one). **Removed entirely** — see the corrected Task 3 section.
+- **D4 — `idempotencyKey` is now required on `attachMedia`**, and a
+  request fingerprint (`sha256` of `{gkAssetId, captureRole, sha256}`) is
+  stored alongside the idempotency claim and checked on every replay: same
+  key + same semantic request → the original result; same key + a
+  genuinely different request → a typed `ConflictError`. **Verified
+  against the existing shared mechanism first, not assumed:** re-running
+  `S3-9-idempotency-key-replay.mjs` confirms `checkIdempotencyReplay`/
+  `claimIdempotencyKey` (`src/modules/assets/idempotency.js`) have NO
+  fingerprint concept for ANY of the other 9 DATA-1B operations either — a
+  real, wider gap (a replayed key with a genuinely different payload is
+  silently returned as if it matched, for `recordValuation` and everything
+  else), confirmed by direct evidence, not scoped or touched by this
+  correction (out of bounds — this pass only fixes `attachMedia`, which is
+  the one operation this dispatch itself introduced).
+- **D5 — storage preflight ordering corrected.** A non-transactional
+  preflight (`assertPrincipalActive` + `assertAssetExists`) now runs
+  BEFORE `media.put()`; the PUT itself runs with no DB transaction open;
+  the same invariants are re-run around the actual transactional write.
+  Orphan-object language corrected from "harmless" to what it actually is:
+  **not identity corruption, but a real storage/retention leak** — see the
+  corrected Task 3 section.
+- **D6 — Outcome Ledger append-only law: certified, unchanged.** See the
+  "D6 certification" subsection under Addition 1 below — the excerpt
+  already meets the law; nothing was changed.
+- **D7 — full re-verification, corrected results below.** Re-run: syntax
+  checks on every touched file, both module-boundary tests (17/17, 11/11 —
+  unchanged), `S3-4-mint-idempotency.mjs` (9/9) and
+  `S3-9-idempotency-key-replay.mjs` (8/8, the evidence for D4's "verify the
+  existing behavior" instruction), the corrected M4 proof suite (31/31
+  assertions, gate states corrected per D1/D2), and `npm run build`
+  (clean).
+- **D8 — checked against the real codebase, found FALSE as stated.** The
+  proposed unblock path ("the app's existing 'Backup to Drive'/CSV-export
+  flow serializes collection records including base64 photos") does not
+  match `src/App.jsx`: `exportJSON` (line 2962), `exportCSV` (line 2974),
+  and `backupToDrive` (line 2994) ALL either explicitly destructure
+  `images` out of the record before serializing (`({ images, ...rest }) =>
+  rest`, `exportJSON`/`backupToDrive`) or use a fixed column list that
+  never includes `images` at all (`exportCSV`) — confirmed by direct
+  `grep` for every `JSON.stringify(...)` call site touching `items`/`data`
+  in that file; there is no other export path. **None of this app's
+  current export flows include photo bytes.** Corrected in the design doc
+  below: the real unblock path for genuine M4-1 does not exist in the app
+  today and would need new code (a dedicated export mode that keeps
+  `images`, or a direct IndexedDB read) — not a repurposing of an existing
+  flow. Recorded honestly rather than silently reproducing an unverified
+  claim as fact.
+
+---
+
 **Predecessor:** DATA-1B (`235d7a4` local, `f31810f` referenced as deployed
 in that dispatch's own text). `531a2ee` (GK-162 registry log) rides this
 train — both sit locally ahead of `origin/main` (confirmed:
@@ -183,35 +262,77 @@ adapter's own internal check — defense in depth, both reading the same
 real bytes) — this is the value written to `media.content_hash`, always,
 never a caller-supplied value.
 
-**Three independent idempotency/dedupe layers (C4), never conflated:**
+**CORRECTED (DATA-1C review, D3/D4) — two independent dedupe/idempotency
+mechanisms, at two different layers, never conflated:**
 
 1. **Blob-level dedupe** (`src/modules/media/`) — the SAME bytes, from ANY
-   asset/role, always resolve to ONE stored object.
-2. **Evidence-row dedupe** (`repo.findMediaByAssetRoleHash`) — the SAME
-   `(asset, role, content)` combination never produces two `media` rows,
-   with or without an explicit `idempotencyKey`.
-3. **Explicit `idempotencyKey` replay** — the same mechanism every other
-   DATA-1B operation already uses (`checkIdempotencyReplay`/
-   `claimIdempotencyKey`), returning the ORIGINAL result verbatim.
+   asset/role, always resolve to ONE stored object. This is a fact about
+   PIXELS, not about evidence.
+2. **`idempotencyKey` replay, now mandatory (D4)** — the ONLY mechanism
+   that collapses two `attachMedia` calls into one `media` ROW. A request
+   fingerprint (`sha256` of `{gkAssetId, captureRole, sha256}`) rides
+   alongside the idempotency claim: same key + same fingerprint → the
+   original result, verbatim; same key + a DIFFERENT fingerprint → a typed
+   `ConflictError`, never a silent wrong-answer replay.
 
-Proven as genuinely distinct, not just asserted: the M4 proof suite
-attaches the SAME bytes to a DIFFERENT asset under a different role and
-confirms it creates a legitimate NEW row (`mediaId` differs) that still
-resolves to the SAME underlying object (`objectUri` identical) — layer 1
-and layer 2 caught operating independently, in the same run.
+**Removed (D3): the original build's "evidence-row dedupe" layer**
+(`repo.findMediaByAssetRoleHash`, automatically collapsing any call with
+matching `(asset, role, content_hash)` into an existing row). This was a
+real defect in the original design, not a style preference — it would
+have silently discarded genuinely separate evidence. **Two distinct
+`attachMedia` calls, under two distinct `idempotencyKey`s, for the
+IDENTICAL `(asset, role, bytes)` now always produce TWO distinct `media`
+rows** — proven directly by the corrected M4-4 (a "second capture event"
+call with a different key creates a new row over the SAME underlying
+object; blob-level dedupe stays intact even as evidence-row dedupe is
+gone). `findMediaByAssetRoleHash` itself is deleted from
+`repository.js`, not merely unused.
 
-Storage I/O (`media.put`) happens BEFORE the DB transaction opens —
-object storage isn't transactional with Postgres, and content-addressing
-makes an orphaned-but-unreferenced object harmless (the same bytes stored
-twice resolve to the same object; nothing is ever overwritten) — the same
-tradeoff every content-addressed store (git, IPFS) already accepts,
-stated explicitly in the code's own comment rather than left implicit.
+**D4 — verified against the existing shared mechanism, not assumed.**
+`src/modules/assets/idempotency.js`'s `checkIdempotencyReplay`/
+`claimIdempotencyKey` — the generic mechanism EVERY DATA-1B operation
+uses — has NO request-fingerprint concept for any of the other 9
+operations. Re-running `S3-9-idempotency-key-replay.mjs` (unmodified)
+confirms this directly: step 3 sends the SAME `idempotencyKey` with a
+DIFFERENTLY-valued `recordValuation` payload and receives back the
+ORIGINAL (`$33.33`) value with no error and no warning — the same key
+silently "wins" regardless of whether the new call's content agrees with
+the old one. This is a real, disclosed, WIDER gap than `attachMedia`
+alone — out of this bounded correction's scope (it would mean touching
+the shared `idempotency_key` table's schema or every one of the other 9
+operations, neither authorized here) — `attachMedia`'s own fingerprint
+check is carried entirely inside its own `result_snapshot` JSONB, a
+local fix scoped to the one operation this dispatch introduced, not a
+change to the shared mechanism's contract for anyone else.
+
+**D5 — storage I/O ordering, corrected.** `attachMedia` now runs, in
+order: (1) a non-transactional preflight read
+(`assertPrincipalActive`+`assertAssetExists`) BEFORE any storage I/O; (2)
+`media.put()`, with NO DB transaction open at all; (3) a fresh connection
+that re-runs `assertPrincipalActive` (the same "right before `BEGIN`"
+convention every other DATA-1B operation already follows) and, inside the
+transaction, re-verifies `assertAssetExists` again before the insert — a
+genuine re-check against the window between (1) and (3), not merely
+trusting the earlier read. A DB transaction is never held open across the
+remote storage call.
+
+**Orphan-object language, corrected (D5).** The original build's own
+comment called an orphaned-but-unreferenced object (created if the
+transactional write later fails) "harmless." That was the wrong word:
+content-addressing means it's never IDENTITY corruption (the object is
+still correctly addressed by its own hash; nothing is ever
+misattributed) — but it IS a real storage/retention leak: bytes billed
+and held with no `media` row pointing at them. **Orphan
+reconciliation/GC is recorded here as pre-production media debt**, not
+solved by this dispatch — a future pass needs a real answer (a periodic
+sweep comparing stored keys against referenced `content_hash` values, or
+equivalent), not assumed away by the word "harmless."
 
 Every successful `attachMedia` call that actually creates a new row emits
 a `media.attached` `domain_event` (Ruling 21's envelope), inside the same
-transaction as the row insert — a pure replay (either idempotency layer)
-emits nothing new, matching every other DATA-1B operation's own
-established shape.
+transaction as the row insert — a pure `idempotencyKey` replay emits
+nothing new, matching every other DATA-1B operation's own established
+shape.
 
 ---
 
@@ -220,75 +341,94 @@ established shape.
 Run for real against the real `data1_dev` schema via
 `C:\grailkey-data\data-1\m4-media-proof.mjs` (local scratch, not
 committed — matches the DATA-1A/DATA-1B/DATA-0E-PILOT precedent for proof
-scripts). **26/26 assertions passing.**
+scripts). **31/31 assertions passing. Two of eight milestone GATES are
+`BLOCKED` on an external prerequisite, not `PASS` — D1/D2, see below.**
+The proof script itself now tracks a gate state per milestone, separate
+from its individual assertions, specifically so a milestone with every
+assertion green can still be honestly reported as blocked when what's
+missing is an external prerequisite rather than a code defect.
 
-**C6 disclosure, stated plainly:** the "photo bytes" used below are an
+**C6/D1 disclosure, stated plainly:** the "photo bytes" used below are an
 **honestly-labeled substitute** — a well-known 1x1 public-domain PNG, with
 a distinct per-book tag appended so Creepy's and Sabrina's "photos" hash
-differently. **These are NOT the real Creepy #1 / Sabrina photographs.**
-Checked directly before writing this proof: those photographs exist only
-as base64 strings inside the operator's own browser IndexedDB
+differently. **These are NOT the real Creepy #1 / Sabrina photographs**,
+and the hashes below are **NOT** described as "the first permanent
+evidence" (that framing was wrong in the original build — corrected per
+D1). Checked directly before writing this proof: those photographs exist
+only as base64 strings inside the operator's own browser IndexedDB
 (`docs/DATA-1-READINESS.md`, section A1/A3) — `scanLog` records (the only
 server-side trace of either scan) carry book/pricing/identity/latency
 metadata and zero image bytes, confirmed by direct inspection of the real
 `scanlog:` records pulled via `find-real-scan.mjs`. This server-side
 environment has never had access to either photo and does not gain it by
-running this proof. If Jimmy supplies the real photo files, the identical
-proof script re-run substituting real bytes for `substitutePhoto(...)`
-produces the identical structure of proof against the real pixels — the
-proof's value is the real-bytes round-trip/integrity/idempotency
-mechanics, not the specific comic depicted, per C6's own stated standard.
+running this proof.
 
 ```
-M4-1  REAL PIXELS, REAL ASSETS — PASS (6/6 assertions)
-      Creepy #1 (1964): pre-existing real gk_asset 01a02aae-23bc-7d51-a759-961c5ff4b4a1
-        -> localfs://sha256/0c/0c4459ddb5bb6f626de7084af7d8e9d203182bb5b6a40acb88e20489260fd990
-        sha256 = 0c4459ddb5bb6f626de7084af7d8e9d203182bb5b6a40acb88e20489260fd990
-      Sabrina Annual Spectacular #1 (2024, Dan Parent): MINTED FOR REAL this
-        dispatch (was never a DATA-1A/1B asset before — see C0), from the
-        real scanlog record correlationId 15594457-47b2-4e4e-b862-afdf576aef98
-        -> asset 01a02bd8-fd28-745d-92a5-198583e21817
-        -> localfs://sha256/e2/e2a5b3122d9e45782c5fdd4f8310e069e510220aca223c20232ab072daff6c75
-        sha256 = e2a5b3122d9e45782c5fdd4f8310e069e510220aca223c20232ab072daff6c75
-      THE FIRST PERMANENT EVIDENCE: both objects real, both media rows real,
-      both linked by real gkAssetId — confirmed distinct content hashes.
+M4-1  GATE: BLOCKED-ON-SOURCE-ACCESS (D1)  —  3/3 assertions PASS
+      Both gkAsset rows are REAL: Creepy #1 (1964) pre-existing
+        (01a02aae-23bc-7d51-a759-961c5ff4b4a1); Sabrina Annual Spectacular
+        #1 minted for real this dispatch (01a02bd8-fd28-745d-92a5-198583e21817,
+        from real scanlog correlationId 15594457-47b2-4e4e-b862-afdf576aef98).
+      The real DB write and the real local storage service both genuinely
+      accepted and round-tripped test media (preserved as useful proof,
+      NOT relabeled as failing):
+        Creepy   -> localfs://sha256/87/872c733ae1a2d2b93986eec2b274b6027b9e94aeb177f6a9f78e45c96bdf30c1  [SUBSTITUTE BYTES]
+        Sabrina  -> localfs://sha256/80/80f09a065bd8cf68ac9c259ec8f81b46041666df94b805d40ba1dc183bf091da  [SUBSTITUTE BYTES]
+      NOT MET: the genuine historical-pixel criterion. Both hashes above
+      are substitute test bytes, explicitly not called "permanent
+      evidence." See Addition D8 below for the real unblock path.
 
-M4-2  ROUND-TRIP INTEGRITY — PASS (2/2): retrieved bytes byte-identical to
-      source (Buffer.compare === 0); re-hashed retrieved bytes match the
-      stored sha256.
+M4-2  GATE: PASS  —  2/2: retrieved bytes byte-identical to source
+      (Buffer.compare === 0); re-hashed retrieved bytes match the stored
+      sha256.
 
-M4-3  IMMUTABILITY — PASS (4/4): identical re-put returns the SAME
-      objectUri with created:false (no new write); genuinely different
-      bytes land at a genuinely DIFFERENT key; the original object is
-      still exactly the original bytes after that different put().
+M4-3  GATE: PASS  —  4/4: identical re-put returns the SAME objectUri
+      with created:false (no new write); genuinely different bytes land
+      at a genuinely DIFFERENT key; the original object is still exactly
+      the original bytes after that different put().
 
-M4-4  IDEMPOTENT ATTACH — PASS (6/6): same idempotencyKey twice ->
-      identical mediaId, zero new rows; SAME (asset,role,content) with NO
-      idempotencyKey -> evidence-row dedupe still catches it, zero new
-      rows; SAME bytes to a DIFFERENT asset -> a legitimate NEW row over
-      the SAME underlying object (both C4 layers proven independently).
+M4-4  GATE: PASS  —  11/11, D3/D4-corrected semantics (rewritten from the
+      original build's 6/6, which tested the now-removed evidence-row
+      auto-dedupe): (a) same idempotencyKey + same request -> original
+      mediaId, zero new rows; (b) same idempotencyKey + a DIFFERENT
+      request (different bytes) -> typed ConflictError via the request
+      fingerprint, NOT a silent replay; (c) a DIFFERENT idempotencyKey for
+      the IDENTICAL (asset,role,bytes) -> a NEW, legitimate row (D3 — no
+      more automatic collapse), confirmed the row count grew by exactly 1;
+      (d) idempotencyKey omitted entirely -> ValidationFailedError (D4 —
+      now mandatory); (e) same bytes to a DIFFERENT asset, distinct key ->
+      a new row over the SAME underlying object (blob-level dedupe intact).
 
-M4-5  HASH-MISMATCH REJECTION — PASS (3/3): a declared sha256 that
-      disagrees with the actual bytes throws HashMismatchError
-      (typed, confirmed via instanceof) before anything is stored;
-      confirmed zero rows exist afterward with that mismatched hash.
+M4-5  GATE: PASS  —  3/3: a declared sha256 that disagrees with the
+      actual bytes throws HashMismatchError (typed, confirmed via
+      instanceof) before anything is stored; confirmed zero rows exist
+      afterward with that mismatched hash.
 
-M4-6  ADAPTER SWAP — PASS (3/3): switching MEDIA_STORAGE_DRIVER to
-      'vercel-blob' at runtime (env var read live, not cached) makes the
-      NEXT call attempt the other driver; that attempt fails with the
-      honest, typed NotProvisionedError (never a silent success or an
-      unhandled crash); switching back to localfs works immediately.
-      Full parity between drivers is NOT yet proven (Task 2d) — only that
-      the swap mechanism itself is real.
+M4-6  GATE: BLOCKED-ON-PRIMARY-PROVISIONING (D2)  —  3/3 assertions PASS
+      Switching MEDIA_STORAGE_DRIVER to 'vercel-blob' at runtime (env var
+      read live, not cached) makes the NEXT call attempt the other
+      driver; that attempt fails with the honest, typed
+      NotProvisionedError (never a silent success or an unhandled crash);
+      switching back to localfs works immediately. NOT MET: the same
+      storage-contract suite has not run against a live Vercel Blob
+      store — the milestone stays blocked until Task 1's PRIMARY
+      candidate is actually provisioned and exercised, not merely
+      selectable.
 
-M4-7  BOUNDARY — PASS (11/11, tests/media-module-boundary.test.js, run
+M4-7  GATE: PASS  —  11/11, tests/media-module-boundary.test.js, run
       separately, repo-tracked, no DB needed) — see Task 2a.
 
-M4-8  EVENT + RETRIEVAL — PASS (3/3): a real media.attached domain_event
-      row exists for the Creepy attach; a COLD getPhysicalAsset call (a
-      fresh read, no cached state) returns the media row with the correct
-      object_uri; that object_uri independently resolves via head().
+M4-8  GATE: PASS  —  3/3: a real media.attached domain_event row exists
+      for the Creepy attach; a COLD getPhysicalAsset call (a fresh read,
+      no cached state) returns the media row with the correct object_uri;
+      that object_uri independently resolves via head().
 ```
+
+**Gate summary:** `M4-1: BLOCKED-ON-SOURCE-ACCESS` · `M4-2: PASS` ·
+`M4-3: PASS` · `M4-4: PASS` · `M4-5: PASS` ·
+`M4-6: BLOCKED-ON-PRIMARY-PROVISIONING` · `M4-7: PASS` · `M4-8: PASS`.
+Not claimed as "Task 4 complete" — two of eight gates remain genuinely
+open on external prerequisites, per D1/D2.
 
 ---
 
@@ -314,6 +454,95 @@ operationally" territory for the Pro plan — the number worth getting
 precisely right is the one at 100K+ assets, not 10K, and that's a
 question for whenever Vertical #2 or the Long Box pilot make it real
 (`docs/GRAILKEY-STRATEGY.md` §7).
+
+---
+
+## D6 — OUTCOME LEDGER CERTIFICATION (append-only law, verified against the real DDL)
+
+Re-read `db/data0/0006_outcome_ledger.sql` directly against D6's own
+standard before writing this section. **The law is met; nothing changed.**
+
+```sql
+CREATE TABLE outcome_event (
+  event_id              UUID PRIMARY KEY,          -- uuidv7()
+  gk_asset_id            UUID NOT NULL REFERENCES gk_asset(id),
+  decision_event_id       UUID REFERENCES decision_event(id),
+  outcome_type              TEXT NOT NULL CHECK (outcome_type IN (
+                               'LISTED', 'SOLD', 'FEES_FINALIZED',
+                               'FULFILLMENT_FINALIZED', 'REALIZED_OUTCOME'
+                             )),
+  occurred_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ...
+  ask_amount, gross_amount, fees_amount, shipping_amount, net_amount,
+  days_to_sale   -- typed economic columns, every one nullable
+);
+```
+
+- **No `UPDATE`/`DELETE` statement anywhere in the file** — confirmed by
+  direct inspection, not assumed. `outcome_event` has no mutable-row
+  update path at all; every economic fact (LISTED, then later SOLD, then
+  later FEES_FINALIZED, ...) is its OWN row with its OWN `outcome_type`,
+  never a field filled in on a prior row.
+- **A separate, explicitly-labeled projection table**
+  (`asset_outcome_current`) carries the derived "current state" —
+  `PRIMARY KEY (gk_asset_id)`, one row per asset, pointing back at
+  `as_of_outcome_event_id`. The file's own trailing comment states this
+  is rebuilt FROM the ledger, matching `current_owner`'s already-proven
+  convention in `0004_data1_foundation.sql` — never an independent write
+  path.
+- **LISTED/SOLD/FEES_FINALIZED/FULFILLMENT_FINALIZED/REALIZED_OUTCOME are
+  represented as history** (distinct `outcome_type` values on distinct
+  rows), never as progressive mutation of one row acquiring `listed_at`,
+  then `sold_at`, then `fees_amount` in place — exactly the shape D6 asks
+  to verify.
+
+**Verdict: history appends; current state derives — confirmed, not
+changed.** No edit made to `db/data0/0006_outcome_ledger.sql` or
+`docs/adr/DATA-1-OUTCOME-LEDGER-DESIGN.md` as a result of this
+certification, per D6's own instruction.
+
+---
+
+## D8 — THE REAL-PIXELS UNBLOCK PATH FOR GENUINE M4-1 (documented, corrected against the actual codebase)
+
+**Checked against `src/App.jsx` before writing this section — the
+originally-proposed path does not exist as described.** `src/App.jsx`
+has exactly three export/backup functions that serialize the collection:
+
+- `exportJSON` (`App.jsx:2962-2972`) — `items.map(({ images, ...rest }) =>
+  rest)`. **Explicitly destructures `images` OUT** before serializing.
+- `exportCSV` (`App.jsx:2974-2992`) — a fixed column list (`title, issue,
+  publisher, year, grade, ...`) that **never includes `images` at all**.
+- `backupToDrive` (`App.jsx:2994-3004`) — **identical** `({ images,
+  ...rest }) => rest` destructure as `exportJSON`.
+
+Confirmed exhaustive by direct `grep` for every `JSON.stringify(...)`
+call site touching `items`/`data` in the file — there is no fourth export
+path, and no existing flow anywhere in this app currently serializes
+photo bytes out of IndexedDB. **None of this app's current export flows
+include photo bytes** — the "Backup to Drive"/CSV-export route described
+as the unblock path does not work as stated today.
+
+**What a real unblock path actually requires** (not yet built, not
+attempted this dispatch — MODE remains bounded build, no UI changes):
+
+1. A new export mode (or a modification to `exportJSON`/`backupToDrive`)
+   that KEEPS `images` in the serialized output — the simplest code
+   change, but still a real UI-adjacent change out of this dispatch's
+   bounded scope.
+2. Alternatively, a direct IndexedDB read (`src/db.js`'s `comics` store)
+   via a small one-off script run in the browser console or a temporary
+   debug route — no `App.jsx` change needed, but requires Jimmy to run it
+   himself since this server-side environment has no browser access at
+   all.
+
+**Until either exists and Jimmy provides the resulting file (or runs the
+read himself and hands over the base64 strings), M4-1 stays
+`BLOCKED-ON-SOURCE-ACCESS`, exactly as D1 states.** When it does: the
+identical `m4-media-proof.mjs` script, with `substitutePhoto(...)`'s two
+call sites replaced by the real decoded bytes, re-runs the identical
+suite against genuine historical pixels — real provenance, and only then
+are the resulting hashes recorded as the first permanent evidence.
 
 ---
 
@@ -386,8 +615,32 @@ modified: src/modules/assets/service.js     (+attachMedia)
 modified: docs/TICKET-REGISTRY.md           (GK-162 capture-order note)
 ```
 
-**Local only. Not pushed.** `531a2ee` (GK-162 registry log, the prior
-dispatch's own work) rides this same train — both sit on `main`, one
-commit and then this dispatch's commit(s) ahead of `origin/main`, per
-`git log origin/main..HEAD`, confirmed before writing any code above.
-**Ask before push**, per the dispatch's own explicit instruction.
+**Correction commit, on top of `4336e3e` (D1-D8, "DATA-1C REVIEW — CORE
+PASS, PUSH HOLD"), no history rewrite:**
+
+```
+modified: src/modules/assets/service.js     (attachMedia: D3 evidence-row
+                                             dedupe removed, D4 mandatory
+                                             idempotencyKey + request
+                                             fingerprint, D5 preflight-
+                                             before-PUT ordering)
+modified: src/modules/assets/repository.js  (findMediaByAssetRoleHash
+                                             deleted, per D3)
+modified: docs/adr/DATA-1C-MEDIA-DESIGN.md  (M4-1/M4-6 gate states
+                                             corrected per D1/D2; D3-D8
+                                             documented in place)
+modified: db/data0/snapshots/data-1c-media-slice-summary.json
+                                             (gate states + corrections
+                                             reflected)
+```
+(`C:\grailkey-data\data-1\m4-media-proof.mjs`, local scratch, not
+committed, rewritten to match — see Task 4 above for the corrected
+31/31-assertion run it produced.)
+
+**Local only. Not pushed.** `531a2ee` → `4336e3e` → this correction
+commit all sit on `main`, ahead of `origin/main`, per
+`git log origin/main..HEAD`. Pre-existing quarantined scratch files
+(`scripts/capture-active-cache-entry.mjs` modified,
+`scripts/ingest-fixture-response.mjs`/`scripts/merge-fixture.mjs`
+untracked) remain exactly as found — not part of any DATA-1C commit.
+**Ask before push**, per the review's own explicit instruction.

@@ -271,87 +271,134 @@ export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields,
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// attachMedia — DATA-1C, Task 3. Real bytes in, a real stored object +
-// a real media row out. Distinct from attachMediaMetadata (DATA-1B,
-// above), which only ever recorded metadata a CALLER already resolved
-// elsewhere — this function is the one that actually calls the storage
-// adapter.
+// attachMedia — DATA-1C, Task 3, CORRECTED by the DATA-1C review (D3/D4/
+// D5). Real bytes in, a real stored object + a real media row out.
+// Distinct from attachMediaMetadata (DATA-1B, above), which only ever
+// recorded metadata a CALLER already resolved elsewhere — this function
+// is the one that actually calls the storage adapter.
 //
-// Three independent idempotency/dedupe layers, per C4 — never conflated:
-//   1. Blob-level dedupe (src/modules/media/) — same bytes anywhere in
-//      the whole store resolve to ONE object, regardless of asset/role.
-//   2. Evidence-row dedupe (repo.findMediaByAssetRoleHash, C4) — same
-//      (asset, role, content) never produces two media rows, whether or
-//      not an idempotencyKey was supplied.
-//   3. Explicit idempotencyKey replay (checkIdempotencyReplay, same
-//      mechanism every other operation in this file already uses) —
-//      an exact repeated call returns the ORIGINAL result verbatim.
+// D3 — evidence-row semantics, corrected. SHA256 dedupes the STORED
+// OBJECT ONLY (src/modules/media/'s content addressing) — it never
+// dedupes the EVIDENCE (media) ROW. Two distinct attachMedia calls
+// (distinct idempotencyKey) for the identical (asset, role, bytes)
+// ALWAYS produce two distinct media rows: two grading sessions that
+// happen to photograph the identical page are two legitimate, separate
+// evidence events, not one. The ONLY thing that collapses to one row is
+// a genuine REPLAY — the same idempotencyKey used again.
 //
-// captureRole maps directly onto the live media.media_type column
-// (ADR-MEDIA-001's vocabulary IS this schema's media_type CHECK
-// constraint — capture-photo/grading-photo/document; not a second,
-// parallel vocabulary).
+// D4 — idempotencyKey is now REQUIRED (was optional). A caller-omitted
+// key made "was this the same command or a new one" undecidable, which
+// D3's row-per-call semantics can no longer tolerate. A request
+// fingerprint (sha256 of {gkAssetId, captureRole, sha256}) is stored
+// alongside the idempotency claim and re-checked on every replay hit:
+// same key + same semantic request -> the original result, verbatim;
+// same key + a DIFFERENT asset/role/content -> a typed ConflictError,
+// never a silent wrong-answer replay. checkIdempotencyReplay/
+// claimIdempotencyKey themselves (src/modules/assets/idempotency.js)
+// are untouched — they have no fingerprint concept for ANY of the other
+// 9 DATA-1B operations either (a real, wider gap, out of this bounded
+// correction's scope) — the fingerprint is carried inside THIS
+// operation's own result_snapshot JSONB instead, not a schema change.
+//
+// D5 — ordering, corrected. A non-transactional preflight (principal +
+// asset existence) runs BEFORE the storage PUT; the PUT itself runs
+// with no DB transaction open at all; the same invariants are re-run
+// around the actual transactional write (matching every other DATA-1B
+// operation's own "assertPrincipalActive right before BEGIN" + the
+// asset check now genuinely re-verified again just before the insert,
+// not merely trusted from the earlier preflight). A DB transaction is
+// never held open across the remote storage I/O.
 // ─────────────────────────────────────────────────────────────────────
 export async function attachMedia({ principalId, gkAssetId, bytes, contentType, captureRole, idempotencyKey, correlationId } = {}) {
-  requireFields({ principalId, gkAssetId, bytes, contentType, captureRole }, ['principalId', 'gkAssetId', 'bytes', 'contentType', 'captureRole']);
+  requireFields(
+    { principalId, gkAssetId, bytes, contentType, captureRole, idempotencyKey },
+    ['principalId', 'gkAssetId', 'bytes', 'contentType', 'captureRole', 'idempotencyKey']
+  );
   requireEnum(captureRole, ['capture-photo', 'grading-photo', 'document'], 'captureRole');
   if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
     throw new ValidationFailedError('bytes must be a non-empty Buffer/Uint8Array');
   }
 
   // C5 — the SERVICE computes the hash from the actual received bytes.
-  // This is the value that gets written to media.content_hash; the media
-  // adapter's own internal hash check (src/modules/media/) is a second,
-  // independent computation from the same real bytes — defense in depth,
-  // never a caller-declared value trusted for storage.
+  // This is the value written to media.content_hash; the media adapter's
+  // own internal hash check (src/modules/media/) is a second, independent
+  // computation from the same real bytes — defense in depth, never a
+  // caller-declared value trusted for storage.
   const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const requestFingerprint = createHash('sha256')
+    .update(JSON.stringify({ gkAssetId, captureRole, sha256 }))
+    .digest('hex');
 
-  // Storage I/O happens BEFORE the DB transaction opens — object storage
-  // isn't transactional with Postgres, and content-addressing makes an
-  // orphaned-but-unreferenced object harmless (the same bytes stored
-  // twice resolve to the same object; nothing is ever overwritten). If
-  // the DB half below fails/rolls back, the object may already exist
-  // with nothing pointing at it yet — a real, disclosed, harmless gap,
-  // not silently different from how every other content-addressed store
-  // (git, IPFS) already accepts this exact tradeoff.
+  // D5 — non-transactional preflight, strictly BEFORE any storage I/O.
+  const preflight = await acquireConnection();
+  try {
+    await assertPrincipalActive(preflight, principalId);
+    await assertAssetExists(preflight, gkAssetId);
+  } finally {
+    preflight.release();
+  }
+
+  // Storage I/O with NO DB transaction open — a slow/hanging remote PUT
+  // must never pin a Postgres connection+transaction for its duration.
+  // Content-addressing means an orphaned-but-unreferenced object here
+  // (e.g. the transactional write below later fails) is NOT identity
+  // corruption — the object is still correctly addressed by its own
+  // hash, nothing is ever misattributed — but it IS a real storage/
+  // retention leak: bytes billed and held with no media row pointing at
+  // them. Reconciliation/GC for orphaned objects is pre-production media
+  // debt, not solved by this dispatch (see docs/adr/
+  // DATA-1C-MEDIA-DESIGN.md, Task 3).
   const stored = await media.put({ bytes, contentType, sha256 });
 
   const client = await acquireConnection();
   try {
+    // Re-run the invariant this function already checked in the
+    // preflight above — the same "assertPrincipalActive right before
+    // BEGIN" convention every other DATA-1B operation in this file
+    // already follows, genuinely re-executed here, not assumed to still
+    // hold from the earlier read.
     await assertPrincipalActive(client, principalId);
     await client.query('BEGIN');
     try {
       const operation = 'attachMedia';
       const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
-      if (replay) { await client.query('COMMIT'); return replay; }
-
-      await assertAssetExists(client, gkAssetId);
-
-      const existingRow = await repo.findMediaByAssetRoleHash(client, {
-        assetId: gkAssetId, mediaType: captureRole, contentHash: sha256,
-      });
-      let mediaId, outcome;
-      if (existingRow) {
-        mediaId = existingRow.id;
-        outcome = 'existing-row';
-      } else {
-        mediaId = await repo.insertMedia(client, {
-          assetId: gkAssetId, mediaType: captureRole, contentHash: sha256,
-          objectUri: stored.objectUri, recordedByPrincipalId: principalId,
-        });
-        outcome = stored.created ? 'created' : 'existing-blob-new-row';
-        await repo.writeDomainEvent(client, {
-          eventType: 'media.attached', actorPrincipalId: principalId, actorKind: 'user',
-          subjectType: 'gk_asset', subjectId: gkAssetId,
-          payload: { mediaId, captureRole, sha256, objectUri: stored.objectUri, outcome },
-          correlationId: correlationId || await newCorrelationId(client),
-        });
+      if (replay) {
+        if (replay.requestFingerprint !== requestFingerprint) {
+          throw new ConflictError(
+            `idempotencyKey "${idempotencyKey}" was already used for a different request ` +
+            `(gkAssetId/captureRole/content differ from the original call) — the same key ` +
+            `must represent the same semantic request`
+          );
+        }
+        await client.query('COMMIT');
+        const { requestFingerprint: _drop, ...publicResult } = replay;
+        return publicResult;
       }
 
-      const result = { mediaId, objectUri: stored.objectUri, sha256, outcome };
-      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      // Re-verified again here, not just trusted from the preflight —
+      // the asset could have changed state in the window between the
+      // preflight read and this transactional write.
+      await assertAssetExists(client, gkAssetId);
+
+      const mediaId = await repo.insertMedia(client, {
+        assetId: gkAssetId, mediaType: captureRole, contentHash: sha256,
+        objectUri: stored.objectUri, recordedByPrincipalId: principalId,
+      });
+      const outcome = stored.created ? 'created' : 'existing-blob-new-row';
+      await repo.writeDomainEvent(client, {
+        eventType: 'media.attached', actorPrincipalId: principalId, actorKind: 'user',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { mediaId, captureRole, sha256, objectUri: stored.objectUri, outcome },
+        correlationId: correlationId || await newCorrelationId(client),
+      });
+
+      const publicResult = { mediaId, objectUri: stored.objectUri, sha256, outcome };
+      await claimIdempotencyKey(client, {
+        operation, idempotencyKey, principalId,
+        result: { ...publicResult, requestFingerprint },
+      });
       await client.query('COMMIT');
-      return result;
+      return publicResult;
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;

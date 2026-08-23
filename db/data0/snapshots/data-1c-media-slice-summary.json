@@ -35,28 +35,56 @@
   "task3_service_integration": {
     "files_modified": ["src/modules/assets/service.js", "src/modules/assets/repository.js", "src/modules/assets/index.js"],
     "new_export": "attachMedia",
-    "new_repository_query": "findMediaByAssetRoleHash",
-    "idempotency_layers": ["blob-level content dedupe (media module)", "evidence-row dedupe (asset+role+content_hash)", "explicit idempotencyKey replay"],
+    "idempotency_layers_CORRECTED_per_D3_D4": [
+      "blob-level content dedupe (media module) -- dedupes the STORED OBJECT only",
+      "explicit idempotencyKey replay, now MANDATORY, with a request fingerprint (sha256 of {gkAssetId, captureRole, sha256}) -- the ONLY mechanism that collapses two attachMedia calls into one media ROW"
+    ],
+    "removed_per_D3": "findMediaByAssetRoleHash -- automatic evidence-row dedupe on (asset, role, content_hash) alone, deleted from repository.js; would have silently discarded genuinely separate capture/evidence events",
+    "ordering_corrected_per_D5": "non-transactional preflight (assertPrincipalActive + assertAssetExists) BEFORE media.put(); PUT runs with no DB transaction open; invariants re-run around the actual transactional write",
+    "orphan_wording_corrected_per_D5": "'harmless' -> 'not identity corruption but a storage/retention leak'; orphan reconciliation/GC recorded as pre-production media debt, not solved this dispatch",
     "api_files_touched": 0
   },
   "task4_proof_suite": {
-    "script_location": "C:\\grailkey-data\\data-1\\m4-media-proof.mjs (local scratch, not committed)",
-    "result": "26/26 assertions passing",
+    "script_location": "C:\\grailkey-data\\data-1\\m4-media-proof.mjs (local scratch, not committed, rewritten for D1-D4)",
+    "result": "31/31 assertions passing; 2 of 8 milestone GATES are BLOCKED on an external prerequisite, not PASS",
     "c6_disclosure": "substitute image bytes used (1x1 public-domain PNG, tagged per-book) -- real Creepy/Sabrina photos are browser-IndexedDB-only, never reach this server-side environment, confirmed via docs/DATA-1-READINESS.md section A1/A3 and direct scanlog record inspection",
     "creepy_asset_id": "01a02aae-23bc-7d51-a759-961c5ff4b4a1",
-    "creepy_media_object_uri": "localfs://sha256/0c/0c4459ddb5bb6f626de7084af7d8e9d203182bb5b6a40acb88e20489260fd990",
-    "creepy_sha256": "0c4459ddb5bb6f626de7084af7d8e9d203182bb5b6a40acb88e20489260fd990",
+    "creepy_media_object_uri": "localfs://sha256/87/872c733ae1a2d2b93986eec2b274b6027b9e94aeb177f6a9f78e45c96bdf30c1",
+    "creepy_sha256": "872c733ae1a2d2b93986eec2b274b6027b9e94aeb177f6a9f78e45c96bdf30c1",
     "sabrina_asset_id": "01a02bd8-fd28-745d-92a5-198583e21817",
-    "sabrina_mint_source": "real scanlog record, correlationId 15594457-47b2-4e4e-b862-afdf576aef98, minted-new this dispatch",
-    "sabrina_media_object_uri": "localfs://sha256/e2/e2a5b3122d9e45782c5fdd4f8310e069e510220aca223c20232ab072daff6c75",
-    "sabrina_sha256": "e2a5b3122d9e45782c5fdd4f8310e069e510220aca223c20232ab072daff6c75",
-    "m4_1": "PASS 6/6", "m4_2": "PASS 2/2", "m4_3": "PASS 4/4", "m4_4": "PASS 6/6",
-    "m4_5": "PASS 3/3", "m4_6": "PASS 3/3", "m4_7": "PASS 11/11 (separate test file)", "m4_8": "PASS 3/3"
+    "sabrina_mint_source": "real scanlog record, correlationId 15594457-47b2-4e4e-b862-afdf576aef98, resolved-existing (minted-new on first run)",
+    "sabrina_media_object_uri": "localfs://sha256/80/80f09a065bd8cf68ac9c259ec8f81b46041666df94b805d40ba1dc183bf091da",
+    "sabrina_sha256": "80f09a065bd8cf68ac9c259ec8f81b46041666df94b805d40ba1dc183bf091da",
+    "note": "these hashes are SUBSTITUTE test bytes, explicitly NOT labeled 'first permanent evidence' per D1",
+    "gates": {
+      "m4_1": "BLOCKED-ON-SOURCE-ACCESS (D1) -- 3/3 assertions PASS; real assets/DB/storage proven, genuine historical pixels not obtained",
+      "m4_2": "PASS 2/2",
+      "m4_3": "PASS 4/4",
+      "m4_4": "PASS 11/11 (rewritten per D3/D4 -- replay/conflict/new-row-per-event/mandatory-key/cross-asset-dedupe)",
+      "m4_5": "PASS 3/3",
+      "m4_6": "BLOCKED-ON-PRIMARY-PROVISIONING (D2) -- 3/3 assertions PASS; swap mechanism + honest failure proven, full suite not run against a live vercel-blob store",
+      "m4_7": "PASS 11/11 (separate test file)",
+      "m4_8": "PASS 3/3"
+    }
   },
   "additions": {
     "outcome_ledger": "design + draft migration only, db/data0/0006_outcome_ledger.sql (NOT applied), docs/adr/DATA-1-OUTCOME-LEDGER-DESIGN.md",
+    "outcome_ledger_d6_certification": "re-read against the real DDL -- no UPDATE/DELETE anywhere, asset_outcome_current is a separate rebuilt-on-write projection, LISTED/SOLD/FEES_FINALIZED/etc. are distinct rows not progressive mutation -- law met, nothing changed",
     "strategy_doc": "docs/GRAILKEY-STRATEGY.md committed, closing-line wording correction applied per this document's own claims policy",
-    "capture_order_law": "recorded in docs/adr/DATA-1C-MEDIA-DESIGN.md Addition 3 and docs/TICKET-REGISTRY.md GK-162"
+    "capture_order_law": "recorded in docs/adr/DATA-1C-MEDIA-DESIGN.md Addition 3 and docs/TICKET-REGISTRY.md GK-162",
+    "d8_real_pixel_unblock_path": "CORRECTED against actual code -- App.jsx's exportJSON/exportCSV/backupToDrive all exclude images from serialization (confirmed by direct grep, App.jsx:2962-3004); no existing export path includes photo bytes today; a real unblock needs new code (an export mode that keeps images, or a direct IndexedDB read), not a repurposed existing flow"
+  },
+  "correction_pass_2026_08_23": {
+    "trigger": "DATA-1C REVIEW -- CORE PASS, PUSH HOLD (D1-D8)",
+    "on_top_of_commit": "4336e3e",
+    "findings": ["D1: M4-1 relabeled BLOCKED-ON-SOURCE-ACCESS", "D2: M4-6 relabeled BLOCKED-ON-PRIMARY-PROVISIONING", "D3: evidence-row auto-dedupe removed", "D4: idempotencyKey mandatory + request fingerprint added", "D5: preflight-before-PUT ordering + orphan wording corrected", "D6: outcome ledger append-only law certified, unchanged", "D7: full re-verification re-run", "D8: real-pixel unblock-path claim checked and found false as originally stated, corrected"],
+    "s3_targeted_reverify": {
+      "s3_4_mint_idempotency": "9/9 PASS, unaffected",
+      "s3_9_idempotency_key_replay": "8/8 PASS, unaffected -- ALSO used as D4's own evidence: step 3 confirms the shared idempotency.js mechanism has NO fingerprint concept for the other 9 DATA-1B operations (same key + different payload silently returns the stale original, no conflict) -- a real, wider, disclosed gap, out of this correction's scope"
+    },
+    "no_history_rewrite": true,
+    "no_production_wiring": true,
+    "no_data1d_work": true
   },
   "crawl_status_at_dispatch": {
     "pid": 16696,

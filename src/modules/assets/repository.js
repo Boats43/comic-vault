@@ -130,23 +130,18 @@ export async function insertMedia(client, { assetId, mediaType, contentHash, obj
   return id;
 }
 
-// DATA-1C, C4 — "blob dedupe != evidence idempotency." This is the
-// EVIDENCE-idempotency layer: the same (asset, role, content) combination
-// should never produce two media rows, independent of whether an
-// idempotencyKey was supplied. Distinct from the idempotency_key table's
-// own replay layer (an explicit caller-supplied key) and distinct from
-// the media adapter's own blob-level dedupe (same bytes, ANY asset/role,
-// one object — src/modules/media/). Same photo attached to two different
-// assets is two legitimate rows over one blob; this query is scoped to
-// ONE asset+role, on purpose.
-export async function findMediaByAssetRoleHash(client, { assetId, mediaType, contentHash }) {
-  const res = await client.query(
-    `SELECT * FROM media WHERE asset_id = $1 AND media_type = $2 AND content_hash = $3
-     ORDER BY captured_at LIMIT 1`,
-    [assetId, mediaType, contentHash]
-  );
-  return res.rows[0] || null;
-}
+// REMOVED (DATA-1C review, D3): this dispatch originally shipped
+// findMediaByAssetRoleHash as an automatic evidence-row dedupe keyed on
+// (asset, role, content_hash) alone. That was wrong — SHA256 dedupes the
+// STORED OBJECT (src/modules/media/'s content addressing), never the
+// EVIDENCE of a capture event. Two distinct attachMedia calls for the
+// identical (asset, role, bytes) are two legitimate, separate evidence
+// rows (e.g. two grading sessions that happen to photograph the
+// identical page) — collapsing them automatically would have discarded
+// real evidence. Row-level collapsing now happens ONLY for a genuine
+// idempotencyKey replay (service.js's own requestFingerprint check),
+// never as a side effect of matching content. See docs/adr/
+// DATA-1C-MEDIA-DESIGN.md, Task 3 (D3), for the full correction.
 
 export async function insertAcquisitionEvent(client, { assetId, costAmount, costCurrency, source, lotReference, recordedByPrincipalId }) {
   const id = await uuidv7(client);
