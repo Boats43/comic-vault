@@ -365,50 +365,87 @@ run. Summary of what was exercised:
 
 ## H8 — Milestone status
 
-**DATA-1D = MECHANISM-PASS / PHYSICAL-CROSS-DEVICE-PENDING.**
+**DATA-1D = PRODUCTION LIVE / PHYSICAL-CROSS-DEVICE-PENDING.**
+
+### Production push — done (2026-08-23)
+
+Pushed `origin/main`: `083c8ff..a8dcdca` (six commits, `d61f9ea →
+5056fe0 → 2396c56 → 1f95cc7 → b3d11cb → a8dcdca`). Auto-deploy fired;
+verified via real Vercel tooling, not assumed:
+
+- **Deployment:** `dpl_5TtAVeW2uirLpFpgQ2caVnxbncEL`, `readyState:
+  READY`, `target: production`, deployed commit
+  `a8dcdcaa184158c322f016381fd55da8b5a2bc53` — matches `git rev-parse
+  HEAD` exactly, character for character.
+- **Aliases:** `comic-vault-rouge.vercel.app` (primary, per CLAUDE.md),
+  `comic-vault-boats43s-projects.vercel.app`,
+  `comic-vault-git-main-boats43s-projects.vercel.app`.
+- **Env vars confirmed active on Production** (`vercel env ls
+  production`, names only): `GRAILKEY_SESSION_SECRET`,
+  `GRAILKEY_CATALOG_DATABASE_URL`, `GRAILKEY_SESSION_EPOCH` — all
+  present.
+
+### Production smoke test — real HTTPS requests, `comic-vault-rouge.vercel.app`
+
+| Check | Result |
+|---|---|
+| Login, wrong passphrase | `401 {"error":"Invalid credentials"}` ✅ |
+| Login, correct passphrase | `200`, real token ✅ |
+| Authenticated asset fetch (`gkAssetId=01a02d23-1acb-72e8-aae3-8f851308e9cf`) | `200`, correct asset, media reference present ✅ |
+| Authenticated asset-media fetch (`mediaId=01a02d23-2809-7024-9312-d45bb5003014`) | `200`, `Content-Type: image/jpeg`, `Content-Length: 108209` ✅ |
+| Bytes served vs. original source file | SHA-256 `811a8638...4b9d63` both, `Buffer.compare === 0` — **byte-identical** ✅ |
+| Same media, unauthenticated | `401` ✅ |
+
+Production is publicly reachable (no Vercel Deployment Protection wall,
+unlike Preview) — every request above hit `comic-vault-rouge.vercel.app`
+directly, no bypass cookie needed.
 
 Session security, credential hygiene, and the auth mechanism itself are
-now proven end-to-end against real code and a real database, including
-the two new hardening mechanisms this pass added (session epoch,
-secret-strength floor). What remains genuinely unproven is the same
-thing the original DATA-1D dispatch already disclosed: a literal second
-physical device.
+now proven end-to-end against real code, a real database, and — as of
+this smoke test — real production traffic, including the two new
+hardening mechanisms this pass added (session epoch, secret-strength
+floor) and the real Creepy #1 capture (GK-166). What remains genuinely
+unproven is the same thing the original DATA-1D dispatch already
+disclosed: a literal second physical device.
 
-### The exact phone procedure (once H5/H6 clear and this is pushed)
+### The exact phone procedure — Jimmy's next step
 
-1. Jimmy approves and this commit (and the correction commit on top of
-   it) get pushed to `main`.
-2. Confirm the Production env-var checklist above is complete — if not,
-   every step below will 500.
-3. **From the phone**, independently: `POST
+The real asset this checks against already exists in Production — this
+is not a hypothetical: **Creepy #1, Warren Publishing, 1964**,
+`gkAssetId 01a02d23-1acb-72e8-aae3-8f851308e9cf`,
+`mediaId 01a02d23-2809-7024-9312-d45bb5003014`.
+
+1. **From the phone**, independently: `POST
    https://comic-vault-rouge.vercel.app/api/auth-login` with `{
    "passphrase": "<the current rotated passphrase, read from
    C:\grailkey-data\data-1\OPERATOR-PASSPHRASE-CURRENT.txt on the
    desktop — typed in on the phone directly, NEVER copied/shared as a
    token or screenshot between devices>" }`. This must be a fresh login
    the phone performs itself — not a token copied over from desktop.
-   Record the returned `token` value (on the phone only) and the
-   `gkAssetId` you intend to check.
-4. `GET /api/assets?gkAssetId=<id>` from the phone, using the phone's
-   OWN token in the `Authorization: Bearer` header. Record the
-   `currentIdentityAssignment.id` and the `media[0].id` (rewritten
-   `object_uri` path) from the response.
-5. `GET /api/asset-media?mediaId=<id>` from the phone (same header) —
-   either via a raw HTTP client or an `<img src>` with the header
-   attached. Record: does the real photo render, and its byte length
-   (visible via the HTTP response's `Content-Length` if your client
-   shows it, or by saving the file and checking its size).
-6. **Independently, from the desktop**, using a SEPARATE login (do not
-   reuse the phone's token): repeat steps 3–5 for the identical
-   `gkAssetId`/`mediaId`. Record the same three data points.
-7. **Milestone Ten closes when, and only when:** the
-   `currentIdentityAssignment.id` matches between phone and desktop, the
-   `media[0].id` matches, and the retrieved photo's byte length matches
-   — two independently-authenticated sessions, two physically separate
-   devices, identical persistent state. Report back what you saw on
-   each device (id values and byte length are fine to report; the
-   passphrase and any token values are not — Secret Hygiene applies to
-   this report too).
+   Record the returned `token` (on the phone only).
+2. `GET /api/assets?gkAssetId=01a02d23-1acb-72e8-aae3-8f851308e9cf`
+   from the phone, using the phone's OWN token in the `Authorization:
+   Bearer` header. Record: does the identity show Creepy #1, 1964?
+   What is `currentIdentityAssignment.id`? What is `media[0].id`
+   (should read `01a02d23-2809-7024-9312-d45bb5003014`)?
+3. `GET /api/asset-media?mediaId=01a02d23-2809-7024-9312-d45bb5003014`
+   from the phone (same header) — either a raw HTTP client or an
+   `<img src>` with the header attached. Record: does the real Creepy
+   #1 cover photo render? What byte length does your client report (it
+   should be **108209** if visible — via `Content-Length`, or by
+   saving the file and checking its size)?
+4. **Independently, from the desktop**, using a SEPARATE login (do not
+   reuse the phone's token): repeat steps 1–3 for the identical
+   `gkAssetId`/`mediaId`. Record the same data points.
+5. **Milestone Ten closes when, and only when:** the
+   `currentIdentityAssignment.id` matches between phone and desktop,
+   `media[0].id` matches (`01a02d23-2809-7024-9312-d45bb5003014` on
+   both), and the retrieved photo's byte length matches (108209 on
+   both) — two independently-authenticated sessions, two physically
+   separate devices, identical persistent state, the same real book.
+   Report back what you saw on each device (id values and byte length
+   are fine to report; the passphrase and any token values are not —
+   Secret Hygiene applies to this report too).
 
 ---
 
