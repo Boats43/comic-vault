@@ -456,6 +456,76 @@ export async function transferOwnership({ principalId, gkAssetId, toPrincipalId,
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// linkCollectionItem / resolveCollectionItemLink — CAPTURE-INT (Task 1a).
+// A routing lookup, never an identity claim: collectionItemId !=
+// gkAssetId (GK-145's law, formalized). linkCollectionItem throws
+// ConflictError rather than silently repointing an existing link to a
+// different asset — a genuine "relink" need is a named, unsolved open
+// item (see db/data0/0007_capture_integration_linkage.sql), not
+// defaulted to either "overwrite" or "reject silently."
+// ─────────────────────────────────────────────────────────────────────
+export async function linkCollectionItem({ principalId, collectionItemId, gkAssetId, idempotencyKey, correlationId } = {}) {
+  requireFields({ principalId, collectionItemId, gkAssetId }, ['principalId', 'collectionItemId', 'gkAssetId']);
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'linkCollectionItem';
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      await assertAssetExists(client, gkAssetId);
+      const existing = await repo.getCollectionItemLink(client, { collectionItemId });
+      if (existing) {
+        if (existing.gk_asset_id !== gkAssetId) {
+          throw new ConflictError(
+            `collectionItemId "${collectionItemId}" is already linked to a different gkAssetId ` +
+            `(${existing.gk_asset_id}) — cannot relink to ${gkAssetId} (no relink mechanism in v1)`
+          );
+        }
+        const result = { collectionItemId, gkAssetId, outcome: 'already-linked' };
+        await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+        await client.query('COMMIT');
+        return result;
+      }
+
+      await repo.insertCollectionItemLink(client, { collectionItemId, gkAssetId, principalId });
+      await repo.writeDomainEvent(client, {
+        eventType: 'collection-item.linked', actorPrincipalId: principalId, actorKind: 'user',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { collectionItemId },
+        correlationId: correlationId || await newCorrelationId(client),
+      });
+
+      const result = { collectionItemId, gkAssetId, outcome: 'linked' };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// Read-only, no transaction — mirrors getPhysicalAsset's own shape.
+export async function resolveCollectionItemLink({ principalId, collectionItemId } = {}) {
+  requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const link = await repo.getCollectionItemLink(client, { collectionItemId });
+    return link ? { gkAssetId: link.gk_asset_id } : null;
+  } finally {
+    client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // recordAcquisition
 // ─────────────────────────────────────────────────────────────────────
 export async function recordAcquisition({ principalId, gkAssetId, costAmount, costCurrency = 'USD', source, lotReference, idempotencyKey, correlationId } = {}) {

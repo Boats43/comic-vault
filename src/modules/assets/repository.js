@@ -173,6 +173,26 @@ export async function insertDecisionEvent(client, { assetId, recommendation, rea
   return id;
 }
 
+// CAPTURE-INT (db/data0/0007_capture_integration_linkage.sql) — a routing
+// lookup only ("which asset does a re-scan of this collection row attach
+// to"), never a claim about physical identity. collectionItemId !=
+// gkAssetId, per GK-145's own law, formalized here into a durable table.
+export async function insertCollectionItemLink(client, { collectionItemId, gkAssetId, principalId }) {
+  await client.query(
+    `INSERT INTO collection_item_link (collection_item_id, gk_asset_id, linked_by_principal_id)
+     VALUES ($1, $2, $3)`,
+    [collectionItemId, gkAssetId, principalId]
+  );
+}
+
+export async function getCollectionItemLink(client, { collectionItemId }) {
+  const res = await client.query(
+    `SELECT collection_item_id, gk_asset_id FROM collection_item_link WHERE collection_item_id = $1`,
+    [collectionItemId]
+  );
+  return res.rows[0] || null;
+}
+
 // Ruling 21's ratified envelope — event_id, event_type, occurred_at,
 // actor, subject, payload, correlation_id, schema_version. No
 // causation_id: that field is not part of the ratified envelope or the

@@ -18,6 +18,8 @@ export {
   recordAcquisition,
   recordValuation,
   recordDecision,
+  linkCollectionItem,
+  resolveCollectionItemLink,
 } from './service.js';
 
 export {
