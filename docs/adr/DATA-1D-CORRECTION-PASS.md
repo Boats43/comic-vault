@@ -182,12 +182,16 @@ runtime logs, never in the HTTP response.
 
 ## H6 — Preview before production
 
-**STATUS: PREVIEW AUTH/ASSET PROOF PASS — FULL MEDIA ROUND-TRIP BLOCKED (GK-166), first pass.**
-Relabeled per the consolidated pre-push pass instruction. See "GK-166
-infrastructure update" below for what has since changed — the label
-above records the state of the FIRST full round-trip specifically; it
-is superseded by that update, not deleted, so the record of what was
-actually observed at each point in time stays intact.
+**STATUS: PREVIEW AUTH/ASSET/MEDIA PROOF — FULL PASS (GK-166 CLOSED,
+2026-08-23).** History, in order: the FIRST full round-trip (below) hit
+a real media-storage gap and was labeled PREVIEW AUTH/ASSET PROOF
+PASS — FULL MEDIA ROUND-TRIP BLOCKED (GK-166). The "GK-166
+infrastructure update" section closed the storage layer (Blob
+provisioned, M4-6 passing). The "GK-166 real-photo capture proof"
+section, last, closes the ticket itself: a real photo of a real book,
+through the real capture path, retrieved byte-identical from a live
+Preview deployment. Every stage's actual result is kept below, not
+overwritten, so what was observed at each point in time stays intact.
 
 **Deployed and round-trip tested (2026-08-23).** A pre-existing,
 unrelated build-tooling gap was found and fixed first:
@@ -281,6 +285,56 @@ going forward are unaffected (written and read under the same active
 driver) — including the one this ticket's own closing proof will
 create — but this is a real production-readiness gap worth fixing
 before any broader cutover. Not fixed this pass; log-only.
+
+### GK-166 real-photo capture proof — CLOSED (2026-08-23, same day)
+
+Jimmy supplied a real photograph of a real physical book:
+`C:\Users\matam\Downloads\s-l500.jpg`, his own photo. Identity read
+directly off the photographed cover — "CREEPY," "No. 1," "35¢,"
+"COLLECTOR'S EDITION" — Creepy #1, Warren Publishing, 1964. Vision-
+sourced per this project's standing identity convention
+(`source: 'vision'`), never fabricated; no pricing/valuation/decision/
+acquisition data asserted, since none of that is real for this capture
+(Ruling 10 / this project's anti-fabrication discipline).
+
+**No substitution, no fixture — the REAL internal path, end to end**
+(`C:\grailkey-data\data-1\gk166-real-capture-proof.mjs`, local, not
+committed, real DB + real live Blob store):
+
+```
+SOURCE SHA-256:     811a86380961a7dd4a2096f58bf112294eb3b7c521dbb3e61c6f8d59014b9d63
+SOURCE BYTE LENGTH: 108209
+
+captureFromScan -> createPhysicalAsset -> attachMedia -> media.put() [vercel-blob]
+
+GK_ASSET_ID:  01a02d23-1acb-72e8-aae3-8f851308e9cf   (mint outcome: minted-new)
+MEDIA_ID:     01a02d23-2809-7024-9312-d45bb5003014
+BLOB REFERENCE: https://elu7tmuzwfjot0pk.private.blob.vercel-storage.com/
+                sha256/81/811a86380961a7dd4a2096f58bf112294eb3b7c521dbb3e61c6f8d59014b9d63
+
+CAPTURED SHA-256:   811a8638...4b9d63  (matches source)
+RETRIEVED SHA-256:  811a8638...4b9d63  (matches source, via media.getBytes())
+RETRIEVED LENGTH:   108209             (matches source)
+PROOF: source == retrieved -> true (Buffer.compare === 0)
+```
+
+6/6 local assertions passing.
+
+**Then the live Preview round-trip**, redeployed first to the full
+current stack (`083c8ff → d61f9ea → 5056fe0 → 2396c56 → 1f95cc7 →
+b3d11cb`, deployment `dpl_5Q4ftvpGGjye6Rs2caWPYgEPDNs7`):
+
+| Step | Result |
+|---|---|
+| Fresh login | `200`, real token |
+| `GET /api/assets?gkAssetId=01a02d23-...` | `200`, correct asset, `media[0].object_uri` rewritten to `/api/asset-media?mediaId=...` |
+| `GET /api/asset-media?mediaId=01a02d23-...` (authenticated) | `200`, `Content-Type: image/jpeg`, `Content-Length: 108209` |
+| Bytes served by Preview vs. the original source file | SHA-256 `811a8638...4b9d63` both — **byte-identical, `Buffer.compare === 0`** |
+| Same `mediaId`, UNAUTHENTICATED (negative control) | `401`, before storage touched — C1 holds for real data, not just fixtures |
+
+**GK-166 CLOSED.** The full chain — real photo → real capture → real
+Blob object → real authenticated retrieval over HTTPS, byte-identical
+— is proven, not asserted.
 
 ---
 
