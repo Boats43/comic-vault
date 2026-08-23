@@ -131,76 +131,114 @@ rejected.
 
 ## H5 — Production environment gate
 
-**Blocked this pass — reported honestly, not inferred.**
+**RESOLVED (2026-08-23, same day, after Vercel CLI login) — verified by
+real tooling, not inferred, values never displayed.**
 
-Attempted: `npx vercel@latest whoami` → `Logged out`. No interactive
-`vercel login` is possible from this environment. No MCP tool available
-in this session exposes environment-variable listing (`get_project`
-returns project/deployment metadata only, no env vars). Per this pass's
-own instruction, the stale, pre-Neon `.env.production` snapshot (dated
-2026-08-09, zero `GRAILKEY_*` entries) is explicitly NOT treated as
-evidence of Production's real current state — it is noted only as
-context that existed before this investigation, not as a substitute for
-it.
+`vercel env ls production` / `vercel env ls preview` (the CLI's own
+listing, values always shown only as `Encrypted`) confirmed, before any
+change: **zero** `GRAILKEY_*` variables existed in either environment —
+this matched, and for the first time actually PROVED rather than merely
+echoed, the stale `.env.production` snapshot's implication.
 
-**Fail-closed behavior IS verified** (code trace + the H2 live tests
-above): if either `GRAILKEY_SESSION_SECRET` or
-`GRAILKEY_CATALOG_DATABASE_URL` is missing or too weak in a real
-deployment, all three endpoints (`api/auth-login.js`, `api/assets.js`,
-`api/asset-media.js`) already catch the resulting error in a generic
-handler and return `{error:'Internal error'}` with HTTP 500 — no stack
-trace, no secret value, reaches the caller. This was true before this
-pass and is unchanged by it; the new secret-strength floor makes the
-failure trigger a bit earlier (a WEAK secret now also fails closed, not
-just a MISSING one) but the response shape is identical either way.
+**Added, per Jimmy's ruling:**
+- `GRAILKEY_CATALOG_DATABASE_URL` — the real `data1_dev` Neon connection
+  string, the SAME value in Production and Preview. Rationale on record:
+  the milestone proof needs real assets, the deployed surface is
+  read-only (no production capture/write path exists yet), and
+  `data1_dev` is the designated proving ground. **Open item, logged
+  (`GK-164` update, `docs/TICKET-REGISTRY.md`):** the production-capture
+  era revisits DB promotion vs. a true, separate branch — an existing
+  reserved decision, not reopened by this pass.
+- `GRAILKEY_SESSION_SECRET` — freshly generated (48 random bytes,
+  base64url, well above the 32-char floor), **a DIFFERENT value in each
+  environment.** Rationale: Preview and Production must never share a
+  signing secret — a token minted under a Preview login must never
+  verify against Production, and vice versa. Sharing one secret would
+  make Preview (generally more exposed, more people can trigger deploys
+  of it) a backdoor into Production session forgery.
+- `GRAILKEY_SESSION_EPOCH` — explicitly set to `1` in both (explicit
+  beats an unstated default, even though the code's default is already
+  `'1'`).
 
-### Jimmy's exact env-var checklist (Vercel dashboard → Project →
-### Settings → Environment Variables → Production)
+All added via `vercel env add <name> <env> --value "$(...)" --yes`,
+value piped from a local scratch file that was deleted immediately
+after — never printed in any command text, log, or report.
 
-Confirm ALL of the following are set for **Production** specifically
-(Preview/Development having them is not sufficient):
+**Re-run H5 table — all ✅, both environments, names only:**
 
-- [ ] `GRAILKEY_SESSION_SECRET` — a random string, **32+ characters**
-      (the code now enforces this floor; anything shorter fails closed
-      at request time, not at deploy time). Generate one with, e.g.:
-      `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`
-- [ ] `GRAILKEY_CATALOG_DATABASE_URL` — the Neon Postgres connection
-      string for the `data1_dev`-equivalent Production schema (or
-      whatever schema DATA-1's own Production cutover ultimately
-      targets — this pass does not change which schema is live).
-- [ ] (If DATA-1's Production storage driver differs from local
-      `localfs` — check `src/modules/media/` for which driver is
-      selected in a Vercel/serverless context) any storage-specific
-      credentials that driver requires.
-- [ ] After setting/changing any of the above, a new deployment is
-      required — Vercel does not hot-reload env vars into already-running
-      function instances.
+| Var | Production | Preview |
+|---|---|---|
+| `GRAILKEY_SESSION_SECRET` | ✅ present | ✅ present |
+| `GRAILKEY_CATALOG_DATABASE_URL` | ✅ present | ✅ present |
+| `GRAILKEY_SESSION_EPOCH` | ✅ present | ✅ present |
 
-**Once confirmed:** re-run this checklist's result back into
-`docs/PATTERN-LIBRARY.md`'s GK-164 entry as a dated confirmation line,
-the same discipline every other environment-gate finding in this repo
-follows.
+**Fail-closed behavior confirmed live, not just by code trace** — see
+H6's asset-media result below: a real missing-driver failure on Preview
+produced a clean `{error:'Internal error'}` 500, with the real cause
+(`no object at localfs://...`) visible only in Vercel's own server-side
+runtime logs, never in the HTTP response.
 
 ---
 
 ## H6 — Preview before production
 
-**Blocked this pass, same root cause as H5** — no authenticated Vercel
-CLI session, so `vercel deploy` (preview target) cannot run from this
-environment, and this pass does not push to any branch (main or
-otherwise) to trigger an auto-preview, since the top-level instruction
-for this pass is DO NOT PUSH without qualification.
+**Deployed and round-trip tested (2026-08-23).** A pre-existing,
+unrelated build-tooling gap was found and fixed first:
+`scripts/inject-build-id.js` shelled out to `git rev-parse` to stamp a
+build ID, which fails in Vercel's remote build container for a local
+CLI `vercel deploy` (no `.git` directory uploaded, unlike a
+git-triggered build) — fixed with a fallback to
+`VERCEL_GIT_COMMIT_SHA`, committed separately (`2396c56`, unrelated to
+the DATA-1D auth lane, not folded into GK-164).
 
-**Once H5 is resolved (Jimmy logs in via `vercel login` or provides a
-token), the concrete next step is:**
-```
-vercel link            # confirm this links to the existing comic-vault project
-vercel deploy          # preview target (no --prod flag)
-```
-then run the login → asset metadata → asset-media round-trip against
-the resulting preview URL before any push to `main`. Production
-scanner/capture wiring stays forbidden regardless of preview outcome,
-per this pass's own standing instruction.
+**Preview URL:** `https://comic-vault-hbd5y7p2u-boats43s-projects.vercel.app`
+(deployment `dpl_5X6hu8SNMnPJwB9baRkjHW3Zvb7x`, stack
+`083c8ff → d61f9ea → 5056fe0 → 2396c56`, READY).
+
+Note: this project has Vercel Deployment Protection enabled on Preview
+(an SSO wall in front of every route, including API routes) — bypassed
+for testing via a temporary shareable-access cookie
+(`get_access_to_vercel_url`), 23h TTL, unrelated to the app's own auth.
+
+**Full round-trip, real HTTPS requests against the live Preview URL:**
+
+| Step | Result |
+|---|---|
+| Login, wrong passphrase | `401 {"error":"Invalid credentials"}` ✅ |
+| Login, correct passphrase | `200`, real token (186 chars), real `expiresAt` ✅ |
+| Login, rate-limit boundary | `x-ratelimit-remaining` counted down request-by-request to `0`; requests 30–33 all `429 Too Many Requests` ✅ |
+| Authenticated asset list | `200`, 54 real assets (Jimmy's real `data1_dev` collection) ✅ |
+| Authenticated asset fetch (real asset, title "creepy") | `200`, real identity/valuation/decision graph, media `object_uri` correctly rewritten to `/api/asset-media?...` ✅ |
+| Asset-media, UNAUTHENTICATED | `401 {"error":"Missing, invalid, or expired token"}` — before storage is ever touched (C1, proven live) ✅ |
+| Asset-media, AUTHENTICATED | `500 {"error":"Internal error"}` — see below |
+
+**The one incomplete step, root-caused via real Vercel runtime logs
+(not guessed):** `[asset-media] unexpected error: no object at
+localfs://sha256/87/872c...` — the media STORAGE layer has no working
+driver in Preview/Production. `localfs` (this repo's only
+dev/test-proven driver) resolves its root to a local Windows path that
+obviously doesn't exist on Vercel's serverless filesystem; the
+`vercel-blob` driver exists in code but has never been provisioned
+against a real Blob store (matches the pre-existing `m4-media-proof.mjs`
+gate M4-6, `BLOCKED-ON-PRIMARY-PROVISIONING`). **This is NOT a DATA-1D
+auth defect** — authorization correctly ran and passed BEFORE the
+storage call, matching C1's designed order exactly; the failure is one
+layer downstream, in a different subsystem (DATA-1C media), and fails
+closed just as cleanly (generic 500, no stack trace, no secret,
+confirmed via Vercel's own runtime logs showing the real cause
+server-side only). Logged as `GK-166` (new), not fixed here — needs its
+own provisioning decision (a real Vercel Blob store + token) before any
+Preview/Production media-byte round-trip can pass.
+
+**Verdict: the auth mechanism itself — login, rate-limiting, DB-backed
+per-principal authorization, and the C1 authorize-before-storage
+guarantee — is now proven live on a real Vercel deployment, not just
+locally.** Media BYTE retrieval is blocked by a separate, pre-existing,
+now-disclosed storage-provisioning gap (`GK-166`), unrelated to this
+lane's own scope.
+
+Still not pushed to `main`. This round-trip result is the basis for the
+next push ruling.
 
 ---
 
@@ -285,10 +323,20 @@ physical device.
 - `CLAUDE.md` — new Secret Hygiene standing rule + Pattern Library index
   line.
 - `docs/PATTERN-LIBRARY.md` — GK-164 full writeup.
-- `docs/TICKET-REGISTRY.md` — GK-164 entry (OPEN).
+- `docs/TICKET-REGISTRY.md` — GK-164/165/166 entries.
 - `docs/adr/DATA-1D-CORRECTION-PASS.md` — this document.
+- `docs/adr/DATA-1D-AUTH-CROSS-DEVICE.md` — scrubbed (part of the H1
+  history rewrite, not a normal edit — see H1 above).
+- `scripts/inject-build-id.js` — unrelated build-tooling fix, own commit
+  (`2396c56`), needed to unblock the H6 Preview deploy.
+
+Vercel project config touched (not repo files): `GRAILKEY_SESSION_SECRET`
+/ `GRAILKEY_CATALOG_DATABASE_URL` / `GRAILKEY_SESSION_EPOCH` added to
+Production and Preview via `vercel env add` (H5).
 
 Not committed (local scratch, outside the repo, same precedent as every
 other DATA-1x proof script): `rotate-operator-credential.mjs`,
 `verify-rotation.mjs`, `verify-epoch.mjs`, `verify-weak-secret.mjs`,
-`OPERATOR-PASSPHRASE-CURRENT.txt` — all under `C:\grailkey-data\data-1\`.
+`OPERATOR-PASSPHRASE-CURRENT.txt`, `find-creepy*.mjs`,
+`inspect-cols.mjs`, `check-p1-and-creepy-media.mjs` — all under
+`C:\grailkey-data\data-1\`.
