@@ -2,19 +2,31 @@
 // outside src/modules/media/ — enforced by
 // tests/media-module-boundary.test.js.
 //
-// SPEC'D, NOT PROVISIONED (DATA-1C, Task 1 / C7). `@vercel/blob` is not
-// installed in this repo's package.json and no BLOB_READ_WRITE_TOKEN
-// exists in any of this project's .env* files as of this dispatch —
-// confirmed by direct grep, not assumed. This file is real code against
-// the documented @vercel/blob API, dynamically imported (never a static
-// top-level `import`) specifically so its absence cannot break any build
-// or test that doesn't actually select this driver. It has NOT been
-// exercised against a live store — the M4 proof suite (DATA-1C) runs
-// against driver-localfs.js only. See docs/adr/DATA-1C-MEDIA-DESIGN.md,
-// Task 1, for exactly what provisioning this requires (Jimmy's action)
-// and the disclosed uncertainty around head()'s exact return shape,
-// which needs re-verification against the installed package version the
-// first time this driver actually runs.
+// PROVISIONED AND PROVEN (GK-166, 2026-08-23). `@vercel/blob` is
+// installed; a real, private Vercel Blob store
+// (comic-vault-media-primary, store_ELU7TMUZwfjot0Pk, iad1) is
+// connected to this project, with BLOB_READ_WRITE_TOKEN set in
+// Development/Preview/Production. This driver became the proving-ground
+// PRIMARY driver this dispatch — the first real cloud implementation of
+// the MediaStorage contract, not localfs — closing M4-6
+// (`m4-media-proof.mjs`, BLOCKED-ON-PRIMARY-PROVISIONING → PASS): the
+// same round-trip/immutability/hash-mismatch storage-contract suite
+// M4-2/M4-3/M4-5 run against localfs now also runs, and passes, against
+// this live store. Dynamically imported (never a static top-level
+// `import`) specifically so an environment with no Blob store
+// configured (MEDIA_STORAGE_DRIVER left at its 'localfs' default) is
+// never affected by this file at all. This is a proving-ground choice,
+// not a permanent vendor commitment — the adapter boundary
+// (src/modules/media/index.js's driver selection) keeps it demotable if
+// a future dispatch has reason to switch.
+//
+// One real bug found and fixed while proving this for real: the
+// "pathname already exists" recovery path below originally called
+// head() with a placeholder scheme (`vercel-blob-key:${key}`) that was
+// never a valid input — silently defeating the whole recovery branch.
+// Fixed to pass the real, deterministic content-addressed key directly;
+// confirmed against the installed @vercel/blob's own type definitions
+// that head()/get() both accept a bare pathname, not only a full URL.
 
 import { sha256Hex, deriveKey } from './contentAddress.js';
 import { HashMismatchError, MediaNotFoundError, NotProvisionedError } from './errors.js';
@@ -63,15 +75,19 @@ export async function put({ bytes, contentType, sha256 }) {
     });
     return { objectUri: result.url, bytesStored: bytes.length, sha256Verified: actualHash, created: true };
   } catch (e) {
-    // Disclosed uncertainty: the exact error shape @vercel/blob throws
-    // for "pathname already exists, allowOverwrite not set" has not been
-    // confirmed against a live store in this dispatch (no store is
-    // provisioned to test against — see the module header). Matching
-    // defensively on message text until that's verified for real.
+    // GK-166 (2026-08-23) — verified for real against a live store: the
+    // installed @vercel/blob's own head()/get() BOTH accept a bare
+    // pathname, not only a full URL (confirmed directly against
+    // node_modules/@vercel/blob's own type definitions — `head(urlOrPathname:
+    // string, ...)`). The original placeholder scheme
+    // (`vercel-blob-key:${key}`) below was never a valid input to
+    // head() and silently defeated this entire recovery path — fixed to
+    // pass the real, deterministic `key` directly.
     if (/already exists|overwrite/i.test(e?.message || '')) {
-      const existing = await head({ objectUri: `vercel-blob-key:${key}` }).catch(() => null);
-      if (existing?.exists) {
-        return { objectUri: existing.objectUri, bytesStored: bytes.length, sha256Verified: actualHash, created: false };
+      const { head: blobHeadFn } = await loadSdk();
+      const meta = await blobHeadFn(key).catch(() => null);
+      if (meta) {
+        return { objectUri: meta.url, bytesStored: bytes.length, sha256Verified: actualHash, created: false };
       }
     }
     throw e;

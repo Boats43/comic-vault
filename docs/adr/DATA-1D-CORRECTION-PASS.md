@@ -182,6 +182,13 @@ runtime logs, never in the HTTP response.
 
 ## H6 — Preview before production
 
+**STATUS: PREVIEW AUTH/ASSET PROOF PASS — FULL MEDIA ROUND-TRIP BLOCKED (GK-166), first pass.**
+Relabeled per the consolidated pre-push pass instruction. See "GK-166
+infrastructure update" below for what has since changed — the label
+above records the state of the FIRST full round-trip specifically; it
+is superseded by that update, not deleted, so the record of what was
+actually observed at each point in time stays intact.
+
 **Deployed and round-trip tested (2026-08-23).** A pre-existing,
 unrelated build-tooling gap was found and fixed first:
 `scripts/inject-build-id.js` shelled out to `git rev-parse` to stamp a
@@ -239,6 +246,41 @@ lane's own scope.
 
 Still not pushed to `main`. This round-trip result is the basis for the
 next push ruling.
+
+### GK-166 infrastructure update (same day, consolidated pre-push pass)
+
+A real, private Vercel Blob store is now provisioned and connected to
+Preview/Production (`BLOB_READ_WRITE_TOKEN` set in all three
+environments); `MEDIA_STORAGE_DRIVER=vercel-blob` set in Preview/
+Production. A real bug in `driver-vercel-blob.js`'s own "already
+exists" recovery path was found and fixed (a placeholder objectUri
+scheme that was never valid input to `head()`). `m4-media-proof.mjs`'s
+M4-6 gate — the same round-trip/immutability/hash-mismatch
+storage-contract suite already proven against `localfs` — now also
+passes (10/10) against the LIVE Blob store. Full detail:
+`docs/TICKET-REGISTRY.md`, "GK-166."
+
+**What this does NOT yet close:** GK-166 itself stays OPEN. The
+instruction's own bar is a genuine NEW capture — real comic, real
+photograph — through the internal capture integration, landing in
+Blob, retrieved byte-identical through the live Preview's authenticated
+`asset-media` endpoint. That step needs a real photo file, which this
+environment cannot supply itself (no camera, no verified-provenance
+photo of an actual physical book reachable locally) — asked Jimmy
+directly rather than substituting a found file of unknown provenance,
+per the instruction's own explicit fallback.
+
+**A related, real gap found and logged while closing M4-6, not yet
+hit in production:** `GK-167` — driver selection
+(`src/modules/media/index.js`) is global (`MEDIA_STORAGE_DRIVER`), not
+per-object (based on the `object_uri` scheme already stored on a
+row) — switching the driver, as this update just did, means every
+row written under the OLD driver (every existing `localfs://...` media
+row) would fail to read through the new one if fetched. New captures
+going forward are unaffected (written and read under the same active
+driver) — including the one this ticket's own closing proof will
+create — but this is a real production-readiness gap worth fixing
+before any broader cutover. Not fixed this pass; log-only.
 
 ---
 

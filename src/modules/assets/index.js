@@ -1,6 +1,6 @@
 // src/modules/assets/index.js — PUBLIC. The only file anything outside
-// src/modules/assets/ may import. Re-exports the nine service functions
-// and the five error classes — nothing else. repository.js, db.js, and
+// src/modules/assets/ may import. Re-exports the service functions and
+// the error classes — nothing else. repository.js, db.js, and
 // idempotency.js are never re-exported here and never imported directly
 // by any file outside this directory (see
 // tests/assets-module-boundary.test.js, S3-11).
@@ -29,6 +29,7 @@ export {
   NotFoundError,
   ConflictError,
   IdempotentReplayError,
+  IdempotencyConflictError,
   ValidationFailedError,
   AuthorizationFailedError,
 } from './errors.js';

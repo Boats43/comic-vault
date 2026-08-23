@@ -49,3 +49,15 @@ export class AuthorizationFailedError extends AssetServiceError {
     super('AUTHORIZATION_FAILED', message);
   }
 }
+
+// GK-163 — the same idempotencyKey was reused for a request whose
+// semantic payload doesn't match the original call. Distinct from
+// ConflictError (a business-rule conflict, e.g. relinking a
+// collectionItemId already linked elsewhere): this is specifically
+// "the replay mechanism itself detected a mismatch," never a silent
+// stale-success return.
+export class IdempotencyConflictError extends AssetServiceError {
+  constructor(message) {
+    super('IDEMPOTENCY_CONFLICT', message);
+  }
+}

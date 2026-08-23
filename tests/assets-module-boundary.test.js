@@ -97,7 +97,7 @@ const REQUIRED_EXPORTS = [
   'createPhysicalAsset', 'getPhysicalAsset', 'assignIdentity', 'correctIdentity',
   'attachMediaMetadata', 'attachMedia', 'transferOwnership', 'recordAcquisition', 'recordValuation', 'recordDecision',
   'linkCollectionItem', 'resolveCollectionItemLink', 'listMyAssets', 'getMediaById',
-  'AssetServiceError', 'NotFoundError', 'ConflictError', 'IdempotentReplayError', 'ValidationFailedError', 'AuthorizationFailedError',
+  'AssetServiceError', 'NotFoundError', 'ConflictError', 'IdempotentReplayError', 'IdempotencyConflictError', 'ValidationFailedError', 'AuthorizationFailedError',
 ];
 for (const name of REQUIRED_EXPORTS) {
   assertTrue(indexSrc.includes(name), `index.js re-exports ${name}`);

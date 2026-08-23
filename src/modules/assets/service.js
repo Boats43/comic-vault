@@ -20,7 +20,7 @@
 import { createHash } from 'node:crypto';
 import * as repo from './repository.js';
 import { acquireConnection } from './db.js';
-import { checkIdempotencyReplay, claimIdempotencyKey } from './idempotency.js';
+import { checkIdempotencyReplay, claimIdempotencyKey, computeRequestFingerprint } from './idempotency.js';
 import { NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError } from './errors.js';
 import * as media from '../media/index.js';
 
@@ -98,7 +98,12 @@ export async function createPhysicalAsset({ principalId, captureBasis, assetClas
     await client.query('BEGIN');
     try {
       const operation = 'createPhysicalAsset';
-      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      // GK-163 — semantic payload: what asset this call is minting, from
+      // what capture basis, as what class, via what source. Two calls
+      // under the same idempotencyKey but a different captureBasis are
+      // NOT the same request.
+      const requestFingerprint = computeRequestFingerprint({ captureBasis, assetClass, source });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) {
         await client.query('COMMIT');
         return replay;
@@ -138,7 +143,7 @@ export async function createPhysicalAsset({ principalId, captureBasis, assetClas
       }
 
       const result = { assetId: mint.assetId, basisId: mint.basisId, outcome: mint.outcome };
-      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
       await client.query('COMMIT');
       return result;
     } catch (e) {
@@ -219,7 +224,13 @@ export async function assignIdentity({ principalId, gkAssetId, catalogEntityId =
     await client.query('BEGIN');
     try {
       const operation = 'assignIdentity';
-      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      // GK-163 — semantic payload: which asset, to which catalog entity,
+      // asserted with what authority/source. Not the mediaId/evidence
+      // internals beyond what actually changes the assertion's meaning.
+      const requestFingerprint = computeRequestFingerprint({
+        gkAssetId, catalogEntityId, authority: evidence.authority, source: evidence.source,
+      });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
@@ -235,7 +246,7 @@ export async function assignIdentity({ principalId, gkAssetId, catalogEntityId =
       });
 
       const result = { assignmentId };
-      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
       await client.query('COMMIT');
       return result;
     } catch (e) {
@@ -261,7 +272,13 @@ export async function correctIdentity({ principalId, gkAssetId, newCatalogEntity
     await client.query('BEGIN');
     try {
       const operation = 'correctIdentity';
-      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      // GK-163 — semantic payload: asset+assignment, per the ticket's own
+      // wording — which asset, corrected to which new catalog entity.
+      // `reason` is audit-trail text about WHY, not part of WHAT is being
+      // asserted, so it's deliberately excluded (matches correctIdentity's
+      // own asset+assignment spec exactly).
+      const requestFingerprint = computeRequestFingerprint({ gkAssetId, newCatalogEntityId: newCatalogEntityId ?? null });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
@@ -283,7 +300,7 @@ export async function correctIdentity({ principalId, gkAssetId, newCatalogEntity
       });
 
       const result = { assignmentId };
-      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
       await client.query('COMMIT');
       return result;
     } catch (e) {
@@ -309,7 +326,13 @@ export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields,
     await client.query('BEGIN');
     try {
       const operation = 'attachMediaMetadata';
-      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      // GK-163 — semantic payload: which asset, what evidence (type +
+      // content hash + where it lives). Two calls under the same key
+      // describing different bytes/location are NOT the same request.
+      const requestFingerprint = computeRequestFingerprint({
+        gkAssetId, mediaType: mediaFields.mediaType, contentHash: mediaFields.contentHash, objectUri: mediaFields.objectUri ?? null,
+      });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
@@ -326,7 +349,7 @@ export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields,
       });
 
       const result = { mediaId };
-      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
       await client.query('COMMIT');
       return result;
     } catch (e) {
@@ -357,16 +380,20 @@ export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields,
 // D4 — idempotencyKey is now REQUIRED (was optional). A caller-omitted
 // key made "was this the same command or a new one" undecidable, which
 // D3's row-per-call semantics can no longer tolerate. A request
-// fingerprint (sha256 of {gkAssetId, captureRole, sha256}) is stored
-// alongside the idempotency claim and re-checked on every replay hit:
-// same key + same semantic request -> the original result, verbatim;
-// same key + a DIFFERENT asset/role/content -> a typed ConflictError,
-// never a silent wrong-answer replay. checkIdempotencyReplay/
-// claimIdempotencyKey themselves (src/modules/assets/idempotency.js)
-// are untouched — they have no fingerprint concept for ANY of the other
-// 9 DATA-1B operations either (a real, wider gap, out of this bounded
-// correction's scope) — the fingerprint is carried inside THIS
-// operation's own result_snapshot JSONB instead, not a schema change.
+// fingerprint (sha256 of {gkAssetId, captureRole, sha256}) is checked on
+// every replay hit: same key + same semantic request -> the original
+// result, verbatim; same key + a DIFFERENT asset/role/content -> a typed
+// error, never a silent wrong-answer replay.
+//
+// GK-163 UPDATE (docs/TICKET-REGISTRY.md) — this was originally the ONE
+// operation with this protection, hand-rolled inline (fingerprint stored
+// inside result_snapshot JSONB, since no shared column existed yet).
+// checkIdempotencyReplay/claimIdempotencyKey (idempotency.js) now carry
+// this as a class-wide law (a real `request_fingerprint` column,
+// migration 0010) — this function was migrated onto that same shared
+// mechanism rather than staying a bespoke tenth copy, so the whole
+// module has exactly ONE idempotency-conflict implementation, not one
+// original plus nine new ones.
 //
 // D5 — ordering, corrected. A non-transactional preflight (principal +
 // asset existence) runs BEFORE the storage PUT; the PUT itself runs
@@ -393,9 +420,8 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
   // computation from the same real bytes — defense in depth, never a
   // caller-declared value trusted for storage.
   const sha256 = createHash('sha256').update(bytes).digest('hex');
-  const requestFingerprint = createHash('sha256')
-    .update(JSON.stringify({ gkAssetId, captureRole, sha256 }))
-    .digest('hex');
+  // GK-163 — semantic payload: which asset, what role, what content.
+  const requestFingerprint = computeRequestFingerprint({ gkAssetId, captureRole, sha256 });
 
   // D5 — non-transactional preflight, strictly BEFORE any storage I/O.
   const preflight = await acquireConnection();
@@ -430,18 +456,10 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
     await client.query('BEGIN');
     try {
       const operation = 'attachMedia';
-      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) {
-        if (replay.requestFingerprint !== requestFingerprint) {
-          throw new ConflictError(
-            `idempotencyKey "${idempotencyKey}" was already used for a different request ` +
-            `(gkAssetId/captureRole/content differ from the original call) — the same key ` +
-            `must represent the same semantic request`
-          );
-        }
         await client.query('COMMIT');
-        const { requestFingerprint: _drop, ...publicResult } = replay;
-        return publicResult;
+        return replay;
       }
 
       // Re-verified again here, not just trusted from the preflight —
@@ -464,8 +482,7 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
 
       const publicResult = { mediaId, objectUri: stored.objectUri, sha256, outcome };
       await claimIdempotencyKey(client, {
-        operation, idempotencyKey, principalId,
-        result: { ...publicResult, requestFingerprint },
+        operation, idempotencyKey, principalId, result: publicResult, requestFingerprint,
       });
       await client.query('COMMIT');
       return publicResult;
@@ -495,7 +512,10 @@ export async function transferOwnership({ principalId, gkAssetId, toPrincipalId,
     await client.query('BEGIN');
     try {
       const operation = 'transferOwnership';
-      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      // GK-163 — semantic payload: asset+destination+type+reason, per the
+      // ticket's own wording.
+      const requestFingerprint = computeRequestFingerprint({ gkAssetId, toPrincipalId, type, reason });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
@@ -514,7 +534,7 @@ export async function transferOwnership({ principalId, gkAssetId, toPrincipalId,
       });
 
       const result = { ownershipEventId };
-      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
       await client.query('COMMIT');
       return result;
     } catch (e) {
@@ -544,7 +564,9 @@ export async function linkCollectionItem({ principalId, collectionItemId, gkAsse
     await client.query('BEGIN');
     try {
       const operation = 'linkCollectionItem';
-      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      // GK-163 — semantic payload: which collectionItemId, to which asset.
+      const requestFingerprint = computeRequestFingerprint({ collectionItemId, gkAssetId });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
@@ -558,7 +580,7 @@ export async function linkCollectionItem({ principalId, collectionItemId, gkAsse
           );
         }
         const result = { collectionItemId, gkAssetId, outcome: 'already-linked' };
-        await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+        await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
         await client.query('COMMIT');
         return result;
       }
@@ -572,7 +594,7 @@ export async function linkCollectionItem({ principalId, collectionItemId, gkAsse
       });
 
       const result = { collectionItemId, gkAssetId, outcome: 'linked' };
-      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
       await client.query('COMMIT');
       return result;
     } catch (e) {
@@ -616,7 +638,12 @@ export async function recordAcquisition({ principalId, gkAssetId, costAmount, co
     await client.query('BEGIN');
     try {
       const operation = 'recordAcquisition';
-      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      // GK-163 — semantic payload: what was acquired, for how much, from
+      // where, out of which lot.
+      const requestFingerprint = computeRequestFingerprint({
+        gkAssetId, costAmount, costCurrency, source, lotReference: lotReference ?? null,
+      });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
@@ -632,7 +659,7 @@ export async function recordAcquisition({ principalId, gkAssetId, costAmount, co
       });
 
       const result = { acquisitionEventId };
-      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
       await client.query('COMMIT');
       return result;
     } catch (e) {
@@ -657,7 +684,10 @@ export async function recordValuation({ principalId, gkAssetId, valueAmount, val
     await client.query('BEGIN');
     try {
       const operation = 'recordValuation';
-      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      // GK-163 — semantic payload: asset+amount+currency+basis, per the
+      // ticket's own wording ("basis" = the valuation method).
+      const requestFingerprint = computeRequestFingerprint({ gkAssetId, valueAmount, valueCurrency, method });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
@@ -674,7 +704,7 @@ export async function recordValuation({ principalId, gkAssetId, valueAmount, val
       });
 
       const result = { valuationEventId };
-      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
       await client.query('COMMIT');
       return result;
     } catch (e) {
@@ -698,7 +728,13 @@ export async function recordDecision({ principalId, gkAssetId, recommendation, r
     await client.query('BEGIN');
     try {
       const operation = 'recordDecision';
-      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey });
+      // GK-163 — semantic payload: asset+decision semantics, per the
+      // ticket's own wording (recommendation + reasonCodes + which
+      // valuation it's grounded in).
+      const requestFingerprint = computeRequestFingerprint({
+        gkAssetId, recommendation, reasonCodes, valuationEventId: valuationEventId ?? null,
+      });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
@@ -714,7 +750,7 @@ export async function recordDecision({ principalId, gkAssetId, recommendation, r
       });
 
       const result = { decisionEventId };
-      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result });
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
       await client.query('COMMIT');
       return result;
     } catch (e) {
