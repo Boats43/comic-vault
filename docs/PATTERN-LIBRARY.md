@@ -12557,3 +12557,129 @@ any further trace or fix can be scoped.
 GK-148 committed locally, NOT pushed — report and ask before pushing.
 GK-149 stands as logged (`docs/TICKET-REGISTRY.md`), no code changed,
 blocked on evidence from Jimmy.
+
+## GK-164 — DATA-1D correction pass: credential disclosure, session hardening
+
+**Finding.** The original `docs/adr/DATA-1D-AUTH-CROSS-DEVICE.md` (T1),
+committed at (superseded SHA) `506f776`, printed Jimmy's real operator
+passphrase in cleartext as part of its own design narrative ("Jimmy's
+real, working credential this dispatch provisioned: passphrase
+`<redacted, was in cleartext>`"). `506f776` was confirmed via `git fetch
+origin` + `git log origin/main..HEAD` to be LOCAL ONLY — `origin/main`
+was still at `083c8ff` at investigation time, so the disclosure never
+reached the remote. Full 12-file `git log -S` sweep across every local
+branch found exactly one hit (this one file, this one commit) — no
+second disclosure site.
+
+**RULING (Jimmy, 2026-08-23) — rewrite before push.** Rebuild the local
+branch as `083c8ff → DATA-1D (scrubbed) → correction pass`, so the
+cleartext credential appears in no commit that will ever be pushed;
+`506f776` and the first correction commit become superseded local
+history. Do not run `reflog expire`/`gc` — that is a separate
+authorization. Executed exactly as ruled; see "History rewritten" below.
+
+**Rotation, done and proven, not merely claimed.** A local, uncommitted
+script (`C:\grailkey-data\data-1\rotate-operator-credential.mjs`,
+mirrors `set-operator-credential.mjs`'s own precedent) generated a new
+24-byte-random passphrase INSIDE the script (never passed as a CLI arg,
+never printed) and wrote it via the real `upsertCredential` path against
+the live `data1_dev` `principal_credential` row. Verified directly
+against the real DB: the disclosed old passphrase now returns
+`INVALID_CREDENTIAL`; the new one issues a real token. New value stored
+only at `C:\grailkey-data\data-1\OPERATOR-PASSPHRASE-CURRENT.txt`,
+outside the repo, never displayed in this session's output.
+
+**H2 mechanism hardening, all shipped and proven against the real DB:**
+- **Session-epoch revocation** (`src/modules/auth/token.js`) — token
+  payload gained an `epoch` claim (`GRAILKEY_SESSION_EPOCH`, defaults
+  `'1'`). Bumping the env var invalidates every outstanding token
+  immediately, independent of whether `GRAILKEY_SESSION_SECRET` is also
+  rotated — the actual gap a passphrase-only rotation left standing
+  (tokens are HMAC-signed by a separate secret; rotating the passphrase
+  alone does nothing to a token already issued). Proven live: a token
+  issued under epoch 1 verifies fine, is rejected the instant the epoch
+  bumps to 2, and a fresh epoch-2 token verifies under epoch 2.
+- **Secret-strength floor** — `token.js`'s `secret()` now refuses to
+  sign or verify under a `GRAILKEY_SESSION_SECRET` shorter than 32
+  chars, failing closed with a length-only error message (never logs
+  the value). Proven live against a deliberately weak secret.
+- **scrypt cost parameters pinned explicitly** (`credentials.js`) —
+  `N=16384, r=8, p=1` now named constants instead of node:crypto's
+  implicit defaults (functionally identical today; the point is the
+  values are now reviewable in a diff, not silently whatever a future
+  Node runtime happens to default to).
+- **Zero secret logging** — grepped `src/modules/auth/` and
+  `api/auth-login.js`/`api/assets.js`/`api/asset-media.js` for any
+  `console.*` referencing passphrase/token/secret/hash/salt material —
+  clean; the two existing `console.error` calls in `auth-login.js` log
+  only typed-error `.message` text, none of which carries credential
+  material (verified by reading each error class's constructor).
+- **Fail-closed, no leakage** — all three endpoints already returned a
+  generic `{error:'Internal error'}` 500 on any unexpected failure
+  (missing/weak secret, DB unreachable) with no stack trace and no
+  secret value reaching the response body; confirmed by code trace, not
+  changed (was already correct).
+
+**H3 — login abuse boundary.** `api/auth-login.js` already reuses
+`api/rate-limit.js` (the same 30-req/10-min sliding window
+`api/enrich.js` uses), checked before the passphrase comparison runs.
+Evidence for leaving it as-is rather than building a stricter
+login-specific limiter: the rotated passphrase carries ~192 bits of
+entropy (24 random bytes, base64url) — at any rate limit a single-IP
+attacker could plausibly sustain, brute-forcing it is not the real
+threat model here; the limiter's actual job is blunting scripted
+credential-stuffing/DoS noise, which the existing, already-proven
+mechanism does. Reused, not modified — matches T3's own "a real,
+working rate limiter, reused" precedent.
+
+**H4 — owner-only is temporary policy, restated explicitly.**
+`ADR-AUTH-001` and `GK-151`'s own registry line already say this
+(single-operator prototype, "acceptable today... categorically
+unacceptable the moment a second real user exists," GK-151 stays
+PARTIALLY-SATISFIED not CLOSED) — this correction pass adds no new
+authorization code and changes no status, only cross-references the
+existing language from the new `docs/adr/DATA-1D-CORRECTION-PASS.md`
+so a reader of the correction pass doesn't have to already know to look
+in the ADR.
+
+**H5/H6 — blocked on tooling, not attempted further.** No Vercel CLI
+session is authenticated in this environment (`vercel whoami` →
+`Logged out`) and no MCP tool exposes environment-variable listing —
+Production `GRAILKEY_SESSION_SECRET`/`GRAILKEY_CATALOG_DATABASE_URL`
+presence could NOT be verified via real Vercel tooling this pass (the
+stale, pre-Neon `.env.production` snapshot showing zero `GRAILKEY_*`
+entries is explicitly not treated as evidence of the live state, per
+the instruction). Preview deployment likewise not attempted — no
+authenticated deploy path available without an interactive `vercel
+login`. Both logged as blocked, not skipped.
+
+**History rewritten, per the ruling above.** Built via `git commit-tree`
+against a scratch index (`GIT_INDEX_FILE` pointed at a temp file — the
+real working directory and index were never touched mid-rewrite). The
+scrubbed `DATA-1D` commit's tree is byte-identical to `506f776`'s except
+one blob: `docs/adr/DATA-1D-AUTH-CROSS-DEVICE.md`, with its two
+cleartext-passphrase lines replaced by neutral, non-forward-referencing
+text (it reads as the original dispatch doc always read, not as a
+redaction notice). `git diff` between the old and new trees, restricted
+to that one file, confirmed the diff is exactly those two lines — no
+unintended content drift. The correction-pass commit was then rebuilt on
+top of the scrubbed commit instead of `506f776`, carrying forward every
+H2–H8 change from the first pass. `git log -S "<the disclosed
+passphrase>" --oneline --all` re-run after the rewrite: still exactly
+one hit, now confined to the superseded (unreachable-from-`main`, no
+longer HEAD's ancestor) commits only — see the companion report for the
+exact SHAs. Neither superseded commit was pruned (`reflog
+expire`/`gc` deliberately not run, per the ruling) — they remain locally
+recoverable via reflog, inert now that the credential itself is dead.
+
+GK-165 opened (log-only) for the S3 proof-suite assertion-count drift
+noticed while re-verifying the rewritten stack — see
+`docs/TICKET-REGISTRY.md`.
+
+### Handoff
+
+GK-164 CLOSED. Correction-pass commit sits on the rewritten stack,
+locally, NOT pushed. One item still blocks any push of this lane: H5/H6
+— Vercel CLI login + Production `GRAILKEY_*` env-var confirmation +
+Preview round-trip, none of which were possible from this environment
+this pass.
