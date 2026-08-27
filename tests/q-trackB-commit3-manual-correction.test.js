@@ -60,7 +60,11 @@ console.log('\n=== Track B Phase 0, Commit 3 — manual identity correction ===\
 // ══════════════════════════════════════════════════════════════════════════════
 console.log('Sanity: list invariants\n');
 {
-  assertEq(MANUAL_CORRECTION_ALLOWED_FIELDS.slice().sort(), ['issue', 'publisher', 'title', 'variant', 'year'], 'MANUAL_CORRECTION_ALLOWED_FIELDS is exactly title/issue/year/publisher/variant');
+  // GK-168 (2026-08-24, Creepy #1 facsimile dispatch) added 'printingClass'
+  // to this allow-list, server-side enum-validated (manualCorrection.js's
+  // normalizeManualPrintingClass/PRINTING_CLASS_ENUM) — updated here, not
+  // reverted, same treatment as Directive T's own 'variant' addition.
+  assertEq(MANUAL_CORRECTION_ALLOWED_FIELDS.slice().sort(), ['issue', 'printingClass', 'publisher', 'title', 'variant', 'year'], 'MANUAL_CORRECTION_ALLOWED_FIELDS is exactly title/issue/year/publisher/variant/printingClass');
   const overlap = IDENTITY_DEPENDENT_FIELDS_TO_CLEAR.filter((f) => IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE.includes(f));
   assertEq(overlap, [], 'zero overlap between the clear-list and the preserve-list');
   assertTrue(IDENTITY_DEPENDENT_FIELDS_TO_CLEAR.includes('decision'), 'clear-list includes decision (never inherit stale routing state)');

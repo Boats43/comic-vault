@@ -135,11 +135,30 @@ console.log('\nPart 1c: Sabrina production shape — vision "Dan Parent NYCC Foi
   );
 }
 
-console.log('\nPart 1d: cgc_cert (already sole-authority) is completely untouched by this mechanism');
+console.log('\nPart 1d: cgc_cert is still sole-authority, unaffected by THIS (AL) mechanism\'s corroboration machinery — GK-169 DOCTRINE NOTE: the original assertion here checked reconciled.value === \'CGC SS Signed Edition\' verbatim, bundling two separate claims into one check — (a) cgc_cert is not re-litigated by AL\'s corroboration/agreement logic, and (b) the exact raw string survives untouched. GK-169 (2026-08-24, plan review C1/F1-F4) supersedes (b): a per-copy authentication attribute ("SS"/"signed") is never legal confirmedVariant text, regardless of source authority — evidence strength does not change fact type, a CGC label is not exempt. Claim (a) is still true and re-asserted below; claim (b) is deliberately replaced, not preserved.');
 {
-  const { reconciled, candidate } = reconcileVariantFacet('CGC SS Signed Edition', 'cgc_cert', null);
-  check(reconciled.value === 'CGC SS Signed Edition' && reconciled.source === 'cgc_cert' && reconciled.authority === 'CORROBORATED', 'cgc_cert wins outright, unaffected — this dispatch never re-litigates the other 6 pipeline mechanisms');
+  // Pure-authentication label: nothing legitimate survives as variant
+  // identity once "SS"/"Signed" are stripped and the residual is run
+  // through the existing extractFirstEligibleVariantCandidate gate (no
+  // creator, no recognized axis token in bare "Edition") — the
+  // certification itself is preserved as copyAttributes, not discarded.
+  const { reconciled, candidate, copyAttributes } = reconcileVariantFacet('CGC SS Signed Edition', 'cgc_cert', null);
+  check(reconciled.value === null && reconciled.authority === 'NONE', 'GK-169: pure-authentication CGC label carries no legitimate printing/variant identity — confirmedVariant is null, not junk "CGC Edition" text');
+  check(!/\b(SS|signed)\b/i.test(reconciled.value || ''), 'GK-169: confirmedVariant contains no SS/signed authentication token');
+  check(copyAttributes?.signed?.value === true && copyAttributes?.signed?.source === 'cgc_cert' && copyAttributes?.signed?.authority === 'CERTIFIED', 'GK-169: copyAttributes.signed preserved at CERTIFIED authority, not discarded');
   check(candidate === null, 'no first-eligible-visual candidate needed when the pipeline source is already sole-authority');
+}
+{
+  // A label carrying BOTH authentication text AND a real printing
+  // identity token: only the authentication portion is stripped; the
+  // legitimate printing signal survives through the SAME shared
+  // extractVariantTokensByAxis machinery every other caller uses (its
+  // printing axis normalizes "2nd print" to "reprint" — pre-existing
+  // behavior, not a CGC-specific rule).
+  const { reconciled, copyAttributes } = reconcileVariantFacet('CGC SS Signed 2nd Print', 'cgc_cert', null);
+  check(reconciled.value === 'reprint' && reconciled.source === 'cgc_cert' && reconciled.authority === 'CORROBORATED', 'GK-169: legitimate printing identity survives independently through the EXISTING extractFirstEligibleVariantCandidate machinery — no special CGC parser, cgc_cert still sole-authority');
+  check(!/\b(SS|signed)\b/i.test(reconciled.value || ''), 'GK-169: confirmedVariant contains no SS/signed authentication token even when other identity text survives');
+  check(copyAttributes?.signed?.value === true && copyAttributes?.signed?.source === 'cgc_cert' && copyAttributes?.signed?.authority === 'CERTIFIED', 'GK-169: certified signed evidence still captured alongside surviving identity text');
 }
 
 // ─── Part 2: 4a outgoing comp query, real fetchComps() + mocked eBay ──────

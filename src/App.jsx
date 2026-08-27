@@ -3653,6 +3653,167 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
   );
 }
 
+// GK-172 / E-UX — the reusable operator printing/edition verification slot.
+// Pattern: DETECT (the parent's needsEditionAck gate) -> VERIFY (this
+// component's chips) -> AUTHORITY WRITE (onManualCorrect, the EXISTING
+// manual-correction contract src/lib/manualCorrection.js already validates
+// server-side — no parallel authority mechanism) -> RECONCILE / MARKET
+// ISOLATION / RE-DERIVE PRICE / RE-DERIVE ACTION all happen server-side
+// (reconcileEditionFacet + the edition-gate, GK-168/172) -> the corrected
+// response replaces the card via the same buildCorrectedCatalogueItem path
+// every other correction uses.
+//
+// Authority law (GK-172 ruling, §8-9): no default selection, no auto-pick,
+// no direct price mutation, no listing-gate bypass. Selecting UNKNOWN /
+// Research submits printingClass='UNKNOWN' through this SAME contract —
+// reconcileEditionFacet's own law resolves that to authority=NONE, not
+// OPERATOR_CONFIRMED (Control 4b) — this component does not special-case
+// it locally or fabricate a different outcome. A disagreeing Vision claim
+// is never discarded — editionReconciliation.conflicts (server-computed)
+// is rendered here, not recomputed client-side.
+const PRINTING_CLASS_CHOICES = [
+  { value: 'ORIGINAL', label: 'Original' },
+  { value: 'FACSIMILE', label: 'Facsimile' },
+  { value: 'SECOND_PRINT', label: 'Second Print' },
+  { value: 'REPRINT', label: 'Reprint' },
+  { value: 'LATER_PRINT', label: 'Later Print' },
+  { value: 'UNKNOWN', label: 'Unknown / Research' },
+];
+
+const PRINTING_CLASS_CONSEQUENCE = {
+  ORIGINAL: 'Original selected — valuation will use original-print market evidence.',
+  FACSIMILE: 'Facsimile selected — valuation will use matching facsimile-market evidence rather than original-print market evidence.',
+  SECOND_PRINT: 'Second print selected — valuation will use matching second-printing market evidence.',
+  REPRINT: 'Reprint selected — valuation will use matching reprint-market evidence.',
+  LATER_PRINT: 'Later print selected — valuation will use matching later-printing market evidence.',
+  UNKNOWN: 'Marked unknown/research — no printing-specific pricing will be applied. This does not establish identity, pricing, or listing authority; future evidence may still resolve it.',
+};
+
+function EditionVerifyPanel({ item, onManualCorrect, onDismiss }) {
+  // No default selection (§8) — armedChoice is null until the operator
+  // taps a chip; that tap ARMS the choice and shows the consequence
+  // preview + a distinct Confirm step, it does not submit immediately —
+  // this is a real market-applicability decision, not a cosmetic toggle.
+  const [armedChoice, setArmedChoice] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const resolved = item.editionReconciliation;
+  const conflicts = Array.isArray(resolved?.conflicts) ? resolved.conflicts : [];
+  const currentPrintingClass = item.printingClass || null;
+  const currentAuthority = resolved?.authority || null;
+
+  const confirm = async () => {
+    if (!armedChoice || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const corrected = await onManualCorrect(item, { printingClass: armedChoice }, ['printingClass']);
+      setArmedChoice(null);
+      // GK-172 safety correction — CLIENT ACKNOWLEDGEMENT != SERVER
+      // AUTHORITY. Dismissing this panel (editionConfirmed=true) must
+      // depend on what the SERVER actually resolved, never on "the
+      // request succeeded." A submitted UNKNOWN choice succeeds too
+      // (server returns 200, printingClass='UNKNOWN', authority='NONE'
+      // — Control 4b) and must NOT locally suppress the unresolved-
+      // state warning or unlock listing. Only a genuinely resolved
+      // OPERATOR_CONFIRMED authority dismisses the prompt; onManualCorrect
+      // (submitManualCorrection) returns the real corrected item built
+      // from the server response (buildCorrectedCatalogueItem), so this
+      // reads the actual returned state, never a locally-assumed one.
+      if (corrected?.editionReconciliation?.authority === 'OPERATOR_CONFIRMED' && onDismiss) {
+        onDismiss();
+      }
+    } catch (err) {
+      setError(err.message || 'Correction failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{
+      padding: "8px 10px",
+      marginBottom: 8,
+      background: "rgba(218,54,51,0.1)",
+      border: "1px solid #da3633",
+      borderRadius: 6,
+      fontSize: 12,
+      color: "#fca5a5",
+    }}>
+      <div style={{ marginBottom: 6, fontWeight: 700 }}>
+        🚨 POSSIBLE PRINTING / EDITION MISMATCH
+      </div>
+      {currentPrintingClass && currentAuthority && (
+        <div style={{ marginBottom: 6, color: "#fde68a" }}>
+          Current state: {currentPrintingClass} ({currentAuthority})
+        </div>
+      )}
+      {conflicts.length > 0 && (
+        <div style={{ marginBottom: 6, color: "#93c5fd" }}>
+          {conflicts.map((c, i) => (
+            <div key={i}>
+              ⚠ {c.source} claims "{c.value}" — preserved as conflicting evidence, not discarded.
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ marginBottom: 8 }}>Verify this physical copy:</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+        {PRINTING_CLASS_CHOICES.map((choice) => (
+          <button
+            key={choice.value}
+            disabled={submitting}
+            onClick={() => { setArmedChoice(choice.value); setError(null); }}
+            style={{
+              padding: "6px 12px",
+              background: armedChoice === choice.value ? "rgba(218,54,51,0.35)" : "rgba(218,54,51,0.15)",
+              border: "1px solid rgba(218,54,51,0.4)",
+              borderRadius: 20,
+              color: "#fca5a5",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: submitting ? "default" : "pointer",
+              opacity: submitting ? 0.6 : 1,
+            }}
+          >
+            {choice.label}
+          </button>
+        ))}
+      </div>
+      {armedChoice && (
+        <>
+          {/* Consequence preview — conceptual only, never a fabricated
+              price (§10): the actual price comes from the real
+              choice -> authority -> reconciliation -> applicable market
+              -> price -> action chain, server-side, after Confirm. */}
+          <div style={{ marginBottom: 8, color: "#9ca3af" }}>
+            {PRINTING_CLASS_CONSEQUENCE[armedChoice]}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              className="reset-btn"
+              disabled={submitting}
+              onClick={confirm}
+              style={{ background: "#da3633", color: "white" }}
+            >
+              {submitting ? "Submitting…" : `Confirm ${PRINTING_CLASS_CHOICES.find((c) => c.value === armedChoice)?.label}`}
+            </button>
+            <button
+              className="reset-btn"
+              disabled={submitting}
+              onClick={() => { setArmedChoice(null); setError(null); }}
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+      {error && <div style={{ marginTop: 6, color: "#f87171" }}>{error}</div>}
+    </div>
+  );
+}
+
 function CollectionDetail({
   item,
   onBack,
@@ -7731,32 +7892,22 @@ function CollectionDetail({
                 );
               }
               if (needsEditionAck) {
-                const signals = Array.isArray(item.editionWarning?.signals)
-                  ? item.editionWarning.signals.join(", ")
-                  : "";
+                // GK-172 / E-UX — replaces the plain "Acknowledge and
+                // Enable Listing" button with the real detect->verify->
+                // re-derive slot. The gating condition above
+                // (needsEditionAck, unchanged) still hard-blocks listing
+                // for as long as this branch renders — only WHAT renders
+                // changed, not whether listing stays blocked (the
+                // unresolved-refusal behavior this whole chain exists to
+                // enforce is untouched). onDismiss only fires after a
+                // real server round-trip succeeds (EditionVerifyPanel's
+                // own confirm()), never optimistically.
                 return (
-                  <>
-                    <div style={{
-                      padding: "8px 10px",
-                      marginBottom: 8,
-                      background: "rgba(218,54,51,0.1)",
-                      border: "1px solid #da3633",
-                      borderRadius: 6,
-                      fontSize: 12,
-                      color: "#fca5a5",
-                    }}>
-                      🚨 EDITION WARNING — Vision detected reprint or later-print
-                      signals{signals ? ` (${signals})` : ""}. Current price may
-                      reflect 1st-print comps. Verify edition before listing.
-                    </div>
-                    <button
-                      className="reset-btn"
-                      onClick={() => onUpdateField(item, 'editionConfirmed', true)}
-                      style={{ width: "100%", background: "#da3633", color: "white" }}
-                    >
-                      Acknowledge edition warning and Enable Listing
-                    </button>
-                  </>
+                  <EditionVerifyPanel
+                    item={item}
+                    onManualCorrect={onManualCorrect}
+                    onDismiss={() => onUpdateField(item, 'editionConfirmed', true)}
+                  />
                 );
               }
               // Ship #24 authentication gate REMOVED (GK-39A, 2026-08-10).
@@ -10682,6 +10833,13 @@ export default function App() {
                 // Ship #19 — preserve Vision-set editionWarning + ack state
                 editionWarning: enrich.editionWarning || cur.editionWarning || null,
                 editionConfirmed: cur.editionConfirmed || false,
+                // GK-168/172 (E-UX) — preserve/refresh edition-facet state
+                printingClass: enrich.printingClass || cur.printingClass || null,
+                editionReconciliation: enrich.editionReconciliation || cur.editionReconciliation || null,
+                editionLabel: enrich.editionLabel || cur.editionLabel || null,
+                editionPricingCeiling: enrich.editionPricingCeiling || cur.editionPricingCeiling || null,
+                editionPricingCeilingNote: enrich.editionPricingCeilingNote || cur.editionPricingCeilingNote || null,
+                printingYear: enrich.printingYear || cur.printingYear || null,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedAR ? false : (cur.manualConfirmed || false),
                 // Q135 dispatch (2026-07-22) — pool-provisional identity's
@@ -11260,6 +11418,13 @@ export default function App() {
                   // Ship #19 — preserve Vision-set editionWarning + ack state
                   editionWarning: enrich.editionWarning || cur.editionWarning || null,
                   editionConfirmed: cur.editionConfirmed || false,
+                  // GK-168/172 (E-UX) — preserve/refresh edition-facet state
+                  printingClass: enrich.printingClass || cur.printingClass || null,
+                  editionReconciliation: enrich.editionReconciliation || cur.editionReconciliation || null,
+                  editionLabel: enrich.editionLabel || cur.editionLabel || null,
+                  editionPricingCeiling: enrich.editionPricingCeiling || cur.editionPricingCeiling || null,
+                  editionPricingCeilingNote: enrich.editionPricingCeilingNote || cur.editionPricingCeilingNote || null,
+                  printingYear: enrich.printingYear || cur.printingYear || null,
                   // Ship #26 — Decision Engine v0-B
                   decision: syncedDecisionB,
                   contract: enrich.contract ?? cur.contract ?? null, // Ship #24a-3
@@ -11398,6 +11563,13 @@ export default function App() {
                   // Ship #19 — preserve Vision-set editionWarning + ack state
                   editionWarning: enrich.editionWarning || s.editionWarning || null,
                   editionConfirmed: s.editionConfirmed || false,
+                  // GK-168/172 (E-UX) — preserve/refresh edition-facet state
+                  printingClass: enrich.printingClass || s.printingClass || null,
+                  editionReconciliation: enrich.editionReconciliation || s.editionReconciliation || null,
+                  editionLabel: enrich.editionLabel || s.editionLabel || null,
+                  editionPricingCeiling: enrich.editionPricingCeiling || s.editionPricingCeiling || null,
+                  editionPricingCeilingNote: enrich.editionPricingCeilingNote || s.editionPricingCeilingNote || null,
+                  printingYear: enrich.printingYear || s.printingYear || null,
                   // Ship #26 — Decision Engine v0-B
                   decision: enrich.decision || s.decision,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
@@ -11796,6 +11968,13 @@ export default function App() {
                 // Ship #19 — preserve Vision-set editionWarning + ack state
                 editionWarning: enrich.editionWarning || cur.editionWarning || null,
                 editionConfirmed: cur.editionConfirmed || false,
+                // GK-168/172 (E-UX) — preserve/refresh edition-facet state
+                printingClass: enrich.printingClass || cur.printingClass || null,
+                editionReconciliation: enrich.editionReconciliation || cur.editionReconciliation || null,
+                editionLabel: enrich.editionLabel || cur.editionLabel || null,
+                editionPricingCeiling: enrich.editionPricingCeiling || cur.editionPricingCeiling || null,
+                editionPricingCeilingNote: enrich.editionPricingCeilingNote || cur.editionPricingCeilingNote || null,
+                printingYear: enrich.printingYear || cur.printingYear || null,
                 megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                 manualConfirmed: priceChangedBulk ? false : (cur.manualConfirmed || false),
                 // Q135 dispatch (2026-07-22) — see auto-refresh path for
@@ -12424,6 +12603,13 @@ export default function App() {
       // Ship #19 — preserve Vision-set editionWarning + ack state
       editionWarning: enrich.editionWarning || item.editionWarning || null,
       editionConfirmed: item.editionConfirmed || false,
+      // GK-168/172 (E-UX) — preserve/refresh edition-facet state
+      printingClass: enrich.printingClass || item.printingClass || null,
+      editionReconciliation: enrich.editionReconciliation || item.editionReconciliation || null,
+      editionLabel: enrich.editionLabel || item.editionLabel || null,
+      editionPricingCeiling: enrich.editionPricingCeiling || item.editionPricingCeiling || null,
+      editionPricingCeilingNote: enrich.editionPricingCeilingNote || item.editionPricingCeilingNote || null,
+      printingYear: enrich.printingYear || item.printingYear || null,
       megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
       manualConfirmed: priceChangedRM ? false : (item.manualConfirmed || false),
       // FIX 2: Preserve book-level comps cache fields across refresh
@@ -12654,6 +12840,14 @@ export default function App() {
       defectPenalty: gradeData.defectPenalty || null,
       cgcPenaltyFlags: gradeData.cgcPenaltyFlags || null,
       editionWarning: gradeData.editionWarning || null,
+      // GK-168/172 (E-UX) — enrich-only fields (grade.js doesn't compute
+      // these), fall back to the pre-existing item's value for continuity.
+      printingClass: enrichData?.printingClass || item.printingClass || null,
+      editionReconciliation: enrichData?.editionReconciliation || item.editionReconciliation || null,
+      editionLabel: enrichData?.editionLabel || item.editionLabel || null,
+      editionPricingCeiling: enrichData?.editionPricingCeiling || item.editionPricingCeiling || null,
+      editionPricingCeilingNote: enrichData?.editionPricingCeilingNote || item.editionPricingCeilingNote || null,
+      printingYear: enrichData?.printingYear || item.printingYear || null,
       certNumber: gradeData.certNumber || null,
       labelType: gradeData.labelType || null,
       labelNotes: gradeData.labelNotes || null,

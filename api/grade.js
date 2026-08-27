@@ -54,7 +54,7 @@ const SYSTEM_PROMPT =
 // "interim prompt containment — does NOT close Step 2C (structured schema
 // + server-side sanitizer still required, queued)."
 const CONDITION_REPORT_CONTAINMENT =
-  ' reason: describe ONLY what you can physically observe on THIS copy — wear, defects, printing/edition markings, condition-relevant observations. Do NOT include dollar amounts, price ranges, estimated value, demand level, investment potential, key-issue significance or importance, recent sales activity, or return-on-investment language — none of that belongs in a condition report. Do NOT independently attribute series name, issue number, year, publisher, or cover/variant identity in this field beyond what you already reported in the structured identity fields above — do not introduce a second, competing identification here.';
+  ' reason: describe ONLY what you can physically observe on THIS copy — wear, defects, printing/edition markings, condition-relevant observations. Do NOT include dollar amounts, price ranges, estimated value, demand level, investment potential, key-issue significance or importance, recent sales activity, or return-on-investment language — none of that belongs in a condition report. Do NOT independently attribute series name, issue number, year, publisher, or cover/variant identity in this field beyond what you already reported in the structured identity fields above — do not introduce a second, competing identification here. When describing printing/edition status, only conclude facsimile, reprint, later-printing, or "not the original" when you can point to an EXPLICIT physical indicator actually visible in the supplied images — printed text reading FACSIMILE or REPRINT, a barcode/UPC or other printed identifier whose visible form is demonstrably inconsistent with the claimed original printing (not merely that a barcode exists — a barcode\'s ordinary presence proves nothing on its own), or a copyright/indicia date that is actually visible in the supplied images and contradicts the claimed publication year. Do NOT reach that conclusion from paper stock or print-quality impressions you cannot verify from a photograph, from the cover simply looking modern, or from marketing/cover text such as "Collector\'s Edition" — genuine original comics carry wording like that too, and it is not by itself evidence of a later printing. When you cannot point to specific visible evidence for a printing/edition concern, do not raise one in this field.';
 
 const JSON_SHAPE =
   '{ "title": string, "issue": string, "publisher": string, "year": string, "assetTypeConfident": boolean, "foreignEdition": boolean, "isReprint": boolean, "editionType": "original" or "reprint" or "facsimile" or "variant", "grade": string, "isGraded": boolean, "numericGrade": number or null, "certNumber": string or null, "labelType": "universal" or "qualified" or "restored" or "conserved" or "signature" or null, "labelNotes": string or null, "keyIssue": string or null, "variant": string or null, "creator": string or null, "price": string, "priceLow": string, "priceHigh": string, "reason": string, "confidence": string, "detectedPrice": string or null, "restoration": string or null, "defectPenalty": number or null, "cgcPenaltyFlags": { "storeStamp": { "detected": boolean, "pedigreeName": string or null }, "staplePopping": { "detected": boolean, "severity": "minor" or "severe" or null }, "polybagIndents": { "detected": boolean }, "cornerChips": { "detected": boolean, "count": number or null }, "pedigreeStamp": { "detected": boolean, "pedigreeName": string or null } } or null }';
@@ -243,6 +243,27 @@ export const classifySpecificPrinting = (signals) => {
     return { text: 'facsimile', label: 'Facsimile edition', re: /facsimile/i };
   }
   return null;
+};
+
+// GK-168 (2026-08-24, Creepy #1 facsimile dispatch) — maps editionWarning's
+// classified signal to the printingClass vocabulary (identityCore.js's
+// PRINTING_CLASS_VALUES) for reconcileEditionFacet's Vision-origin input.
+// classifySpecificPrinting only names a SPECIFIC printing on purpose
+// (third/second/facsimile — see its own comment above); the remaining
+// generic signals (reprint/later-printing/not-first-print/not-original/
+// less-valuable) mean "known non-original, printing kind unspecified" —
+// mapped to the generic REPRINT bucket, the same bucket the existing
+// comp-isolation fallback regex already treats as "not the original"
+// when no specific printing kind is known.
+export const classifyPrintingClassFromEditionWarning = (editionWarning) => {
+  if (!editionWarning?.detected) return null;
+  const specific = classifySpecificPrinting(editionWarning.signals);
+  if (specific) {
+    if (specific.text === 'facsimile') return 'FACSIMILE';
+    if (specific.text === '2nd print') return 'SECOND_PRINT';
+    if (specific.text === '3rd print') return 'LATER_PRINT';
+  }
+  return 'REPRINT';
 };
 
 // Q-newsstand (2026-07-16) — AI-CROSS-LAYER-DISCONNECT class, newsstand

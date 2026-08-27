@@ -1387,6 +1387,7 @@ export const fetchComps = async ({
   let fellBack = false;
   let eraFilterBypassed = false;
   let eraRejectedReferenceRows = [];  // Track B Phase 0, Commit 2 — I13 reference bucket for era-rejected rows
+  let reprintFilterRejectedRows = [];  // GK-168 — same bucket shape, Filter 1 (REPRINT_RE) removals
   let variantCompsExcludedByEra = null;
   let multiIssueRejected = 0;
   let sequelRejected = 0;
@@ -1416,6 +1417,16 @@ export const fetchComps = async ({
       let _eraExcludedVariantCount = 0;
       const _eraExcludedVariantSamples = [];
       const _eraRejectedReferenceRows = [];
+      // GK-168 (2026-08-24, Creepy #1 facsimile dispatch, plan review) —
+      // same tracking pattern as _eraRejectedReferenceRows, for Filter 1
+      // (REPRINT_RE) below. That filter's own removal behavior is
+      // completely unchanged — this only additionally records what it
+      // removed, so api/enrich.js's edition-candidate lane has a second
+      // source of rows an explicit printing-class discriminator might
+      // recognize (a facsimile/reprint listing with no year in its title
+      // at all survives era filtering — "no year evidence — ACCEPT" — but
+      // is then removed here instead, on title-text grounds).
+      const _reprintFilterRejectedRows = [];
       let _multiIssueRejected = 0;
       let _sequelRejected = 0;
       let _signedRejected = 0;
@@ -1579,6 +1590,13 @@ export const fetchComps = async ({
           p = afterReprint;
           if (p.length < beforeReprint.length) {
             console.log(`[comps] reprint filter removed ${beforeReprint.length - p.length}`);
+            // GK-168 — record what this step removed (see
+            // _reprintFilterRejectedRows' own declaration comment above).
+            for (const it of beforeReprint) {
+              if (REPRINT_RE.test(String(it.title || ''))) {
+                _reprintFilterRejectedRows.push({ title: it.title ?? null, price: it.price ?? null, reason: 'reprint-title-match' });
+              }
+            }
           }
         }
       } else {
@@ -2071,6 +2089,7 @@ export const fetchComps = async ({
         fellBack: _fellBack,
         eraFilterBypassed: _eraFilterBypassed,
         eraRejectedReferenceRows: _eraRejectedReferenceRows,
+        reprintFilterRejectedRows: _reprintFilterRejectedRows,
         variantCompsExcludedByEra: _variantCompsExcludedByEra,
         multiIssueRejected: _multiIssueRejected,
         sequelRejected: _sequelRejected,
@@ -2136,6 +2155,7 @@ export const fetchComps = async ({
         fellBack = filtered.fellBack;
         eraFilterBypassed = filtered.eraFilterBypassed;
         eraRejectedReferenceRows = filtered.eraRejectedReferenceRows || [];
+        reprintFilterRejectedRows = filtered.reprintFilterRejectedRows || [];
         variantCompsExcludedByEra = filtered.variantCompsExcludedByEra;
         multiIssueRejected = filtered.multiIssueRejected;
         sequelRejected = filtered.sequelRejected;
@@ -2468,6 +2488,19 @@ export const fetchComps = async ({
       premiumVariantIsolated,
       variantApplicability, // GrailKey Directive AB (GK-101) — CONFIRMED | UNVERIFIED | null
       eraFilterBypassed,
+      // GK-168 (2026-08-24, Creepy #1 facsimile dispatch, plan review) —
+      // surfaces the era filter's own rejectedReferenceRows (already
+      // tracked internally since Track B Phase 0 Commit 2, assigned to
+      // this outer variable at line ~2138, but never previously included
+      // in this return object at all — a genuine computed-then-discarded
+      // gap). This is the RAW material for api/enrich.js's edition-
+      // candidate lane: rows rejected here purely for era-year-mismatch
+      // are exactly the modern facsimile/reprint comps a confirmed non-
+      // original printingClass needs to price against, without this
+      // function's own era filter (unchanged, still protects the
+      // ORIGINAL-lane population exactly as before) ever being weakened.
+      eraRejectedReferenceRows,
+      reprintFilterRejectedRows,
       variantCompsExcludedByEra,
       artistFallback,
       compBasis: artistFallback ? 'generic-variant-fallback' : null,

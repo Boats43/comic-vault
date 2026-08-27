@@ -153,6 +153,26 @@ export function deriveMarketStanding(out) {
     // same revocation-only principle as AB/AP/AR/AT/AV's own sibling
     // floors above.
     if (out?.issueAuthority?.status === 'conflicted') return 'SIMILAR_ONLY';
+    // GK-168 (2026-08-24, Creepy #1 facsimile dispatch, plan review C7) —
+    // a CONFIRMED non-original printingClass (facsimile/2nd/later print/
+    // reprint, authority OPERATOR_CONFIRMED or CORROBORATED) floors to
+    // SIMILAR_ONLY even though the isolated pool prices EXACT_CURRENT for
+    // THAT printing's own market — a conservative rollout policy for this
+    // bounded release (out.editionPricingCeiling documents this
+    // explicitly as temporary, not a permanent semantic law that a
+    // confirmed edition can never reach a higher state once more
+    // edition-scoped market data exists), same revocation-only principle
+    // as every sibling floor above. out.editionReconciliation is
+    // custodied, not re-derived, from api/enrich.js's own
+    // reconcileEditionFacet call — this function never recomputes it.
+    if (
+      out?.editionReconciliation?.printingClass &&
+      out.editionReconciliation.printingClass !== 'ORIGINAL' &&
+      out.editionReconciliation.printingClass !== 'UNKNOWN' &&
+      (out.editionReconciliation.authority === 'OPERATOR_CONFIRMED' || out.editionReconciliation.authority === 'CORROBORATED')
+    ) {
+      return 'SIMILAR_ONLY';
+    }
     return 'EXACT_CURRENT';
   }
   // Unrecognized source string — conservative default, never silently
@@ -214,6 +234,7 @@ const LOCK_CODE_TO_REASON = {
   'market-standing-year-contested': 'YEAR_CONTESTED', // GrailKey Directive AT (GK-135)
   'market-standing-title-contested': 'TITLE_CONTESTED', // GrailKey Directive AV (GK-133)
   'market-standing-issue-contested': 'ISSUE_CONTESTED', // GK-152 (2026-08-22)
+  'market-standing-edition-review-ceiling': 'EDITION_REVIEW_CEILING', // GK-168 (2026-08-24)
 };
 
 const lockToReasonCode = (lock) => {

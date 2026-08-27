@@ -920,15 +920,142 @@ const PRINT_RUN_RE = /\ble\s*\d+\b|\b\d+\s*\/\s*\d+\b/i;
 // collision-prone bare words (e.g. compHygiene.js's Q48 cover-letter
 // gate, ARTIST_PATTERNS' \b-anchored entries).
 const COLOR_FINISH_RE = /\b(white|black|gold|silver|red|blue|green|purple|pink)\s+(?:variant|cover)\b/i;
-// Same SIGNED_RE precedent as compHygiene.js (CLAUDE.md): bare "SS"
-// deliberately omitted — false-positive risk (SS-Squadron and other
-// unrelated acronyms).
-const AUTHENTICATION_RE = /\b(signed|remarked|autographed?|signature\s+series)\b/i;
+// GK-169 (2026-08-24, Creepy #1 facsimile dispatch, plan review C1) — the
+// PER-COPY ATTRIBUTE vocabulary: signed/remarked/autographed/signature
+// series/sketched/COA/witnessed describe the PHYSICAL COPY in hand, never
+// the printing/cover identity. Same precedent as compHygiene.js's
+// SIGNED_RE and variantIdentity.js's AUTH_TOKENS (bare "SS" deliberately
+// omitted from all three — false-positive risk, SS-Squadron and other
+// unrelated acronyms) — kept as this file's own scoped list rather than
+// importing SIGNED_RE directly, since that constant also carries
+// "yellow label"/"green label" (CGC label-color descriptors, a different
+// concern than per-copy authentication) which would over-strip here.
+// "sketched" (past participle — an artist drew ON this copy) is
+// deliberately distinct from bare "sketch" (the cover-TYPE noun, e.g.
+// "sketch cover"/"sketch variant" — a real, distinct printing/product,
+// not a per-copy attribute; stripping bare "sketch" would eat that
+// legitimate identity term). "witnessed" and any "slab/certification of
+// THIS copy" phrasing are named in the approved plan but have zero prior
+// occurrence anywhere in this repo (checked compHygiene.js, comps.js,
+// soldVerification.js, variantIdentity.js, imageSearchIdentity.js,
+// titleHygiene.js) — "witnessed" is included below as a precise,
+// low-collision word-boundary term per the plan's explicit list, but no
+// "slab-of-this-copy" pattern is invented here; there is no evidenced
+// shape to build one from, and a broad "slab" match would incorrectly
+// strip legitimate CGC/CBCS/PGX grading references. Flagged as an open
+// gap, not silently covered.
+//
+// ONE shared word list feeds both the non-global test regex (AUTHENTICATION_RE,
+// used for repeated .test() calls — must stay non-global, a global regex's
+// .lastIndex statefulness would make repeated .test() calls on the same
+// instance silently skip matches) and the global strip regex
+// (AUTHENTICATION_STRIP_RE, used by stripAuthenticationTokens's .replace()
+// to remove every occurrence, not just the first) — no second,
+// independently hand-maintained vocabulary to drift out of sync.
+const AUTHENTICATION_WORDS = ['signed', 'remarked', 'autographed?', 'signature\\s+series', 'sketched', 'COA', 'witnessed'];
+const AUTHENTICATION_PATTERN_SOURCE = `\\b(?:${AUTHENTICATION_WORDS.join('|')})\\b`;
+const AUTHENTICATION_RE = new RegExp(AUTHENTICATION_PATTERN_SOURCE, 'i');
+const AUTHENTICATION_STRIP_RE = new RegExp(AUTHENTICATION_PATTERN_SOURCE, 'gi');
 
-// Event/print-run/authentication are genuinely specific/discriminative
-// signals (same standing as distribution/printing/artist) — returned
-// separately from color-finish so callers can include the former in
-// "specific" comparisons and the latter only in display text.
+// GK-169 plan-review correction — evidence STRENGTH does not change fact
+// TYPE. A CGC Signature Series designation is stronger physical evidence
+// than Vision or marketplace text, but "SS"/"signed" is still a PER-COPY
+// ATTRIBUTE and must never enter confirmedVariant, regardless of source —
+// no cgc_cert exemption. Extends (not duplicates) the same
+// AUTHENTICATION_WORDS base list with bare "SS" — safe ONLY here: cgc_cert
+// values are curated CGC label text (STANDARD_PROMPT's labelType field
+// documents "SS" as the real CGC Signature Series label abbreviation),
+// not noisy marketplace/Vision free text where bare "SS" collides with
+// unrelated acronyms (SS-Squadron, etc. — why the general
+// AUTHENTICATION_WORDS list omits it, same precedent as compHygiene.js's
+// SIGNED_RE). The general/Vision-facing strip is unchanged.
+const CGC_CERT_AUTHENTICATION_WORDS = [...AUTHENTICATION_WORDS, 'SS'];
+const CGC_CERT_AUTHENTICATION_PATTERN_SOURCE = `\\b(?:${CGC_CERT_AUTHENTICATION_WORDS.join('|')})\\b`;
+const CGC_CERT_AUTHENTICATION_STRIP_RE = new RegExp(CGC_CERT_AUTHENTICATION_PATTERN_SOURCE, 'gi');
+
+// GK-169 — strips authentication tokens out of free text before it can
+// become confirmedVariant evidence. Needed specifically for
+// reconcileVariantFacet's pipelineValue (Vision's own raw claim, or a
+// cgc_cert label transcription): unlike pool-row candidates (built FROM
+// variantSpecificTokens, so simply excluding auth from that pool already
+// keeps them out), pipelineValue is free text — STANDARD_PROMPT tells
+// Vision not to include signing status in the variant field, but that is
+// a prompt instruction, not an enforced constraint, and the real Venom/
+// Mayhew production incident (GrailKey Directive AR/GK-129, this file's
+// own reconcileVariantFacet tests) shows Vision can and does write
+// "signed" into that field anyway. Core law (plan C1, reaffirmed on
+// review): no per-copy authentication attribute may enter
+// confirmedVariant, regardless of marketplace, Vision, operator, frozen-
+// row, cgc_cert, or consensus source — unconditional, no source
+// exemption. Accepts an optional stripRegex override (the cgc_cert-
+// scoped, SS-inclusive one above) so this stays the single strip
+// implementation rather than a second hand-written copy.
+const stripAuthenticationTokens = (text, stripRegex = AUTHENTICATION_STRIP_RE) => {
+  const s = String(text || '');
+  const stripped = s.replace(stripRegex, ' ').replace(/\s{2,}/g, ' ').trim();
+  return stripped || null;
+};
+
+// GK-169 — informational-only extraction, kept separate from
+// variantSpecificTokens on purpose (see block comment above — folding
+// authentication into the "specific/discriminative" token pool was the
+// root cause: it let a bare "signed" mention on ANY comp-pool row,
+// including third-entry-path siblings that are not the frozen rank-1 row
+// and never require a creator match on their own, become identity-
+// eligible). Not currently wired to any consumer — comp-filtering already
+// has its own, independent, pool-consensus-based signed signal via
+// variantIdentity.js's consensus.signed / applySignedPreferenceFilter,
+// unaffected by this file. Exported for callers that want to know a row
+// mentions authentication without risking it leaking into identity text.
+export const extractAuthenticationTokens = (text) => {
+  const matches = String(text || '').match(AUTHENTICATION_STRIP_RE);
+  return matches ? [...new Set(matches.map((m) => m.toLowerCase()))] : [];
+};
+
+// GK-169 — maps a matched authentication token to its copyAttributes key.
+// signed/autograph(ed)/signature series/SS all describe the same
+// underlying attribute (a signature on this copy); remarked/sketched/
+// coa/witnessed are distinct attributes, kept separate. "ss" only ever
+// matches via CGC_CERT_AUTHENTICATION_STRIP_RE (the general regex never
+// includes bare SS), so it only appears here when pipelineSource is
+// already known to be 'cgc_cert'.
+const AUTH_TOKEN_ATTRIBUTE_MAP = {
+  signed: 'signed', autograph: 'signed', autographed: 'signed', 'signature series': 'signed', ss: 'signed',
+  remark: 'remarked', remarked: 'remarked',
+  sketched: 'sketched',
+  coa: 'coa',
+  witnessed: 'witnessed',
+};
+
+// GK-169 — captures the certification the strip is about to remove,
+// instead of discarding it. cgc_cert-only for now: it is the one source
+// reaching this function today that is genuinely physically-certified
+// evidence (a CGC label doesn't print "SS" without having verified the
+// signature against that exact copy) — Vision-on-photo/operator copy-
+// attribute capture is the next step in this same train, not yet wired
+// here. Explicit value shape (not presence-only) — there is no pre-
+// existing copyAttributes contract to conform to, so this is the
+// contract. authority 'CERTIFIED' is the strongest tier, reserved for
+// this source.
+const extractCopyAttributesForCgcCert = (rawPipelineValue) => {
+  const matches = String(rawPipelineValue || '').match(CGC_CERT_AUTHENTICATION_STRIP_RE);
+  if (!matches) return {};
+  const out = {};
+  for (const m of matches) {
+    const key = m.toLowerCase().replace(/\s+/g, ' ').trim();
+    const attribute = AUTH_TOKEN_ATTRIBUTE_MAP[key];
+    if (!attribute || out[attribute]) continue;
+    out[attribute] = { value: true, source: 'cgc_cert', authority: 'CERTIFIED' };
+  }
+  return out;
+};
+
+// Event/print-run are genuinely specific/discriminative signals (same
+// standing as distribution/printing/artist) — returned separately from
+// color-finish so callers can include the former in "specific"
+// comparisons and the latter only in display text. Authentication is
+// deliberately NOT included here (see GK-169 block comment above) — it
+// used to be, and that was the bug.
 const extractEventPrintRunAuth = (text) => {
   const s = String(text || '');
   const found = [];
@@ -936,8 +1063,6 @@ const extractEventPrintRunAuth = (text) => {
   if (eventMatch) found.push(eventMatch[0].trim().toLowerCase());
   const printRunMatch = s.match(PRINT_RUN_RE);
   if (printRunMatch) found.push(printRunMatch[0].trim().toLowerCase());
-  const authMatch = s.match(AUTHENTICATION_RE);
-  if (authMatch) found.push(authMatch[0].toLowerCase());
   return found;
 };
 
@@ -1419,12 +1544,45 @@ export const reconcileTitleFacet = (visionTitle, familyCandidate) => {
  *   dissenting row stands as visible, non-winning conflict evidence, never
  *   silently dropped (same "never hidden, never adopted without standing"
  *   rule the reconciler already applies everywhere else).
- * @returns {{reconciled: object, candidate: string|null}}
+ * @returns {{reconciled: object, candidate: string|null, copyAttributes: object}}
  */
 export const reconcileVariantFacet = (pipelineValue, pipelineSource, firstEligibleRawTitle, otherEligibleRawTitles = []) => {
   const evidence = createEvidenceSet();
-  if (pipelineValue) {
-    addEvidence(evidence, 'variant', pipelineSource === 'vision' ? 'vision' : pipelineSource, pipelineValue);
+  const isCgcCert = pipelineSource === 'cgc_cert';
+  // GK-169 — capture BEFORE stripping, so the certified fact survives as
+  // copy evidence instead of being discarded. cgc_cert-only for now (see
+  // extractCopyAttributesForCgcCert's own comment).
+  const copyAttributes = isCgcCert ? extractCopyAttributesForCgcCert(pipelineValue) : {};
+  // GK-169 (plan-review correction) — strip authentication tokens
+  // unconditionally, no source exemption (cgc_cert additionally strips
+  // bare "SS", via CGC_CERT_AUTHENTICATION_STRIP_RE — evidence strength
+  // does not change fact type). For cgc_cert specifically, the auth-free
+  // residual is then run through the SAME extraction gate already used
+  // for pool-row/first-eligible-visual candidates just below
+  // (extractFirstEligibleVariantCandidate) rather than trusted as raw
+  // leftover text — this reuses the existing "only registry-recognized
+  // tokens survive" discipline instead of a special CGC-only parser.
+  // "CGC SS Signed Edition" strips to "Edition," which that shared
+  // extractor recognizes nothing in (no creator, no axis token) and
+  // correctly returns null — not junk "CGC Edition" text. "CGC SS Signed
+  // 2nd Print" strips to "2nd Print," which the shared printing-axis
+  // extractor (compHygiene.js's extractVariantTokensByAxis) already
+  // recognizes and normalizes to "reprint" — the same normalization any
+  // other caller of that axis gets, not a CGC-specific rule. Vision's
+  // path is unchanged: its residual is used directly, exactly as before
+  // this correction, since routing Vision's rich free text through the
+  // same registry-only gate would discard real, unrecognized-but-true
+  // detail (Sabrina shape) — a different, much larger behavior change
+  // this fix does not make.
+  const authFreeResidual = stripAuthenticationTokens(
+    pipelineValue,
+    isCgcCert ? CGC_CERT_AUTHENTICATION_STRIP_RE : AUTHENTICATION_STRIP_RE
+  );
+  const sanitizedPipelineValue = isCgcCert
+    ? extractFirstEligibleVariantCandidate(authFreeResidual)
+    : authFreeResidual;
+  if (sanitizedPipelineValue) {
+    addEvidence(evidence, 'variant', pipelineSource === 'vision' ? 'vision' : pipelineSource, sanitizedPipelineValue);
   }
   const candidate = firstEligibleRawTitle ? extractFirstEligibleVariantCandidate(firstEligibleRawTitle) : null;
   // A candidate built from ONLY a generic coverType/finish token (e.g.
@@ -1500,7 +1658,151 @@ export const reconcileVariantFacet = (pipelineValue, pipelineSource, firstEligib
     `authority=${reconciled.authority} justifiedBy=${JSON.stringify(reconciled.justifiedBy)} ` +
     `conflicts=${JSON.stringify(reconciled.conflicts)}`
   );
-  return { reconciled, candidate: candidateHasDiscriminativeSignal ? candidate : null };
+  return { reconciled, candidate: candidateHasDiscriminativeSignal ? candidate : null, copyAttributes };
+};
+
+// GK-168 (2026-08-24, Creepy #1 facsimile dispatch, plan review C2/F1) —
+// the printing/edition facet's canonical vocabulary. UNKNOWN is the
+// honest-absence default, never fabricated to enable pricing.
+export const PRINTING_CLASS_VALUES = ['ORIGINAL', 'FACSIMILE', 'REPRINT', 'SECOND_PRINT', 'LATER_PRINT', 'UNKNOWN'];
+
+/**
+ * reconcileEditionFacet — GK-168. Printing/edition identity for THIS
+ * physical copy. Deliberately NOT built on reconcileVariant's generic
+ * evidence-set model: that model lets any two non-sole-authority sources
+ * agreeing with each other win (the "third entry path" reconcileVariantFacet
+ * itself uses) — for edition/printing, that would let marketplace comp
+ * rows alone manufacture a fact about the user's physical copy, which the
+ * plan review explicitly forbids ("no vote-count authority"). Law instead:
+ * AT LEAST ONE copy-grounded origin source (Vision's read of the actual
+ * physical scan, or explicit operator confirmation) is required before
+ * THIS copy may acquire printingClass authority at all. Marketplace rows,
+ * frozen-visual-candidate text, and catalog records may corroborate or
+ * contradict an EXISTING origin claim; they may never originate one — a
+ * bare corroborator with no origin claim present is simply ignored, not
+ * treated as weak evidence.
+ *
+ * Precedence when both origins exist and disagree: operator resolves
+ * current state (matches identityAuthority's OPERATOR_CONFIRMED precedence
+ * elsewhere in this codebase), but Vision's claim is preserved as a visible
+ * conflict, never discarded (F1).
+ *
+ * @param {Object} opts
+ * @param {string|null} [opts.visionPrintingClass] - from Vision's read of
+ *   the actual physical scan (api/enrich.js's editionWarning, already
+ *   scan-photo-grounded per GK-149's trace — generated before any
+ *   comp-pool fetch). One of PRINTING_CLASS_VALUES, or null/absent.
+ * @param {string|null} [opts.operatorPrintingClass] - OPERATOR_CONFIRMED
+ *   manual correction. One of PRINTING_CLASS_VALUES, or null/absent.
+ * @param {Array<{source: string, printingClass: string}>} [opts.corroboratingClaims] -
+ *   marketplace/frozen-row/catalog signals. Corroboration-only — read
+ *   only when an origin claim already exists above.
+ * @returns {{printingClass: string, authority: string, source: string|null, justifiedBy: Array, conflicts: Array}}
+ */
+export const reconcileEditionFacet = ({ visionPrintingClass = null, operatorPrintingClass = null, corroboratingClaims = [] } = {}) => {
+  const corroborators = (Array.isArray(corroboratingClaims) ? corroboratingClaims : [])
+    .filter((c) => c && PRINTING_CLASS_VALUES.includes(c.printingClass) && c.printingClass !== 'UNKNOWN');
+
+  // GK-168, plan review — UNKNOWN is a legitimate operator state ("I
+  // looked, I genuinely can't tell, this needs research") but it is NOT a
+  // resolved identity fact and must not enter the same authority-bearing
+  // path a resolved printingClass does — no committed edition-scoped
+  // pricing, no listing authority gained. source stays 'operator' (an
+  // action genuinely happened, worth an audit trail) but authority is
+  // 'NONE', exactly like the no-evidence-at-all case below, so every
+  // downstream pricing/listing gate that only checks `authority` treats
+  // this identically to "unresolved" — which is what it is.
+  if (operatorPrintingClass === 'UNKNOWN') {
+    const conflicts = (visionPrintingClass && visionPrintingClass !== 'UNKNOWN')
+      ? [{ source: 'vision', value: visionPrintingClass }]
+      : [];
+    console.log(
+      `[reconcile-edition] operator explicitly marked UNKNOWN/research — printingClass=UNKNOWN authority=NONE ` +
+      `(unresolved, NOT OPERATOR_CONFIRMED — does not unlock edition-scoped pricing) conflicts=${JSON.stringify(conflicts)}`
+    );
+    return {
+      printingClass: 'UNKNOWN',
+      authority: 'NONE',
+      source: 'operator',
+      justifiedBy: [{ source: 'operator', value: 'UNKNOWN' }],
+      conflicts,
+    };
+  }
+
+  // Law: a RESOLVED operator confirmation has resolved-state precedence —
+  // full stop, no corroboration required (matches identityAuthority's
+  // existing OPERATOR_CONFIRMED precedent elsewhere). Vision's disagreeing
+  // claim, if any, is preserved as a visible conflict, never discarded (F1).
+  if (operatorPrintingClass && PRINTING_CLASS_VALUES.includes(operatorPrintingClass)) {
+    const conflicts = (visionPrintingClass && visionPrintingClass !== operatorPrintingClass)
+      ? [{ source: 'vision', value: visionPrintingClass }]
+      : [];
+    console.log(
+      `[reconcile-edition] printingClass=${operatorPrintingClass} source=operator authority=OPERATOR_CONFIRMED ` +
+      `conflicts=${JSON.stringify(conflicts)}`
+    );
+    return {
+      printingClass: operatorPrintingClass,
+      authority: 'OPERATOR_CONFIRMED',
+      source: 'operator',
+      justifiedBy: [{ source: 'operator', value: operatorPrintingClass }],
+      conflicts,
+    };
+  }
+
+  // No operator confirmation. Law: NO ORIGIN CLAIM -> NO CONFIRMATION,
+  // regardless of however many corroborating rows exist — a marketplace
+  // pool agreeing with itself is not evidence about the physical copy.
+  if (!visionPrintingClass || !PRINTING_CLASS_VALUES.includes(visionPrintingClass)) {
+    console.log(
+      `[reconcile-edition] no copy-grounded origin claim — printingClass=UNKNOWN authority=NONE ` +
+      `(${corroborators.length} corroborator(s) present but ignored, no origin to corroborate)`
+    );
+    return {
+      printingClass: 'UNKNOWN',
+      authority: 'NONE',
+      source: null,
+      justifiedBy: [],
+      conflicts: corroborators.map((c) => ({ source: c.source, value: c.printingClass })),
+    };
+  }
+
+  // Vision origin exists. C8 applies here exactly as it does for variant:
+  // a populated-but-uncorroborated candidate is not authority — bare
+  // Vision alone, zero agreeing corroboration, stays NONE (honest refusal,
+  // Control 3), never silently promoted to authoritative.
+  const agreeing = corroborators.filter((c) => c.printingClass === visionPrintingClass);
+  const disagreeing = corroborators.filter((c) => c.printingClass !== visionPrintingClass);
+
+  if (agreeing.length === 0) {
+    console.log(
+      `[reconcile-edition] Vision origin claim "${visionPrintingClass}" uncorroborated (C8: not authority) ` +
+      `— printingClass=UNKNOWN authority=NONE`
+    );
+    return {
+      printingClass: 'UNKNOWN',
+      authority: 'NONE',
+      source: null,
+      justifiedBy: [],
+      conflicts: [
+        { source: 'vision', value: visionPrintingClass },
+        ...disagreeing.map((c) => ({ source: c.source, value: c.printingClass })),
+      ],
+    };
+  }
+
+  const authority = disagreeing.length > 0 ? 'CONTESTED' : 'CORROBORATED';
+  console.log(
+    `[reconcile-edition] printingClass=${visionPrintingClass} source=vision authority=${authority} ` +
+    `agreeing=${agreeing.length} disagreeing=${disagreeing.length}`
+  );
+  return {
+    printingClass: visionPrintingClass,
+    authority,
+    source: 'vision',
+    justifiedBy: [{ source: 'vision', value: visionPrintingClass }, ...agreeing.map((c) => ({ source: c.source, value: c.printingClass }))],
+    conflicts: disagreeing.map((c) => ({ source: c.source, value: c.printingClass })),
+  };
 };
 
 /**

@@ -37,10 +37,16 @@ console.log('\n=== GrailKey Directive T, Task 4 — variant in the manual-correc
 
 console.log('MANUAL_CORRECTION_ALLOWED_FIELDS includes variant\n');
 {
+  // GK-168 (2026-08-24, Creepy #1 facsimile dispatch) added 'printingClass'
+  // to this allow-list — same shape as this exact test's own subject
+  // (Directive T Task 4 adding 'variant'). Updated here, not reverted:
+  // the addition is intentional and server-side enum-validated
+  // (manualCorrection.js's normalizeManualPrintingClass/PRINTING_CLASS_ENUM),
+  // not an open-ended widening — this snapshot just needs to reflect it.
   assertEq(
     MANUAL_CORRECTION_ALLOWED_FIELDS.slice().sort(),
-    ['issue', 'publisher', 'title', 'variant', 'year'],
-    'exactly the original four plus variant, alphabetically'
+    ['issue', 'printingClass', 'publisher', 'title', 'variant', 'year'],
+    'exactly the original four plus variant (Directive T) plus printingClass (GK-168), alphabetically'
   );
 }
 

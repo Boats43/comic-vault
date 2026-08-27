@@ -321,7 +321,7 @@ export function buildVerifiedSoldPool(soldComps, { title, issue, variant }) {
  * Prevents modern variant asks (1:100 sketch, timeless, etc.) from
  * contaminating vintage/standard edition pricing.
  */
-export function buildVerifiedActivePool(comps, { title, issue, year, variant }) {
+export function buildVerifiedActivePool(comps, { title, issue, year, variant, editionLane = false }) {
   if (!comps || !comps.prices || comps.prices.length === 0) {
     return [];
   }
@@ -382,7 +382,23 @@ export function buildVerifiedActivePool(comps, { title, issue, year, variant }) 
       }
 
       // Q75-1: Year token filter (era contamination)
-      if (confirmedYear) {
+      // GK-172 (2026-08-26) — this check's whole premise is that a
+      // listing's year should track the ORIGINAL work's confirmedYear.
+      // That premise doesn't hold for a pool already isolated to a
+      // confirmed non-original printing class (editionLane=true, set by
+      // api/enrich.js's edition-gate ONLY when reconcileEditionFacet
+      // already granted OPERATOR_CONFIRMED/CORROBORATED authority — see
+      // GK-168): a facsimile/later-print row's market year legitimately
+      // follows its own printing run, not the work's original cover date,
+      // so re-applying confirmedYear here would reject every row the
+      // edition-gate just isolated FOR this exact printing class. No
+      // per-printing expected year exists to check against instead
+      // (out.printingYear is honestly null, F3 — no origin populates it
+      // yet) so this is a skip, not a substitution — never a bare year
+      // difference used as proof of anything. The ORIGINAL lane
+      // (editionLane=false, the default) is completely untouched — same
+      // confirmedYear check, same >5y threshold, byte-identical.
+      if (confirmedYear && !editionLane) {
         const yearMatch = t.match(YEAR_TOKEN_RE);
         if (yearMatch) {
           const listingYear = parseInt(yearMatch[0], 10);
@@ -391,6 +407,11 @@ export function buildVerifiedActivePool(comps, { title, issue, year, variant }) 
             console.log(`[Q75] active rejected: "${p.title?.slice(0, 60)}" reason=era (${listingYear} vs ${confirmedYear})`);
             return false;
           }
+        }
+      } else if (confirmedYear && editionLane) {
+        const yearMatch = t.match(YEAR_TOKEN_RE);
+        if (yearMatch) {
+          console.log(`[Q75-1] edition-lane admitted despite year drift: "${p.title?.slice(0, 60)}" (${yearMatch[0]} vs original ${confirmedYear}) — printing-class year, not original-work year`);
         }
       }
 
@@ -642,12 +663,16 @@ export function computePriceBands({
   variant,
   variantAdjusted = false,
   soldVerifyResult = null,
+  editionLane = false,
 }) {
   // Build verified pools
   const verifiedSolds = buildVerifiedSoldPool(soldComps, { title, issue, variant });
   const soldPrices = verifiedSolds.map(s => s.price);
   // Q75: Pass year + variant to active pool builder for era/variant filtering
-  const verifiedActive = buildVerifiedActivePool(activeComps, { title, issue, year, variant });
+  // GK-172 — editionLane forwarded from the caller (api/enrich.js stamps
+  // it from rawComps.reprintFiltered, the same flag the edition-gate
+  // already sets when it isolates to a confirmed non-original printing).
+  const verifiedActive = buildVerifiedActivePool(activeComps, { title, issue, year, variant, editionLane });
 
   // Extract recency band counts from LIVE soldVerifyResult.
   // EX-A (Q109 greenlight): rows re-admitted by the soldVerification.js

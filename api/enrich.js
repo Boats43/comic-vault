@@ -57,6 +57,8 @@ import {
   reconcileVariantFacet,
   deriveSeriesCoreQuery,
   rescueIssueFromCompsPoolConsensus,
+  reconcileEditionFacet,
+  PRINTING_CLASS_VALUES,
 } from "../src/lib/identityCore.js";
 // GrailKey Directive 2026-08-16-AL continuation (4a/4e) — direct import,
 // not re-exported through identityCore.js's own list above (that list
@@ -151,7 +153,7 @@ import { runClaudeCheck } from "../src/lib/claudeCheck.js";
 // agree on specific tokens (convention, artist, exclusive, limitation).
 import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict, detectFamilyOverrideConflict, pcMatchConflictsWithPoolYear, pcMatchConflictsWithPoolName, pcMatchMissingFamilyDiscriminator, hasUnresolvedActiveVariantConflict, isVariantProvenanceValid, validateVisionPrintingClaim } from "../src/lib/variantIdentity.js";
 // Ship #1.3 — edition warning detection (reprint/facsimile/later-print gates).
-import { detectEditionWarning, classifySpecificPrinting } from "./grade.js";
+import { detectEditionWarning, classifySpecificPrinting, classifyPrintingClassFromEditionWarning } from "./grade.js";
 // Q118 — internal consistency checker (Vision's free-text reason vs its own structured fields).
 import { checkVisionConsistency } from "../src/lib/visionConsistency.js";
 // Session 4B — Import book signal detection from shared classifier
@@ -2443,6 +2445,17 @@ export default async function handler(req, res) {
     if (editionWarning?.detected) {
       console.log('[edition-gate] detected:', editionWarning.signals.join(', '));
     }
+
+    // GK-168 (2026-08-24, Creepy #1 facsimile dispatch) — the ONLY
+    // copy-grounded Vision origin input to reconcileEditionFacet.
+    // editionWarning is already scan-photo-grounded (GK-149's trace:
+    // detectEditionWarning reads req.body.reason, Vision's own
+    // condition-report text about the physically scanned book, generated
+    // before any eBay/comp-pool fetch happens in the pipeline — Vision
+    // never sees comp listings at this point). classifyPrintingClassFromEditionWarning
+    // maps the same signals classifySpecificPrinting already classifies,
+    // just to the printingClass vocabulary instead of the variant-text one.
+    const visionPrintingClass = classifyPrintingClassFromEditionWarning(editionWarning);
 
     // Q118 dispatch (2026-07-18) — internal consistency checker. Compares
     // Vision's own free-text reason against Vision's own RAW structured
@@ -5737,6 +5750,16 @@ export default async function handler(req, res) {
     // Bypasses safeVariantForConfirmed (Vision's printing-claim-filtered
     // read) entirely — the operator's explicit correction is not subject
     // to a check designed to catch Vision's own free-text overreach.
+    // GK-168 — the operator-confirmation origin input to reconcileEditionFacet,
+    // same shape as manualVariantAccepted immediately below. printingClass
+    // is validated server-side by manualCorrection.js's normalizeManualPrintingClass
+    // (enum-only — F4) before it can ever reach here as a non-null value.
+    const manualPrintingClassAccepted = manualCorrectionRequest?.valid
+      && manualCorrectionRequest.validation.acceptedFields.includes('printingClass');
+    const operatorPrintingClass = manualPrintingClassAccepted
+      ? manualCorrectionRequest.workingIdentity.printingClass
+      : null;
+
     const manualVariantAccepted = manualCorrectionRequest?.valid
       && manualCorrectionRequest.validation.acceptedFields.includes('variant');
     let confirmedVariant = manualVariantAccepted
@@ -7098,74 +7121,272 @@ export default async function handler(req, res) {
       console.log('[ai-comp-verify] skipped — refresh/cached (', rawComps.recentSales.length, 'comps)');
     }
 
-    // Ship #1.3 — Edition warning comp filter. When Vision detected reprint/
-    // facsimile/later-print signals, filter rawComps to reprint-only listings.
-    // If <3 reprint comps remain, refuse-to-price (prevents 1st-print comps
-    // from anchoring reprint book prices at 100-1000% over market).
-    // Session 4B — SKIP for books. Edition warning is comic-specific (facsimile detection).
-    if (out.assetType !== 'book' && editionWarning?.detected) {
-      console.log(`[edition-gate] reprint/later-print detected — filtering comps`);
-
-      // Q116 dispatch (2026-07-18, Incredible Hulk #377 class) — when
-      // Vision's reason text named a SPECIFIC printing number (or
-      // facsimile), isolate comps to that exact printing rather than an
-      // undifferentiated "any reprint" bucket that mixes 2nd print, 3rd
-      // print, and facsimile comps together — the same "generic signal
-      // used where a specific one already exists" class as tonight's
-      // other fixes (Q111 variant-token collapse). editionWarning.signals
-      // already classifies this (EDITION_WARNING_PATTERNS, api/grade.js);
-      // it was just never consumed for isolation, only for the pass/fail
-      // gate below. Falls back to the original generic match when only a
-      // generic signal fired (reprint/later-printing/not-first-print/
-      // not-original/less-valuable, no specific number) — genuinely
-      // unknown which printing then, generic isolation remains the best
-      // available signal, unchanged from before this fix.
-      const specificPrinting = classifySpecificPrinting(editionWarning.signals);
-      if (specificPrinting) {
-        console.log(`[edition-gate] specific printing kind detected (${specificPrinting.text}) — isolating to matching comps only`);
+    // Ship #1.3 / GK-168 (2026-08-24, Creepy #1 facsimile dispatch) —
+    // Edition warning comp filter, rebuilt on reconcileEditionFacet's
+    // origin-then-corroborate authority model. Session 4B — SKIP for
+    // books (unchanged). Gate widened from `editionWarning?.detected`
+    // alone to also fire on a standalone operator printingClass
+    // correction (Control 4 — an operator can confirm/override edition
+    // status on a scan where Vision itself raised no fresh concern this
+    // time, e.g. re-affirming a prior detection).
+    if (out.assetType !== 'book' && (editionWarning?.detected || operatorPrintingClass)) {
+      // GK-168 — corroboration-only signal from the RAW, pre-isolation
+      // comp pool. Per reconcileEditionFacet's own law, these rows can
+      // never originate a printingClass claim on their own (no vote-count
+      // authority) — they only count when visionPrintingClass or
+      // operatorPrintingClass already supplied an origin claim above.
+      const classifyCompRowPrintingClass = (title) => {
+        const s = String(title || '');
+        if (/facsimile/i.test(s)) return 'FACSIMILE';
+        if (/\b(?:2nd|second)\s*print(?:ing)?\b/i.test(s)) return 'SECOND_PRINT';
+        if (/\b(?:3rd|third)\s*print(?:ing)?\b/i.test(s)) return 'LATER_PRINT';
+        if (/\breprint(?!\s+series)\b|loot.?crate|millennium\s+edition/i.test(s)) return 'REPRINT';
+        return null;
+      };
+      // GK-168, plan review — the EDITION-CANDIDATE LANE. api/comps.js's
+      // era filter (applyEraConsistencyFilter, unchanged) already rejects
+      // any comp whose year doesn't fall within confirmedYear's tolerance
+      // — correct and necessary for the ORIGINAL-lane population, but it
+      // means a modern facsimile/reprint comp of a vintage book (Creepy
+      // #1's own 2019 facsimile market vs. its 1964 confirmedYear) never
+      // survives into rawComps.prices at all, starving both corroboration
+      // and isolation before either can run. Enabled ONLY when a copy-
+      // grounded printing claim already exists (this block's own outer
+      // gate: editionWarning?.detected || operatorPrintingClass —
+      // marketplace evidence alone never activates this lane, matching
+      // reconcileEditionFacet's own origin-then-corroborate law). Built
+      // from api/comps.js's own eraRejectedReferenceRows (rows it already
+      // rejected and tracked, reason-tagged — nothing re-fetched, the era
+      // filter itself is completely untouched) — admits a row ONLY when
+      // its title carries an EXPLICIT printing-class discriminator
+      // (classifyCompRowPrintingClass, the same title-text match used for
+      // corroboration/isolation below), never merely because its year
+      // differs from confirmedYear (a bare year mismatch alone proves
+      // nothing about printing — no circular proof). The ORIGINAL lane
+      // (rawComps.prices, and the ORIGINAL isolation branch below) never
+      // reads this — it stays governed exclusively by the unmodified era
+      // filter, exactly as before this dispatch.
+      // GK-168 — two independent api/comps.js filter steps can remove a
+      // genuine facsimile/reprint comp before it ever reaches
+      // rawComps.prices: the era filter (year mismatch — the Creepy
+      // shape, a dated 2019 facsimile listing) and Filter 1's REPRINT_RE
+      // (title-text match, independent of any year being present at all —
+      // a facsimile listing with no year in its title survives era
+      // filtering "no year evidence — ACCEPT" but is then removed here on
+      // text grounds). Both are unioned into the same candidate lane;
+      // both are still gated by the SAME explicit-discriminator
+      // requirement (classifyCompRowPrintingClass) before admission.
+      const editionCandidateComps = [
+        ...(rawComps?.eraRejectedReferenceRows || []).filter((r) => String(r?.reason || '').startsWith('era-year-mismatch')),
+        ...(rawComps?.reprintFilterRejectedRows || []),
+      ]
+        .filter((r) => classifyCompRowPrintingClass(r?.title))
+        .map((r) => ({ title: r.title, price: r.price }));
+      if (editionCandidateComps.length > 0) {
+        console.log(
+          `[edition-gate] edition-candidate lane: ${editionCandidateComps.length} era-rejected row(s) ` +
+          `carry an explicit printing-class discriminator — available for corroboration/isolation, ` +
+          `original-lane pool (rawComps.prices) unaffected`
+        );
       }
 
-      const reprintComps = (rawComps?.prices || []).filter((c) =>
-        specificPrinting
-          ? specificPrinting.re.test(String(c.title || ''))
-          : /reprint|facsimile|2nd\s*print|3rd\s*print|loot.?crate|millennium/i.test(
-              String(c.title || '')
-            )
-      );
-      if (reprintComps.length < 3) {
+      const editionCorroboratingClaims = [...(rawComps?.prices || []), ...editionCandidateComps]
+        .map((c) => ({ source: 'marketplace-pool-row', printingClass: classifyCompRowPrintingClass(c?.title) }))
+        .filter((c) => c.printingClass);
+
+      const editionReconciled = reconcileEditionFacet({
+        visionPrintingClass,
+        operatorPrintingClass,
+        corroboratingClaims: editionCorroboratingClaims,
+      });
+
+      out.printingClass = editionReconciled.printingClass;
+      // editionLabel — descriptive only, NEVER authoritative for
+      // printingClass by itself (plan C3). Vision's raw signal kind
+      // (e.g. "facsimile edition") when a specific one was classified,
+      // else the generic detection label — display text, not identity.
+      const specificPrintingForLabel = classifySpecificPrinting(editionWarning?.signals);
+      out.editionLabel = specificPrintingForLabel?.label
+        || (editionWarning?.detected ? 'Reprint/later printing detected' : null);
+      // printingYear — GK-168 F3: no origin currently populates this in
+      // this release (operator-confirmed physical-copy year entry and
+      // catalog-record-after-match lookup are both out of scope for this
+      // train — see plan). Honest null rather than fabricated, per F3.
+      out.printingYear = null;
+      out.editionReconciliation = editionReconciled;
+
+      // F1 — surface operator-vs-Vision disagreement as a visible,
+      // auditable conflict (reuses the SAME identityAlignment.conflicts
+      // shape the title facet already populates, api/enrich.js ~4553-4560,
+      // rendered at App.jsx:5945-5968) — first non-title facet to use it.
+      if (editionReconciled.conflicts?.length > 0 && alignment) {
+        for (const c of editionReconciled.conflicts) {
+          alignment.conflicts.push({
+            field: 'printingClass',
+            severity: 'INFO',
+            vision: c.source === 'vision' ? c.value : undefined,
+            resolved: editionReconciled.printingClass,
+            message: `Edition/printing: ${c.source} claims "${c.value}", resolved state is "${editionReconciled.printingClass}" (${editionReconciled.authority})`,
+          });
+        }
+      }
+
+      const editionAuthoritySufficient = editionReconciled.authority === 'OPERATOR_CONFIRMED' || editionReconciled.authority === 'CORROBORATED';
+
+      if (editionAuthoritySufficient && editionReconciled.printingClass === 'ORIGINAL') {
+        // Control 4: confirmed ORIGINAL — price from the original
+        // population only. This still EXCLUDES any facsimile/reprint/
+        // 2nd/3rd-print-titled rows from the pool (a mixed pool blending
+        // original and facsimile comps is exactly the contamination this
+        // whole facet exists to prevent) — it just doesn't apply the
+        // <3-comps hard refusal the non-original branch below does, since
+        // ORIGINAL is the baseline/default population and any resulting
+        // thinness is already handled by this file's existing general
+        // thin-pool safety nets (Ship #13.1 thin-pool anchor, low-grade
+        // floor) further downstream, which already run on whatever
+        // rawComps.count ends up being.
+        const nonOriginalRe = /reprint|facsimile|2nd\s*print|3rd\s*print|loot.?crate|millennium/i;
+        const originalOnlyComps = (rawComps?.prices || []).filter((c) => !nonOriginalRe.test(String(c?.title || '')));
+        if (originalOnlyComps.length > 0 && originalOnlyComps.length < (rawComps?.prices || []).length) {
+          const origPrices = originalOnlyComps.map((c) => c.price).filter((p) => p > 0);
+          const origAvg = origPrices.length > 0 ? origPrices.reduce((s, p) => s + p, 0) / origPrices.length : 0;
+          const origLow = origPrices.length > 0 ? Math.min(...origPrices) : 0;
+          const origHigh = origPrices.length > 0 ? Math.max(...origPrices) : 0;
+          rawComps = {
+            ...rawComps,
+            prices: originalOnlyComps,
+            count: originalOnlyComps.length,
+            average: origAvg,
+            averageFormatted: fmtUsd(origAvg),
+            lowest: origLow,
+            lowestFormatted: fmtUsd(origLow),
+            highest: origHigh,
+            highestFormatted: fmtUsd(origHigh),
+            // GK-172 — recentSales/gradeFilteredLowest are NOT in the
+            // fields rebuilt above; left alone they carry over verbatim
+            // from the pre-rebuild spread and can still surface an
+            // excluded non-original comp (recentSales) or a stale
+            // grade-floor value computed against the wrong population.
+            // Same honest-null precedent api/enrich.js already uses a
+            // few hundred lines up (line ~7102) when a pool is narrowed.
+            recentSales: originalOnlyComps.slice(0, 5).map((c) => ({
+              price: c.price,
+              priceFormatted: fmtUsd(c.price),
+              title: c.title || null,
+              date: null,
+              daysAgo: null,
+              itemWebUrl: null,
+            })),
+            gradeFilteredLowest: null,
+          };
+        }
+        console.log(`[edition-gate] printingClass=ORIGINAL (${editionReconciled.authority}) — pricing from original-only population (${rawComps?.count ?? 0} comps)`);
+      } else if (editionAuthoritySufficient && editionReconciled.printingClass !== 'UNKNOWN') {
+        // Confirmed non-original printing with sufficient authority —
+        // isolate comps to the matching printing population. Q116's own
+        // per-printing regex (classifySpecificPrinting) still supplies the
+        // tightest match when the classified printingClass has one;
+        // otherwise the same generic "not the original" bucket the
+        // pre-GK-168 code already used.
+        console.log(`[edition-gate] printingClass=${editionReconciled.printingClass} (${editionReconciled.authority}) — isolating to matching comps only`);
+        const specificPrinting = classifySpecificPrinting(editionWarning?.signals);
+        const printingClassMatchRe = {
+          FACSIMILE: /facsimile/i,
+          SECOND_PRINT: /\b(?:2nd|second)\s*print(?:ing)?\b/i,
+          LATER_PRINT: /\b(?:3rd|third)\s*print(?:ing)?\b/i,
+          REPRINT: /reprint|facsimile|2nd\s*print|3rd\s*print|loot.?crate|millennium/i,
+        }[editionReconciled.printingClass];
+
+        // GK-168, plan review — isolation source is the union of the
+        // (unmodified) original-lane pool and the edition-candidate lane
+        // built above. A row can appear in at most one of the two (the
+        // candidate lane is built exclusively from rows the era filter
+        // already REMOVED from rawComps.prices), so no double-count risk.
+        const editionIsolationSourcePool = [...(rawComps?.prices || []), ...editionCandidateComps];
+        const editionComps = editionIsolationSourcePool.filter((c) =>
+          specificPrinting
+            ? specificPrinting.re.test(String(c.title || ''))
+            : printingClassMatchRe.test(String(c.title || ''))
+        );
+        if (editionComps.length < 3) {
+          // Original-market anchors may remain visible as REFERENCE ONLY
+          // (see the catalog_ladder_reference-style pattern elsewhere in
+          // this file) but the committed price stays refused — the
+          // original market's price must never leak into a confirmed-
+          // facsimile/reprint committed price (Control 1's central law).
+          out.price = null;
+          out.priceBands = null;
+          out.pricingSource = 'refused-reprint-thin-pool';
+          out.priceNote = specificPrinting
+            ? `${specificPrinting.label} detected — insufficient printing-specific comps`
+            : `${editionReconciled.printingClass} confirmed — insufficient printing-specific comps`;
+          out.refusedToPrice = true;
+          out.confidenceLevel = 'LOW';
+          console.log(`[edition-gate] only ${editionComps.length} ${editionReconciled.printingClass} comps — refused to price`);
+        } else {
+          const editionPrices = editionComps.map((c) => c.price).filter((p) => p > 0);
+          const editionAvg = editionPrices.length > 0
+            ? editionPrices.reduce((s, p) => s + p, 0) / editionPrices.length
+            : 0;
+          const editionLow = editionPrices.length > 0 ? Math.min(...editionPrices) : 0;
+          const editionHigh = editionPrices.length > 0 ? Math.max(...editionPrices) : 0;
+          rawComps = {
+            ...rawComps,
+            prices: editionComps,
+            count: editionComps.length,
+            average: editionAvg,
+            averageFormatted: fmtUsd(editionAvg),
+            lowest: editionLow,
+            lowestFormatted: fmtUsd(editionLow),
+            highest: editionHigh,
+            highestFormatted: fmtUsd(editionHigh),
+            reprintFiltered: true,
+            // GK-172 — same gap as the ORIGINAL-only rebuild above:
+            // recentSales/gradeFilteredLowest aren't in this rebuild's
+            // field list, so left alone they still carry the PRE-
+            // isolation original-population values (Control 1's own
+            // $64 comp would otherwise remain visible in recentSales
+            // even though prices/average/lowest correctly show the
+            // isolated FACSIMILE population).
+            recentSales: editionComps.slice(0, 5).map((c) => ({
+              price: c.price,
+              priceFormatted: fmtUsd(c.price),
+              title: c.title || null,
+              date: null,
+              daysAgo: null,
+              itemWebUrl: null,
+            })),
+            gradeFilteredLowest: null,
+          };
+          // GK-168 plan C7 — REVIEW ceiling is a conservative rollout
+          // policy for THIS bounded release, not a permanent semantic law
+          // that a confirmed facsimile/reprint can never reach a higher
+          // execution state. Revisit once more edition-scoped market data
+          // exists. Only the pricing-decision layer (Decision Engine)
+          // actually enforces the ceiling; this flag documents intent for
+          // that consumer and for anyone reading this response.
+          out.editionPricingCeiling = 'REVIEW';
+          out.editionPricingCeilingNote = 'Temporary rollout safety policy (GK-168) — not a permanent limit on confirmed-edition pricing.';
+          console.log(
+            `[edition-gate] filtered to ${editionComps.length} ${editionReconciled.printingClass} comps ` +
+            `(avg $${editionAvg.toFixed(2)}, was $${compsFromEbay?.average?.toFixed(2) || 'null'})`
+          );
+        }
+      } else {
+        // Control 3: insufficient authority (NONE/CONTESTED) — a bare
+        // Vision-origin suspicion with no operator confirmation and no
+        // corroboration is not authority (C8). Honest refusal: do not
+        // price as original, do not price as the suspected edition.
+        // Unchanged in spirit from the pre-GK-168 behavior for this case.
         out.price = null;
         out.priceBands = null;
         out.pricingSource = 'refused-reprint-thin-pool';
-        out.priceNote = specificPrinting
-          ? `${specificPrinting.label} detected — insufficient printing-specific comps`
-          : 'Reprint edition detected — insufficient reprint-specific comps';
+        out.priceNote = editionReconciled.authority === 'CONTESTED'
+          ? 'Edition/printing status contested — insufficient authority to price either way'
+          : 'Possible reprint/later edition detected — unconfirmed, insufficient authority to price';
         out.refusedToPrice = true;
         out.confidenceLevel = 'LOW';
-        console.log(`[edition-gate] only ${reprintComps.length} reprint comps — refused to price`);
-      } else {
-        // Recalculate stats with reprint-only pool
-        const reprintPrices = reprintComps.map((c) => c.price).filter((p) => p > 0);
-        const reprintAvg = reprintPrices.length > 0
-          ? reprintPrices.reduce((s, p) => s + p, 0) / reprintPrices.length
-          : 0;
-        const reprintLow = reprintPrices.length > 0 ? Math.min(...reprintPrices) : 0;
-        const reprintHigh = reprintPrices.length > 0 ? Math.max(...reprintPrices) : 0;
-        rawComps = {
-          ...rawComps,
-          prices: reprintComps,
-          count: reprintComps.length,
-          average: reprintAvg,
-          averageFormatted: fmtUsd(reprintAvg),
-          lowest: reprintLow,
-          lowestFormatted: fmtUsd(reprintLow),
-          highest: reprintHigh,
-          highestFormatted: fmtUsd(reprintHigh),
-          reprintFiltered: true,
-        };
-        console.log(
-          `[edition-gate] filtered to ${reprintComps.length} reprint comps ` +
-          `(avg $${reprintAvg.toFixed(2)}, was $${compsFromEbay?.average?.toFixed(2) || 'null'})`
-        );
+        console.log(`[edition-gate] authority=${editionReconciled.authority} — refused to price (Control 3, C8)`);
       }
     }
 
@@ -7470,6 +7691,13 @@ export default async function handler(req, res) {
       variant: confirmedVariant,
       variantAdjusted: soldVerifyResult.variantAdjusted || false,
       soldVerifyResult,
+      // GK-172 — rawComps.reprintFiltered is the edition-gate's own tag
+      // (set above only when reconcileEditionFacet already granted
+      // OPERATOR_CONFIRMED/CORROBORATED authority and isolated the pool
+      // to a confirmed non-original printing class). Tells
+      // buildVerifiedActivePool's Q75-1 year check to stop measuring
+      // drift against the ORIGINAL work's confirmedYear for this pool.
+      editionLane: rawComps?.reprintFiltered === true,
     });
 
     if (priceBandsRaw) {
@@ -10293,7 +10521,19 @@ export default async function handler(req, res) {
       out.soldCompsAvg = soldAvg;
       // Book-level comps cache — surface timestamp and comps for persistence
       out.compsCachedAt = useBookCompsCache ? bookCompsCachedAt : now;
-      out.activeCached = compsFromEbay;
+      // GK-172 — compsFromEbay is the pre-edition-gate snapshot (the
+      // original-work population, e.g. Creepy #1's own $64 comp); when
+      // the edition-gate has isolated to a confirmed non-original
+      // printing (rawComps.reprintFiltered), caching compsFromEbay
+      // verbatim both leaks the original-population average into the
+      // response (Control 1's own law: the original market's price must
+      // never appear alongside a confirmed-facsimile response) and
+      // poisons the client-side cache round-trip (line ~6599 reads
+      // req.body.activeCached back as compsFromEbay on the NEXT scan,
+      // which would silently skip the edition-gate rescue entirely on
+      // refresh). Cache the edition-isolated pool instead whenever one
+      // was produced; every other path is unchanged.
+      out.activeCached = rawComps?.reprintFiltered ? rawComps : compsFromEbay;
       out.soldCompsRawCached = capRawSoldRows(rawSoldRows);
       // Q89-CACHE: stamp the comp-filter version the active pool was built
       // with — book cache is only trusted when versions match (see gate).
@@ -11769,8 +12009,22 @@ export default async function handler(req, res) {
       // actually corrected THIS request get locked; a field left
       // unmentioned stays unlocked and remains fillable by future
       // automatic resolution (Directive T's per-field design rationale).
+      //
+      // GK-168, plan review — 'printingClass' is excluded from this
+      // generic lock specifically when its accepted value is 'UNKNOWN'.
+      // reconcileEditionFacet already keeps that state at authority=NONE
+      // (never OPERATOR_CONFIRMED) for pricing/listing purposes; locking
+      // it here too would ALSO stop future automatic scans from ever
+      // re-surfacing the detect-and-verify slot, permanently freezing a
+      // book the operator explicitly said still "needs research" — the
+      // opposite of what that choice means. Every other field, and every
+      // OTHER printingClass value (a genuinely resolved one), locks
+      // exactly as before.
+      const lockableAcceptedFields = manualCorrectionRequest.validation.acceptedFields.filter(
+        (f) => !(f === 'printingClass' && manualCorrectionRequest.workingIdentity.printingClass === 'UNKNOWN')
+      );
       out.identityAuthority = Object.fromEntries(
-        manualCorrectionRequest.validation.acceptedFields.map((f) => [f, 'OPERATOR_CONFIRMED'])
+        lockableAcceptedFields.map((f) => [f, 'OPERATOR_CONFIRMED'])
       );
     }
 

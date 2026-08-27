@@ -53,7 +53,22 @@ import { mergeIdentityAuthority } from './dataQualityGuard.js';
 // response (buildCorrectedCatalogueItem), but nothing let the operator
 // *set* it. Required for the picker foundation (Directive S) to have
 // anywhere to put a selected candidate's variant facet at all.
-export const MANUAL_CORRECTION_ALLOWED_FIELDS = ['title', 'issue', 'year', 'publisher', 'variant'];
+// GK-168 (2026-08-24, Creepy #1 facsimile dispatch) — added 'printingClass',
+// same shape as Directive T's 'variant' addition above. The E-UX
+// detect-and-verify chip writes through this exact same operator-authority
+// contract, not a new one.
+export const MANUAL_CORRECTION_ALLOWED_FIELDS = ['title', 'issue', 'year', 'publisher', 'variant', 'printingClass'];
+
+// GK-168, plan review F4/F5 — the ONLY values printingClass may validate
+// to. Server-side enum validation, independent of whatever choice set the
+// E-UX chip UI happens to render — an arbitrary manual-correction string
+// must never acquire OPERATOR_CONFIRMED authority as printingClass.
+// Mirrors identityCore.js's PRINTING_CLASS_VALUES (not imported directly —
+// this file is deliberately dependency-light/pure, same reasoning as its
+// other normalizers; kept in sync by the shared vocabulary being small,
+// named, and reviewed together, same discipline GK-169's shared
+// AUTHENTICATION_WORDS list documents for a similar case).
+export const PRINTING_CLASS_ENUM = ['ORIGINAL', 'FACSIMILE', 'REPRINT', 'SECOND_PRINT', 'LATER_PRINT', 'UNKNOWN'];
 
 const YEAR_MIN = 1930;
 const YEAR_MAX_SLACK = 1; // allow next calendar year (solicitation/cover-date lead)
@@ -120,12 +135,33 @@ const normalizeManualVariant = (raw) => {
   return trimmed || null;
 };
 
+// GK-168, plan review F4/F5 — strict enum membership only (all 6 values,
+// UNKNOWN included — it is a legitimate value at the validation layer;
+// the semantic distinction between a resolved printing class and the
+// UNKNOWN/research state is enforced downstream, in
+// identityCore.js's reconcileEditionFacet and in api/enrich.js's
+// identityAuthority-locking logic, not here — this function's only job
+// is "is this one of the six real values," same scope as
+// normalizeManualYear's range check). Any string not exactly matching
+// PRINTING_CLASS_ENUM (case-insensitive input, normalized to the
+// canonical uppercase form) returns null, which validateManualAuthority
+// already treats as "supplied value was empty/invalid" (pushed to
+// emptyFields, never acceptedFields). This is the actual server-side
+// enforcement point: it runs regardless of what choice set any client UI
+// renders.
+const normalizeManualPrintingClass = (raw) => {
+  if (raw == null) return null;
+  const upper = String(raw).trim().toUpperCase();
+  return PRINTING_CLASS_ENUM.includes(upper) ? upper : null;
+};
+
 const NORMALIZERS = {
   title: normalizeManualTitle,
   issue: normalizeManualIssue,
   year: (raw) => normalizeManualYear(raw),
   publisher: normalizeManualPublisher,
   variant: normalizeManualVariant,
+  printingClass: normalizeManualPrintingClass,
 };
 
 // Field-keyed normalization, tolerant of a currentYear override — used by
@@ -138,6 +174,7 @@ const normalizeFieldValue = (field, rawValue, currentYear) => {
   if (field === 'title') return normalizeManualTitle(rawValue);
   if (field === 'publisher') return normalizeManualPublisher(rawValue);
   if (field === 'variant') return normalizeManualVariant(rawValue);
+  if (field === 'printingClass') return normalizeManualPrintingClass(rawValue);
   return rawValue ?? null;
 };
 
@@ -264,7 +301,7 @@ export const prepareManualCorrectionRequest = (body, currentYear) => {
 
   const validation = validateManualAuthority(
     body.manualAuthority,
-    { title: body.title, issue: body.issue, year: body.year, publisher: body.publisher, variant: body.variant },
+    { title: body.title, issue: body.issue, year: body.year, publisher: body.publisher, variant: body.variant, printingClass: body.printingClass },
     currentYear
   );
   if (!validation.valid) {
@@ -283,6 +320,7 @@ export const prepareManualCorrectionRequest = (body, currentYear) => {
     year: buildField('year'),
     publisher: buildField('publisher'),
     variant: buildField('variant'),
+    printingClass: buildField('printingClass'),
   };
 
   return { valid: true, error: null, contractOk: true, validation, workingIdentity };
@@ -417,6 +455,16 @@ const CLEAR_VARIANT_PRINTING = [
   // slab/grading-service record and physical condition of the object
   // itself, not which specific printing/variant of a title it is.
   'variant', 'isReprint', 'editionType',
+  // GK-168/172 (E-UX) — same reasoning as the group above: "is this book a
+  // FACSIMILE" is a determination tied to WHICH BOOK this is, not a photo-
+  // condition fact. Cleared here so a correction that changes identity away
+  // from a facsimile-suspected book doesn't carry the OLD identity's
+  // printing-class determination forward; the raw `{...cleared,
+  // ...enrichData}` spread in buildCorrectedCatalogueItem below repopulates
+  // whatever the new response actually computed (same mechanism as
+  // editionWarning above, mirrors GK-138's printingClass field set).
+  'printingClass', 'editionReconciliation', 'editionLabel',
+  'editionPricingCeiling', 'editionPricingCeilingNote', 'printingYear',
 ];
 
 const CLEAR_PRIOR_IDENTITY_WARNINGS = [

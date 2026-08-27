@@ -379,6 +379,31 @@ export function deriveLocks(out) {
     });
   }
 
+  // GK-168 (2026-08-24, Creepy #1 facsimile dispatch, plan review C7) —
+  // a CONFIRMED non-original printingClass floors marketStanding to
+  // SIMILAR_ONLY (deriveMarketStanding, actionAuthority.js) even though
+  // the isolated pool prices EXACT_CURRENT for that printing's own
+  // market — same additive/independent pattern as every other standing
+  // lock in this block. Conservative rollout policy for this bounded
+  // release, not a permanent semantic law (C7) — the reason string says
+  // so explicitly, so the operator never reads this as a permanent limit.
+  // out.editionReconciliation is custodied from api/enrich.js's own
+  // reconcileEditionFacet call — never re-derived here.
+  if (
+    preStandingLockCount === 0 &&
+    out.editionReconciliation?.printingClass &&
+    out.editionReconciliation.printingClass !== 'ORIGINAL' &&
+    out.editionReconciliation.printingClass !== 'UNKNOWN' &&
+    (out.editionReconciliation.authority === 'OPERATOR_CONFIRMED' || out.editionReconciliation.authority === 'CORROBORATED')
+  ) {
+    locks.push({
+      code: 'market-standing-edition-review-ceiling',
+      reason: `Confirmed ${out.editionReconciliation.printingClass} — price reflects that printing's own market, held at REVIEW as a conservative rollout policy (GK-168), not a permanent limit`,
+      hard: false,
+      class: 'insufficiency',
+    });
+  }
+
   // GrailKey Directive AH (GK-111) — sufficiency, not applicability. A
   // marketStanding of EXACT_CURRENT says the pool IS current and (per the
   // lock above) confirmed applicable to this edition — it says nothing
