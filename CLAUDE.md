@@ -399,6 +399,8 @@ Full detail (external API status, internal-investigation notes): `docs/OPEN-BLOC
 
 ## Handoff Pointers — Navigation
 
+- Physical Asset Protocol (Six Foundation Laws + Compatibility Matrix, canonical) → `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`
+- Cross-workstream status board → `docs/MASTER-BOARD.md`
 - Tickets/history → `docs/TICKET-REGISTRY.md`
 - Failure patterns (older/architectural) → `docs/PATTERN-LIBRARY.md`
 - Architecture decisions → `docs/adr/`
