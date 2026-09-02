@@ -277,6 +277,8 @@ Migration `db/data0/0013_d4_identifier_fabric.sql` — four new additive tables 
 
 **Terminal: `GK-178 PASS — POOLED SESSION-STATE HAZARD CLOSED — D5 RELEASED.`**
 
+**Process note (2026-09-03):** the 7 uncommitted scratch diagnostic scripts written to `C:\grailkey-data\data-1\` during this dispatch's G1/G6/G7 steps were deleted after use. Standing convention: proof scripts written to `C:\grailkey-data\data-1\` are retained uncommitted, not cleaned up. No action taken to re-create them — the committed regression (`tests/gk178-pooled-session-state.test.js`) is self-contained and re-runnable, so no evidence was lost, but the deletion itself departed from convention.
+
 ## Related documents
 
 - Cross-workstream status board (migration-truth row updated from this pass): `docs/MASTER-BOARD.md`
