@@ -118,7 +118,17 @@ HEAD at this publication: `6b800f4`.
 
 ## Migration truth (data1_dev live schema)
 
-**PENDING.** The live `data1_dev` Postgres schema has not been queried as part of this D1 pass. Nothing above should be read as a claim about live database state — every DB-shape fact cited in this board and in `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md` is sourced from the migration *files* in `db/data0/` (0001–0010), which is a file-state fact, not a live-state fact. `data1_dev` may have drifted from what those files describe (the repository audit already reconciled a 13-of-17-vs-11-of-15 applied-migration discrepancy once before — see the dispatch's own D2.1 framing). **D2.1's live `information_schema` query is the sole authority for live schema state.** This row stays PENDING until D2 runs.
+**VERIFIED — D2.1, 2026-09-01.** Live `information_schema` query (not file inference) against both existing user schemas: `public` (0 tables) and `data1_dev` (16 tables). Table-by-table APPLIED/NOT APPLIED/PARTIAL status, full reconciliation of the prior "13-of-17-vs-11-of-15" claim (found to have no citation anywhere else in the repo — recorded as an open contradiction, not resolved either way), and the design-snapshot's "0001-0003 target public" claim (only partially true — `entity_mint_basis`/`mint_event` actually live in `data1_dev`): `docs/DATABASE-MIGRATION-STATUS.md`. Two real production rows (`gk_asset`, `media`) re-confirmed live and byte-consistent with the values already cited in CLAUDE.md's DATA-1D block.
+
+## Production/Development isolation risk
+
+**PRODUCTION ENVIRONMENT ISOLATION — OPEN / PRE-D6 GATE.**
+
+D2.1's live query and `vercel env ls` (list-only, no secret values pulled) together establish: Development, Preview, and Production each carry their own `GRAILKEY_CATALOG_DATABASE_URL`, but only Development's environment carries the full Neon-integration-generated variable family (`PGHOST`/`PGUSER`/`NEON_PROJECT_ID`/etc.) — Production and Preview each have only a bare `DATABASE_URL`. **Whether Production/Preview's connection strings point at the same Neon branch/schema as the `data1_dev` this pass queried, or at a genuinely separate one, was not determined — doing so would require decrypting environment-variable values, which was not done (Secret Hygiene).** This is stated as an open question, not resolved as fact in either direction.
+
+Real, proven contamination-risk evidence from this same pass, offered as supporting signal for the gate — not as proof of the topology question itself: the D2.3 orphan reconciler found 4 `data1_dev.media` rows carrying non-hash fixture-style `object_uri` values (`localfs://sha256/aa/gk163-A`, duplicated across 2 asset rows each), consistent in shape with leftover GK-163 idempotency-test fixture data. **Provenance is not established beyond that shape-based observation — no commit, test run, or log line confirming which dispatch wrote them was checked this pass.** Recorded as evidence of what test/dev activity can leave behind in this schema, not as confirmation that Production shares that same schema.
+
+**Gate: Production capture must not be enabled at D6 while it is undetermined whether Production shares the same writable database failure domain as Development/test activity.** Resolving this (Neon branch-per-environment vs. confirmed-separate topology) is now a pre-D6 gate, not a preference — see `docs/DATABASE-MIGRATION-STATUS.md` and the D2 checkpoint report (2026-09-01) for the two topology options under review. No branch was created, no schema was migrated, and Production was not repointed as part of establishing this row.
 
 ---
 

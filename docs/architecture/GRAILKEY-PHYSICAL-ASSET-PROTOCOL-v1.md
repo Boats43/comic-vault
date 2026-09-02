@@ -120,6 +120,16 @@ Standing pre-merge gate. Any change touching the physical-asset domain, the iden
 15. Does the design preserve eventual outcome learning, including nothing that prevents later `OutcomeEvent` / transaction linkage?
 16. Wherever an event may be backdated or imported, does the system preserve a true `occurred_at` distinct from `recorded_at`?
 
+### Reporting procedure (added D2 checkpoint, 2026-09-01)
+
+For a documentation-only change that touches no executable code, schema, migration, permanent-domain structure, or runtime behavior, the Compatibility Matrix may be reported once as:
+
+> `N/A — documentation-only; no governed executable/domain/schema/migration surface changed.`
+
+For any change touching executable code, schema, or migrations, all 16 ratified questions above must be rendered individually with YES / N/A / NO and evidence — the single-line form above is not a substitute in that case. Any NO still stops the train regardless of which form was used.
+
+This procedural rule governs how the matrix is *reported*; it does not alter, replace, reword, or reduce the count of the 16 ratified questions themselves.
+
 ---
 
 ## Supporting invariants (not Foundation Laws)
