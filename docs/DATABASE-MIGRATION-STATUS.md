@@ -201,6 +201,14 @@ Representative payloads sized off this repo's own documented comp-pool conventio
 
 **Not generalized further.** This is a recorded session-state hazard and its operational consequence — not a claim that pooled connections are broken, and not a claim about any other property of the pooler. Simple, single-statement, or already-schema-qualified queries are unaffected by this finding.
 
+## D4 Phase A — Identifier Fabric (PROPOSED, NOT applied to `data1_dev`)
+
+Migration `db/data0/0013_d4_identifier_fabric.sql` — four new additive tables (`asset_identifier`, `asset_raw_observation`, `asset_identifier_assertion`, `asset_identifier_assertion_evidence`), zero `ALTER` statements against any existing table. Ratified: `docs/adr/ADR-IDENTIFIER-001-identifier-fabric.md`. Rollback: `db/data0/0013_d4_identifier_fabric_rollback.sql`. SHA-256, both files, final proposed bytes: forward `e522de5097fec2e72bea5d45dd96586b42068ab8bf6e5664ca3dd7160a5b5e4d`, rollback `36a7e76338ff177755ad14b843d18502bd40151fcff2572a91ff7b8cece9cf87`.
+
+**Real, isolated-scratch-schema proof, not applied to `data1_dev`:** `tests/d4-identifier-fabric-migration-contract.test.js` (67/67) — reads the real forward/rollback SQL from disk, applies verbatim, proves canonical uniqueness (incl. manufacturer-serial issuer-sensitivity, `UNKNOWN` sentinel, GTIN/ISBN canonical-value collision), all 7 scopes, full immutability audit across all four tables, `CORROBORATED` cardinality permissiveness (0/1/2+ evidence links all legal), convergent supersession, `gkAssetId` invariance across every operation, and identifier multiplicity in both directions — then rehearses rollback (all 4 tables removed, prerequisite substrate preserved), reapplies the identical bytes, and re-runs a critical subset. `tests/d4-identifier-fabric-concurrency.test.js` (7/7) — real two-connection race against the actual proposed trigger (not a hand-built approximation): `bothCommitted=false`, `cycleFormed=false`, confirmed; convergent supersession re-confirmed against the real trigger. `data1_dev`'s four D4 table slots confirmed `null` before and after every proof run.
+
+**Phase B (applying `0013` to `data1_dev`) remains a separate, not-yet-authorized step, gated by the same recovery-anchor sequence D3.2 established.** No application wiring exists or is proposed by this pass.
+
 ## Related documents
 
 - Cross-workstream status board (migration-truth row updated from this pass): `docs/MASTER-BOARD.md`
