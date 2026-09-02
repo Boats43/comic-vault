@@ -128,6 +128,33 @@ Migration: `db/data0/0012_d3_3_comp_snapshot.sql` — one new, additive table, `
 
 **WAL measurement re-run after the R1 amendment (`tests/d3-3-wal-measurement.test.js`):** figures reproduced essentially identically to the original run (steady-state medians unchanged: SMALL 1616, NORMAL 1480, LARGE 3504 WAL bytes) — the added FK column on `valuation_event` has no measurable effect on `comp_snapshot`'s own insert cost, since the measured inserts write only to `comp_snapshot`.
 
+## D3.3 Phase B — APPLIED to `data1_dev` (2026-09-02)
+
+**Recovery anchor:** `2026-09-02T04:18:26Z` UTC / `2026-09-01 9:18:26 PM MST` (America/Phoenix, no DST). Neon project `polished-frog-12911134`, source branch `main`, target schema `data1_dev`. Committed migration SHA-256 (`db/data0/0012_d3_3_comp_snapshot.sql` at `d48f32f`): `74a539fbf8b045c5314beb65951241504bc983772105e013dd04347ed061098a` — verified byte-identical to the working-tree file actually executed (`git show d48f32f:... | diff`) before running.
+
+**Pre-migration evidence:** `valuation_event` 78 rows; `comp_snapshot_ref` population unchanged from R1's audit (8× `"snap-ref-1"`, 2× `"scanlog:ff4eb86c-..."`); `comp_snapshot` table and `valuation_event.comp_snapshot_id` column both confirmed absent (`to_regclass()` null / zero `information_schema.columns` rows) immediately before applying. Quarantine and `DATA-0E-FULL` confirmed unchanged.
+
+**Forward migration:** applied verbatim, no hand-editing — start `2026-09-02T04:19:07.482Z` UTC, end `2026-09-02T04:19:07.666Z` UTC (184ms). Rollback (`db/data0/0012_d3_3_comp_snapshot_rollback.sql`, R1-amended) not needed — no incident.
+
+**Post-migration schema proof: 14/14.** `comp_snapshot`: exactly the 7 designed generic columns (no comic-specific field), both triggers + the trigger function present, `recorded_at` still `NOT NULL DEFAULT now()`, both indexes present. `valuation_event.comp_snapshot_id`: present, nullable, FK-linked to `comp_snapshot(id)`, indexed. **All 78 pre-existing `valuation_event` rows confirmed `comp_snapshot_id IS NULL`** — no manufactured historical linkage. `comp_snapshot_ref` population confirmed byte-identical to pre-migration (still the same 8+2 non-durable values, completely untouched).
+
+**Application wiring** (`src/modules/assets/repository.js`, `service.js`, `index.js`): new `insertCompSnapshot`/`recordCompSnapshot` (persist-only — the DB trigger is what actually enforces immutability, this function issues nothing but INSERT). `insertValuationEvent`/`recordValuation` gain an explicit `compSnapshotId` parameter — never inferred from `compSnapshotRef`, a Redis/scanlog key, a correlationId, or any other value; caller-supplied only, optional (a valuation with no durable evidence, e.g. `operator-override`, legitimately omits it). `capture/mapping.js` (the legacy `comp_snapshot_ref` writer) is **completely untouched**.
+
+**Live contract proof, real functions, real `data1_dev`: `tests/d3-3-phase-b-live-contract-proof.test.js`, 31/31** — A (persist S1, exact read-back), B (V1 durably resolves to S1 via a real JOIN), C (a nonexistent snapshot UUID rejected by the FK, through the real application path), D (real trigger rejects UPDATE and DELETE of S1), E (repricing → S2 ≠ S1, V2→S2 independent of V1→S1), F (S1/V1 remain exactly readable/resolvable after S2/V2), G (`gkAssetId` unchanged throughout), H (multi-item temporal evidence — including one item's genuinely absent optional field — round-trips exactly; `recorded_at` proven independent of every per-item date), I (`comp_snapshot_ref` never populated or required by the new linkage), J (all 78 pre-existing rows re-confirmed `NULL`), K (cleanup — see below).
+
+**K — retained controlled test artifacts (comp_snapshot is genuinely DELETE-protected — a real trigger, not a convention, so this is a structural consequence of the invariant just proven, not a bookkeeping gap):**
+
+| Table | Before | After | Delta | Disposition |
+|---|---|---|---|---|
+| `gk_asset` | 110 | 111 | +1 | **Retained** — pinned transitively: `comp_snapshot.asset_id` FK-references it, and `comp_snapshot` can never be deleted |
+| `entity_mint_basis` | 110 | 111 | +1 | **Retained** — pinned transitively: `gk_asset.mint_basis_id` FK-references it, and `gk_asset` (above) can never be deleted |
+| `comp_snapshot` | 0 | 2 | +2 | **Retained** — the real immutability trigger this proof exists to demonstrate; `DELETE` was attempted and genuinely rejected |
+| `valuation_event`, `ownership_event`, `current_owner`, `mint_event`, `domain_event`, `outbox`, `idempotency_key` | — | — | 0 | Fully cleaned — nothing pins these, all test rows removed |
+
+Exact retained IDs (real, live, this dispatch, 2026-09-02 — not production data): `gk_asset.id` and `entity_mint_basis.id` for the one test asset minted this pass; `comp_snapshot.id` ×2 (S1, S2). Attempting `DELETE` on `gk_asset`/`entity_mint_basis` was tried and genuinely rejected by their own FK constraints (proven, not assumed) — reported honestly as a non-zero delta, never claimed byte-identical.
+
+**Regression re-confirmed after wiring:** WAL measurement re-run (`tests/d3-3-wal-measurement.test.js`) — steady-state medians reproduced (SMALL 1616, NORMAL 1504–1480, LARGE 3504); one `NORMAL` sample this run read 9752 bytes, a real observed instance of the method's own disclosed background-write-contamination limitation (the LSN is database-wide) — the median-based reporting already in use was unaffected by this single outlier. D3.2 application-wiring live proof 10/10, D3.1 mint-basis live regression 9/9, both re-run clean after this change.
+
 ### Amendment A3 / E3 — logical vs. WAL/change-history byte measurement
 
 **Method (MEASURED, not estimated):** `pg_current_wal_lsn()` is callable by this role (`neondb_owner`; gated by `rolreplication=true`, not superuser — confirmed directly). Captured immediately before/after a single-row `INSERT` transaction; `pg_wal_lsn_diff()` gives the byte delta. **Limitation, disclosed:** this LSN is database-wide, not per-transaction — any concurrent write during the window would contaminate the result. **Controls:** a no-write LSN delta was sampled 3× immediately before measuring (result: `0, 0, 0` bytes — no background noise detected this run, but that is a property of this idle dev database during this run, not a guarantee the method itself provides). Each payload size measured 5× **after priming** (20 throwaway inserts, to warm pages past Postgres's one-time full-page-image WAL cost on a table's first writes — real effect, separately measured: a cold first insert of the SMALL payload cost 2208 WAL bytes vs. its own steady-state median of 1616).

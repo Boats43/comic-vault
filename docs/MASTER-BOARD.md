@@ -160,9 +160,17 @@ Migration `db/data0/0012_d3_3_comp_snapshot.sql` — one new additive table, `co
 
 **New standing rule: Historical Regression Freshness** (Phase A review, R5) — added to `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`: a dispatch that does not freshly re-run the byte-exact historical test roster must report `historical-roster status changes: NOT FRESHLY MEASURED`, never "0 status-changed" from untouched-source reasoning alone.
 
-**GK-167 constitutional-text correction** (Phase A review, R4) — `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`'s Media durability subsection previously stated "Currently violated at HEAD," stale since D2.2 actually closed it; corrected, chronology preserved. A second, separate stale-doc finding surfaced while fixing it: `docs/TICKET-REGISTRY.md:152` still lists GK-167 OPEN (dated 2026-08-23) — **not fixed this pass**, out of R4's explicit scope (a different document), recorded as an open contradiction.
+**GK-167 constitutional-text correction** (Phase A review, R4) — `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`'s Media durability subsection previously stated "Currently violated at HEAD," stale since D2.2 actually closed it; corrected, chronology preserved. **GK-167 registry-status follow-up CLOSED this pass (Phase B, R4 follow-up):** `docs/TICKET-REGISTRY.md:152` corrected from `OPEN` to `CLOSED` (`77f48f5`, 2026-09-01), original problem description preserved verbatim, closure narrative appended — narrow, single-line correction only, not a general registry cleanup.
 
-**D3.3 Phase A only — migration NOT applied to `data1_dev`. Phase B (live application) requires separate explicit authorization**, mirroring D3.2's own two-phase discipline.
+## D3.3 Phase B — APPLIED to `data1_dev` (2026-09-02)
+
+**PASS.** Migration `0012_d3_3_comp_snapshot.sql` (R1/R2-amended) applied to `data1_dev` — recovery anchor `2026-09-02T04:18:26Z` UTC; committed-vs-executed SHA-256 verified byte-identical before running; 14/14 post-migration schema proof; all 78 pre-existing `valuation_event` rows confirmed `comp_snapshot_id IS NULL`; `comp_snapshot_ref` confirmed byte-identical to pre-migration (untouched). Application wiring shipped (`recordCompSnapshot`, `recordValuation`'s new explicit `compSnapshotId` param — never inferred from `comp_snapshot_ref` or any other value; `capture/mapping.js` untouched). **Live contract proof: 31/31**, real functions, real `data1_dev` — full A–K, including real FK rejection of a dangling reference and real trigger rejection of both UPDATE and DELETE on a referenced snapshot.
+
+**Retained controlled test artifacts (structurally forced — `comp_snapshot` is genuinely DELETE-protected):** `gk_asset` +1, `entity_mint_basis` +1, `comp_snapshot` +2 — all other touched tables returned to exact baseline. Reported honestly as a non-zero, explained delta, never claimed byte-identical. Full IDs and disposition table: `docs/DATABASE-MIGRATION-STATUS.md`, "D3.3 Phase B."
+
+**Foundation Law 5 ("Market = observations → valuation") — durable evidence linkage now real and enforced**, not merely designed: `valuation_event.comp_snapshot_id → comp_snapshot.id`, FK + immutability trigger together, live-proven non-dangling.
+
+**D3.3 CLOSED — Phase A + Phase B both complete.** No D4, D5, D6 this pass.
 
 ---
 

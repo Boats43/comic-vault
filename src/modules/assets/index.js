@@ -18,6 +18,7 @@ export {
   attachMedia,
   transferOwnership,
   recordAcquisition,
+  recordCompSnapshot,
   recordValuation,
   recordDecision,
   linkCollectionItem,

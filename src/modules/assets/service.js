@@ -688,9 +688,69 @@ export async function recordAcquisition({ principalId, gkAssetId, costAmount, co
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// recordCompSnapshot — D3.3 Phase B. The durable, immutable evidence set
+// a valuation may later reference by its real UUID (recordValuation's
+// own compSnapshotId param, below) — never by comp_snapshot_ref (the
+// pre-existing free-text field, untouched, still whatever it already
+// was), never inferred from a correlationId/Redis key/marketplace id/
+// asset id. `source` names where the evidence came from ('pricecharting-
+// scrape', 'ebay-browse-api', 'manual', ...); `payload` is caller-
+// supplied, opaque, generic — no comic-specific field is added here.
+// content_hash is computed from the SAME canonical JSON string actually
+// persisted (mirrors attachMedia's own bytes-hash discipline).
+// ─────────────────────────────────────────────────────────────────────
+export async function recordCompSnapshot({ principalId, gkAssetId, source, payload, idempotencyKey, correlationId } = {}) {
+  requireFields({ principalId, gkAssetId, source, payload }, ['principalId', 'gkAssetId', 'source', 'payload']);
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'recordCompSnapshot';
+      const canonicalJson = JSON.stringify(payload);
+      const contentHash = createHash('sha256').update(canonicalJson).digest('hex');
+      // GK-163 — semantic payload: which asset, what evidence (content
+      // hash stands in for the full payload — two calls with the same
+      // idempotencyKey but different evidence are NOT the same request).
+      const requestFingerprint = computeRequestFingerprint({ gkAssetId, source, contentHash });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      const compSnapshotId = await repo.insertCompSnapshot(client, {
+        assetId: gkAssetId, source, payload, contentHash, recordedByPrincipalId: principalId,
+      });
+      await repo.writeDomainEvent(client, {
+        eventType: 'comp-snapshot.recorded', actorPrincipalId: principalId, actorKind: 'user',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { compSnapshotId, source, contentHash },
+        correlationId: correlationId || await newCorrelationId(client),
+        // No occurredAt here on purpose — this event's own occurrence IS
+        // its recording (matches mint_event's established reasoning,
+        // 0011's own scope note); the evidence's OWN per-item temporal
+        // fields, if any, live inside `payload` untouched, never
+        // collapsed into this domain_event's timestamp either.
+      });
+
+      const result = { compSnapshotId };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // recordValuation
 // ─────────────────────────────────────────────────────────────────────
-export async function recordValuation({ principalId, gkAssetId, valueAmount, valueCurrency = 'USD', method, compSnapshotRef, gradeAssumption, buildSha, idempotencyKey, correlationId, occurredAt } = {}) {
+export async function recordValuation({ principalId, gkAssetId, valueAmount, valueCurrency = 'USD', method, compSnapshotRef, compSnapshotId, gradeAssumption, buildSha, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields({ principalId, gkAssetId, valueAmount, method, buildSha }, ['principalId', 'gkAssetId', 'valueAmount', 'method', 'buildSha']);
   requireEnum(method, ['engine-computed', 'operator-override', 'gocollect', 'other'], 'method');
 
@@ -702,20 +762,28 @@ export async function recordValuation({ principalId, gkAssetId, valueAmount, val
       const operation = 'recordValuation';
       // GK-163 — semantic payload: asset+amount+currency+basis, per the
       // ticket's own wording ("basis" = the valuation method).
-      const requestFingerprint = computeRequestFingerprint({ gkAssetId, valueAmount, valueCurrency, method });
+      // compSnapshotId included: two calls under the same idempotencyKey
+      // referencing different durable evidence are NOT the same request.
+      const requestFingerprint = computeRequestFingerprint({ gkAssetId, valueAmount, valueCurrency, method, compSnapshotId: compSnapshotId ?? null });
       const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
       await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      // compSnapshotId is caller-supplied ONLY — never derived from
+      // compSnapshotRef, a Redis/scanlog key, a correlationId, a
+      // marketplace id, or gkAssetId itself. A caller with no durable
+      // snapshot (e.g. an operator-override valuation with no comp
+      // evidence at all) legitimately omits it -> NULL, a truthful
+      // legal state, not an error.
       const valuationEventId = await repo.insertValuationEvent(client, {
-        assetId: gkAssetId, valueAmount, valueCurrency, method, compSnapshotRef, gradeAssumption, buildSha,
+        assetId: gkAssetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, gradeAssumption, buildSha,
         recordedByPrincipalId: principalId, occurredAt,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'valuation.computed', actorPrincipalId: principalId, actorKind: method === 'engine-computed' ? 'system' : 'user',
         subjectType: 'gk_asset', subjectId: gkAssetId,
-        payload: { valuationEventId, valueAmount, valueCurrency, method, buildSha },
+        payload: { valuationEventId, valueAmount, valueCurrency, method, buildSha, compSnapshotId: compSnapshotId ?? null },
         correlationId: correlationId || await newCorrelationId(client),
         occurredAt,
       });

@@ -195,12 +195,31 @@ export async function insertAcquisitionEvent(client, { assetId, costAmount, cost
   return id;
 }
 
-export async function insertValuationEvent(client, { assetId, valueAmount, valueCurrency, method, compSnapshotRef, gradeAssumption, buildSha, recordedByPrincipalId, occurredAt }) {
+// D3.3 Phase B -- insertCompSnapshot. comp_snapshot_immutable() (the
+// live trigger, 0012) makes this table impossible to UPDATE/DELETE at
+// the DB level -- this function only ever INSERTs, never anything else.
+export async function insertCompSnapshot(client, { assetId, source, payload, contentHash, recordedByPrincipalId }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO valuation_event (id, asset_id, value_amount, value_currency, method, comp_snapshot_ref, grade_assumption, build_sha, recorded_by_principal_id, occurred_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [id, assetId, valueAmount, valueCurrency, method, compSnapshotRef ?? null, gradeAssumption ?? null, buildSha, recordedByPrincipalId, occurredAt ?? null]
+    `INSERT INTO comp_snapshot (id, asset_id, source, payload, content_hash, recorded_by_principal_id)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, assetId, source, JSON.stringify(payload), contentHash, recordedByPrincipalId]
+  );
+  return id;
+}
+
+// D3.3 Phase B -- compSnapshotId is the NEW, durable, FK-enforced
+// reference (valuation_event.comp_snapshot_id -> comp_snapshot.id,
+// 0012). compSnapshotRef (the pre-existing free-text column) is
+// completely untouched by this change -- still accepted, still written
+// exactly as before, never reinterpreted, never repurposed, never used
+// to infer compSnapshotId. Both columns are independent and optional.
+export async function insertValuationEvent(client, { assetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, gradeAssumption, buildSha, recordedByPrincipalId, occurredAt }) {
+  const id = await uuidv7(client);
+  await client.query(
+    `INSERT INTO valuation_event (id, asset_id, value_amount, value_currency, method, comp_snapshot_ref, comp_snapshot_id, grade_assumption, build_sha, recorded_by_principal_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [id, assetId, valueAmount, valueCurrency, method, compSnapshotRef ?? null, compSnapshotId ?? null, gradeAssumption ?? null, buildSha, recordedByPrincipalId, occurredAt ?? null]
   );
   return id;
 }
