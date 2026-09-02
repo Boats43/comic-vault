@@ -102,7 +102,7 @@ HEAD at this publication: `6b800f4`.
 | Dependency | None |
 | Exit gate | N/A — standing, not a one-time gate |
 | Evidence | CLAUDE.md, "Secret Hygiene" and "Quarantined Scratch" sections; `src/modules/auth/token.js` (`GRAILKEY_SESSION_EPOCH`) |
-| Next action | D1 (this document), then D2, then D3, per the ratified sequencing |
+| Next action | D1 CLOSED, D2 EXIT PASS (2026-09-01 — see `docs/DATABASE-MIGRATION-STATUS.md` for D2.1/D2.4 evidence), D3 released |
 
 ---
 
@@ -128,7 +128,17 @@ D2.1's live query and `vercel env ls` (list-only, no secret values pulled) toget
 
 Real, proven contamination-risk evidence from this same pass, offered as supporting signal for the gate — not as proof of the topology question itself: the D2.3 orphan reconciler found 4 `data1_dev.media` rows carrying non-hash fixture-style `object_uri` values (`localfs://sha256/aa/gk163-A`, duplicated across 2 asset rows each), consistent in shape with leftover GK-163 idempotency-test fixture data. **Provenance is not established beyond that shape-based observation — no commit, test run, or log line confirming which dispatch wrote them was checked this pass.** Recorded as evidence of what test/dev activity can leave behind in this schema, not as confirmation that Production shares that same schema.
 
-**Gate: Production capture must not be enabled at D6 while it is undetermined whether Production shares the same writable database failure domain as Development/test activity.** Resolving this (Neon branch-per-environment vs. confirmed-separate topology) is now a pre-D6 gate, not a preference — see `docs/DATABASE-MIGRATION-STATUS.md` and the D2 checkpoint report (2026-09-01) for the two topology options under review. No branch was created, no schema was migrated, and Production was not repointed as part of establishing this row.
+**Gate: Production capture must not be enabled at D6 while it is undetermined whether Production shares the same writable database failure domain as Development/test activity.** Resolving this (Neon branch-per-environment vs. confirmed-separate topology) is now a pre-D6 gate, not a preference — see `docs/DATABASE-MIGRATION-STATUS.md` and the D2 checkpoint report (2026-09-01) for the two topology options under review. No branch was created, no schema was migrated, and Production was not repointed as part of establishing this row. **Preserved as-is at D2 EXIT — not touched, resolved, or downgraded by the D2.4 restore drill below.**
+
+## D2.4 — Restore/PITR capability
+
+**PASS — 2026-09-01.** Real, operator-executed Neon Console drill: new branch (`d2-4-scratch-restore-proof`) created non-destructively from `main` at a past point in time (2026-09-01 7:04 PM America/Phoenix), the known `gk_asset`/`media` rows and the media row's `object_uri` confirmed present and byte-identical on the recovered branch, scratch branch deleted after verification. `main`/`data1_dev` independently re-confirmed unchanged by this session immediately after (same 2 rows, same 16-table count). Full record: `docs/DATABASE-MIGRATION-STATUS.md`, "D2.4 — Real Neon restore/PITR drill." No new Neon credential was created. Production was not touched.
+
+**Actual current tier, as shown in Console:** **Free** — 6-hour/1GB restore window, 10-branch/project cap. Not inferred; this is what Console displayed during the drill.
+
+## Durability risk — 6-hour restore window
+
+**6-HOUR RESTORE WINDOW — OPEN / PRE-D6 GATE.** The D2.4 drill proves the restore *mechanism* works on the current (Free) plan; it does not establish that a 6-hour history window is *adequate* for permanent physical-asset custody — a capture written more than 6 hours before an incident is discovered would fall outside Free's restore window entirely. Recorded as an **operational durability threshold for a later ruling**, not a mandate to upgrade — no plan change is recommended or implied here. **Gate: before D6, this retention requirement must be explicitly ratified** (accept the 6-hour exposure window on Free, or move to a paid tier with a longer one) — alongside, and independent of, the Production/Development isolation gate above.
 
 ---
 

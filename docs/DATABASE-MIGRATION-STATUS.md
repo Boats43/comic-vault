@@ -39,16 +39,34 @@ What the live D2.1 result actually shows:
 
 **Conclusion: "13-of-17" is not verified by this pass and has no other citation anywhere in the repository to verify it against.** Recorded here as an open contradiction for review, per the Protocol's own governance rule ("that conflict is recorded as a contradiction for review... not resolved silently in either direction") — not deleted, not silently corrected, not asserted as true. The only migration-count figure this document actually stands behind is the live, table-by-table result above.
 
-## Known gap surfaced by this pass: real Neon restore/PITR capability
+## D2.4 — Real Neon restore/PITR drill: **PASS** (2026-09-01, operator-executed)
 
-Not part of the live schema query itself, but discovered while attempting D2.4 in this same pass: no `neonctl`, no `NEON_API_KEY`/`NEON_API_TOKEN` in any env file, and no available MCP tool exposes Neon branch/PITR/restore management (only generic Vercel deploy/project tooling is reachable). The Vercel CLI is installed and authenticated but its `integration`/`storage` subcommands do not expose branch-level restore for a marketplace-provisioned Postgres resource.
+**Capability gap closed.** The prior blocker (no `neonctl`, no `NEON_API_KEY`, no MCP Neon-management tool, Vercel CLI's `integration`/`storage` subcommands not exposing branch-level restore) is a *scripted-access* gap, not a capability gap — per the D2.4 capability-vs-access review, the Neon Console itself (reachable from Vercel Dashboard → `comic-vault` → Storage → `grailkey-catalog` → "Open in Neon," no separate API key) already exposes the real, non-destructive restore mechanism. Jimmy performed the drill directly in Console.
 
-Minimum capability actually required to complete D2.4 for real:
-1. **Branch creation or PITR-target access** on the Neon project backing `GRAILKEY_CATALOG_NEON_PROJECT_ID` — either the Neon Console, `neonctl` authenticated with a Neon API key, or Neon's REST API with that key. None are available in this environment today.
-2. **Execute the actual supported restore/PITR operation** against that isolated scratch branch/target — a Neon branch-from-timestamp or branch-from-parent operation, not a manual `pg_dump`/replay approximation.
-3. **Verify on the recovered target, not the live branch** — reconnect to the restored branch's own connection string and re-run the same `gk_asset`/`media` row lookups this document's D2.1 pass already ran against live `data1_dev` (`id = 01a02d23-1acb-72e8-aae3-8f851308e9cf` / `id = 01a02d23-2809-7024-9312-d45bb5003014`), confirming both rows exist on the restored copy.
+**Drill record (operator-attested — executed via Neon Console UI, which this session has no access to and could not independently observe; the source/scratch-branch mechanics below are Jimmy's report, not re-verified live by this session):**
 
-None of the above was performed. **D2.4 = FAILED CAPABILITY** stands; nothing here should be read as a substitute proof.
+| Field | Value |
+|---|---|
+| Neon plan (as shown in Console) | **Free** |
+| History/restore window (as shown in Console) | **6 hours** |
+| Branch capacity | 1/10 before the drill, 2/10 during (scratch branch deleted after — back to 1/10) |
+| Mechanism used | Console → Branches → **New Branch** → data source = **"Branch data and schema from a past point in time"** (the non-destructive, copy-on-write path — not "Instant Restore," which mutates the parent's head in place) |
+| Parent/source branch | `main` |
+| Restore point | 2026-09-01, 7:04 PM America/Phoenix |
+| Scratch branch | `d2-4-scratch-restore-proof` (deleted after verification) |
+| Known asset row, recovered branch | `gk_asset.id = 01a02d23-1acb-72e8-aae3-8f851308e9cf`, `asset_class=comic`, `status=active` — 1 row |
+| Known media row, recovered branch | `media.id = 01a02d23-2809-7024-9312-d45bb5003014` — 1 row |
+| `object_uri` preserved on recovered branch | `https://elu7tmuzwfjot0pk.private.blob.vercel-storage.com/sha256/81/811a86380961a7dd4a2096f58bf112294eb3b7c521dbb3e61c6f8d59014b9d63` — matches the value this document's D2.1 pass already confirmed live |
+
+**Independently verified by this session (the one part that doesn't require Console access):** re-ran the same two lookups against the live `main`/`data1_dev` connection immediately after the reported drill — both rows unchanged (`asset_class=comic`/`status=active`; the same `object_uri`), and `data1_dev`'s table count still 16. This corroborates "additive/copy-on-write, `main` was not restored or mutated" with independent evidence from this session, on top of the operator's own report — the scratch-branch creation/deletion steps themselves remain operator-attested only, since this session has no Neon Console or API access to observe them directly.
+
+**No new Neon credential was created or requested to close this.**
+
+## Durability risk — pre-D6 gate (added at D2.4 closure)
+
+**6-HOUR RESTORE WINDOW — OPEN / PRE-D6 GATE.** The drill above proves the *mechanism* works — it does not establish that a 6-hour history window is *adequate* for permanent physical-asset custody. A real capture written more than 6 hours before an incident is discovered would fall outside Free plan's restore window entirely (Launch extends this to 7 days, Scale to 30 — see Section 1 of the D2.4 capability review, 2026-09-01, for sourced detail). This is recorded as an **operational durability threshold requiring a later ruling**, not a mandate to purchase a paid plan now — no plan change is recommended or implied by recording this gate.
+
+**Gate: before D6 (flag-gated production capture), the retention-window requirement for permanent GrailKey asset custody must be explicitly ratified** (stay on Free with a documented acceptance of the 6-hour exposure window, or move to a paid tier with a longer window) — this is now a pre-D6 gate alongside the existing Production/Development isolation gate, not a preference.
 
 ## Related documents
 
