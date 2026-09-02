@@ -62,11 +62,15 @@ try {
   // -----------------------------------------------------------------
   // Build scratch schema, minimal FK-free gk_asset/gk_principal stand-
   // ins (this proof concerns comp_snapshot's own behavior, not the full
-  // referential graph) so the real FKs on comp_snapshot resolve.
+  // referential graph) so the real FKs on comp_snapshot resolve. A
+  // minimal valuation_event stand-in (R1) so the new
+  // comp_snapshot_id FK this migration adds to it can be exercised for
+  // real.
   // -----------------------------------------------------------------
   await client.query(`CREATE SCHEMA ${SCHEMA}`);
   await client.query(`SET search_path TO ${SCHEMA}`);
   await client.query(`
+    CREATE TABLE valuation_event (id UUID PRIMARY KEY, comp_snapshot_ref TEXT);
     CREATE TABLE gk_asset (id UUID PRIMARY KEY);
     CREATE TABLE gk_principal (id UUID PRIMARY KEY);
   `);
@@ -144,6 +148,78 @@ try {
   assertTrue(bothRows.rows.every(() => true), 'E: sanity — both rows queried by the same asset_id filter');
   const assetIdCheck = await client.query('SELECT DISTINCT asset_id FROM comp_snapshot WHERE id = ANY($1::uuid[])', [[snap1Id, snap2Id]]);
   assertTrue(assetIdCheck.rows.length === 1 && assetIdCheck.rows[0].asset_id === assetId, 'E: gkAssetId (asset_id) is identical across both snapshots — never reassigned by a repricing event');
+
+  // -----------------------------------------------------------------
+  // R1 -- the valuation -> snapshot relationship cannot dangle. Real FK
+  // enforcement on valuation_event.comp_snapshot_id, proven end to end:
+  // a valuation can reference a real snapshot; it CANNOT reference a
+  // non-existent one; and a snapshot already referenced by a valuation
+  // cannot be deleted (blocked by the immutability trigger before the
+  // FK even gets a chance to complain -- either mechanism alone would
+  // stop it; both exist).
+  // -----------------------------------------------------------------
+  const val1Id = crypto.randomUUID();
+  await client.query('INSERT INTO valuation_event (id, comp_snapshot_id) VALUES ($1, $2)', [val1Id, snap1Id]);
+  const valRead = await client.query('SELECT comp_snapshot_id FROM valuation_event WHERE id = $1', [val1Id]);
+  assertTrue(valRead.rows[0].comp_snapshot_id === snap1Id, 'R1: a valuation_event row can reference a real comp_snapshot via the new FK column');
+
+  let danglingRefThrew = false;
+  try {
+    await client.query('INSERT INTO valuation_event (id, comp_snapshot_id) VALUES ($1, $2)', [crypto.randomUUID(), crypto.randomUUID()]);
+  } catch (e) {
+    danglingRefThrew = true;
+  }
+  assertTrue(danglingRefThrew, 'R1: a valuation_event row CANNOT reference a non-existent comp_snapshot — the FK constraint rejects a dangling reference outright, at write time');
+
+  let deleteReferencedSnapshotThrew = false, deleteReferencedErrorMsg = '';
+  try {
+    await client.query('DELETE FROM comp_snapshot WHERE id = $1', [snap1Id]);
+  } catch (e) {
+    deleteReferencedSnapshotThrew = true;
+    deleteReferencedErrorMsg = e.message;
+  }
+  assertTrue(deleteReferencedSnapshotThrew, 'R1: a comp_snapshot row already referenced by a real valuation_event CANNOT be deleted — S1 remains durably resolvable for V1, a real enforced guarantee, not a documented convention');
+  const stillReferenced = await client.query('SELECT comp_snapshot_id FROM valuation_event WHERE id = $1', [val1Id]);
+  assertTrue(stillReferenced.rows[0].comp_snapshot_id === snap1Id, 'R1: the valuation\'s reference is still intact after the rejected delete attempt — never silently nulled out either');
+
+  // -----------------------------------------------------------------
+  // R2 -- source-level temporal evidence (per-item sold/observed dates
+  // that differ from each other and from comp_snapshot.recorded_at)
+  // survives verbatim inside the immutable payload. comp_snapshot never
+  // manufactures or collapses these into one snapshot-level occurrence
+  // timestamp -- there is no occurred_at column on this table at all,
+  // by design (see the migration file's own comment).
+  // -----------------------------------------------------------------
+  const payloadWithRichTemporalEvidence = {
+    items: [
+      { title: 'Amazing Fantasy #15', price: 800, soldDate: '2026-01-03', listingDate: '2025-12-20', source: 'ebay-browse-api' },
+      { title: 'Amazing Fantasy #15', price: 950, soldDate: '2025-11-11', listingDate: '2025-11-01', source: 'pricecharting-scrape' },
+      { title: 'Amazing Fantasy #15', price: 720, soldDate: '2026-02-28', source: 'ebay-browse-api' }, // no listingDate at all for this one -- absence preserved too
+    ],
+    summary: { avg: 823.33 },
+  };
+  const hashTemporal = createHash('sha256').update(JSON.stringify(payloadWithRichTemporalEvidence)).digest('hex');
+  const snapTemporalId = crypto.randomUUID();
+  const beforeInsert = await client.query('SELECT now() AS n');
+  await client.query(
+    `INSERT INTO comp_snapshot (id, asset_id, source, payload, content_hash, recorded_by_principal_id)
+     VALUES ($1, $2, 'test-source', $3, $4, $5)`,
+    [snapTemporalId, assetId, JSON.stringify(payloadWithRichTemporalEvidence), hashTemporal, principalId]
+  );
+  const temporalReadBack = await client.query('SELECT payload, recorded_at FROM comp_snapshot WHERE id = $1', [snapTemporalId]);
+  assertTrue(
+    isDeepStrictEqual(temporalReadBack.rows[0].payload, payloadWithRichTemporalEvidence),
+    'R2: a payload with three DIFFERENT per-item sold/listing dates (including one item with no listingDate at all) round-trips byte-for-byte — no field dropped, none normalized, absence-of-a-field preserved as absence'
+  );
+  assertTrue(
+    temporalReadBack.rows[0].recorded_at.getTime() >= beforeInsert.rows[0].n.getTime(),
+    'R2: comp_snapshot.recorded_at is the persistence timestamp only (>= the moment this test issued the INSERT) — never derived from or equal to any of the per-item soldDate/listingDate values inside payload (2025/2026 dates chosen specifically so equality would be an obvious bug, not a coincidence)'
+  );
+  const noOccurredAtColumn = await client.query(
+    `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'comp_snapshot' AND column_name = 'occurred_at'`,
+    [SCHEMA]
+  );
+  assertTrue(noOccurredAtColumn.rows.length === 0, 'R2: comp_snapshot has NO occurred_at column at all — the multi-timestamp evidence set is never collapsed into one manufactured snapshot-level occurrence time');
 
   // -----------------------------------------------------------------
   // Rollback rehearsal: apply the real rollback text, confirm the

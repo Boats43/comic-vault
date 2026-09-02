@@ -132,6 +132,18 @@ For any change touching executable code, schema, or migrations, all 16 ratified 
 
 This procedural rule governs how the matrix is *reported*; it does not alter, replace, reword, or reduce the count of the 16 ratified questions themselves.
 
+### Historical Regression Freshness Rule (added D3.3 Phase A, R5, 2026-09-02)
+
+When the byte-exact historical test roster (the full tracked `tests/*.test.js` suite) is **not actually executed** as part of a dispatch's own regression reporting, that dispatch must report:
+
+> `historical-roster status changes: NOT FRESHLY MEASURED`
+
+**Never** report "0 status-changed" or equivalent language implying the historical roster's pass/fail outcomes were confirmed unchanged, merely because the source files or test files the roster covers were untouched by the current change. Untouched source is not evidence of unchanged historical test outcomes — a regression can be introduced by something the roster-execution step itself would catch and an untouched-file argument would not (environment drift, a dependency update, a prior uncommitted change, timing/flakiness newly triggered, etc.).
+
+Added and removed test files are accounted for **separately** from this rule — a dispatch that adds or removes tracked test files still reports that delta explicitly (file names, pass/fail counts), independent of whether the pre-existing historical roster was freshly re-run.
+
+This rule is part of the permanent evidence standard for any Standing Report Contract or committed document that characterizes historical regression status.
+
 ---
 
 ## Supporting invariants (not Foundation Laws)
@@ -142,7 +154,9 @@ These are real, standing durability rules that support the laws above — most d
 
 Reads and deletes of an existing media row must dispatch exclusively from the persisted `object_uri` scheme. `MEDIA_STORAGE_DRIVER` controls the storage provider used for **new writes only** and must never reinterpret an existing row.
 
-**Currently violated at HEAD.** `src/modules/media/index.js:26-35`:
+**Status: CLOSED at D2.2 (`77f48f5`).** Corrected here, D3.3 Phase A / R4, 2026-09-02 — this subsection previously stated "Currently violated at HEAD," which was accurate at D1's original 2026-09-01 publication but became stale and false the moment D2.2 shipped the fix on 2026-09-01/02, and was never updated. A governance document asserting present-tense implementation status must not knowingly state a false one — corrected now, present-state chronology preserved below rather than deleted.
+
+**Original violation, as it stood at D1 publication (2026-09-01), preserved for chronology:** `src/modules/media/index.js` (pre-D2.2) resolved every `put`/`head`/`getBytes` call from `MEDIA_STORAGE_DRIVER` alone:
 
 ```js
 function driverName() {
@@ -157,9 +171,11 @@ async function selectDriver() {
 }
 ```
 
-Every `put`/`head`/`getBytes` call (`index.js:38-54`) resolves the driver from the env var alone — it never inspects the `object_uri` string already stored on the row being read. Tracked as **GK-167, OPEN** (`docs/TICKET-REGISTRY.md:152`). The fix — dispatching `head()`/`getBytes()` by the `object_uri`'s own scheme prefix rather than the blanket env var — is scoped to D2.2, not this pass.
+It never inspected the `object_uri` string already stored on the row being read — tracked as GK-167 (`docs/TICKET-REGISTRY.md:152`).
 
-**Contradiction noted, D3.3 Phase A pass (not fixed here — out of this dispatch's scope):** GK-167 was actually closed at D2.2 (`77f48f5`, `src/modules/media/index.js`'s `selectDriverForUri`, live-proven `tests/gk167-media-storage-routing.test.js`). This subsection's "Currently violated at HEAD" wording above was never updated after that fix shipped — recorded here as a stale-doc finding, not corrected in this pass since it is unrelated to E1/E2/E3.
+**Current state (verified against `src/modules/media/index.js` as of this correction):** `head()`/`getBytes()` now dispatch by the `object_uri`'s own scheme prefix (`selectDriverForUri`) — `localfs://` routes to the localfs driver, `https://` routes to the Blob driver, regardless of what `MEDIA_STORAGE_DRIVER` currently names; `put()` remains the one function genuinely driven by the env var, by design (it only ever writes new objects). Real, live-proven: `tests/gk167-media-storage-routing.test.js`, 13/13, deterministic, no network/token dependency (D2.2 checkpoint). The code is fixed — this subsection's own governance-status wording is what was corrected here.
+
+**Second stale-doc finding, discovered while making this correction (not fixed here — separate document, out of this dispatch's explicit R4 scope):** `docs/TICKET-REGISTRY.md:152` still lists GK-167 as **OPEN**, dated 2026-08-23, with no update reflecting the D2.2 fix. That registry is the canonical ticket-status source in principle, but is itself stale on this exact ticket — recorded as a contradiction for a future correction pass, not silently left unremarked.
 
 ### Schema/Application Sequencing Invariant (added D3.3 Phase A, E1, 2026-09-02)
 

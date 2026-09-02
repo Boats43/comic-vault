@@ -69,7 +69,7 @@ const results = {};
 try {
   await client.query(`CREATE SCHEMA ${SCHEMA}`);
   await client.query(`SET search_path TO ${SCHEMA}`);
-  await client.query(`CREATE TABLE gk_asset (id UUID PRIMARY KEY); CREATE TABLE gk_principal (id UUID PRIMARY KEY);`);
+  await client.query(`CREATE TABLE gk_asset (id UUID PRIMARY KEY); CREATE TABLE gk_principal (id UUID PRIMARY KEY); CREATE TABLE valuation_event (id UUID PRIMARY KEY);`);
   const assetId = crypto.randomUUID();
   const principalId = crypto.randomUUID();
   await client.query('INSERT INTO gk_asset (id) VALUES ($1)', [assetId]);
