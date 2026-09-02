@@ -36,9 +36,11 @@ A detected candidate is not automatically an asset. The candidate-safe mint-basi
 
 `occurred_at` is asserted event time. `recorded_at` is GrailKey ingestion/recording time. Both are independently persisted where applicable. Neither is inferred from the other after persistence. There is no DB chronology invariant requiring `occurred_at <= recorded_at`.
 
-**Audited status: PARTIAL.**
+**Audited status: IMPLEMENTED.** Status changed by explicit later audit ruling — D3.3 Phase A dispatch, 2026-09-02 (E2), citing the D3.2 evidence below. Prior wording (PARTIAL, citing the pre-D3.2 schema) preserved in git history, not silently deleted.
 
-**Evidence (current state):** checked every `*_event` table across `db/data0/0001`–`0010`. None currently carries both `occurred_at` and `recorded_at` — each has exactly one timestamp column today (e.g. `valuation_event.occurred_at`, `db/data0/0004_data1_foundation.sql:187`, no companion `recorded_at`). The only two-timestamp shapes in the schema today are `outbox` (`created_at`/`processed_at`, a delivery-tracking pair, not this law's shape) and the design-draft, unapplied `asset_outcome_current` projection (`last_listed_at`/`last_sold_at`, `0006_outcome_ledger.sql`). D3.2 (not this pass) is the implementation slice for this law. Consistent with PARTIAL.
+**Evidence (current state, D3.2, applied to `data1_dev` 2026-09-02):** migration `db/data0/0011_d3_2_event_time.sql` gave seven durable surfaces (`ownership_event`, `acquisition_event`, `valuation_event`, `decision_event`, `domain_event`, `media`, `asset_identity_assignment`) both timestamps — `occurred_at` (nullable, no default, never manufactured) and `recorded_at` (the renamed historical column, `DEFAULT now()`, independently persisted). Live-proven, not merely designed: unknown historical occurrence remains `NULL` (never backfilled); backdated occurrence is legal (a real past `occurred_at` round-trips exactly); occurrence later than recording is also legal (`occurred_at > recorded_at` accepted, no rejection); no chronology `CHECK` constraint exists anywhere in `data1_dev`. Post-migration schema verification: 78/78. Application-wiring live proof (`repository.js`/`service.js`, real functions against real `data1_dev`): 10/10. Full record: `docs/DATABASE-MIGRATION-STATUS.md`, "D3.2 Phase B."
+
+This is a status/evidence correction, not a change to Law 3's own wording — the law text above is unmodified.
 
 ### Law 4 — Identifier Fabric
 
@@ -86,13 +88,13 @@ A capability may add a relationship, observation, event, projection, adapter, cr
 
 The audited-status value on each law above is preserved from the ratified 2026-09-01 wording and is **not** re-derived from current repo observations on each future read of this document. Repo evidence is used only to describe current state and supporting proof underneath a law. If a future direct read of the codebase appears inconsistent with a law's wording or its audited status, that inconsistency must be recorded explicitly as a contradiction for review — never silently resolved by rewriting the law or by quietly changing the status column to match new observations. A status changes only by an explicit later audit ruling, cited by date and dispatch.
 
-Status snapshot at this publication:
+Status snapshot at this publication (2026-09-01), with later rulings noted where a status has since changed:
 
 | Law | Status |
 |---|---|
 | 1 — Physical instance ≠ catalog class | IMPLEMENTED |
 | 2 — Capture is many-to-many | PARTIAL |
-| 3 — Time is first-class | PARTIAL |
+| 3 — Time is first-class | ~~PARTIAL~~ **IMPLEMENTED** (changed by ruling, D3.3 Phase A / E2, 2026-09-02 — see Law 3's own evidence above) |
 | 4 — Identifier Fabric | ABSENT |
 | 5 — Market = observations → valuation | PARTIAL |
 | 6 — Prediction ≠ outcome | PARTIAL / design-only-in-practice |
@@ -156,6 +158,20 @@ async function selectDriver() {
 ```
 
 Every `put`/`head`/`getBytes` call (`index.js:38-54`) resolves the driver from the env var alone — it never inspects the `object_uri` string already stored on the row being read. Tracked as **GK-167, OPEN** (`docs/TICKET-REGISTRY.md:152`). The fix — dispatching `head()`/`getBytes()` by the `object_uri`'s own scheme prefix rather than the blanket env var — is scoped to D2.2, not this pass.
+
+**Contradiction noted, D3.3 Phase A pass (not fixed here — out of this dispatch's scope):** GK-167 was actually closed at D2.2 (`77f48f5`, `src/modules/media/index.js`'s `selectDriverForUri`, live-proven `tests/gk167-media-storage-routing.test.js`). This subsection's "Currently violated at HEAD" wording above was never updated after that fix shipped — recorded here as a stale-doc finding, not corrected in this pass since it is unrelated to E1/E2/E3.
+
+### Schema/Application Sequencing Invariant (added D3.3 Phase A, E1, 2026-09-02)
+
+When application behavior depends on a schema change, the required sequence is:
+
+**rollback prepared → rollback rehearsed in isolated scratch schema → UTC recovery anchor recorded → committed migration applied verbatim → resulting schema verified → dependent application wiring shipped → live behavior proven.**
+
+Application code that assumes the new schema must not ship before the prerequisite schema change has been successfully applied and verified.
+
+**Empirical basis (D3.2, 2026-09-02):** premature application wiring — `repository.js`'s writers modified to include `occurred_at` in their INSERT column lists ahead of migration `0011` actually running against `data1_dev` — produced a real, live failure: `null value in column "occurred_at" of relation "ownership_event" violates not-null constraint`, thrown by the already-shipped D3.1 live regression test against the real, unmigrated schema. This proved the unsafe order concretely, not hypothetically; the same dispatch then demonstrated the safe order (D3.2 Phase B: migration applied and verified first, application wiring shipped and live-proven second) with zero incident. Full record: `docs/DATABASE-MIGRATION-STATUS.md`, "D3.2 Phase B."
+
+**Scope, explicitly bounded:** this invariant governs deployments where application behavior depends on a schema transition. It does not generalize into a requirement that every unrelated code deployment needs a database recovery anchor.
 
 ### Append-only
 

@@ -140,6 +140,8 @@ Real, proven contamination-risk evidence from this same pass, offered as support
 
 **6-HOUR RESTORE WINDOW — OPEN / PRE-D6 GATE.** The D2.4 drill proves the restore *mechanism* works on the current (Free) plan; it does not establish that a 6-hour history window is *adequate* for permanent physical-asset custody — a capture written more than 6 hours before an incident is discovered would fall outside Free's restore window entirely. Recorded as an **operational durability threshold for a later ruling**, not a mandate to upgrade — no plan change is recommended or implied here. **Gate: before D6, this retention requirement must be explicitly ratified** (accept the 6-hour exposure window on Free, or move to a paid tier with a longer one) — alongside, and independent of, the Production/Development isolation gate above.
 
+**Comp-snapshot write-volume interaction (D3.3 Phase A / Amendment A3-E3, 2026-09-02, real measured evidence, not estimated):** high-volume durable `comp_snapshot` writes could, in principle, reduce the effective recovery window below the nominal 6-hour time limit if the 1 GB change-history budget is consumed first (WAL bytes, not logical row bytes, are what actually count against that budget — logical and WAL bytes were confirmed NOT proportional by direct measurement). At measured steady-state WAL cost, even the LARGE (100-comp) snapshot size would need ~306,000 writes to exhaust 1 GB on its own — **not a near-term threat on this evidence**, but the mechanism is now measured, not assumed absent. Full figures: `docs/DATABASE-MIGRATION-STATUS.md`, "Amendment A3/E3."
+
 ## D3.1 / D3.2 — information contracts (candidate-safe mint basis; true event time)
 
 **D3.1 PASS** (`2dce8bd`, KEPT). `buildCaptureBasis` gains an optional candidate discriminator, additive-only, byte-compatible with its own pre-change legacy call shape. **D3.2 PASS (2026-09-02, Phase B) — migration `0011_d3_2_event_time.sql` APPLIED to `data1_dev`** (recovery anchor `2026-09-02T03:29:11Z` UTC; rollback written+validated before the forward migration ran; 78/78 post-migration schema checks; application wiring shipped and live-proven 10/10 against real `data1_dev`). Full detail: `docs/DATABASE-MIGRATION-STATUS.md`, "D3.2 Phase B."
@@ -147,6 +149,16 @@ Real, proven contamination-risk evidence from this same pass, offered as support
 **`entity_mint_basis` row-provenance — MIXED, not assumed production.** Of the 110 live rows: 97 are explicitly-marked proof/test artifacts, 1 is confirmed production (Creepy #1), 12 are UNKNOWN (realistic, uncorroborated). **The known row count is explicitly not itself proof of production provenance** — recorded per Amendment A4's own instruction that this distinction must stay visible for any future migration whose interpretation depends on these rows. Full classification and evidence: `docs/DATABASE-MIGRATION-STATUS.md`. **D3.1's own commit message/test-file claim that `buildCaptureBasis` "has never been the writer of any of the 110 rows" is corrected here as FALSE** — 3 of 110 (including Creepy #1) do match its output shape; the commit itself is KEPT unamended per ruling, this is a recorded correction, not a history rewrite.
 
 No destructive cleanup of any row was performed while establishing this classification — per Amendment A4, discovering provenance is not itself grounds for cleanup.
+
+## D3.3 Phase A — durable comp snapshots (PROPOSED, NOT applied to `data1_dev`)
+
+Migration `db/data0/0012_d3_3_comp_snapshot.sql` — one new additive table, `comp_snapshot`, with **real DB-enforced immutability** (trigger-rejected `UPDATE`/`DELETE`, not merely a convention). Rollback written and validated (forward+rollback rehearsed against an isolated scratch schema) before this dispatch used the forward migration for its own proof. Real proof, 16/16 (`tests/d3-3-comp-snapshot-immutability.test.js`): persist/read-back, trigger-rejected mutation, repricing creates a new snapshot rather than mutating the old one, old snapshot stays readable, `gkAssetId` unchanged throughout. Full record: `docs/DATABASE-MIGRATION-STATUS.md`, "D3.3 Phase A."
+
+**Foundation Law 3 ("Time is first-class") status corrected: PARTIAL → IMPLEMENTED** (D3.3 Phase A / E2, citing the D3.2 evidence — 78/78 schema verification, 10/10 application live proof). Full detail: `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`, Law 3.
+
+**New standing invariant: Schema/Application Sequencing** (D3.3 Phase A / E1) — added to `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`, "Supporting invariants," citing the D3.2 premature-wiring incident as its empirical basis.
+
+**D3.3 Phase A only — migration NOT applied to `data1_dev`. Phase B (live application) requires separate explicit authorization**, mirroring D3.2's own two-phase discipline.
 
 ---
 

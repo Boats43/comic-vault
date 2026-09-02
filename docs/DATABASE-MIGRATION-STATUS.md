@@ -106,8 +106,45 @@ Per the explicit ruling that "existing timestamp = insertion time" (and, separat
 
 **Correction to the D3.1 record (`2dce8bd`, KEPT per ruling — not amended):** that commit's test-file header claimed `buildCaptureBasis` "has never been the writer of any of the 110 real entity_mint_basis rows." This is **false**, discovered during this D3.2 provenance audit: exactly 3 of 110 rows carry `buildCaptureBasis`'s own exact output shape (`{namespace,key,book,correlationId,scanlogKey}`, `namespace:'asset:capture'`) — one of which is the confirmed-production Creepy #1 row. D3.1's original claim was based on sampling only the 3 earliest rows (all pre-dating `buildCaptureBasis`'s existence), generalized incorrectly to all 110 without checking the rest. This does not change D3.1's shipped code (the byte-compatibility proof compared the function's own before/after behavior, which remains valid regardless of live-row count) — only the prose claim about live usage was wrong, and is corrected here rather than silently left standing. No destructive cleanup of any row was performed as part of discovering this — per Amendment A4, provenance discovery is not itself grounds for cleanup; any cleanup requires a separate ruling.
 
+## D3.3 Phase A — durable comp snapshots (PROPOSED, NOT applied to `data1_dev`)
+
+Migration: `db/data0/0012_d3_3_comp_snapshot.sql` — one new, additive table, `comp_snapshot` (`id`, `asset_id` → `gk_asset`, `source`, `payload JSONB`, `content_hash`, `recorded_at`, `recorded_by_principal_id`). No existing table touched. `valuation_event.comp_snapshot_ref` (0004, nullable `TEXT`, still unpopulated) can store a `comp_snapshot.id` as a soft (non-FK) reference — that column's type is not altered. Deliberately NOT D5's `MarketObservation`/`MarketPopulation`/`EconomicProjection` architecture — `payload` is one opaque JSONB blob, no comic-specific column anywhere in the table.
+
+**Immutability — stronger than this schema's existing convention-only pattern.** Every other append-only table in `db/data0/` relies on "no `repository.js` function issues UPDATE," spot-checked, not DB-enforced. `comp_snapshot` adds **real DB-enforced immutability**: `BEFORE UPDATE`/`BEFORE DELETE` triggers that raise a real exception. Live-proven, not asserted: a direct `UPDATE`/`DELETE` against a real row in an isolated scratch schema was genuinely rejected by Postgres, not merely unattempted.
+
+**Rollback, written and validated before this dispatch's own scratch-proof used the forward migration:** `db/data0/0012_d3_3_comp_snapshot_rollback.sql` (drops the two triggers, the trigger function, then the table). Rehearsed for real: forward `0012` then the rollback, against an isolated scratch schema — `to_regclass()` confirmed the table no longer exists afterward, mirroring D3.2's B1 discipline.
+
+**Real proof (`tests/d3-3-comp-snapshot-immutability.test.js`, 16/16, isolated scratch schema, `data1_dev` untouched):** A (persist + read back, `isDeepStrictEqual` — not naive `JSON.stringify` equality, since Postgres JSONB reorders object keys on storage, confirmed directly: a real round-trip returned `{price,title,source}` for a row written as `{title,price,source}` — values/structure unchanged, key order is not preserved by JSONB itself); B (a real `UPDATE` and a real `DELETE` against a referenced snapshot were both rejected by the trigger, error message inspected); C (repricing produces a genuinely new snapshot row, distinct `id`); D (the old snapshot row remains readable with its exact original payload after the new one is written); E (`asset_id` identical across both snapshots — never reassigned).
+
+### Amendment A3 / E3 — logical vs. WAL/change-history byte measurement
+
+**Method (MEASURED, not estimated):** `pg_current_wal_lsn()` is callable by this role (`neondb_owner`; gated by `rolreplication=true`, not superuser — confirmed directly). Captured immediately before/after a single-row `INSERT` transaction; `pg_wal_lsn_diff()` gives the byte delta. **Limitation, disclosed:** this LSN is database-wide, not per-transaction — any concurrent write during the window would contaminate the result. **Controls:** a no-write LSN delta was sampled 3× immediately before measuring (result: `0, 0, 0` bytes — no background noise detected this run, but that is a property of this idle dev database during this run, not a guarantee the method itself provides). Each payload size measured 5× **after priming** (20 throwaway inserts, to warm pages past Postgres's one-time full-page-image WAL cost on a table's first writes — real effect, separately measured: a cold first insert of the SMALL payload cost 2208 WAL bytes vs. its own steady-state median of 1616).
+
+Representative payloads sized off this repo's own documented comp-pool conventions (`CLAUDE.md`): SMALL = the thin-pool floor (`MIN_POOL_FOR_OVERRIDE=3`, GK-34), NORMAL = a typical resolved pool (20 comps), LARGE = the eBay Browse API's own stated cap (`limit=100`).
+
+| Size | Evidence items | Logical payload bytes | WAL bytes (steady-state median, 5 samples) | Label |
+|---|---|---|---|---|
+| SMALL | 3 | 829 | 1616 (samples: 1616, 1616, 1752, 1616, 1640) | MEASURED |
+| NORMAL | 20 | 5310 | 1480 (samples: 1480, 1480, 1480, 1480, 1536) | MEASURED |
+| LARGE | 100 | 26397 | 3504 (samples: 3480, 3480, 3504, 3616, 3712) | MEASURED |
+
+**Non-obvious real finding:** WAL bytes do **not** scale with logical payload size the naive way — NORMAL's WAL (1480) is lower than SMALL's (1616). This is genuine Postgres write-amplification behavior (index writes on both `asset_id`/`content_hash`, transaction/commit metadata, and — for LARGE — TOAST compression of the >2KB JSONB value, which is why LARGE's WAL only ~2.4× NORMAL's despite ~5× the logical bytes), not a measurement error. **Logical row bytes alone would have been the wrong estimate for Neon recovery-history consumption** — exactly the distinction this addendum required.
+
+**1 GB projections (two distinct, per the ruling — the second governs the pre-D6 retention question):**
+
+| Size | Logical-storage projection (snapshots per 1 GB) | Change-history/WAL projection (snapshots per 1 GB) |
+|---|---|---|
+| SMALL | ~1,295,225 | ~664,444 |
+| NORMAL | ~202,211 | ~725,501 |
+| LARGE | ~40,676 | ~306,433 |
+
+**The pre-D6 durability-risk ruling (`docs/MASTER-BOARD.md`, "Durability risk — 6-hour restore window") should use the WAL/change-history column, not the logical-storage column** — that is what actually consumes Free plan's 1 GB change-history budget (Section 1, D2.4 capability review). Even at LARGE (the eBay Browse API's own 100-comp cap), ~306K snapshot writes would be needed to exhaust the 1 GB budget on its own — comp-snapshot volume is not, on this evidence, a near-term threat to the existing 6-hour/1GB gate, but the mechanism by which it *could* interact with that gate is now measured, not guessed at.
+
+**No measurement pollution:** all measurement ran against a self-dropped isolated scratch schema; `data1_dev` was never written to for this purpose.
+
 ## Related documents
 
 - Cross-workstream status board (migration-truth row updated from this pass): `docs/MASTER-BOARD.md`
 - GK-167 media-driver routing: `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`, "Supporting invariants"
-- Migration files (historical, unedited): `db/data0/0001`–`0010`
+- Schema/Application Sequencing Invariant, Foundation Law 3 status: `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`
+- Migration files (historical, unedited): `db/data0/0001`–`0012`
