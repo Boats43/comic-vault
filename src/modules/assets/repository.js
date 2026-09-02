@@ -319,3 +319,121 @@ export async function getAssetGraph(client, assetId) {
     decisions: decisions.rows,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// D4 Phase B -- Identifier Fabric (docs/adr/ADR-IDENTIFIER-001-
+// identifier-fabric.md). Four tables, migration 0013. Vertical-neutral:
+// no scheme-specific (comic/UPC/ISBN/cert-number) branching anywhere in
+// this file -- scheme/issuingAuthority/normalizedValue are opaque
+// caller-supplied strings throughout.
+// ─────────────────────────────────────────────────────────────────────
+
+// insertOrResolveAssetIdentifier -- mirrors mintAsset's own resolve-or-
+// create pattern exactly (ON CONFLICT DO NOTHING + fallback SELECT):
+// UNIQUE(scheme, issuing_authority, normalized_value) is the sole
+// idempotency gate (Ruling 12). Same canonical identifier, repeated,
+// always resolves to exactly one row -- never a second definition for
+// the same real-world identifier. asset_identifier_immutable() (the live
+// trigger) makes this table impossible to UPDATE/DELETE at the DB level
+// regardless -- this function never attempts either.
+export async function insertOrResolveAssetIdentifier(client, { scheme, issuingAuthority, normalizedValue, scope }) {
+  const candidateId = await uuidv7(client);
+  const insert = await client.query(
+    `INSERT INTO asset_identifier (id, scheme, issuing_authority, normalized_value, scope)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (scheme, issuing_authority, normalized_value) DO NOTHING
+     RETURNING id`,
+    [candidateId, scheme, issuingAuthority, normalizedValue, scope]
+  );
+  if (insert.rows.length > 0) {
+    return { identifierId: insert.rows[0].id, outcome: 'minted-new' };
+  }
+  const existing = await client.query(
+    `SELECT id FROM asset_identifier WHERE scheme = $1 AND issuing_authority = $2 AND normalized_value = $3`,
+    [scheme, issuingAuthority, normalizedValue]
+  );
+  return { identifierId: existing.rows[0].id, outcome: 'resolved-existing' };
+}
+
+// insertRawObservation -- asset_raw_observation_immutable() (live
+// trigger) rejects UPDATE/DELETE unconditionally; this function only
+// ever INSERTs. No identifier_id column exists on this table at all
+// (Ruling 15) -- a malformed/unresolved raw value is fully legal here.
+export async function insertRawObservation(client, { assetId, observedRawValue, source, recordedByPrincipalId, occurredAt }) {
+  const id = await uuidv7(client);
+  await client.query(
+    `INSERT INTO asset_raw_observation (id, asset_id, observed_raw_value, source, recorded_by_principal_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, assetId, observedRawValue, source, recordedByPrincipalId, occurredAt ?? null]
+  );
+  return id;
+}
+
+// insertIdentifierAssertion -- identifier_id is NOT NULL, DB-enforced
+// (Ruling 15). Evidence fields become immutable the moment
+// asset_identifier_assertion_guard() sees this row for the first time
+// via an UPDATE attempt -- this function's own INSERT is the one and
+// only time these fields are ever written.
+export async function insertIdentifierAssertion(client, { identifierId, assetId, source, recordedByPrincipalId, resolutionAuthority, occurredAt }) {
+  const id = await uuidv7(client);
+  await client.query(
+    `INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, identifierId, assetId, source, recordedByPrincipalId, resolutionAuthority, occurredAt ?? null]
+  );
+  return id;
+}
+
+// insertAssertionEvidence -- assetId is caller-supplied (the SAME
+// gkAssetId the calling service function already authorized via
+// assertAssetExists/assertPrincipalOwnsAsset), never independently
+// derived from assertionId or observationId. The database itself is the
+// actual enforcement mechanism (Ruling 21's composite FKs): if assetId
+// does not genuinely match both the assertion's and the observation's
+// own asset_id, this INSERT is rejected by Postgres, not by application
+// logic -- this function does not re-check that here, by design.
+// Duplicate (assertionId, observationId) links are rejected by the
+// table's own PRIMARY KEY, not application logic either.
+export async function insertAssertionEvidence(client, { assertionId, observationId, assetId }) {
+  await client.query(
+    `INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id)
+     VALUES ($1, $2, $3)`,
+    [assertionId, observationId, assetId]
+  );
+}
+
+// supersedeIdentifierAssertion -- the ONE permitted lifecycle mutation
+// on asset_identifier_assertion (Ruling 17). asset_identifier_assertion_
+// guard() (the live trigger) is the actual enforcement: rejects DELETE
+// unconditionally, rejects mutating any field but superseded_by, rejects
+// re-superseding an already-superseded row, and rejects targeting a
+// non-live (already-superseded) or cross-asset target via the
+// concurrency-safe FOR UPDATE lock (Ruling 19) and the composite
+// same-asset FK (Ruling 21) respectively. This function performs
+// exactly the one UPDATE the trigger permits -- it implements none of
+// that enforcement itself.
+export async function supersedeIdentifierAssertion(client, { oldAssertionId, newAssertionId }) {
+  await client.query(
+    `UPDATE asset_identifier_assertion SET superseded_by = $1 WHERE id = $2`,
+    [newAssertionId, oldAssertionId]
+  );
+}
+
+// Read helpers -- no transaction required by the caller for these.
+export async function getIdentifierAssertion(client, assertionId) {
+  const r = await client.query(`SELECT * FROM asset_identifier_assertion WHERE id = $1`, [assertionId]);
+  return r.rows[0] || null;
+}
+
+export async function getRawObservation(client, observationId) {
+  const r = await client.query(`SELECT * FROM asset_raw_observation WHERE id = $1`, [observationId]);
+  return r.rows[0] || null;
+}
+
+export async function listLiveIdentifierAssertions(client, assetId) {
+  const r = await client.query(
+    `SELECT * FROM asset_identifier_assertion WHERE asset_id = $1 AND superseded_by IS NULL ORDER BY recorded_at`,
+    [assetId]
+  );
+  return r.rows;
+}

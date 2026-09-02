@@ -23,6 +23,11 @@ export {
   recordDecision,
   linkCollectionItem,
   resolveCollectionItemLink,
+  recordIdentifierDefinition,
+  recordRawObservation,
+  recordIdentifierAssertion,
+  linkAssertionEvidence,
+  supersedeIdentifierAssertion,
 } from './service.js';
 
 export {

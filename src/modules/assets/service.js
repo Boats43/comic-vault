@@ -23,6 +23,7 @@ import { acquireConnection } from './db.js';
 import { checkIdempotencyReplay, claimIdempotencyKey, computeRequestFingerprint } from './idempotency.js';
 import { NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError } from './errors.js';
 import * as media from '../media/index.js';
+import { withRetryOn40P01 } from './retry.js';
 
 const CONTRACT_VERSION = 'grailkey-data1b-asset-service-v1';
 const BASIS_SCHEMA_VERSION = 'asset-capture-event-v1';
@@ -846,4 +847,285 @@ export async function recordDecision({ principalId, gkAssetId, recommendation, r
   } finally {
     client.release();
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// D4 Phase B -- Identifier Fabric (docs/adr/ADR-IDENTIFIER-001-
+// identifier-fabric.md, Rulings 1-21; migration 0013). Minimum
+// vertical-neutral API surface: create/read a canonical identifier, a
+// raw observation, an identifier assertion, an evidence link, and
+// supersede an assertion. Deliberately generic -- no createUPC/
+// createISBN/createCGCCert-style methods, no comic-specific branching
+// anywhere below. entity_mint_basis, catalog_entity, and external_map
+// are never referenced by any function in this section (Ruling 1/3).
+// ─────────────────────────────────────────────────────────────────────
+
+// recordIdentifierDefinition -- "this scheme+issuer+value is a real-
+// world identifier" (Ruling 4, concept 1). Independent of any physical
+// asset -- no gkAssetId parameter, no ownership check, only principal
+// existence. normalizedValue is caller-supplied, already normalized --
+// scheme-specific normalization (GTIN<->GTIN-14, ISBN-10<->ISBN-13) is
+// the CALLER's responsibility (a future normalizer registry, Ruling 14),
+// never performed here. issuingAuthority must be the literal string
+// 'UNKNOWN' when genuinely unresolved (Ruling 13) -- never omitted,
+// never NULL; requireFields below enforces its presence the same as any
+// other required field.
+export async function recordIdentifierDefinition({ principalId, scheme, issuingAuthority, normalizedValue, scope, idempotencyKey, correlationId } = {}) {
+  requireFields(
+    { principalId, scheme, issuingAuthority, normalizedValue, scope },
+    ['principalId', 'scheme', 'issuingAuthority', 'normalizedValue', 'scope']
+  );
+  requireEnum(scope, ['PRODUCT_CLASS', 'MODEL', 'VARIANT', 'BATCH', 'LOT', 'SERIALIZED_INSTANCE', 'CERTIFIED_INSTANCE'], 'scope');
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'recordIdentifierDefinition';
+      const requestFingerprint = computeRequestFingerprint({ scheme, issuingAuthority, normalizedValue, scope });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      const { identifierId, outcome } = await repo.insertOrResolveAssetIdentifier(client, {
+        scheme, issuingAuthority, normalizedValue, scope,
+      });
+      if (outcome === 'minted-new') {
+        await repo.writeDomainEvent(client, {
+          eventType: 'identifier-definition.recorded', actorPrincipalId: principalId, actorKind: 'user',
+          subjectType: 'asset_identifier', subjectId: identifierId,
+          payload: { scheme, issuingAuthority, normalizedValue, scope },
+          correlationId: correlationId || await newCorrelationId(client),
+        });
+      }
+
+      const result = { identifierId, outcome };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// recordRawObservation -- "this raw identifier-shaped value was
+// observed on this physical asset" (Ruling 15). No identifierId
+// parameter exists -- this function cannot resolve a value to a
+// canonical identifier, by design; a malformed/unresolved raw value is
+// fully legal and durable here regardless.
+export async function recordRawObservation({ principalId, gkAssetId, observedRawValue, source, idempotencyKey, correlationId, occurredAt } = {}) {
+  requireFields({ principalId, gkAssetId, observedRawValue, source }, ['principalId', 'gkAssetId', 'observedRawValue', 'source']);
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'recordRawObservation';
+      const requestFingerprint = computeRequestFingerprint({ gkAssetId, observedRawValue, source });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      const observationId = await repo.insertRawObservation(client, {
+        assetId: gkAssetId, observedRawValue, source, recordedByPrincipalId: principalId, occurredAt,
+      });
+      await repo.writeDomainEvent(client, {
+        eventType: 'raw-observation.recorded', actorPrincipalId: principalId, actorKind: 'user',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { observationId, source },
+        correlationId: correlationId || await newCorrelationId(client),
+        occurredAt,
+      });
+
+      const result = { observationId };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// recordIdentifierAssertion -- "this canonical identifier is asserted
+// of this physical asset" (Ruling 4, concept 2; Ruling 15).
+// identifierId is required -- an unresolved reading has no assertion,
+// by construction (use recordRawObservation instead).
+//
+// B6 -- CORROBORATED is a caller-asserted CAPABILITY claim, never a
+// database row-count inference. This function does not count, require,
+// or validate evidence links before accepting resolutionAuthority =
+// 'CORROBORATED' -- the database itself permits 0, 1, or N links under
+// any resolution_authority value (migration 0013's own binding ruling).
+// Judging whether the cited evidence is genuinely INDEPENDENT (not two
+// reads of the same label by the same scanner) is a reconciliation/
+// upstream-caller responsibility this Phase-B slice does not implement
+// -- no independence evaluator is built here, deliberately.
+export async function recordIdentifierAssertion({ principalId, gkAssetId, identifierId, source, resolutionAuthority, idempotencyKey, correlationId, occurredAt } = {}) {
+  requireFields(
+    { principalId, gkAssetId, identifierId, source, resolutionAuthority },
+    ['principalId', 'gkAssetId', 'identifierId', 'source', 'resolutionAuthority']
+  );
+  requireEnum(resolutionAuthority, ['NONE', 'CONTESTED', 'CORROBORATED'], 'resolutionAuthority');
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'recordIdentifierAssertion';
+      const requestFingerprint = computeRequestFingerprint({ gkAssetId, identifierId, source, resolutionAuthority });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      const assertionId = await repo.insertIdentifierAssertion(client, {
+        identifierId, assetId: gkAssetId, source, recordedByPrincipalId: principalId, resolutionAuthority, occurredAt,
+      });
+      await repo.writeDomainEvent(client, {
+        eventType: 'identifier-assertion.recorded', actorPrincipalId: principalId, actorKind: 'user',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { assertionId, identifierId, source, resolutionAuthority },
+        correlationId: correlationId || await newCorrelationId(client),
+        occurredAt,
+      });
+
+      const result = { assertionId };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// linkAssertionEvidence -- gkAssetId is the SAME asset the caller
+// already authorized (assertAssetExists/assertPrincipalOwnsAsset) --
+// never independently derived from assertionId or observationId. If
+// assertionId and observationId do not genuinely share this gkAssetId,
+// the composite same-asset FKs (Ruling 21) reject the INSERT at the
+// database boundary; this function performs no redundant same-asset
+// check of its own, by design (the DB is the actual enforcement).
+export async function linkAssertionEvidence({ principalId, gkAssetId, assertionId, observationId, idempotencyKey, correlationId } = {}) {
+  requireFields({ principalId, gkAssetId, assertionId, observationId }, ['principalId', 'gkAssetId', 'assertionId', 'observationId']);
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'linkAssertionEvidence';
+      const requestFingerprint = computeRequestFingerprint({ gkAssetId, assertionId, observationId });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      await repo.insertAssertionEvidence(client, { assertionId, observationId, assetId: gkAssetId });
+      await repo.writeDomainEvent(client, {
+        eventType: 'assertion-evidence.linked', actorPrincipalId: principalId, actorKind: 'user',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { assertionId, observationId },
+        correlationId: correlationId || await newCorrelationId(client),
+      });
+
+      const result = { assertionId, observationId };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+async function attemptSupersedeIdentifierAssertion({ principalId, gkAssetId, oldAssertionId, newAssertionId, idempotencyKey, correlationId }) {
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'supersedeIdentifierAssertion';
+      const requestFingerprint = computeRequestFingerprint({ gkAssetId, oldAssertionId, newAssertionId });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      const oldAssertion = await repo.getIdentifierAssertion(client, oldAssertionId);
+      if (!oldAssertion) throw new NotFoundError(`asset_identifier_assertion ${oldAssertionId} does not exist`);
+      if (oldAssertion.asset_id !== gkAssetId) {
+        throw new AuthorizationFailedError(`asset_identifier_assertion ${oldAssertionId} does not belong to gkAssetId ${gkAssetId}`);
+      }
+
+      // The actual same-asset/target-live/cycle enforcement lives entirely
+      // in asset_identifier_assertion_guard() (the live trigger, Ruling
+      // 19/21) -- this UPDATE either succeeds under that enforcement or
+      // throws a real Postgres error (a cross-asset target's composite FK
+      // violation, an already-superseded target's cycle guard, etc.). This
+      // function adds no parallel validation of its own.
+      await repo.supersedeIdentifierAssertion(client, { oldAssertionId, newAssertionId });
+      await repo.writeDomainEvent(client, {
+        eventType: 'identifier-assertion.superseded', actorPrincipalId: principalId, actorKind: 'user',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { oldAssertionId, newAssertionId },
+        correlationId: correlationId || await newCorrelationId(client),
+      });
+
+      const result = { oldAssertionId, newAssertionId };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// supersedeIdentifierAssertion -- B7's bounded 40P01 retry, narrowed to
+// this one write boundary, via the shared, independently-unit-tested
+// withRetryOn40P01 helper (retry.js). Only SQLSTATE 40P01 (deadlock
+// detected) is retried -- the real, database-generated failure mode
+// proven reachable under real two-connection concurrency (Ruling
+// 19/21; a plain trigger-raised rejection, e.g. "already superseded" or
+// a cross-asset FK violation, carries a DIFFERENT SQLSTATE — plpgsql
+// RAISE EXCEPTION defaults to P0001, and constraint violations carry
+// their own codes — so genuine integrity/validation rejections are
+// never mistaken for a transient failure and are never retried). The
+// ENTIRE transaction (acquire connection -> BEGIN -> ... -> COMMIT)
+// re-runs on retry, never a single statement inside an already-aborted
+// transaction -- a 40P01 aborts the whole transaction, so anything less
+// would retry against dead state. idempotencyKey is REQUIRED (unlike
+// most other operations here, where it's optional) specifically because
+// retry safety depends on it: nothing commits from a 40P01'd attempt,
+// so a retried attempt's own checkIdempotencyReplay always sees a
+// clean, unclaimed key and proceeds normally -- never a double-effect,
+// never a duplicate supersession edge.
+// __onAttemptError -- OPTIONAL, test/observability only (see retry.js);
+// destructured off separately so it is never accidentally forwarded
+// into attemptSupersedeIdentifierAssertion's own args or persisted
+// anywhere. Real callers never pass this.
+export async function supersedeIdentifierAssertion({ __onAttemptError, ...args } = {}) {
+  requireFields(args, ['idempotencyKey']);
+  return withRetryOn40P01(() => attemptSupersedeIdentifierAssertion(args), { onAttemptError: __onAttemptError });
 }
