@@ -19,6 +19,15 @@
 // schema (catalog_entity doesn't exist here at all) — treated as an
 // opaque nullable value throughout, never assumed to be a real foreign
 // key.
+//
+// D3.2 (db/data0/0011_d3_2_event_time.sql, APPLIED to data1_dev
+// 2026-09-02, verified 78/78 post-migration checks) — ownership_event,
+// acquisition_event, valuation_event, decision_event, domain_event,
+// media, asset_identity_assignment each now carry recorded_at (the
+// renamed historical column — DEFAULT now(), unchanged behavior) AND a
+// new nullable occurred_at (no default). occurredAt is caller-supplied
+// only; every writer below passes it through as `occurredAt ?? null` —
+// never substitutes "now" or infers it from recorded_at.
 
 import { NotFoundError } from './errors.js';
 
@@ -107,12 +116,12 @@ export async function getMediaById(client, mediaId) {
   return res.rows[0] || null;
 }
 
-export async function insertOwnershipEvent(client, { assetId, ownerPrincipalId, reason, recordedByPrincipalId }) {
+export async function insertOwnershipEvent(client, { assetId, ownerPrincipalId, reason, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO ownership_event (id, asset_id, owner_principal_id, reason, recorded_by_principal_id)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [id, assetId, ownerPrincipalId, reason, recordedByPrincipalId]
+    `INSERT INTO ownership_event (id, asset_id, owner_principal_id, reason, recorded_by_principal_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, assetId, ownerPrincipalId, reason, recordedByPrincipalId, occurredAt ?? null]
   );
   // Materialized "who owns this right now" — a cache of ownership_event's
   // own append-only history, rebuilt in the same transaction (never a
@@ -129,12 +138,12 @@ export async function insertOwnershipEvent(client, { assetId, ownerPrincipalId, 
 // Append-only + supersede: the asset's prior LIVE assignment (superseded_by
 // IS NULL), if one exists, has its superseded_by set to the new row's id.
 // The prior row is never edited otherwise, never deleted (Ruling 19).
-export async function insertIdentityAssignment(client, { assetId, catalogEntityId, authority, source }) {
+export async function insertIdentityAssignment(client, { assetId, catalogEntityId, authority, source, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO asset_identity_assignment (id, asset_id, catalog_entity_id, authority, source)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [id, assetId, catalogEntityId ?? null, authority, source]
+    `INSERT INTO asset_identity_assignment (id, asset_id, catalog_entity_id, authority, source, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, assetId, catalogEntityId ?? null, authority, source, occurredAt ?? null]
   );
   await client.query(
     `UPDATE asset_identity_assignment
@@ -153,12 +162,12 @@ export async function getLiveIdentityAssignment(client, assetId) {
   return res.rows[0] || null;
 }
 
-export async function insertMedia(client, { assetId, mediaType, contentHash, objectUri, contentType, recordedByPrincipalId }) {
+export async function insertMedia(client, { assetId, mediaType, contentHash, objectUri, contentType, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO media (id, asset_id, media_type, content_hash, object_uri, content_type, recorded_by_principal_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [id, assetId, mediaType, contentHash, objectUri ?? null, contentType ?? null, recordedByPrincipalId]
+    `INSERT INTO media (id, asset_id, media_type, content_hash, object_uri, content_type, recorded_by_principal_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [id, assetId, mediaType, contentHash, objectUri ?? null, contentType ?? null, recordedByPrincipalId, occurredAt ?? null]
   );
   return id;
 }
@@ -176,32 +185,32 @@ export async function insertMedia(client, { assetId, mediaType, contentHash, obj
 // never as a side effect of matching content. See docs/adr/
 // DATA-1C-MEDIA-DESIGN.md, Task 3 (D3), for the full correction.
 
-export async function insertAcquisitionEvent(client, { assetId, costAmount, costCurrency, source, lotReference, recordedByPrincipalId }) {
+export async function insertAcquisitionEvent(client, { assetId, costAmount, costCurrency, source, lotReference, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO acquisition_event (id, asset_id, cost_amount, cost_currency, source, lot_reference, recorded_by_principal_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [id, assetId, costAmount, costCurrency, source, lotReference ?? null, recordedByPrincipalId]
+    `INSERT INTO acquisition_event (id, asset_id, cost_amount, cost_currency, source, lot_reference, recorded_by_principal_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [id, assetId, costAmount, costCurrency, source, lotReference ?? null, recordedByPrincipalId, occurredAt ?? null]
   );
   return id;
 }
 
-export async function insertValuationEvent(client, { assetId, valueAmount, valueCurrency, method, compSnapshotRef, gradeAssumption, buildSha, recordedByPrincipalId }) {
+export async function insertValuationEvent(client, { assetId, valueAmount, valueCurrency, method, compSnapshotRef, gradeAssumption, buildSha, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO valuation_event (id, asset_id, value_amount, value_currency, method, comp_snapshot_ref, grade_assumption, build_sha, recorded_by_principal_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [id, assetId, valueAmount, valueCurrency, method, compSnapshotRef ?? null, gradeAssumption ?? null, buildSha, recordedByPrincipalId]
+    `INSERT INTO valuation_event (id, asset_id, value_amount, value_currency, method, comp_snapshot_ref, grade_assumption, build_sha, recorded_by_principal_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [id, assetId, valueAmount, valueCurrency, method, compSnapshotRef ?? null, gradeAssumption ?? null, buildSha, recordedByPrincipalId, occurredAt ?? null]
   );
   return id;
 }
 
-export async function insertDecisionEvent(client, { assetId, recommendation, reasonCodes, valuationEventId }) {
+export async function insertDecisionEvent(client, { assetId, recommendation, reasonCodes, valuationEventId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO decision_event (id, asset_id, recommendation, reason_codes, valuation_event_id)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [id, assetId, recommendation, JSON.stringify(reasonCodes ?? []), valuationEventId ?? null]
+    `INSERT INTO decision_event (id, asset_id, recommendation, reason_codes, valuation_event_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, assetId, recommendation, JSON.stringify(reasonCodes ?? []), valuationEventId ?? null, occurredAt ?? null]
   );
   return id;
 }
@@ -231,11 +240,11 @@ export async function getCollectionItemLink(client, { collectionItemId }) {
 // causation_id: that field is not part of the ratified envelope or the
 // live domain_event table (see the design doc's Section 0 preflight
 // note) — not silently added here.
-export async function writeDomainEvent(client, { eventType, actorPrincipalId, actorKind = 'user', subjectType, subjectId, payload, correlationId }) {
+export async function writeDomainEvent(client, { eventType, actorPrincipalId, actorKind = 'user', subjectType, subjectId, payload, correlationId, occurredAt }) {
   const eventId = await uuidv7(client);
   await client.query(
-    `INSERT INTO domain_event (event_id, event_type, actor, subject, payload, correlation_id)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+    `INSERT INTO domain_event (event_id, event_type, actor, subject, payload, correlation_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       eventId,
       eventType,
@@ -243,6 +252,7 @@ export async function writeDomainEvent(client, { eventType, actorPrincipalId, ac
       JSON.stringify({ entity_type: subjectType, entity_id: subjectId }),
       JSON.stringify(payload),
       correlationId,
+      occurredAt ?? null,
     ]
   );
   const outboxId = await uuidv7(client);
@@ -264,13 +274,20 @@ export async function getAssetGraph(client, assetId) {
   const asset = await getAssetById(client, assetId);
   if (!asset) throw new NotFoundError(`gk_asset ${assetId} does not exist`);
 
+  // D3.2 -- ORDER BY recorded_at, not occurred_at: recorded_at is NEVER
+  // NULL (DEFAULT now(), always populated), so it remains a total,
+  // stable chronological order for display even when occurred_at is
+  // UNKNOWN (NULL) for a given row. occurred_at is available on every
+  // returned row for callers that want asserted-occurrence ordering
+  // instead, but this function does not silently prefer one over the
+  // other by re-deriving anything.
   const identity = await client.query(`SELECT * FROM asset_identity_assignment WHERE asset_id = $1 AND superseded_by IS NULL`, [assetId]);
-  const media = await client.query(`SELECT * FROM media WHERE asset_id = $1 ORDER BY captured_at`, [assetId]);
-  const ownershipHistory = await client.query(`SELECT * FROM ownership_event WHERE asset_id = $1 ORDER BY occurred_at`, [assetId]);
+  const media = await client.query(`SELECT * FROM media WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
+  const ownershipHistory = await client.query(`SELECT * FROM ownership_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
   const currentOwner = await client.query(`SELECT * FROM current_owner WHERE asset_id = $1`, [assetId]);
-  const acquisitions = await client.query(`SELECT * FROM acquisition_event WHERE asset_id = $1 ORDER BY occurred_at`, [assetId]);
-  const valuations = await client.query(`SELECT * FROM valuation_event WHERE asset_id = $1 ORDER BY occurred_at`, [assetId]);
-  const decisions = await client.query(`SELECT * FROM decision_event WHERE asset_id = $1 ORDER BY occurred_at`, [assetId]);
+  const acquisitions = await client.query(`SELECT * FROM acquisition_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
+  const valuations = await client.query(`SELECT * FROM valuation_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
+  const decisions = await client.query(`SELECT * FROM decision_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
 
   return {
     asset,

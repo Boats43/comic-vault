@@ -133,6 +133,10 @@ export async function createPhysicalAsset({ principalId, captureBasis, assetClas
         await repo.insertOwnershipEvent(client, {
           assetId: mint.assetId, ownerPrincipalId: principalId,
           reason: 'initial-mint', recordedByPrincipalId: principalId,
+          // D3.2: occurredAt is not part of createPhysicalAsset's own
+          // parameter contract (its inputs are about WHAT is being
+          // minted, not WHEN ownership began) — omitted here on purpose,
+          // resulting in occurred_at = NULL (UNKNOWN), never "now".
         });
         await repo.writeDomainEvent(client, {
           eventType: 'asset.minted', actorPrincipalId: principalId, actorKind: 'user',
@@ -213,7 +217,7 @@ export async function getMediaById({ principalId, mediaId } = {}) {
 // ─────────────────────────────────────────────────────────────────────
 // assignIdentity
 // ─────────────────────────────────────────────────────────────────────
-export async function assignIdentity({ principalId, gkAssetId, catalogEntityId = null, evidence, idempotencyKey, correlationId } = {}) {
+export async function assignIdentity({ principalId, gkAssetId, catalogEntityId = null, evidence, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields({ principalId, gkAssetId, evidence }, ['principalId', 'gkAssetId', 'evidence']);
   requireEnum(evidence.authority, ['NONE', 'CONTESTED', 'CORROBORATED'], 'evidence.authority');
   requireEnum(evidence.source, ['vision', 'unresolved'], 'evidence.source');
@@ -236,13 +240,14 @@ export async function assignIdentity({ principalId, gkAssetId, catalogEntityId =
       await assertAssetExists(client, gkAssetId);
       await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const assignmentId = await repo.insertIdentityAssignment(client, {
-        assetId: gkAssetId, catalogEntityId, authority: evidence.authority, source: evidence.source,
+        assetId: gkAssetId, catalogEntityId, authority: evidence.authority, source: evidence.source, occurredAt,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'identity.assigned', actorPrincipalId: principalId, actorKind: 'user',
         subjectType: 'gk_asset', subjectId: gkAssetId,
         payload: { assignmentId, catalogEntityId, authority: evidence.authority, source: evidence.source },
         correlationId: correlationId || await newCorrelationId(client),
+        occurredAt,
       });
 
       const result = { assignmentId };
@@ -263,7 +268,7 @@ export async function assignIdentity({ principalId, gkAssetId, catalogEntityId =
 // (ConflictError otherwise — "correcting" implies something exists to
 // correct; a genuinely-unassigned asset should use assignIdentity).
 // ─────────────────────────────────────────────────────────────────────
-export async function correctIdentity({ principalId, gkAssetId, newCatalogEntityId, reason, idempotencyKey, correlationId } = {}) {
+export async function correctIdentity({ principalId, gkAssetId, newCatalogEntityId, reason, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields({ principalId, gkAssetId, reason }, ['principalId', 'gkAssetId', 'reason']);
 
   const client = await acquireConnection();
@@ -290,13 +295,14 @@ export async function correctIdentity({ principalId, gkAssetId, newCatalogEntity
 
       const assignmentId = await repo.insertIdentityAssignment(client, {
         assetId: gkAssetId, catalogEntityId: newCatalogEntityId ?? null,
-        authority: 'CORROBORATED', source: 'operator-correction',
+        authority: 'CORROBORATED', source: 'operator-correction', occurredAt,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'identity.corrected', actorPrincipalId: principalId, actorKind: 'user',
         subjectType: 'gk_asset', subjectId: gkAssetId,
         payload: { assignmentId, priorAssignmentId: priorLive.id, newCatalogEntityId: newCatalogEntityId ?? null, reason },
         correlationId: correlationId || await newCorrelationId(client),
+        occurredAt,
       });
 
       const result = { assignmentId };
@@ -315,7 +321,7 @@ export async function correctIdentity({ principalId, gkAssetId, newCatalogEntity
 // ─────────────────────────────────────────────────────────────────────
 // attachMediaMetadata
 // ─────────────────────────────────────────────────────────────────────
-export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields, idempotencyKey, correlationId } = {}) {
+export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields({ principalId, gkAssetId, mediaFields }, ['principalId', 'gkAssetId', 'mediaFields']);
   requireFields(mediaFields, ['mediaType', 'contentHash']);
   requireEnum(mediaFields.mediaType, ['capture-photo', 'grading-photo', 'document'], 'mediaFields.mediaType');
@@ -340,12 +346,14 @@ export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields,
       const mediaId = await repo.insertMedia(client, {
         assetId: gkAssetId, mediaType: mediaFields.mediaType, contentHash: mediaFields.contentHash,
         objectUri: mediaFields.objectUri, contentType: mediaFields.contentType, recordedByPrincipalId: principalId,
+        occurredAt,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'media.recorded', actorPrincipalId: principalId, actorKind: 'user',
         subjectType: 'gk_asset', subjectId: gkAssetId,
         payload: { mediaId, mediaType: mediaFields.mediaType },
         correlationId: correlationId || await newCorrelationId(client),
+        occurredAt,
       });
 
       const result = { mediaId };
@@ -404,7 +412,7 @@ export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields,
 // not merely trusted from the earlier preflight). A DB transaction is
 // never held open across the remote storage I/O.
 // ─────────────────────────────────────────────────────────────────────
-export async function attachMedia({ principalId, gkAssetId, bytes, contentType, captureRole, idempotencyKey, correlationId } = {}) {
+export async function attachMedia({ principalId, gkAssetId, bytes, contentType, captureRole, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields(
     { principalId, gkAssetId, bytes, contentType, captureRole, idempotencyKey },
     ['principalId', 'gkAssetId', 'bytes', 'contentType', 'captureRole', 'idempotencyKey']
@@ -471,6 +479,11 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
       const mediaId = await repo.insertMedia(client, {
         assetId: gkAssetId, mediaType: captureRole, contentHash: sha256,
         objectUri: stored.objectUri, contentType, recordedByPrincipalId: principalId,
+        // D3.2: occurredAt would represent when the PHOTO WAS ACTUALLY
+        // TAKEN, not when this attach call ran — a genuinely separate
+        // fact from recorded_at. Caller-supplied only; omitted -> NULL,
+        // never "now".
+        occurredAt,
       });
       const outcome = stored.created ? 'created' : 'existing-blob-new-row';
       await repo.writeDomainEvent(client, {
@@ -478,6 +491,7 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
         subjectType: 'gk_asset', subjectId: gkAssetId,
         payload: { mediaId, captureRole, sha256, objectUri: stored.objectUri, outcome },
         correlationId: correlationId || await newCorrelationId(client),
+        occurredAt,
       });
 
       const publicResult = { mediaId, objectUri: stored.objectUri, sha256, outcome };
@@ -498,7 +512,7 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
 // ─────────────────────────────────────────────────────────────────────
 // transferOwnership
 // ─────────────────────────────────────────────────────────────────────
-export async function transferOwnership({ principalId, gkAssetId, toPrincipalId, type, reason, idempotencyKey, correlationId } = {}) {
+export async function transferOwnership({ principalId, gkAssetId, toPrincipalId, type, reason, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields({ principalId, gkAssetId, toPrincipalId, type, reason }, ['principalId', 'gkAssetId', 'toPrincipalId', 'type', 'reason']);
   // v1: only 'ownership' is real — no custody_event table exists in the
   // live schema (see the design doc, Section 2). Rejecting 'custody'
@@ -524,13 +538,14 @@ export async function transferOwnership({ principalId, gkAssetId, toPrincipalId,
       if (!toExists) throw new NotFoundError(`toPrincipalId ${toPrincipalId} does not resolve to a real gk_principal row`);
 
       const ownershipEventId = await repo.insertOwnershipEvent(client, {
-        assetId: gkAssetId, ownerPrincipalId: toPrincipalId, reason, recordedByPrincipalId: principalId,
+        assetId: gkAssetId, ownerPrincipalId: toPrincipalId, reason, recordedByPrincipalId: principalId, occurredAt,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'ownership.transferred', actorPrincipalId: principalId, actorKind: 'user',
         subjectType: 'gk_asset', subjectId: gkAssetId,
         payload: { ownershipEventId, toPrincipalId, reason },
         correlationId: correlationId || await newCorrelationId(client),
+        occurredAt,
       });
 
       const result = { ownershipEventId };
@@ -628,7 +643,7 @@ export async function resolveCollectionItemLink({ principalId, collectionItemId 
 // ─────────────────────────────────────────────────────────────────────
 // recordAcquisition
 // ─────────────────────────────────────────────────────────────────────
-export async function recordAcquisition({ principalId, gkAssetId, costAmount, costCurrency = 'USD', source, lotReference, idempotencyKey, correlationId } = {}) {
+export async function recordAcquisition({ principalId, gkAssetId, costAmount, costCurrency = 'USD', source, lotReference, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields({ principalId, gkAssetId, costAmount, source }, ['principalId', 'gkAssetId', 'costAmount', 'source']);
   requireEnum(source, ['purchase', 'gift', 'inherited', 'other'], 'source');
 
@@ -649,13 +664,14 @@ export async function recordAcquisition({ principalId, gkAssetId, costAmount, co
       await assertAssetExists(client, gkAssetId);
       await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const acquisitionEventId = await repo.insertAcquisitionEvent(client, {
-        assetId: gkAssetId, costAmount, costCurrency, source, lotReference, recordedByPrincipalId: principalId,
+        assetId: gkAssetId, costAmount, costCurrency, source, lotReference, recordedByPrincipalId: principalId, occurredAt,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'acquisition.recorded', actorPrincipalId: principalId, actorKind: 'user',
         subjectType: 'gk_asset', subjectId: gkAssetId,
         payload: { acquisitionEventId, costAmount, costCurrency, source },
         correlationId: correlationId || await newCorrelationId(client),
+        occurredAt,
       });
 
       const result = { acquisitionEventId };
@@ -674,7 +690,7 @@ export async function recordAcquisition({ principalId, gkAssetId, costAmount, co
 // ─────────────────────────────────────────────────────────────────────
 // recordValuation
 // ─────────────────────────────────────────────────────────────────────
-export async function recordValuation({ principalId, gkAssetId, valueAmount, valueCurrency = 'USD', method, compSnapshotRef, gradeAssumption, buildSha, idempotencyKey, correlationId } = {}) {
+export async function recordValuation({ principalId, gkAssetId, valueAmount, valueCurrency = 'USD', method, compSnapshotRef, gradeAssumption, buildSha, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields({ principalId, gkAssetId, valueAmount, method, buildSha }, ['principalId', 'gkAssetId', 'valueAmount', 'method', 'buildSha']);
   requireEnum(method, ['engine-computed', 'operator-override', 'gocollect', 'other'], 'method');
 
@@ -694,13 +710,14 @@ export async function recordValuation({ principalId, gkAssetId, valueAmount, val
       await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const valuationEventId = await repo.insertValuationEvent(client, {
         assetId: gkAssetId, valueAmount, valueCurrency, method, compSnapshotRef, gradeAssumption, buildSha,
-        recordedByPrincipalId: principalId,
+        recordedByPrincipalId: principalId, occurredAt,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'valuation.computed', actorPrincipalId: principalId, actorKind: method === 'engine-computed' ? 'system' : 'user',
         subjectType: 'gk_asset', subjectId: gkAssetId,
         payload: { valuationEventId, valueAmount, valueCurrency, method, buildSha },
         correlationId: correlationId || await newCorrelationId(client),
+        occurredAt,
       });
 
       const result = { valuationEventId };
@@ -719,7 +736,7 @@ export async function recordValuation({ principalId, gkAssetId, valueAmount, val
 // ─────────────────────────────────────────────────────────────────────
 // recordDecision
 // ─────────────────────────────────────────────────────────────────────
-export async function recordDecision({ principalId, gkAssetId, recommendation, reasonCodes = [], valuationEventId, idempotencyKey, correlationId } = {}) {
+export async function recordDecision({ principalId, gkAssetId, recommendation, reasonCodes = [], valuationEventId, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields({ principalId, gkAssetId, recommendation }, ['principalId', 'gkAssetId', 'recommendation']);
 
   const client = await acquireConnection();
@@ -740,13 +757,14 @@ export async function recordDecision({ principalId, gkAssetId, recommendation, r
       await assertAssetExists(client, gkAssetId);
       await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
       const decisionEventId = await repo.insertDecisionEvent(client, {
-        assetId: gkAssetId, recommendation, reasonCodes, valuationEventId,
+        assetId: gkAssetId, recommendation, reasonCodes, valuationEventId, occurredAt,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'decision.computed', actorPrincipalId: principalId, actorKind: 'system',
         subjectType: 'gk_asset', subjectId: gkAssetId,
         payload: { decisionEventId, recommendation, reasonCodes },
         correlationId: correlationId || await newCorrelationId(client),
+        occurredAt,
       });
 
       const result = { decisionEventId };

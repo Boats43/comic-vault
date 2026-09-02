@@ -76,7 +76,21 @@ Every writer in `src/modules/assets/repository.js`, for every one of the 7 in-sc
 
 Out-of-scope tables, with reasoning (not oversight): `entity_mint_basis.created_at`/`mint_event.occurred_at` (0003) — minting IS the event, no real-world occurrence distinct from its own recording; `collection_item_link.linked_at` (0007) — a pure routing edge, not a domain event; `outbox.created_at`/`processed_at` (0004) — queue mechanics, already honestly named; `gk_asset`/`gk_principal`/`gk_organization.created_at` (0004) — entity-row creation metadata, not `_event` tables; `custody_event`/`condition_observation`/`gk_organization`/`gk_membership` — not live (confirmed absent from `data1_dev`, D2.1).
 
-Proposed (NOT applied) migration: `db/data0/0011_d3_2_event_time.sql` — for each of the 7 tables, renames the existing column to `recorded_at` (meaning unchanged, name now honest) and adds a new, nullable `occurred_at` (no default — omitted on insert means NULL, never "now"). No `CHECK (occurred_at <= recorded_at)` or equivalent — chronological inconsistency is legal, evidence for review, never schema invalidity. Full real-DB proof (not applied to `data1_dev`; run against an isolated, self-dropped scratch schema in the same Neon database, using the actual 0011 SQL text and the actual `repository.js` functions): `tests/d3-2-true-event-time-live-roundtrip.test.js`, 30/30, plus `tests/d3-2-*` pure/unit coverage.
+Migration: `db/data0/0011_d3_2_event_time.sql` — for each of the 7 tables, renames the existing column to `recorded_at` (meaning unchanged, name now honest) and adds a new, nullable `occurred_at` (no default — omitted on insert means NULL, never "now"). No `CHECK (occurred_at <= recorded_at)` or equivalent — chronological inconsistency is legal, evidence for review, never schema invalidity. Phase A real-DB proof (isolated, self-dropped scratch schema, actual 0011 SQL text, actual `repository.js` functions): `tests/d3-2-true-event-time-live-roundtrip.test.js`, 30/30.
+
+### D3.2 Phase B — APPLIED to `data1_dev` (2026-09-02)
+
+**Recovery anchor:** `2026-09-02T03:29:11Z` UTC / `2026-09-01 8:29 PM MST` (America/Phoenix, no DST). Neon project `polished-frog-12911134`, source branch `main`, target schema `data1_dev`.
+
+**Rollback, written and validated BEFORE the forward migration ran:** `db/data0/0011_d3_2_event_time_rollback.sql` — the exact inverse (`DROP COLUMN occurred_at` then `RENAME COLUMN recorded_at TO <original>`, per table). Validated for real: applied forward `0011`, then the rollback, against an isolated scratch schema — `information_schema.columns` confirmed byte-identical to the pre-forward-migration snapshot.
+
+**Forward migration:** applied verbatim (no hand-editing; the applied text confirmed byte-identical to the committed `bd2ded8` version via `git show` diff before running) — start `2026-09-02T03:30:17.839Z` UTC, end `2026-09-02T03:30:17.900Z` UTC (61ms).
+
+**Pre-migration evidence captured:** full `information_schema.columns` snapshot for all 7 tables; row counts (`ownership_event` 124, `acquisition_event` 20, `valuation_event` 78, `decision_event` 33, `domain_event` 378, `media` 42, `asset_identity_assignment` 80); 3 representative historical-timestamp samples per table (21 rows total), exact ISO values recorded for byte-for-byte post-migration comparison. Quarantine and `DATA-0E-FULL` confirmed unchanged immediately before.
+
+**Post-migration verification: 78/78 checks passed** (per-table: `recorded_at` exists, `occurred_at` exists/nullable/no-default; no chronology `CHECK` constraint anywhere in `data1_dev`; all 21 sampled historical rows' `recorded_at` byte-exact match to their pre-migration value; all 21 corresponding `occurred_at` values NULL; all 7 row counts unchanged).
+
+**Application wiring shipped:** `src/modules/assets/repository.js` (7 writers + `getAssetGraph`'s `ORDER BY`) and `service.js` (8 public functions) now thread an optional `occurredAt` through to `occurred_at`, defaulting to `null` — never `now()`, never inferred. **Live proof, real functions, real `data1_dev`:** `tests/d3-2-application-wiring-live-proof.test.js`, 10/10 — past `occurredAt` (C), omitted → NULL (D), future `occurredAt` accepted (E), legacy call with no `occurredAt` param at all (F), no chronology rejection (G), full cleanup with count verification (I). D3.1's own live regression re-run clean after this change (H, 9/9) — confirmed no interaction between the two information contracts.
 
 ### `entity_mint_basis` row-provenance classification (Amendment A4)
 
