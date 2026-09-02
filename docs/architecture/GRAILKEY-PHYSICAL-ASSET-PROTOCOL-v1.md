@@ -132,6 +132,14 @@ For any change touching executable code, schema, or migrations, all 16 ratified 
 
 This procedural rule governs how the matrix is *reported*; it does not alter, replace, reword, or reduce the count of the 16 ratified questions themselves.
 
+### Matrix answer values (added D3 EXIT correction, 2026-09-02)
+
+Matrix answers are **YES / N/A / NO only.** No hedged variant (`PARTIAL`, `PARTIAL, by design`, `YES-architectural`, `YES (upgraded...)`, or any other qualified label) is a valid matrix answer value.
+
+A matrix question asks whether **this specific change** satisfies the constraint it names — it never reports a Foundation Law's overall status. A change may correctly answer a question YES while the Foundation Law that motivates the question remains PARTIAL (or any other law-status value) in the Status governance table above. The two are independent axes: the matrix scores the change; the law-status table scores the architecture. Collapsing them onto one hedged label loses that distinction and is the failure mode this rule exists to prevent.
+
+Worked example: Question 7 asks whether a change is many-to-many-capable at the capture layer, or explicitly N/A. D3.1 answers **YES** — one observation can carry multiple candidate discriminators, and distinct candidates can mint distinct physical assets without candidate identity becoming `gkAssetId` (evidence: `src/modules/capture/mapping.js`'s `buildCaptureBasis` optional `candidateDiscriminator` parameter, `entity_mint_basis`'s `UNIQUE (basis_namespace, basis_key)` constraint, `tests/d3-1-mint-basis-live-roundtrip.test.js` case B). Law 2 ("Capture is many-to-many") independently remains **PARTIAL** in the Status governance table, because the full `CaptureSession → Observation/Frame → ObjectCandidate → AssetLink` graph is still D8, not built by D3.1. Both statements are true at once and are recorded separately — the YES is not diluted to PARTIAL to hedge against the law's own unfinished status, and the law's PARTIAL is not overwritten to YES because one dependent change scored cleanly.
+
 ### Historical Regression Freshness Rule (added D3.3 Phase A, R5, 2026-09-02)
 
 When the byte-exact historical test roster (the full tracked `tests/*.test.js` suite) is **not actually executed** as part of a dispatch's own regression reporting, that dispatch must report:
