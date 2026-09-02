@@ -23,17 +23,61 @@
 //   evidence: { promptVersion }   (a real git SHA, confirmed)
 //   outcome: { decisionAction, pricingSource, price, gradeMultiplier }
 
-export function buildCaptureBasis(principalId, scanPayload) {
-  const key = scanPayload.correlationId
-    ? `${principalId}/${scanPayload.correlationId}`
-    : `${principalId}/${scanPayload.scanlogKey}`;
-  return {
+// D3.1 (candidate-safe mint basis) — `candidateDiscriminator` is an
+// OPTIONAL 3rd parameter, added additively. Every existing caller
+// (today: src/modules/capture/service.js's captureFromScan, always
+// calling this with 2 arguments) is byte-for-byte unaffected: when
+// `candidateDiscriminator` is omitted, `key` is computed by the exact
+// same expression this function has always used, and the returned
+// object has the exact same 5 keys in the exact same order — so
+// JSON.stringify(...) of the result is identical to what this function
+// produced before this change, for the same (principalId, scanPayload)
+// inputs (D3 Amendment A1 — see tests/d3-1-candidate-safe-mint-basis.test.js
+// for the regression vectors proving this, and that file's own header
+// comment for why a live-row byte-comparison isn't the applicable proof
+// here: this function has never been the writer of any of the 110 real
+// entity_mint_basis rows in data1_dev today — captureFromScan has no
+// live caller yet, confirmed by grep across api/).
+//
+// A future multi-candidate caller (D8's own CaptureSession/Observation/
+// ObjectCandidate graph — NOT built here) MAY pass a 3rd argument, one
+// per distinct physical candidate detected within the SAME observation
+// (same principalId + correlationId/scanlogKey). When present, it
+// becomes a namespaced SUFFIX of `key` — a capture-basis component only.
+// It is never written to `book`, never treated as catalog/variant/
+// external identity, and never reaches any gk_asset column (gk_asset
+// carries only id/asset_class/status/mint_basis_id/created_at — see
+// db/data0/0004_data1_foundation.sql — none of which this function ever
+// touches). Two different discriminators under the same observation
+// produce two different `key` strings, so entity_mint_basis's existing
+// UNIQUE (basis_namespace, basis_key) constraint — unmodified by this
+// change — mints two distinct gk_asset rows instead of colliding them
+// onto one (Law 2). The same discriminator replayed against the same
+// observation reproduces the same `key` string, so the SAME existing
+// constraint resolves it to the SAME asset instead of minting a second
+// one for what is still the same physical candidate.
+export function buildCaptureBasis(principalId, scanPayload, candidateDiscriminator) {
+  const hasDiscriminator = candidateDiscriminator !== undefined && candidateDiscriminator !== null;
+  const sessionKey = scanPayload.correlationId ? scanPayload.correlationId : scanPayload.scanlogKey;
+  const key = hasDiscriminator
+    ? `${principalId}/${sessionKey}/candidate:${candidateDiscriminator}`
+    : `${principalId}/${sessionKey}`;
+  const basis = {
     namespace: 'asset:capture',
     key,
     book: scanPayload.book ?? null,
     correlationId: scanPayload.correlationId ?? null,
     scanlogKey: scanPayload.scanlogKey ?? null,
   };
+  if (hasDiscriminator) {
+    // Provenance/basis-composition metadata only — participates in `key`
+    // (above), which is what actually drives entity_mint_basis's
+    // uniqueness check; this field itself is for audit/debugging
+    // legibility, the same role basis_schema_version/mint_policy_version
+    // already play one layer up (0003's own basis-key stability clause).
+    basis.candidateDiscriminator = candidateDiscriminator;
+  }
+  return basis;
 }
 
 // CORROBORATED/CONTESTED/NONE is a single, whole-asset value in DATA-1B's
