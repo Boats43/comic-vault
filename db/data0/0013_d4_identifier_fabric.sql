@@ -87,6 +87,30 @@
 -- identifier of any kind participates in mint-basis construction, and
 -- nothing here changes that.
 --
+-- SAME-ASSET INTEGRITY -- added after an adversarial pre-modification
+-- attack against this file's original committed bytes (SHA-256
+-- e522de5097fec2e72bea5d45dd96586b42068ab8bf6e5664ca3dd7160a5b5e4d)
+-- proved, empirically, that BOTH an evidence link across two different
+-- physical assets AND a supersession edge across two different physical
+-- assets succeeded -- a real same-asset provenance hole, not merely a
+-- hypothetical one. Fixed declaratively, not with a new trigger: both
+-- asset_identifier_assertion and asset_raw_observation carry a
+-- UNIQUE(id, asset_id) so a composite FK can pin a referencing row's
+-- asset_id to match. asset_identifier_assertion.superseded_by is now a
+-- composite FK (superseded_by, asset_id) -> (id, asset_id) on itself --
+-- a correcting assertion must belong to the same asset, but may
+-- legitimately assert a DIFFERENT identifier_id (the ruled invariant is
+-- same physical asset, never same external identifier).
+-- asset_identifier_assertion_evidence gained an asset_id column with two
+-- composite FKs, one to each side, transitively forcing
+-- assertion.asset_id = observation.asset_id for every link. None of this
+-- adds a new trigger or changes the existing supersession trigger's own
+-- locking behavior -- the same FOR UPDATE lock geometry proven under
+-- real concurrency is unchanged; Postgres's own FK-existence checking
+-- (a FOR KEY SHARE lock on the referenced row) is the only additional
+-- locking surface, and was re-verified under real two-connection
+-- concurrency after this change, not assumed safe.
+--
 -- No chronology CHECK -- occurred_at/recorded_at remain independent
 -- exactly as D3.2 established (0011); occurred_at is nullable, no
 -- default, never inferred from recorded_at, and occurred_at > recorded_at
@@ -183,6 +207,12 @@ CREATE TABLE asset_raw_observation (
   occurred_at               TIMESTAMPTZ
 );
 CREATE INDEX ON asset_raw_observation (asset_id);
+-- Same-asset integrity target (S1, adversarial proof): lets the evidence
+-- table's composite FK below force observation.asset_id to match without
+-- a trigger. id is already globally unique (PRIMARY KEY); this adds no
+-- new uniqueness semantics of its own, only a (id, asset_id) pair a
+-- composite FK can reference.
+CREATE UNIQUE INDEX asset_raw_observation_id_asset_unique ON asset_raw_observation (id, asset_id);
 
 CREATE OR REPLACE FUNCTION asset_raw_observation_immutable() RETURNS TRIGGER AS $$
 BEGIN
@@ -227,8 +257,30 @@ CREATE TABLE asset_identifier_assertion (
   -- currently-live correcting/replacing assertion (Ruling 9/17). Every
   -- other column above is immutable after insert -- enforced by the
   -- trigger below, not by convention.
-  superseded_by             UUID REFERENCES asset_identifier_assertion(id),
-  CHECK (superseded_by IS NULL OR superseded_by <> id)
+  superseded_by             UUID,
+  CHECK (superseded_by IS NULL OR superseded_by <> id),
+  -- Same-asset FK target for the self-reference below, and for the
+  -- evidence table's own composite FKs further down. id alone is
+  -- already the PRIMARY KEY, but Postgres requires the exact referenced
+  -- column SET to carry its own unique constraint for a composite FK to
+  -- target it -- declared here, inline, so it exists before the
+  -- self-referencing FK immediately below needs it (a separate
+  -- CREATE UNIQUE INDEX statement placed after this CREATE TABLE closes
+  -- would be too late for that self-reference).
+  UNIQUE (id, asset_id),
+  -- Same-asset integrity for supersession (S2, adversarial proof) --
+  -- DECLARATIVE, not trigger-based. superseded_by alone (a plain FK to
+  -- id) cannot express "and the same asset_id" -- a composite FK against
+  -- this table's own (id, asset_id) does, using columns that already
+  -- exist on this row: no new column needed. This forces the correcting
+  -- target to belong to the SAME physical asset as the row being
+  -- superseded -- it says nothing about identifier_id, so a wrong
+  -- identifier may still be legitimately corrected by asserting a
+  -- DIFFERENT identifier_id on the same asset (per ruling: the invariant
+  -- is same physical asset, never same external identifier). NULL
+  -- superseded_by trivially satisfies this FK (standard MATCH SIMPLE
+  -- NULL handling) -- a live row is unaffected.
+  FOREIGN KEY (superseded_by, asset_id) REFERENCES asset_identifier_assertion (id, asset_id)
 );
 CREATE INDEX ON asset_identifier_assertion (asset_id);
 CREATE INDEX ON asset_identifier_assertion (identifier_id);
@@ -288,14 +340,34 @@ CREATE TRIGGER asset_identifier_assertion_no_delete BEFORE DELETE ON asset_ident
 -- require, and no repo evidence claims reachable today) one observation
 -- supporting multiple assertions -- the same relation costs nothing
 -- extra to allow both directions.
+--
+-- Same-asset integrity (S1, adversarial proof) -- DECLARATIVE, not
+-- trigger-based. Plain single-column FKs to assertion(id) and
+-- observation(id) only check existence, not that the two rows belong to
+-- the SAME physical asset -- proven exploitable against the original
+-- shape of this table (cross-asset evidence link succeeded, no
+-- constraint stopped it). Fixed by carrying asset_id on this table and
+-- pointing BOTH composite FKs at it: (assertion_id, asset_id) must
+-- resolve on asset_identifier_assertion, AND (observation_id, asset_id)
+-- must resolve on asset_raw_observation -- since both FKs constrain the
+-- SAME asset_id column value on this row, they transitively force
+-- assertion.asset_id = evidence.asset_id = observation.asset_id. Holds
+-- for every assertion row regardless of lifecycle state (live,
+-- superseded, an intermediate chain position, or the target of multiple
+-- incoming supersession edges) -- the FK doesn't know or care about
+-- superseded_by, it only ever checks (id, asset_id).
 -- ---------------------------------------------------------------------
 CREATE TABLE asset_identifier_assertion_evidence (
-  assertion_id    UUID NOT NULL REFERENCES asset_identifier_assertion(id),
-  observation_id  UUID NOT NULL REFERENCES asset_raw_observation(id),
+  assertion_id    UUID NOT NULL,
+  observation_id  UUID NOT NULL,
+  asset_id        UUID NOT NULL REFERENCES gk_asset(id),
   linked_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (assertion_id, observation_id)
+  PRIMARY KEY (assertion_id, observation_id),
+  FOREIGN KEY (assertion_id, asset_id) REFERENCES asset_identifier_assertion (id, asset_id),
+  FOREIGN KEY (observation_id, asset_id) REFERENCES asset_raw_observation (id, asset_id)
 );
 CREATE INDEX ON asset_identifier_assertion_evidence (observation_id);
+CREATE INDEX ON asset_identifier_assertion_evidence (asset_id);
 
 CREATE OR REPLACE FUNCTION asset_identifier_assertion_evidence_immutable() RETURNS TRIGGER AS $$
 BEGIN

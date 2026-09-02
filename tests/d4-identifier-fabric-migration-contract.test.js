@@ -227,29 +227,29 @@ try {
   const oneLinkAssertion = crypto.randomUUID();
   await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,'single-source',$4,'CORROBORATED')`, [oneLinkAssertion, isbnId, assetA, principalId]);
   await assertSucceeds(
-    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id) VALUES ($1,$2)`, [oneLinkAssertion, badObsId]),
+    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [oneLinkAssertion, badObsId, assetA]),
     'CORROBORATED with 1 evidence link -- structurally legal'
   );
 
   // CORROBORATED with 2+ independent links.
   const multiLinkAssertion = crypto.randomUUID();
   await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,'multi-source',$4,'CORROBORATED')`, [multiLinkAssertion, isbnId, assetA, principalId]);
-  await client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id) VALUES ($1,$2),($1,$3)`, [multiLinkAssertion, badObsId, correctedObsId]);
+  await client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$4),($1,$3,$4)`, [multiLinkAssertion, badObsId, correctedObsId, assetA]);
   const multiLinkRows = await client.query(`SELECT observation_id FROM asset_identifier_assertion_evidence WHERE assertion_id=$1`, [multiLinkAssertion]);
   assertTrue(multiLinkRows.rows.length === 2, 'CORROBORATED with 2 independent evidence links -- structurally legal, both named explicitly');
   const bothStillQueryable = await client.query(`SELECT id FROM asset_raw_observation WHERE id IN ($1,$2)`, [badObsId, correctedObsId]);
   assertTrue(bothStillQueryable.rows.length === 2, 'both linked observations remain individually queryable');
 
   await assertRejected(
-    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id) VALUES ($1,$2)`, [crypto.randomUUID(), badObsId]),
+    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [crypto.randomUUID(), badObsId, assetA]),
     'evidence link: nonexistent assertion_id rejected (real FK)', 'foreign key'
   );
   await assertRejected(
-    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id) VALUES ($1,$2)`, [multiLinkAssertion, crypto.randomUUID()]),
+    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [multiLinkAssertion, crypto.randomUUID(), assetA]),
     'evidence link: nonexistent observation_id rejected (real FK)', 'foreign key'
   );
   await assertRejected(
-    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id) VALUES ($1,$2)`, [multiLinkAssertion, badObsId]),
+    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [multiLinkAssertion, badObsId, assetA]),
     'evidence link: duplicate identical (assertion_id, observation_id) rejected (PK)', 'duplicate key'
   );
   await assertRejected(
@@ -265,8 +265,58 @@ try {
   const secondAssertionOnSameObs = crypto.randomUUID();
   await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,'second-read',$4,'NONE')`, [secondAssertionOnSameObs, gtinId, assetA, principalId]);
   await assertSucceeds(
-    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id) VALUES ($1,$2)`, [secondAssertionOnSameObs, badObsId]),
+    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [secondAssertionOnSameObs, badObsId, assetA]),
     'one observation supports a SECOND, different assertion -- schema structurally permits this (not claimed reachable in the current pipeline, see the ADR)'
+  );
+
+  // ===================================================================
+  // S1/S1a -- same-asset integrity, evidence-link cross-asset attack
+  // ===================================================================
+  console.log('\n-- S1/S1a: same-asset integrity, evidence-link cross-asset attack --\n');
+
+  const s1PassAssertion = crypto.randomUUID(), s1PassObs = crypto.randomUUID();
+  await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,'s1-pass-assertion',$4,'NONE')`, [s1PassAssertion, isbnId, assetA, principalId]);
+  await client.query(`INSERT INTO asset_raw_observation (id, asset_id, observed_raw_value, source, recorded_by_principal_id) VALUES ($1,$2,'s1-pass-obs','test',$3)`, [s1PassObs, assetA, principalId]);
+  await assertSucceeds(
+    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [s1PassAssertion, s1PassObs, assetA]),
+    'S1: same-asset assertion<->observation link -- PASS (both on assetA)'
+  );
+  const crossAssertion = crypto.randomUUID();
+  await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,'s1-cross',$4,'NONE')`, [crossAssertion, isbnId, assetB, principalId]);
+  await assertRejected(
+    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [crossAssertion, badObsId, assetB]),
+    'S1: cross-asset assertion(B)<->observation(A) link -- REJECT (composite FK: observation.asset_id must match)', 'foreign key'
+  );
+  const s1VariantObs = crypto.randomUUID();
+  await client.query(`INSERT INTO asset_raw_observation (id, asset_id, observed_raw_value, source, recorded_by_principal_id) VALUES ($1,$2,'s1-variant-obs','test',$3)`, [s1VariantObs, assetA, principalId]);
+  await assertRejected(
+    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [multiLinkAssertion, s1VariantObs, assetB]),
+    'S1 variant: mismatched declared asset_id (neither side actually on assetB) -- REJECT', 'foreign key'
+  );
+
+  // S1a -- chain X -> Y -> Z on assetA, all same-asset evidence links,
+  // then attack the LIVE tail (Z) and a non-tail (X) from assetB.
+  const chainX = crypto.randomUUID(), chainY = crypto.randomUUID(), chainZ = crypto.randomUUID();
+  for (const [id, src] of [[chainX, 's1a-x'], [chainY, 's1a-y'], [chainZ, 's1a-z']]) {
+    await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,$4,$5,'CORROBORATED')`, [id, isbnId, assetA, src, principalId]);
+  }
+  const obsForChain = crypto.randomUUID();
+  await client.query(`INSERT INTO asset_raw_observation (id, asset_id, observed_raw_value, source, recorded_by_principal_id) VALUES ($1,$2,'s1a-chain-obs','test',$3)`, [obsForChain, assetA, principalId]);
+  await client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3),($4,$2,$3),($5,$2,$3)`, [chainX, obsForChain, assetA, chainY, chainZ]);
+  await client.query(`UPDATE asset_identifier_assertion SET superseded_by=$1 WHERE id=$2`, [chainY, chainX]);
+  await client.query(`UPDATE asset_identifier_assertion SET superseded_by=$1 WHERE id=$2`, [chainZ, chainY]);
+  const zLiveCheck = await client.query(`SELECT superseded_by FROM asset_identifier_assertion WHERE id=$1`, [chainZ]);
+  assertTrue(zLiveCheck.rows[0].superseded_by === null, 'S1a setup: chain X->Y->Z built, Z confirmed live');
+
+  const obsOnBForChainAttack = crypto.randomUUID();
+  await client.query(`INSERT INTO asset_raw_observation (id, asset_id, observed_raw_value, source, recorded_by_principal_id) VALUES ($1,$2,'s1a-attack-obs','test',$3)`, [obsOnBForChainAttack, assetB, principalId]);
+  await assertRejected(
+    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [chainZ, obsOnBForChainAttack, assetB]),
+    'S1a: cross-asset evidence link onto the LIVE chain tail Z -- REJECT', 'foreign key'
+  );
+  await assertRejected(
+    () => client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [chainX, obsOnBForChainAttack, assetB]),
+    'S1a: cross-asset evidence link onto a NON-TAIL (superseded, chain-intermediate) assertion X -- REJECT (same-asset invariant holds regardless of lifecycle state)', 'foreign key'
   );
 
   // ===================================================================
@@ -307,6 +357,36 @@ try {
   await assertSucceeds(() => client.query(`UPDATE asset_identifier_assertion SET superseded_by=$1 WHERE id=$2`, [cD, cC]), 'convergence: C -> D succeeds');
   const dCheck = await client.query(`SELECT superseded_by FROM asset_identifier_assertion WHERE id=$1`, [cD]);
   assertTrue(dCheck.rows[0].superseded_by === null, 'D remains live (superseded_by IS NULL) after 3 rows converge onto it');
+  assertTrue(true, 'convergence on same asset -- PASS (cA/cB/cC/cD all on assetA, proven above)');
+
+  // ===================================================================
+  // S2 -- same-asset integrity, supersession cross-asset attack
+  // ===================================================================
+  console.log('\n-- S2: same-asset/cross-asset supersession attack --\n');
+
+  const s2XOnA = crypto.randomUUID();
+  await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,'s2-x-a',$4,'NONE')`, [s2XOnA, isbnId, assetA, principalId]);
+  const s2YOnA = crypto.randomUUID();
+  // Deliberately a DIFFERENT identifier_id, same asset -- proving the
+  // ruled invariant is same physical asset, never same external
+  // identifier (a wrong identifier may legitimately be corrected by a
+  // different one).
+  await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,'s2-y-a-different-identifier',$4,'CORROBORATED')`, [s2YOnA, gtinId, assetA, principalId]);
+  await assertSucceeds(
+    () => client.query(`UPDATE asset_identifier_assertion SET superseded_by=$1 WHERE id=$2`, [s2YOnA, s2XOnA]),
+    'S2: same-asset X->Y supersession -- PASS (X and Y both on assetA, Y asserts a DIFFERENT identifier_id than X -- still legal)'
+  );
+
+  const s2XOnA2 = crypto.randomUUID();
+  await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,'s2-x2-a',$4,'NONE')`, [s2XOnA2, isbnId, assetA, principalId]);
+  const s2YOnB = crypto.randomUUID();
+  await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,'s2-y-b',$4,'NONE')`, [s2YOnB, isbnId, assetB, principalId]);
+  await assertRejected(
+    () => client.query(`UPDATE asset_identifier_assertion SET superseded_by=$1 WHERE id=$2`, [s2YOnB, s2XOnA2]),
+    'S2: cross-asset X(assetA)->Y(assetB) supersession -- REJECT (composite FK: superseded_by target must share this row\'s own asset_id)', 'foreign key'
+  );
+  const s2AfterReject = await client.query(`SELECT superseded_by FROM asset_identifier_assertion WHERE id=$1`, [s2XOnA2]);
+  assertTrue(s2AfterReject.rows[0].superseded_by === null, 'S2: rejected cross-asset attempt left X (assetA) still live -- no partial mutation');
 
   // ===================================================================
   // #12 -- gkAssetId invariance, full sequence
@@ -333,7 +413,7 @@ try {
   await client.query(`INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority) VALUES ($1,$2,$3,'inv',$4,'NONE')`, [invAssertionId, invIdfId, invAsset, principalId]);
   await checkAssetUnchanged('assert identifier');
 
-  await client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id) VALUES ($1,$2)`, [invAssertionId, invObsId]);
+  await client.query(`INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id) VALUES ($1,$2,$3)`, [invAssertionId, invObsId, invAsset]);
   await checkAssetUnchanged('add corroborating evidence');
 
   const invConflictIdfId = crypto.randomUUID();

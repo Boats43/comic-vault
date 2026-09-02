@@ -8,9 +8,12 @@
 -- corrective migration is ever written during an incident.
 --
 -- Drops exactly what 0013 adds, in FK-safe dependency order: the
--- evidence-link table first (references both assertion and observation),
--- then the assertion table's triggers/function/table (references
--- identifier and gk_asset), then the raw-observation table's
+-- evidence-link table first (composite-FK-references both assertion and
+-- observation, including the same-asset integrity FKs added after the
+-- S1/S2 adversarial proof), then the assertion table's own
+-- triggers/function/table (self-referencing composite FK included --
+-- DROP TABLE removes it along with everything else on the table, no
+-- separate statement needed), then the raw-observation table's
 -- triggers/function/table (references gk_asset), then the identifier
 -- definition table itself. No existing table (gk_asset, gk_principal, or
 -- any other) is touched -- 0013 never ALTERs an existing table, so this
@@ -32,6 +35,7 @@ DROP TABLE IF EXISTS asset_identifier_assertion;
 DROP TRIGGER IF EXISTS asset_raw_observation_no_update ON asset_raw_observation;
 DROP TRIGGER IF EXISTS asset_raw_observation_no_delete ON asset_raw_observation;
 DROP FUNCTION IF EXISTS asset_raw_observation_immutable();
+DROP INDEX IF EXISTS asset_raw_observation_id_asset_unique;
 DROP TABLE IF EXISTS asset_raw_observation;
 
 DROP TRIGGER IF EXISTS asset_identifier_no_update ON asset_identifier;
