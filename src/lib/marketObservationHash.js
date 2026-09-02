@@ -1,0 +1,220 @@
+// src/lib/marketObservationHash.js — D5A, mo-hash-v1.
+//
+// NOT wired into any production endpoint, any adapter, or any DB write path
+// yet — pure infrastructure, matching the same "designed, unconsumed"
+// convention already established by src/lib/evidenceContracts.js (GK-182).
+// No provider adapter is authorized to call this (D5D remains gated behind
+// D5B/D5C, and behind the rights review named in GK-182/A3).
+//
+// Two deliberately separate layers, independently testable and
+// independently versionable:
+//   1. NORMALIZATION — turns a raw field value into its canonical string
+//      form (or null). Business logic: decimal scale, text case-folding,
+//      timestamp formatting. Each field's own rule is documented at its
+//      own function below.
+//   2. SERIALIZATION — turns a tuple of already-canonical strings-or-null
+//      into one injective byte sequence, and hashes it. Pure structural
+//      encoding. Never inspects field MEANING, only presence/absence and
+//      exact byte length.
+//
+// Layer 2 replaces an earlier, REJECTED draft that joined normalized
+// strings with a delimiter byte (``) and used reserved *_UNKNOWN
+// sentinel strings for "field absent." Both were withdrawn (D5A dispatch,
+// 2026-09-03) because a delimiter-joined encoding is not provably
+// injective — nothing prevents a field's own normalized content from
+// containing the delimiter byte and shifting where the next field appears
+// to start, and a sentinel string is not distinguishable from a provider's
+// real text that happens to equal it. This file's encoding is
+// length-prefixed (TLV-shaped): every field is encoded as
+// <presence byte><4-byte big-endian UTF-8 byte length><UTF-8 bytes>. A
+// decoder (conceptual — nothing in this codebase decodes the hash input,
+// but injectivity is what makes the ENCODING side trustworthy) never scans
+// for a delimiter; it always consumes exactly the declared byte count
+// before moving to the next field. This is immune by construction to a
+// field's own content containing what would have been a delimiter byte —
+// see tests/d5a-market-observation-hash-serializer.test.js for the
+// property/adversarial proof, including the exact field-shifting
+// construction this design is meant to defeat.
+
+import { createHash } from 'node:crypto';
+
+export const HASH_CONTRACT_VERSION = 'mo-hash-v1';
+
+// ─────────────────────────────────────────────────────────────────────
+// Layer 2 — structural (TLV) serialization. No business meaning here.
+// ─────────────────────────────────────────────────────────────────────
+
+const PRESENT = 0x01;
+const ABSENT = 0x00;
+
+// encodeField(str) -- str is null (absent) or an already-canonical string
+// (present, possibly empty). Returns a Buffer: 1 presence byte + 4-byte
+// big-endian UTF-8 byte length + the UTF-8 bytes themselves (zero bytes
+// if str === ''). NULL and '' are always distinguishable (different
+// presence byte) even though both have a zero-length body.
+export function encodeField(str) {
+  if (str !== null && typeof str !== 'string') {
+    throw new TypeError(`encodeField expects a string or null, got ${typeof str}`);
+  }
+  const presence = str === null ? ABSENT : PRESENT;
+  const bytes = str === null ? Buffer.alloc(0) : Buffer.from(str, 'utf8');
+  const lengthBuf = Buffer.alloc(4);
+  lengthBuf.writeUInt32BE(bytes.length, 0);
+  return Buffer.concat([Buffer.from([presence]), lengthBuf, bytes]);
+}
+
+// serializeMarketObservationTuple(canonicalFields) -- canonicalFields is
+// an object of already-normalized strings-or-null, in the exact ratified
+// field order. Returns the full injective Buffer (before hashing) --
+// exposed separately from computeMarketObservationHash so the byte
+// serialization itself (not just its SHA-256 digest) is what gets
+// property-tested for injectivity (D2b — "collision resistance of SHA-256
+// is not a substitute for injective canonical serialization").
+export function serializeMarketObservationTuple({
+  provider, providerItemId, listingKind, priceAmount, currency,
+  conditionText, gradeNumeric, occurredAt,
+}) {
+  return Buffer.concat([
+    encodeField(HASH_CONTRACT_VERSION),
+    encodeField(provider),
+    encodeField(providerItemId),
+    encodeField(listingKind),
+    encodeField(priceAmount),
+    encodeField(currency),
+    encodeField(conditionText),
+    encodeField(gradeNumeric),
+    encodeField(occurredAt),
+  ]);
+}
+
+// computeMarketObservationHash -- SHA-256 hex digest of the tuple above.
+// occurred_at participates (S1, 2026-09-03 ruling — an asserted fact about
+// the market event itself, reversing this dispatch train's own earlier
+// exclusion). observed_at, recorded_at, id, recorded_by_principal_id,
+// correlation_id, raw_payload, and content_hash itself are NEVER part of
+// this input — provenance/timing metadata, not observed market fact.
+export function computeMarketObservationHash(canonicalFields) {
+  return createHash('sha256').update(serializeMarketObservationTuple(canonicalFields)).digest('hex');
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Layer 1 — normalization. Business meaning lives here, per field.
+// Every function: null/undefined in -> null out (never fabricated).
+// ─────────────────────────────────────────────────────────────────────
+
+// normalizeLowerToken -- provider, listing_kind. Fixed, generic
+// vocabulary strings, never comic-specific.
+export function normalizeLowerToken(value) {
+  if (value === null || value === undefined) return null;
+  return String(value).trim().toLowerCase();
+}
+
+// normalizeUpperCode -- currency (ISO 4217 alpha code). Never defaulted
+// to USD or any other currency when genuinely unknown (stays null).
+export function normalizeUpperCode(value) {
+  if (value === null || value === undefined) return null;
+  return String(value).trim().toUpperCase();
+}
+
+// normalizeText -- provider_item_id, condition_text. Trim, collapse
+// internal whitespace, Unicode NFC-normalize, lowercase (case/whitespace
+// differences must not manufacture a spurious "new" observation for
+// trivially-reformatted re-scraped text). A present-but-empty string
+// stays present-but-empty (never silently promoted to null) -- only a
+// genuinely absent (null/undefined) input yields null.
+export function normalizeText(value) {
+  if (value === null || value === undefined) return null;
+  return String(value).trim().replace(/\s+/g, ' ').normalize('NFC').toLowerCase();
+}
+
+// canonicalFixedScaleDecimal -- price_amount (scale=4) and grade_numeric
+// (scale=1). Exact base-10 STRING normalization -- never routes through
+// Number/toFixed/IEEE-754 float rounding, so the hash input can never
+// silently diverge from the persisted exact NUMERIC value on a
+// floating-point edge case.
+//
+// Rules (D2a/D3, ratified 2026-09-03):
+//   - leading zeros stripped ("007" -> "7", "09.4" -> "9.4")
+//   - fractional part padded with trailing zeros up to `scale` digits
+//     ("9.4" -> "9.4" at scale=1; "66" -> "66.0000" at scale=4)
+//   - fractional precision BEYOND `scale` is REJECTED (thrown), UNLESS
+//     every excess digit is itself '0' ("9.40" at scale=1 -> allowed,
+//     canonicalizes to "9.4"; "9.47" at scale=1 -> rejected) -- silent
+//     rounding is never performed; a genuinely over-precise input is a
+//     data-quality bug at the adapter layer, not something to coerce
+//     quietly.
+//   - "-0"/"-0.00" normalizes to unsigned zero (no negative-zero string)
+//   - negative values are NOT rejected by this function (price's
+//     non-negativity is a separate schema-level CHECK constraint,
+//     0014's own DDL -- this function's job is canonical-string
+//     correctness for whatever numeric value it's given, positive or
+//     negative, since grade has no non-negativity requirement)
+export function canonicalFixedScaleDecimal(value, scale) {
+  if (value === null || value === undefined) return null;
+  if (!Number.isInteger(scale) || scale < 0) {
+    throw new RangeError(`scale must be a non-negative integer, got ${scale}`);
+  }
+  const str = String(value).trim();
+  const m = str.match(/^(-?)(\d+)(?:\.(\d+))?$/);
+  if (!m) {
+    throw new Error(`canonicalFixedScaleDecimal: not a valid decimal string: ${JSON.stringify(value)}`);
+  }
+  const [, sign, rawInt, rawFrac = ''] = m;
+  if (rawFrac.length > scale) {
+    const excess = rawFrac.slice(scale);
+    if (/[^0]/.test(excess)) {
+      throw new Error(
+        `canonicalFixedScaleDecimal: excess fractional precision beyond ${scale} digit(s) -- ` +
+        `refusing to silently round ${JSON.stringify(value)}`
+      );
+    }
+  }
+  const normalizedInt = rawInt.replace(/^0+(?=\d)/, '');
+  const paddedFrac = (rawFrac + '0'.repeat(scale)).slice(0, scale);
+  const isZero = normalizedInt === '0' && /^0*$/.test(paddedFrac);
+  const finalSign = sign === '-' && !isZero ? '-' : '';
+  return scale > 0 ? `${finalSign}${normalizedInt}.${paddedFrac}` : `${finalSign}${normalizedInt}`;
+}
+
+export const canonicalPriceString = (value) => canonicalFixedScaleDecimal(value, 4);
+export const canonicalGradeString = (value) => canonicalFixedScaleDecimal(value, 1);
+
+// normalizeOccurredAt -- occurred_at only. observed_at/recorded_at never
+// pass through this (they never enter the hash at all -- see the header).
+// A date-only source fact (PriceCharting's sales-history rows carry a
+// date, no time-of-day) is normalized to a fixed instant (UTC midnight)
+// so every adapter facing the same date-only fact produces the same
+// canonical string -- this is part of the mo-hash-v1 contract itself,
+// never left to an individual adapter's own discretion. Never infers a
+// missing event time from anything -- an input of null/undefined stays
+// null; this function is never called with observed_at/recorded_at as a
+// substitute value.
+export function normalizeOccurredAt(value) {
+  if (value === null || value === undefined) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    throw new Error(`normalizeOccurredAt: not a valid date/timestamp: ${JSON.stringify(value)}`);
+  }
+  return d.toISOString();
+}
+
+// canonicalizeMarketObservationFields -- convenience: raw field values in,
+// the exact canonical tuple computeMarketObservationHash/
+// serializeMarketObservationTuple expect, out. Kept separate from those
+// two functions so normalization rules and byte-serialization rules stay
+// independently testable (D2b).
+export function canonicalizeMarketObservationFields({
+  provider, providerItemId, listingKind, priceAmount, currency,
+  conditionText, gradeNumeric, occurredAt,
+}) {
+  return {
+    provider: normalizeLowerToken(provider),
+    providerItemId: normalizeText(providerItemId),
+    listingKind: normalizeLowerToken(listingKind),
+    priceAmount: canonicalPriceString(priceAmount),
+    currency: normalizeUpperCode(currency),
+    conditionText: normalizeText(conditionText),
+    gradeNumeric: canonicalGradeString(gradeNumeric),
+    occurredAt: normalizeOccurredAt(occurredAt),
+  };
+}
