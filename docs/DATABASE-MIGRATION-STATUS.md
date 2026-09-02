@@ -193,6 +193,14 @@ Representative payloads sized off this repo's own documented comp-pool conventio
 - `mintAsset` has exactly one live call site (`service.js:113`, inside `createPhysicalAsset`) — `entity_mint_basis` is, in actual live use, 100% physical-asset-side mint-idempotency, 0% catalog-side, the opposite of its 0003 design-time scope statement.
 - **Ruled (D4 Schema Ruling dispatch, 2026-09-02, `docs/adr/ADR-IDENTIFIER-001-identifier-fabric.md`, Ruling 1): `entity_mint_basis` is preserved exactly as-is, as mint-idempotency only — this contradiction is not "fixed" by moving the table, retyping `entity_id`, or editing `0003`.** It is recorded here so a future reader querying live schema truth sees the design-vs-live gap explicitly, the same way the "13-of-17 vs 11-of-15" and "0001-0003 target public" contradictions above are recorded rather than papered over.
 
+## Operational note — pooled connection string loses session-scoped state mid-run (found D4 A6/A7 concurrency proof, 2026-09-02)
+
+**FACT.** During the D4 A6/A7 real two-connection concurrency proof (`docs/adr/ADR-IDENTIFIER-001-identifier-fabric.md`, Ruling 19), the pooled connection string (`GRAILKEY_CATALOG_DATABASE_URL`) was observed silently losing session-level `SET search_path` state between statements issued from the *same* client object — a later statement resolved a table name against a stale, previous scratch schema instead of the one just set on that same connection. The unpooled connection string (`GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED`) preserved the required session semantics correctly and was used for the concurrency proof once this was caught.
+
+**Operational rule:** multi-statement work that depends on session-scoped PostgreSQL state must use the unpooled connection string. Explicit examples: migrations, scratch-schema proofs, transactional test harnesses, or any future operation relying on `SET`, temporary session state, or other connection-local behavior.
+
+**Not generalized further.** This is a recorded session-state hazard and its operational consequence — not a claim that pooled connections are broken, and not a claim about any other property of the pooler. Simple, single-statement, or already-schema-qualified queries are unaffected by this finding.
+
 ## Related documents
 
 - Cross-workstream status board (migration-truth row updated from this pass): `docs/MASTER-BOARD.md`
