@@ -121,7 +121,7 @@ export async function createPhysicalAsset({ principalId, captureBasis, assetClas
       });
 
       if (assetClass && assetClass !== 'comic') {
-        await client.query('UPDATE gk_asset SET asset_class = $1 WHERE id = $2', [assetClass, mint.assetId]);
+        await client.query('UPDATE data1_dev.gk_asset SET asset_class = $1 WHERE id = $2', [assetClass, mint.assetId]);
       }
 
       // Only on a genuine first mint — resolved-existing means this asset

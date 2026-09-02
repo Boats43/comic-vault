@@ -31,13 +31,27 @@ export function getPool() {
   return pool;
 }
 
-// One connection, search_path already set to data1_dev, for the duration
-// of a single service-function call. Callers MUST release() in a
-// finally block.
+// One connection, for the duration of a single service-function call.
+// Callers MUST release() in a finally block.
+//
+// GK-178 (2026-09-03) — this used to also run `SET search_path TO
+// data1_dev` here, once per checkout, on the theory that it would
+// persist for the connection's lifetime. It does not: this pool's
+// connection string resolves to a Neon PgBouncer transaction-pooling
+// endpoint, which does not guarantee that a `SET` issued as its own
+// statement survives to any later statement on the "same" pg.Pool
+// client — proven with real pg_backend_pid() drift mid-operation and
+// real 42P01 "relation does not exist" errors, reproducible at 3
+// concurrent operations (docs/DATABASE-MIGRATION-STATUS.md, "GK-178").
+// The fix is architectural, not a retry or a bigger pool: every query
+// in repository.js/idempotency.js/service.js is now schema-qualified
+// (`data1_dev.<table>`) instead, which needs no session state at all —
+// correct regardless of concurrency, pool warmth, or which physical
+// backend PgBouncer happens to route a given statement to. Do not
+// reintroduce a bare `SET search_path` here as a "convenience" — it
+// would silently reintroduce this exact hazard.
 export async function acquireConnection() {
-  const client = await getPool().connect();
-  await client.query('SET search_path TO data1_dev');
-  return client;
+  return getPool().connect();
 }
 
 // Test/shutdown only — closes the pool. Never called from service.js

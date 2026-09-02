@@ -27,10 +27,13 @@ export function getPool() {
   return pool;
 }
 
+// GK-178 (2026-09-03) — no longer runs `SET search_path TO data1_dev`
+// here; see src/modules/assets/db.js's own acquireConnection() header
+// for the full rationale (Neon PgBouncer transaction-pooling does not
+// guarantee a bare SET survives to later statements). auth/repository.js
+// now schema-qualifies every table reference instead.
 export async function acquireConnection() {
-  const client = await getPool().connect();
-  await client.query('SET search_path TO data1_dev');
-  return client;
+  return getPool().connect();
 }
 
 export async function closePool() {

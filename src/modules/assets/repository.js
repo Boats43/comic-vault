@@ -11,6 +11,20 @@
 // transaction" (docs/adr/DATA-1B-ASSET-SERVICE-DESIGN.md, Section 3)
 // checkable by reading one file.
 //
+// GK-178 (2026-09-03) — every table reference below is schema-qualified
+// (`data1_dev.<table>`), never bare. `db.js`'s pooled connection string
+// resolves to a Neon PgBouncer transaction-pooling endpoint, which does
+// not guarantee that a `SET search_path` issued at connection-acquire
+// time survives to any later statement on the "same" client (proven:
+// real pg_backend_pid() drift mid-operation, real 42P01 "relation does
+// not exist" errors, real concurrent reproduction at N=3 — see
+// docs/DATABASE-MIGRATION-STATUS.md, "GK-178 — resolved"). Schema
+// qualification eliminates the session-state dependence entirely rather
+// than pinning it to a transaction boundary — correct regardless of
+// concurrency, pool warmth, or PgBouncer's own backend-assignment
+// behavior. `uuidv7()` and `now()` are native `pg_catalog` functions,
+// always resolvable regardless of search_path — never qualified.
+//
 // Column shapes here are verified against the LIVE data1_dev schema
 // (queried directly, not assumed from the 0004 design draft, which
 // includes 4 tables — gk_organization, gk_membership, custody_event,
@@ -34,7 +48,7 @@ import { NotFoundError } from './errors.js';
 const uuidv7 = async (client) => (await client.query('SELECT uuidv7() as id')).rows[0].id;
 
 export async function assertPrincipalExists(client, principalId) {
-  const res = await client.query('SELECT id FROM gk_principal WHERE id = $1', [principalId]);
+  const res = await client.query('SELECT id FROM data1_dev.gk_principal WHERE id = $1', [principalId]);
   return res.rows.length > 0;
 }
 
@@ -46,7 +60,7 @@ export async function mintAsset(client, { basisNamespace, basisKey, basisSchemaV
   const candidateId = await uuidv7(client);
 
   const basisInsert = await client.query(
-    `INSERT INTO entity_mint_basis (id, entity_id, basis_namespace, basis_key, basis_schema_version, mint_policy_version)
+    `INSERT INTO data1_dev.entity_mint_basis (id, entity_id, basis_namespace, basis_key, basis_schema_version, mint_policy_version)
      VALUES (uuidv7(), $1, $2, $3, $4, $5)
      ON CONFLICT (basis_namespace, basis_key) DO NOTHING
      RETURNING id, entity_id`,
@@ -57,11 +71,11 @@ export async function mintAsset(client, { basisNamespace, basisKey, basisSchemaV
   if (basisInsert.rows.length > 0) {
     basisId = basisInsert.rows[0].id;
     assetId = candidateId;
-    await client.query(`INSERT INTO gk_asset (id, mint_basis_id) VALUES ($1, $2)`, [assetId, basisId]);
+    await client.query(`INSERT INTO data1_dev.gk_asset (id, mint_basis_id) VALUES ($1, $2)`, [assetId, basisId]);
     outcome = 'minted-new';
   } else {
     const existing = await client.query(
-      `SELECT id, entity_id FROM entity_mint_basis WHERE basis_namespace = $1 AND basis_key = $2`,
+      `SELECT id, entity_id FROM data1_dev.entity_mint_basis WHERE basis_namespace = $1 AND basis_key = $2`,
       [basisNamespace, basisKey]
     );
     basisId = existing.rows[0].id;
@@ -70,7 +84,7 @@ export async function mintAsset(client, { basisNamespace, basisKey, basisSchemaV
   }
 
   await client.query(
-    `INSERT INTO mint_event (id, contract_version, candidate_snapshot, mint_basis_id, outcome, entity_id)
+    `INSERT INTO data1_dev.mint_event (id, contract_version, candidate_snapshot, mint_basis_id, outcome, entity_id)
      VALUES (uuidv7(), $1, $2, $3, $4, $5)`,
     [contractVersion, JSON.stringify(candidateSnapshot), basisId, outcome, assetId]
   );
@@ -79,7 +93,7 @@ export async function mintAsset(client, { basisNamespace, basisKey, basisSchemaV
 }
 
 export async function getAssetById(client, assetId) {
-  const res = await client.query('SELECT * FROM gk_asset WHERE id = $1', [assetId]);
+  const res = await client.query('SELECT * FROM data1_dev.gk_asset WHERE id = $1', [assetId]);
   return res.rows[0] || null;
 }
 
@@ -89,7 +103,7 @@ export async function getAssetById(client, assetId) {
 // path, so this is always reading the SAME truth transferOwnership
 // itself writes.
 export async function getAssetOwner(client, assetId) {
-  const res = await client.query('SELECT owner_principal_id FROM current_owner WHERE asset_id = $1', [assetId]);
+  const res = await client.query('SELECT owner_principal_id FROM data1_dev.current_owner WHERE asset_id = $1', [assetId]);
   return res.rows[0]?.owner_principal_id || null;
 }
 
@@ -99,8 +113,8 @@ export async function getAssetOwner(client, assetId) {
 // to guard against.
 export async function listAssetsByOwner(client, principalId) {
   const res = await client.query(
-    `SELECT ga.* FROM gk_asset ga
-     JOIN current_owner co ON co.asset_id = ga.id
+    `SELECT ga.* FROM data1_dev.gk_asset ga
+     JOIN data1_dev.current_owner co ON co.asset_id = ga.id
      WHERE co.owner_principal_id = $1
      ORDER BY ga.created_at`,
     [principalId]
@@ -112,14 +126,14 @@ export async function listAssetsByOwner(client, principalId) {
 // layer can authorize against the OWNING asset (never the media row's
 // own recorded_by_principal_id, which is provenance, not authorization).
 export async function getMediaById(client, mediaId) {
-  const res = await client.query('SELECT * FROM media WHERE id = $1', [mediaId]);
+  const res = await client.query('SELECT * FROM data1_dev.media WHERE id = $1', [mediaId]);
   return res.rows[0] || null;
 }
 
 export async function insertOwnershipEvent(client, { assetId, ownerPrincipalId, reason, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO ownership_event (id, asset_id, owner_principal_id, reason, recorded_by_principal_id, occurred_at)
+    `INSERT INTO data1_dev.ownership_event (id, asset_id, owner_principal_id, reason, recorded_by_principal_id, occurred_at)
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [id, assetId, ownerPrincipalId, reason, recordedByPrincipalId, occurredAt ?? null]
   );
@@ -127,7 +141,7 @@ export async function insertOwnershipEvent(client, { assetId, ownerPrincipalId, 
   // own append-only history, rebuilt in the same transaction (never a
   // separately-triggered async job, per DATA-1A's own bounded slice).
   await client.query(
-    `INSERT INTO current_owner (asset_id, owner_principal_id, as_of_ownership_event_id)
+    `INSERT INTO data1_dev.current_owner (asset_id, owner_principal_id, as_of_ownership_event_id)
      VALUES ($1, $2, $3)
      ON CONFLICT (asset_id) DO UPDATE SET owner_principal_id = EXCLUDED.owner_principal_id, as_of_ownership_event_id = EXCLUDED.as_of_ownership_event_id, updated_at = now()`,
     [assetId, ownerPrincipalId, id]
@@ -141,12 +155,12 @@ export async function insertOwnershipEvent(client, { assetId, ownerPrincipalId, 
 export async function insertIdentityAssignment(client, { assetId, catalogEntityId, authority, source, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO asset_identity_assignment (id, asset_id, catalog_entity_id, authority, source, occurred_at)
+    `INSERT INTO data1_dev.asset_identity_assignment (id, asset_id, catalog_entity_id, authority, source, occurred_at)
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [id, assetId, catalogEntityId ?? null, authority, source, occurredAt ?? null]
   );
   await client.query(
-    `UPDATE asset_identity_assignment
+    `UPDATE data1_dev.asset_identity_assignment
      SET superseded_by = $1
      WHERE asset_id = $2 AND id != $1 AND superseded_by IS NULL`,
     [id, assetId]
@@ -156,7 +170,7 @@ export async function insertIdentityAssignment(client, { assetId, catalogEntityI
 
 export async function getLiveIdentityAssignment(client, assetId) {
   const res = await client.query(
-    `SELECT * FROM asset_identity_assignment WHERE asset_id = $1 AND superseded_by IS NULL`,
+    `SELECT * FROM data1_dev.asset_identity_assignment WHERE asset_id = $1 AND superseded_by IS NULL`,
     [assetId]
   );
   return res.rows[0] || null;
@@ -165,7 +179,7 @@ export async function getLiveIdentityAssignment(client, assetId) {
 export async function insertMedia(client, { assetId, mediaType, contentHash, objectUri, contentType, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO media (id, asset_id, media_type, content_hash, object_uri, content_type, recorded_by_principal_id, occurred_at)
+    `INSERT INTO data1_dev.media (id, asset_id, media_type, content_hash, object_uri, content_type, recorded_by_principal_id, occurred_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [id, assetId, mediaType, contentHash, objectUri ?? null, contentType ?? null, recordedByPrincipalId, occurredAt ?? null]
   );
@@ -188,7 +202,7 @@ export async function insertMedia(client, { assetId, mediaType, contentHash, obj
 export async function insertAcquisitionEvent(client, { assetId, costAmount, costCurrency, source, lotReference, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO acquisition_event (id, asset_id, cost_amount, cost_currency, source, lot_reference, recorded_by_principal_id, occurred_at)
+    `INSERT INTO data1_dev.acquisition_event (id, asset_id, cost_amount, cost_currency, source, lot_reference, recorded_by_principal_id, occurred_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [id, assetId, costAmount, costCurrency, source, lotReference ?? null, recordedByPrincipalId, occurredAt ?? null]
   );
@@ -201,7 +215,7 @@ export async function insertAcquisitionEvent(client, { assetId, costAmount, cost
 export async function insertCompSnapshot(client, { assetId, source, payload, contentHash, recordedByPrincipalId }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO comp_snapshot (id, asset_id, source, payload, content_hash, recorded_by_principal_id)
+    `INSERT INTO data1_dev.comp_snapshot (id, asset_id, source, payload, content_hash, recorded_by_principal_id)
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [id, assetId, source, JSON.stringify(payload), contentHash, recordedByPrincipalId]
   );
@@ -217,7 +231,7 @@ export async function insertCompSnapshot(client, { assetId, source, payload, con
 export async function insertValuationEvent(client, { assetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, gradeAssumption, buildSha, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO valuation_event (id, asset_id, value_amount, value_currency, method, comp_snapshot_ref, comp_snapshot_id, grade_assumption, build_sha, recorded_by_principal_id, occurred_at)
+    `INSERT INTO data1_dev.valuation_event (id, asset_id, value_amount, value_currency, method, comp_snapshot_ref, comp_snapshot_id, grade_assumption, build_sha, recorded_by_principal_id, occurred_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [id, assetId, valueAmount, valueCurrency, method, compSnapshotRef ?? null, compSnapshotId ?? null, gradeAssumption ?? null, buildSha, recordedByPrincipalId, occurredAt ?? null]
   );
@@ -227,7 +241,7 @@ export async function insertValuationEvent(client, { assetId, valueAmount, value
 export async function insertDecisionEvent(client, { assetId, recommendation, reasonCodes, valuationEventId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO decision_event (id, asset_id, recommendation, reason_codes, valuation_event_id, occurred_at)
+    `INSERT INTO data1_dev.decision_event (id, asset_id, recommendation, reason_codes, valuation_event_id, occurred_at)
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [id, assetId, recommendation, JSON.stringify(reasonCodes ?? []), valuationEventId ?? null, occurredAt ?? null]
   );
@@ -240,7 +254,7 @@ export async function insertDecisionEvent(client, { assetId, recommendation, rea
 // gkAssetId, per GK-145's own law, formalized here into a durable table.
 export async function insertCollectionItemLink(client, { collectionItemId, gkAssetId, principalId }) {
   await client.query(
-    `INSERT INTO collection_item_link (collection_item_id, gk_asset_id, linked_by_principal_id)
+    `INSERT INTO data1_dev.collection_item_link (collection_item_id, gk_asset_id, linked_by_principal_id)
      VALUES ($1, $2, $3)`,
     [collectionItemId, gkAssetId, principalId]
   );
@@ -248,7 +262,7 @@ export async function insertCollectionItemLink(client, { collectionItemId, gkAss
 
 export async function getCollectionItemLink(client, { collectionItemId }) {
   const res = await client.query(
-    `SELECT collection_item_id, gk_asset_id FROM collection_item_link WHERE collection_item_id = $1`,
+    `SELECT collection_item_id, gk_asset_id FROM data1_dev.collection_item_link WHERE collection_item_id = $1`,
     [collectionItemId]
   );
   return res.rows[0] || null;
@@ -262,7 +276,7 @@ export async function getCollectionItemLink(client, { collectionItemId }) {
 export async function writeDomainEvent(client, { eventType, actorPrincipalId, actorKind = 'user', subjectType, subjectId, payload, correlationId, occurredAt }) {
   const eventId = await uuidv7(client);
   await client.query(
-    `INSERT INTO domain_event (event_id, event_type, actor, subject, payload, correlation_id, occurred_at)
+    `INSERT INTO data1_dev.domain_event (event_id, event_type, actor, subject, payload, correlation_id, occurred_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       eventId,
@@ -275,7 +289,7 @@ export async function writeDomainEvent(client, { eventType, actorPrincipalId, ac
     ]
   );
   const outboxId = await uuidv7(client);
-  await client.query(`INSERT INTO outbox (id, domain_event_id) VALUES ($1, $2)`, [outboxId, eventId]);
+  await client.query(`INSERT INTO data1_dev.outbox (id, domain_event_id) VALUES ($1, $2)`, [outboxId, eventId]);
   return eventId;
 }
 
@@ -300,13 +314,13 @@ export async function getAssetGraph(client, assetId) {
   // returned row for callers that want asserted-occurrence ordering
   // instead, but this function does not silently prefer one over the
   // other by re-deriving anything.
-  const identity = await client.query(`SELECT * FROM asset_identity_assignment WHERE asset_id = $1 AND superseded_by IS NULL`, [assetId]);
-  const media = await client.query(`SELECT * FROM media WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
-  const ownershipHistory = await client.query(`SELECT * FROM ownership_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
-  const currentOwner = await client.query(`SELECT * FROM current_owner WHERE asset_id = $1`, [assetId]);
-  const acquisitions = await client.query(`SELECT * FROM acquisition_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
-  const valuations = await client.query(`SELECT * FROM valuation_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
-  const decisions = await client.query(`SELECT * FROM decision_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
+  const identity = await client.query(`SELECT * FROM data1_dev.asset_identity_assignment WHERE asset_id = $1 AND superseded_by IS NULL`, [assetId]);
+  const media = await client.query(`SELECT * FROM data1_dev.media WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
+  const ownershipHistory = await client.query(`SELECT * FROM data1_dev.ownership_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
+  const currentOwner = await client.query(`SELECT * FROM data1_dev.current_owner WHERE asset_id = $1`, [assetId]);
+  const acquisitions = await client.query(`SELECT * FROM data1_dev.acquisition_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
+  const valuations = await client.query(`SELECT * FROM data1_dev.valuation_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
+  const decisions = await client.query(`SELECT * FROM data1_dev.decision_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
 
   return {
     asset,
@@ -339,7 +353,7 @@ export async function getAssetGraph(client, assetId) {
 export async function insertOrResolveAssetIdentifier(client, { scheme, issuingAuthority, normalizedValue, scope }) {
   const candidateId = await uuidv7(client);
   const insert = await client.query(
-    `INSERT INTO asset_identifier (id, scheme, issuing_authority, normalized_value, scope)
+    `INSERT INTO data1_dev.asset_identifier (id, scheme, issuing_authority, normalized_value, scope)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (scheme, issuing_authority, normalized_value) DO NOTHING
      RETURNING id`,
@@ -349,7 +363,7 @@ export async function insertOrResolveAssetIdentifier(client, { scheme, issuingAu
     return { identifierId: insert.rows[0].id, outcome: 'minted-new' };
   }
   const existing = await client.query(
-    `SELECT id FROM asset_identifier WHERE scheme = $1 AND issuing_authority = $2 AND normalized_value = $3`,
+    `SELECT id FROM data1_dev.asset_identifier WHERE scheme = $1 AND issuing_authority = $2 AND normalized_value = $3`,
     [scheme, issuingAuthority, normalizedValue]
   );
   return { identifierId: existing.rows[0].id, outcome: 'resolved-existing' };
@@ -362,7 +376,7 @@ export async function insertOrResolveAssetIdentifier(client, { scheme, issuingAu
 export async function insertRawObservation(client, { assetId, observedRawValue, source, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO asset_raw_observation (id, asset_id, observed_raw_value, source, recorded_by_principal_id, occurred_at)
+    `INSERT INTO data1_dev.asset_raw_observation (id, asset_id, observed_raw_value, source, recorded_by_principal_id, occurred_at)
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [id, assetId, observedRawValue, source, recordedByPrincipalId, occurredAt ?? null]
   );
@@ -377,7 +391,7 @@ export async function insertRawObservation(client, { assetId, observedRawValue, 
 export async function insertIdentifierAssertion(client, { identifierId, assetId, source, recordedByPrincipalId, resolutionAuthority, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority, occurred_at)
+    `INSERT INTO data1_dev.asset_identifier_assertion (id, identifier_id, asset_id, source, recorded_by_principal_id, resolution_authority, occurred_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [id, identifierId, assetId, source, recordedByPrincipalId, resolutionAuthority, occurredAt ?? null]
   );
@@ -396,7 +410,7 @@ export async function insertIdentifierAssertion(client, { identifierId, assetId,
 // table's own PRIMARY KEY, not application logic either.
 export async function insertAssertionEvidence(client, { assertionId, observationId, assetId }) {
   await client.query(
-    `INSERT INTO asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id)
+    `INSERT INTO data1_dev.asset_identifier_assertion_evidence (assertion_id, observation_id, asset_id)
      VALUES ($1, $2, $3)`,
     [assertionId, observationId, assetId]
   );
@@ -414,25 +428,25 @@ export async function insertAssertionEvidence(client, { assertionId, observation
 // that enforcement itself.
 export async function supersedeIdentifierAssertion(client, { oldAssertionId, newAssertionId }) {
   await client.query(
-    `UPDATE asset_identifier_assertion SET superseded_by = $1 WHERE id = $2`,
+    `UPDATE data1_dev.asset_identifier_assertion SET superseded_by = $1 WHERE id = $2`,
     [newAssertionId, oldAssertionId]
   );
 }
 
 // Read helpers -- no transaction required by the caller for these.
 export async function getIdentifierAssertion(client, assertionId) {
-  const r = await client.query(`SELECT * FROM asset_identifier_assertion WHERE id = $1`, [assertionId]);
+  const r = await client.query(`SELECT * FROM data1_dev.asset_identifier_assertion WHERE id = $1`, [assertionId]);
   return r.rows[0] || null;
 }
 
 export async function getRawObservation(client, observationId) {
-  const r = await client.query(`SELECT * FROM asset_raw_observation WHERE id = $1`, [observationId]);
+  const r = await client.query(`SELECT * FROM data1_dev.asset_raw_observation WHERE id = $1`, [observationId]);
   return r.rows[0] || null;
 }
 
 export async function listLiveIdentifierAssertions(client, assetId) {
   const r = await client.query(
-    `SELECT * FROM asset_identifier_assertion WHERE asset_id = $1 AND superseded_by IS NULL ORDER BY recorded_at`,
+    `SELECT * FROM data1_dev.asset_identifier_assertion WHERE asset_id = $1 AND superseded_by IS NULL ORDER BY recorded_at`,
     [assetId]
   );
   return r.rows;

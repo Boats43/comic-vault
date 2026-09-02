@@ -25,6 +25,10 @@
 // Both functions take an already-open `client` (a connection mid-
 // transaction) — this module never opens its own connection or manages
 // its own transaction boundary; that stays entirely in service.js.
+//
+// GK-178 (2026-09-03) — idempotency_key is schema-qualified
+// (data1_dev.idempotency_key), never bare — see repository.js's header
+// for why (pooled-connection session-state hazard).
 
 import { createHash } from 'node:crypto';
 import { IdempotencyConflictError } from './errors.js';
@@ -55,7 +59,7 @@ export function computeRequestFingerprint(semanticPayload) {
 export async function checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint }) {
   if (!idempotencyKey) return null;
   const existing = await client.query(
-    `SELECT result_snapshot, request_fingerprint FROM idempotency_key WHERE operation = $1 AND idempotency_key = $2`,
+    `SELECT result_snapshot, request_fingerprint FROM data1_dev.idempotency_key WHERE operation = $1 AND idempotency_key = $2`,
     [operation, idempotencyKey]
   );
   if (existing.rows.length === 0) return null;
@@ -77,7 +81,7 @@ export async function claimIdempotencyKey(client, { operation, idempotencyKey, p
   if (!idempotencyKey) return;
   const idRes = await client.query('SELECT uuidv7() as id');
   await client.query(
-    `INSERT INTO idempotency_key (id, operation, idempotency_key, principal_id, result_snapshot, request_fingerprint)
+    `INSERT INTO data1_dev.idempotency_key (id, operation, idempotency_key, principal_id, result_snapshot, request_fingerprint)
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [idRes.rows[0].id, operation, idempotencyKey, principalId, JSON.stringify(result), requestFingerprint ?? null]
   );
