@@ -183,6 +183,16 @@ Representative payloads sized off this repo's own documented comp-pool conventio
 
 **No measurement pollution:** all measurement ran against a self-dropped isolated scratch schema; `data1_dev` was never written to for this purpose.
 
+## `entity_mint_basis` — live-vs-design contradiction (found D4 Phase 0, 2026-09-02)
+
+**Recorded as a contradiction, per this document's own standing rule (see the "Design-snapshot claim not fully reproduced" section above) — not silently reconciled in either direction. `db/data0/0003_uuidv7_identity_and_mint_ledger.sql` is not edited.**
+
+- `0003`'s own header text (`0003:11-19`) states, at design time: *"SCOPE, corrected in review... catalog permanent identity ONLY... gk_asset and asset_identity_assignment ... do NOT belong in this file."*
+- **Live implementation contradicts that scope statement.** `src/modules/assets/repository.js:36-61` (`mintAsset`) generates one UUID and writes it as both `entity_mint_basis.entity_id` and, on a fresh mint, `gk_asset.id` (`repository.js:60`) — the same value. In live usage, `entity_mint_basis.entity_id` resolves to `gk_asset.id`, never to a `catalog_entity.id`.
+- **`catalog_entity` does not exist in the live schema at all** — confirmed above (`0001_generic_substrate.sql` NOT APPLIED, 0 of 8 tables). `entity_mint_basis`'s `entity_id` column has no real target it could point at on the catalog side even if it wanted to.
+- `mintAsset` has exactly one live call site (`service.js:113`, inside `createPhysicalAsset`) — `entity_mint_basis` is, in actual live use, 100% physical-asset-side mint-idempotency, 0% catalog-side, the opposite of its 0003 design-time scope statement.
+- **Ruled (D4 Schema Ruling dispatch, 2026-09-02, `docs/adr/ADR-IDENTIFIER-001-identifier-fabric.md`, Ruling 1): `entity_mint_basis` is preserved exactly as-is, as mint-idempotency only — this contradiction is not "fixed" by moving the table, retyping `entity_id`, or editing `0003`.** It is recorded here so a future reader querying live schema truth sees the design-vs-live gap explicitly, the same way the "13-of-17 vs 11-of-15" and "0001-0003 target public" contradictions above are recorded rather than papered over.
+
 ## Related documents
 
 - Cross-workstream status board (migration-truth row updated from this pass): `docs/MASTER-BOARD.md`

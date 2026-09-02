@@ -50,7 +50,9 @@ GrailKey uses one generic `AssetIdentifier` domain rather than a per-vertical id
 
 **Audited status: ABSENT.**
 
-**Evidence (current state):** no such table or domain exists anywhere in `db/data0/0001`–`0010`. Identity today is carried by `catalog_entity`/`external_map`/`claim` (0001) for catalog-side identity and `gk_asset`/`entity_mint_basis` (0003/0004) for physical-asset identity — no generic `AssetIdentifier` scope table spanning `PRODUCT_CLASS`/`MODEL`/`VARIANT`/`BATCH`/`LOT`/`SERIALIZED_INSTANCE`/`CERTIFIED_INSTANCE` exists. Planned implementation: D4. Consistent with ABSENT.
+**Evidence (current state):** no such table or domain exists anywhere in `db/data0/0001`–`0012`. Identity today is carried by `catalog_entity`/`external_map`/`claim` (0001, never applied) for catalog-side identity and `gk_asset`/`entity_mint_basis` (0003/0004, live) for physical-asset identity — no generic `AssetIdentifier` scope table spanning `PRODUCT_CLASS`/`MODEL`/`VARIANT`/`BATCH`/`LOT`/`SERIALIZED_INSTANCE`/`CERTIFIED_INSTANCE` exists. Consistent with ABSENT — status unchanged by the ruling below, since nothing is built yet.
+
+**D4 Phase 0 audit + Schema Ruling (2026-09-02):** full architectural ruling for this law's eventual implementation is now ratified — `docs/adr/ADR-IDENTIFIER-001-identifier-fabric.md`. Phase A (the first live migration) remains HOLD until explicitly opened by a future dispatch; this status line stays ABSENT until Phase A actually ships.
 
 ### Law 5 — Market = observations → valuation
 

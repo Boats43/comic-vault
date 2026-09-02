@@ -302,7 +302,7 @@ external ID ≠ GrailKey ID · listing ≠ asset · AI output ≠ canonical trut
 pipeline trace ≠ audit identity
 ```
 
-Full strategy: `docs/GRAILKEY-STRATEGY.md`. Architecture decisions: `docs/adr/` (ADR-AUTH-001 principal/owner/custodian, ADR-ASSET-001 physical-asset identity, ADR-MEDIA-001 private-media law, ADR-EVENT-001 event model, ADR-STORAGE-001 storage roles, ADR-ADAPTER-001 adapter contract, ADR-API-001 API contract discipline, ADR-ID-001 permanent identity, plus per-milestone design docs).
+Full strategy: `docs/GRAILKEY-STRATEGY.md`. Architecture decisions: `docs/adr/` (ADR-AUTH-001 principal/owner/custodian, ADR-ASSET-001 physical-asset identity, ADR-MEDIA-001 private-media law, ADR-EVENT-001 event model, ADR-STORAGE-001 storage roles, ADR-ADAPTER-001 adapter contract, ADR-API-001 API contract discipline, ADR-ID-001 permanent identity, ADR-IDENTIFIER-001 identifier fabric (D4, schema ruling only — Phase A HOLD), plus per-milestone design docs).
 
 ## Features
 - **Bundle listing**: Manage tab → "📦 Create Bundle" chip → multi-select tiles → floating bar → `/api/list-ebay` with `{bundle:true, items:[...]}` → single eBay listing, shared `ebayItemId`/`bundleId`. ERA from earliest book year.

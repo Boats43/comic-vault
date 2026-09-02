@@ -172,6 +172,20 @@ Migration `db/data0/0012_d3_3_comp_snapshot.sql` — one new additive table, `co
 
 **D3.3 CLOSED — Phase A + Phase B both complete.** No D4, D5, D6 this pass.
 
+## D4 Phase 0 + Schema Ruling — Identifier Fabric (2026-09-02)
+
+**Phase 0 audit-only pass: PASS.** Complete census of every existing identifier-shaped mechanism (`entity_mint_basis`, `external_map`, `collection_item_link`, plus `asset_identity_assignment` as an assertion-pattern precedent, and the transient `certNumber`/UPC/`ebayItemId` fields) before any new design was proposed. Zero code/schema/migration surface touched.
+
+**Schema concept: PASS WITH AMENDMENTS**, ratified this same dispatch — full ruling: `docs/adr/ADR-IDENTIFIER-001-identifier-fabric.md`. Headline rulings: `entity_mint_basis` stays SIBLING (mint-idempotency only — no external identifier may ever participate in a mint-basis key, closing a contradiction the Phase 0 audit itself left open); `external_map` is DESIGN-SUPERSEDED (never applied, not resurrected, `catalog_entity` not activated as a side effect); `collection_item_link` stays SIBLING (routing only); Model C ratified (identifier existence / subject assertion / resolved identity kept structurally distinct); scope belongs to the identifier definition, not the assertion; **Phase 0's own proposed polymorphic `subject_type`+`subject_id` persistence model was rejected** in favor of typed, genuinely-FK-enforced attachment tables, specifically to avoid manufacturing a second `asset_identity_assignment.catalog_entity_id`-class opaque-UUID hazard (now tracked as GK-176); `issuing_authority` (external scheme governor) and `resolution_authority` (GrailKey's own NONE/CONTESTED/CORROBORATED state) are mandatory, distinct names — no future D4 table may carry a bare `authority` column; Phase A's minimum live slice is a generic identifier-definition domain plus a physical-asset (`gk_asset`)-only assertion table, with no requirement that `catalog_entity` exist.
+
+**Live-vs-design contradiction found and recorded** (not fixed): `entity_mint_basis.entity_id` resolves to `gk_asset.id` in live use, contradicting `0003`'s own design-time text that the table was catalog-identity-scoped only — full detail `docs/DATABASE-MIGRATION-STATUS.md`.
+
+**Greenfield fact, recorded:** `certNumber`, UPC/barcode, and `ebayItemId` are all transient today — none persisted, none reaching `src/modules/assets/`. D4 has zero historical identifier rows to migrate or backfill.
+
+**Two incidental findings logged as tickets, not fixed:** GK-175 (`assetClass='comic'` default in `createPhysicalAsset`, permanent-kernel vertical leakage) and GK-176 (`asset_identity_assignment.catalog_entity_id` FK-less opaque-UUID sequencing hazard — the same hazard Ruling 6 above exists to not repeat).
+
+**Phase A: HOLD** until explicitly opened by a future dispatch. No migration `0013` written. No schema or source code touched by either the Phase 0 or Schema Ruling passes — both fully docs-only.
+
 ---
 
 ## Governance / registry notes
