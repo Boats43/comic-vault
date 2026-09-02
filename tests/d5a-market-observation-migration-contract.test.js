@@ -9,13 +9,21 @@
 // confirm it restores the pre-migration state exactly, then reapply and
 // re-run a critical subset. data1_dev is never touched.
 //
+// PRE-LIVE DESIGN CORRECTION (T1/T1a/T2/T2a, 2026-09-03) -- extends the
+// original suite: occurred_at_precision column + its CHECK constraint,
+// DATE vs INSTANT scenarios, grade_numeric retyped NUMERIC(12,6) with
+// minimal-decimal precision preserved exactly (no comic-specific scale).
+//
 // Required proof, mapped to the D5A dispatch's own item numbers:
 //   D1  exact table contract (columns, types, constraints, no asset_id)
 //   D5  dedup/observation-identity behavior (all named scenarios)
 //   D6  immutability (UPDATE/DELETE rejected)
-//   D7  batch-persistence structural support (correlation_id linking)
+//   D7  batch-persistence structural support (correlation_id linking + atomicity)
 //   D9  D3.3 non-interference (comp_snapshot/valuation_event untouched)
 //   D10 forward -> verify -> rollback -> verify -> reapply -> verify
+//   T1/T1a  temporal precision: DATE vs INSTANT, improvement, correction
+//   T2/T2a  grade precision: minimal-decimal, no fixed comic scale
+//   T2b  cross-provider dedup safety (temporary, disclosed, GK-183)
 //
 // Invoke: node tests/d5a-market-observation-migration-contract.test.js
 
@@ -73,29 +81,20 @@ const rbPath = path.join(repoRoot, 'db', 'data0', '0014_d5a_market_observation_r
 const fwdRaw = readFileSync(fwdPath, 'utf8');
 const rbRaw = readFileSync(rbPath, 'utf8');
 
-// D9 static check -- the committed migration's REAL SQL (comments
-// stripped -- the header prose deliberately discusses the D3.3
-// relationship in English, which must not count as a code reference)
-// never mentions D3.3's tables, before any live proof runs at all.
 const stripSqlComments = (raw) => raw.split('\n').map((l) => l.replace(/--.*$/, '')).join('\n');
 assertTrue(!/comp_snapshot|valuation_event/i.test(stripSqlComments(fwdRaw)), 'D9 (static): 0014 forward migration\'s REAL SQL (comments excluded) contains zero references to comp_snapshot or valuation_event');
 assertTrue(!/comp_snapshot|valuation_event/i.test(stripSqlComments(rbRaw)), 'D9 (static): 0014 rollback\'s REAL SQL (comments excluded) contains zero references to comp_snapshot or valuation_event');
+
+const COLS = '(id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, occurred_at_precision, observed_at, recorded_by_principal_id, correlation_id, content_hash)';
 
 try {
   await client.query(`CREATE SCHEMA ${SCHEMA}`);
   await client.query(`SET search_path TO ${SCHEMA}`);
 
-  // Minimal prerequisite substrate -- only gk_principal.id is FK-referenced
-  // by 0014. D9's non-interference is proven with REAL comp_snapshot/
-  // valuation_event stand-ins in this same scratch schema (below), not
-  // merely the static text check above.
   await client.query(`CREATE TABLE gk_principal (id UUID PRIMARY KEY)`);
   const principalId = crypto.randomUUID();
   await client.query('INSERT INTO gk_principal (id) VALUES ($1)', [principalId]);
 
-  // D9 -- minimal real D3.3 stand-ins, populated with a real row each, so
-  // "0014 does not touch them" can be proven by exact before/after
-  // comparison, not merely by 0014's own text never mentioning them.
   await client.query(`
     CREATE TABLE comp_snapshot (id UUID PRIMARY KEY, marker TEXT NOT NULL);
     CREATE TABLE valuation_event (id UUID PRIMARY KEY, marker TEXT NOT NULL);
@@ -110,7 +109,6 @@ try {
   const fwd = fwdRaw.replace('SET search_path TO data1_dev;', `SET search_path TO ${SCHEMA};`);
   await assertSucceeds(() => client.query(fwd), 'D10: real 0014 migration text applied successfully to the scratch schema');
 
-  // D9 -- live proof: comp_snapshot/valuation_event completely unaffected.
   const compAfter = await client.query('SELECT id, marker FROM comp_snapshot');
   const valAfter = await client.query('SELECT id, marker FROM valuation_event');
   assertTrue(compAfter.rows.length === 1 && compAfter.rows[0].id === compSnapshotId && compAfter.rows[0].marker === 'd9-untouched-marker', 'D9: comp_snapshot row survives byte-for-byte after 0014 apply (1 row, same id, same marker)');
@@ -132,13 +130,13 @@ try {
   const colByName = Object.fromEntries(cols.rows.map(r => [r.column_name, r]));
   const expectedCols = [
     'id', 'provider', 'provider_item_id', 'listing_kind', 'price_amount',
-    'currency', 'condition_text', 'grade_numeric', 'occurred_at',
+    'currency', 'condition_text', 'grade_numeric', 'occurred_at', 'occurred_at_precision',
     'observed_at', 'recorded_at', 'recorded_by_principal_id',
     'correlation_id', 'content_hash', 'hash_contract_version', 'raw_payload',
   ];
   assertTrue(
     JSON.stringify(cols.rows.map(r => r.column_name).sort()) === JSON.stringify([...expectedCols].sort()),
-    `D1: exactly the ratified 16 columns exist, no extras, no asset_id (actual: ${cols.rows.map(r => r.column_name).join(',')})`
+    `D1: exactly the ratified 17 columns exist, no extras, no asset_id (actual: ${cols.rows.map(r => r.column_name).join(',')})`
   );
   assertTrue(!('asset_id' in colByName), 'D1 (A1): asset_id column does NOT exist on market_observation');
   assertTrue(colByName.provider.is_nullable === 'NO', 'D1: provider NOT NULL');
@@ -146,8 +144,9 @@ try {
   assertTrue(colByName.listing_kind.is_nullable === 'NO', 'D1: listing_kind NOT NULL');
   assertTrue(colByName.price_amount.is_nullable === 'YES' && colByName.price_amount.numeric_precision === 14 && colByName.price_amount.numeric_scale === 4, 'D1 (S2): price_amount NUMERIC(14,4), nullable');
   assertTrue(colByName.currency.is_nullable === 'YES', 'D1: currency nullable');
-  assertTrue(colByName.grade_numeric.is_nullable === 'YES' && colByName.grade_numeric.numeric_precision === 3 && colByName.grade_numeric.numeric_scale === 1, 'D1 (D2a): grade_numeric NUMERIC(3,1), nullable');
+  assertTrue(colByName.grade_numeric.is_nullable === 'YES' && colByName.grade_numeric.numeric_precision === 12 && colByName.grade_numeric.numeric_scale === 6, 'D1 (T2/T2a): grade_numeric NUMERIC(12,6), nullable -- generic bound, no comic-specific scale');
   assertTrue(colByName.occurred_at.is_nullable === 'YES', 'D1 (G7): occurred_at nullable');
+  assertTrue(colByName.occurred_at_precision.is_nullable === 'YES', 'D1 (T1/T1a): occurred_at_precision nullable (nullable together with occurred_at, enforced by CHECK below)');
   assertTrue(colByName.observed_at.is_nullable === 'NO', 'D1 (G7): observed_at NOT NULL');
   assertTrue(colByName.recorded_at.is_nullable === 'NO' && /now\(\)/.test(colByName.recorded_at.column_default || ''), 'D1 (G7): recorded_at NOT NULL DEFAULT now()');
   assertTrue(colByName.recorded_by_principal_id.is_nullable === 'NO', 'D1: recorded_by_principal_id NOT NULL');
@@ -162,13 +161,53 @@ try {
   );
   const constraintDefs = constraints.rows.map(r => r.def).join(' | ');
   assertTrue(/listing_kind = ANY/.test(constraintDefs) || /listing_kind.*IN/.test(constraintDefs), 'D1: listing_kind CHECK constraint present');
-  assertTrue(/price_amount.*>=\s*\(?0/.test(constraintDefs), `D1: price_amount non-negative CHECK constraint present (actual: ${constraintDefs})`);
+  assertTrue(/price_amount.*>=\s*\(?0/.test(constraintDefs), `D1: price_amount non-negative CHECK constraint present`);
+  assertTrue(/occurred_at_precision.*(DATE|INSTANT)/.test(constraintDefs), 'D1 (T1): occurred_at_precision CHECK (IN DATE, INSTANT) present');
+  assertTrue(/occurred_at.*IS NULL.*occurred_at_precision.*IS NULL|occurred_at_precision.*IS NULL.*occurred_at.*IS NULL/.test(constraintDefs), `D1 (T1): occurred_at/occurred_at_precision paired-nullability CHECK present (actual: ${constraintDefs})`);
 
   const uniqueIdx = await client.query(
     `SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND tablename = 'market_observation' AND indexname = 'market_observation_dedup_key'`,
     [SCHEMA]
   );
   assertTrue(uniqueIdx.rows.length === 1 && /UNIQUE/i.test(uniqueIdx.rows[0].indexdef), 'D1 (D5): market_observation_dedup_key is a real UNIQUE index on (provider, provider_item_id, content_hash)');
+
+  // ===================================================================
+  // T1: occurred_at_precision CHECK constraints, live
+  // ===================================================================
+  console.log('\n-- T1: occurred_at_precision live constraints --\n');
+
+  await assertRejected(
+    () => client.query(
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay','t1-a','sold',1.0000,'USD',NULL,NULL,'2026-06-14T00:00:00.000Z','WEEK',$2,$3,$4,'hash-t1-a')`,
+      [crypto.randomUUID(), new Date().toISOString(), principalId, crypto.randomUUID()]
+    ),
+    'T1: an invalid occurred_at_precision value ("WEEK") is rejected by the CHECK constraint', 'violates check constraint'
+  );
+  await assertRejected(
+    () => client.query(
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay','t1-b','sold',1.0000,'USD',NULL,NULL,'2026-06-14T00:00:00.000Z',NULL,$2,$3,$4,'hash-t1-b')`,
+      [crypto.randomUUID(), new Date().toISOString(), principalId, crypto.randomUUID()]
+    ),
+    'T1: occurred_at present with occurred_at_precision NULL is rejected (precision never silently defaulted)', 'violates check constraint'
+  );
+  await assertRejected(
+    () => client.query(
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay','t1-c','sold',1.0000,'USD',NULL,NULL,NULL,'DATE',$2,$3,$4,'hash-t1-c')`,
+      [crypto.randomUUID(), new Date().toISOString(), principalId, crypto.randomUUID()]
+    ),
+    'T1: occurred_at NULL with a precision supplied is rejected (nothing to qualify)', 'violates check constraint'
+  );
+  await assertSucceeds(
+    () => client.query(
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay','t1-d','sold',1.0000,'USD',NULL,NULL,NULL,NULL,$2,$3,$4,'hash-t1-d')`,
+      [crypto.randomUUID(), new Date().toISOString(), principalId, crypto.randomUUID()]
+    ),
+    'T1: both occurred_at and occurred_at_precision NULL together -- legal (genuinely unknown event time)'
+  );
 
   // ===================================================================
   // D6 -- immutability
@@ -179,8 +218,8 @@ try {
   const obs1 = crypto.randomUUID();
   const corrId1 = crypto.randomUUID();
   await client.query(
-    `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-     VALUES ($1,'ebay','item-1','sold',66.0000,'USD','near mint',9.4,'2026-06-14T00:00:00.000Z',$2,$3,$4,'hash-1')`,
+    `INSERT INTO market_observation ${COLS}
+     VALUES ($1,'ebay','item-1','sold',66.0000,'USD','near mint',9.4,'2026-06-14T00:00:00.000Z','INSTANT',$2,$3,$4,'hash-1')`,
     [obs1, now, principalId, corrId1]
   );
   await assertRejected(
@@ -197,83 +236,91 @@ try {
   // ===================================================================
   console.log('\n-- D5: dedup / observation identity --\n');
 
-  // same provider object + unchanged normalized facts -> resolves
-  // idempotently (ON CONFLICT DO NOTHING RETURNING + fallback SELECT is
-  // an application-layer concern, not built here -- but the DB-level
-  // guarantee this depends on IS built here: the unique index rejects a
-  // literal duplicate insert attempt).
   await assertRejected(
     () => client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'ebay','item-1','sold',66.0000,'USD','near mint',9.4,'2026-06-14T00:00:00.000Z',$2,$3,$4,'hash-1')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay','item-1','sold',66.0000,'USD','near mint',9.4,'2026-06-14T00:00:00.000Z','INSTANT',$2,$3,$4,'hash-1')`,
       [crypto.randomUUID(), now, principalId, crypto.randomUUID()]
     ),
     'D5: identical (provider, provider_item_id, content_hash) -- unique index rejects the duplicate (resolve-or-create is the app-layer contract over this)',
     'duplicate key'
   );
 
-  // changed price -> different hash (app-layer concern) -> new row succeeds
   const obs2 = crypto.randomUUID(), corrId2 = crypto.randomUUID();
   await assertSucceeds(
     () => client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'ebay','item-1','asking',85.0000,'USD','near mint',9.4,'2026-07-01T00:00:00.000Z',$2,$3,$4,'hash-2-changed-price')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay','item-1','asking',85.0000,'USD','near mint',9.4,'2026-07-01T00:00:00.000Z','INSTANT',$2,$3,$4,'hash-2-changed-price')`,
       [obs2, now, principalId, corrId2]
     ),
     'D5: changed price (different content_hash) -- new row succeeds (asking $85, distinct from sold $66)'
   );
 
-  // changed listing state (asking -> sold) -> new row
   const obs3 = crypto.randomUUID();
   await assertSucceeds(
     () => client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'ebay','item-1','sold',72.0000,'USD','near mint',9.4,'2026-08-02T00:00:00.000Z',$2,$3,$4,'hash-3-sold-final')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay','item-1','sold',72.0000,'USD','near mint',9.4,'2026-08-02T00:00:00.000Z','INSTANT',$2,$3,$4,'hash-3-sold-final')`,
       [obs3, now, principalId, crypto.randomUUID()]
     ),
     'D5: changed listing state + price (asking $85 -> sold $72) -- new row succeeds'
   );
 
-  // changed condition/grade -> new row (different content_hash by app-layer contract)
   const obs4 = crypto.randomUUID();
   await assertSucceeds(
     () => client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'ebay','item-1','sold',72.0000,'USD','very fine',8.0,'2026-08-02T00:00:00.000Z',$2,$3,$4,'hash-4-different-grade')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay','item-1','sold',72.0000,'USD','very fine',8.0,'2026-08-02T00:00:00.000Z','INSTANT',$2,$3,$4,'hash-4-different-grade')`,
       [obs4, now, principalId, crypto.randomUUID()]
     ),
     'D5: changed condition/grade -- new row succeeds'
   );
 
-  // changed occurred_at only (S1) -> new row -- the exact PriceCharting
-  // two-sales-same-price scenario from the S1 ruling.
+  // T1/S1: two real PriceCharting sales, same price, DATE precision, different dates.
   const pcObs1 = crypto.randomUUID(), pcObs2 = crypto.randomUUID();
   await client.query(
-    `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-     VALUES ($1,'pricecharting','pc-item-9','sold',66.0000,'USD',NULL,NULL,'2026-06-14T00:00:00.000Z',$2,$3,$4,'hash-pc-sale-june')`,
+    `INSERT INTO market_observation ${COLS}
+     VALUES ($1,'pricecharting','pc-item-9','sold',66.0000,'USD',NULL,NULL,'2026-06-14T00:00:00.000Z','DATE',$2,$3,$4,'hash-pc-sale-june')`,
     [pcObs1, now, principalId, crypto.randomUUID()]
   );
   await assertSucceeds(
     () => client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'pricecharting','pc-item-9','sold',66.0000,'USD',NULL,NULL,'2026-08-02T00:00:00.000Z',$2,$3,$4,'hash-pc-sale-august')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'pricecharting','pc-item-9','sold',66.0000,'USD',NULL,NULL,'2026-08-02T00:00:00.000Z','DATE',$2,$3,$4,'hash-pc-sale-august')`,
       [pcObs2, now, principalId, crypto.randomUUID()]
     ),
-    'D5 (S1): identical price/status/provider/item, DIFFERENT occurred_at (two real PriceCharting sales) -- both rows persist, never collapsed'
+    'D5/T1 (S1): identical price/status/provider/item, DATE-precision, DIFFERENT dates (two real PriceCharting sales) -- both rows persist, never collapsed'
   );
   const pcRows = await client.query(`SELECT id FROM market_observation WHERE provider = 'pricecharting' AND provider_item_id = 'pc-item-9'`);
   assertTrue(pcRows.rows.length === 2, 'D5 (S1): both PriceCharting sales exist as two distinct rows, not one');
 
-  // provider correction (same object, corrected event date) -> new row,
-  // old row remains exactly as originally recorded.
+  // T1a: DATE -> INSTANT improvement of the SAME underlying sale.
+  const pcObsImproved = crypto.randomUUID();
+  await assertSucceeds(
+    () => client.query(
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'pricecharting','pc-item-9','sold',66.0000,'USD',NULL,NULL,'2026-06-14T09:15:00.000Z','INSTANT',$2,$3,$4,'hash-pc-sale-june-precise')`,
+      [pcObsImproved, now, principalId, crypto.randomUUID()]
+    ),
+    'T1a: a later exact-timestamp report of the SAME June sale (DATE -> INSTANT improvement) creates a NEW observation, never an update to the date-only one'
+  );
+  const dateOnlyRowStillIntact = await client.query('SELECT occurred_at, occurred_at_precision FROM market_observation WHERE id = $1', [pcObs1]);
+  assertTrue(
+    new Date(dateOnlyRowStillIntact.rows[0].occurred_at).toISOString() === '2026-06-14T00:00:00.000Z' && dateOnlyRowStillIntact.rows[0].occurred_at_precision === 'DATE',
+    'T1a: the ORIGINAL date-only observation remains exactly as recorded (still DATE precision, still the midnight anchor) -- never mutated or "upgraded in place"'
+  );
+  const pcAllRows = await client.query(`SELECT occurred_at_precision, count(*)::int AS n FROM market_observation WHERE provider = 'pricecharting' AND provider_item_id = 'pc-item-9' GROUP BY occurred_at_precision ORDER BY occurred_at_precision`);
+  assertTrue(JSON.stringify(pcAllRows.rows) === JSON.stringify([{ occurred_at_precision: 'DATE', n: 2 }, { occurred_at_precision: 'INSTANT', n: 1 }]), 'T1a: 3 total observations for this listing now exist (2 DATE-precision + 1 INSTANT-precision), all independently addressable');
+
+  // provider correction (same object, corrected event date, still DATE precision).
   const correctedObs = crypto.randomUUID();
   await assertSucceeds(
     () => client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'pricecharting','pc-item-9','sold',66.0000,'USD',NULL,NULL,'2026-06-15T00:00:00.000Z',$2,$3,$4,'hash-pc-sale-june-corrected')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'pricecharting','pc-item-9','sold',66.0000,'USD',NULL,NULL,'2026-06-15T00:00:00.000Z','DATE',$2,$3,$4,'hash-pc-sale-june-corrected')`,
       [correctedObs, now, principalId, crypto.randomUUID()]
     ),
-    'D5: provider correction of occurred_at (2026-06-14 -> 2026-06-15) -- new immutable row, original untouched'
+    'D5: provider correction of occurred_at (2026-06-14 -> 2026-06-15, both DATE precision) -- new immutable row, original untouched'
   );
   const originalStillIntact = await client.query('SELECT occurred_at FROM market_observation WHERE id = $1', [pcObs1]);
   assertTrue(new Date(originalStillIntact.rows[0].occurred_at).toISOString() === '2026-06-14T00:00:00.000Z', 'D5: the ORIGINAL pre-correction row remains exactly as recorded (never mutated)');
@@ -281,33 +328,32 @@ try {
   // NULL provider_item_id never falsely collapses unrelated observations
   const nullId1 = crypto.randomUUID(), nullId2 = crypto.randomUUID();
   await client.query(
-    `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-     VALUES ($1,'pricecharting',NULL,'sold',10.0000,'USD',NULL,NULL,NULL,$2,$3,$4,'hash-idless-a')`,
+    `INSERT INTO market_observation ${COLS}
+     VALUES ($1,'pricecharting',NULL,'sold',10.0000,'USD',NULL,NULL,NULL,NULL,$2,$3,$4,'hash-idless-a')`,
     [nullId1, now, principalId, crypto.randomUUID()]
   );
   await assertSucceeds(
     () => client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'pricecharting',NULL,'sold',10.0000,'USD',NULL,NULL,NULL,$2,$3,$4,'hash-idless-a')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'pricecharting',NULL,'sold',10.0000,'USD',NULL,NULL,NULL,NULL,$2,$3,$4,'hash-idless-a')`,
       [nullId2, now, principalId, crypto.randomUUID()]
     ),
     'D5 (A2a): TWO rows, same provider, NULL provider_item_id, SAME content_hash -- unique index does NOT reject (NULL is distinct from NULL, standard Postgres semantics) -- never falsely collapsed'
   );
 
-  // provider A and provider B cannot dedup against each other
+  // T2b: provider A and provider B cannot dedup against each other, even
+  // with an identical grade value -- the temporary cross-provider safety
+  // property GK-183 relies on.
   await assertSucceeds(
     () => client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'heritage-auctions','item-1','sold',66.0000,'USD','near mint',9.4,'2026-06-14T00:00:00.000Z',$2,$3,$4,'hash-1')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'heritage-auctions','item-1','sold',66.0000,'USD','near mint',9.4,'2026-06-14T00:00:00.000Z','INSTANT',$2,$3,$4,'hash-1')`,
       [crypto.randomUUID(), now, principalId, crypto.randomUUID()]
     ),
-    'D5: same provider_item_id + same content_hash but DIFFERENT provider (heritage-auctions vs ebay) -- distinct row, unique index does not cross providers'
+    'D5/T2b: same provider_item_id + same content_hash + same grade_numeric value but DIFFERENT provider (heritage-auctions vs ebay) -- distinct row, unique index does not cross providers (the temporary cross-scale safety property GK-183 documents)'
   );
 
-  // hash-contract version change does not mutate historical hashes --
-  // structural proof: hash_contract_version is stored per-row, never
-  // recomputed/rewritten (the immutability trigger already proves no
-  // UPDATE is possible on any column, including this one).
+  // hash-contract version change does not mutate historical hashes.
   const versionRow = await client.query('SELECT hash_contract_version FROM market_observation WHERE id = $1', [obs1]);
   assertTrue(versionRow.rows[0].hash_contract_version === 'mo-hash-v1', 'D5 (S3): hash_contract_version recorded per-row, defaults to mo-hash-v1');
   await assertRejected(
@@ -315,6 +361,23 @@ try {
     'D5 (S3): hash_contract_version cannot be rewritten on an existing row -- the SAME immutability trigger that protects every other column protects this one too (a future v2 contract can never retroactively relabel v1 history)',
     'immutable once written'
   );
+
+  // ===================================================================
+  // T2/T2a -- grade precision, live, no comic-specific scale
+  // ===================================================================
+  console.log('\n-- T2/T2a: grade precision, live --\n');
+
+  const gradeObs1 = crypto.randomUUID();
+  await assertSucceeds(
+    () => client.query(
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'manual','g-1','sold',1.0000,'USD',NULL,87.1250,NULL,NULL,$2,$3,$4,'hash-grade-precise')`,
+      [gradeObs1, now, principalId, crypto.randomUUID()]
+    ),
+    'T2a: grade_numeric accepts a value beyond one decimal place (87.1250) -- NUMERIC(12,6) has no comic-specific one-decimal restriction'
+  );
+  const gradeReadBack = await client.query('SELECT grade_numeric FROM market_observation WHERE id = $1', [gradeObs1]);
+  assertTrue(Number(gradeReadBack.rows[0].grade_numeric) === 87.125, 'T2a: the persisted NUMERIC value round-trips exactly (87.1250 stored, 87.125 is the same real value -- Postgres NUMERIC preserves it precisely)');
 
   // ===================================================================
   // D7 -- batch-persistence structural support
@@ -325,37 +388,32 @@ try {
   const batchRows = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
   for (const [i, id] of batchRows.entries()) {
     await client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'ebay',$2,'sold',$3,'USD',NULL,NULL,'2026-06-14T00:00:00.000Z',$4,$5,$6,$7)`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay',$2,'sold',$3,'USD',NULL,NULL,'2026-06-14T00:00:00.000Z','INSTANT',$4,$5,$6,$7)`,
       [id, `batch-item-${i}`, (10 + i).toFixed(4), now, principalId, batchCorrId, `hash-batch-${i}`]
     );
   }
   const recovered = await client.query('SELECT id FROM market_observation WHERE correlation_id = $1 ORDER BY id', [batchCorrId]);
   assertTrue(recovered.rows.length === 3, 'D7: all 3 rows of one batch are recoverable via a single correlation_id query, individually addressable, independently immutable');
 
-  // D7 -- batch ATOMICITY: one BEGIN/COMMIT wraps the whole batch (A4a's
-  // ratified "1 transaction -> N rows" unit) -- if any one row in the
-  // batch is invalid, the WHOLE batch must roll back, never a partial
-  // durable batch. Proven directly against this table's own constraints
-  // (a NOT NULL violation on the 3rd of 3 rows), not merely asserted.
   const atomicCorrId = crypto.randomUUID();
   const atomicRow1 = crypto.randomUUID(), atomicRow2 = crypto.randomUUID();
   await client.query('BEGIN');
   try {
     await client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'ebay','atomic-1','sold',1.0000,'USD',NULL,NULL,NULL,$2,$3,$4,'hash-atomic-1')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay','atomic-1','sold',1.0000,'USD',NULL,NULL,NULL,NULL,$2,$3,$4,'hash-atomic-1')`,
       [atomicRow1, now, principalId, atomicCorrId]
     );
     await client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1,'ebay','atomic-2','sold',2.0000,'USD',NULL,NULL,NULL,$2,$3,$4,'hash-atomic-2')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1,'ebay','atomic-2','sold',2.0000,'USD',NULL,NULL,NULL,NULL,$2,$3,$4,'hash-atomic-2')`,
       [atomicRow2, now, principalId, atomicCorrId]
     );
     // Deliberately invalid 3rd row -- provider is NOT NULL, pass NULL.
     await client.query(
-      `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-       VALUES ($1, NULL, 'atomic-3','sold',3.0000,'USD',NULL,NULL,NULL,$2,$3,$4,'hash-atomic-3')`,
+      `INSERT INTO market_observation ${COLS}
+       VALUES ($1, NULL, 'atomic-3','sold',3.0000,'USD',NULL,NULL,NULL,NULL,$2,$3,$4,'hash-atomic-3')`,
       [crypto.randomUUID(), now, principalId, atomicCorrId]
     );
     await client.query('COMMIT');
@@ -387,13 +445,10 @@ try {
   const afterReapply = await client.query(`SELECT count(*)::int AS n FROM market_observation`);
   assertTrue(afterReapply.rows[0].n === 0, 'D10: reapplied table is empty (rollback genuinely removed all prior rows along with the table)');
 
-  // Real row-based re-check (a WHERE-false DELETE would affect zero rows
-  // and never fire a FOR EACH ROW trigger at all -- this proves the
-  // trigger is genuinely re-attached post-reapply, not a vacuous pass).
   const postReapplyObs = crypto.randomUUID();
   await client.query(
-    `INSERT INTO market_observation (id, provider, provider_item_id, listing_kind, price_amount, currency, condition_text, grade_numeric, occurred_at, observed_at, recorded_by_principal_id, correlation_id, content_hash)
-     VALUES ($1,'ebay','post-reapply-item','sold',1.0000,'USD',NULL,NULL,NULL,$2,$3,$4,'hash-post-reapply')`,
+    `INSERT INTO market_observation ${COLS}
+     VALUES ($1,'ebay','post-reapply-item','sold',1.0000,'USD',NULL,NULL,NULL,NULL,$2,$3,$4,'hash-post-reapply')`,
     [postReapplyObs, now, principalId, crypto.randomUUID()]
   );
   await assertRejected(

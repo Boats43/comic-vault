@@ -40,13 +40,13 @@
 -- approach (verified not actually canonical -- caller object key order,
 -- unversioned). mo-hash-v1's tuple is: version tag, provider,
 -- provider_item_id, listing_kind, price_amount, currency,
--- condition_text, grade_numeric, occurred_at -- observed_at/recorded_at/
--- id/recorded_by_principal_id/correlation_id/raw_payload/content_hash
--- itself NEVER participate (provenance/timing metadata, not observed
--- market fact). occurred_at's inclusion is a deliberate, load-bearing
--- correction (S1): two distinct real market events (e.g. two
--- PriceCharting sales at the identical price on different dates) must
--- never silently collapse into one row via dedup.
+-- condition_text, grade_numeric, occurred_at, occurred_at_precision --
+-- observed_at/recorded_at/id/recorded_by_principal_id/correlation_id/
+-- raw_payload/content_hash itself NEVER participate (provenance/timing
+-- metadata, not observed market fact). occurred_at's inclusion is a
+-- deliberate, load-bearing correction (S1): two distinct real market
+-- events (e.g. two PriceCharting sales at the identical price on
+-- different dates) must never silently collapse into one row via dedup.
 --
 -- A2a -- provider_item_id stays plain nullable TEXT, no reserved
 -- sentinel (deliberately diverges from D4 Ruling 13's issuing_authority
@@ -62,9 +62,66 @@
 -- at the adapter boundary (not built here), never encoded into this
 -- schema.
 --
--- D2a -- grade_numeric is NUMERIC(3,1), matching the existing
--- valuation_event.grade_assumption precedent (0004:185) and the
--- CGC/CBCS one-decimal grading convention exactly.
+-- T1/T1a (PRE-LIVE DESIGN CORRECTION, 2026-09-03) -- occurred_at gained
+-- a sibling, occurred_at_precision ('DATE'|'INSTANT'). The original
+-- draft silently coerced a date-only source fact ("2026-06-14") into a
+-- full instant ("2026-06-14T00:00:00.000Z") -- manufacturing a
+-- precision (midnight, specifically) no third-party source ever
+-- asserted. occurred_at_precision now records exactly what WAS
+-- asserted; occurred_at's own TIMESTAMPTZ value is a storage anchor
+-- ONLY when precision='DATE' (UTC midnight), never to be read as "the
+-- event happened at midnight" without checking precision first. Both
+-- columns participate in mo-hash-v1 (T1a) -- a date-only fact and a
+-- genuinely-midnight-UTC exact instant are DIFFERENT observations even
+-- though their stored TIMESTAMPTZ value is textually identical; a later
+-- improvement from date-only to an exact timestamp is correctly a NEW,
+-- more precise assertion (new hash), never an update to the coarser one.
+--
+-- T1b -- deliberate asymmetry, recorded explicitly: D3.2's occurred_at
+-- on the seven asset-kernel event tables (db/data0/0011) carries NO
+-- precision qualifier, and this is intentional, not an oversight to
+-- retrofit. Those are operator/system-asserted events, generated within
+-- GrailKey's own event semantics -- there is no partial-precision
+-- third-party report to preserve. MarketObservation's occurred_at is
+-- fundamentally different: third-party-reported evidence that may
+-- arrive as only a partial temporal fact. Do not add occurred_at_
+-- precision to 0011's seven tables merely for schema consistency.
+--
+-- T2/T2a (PRE-LIVE DESIGN CORRECTION, 2026-09-03) -- grade_numeric is
+-- NUMERIC(12, 6), NOT NUMERIC(3, 1). The original NUMERIC(3,1) choice
+-- was justified by CGC/CBCS's one-decimal grading convention --
+-- vertical leakage into a table whose entire purpose is to stay
+-- provider-neutral AND asset-class-neutral. NUMERIC(12,6)'s bound is
+-- chosen purely for generic database/domain safety (enough headroom for
+-- any realistic observed numeric grade/condition-index across any
+-- conceivable asset class, while still catching pathological/malformed
+-- input) -- it names no grading convention and requires no future
+-- vertical to migrate this schema merely because its own grading
+-- precision differs from a comic's. Canonicalization is likewise
+-- generic: canonicalMinimalDecimal (src/lib/marketObservationHash.js)
+-- strips only insignificant trailing fractional zeros -- no fixed-scale
+-- padding, unlike price_amount above (money has a real, currency-defined
+-- natural precision; a numeric grade/condition-index does not have one
+-- universal natural precision across verticals, so the two fields use
+-- deliberately different canonicalization strategies).
+--
+-- T2b -- grade_numeric alone is a KNOWN, DISCLOSED, DEFERRED semantic
+-- gap, not silently accepted as complete: a bare "9.4" does not itself
+-- record what scale/authority asserted it (CGC's 10-point scale? a
+-- 100-point condition index? a 5-star rating normalized to decimal?).
+-- Today this is masked because every provider actually integrated in
+-- this codebase (eBay, PriceCharting) empirically reports grades on the
+-- same implicit CGC/CBCS-derived scale -- but that is an observed
+-- current fact about today's two providers, never a schema guarantee.
+-- Temporary safety property, real and proven (see the migration-contract
+-- test): `provider` is part of BOTH the dedup unique index and the hash
+-- tuple, so two DIFFERENT providers can never collide even if their
+-- grade scales differ. NOT protected: a single provider later reporting
+-- grades on two genuinely different sub-scales of its own. Logged as
+-- GK-183 (not yet committed to docs/TICKET-REGISTRY.md this pass -- no
+-- explicit docs-write authorization in this dispatch); a grade_scale/
+-- grading_authority qualifier, if ever added, MUST participate in
+-- mo-hash-v1.
 --
 -- A3 -- raw_payload is nullable and rights-gated at the SERVICE/adapter
 -- call layer (not built here), never by a schema column -- this table
@@ -132,9 +189,10 @@ CREATE TABLE market_observation (
   currency                  TEXT,
 
   condition_text            TEXT,
-  -- D2a -- one-decimal grading convention, matches valuation_event.
-  -- grade_assumption (0004:185) exactly.
-  grade_numeric              NUMERIC(3, 1),
+  -- T2/T2a -- generic numeric bound, no grading-convention-specific
+  -- scale (see the header). Canonicalized via canonicalMinimalDecimal,
+  -- never a fixed-scale pad.
+  grade_numeric              NUMERIC(12, 6),
 
   -- Three-axis time (G7/S1, ratified): occurred_at is the asserted
   -- real-world market-event time -- nullable, never inferred, never
@@ -146,7 +204,18 @@ CREATE TABLE market_observation (
   -- other -- backdated/future-dated/out-of-order values are all
   -- structurally legal, matching Law 3's already-ratified precedent
   -- (db/data0/0011_d3_2_event_time.sql).
+  --
+  -- T1/T1a -- occurred_at_precision records exactly what the source
+  -- asserted ('DATE' = a calendar date only, no time-of-day; 'INSTANT'
+  -- = a specific point in time). occurred_at's own value is a UTC-
+  -- midnight STORAGE ANCHOR ONLY when precision='DATE' -- never to be
+  -- read as an assertion that the event happened at midnight. The CHECK
+  -- below enforces that the two travel together: an unknown event time
+  -- has no precision to qualify, and a known event time always carries
+  -- an explicit precision (never silently defaulted).
   occurred_at                TIMESTAMPTZ,
+  occurred_at_precision      TEXT CHECK (occurred_at_precision IN ('DATE', 'INSTANT')),
+  CHECK ((occurred_at IS NULL) = (occurred_at_precision IS NULL)),
   observed_at                TIMESTAMPTZ NOT NULL,
   recorded_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
 
