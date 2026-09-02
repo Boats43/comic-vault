@@ -68,6 +68,30 @@ What the live D2.1 result actually shows:
 
 **Gate: before D6 (flag-gated production capture), the retention-window requirement for permanent GrailKey asset custody must be explicitly ratified** (stay on Free with a documented acceptance of the 6-hour exposure window, or move to a paid tier with a longer window) — this is now a pre-D6 gate alongside the existing Production/Development isolation gate, not a preference.
 
+## D3.2 — event-time audit, and `entity_mint_basis` row-provenance classification (Amendment A4)
+
+### Event-time audit (D3.2, 2026-09-02)
+
+Every writer in `src/modules/assets/repository.js`, for every one of the 7 in-scope tables (`ownership_event`, `acquisition_event`, `valuation_event`, `decision_event`, `domain_event`, `media`, `asset_identity_assignment`), was individually checked — not generalized from one to the rest. **FACT, uniform across all 7:** every INSERT statement omitted the existing occurrence-shaped column (`occurred_at`/`captured_at`/`assigned_at`) from its column list, relying exclusively on that column's own `DEFAULT now()`. Readers (`repository.js`'s `getAssetGraph`) use the column only for chronological `ORDER BY`, never with occurrence-specific interpretation. **Conclusion: every one of these columns has, in the live code, always functioned as `recorded_at` (persistence time), never as a genuinely asserted `occurred_at`.** No table in this set showed different behavior — the audit found one uniform pattern, not a per-table variance requiring a stop.
+
+Out-of-scope tables, with reasoning (not oversight): `entity_mint_basis.created_at`/`mint_event.occurred_at` (0003) — minting IS the event, no real-world occurrence distinct from its own recording; `collection_item_link.linked_at` (0007) — a pure routing edge, not a domain event; `outbox.created_at`/`processed_at` (0004) — queue mechanics, already honestly named; `gk_asset`/`gk_principal`/`gk_organization.created_at` (0004) — entity-row creation metadata, not `_event` tables; `custody_event`/`condition_observation`/`gk_organization`/`gk_membership` — not live (confirmed absent from `data1_dev`, D2.1).
+
+Proposed (NOT applied) migration: `db/data0/0011_d3_2_event_time.sql` — for each of the 7 tables, renames the existing column to `recorded_at` (meaning unchanged, name now honest) and adds a new, nullable `occurred_at` (no default — omitted on insert means NULL, never "now"). No `CHECK (occurred_at <= recorded_at)` or equivalent — chronological inconsistency is legal, evidence for review, never schema invalidity. Full real-DB proof (not applied to `data1_dev`; run against an isolated, self-dropped scratch schema in the same Neon database, using the actual 0011 SQL text and the actual `repository.js` functions): `tests/d3-2-true-event-time-live-roundtrip.test.js`, 30/30, plus `tests/d3-2-*` pure/unit coverage.
+
+### `entity_mint_basis` row-provenance classification (Amendment A4)
+
+Per the explicit ruling that "existing timestamp = insertion time" (and, separately, "these rows are production data") are hypotheses requiring independent proof, not assumptions — all 110 `basis_namespace='asset:capture-event'` rows' `mint_event.candidate_snapshot` shapes were individually inspected (not inferred from row count or table presence alone):
+
+| Classification | Count | Evidence |
+|---|---|---|
+| **CONTROLLED PROOF/TEST ARTIFACT** | 97 | Explicit non-production marker in the row's own data: `{test,ts}` (76), `{basisKey,...,variant}` carrying literal `"s3-1"`-style dispatch-phase labels (9), `{note:...}` (6), `{probe,...}` (4), bare `{issue,title,year}` with no session metadata at all (2) |
+| **CONFIRMED PRODUCTION** | 1 | The real Creepy #1 capture (`gkAssetId 01a02d23-1acb-72e8-aae3-8f851308e9cf`) — corroborated independently by CLAUDE.md's own documented production smoke-test chain (real HTTPS auth flow, SHA-256 byte-identical to a real photographed source, D2.4's live-verified Blob object) |
+| **UNKNOWN** | 12 | Realistic capture-shaped payloads (real book titles/issues, real `correlationId`/`scanlogKey` session metadata, in some cases real `photoContentHash`) with no explicit fixture marker and no independent corroboration either way — plausibly genuine development-phase rehearsal captures of real physical books, or a proof script simply omitting a marker; not resolved by durable evidence available this pass |
+
+**Classification: MIXED PROVENANCE.** The known live row count (110, or the 378 `domain_event` rows, etc.) is explicitly **not itself proof of production provenance** — the vast majority of `entity_mint_basis` rows are proof-script artifacts, evidenced by markers embedded in the data itself, not inferred from mere presence in `data1_dev`.
+
+**Correction to the D3.1 record (`2dce8bd`, KEPT per ruling — not amended):** that commit's test-file header claimed `buildCaptureBasis` "has never been the writer of any of the 110 real entity_mint_basis rows." This is **false**, discovered during this D3.2 provenance audit: exactly 3 of 110 rows carry `buildCaptureBasis`'s own exact output shape (`{namespace,key,book,correlationId,scanlogKey}`, `namespace:'asset:capture'`) — one of which is the confirmed-production Creepy #1 row. D3.1's original claim was based on sampling only the 3 earliest rows (all pre-dating `buildCaptureBasis`'s existence), generalized incorrectly to all 110 without checking the rest. This does not change D3.1's shipped code (the byte-compatibility proof compared the function's own before/after behavior, which remains valid regardless of live-row count) — only the prose claim about live usage was wrong, and is corrected here rather than silently left standing. No destructive cleanup of any row was performed as part of discovering this — per Amendment A4, provenance discovery is not itself grounds for cleanup; any cleanup requires a separate ruling.
+
 ## Related documents
 
 - Cross-workstream status board (migration-truth row updated from this pass): `docs/MASTER-BOARD.md`

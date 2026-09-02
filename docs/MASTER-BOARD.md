@@ -140,6 +140,14 @@ Real, proven contamination-risk evidence from this same pass, offered as support
 
 **6-HOUR RESTORE WINDOW — OPEN / PRE-D6 GATE.** The D2.4 drill proves the restore *mechanism* works on the current (Free) plan; it does not establish that a 6-hour history window is *adequate* for permanent physical-asset custody — a capture written more than 6 hours before an incident is discovered would fall outside Free's restore window entirely. Recorded as an **operational durability threshold for a later ruling**, not a mandate to upgrade — no plan change is recommended or implied here. **Gate: before D6, this retention requirement must be explicitly ratified** (accept the 6-hour exposure window on Free, or move to a paid tier with a longer one) — alongside, and independent of, the Production/Development isolation gate above.
 
+## D3.1 / D3.2 — information contracts (candidate-safe mint basis; true event time)
+
+**D3.1 PASS** (`2dce8bd`, KEPT). `buildCaptureBasis` gains an optional candidate discriminator, additive-only, byte-compatible with its own pre-change legacy call shape. **D3.2 in progress, this pass: event-time audit complete, migration proposed (`db/data0/0011_d3_2_event_time.sql`, NOT applied to `data1_dev` — authorization not sought this pass), real proof against an isolated scratch schema.** Full detail: `docs/DATABASE-MIGRATION-STATUS.md`, "D3.2 — event-time audit."
+
+**`entity_mint_basis` row-provenance — MIXED, not assumed production.** Of the 110 live rows: 97 are explicitly-marked proof/test artifacts, 1 is confirmed production (Creepy #1), 12 are UNKNOWN (realistic, uncorroborated). **The known row count is explicitly not itself proof of production provenance** — recorded per Amendment A4's own instruction that this distinction must stay visible for any future migration whose interpretation depends on these rows. Full classification and evidence: `docs/DATABASE-MIGRATION-STATUS.md`. **D3.1's own commit message/test-file claim that `buildCaptureBasis` "has never been the writer of any of the 110 rows" is corrected here as FALSE** — 3 of 110 (including Creepy #1) do match its output shape; the commit itself is KEPT unamended per ruling, this is a recorded correction, not a history rewrite.
+
+No destructive cleanup of any row was performed while establishing this classification — per Amendment A4, discovering provenance is not itself grounds for cleanup.
+
 ---
 
 ## Governance / registry notes
