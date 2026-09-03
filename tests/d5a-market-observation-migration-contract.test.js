@@ -66,23 +66,65 @@ const assertSucceeds = async (fn, label) => {
 
 console.log('\n=== D5A -- MarketObservation migration contract (real, isolated scratch-schema proof) ===\n');
 
+// P2a (post-live banking closure, 2026-09-03) -- POSITIVE scratch-schema
+// containment. The old precondition ("market_observation must be absent
+// from data1_dev") was never actually a guard against this suite's OWN
+// forward/rollback DDL running against the wrong schema -- it was a
+// pre-existing-state diagnostic only, checked on the client BEFORE it
+// was ever repointed at the scratch schema, and 0014's forward/rollback
+// DDL only ever runs later, after a SEPARATE `SET search_path TO
+// ${SCHEMA}` call. It also became permanently unusable the moment 0014
+// went live (market_observation now legitimately exists in data1_dev
+// forever). Replaced with a REAL containment guard: assertScratchTarget
+// positively proves, via `current_schema()`, that the connection is
+// pointed at the expected scratch schema and explicitly, unconditionally
+// refuses `data1_dev` regardless of what was "expected" -- called
+// immediately before every DDL-mutating statement (forward apply,
+// rollback, reapply), not merely once at the top.
+//
+// GK-178 note: this uses a single dedicated, UNPOOLED `pg.Client`
+// (GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED) held open for this script's
+// entire lifetime -- never a pooled multi-connection `pg.Pool` -- so
+// `SET search_path`/`current_schema()` state cannot silently move
+// between statements the way GK-178 proved a pooled connection can.
+// This is verified directly, not merely asserted: pg_backend_pid() is
+// captured once after connecting and re-checked at every guard call --
+// if the underlying physical backend ever changed mid-script, the guard
+// itself would fail loudly rather than silently trusting session state.
 const client = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED, ssl: { rejectUnauthorized: false } });
 await client.connect();
+const { rows: [{ pid: sessionPid }] } = await client.query('SELECT pg_backend_pid() AS pid');
+console.log('  dedicated unpooled backend PID for this entire script:', sessionPid);
 
-async function marketObservationExistsInDataOneDev() {
-  await client.query('SET search_path TO data1_dev');
-  const r = await client.query(`SELECT to_regclass('data1_dev.market_observation') AS t`);
-  return r.rows[0].t;
+async function assertScratchTarget(expectedSchema, label) {
+  const r = await client.query('SELECT current_schema() AS s, pg_backend_pid() AS pid');
+  const { s: actualSchema, pid: actualPid } = r.rows[0];
+  if (actualPid !== sessionPid) {
+    throw new Error(`SAFETY ABORT (${label}): backend PID changed mid-script (${sessionPid} -> ${actualPid}) -- session identity is not stable, refusing to execute DDL`);
+  }
+  if (actualSchema === 'data1_dev') {
+    throw new Error(`SAFETY ABORT (${label}): current_schema() resolved to data1_dev -- refusing unconditionally, regardless of any expected value`);
+  }
+  if (actualSchema !== expectedSchema) {
+    throw new Error(`SAFETY ABORT (${label}): expected scratch schema "${expectedSchema}" but current_schema() returned "${actualSchema}" -- refusing to execute DDL`);
+  }
+  return actualSchema;
 }
-// Informational only, not asserted -- 0014 was LIVE-APPLIED to data1_dev
-// on 2026-09-03 (docs/DATABASE-MIGRATION-STATUS.md, "D5A Phase A --
-// APPLIED"), so market_observation now permanently exists there. This
-// scratch-schema proof runs entirely inside its own isolated schema
-// regardless of that value and never reads, writes, or depends on the
-// real data1_dev.market_observation table at all.
-const dataOneDevState = await marketObservationExistsInDataOneDev();
-console.log('  data1_dev.market_observation exists (informational only, not asserted -- live since 2026-09-03):', dataOneDevState);
-assertTrue(true, 'PRECONDITION: this proof runs entirely in an isolated scratch schema, independent of data1_dev\'s real state');
+
+// Positive proof (not merely asserted): deliberately point this exact
+// client at data1_dev and confirm the guard refuses -- proves the
+// containment mechanism actually rejects the real production schema
+// before any DDL, using the real function, not a hypothetical.
+{
+  await client.query('SET search_path TO data1_dev');
+  let refused = false;
+  try {
+    await assertScratchTarget('some-scratch-schema-name', 'negative proof');
+  } catch (e) {
+    refused = /SAFETY ABORT/.test(e.message) && /data1_dev/.test(e.message);
+  }
+  assertTrue(refused, 'P2a: intentionally pointing this client at data1_dev causes assertScratchTarget to refuse BEFORE any DDL -- proven with the real guard function, not a hypothetical');
+}
 
 const SCHEMA = `d5a_0014_scratch_${Date.now()}`;
 const fwdPath = path.join(repoRoot, 'db', 'data0', '0014_d5a_market_observation.sql');
@@ -100,6 +142,8 @@ const COLS = '(id, provider, provider_item_id, listing_kind, price_amount, curre
 try {
   await client.query(`CREATE SCHEMA ${SCHEMA}`);
   await client.query(`SET search_path TO ${SCHEMA}`);
+  await assertScratchTarget(SCHEMA, 'post-setup');
+  assertTrue(true, `P2a: positively confirmed connected to scratch schema "${SCHEMA}" (current_schema() + stable backend PID), not data1_dev`);
 
   await client.query(`CREATE TABLE gk_principal (id UUID PRIMARY KEY)`);
   const principalId = crypto.randomUUID();
@@ -117,6 +161,7 @@ try {
   // D10 -- apply the REAL forward migration text, schema-qualified.
   // -------------------------------------------------------------------
   const fwd = fwdRaw.replace('SET search_path TO data1_dev;', `SET search_path TO ${SCHEMA};`);
+  await assertScratchTarget(SCHEMA, 'pre-forward-apply');
   await assertSucceeds(() => client.query(fwd), 'D10: real 0014 migration text applied successfully to the scratch schema');
 
   const compAfter = await client.query('SELECT id, marker FROM comp_snapshot');
@@ -473,6 +518,7 @@ try {
   console.log('\n-- D10: rollback / reapply --\n');
 
   const rb = rbRaw.replace('SET search_path TO data1_dev;', `SET search_path TO ${SCHEMA};`);
+  await assertScratchTarget(SCHEMA, 'pre-rollback');
   await assertSucceeds(() => client.query(rb), 'D10: rollback text applied successfully');
 
   const afterRollback = await client.query(`SELECT to_regclass('${SCHEMA}.market_observation') AS t`);
@@ -482,6 +528,7 @@ try {
   assertTrue(compAfterRollback.rows.length === 1 && compAfterRollback.rows[0].marker === 'd9-untouched-marker', 'D9/D10: comp_snapshot survives rollback untouched too');
   assertTrue(valAfterRollback.rows.length === 1 && valAfterRollback.rows[0].marker === 'd9-untouched-marker', 'D9/D10: valuation_event survives rollback untouched too');
 
+  await assertScratchTarget(SCHEMA, 'pre-reapply');
   await assertSucceeds(() => client.query(fwd), 'D10: reapply of the same forward text succeeds cleanly after rollback');
   const afterReapply = await client.query(`SELECT count(*)::int AS n FROM market_observation`);
   assertTrue(afterReapply.rows[0].n === 0, 'D10: reapplied table is empty (rollback genuinely removed all prior rows along with the table)');
