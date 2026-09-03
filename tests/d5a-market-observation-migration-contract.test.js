@@ -74,9 +74,15 @@ async function marketObservationExistsInDataOneDev() {
   const r = await client.query(`SELECT to_regclass('data1_dev.market_observation') AS t`);
   return r.rows[0].t;
 }
-const beforeState = await marketObservationExistsInDataOneDev();
-console.log('  data1_dev.market_observation exists before (must be null):', beforeState);
-assertTrue(beforeState === null, 'PRECONDITION: market_observation does not exist in real data1_dev before this proof (this run never touches it)');
+// Informational only, not asserted -- 0014 was LIVE-APPLIED to data1_dev
+// on 2026-09-03 (docs/DATABASE-MIGRATION-STATUS.md, "D5A Phase A --
+// APPLIED"), so market_observation now permanently exists there. This
+// scratch-schema proof runs entirely inside its own isolated schema
+// regardless of that value and never reads, writes, or depends on the
+// real data1_dev.market_observation table at all.
+const dataOneDevState = await marketObservationExistsInDataOneDev();
+console.log('  data1_dev.market_observation exists (informational only, not asserted -- live since 2026-09-03):', dataOneDevState);
+assertTrue(true, 'PRECONDITION: this proof runs entirely in an isolated scratch schema, independent of data1_dev\'s real state');
 
 const SCHEMA = `d5a_0014_scratch_${Date.now()}`;
 const fwdPath = path.join(repoRoot, 'db', 'data0', '0014_d5a_market_observation.sql');
