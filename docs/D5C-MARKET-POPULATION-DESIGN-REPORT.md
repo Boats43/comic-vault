@@ -99,7 +99,7 @@ Per 1K/10K/100K scans (1 question/scan, 1 evaluation/question, ~50 members/popul
 
 One additive change to a pre-existing table: `ALTER TABLE applicability ADD CONSTRAINT applicability_id_observation_uk UNIQUE (id, observation_id)` — same composite-FK-target technique used twice already (D4 Ruling 21; 0016's own `asset_identity_assignment` composite FK). Zero columns added to `applicability`, zero rows touched. `comp_snapshot`/`valuation_event` are completely untouched — zero `ALTER`, zero write, per M1's historical safety rule.
 
-**Disclosed limit (not silently assumed solved):** a full 3-way composite FK enforcing "the cited `applicability_id` also belongs to the SAME `valuation_question_id` this population answers" (population → question → judgment → question) is not expressible as a single Postgres constraint without a generated/duplicated column. The 2-way composite FK (judgment must match the SAME observation) is DB-enforced and proven (MP-NP3); the question-level transitive match is left to the future writer/service layer, named explicitly here as a gap, not hidden.
+**UPDATE (D5C live-migration gate dispatch, N1) — the disclosed limit below is CLOSED, not merely delegated.** Originally: a full 3-way composite FK enforcing "the cited `applicability_id` also belongs to the SAME `valuation_question_id` this population answers" was believed inexpressible as a single Postgres constraint. Tested directly against D4's own discriminator-carrying precedent (a child relation carries the parent discriminator explicitly, constrained by composite FKs to both independently-referenced parents, no trigger): `market_population_member` now carries its own `valuation_question_id` column, constrained simultaneously by `(market_population_id, valuation_question_id) → market_population(id, valuation_question_id)` and `(applicability_id, observation_id, valuation_question_id) → applicability(id, observation_id, question_id)`. The column is never independently writable — once `market_population_id` and `applicability_id` are set, both FKs together fully determine its only legal value. A cross-question construction is now structurally unrepresentable, proven live (MP-NP3b/N1, two independent FK-direction proofs). **GK-192 CLOSED.** See `docs/D5C-MARKET-POPULATION-LIVE-GATE-REPORT.md` for the full N1 reasoning.
 
 ## Deliverable J — scratch-proof plan (executed, not merely planned)
 
@@ -155,7 +155,7 @@ This dispatch authorized: repository inspection, semantic design, schema proposa
 
 ## What was NOT done
 
-`0017` not applied to `data1_dev`. No `comp_snapshot.market_population_id` column added (M1's own explicit deferral). No 3-way transitive composite FK (disclosed limit, Deliverable I). No writer, no D5D, no production capture, no historical backfill. Member-row WAL figure is an upper bound, not an isolated marginal cost (disclosed). Per-scan volume multipliers are HYPOTHESIS, not measured (no real corpus exists to query, GK-180).
+`0017` not applied to `data1_dev`. No `comp_snapshot.market_population_id` column added (M1's own explicit deferral). No writer, no D5D, no production capture, no historical backfill. Member-row WAL figure is an upper bound, not an isolated marginal cost (disclosed). Per-scan volume multipliers are HYPOTHESIS, not measured (no real corpus exists to query, GK-180). (The 3-way transitive composite FK originally disclosed as a limit here was closed in the immediately following live-gate dispatch, N1 — see `docs/D5C-MARKET-POPULATION-LIVE-GATE-REPORT.md`.)
 
 ## Terminal
 

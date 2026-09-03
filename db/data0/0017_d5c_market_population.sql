@@ -88,6 +88,27 @@
 -- writer-layer), not built or implied here. All 4 existing comp_
 -- snapshot rows and all 78 existing valuation_event rows remain
 -- completely untouched by this migration.
+--
+-- N1 (live-migration gate dispatch, GK-192 declarative closure) --
+-- GK-192, as originally banked, disclosed that the 2-way composite FK
+-- below (applicability_id, observation_id) proves observation-level
+-- consistency but NOT that the cited judgment belongs to the SAME
+-- valuation_question this population answers (a Q1-population citing a
+-- Q2-judgment was DB-representable). Tested directly, following D4's
+-- own discriminator-carrying pattern (a child relation carries the
+-- parent discriminator explicitly, constrained equal to BOTH
+-- independently-referenced parents via composite FKs, no trigger, no
+-- procedural reconciliation): market_population_member now carries its
+-- own valuation_question_id column, NOT independently writable in
+-- practice -- once market_population_id and applicability_id are set,
+-- this column is fully determined by BOTH composite FKs below
+-- simultaneously (a pure integrity discriminator, never a second source
+-- of truth, per N1-C's own test). GK-192 is CLOSED at the schema level
+-- by this redesign -- proven live (tests/d5c-market-population-
+-- migration-contract.test.js, MP-NP3b): a population belonging to Q1
+-- citing a judgment that actually belongs to Q2 is REJECTED by a real
+-- foreign key violation, not delegated to a future writer's own
+-- discipline.
 -- =====================================================================
 
 SET search_path TO data1_dev;
@@ -120,6 +141,13 @@ CREATE UNIQUE INDEX market_population_dedup_key ON market_population (content_ha
 CREATE INDEX ON market_population (valuation_question_id);
 CREATE INDEX ON market_population (correlation_id);
 
+-- N1 -- id alone is already the PRIMARY KEY; this composite UNIQUE lets
+-- market_population_member's own composite FK (below) prove that a
+-- member row's stated valuation_question_id matches the SPECIFIC
+-- population it belongs to -- half of the two-sided discriminator that
+-- closes GK-192.
+ALTER TABLE market_population ADD CONSTRAINT market_population_id_question_uk UNIQUE (id, valuation_question_id);
+
 CREATE OR REPLACE FUNCTION market_population_immutable() RETURNS TRIGGER AS $$
 BEGIN
   RAISE EXCEPTION 'market_population rows are immutable once written -- % on market_population.id=% is not permitted (a changed population is a NEW header row -- no supersession, see the header)', TG_OP, OLD.id;
@@ -130,41 +158,42 @@ CREATE TRIGGER market_population_no_update BEFORE UPDATE ON market_population FO
 CREATE TRIGGER market_population_no_delete BEFORE DELETE ON market_population FOR EACH ROW EXECUTE FUNCTION market_population_immutable();
 
 -- id alone is already applicability's PRIMARY KEY; this composite
--- UNIQUE is required for market_population_member's own composite FK
+-- UNIQUE is required for market_population_member's own composite FKs
 -- (below) to target it -- must exist BEFORE that table is created
 -- (same ordering lesson already learned in 0015/0016: Postgres requires
 -- the exact referenced column SET to carry its own unique constraint
--- before a composite FK can be declared against it).
-ALTER TABLE applicability ADD CONSTRAINT applicability_id_observation_uk UNIQUE (id, observation_id);
+-- before a composite FK can be declared against it). A single 3-column
+-- key (id, observation_id, question_id) closes BOTH the observation-
+-- level (MP-NP3) and question-level (N1/GK-192) consistency
+-- requirements with one constraint and one FK, rather than two
+-- separate 2-column ones.
+ALTER TABLE applicability ADD CONSTRAINT applicability_id_observation_question_uk UNIQUE (id, observation_id, question_id);
 
 -- market_population_member -- one row per (population, observation)
 -- pair actually evaluated for membership. Records member_status
 -- (SELECTED/EXCLUDED) and, for excluded rows, exclusion_reason -- the
 -- population-level selection decision Applicability alone cannot
--- express (M2). MP-NP2/MP-NP3: both FKs are real; the composite FK
--- against valuation_question_id below additionally forbids a member
--- row's observation from being tied to an Applicability judgment that
--- belongs to a DIFFERENT (observation, question) pair than the ones
--- this population itself was built from -- same cross-domain integrity
--- technique as 0016's own valuation_question composite FK (D4 Ruling
--- 21 precedent, reused a third time in this train).
+-- express (M2).
+--
+-- N1/GK-192 (closed) -- valuation_question_id is carried on this row
+-- as a pure integrity DISCRIMINATOR, never an independent source of
+-- truth: once market_population_id and applicability_id are set, this
+-- column's legal value is fully determined by BOTH composite FKs below
+-- simultaneously (population's own question via FK1, the cited
+-- judgment's own question via FK2) -- the same column cannot
+-- simultaneously satisfy "= population's question" and "= judgment's
+-- question" unless those two are already equal, so a cross-question
+-- construction is structurally unrepresentable, not merely discouraged.
 CREATE TABLE market_population_member (
   id                          UUID PRIMARY KEY,
 
   market_population_id         UUID NOT NULL REFERENCES market_population(id),
   observation_id                 UUID NOT NULL REFERENCES market_observation(id),
-
-  -- MP-NP3: the specific Applicability judgment this membership
-  -- decision was made under -- must belong to the SAME observation
-  -- this member row names (composite FK below) AND, transitively via
-  -- that judgment's own question_id, the same valuation_question this
-  -- population answers (enforced at the application/service layer when
-  -- a future writer exists -- a DB-level 3-way composite FK spanning
-  -- population->question->judgment->question is not expressible as a
-  -- single Postgres constraint without a generated/duplicated column;
-  -- documented here as an explicit, disclosed limit, not silently
-  -- assumed solved).
   applicability_id                UUID NOT NULL REFERENCES applicability(id),
+
+  -- N1/GK-192 discriminator -- see header. Not independently
+  -- meaningful; fully constrained by the two composite FKs below.
+  valuation_question_id             UUID NOT NULL,
 
   member_status                     TEXT NOT NULL CHECK (member_status IN ('SELECTED', 'EXCLUDED')),
   -- Nullable -- only populated for EXCLUDED rows (a SELECTED row has no
@@ -175,11 +204,14 @@ CREATE TABLE market_population_member (
 
   recorded_at                          TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  -- MP-NP3: composite FK forces this row's observation_id to match the
-  -- SAME observation the cited applicability_id judged -- a member row
-  -- can never point at a judgment for a DIFFERENT observation than the
-  -- one it itself names.
-  FOREIGN KEY (applicability_id, observation_id) REFERENCES applicability (id, observation_id)
+  -- FK1 (N1/GK-192, population side) -- forces valuation_question_id to
+  -- match the SAME question the cited population itself answers.
+  FOREIGN KEY (market_population_id, valuation_question_id) REFERENCES market_population (id, valuation_question_id),
+  -- FK2 (MP-NP3 + N1/GK-192, judgment side) -- forces observation_id
+  -- AND valuation_question_id to match the SAME observation and
+  -- question the cited Applicability judgment actually judged, in one
+  -- 3-column composite FK.
+  FOREIGN KEY (applicability_id, observation_id, valuation_question_id) REFERENCES applicability (id, observation_id, question_id)
 );
 
 CREATE UNIQUE INDEX market_population_member_dedup_key ON market_population_member (market_population_id, observation_id);
