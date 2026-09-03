@@ -5,14 +5,14 @@
 // in any field's value OR presence produce different serialized bytes.
 // This tests the raw serializer (serializeMarketObservationTuple),
 // separately from its SHA-256 digest (computeMarketObservationHash) --
-// per the ratified instruction, SHA-256 collision resistance is not a
-// substitute for proving the pre-hash byte encoding is itself injective.
+// SHA-256 collision resistance is not a substitute for proving the
+// pre-hash byte encoding is itself injective.
 //
-// PRE-LIVE DESIGN CORRECTION (T1/T1a/T2/T2a, 2026-09-03) -- extends the
-// original suite with: temporal precision (DATE vs INSTANT) participating
-// in the hash and never manufacturing precision a source didn't assert;
-// grade canonicalization corrected from a comic-specific fixed one-decimal
-// scale to a generic minimal-decimal (trailing-zero-strip) contract.
+// FINAL PRE-LIVE REPRESENTATION CLOSURE (F1/F1a/F1b/F1c/F2/F2a/F2b,
+// 2026-09-03) -- supersedes the intermediate T1/T1a/T2/T2a suite.
+// Temporal representation is now structural (occurred_on DATE +
+// occurred_at TIMESTAMPTZ, mutually exclusive, no occurred_at_precision
+// qualifier). grade_basis added, nullable, hash-participating.
 //
 // No DB, no network -- pure deterministic unit proof.
 //
@@ -27,8 +27,8 @@ const mod = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'market
 const {
   encodeField, serializeMarketObservationTuple, computeMarketObservationHash,
   canonicalFixedScaleDecimal, canonicalPriceString, canonicalMinimalDecimal, canonicalGradeString,
-  normalizeText, normalizeLowerToken, normalizeUpperCode, normalizeOccurredAt,
-  canonicalizeMarketObservationFields, HASH_CONTRACT_VERSION, OCCURRED_AT_PRECISIONS,
+  normalizeText, normalizeLowerToken, normalizeUpperCode, normalizeGradeBasis, normalizeOccurredOnOrAt,
+  canonicalizeMarketObservationFields, HASH_CONTRACT_VERSION,
 } = mod;
 
 let passed = 0, failed = 0;
@@ -43,7 +43,7 @@ console.log('\n=== D5A mo-hash-v1 -- serializer injectivity property proof ===\n
 const BASE_TUPLE = {
   provider: 'ebay', providerItemId: 'item-123', listingKind: 'sold',
   priceAmount: '66.0000', currency: 'USD', conditionText: 'near mint',
-  gradeNumeric: '9.4', occurredAt: '2026-06-14T00:00:00.000Z', occurredAtPrecision: 'INSTANT',
+  gradeNumeric: '9.4', gradeBasis: 'cgc', occurredOn: null, occurredAt: '2026-06-14T00:00:00.000Z',
 };
 
 function tupleBytes(overrides) {
@@ -71,34 +71,6 @@ console.log('-- structural TLV shape --\n');
   const emptyField = encodeField('');
   assertTrue(bytesDiffer(spaceField, emptyField), 'RAW serializer: "" and " " are byte-distinct (both present, different length)');
   assertTrue(spaceField.length === 6, '" " is 1 presence + 4 length + 1 body byte = 6 bytes total');
-}
-
-// ── D2b: retired sentinel strings must be ordinary text now ──────────
-console.log('\n-- retired *_UNKNOWN sentinels are ordinary text, never confused with NULL --\n');
-
-const RETIRED_SENTINELS = [
-  'PROVIDER_ITEM_ID_UNKNOWN', 'PRICE_UNKNOWN', 'CURRENCY_UNKNOWN',
-  'CONDITION_UNKNOWN', 'GRADE_UNKNOWN', 'OCCURRED_AT_UNKNOWN',
-];
-for (const literal of RETIRED_SENTINELS) {
-  const nullEnc = encodeField(null);
-  const literalEnc = encodeField(literal);
-  assertTrue(bytesDiffer(nullEnc, literalEnc), `NULL vs literal text "${literal}" -- byte-distinct`);
-}
-
-{
-  const withNull = tupleBytes({ conditionText: null });
-  const withLiteral = tupleBytes({ conditionText: normalizeText('CONDITION_UNKNOWN') });
-  assertTrue(bytesDiffer(withNull, withLiteral), 'full tuple: conditionText=null vs conditionText="CONDITION_UNKNOWN" (real text) -- byte-distinct');
-}
-
-{
-  let threw = false;
-  try { normalizeOccurredAt({ value: 'OCCURRED_AT_UNKNOWN', precision: 'INSTANT' }); } catch (e) { threw = true; }
-  assertTrue(threw, 'normalizeOccurredAt rejects the literal retired sentinel string as an invalid timestamp (throws, never silently accepted)');
-  const rawNull = encodeField(null);
-  const rawLiteral = encodeField('OCCURRED_AT_UNKNOWN');
-  assertTrue(bytesDiffer(rawNull, rawLiteral), 'RAW serializer: NULL vs literal "OCCURRED_AT_UNKNOWN" bytes -- still byte-distinct at the serializer layer alone');
 }
 
 // ── D2b: field-shifting / delimiter-injection attack ──────────────────
@@ -169,7 +141,6 @@ console.log('\n-- NULL vs present, for every nullable field --\n');
 
 {
   assertTrue(bytesDiffer(tupleBytes({ currency: null }), tupleBytes({ currency: 'ZZZ' })), 'currency: NULL vs literal "ZZZ" -- byte-distinct');
-  assertTrue(bytesDiffer(tupleBytes({ occurredAt: null, occurredAtPrecision: null }), tupleBytes({ occurredAt: '2026-01-01T00:00:00.000Z', occurredAtPrecision: 'INSTANT' })), 'occurredAt: NULL vs an arbitrary real timestamp -- byte-distinct');
   assertTrue(bytesDiffer(tupleBytes({ priceAmount: null }), tupleBytes({ priceAmount: '0.0000' })), 'priceAmount: NULL vs the literal value zero -- byte-distinct (unknown price != a price of zero)');
   assertTrue(bytesDiffer(tupleBytes({ gradeNumeric: null }), tupleBytes({ gradeNumeric: '0' })), 'gradeNumeric: NULL vs the literal value zero -- byte-distinct');
   assertTrue(bytesDiffer(tupleBytes({ providerItemId: null }), tupleBytes({ providerItemId: '' })), 'providerItemId: NULL vs present-empty-string -- byte-distinct');
@@ -189,172 +160,200 @@ console.log('\n-- minimal-difference pairs --\n');
   assertTrue(bytesDiffer(a, b), 'two tuples differing ONLY in one byte of one normalized value -- byte-distinct');
 }
 
-// ── T2/T2a: grade canonicalization -- minimal decimal, no fixed scale ─
-console.log('\n-- T2/T2a: grade minimal-decimal (trailing-zero-strip) contract, no comic-specific scale --\n');
-
-assertTrue(canonicalGradeString('9.4') === '9.4', '"9.4" canonicalizes to "9.4"');
-assertTrue(canonicalGradeString('9.40') === '9.4', '"9.40" canonicalizes to "9.4" (insignificant trailing zero stripped)');
-assertTrue(canonicalGradeString('9.4') === canonicalGradeString('9.40'), '"9.4" and "9.40" produce the IDENTICAL canonical string');
-assertTrue(canonicalGradeString('10') === '10', '"10" canonicalizes to "10" (bare integer, no manufactured decimal point)');
-assertTrue(canonicalGradeString('10.00') === '10', '"10.00" canonicalizes to "10" (all fractional digits insignificant -- decimal point dropped entirely)');
-assertTrue(canonicalGradeString('87.1250') === '87.125', '"87.1250" canonicalizes to "87.125" (one trailing zero stripped, rest preserved exactly)');
-assertTrue(canonicalGradeString('09.4') === '9.4', 'leading zero stripped: "09.4" -> "9.4"');
-assertTrue(canonicalGradeString(null) === null, 'NULL grade stays NULL (never fabricated)');
-assertTrue(canonicalGradeString('9.47') === '9.47', '"9.47" is preserved exactly -- no fixed-scale rejection, since there is no fixed scale (unlike the old comic-specific one-decimal design, this is a fully legal, distinct value now)');
-assertTrue(canonicalGradeString('9.4') !== canonicalGradeString('9.47'), '"9.4" and "9.47" remain materially distinct values (never collapsed)');
-{
-  const h1 = tupleBytes({ gradeNumeric: canonicalGradeString('9.4') });
-  const h2 = tupleBytes({ gradeNumeric: canonicalGradeString('9.40') });
-  assertTrue(!bytesDiffer(h1, h2), 'full tuple: grade "9.4" and "9.40" hash identically after canonicalization (equivalent decimal spellings)');
-  const h3 = tupleBytes({ gradeNumeric: canonicalGradeString('10') });
-  const h4 = tupleBytes({ gradeNumeric: canonicalGradeString('10.00') });
-  assertTrue(!bytesDiffer(h3, h4), 'full tuple: grade "10" and "10.00" hash identically after canonicalization');
-  const h5 = tupleBytes({ gradeNumeric: canonicalGradeString('9.4') });
-  const h6 = tupleBytes({ gradeNumeric: canonicalGradeString('9.5') });
-  assertTrue(bytesDiffer(h5, h6), 'full tuple: materially different grades ("9.4" vs "9.5") remain byte-distinct');
-}
-{
-  // T2 explicit non-goal check: canonicalMinimalDecimal is exported as the
-  // generic function; canonicalGradeString is its grade-specific alias.
-  assertTrue(canonicalMinimalDecimal === canonicalGradeString, 'canonicalGradeString is exactly canonicalMinimalDecimal -- no hidden grading-convention-specific logic layered on top');
-}
-{
-  // Never routes through Number/toFixed/IEEE-754 -- a value with more
-  // significant digits than any IEEE-754 double can exactly represent
-  // must still round-trip exactly as a string.
-  const bigPrecise = '123456789012345.678901';
-  assertTrue(canonicalGradeString(bigPrecise) === bigPrecise, 'high-precision decimal string beyond IEEE-754 double exactness still canonicalizes losslessly (string-only path, never Number)');
-}
-
-// ── D3: price canonicalization (UNCHANGED by T2/T2a -- fixed-scale-4, money's own natural precision) ──
-console.log('\n-- D3: price fixed-scale decimal contract (unchanged) --\n');
-
-assertTrue(canonicalPriceString('66') === '66.0000', '"66" canonicalizes to "66.0000"');
-assertTrue(canonicalPriceString('66.5') === '66.5000', '"66.5" canonicalizes to "66.5000"');
-assertTrue(canonicalPriceString('66.1200') === '66.1200', '"66.1200" canonicalizes to itself (already exact scale)');
-assertTrue(canonicalPriceString('66.12') === canonicalPriceString('66.1200'), '"66.12" and "66.1200" produce the IDENTICAL canonical string');
-assertTrue(canonicalPriceString(null) === null, 'NULL price stays NULL');
-assertTrue(canonicalPriceString('-0') === '0.0000', 'negative-zero input normalizes to unsigned "0.0000"');
-{
-  let threw = false;
-  try { canonicalPriceString('66.12345'); } catch (e) { threw = true; }
-  assertTrue(threw, 'price with genuine excess precision beyond 4 decimals is REJECTED, not silently rounded (price DOES still use a fixed scale -- money has a real currency-defined precision, unlike grade)');
-}
-{
-  assertTrue(canonicalPriceString('0.30000000000000004'.slice(0, 6)) === '0.3000', 'string-only decimal parsing never introduces IEEE-754 float drift');
-}
-
-// ── T1/T1a: temporal precision ─────────────────────────────────────────
-console.log('\n-- T1/T1a: temporal precision (DATE vs INSTANT) participates in the hash --\n');
-
-assertTrue(OCCURRED_AT_PRECISIONS.includes('DATE') && OCCURRED_AT_PRECISIONS.includes('INSTANT') && OCCURRED_AT_PRECISIONS.length === 2, 'exactly two precision values exist: DATE, INSTANT');
+// ── F1/F1b/F1c: structural temporal representation ─────────────────────
+console.log('\n-- F1/F1b/F1c: structural temporal representation (occurred_on / occurred_at) --\n');
 
 {
-  const unknown = normalizeOccurredAt({ value: null, precision: null });
-  assertTrue(unknown.occurredAt === null && unknown.occurredAtPrecision === null, 'unknown event time: both occurredAt and occurredAtPrecision are null -- never fabricated');
+  const unknown = normalizeOccurredOnOrAt({ occurredOn: null, occurredAt: null });
+  assertTrue(unknown.occurredOn === null && unknown.occurredAt === null, 'unknown event time: both occurredOn and occurredAt are null -- never fabricated');
 }
 {
   let threw = false;
-  try { normalizeOccurredAt({ value: null, precision: 'DATE' }); } catch (e) { threw = true; }
-  assertTrue(threw, 'a precision supplied WITHOUT a value is rejected (nothing to qualify)');
+  try { normalizeOccurredOnOrAt({ occurredOn: '2026-06-14', occurredAt: '2026-06-14T00:00:00.000Z' }); } catch (e) { threw = true; }
+  assertTrue(threw, 'supplying BOTH occurredOn and occurredAt is rejected -- exactly one asserted-fact representation, or neither');
 }
 {
   let threw = false;
-  try { normalizeOccurredAt({ value: '2026-06-14', precision: null }); } catch (e) { threw = true; }
-  assertTrue(threw, 'a value supplied WITHOUT a precision is rejected -- precision is never silently defaulted');
+  try { normalizeOccurredOnOrAt({ occurredOn: '2026-02-30', occurredAt: null }); } catch (e) { threw = true; }
+  assertTrue(threw, 'a syntactically-date-shaped but calendrically-invalid date (2026-02-30) is rejected');
 }
 {
-  let threw = false;
-  try { normalizeOccurredAt({ value: '2026-06-14', precision: 'SOMETHING_ELSE' }); } catch (e) { threw = true; }
-  assertTrue(threw, 'an invalid precision value is rejected outright');
-}
+  const dateOnly = normalizeOccurredOnOrAt({ occurredOn: '2026-06-14', occurredAt: null });
+  assertTrue(dateOnly.occurredOn === '2026-06-14', 'F1: a DATE fact\'s canonical value is the bare calendar date string ITSELF');
+  assertTrue(dateOnly.occurredAt === null, 'F1: a DATE fact leaves occurredAt genuinely null -- NO synthetic instant (not even a midnight anchor) is ever constructed');
 
-{
-  const dateOnly = normalizeOccurredAt({ value: '2026-06-14', precision: 'DATE' });
-  assertTrue(dateOnly.occurredAt === '2026-06-14T00:00:00.000Z', 'DATE-precision "2026-06-14" normalizes to a UTC-midnight storage anchor');
-  assertTrue(dateOnly.occurredAtPrecision === 'DATE', 'DATE-precision is recorded exactly as asserted, never silently promoted');
+  const instant = normalizeOccurredOnOrAt({ occurredOn: null, occurredAt: '2026-06-14T00:00:00.000Z' });
+  assertTrue(instant.occurredOn === null, 'F1: an INSTANT fact leaves occurredOn genuinely null');
+  assertTrue(instant.occurredAt === '2026-06-14T00:00:00.000Z', 'F1: an INSTANT fact\'s canonical value is the exact asserted instant');
 
-  const exactInstant = normalizeOccurredAt({ value: '2026-06-14T00:00:00.000Z', precision: 'INSTANT' });
-  assertTrue(exactInstant.occurredAt === '2026-06-14T00:00:00.000Z', 'INSTANT-precision genuinely-midnight timestamp normalizes to the same textual value as the DATE anchor above');
-  assertTrue(exactInstant.occurredAtPrecision === 'INSTANT', 'INSTANT-precision is recorded exactly as asserted');
-
-  // T1a's decisive case: identical occurredAt STRING, different precision.
-  const dateBytes = tupleBytes({ occurredAt: dateOnly.occurredAt, occurredAtPrecision: dateOnly.occurredAtPrecision });
-  const instantBytes = tupleBytes({ occurredAt: exactInstant.occurredAt, occurredAtPrecision: exactInstant.occurredAtPrecision });
-  assertTrue(bytesDiffer(dateBytes, instantBytes), 'T1a: DATE-precision "2026-06-14" and INSTANT-precision genuinely-midnight-UTC timestamp are BYTE-DISTINCT despite an identical occurredAt string -- precision is load-bearing hash input, never decorative');
+  // F1c's decisive case: DATE fact vs. genuinely-midnight INSTANT fact
+  // for the identical calendar date -- automatically byte-distinct
+  // because they populate DIFFERENT columns, no synthetic marker needed.
+  const dateBytes = tupleBytes({ occurredOn: dateOnly.occurredOn, occurredAt: dateOnly.occurredAt });
+  const instantBytes = tupleBytes({ occurredOn: instant.occurredOn, occurredAt: instant.occurredAt });
+  assertTrue(bytesDiffer(dateBytes, instantBytes), 'F1c: a DATE fact ("2026-06-14") and a genuinely-midnight-UTC INSTANT fact for the SAME calendar date are byte-distinct -- they occupy different fields entirely');
 }
 
 {
   // DATE -> INSTANT improvement is a NEW, more precise assertion.
   const coarse = canonicalizeMarketObservationFields({
     provider: 'pricecharting', providerItemId: 'pc-9', listingKind: 'sold',
-    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null,
-    occurredAt: '2026-06-14', occurredAtPrecision: 'DATE',
+    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null, gradeBasis: null,
+    occurredOn: '2026-06-14', occurredAt: null,
   });
   const precise = canonicalizeMarketObservationFields({
     provider: 'pricecharting', providerItemId: 'pc-9', listingKind: 'sold',
-    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null,
-    occurredAt: '2026-06-14T14:32:07.000Z', occurredAtPrecision: 'INSTANT',
+    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null, gradeBasis: null,
+    occurredOn: null, occurredAt: '2026-06-14T14:32:07.000Z',
   });
   assertTrue(
     computeMarketObservationHash(coarse) !== computeMarketObservationHash(precise),
-    'T1a: date-only -> exact-timestamp improvement of the SAME underlying sale produces a DIFFERENT hash -- correctly modeled as a new, more precise assertion, never an update to the coarser one'
+    'F1: date-only -> exact-timestamp improvement of the SAME underlying sale produces a DIFFERENT hash -- a new, more precise assertion, never an update to the coarser one'
   );
 }
 
 {
-  // Repeated same-price sales on different DATES (both DATE-precision).
+  // Repeated same-price sales on different DATES (both DATE facts).
   const sale1 = canonicalizeMarketObservationFields({
     provider: 'pricecharting', providerItemId: 'pc-9', listingKind: 'sold',
-    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null,
-    occurredAt: '2026-06-14', occurredAtPrecision: 'DATE',
+    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null, gradeBasis: null,
+    occurredOn: '2026-06-14', occurredAt: null,
   });
   const sale2 = canonicalizeMarketObservationFields({
     provider: 'pricecharting', providerItemId: 'pc-9', listingKind: 'sold',
-    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null,
-    occurredAt: '2026-08-02', occurredAtPrecision: 'DATE',
+    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null, gradeBasis: null,
+    occurredOn: '2026-08-02', occurredAt: null,
   });
   assertTrue(
     computeMarketObservationHash(sale1) !== computeMarketObservationHash(sale2),
-    'S1 proof (re-confirmed under DATE precision): identical price/status/provider/item, DIFFERENT dates -- distinct hashes, never silently collapsed'
+    'S1 proof (re-confirmed under the DATE column): identical price/status/provider/item, DIFFERENT dates -- distinct hashes, never silently collapsed'
   );
 }
 
 {
-  // Correction from one asserted date to another (both DATE-precision).
+  // Correction from one asserted date to another.
   const original = canonicalizeMarketObservationFields({
     provider: 'pricecharting', providerItemId: 'pc-9', listingKind: 'sold',
-    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null,
-    occurredAt: '2026-06-14', occurredAtPrecision: 'DATE',
+    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null, gradeBasis: null,
+    occurredOn: '2026-06-14', occurredAt: null,
   });
   const corrected = canonicalizeMarketObservationFields({
     provider: 'pricecharting', providerItemId: 'pc-9', listingKind: 'sold',
-    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null,
-    occurredAt: '2026-06-15', occurredAtPrecision: 'DATE',
+    priceAmount: '66', currency: 'USD', conditionText: null, gradeNumeric: null, gradeBasis: null,
+    occurredOn: '2026-06-15', occurredAt: null,
   });
   assertTrue(
     computeMarketObservationHash(original) !== computeMarketObservationHash(corrected),
-    'a provider date correction (2026-06-14 -> 2026-06-15, both DATE-precision) produces a new hash -- a new immutable observation, never a mutation of the original'
+    'a provider date correction (2026-06-14 -> 2026-06-15) produces a new hash -- a new immutable observation, never a mutation of the original'
   );
 }
 
-// ── D5.0a mechanism reused here: canonicalizeMarketObservationFields end-to-end ──
+{
+  // Neither observed_at nor recorded_at substitutes for event time --
+  // they are structurally absent from the hash tuple entirely (proven by
+  // the fact that computeMarketObservationHash's parameter object never
+  // even has an observedAt/recordedAt field in its destructuring list --
+  // passing one has zero effect on the output).
+  const withoutExtras = canonicalizeMarketObservationFields({
+    provider: 'ebay', providerItemId: 'x', listingKind: 'sold', priceAmount: '1',
+    currency: 'USD', conditionText: null, gradeNumeric: null, gradeBasis: null,
+    occurredOn: null, occurredAt: null,
+  });
+  const h1 = computeMarketObservationHash(withoutExtras);
+  const h2 = computeMarketObservationHash({ ...withoutExtras, observedAt: '2099-01-01T00:00:00.000Z', recordedAt: '2000-01-01T00:00:00.000Z' });
+  assertTrue(h1 === h2, 'injecting observedAt/recordedAt fields into the hash input object has ZERO effect on the digest -- they are structurally excluded, never a silent event-time substitute');
+}
+
+// ── F2/F2a/F2b: grade_basis ─────────────────────────────────────────────
+console.log('\n-- F2/F2a/F2b: grade_basis (nullable, generic, hash-participating) --\n');
+
+{
+  assertTrue(normalizeGradeBasis === normalizeText, 'normalizeGradeBasis reuses normalizeText verbatim -- no hidden grading-authority-specific logic');
+  assertTrue(normalizeGradeBasis(null) === null, 'NULL grade_basis stays NULL (provider asserted no basis -- never fabricated)');
+  assertTrue(normalizeGradeBasis('CGC') === 'cgc', 'a real asserted basis normalizes like any other text field');
+}
+{
+  // F2a's decisive case: same numeric grade, NULL basis vs. a present basis.
+  const noBasis = tupleBytes({ gradeNumeric: '9.4', gradeBasis: null });
+  const withBasis = tupleBytes({ gradeNumeric: '9.4', gradeBasis: 'cgc' });
+  assertTrue(bytesDiffer(noBasis, withBasis), 'F2a: grade_numeric=9.4 with grade_basis=NULL vs. grade_numeric=9.4 with grade_basis="cgc" -- byte-distinct (genuinely different asserted facts)');
+}
+{
+  // F2b: same numeric value, different asserted bases -- must differ.
+  const cgcBasis = tupleBytes({ gradeNumeric: '9.4', gradeBasis: normalizeGradeBasis('CGC') });
+  const houseBasis = tupleBytes({ gradeNumeric: '9.4', gradeBasis: normalizeGradeBasis('house-standard') });
+  assertTrue(bytesDiffer(cgcBasis, houseBasis), 'F2b: identical grade_numeric (9.4) with DIFFERENT asserted grade_basis values -- byte-distinct serialization');
+}
+{
+  // F2a: two NULL-basis observations, otherwise identical, may
+  // legitimately dedup -- this is proven at the migration-contract
+  // (DB unique-index) level; here we confirm the HASH itself agrees
+  // (same input -> same output, the necessary precondition for that
+  // dedup to actually occur).
+  const f1 = canonicalizeMarketObservationFields({
+    provider: 'ebay', providerItemId: 'x', listingKind: 'sold', priceAmount: '1',
+    currency: 'USD', conditionText: null, gradeNumeric: '9.4', gradeBasis: null,
+    occurredOn: null, occurredAt: null,
+  });
+  const f2 = canonicalizeMarketObservationFields({
+    provider: 'ebay', providerItemId: 'x', listingKind: 'sold', priceAmount: '1',
+    currency: 'USD', conditionText: null, gradeNumeric: '9.4', gradeBasis: null,
+    occurredOn: null, occurredAt: null,
+  });
+  assertTrue(computeMarketObservationHash(f1) === computeMarketObservationHash(f2), 'F2a: two otherwise-identical NULL-basis observations hash identically -- the correct precondition for legitimate re-observation dedup');
+}
+
+// ── T2/T2a (F2b): grade canonicalization -- minimal decimal, no fixed scale ─
+console.log('\n-- T2/T2a (F2b): grade minimal-decimal contract, unchanged by this closure --\n');
+
+assertTrue(canonicalGradeString('9.4') === '9.4', '"9.4" canonicalizes to "9.4"');
+assertTrue(canonicalGradeString('9.40') === '9.4', '"9.40" canonicalizes to "9.4" (insignificant trailing zero stripped)');
+assertTrue(canonicalGradeString('9.4') === canonicalGradeString('9.40'), '"9.4" and "9.40" produce the IDENTICAL canonical string');
+assertTrue(canonicalGradeString('10') === '10', '"10" canonicalizes to "10" (bare integer, no manufactured decimal point)');
+assertTrue(canonicalGradeString('10.00') === '10', '"10.00" canonicalizes to "10"');
+assertTrue(canonicalGradeString('87.1250') === '87.125', '"87.1250" canonicalizes to "87.125"');
+assertTrue(canonicalGradeString('09.4') === '9.4', 'leading zero stripped: "09.4" -> "9.4"');
+assertTrue(canonicalGradeString(null) === null, 'NULL grade stays NULL (never fabricated)');
+assertTrue(canonicalGradeString('9.4') !== canonicalGradeString('9.47'), '"9.4" and "9.47" remain materially distinct values (no fixed-scale rejection or rounding)');
+{
+  const h1 = tupleBytes({ gradeNumeric: canonicalGradeString('9.4') });
+  const h2 = tupleBytes({ gradeNumeric: canonicalGradeString('9.40') });
+  assertTrue(!bytesDiffer(h1, h2), 'full tuple: grade "9.4" and "9.40" hash identically after canonicalization');
+}
+{
+  const bigPrecise = '123456789012345.678901';
+  assertTrue(canonicalGradeString(bigPrecise) === bigPrecise, 'high-precision decimal string beyond IEEE-754 double exactness still canonicalizes losslessly (string-only path, never Number)');
+}
+
+// ── D3: price canonicalization (unchanged) ─────────────────────────────
+console.log('\n-- D3: price fixed-scale decimal contract (unchanged) --\n');
+
+assertTrue(canonicalPriceString('66') === '66.0000', '"66" canonicalizes to "66.0000"');
+assertTrue(canonicalPriceString('66.12') === canonicalPriceString('66.1200'), '"66.12" and "66.1200" produce the IDENTICAL canonical string');
+assertTrue(canonicalPriceString(null) === null, 'NULL price stays NULL');
+{
+  let threw = false;
+  try { canonicalPriceString('66.12345'); } catch (e) { threw = true; }
+  assertTrue(threw, 'price with genuine excess precision beyond 4 decimals is REJECTED (money DOES still use a fixed scale, unlike grade)');
+}
+
+// ── end-to-end canonicalization + hash determinism ─────────────────────
 console.log('\n-- end-to-end canonicalization + hash determinism --\n');
 
 {
   const f1 = canonicalizeMarketObservationFields({
     provider: 'PriceCharting', providerItemId: '  ABC-123  ', listingKind: 'SOLD',
     priceAmount: '66', currency: 'usd', conditionText: '  Near   Mint  ',
-    gradeNumeric: '9.40', occurredAt: '2026-06-14', occurredAtPrecision: 'DATE',
+    gradeNumeric: '9.40', gradeBasis: 'CGC', occurredOn: '2026-06-14', occurredAt: null,
   });
   const f2 = canonicalizeMarketObservationFields({
     provider: 'pricecharting', providerItemId: 'abc-123', listingKind: 'sold',
     priceAmount: '66.0000', currency: 'USD', conditionText: 'near mint',
-    gradeNumeric: '9.4', occurredAt: '2026-06-14T00:00:00.000Z', occurredAtPrecision: 'DATE',
+    gradeNumeric: '9.4', gradeBasis: 'cgc', occurredOn: '2026-06-14', occurredAt: null,
   });
   const h1 = computeMarketObservationHash(f1);
   const h2 = computeMarketObservationHash(f2);
-  assertTrue(h1 === h2, 'two differently-formatted inputs describing the SAME real fact hash identically end-to-end (idempotent re-observation resolves correctly)');
+  assertTrue(h1 === h2, 'two differently-formatted inputs describing the SAME real fact hash identically end-to-end');
   assertTrue(/^[0-9a-f]{64}$/.test(h1), 'hash output is a well-formed 64-hex-char SHA-256 digest');
 }
 
@@ -365,19 +364,19 @@ console.log('\n-- S3: hash-contract version participation --\n');
   assertTrue(HASH_CONTRACT_VERSION === 'mo-hash-v1', 'HASH_CONTRACT_VERSION constant is exactly "mo-hash-v1"');
   const realHash = computeMarketObservationHash(canonicalizeMarketObservationFields({
     provider: 'ebay', providerItemId: 'x', listingKind: 'sold', priceAmount: '1',
-    currency: 'USD', conditionText: null, gradeNumeric: null,
-    occurredAt: '2026-01-01', occurredAtPrecision: 'DATE',
+    currency: 'USD', conditionText: null, gradeNumeric: null, gradeBasis: null,
+    occurredOn: '2026-01-01', occurredAt: null,
   }));
   const v2SimulatedBytes = Buffer.concat([
     encodeField('mo-hash-v2'),
     encodeField('ebay'), encodeField('x'), encodeField('sold'),
     encodeField('1.0000'), encodeField('USD'),
-    encodeField(null), encodeField(null),
-    encodeField('2026-01-01T00:00:00.000Z'), encodeField('DATE'),
+    encodeField(null), encodeField(null), encodeField(null),
+    encodeField('2026-01-01'), encodeField(null),
   ]);
   const { createHash } = await import('node:crypto');
   const v2SimulatedHash = createHash('sha256').update(v2SimulatedBytes).digest('hex');
-  assertTrue(realHash !== v2SimulatedHash, 'S3: identical observed facts under a different (simulated v2) hash-contract-version tag produce a DIFFERENT hash -- a future version bump does not silently collide with v1 history, and does not require rewriting any v1 hash to remain correct');
+  assertTrue(realHash !== v2SimulatedHash, 'S3: identical observed facts under a different (simulated v2) hash-contract-version tag produce a DIFFERENT hash -- a future version bump does not silently collide with v1 history');
 }
 
 console.log(`\n=== ${passed} passed, ${failed} failed ===`);

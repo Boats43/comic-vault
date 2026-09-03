@@ -28,25 +28,19 @@
 -- third party, independently of whether GrailKey ever queries it, and
 -- its relevance to zero, one, or many gkAssetIds is a JUDGMENT
 -- (Applicability, D5B), never a fact the observation itself carries.
--- Writing asset_id here, even nullable, would create a standing
--- temptation to skip Applicability and stamp an asset relationship
--- directly at observation-creation time -- removing the column makes
--- that architecturally impossible, not merely discouraged.
 --
--- A2/S1-S3 (D5A dispatch + D5A semantic closure, 2026-09-03) --
--- content_hash follows its OWN canonical contract (mo-hash-v1,
--- src/lib/marketObservationHash.js), deliberately diverging from
--- comp_snapshot.content_hash's reused-but-fragile plain-JSON.stringify
--- approach (verified not actually canonical -- caller object key order,
--- unversioned). mo-hash-v1's tuple is: version tag, provider,
+-- A2/S1-S3/F1-F2 (D5A dispatch, D5A semantic closure, and this FINAL
+-- PRE-LIVE REPRESENTATION CLOSURE, all 2026-09-03) -- content_hash
+-- follows its OWN canonical contract (mo-hash-v1, src/lib/
+-- marketObservationHash.js), deliberately diverging from comp_snapshot.
+-- content_hash's reused-but-fragile plain-JSON.stringify approach
+-- (verified not actually canonical -- caller object key order,
+-- unversioned). mo-hash-v1's final tuple is: version tag, provider,
 -- provider_item_id, listing_kind, price_amount, currency,
--- condition_text, grade_numeric, occurred_at, occurred_at_precision --
--- observed_at/recorded_at/id/recorded_by_principal_id/correlation_id/
+-- condition_text, grade_numeric, grade_basis, occurred_on, occurred_at
+-- -- observed_at/recorded_at/id/recorded_by_principal_id/correlation_id/
 -- raw_payload/content_hash itself NEVER participate (provenance/timing
--- metadata, not observed market fact). occurred_at's inclusion is a
--- deliberate, load-bearing correction (S1): two distinct real market
--- events (e.g. two PriceCharting sales at the identical price on
--- different dates) must never silently collapse into one row via dedup.
+-- metadata, not observed market fact).
 --
 -- A2a -- provider_item_id stays plain nullable TEXT, no reserved
 -- sentinel (deliberately diverges from D4 Ruling 13's issuing_authority
@@ -62,66 +56,106 @@
 -- at the adapter boundary (not built here), never encoded into this
 -- schema.
 --
--- T1/T1a (PRE-LIVE DESIGN CORRECTION, 2026-09-03) -- occurred_at gained
--- a sibling, occurred_at_precision ('DATE'|'INSTANT'). The original
--- draft silently coerced a date-only source fact ("2026-06-14") into a
--- full instant ("2026-06-14T00:00:00.000Z") -- manufacturing a
--- precision (midnight, specifically) no third-party source ever
--- asserted. occurred_at_precision now records exactly what WAS
--- asserted; occurred_at's own TIMESTAMPTZ value is a storage anchor
--- ONLY when precision='DATE' (UTC midnight), never to be read as "the
--- event happened at midnight" without checking precision first. Both
--- columns participate in mo-hash-v1 (T1a) -- a date-only fact and a
--- genuinely-midnight-UTC exact instant are DIFFERENT observations even
--- though their stored TIMESTAMPTZ value is textually identical; a later
--- improvement from date-only to an exact timestamp is correctly a NEW,
--- more precise assertion (new hash), never an update to the coarser one.
+-- F1/F1b (FINAL PRE-LIVE REPRESENTATION CLOSURE, 2026-09-03 -- supersedes
+-- the intermediate T1/T1a occurred_at_precision draft entirely) -- a
+-- prior draft fixed HASH semantics for date-only facts but still
+-- physically STORED a manufactured midnight instant
+-- ("2026-06-14T00:00:00.000Z") for a source that asserted only a
+-- calendar date, with a separate qualifier column saying so. That is
+-- insufficient: a schema must prevent the accidental interpretation of
+-- a synthetic midnight as a real event time, not merely annotate it
+-- after the fact. Temporal representation is now fully structural:
+-- TWO independent nullable columns, occurred_on (DATE) and occurred_at
+-- (TIMESTAMPTZ). Presence alone is the discriminator -- both NULL =
+-- event time unknown; occurred_on populated alone = a DATE fact (the
+-- source asserted a calendar date only, no time-of-day, and the
+-- canonical value is the bare date itself -- NO instant, synthetic or
+-- otherwise, is ever constructed or stored for this case); occurred_at
+-- populated alone = an INSTANT fact (the source asserted a specific
+-- point in time). Both populated is REJECTED by the CHECK below --
+-- exactly one asserted-fact representation, or neither, never both.
+-- occurred_at_precision (the prior draft's qualifier column) is REMOVED
+-- entirely -- under this two-column model it would be a second,
+-- independently-mutable source of truth for information already fully
+-- determined by column presence; no additional semantic survives its
+-- removal that cannot be derived from which of the two columns is
+-- non-null.
 --
--- T1b -- deliberate asymmetry, recorded explicitly: D3.2's occurred_at
--- on the seven asset-kernel event tables (db/data0/0011) carries NO
--- precision qualifier, and this is intentional, not an oversight to
--- retrofit. Those are operator/system-asserted events, generated within
--- GrailKey's own event semantics -- there is no partial-precision
--- third-party report to preserve. MarketObservation's occurred_at is
--- fundamentally different: third-party-reported evidence that may
--- arrive as only a partial temporal fact. Do not add occurred_at_
--- precision to 0011's seven tables merely for schema consistency.
+-- F1a -- observed_at means EXACTLY ONE THING: the timestamp of the
+-- actual upstream provider retrieval that produced the payload/facts
+-- being persisted. It must NEVER mean cache-read time, persistence
+-- time, request-handling time, or enrichment-completion time.
+-- PriceCharting's own HTML scrape is cached up to 7 days
+-- (api/kv-cache.js:147, KV_TTL.PC_HTML=604800) -- if a future writer
+-- stamped observed_at=now() at PERSISTENCE time on a cache-hit path, it
+-- would manufacture up to 7 days of false freshness. This is not yet a
+-- live hazard (confirmed: api/kv-cache.js's kvGet/kvSet store and
+-- return only the raw cached value today, api/kv-cache.js:60-90 -- no
+-- fetch-timestamp metadata travels with a cached entry at all, so
+-- nothing currently claims to solve this). Logged as **GK-184**: before
+-- any rights-gated production capture (D5D) is enabled, the provider
+-- retrieval timestamp must be threaded through the cache layer itself
+-- (stored alongside the cached payload, returned on every cache hit)
+-- so that observed_at is always sourced from the ORIGINAL fetch, never
+-- fabricated at persistence time. No cache/adapter wiring is built by
+-- this migration -- schema only. recorded_at remains GrailKey's own
+-- persistence time, independent of observed_at exactly as before.
 --
--- T2/T2a (PRE-LIVE DESIGN CORRECTION, 2026-09-03) -- grade_numeric is
--- NUMERIC(12, 6), NOT NUMERIC(3, 1). The original NUMERIC(3,1) choice
--- was justified by CGC/CBCS's one-decimal grading convention --
--- vertical leakage into a table whose entire purpose is to stay
--- provider-neutral AND asset-class-neutral. NUMERIC(12,6)'s bound is
--- chosen purely for generic database/domain safety (enough headroom for
--- any realistic observed numeric grade/condition-index across any
--- conceivable asset class, while still catching pathological/malformed
--- input) -- it names no grading convention and requires no future
--- vertical to migrate this schema merely because its own grading
--- precision differs from a comic's. Canonicalization is likewise
--- generic: canonicalMinimalDecimal (src/lib/marketObservationHash.js)
--- strips only insignificant trailing fractional zeros -- no fixed-scale
--- padding, unlike price_amount above (money has a real, currency-defined
--- natural precision; a numeric grade/condition-index does not have one
--- universal natural precision across verticals, so the two fields use
--- deliberately different canonicalization strategies).
+-- F1c -- both occurred_on and occurred_at participate in mo-hash-v1 as
+-- two independent fields (src/lib/marketObservationHash.js). This makes
+-- "DATE fact" and "genuinely-midnight-UTC INSTANT fact for the same
+-- calendar date" automatically byte-distinct -- they populate different
+-- columns entirely, so no synthetic marker is needed to tell them apart
+-- the way occurred_at_precision previously had to.
 --
--- T2b -- grade_numeric alone is a KNOWN, DISCLOSED, DEFERRED semantic
--- gap, not silently accepted as complete: a bare "9.4" does not itself
--- record what scale/authority asserted it (CGC's 10-point scale? a
--- 100-point condition index? a 5-star rating normalized to decimal?).
--- Today this is masked because every provider actually integrated in
--- this codebase (eBay, PriceCharting) empirically reports grades on the
--- same implicit CGC/CBCS-derived scale -- but that is an observed
--- current fact about today's two providers, never a schema guarantee.
--- Temporary safety property, real and proven (see the migration-contract
--- test): `provider` is part of BOTH the dedup unique index and the hash
--- tuple, so two DIFFERENT providers can never collide even if their
--- grade scales differ. NOT protected: a single provider later reporting
--- grades on two genuinely different sub-scales of its own. Logged as
--- GK-183 (not yet committed to docs/TICKET-REGISTRY.md this pass -- no
--- explicit docs-write authorization in this dispatch); a grade_scale/
--- grading_authority qualifier, if ever added, MUST participate in
--- mo-hash-v1.
+-- F1d -- deliberate asymmetry, recorded explicitly: D3.2's occurred_at
+-- on the seven asset-kernel event tables (db/data0/0011) carries no
+-- partial-precision representation, and this is intentional, not an
+-- oversight to retrofit. Those are operator/system-asserted events,
+-- generated within GrailKey's own event semantics -- there is no
+-- partial-precision third-party report to preserve. MarketObservation's
+-- temporal fields are fundamentally different: third-party-reported
+-- evidence that may arrive as only a partial temporal fact. Do not
+-- retrofit occurred_on onto 0011's seven tables merely for consistency.
+--
+-- T2/T2a (unchanged by this closure) -- grade_numeric is NUMERIC(12,6),
+-- NOT a comic-specific fixed one-decimal scale. The bound is chosen
+-- purely for generic database/domain safety, naming no grading
+-- convention. Canonicalization (canonicalMinimalDecimal, src/lib/
+-- marketObservationHash.js) strips only insignificant trailing
+-- fractional zeros -- no fixed-scale padding, unlike price_amount
+-- above (money has a real, currency-defined natural precision; a
+-- numeric grade/condition-index does not have one universal natural
+-- precision across verticals).
+--
+-- F2/F2a/F2b (FINAL PRE-LIVE REPRESENTATION CLOSURE, 2026-09-03 --
+-- closes the T2b-disclosed gap directly rather than deferring it) --
+-- grade_basis added: a nullable, generic, source-asserted qualifier
+-- (e.g. whatever string a provider's own page/API names its scale as).
+-- Never invented, inferred, or defaulted by GrailKey; no hardcoded
+-- CGC/CBCS vocabulary anywhere in this schema. Participates in
+-- mo-hash-v1. F2a: a grade with NO asserted basis (grade_basis IS NULL)
+-- is a genuinely different, distinct fact from the identical numeric
+-- grade WITH an asserted basis -- presence-tagged hash serialization
+-- makes this automatic, proven live (see the migration-contract test).
+-- Two observations from the same provider with an identical
+-- grade_numeric, both with grade_basis IS NULL, and otherwise identical
+-- facts, MAY legitimately deduplicate -- that is the correct behavior,
+-- not a defect: GrailKey preserves exactly the absence the provider
+-- itself asserted, rather than inventing a distinction the source never
+-- made.
+--
+-- F2 (residual, disclosed, not silently accepted as fully closed) --
+-- grade_basis being NULLABLE is semantically correct (F2a), but it
+-- means a single provider that reports on two genuinely different
+-- numeric sub-scales of its OWN, without ever disclosing which, is
+-- still not protected by schema alone (the DEDUP-across-providers
+-- hazard T2b originally named IS now closed: provider already
+-- participates in the unique index and hash tuple, proven live).
+-- Logged as **GK-183** (narrowed from T2b's original, now-resolved
+-- finding): the residual is specifically single-provider,
+-- multi-sub-scale, NULL-basis ambiguity, not the original
+-- zero-qualifier gap.
 --
 -- A3 -- raw_payload is nullable and rights-gated at the SERVICE/adapter
 -- call layer (not built here), never by a schema column -- this table
@@ -193,29 +227,28 @@ CREATE TABLE market_observation (
   -- scale (see the header). Canonicalized via canonicalMinimalDecimal,
   -- never a fixed-scale pad.
   grade_numeric              NUMERIC(12, 6),
+  -- F2/F2a/F2b -- nullable, generic, source-asserted qualifier for
+  -- grade_numeric. NULL means the source asserted no basis -- preserved
+  -- exactly, never invented (see the header for the full rule).
+  grade_basis                TEXT,
 
-  -- Three-axis time (G7/S1, ratified): occurred_at is the asserted
-  -- real-world market-event time -- nullable, never inferred, never
-  -- defaulted from observed_at or recorded_at. observed_at is when
-  -- GrailKey/the provider's retrieval actually fetched this evidence --
-  -- always known (the retrieval itself happened), NOT NULL. recorded_at
-  -- is GrailKey's own persistence time -- always known, NOT NULL
-  -- DEFAULT now(). No CHECK constraint relates any of the three to each
-  -- other -- backdated/future-dated/out-of-order values are all
+  -- F1/F1a/F1b/F1c -- structural temporal representation. Exactly one
+  -- of occurred_on/occurred_at may be populated (or neither); the CHECK
+  -- below rejects both-populated. NO synthetic instant is ever
+  -- manufactured for a date-only fact -- occurred_on's canonical value
+  -- is the bare calendar date itself. observed_at is the actual
+  -- upstream PROVIDER RETRIEVAL time (see the header, F1a) -- never
+  -- cache-read/persistence/request-handling/enrichment-completion time
+  -- -- always known (a retrieval genuinely happened), NOT NULL.
+  -- recorded_at is GrailKey's own persistence time -- always known,
+  -- NOT NULL DEFAULT now(), independent of observed_at. No CHECK
+  -- constraint relates occurred_on/occurred_at to observed_at/
+  -- recorded_at -- backdated/future-dated/out-of-order values are all
   -- structurally legal, matching Law 3's already-ratified precedent
   -- (db/data0/0011_d3_2_event_time.sql).
-  --
-  -- T1/T1a -- occurred_at_precision records exactly what the source
-  -- asserted ('DATE' = a calendar date only, no time-of-day; 'INSTANT'
-  -- = a specific point in time). occurred_at's own value is a UTC-
-  -- midnight STORAGE ANCHOR ONLY when precision='DATE' -- never to be
-  -- read as an assertion that the event happened at midnight. The CHECK
-  -- below enforces that the two travel together: an unknown event time
-  -- has no precision to qualify, and a known event time always carries
-  -- an explicit precision (never silently defaulted).
+  occurred_on                DATE,
   occurred_at                TIMESTAMPTZ,
-  occurred_at_precision      TEXT CHECK (occurred_at_precision IN ('DATE', 'INSTANT')),
-  CHECK ((occurred_at IS NULL) = (occurred_at_precision IS NULL)),
+  CHECK (occurred_on IS NULL OR occurred_at IS NULL),
   observed_at                TIMESTAMPTZ NOT NULL,
   recorded_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -227,7 +260,7 @@ CREATE TABLE market_observation (
   -- though the event/idempotency ceremony itself is batched.
   correlation_id            UUID NOT NULL,
 
-  -- A2/S1-S3 -- mo-hash-v1 (src/lib/marketObservationHash.js). The
+  -- A2/S1-S3/F1-F2 -- mo-hash-v1 (src/lib/marketObservationHash.js). The
   -- version tag is embedded IN the hash input itself (S3) -- this
   -- column additionally stores it in queryable form, so a future
   -- v1-vs-v2 audit never has to reverse an opaque hash to know which

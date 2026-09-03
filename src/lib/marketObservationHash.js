@@ -4,7 +4,8 @@
 // yet — pure infrastructure, matching the same "designed, unconsumed"
 // convention already established by src/lib/evidenceContracts.js (GK-182).
 // No provider adapter is authorized to call this (D5D remains gated behind
-// D5B/D5C, and behind the rights review named in GK-182/A3).
+// D5B/D5C, and behind the rights review named in GK-182/A3, and behind the
+// GK-184 provider-retrieval-time-through-cache requirement below).
 //
 // Two deliberately separate layers, independently testable and
 // independently versionable:
@@ -27,44 +28,48 @@
 // real text that happens to equal it. This file's encoding is
 // length-prefixed (TLV-shaped): every field is encoded as
 // <presence byte><4-byte big-endian UTF-8 byte length><UTF-8 bytes>. A
-// decoder (conceptual — nothing in this codebase decodes the hash input,
-// but injectivity is what makes the ENCODING side trustworthy) never scans
-// for a delimiter; it always consumes exactly the declared byte count
-// before moving to the next field. This is immune by construction to a
-// field's own content containing what would have been a delimiter byte —
-// see tests/d5a-market-observation-hash-serializer.test.js for the
-// property/adversarial proof, including the exact field-shifting
-// construction this design is meant to defeat.
+// decoder never scans for a delimiter; it always consumes exactly the
+// declared byte count before moving to the next field — immune by
+// construction to a field's own content containing what would have been a
+// delimiter byte. See tests/d5a-market-observation-hash-serializer.test.js
+// for the property/adversarial proof.
 //
-// PRE-LIVE DESIGN CORRECTION (T1/T1a/T2/T2a, 2026-09-03) — two
-// corrections to the first draft, both load-bearing:
-//   T1/T1a — occurred_at gained a sibling, occurred_at_precision
-//     ('DATE'|'INSTANT'), and BOTH now participate in the hash. A
-//     date-only source fact ("2026-06-14") is never coerced into
-//     asserting a time-of-day the source never supplied — the stored
-//     TIMESTAMPTZ uses UTC midnight purely as a storage anchor when
-//     precision='DATE', and occurred_at_precision is what actually
-//     records what was and wasn't asserted. This means a date-only fact
-//     and a genuinely-midnight-UTC exact instant are DIFFERENT hash
-//     inputs even though their TIMESTAMPTZ value is textually identical
-//     — precision is not decorative, it changes the hash.
-//   T2/T2a — grade_numeric's canonicalization is no longer a
-//     comic-specific fixed one-decimal scale (that was vertical leakage
-//     — CGC/CBCS's own one-decimal convention, encoded into a supposedly
-//     provider-neutral, asset-class-neutral table). It now uses MINIMAL
-//     exact-decimal normalization (strip insignificant trailing
-//     fractional zeros only, no padding to any fixed scale) — see
-//     canonicalMinimalDecimal below. price_amount is UNCHANGED (still
-//     fixed-scale-4, canonicalFixedScaleDecimal) — money has a real,
-//     currency-defined natural precision; grade/condition-index values
-//     have no universal natural precision across asset classes, so the
-//     two fields deliberately use different canonicalization strategies.
+// FINAL PRE-LIVE REPRESENTATION CLOSURE (F1/F1a/F1b/F1c/F2/F2a/F2b,
+// 2026-09-03) — supersedes the intermediate T1/T1a/T2/T2a draft (which
+// had already fixed hash semantics but still MANUFACTURED a synthetic
+// midnight instant for date-only facts, via an occurred_at_precision
+// qualifier bolted onto a single TIMESTAMPTZ column):
+//
+//   F1/F1b — occurred_at_precision is REMOVED. Temporal representation is
+//     now structural, two independent nullable columns: occurredOn (a
+//     bare calendar date, canonical form "YYYY-MM-DD", NEVER zero-filled
+//     into a timestamp — no synthetic instant is ever manufactured for a
+//     date-only fact) and occurredAt (a genuine point-in-time instant,
+//     full ISO-8601 UTC millisecond precision). Presence alone is the
+//     discriminator: both null = unknown; occurredOn only = a DATE fact;
+//     occurredAt only = an INSTANT fact; both populated is illegal
+//     (rejected by normalizeOccurredOnOrAt below AND by 0014's own CHECK
+//     constraint — defense in depth, not a second source of truth, since
+//     the illegal state itself is unrepresentable, not merely
+//     discouraged).
+//   F1c — both occurredOn and occurredAt participate in the hash as two
+//     independent TLV fields. A DATE fact and a genuinely-midnight-UTC
+//     INSTANT fact for the same calendar date are automatically
+//     byte-distinct, because they populate DIFFERENT columns/fields —
+//     no synthetic marker or precision tag is needed to distinguish them.
+//   F2/F2a/F2b — grade_basis added: a nullable, generic, source-asserted
+//     qualifier (never inferred from comic-domain knowledge, never a
+//     hardcoded CGC/CBCS vocabulary) that participates in the hash. A
+//     grade with no asserted basis (gradeBasis=null) is a genuinely
+//     different, distinct fact from the identical numeric grade WITH an
+//     asserted basis — presence-tagged serialization makes this
+//     automatic, the same mechanism that already distinguishes NULL from
+//     "" everywhere else in this file. canonicalMinimalDecimal (grade's
+//     own numeric canonicalization) is UNCHANGED by this closure.
 
 import { createHash } from 'node:crypto';
 
 export const HASH_CONTRACT_VERSION = 'mo-hash-v1';
-
-export const OCCURRED_AT_PRECISIONS = Object.freeze(['DATE', 'INSTANT']);
 
 // ─────────────────────────────────────────────────────────────────────
 // Layer 2 — structural (TLV) serialization. No business meaning here.
@@ -94,18 +99,10 @@ export function encodeField(str) {
 // field order. Returns the full injective Buffer (before hashing) --
 // exposed separately from computeMarketObservationHash so the byte
 // serialization itself (not just its SHA-256 digest) is what gets
-// property-tested for injectivity (D2b — "collision resistance of SHA-256
-// is not a substitute for injective canonical serialization").
-//
-// T1a -- occurredAtPrecision is its OWN tuple field, immediately after
-// occurredAt, not folded into the occurredAt string itself -- keeping
-// them as two independently-encoded TLV fields (rather than e.g.
-// prefixing the precision onto the timestamp string) means the
-// injectivity proof for one field never has to reason about the other's
-// content, and a future field reordering/addition stays mechanical.
+// property-tested for injectivity.
 export function serializeMarketObservationTuple({
   provider, providerItemId, listingKind, priceAmount, currency,
-  conditionText, gradeNumeric, occurredAt, occurredAtPrecision,
+  conditionText, gradeNumeric, gradeBasis, occurredOn, occurredAt,
 }) {
   return Buffer.concat([
     encodeField(HASH_CONTRACT_VERSION),
@@ -116,19 +113,16 @@ export function serializeMarketObservationTuple({
     encodeField(currency),
     encodeField(conditionText),
     encodeField(gradeNumeric),
+    encodeField(gradeBasis),
+    encodeField(occurredOn),
     encodeField(occurredAt),
-    encodeField(occurredAtPrecision),
   ]);
 }
 
 // computeMarketObservationHash -- SHA-256 hex digest of the tuple above.
-// occurred_at and occurred_at_precision both participate (S1/T1a) -- an
-// asserted fact about the market event itself, and the fidelity of that
-// assertion, reversing this dispatch train's own earlier exclusion and
-// earlier under-specification. observed_at, recorded_at, id,
-// recorded_by_principal_id, correlation_id, raw_payload, and content_hash
-// itself are NEVER part of this input -- provenance/timing metadata, not
-// observed market fact.
+// observed_at, recorded_at, id, recorded_by_principal_id, correlation_id,
+// raw_payload, and content_hash itself are NEVER part of this input --
+// provenance/timing metadata, not observed market fact.
 export function computeMarketObservationHash(canonicalFields) {
   return createHash('sha256').update(serializeMarketObservationTuple(canonicalFields)).digest('hex');
 }
@@ -152,12 +146,13 @@ export function normalizeUpperCode(value) {
   return String(value).trim().toUpperCase();
 }
 
-// normalizeText -- provider_item_id, condition_text. Trim, collapse
-// internal whitespace, Unicode NFC-normalize, lowercase (case/whitespace
-// differences must not manufacture a spurious "new" observation for
-// trivially-reformatted re-scraped text). A present-but-empty string
-// stays present-but-empty (never silently promoted to null) -- only a
-// genuinely absent (null/undefined) input yields null.
+// normalizeText -- provider_item_id, condition_text, grade_basis. Trim,
+// collapse internal whitespace, Unicode NFC-normalize, lowercase
+// (case/whitespace differences must not manufacture a spurious "new"
+// observation for trivially-reformatted re-scraped text). A
+// present-but-empty string stays present-but-empty (never silently
+// promoted to null) -- only a genuinely absent (null/undefined) input
+// yields null.
 export function normalizeText(value) {
   if (value === null || value === undefined) return null;
   return String(value).trim().replace(/\s+/g, ' ').normalize('NFC').toLowerCase();
@@ -168,17 +163,15 @@ export function normalizeText(value) {
 // float rounding, so the hash input can never silently diverge from the
 // persisted exact NUMERIC value on a floating-point edge case.
 //
-// Rules (D3, ratified 2026-09-03, unchanged by the T2/T2a correction --
-// money has a real, currency-defined natural precision; a fixed scale is
-// the right choice HERE specifically, unlike grade -- see
-// canonicalMinimalDecimal below for why grade differs):
+// Rules (D3, unchanged by this closure -- money has a real,
+// currency-defined natural precision; a fixed scale is the right choice
+// HERE specifically, unlike grade -- see canonicalMinimalDecimal below):
 //   - leading zeros stripped ("007" -> "7")
 //   - fractional part padded with trailing zeros up to `scale` digits
 //     ("66" -> "66.0000" at scale=4)
 //   - fractional precision BEYOND `scale` is REJECTED (thrown), UNLESS
 //     every excess digit is itself '0' -- silent rounding is never
-//     performed; a genuinely over-precise input is a data-quality bug at
-//     the adapter layer, not something to coerce quietly.
+//     performed.
 //   - "-0"/"-0.00" normalizes to unsigned zero (no negative-zero string)
 export function canonicalFixedScaleDecimal(value, scale) {
   if (value === null || value === undefined) return null;
@@ -209,16 +202,16 @@ export function canonicalFixedScaleDecimal(value, scale) {
 
 export const canonicalPriceString = (value) => canonicalFixedScaleDecimal(value, 4);
 
-// canonicalMinimalDecimal -- grade_numeric ONLY (T2/T2a, 2026-09-03
-// correction). Deliberately NOT a fixed-scale function -- MarketObservation
-// is provider-neutral AND asset-class-neutral; a hard-coded one-decimal
-// scale was CGC/CBCS's own comic-grading convention leaking into a
-// permanent-domain table that must not assume any vertical's grading
-// system. This function makes no assumption about what scale a numeric
-// grade/condition-index is expressed in -- it only guarantees that two
-// different EXACT DECIMAL SPELLINGS of the same value canonicalize
-// identically, and different values never do. Pure base-10 string
-// manipulation -- never Number/parseFloat/toFixed/IEEE-754.
+// canonicalMinimalDecimal -- grade_numeric ONLY. Deliberately NOT a
+// fixed-scale function -- MarketObservation is provider-neutral AND
+// asset-class-neutral; a hard-coded fixed scale would be one grading
+// convention's own precision leaking into a permanent-domain table that
+// must not assume any vertical's grading system. This function makes no
+// assumption about what scale a numeric grade/condition-index is
+// expressed in -- it only guarantees that two different EXACT DECIMAL
+// SPELLINGS of the same value canonicalize identically, and different
+// values never do. Pure base-10 string manipulation -- never
+// Number/parseFloat/toFixed/IEEE-754. (F2b: unchanged by this closure.)
 //
 // Rule: strip INSIGNIFICANT trailing fractional zeros only (never pad to
 // any fixed scale); if every fractional digit strips away, drop the
@@ -245,57 +238,78 @@ export function canonicalMinimalDecimal(value) {
 
 export const canonicalGradeString = canonicalMinimalDecimal;
 
-// normalizeOccurredAt -- occurred_at + occurred_at_precision together
-// (T1/T1a, 2026-09-03 correction). observed_at/recorded_at never pass
-// through this (they never enter the hash at all -- see the header).
-//
-// Precision is REQUIRED input, never inferred from the shape of `value`
-// -- guessing "this string looks like a bare date, so it must be
-// DATE-precision" would be exactly the kind of silent inference this
-// correction exists to eliminate. The CALLER (a future adapter) is the
-// only party that actually knows whether its source asserted a full
-// instant or only a calendar date, so the caller must say so explicitly.
-//
-//   value === null  -> event time genuinely unknown. precision MUST also
-//     be null/undefined in this case (there is nothing to qualify).
-//   precision === 'DATE'  -> the source asserted a calendar date only,
-//     no time-of-day. `value` is normalized to UTC midnight as a STORAGE
-//     ANCHOR ONLY -- this is never to be read as "the event happened at
-//     midnight." Readers must check occurred_at_precision before
-//     interpreting occurred_at's apparent precision.
-//   precision === 'INSTANT'  -> the source asserted a specific point in
-//     time. `value` is normalized to its exact ISO-8601 UTC
-//     millisecond-precision instant, unmodified.
-//
-// Never infers a missing event time from anything, never defaults
-// precision, never silently promotes DATE to INSTANT or vice versa.
-export function normalizeOccurredAt({ value, precision } = {}) {
-  if (value === null || value === undefined) {
-    if (precision !== null && precision !== undefined) {
-      throw new Error('normalizeOccurredAt: precision must be null/undefined when value is null -- unknown event time has no precision to qualify');
+// normalizeGradeBasis -- grade_basis (F2). A source-asserted qualifier
+// (e.g. whatever string a provider's own page/API names its scale as) --
+// GrailKey never invents, infers, or defaults one. Uses the same
+// normalizeText discipline as condition_text -- trivial formatting
+// differences in a provider's re-rendered page must not manufacture a
+// spurious "new" observation, but a genuinely-absent basis (null) always
+// stays structurally distinct from any present string, including an
+// empty one (F2a).
+export const normalizeGradeBasis = normalizeText;
+
+// normalizeOccurredOnOrAt -- F1/F1b/F1c. Replaces the earlier
+// normalizeOccurredAt + occurred_at_precision draft entirely. Takes BOTH
+// raw inputs; returns the canonical { occurredOn, occurredAt } pair.
+// Exactly one of the three legal states results:
+//   both null/undefined in  -> { occurredOn: null, occurredAt: null }
+//     (event time genuinely unknown -- never fabricated)
+//   occurredOn given, occurredAt absent -> { occurredOn: "YYYY-MM-DD",
+//     occurredAt: null } (a DATE fact -- canonical form is the bare
+//     calendar date string ITSELF, never zero-filled into a timestamp;
+//     no synthetic instant is manufactured anywhere in this path)
+//   occurredAt given, occurredOn absent -> { occurredOn: null,
+//     occurredAt: "<full ISO-8601 UTC ms instant>" } (an INSTANT fact)
+//   both given -> THROWS. This is not a legal state -- exactly one
+//     asserted-fact representation, or neither. 0014's own CHECK
+//     constraint enforces the identical rule at the DB layer (defense in
+//     depth against the same invariant, not a second, independently
+//     mutable source of truth for it).
+// Never infers a missing event time from anything, never defaults which
+// representation is used -- the caller (a future adapter) supplies
+// whichever ONE the source actually asserted.
+export function normalizeOccurredOnOrAt({ occurredOn, occurredAt } = {}) {
+  const onGiven = occurredOn !== null && occurredOn !== undefined;
+  const atGiven = occurredAt !== null && occurredAt !== undefined;
+
+  if (onGiven && atGiven) {
+    throw new Error('normalizeOccurredOnOrAt: occurredOn and occurredAt cannot both be supplied -- exactly one asserted temporal fact, or neither (unknown)');
+  }
+  if (!onGiven && !atGiven) {
+    return { occurredOn: null, occurredAt: null };
+  }
+  if (onGiven) {
+    const str = String(occurredOn).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      throw new Error(`normalizeOccurredOnOrAt: occurredOn must be an exact YYYY-MM-DD calendar date, got ${JSON.stringify(occurredOn)}`);
     }
-    return { occurredAt: null, occurredAtPrecision: null };
+    // Reject a syntactically-shaped but calendrically-invalid date (e.g.
+    // 2026-02-30) without ever constructing a TIMESTAMPTZ-shaped instant
+    // for a DATE fact -- the round-trip through Date here is validation
+    // only, its own instant value is discarded, never returned.
+    const validated = new Date(`${str}T00:00:00.000Z`);
+    if (Number.isNaN(validated.getTime()) || validated.toISOString().slice(0, 10) !== str) {
+      throw new Error(`normalizeOccurredOnOrAt: not a real calendar date: ${JSON.stringify(occurredOn)}`);
+    }
+    return { occurredOn: str, occurredAt: null };
   }
-  if (!OCCURRED_AT_PRECISIONS.includes(precision)) {
-    throw new Error(`normalizeOccurredAt: precision must be exactly 'DATE' or 'INSTANT' when value is present, got ${JSON.stringify(precision)}`);
-  }
-  const d = value instanceof Date ? value : new Date(value);
+  const d = occurredAt instanceof Date ? occurredAt : new Date(occurredAt);
   if (Number.isNaN(d.getTime())) {
-    throw new Error(`normalizeOccurredAt: not a valid date/timestamp: ${JSON.stringify(value)}`);
+    throw new Error(`normalizeOccurredOnOrAt: not a valid date/timestamp: ${JSON.stringify(occurredAt)}`);
   }
-  return { occurredAt: d.toISOString(), occurredAtPrecision: precision };
+  return { occurredOn: null, occurredAt: d.toISOString() };
 }
 
 // canonicalizeMarketObservationFields -- convenience: raw field values in,
 // the exact canonical tuple computeMarketObservationHash/
 // serializeMarketObservationTuple expect, out. Kept separate from those
 // two functions so normalization rules and byte-serialization rules stay
-// independently testable (D2b).
+// independently testable.
 export function canonicalizeMarketObservationFields({
   provider, providerItemId, listingKind, priceAmount, currency,
-  conditionText, gradeNumeric, occurredAt, occurredAtPrecision,
+  conditionText, gradeNumeric, gradeBasis, occurredOn, occurredAt,
 }) {
-  const occ = normalizeOccurredAt({ value: occurredAt, precision: occurredAtPrecision });
+  const occ = normalizeOccurredOnOrAt({ occurredOn, occurredAt });
   return {
     provider: normalizeLowerToken(provider),
     providerItemId: normalizeText(providerItemId),
@@ -304,7 +318,8 @@ export function canonicalizeMarketObservationFields({
     currency: normalizeUpperCode(currency),
     conditionText: normalizeText(conditionText),
     gradeNumeric: canonicalGradeString(gradeNumeric),
+    gradeBasis: normalizeGradeBasis(gradeBasis),
+    occurredOn: occ.occurredOn,
     occurredAt: occ.occurredAt,
-    occurredAtPrecision: occ.occurredAtPrecision,
   };
 }
