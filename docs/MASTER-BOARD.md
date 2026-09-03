@@ -84,13 +84,13 @@ HEAD at this publication: `6b800f4`.
 
 | Field | Value |
 |---|---|
-| Status | Pricing engine live and gated behind the same void launch GO as Runtime. Durable valuation evidence (Foundation Law 5) is PARTIAL — `comp_snapshot_ref` column exists, nothing populates it yet. |
+| Status | Pricing engine live and gated behind the same void launch GO as Runtime. Durable valuation evidence (Foundation Law 5) is PARTIAL but materially advanced since D1: `comp_snapshot`/`valuation_event` are live (D3.3), `market_observation` (D5A, `0014`) is LIVE in `data1_dev`, and the ValuationQuestion/Applicability semantic boundary sitting on top of it is ratified docs-only (D5B, `docs/adr/ADR-VALUATION-001-question-applicability.md`). GK-180 remains the load-bearing gap: zero call sites from `api/comps.js`/`api/enrich.js` into any of this durable substrate — production scan traffic still writes nothing durable. |
 | Proof level | P2 |
 | Owner | Engineering |
-| Dependency | This train's D3.3 (pulled-forward durable comp-snapshot slice, the audit's worst realized-loss risk per the dispatch) |
-| Exit gate | D3.3 EXIT proof: one real scan's comp pool persisted and re-read after the KV key is manually expired |
-| Evidence | `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`, Law 5; `db/data0/0004_data1_foundation.sql:178,184` |
-| Next action | D3.3 (not this pass — D1 only) |
+| Dependency | 0015 (ValuationQuestion + Applicability schema, scoped by the D5B ADR and gated on GK-187's V1-V4) is the next dependency; GK-180 (writer bridge from `api/comps.js`) remains open regardless of 0015's timing |
+| Exit gate | 0015 scratch-schema proof → live apply → D5C `MarketPopulation` + D3.3 bridge → D5D controlled provider-capture writer, per the A4 sequencing ratified in Phase A (this file, "Phase A — PASS") |
+| Evidence | `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`, Law 5; `db/data0/0004_data1_foundation.sql:178,184`; `db/data0/0014_d5a_market_observation.sql` (LIVE); `docs/adr/ADR-VALUATION-001-question-applicability.md` |
+| Next action | 0015 design/schema-ruling pass (not started) |
 
 ## 8. Governance / Sec / Ops
 
