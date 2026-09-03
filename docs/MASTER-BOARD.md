@@ -84,13 +84,13 @@ HEAD at this publication: `6b800f4`.
 
 | Field | Value |
 |---|---|
-| Status | Pricing engine live and gated behind the same void launch GO as Runtime. Durable valuation evidence (Foundation Law 5) is PARTIAL but materially advanced since D1: `comp_snapshot`/`valuation_event` are live (D3.3), `market_observation` (D5A, `0014`) is LIVE in `data1_dev`, and `valuation_question`/`applicability` (D5B, `0015`) are DESIGNED + REAL-SCRATCH-PROVEN (`docs/D5B-0015-DESIGN-REPORT.md` — 42/42 live scratch-schema proof, 36/36 hash-serializer proof, `data1_dev` untouched) but NOT applied to `data1_dev`. GK-180 remains the load-bearing gap: zero call sites from `api/comps.js`/`api/enrich.js` into any of this durable substrate — production scan traffic still writes nothing durable. |
-| Proof level | P2 |
+| Status | Pricing engine live and gated behind the same void launch GO as Runtime. Durable valuation evidence (Foundation Law 5) is PARTIAL but materially advanced since D1: `comp_snapshot`/`valuation_event` are live (D3.3), `market_observation` (D5A, `0014`) is LIVE in `data1_dev`, and `valuation_question`/`applicability` (D5B, `0015`+`0016`) are now **LIVE in `data1_dev`** (2026-09-03, `docs/D5B-LIVE-APPLY-REPORT.md` — PA1-PA18 independently verified read-only, 0 rows in either table, `asset_identity_assignment`/`market_observation`/`gk_asset` row counts unchanged). GK-180 remains the load-bearing gap: zero call sites from `api/comps.js`/`api/enrich.js` into any of this durable substrate — production scan traffic still writes nothing durable, and nothing yet CAN write to `valuation_question`/`applicability` either (no writer built). |
+| Proof level | P3 (schema live, independently verified against real `data1_dev`) |
 | Owner | Engineering |
-| Dependency | 0015 live-apply dispatch (gated on GK-188's real-data1_dev compatibility re-check) is the next dependency; GK-180 (writer bridge from `api/comps.js`) remains open regardless of 0015's live-apply timing |
-| Exit gate | 0015 live apply → D5C `MarketPopulation` + D3.3 bridge → D5D controlled provider-capture writer, per the A4 sequencing ratified in Phase A (this file, "Phase A — PASS") |
-| Evidence | `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`, Law 5; `db/data0/0004_data1_foundation.sql:178,184`; `db/data0/0014_d5a_market_observation.sql` (LIVE); `db/data0/0015_d1_identity_assignment_immutability.sql` + `db/data0/0016_d5b_valuation_question_applicability.sql` (SPLIT per A1, scratch-proven, gates passed); `docs/adr/ADR-VALUATION-001-question-applicability.md`; `docs/D5B-0015-DESIGN-REPORT.md`; `docs/D5B-LIVE-APPLY-REPORT.md` |
-| Next action | 0015 live-apply dispatch (design + scratch proof complete; GK-188 real-data1_dev compatibility re-check required first) |
+| Dependency | D5C `MarketPopulation` design is the next dependency; GK-180 (writer bridge from `api/comps.js`) remains open regardless |
+| Exit gate | D5C `MarketPopulation` + D3.3 bridge → D5D controlled provider-capture writer, per the A4 sequencing ratified in Phase A (this file, "Phase A — PASS") |
+| Evidence | `docs/architecture/GRAILKEY-PHYSICAL-ASSET-PROTOCOL-v1.md`, Law 5; `db/data0/0004_data1_foundation.sql:178,184`; `db/data0/0014_d5a_market_observation.sql` (LIVE); `db/data0/0015_d1_identity_assignment_immutability.sql` (LIVE) + `db/data0/0016_d5b_valuation_question_applicability.sql` (LIVE); `docs/adr/ADR-VALUATION-001-question-applicability.md`; `docs/D5B-0015-DESIGN-REPORT.md`; `docs/D5B-LIVE-APPLY-REPORT.md` |
+| Next action | D5C `MarketPopulation` design (0015/0016 live-apply complete) |
 
 ## 8. Governance / Sec / Ops
 
