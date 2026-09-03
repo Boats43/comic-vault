@@ -1,130 +1,48 @@
 -- =====================================================================
--- 0015 -- D5B: ValuationQuestion + Applicability (PROPOSED, NOT APPLIED
+-- 0016 -- D5B: ValuationQuestion + Applicability (PROPOSED, NOT APPLIED
 -- to data1_dev)
 -- =====================================================================
 -- STATUS: proposed by this dispatch, NOT yet run against any database.
 -- Per the standing "never modify historical migrations" rule, this is a
--- NEW additive file -- 0001 through 0014 are untouched. Applying this
--- migration to live data1_dev requires explicit authorization (a future
--- D5B live-apply dispatch, not this pass). Design authority:
+-- NEW additive file -- 0001 through 0015 are untouched. Requires 0015
+-- (asset_identity_assignment immutability repair) already applied --
+-- this file's composite FK on valuation_question depends on the
+-- UNIQUE(id, asset_id) constraint 0015 adds. Design authority:
 -- docs/adr/ADR-VALUATION-001-question-applicability.md (banked 5d667fc,
 -- V1-V4 addendum 30d001d). This file implements ONLY ValuationQuestion +
 -- Applicability -- no MarketPopulation, no comp_snapshot/valuation_event
 -- wiring, no writer. Those are D5C/D5D, deliberately not built here.
 --
--- =====================================================================
--- PART 1 -- asset_identity_assignment: D1 identity-anchor prerequisite
--- =====================================================================
--- D1 (this dispatch) required a typed identity anchor such that a
--- ValuationQuestion asked at T1 (identity X) can never retroactively
--- acquire a T2 correction (identity Y). asset_identity_assignment
--- (db/data0/0004_data1_foundation.sql, live in data1_dev, 80 rows as of
--- 2026-09-03) already has the right SHAPE for this -- an append-only
--- row per identity assignment, with `superseded_by` the sole documented
--- lifecycle mutation (repository.js:158-167's own INSERT/UPDATE usage:
--- INSERT once, later UPDATE sets ONLY superseded_by, nothing else) --
--- but that contract was, before this migration, enforced by application
--- convention ONLY. No DB trigger protected it, unlike D4's sibling table
--- asset_identifier_assertion (0013), which has always had one. Freezing
--- a ValuationQuestion to a specific assignment row's id is only a real
--- guarantee if that row's substantive fields genuinely cannot change
--- after insert -- this migration closes that gap now, rather than
--- shipping valuation_question's own anchor on top of an unenforced
--- assumption ("HOLD and report the missing primitive" was the
--- alternative; this is the primitive, added here, in-scope, because
--- D1's own guarantee is not real without it).
+-- SPLIT FROM 0015 (A1 ruling, GK-188 live-apply gate dispatch,
+-- 2026-09-03): originally proposed as Part 2/3 of a single combined
+-- "0015_d5b_valuation_question_applicability.sql" file, alongside the
+-- asset_identity_assignment repair. Split so that rolling back a D5B
+-- schema defect (this file) can never silently remove 0015's D1
+-- protection, and so 0015's own rollback lifecycle is never entangled
+-- with this file's. Full A1 reasoning and the independent scratch
+-- rehearsal proof for each file: docs/D5B-LIVE-APPLY-REPORT.md.
 --
--- Compatibility with the ONE live write pattern (repository.js:158-167,
--- 171-177): the existing UPDATE statement sets ONLY superseded_by
--- (`UPDATE asset_identity_assignment SET superseded_by = $1 WHERE
--- asset_id = $2 AND id != $1 AND superseded_by IS NULL`) -- every other
--- column is left untouched by that statement, so the new trigger's
--- IS DISTINCT checks below all evaluate false (no real change) for that
--- exact call shape. Verified by STATIC reading of repository.js in this
--- pass; NOT verified against the live 80 data1_dev rows (0015 is not
--- applied there this pass) -- a future live-apply dispatch must re-run
--- this same compatibility check against real data1_dev before applying.
---
--- D1 also requires: no copied comic identity fields merely to freeze
--- identity (satisfied -- valuation_question, Part 2, carries no title/
--- issue/publisher text); no activation dependency on dormant
--- catalog_entity (satisfied -- valuation_question references
--- asset_identity_assignment.id only, never .catalog_entity_id, which
--- stays exactly as opaque/unused as it already is); no external
--- identifier becomes asset/question identity (satisfied -- this
--- migration does not touch asset_identifier_assertion or any D4 table
--- at all); cross-asset identity anchoring impossible at DB level
--- (satisfied by the composite FK in Part 2, which requires the UNIQUE
--- constraint added immediately below).
-
-SET search_path TO data1_dev;
-
--- id alone is already the PRIMARY KEY; Postgres requires the exact
--- referenced column SET to carry its own unique constraint for a
--- composite FK to target it -- identical technique already proven at
--- db/data0/0013_d4_identifier_fabric.sql:270 for asset_identifier_
--- assertion's own self-reference, reused here verbatim (not
--- reinvented) for a different table.
-ALTER TABLE asset_identity_assignment ADD CONSTRAINT asset_identity_assignment_id_asset_uk UNIQUE (id, asset_id);
-
--- Mirrors asset_identifier_assertion_guard() (0013) exactly, adapted to
--- this table's own column set (authority/source/catalog_entity_id in
--- place of identifier_id/resolution_authority) -- same cycle-guard
--- technique (FOR UPDATE lock on the target's own superseded_by before
--- allowing an edge into it), same "only superseded_by may be set" rule,
--- same "never deleted" rule.
-CREATE OR REPLACE FUNCTION asset_identity_assignment_guard() RETURNS TRIGGER AS $$
-DECLARE target_superseded_by UUID;
-BEGIN
-  IF TG_OP = 'DELETE' THEN
-    RAISE EXCEPTION 'asset_identity_assignment rows are never deleted -- id=% (correct via a new superseding assignment instead)', OLD.id;
-  END IF;
-  IF OLD.superseded_by IS NOT NULL THEN
-    RAISE EXCEPTION 'asset_identity_assignment id=% is already superseded -- no further mutation permitted', OLD.id;
-  END IF;
-  IF NEW.superseded_by IS NULL THEN
-    RAISE EXCEPTION 'asset_identity_assignment id=% -- UPDATE must set superseded_by (no other mutation permitted)', OLD.id;
-  END IF;
-  IF NEW.asset_id IS DISTINCT FROM OLD.asset_id
-     OR NEW.catalog_entity_id IS DISTINCT FROM OLD.catalog_entity_id
-     OR NEW.authority IS DISTINCT FROM OLD.authority
-     OR NEW.source IS DISTINCT FROM OLD.source
-     OR NEW.occurred_at IS DISTINCT FROM OLD.occurred_at
-     OR NEW.recorded_at IS DISTINCT FROM OLD.recorded_at
-  THEN
-    RAISE EXCEPTION 'asset_identity_assignment id=% -- only superseded_by may be set; all other fields are immutable after insert', OLD.id;
-  END IF;
-  SELECT superseded_by INTO target_superseded_by FROM asset_identity_assignment WHERE id = NEW.superseded_by FOR UPDATE;
-  IF target_superseded_by IS NOT NULL THEN
-    RAISE EXCEPTION 'asset_identity_assignment id=% -- superseded_by target % is itself already superseded; cannot supersede into a non-live row (cycle guard)', OLD.id, NEW.superseded_by;
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER asset_identity_assignment_no_update BEFORE UPDATE ON asset_identity_assignment FOR EACH ROW EXECUTE FUNCTION asset_identity_assignment_guard();
-CREATE TRIGGER asset_identity_assignment_no_delete BEFORE DELETE ON asset_identity_assignment FOR EACH ROW EXECUTE FUNCTION asset_identity_assignment_guard();
-
 -- =====================================================================
--- PART 2 -- valuation_question
+-- PART 1 -- valuation_question
 -- =====================================================================
 -- D2 field admission (ADR-VALUATION-001 R2, mechanically applied to
 -- fetchComps()'s live 22-parameter surface, api/comps.js:998-1029):
 -- exactly 4 semantic assumption fields survive ("does changing it
 -- change what a correct answer would be") -- target_grade, disposition,
--- variant_scope, target_year. D2 re-audit (this dispatch): does the D1
--- identity anchor already establish variant/year, making a duplicate
--- column here redundant? NO -- asset_identity_assignment carries only
--- asset_id/catalog_entity_id/authority/source, no variant or year
--- field at all, so both remain genuinely distinct valuation assumptions,
--- not copies of identity. The other 18 fetchComps() inputs (title,
--- issue, author, publisher, assetType, imageSearchTitle, labelType,
--- categoryId, appId, certId, creator, cvVolumeStartYear, artistOverride,
--- signedConsensus, issueAuthorityPresent, issueAuthorityStatus,
--- yearIsContested, plus COMP_FILTER_VERSION/modelVersion per R3) do NOT
--- participate -- query/credential/reconciliation/filter-implementation
--- state, never persisted here. See ADR-VALUATION-001's field
--- classification table for the per-field reasoning.
+-- variant_scope, target_year. D2 re-audit (this dispatch): does the
+-- identity anchor (0015) already establish variant/year, making a
+-- duplicate column here redundant? NO -- asset_identity_assignment
+-- carries only asset_id/catalog_entity_id/authority/source, no variant
+-- or year field at all, so both remain genuinely distinct valuation
+-- assumptions, not copies of identity. The other 18 fetchComps() inputs
+-- (title, issue, author, publisher, assetType, imageSearchTitle,
+-- labelType, categoryId, appId, certId, creator, cvVolumeStartYear,
+-- artistOverride, signedConsensus, issueAuthorityPresent,
+-- issueAuthorityStatus, yearIsContested, plus COMP_FILTER_VERSION/
+-- modelVersion per R3) do NOT participate -- query/credential/
+-- reconciliation/filter-implementation state, never persisted here. See
+-- ADR-VALUATION-001's field classification table for the per-field
+-- reasoning.
 --
 -- D3/V4 -- target_grade is NUMERIC(12,6), the exact same generic bound
 -- and canonicalization discipline (canonicalMinimalDecimal, "9.4" and
@@ -151,12 +69,13 @@ CREATE TRIGGER asset_identity_assignment_no_delete BEFORE DELETE ON asset_identi
 -- .js), which imports its byte-framing primitive (encodeField) directly
 -- from src/lib/canonicalHashFraming.js -- the SAME module mo-hash-v1
 -- now uses (marketObservationHash.js was refactored to the identical
--- shared primitive in this same pass, zero behavior change, proven by
--- tests/d5a-market-observation-hash-serializer.test.js rerun unchanged).
--- Tuple: version tag, asset_id, identity_assignment_id, target_grade,
--- grade_basis, disposition, variant_scope, target_year.
--- COMP_FILTER_VERSION/modelVersion/every other transient fetchComps()
--- input NEVER participates (R3/GK-185).
+-- shared primitive in the same pass this file was originally proposed
+-- in, zero behavior change, proven by tests/d5a-market-observation-
+-- hash-serializer.test.js rerun unchanged). Tuple: version tag,
+-- asset_id, identity_assignment_id, target_grade, grade_basis,
+-- disposition, variant_scope, target_year. COMP_FILTER_VERSION/
+-- modelVersion/every other transient fetchComps() input NEVER
+-- participates (R3/GK-185).
 --
 -- R1 -- asset_id NOT NULL FK -> gk_asset(id), no exception carved out
 -- for a hypothetical future assetless acquisition workflow (ADR-
@@ -166,18 +85,21 @@ CREATE TRIGGER asset_identity_assignment_no_delete BEFORE DELETE ON asset_identi
 -- No valuation RESULT column (D10's own instruction, restated here for
 -- this table too) -- a ValuationQuestion is what is being asked, never
 -- an answer.
+
+SET search_path TO data1_dev;
+
 CREATE TABLE valuation_question (
   id                        UUID PRIMARY KEY,
 
   -- R1 -- WHICH physical instance.
   asset_id                  UUID NOT NULL REFERENCES gk_asset(id),
 
-  -- D1 -- WHAT GrailKey believed that instance was, frozen to one
-  -- immutable asset_identity_assignment row (never "current identity" --
-  -- a live JOIN to the un-superseded row would let a later correction
-  -- retroactively change what an existing question means; referencing
-  -- the specific row's id, now DB-guaranteed immutable by Part 1's
-  -- trigger, prevents that structurally).
+  -- D1 (0015) -- WHAT GrailKey believed that instance was, frozen to
+  -- one immutable asset_identity_assignment row (never "current
+  -- identity" -- a live JOIN to the un-superseded row would let a later
+  -- correction retroactively change what an existing question means;
+  -- referencing the specific row's id, DB-guaranteed immutable by
+  -- 0015's trigger, prevents that structurally).
   identity_assignment_id    UUID NOT NULL,
 
   -- D2/D3/V4 -- see header.
@@ -203,12 +125,12 @@ CREATE TABLE valuation_question (
   -- D1 -- cross-asset identity anchoring impossible at DB level. A
   -- plain FK on identity_assignment_id alone cannot express "and the
   -- same asset_id" -- this composite FK, against the UNIQUE(id,
-  -- asset_id) added in Part 1, forces the referenced identity-
-  -- assignment row to belong to the SAME asset_id this question itself
-  -- asserts. Exact same technique D4 Ruling 21 used for asset_
-  -- identifier_assertion's own same-asset integrity fix
-  -- (db/data0/0013:283, FOREIGN KEY (superseded_by, asset_id)
-  -- REFERENCES asset_identifier_assertion (id, asset_id)).
+  -- asset_id) added by 0015, forces the referenced identity-assignment
+  -- row to belong to the SAME asset_id this question itself asserts.
+  -- Exact same technique D4 Ruling 21 used for asset_identifier_
+  -- assertion's own same-asset integrity fix (db/data0/0013:283,
+  -- FOREIGN KEY (superseded_by, asset_id) REFERENCES asset_identifier_
+  -- assertion (id, asset_id)). REQUIRES 0015 already applied.
   FOREIGN KEY (identity_assignment_id, asset_id) REFERENCES asset_identity_assignment (id, asset_id)
 );
 
@@ -238,7 +160,7 @@ CREATE TRIGGER valuation_question_no_update BEFORE UPDATE ON valuation_question 
 CREATE TRIGGER valuation_question_no_delete BEFORE DELETE ON valuation_question FOR EACH ROW EXECUTE FUNCTION valuation_question_immutable();
 
 -- =====================================================================
--- PART 3 -- applicability
+-- PART 2 -- applicability
 -- =====================================================================
 -- D6/V1 -- verdict and confidence are two independent columns, never
 -- collapsed into one enum (precedent: ADR-IDENTIFIER-001 Ruling 8's
@@ -260,7 +182,12 @@ CREATE TRIGGER valuation_question_no_delete BEFORE DELETE ON valuation_question 
 -- model_version, not folded into confidence_tier. An automated rule and
 -- an operator override can each independently be LOW, MEDIUM, or HIGH
 -- confidence; the two axes are orthogonal by construction (2 x 3 = 6
--- representable combinations, none forced).
+-- representable combinations, none forced). GK-189 (permanent note,
+-- banked at live-apply time): source_type is PROVENANCE, not
+-- PRECEDENCE -- it does not establish that an operator-override
+-- judgment defeats or outranks an automated one; that behavior, if ever
+-- needed, requires an explicit modeled rule, never an inference from
+-- this column's value.
 --
 -- D7 -- verdict's CHECK constraint below allows ONLY APPLICABLE and
 -- NOT_APPLICABLE -- CONTESTED is never a persisted verdict value.
@@ -284,7 +211,9 @@ CREATE TRIGGER valuation_question_no_delete BEFORE DELETE ON valuation_question 
 -- D4's trigger/FOR UPDATE-lock/40P01-retry surface. Consequence: this
 -- table's immutability trigger (below) rejects ALL UPDATE/DELETE
 -- unconditionally -- there is no "only superseded_by may change"
--- carve-out, because there is no mutable field at all.
+-- carve-out, because there is no mutable field at all. (Contrast
+-- directly with 0015's asset_identity_assignment_guard, which DOES have
+-- exactly one such carve-out -- this table intentionally has none.)
 --
 -- D9 -- explicitly NO UNIQUE(observation_id, question_id) -- multiple
 -- judgments per pair are legal and expected (a rule-version bump, a
@@ -341,7 +270,7 @@ CREATE TABLE applicability (
 
   -- Separate from confidence_tier -- WHO/WHAT produced the judgment
   -- (the "machine rule vs operator override" axis raised in review),
-  -- not how confident it is.
+  -- not how confident it is. GK-189: provenance, never precedence.
   source_type                     TEXT NOT NULL CHECK (source_type IN ('automated', 'operator-override')),
 
   reason                            TEXT,
@@ -368,7 +297,7 @@ CREATE INDEX ON applicability (correlation_id);
 
 -- D8/V2 -- full immutability, no carve-out (see header -- no field on
 -- this table is ever mutable, unlike asset_identity_assignment's
--- superseded_by-only exception).
+-- superseded_by-only exception, added by 0015).
 CREATE OR REPLACE FUNCTION applicability_immutable() RETURNS TRIGGER AS $$
 BEGIN
   RAISE EXCEPTION 'applicability rows are immutable once written -- % on applicability.id=% is not permitted (a new judgment under changed rule/model logic is a NEW row -- D8 rules out supersession entirely)', TG_OP, OLD.id;
@@ -401,14 +330,27 @@ HAVING COUNT(DISTINCT verdict) > 1;
 --
 -- D14 -- D5D contract only (not built here): a future writer can
 -- eventually (a) carry a real gkAssetId (R1's asset_id), (b) establish
--- the exact identity anchor (D1's identity_assignment_id), (c) resolve-
--- or-create the semantic ValuationQuestion via content_hash (R4/R5),
--- (d) preserve every eligible MarketObservation (0014, already live),
--- (e) persist every applicability outcome, not a sampled subset (D11/
--- GK-186 -- nothing in this schema obstructs full accounting), (f)
+-- the exact identity anchor (D1's identity_assignment_id, 0015), (c)
+-- resolve-or-create the semantic ValuationQuestion via content_hash
+-- (R4/R5), (d) preserve every eligible MarketObservation (0014, already
+-- live), (e) persist every applicability outcome, not a sampled subset
+-- (D11/GK-186 -- nothing in this schema obstructs full accounting), (f)
 -- retain true provider retrieval time (market_observation.observed_at,
 -- 0014 -- GK-184 remains the hard gate on threading it through the
 -- cache layer correctly), (g) avoid any rejectedSamples-style
 -- truncation (D11). GK-182 and GK-184 remain hard D5D gates, unaffected
 -- by this migration.
+-- =====================================================================
+
+-- =====================================================================
+-- REVERSIBILITY -- every statement above is reversible without risk to
+-- existing data: neither valuation_question nor applicability existed
+-- before this file, so DROP undoes them completely. This migration
+-- touches ZERO rows/columns of any pre-existing table (0001-0015) --
+-- confirmed: this file contains no ALTER TABLE statement at all,
+-- unlike 0015, which this file depends on but does not modify further.
+-- The rollback, db/data0/0016_d5b_valuation_question_applicability_
+-- rollback.sql, removes exactly what this file adds, in FK-safe
+-- dependency order, and nothing else -- safe to run at any time without
+-- affecting 0015's own objects (proven, A1-R3).
 -- =====================================================================

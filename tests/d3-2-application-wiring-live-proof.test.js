@@ -150,22 +150,40 @@ try {
     assertTrue(chrono === undefined, `G: no chronology CHECK constraint exists live (${checks.rows.length} CHECK constraints scanned), and no application code threw on past- or future-dated occurredAt above`);
   }
 } finally {
-  // Cleanup: delete exactly what this test created.
+  // Cleanup: delete exactly what this test created -- EXCEPT
+  // asset_identity_assignment and everything that depends on gk_asset
+  // surviving alongside it (gk_asset itself, mint_event,
+  // entity_mint_basis). Found during the D5B live-apply gate dispatch's
+  // GK-188 mutation-path census (2026-09-03, docs/D5B-LIVE-APPLY-REPORT
+  // .md): this test's own cleanup previously issued a real `DELETE FROM
+  // asset_identity_assignment` against real data1_dev -- that was
+  // always contrary to the RATIFIED design intent (asset_identity_
+  // assignment rows are "never edited or deleted," 0004's own header
+  // comment; Ruling 19), it simply worked pre-0015 because nothing
+  // enforced it at the DB level. Once 0015's asset_identity_assignment_
+  // guard trigger is live, that DELETE is REJECTED -- and because
+  // asset_identity_assignment.asset_id REFERENCES gk_asset(id) (a
+  // pre-existing FK, unrelated to 0015), the surviving assignment row
+  // then also blocks the subsequent `DELETE FROM gk_asset`, which would
+  // otherwise leave the whole cleanup chain half-finished with a thrown
+  // error. Fix: never attempt to delete these four durably -- the test
+  // asset, its identity assignment, its mint_event, and its
+  // entity_mint_basis row are accepted as PERMANENTLY RETAINED test
+  // fixtures, the exact same precedent already established for D3.3's
+  // own comp_snapshot test-proof rows (docs/TICKET-REGISTRY.md,
+  // GK-180's own citation: "the entire live comp_snapshot population...
+  // is D3.3's own retained test-proof fixtures"). Everything else this
+  // test creates (domain_event/outbox/decision_event/valuation_event/
+  // acquisition_event/current_owner/ownership_event) carries no such
+  // constraint and is still cleaned up normally.
   if (createdAssetId) {
     await client.query(`DELETE FROM outbox WHERE domain_event_id IN (SELECT event_id FROM domain_event WHERE (subject->>'entity_id')::uuid = $1)`, [createdAssetId]);
     await client.query(`DELETE FROM domain_event WHERE (subject->>'entity_id')::uuid = $1`, [createdAssetId]);
-    await client.query(`DELETE FROM asset_identity_assignment WHERE asset_id = $1`, [createdAssetId]);
     await client.query(`DELETE FROM decision_event WHERE asset_id = $1`, [createdAssetId]);
     await client.query(`DELETE FROM valuation_event WHERE asset_id = $1`, [createdAssetId]);
     await client.query(`DELETE FROM acquisition_event WHERE asset_id = $1`, [createdAssetId]);
     await client.query(`DELETE FROM current_owner WHERE asset_id = $1`, [createdAssetId]);
     await client.query(`DELETE FROM ownership_event WHERE asset_id = $1`, [createdAssetId]);
-    const mintBasis = await client.query(`SELECT mint_basis_id FROM gk_asset WHERE id = $1`, [createdAssetId]);
-    await client.query(`DELETE FROM mint_event WHERE entity_id = $1`, [createdAssetId]);
-    await client.query(`DELETE FROM gk_asset WHERE id = $1`, [createdAssetId]);
-    if (mintBasis.rows[0]) {
-      await client.query(`DELETE FROM entity_mint_basis WHERE id = $1`, [mintBasis.rows[0].mint_basis_id]);
-    }
   }
   if (idempotencyKeysUsed.length > 0) {
     await client.query(`DELETE FROM idempotency_key WHERE idempotency_key = ANY($1::text[])`, [idempotencyKeysUsed]);
@@ -173,9 +191,19 @@ try {
 
   const after = await countAll();
   console.log('  post-cleanup table counts:', JSON.stringify(after));
+  // Four tables are now PERMANENTLY retained at baseline+1 (see the
+  // cleanup comment above, GK-188 finding): gk_asset, entity_mint_basis,
+  // mint_event (all pinned by the surviving asset_identity_assignment
+  // row's FK), and asset_identity_assignment itself (immutable, 0015).
+  // Every other table must still return to the exact pre-test baseline.
+  const PERMANENTLY_RETAINED = ['gk_asset', 'entity_mint_basis', 'mint_event', 'asset_identity_assignment'];
+  const otherTablesMatch = Object.keys(before).every(
+    (k) => PERMANENTLY_RETAINED.includes(k) || before[k] === after[k]
+  );
+  const retainedTablesGrewByOne = PERMANENTLY_RETAINED.every((k) => after[k] === before[k] + 1);
   assertTrue(
-    JSON.stringify(after) === JSON.stringify(before),
-    `I: cleanup restored all table counts to the exact pre-test baseline (before=${JSON.stringify(before)}, after=${JSON.stringify(after)})`
+    otherTablesMatch && retainedTablesGrewByOne,
+    `I: cleanup restored every OTHER table to the exact pre-test baseline, and the 4 permanently-retained tables (${PERMANENTLY_RETAINED.join(', ')}) each grew by exactly 1 (this test's own real, immutable fixture row) -- before=${JSON.stringify(before)}, after=${JSON.stringify(after)}`
   );
 
   await client.end();

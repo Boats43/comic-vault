@@ -45,6 +45,8 @@ All required fixtures proven live against the real hash functions (unit) and the
 
 `db/data0/0015_d5b_valuation_question_applicability.sql` (forward) and its `_rollback.sql` — both real, both proven against a real isolated Postgres scratch schema: positive scratch-target guard → 0014 applied fresh → 0015 applied → full semantic-invariant proof → rollback → exact object census (view, both tables, and the `asset_identity_assignment` constraint/trigger all confirmed gone; `asset_identity_assignment`'s own 80-row-shaped pre-existing data proven untouched) → reapply → re-verified. `data1_dev` was never opened for a write statement at any point in this pass.
 
+**Superseded by the live-apply gate dispatch (same day):** this single combined file was SPLIT (A1 ruling) into `db/data0/0015_d1_identity_assignment_immutability.sql` (the `asset_identity_assignment` repair, standalone) and `db/data0/0016_d5b_valuation_question_applicability.sql` (the two new tables, depends on 0015) — see `docs/D5B-LIVE-APPLY-REPORT.md` for the full A1 reasoning and the independent rollback rehearsal proof. All semantic content and proof results described in this report are unchanged by the split; only the file boundary changed.
+
 ## Required proof — results
 
 | Suite | Result | Real DB? |

@@ -1,17 +1,26 @@
 // tests/d5b-0015-migration-contract.test.js
 //
-// D5B 0015 -- real, isolated scratch-schema proof of the
-// ValuationQuestion + Applicability substrate
-// (db/data0/0015_d5b_valuation_question_applicability.sql, NOT applied
-// to data1_dev this pass). Mirrors D3.3/D4/D5A's own proof discipline
-// exactly: build a scratch schema, run the ACTUAL migration text (read
-// from disk, not retyped) against it -- both 0014 (already live in real
-// data1_dev, but re-applied fresh here so this scratch schema has the
-// substrate 0015 depends on) and 0015 -- prove the required behavior
-// with real SQL, real trigger enforcement, real dedup, real measured
-// WAL, then rehearse the rollback and confirm it restores the
-// pre-0015 state exactly, then reapply and re-run a critical subset.
-// data1_dev is never touched.
+// D5B -- real, isolated scratch-schema proof of the ValuationQuestion +
+// Applicability substrate, NOW SPLIT (A1 ruling, GK-188 live-apply gate
+// dispatch) across two independent migrations:
+//   0015 -- db/data0/0015_d1_identity_assignment_immutability.sql (D1
+//           repair to the EXISTING asset_identity_assignment table)
+//   0016 -- db/data0/0016_d5b_valuation_question_applicability.sql (the
+//           two NEW tables, depends on 0015)
+// NOT applied to data1_dev this pass. Mirrors D3.3/D4/D5A's own proof
+// discipline exactly: build a scratch schema, run the ACTUAL migration
+// text (read from disk, not retyped) against it -- 0014 (already live
+// in real data1_dev, re-applied fresh here so this scratch schema has
+// the substrate 0015/0016 depend on), then 0015, then 0016 -- prove the
+// required behavior with real SQL, real trigger enforcement, real
+// dedup, real measured WAL, then rehearse rollback (in the correct
+// dependency order, 0016 before 0015) and confirm it restores the
+// pre-migration state exactly, then reapply and re-run a critical
+// subset. data1_dev is never touched. Independent per-migration
+// rollback rehearsal (A1-R1/R2/R3 -- baseline/forward/rollback/
+// structural-identity proof for EACH file separately, plus the
+// cross-domain isolation proof) lives in
+// tests/d5b-live-apply-gate-a1-rehearsal.test.js, not here.
 //
 // Required proof, mapped to the dispatch's own item numbers:
 //   D0  positive scratch-target containment (P2a-style guard, this
@@ -114,11 +123,15 @@ async function assertScratchTarget(expectedSchema, label) {
 
 const SCHEMA = `d5b_0015_scratch_${Date.now()}`;
 const fwd0014Path = path.join(repoRoot, 'db', 'data0', '0014_d5a_market_observation.sql');
-const fwd0015Path = path.join(repoRoot, 'db', 'data0', '0015_d5b_valuation_question_applicability.sql');
-const rb0015Path = path.join(repoRoot, 'db', 'data0', '0015_d5b_valuation_question_applicability_rollback.sql');
+const fwd0015Path = path.join(repoRoot, 'db', 'data0', '0015_d1_identity_assignment_immutability.sql');
+const rb0015Path = path.join(repoRoot, 'db', 'data0', '0015_d1_identity_assignment_immutability_rollback.sql');
+const fwd0016Path = path.join(repoRoot, 'db', 'data0', '0016_d5b_valuation_question_applicability.sql');
+const rb0016Path = path.join(repoRoot, 'db', 'data0', '0016_d5b_valuation_question_applicability_rollback.sql');
 const fwd0014Raw = readFileSync(fwd0014Path, 'utf8');
 const fwd0015Raw = readFileSync(fwd0015Path, 'utf8');
 const rb0015Raw = readFileSync(rb0015Path, 'utf8');
+const fwd0016Raw = readFileSync(fwd0016Path, 'utf8');
+const rb0016Raw = readFileSync(rb0016Path, 'utf8');
 
 let observationId, questionId, principalId, assetId, identityAssignmentId;
 let batch20LsnDelta, batch60LsnDelta, batch100LsnDelta, secondEvalLsnDelta;
@@ -177,11 +190,18 @@ try {
   await assertSucceeds(() => client.query(fwd0014), 'D0: real 0014 forward text applies cleanly to this scratch schema (prerequisite substrate for 0015)');
 
   // ===================================================================
-  // Apply 0015 (real forward text, schema-qualified)
+  // Apply 0015 (D1 repair, real forward text, schema-qualified)
   // ===================================================================
   const fwd0015 = fwd0015Raw.replace(/SET search_path TO data1_dev;/g, `SET search_path TO ${SCHEMA};`);
   await assertScratchTarget(SCHEMA, 'pre-0015-apply');
-  await assertSucceeds(() => client.query(fwd0015), 'D15: real 0015 forward text applies cleanly to the scratch schema on top of 0014');
+  await assertSucceeds(() => client.query(fwd0015), 'D15: real 0015 (D1 repair) forward text applies cleanly to the scratch schema on top of 0014');
+
+  // ===================================================================
+  // Apply 0016 (D5B ValuationQuestion+Applicability, real forward text)
+  // ===================================================================
+  const fwd0016 = fwd0016Raw.replace(/SET search_path TO data1_dev;/g, `SET search_path TO ${SCHEMA};`);
+  await assertScratchTarget(SCHEMA, 'pre-0016-apply');
+  await assertSucceeds(() => client.query(fwd0016), 'D15: real 0016 (D5B) forward text applies cleanly on top of 0015 -- proves the split migrations still compose correctly in sequence');
 
   const compAfter = await client.query('SELECT id, marker FROM comp_snapshot');
   const valAfter = await client.query('SELECT id, marker FROM valuation_event');
@@ -496,12 +516,21 @@ try {
 
   // ===================================================================
   // D10(D5A discipline) -- rollback -> verify -> reapply -> verify
+  // A1 ordering: 0016 rolled back FIRST (it depends on 0015), then 0015.
+  // Full independent-domain rehearsal (A1-R1/R2/R3) lives in
+  // tests/d5b-live-apply-gate-a1-rehearsal.test.js -- this block only
+  // re-confirms the combined forward/rollback/reapply cycle still works
+  // end-to-end across both split files, in the correct order.
   // ===================================================================
   console.log('\n-- rollback / reapply --\n');
 
-  const rb = rb0015Raw.replace(/SET search_path TO data1_dev;/g, `SET search_path TO ${SCHEMA};`);
-  await assertScratchTarget(SCHEMA, 'pre-rollback');
-  await assertSucceeds(() => client.query(rb), 'D15: 0015 rollback text applies successfully');
+  const rb0016 = rb0016Raw.replace(/SET search_path TO data1_dev;/g, `SET search_path TO ${SCHEMA};`);
+  await assertScratchTarget(SCHEMA, 'pre-0016-rollback');
+  await assertSucceeds(() => client.query(rb0016), 'D15: 0016 rollback text applies successfully');
+
+  const rb0015 = rb0015Raw.replace(/SET search_path TO data1_dev;/g, `SET search_path TO ${SCHEMA};`);
+  await assertScratchTarget(SCHEMA, 'pre-0015-rollback');
+  await assertSucceeds(() => client.query(rb0015), 'D15: 0015 rollback text applies successfully (after 0016 is already rolled back)');
 
   const appAfterRollback = await client.query(`SELECT to_regclass('${SCHEMA}.applicability') AS t`);
   const vqAfterRollback = await client.query(`SELECT to_regclass('${SCHEMA}.valuation_question') AS t`);
@@ -531,12 +560,14 @@ try {
   const compAfterRollback = await client.query('SELECT id, marker FROM comp_snapshot');
   const valAfterRollback = await client.query('SELECT id, marker FROM valuation_event');
   const moAfterRollback = await client.query('SELECT count(*)::int AS n FROM market_observation');
-  assertTrue(compAfterRollback.rows.length === 1 && compAfterRollback.rows[0].marker === 'd9-untouched-marker', 'D9/D15: comp_snapshot survives 0015 rollback untouched too');
-  assertTrue(valAfterRollback.rows.length === 1 && valAfterRollback.rows[0].marker === 'd9-untouched-marker', 'D9/D15: valuation_event survives 0015 rollback untouched too');
-  assertTrue(moAfterRollback.rows[0].n === 1, 'D9/D15: market_observation (0014) is completely unaffected by 0015\'s rollback -- 0015 never touched that table\'s own DDL');
+  assertTrue(compAfterRollback.rows.length === 1 && compAfterRollback.rows[0].marker === 'd9-untouched-marker', 'D9/D15: comp_snapshot survives 0015/0016 rollback untouched too');
+  assertTrue(valAfterRollback.rows.length === 1 && valAfterRollback.rows[0].marker === 'd9-untouched-marker', 'D9/D15: valuation_event survives 0015/0016 rollback untouched too');
+  assertTrue(moAfterRollback.rows[0].n === 1, 'D9/D15: market_observation (0014) is completely unaffected by 0015/0016\'s rollback -- neither file touches that table\'s own DDL');
 
-  await assertScratchTarget(SCHEMA, 'pre-reapply');
-  await assertSucceeds(() => client.query(fwd0015), 'D15: reapply of the same 0015 forward text succeeds cleanly after rollback');
+  await assertScratchTarget(SCHEMA, 'pre-reapply-0015');
+  await assertSucceeds(() => client.query(fwd0015), 'D15: reapply of the same 0015 (D1) forward text succeeds cleanly after rollback');
+  await assertScratchTarget(SCHEMA, 'pre-reapply-0016');
+  await assertSucceeds(() => client.query(fwd0016), 'D15: reapply of the same 0016 (D5B) forward text succeeds cleanly after rollback, in the correct order on top of 0015');
   const afterReapplyCount = await client.query(`SELECT count(*)::int AS n FROM valuation_question`);
   assertTrue(afterReapplyCount.rows[0].n === 0, 'D15: reapplied valuation_question table is empty (rollback genuinely removed all prior rows along with the table)');
 
