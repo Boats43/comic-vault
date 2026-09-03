@@ -641,6 +641,34 @@ export async function resolveCollectionItemLink({ principalId, collectionItemId 
   }
 }
 
+// getLiveIdentityAssignment — D5D (valuation-evidence) writer-design
+// dependency. Read-only, no transaction, same shape and ownership
+// discipline as resolveCollectionItemLink immediately above: a caller
+// who does not own gkAssetId gets null, never a cross-principal leak of
+// whether an identity assignment exists. Wraps the already-existing
+// private repo.getLiveIdentityAssignment (used internally by
+// correctIdentity) as a new PUBLIC read accessor — no existing
+// behavior changes; nothing calls this yet (added ahead of any
+// production call site, per the D5D isolated-writer-design dispatch).
+// A ValuationQuestion (src/modules/valuation/, isolated, zero
+// production call sites) needs the LIVE identity_assignment_id to
+// anchor to (0016's own D1 rule: never "current identity" derived
+// implicitly — the specific, frozen row this call resolves).
+export async function getLiveIdentityAssignment({ principalId, gkAssetId } = {}) {
+  requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const ownerId = await repo.getAssetOwner(client, gkAssetId);
+    if (ownerId !== principalId) return null;
+    const assignment = await repo.getLiveIdentityAssignment(client, gkAssetId);
+    if (!assignment) return null;
+    return { identityAssignmentId: assignment.id, authority: assignment.authority, source: assignment.source };
+  } finally {
+    client.release();
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // recordAcquisition
 // ─────────────────────────────────────────────────────────────────────

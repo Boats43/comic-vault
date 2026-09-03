@@ -23,6 +23,7 @@ export {
   recordDecision,
   linkCollectionItem,
   resolveCollectionItemLink,
+  getLiveIdentityAssignment,
   recordIdentifierDefinition,
   recordRawObservation,
   recordIdentifierAssertion,
