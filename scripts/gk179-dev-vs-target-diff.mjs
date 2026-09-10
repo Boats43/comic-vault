@@ -4,13 +4,28 @@
 // against an isolated target (Production or Preview). Compares tables,
 // columns, constraints, indexes (definition-normalized, names reported
 // separately), triggers, functions, views, sequences, types, and the
-// environment_marker row value. Applies the closed, exhaustive GK-194
-// proconfig whitelist (asset_identifier_assertion_guard,
-// asset_identity_assignment_guard) — no other function delta is permitted.
+// environment_marker row value.
+//
+// MODE (GK-194, 2026-09-09): a third argument selects which function
+// assertion this run certifies against, preserving GK-179's own original
+// certification exactly rather than silently changing what it proved:
+//   (omitted) or "gk179-historical" — the ORIGINAL GK-179 closure mode.
+//     Expects EXACTLY the 2 named GK-194 proconfig deltas
+//     (asset_identifier_assertion_guard, asset_identity_assignment_guard)
+//     and fails if that count is anything else, zero included. This is
+//     what actually ran at GK-179 closure — do not repoint it at "0
+//     expected" retroactively, or GK-179's own historical certification
+//     becomes unreproducible.
+//   "post-gk194" — current-state certification after 0019 has closed the
+//     gap. Expects ZERO function differences of any kind, whitelist
+//     included — Development and the target must now be fully identical
+//     on both guard functions' proconfig.
 //
 // Usage:
 //   node --env-file=.env.development.local scripts/gk179-dev-vs-target-diff.mjs production
 //   node --env-file=.env.development.local scripts/gk179-dev-vs-target-diff.mjs preview
+//   node --env-file=.env.development.local scripts/gk179-dev-vs-target-diff.mjs production post-gk194
+//   node --env-file=.env.development.local scripts/gk179-dev-vs-target-diff.mjs preview post-gk194
 
 import { Client } from 'pg';
 
@@ -21,9 +36,10 @@ const TARGET_ENV_VARS = {
 
 const target = process.argv[2];
 if (!target || !TARGET_ENV_VARS[target]) {
-  console.log('Usage: node scripts/gk179-dev-vs-target-diff.mjs <production|preview>');
+  console.log('Usage: node scripts/gk179-dev-vs-target-diff.mjs <production|preview> [post-gk194]');
   process.exit(2);
 }
+const MODE = process.argv[3] === 'post-gk194' ? 'post-gk194' : 'gk179-historical';
 
 const devConnStr = process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED;
 const targetConnStr = process.env[TARGET_ENV_VARS[target]];
@@ -185,7 +201,8 @@ for (const t of tgt.triggers) if (!devTrigSet.has(trigKey(t))) { fail(`trigger e
 console.log(`  Development: ${dev.triggers.length} | ${target}: ${tgt.triggers.length}`);
 if (trigDiffs === 0) pass('triggers identical');
 
-console.log('\n=== 6. Functions (GK-194 whitelist applied: proconfig only, 2 named functions) ===');
+const activeWhitelist = MODE === 'post-gk194' ? new Set() : GK194_WHITELIST;
+console.log(`\n=== 6. Functions (mode=${MODE}${MODE === 'post-gk194' ? ', GK-194 whitelist RETIRED — zero deltas expected' : ', GK-194 whitelist applied: proconfig only, 2 named functions'}) ===`);
 const fnKey = (f) => `${f.name}(${f.args})`;
 const devFns = new Map(dev.functions.map(f => [fnKey(f), f])), tgtFns = new Map(tgt.functions.map(f => [fnKey(f), f]));
 let fnDiffs = 0, whitelistedHits = 0;
@@ -197,21 +214,22 @@ for (const [k, df] of devFns) {
   }
   const proconfigDiffers = JSON.stringify(df.proconfig) !== JSON.stringify(tf.proconfig);
   if (proconfigDiffers) {
-    if (GK194_WHITELIST.has(k)) {
+    if (activeWhitelist.has(k)) {
       const devVal = JSON.stringify(df.proconfig), tgtVal = JSON.stringify(tf.proconfig);
       const shapeOk = devVal === '["search_path=pg_catalog, data1_dev"]' && tgtVal === 'null';
       if (shapeOk) { console.log(`  (GK-194 whitelisted) ${k}.proconfig — Dev=${devVal} vs ${target}=${tgtVal}`); whitelistedHits++; }
       else { fail(`function ${k}.proconfig differs but NOT in the exact whitelisted shape: Dev=${devVal} vs ${target}=${tgtVal}`); fnDiffs++; }
     } else {
-      fail(`function ${k}.proconfig differs (NOT on the GK-194 whitelist): Dev=${JSON.stringify(df.proconfig)} vs ${target}=${JSON.stringify(tf.proconfig)}`);
+      fail(`function ${k}.proconfig differs (NOT on the ${MODE} whitelist, active whitelist size=${activeWhitelist.size}): Dev=${JSON.stringify(df.proconfig)} vs ${target}=${JSON.stringify(tf.proconfig)}`);
       fnDiffs++;
     }
   }
 }
 for (const k of tgtFns.keys()) if (!devFns.has(k)) { fail(`function extra in ${target}: ${k}`); fnDiffs++; }
-console.log(`  Development: ${dev.functions.length} | ${target}: ${tgt.functions.length} | whitelisted proconfig hits: ${whitelistedHits}/${GK194_WHITELIST.size}`);
+console.log(`  Development: ${dev.functions.length} | ${target}: ${tgt.functions.length} | whitelisted proconfig hits: ${whitelistedHits}/${activeWhitelist.size}`);
 if (fnDiffs === 0) pass('0 unwhitelisted function differences');
-if (whitelistedHits !== GK194_WHITELIST.size) fail(`expected exactly ${GK194_WHITELIST.size} GK-194 whitelist hits, got ${whitelistedHits}`);
+if (whitelistedHits !== activeWhitelist.size) fail(`expected exactly ${activeWhitelist.size} whitelist hits under mode=${MODE}, got ${whitelistedHits}`);
+if (MODE === 'post-gk194' && whitelistedHits === 0) pass('GK-194 whitelist entries remaining = 0 — retired');
 
 console.log('\n=== 7. Views / Sequences / Types ===');
 const eq = (a,b) => JSON.stringify(a) === JSON.stringify(b);

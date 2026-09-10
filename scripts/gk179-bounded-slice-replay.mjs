@@ -8,6 +8,22 @@
 // Preview must run this exact file, unmodified, with only its own
 // branch config selected.
 //
+// AMENDED (GK-194, 2026-09-09) — Step 16 now applies 0019 (the stored
+// function search_path pin). GK-179's OWN original certification ran
+// against the PRE-0019 form of this file (0018 as the final step,
+// proconfig left NULL on both guard functions, closed under the
+// temporary 2-function whitelist in scripts/gk179-dev-vs-target-diff.mjs)
+// — that historical certification is not retroactively changed by this
+// amendment. This is the one and only permitted modification to this
+// certified artifact (per GK-194's own closure ruling): rebuilding any
+// environment from this file must reproduce the current live state,
+// including the GK-194 fix, rather than silently regressing proconfig
+// back to NULL on every future rebuild. Verified by rebuilding Preview
+// from this amended file and confirming proconfig is present with no
+// manual follow-up apply (tests/gk194-stored-function-resolution-
+// scratch.test.js covers 0019's own correctness; this file's amendment
+// is verified operationally, by an actual rebuild, not by a unit test).
+//
 // Usage:
 //   node --env-file=.env.development.local scripts/gk179-bounded-slice-replay.mjs production
 //   node --env-file=.env.development.local scripts/gk179-bounded-slice-replay.mjs preview
@@ -89,17 +105,16 @@
 //   0012_d3_3_comp_snapshot.sql, 0013_d4_identifier_fabric.sql,
 //   0014_d5a_market_observation.sql, 0015_d1_identity_assignment_immutability.sql,
 //   0016_d5b_valuation_question_applicability.sql, 0017_d5c_market_population.sql,
-//   0018_gk179_environment_identity.sql
+//   0018_gk179_environment_identity.sql, 0019_gk194_stored_function_schema_resolution.sql
 //
 // EXPECTED RESULT (per branch): 28 data1_dev tables (27 kernel + environment_marker),
 // byte-identical to live Development on every table/column/constraint/trigger/
 // view/sequence/type, index-identical net of pure auto-vs-explicit naming,
-// function-identical EXCEPT the two whitelisted GK-194 proconfig deltas
-// (asset_identifier_assertion_guard, asset_identity_assignment_guard --
-// Development already has `search_path=pg_catalog, data1_dev` live,
-// pre-isolation targets intentionally do not; GK-194/0019 closes this gap
-// later, after V1-V5, under its own commit -- NOT this script's job).
-// `public` schema must be byte-identical before and after this script runs.
+// and — as of the GK-194 amendment above — function-identical with ZERO
+// whitelist exceptions: both guard functions carry
+// `search_path=pg_catalog, data1_dev` immediately after this script runs,
+// no separate manual apply required. `public` schema must be byte-identical
+// before and after this script runs.
 //
 // ===========================================================================
 
@@ -329,6 +344,7 @@ const unmodifiedFiles = [
   '0016_d5b_valuation_question_applicability.sql',
   '0017_d5c_market_population.sql',
   '0018_gk179_environment_identity.sql',
+  '0019_gk194_stored_function_schema_resolution.sql',
 ];
 let step = 3;
 for (const f of unmodifiedFiles) {
