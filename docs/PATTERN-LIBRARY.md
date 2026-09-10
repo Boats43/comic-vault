@@ -12908,3 +12908,69 @@ read `provenance` directly and retire this regex.** Until then, any edit
 to `applyDualAxisGate`'s `reason` strings must grep
 `isBareCreatorTokensOnly`'s two patterns first and confirm they still
 match the intended branches.
+
+## GK-184 — True market-evidence retrieval time (+ correction pass)
+
+Built `src/lib/evidenceObservedAt.js` — the canonical `evidenceObservedAt`
+concept, wired into all 6 real provider-evidence cache boundaries
+(`cv:`/`pc:`×2/`ac:`/`bc:` in `api/enrich.js`/`api/comps.js`, `ph:` in
+`api/pricecharting-pop.js`, the last requiring a shape change from a bare
+HTML string to `{html, evidenceObservedAt}` with explicit legacy-string
+backward compatibility). Zero D5 schema changes, zero D5 writer call
+sites (GK-180 stays at zero). Full detail: `docs/TICKET-REGISTRY.md`,
+"GK-184", and this dispatch's own session report.
+
+Three standing patterns banked by this dispatch:
+
+**Evidence Time Is Not Persistence Time.** `occurred_at` (when the
+market event itself happened) != `observed_at`/`evidenceObservedAt`
+(when GrailKey actually retrieved the evidence) != `recorded_at` (when
+GrailKey persisted the row). No substitution between the three without
+explicit domain evidence — a cache HIT must return the ORIGINAL fetch
+instant, never the hit instant; a legacy/missing value must read back as
+explicitly ABSENT, never silently upgraded to `now()`.
+
+**Negative-Proof Specificity.** A rejected operation is not proof until
+the intended guard/constraint is identified by name — `expected
+error/reason/SQLSTATE + expected guard or constraint identity`, never a
+bare `assertThrows()`. Promoted after repeated masking incidents in the
+D5C migration-contract negative tests and the D5D W-F7/GK-192 negative
+test; GK-184's own N1-N5 proofs each anchor to
+`classifyEvidenceObservedAt`'s exact three-way classification
+(`PRESENT_VALID`/`ABSENT`/`MALFORMED`) rather than a generic failure.
+
+**Provenance Truth != Evidence Freshness** (added by the GK-184
+correction pass, 2026-09-03). A truthful `evidenceObservedAt` says only
+that a genuine retrieval instant exists and is well-formed — it says
+NOTHING about whether that evidence is fresh enough to be trusted for
+any given decision. `src/lib/evidenceObservedAt.js` deliberately
+contains no staleness/freshness/expiry policy of any kind, and
+`isEvidenceTimeAdmissible` (the module's explicit switch-style
+admission test) answers exactly one question — "is there a genuine
+timestamp value at all" (time-axis admissibility) — never "is this
+timestamp recent enough." A future staleness/freshness judgment belongs
+to a distinct, later Applicability/policy layer (D5B's own
+ValuationQuestion/Applicability boundary is the natural home), never
+baked into this provenance-capture primitive. Legacy cache entries
+classified `ABSENT` mean D5D must SKIP persisting that observation, not
+substitute any other timestamp for it; every touched cache namespace's
+own TTL (`ac:` 1h, `bc:` 6h, `cv:`/`pc:` 24h, `ph:` 7d — the longest)
+bounds how long an `ABSENT` legacy entry can persist post-deploy before
+naturally cycling out via ordinary TTL expiry, so deploy-time mass cache
+invalidation is NOT required unless future evidence contradicts this.
+
+Joins the running list: Dispatch 33 (Monotonic Evidence Extension, No
+Self-Corroboration), Dispatch 34 (Rejection Must Not Create Authority),
+Dispatch 37 (Cache Correctness Is Authority Correctness), Dispatch 44
+(Authority Must Be Use-Consistent), Directive AN (Corroboration Must Be
+Physical), Directive AR (Authority Is Evidence-Earned).
+
+**GK-184 correction pass also reclassified** its own regression finding:
+the 4 newly-failing `tests/d4-identifier-fabric-live-*.test.js` files
+(surfaced by this dispatch's full 280-file sweep, structurally proven
+unrelated to GK-184 by zero import overlap with any file it touched) are
+tracked as **NEWLY OBSERVED / GK-184-UNRELATED / ROOT CAUSE OPEN** — not
+"D4 schema drift," which this dispatch is not positioned to claim.
+Diagnostic evidence (session `search_path` vs. the D4 trigger function's
+own unqualified internal reference) fed to `docs/TICKET-REGISTRY.md`,
+"GK-179," as evidence only, not a closure.
