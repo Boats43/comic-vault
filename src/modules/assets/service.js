@@ -879,6 +879,80 @@ export async function recordDecision({ principalId, gkAssetId, recommendation, r
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// recordOperatorAction — OperatorAction (0021, GK-199 dispatch 2).
+// The FOURTH distinct truth: what the authenticated human actually
+// chose, in response to a specific existing GrailKey recommendation
+// (decision_event). NEVER mutates decision_event/valuation_event
+// (Chain #2's own rows are read-only historical facts to this
+// function). principalId must already be the caller's own verified
+// identity — this function does not itself authenticate anything, the
+// SAME parameter-contract boundary every other function in this file
+// already relies on (ADR-AUTH-001 v1).
+// ─────────────────────────────────────────────────────────────────────
+export async function recordOperatorAction({ principalId, gkAssetId, decisionEventId, actionCode, actionValueAmount, actionValueCurrency = 'USD', source, idempotencyKey, correlationId, occurredAt } = {}) {
+  requireFields({ principalId, gkAssetId, decisionEventId, actionCode, source }, ['principalId', 'gkAssetId', 'decisionEventId', 'actionCode', 'source']);
+  requireEnum(actionCode, ['LIST', 'HOLD', 'PASS'], 'actionCode');
+  requireEnum(source, ['operator-api', 'test-fixture'], 'source');
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'recordOperatorAction';
+      // GK-163 — semantic payload: which recommendation, which action,
+      // which value. A different decisionEventId/actionCode/value under
+      // the same idempotencyKey is NOT the same request (mirrors every
+      // other writer in this file).
+      const requestFingerprint = computeRequestFingerprint({
+        gkAssetId, decisionEventId, actionCode, actionValueAmount: actionValueAmount ?? null, actionValueCurrency,
+      });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+
+      // The action cannot float unattached to the historical
+      // recommendation it responds to — the referenced decision_event
+      // must exist AND actually belong to this exact asset, never
+      // trusted from the caller's own claim that the two are related.
+      const decisionAssetId = await repo.getDecisionEventAssetId(client, decisionEventId);
+      if (decisionAssetId === null) {
+        throw new NotFoundError(`decision_event ${decisionEventId} does not exist`);
+      }
+      if (decisionAssetId !== gkAssetId) {
+        throw new ValidationFailedError(`decision_event ${decisionEventId} belongs to a different asset than gkAssetId ${gkAssetId}`);
+      }
+
+      const batchCorrelationId = correlationId || await newCorrelationId(client);
+      const operatorActionEventId = await repo.insertOperatorActionEvent(client, {
+        gkAssetId, decisionEventId, principalId, actionCode,
+        actionValueAmount: actionValueAmount ?? null, actionValueCurrency,
+        source, correlationId: batchCorrelationId, occurredAt,
+      });
+      await repo.writeDomainEvent(client, {
+        eventType: 'operator-action.recorded', actorPrincipalId: principalId, actorKind: 'user',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { operatorActionEventId, decisionEventId, actionCode, actionValueAmount: actionValueAmount ?? null, actionValueCurrency },
+        correlationId: batchCorrelationId,
+        occurredAt,
+      });
+
+      const result = { operatorActionEventId };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // D4 Phase B -- Identifier Fabric (docs/adr/ADR-IDENTIFIER-001-
 // identifier-fabric.md, Rulings 1-21; migration 0013). Minimum
 // vertical-neutral API surface: create/read a canonical identifier, a

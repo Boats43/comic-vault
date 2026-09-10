@@ -253,6 +253,33 @@ export async function insertDecisionEvent(client, { assetId, recommendation, rea
   return id;
 }
 
+// OperatorAction (0021) — reads decision_event.asset_id ONLY to confirm
+// the caller-supplied gkAssetId genuinely matches the recommendation
+// being responded to (never trusts the client's own claim that the two
+// are related). Returns null if the decisionEventId does not exist at
+// all -- service.js turns that into a real NotFoundError, never a bare
+// FK-violation surface.
+export async function getDecisionEventAssetId(client, decisionEventId) {
+  const r = await client.query(`SELECT asset_id FROM data1_dev.decision_event WHERE id = $1`, [decisionEventId]);
+  return r.rows[0]?.asset_id ?? null;
+}
+
+export async function insertOperatorActionEvent(client, { gkAssetId, decisionEventId, principalId, actionCode, actionValueAmount, actionValueCurrency, source, correlationId, occurredAt }) {
+  const id = await uuidv7(client);
+  // occurred_at is NOT NULL DEFAULT now() (unlike valuation_event/
+  // decision_event's own nullable occurred_at -- an operator action's
+  // instant is always asserted, defaulting to "now" when the caller
+  // doesn't backdate it). COALESCE, not a bare bound NULL, so an
+  // omitted occurredAt actually gets the column's own now() rather than
+  // an explicit NULL bypassing the default entirely.
+  await client.query(
+    `INSERT INTO data1_dev.operator_action_event (id, gk_asset_id, decision_event_id, principal_id, action_code, action_value_amount, action_value_currency, source, correlation_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, now()))`,
+    [id, gkAssetId, decisionEventId, principalId, actionCode, actionValueAmount ?? null, actionValueCurrency || 'USD', source, correlationId, occurredAt ?? null]
+  );
+  return id;
+}
+
 // CAPTURE-INT (db/data0/0007_capture_integration_linkage.sql) — a routing
 // lookup only ("which asset does a re-scan of this collection row attach
 // to"), never a claim about physical identity. collectionItemId !=

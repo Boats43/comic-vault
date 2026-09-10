@@ -21,6 +21,7 @@ export {
   recordCompSnapshot,
   recordValuation,
   recordDecision,
+  recordOperatorAction,
   linkCollectionItem,
   resolveCollectionItemLink,
   getLiveIdentityAssignment,
