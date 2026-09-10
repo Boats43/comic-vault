@@ -22,6 +22,21 @@
 
 import { classifyEvidenceObservedAt, isEvidenceTimeAdmissible, EVIDENCE_CLASSIFICATION } from './evidenceObservedAt.js';
 
+// The exact enum data1_dev.market_observation.listing_kind's CHECK
+// constraint permits (db/data0/0014_d5a_market_observation.sql:216:
+// CHECK (listing_kind IN ('asking', 'sold', 'offer', 'auction-result'))).
+// A caller that emits any other string gets a live 23514 at write time,
+// not a decline -- this happened once (Chain #1's first real-write
+// attempt, 2026-09-09, used 'active') and is the exact regression this
+// constant plus buildChain1ObservationsFromRawComps's own unit proof
+// (tests/d5d-runtime-bridge-unit.test.js) now guard against.
+export const MARKET_OBSERVATION_LISTING_KIND = Object.freeze({
+  ASKING: 'asking',
+  SOLD: 'sold',
+  OFFER: 'offer',
+  AUCTION_RESULT: 'auction-result',
+});
+
 export const D5D_DECLINE_REASONS = Object.freeze({
   DISABLED: 'd5d-disabled',
   WRONG_ENVIRONMENT: 'wrong-environment',
@@ -78,6 +93,63 @@ export function auditEvidenceTime(observations) {
     return { index: i, classification: cls.classification, admissible: isEvidenceTimeAdmissible(cls.classification) };
   });
   return { allAdmissible: results.every((r) => r.admissible), results };
+}
+
+// buildChain1ObservationsFromRawComps — the exact mapping from a
+// fetchComps() result to a Chain #1 buildObservations() payload,
+// extracted out of api/enrich.js's own wiring so the mapping (in
+// particular listingKind) is unit-testable without a DB or a real
+// handler invocation. Pure function, no I/O -- up to 3 real comp rows,
+// all sharing the ONE genuine provider-retrieval instant this pool was
+// fetched at (they came from the same fetchComps() call).
+export function buildChain1ObservationsFromRawComps({
+  prices,
+  evidenceObservedAt,
+  confidenceTier,
+  ruleVersion,
+  targetGrade,
+  gradeBasis,
+  disposition,
+  targetYear,
+  populationRuleVersion = 'd5d-chain1-v1',
+} = {}) {
+  const list = Array.isArray(prices) ? prices : [];
+  if (list.length === 0) return null;
+  const observations = list.slice(0, 3).map((p) => ({
+    marketObservation: {
+      provider: 'ebay',
+      providerItemId: null, // not extracted from the URL for this minimal proof -- never the raw url itself (GK-182)
+      listingKind: MARKET_OBSERVATION_LISTING_KIND.ASKING, // these are active/not-yet-sold eBay Browse API listings
+      priceAmount: p.price,
+      currency: 'USD',
+      conditionText: p.condition || null,
+      gradeNumeric: null, // not asserted per-row for this minimal proof -- never fabricated
+      gradeBasis: null,
+      occurredOn: null,
+      occurredAt: p.date || null,
+      observedAt: evidenceObservedAt ?? null,
+    },
+    applicability: {
+      verdict: 'APPLICABLE',
+      confidenceTier: confidenceTier || 'MEDIUM',
+      ruleId: 'comp-filter',
+      ruleVersion: String(ruleVersion || '1'),
+      modelVersion: null,
+      sourceType: 'automated',
+      reason: null,
+    },
+    memberStatus: 'SELECTED',
+  })).filter((o) => o.marketObservation.priceAmount != null);
+  if (observations.length === 0) return null;
+  return {
+    targetGrade,
+    gradeBasis,
+    disposition,
+    variantScope: null,
+    targetYear,
+    populationRuleVersion,
+    observations,
+  };
 }
 
 // attemptChain1 — the single entry point. NEVER throws for an
@@ -150,12 +222,16 @@ export async function attemptChain1({
   };
 
   if (dryRun) {
-    return { attempted: true, dryRun: true, payload, timeAudit, retentionAudit };
+    return { attempted: true, dryRun: true, payload, timeAudit, retentionAudit, eligibility };
   }
 
   const writeResult = await attemptDurablePersistence(payload);
   if (!writeResult.ok) {
-    return { attempted: true, dryRun: false, declineReason: D5D_DECLINE_REASONS.WRITE_FAILED, error: writeResult.error };
+    return { attempted: true, dryRun: false, declineReason: D5D_DECLINE_REASONS.WRITE_FAILED, error: writeResult.error, eligibility };
   }
-  return { attempted: true, dryRun: false, result: writeResult.result, elapsedMs: writeResult.elapsedMs };
+  // eligibility carried through on success too (not just the decline
+  // path) -- a caller building a downstream durable result (Outcome #1)
+  // needs gkAssetId/identityAssignmentId without a second, duplicate
+  // resolveEligibleSubject() round trip.
+  return { attempted: true, dryRun: false, result: writeResult.result, elapsedMs: writeResult.elapsedMs, eligibility };
 }

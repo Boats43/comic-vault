@@ -39,6 +39,13 @@ for (const line of envRaw.split(/\r?\n/)) {
   if (m) process.env[m[1]] = m[2].replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
 }
 
+// GK-179 (2026-09-09) — src/modules/assets/db.js's acquireConnection()
+// now runs the environment-identity guard, added after this test file
+// was originally written. This module's pool targets real Development,
+// so the expected identity is 'development' (mirrors the same one-line
+// fix already applied to tests/d5d-valuation-writer.test.js).
+process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development';
+
 const { createPhysicalAsset, recordCompSnapshot, recordValuation, closePool } =
   await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')));
 const mapping = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'capture', 'mapping.js')));

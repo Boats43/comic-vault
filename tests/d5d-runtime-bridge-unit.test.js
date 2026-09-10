@@ -8,7 +8,7 @@
 //
 // Invoke: node tests/d5d-runtime-bridge-unit.test.js
 
-import { attemptChain1, auditGk182Retention, auditEvidenceTime, D5D_DECLINE_REASONS } from '../src/lib/d5dRuntimeBridge.js';
+import { attemptChain1, auditGk182Retention, auditEvidenceTime, D5D_DECLINE_REASONS, buildChain1ObservationsFromRawComps, MARKET_OBSERVATION_LISTING_KIND } from '../src/lib/d5dRuntimeBridge.js';
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -162,6 +162,7 @@ console.log('\n-- real write: success --\n');
   });
   assertTrue(r.attempted && r.dryRun === false, 'real write reports attempted=true, dryRun=false');
   assertEq(r.result?.populationId, 'pop-1', 'real write returns the writer result');
+  assertEq(r.eligibility?.gkAssetId, 'asset-1', 'real write ALSO carries eligibility through (Outcome #1 needs gkAssetId without a second resolveEligibleSubject round trip)');
 }
 
 console.log('\n-- real write: writer failure surfaces as write-failed, not a throw --\n');
@@ -181,6 +182,43 @@ console.log('\n-- auditEvidenceTime, direct --\n');
   assertTrue(!audit.allAdmissible, 'mixed valid/absent -> not all admissible');
   assertEq(audit.results[0].admissible, true, 'first observation (valid) is admissible');
   assertEq(audit.results[1].admissible, false, 'second observation (absent) is not admissible');
+}
+
+console.log('\n-- buildChain1ObservationsFromRawComps: listingKind regression guard (23514, 2026-09-09) --\n');
+{
+  // The exact defect: Chain #1's first real-write attempt emitted
+  // listingKind:'active' and hit a live Postgres 23514 --
+  // data1_dev.market_observation's CHECK constraint only permits
+  // 'asking'|'sold'|'offer'|'auction-result' (db/data0/0014). This
+  // proves the fix directly against the real production mapping
+  // function (not a fixture re-implementation) with no DB required.
+  const built = buildChain1ObservationsFromRawComps({
+    prices: [{ price: 75, condition: null, date: null }, { price: 115 }, { price: 200 }],
+    evidenceObservedAt: '2026-09-10T02:43:53.285Z',
+    confidenceTier: 'HIGH', ruleVersion: '1',
+    targetGrade: '4', gradeBasis: 'raw-estimate', disposition: 'raw', targetYear: 1964,
+  });
+  const ALLOWED = new Set(Object.values(MARKET_OBSERVATION_LISTING_KIND));
+  assertTrue(!!built && built.observations.length === 3, 'maps up to 3 real comp rows');
+  assertTrue(
+    built.observations.every((o) => ALLOWED.has(o.marketObservation.listingKind)),
+    'every observation.marketObservation.listingKind is in the DB CHECK constraint\'s exact allowed set'
+  );
+  assertEq(MARKET_OBSERVATION_LISTING_KIND.ASKING, 'asking', 'ASKING constant is the literal DB-allowed value');
+  assertTrue(
+    built.observations.every((o) => o.marketObservation.listingKind !== 'active'),
+    'never regresses to the historical defect value "active" (not in the DB-allowed set)'
+  );
+  assertEq(built.observations[0].marketObservation.observedAt, '2026-09-10T02:43:53.285Z', 'threads evidenceObservedAt through unchanged (GK-184)');
+  assertEq(built.populationRuleVersion, 'd5d-chain1-v1', 'defaults populationRuleVersion when not supplied');
+}
+{
+  const built = buildChain1ObservationsFromRawComps({ prices: [] });
+  assertEq(built, null, 'empty prices array returns null (no observations to build)');
+}
+{
+  const built = buildChain1ObservationsFromRawComps({});
+  assertEq(built, null, 'no prices at all returns null, never throws');
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

@@ -228,12 +228,17 @@ export async function insertCompSnapshot(client, { assetId, source, payload, con
 // completely untouched by this change -- still accepted, still written
 // exactly as before, never reinterpreted, never repurposed, never used
 // to infer compSnapshotId. Both columns are independent and optional.
-export async function insertValuationEvent(client, { assetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, gradeAssumption, buildSha, recordedByPrincipalId, occurredAt }) {
+// Outcome #1 (0020) -- marketPopulationId is the NEW, durable, FK-
+// enforced reference (valuation_event.market_population_id ->
+// market_population.id) into D5's own structured evidence chain --
+// independent of, and coexisting with, compSnapshotId/compSnapshotRef
+// exactly as those two already coexist with each other.
+export async function insertValuationEvent(client, { assetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, marketPopulationId, gradeAssumption, buildSha, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO data1_dev.valuation_event (id, asset_id, value_amount, value_currency, method, comp_snapshot_ref, comp_snapshot_id, grade_assumption, build_sha, recorded_by_principal_id, occurred_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [id, assetId, valueAmount, valueCurrency, method, compSnapshotRef ?? null, compSnapshotId ?? null, gradeAssumption ?? null, buildSha, recordedByPrincipalId, occurredAt ?? null]
+    `INSERT INTO data1_dev.valuation_event (id, asset_id, value_amount, value_currency, method, comp_snapshot_ref, comp_snapshot_id, market_population_id, grade_assumption, build_sha, recorded_by_principal_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    [id, assetId, valueAmount, valueCurrency, method, compSnapshotRef ?? null, compSnapshotId ?? null, marketPopulationId ?? null, gradeAssumption ?? null, buildSha, recordedByPrincipalId, occurredAt ?? null]
   );
   return id;
 }

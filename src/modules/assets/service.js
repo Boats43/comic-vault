@@ -779,7 +779,7 @@ export async function recordCompSnapshot({ principalId, gkAssetId, source, paylo
 // ─────────────────────────────────────────────────────────────────────
 // recordValuation
 // ─────────────────────────────────────────────────────────────────────
-export async function recordValuation({ principalId, gkAssetId, valueAmount, valueCurrency = 'USD', method, compSnapshotRef, compSnapshotId, gradeAssumption, buildSha, idempotencyKey, correlationId, occurredAt } = {}) {
+export async function recordValuation({ principalId, gkAssetId, valueAmount, valueCurrency = 'USD', method, compSnapshotRef, compSnapshotId, marketPopulationId, gradeAssumption, buildSha, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields({ principalId, gkAssetId, valueAmount, method, buildSha }, ['principalId', 'gkAssetId', 'valueAmount', 'method', 'buildSha']);
   requireEnum(method, ['engine-computed', 'operator-override', 'gocollect', 'other'], 'method');
 
@@ -791,28 +791,29 @@ export async function recordValuation({ principalId, gkAssetId, valueAmount, val
       const operation = 'recordValuation';
       // GK-163 — semantic payload: asset+amount+currency+basis, per the
       // ticket's own wording ("basis" = the valuation method).
-      // compSnapshotId included: two calls under the same idempotencyKey
-      // referencing different durable evidence are NOT the same request.
-      const requestFingerprint = computeRequestFingerprint({ gkAssetId, valueAmount, valueCurrency, method, compSnapshotId: compSnapshotId ?? null });
+      // compSnapshotId/marketPopulationId included: two calls under the
+      // same idempotencyKey referencing different durable evidence are
+      // NOT the same request.
+      const requestFingerprint = computeRequestFingerprint({ gkAssetId, valueAmount, valueCurrency, method, compSnapshotId: compSnapshotId ?? null, marketPopulationId: marketPopulationId ?? null });
       const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertAssetExists(client, gkAssetId);
       await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
-      // compSnapshotId is caller-supplied ONLY — never derived from
-      // compSnapshotRef, a Redis/scanlog key, a correlationId, a
-      // marketplace id, or gkAssetId itself. A caller with no durable
-      // snapshot (e.g. an operator-override valuation with no comp
-      // evidence at all) legitimately omits it -> NULL, a truthful
-      // legal state, not an error.
+      // compSnapshotId/marketPopulationId are caller-supplied ONLY —
+      // never derived from compSnapshotRef, a Redis/scanlog key, a
+      // correlationId, a marketplace id, or gkAssetId itself. A caller
+      // with no durable evidence basis at all (e.g. an operator-
+      // override valuation) legitimately omits both -> NULL, a
+      // truthful legal state, not an error.
       const valuationEventId = await repo.insertValuationEvent(client, {
-        assetId: gkAssetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, gradeAssumption, buildSha,
+        assetId: gkAssetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, marketPopulationId, gradeAssumption, buildSha,
         recordedByPrincipalId: principalId, occurredAt,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'valuation.computed', actorPrincipalId: principalId, actorKind: method === 'engine-computed' ? 'system' : 'user',
         subjectType: 'gk_asset', subjectId: gkAssetId,
-        payload: { valuationEventId, valueAmount, valueCurrency, method, buildSha, compSnapshotId: compSnapshotId ?? null },
+        payload: { valuationEventId, valueAmount, valueCurrency, method, buildSha, compSnapshotId: compSnapshotId ?? null, marketPopulationId: marketPopulationId ?? null },
         correlationId: correlationId || await newCorrelationId(client),
         occurredAt,
       });

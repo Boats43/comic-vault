@@ -161,7 +161,8 @@ import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map caches)
 import { kvGet, kvSet, kvZAdd, KV_TTL, PC_FILTER_VERSION, CV_FILTER_VERSION } from "./kv-cache.js";
 import { captureEvidenceObservedAt, stampEvidenceObservedAt } from "../src/lib/evidenceObservedAt.js";
-import { attemptChain1 } from "../src/lib/d5dRuntimeBridge.js";
+import { attemptChain1, buildChain1ObservationsFromRawComps } from "../src/lib/d5dRuntimeBridge.js";
+import { attemptOutcome1 } from "../src/lib/outcome1RuntimeBridge.js";
 import { buildScanLogRecord, buildScanLogKey, SCAN_LOG_INDEX_KEY } from "../src/lib/scanLog.js";
 import { checkRateLimit } from "./rate-limit.js";
 import { randomUUID } from "node:crypto";
@@ -12552,47 +12553,16 @@ export default async function handler(req, res) {
 
         const buildObservations = () => {
           try {
-            const prices = Array.isArray(out?.rawComps?.prices) ? out.rawComps.prices : [];
-            const evidenceObservedAt = out?.rawComps?.evidenceObservedAt ?? null;
-            if (prices.length === 0) return null;
-            // Chain #1 minimal scope: up to 3 real comp rows, all sharing
-            // the ONE genuine provider-retrieval instant this pool was
-            // fetched at (they came from the same fetchComps() call).
-            const observations = prices.slice(0, 3).map((p) => ({
-              marketObservation: {
-                provider: 'ebay',
-                providerItemId: null, // not extracted from the URL for this minimal proof -- never the raw url itself (GK-182)
-                listingKind: 'asking', // these are active/not-yet-sold eBay Browse API listings -- schema's allowed set (0014) is 'asking'|'sold'|'offer'|'auction-result', not 'active'
-                priceAmount: p.price,
-                currency: 'USD',
-                conditionText: p.condition || null,
-                gradeNumeric: null, // not asserted per-row for this minimal proof -- never fabricated
-                gradeBasis: null,
-                occurredOn: null,
-                occurredAt: p.date || null,
-                observedAt: evidenceObservedAt,
-              },
-              applicability: {
-                verdict: 'APPLICABLE',
-                confidenceTier: out?.matchConfidence?.tier || 'MEDIUM',
-                ruleId: 'comp-filter',
-                ruleVersion: String(out?.pipelineAudit?.identityRevision || '1'),
-                modelVersion: null,
-                sourceType: 'automated',
-                reason: null,
-              },
-              memberStatus: 'SELECTED',
-            })).filter((o) => o.marketObservation.priceAmount != null);
-            if (observations.length === 0) return null;
-            return {
+            return buildChain1ObservationsFromRawComps({
+              prices: out?.rawComps?.prices,
+              evidenceObservedAt: out?.rawComps?.evidenceObservedAt,
+              confidenceTier: out?.matchConfidence?.tier,
+              ruleVersion: out?.pipelineAudit?.identityRevision,
               targetGrade: out?.numericGrade != null ? String(out.numericGrade) : (req.body?.numericGrade != null ? String(req.body.numericGrade) : '0'),
               gradeBasis: (req.body?.isGraded || out?.isGraded) ? 'cgc' : 'raw-estimate',
               disposition: (req.body?.isGraded || out?.isGraded) ? 'graded' : 'raw',
-              variantScope: null,
               targetYear: out?.year ? parseInt(out.year, 10) : null,
-              populationRuleVersion: 'd5d-chain1-v1',
-              observations,
-            };
+            });
           } catch (buildErr) {
             console.error('[d5d-chain1] buildObservations error (non-fatal):', buildErr.message);
             return null;
@@ -12636,6 +12606,54 @@ export default async function handler(req, res) {
           // so this is safe to carry through.
           error: d5dOutcome.error || undefined,
         };
+
+        // ─────────────────────────────────────────────────────────────
+        // Outcome #1 (2026-09-09) — durable prediction/recommendation.
+        // Fires ONLY immediately after a real (non-dry-run), successful
+        // D5D write in this SAME request — the freshly-written
+        // marketPopulationId is threaded straight through, so the
+        // persisted valuation_event is linked to the exact evidence
+        // basis that produced it, never a stale or guessed population.
+        // Same environment/flag discipline as D5D: Development-only,
+        // fail-safe (own try/catch, never touches out.price/out.decision
+        // themselves — read-only with respect to the pricing response).
+        // Reuses the EXISTING recordValuation/recordDecision primitives
+        // (src/modules/assets/) rather than a new table — see
+        // src/lib/outcome1RuntimeBridge.js's own header for why.
+        // ─────────────────────────────────────────────────────────────
+        if (d5dOutcome.attempted && !d5dOutcome.dryRun && !d5dOutcome.declineReason && d5dOutcome.result?.populationId) {
+          try {
+            const outcome1Start = Date.now();
+            const assetsMod = await import('../src/modules/assets/index.js');
+            const outcome1Result = await attemptOutcome1({
+              enabled: process.env.D5D_RUNTIME_ENABLED === 'true',
+              environment: process.env.GRAILKEY_CATALOG_ENVIRONMENT || null,
+              principalId,
+              gkAssetId: d5dOutcome.eligibility?.gkAssetId,
+              marketPopulationId: d5dOutcome.result.populationId,
+              priceString: out.price,
+              decision: out.decision,
+              gradeAssumption: numericGrade ?? null,
+              buildSha: buildId,
+              idempotencyKey: req.body?.d5dIdempotencyKey || null,
+              correlationId: pipelineTraceId || null,
+              recordValuation: assetsMod.recordValuation,
+              recordDecision: assetsMod.recordDecision,
+            });
+            const outcome1ElapsedMs = Date.now() - outcome1Start;
+            console.log(
+              `[outcome1] attempted=${outcome1Result.attempted} declineReason=${outcome1Result.declineReason || 'n/a'} elapsedMs=${outcome1ElapsedMs}`
+            );
+            out.outcome1Result = {
+              attempted: outcome1Result.attempted,
+              declineReason: outcome1Result.declineReason || null,
+              elapsedMs: outcome1ElapsedMs,
+              error: outcome1Result.error || undefined,
+            };
+          } catch (outcome1Err) {
+            console.error('[outcome1] wiring error (non-fatal, pricing response unaffected):', outcome1Err.message);
+          }
+        }
       }
     } catch (d5dErr) {
       console.error('[d5d-chain1] wiring error (non-fatal, pricing response unaffected):', d5dErr.message);
