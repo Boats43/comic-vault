@@ -15,6 +15,7 @@
 // capped at max:5); this module never imports assets/db.js.
 
 import pg from 'pg';
+import { assertEnvironmentIdentity } from '../../lib/environmentGuard.js';
 
 let pool = null;
 
@@ -38,8 +39,21 @@ export function getPool() {
 // schema-qualified (`data1_dev.<table>`) instead -- correct regardless
 // of concurrency, pool warmth, or which physical PgBouncer backend a
 // given statement lands on.
+// GK-179 (2026-09-09) — see src/modules/assets/db.js's own
+// acquireConnection() header for the full rationale; identical shape
+// here, sharing the one assertEnvironmentIdentity() helper. Valuation
+// has zero production call sites (D5D, GK-180) — this wiring is dormant
+// in production traffic today but keeps the module consistent with its
+// two siblings the moment it is ever wired live.
 export async function acquireConnection() {
-  return getPool().connect();
+  const client = await getPool().connect();
+  try {
+    await assertEnvironmentIdentity(client);
+  } catch (e) {
+    client.release();
+    throw e;
+  }
+  return client;
 }
 
 // Test/shutdown only.

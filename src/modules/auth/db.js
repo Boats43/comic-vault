@@ -11,6 +11,7 @@
 // separate database.
 
 import pg from 'pg';
+import { assertEnvironmentIdentity } from '../../lib/environmentGuard.js';
 
 let pool = null;
 
@@ -32,8 +33,19 @@ export function getPool() {
 // for the full rationale (Neon PgBouncer transaction-pooling does not
 // guarantee a bare SET survives to later statements). auth/repository.js
 // now schema-qualifies every table reference instead.
+// GK-179 (2026-09-09) — see src/modules/assets/db.js's own
+// acquireConnection() header for the full rationale; identical shape
+// here, sharing the one assertEnvironmentIdentity() helper rather than
+// a second independently-implemented guard.
 export async function acquireConnection() {
-  return getPool().connect();
+  const client = await getPool().connect();
+  try {
+    await assertEnvironmentIdentity(client);
+  } catch (e) {
+    client.release();
+    throw e;
+  }
+  return client;
 }
 
 export async function closePool() {

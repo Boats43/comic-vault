@@ -14,6 +14,7 @@
 // driver-choice rationale (pg over @neondatabase/serverless, for now).
 
 import pg from 'pg';
+import { assertEnvironmentIdentity } from '../../lib/environmentGuard.js';
 
 let pool = null;
 
@@ -50,8 +51,20 @@ export function getPool() {
 // backend PgBouncer happens to route a given statement to. Do not
 // reintroduce a bare `SET search_path` here as a "convenience" — it
 // would silently reintroduce this exact hazard.
+// GK-179 (2026-09-09) — every acquisition is now gated by
+// assertEnvironmentIdentity() before the client is handed to the
+// caller. On failure, the client is released back to the pool (never
+// left checked out) and the error propagates — no ordinary domain
+// query ever executes against a misidentified target.
 export async function acquireConnection() {
-  return getPool().connect();
+  const client = await getPool().connect();
+  try {
+    await assertEnvironmentIdentity(client);
+  } catch (e) {
+    client.release();
+    throw e;
+  }
+  return client;
 }
 
 // Test/shutdown only — closes the pool. Never called from service.js

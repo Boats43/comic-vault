@@ -42,6 +42,14 @@ for (const line of envRaw.split(/\r?\n/)) {
   if (m) process.env[m[1]] = m[2].replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
 }
 
+// GK-179 (2026-09-09) — acquireConnection() in both modules now runs the
+// environment-identity guard before returning a client. This test's real
+// live calls target real Development, so the expected identity is
+// 'development' — without this, every call below fails closed with
+// EnvironmentIdentityError(EXPECTED_ENV_UNSET), which is the guard
+// working correctly, not a GK-178 regression.
+process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development';
+
 let passed = 0, failed = 0;
 const failures = [];
 const assertTrue = (cond, label) => {

@@ -32,6 +32,11 @@ for (const line of envRaw.split(/\r?\n/)) {
   if (m) process.env[m[1]] = m[2].replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
 }
 
+// GK-179 (2026-09-09) — valuation/db.js's acquireConnection() now runs
+// the environment-identity guard. This module's pool targets real
+// Development, so the expected identity is 'development'.
+process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development';
+
 let passed = 0, failed = 0;
 const failures = [];
 const assertTrue = (cond, label) => {

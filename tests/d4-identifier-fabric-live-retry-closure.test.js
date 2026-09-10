@@ -37,6 +37,9 @@ for (const line of envRaw.split(/\r?\n/)) {
   const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
   if (m) process.env[m[1]] = m[2].replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
 }
+// GK-179 (2026-09-09) — assets/db.js's acquireConnection() now runs the
+// environment-identity guard; this test targets real Development.
+process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development';
 const assets = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
 
 const OPERATOR_PRINCIPAL = '01a0283a-b1b6-7f90-9b41-9c06bee6ecba';
