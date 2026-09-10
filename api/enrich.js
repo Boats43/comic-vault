@@ -160,6 +160,7 @@ import { checkVisionConsistency } from "../src/lib/visionConsistency.js";
 import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map caches)
 import { kvGet, kvSet, kvZAdd, KV_TTL, PC_FILTER_VERSION, CV_FILTER_VERSION } from "./kv-cache.js";
+import { captureEvidenceObservedAt, stampEvidenceObservedAt } from "../src/lib/evidenceObservedAt.js";
 import { buildScanLogRecord, buildScanLogKey, SCAN_LOG_INDEX_KEY } from "../src/lib/scanLog.js";
 import { checkRateLimit } from "./rate-limit.js";
 import { randomUUID } from "node:crypto";
@@ -4178,6 +4179,12 @@ export default async function handler(req, res) {
         const cvCallStart = Date.now();
         const result = await lookupComicVine(buildComicVineQueryParams(cleanedCVTitle, confirmedIssue, confirmedYear, confirmedPublisher, poolYearHint)).catch(() => null);
         comicvineLatencyMs = Date.now() - cvCallStart;
+        // GK-184 — stamp the TRUE retrieval instant (right after the real
+        // network fetch resolved, before this result is ever written to
+        // cache) so a future cache HIT reads back the original fetch time,
+        // never the hit time. A null/failed lookup is never stamped — no
+        // fabricated observation for evidence that was never obtained.
+        if (result) stampEvidenceObservedAt(result, captureEvidenceObservedAt());
         await kvSet(kvKey, result, KV_TTL.CV);
         return result;
       })(),
@@ -4231,6 +4238,11 @@ export default async function handler(req, res) {
         const pcCallStart = Date.now();
         let result = await lookupPriceCharting(buildPriceChartingQueryParams(confirmedTitle, confirmedIssue, pcQueryYear, q86PreYearConfidence, eraAdvisory, req.body.variant, out, req.body.pcProductId)).catch(() => null);
         priceChartingLatencyMs = Date.now() - pcCallStart;
+        // GK-184 — stamp the TRUE retrieval instant right after the live
+        // fetch resolved, BEFORE the title-overlap cache-write gate below —
+        // evidenceObservedAt describes when this evidence was obtained,
+        // independent of whether it's judged safe to cache durably.
+        if (result) stampEvidenceObservedAt(result, captureEvidenceObservedAt());
 
         if (result) {
           console.log(`[pc-query] full title matched: "${result.productName}"`);
@@ -4267,6 +4279,9 @@ export default async function handler(req, res) {
           // buildPriceChartingQueryParams builder as the full-title call
           // above, for the stripped-title fallback query.
           result = await lookupPriceCharting(buildPriceChartingQueryParams(subtitleStripped, confirmedIssue, pcQueryYear, q86PreYearConfidence, eraAdvisory, req.body.variant, out, req.body.pcProductId)).catch(() => null);
+          // GK-184 — same stamp-before-cache discipline, this fetch's own
+          // true retrieval instant (independent of the full-title attempt's).
+          if (result) stampEvidenceObservedAt(result, captureEvidenceObservedAt());
           if (result) {
             console.log(`[pc-query] stripped title matched: "${result.productName}"`);
             // GrailKey Commit T (T3) — same guard as the full-title write above.
@@ -6818,6 +6833,16 @@ export default async function handler(req, res) {
               // `rawComps.unavailable === true`.
               return emptyComps(null, err?.message || 'comps fetch threw', true);
             });
+            // GK-184 CORRECTION — fetchComps() itself now sets
+            // evidenceObservedAt internally, at the exact moment the
+            // WINNING query-ladder attempt's raw response was obtained
+            // (before any filtering ran on it). Re-stamping here with a
+            // fresh captureEvidenceObservedAt() would silently overwrite
+            // that precise value with "whenever the entire ladder + filter
+            // chain finished," which can be materially later when earlier
+            // attempts were tried and discarded first. Deliberately no
+            // stamping logic at this call site anymore — `result` already
+            // carries the correct value straight from fetchComps.
             // FIX: Never cache empty/null active-comps results (prevents cache poisoning)
             // Amazing Adventures #3: bad empty value cached → replayed on every request
             // → blocked FIX 1 blend-override from ever having real data.

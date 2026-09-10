@@ -15,6 +15,8 @@
 import { extractNumericFromGrade } from '../src/lib/gradeUtils.js';
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map)
 import { kvGet, kvSet, KV_TTL } from './kv-cache.js';
+// GK-184 — true provider-evidence retrieval time (see src/lib/evidenceObservedAt.js)
+import { captureEvidenceObservedAt } from '../src/lib/evidenceObservedAt.js';
 
 // Comp hygiene primitives extracted Ship #20a.6 to src/lib/compHygiene.js
 // for reuse by sold-comp verification (src/lib/soldVerification.js).
@@ -1372,6 +1374,17 @@ export const fetchComps = async ({
   let attemptUsed = 0;
   let attemptLabel = null;
   let parsed = [];
+  // GK-184 correction — fetchComps can issue MULTIPLE sequential real
+  // provider fetches per call (the query ladder below tries attempts
+  // most-specific -> least, discarding every attempt before the one
+  // whose post-filter survivors are non-empty). Stamping AFTER this
+  // whole function resolves would record cumulative ladder/processing
+  // time under a "retrieval" label, not the true provider-response
+  // instant. `winningEvidenceObservedAt` is set ONLY at the exact
+  // moment the attempt that actually produced the returned pool had its
+  // raw response — captured immediately after that attempt's own fetch
+  // call, before any filtering runs on it.
+  let winningEvidenceObservedAt = null;
   let gradeFilteredPrices = null;  // Fix C: grade-proximity filtered prices for floor calc
   let reprintFallback = false;
   let variantFallback = false;
@@ -2105,13 +2118,21 @@ export const fetchComps = async ({
       const attempt = uniqueAttempts[i];
       query = attempt.q + (attempt.useGrade ? gradeSuffix : "");
       let raw = null;
+      // GK-184 — captured immediately after whichever real fetch call
+      // below actually executes for THIS attempt, before applyFilterChain
+      // (or anything else) runs on the result. Not stamped when neither
+      // branch below runs a real fetch (can't happen given the two `if`s
+      // are unconditional/fallback, but kept null-safe regardless).
+      let attemptEvidenceObservedAt = null;
       if (USE_FINDING) {
         source = "finding_api";
         raw = await tryFindCompleted({ appId, query });
+        attemptEvidenceObservedAt = captureEvidenceObservedAt();
       }
       if (!raw || raw.length === 0) {
         source = "browse_api";
         raw = await tryBrowse({ appId, certId, query, categoryId, assetType });
+        attemptEvidenceObservedAt = captureEvidenceObservedAt();
       }
       const rawCount = raw ? raw.length : 0;
       console.log(`[comps] attempt ${attempt.n} query="${query}" raw=${rawCount}`);
@@ -2122,7 +2143,7 @@ export const fetchComps = async ({
 
       // Ship v0-I — collect raw candidates when post-filter=0 for era-filter fallback
       if (filtered.parsed.length === 0 && raw.length > 0) {
-        rawCandidates.push({ raw, attempt, filtered });
+        rawCandidates.push({ raw, attempt, filtered, evidenceObservedAt: attemptEvidenceObservedAt });
       }
 
       if (filtered.parsed.length > 0) {
@@ -2162,6 +2183,10 @@ export const fetchComps = async ({
         signedRejected = filtered.signedRejected;
         attemptUsed = attempt.n;
         attemptLabel = attempt.label || null;
+        // GK-184 — commit THIS attempt's own fetch-boundary timestamp as
+        // the winner, at the exact same moment its results are committed
+        // as the returned pool.
+        winningEvidenceObservedAt = attemptEvidenceObservedAt;
         // GrailKey Directive O — explicit winner log. Previously the
         // winning attempt was only inferable from the last non-empty
         // "[comps] attempt N ... post-filter=" pair before the loop
@@ -2311,6 +2336,11 @@ export const fetchComps = async ({
         console.log(`[v0-I] SUCCESS: ${guardedPool.length} comps survived guardrail`);
         parsed = guardedPool;
         eraFilterBypassed = true;
+        // GK-184 — bestCandidate is chosen by raw-result COUNT, not
+        // recency, so its own captured fetch-boundary timestamp (set when
+        // it was pushed onto rawCandidates, not "now") is what travels
+        // forward as the winner here.
+        winningEvidenceObservedAt = bestCandidate.evidenceObservedAt;
         attemptUsed = bestCandidate.attempt.n;
         attemptLabel = bestCandidate.attempt.label || 'vintage-year-missing';
         query = bestCandidate.attempt.q;
@@ -2519,6 +2549,10 @@ export const fetchComps = async ({
       // shape (including provisionalAuthorityReferences) rather than two
       // independently-maintained copies that could drift.
       evidence: evidenceForResponse,
+      // GK-184 — the true provider-response instant of whichever attempt
+      // (main ladder or v0-I fallback) actually produced this pool, not
+      // "now" and not the time this whole function finished resolving.
+      evidenceObservedAt: winningEvidenceObservedAt,
     };
   } catch (err) {
     console.error(`[comps] error: ${err?.message || err}`);
@@ -2589,6 +2623,15 @@ export default async function handler(req, res) {
       certId: EBAY_CERT_ID,
     });
 
+    // GK-184 CORRECTION — fetchComps() itself now sets evidenceObservedAt
+    // internally, at the exact moment the WINNING query-ladder attempt's
+    // raw response was obtained (before any filtering ran on it) — see
+    // fetchComps's own `winningEvidenceObservedAt` threading. Re-stamping
+    // here with a fresh captureEvidenceObservedAt() would silently
+    // overwrite that precise value with "whenever the entire ladder +
+    // filter chain finished," which can be materially later when earlier
+    // attempts were tried and discarded first. Deliberately no stamping
+    // logic at this call site anymore.
     // FIX 3 — Cache successful result
     await kvSet(`bc:${cacheKey}`, comps, KV_TTL.BROWSE);
 

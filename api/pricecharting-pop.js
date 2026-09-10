@@ -21,6 +21,8 @@
 
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map)
 import { kvGet, kvSet, KV_TTL } from './kv-cache.js';
+// GK-184 — true provider-evidence retrieval time (see src/lib/evidenceObservedAt.js)
+import { captureEvidenceObservedAt, stampEvidenceObservedAt } from '../src/lib/evidenceObservedAt.js';
 
 // ───────────────────────── shared HTML fetch + cache ─────────────────────────
 
@@ -51,11 +53,26 @@ const pcRelease = () => {
   if (nextWaiter) nextWaiter();
 };
 
+// GK-184 — fetchPCProductHtml returns { html, evidenceObservedAt } instead
+// of a bare string, so the true retrieval instant of this shared HTML
+// fetch survives into every extractor built on top of it (pop/sales/
+// ladder/velocity all reuse the SAME fetch, so they all share the SAME
+// evidenceObservedAt — one real network call, one retrieval instant).
+//
+// Cache-shape compatibility (GK-184 Section 5): a cache entry written
+// under the OLD contract (a bare HTML string, pre-dating this dispatch)
+// is read back here as `typeof cached === 'string'` and treated as
+// UNKNOWN retrieval time — evidenceObservedAt: null — never silently
+// stamped with now(). New entries always carry the real fetch instant.
 const fetchPCProductHtml = async (productId) => {
   if (!productId) return null;
-  // FIX 3 — KV cache returns HTML directly (no wrapper object)
   const cached = await kvGet(`ph:${productId}`);
-  if (cached) return cached;
+  if (cached) {
+    if (typeof cached === 'string') {
+      return { html: cached, evidenceObservedAt: null };
+    }
+    return cached;
+  }
   await pcAcquire(); // Q91-B: throttle only actual network fetches
   try {
     const url = `https://www.pricecharting.com/game/${productId}`;
@@ -65,8 +82,13 @@ const fetchPCProductHtml = async (productId) => {
       return null;
     }
     const html = await res.text();
-    await kvSet(`ph:${productId}`, html, KV_TTL.PC_HTML);
-    return html;
+    // GK-184 — capture the true retrieval instant right after the real
+    // network fetch resolved, stamp it into the SAME object written to
+    // cache, so a future HIT reads back this exact value, never the hit
+    // time.
+    const entry = { html, evidenceObservedAt: captureEvidenceObservedAt() };
+    await kvSet(`ph:${productId}`, entry, KV_TTL.PC_HTML);
+    return entry;
   } catch (err) {
     console.error(`[pc-html] fetch error id=${productId}: ${err?.message || err}`);
     return null;
@@ -107,8 +129,12 @@ const POP_DATA_RE = /VGPC\.pop_data\s*=\s*(\{[^;]+\})\s*;/;
 
 export const fetchPricechartingPop = async (productId, userGrade = null) => {
   if (!productId) return null;
-  const html = await fetchPCProductHtml(productId);
-  if (!html) return null;
+  // GK-184 — fetchPCProductHtml now returns { html, evidenceObservedAt };
+  // evidenceObservedAt is the true retrieval instant of this shared HTML
+  // fetch (or null for a legacy pre-dispatch cache entry / unknown).
+  const htmlResult = await fetchPCProductHtml(productId);
+  if (!htmlResult || !htmlResult.html) return null;
+  const { html, evidenceObservedAt } = htmlResult;
 
   const m = html.match(POP_DATA_RE);
   if (!m) {
@@ -140,7 +166,7 @@ export const fetchPricechartingPop = async (productId, userGrade = null) => {
       byGrade: {},
       source: "pricecharting",
     };
-    return attachGradeContext(emptyPop, userGrade);
+    return stampEvidenceObservedAt(attachGradeContext(emptyPop, userGrade), evidenceObservedAt);
   }
 
   const byGrade = {};
@@ -149,7 +175,7 @@ export const fetchPricechartingPop = async (productId, userGrade = null) => {
   }
 
   const pop = { cgc, total, byGrade, source: "pricecharting" };
-  return attachGradeContext(pop, userGrade);
+  return stampEvidenceObservedAt(attachGradeContext(pop, userGrade), evidenceObservedAt);
 };
 
 // Derives atGrade / aboveGrade / belowGrade / scarcityRatio for a
@@ -555,6 +581,7 @@ const EMPTY_SALES_RESULT = Object.freeze({
   priceLadder: {},
   salesVelocity: {},
   priceChart: null,
+  evidenceObservedAt: null,
 });
 
 export const fetchPricechartingSales = async (
@@ -563,8 +590,13 @@ export const fetchPricechartingSales = async (
 ) => {
   if (!productId) return { ...EMPTY_SALES_RESULT };
   try {
-    const html = await fetchPCProductHtml(productId);
-    if (!html) return { ...EMPTY_SALES_RESULT };
+    // GK-184 — evidenceObservedAt is the true retrieval instant of this
+    // shared HTML fetch (or null for a legacy pre-dispatch entry). Each
+    // individual sold row keeps its OWN `date` field (the sale's own
+    // occurred-date) completely independent of this — never conflated.
+    const htmlResult = await fetchPCProductHtml(productId);
+    if (!htmlResult || !htmlResult.html) return { ...EMPTY_SALES_RESULT };
+    const { html, evidenceObservedAt } = htmlResult;
 
     const tabMap = buildTabGradeMap(html);
     const salesByGrade = {};
@@ -604,7 +636,7 @@ export const fetchPricechartingSales = async (
     console.log(
       `[pc-sales] id=${productId} grades=${Object.keys(salesByGrade).length} userGrade=${lookupKey} soldComps=${soldComps.length} ladder=${Object.keys(priceLadder).length} velocity=${Object.keys(salesVelocity).length} chart=${priceChart ? `${priceChart.used.length}u/${priceChart.graded.length}g` : "none"}`
     );
-    return { soldComps, salesByGrade, priceLadder, salesVelocity, priceChart };
+    return { soldComps, salesByGrade, priceLadder, salesVelocity, priceChart, evidenceObservedAt };
   } catch (err) {
     console.error(`[pc-sales] error id=${productId}: ${err?.message || err}`);
     return { ...EMPTY_SALES_RESULT };
