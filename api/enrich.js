@@ -161,6 +161,7 @@ import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map caches)
 import { kvGet, kvSet, kvZAdd, KV_TTL, PC_FILTER_VERSION, CV_FILTER_VERSION } from "./kv-cache.js";
 import { captureEvidenceObservedAt, stampEvidenceObservedAt } from "../src/lib/evidenceObservedAt.js";
+import { attemptChain1 } from "../src/lib/d5dRuntimeBridge.js";
 import { buildScanLogRecord, buildScanLogKey, SCAN_LOG_INDEX_KEY } from "../src/lib/scanLog.js";
 import { checkRateLimit } from "./rate-limit.js";
 import { randomUUID } from "node:crypto";
@@ -11576,6 +11577,14 @@ export default async function handler(req, res) {
             condition: p?.conditionDisplayName || null,
           }))
         : [],
+      // GK-184/D5D — carried forward here (rawComps is definitely in scope
+      // at this exact construction site) so the D5D runtime-wiring block
+      // near the end of this handler never needs to reach for the bare
+      // `rawComps` identifier out of its original scope — reads
+      // out.rawComps.evidenceObservedAt instead, a plain object-property
+      // access with no scope risk. Diagnostic/provenance field only,
+      // never a pricing input.
+      evidenceObservedAt: rawComps.evidenceObservedAt ?? null,
     } : { count: 0 };
 
     // GK-152 (Absolute Wonder Woman #16 Talavera virgin, 2026-08-22) —
@@ -12510,6 +12519,127 @@ export default async function handler(req, res) {
       preResponseOk: responseBoundaryOk,
       decision: out.decision,
     });
+
+    // ─────────────────────────────────────────────────────────────────
+    // GK-180 narrow-open — D5D Chain #1 runtime wiring (2026-09-09).
+    // Default OFF (D5D_RUNTIME_ENABLED unset) for all normal traffic;
+    // hard-gated to GRAILKEY_CATALOG_ENVIRONMENT==='development'
+    // regardless of the flag, so Production/Preview D5D stays disabled
+    // no matter what. Purely additive and read-only with respect to
+    // `out`'s pricing/decision fields — Ship #24a-2's single-writer
+    // boundary is respected: this block only READS out.rawComps and
+    // attaches a diagnostic-only out.d5dOutcome, never touching
+    // out.price/out.decision. Any error here is caught and logged; it
+    // can never fail the pricing response.
+    try {
+      const d5dEnabled = process.env.D5D_RUNTIME_ENABLED === 'true';
+      const d5dDryRun = process.env.D5D_DRY_RUN === 'true';
+      if (d5dEnabled) {
+        const d5dStart = Date.now();
+        const authHeader = req.headers?.authorization || req.headers?.Authorization;
+        const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+        const collectionItemId = req.body?.collectionItemId || null;
+        let principalId = null;
+        if (bearerToken) {
+          try {
+            const authMod = await import('../src/modules/auth/index.js');
+            const verified = authMod.verifyToken(bearerToken);
+            principalId = verified?.principalId || null;
+          } catch {
+            principalId = null; // invalid/expired token -> no auth context, not a crash
+          }
+        }
+
+        const buildObservations = () => {
+          try {
+            const prices = Array.isArray(out?.rawComps?.prices) ? out.rawComps.prices : [];
+            const evidenceObservedAt = out?.rawComps?.evidenceObservedAt ?? null;
+            if (prices.length === 0) return null;
+            // Chain #1 minimal scope: up to 3 real comp rows, all sharing
+            // the ONE genuine provider-retrieval instant this pool was
+            // fetched at (they came from the same fetchComps() call).
+            const observations = prices.slice(0, 3).map((p) => ({
+              marketObservation: {
+                provider: 'ebay',
+                providerItemId: null, // not extracted from the URL for this minimal proof -- never the raw url itself (GK-182)
+                listingKind: 'asking', // these are active/not-yet-sold eBay Browse API listings -- schema's allowed set (0014) is 'asking'|'sold'|'offer'|'auction-result', not 'active'
+                priceAmount: p.price,
+                currency: 'USD',
+                conditionText: p.condition || null,
+                gradeNumeric: null, // not asserted per-row for this minimal proof -- never fabricated
+                gradeBasis: null,
+                occurredOn: null,
+                occurredAt: p.date || null,
+                observedAt: evidenceObservedAt,
+              },
+              applicability: {
+                verdict: 'APPLICABLE',
+                confidenceTier: out?.matchConfidence?.tier || 'MEDIUM',
+                ruleId: 'comp-filter',
+                ruleVersion: String(out?.pipelineAudit?.identityRevision || '1'),
+                modelVersion: null,
+                sourceType: 'automated',
+                reason: null,
+              },
+              memberStatus: 'SELECTED',
+            })).filter((o) => o.marketObservation.priceAmount != null);
+            if (observations.length === 0) return null;
+            return {
+              targetGrade: out?.numericGrade != null ? String(out.numericGrade) : (req.body?.numericGrade != null ? String(req.body.numericGrade) : '0'),
+              gradeBasis: (req.body?.isGraded || out?.isGraded) ? 'cgc' : 'raw-estimate',
+              disposition: (req.body?.isGraded || out?.isGraded) ? 'graded' : 'raw',
+              variantScope: null,
+              targetYear: out?.year ? parseInt(out.year, 10) : null,
+              populationRuleVersion: 'd5d-chain1-v1',
+              observations,
+            };
+          } catch (buildErr) {
+            console.error('[d5d-chain1] buildObservations error (non-fatal):', buildErr.message);
+            return null;
+          }
+        };
+
+        const valuationMod = await import('../src/modules/valuation/index.js');
+        const d5dOutcome = await attemptChain1({
+          enabled: d5dEnabled,
+          dryRun: d5dDryRun,
+          environment: process.env.GRAILKEY_CATALOG_ENVIRONMENT || null,
+          principalId,
+          collectionItemId,
+          buildObservations,
+          resolveEligibleSubject: valuationMod.resolveEligibleSubject,
+          attemptDurablePersistence: valuationMod.attemptDurablePersistence,
+          idempotencyKey: req.body?.d5dIdempotencyKey || null,
+          correlationId: pipelineTraceId || null,
+        });
+        const d5dElapsedMs = Date.now() - d5dStart;
+        console.log(
+          `[d5d-chain1] attempted=${d5dOutcome.attempted} dryRun=${d5dOutcome.dryRun || false} ` +
+          `declineReason=${d5dOutcome.declineReason || 'n/a'} elapsedMs=${d5dElapsedMs}`
+        );
+        // Diagnostic only -- never a pricing/decision field. The full
+        // assembled `payload` is surfaced ONLY in dry-run mode (an
+        // explicit opt-in flag never set in real traffic) specifically
+        // so the pre-write payload-inspection gate (this dispatch's own
+        // requirement) has something real to inspect before the write
+        // flag is ever turned on.
+        out.d5dOutcome = {
+          attempted: d5dOutcome.attempted,
+          dryRun: d5dOutcome.dryRun || false,
+          declineReason: d5dOutcome.declineReason || null,
+          elapsedMs: d5dElapsedMs,
+          payload: d5dOutcome.dryRun ? d5dOutcome.payload : undefined,
+          // Diagnostic only, surfaced whenever a real (non-dry-run) write
+          // declines with write-failed -- attemptDurablePersistence's own
+          // diagnostic shape (src/modules/valuation/service.js) is
+          // explicitly documented to exclude secrets/provider payloads,
+          // so this is safe to carry through.
+          error: d5dOutcome.error || undefined,
+        };
+      }
+    } catch (d5dErr) {
+      console.error('[d5d-chain1] wiring error (non-fatal, pricing response unaffected):', d5dErr.message);
+    }
 
     // FIX 1 PHASE 2 — api/metadata.js merged into enrich.
     // Return full enrichment including display-only fields (story, creators, pop, goCollect).

@@ -210,7 +210,15 @@ async function main() {
   // (e.g. a bespoke `res.evidenceObservedAt`) — proven absent below.
   assertTrue(!Object.prototype.hasOwnProperty.call(capturedBody || {}, 'evidenceObservedAt'), 'no NEW dedicated top-level `evidenceObservedAt` response field was invented');
 
-  const KNOWN_PREEXISTING_EVIDENCE_CONTAINERS = new Set(['activeCached', 'pop', 'priceCharting', 'soldComps', 'activeComps']);
+  // D5D dispatch (2026-09-09) — `rawComps` added deliberately: the D5D
+  // runtime-wiring block needs a real evidenceObservedAt value to build
+  // Chain #1's persistence payload from, and out.rawComps is where
+  // fetchComps()'s own genuine value was already available but
+  // previously stripped during projection (api/enrich.js, the
+  // out.rawComps construction site) -- same I13 evidence-passthrough
+  // pattern as the other containers here, one property richer, not a
+  // new dedicated field.
+  const KNOWN_PREEXISTING_EVIDENCE_CONTAINERS = new Set(['activeCached', 'pop', 'priceCharting', 'soldComps', 'activeComps', 'rawComps']);
   const foundAt = [];
   const walk = (obj, pathParts) => {
     if (obj == null || typeof obj !== 'object') return;
