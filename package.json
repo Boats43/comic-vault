@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.86.1",
+    "@clerk/backend": "^3.17.2",
+    "@clerk/react": "^6.15.2",
     "@upstash/redis": "^1.38.0",
     "@vercel/blob": "^2.8.0",
     "@zxing/browser": "^0.2.0",

@@ -170,6 +170,8 @@ import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
 import { resetTitleStripStats, logTitleStripSummary } from "../src/lib/titleStripStats.js";
 import { writeConfirmed } from "../src/lib/identityWriteLog.js";
 import { computeAnthropicCallCostUsd } from "../src/lib/anthropicPricing.js";
+// BETA-1A.1 — shared legacy access gate, factored out of this file (see src/lib/accessGate.js)
+import { checkAccessGate } from "../src/lib/accessGate.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -177,22 +179,6 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // api/grade.js's matching constant. Vercel's own system env var, no new
 // version constant to drift out of sync with the deployed code.
 const GIT_SHA = process.env.VERCEL_GIT_COMMIT_SHA ?? null;
-
-// A3 ACCESS GATE: T1 invite mechanism
-function checkAccessGate(req) {
-  const accessCode = process.env.ACCESS_CODE?.trim();
-  if (!accessCode) return null; // Gate disabled when env var not set
-  const clientKey = req.headers['x-vault-key']?.trim();
-
-  // DIAGNOSTIC: Log comparison without exposing full value
-  const match = clientKey === accessCode;
-  console.log(`[access] received_len=${clientKey?.length ?? 0} expected_len=${accessCode?.length ?? 0} match=${match}`);
-
-  if (!match) {
-    return { error: 'Access denied. Contact the vault administrator for an access code.', status: 401 };
-  }
-  return null;
-}
 
 // Marvel test-market price-variant allowlists. Vision labels any 35¢ /
 // 30¢ price box on a cover as a "test market" variant, but those price

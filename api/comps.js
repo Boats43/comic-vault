@@ -17,6 +17,8 @@ import { extractNumericFromGrade } from '../src/lib/gradeUtils.js';
 import { kvGet, kvSet, KV_TTL } from './kv-cache.js';
 // GK-184 — true provider-evidence retrieval time (see src/lib/evidenceObservedAt.js)
 import { captureEvidenceObservedAt } from '../src/lib/evidenceObservedAt.js';
+// BETA-1A.1 — shared legacy access gate, factored out of this file (see src/lib/accessGate.js)
+import { checkAccessGate } from '../src/lib/accessGate.js';
 
 // Comp hygiene primitives extracted Ship #20a.6 to src/lib/compHygiene.js
 // for reuse by sold-comp verification (src/lib/soldVerification.js).
@@ -2560,21 +2562,6 @@ export const fetchComps = async ({
   }
 };
 
-// A3 ACCESS GATE: T1 invite mechanism
-function checkAccessGate(req) {
-  const accessCode = process.env.ACCESS_CODE?.trim();
-  if (!accessCode) return null; // Gate disabled when env var not set
-  const clientKey = req.headers['x-vault-key']?.trim();
-
-  // DIAGNOSTIC: Log comparison without exposing full value
-  const match = clientKey === accessCode;
-  console.log(`[access] received_len=${clientKey?.length ?? 0} expected_len=${accessCode?.length ?? 0} match=${match}`);
-
-  if (!match) {
-    return { error: 'Access denied. Contact the vault administrator for an access code.', status: 401 };
-  }
-  return null;
-}
 
 export default async function handler(req, res) {
   // A3 ACCESS GATE: T1 invite mechanism

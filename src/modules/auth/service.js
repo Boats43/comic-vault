@@ -42,6 +42,39 @@ export async function login({ passphrase } = {}) {
   }
 }
 
+// BETA-1A — loginWithExternalIdentity({ provider, externalSubject }) ->
+// { token, expiresAt, principalId }
+//
+// The Clerk adapter's ONLY entry point into this module. `externalSubject`
+// must already be a VERIFIED value (api/auth-clerk.js derives it from
+// @clerk/backend's own authenticateRequest() — a request-supplied subject
+// never reaches this function). Issues the SAME HMAC session token
+// login() does — everything downstream of a successful call here
+// (assets.js, asset-media.js, operator-action.js) is unchanged, because
+// the resulting token is indistinguishable from one the passphrase path
+// issued. An unrecognized subject is NotProvisionedError, identical in
+// shape/status to an unrecognized passphrase — never a silent fallback
+// to any other principal.
+export async function loginWithExternalIdentity({ provider, externalSubject } = {}) {
+  if (!provider || !externalSubject || typeof externalSubject !== 'string') {
+    throw new InvalidCredentialError('provider and externalSubject are required');
+  }
+  const client = await acquireConnection();
+  try {
+    const principal = await repo.getPrincipalByExternalIdentity(client, { provider, externalSubject });
+    if (!principal) {
+      throw new NotProvisionedError(
+        `no principal mapped for external identity provider=${provider} — ` +
+        'run the local seed script to map this subject before attempting login'
+      );
+    }
+    const { token, expiresAt } = issueToken({ principalId: principal.id });
+    return { token, expiresAt, principalId: principal.id };
+  } finally {
+    client.release();
+  }
+}
+
 // verifyToken(token) -> { principalId, iat, exp }  — throws
 // InvalidTokenError on anything else (missing, malformed, bad
 // signature, expired). No DB round-trip — this token is self-verifying

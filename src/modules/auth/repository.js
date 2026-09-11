@@ -45,3 +45,34 @@ export async function upsertCredential(client, { principalId, hash, salt }) {
     [principalId, hash, salt]
   );
 }
+
+// BETA-1A — resolves a verified external-identity-provider subject (e.g.
+// Clerk's own user ID) to the ONE gk_principal it was explicitly mapped
+// to. Returns null on no match — the caller (service.js) turns that into
+// the SAME NotProvisionedError the passphrase path already uses for an
+// unrecognized credential; there is no fallback to any other principal.
+// db/data0/0022_beta1a_clerk_identity_mapping.sql (PROPOSED, not yet
+// applied to data1_dev) is the table this reads.
+export async function getPrincipalByExternalIdentity(client, { provider, externalSubject }) {
+  const res = await client.query(
+    `SELECT p.id, p.display_name
+     FROM data1_dev.principal_external_identity pei
+     JOIN data1_dev.gk_principal p ON p.id = pei.principal_id
+     WHERE pei.provider = $1 AND pei.external_subject = $2`,
+    [provider, externalSubject]
+  );
+  return res.rows[0] || null;
+}
+
+// Used only by the local seed script that provisions a Clerk mapping for
+// the existing operator principal — same pattern/precedent as
+// upsertCredential above, never called from any public endpoint.
+export async function upsertExternalIdentity(client, { id, principalId, provider, externalSubject }) {
+  await client.query(
+    `INSERT INTO data1_dev.principal_external_identity (id, principal_id, provider, external_subject)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (provider, external_subject) DO UPDATE SET
+       principal_id = EXCLUDED.principal_id`,
+    [id, principalId, provider, externalSubject]
+  );
+}

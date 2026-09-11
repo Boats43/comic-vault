@@ -9,6 +9,7 @@ import {
 import { getOAuthToken } from "./comps.js";
 import { checkRateLimit } from "./rate-limit.js";
 import { computeAnthropicCallCostUsd, getEstimatedStaticPrefixTokens, classifyCacheEligibility } from "../src/lib/anthropicPricing.js";
+import { checkAccessGate } from "../src/lib/accessGate.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -22,21 +23,6 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // no new version constant to drift out of sync with the deployed prompt.
 const GIT_SHA = process.env.VERCEL_GIT_COMMIT_SHA ?? null;
 
-// A3 ACCESS GATE: T1 invite-only mechanism
-function checkAccessGate(req) {
-  const accessCode = process.env.ACCESS_CODE?.trim();
-  if (!accessCode) return null; // Gate disabled when env var not set
-  const clientKey = req.headers['x-vault-key']?.trim();
-
-  // DIAGNOSTIC: Log comparison without exposing full value
-  const match = clientKey === accessCode;
-  console.log(`[access] received_len=${clientKey?.length ?? 0} expected_len=${accessCode?.length ?? 0} match=${match}`);
-
-  if (!match) {
-    return { error: 'Access denied. Contact the vault administrator for an access code.', status: 401 };
-  }
-  return null;
-}
 const BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope";
 
 const SYSTEM_PROMPT =

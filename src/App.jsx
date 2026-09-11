@@ -23,12 +23,22 @@ import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE, wasSupersededByCorrection, logStaleScanResponse } from "./lib/scanOwnership.js";
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
+import { isAuthenticated, clearSession, getSession } from "./lib/grailkeySession.js";
+import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 
 // A3 ACCESS GATE: Client-side key helper
 // ACCESS GATE — T1 invite key management (A3 + LAUNCH BLOCKER FIX)
+// BETA-1A.1 — also attaches the real GrailKey session Bearer token when
+// one exists (src/lib/accessGate.js now accepts either credential
+// server-side). This is purely additive: a caller with no GrailKey
+// session still relies on the vault key exactly as before.
 const getVaultHeaders = () => {
   const key = localStorage.getItem('vault_key');
-  return key ? { 'x-vault-key': key } : {};
+  const session = getSession();
+  return {
+    ...(key ? { 'x-vault-key': key } : {}),
+    ...(session ? { Authorization: `Bearer ${session.token}` } : {}),
+  };
 };
 
 const clearVaultKey = () => {
@@ -10418,6 +10428,10 @@ export default function App() {
   const [tradePiles, setTradePiles] = useState(() => getTradePiles());
   const [showAccessModal, setShowAccessModal] = useState(false);
   const [accessCodeInput, setAccessCodeInput] = useState('');
+  // GrailKey operator auth (Outcome #1) — distinct from the legacy vault-key
+  // gate above. Reuses the existing DATA-1D backend auth contract exactly;
+  // no new auth mechanism, no signup, no tenancy.
+  const [grailkeyAuthed, setGrailkeyAuthed] = useState(() => isAuthenticated());
   const fileRef = useRef(null);
   const buyerFileRef = useRef(null);
   const bulkRef = useRef(null);
@@ -10454,10 +10468,20 @@ export default function App() {
     saveTradePiles(tradePiles);
   }, [tradePiles]);
 
-  // ACCESS GATE — Check for vault key on mount
+  // ACCESS GATE — Check for vault key on mount.
+  // BETA-1A.1: this component only ever renders once grailkeyAuthed is
+  // true (see the `if (!grailkeyAuthed) return <GrailKeyLoginGate/>` gate
+  // above) — a valid authenticated GrailKey session already exists on
+  // every render that reaches here, and src/lib/accessGate.js now accepts
+  // that session as an alternate credential server-side. The legacy
+  // shared-code prompt is therefore only ever needed for a caller with
+  // NEITHER a stored vault key NOR a GrailKey session, which cannot occur
+  // on this render path — so it no longer pops up automatically for an
+  // authenticated user. The modal itself, and its manual "access code"
+  // button (unrelated administrative entry point), are unchanged.
   useEffect(() => {
     const key = localStorage.getItem('vault_key');
-    if (!key) {
+    if (!key && !isAuthenticated()) {
       setShowAccessModal(true);
     }
   }, []);
@@ -13215,11 +13239,25 @@ export default function App() {
     setInstallDismissed(true);
   };
 
+  if (!grailkeyAuthed) {
+    return <GrailKeyLoginGate onAuthenticated={() => setGrailkeyAuthed(true)} />;
+  }
+
   return (
     <div className="app">
       <header className="header">
-        <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5 }}>GrailKey</div>
-        <div style={{ fontSize: 11, color: "#999", marginTop: 2, fontWeight: 400 }}>Know what it's worth. Get paid.</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5 }}>GrailKey</div>
+            <div style={{ fontSize: 11, color: "#999", marginTop: 2, fontWeight: 400 }}>Know what it's worth. Get paid.</div>
+          </div>
+          <button
+            onClick={() => { clearSession(); setGrailkeyAuthed(false); }}
+            style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, color: "#999", fontSize: 11, padding: "4px 10px", cursor: "pointer" }}
+          >
+            Log out
+          </button>
+        </div>
       </header>
 
       {tab === "scan" && (
