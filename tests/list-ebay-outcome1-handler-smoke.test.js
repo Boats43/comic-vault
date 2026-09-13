@@ -49,6 +49,16 @@ const fetchCalls = [];
 let addFixedPriceItemBehavior = 'success'; // 'success' | 'failure'
 const FAKE_ITEM_ID = `test-item-${Date.now()}`;
 
+// GK-208 — the zero-photo precall gate now blocks before any eBay call
+// unless at least one image was successfully uploaded, so every
+// scenario here that expects to reach AddFixedPriceItem must supply a
+// real image and a working UploadSiteHostedPictures mock. A real,
+// standard, non-sensitive 1x1 transparent PNG data URL -- never a real
+// photo, never printed.
+const FAKE_HOSTED_PICTURE_URL = 'https://i.ebayimg.example/hosted/outcome1-smoke.jpg';
+const TINY_PNG_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
 global.fetch = async (url, opts) => {
   const callName = opts?.headers?.['X-EBAY-API-CALL-NAME'] || '(unknown)';
   fetchCalls.push(callName);
@@ -56,6 +66,12 @@ global.fetch = async (url, opts) => {
     return {
       status: 200,
       text: async () => `<?xml version="1.0"?><GetUserResponse><Ack>Success</Ack><User><UserID>test-seller</UserID><Site>US</Site></User></GetUserResponse>`,
+    };
+  }
+  if (callName === 'UploadSiteHostedPictures') {
+    return {
+      status: 200,
+      text: async () => `<?xml version="1.0"?><UploadSiteHostedPicturesResponse><Ack>Success</Ack><SiteHostedPictureDetails><FullURL>${FAKE_HOSTED_PICTURE_URL}</FullURL></SiteHostedPictureDetails></UploadSiteHostedPicturesResponse>`,
     };
   }
   if (callName === 'AddFixedPriceItem') {
@@ -124,6 +140,10 @@ function baseItem(overrides = {}) {
     price: '$61.41',
     grade: 'VG',
     q41Override: { priceOverridden: true, manualPrice: 61.41 },
+    // GK-208 — the zero-photo precall gate requires at least one usable
+    // photo to reach AddFixedPriceItem at all; every scenario in this
+    // file that's meant to reach that far needs one.
+    images: [TINY_PNG_DATA_URL],
     ...overrides,
   };
 }

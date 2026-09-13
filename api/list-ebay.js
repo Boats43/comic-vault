@@ -1011,6 +1011,25 @@ export default async function handler(req, res) {
       }
     }
 
+    // GK-208 ZERO-PHOTO PRECALL GATE — eBay's own Trading API hard-
+    // requires at least one PictureURL (ErrorCode 21919136, "eBay
+    // requires at least one photo") and rejects AddFixedPriceItem
+    // outright otherwise. Previously this handler always attempted the
+    // real eBay call regardless, letting eBay itself reject a doomed
+    // listing (a real 502 was hit this way when the client sent no
+    // usable `images` array — GK-208). Fail closed HERE instead: if,
+    // after every upload attempt above, zero usable eBay-hosted picture
+    // URLs exist, abort BEFORE verifySellerAccount/AddFixedPriceItem —
+    // no eBay call is made, and the operator sees an actionable reason
+    // instead of an opaque eBay error surfaced through a generic 502.
+    if (pictureUrls.length === 0) {
+      res.status(400).json({
+        error: 'PUBLISH_BLOCKED_NO_PHOTO',
+        message: 'PUBLISH BLOCKED — NO VALID EBAY PHOTO. No usable photo could be uploaded to eBay for this listing (0 of ' + imagesToUpload.length + ' attempted image(s) produced a hosted URL). Add or re-check a photo before publishing.',
+      });
+      return;
+    }
+
     // EBAY PUBLISH SAFETY — read-only account/token validity check,
     // immediately before the real AddFixedPriceItem call below. Throws
     // (and this handler's outer catch turns it into a 500) if the token

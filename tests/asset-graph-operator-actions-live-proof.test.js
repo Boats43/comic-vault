@@ -42,14 +42,33 @@ console.log('\n=== getAssetGraph -- real, live operatorActions/currentOperatorAc
 
 const graph = await getPhysicalAsset({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID });
 
+// GK-208 correction: this originally asserted "exactly 2 rows" and a
+// hardcoded currentOperatorActionId. That was true only as a snapshot —
+// Creepy's real operator_action_event history is genuinely live and
+// append-only (Jimmy's own real usage adds to it over time, e.g. a
+// third real LIST row recorded 2026-09-13T04:02:07Z), so hardcoding an
+// exact count or a specific "current" id is inherently stale-prone.
+// This test now asserts the two things that must ALWAYS be true
+// regardless of how many real rows accumulate: the original two rows
+// are present and untouched, and currentOperatorActionId — whichever
+// row it names — always resolves to a real row in the array whose
+// action_code is a valid one (never dangling, never fabricated).
 assertTrue(Array.isArray(graph.operatorActions), 'graph.operatorActions is an array');
-assertTrue(graph.operatorActions.length === 2, `exactly 2 real operator actions for Creepy (got ${graph.operatorActions.length})`);
-assertTrue(graph.operatorActions.some((a) => a.id === CREEPY_HOLD_OPERATOR_ACTION_EVENT_ID && a.action_code === 'HOLD'), 'the real HOLD row is present, untouched');
-assertTrue(graph.operatorActions.some((a) => a.id === CREEPY_LIST_OPERATOR_ACTION_EVENT_ID && a.action_code === 'LIST'), 'the real LIST row is present, untouched');
-assertTrue(graph.currentOperatorActionId === CREEPY_LIST_OPERATOR_ACTION_EVENT_ID, 'currentOperatorActionId names the LIST row, not the HOLD row -- the exact server-declared fact listOnEbay/selectCurrentOperatorAction depend on');
+assertTrue(graph.operatorActions.length >= 2, `at least the 2 known real operator actions for Creepy are present (got ${graph.operatorActions.length})`);
+assertTrue(graph.operatorActions.some((a) => a.id === CREEPY_HOLD_OPERATOR_ACTION_EVENT_ID && a.action_code === 'HOLD'), 'the original real HOLD row is present, untouched');
+assertTrue(graph.operatorActions.some((a) => a.id === CREEPY_LIST_OPERATOR_ACTION_EVENT_ID && a.action_code === 'LIST'), 'the original real LIST row is present, untouched');
 
 const currentRow = graph.operatorActions.find((a) => a.id === graph.currentOperatorActionId);
-assertTrue(currentRow?.action_code === 'LIST', 'find-by-id on currentOperatorActionId resolves to a LIST row');
+assertTrue(!!currentRow, 'currentOperatorActionId resolves to a REAL row in operatorActions, never a dangling/fabricated id');
+assertTrue(currentRow?.action_code === 'LIST', `find-by-id on currentOperatorActionId resolves to a LIST row (currently ${currentRow?.id}, action_code=${currentRow?.action_code})`);
+// The "current" row must be the one with the latest (recorded_at, id) —
+// never an earlier row — confirming the deterministic tie-break still
+// holds against however many real rows exist right now.
+const sorted = [...graph.operatorActions].sort((a, b) => {
+  const t = new Date(a.recorded_at) - new Date(b.recorded_at);
+  return t !== 0 ? t : (a.id < b.id ? -1 : 1);
+});
+assertTrue(graph.currentOperatorActionId === sorted[sorted.length - 1].id, 'currentOperatorActionId is genuinely the chronologically-last row by (recorded_at, id), not a stale or arbitrary one');
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) {

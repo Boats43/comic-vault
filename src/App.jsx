@@ -12198,7 +12198,21 @@ export default function App() {
   }, [catalogue]);
 
   const listOnEbay = useCallback(async (item) => {
-    const coverPhoto = getComicPhotos(item)[0] || null;
+    // GK-208 PHOTO HANDOFF FIX — root cause: this request body sent only
+    // a single `image` field (coverPhoto). api/list-ebay.js's own image-
+    // upload logic (T2-1) uses that fallback ONLY when
+    // matchConfidence?.tier === 'LOW' or claudeCheck?.confidence ===
+    // 'LOW' — the OVERWHELMING common case (shouldUploadMultiple===true)
+    // reads ONLY item.images (plural), which this request never sent at
+    // all, meaning imagesToUpload was silently [] for every non-LOW-
+    // confidence listing, `pictureUrls` stayed empty, `<PictureDetails>`
+    // was omitted entirely, and eBay rejected the real AddFixedPriceItem
+    // call with ErrorCode 21919136 ("eBay requires at least one photo").
+    // getComicPhotos(item) is the SAME array this file already uses
+    // everywhere else (photo strip, packet generation) — sending it here
+    // too, not inventing a new source of truth.
+    const allPhotos = getComicPhotos(item);
+    const coverPhoto = allPhotos[0] || null;
     // Q41: acknowledged-override listings carry their audit payload to the
     // server so [Q41-override] appears in Vercel logs (client console does
     // not reach log capture).
@@ -12273,6 +12287,7 @@ export default function App() {
         priceHigh: item.priceHigh,
         reason: item.reason,
         image: coverPhoto,
+        images: allPhotos,
         // GrailKey Directive Z, C3 — raw evidence fields for the server's
         // OWN independent re-derivation (api/list-ebay.js), never a
         // pre-computed verdict. The server never reads actionAuthority/
