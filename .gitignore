@@ -45,3 +45,8 @@ go collect api.txt
 # committed — this is investigation material for an offline predicate
 # replay, not documentation or source.
 /dispatch39-fixtures/
+
+# Option-D manual Development pg_dump backups (retention/backup gate,
+# docs/MASTER-BOARD.md §Retention). Real row data (incl. scrypt credential
+# hashes) — off-platform on purpose, never in git.
+/backups/

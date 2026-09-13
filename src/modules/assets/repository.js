@@ -280,6 +280,52 @@ export async function insertOperatorActionEvent(client, { gkAssetId, decisionEve
   return id;
 }
 
+// Outcome #1 (0023) -- reads operator_action_event.action_code/asset_id/
+// decision_event_id ONLY to let service.js enforce the OUTCOME
+// ATTACHMENT RULE (a LISTED outcome must attach to a LIST action, never
+// a HOLD/PASS row) without ever mutating operator_action_event. Returns
+// null if the id does not exist at all -- service.js turns that into a
+// real NotFoundError, mirroring getDecisionEventAssetId's own shape.
+export async function getOperatorActionEventContext(client, operatorActionEventId) {
+  const r = await client.query(
+    `SELECT gk_asset_id, decision_event_id, action_code FROM data1_dev.operator_action_event WHERE id = $1`,
+    [operatorActionEventId]
+  );
+  if (!r.rows[0]) return null;
+  return {
+    gkAssetId: r.rows[0].gk_asset_id,
+    decisionEventId: r.rows[0].decision_event_id,
+    actionCode: r.rows[0].action_code,
+  };
+}
+
+// Outcome #1 (0023) -- outcome_event, the marketplace-execution ledger.
+// Append-only, exactly like operator_action_event/decision_event/
+// valuation_event -- no update/delete function exists for this table
+// anywhere in this file, by construction.
+export async function insertOutcomeEvent(client, {
+  gkAssetId, decisionEventId, operatorActionEventId,
+  outcomeType, channel, externalListingId,
+  askAmount, askCurrency, grossAmount, feesAmount, shippingAmount, netAmount, daysToSale,
+  nextObservationDueAt,
+  recordedByPrincipalId, correlationId, occurredAt,
+}) {
+  const id = await uuidv7(client);
+  await client.query(
+    `INSERT INTO data1_dev.outcome_event
+       (id, gk_asset_id, decision_event_id, operator_action_event_id, outcome_type, channel, external_listing_id,
+        ask_amount, ask_currency, gross_amount, fees_amount, shipping_amount, net_amount, days_to_sale,
+        next_observation_due_at, recorded_by_principal_id, correlation_id, occurred_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, COALESCE($18, now()))`,
+    [
+      id, gkAssetId, decisionEventId ?? null, operatorActionEventId ?? null, outcomeType, channel, externalListingId ?? null,
+      askAmount ?? null, askCurrency || 'USD', grossAmount ?? null, feesAmount ?? null, shippingAmount ?? null, netAmount ?? null, daysToSale ?? null,
+      nextObservationDueAt ?? null, recordedByPrincipalId, correlationId, occurredAt ?? null,
+    ]
+  );
+  return id;
+}
+
 // CAPTURE-INT (db/data0/0007_capture_integration_linkage.sql) — a routing
 // lookup only ("which asset does a re-scan of this collection row attach
 // to"), never a claim about physical identity. collectionItemId !=
@@ -351,8 +397,39 @@ export async function getAssetGraph(client, assetId) {
   const ownershipHistory = await client.query(`SELECT * FROM data1_dev.ownership_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
   const currentOwner = await client.query(`SELECT * FROM data1_dev.current_owner WHERE asset_id = $1`, [assetId]);
   const acquisitions = await client.query(`SELECT * FROM data1_dev.acquisition_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
-  const valuations = await client.query(`SELECT * FROM data1_dev.valuation_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
-  const decisions = await client.query(`SELECT * FROM data1_dev.decision_event WHERE asset_id = $1 ORDER BY recorded_at`, [assetId]);
+  // P0-B (deterministic decision selection) -- `recorded_at` alone has no
+  // guaranteed tie-break: two rows sharing the same DEFAULT now() instant
+  // (same millisecond/microsecond, or a future backfill) have UNDEFINED
+  // relative order under a bare `ORDER BY recorded_at` -- Postgres makes
+  // no promise about tie ordering. `id` is a second, explicit sort key
+  // and is never ambiguous: every id here is server-generated via
+  // uuidv7() (repository.js's own mint calls), whose first 48 bits ARE
+  // the creation timestamp in milliseconds -- comparing the UUID's raw
+  // bytes therefore agrees with `recorded_at` in the common case and
+  // additionally resolves same-instant ties in true creation order, with
+  // no possible collision (two calls to uuidv7() never produce the same
+  // value). `currentValuationId`/`currentDecisionId` below are computed
+  // from this now fully deterministic order -- callers (including
+  // GrailKeyOperatorPanel.jsx / the OperatorAction submit path) must
+  // read THESE fields, never re-derive "the last one" themselves via
+  // array-index arithmetic (`arr[arr.length - 1]`) on `valuations`/
+  // `decisions` -- one server-declared fact, not two independently
+  // computed copies that could silently drift apart.
+  const valuations = await client.query(`SELECT * FROM data1_dev.valuation_event WHERE asset_id = $1 ORDER BY recorded_at, id`, [assetId]);
+  const decisions = await client.query(`SELECT * FROM data1_dev.decision_event WHERE asset_id = $1 ORDER BY recorded_at, id`, [assetId]);
+  // Outcome #1 pre-publish hardening -- same P0-B deterministic tie-break
+  // (recorded_at, then id) extended to operator_action_event. A caller
+  // (the App.jsx "List on eBay" button) must be able to find "the LIST
+  // action that is currently in force" WITHOUT re-deriving it via
+  // array-index arithmetic -- currentOperatorActionId below is that one
+  // server-declared fact, exactly mirroring currentValuationId/
+  // currentDecisionId. It does NOT filter to action_code='LIST' -- it is
+  // simply "the most recent operator action for this asset, whatever it
+  // is" (could be HOLD/PASS); a caller that requires it to be LIST
+  // checks operatorActions.find(a => a.id === currentOperatorActionId)
+  // .action_code itself, exactly as this repo's own attachment rule does
+  // server-side.
+  const operatorActions = await client.query(`SELECT * FROM data1_dev.operator_action_event WHERE gk_asset_id = $1 ORDER BY recorded_at, id`, [assetId]);
 
   return {
     asset,
@@ -363,6 +440,10 @@ export async function getAssetGraph(client, assetId) {
     acquisitions: acquisitions.rows,
     valuations: valuations.rows,
     decisions: decisions.rows,
+    operatorActions: operatorActions.rows,
+    currentOperatorActionId: operatorActions.rows.length ? operatorActions.rows[operatorActions.rows.length - 1].id : null,
+    currentValuationId: valuations.rows.length ? valuations.rows[valuations.rows.length - 1].id : null,
+    currentDecisionId: decisions.rows.length ? decisions.rows[decisions.rows.length - 1].id : null,
   };
 }
 

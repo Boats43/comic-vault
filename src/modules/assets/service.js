@@ -953,6 +953,146 @@ export async function recordOperatorAction({ principalId, gkAssetId, decisionEve
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// assertOutcomeAttachment -- shared, read-only. Reads decision_event and
+// operator_action_event ONLY, never writes to either. Used by BOTH
+// recordOutcomeEvent (inside its own write transaction, the actual
+// enforcement point) and validateOutcomeAttachment (a separate,
+// short-lived, no-transaction pre-flight a caller can run BEFORE an
+// irreversible external action, e.g. a real eBay AddFixedPriceItem
+// call) -- one rule, checked in two different connection lifetimes,
+// never two copies of the logic that could drift apart.
+//
+// OUTCOME ATTACHMENT RULE (Outcome #1 pre-publish hardening pass,
+// documented alongside src/lib/operatorActionAlignment.js): a LISTED
+// outcome must attach to the SPECIFIC LIST operator_action_event it
+// executes, never to a HOLD/PASS row, never to an operator_action_event
+// or decision_event belonging to a different asset, and never to a
+// decisionEventId the supplied operatorActionEventId doesn't itself
+// belong to. HOLD/PASS rows are preserved, untouched, as historical
+// truth -- this function never writes to operator_action_event or
+// decision_event, only reads them for this check.
+// ─────────────────────────────────────────────────────────────────────
+async function assertOutcomeAttachment(client, { gkAssetId, decisionEventId, operatorActionEventId, outcomeType }) {
+  if (decisionEventId) {
+    const decisionAssetId = await repo.getDecisionEventAssetId(client, decisionEventId);
+    if (decisionAssetId === null) {
+      throw new NotFoundError(`decision_event ${decisionEventId} does not exist`);
+    }
+    if (decisionAssetId !== gkAssetId) {
+      throw new ValidationFailedError(`decision_event ${decisionEventId} belongs to a different asset than gkAssetId ${gkAssetId}`);
+    }
+  }
+  if (operatorActionEventId) {
+    const opCtx = await repo.getOperatorActionEventContext(client, operatorActionEventId);
+    if (!opCtx) {
+      throw new NotFoundError(`operator_action_event ${operatorActionEventId} does not exist`);
+    }
+    if (opCtx.gkAssetId !== gkAssetId) {
+      throw new ValidationFailedError(`operator_action_event ${operatorActionEventId} belongs to a different asset than gkAssetId ${gkAssetId}`);
+    }
+    if (outcomeType === 'LISTED' && opCtx.actionCode !== 'LIST') {
+      throw new ValidationFailedError(`outcome_type LISTED must attach to a LIST operator_action_event -- ${operatorActionEventId} has action_code ${opCtx.actionCode}`);
+    }
+    if (decisionEventId && opCtx.decisionEventId !== decisionEventId) {
+      throw new ValidationFailedError(`operator_action_event ${operatorActionEventId} does not belong to decisionEventId ${decisionEventId}`);
+    }
+  }
+}
+
+// validateOutcomeAttachment -- READ-ONLY pre-flight check. No writes, no
+// transaction, no idempotency claim -- safe to call repeatedly, and
+// deliberately NOT a substitute for recordOutcomeEvent's own
+// re-validation at write time (state could theoretically change between
+// this call and the real external action it gates). Exists so a caller
+// (api/list-ebay.js) can fail fast, BEFORE making an irreversible
+// external call, if the supplied GrailKey linkage is missing,
+// inconsistent, wrong-asset, wrong-decision, or attached to the wrong
+// operator-action kind (e.g. HOLD/PASS instead of LIST).
+export async function validateOutcomeAttachment({ principalId, gkAssetId, decisionEventId, operatorActionEventId, outcomeType } = {}) {
+  requireFields({ principalId, gkAssetId, outcomeType }, ['principalId', 'gkAssetId', 'outcomeType']);
+  requireEnum(outcomeType, ['LISTED', 'SOLD', 'EXPIRED_UNSOLD', 'DELISTED', 'ACTIVE_AT_CUTOFF'], 'outcomeType');
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertAssetExists(client, gkAssetId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    await assertOutcomeAttachment(client, { gkAssetId, decisionEventId, operatorActionEventId, outcomeType });
+    return { valid: true };
+  } finally {
+    client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// recordOutcomeEvent -- Outcome #1 (0023), the marketplace-execution
+// ledger. The FIFTH distinct truth: what actually happened in the real
+// marketplace (LISTED/SOLD/EXPIRED_UNSOLD/DELISTED/ACTIVE_AT_CUTOFF),
+// never confused with decision_event (engine recommendation) or
+// operator_action_event (human intent). NEVER mutates either of those
+// tables -- enforces the OUTCOME ATTACHMENT RULE above via
+// assertOutcomeAttachment.
+// ─────────────────────────────────────────────────────────────────────
+export async function recordOutcomeEvent({
+  principalId, gkAssetId, decisionEventId, operatorActionEventId,
+  outcomeType, channel, externalListingId,
+  askAmount, askCurrency = 'USD', grossAmount, feesAmount, shippingAmount, netAmount, daysToSale,
+  nextObservationDueAt,
+  idempotencyKey, correlationId, occurredAt,
+} = {}) {
+  requireFields({ principalId, gkAssetId, outcomeType, channel }, ['principalId', 'gkAssetId', 'outcomeType', 'channel']);
+  requireEnum(outcomeType, ['LISTED', 'SOLD', 'EXPIRED_UNSOLD', 'DELISTED', 'ACTIVE_AT_CUTOFF'], 'outcomeType');
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'recordOutcomeEvent';
+      // GK-163 -- semantic payload: asset+linkage+outcome+listing+ask.
+      // A different operatorActionEventId/outcomeType/externalListingId
+      // under the same idempotencyKey is NOT the same request.
+      const requestFingerprint = computeRequestFingerprint({
+        gkAssetId, decisionEventId: decisionEventId ?? null, operatorActionEventId: operatorActionEventId ?? null,
+        outcomeType, channel, externalListingId: externalListingId ?? null, askAmount: askAmount ?? null,
+      });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      await assertOutcomeAttachment(client, { gkAssetId, decisionEventId, operatorActionEventId, outcomeType });
+
+      const batchCorrelationId = correlationId || await newCorrelationId(client);
+      const outcomeEventId = await repo.insertOutcomeEvent(client, {
+        gkAssetId, decisionEventId: decisionEventId ?? null, operatorActionEventId: operatorActionEventId ?? null,
+        outcomeType, channel, externalListingId: externalListingId ?? null,
+        askAmount: askAmount ?? null, askCurrency, grossAmount: grossAmount ?? null, feesAmount: feesAmount ?? null,
+        shippingAmount: shippingAmount ?? null, netAmount: netAmount ?? null, daysToSale: daysToSale ?? null,
+        nextObservationDueAt: nextObservationDueAt ?? null,
+        recordedByPrincipalId: principalId, correlationId: batchCorrelationId, occurredAt,
+      });
+      await repo.writeDomainEvent(client, {
+        eventType: 'outcome.recorded', actorPrincipalId: principalId, actorKind: 'system',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { outcomeEventId, outcomeType, channel, externalListingId: externalListingId ?? null, askAmount: askAmount ?? null, operatorActionEventId: operatorActionEventId ?? null },
+        correlationId: batchCorrelationId,
+        occurredAt,
+      });
+
+      const result = { outcomeEventId };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // D4 Phase B -- Identifier Fabric (docs/adr/ADR-IDENTIFIER-001-
 // identifier-fabric.md, Rulings 1-21; migration 0013). Minimum
 // vertical-neutral API surface: create/read a canonical identifier, a

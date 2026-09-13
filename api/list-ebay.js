@@ -28,6 +28,17 @@
 import { deriveLocks } from "../src/lib/responseContract.js";
 import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
 
+// Outcome #1 — OPTIONAL, ADDITIVE GrailKey linkage. Neither import below
+// changes this endpoint's existing, still-mandatory behavior for a
+// caller that sends none of the new fields (gkAssetId/decisionEventId/
+// operatorActionEventId/idempotencyKey/Authorization) — see
+// src/lib/marketplaceOutcomeBridge.js's own header (GK-151: this
+// endpoint has no mandatory GrailKey auth today, and this dispatch does
+// not add one).
+import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
+import { recordOutcomeEvent, validateOutcomeAttachment, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
+import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
+
 const EBAY_ENDPOINT = "https://api.ebay.com/ws/api.dll";
 const COMPAT_LEVEL = "1193";
 const SITE_ID = "0"; // US
@@ -648,6 +659,60 @@ const checkListingStatus = async (ebayItemId, authToken, headers) => {
   return result;
 };
 
+// EBAY PUBLISH SAFETY (Outcome #1 dispatch) — a real, read-only Trading
+// API GetUser call, run IMMEDIATELY BEFORE any AddFixedPriceItem call
+// this file makes. Confirms the token is genuinely valid and identifies
+// the real seller account an about-to-be-created listing will belong
+// to. Never logs the token itself (redactToken already covers the
+// request XML; GetUser's own request carries the same
+// <eBayAuthToken> element). Read-only by construction — GetUser creates,
+// modifies, or deletes nothing on eBay's side; a failure here throws
+// and the caller aborts BEFORE ever reaching AddFixedPriceItem.
+const verifySellerAccount = async (authToken, headers) => {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${xmlEscape(authToken)}</eBayAuthToken>
+  </RequesterCredentials>
+</GetUserRequest>`;
+
+  const res = await fetch(EBAY_ENDPOINT, {
+    method: "POST",
+    headers: {
+      ...headers,
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": "GetUser",
+    },
+    body: xml,
+  });
+
+  const text = await res.text();
+  const ack = extractTag(text, "Ack");
+  const userId = extractTag(text, "UserID");
+  const site = extractTag(text, "Site");
+
+  if (!ack || /Failure/i.test(ack) || !userId) {
+    console.error(
+      `[ebay] GetUser (account/token validity check) FAILED (HTTP ${res.status}, ack=${ack}). Full response:\n` +
+        redactToken(text)
+    );
+    const msg =
+      extractTag(text, "ShortMessage") ||
+      extractTag(text, "LongMessage") ||
+      "eBay account/token validation failed";
+    throw new Error(`eBay account/token validation failed: ${msg}`);
+  }
+
+  console.log(`[ebay] GetUser account/token validity check PASSED (site=${site || "?"}).`);
+  return { userId, site };
+};
+
+const extractBearerToken = (req) => {
+  const header = req.headers?.authorization || req.headers?.Authorization;
+  if (!header || !header.startsWith("Bearer ")) return null;
+  return header.slice("Bearer ".length).trim();
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -680,6 +745,23 @@ export default async function handler(req, res) {
       "X-EBAY-API-CERT-NAME": EBAY_CERT_ID,
       "X-EBAY-API-SITEID": SITE_ID,
     };
+
+    // Outcome #1 — OPTIONAL GrailKey auth context. A missing/invalid
+    // token never rejects the request (this endpoint has no mandatory
+    // auth today, GK-151) — it only means the durable outcome write
+    // below declines, the real eBay listing is completely unaffected.
+    let grailkeyPrincipalId = null;
+    const bearerToken = extractBearerToken(req);
+    if (bearerToken) {
+      try {
+        ({ principalId: grailkeyPrincipalId } = verifyToken(bearerToken));
+      } catch (e) {
+        if (!(e instanceof InvalidTokenError)) {
+          console.error("[ebay] unexpected token-verification error:", e?.message || e);
+        }
+        grailkeyPrincipalId = null;
+      }
+    }
 
     // Status check branch: { checkStatus: true, ebayItemId }
     if (item.checkStatus === true) {
@@ -716,6 +798,10 @@ export default async function handler(req, res) {
           console.error("[ebay] bundle picture upload failed:", imgErr.message);
         }
       }
+      // EBAY PUBLISH SAFETY — read-only account/token validity check,
+      // immediately before the real AddFixedPriceItem call below.
+      await verifySellerAccount(EBAY_AUTH_TOKEN, ebayHeaders);
+
       const xml = buildBundleXml(items, EBAY_AUTH_TOKEN, pictureUrls);
       console.log("[ebay] AddFixedPriceItem (bundle) request XML:\n" + redactToken(xml));
       const ebayRes = await fetch(EBAY_ENDPOINT, {
@@ -767,6 +853,56 @@ export default async function handler(req, res) {
         flags: item.claudeCheck?.flags || []
       });
       return;
+    }
+
+    // Outcome #1 PRE-PUBLISH HARDENING — durable-linkage pre-flight.
+    // Runs BEFORE any eBay network call this handler makes (image
+    // upload, GetUser, AddFixedPriceItem) — "no irreversible marketplace
+    // call may occur before linkage validation passes." A caller that
+    // supplies NONE of gkAssetId/decisionEventId/operatorActionEventId
+    // is untouched (GK-151's own "no mandatory auth today" carve-out
+    // still holds for that legacy path) — but the moment ANY of the
+    // three is present, ALL three plus a valid Authorization bearer
+    // token are required, and must resolve to a real LIST
+    // operator_action_event for an asset this principal owns. A live
+    // eBay listing without a durable GrailKey execution row is treated
+    // as an unacceptable partial failure — this is a hard abort, not a
+    // decline-and-continue like the post-publish write below.
+    const grailkeyLinkageAttempted = !!(item.gkAssetId || item.decisionEventId || item.operatorActionEventId);
+    if (grailkeyLinkageAttempted) {
+      if (!grailkeyPrincipalId) {
+        res.status(401).json({
+          error: 'GRAILKEY_AUTH_REQUIRED',
+          message: 'A GrailKey linkage field was supplied but no valid Authorization bearer token was present.',
+        });
+        return;
+      }
+      if (!item.gkAssetId || !item.decisionEventId || !item.operatorActionEventId) {
+        res.status(400).json({
+          error: 'GRAILKEY_LINKAGE_INCOMPLETE',
+          message: 'gkAssetId, decisionEventId, and operatorActionEventId are all required together once any one of them is supplied.',
+        });
+        return;
+      }
+      try {
+        await validateOutcomeAttachment({
+          principalId: grailkeyPrincipalId,
+          gkAssetId: item.gkAssetId,
+          decisionEventId: item.decisionEventId,
+          operatorActionEventId: item.operatorActionEventId,
+          outcomeType: 'LISTED',
+        });
+      } catch (e) {
+        console.error("[ebay] pre-flight GrailKey linkage validation FAILED — aborting before any eBay call:", e?.message || e);
+        const status = (e instanceof NotFoundError) ? 404
+          : (e instanceof ValidationFailedError) ? 422
+          : 500;
+        res.status(status).json({
+          error: 'GRAILKEY_LINKAGE_INVALID',
+          message: e?.message || 'GrailKey linkage validation failed.',
+        });
+        return;
+      }
     }
 
     // GrailKey Directive Z (GK-95/96) — the transaction-authority gate.
@@ -869,6 +1005,13 @@ export default async function handler(req, res) {
       }
     }
 
+    // EBAY PUBLISH SAFETY — read-only account/token validity check,
+    // immediately before the real AddFixedPriceItem call below. Throws
+    // (and this handler's outer catch turns it into a 500) if the token
+    // is invalid or the account cannot be confirmed — the real listing
+    // call below never runs in that case.
+    await verifySellerAccount(EBAY_AUTH_TOKEN, ebayHeaders);
+
     // Step 2: create the listing, including the hosted picture URLs.
     const xml = buildXml(item, EBAY_AUTH_TOKEN, pictureUrls);
     console.log("[ebay] AddFixedPriceItem request XML:\n" + redactToken(xml));
@@ -920,10 +1063,35 @@ export default async function handler(req, res) {
       );
     }
 
+    // Outcome #1 — the durable marketplace-execution write. Runs ONLY
+    // here, after itemId is already confirmed present above — never
+    // before eBay's own acknowledgment, so a failure earlier in this
+    // handler can never produce a false LISTED fact. Never blocks or
+    // alters the real eBay response: attemptListedOutcome never throws,
+    // and its result is purely additive information on the response body.
+    const askAmount = parsePriceNumber(item.price) ?? parsePriceNumber(item.priceHigh) ?? parsePriceNumber(item.priceLow) ?? null;
+    const outcome = await attemptListedOutcome({
+      principalId: grailkeyPrincipalId,
+      gkAssetId: item.gkAssetId || null,
+      decisionEventId: item.decisionEventId || null,
+      operatorActionEventId: item.operatorActionEventId || null,
+      externalListingId: itemId,
+      askAmount,
+      idempotencyKey: item.outcomeIdempotencyKey || null,
+      correlationId: item.correlationId || null,
+      recordOutcomeEvent,
+    });
+    if (outcome.attempted && !outcome.ok) {
+      console.error("[ebay] Outcome #1 durable write declined/failed (listing itself succeeded):", outcome.declineReason, outcome.error?.message);
+    } else if (outcome.attempted) {
+      console.log("[ebay] Outcome #1 durable LISTED row recorded:", outcome.outcomeEventId);
+    }
+
     res.status(200).json({
       ok: true,
       listingId: itemId,
       listingUrl: `https://www.ebay.com/itm/${itemId}`,
+      outcome,
       pictureCount: pictureUrls.length,
       ack: ack || "Success",
     });

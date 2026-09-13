@@ -1,5 +1,6 @@
-// GET /api/assets                  -> { assets: [...] }  (list-my-assets)
-// GET /api/assets?gkAssetId=<uuid> -> { asset }           (getPhysicalAsset)
+// GET /api/assets                          -> { assets: [...] }  (list-my-assets)
+// GET /api/assets?gkAssetId=<uuid>         -> { asset }           (getPhysicalAsset)
+// GET /api/assets?collectionItemId=<id>    -> { asset }           (resolve then getPhysicalAsset)
 //
 // DATA-1D, T3 — the first real authenticated READ surface. Requires
 // `Authorization: Bearer <token>` (src/modules/auth/index.js); the
@@ -7,13 +8,20 @@
 // Service's own operations here — never trusted from a request body or
 // query param, so a caller cannot ask to read as someone else.
 //
+// collectionItemId support (Outcome #1, GrailKey Resume dispatch) reuses
+// resolveCollectionItemLink verbatim — it already fails closed (returns
+// null, indistinguishable from "no link exists") on any owner mismatch,
+// so this never becomes a second, weaker authorization path. No new
+// asset-read API — the existing gkAssetId path is reused unchanged once
+// the collectionItemId resolves.
+//
 // C1 — media stays private. This endpoint never returns a raw
 // localfs://... object_uri (an internal storage key, not a fetchable
 // URL for a browser) — every media row's objectUri is rewritten to
 // `/api/asset-media?mediaId=<id>`, itself authenticated the same way.
 
 import { verifyToken, InvalidTokenError } from '../src/modules/auth/index.js';
-import { getPhysicalAsset, listMyAssets, NotFoundError, AuthorizationFailedError } from '../src/modules/assets/index.js';
+import { getPhysicalAsset, listMyAssets, resolveCollectionItemLink, NotFoundError, AuthorizationFailedError } from '../src/modules/assets/index.js';
 import { checkRateLimit } from './rate-limit.js';
 
 function extractBearerToken(req) {
@@ -50,9 +58,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Internal error' });
   }
 
-  const gkAssetId = req.query?.gkAssetId;
+  let gkAssetId = req.query?.gkAssetId;
+  const collectionItemId = req.query?.collectionItemId;
 
   try {
+    if (!gkAssetId && collectionItemId) {
+      const link = await resolveCollectionItemLink({ principalId, collectionItemId });
+      if (!link) return res.status(404).json({ error: 'Not found' });
+      gkAssetId = link.gkAssetId;
+    }
     if (gkAssetId) {
       const asset = await getPhysicalAsset({ principalId, gkAssetId });
       return res.status(200).json({ asset: { ...asset, media: rewriteMediaUris(asset.media) } });

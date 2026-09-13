@@ -40,3 +40,34 @@ export function deriveActionAlignment(recommendation, actionCode) {
   if (followedAction === undefined) return ALIGNMENT.NOT_COMPARABLE;
   return actionCode === followedAction ? ALIGNMENT.FOLLOWED : ALIGNMENT.OVERRIDDEN;
 }
+
+// selectCurrentOperatorAction — Outcome #1 PRE-PUBLISH HARDENING. Pure,
+// no I/O. Finds the operator action a caller (the real "List on eBay"
+// button, GrailKeyOperatorPanel.jsx, or anything else) must treat as
+// "the current one" — by id, against the server-declared
+// currentOperatorActionId (repository.js's getAssetGraph, the SAME
+// recorded_at-then-id deterministic tie-break already established for
+// currentValuationId/currentDecisionId, P0-B) — NEVER by array position
+// (`operatorActions[operatorActions.length - 1]`). For Creepy #1's real
+// two-row history (HOLD at 2026-09-12T20:55:17Z, then LIST at
+// 2026-09-12T21:58:54Z), this returns the LIST row, because that is the
+// row currentOperatorActionId actually names — not because it happens
+// to be last in array order (which, for this asset, is the same row,
+// but that agreement is incidental, never the contract).
+export function selectCurrentOperatorAction({ operatorActions, currentOperatorActionId } = {}) {
+  if (!currentOperatorActionId || !Array.isArray(operatorActions)) return null;
+  return operatorActions.find((a) => a.id === currentOperatorActionId) ?? null;
+}
+
+// Outcome #1 IMPLEMENTATION PASS (2026-09-12) — explicitly confirmed,
+// not re-derived, for Creepy #1's own real chain (recommendation
+// LIST_LOW, operator action LIST): this maps to FOLLOWED under the
+// table above, because LIST_LOW carries two separate semantics —
+// directional action (LIST) and price posture (LOW) — and
+// operator_action_event.action_code only ever records the directional
+// action class. Any gap between the recommended price and the actual
+// listing ask is a SEPARATE fact, scored in the marketplace-execution/
+// economics layer (outcome_event.ask_amount vs. decision_event's own
+// linked valuation_event.value_amount), never folded into this
+// alignment derivation. No logic change was needed — this note exists
+// only so that fact is recorded, not re-litigated by a future reader.

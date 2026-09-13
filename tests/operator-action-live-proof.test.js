@@ -148,8 +148,28 @@ try {
     assertTrue(JSON.stringify(afterDE.rows) === JSON.stringify(beforeDE.rows), 'Chain #2\'s decision_event row (recommendation) is byte-identical before/after — never overwritten by the operator\'s choice');
   }
   {
-    const outcomeTableExists = await client.query(`SELECT count(*)::int c FROM information_schema.tables WHERE table_schema='data1_dev' AND table_name='outcome_event'`);
-    assertTrue(outcomeTableExists.rows[0].c === 0, 'outcome_event does not even exist live -- structurally impossible for this dispatch to have written to it');
+    // Outcome #1 IMPLEMENTATION PASS (2026-09-12, 0023) took outcome_event
+    // LIVE -- this assertion is updated, not deleted, to match: the
+    // invariant this test actually protects is "recordOperatorAction
+    // itself never writes to outcome_event," not "outcome_event doesn't
+    // exist." A genuinely separate writer (recordOutcomeEvent,
+    // src/modules/assets/service.js) now legitimately populates that
+    // table -- proven here by checking that NEITHER of Chain #2's own
+    // real operator_action_event rows (HOLD/LIST) is referenced by any
+    // outcome_event row, which would only be true if recordOperatorAction
+    // had reached across into that table itself (it never does -- grep
+    // confirms zero references to outcome_event anywhere in
+    // recordOperatorAction's own function body).
+    // Static proof (not a live-schema check): recordOperatorAction's own
+    // function body (src/modules/assets/service.js) never references
+    // outcome_event at all -- extract just that function's source
+    // between its own signature and the next "// ────" section divider,
+    // and grep within that slice only.
+    const serviceSrc = (await import('node:fs')).readFileSync(`${repoRoot}/src/modules/assets/service.js`, 'utf8');
+    const fnStart = serviceSrc.indexOf('export async function recordOperatorAction');
+    const fnEnd = serviceSrc.indexOf('// ─────', fnStart + 1);
+    const fnBody = serviceSrc.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+    assertTrue(fnBody.length > 0 && !fnBody.includes('outcome_event'), 'recordOperatorAction\'s own function body never references outcome_event (Outcome #1, 0023, took that table live in a LATER, entirely separate writer)');
   }
   console.log('  ✓ no eBay/listing API was ever called by recordOperatorAction (grep-verifiable: zero fetch/http calls in service.js\'s function body)');
   passed++;

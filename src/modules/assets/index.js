@@ -22,6 +22,8 @@ export {
   recordValuation,
   recordDecision,
   recordOperatorAction,
+  recordOutcomeEvent,
+  validateOutcomeAttachment,
   linkCollectionItem,
   resolveCollectionItemLink,
   getLiveIdentityAssignment,

@@ -23,8 +23,10 @@ import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE, wasSupersededByCorrection, logStaleScanResponse } from "./lib/scanOwnership.js";
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
-import { isAuthenticated, clearSession, getSession } from "./lib/grailkeySession.js";
+import { isAuthenticated, clearSession, getSession, authFetch } from "./lib/grailkeySession.js";
+import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
 import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
+import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
 
 // A3 ACCESS GATE: Client-side key helper
 // ACCESS GATE — T1 invite key management (A3 + LAUNCH BLOCKER FIX)
@@ -4221,6 +4223,8 @@ function CollectionDetail({
           </div>
         )}
       </div>
+
+      <GrailKeyOperatorPanel collectionItemId={item.id} />
 
       {/* 1. PHOTO STRIP */}
       <div
@@ -12184,11 +12188,64 @@ export default function App() {
     if (item.q41Override) {
       console.log('[Q41-override]', JSON.stringify(item.q41Override));
     }
+
+    // Outcome #1 PRE-PUBLISH HARDENING — real frontend linkage. If this
+    // catalogue item is authenticated AND has a real GrailKey asset
+    // graph, the durable LIST operator_action_event actually in force
+    // must be found via the server-declared currentOperatorActionId
+    // (selectCurrentOperatorAction — find-by-id, NEVER
+    // operatorActions[operatorActions.length - 1]) and, if it isn't
+    // LIST, this function refuses to even attempt the eBay call — the
+    // real handler (api/list-ebay.js) enforces the same rule server-side
+    // as defense-in-depth, but failing fast here means an operator never
+    // even sees a live listing attempt for a HOLD/PASS decision. An
+    // item with no linked GrailKey asset (not authenticated, or never
+    // captured through DATA-1D) is unaffected — it lists exactly as
+    // before, with no GrailKey fields sent (GK-151's own "no mandatory
+    // auth today" carve-out).
+    let grailkeyLinkage = null;
+    let grailkeyBearerToken = null;
+    if (isAuthenticated() && item.id) {
+      const graphRes = await authFetch(`/api/assets?collectionItemId=${encodeURIComponent(item.id)}`);
+      if (graphRes && graphRes.ok) {
+        const body = await graphRes.json().catch(() => null);
+        const graph = body?.asset;
+        const gkAssetId = graph?.asset?.id;
+        if (gkAssetId) {
+          const currentAction = selectCurrentOperatorAction({
+            operatorActions: graph.operatorActions,
+            currentOperatorActionId: graph.currentOperatorActionId,
+          });
+          if (!currentAction || currentAction.action_code !== "LIST") {
+            throw new Error(
+              currentAction
+                ? `GrailKey's latest recorded operator action for this asset is ${currentAction.action_code}, not LIST — record a LIST action before publishing.`
+                : "GrailKey has no recorded operator action for this asset yet — record a LIST action before publishing."
+            );
+          }
+          grailkeyLinkage = {
+            gkAssetId,
+            decisionEventId: graph.currentDecisionId || null,
+            operatorActionEventId: currentAction.id,
+          };
+          grailkeyBearerToken = getSession()?.token || null;
+        }
+      }
+      // A missing/non-ok graph response (not linked, 404, network error)
+      // is treated exactly like "not authenticated" — legacy behavior,
+      // no GrailKey fields sent, listing proceeds unaffected.
+    }
+
     const res = await fetch("/api/list-ebay", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...getVaultHeaders() },
+      headers: {
+        "Content-Type": "application/json",
+        ...getVaultHeaders(),
+        ...(grailkeyBearerToken ? { Authorization: `Bearer ${grailkeyBearerToken}` } : {}),
+      },
       body: JSON.stringify({
         q41Override: item.q41Override || null,
+        ...(grailkeyLinkage || {}),
         title: item.title,
         publisher: item.publisher,
         year: item.year,
