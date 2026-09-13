@@ -12316,7 +12316,11 @@ export default function App() {
     });
     const data = await res.json();
     if (!res.ok || !data.listingUrl) {
-      throw new Error(data.error || "Failed to create eBay listing");
+      // GK-207 — prefer the server's human-readable `message` (e.g.
+      // "A valid GrailKey session is required to publish...") over the
+      // bare error CODE (`GRAILKEY_AUTH_REQUIRED`), so a real failure
+      // shows an actionable reason, not an opaque constant.
+      throw new Error(data.message || data.error || "Failed to create eBay listing");
     }
     // GK-94 (Directive X) — was `{...item, ...}`, spreading the CLOSED-OVER
     // pre-request item back into catalogue state; if a correction landed on

@@ -269,21 +269,22 @@ console.log('\n-- PRE-PUBLISH HARDENING: PARTIAL linkage (gkAssetId present, dec
   assertTrue(fetchCalls.length === 0, 'ZERO eBay calls were made');
 }
 
-console.log('\n-- legacy path preserved: ZERO GrailKey fields at all (no gkAssetId, no decisionEventId, no operatorActionEventId, no Authorization) -> real (mocked) listing proceeds exactly as before this hardening pass --\n');
+console.log('\n-- GK-207 CORRECTION: the legacy no-linkage fallback is REMOVED -- ZERO GrailKey fields at all now BLOCKS before any eBay call, never publishes --\n');
 {
   fetchCalls.length = 0;
   addFixedPriceItemBehavior = 'success';
   const req = {
     method: 'POST',
-    headers: {},
-    body: baseItem(), // no GrailKey fields whatsoever -- GK-151's own "no mandatory auth today" carve-out
+    headers: {}, // no Authorization, no GrailKey fields whatsoever
+    body: baseItem(),
   };
   const res = mockRes();
   await handler(req, res);
 
-  assertTrue(res.statusCode === 200, `a caller sending NO GrailKey fields at all still lists successfully -> 200 (got ${res.statusCode})`);
-  assertTrue(res.body?.listingId === FAKE_ITEM_ID, 'real (mocked) listingId returned');
-  assertTrue(res.body?.outcome?.attempted === false && res.body?.outcome?.declineReason === 'no-auth-context', 'outcome bridge declines with no-auth-context, never throws, never blocks the listing');
+  assertTrue(res.statusCode === 401, `a caller sending NO GrailKey fields at all is now REJECTED before any eBay call -> 401 GRAILKEY_AUTH_REQUIRED (got ${res.statusCode})`);
+  assertTrue(res.body?.error === 'GRAILKEY_AUTH_REQUIRED', 'error code = GRAILKEY_AUTH_REQUIRED');
+  assertTrue(res.body?.listingId === undefined, 'NO listingId -- no real eBay listing was ever attempted');
+  assertTrue(fetchCalls.length === 0, `ZERO eBay calls were made (fetchCalls: [${fetchCalls.join(', ')}])`);
 }
 
 console.log('\n-- AddFixedPriceItem itself fails (no ItemID) -> 502, and NO LISTED row is ever fabricated --\n');

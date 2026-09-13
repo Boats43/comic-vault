@@ -855,54 +855,60 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Outcome #1 PRE-PUBLISH HARDENING — durable-linkage pre-flight.
-    // Runs BEFORE any eBay network call this handler makes (image
-    // upload, GetUser, AddFixedPriceItem) — "no irreversible marketplace
-    // call may occur before linkage validation passes." A caller that
-    // supplies NONE of gkAssetId/decisionEventId/operatorActionEventId
-    // is untouched (GK-151's own "no mandatory auth today" carve-out
-    // still holds for that legacy path) — but the moment ANY of the
-    // three is present, ALL three plus a valid Authorization bearer
-    // token are required, and must resolve to a real LIST
-    // operator_action_event for an asset this principal owns. A live
-    // eBay listing without a durable GrailKey execution row is treated
-    // as an unacceptable partial failure — this is a hard abort, not a
-    // decline-and-continue like the post-publish write below.
-    const grailkeyLinkageAttempted = !!(item.gkAssetId || item.decisionEventId || item.operatorActionEventId);
-    if (grailkeyLinkageAttempted) {
-      if (!grailkeyPrincipalId) {
-        res.status(401).json({
-          error: 'GRAILKEY_AUTH_REQUIRED',
-          message: 'A GrailKey linkage field was supplied but no valid Authorization bearer token was present.',
-        });
-        return;
-      }
-      if (!item.gkAssetId || !item.decisionEventId || !item.operatorActionEventId) {
-        res.status(400).json({
-          error: 'GRAILKEY_LINKAGE_INCOMPLETE',
-          message: 'gkAssetId, decisionEventId, and operatorActionEventId are all required together once any one of them is supplied.',
-        });
-        return;
-      }
-      try {
-        await validateOutcomeAttachment({
-          principalId: grailkeyPrincipalId,
-          gkAssetId: item.gkAssetId,
-          decisionEventId: item.decisionEventId,
-          operatorActionEventId: item.operatorActionEventId,
-          outcomeType: 'LISTED',
-        });
-      } catch (e) {
-        console.error("[ebay] pre-flight GrailKey linkage validation FAILED — aborting before any eBay call:", e?.message || e);
-        const status = (e instanceof NotFoundError) ? 404
-          : (e instanceof ValidationFailedError) ? 422
-          : 500;
-        res.status(status).json({
-          error: 'GRAILKEY_LINKAGE_INVALID',
-          message: e?.message || 'GrailKey linkage validation failed.',
-        });
-        return;
-      }
+    // Outcome #1 PRE-PUBLISH HARDENING (GK-207 correction, 2026-09-12) —
+    // durable-linkage pre-flight, now UNCONDITIONAL for this single-item
+    // publish path. Runs BEFORE any eBay network call this handler makes
+    // (image upload, GetUser, AddFixedPriceItem).
+    //
+    // CORRECTION FROM THE PRIOR (GK-203/205) DESIGN: this used to be
+    // conditional on the caller having supplied ANY of gkAssetId/
+    // decisionEventId/operatorActionEventId (GK-151's "no mandatory auth
+    // today" carve-out) — meaning an unauthenticated caller, or one whose
+    // catalogue item simply had no resolvable GrailKey graph, silently
+    // fell through to a legacy publish with NO durable linkage at all.
+    // That is now judged an unacceptable gap for this endpoint: a live
+    // eBay listing without a durable GrailKey execution row is always a
+    // partial failure, not something that should ever be reachable
+    // silently. This gate is therefore now unconditional — every
+    // single-item publish through this endpoint requires a valid
+    // Authorization bearer token AND a complete, valid gkAssetId +
+    // decisionEventId + operatorActionEventId (resolving to a real LIST
+    // action for an asset this principal owns) before ANY eBay call.
+    // A catalogue item with no GrailKey asset at all (never captured via
+    // DATA-1D) can no longer be published through this endpoint until it
+    // has one — disclosed scope change, not silently narrowed.
+    if (!grailkeyPrincipalId) {
+      res.status(401).json({
+        error: 'GRAILKEY_AUTH_REQUIRED',
+        message: 'A valid GrailKey session (Authorization bearer token) is required to publish. Log in before listing.',
+      });
+      return;
+    }
+    if (!item.gkAssetId || !item.decisionEventId || !item.operatorActionEventId) {
+      res.status(400).json({
+        error: 'GRAILKEY_LINKAGE_INCOMPLETE',
+        message: 'gkAssetId, decisionEventId, and operatorActionEventId are all required to publish.',
+      });
+      return;
+    }
+    try {
+      await validateOutcomeAttachment({
+        principalId: grailkeyPrincipalId,
+        gkAssetId: item.gkAssetId,
+        decisionEventId: item.decisionEventId,
+        operatorActionEventId: item.operatorActionEventId,
+        outcomeType: 'LISTED',
+      });
+    } catch (e) {
+      console.error("[ebay] pre-flight GrailKey linkage validation FAILED — aborting before any eBay call:", e?.message || e);
+      const status = (e instanceof NotFoundError) ? 404
+        : (e instanceof ValidationFailedError) ? 422
+        : 500;
+      res.status(status).json({
+        error: 'GRAILKEY_LINKAGE_INVALID',
+        message: e?.message || 'GrailKey linkage validation failed.',
+      });
+      return;
     }
 
     // GrailKey Directive Z (GK-95/96) — the transaction-authority gate.
