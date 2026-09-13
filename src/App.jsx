@@ -8993,6 +8993,14 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   const [search, setSearch] = useState("");
   const [aiTags, setAiTags] = useState({});
   const [actionStatus, setActionStatus] = useState({});
+  // Outcome #1 P0 fix — the pre-existing `catch {}` on this quick-list
+  // action (see handleAction below) surfaced only a generic "Failed —
+  // Retry" state with the actual reason silently discarded, an
+  // operator-facing gap made more consequential once the new fail-
+  // closed GrailKey linkage gate can produce a specific, actionable
+  // rejection reason (e.g. "latest operator action is HOLD, not LIST").
+  // Minimal fix: capture the message, never the state shape itself.
+  const [actionErrorMsg, setActionErrorMsg] = useState({});
   const [booted, setBooted] = useState(false);
 
   // Auto-fire Claude analysis on tab open.
@@ -9109,11 +9117,13 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
       const comic = catalogue.find((c) => c.id === action.comicId);
       if (!comic || !onListComic) return;
       setActionStatus((prev) => ({ ...prev, [action.comicId]: "listing" }));
+      setActionErrorMsg((prev) => ({ ...prev, [action.comicId]: null }));
       try {
         await onListComic(comic);
         setActionStatus((prev) => ({ ...prev, [action.comicId]: "listed" }));
-      } catch {
+      } catch (err) {
         setActionStatus((prev) => ({ ...prev, [action.comicId]: "error" }));
+        setActionErrorMsg((prev) => ({ ...prev, [action.comicId]: err?.message || "Failed to list" }));
       }
       return;
     }
@@ -9361,21 +9371,28 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
         {latestActions.length > 0 && !sending && (
           <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             {latestActions.map((a, j) => (
-              <button
-                key={j}
-                onClick={() => handleAction(a)}
-                disabled={actionStatus[a.comicId] === "listing"}
-                style={{
-                  padding: "10px 16px",
-                  border: a.action === "list" ? "none" : "1px solid rgba(212,175,55,0.3)",
-                  borderRadius: 8,
-                  fontSize: 13,
-                  fontWeight: 700,
-                  ...actionBtnStyle(a),
-                }}
-              >
-                {actionBtnLabel(a)}
-              </button>
+              <div key={j} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <button
+                  onClick={() => handleAction(a)}
+                  disabled={actionStatus[a.comicId] === "listing"}
+                  title={actionStatus[a.comicId] === "error" ? (actionErrorMsg[a.comicId] || undefined) : undefined}
+                  style={{
+                    padding: "10px 16px",
+                    border: a.action === "list" ? "none" : "1px solid rgba(212,175,55,0.3)",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    ...actionBtnStyle(a),
+                  }}
+                >
+                  {actionBtnLabel(a)}
+                </button>
+                {actionStatus[a.comicId] === "error" && actionErrorMsg[a.comicId] && (
+                  <div className="error-text small" style={{ maxWidth: 220 }}>
+                    {actionErrorMsg[a.comicId]}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}
