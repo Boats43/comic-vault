@@ -1093,6 +1093,97 @@ export async function recordOutcomeEvent({
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// recordEconomicsComponent -- GK-209 Outcome #1 CLOSER (0025). Records
+// ONE durable economic fact (gross/fees/shipping/refund/credit/
+// order_reference) against an existing outcome_event, append-only.
+// NEVER computes or stores a "net" -- that is always derived by
+// getOutcomeEconomics, below, at read time. source is caller-asserted
+// and NEVER inferred or upgraded here — a caller claiming
+// source:'api-sourced' for a fact it did not actually get from a real
+// API call is a caller bug, not something this function can detect;
+// callers (api/outcome-economics.js) are responsible for only ever
+// passing 'api-sourced' from a real, verified API response.
+// ─────────────────────────────────────────────────────────────────────
+export async function recordEconomicsComponent({
+  principalId, outcomeEventId, componentType, amount, currency = 'USD',
+  source, sourceReference, externalOrderId, evidenceNote,
+  idempotencyKey, correlationId, occurredAt,
+} = {}) {
+  requireFields({ principalId, outcomeEventId, componentType, source }, ['principalId', 'outcomeEventId', 'componentType', 'source']);
+  requireEnum(componentType, ['gross', 'fees', 'shipping', 'refund', 'credit', 'order_reference'], 'componentType');
+  requireEnum(source, ['api-sourced', 'operator-entered'], 'source');
+  if (componentType !== 'order_reference' && (amount === undefined || amount === null)) {
+    throw new ValidationFailedError(`amount is required for componentType "${componentType}" (only "order_reference" may omit it)`);
+  }
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'recordEconomicsComponent';
+      const requestFingerprint = computeRequestFingerprint({
+        outcomeEventId, componentType, amount: amount ?? null, source, externalOrderId: externalOrderId ?? null,
+      });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey, requestFingerprint });
+      if (replay) { await client.query('COMMIT'); return replay; }
+
+      const outcomeAssetId = await repo.getOutcomeEventAssetId(client, outcomeEventId);
+      if (outcomeAssetId === null) {
+        throw new NotFoundError(`outcome_event ${outcomeEventId} does not exist`);
+      }
+      await assertPrincipalOwnsAsset(client, principalId, outcomeAssetId);
+
+      const batchCorrelationId = correlationId || await newCorrelationId(client);
+      const componentId = await repo.insertEconomicsComponent(client, {
+        outcomeEventId, componentType, amount: amount ?? null, currency, source, sourceReference: sourceReference ?? null,
+        externalOrderId: externalOrderId ?? null, recordedByPrincipalId: principalId, correlationId: batchCorrelationId,
+        occurredAt, evidenceNote: evidenceNote ?? null,
+      });
+      await repo.writeDomainEvent(client, {
+        eventType: 'outcome-economics.recorded', actorPrincipalId: principalId, actorKind: 'user',
+        subjectType: 'gk_asset', subjectId: outcomeAssetId,
+        payload: { componentId, outcomeEventId, componentType, amount: amount ?? null, source, externalOrderId: externalOrderId ?? null },
+        correlationId: batchCorrelationId,
+        occurredAt,
+      });
+
+      const result = { componentId };
+      await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// getOutcomeEconomics -- read-only, no transaction. Returns every
+// persisted component plus the derived realized net (never a stored
+// field) for one outcome_event. Ownership-checked the same way every
+// other read in this module is.
+export async function getOutcomeEconomics({ principalId, outcomeEventId } = {}) {
+  requireFields({ principalId, outcomeEventId }, ['principalId', 'outcomeEventId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const outcomeAssetId = await repo.getOutcomeEventAssetId(client, outcomeEventId);
+    if (outcomeAssetId === null) {
+      throw new NotFoundError(`outcome_event ${outcomeEventId} does not exist`);
+    }
+    await assertPrincipalOwnsAsset(client, principalId, outcomeAssetId);
+    const components = await repo.listEconomicsComponents(client, outcomeEventId);
+    const summary = await repo.getRealizedEconomics(client, outcomeEventId);
+    return { components, ...summary };
+  } finally {
+    client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // D4 Phase B -- Identifier Fabric (docs/adr/ADR-IDENTIFIER-001-
 // identifier-fabric.md, Rulings 1-21; migration 0013). Minimum
 // vertical-neutral API surface: create/read a canonical identifier, a

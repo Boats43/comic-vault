@@ -326,6 +326,75 @@ export async function insertOutcomeEvent(client, {
   return id;
 }
 
+// GK-209 Outcome #1 CLOSER (0025) — outcome_economics_component, the
+// realized-economics ledger. Append-only, one row per economic FACT
+// (gross/fees/shipping/refund/credit/order_reference), never a mutated
+// "current net" field — see 0025's own header for the full rationale.
+export async function getOutcomeEventAssetId(client, outcomeEventId) {
+  const r = await client.query(`SELECT gk_asset_id FROM data1_dev.outcome_event WHERE id = $1`, [outcomeEventId]);
+  return r.rows[0]?.gk_asset_id ?? null;
+}
+
+export async function insertEconomicsComponent(client, {
+  outcomeEventId, componentType, amount, currency, source, sourceReference,
+  externalOrderId, recordedByPrincipalId, correlationId, occurredAt, evidenceNote,
+}) {
+  const id = await uuidv7(client);
+  await client.query(
+    `INSERT INTO data1_dev.outcome_economics_component
+       (id, outcome_event_id, component_type, amount, currency, source, source_reference,
+        external_order_id, recorded_by_principal_id, correlation_id, occurred_at, evidence_note)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, COALESCE($11, now()), $12)`,
+    [
+      id, outcomeEventId, componentType, amount ?? null, currency || 'USD', source, sourceReference ?? null,
+      externalOrderId ?? null, recordedByPrincipalId, correlationId, occurredAt ?? null, evidenceNote ?? null,
+    ]
+  );
+  return id;
+}
+
+export async function listEconomicsComponents(client, outcomeEventId) {
+  const r = await client.query(
+    `SELECT * FROM data1_dev.outcome_economics_component WHERE outcome_event_id = $1 ORDER BY occurred_at, id`,
+    [outcomeEventId]
+  );
+  return r.rows;
+}
+
+// getRealizedEconomics — the ONLY place realized net is ever computed.
+// Pure derivation from persisted components, every time, never a stored
+// field read back. sign convention: gross and credit ADD, fees/shipping/
+// refund SUBTRACT — callers store fees/shipping/refund as positive
+// magnitudes by convention (the table itself does not enforce a sign,
+// proven deliberately permissive in the migration-contract test).
+export async function getRealizedEconomics(client, outcomeEventId) {
+  const r = await client.query(
+    `SELECT
+       COALESCE(SUM(amount) FILTER (WHERE component_type = 'gross'), 0)   AS gross,
+       COALESCE(SUM(amount) FILTER (WHERE component_type = 'fees'), 0)    AS fees,
+       COALESCE(SUM(amount) FILTER (WHERE component_type = 'shipping'), 0) AS shipping,
+       COALESCE(SUM(amount) FILTER (WHERE component_type = 'refund'), 0)  AS refund,
+       COALESCE(SUM(amount) FILTER (WHERE component_type = 'credit'), 0)  AS credit,
+       count(*) FILTER (WHERE component_type = 'gross') AS gross_row_count
+     FROM data1_dev.outcome_economics_component WHERE outcome_event_id = $1`,
+    [outcomeEventId]
+  );
+  const row = r.rows[0];
+  const gross = Number(row.gross), fees = Number(row.fees), shipping = Number(row.shipping),
+    refund = Number(row.refund), credit = Number(row.credit);
+  const orderRef = await client.query(
+    `SELECT external_order_id FROM data1_dev.outcome_economics_component
+     WHERE outcome_event_id = $1 AND external_order_id IS NOT NULL ORDER BY occurred_at LIMIT 1`,
+    [outcomeEventId]
+  );
+  return {
+    hasAnyComponent: Number(row.gross_row_count) > 0,
+    gross, fees, shipping, refund, credit,
+    realizedNet: gross - fees - shipping - refund + credit,
+    externalOrderId: orderRef.rows[0]?.external_order_id ?? null,
+  };
+}
+
 // CAPTURE-INT (db/data0/0007_capture_integration_linkage.sql) — a routing
 // lookup only ("which asset does a re-scan of this collection row attach
 // to"), never a claim about physical identity. collectionItemId !=

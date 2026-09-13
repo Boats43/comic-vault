@@ -24,6 +24,8 @@ export {
   recordOperatorAction,
   recordOutcomeEvent,
   validateOutcomeAttachment,
+  recordEconomicsComponent,
+  getOutcomeEconomics,
   linkCollectionItem,
   resolveCollectionItemLink,
   getLiveIdentityAssignment,
