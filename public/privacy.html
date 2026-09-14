@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy — GrailKey</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e8e8e8; background: #121212; }
+    a { color: #7db8ff; }
+    code { background: #262626; }
+  }
+  h1 { font-size: 1.7rem; margin-bottom: 0.2em; }
+  h2 { font-size: 1.2rem; margin-top: 2em; border-bottom: 1px solid rgba(128,128,128,0.3); padding-bottom: 0.3em; }
+  .updated { color: #888; font-size: 0.9rem; margin-bottom: 2em; }
+  code { background: rgba(128,128,128,0.15); padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.9em; }
+  ul { padding-left: 1.3em; }
+  li { margin-bottom: 0.5em; }
+  .note {
+    background: rgba(255, 196, 0, 0.12);
+    border-left: 3px solid #d9a400;
+    padding: 0.8em 1em;
+    margin: 1.2em 0;
+    font-size: 0.95rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>GrailKey Privacy Policy</h1>
+<p class="updated">Last updated: September 13, 2026</p>
+
+<p>
+GrailKey (the app also reachable at <code>app.grailkey.com</code>) is an
+inventory, grading, and pricing tool for physical collectibles, currently
+operated in a closed, single-operator/invite stage. This page describes
+what the application actually does with data today. It is written to match
+the real, current behavior of the software — not a general template — and
+is updated as that behavior changes.
+</p>
+
+<h2>Who operates this app</h2>
+<p>
+GrailKey is operated as a single-operator tool: there is no public sign-up,
+and accounts are provisioned individually rather than through open
+registration.
+</p>
+
+<h2>Information we collect</h2>
+<ul>
+  <li>
+    <strong>Login credentials.</strong> Access is via a passphrase. The
+    passphrase itself is never stored — only a salted, one-way
+    <code>scrypt</code> hash of it is kept, and every login attempt is
+    checked against that hash rather than any stored plaintext value.
+  </li>
+  <li>
+    <strong>Optional sign-in via Clerk.</strong> In some environments the
+    app can offer sign-in through Clerk, a third-party identity provider,
+    as an alternate path to the same account. When used, Clerk issues a
+    session token that this app verifies server-side; only a single
+    verified identifier from that token is used, and it is matched against
+    an explicit mapping to an existing GrailKey account — an unmapped
+    identity cannot gain access.
+  </li>
+  <li>
+    <strong>Photos you capture or upload.</strong> Photos of comics or
+    other collectibles you scan or add are uploaded and stored so they can
+    be shown back to you in your catalogue.
+  </li>
+  <li>
+    <strong>Catalogue and asset data.</strong> Item details you enter or
+    that the app identifies (title, issue, publisher, year, grade,
+    condition notes) and the pricing/valuation data the app computes for
+    those items.
+  </li>
+  <li>
+    <strong>Listing and marketplace activity.</strong> When you choose to
+    list an item, the item's title, price, and photos are sent to the
+    relevant marketplace (currently eBay) to create that listing. Actions
+    you take (list, hold, delist) and their outcomes (listed, sold, ended)
+    are recorded so the app can show you real historical results.
+  </li>
+</ul>
+
+<h2>How your eBay listings work today</h2>
+<p>
+Listings are currently published using the operator's own eBay seller
+credential, configured on the server — the app does not currently ask you
+to connect a personal eBay account, and it does not currently store any
+per-user eBay OAuth access tokens or refresh tokens. If GrailKey later adds
+a feature where you connect your own eBay account, this policy will be
+updated first to describe exactly what is stored and for how long.
+</p>
+
+<h2>Where data is stored</h2>
+<ul>
+  <li>Your device catalogue view is cached locally in your browser (IndexedDB) for offline access on that device.</li>
+  <li>Photos are stored in cloud object storage (Vercel Blob).</li>
+  <li>Catalogue, valuation, decision, and listing/outcome records are stored in a hosted Postgres database.</li>
+  <li>Some external lookups (for example, pricing and identification data) are cached temporarily in a server-side cache (Upstash Redis) to avoid repeating identical requests. Cached entries expire automatically — cache lifetimes currently in use range from about 24 hours up to 90 days depending on the type of data, after which the cached copy is simply gone and, if needed again, is re-fetched.</li>
+</ul>
+
+<h2>Third parties we send data to</h2>
+<p>Depending on what you do in the app, data may be sent to:</p>
+<ul>
+  <li><strong>eBay</strong> — to search for comparable listings and, when you list an item, to publish that listing.</li>
+  <li><strong>ComicVine</strong> — to look up comic identity/metadata.</li>
+  <li><strong>PriceCharting</strong> — to look up pricing and sales-history data.</li>
+  <li><strong>Ximilar</strong> — for image-based visual search/verification.</li>
+  <li><strong>Anthropic (Claude)</strong> — to identify and grade comics from photos, and to power the in-app assistant.</li>
+  <li><strong>Clerk</strong> — only if you sign in through the optional Clerk path described above.</li>
+  <li><strong>Vercel</strong> — as our hosting provider, and for cloud storage (Vercel Blob) and caching (Upstash Redis, provisioned through Vercel).</li>
+</ul>
+<p>Each of these services receives only the data needed to perform its specific function (for example, an image for identification, or a title/issue for a pricing lookup) and is governed by its own privacy policy.</p>
+
+<h2>Retention</h2>
+<p>
+Temporary lookup caches expire automatically as described above. Catalogue,
+photo, and listing/outcome records are otherwise retained for as long as
+your account is active, since the app's core purpose is keeping a durable
+history of your items and their outcomes over time. We do not currently
+have an automated process that deletes this data on a fixed schedule.
+</p>
+
+<h2>Security</h2>
+<ul>
+  <li>The site is served over HTTPS.</li>
+  <li>Access to your data requires a valid session token; that token is checked, and your ownership of the specific item requested is verified, before any stored photo or record is returned — an unauthenticated or unauthorized request never reaches storage.</li>
+  <li>Passphrases are never stored in plain text (see "Login credentials" above).</li>
+  <li>Session tokens can be revoked account-wide if a credential is ever compromised.</li>
+</ul>
+
+<h2>Your choices</h2>
+<p>
+You can ask us about the data associated with your account, or ask us to
+correct inaccurate data, by contacting us at the address below.
+</p>
+<div class="note">
+<strong>On deletion:</strong> GrailKey does not currently offer an automated,
+self-service way to delete all data associated with an account. If you
+contact us with a deletion request, we will do what we reasonably can
+manually, but we cannot currently guarantee complete or automatic removal
+of every stored record. We are disclosing this limitation directly rather
+than promising a capability the app does not yet have.
+</div>
+
+<h2>Children's privacy</h2>
+<p>GrailKey is not directed at, and is not knowingly used by, children under 13.</p>
+
+<h2>Changes to this policy</h2>
+<p>
+If how the app handles data changes, this page will be updated and the
+"Last updated" date above will change accordingly.
+</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy or your data: <a href="mailto:privacy@grailkey.com">privacy@grailkey.com</a></p>
+
+</body>
+</html>

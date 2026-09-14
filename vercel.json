@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/:path*" },
+    { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/share-target", "destination": "/?share-target=1" }
   ],
   "functions": {
