@@ -111,6 +111,54 @@ export function chooseBetterGrade(incoming, current) {
 }
 
 /**
+ * GrailKey Outcome #1 — legacy grading calibration patch (Wolverine #67
+ * forensic audit follow-up). Write-once calibration baseline: the FIRST
+ * successful model grade ever produced for an item, preserved verbatim
+ * regardless of how many times item.grade itself is later overwritten
+ * (Add Photo, re-grade, re-identify, or any other ordinary model call).
+ * Deliberately NOT chooseBetterGrade — that helper compares
+ * confidenceLevel (api/enrich.js's comp-pool pricing confidence), not
+ * grading-evidence confidence, and grade.js never even populates
+ * confidenceLevel; reusing it here would silently misfire. This function
+ * does not compare confidence at all — it only asks "has a baseline
+ * already been recorded," a plain presence check.
+ *
+ * Once modelPredictedGrade is set, this always returns {} (no-op) — spread
+ * it into a merge and it can never clobber an existing baseline. No
+ * prediction history is kept; a second/third/Nth model call after the
+ * first is invisible to this function by design (deferred to the larger
+ * grading program).
+ *
+ * `source` is deliberately a SEPARATE parameter from `current` rather than
+ * always being "the fresh model response this call just received": for an
+ * item created before this patch shipped (current.modelPredictedGrade is
+ * absent/null but current.grade is real, already-established state from
+ * ITS OWN original model call), the correct backfill source is the item's
+ * own prior grade/reason/confidence — never the NEW incoming response,
+ * which could itself already be a degraded multi-image-fusion re-grade
+ * (the exact failure class the Wolverine #67 audit documented). Callers
+ * pass `source = data` (the true first-ever response) only at genuine
+ * creation time, when there is no prior item state to prefer; every other
+ * call site passes `source = current` so a legacy backfill always prefers
+ * the item's own established grade over whatever this particular call
+ * happened to return.
+ *
+ * @param {object|null} current - existing catalogue item, or null for a brand-new item
+ * @param {object} source - where to backfill from when current has no baseline yet: the /api/grade response at creation time, or `current` itself for every later call site
+ * @returns {object} the four modelPredicted* fields to spread in, or {} if already set / nothing to record
+ */
+export function applyFirstModelPrediction(current, source) {
+  if (current?.modelPredictedGrade != null) return {};
+  if (!source?.grade) return {};
+  return {
+    modelPredictedGrade: source.grade,
+    modelPredictedGradeReason: source.reason ?? null,
+    modelPredictedGradeConfidence: source.confidence ?? null,
+    modelPredictedAt: Date.now(),
+  };
+}
+
+/**
  * Q135 dispatch (2026-07-22, Lozano/Rachta Lin last-mile) — pool-provisional
  * identity (title-family-refused-provisional, Q131/Q134) means the server's
  * resolved title/issue/year/publisher/variant are honest signals — possibly

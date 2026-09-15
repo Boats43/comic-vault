@@ -16,7 +16,7 @@ import { getAssetConfirmationBadge } from "./lib/assetConfirmationBadge.js";
 import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLabels.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
-import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit } from "./lib/dataQualityGuard.js";
+import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, applyFirstModelPrediction } from "./lib/dataQualityGuard.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -11048,6 +11048,12 @@ export default function App() {
       isGraded: data.isGraded === true,
       numericGrade:
         typeof data.numericGrade === "number" ? data.numericGrade : null,
+      // GrailKey Outcome #1 calibration patch — persisted so addPhotoToComic's
+      // gradeLocked wiring has something real to read. Previously this field
+      // was set on the transient `data` object (gradeBlob's Fix 4) but never
+      // copied into the saved entry, so item.gradeLocked was always falsy for
+      // every catalogue item ever saved.
+      gradeLocked: data.gradeLocked === true,
       issue: data.issue || null,
       keyIssue: data.keyIssue || "",
       price: null,  // ignore data.price, will be calculated by enrich.js
@@ -11075,6 +11081,10 @@ export default function App() {
       editionType: data.editionType || null,
       marketPending: true,  // signal price not ready, enrich in progress
       images: thumb ? [thumb] : [],
+      // GrailKey Outcome #1 calibration patch — write-once baseline, see
+      // applyFirstModelPrediction. `current` is null: this is a brand-new
+      // item, so the first grade it's ever saved with IS the baseline.
+      ...applyFirstModelPrediction(null, data),
     };
     try {
       await putComic(entry);
@@ -12977,6 +12987,15 @@ export default function App() {
       assetTypeConfident: enrichData?.assetTypeConfident ?? gradeData.assetTypeConfident ?? true,
       enrichFailed,
       enrichError,
+      // GrailKey Outcome #1 calibration patch — write-once, see
+      // applyFirstModelPrediction. Source is `item` (its own pre-existing
+      // state), not `gradeData` — same reasoning as addPhotoToComic:
+      // reIdentifyBook's forceRegrade:true is allowed to override
+      // item.grade itself (existing, unchanged behavior above) but must
+      // never touch the calibration baseline with its own forced re-grade
+      // output, and a legacy backfill must use the item's real prior
+      // grade, not this call's fresh response.
+      ...applyFirstModelPrediction(item, item),
     };
 
     // Ship #20a.6.22 — Apply autofix engine (skip if enrich failed)
@@ -13164,10 +13183,31 @@ export default function App() {
     const newThumb = await makeThumbnail(rawB64, 1200, 0.85);
     const nextPhotos = [...existingPhotos, newThumb];
 
+    // GrailKey Outcome #1 calibration patch (Wolverine #67 forensic audit) —
+    // thread the SAME existingGrade/gradeConfidence/gradeLocked contract
+    // reIdentifyBook already uses (api/grade.js:657-669), minus
+    // forceRegrade: an ordinary Add Photo is not an explicit override
+    // action, so a locked item's grade must be respected, not bypassed.
+    // When item.gradeLocked is true, the server skips Vision entirely and
+    // echoes existingGrade back unchanged (skipReason: 'grade_locked') —
+    // the new photo is still appended to `images` below regardless of
+    // whether the server skipped Vision.
     const res = await fetch("/api/grade", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
-      body: JSON.stringify({ images: nextPhotos, scanId: addPhotoOwnership.scanId }),
+      body: JSON.stringify({
+        images: nextPhotos,
+        existingGrade: {
+          grade: item.grade,
+          isGraded: item.isGraded,
+          numericGrade: item.numericGrade,
+          conditionSummary: item.conditionSummary,
+          confidence: item.confidence,
+        },
+        gradeConfidence: item.confidence?.toUpperCase(),
+        gradeLocked: item.gradeLocked || false,
+        scanId: addPhotoOwnership.scanId,
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to re-analyze");
@@ -13205,6 +13245,15 @@ export default function App() {
       // Drop the legacy single `image` field if it's still hanging around
       // from an older record — `images` is the source of truth now.
       image: undefined,
+      // GrailKey Outcome #1 calibration patch — write-once, see
+      // applyFirstModelPrediction. Source is `item` (its OWN pre-existing
+      // grade/reason/confidence), never this call's fresh `data` — a
+      // legacy item that predates this patch must backfill from its real
+      // original grade, not from whatever THIS add-photo call's Vision
+      // response happens to say (which could itself already be a
+      // degraded multi-image-fusion re-grade). No-op once
+      // item.modelPredictedGrade is already set.
+      ...applyFirstModelPrediction(item, item),
     };
     // GrailKey Directive V, Task 2 (GK-88) — checked ONCE, before either
     // write branch below, so a superseded response applies neither the
