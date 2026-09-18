@@ -24,7 +24,8 @@ import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNER
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch } from "./lib/grailkeySession.js";
-import { fetchServerCollection, pushCollectionItem } from "./lib/collectionSync.js";
+import { fetchServerCollection } from "./lib/collectionSync.js";
+import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
 import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
@@ -10537,24 +10538,34 @@ export default function App() {
     })();
   }, []);
 
-  // GrailKey Clean Account/Collection Cutover (2026-09-17) — on
-  // authenticated login, the server collection_item store is
-  // authoritative for what this account owns. Fetch it and hydrate the
-  // local IndexedDB cache/UI. This only ever ADDS or overwrites items
-  // the server actually returns — it never deletes, clears, or mutates
-  // any pre-existing local-only record, and a failed/unreachable fetch
-  // (fetchServerCollection returns null) leaves the local cache exactly
-  // as it was. Fires on the login transition, and again on every fresh
-  // mount where a valid session already exists (covers "fresh browser,
-  // already logged in" and "reload after login" identically).
+  // GrailKey Clean Account/Collection Cutover (2026-09-17), extended by
+  // the Collection Sync Closeout (2026-09-18) — on authenticated login,
+  // the server collection_item store is authoritative for what this
+  // account owns. Fetch it and hydrate the local IndexedDB cache/UI.
+  // This only ever ADDS or overwrites items the server actually returns
+  // — it never deletes, clears, or mutates any pre-existing local-only
+  // record, and a failed/unreachable fetch (fetchServerCollection
+  // returns null) leaves the local cache exactly as it was. Purely
+  // additive: a device with a populated legacy local catalogue will
+  // show legacy items alongside server items, indefinitely — see
+  // collectionPersistence.js's own header for why that's correct,
+  // ratified behavior for pre-cutover records, not a bug.
+  //
+  // Retry, same natural moment: any local item this system already
+  // tried and failed to sync (`_syncStatus === 'pending'`) gets one
+  // more safe, idempotent attempt here. Never touches a legacy record
+  // that has no `_syncStatus` field at all.
   useEffect(() => {
     if (!grailkeyAuthed) return;
     (async () => {
       const serverItems = await fetchServerCollection();
-      if (!serverItems || serverItems.length === 0) return;
-      for (const item of serverItems) {
-        await putComic({ id: item.id, ...item.attributes });
+      if (serverItems && serverItems.length > 0) {
+        for (const item of serverItems) {
+          await putComic({ id: item.id, ...item.attributes, _syncStatus: "synced" });
+        }
       }
+      const localItems = await getAllComics();
+      await retryPendingCollectionItems(localItems);
       const items = await getAllComics();
       setCatalogue(items.map(normalizeItem));
     })();
@@ -10939,7 +10950,10 @@ export default function App() {
                 identityProvisionalFields: enrich.identityProvisionalFields ?? cur.identityProvisionalFields ?? null,
                 identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? cur.identityProvisionalYearDetail ?? null,
               };
-              putComic(updated).catch(() => {});
+              // GrailKey Collection Sync Closeout — auto-refresh changes
+              // persisted collection state (price/identity), routed
+              // through the shared local-first/server-aware helper.
+              persistCollectionItem(updated).catch(() => {});
               return prev.map((x) => {
                 if (x.id === item.id) return updated;
                 // Sync duplicate copies with same title + issue + year.
@@ -10950,7 +10964,7 @@ export default function App() {
                   const synced = idGated
                     ? { ...x, price: null, priceLow: null, priceHigh: null, comps: enrich.comps ?? x.comps, pricingSource: enrich.pricingSource ?? x.pricingSource, priceNote: enrich.priceNote ?? null, gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier, identityConfident: false, identityMissingFields: enrich.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? null }
                     : { ...x, price: enrich.price ?? x.price, priceLow: enrich.priceLow ?? x.priceLow, priceHigh: enrich.priceHigh ?? x.priceHigh, comps: enrich.comps ?? x.comps, pricingSource: enrich.pricingSource ?? x.pricingSource, priceNote: enrich.priceNote ?? null, gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier, identityConfident: enrich.identityConfident ?? x.identityConfident ?? true };
-                  putComic(synced).catch(() => {});
+                  persistCollectionItem(synced).catch(() => {});
                   return synced;
                 }
                 return x;
@@ -11127,13 +11141,15 @@ export default function App() {
       }
     }
     setCatalogue((prev) => [normalizeItem(entry), ...prev]); // STRUCTURAL FIX
-    // GrailKey Clean Account/Collection Cutover — write server truth,
-    // best-effort. Never blocks or fails the local save above: the local
-    // putComic()/setCatalogue() have already committed by this point, so
-    // a network failure here costs this one item its cross-device
-    // durability, never the scan itself. pushCollectionItem swallows its
-    // own errors and returns null; nothing here needs to branch on that.
-    pushCollectionItem(entry);
+    // GrailKey Collection Sync Closeout — the local save above has
+    // already committed unconditionally (quota-fallback included); this
+    // only adds the server-aware sync-status tag on top. Never blocks or
+    // fails the local save: a network failure here leaves the item
+    // `_syncStatus: 'pending'` and durably local, picked up again by
+    // retryPendingCollectionItems on the next authenticated load.
+    persistCollectionItem(entry).then((final) => {
+      setCatalogue((prev) => prev.map((x) => (x.id === final.id ? { ...x, _syncStatus: final._syncStatus } : x)));
+    }).catch(() => {});
     return entry.id;
   }, []);
 
@@ -11547,7 +11563,12 @@ export default function App() {
                   'price:', updated.price,
                   'comps count:', updated.comps?.count,
                   'megaKey:', updated.megaKeyFloorApplied);
-                putComic(updated).catch(() => {});
+                // GrailKey Collection Sync Closeout — the initial
+                // addToCatalogue call already synced a price:null
+                // placeholder; this carries the real calculated
+                // price/identity forward, routed through the shared
+                // helper.
+                persistCollectionItem(updated).catch(() => {});
                 return prev.map((x) => x.id === savedId ? updated : x);
               });
               setSelectedItem((s) => {
@@ -12080,7 +12101,12 @@ export default function App() {
               console.log('[persist-bulk] savedId:', savedId,
                 'price:', updated.price,
                 'megaKey:', updated.megaKeyFloorApplied);
-              putComic(updated).catch(() => {});
+              // GrailKey Collection Sync Closeout — bulk-import's own
+              // post-enrich price/identity update, routed through the
+              // shared helper (the initial addToCatalogue call already
+              // synced a price:null placeholder; this carries the real
+              // calculated price forward).
+              persistCollectionItem(updated).catch(() => {});
               return prev.map((x) => x.id === savedId ? updated : x);
             });
             // SPEED-2a: Load deferred metadata asynchronously
@@ -12509,7 +12535,12 @@ export default function App() {
     // background. Users never see the putComic latency.
     setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updated) : x)));
     setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
-    putComic(updated).catch((err) => console.error("[db] write failed:", err));
+    // GrailKey Collection Sync Closeout — persist locally (unconditional)
+    // then attempt server sync (best-effort); tag the final sync status
+    // once known.
+    persistCollectionItem(updated).then((final) => {
+      setCatalogue((prev) => prev.map((x) => (x.id === final.id ? { ...x, _syncStatus: final._syncStatus } : x)));
+    }).catch((err) => console.error("[db] write failed:", err));
   }, []);
 
   // Re-fetch eBay comps + ComicVine + AI verification for an
@@ -12813,7 +12844,10 @@ export default function App() {
         ? SCAN_OWNERSHIP_MODE.ENFORCE
         : CURRENT_SCAN_OWNERSHIP_MODE,
       () => {
-        putComic(updated).catch(() => {});
+        // GrailKey Collection Sync Closeout — market/value refresh
+        // changes persisted collection state, routed through the shared
+        // helper (local commit unconditional, server sync best-effort).
+        persistCollectionItem(updated).catch(() => {});
         setCatalogue((prev) => prev.map((x) => {
           if (x.id === item.id) return updated;
           // Sync duplicate copies with same title + issue + year.
@@ -12846,7 +12880,7 @@ export default function App() {
                   gradeMultiplier: enrich.gradeMultiplier ?? x.gradeMultiplier,
                   identityConfident: enrich.identityConfident ?? x.identityConfident ?? true,
                 };
-            putComic(synced).catch(() => {});
+            persistCollectionItem(synced).catch(() => {});
             return synced;
           }
           return x;
@@ -13056,7 +13090,10 @@ export default function App() {
         ? SCAN_OWNERSHIP_MODE.ENFORCE
         : CURRENT_SCAN_OWNERSHIP_MODE,
       () => {
-        putComic(finalUpdated).catch(() => {});
+        // GrailKey Collection Sync Closeout — re-identify changes
+        // persisted collection identity, routed through the shared
+        // local-first/server-aware helper.
+        persistCollectionItem(finalUpdated).catch(() => {});
         setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(finalUpdated) : x)));
         setSelectedItem(finalUpdated);
         applied = true;
@@ -13187,7 +13224,11 @@ export default function App() {
       throw new Error('Correction superseded by a newer operation — not applied.');
     }
 
-    await putComic(finalUpdated);
+    // GrailKey Collection Sync Closeout — the final corrected state is a
+    // real persisted collection-item edit, routed through the shared
+    // helper (the earlier pendingItem lock-state above is deliberately
+    // NOT routed — transient, about to be overwritten by this same call).
+    finalUpdated = await persistCollectionItem(finalUpdated);
     // replaceCatalogueItemById (src/lib/manualCorrection.js) — pure
     // array-replacement, same collection length, no duplicate append.
     setCatalogue((prev) => replaceCatalogueItemById(prev, normalizeItem(finalUpdated)));
@@ -13305,10 +13346,14 @@ export default function App() {
       setSelectedItem((cur) =>
         cur && cur.id === item.id ? trimmed : cur
       );
+      // GrailKey Collection Sync Closeout — local commit above is already
+      // unconditional; sync best-effort on top.
+      persistCollectionItem(trimmed).catch(() => {});
       return;
     }
     setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updated) : x)));
     setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
+    persistCollectionItem(updated).catch(() => {});
   }, []);
 
   const marketValue = marketValueOf(result);
@@ -13917,7 +13962,10 @@ export default function App() {
                                   // absent on this duplicate-confirm path).
                                   const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
                                   const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
-                                  putComic(updated).catch(() => {});
+                                  // GrailKey Collection Sync Closeout —
+                                  // duplicate-confirm's own post-enrich
+                                  // update, routed through the shared helper.
+                                  persistCollectionItem(updated).catch(() => {});
                                   return prev.map((x) => x.id === savedId ? updated : x);
                                 });
                               }

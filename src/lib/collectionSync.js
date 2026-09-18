@@ -12,6 +12,10 @@
 // large base64 photo blobs have no place in a JSONB attributes column;
 // see db/data0/0026_collection_item.sql's own header for the full
 // rationale. Photos remain local-only (IndexedDB) for this pass.
+//
+// Also excludes `_syncStatus` (collectionPersistence.js) — a local
+// cache/UI-status marker, never a real collection-item attribute; it
+// must never round-trip into the server's own attributes JSONB.
 
 import { authFetch } from "./grailkeySession.js";
 
@@ -31,7 +35,7 @@ export async function fetchServerCollection() {
 // over time, but a network blip must never lose a scan taken in hand).
 export async function pushCollectionItem(entry) {
   try {
-    const { images, ...attributes } = entry || {};
+    const { images, _syncStatus, ...attributes } = entry || {};
     const res = await authFetch("/api/collection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
