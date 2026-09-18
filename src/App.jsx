@@ -24,6 +24,7 @@ import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNER
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch } from "./lib/grailkeySession.js";
+import { fetchServerCollection, pushCollectionItem } from "./lib/collectionSync.js";
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
 import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
@@ -10536,6 +10537,29 @@ export default function App() {
     })();
   }, []);
 
+  // GrailKey Clean Account/Collection Cutover (2026-09-17) — on
+  // authenticated login, the server collection_item store is
+  // authoritative for what this account owns. Fetch it and hydrate the
+  // local IndexedDB cache/UI. This only ever ADDS or overwrites items
+  // the server actually returns — it never deletes, clears, or mutates
+  // any pre-existing local-only record, and a failed/unreachable fetch
+  // (fetchServerCollection returns null) leaves the local cache exactly
+  // as it was. Fires on the login transition, and again on every fresh
+  // mount where a valid session already exists (covers "fresh browser,
+  // already logged in" and "reload after login" identically).
+  useEffect(() => {
+    if (!grailkeyAuthed) return;
+    (async () => {
+      const serverItems = await fetchServerCollection();
+      if (!serverItems || serverItems.length === 0) return;
+      for (const item of serverItems) {
+        await putComic({ id: item.id, ...item.attributes });
+      }
+      const items = await getAllComics();
+      setCatalogue(items.map(normalizeItem));
+    })();
+  }, [grailkeyAuthed]);
+
   // P0-B: Auto-heal books with NO price at all (genuinely incomplete scans).
   // A book with a price is NEVER auto-refreshed — price is frozen after initial scan.
   // Only fires when on collection tab with no detail open, 5-min cooldown.
@@ -11103,6 +11127,13 @@ export default function App() {
       }
     }
     setCatalogue((prev) => [normalizeItem(entry), ...prev]); // STRUCTURAL FIX
+    // GrailKey Clean Account/Collection Cutover — write server truth,
+    // best-effort. Never blocks or fails the local save above: the local
+    // putComic()/setCatalogue() have already committed by this point, so
+    // a network failure here costs this one item its cross-device
+    // durability, never the scan itself. pushCollectionItem swallows its
+    // own errors and returns null; nothing here needs to branch on that.
+    pushCollectionItem(entry);
     return entry.id;
   }, []);
 
