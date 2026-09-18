@@ -15,6 +15,7 @@ export {
   NotFoundError,
   ConflictError,
   IdempotentReplayError,
+  IdempotencyConflictError,
   ValidationFailedError,
   AuthorizationFailedError,
 } from '../assets/index.js';

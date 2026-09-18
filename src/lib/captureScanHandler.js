@@ -22,7 +22,7 @@
 // other real endpoint in this project already relies on.
 
 import { verifyToken, InvalidTokenError } from '../modules/auth/index.js';
-import { captureFromScan, ValidationFailedError, ConflictError, NotFoundError, AuthorizationFailedError } from '../modules/capture/index.js';
+import { captureFromScan, ValidationFailedError, ConflictError, NotFoundError, AuthorizationFailedError, IdempotencyConflictError } from '../modules/capture/index.js';
 import { checkRateLimit } from '../../api/rate-limit.js';
 
 function extractBearerToken(req) {
@@ -72,6 +72,13 @@ export async function handleCaptureScan(req, res) {
     }
     if (e instanceof AuthorizationFailedError) {
       return res.status(404).json({ error: 'Not found' });
+    }
+    if (e instanceof IdempotencyConflictError) {
+      // Same key, different semantic payload — checkIdempotencyReplay
+      // throws this BEFORE any mutation (idempotency.js), so no asset/
+      // media is created on this branch. Mirrors api/operator-action.js's
+      // own mapping for the identical error class.
+      return res.status(409).json({ error: e.message });
     }
     console.error('[capture-scan] unexpected error:', e?.message || e);
     return res.status(500).json({ error: 'Internal error' });
