@@ -97,6 +97,23 @@ try {
     assertTrue(res.statusCode === 401, `no token -> 401 (got ${res.statusCode})`);
   }
 
+  console.log('\n-- auth-order security fix: unauthenticated + Production + H8 unproven -> 401, NEVER 403 --\n');
+  {
+    // The information-leak this proves closed: before the auth-order
+    // fix, an unauthenticated caller in this exact state got 403 with
+    // PRODUCTION_CAPTURE_BLOCKED_H8_NOT_PROVEN — revealing the endpoint
+    // exists, that Production capture is gated, and the internal
+    // milestone name, all without ever proving who they were. Auth must
+    // now run first regardless of environment/H8 state.
+    process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'production';
+    const req = { method: 'POST', headers: {}, body: {} };
+    const res = mockRes();
+    await captureScanRoute(req, res);
+    process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development';
+    assertTrue(res.statusCode === 401, `unauthenticated + Production + H8 unproven -> 401, not 403 (got ${res.statusCode})`);
+    assertTrue(res.body?.error !== 'PRODUCTION_CAPTURE_BLOCKED_H8_NOT_PROVEN', 'response never names the H8 gate to an unauthenticated caller');
+  }
+
   console.log('\n-- malformed request (missing scanPayload/idempotencyKey) -> 400 --\n');
   {
     const req = { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: {} };
@@ -122,18 +139,20 @@ try {
     assertTrue(after === before, `zero gk_asset rows created by the blocked Production attempt (before=${before}, after=${after})`);
   }
 
-  console.log('\n-- PRODUCTION + H8 PASS explicitly recorded -> gate opens (still Development DB in this test) --\n');
+  console.log('\n-- authenticated + PRODUCTION + H8 PASS explicitly recorded -> gate opens (still Development DB in this test) --\n');
   {
     process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'production';
     process.env.MILESTONE_TEN_H8_PASS = 'true';
-    const req = { method: 'POST', headers: {}, body: {} };
+    // A valid, authenticated token this time — proving the GATE (not
+    // auth) is what previously blocked, and that it now opens once H8 is
+    // recorded PASS. Empty body -> falls through past auth and the gate
+    // into handleCaptureScan's own validation (400), never 403/401.
+    const req = { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: {} };
     const res = mockRes();
     await captureScanRoute(req, res);
     process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development';
     delete process.env.MILESTONE_TEN_H8_PASS;
-    // No token supplied -> falls through to auth, proving the H8 gate
-    // itself is no longer what's blocking (401, not 403).
-    assertTrue(res.statusCode === 401, `H8 PASS recorded -> gate no longer blocks, request proceeds to auth (got ${res.statusCode})`);
+    assertTrue(res.statusCode === 400, `authenticated + H8 PASS recorded -> gate no longer blocks, reaches business validation (got ${res.statusCode})`);
   }
 
   console.log('\n-- Development (non-Production) request with a real operator-captured photo -> 200, asset + media created --\n');
