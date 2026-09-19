@@ -443,6 +443,263 @@ No pricing math, grading, inventory, or eBay code touched. Old Man Logan
 zero outcomes — untouched by this dispatch beyond the historical valuation
 row's root-cause (not yet corrected).
 
+**UPDATE (2026-09-20, same day, GK-227 dispatch):** the correction described
+above as blocked was subsequently authorized and executed for real. Exact
+payload: `gkAssetId 01a0bb24-c806-7a63-aa86-ce26fe8eed83`, `valueAmount:
+15.28`, `valueCurrency: USD`, `method: engine-computed`, `compSnapshotRef:
+collection_item:cv_1789846119473_xmrj3x:GK-226-manual-correction`,
+`gradeAssumption: 9.2` (corrected mid-flight — `grade_assumption` is a real
+`numeric(3,1)` column, not free text; the first attempt with the string
+`"NM 9.2"` failed with a real Postgres `22P02` error and rolled back
+cleanly, zero idempotency-key claim, safe to retry), `buildSha:
+GK-226-manual-valuation-correction-2026-09-20`, `idempotencyKey:
+gk226-oml25-valuation-correction-2026-09-20`. Result:
+`valuationEventId 01a0bbdf-380a-7790-9f68-481a79efe40c`. Independently
+re-verified read-only afterward: exactly 2 `valuation_event` rows exist for
+this asset now — the historical `01a0bb24-da01-...` row is byte-identical
+to before (`value_amount: 0.00`, `comp_snapshot_ref:
+scanlog:65a7fbb5-29bc-4e2f-8b7f-0b4df8ce2540`, untouched); the repository's
+own `currentValuationId` selection (`ORDER BY recorded_at, id`, last row
+wins — `getAssetGraph`'s real query, not a re-derivation) now correctly
+resolves to the new row (`recorded_at 2026-09-19T22:52:43.202Z` vs. the
+historical row's `2026-09-19T19:29:09.406Z`). `decision_event` (1 row,
+`recommendation: RESEARCH`) still references the OLD valuation_event_id —
+a disclosed, NOT-reconciled lineage gap: the current decision and current
+valuation now point at two different facts. Per GK-226's own dispatch
+sequencing ("once the actual photo packet is durable, rerun the existing
+grade/enrich/decision flow"), a fresh decision_event is intentionally NOT
+minted here — the photo packet still isn't durable at kernel level (that
+gap is GK-227, immediately below).
+
+## GK-227 — Post-Capture Physical Media Append V1
+
+**Context.** GK-226's photo-persistence trace found a real architecture
+gap, not a bug: `api/collection.js`'s `mediaPut()` (the ordinary "Add
+Photo" server path) is a pure content-addressed blob-store write — it
+never inserts a `data1_dev.media` row. The physical-asset kernel's `media`
+table was written ONLY by `attachMedia()` (`src/modules/assets/service.js`),
+called exclusively from `src/modules/capture/service.js`'s
+`captureFromScan`, i.e. only once, at original capture time. There was no
+code path anywhere to append MORE physical-asset kernel media after that
+single capture — Back/Spine/Pages could appear in the UI (via
+`collection_item.attributes.remoteImages`) while never becoming durable
+physical evidence. This dispatch closes that gap via the smallest correct
+path: reuse `attachMedia()` (already correct — real ownership check, real
+asset-exists check, append-only, class-wide idempotency) rather than
+building a second writer.
+
+**§1 — Media-path census, catalogue vs. kernel distinguished.**
+
+Traced explicitly, confirmed by reading the real code (not assumed):
+
+- **Initial capture:** `captureFromScan` loops over `photos[]`, calling
+  `attachMedia({principalId, gkAssetId, bytes, contentType, captureRole,
+  idempotencyKey, correlationId})` once per photo (`src/modules/capture/
+  service.js`).
+- **`attachMedia()`** (`src/modules/assets/service.js`): non-transactional
+  preflight (`assertPrincipalActive`/`assertAssetExists`/
+  `assertPrincipalOwnsAsset`) BEFORE any storage I/O; SHA-256 computed
+  server-side from the actual received bytes (never a caller-declared
+  value trusted); `media.put()` (content-addressed blob store) with no DB
+  transaction open during the I/O; a second transactional
+  re-verification of the same invariants immediately before the INSERT;
+  class-wide idempotency (`{gkAssetId, captureRole, sha256}` fingerprint —
+  now `+ captureView` when supplied). SHA-256 dedupes the STORED OBJECT
+  only, never the evidence ROW — two distinct `attachMedia` calls (distinct
+  idempotencyKey) for identical bytes always produce two distinct media
+  rows by design (two grading sessions photographing the same page are two
+  legitimate, separate evidence events).
+- **`media` table** (`data1_dev.media`, 0004): `media_type` CHECK-
+  constrained to `capture-photo`/`grading-photo`/`document` — this is a
+  WHY-axis (why does this media exist), never a WHICH-SIDE axis. No column
+  existed to record which physical side/view a row depicts.
+- **Blob storage:** `src/modules/media/index.js`'s `put()` — pure
+  content-addressed primitive (localfs or Vercel Blob driver), no DB
+  awareness at all. The SAME primitive is called by BOTH `attachMedia()`
+  (kernel path) and `api/collection.js`'s `mediaPut()` (catalogue path) —
+  the divergence is entirely in what happens AFTER the blob write:
+  `attachMedia()` inserts a `media` row linked to a real `gkAssetId`;
+  `api/collection.js` writes the resulting URI into
+  `collection_item.attributes.remoteImages`, a JSONB field on an entirely
+  different table, with zero `gk_asset`/`gkAssetId` awareness.
+- **`addPhotoToComic`** (`src/App.jsx`): the ordinary "Add Photo" UI
+  action — reads the file, thumbnails it, calls `/api/grade` (re-grade),
+  writes the full updated `images` array to local IndexedDB
+  (unconditional), then best-effort `persistCollectionItem` →
+  `pushCollectionItem` → `api/collection.js`. Zero gkAssetId awareness
+  anywhere in this path before this dispatch.
+- **captureRole handling:** pre-dispatch, `captureRole` in this codebase's
+  vocabulary IS `media_type` (`capture-photo`/`grading-photo`/`document`)
+  — a completely different concept from the dispatch's own "captureRole"
+  request (FRONT/BACK/SPINE/PAGES/DETAIL, a view-angle). This registry
+  entry and the code both call the NEW concept `captureView` throughout,
+  to avoid conflating it with the pre-existing, differently-scoped
+  `captureRole`/`media_type` parameter name.
+- **Source/provenance validation, pre-dispatch:** existed ONLY for the
+  original capture path — `GrailKeyOperatorPanel.jsx`'s
+  `captureAsOwnedAsset()` requires `item.images[0]/item.image` to be a real
+  local `data:` URL (never a synced `remoteImages` proxy path) before even
+  building a request. No equivalent discipline existed for any
+  hypothetical post-capture path, because none existed to have it.
+
+**Catalogue image vs. physical-asset evidence media — kept structurally
+separate, never merged:** `collection_item.attributes.remoteImages` is a
+display/UI concern with no `gk_asset` linkage of any kind; `data1_dev.media`
+is the durable, ownership-checked, asset-linked evidentiary record. This
+dispatch's new endpoint writes ONLY to the latter and does not touch
+`collection_item.attributes` at all — a photo added through the new
+evidence-append UI updates BOTH (the existing `addPhotoToComic` pipeline's
+catalogue-sync side, unmodified, plus the new kernel-append side,
+additive), but the two writes remain two genuinely independent facts, not
+one conflated concept.
+
+**§2/§4 — Append semantics + captureView.** Migration `0029` (additive,
+LIVE-APPLIED to both Development and Production, 0 pre-existing rows
+touched in either — independently re-verified before/after in both:
+Development 42→42, Production 1→1, Old Man Logan #25's own single real
+row confirmed byte-identical, `capture_view` still `NULL`) adds
+`media.capture_view TEXT` + a second, independent CHECK
+(`FRONT`/`BACK`/`SPINE`/`PAGES`/`DETAIL` only — exact-case, no
+normalization), nullable, never backfilled for historical rows (per this
+dispatch's own "No rewriting history"). Proven in an isolated scratch
+schema first (`tests/gk227-0029-migration-contract.test.js`, 20/20,
+structurally faithful `LIKE data1_dev.media INCLUDING ALL` clone) — this
+scratch proof caught a REAL bug before any live database was touched:
+`ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS` is not valid Postgres
+syntax (only `ADD COLUMN IF NOT EXISTS` is); fixed with the standard
+`DO $$ IF NOT EXISTS (...) THEN ALTER TABLE ... ADD CONSTRAINT ... END IF;
+END $$;` idiom, re-proven 20/20 clean.
+
+`attachMedia()` extended with an OPTIONAL `captureView` parameter —
+backward-compatible BY CONSTRUCTION, not just by testing: the request
+fingerprint changed from `computeRequestFingerprint({gkAssetId,
+captureRole, sha256})` to `computeRequestFingerprint({gkAssetId,
+captureRole, sha256, captureView: captureView ?? undefined})` —
+`?? undefined`, deliberately not `?? null`, because `JSON.stringify` drops
+an `undefined`-valued key entirely but keeps a `null`-valued one. Every
+pre-GK-227 call (including `captureFromScan`'s own capture-time loop,
+which never passes `captureView`) produces the byte-identical fingerprint
+it always has. This matters for a real, if narrow, correctness property:
+a client retrying an in-flight `attachMedia` idempotencyKey that was
+claimed BEFORE this deploy (e.g., the server committed but the response
+was lost) must still resolve as the same legitimate replay after this
+ships, not a spurious `IdempotencyConflictError` from an accidentally
+changed fingerprint shape. Full regression re-run confirms this
+(`grailkey-operator-panel-capture-wiring.test.js` 18/18,
+`capture-scan-endpoint-h8-gate-proof.test.js` 21/21, both unaffected).
+
+**§3 — Provenance gate.** `api/asset-media-append.js` (new) is the sole
+bridge from operator-supplied fresh bytes to a durable kernel media row on
+an EXISTING asset. Provenance is enforced structurally, not merely by a
+runtime check: this file contains no `fetch(url)`/download code path of
+any kind — it is physically incapable of promoting a marketplace image,
+a scraped reference, or a synced-proxy path into evidence, because there
+is no code anywhere in it that would ever retrieve bytes from a URL. On
+top of that structural guarantee, a strict base64-charset check
+(`/^[A-Za-z0-9+/]+={0,2}$/`) rejects a URL/proxy-path/reference string
+outright with a clear `REFERENCE_IMAGE_REJECTED` error rather than either
+silently storing garbage or silently ignoring the field. `captureView` is
+REQUIRED (not optional the way it is at the `attachMedia()` layer, which
+must stay backward-compatible for the mint-time caller) and fails closed
+with `CAPTURE_VIEW_REQUIRED` on anything missing or outside the 5-role
+vocabulary — never inferred, never defaulted.
+
+**§5 — UI wiring.** Extends (does not duplicate) `src/App.jsx`'s existing
+`addPhotoToComic(item, file)` with an optional third parameter
+`{gkAssetId, captureView}` — every other call site (the ordinary,
+non-linked-asset photo strip) omits it and is completely unaffected. New
+`src/lib/physicalMediaAppend.js` is the client bridge (`
+appendPhysicalMediaEvidence`, best-effort, never throws — mirrors
+`collectionSync.js`'s `pushCollectionItem` contract exactly, including its
+own `data:`-URL-only guard before ever attempting a network call). Local
+image persistence and catalogue sync happen exactly as before,
+unconditionally; the kernel-evidence append is attempted using the SAME
+already-thumbnailed bytes (`newThumb`) already being written to `images`
+— never a second, independently re-read copy. On failure, the exact
+original `dataUrl` is preserved in a new local-only
+`_pendingEvidenceAppends` array field (one entry per still-pending role);
+`src/lib/collectionSync.js`'s `pushCollectionItem` explicitly excludes
+this field from the server payload (it holds raw base64 photo bytes,
+exactly the anti-pattern `api/collection.js`'s own header comment already
+forbids for arbitrary `attributes` fields). Retried automatically on the
+next authenticated reconnect via the SAME `[grailkeyAuthed]` effect that
+already retries pending collection-item and buyer-decision syncs
+(`retryPendingPhysicalMediaAppends`), using each entry's own preserved
+bytes — never re-derived from `item.images` (which could have been
+reordered/trimmed by the quota-fallback path in the meantime).
+
+`GrailKeyOperatorPanel.jsx` gains a new "PHYSICAL EVIDENCE" section
+(rendered only when a real `gkAssetId` exists) showing all 5 roles with a
+✓/— status derived from `computeCaptureViewChecklist(graph.media)` (the
+REAL, freshly-reloaded server graph — never a locally-cached guess); a
+"+ Add" button per missing role opens a file picker with that role already
+fixed (the role is chosen by which button was pressed, never inferred
+after the fact); after a successful append attempt, `load()` re-fetches
+the real asset graph so the checklist reflects durable truth, not an
+optimistic local claim. A locally-pending-but-unsynced role shows an
+explicit "kernel evidence sync pending" note distinct from a present
+checkmark — the UI never claims kernel-evidence success on the strength of
+a successful catalogue sync alone.
+
+**§6 — Read model.** New `src/lib/physicalMediaChecklist.js`
+(`computeCaptureViewChecklist`, `isCertificationPhotoPacketComplete`,
+`missingRequiredCaptureViews`) — pure functions, derive presence ONLY from
+real `media` rows' `capture_view` field. Explicitly proven (unit tests) to
+NOT be fooled by raw photo count (10 rows with `capture_view: NULL` still
+reports 0/4 required views present) and to correctly treat a `NULL`
+`capture_view` row (every historical row, including Old Man Logan #25's
+own) as evidence of an UNKNOWN view, never silently counted toward FRONT
+or any other specific role.
+
+**§7 — Tests.** 67 new tests: `tests/gk227-0029-migration-contract.test.js`
+(20/20, real isolated scratch schema — see the real syntax-bug catch
+above), `tests/gk227-physical-media-checklist-unit.test.js` (15/15, pure
+function, no DB), `tests/gk227-asset-media-append-handler-smoke.test.js`
+(32/32, real handler invocation against real Development `data1_dev` —
+mints one fresh real test asset via the real `api/capture-scan.js`
+handler, then covers: append FRONT/BACK/SPINE/PAGES as 4 distinct real
+roles; idempotent replay (same bytes + same key → same mediaId, zero new
+rows); two genuinely different DETAIL photos under different keys →
+two distinct rows; a bare URL, a synced-proxy path
+(`/api/collection-image?...`), and a realistic eBay-CDN-shaped image URL
+(the "production-shaped input" fixture required by this dispatch, plus a
+real ~48KB JPEG-SOI/EOI-bounded buffer standing in for a real photo
+payload rather than a toy 1×1 PNG) all rejected with
+`REFERENCE_IMAGE_REJECTED`, zero rows created by any of them; an unknown
+role (`COVER`) and a missing role both fail closed with
+`CAPTURE_VIEW_REQUIRED`; a wrong principal and a nonexistent `gkAssetId`
+both correctly rejected with 404; the original capture-time media row
+confirmed untouched (`capture_view` still `NULL`) after 6 new rows were
+appended; a durable row's `capture_view` and `content_hash` both
+independently re-read and matched against a freshly-recomputed SHA-256 of
+the exact bytes sent; an unauthenticated request rejected before any DB
+touch). Full regression re-run clean: `assets-module-boundary` (23/23),
+`media-module-boundary` (11/11), `capture-module-boundary` (7/7),
+`capture-scan-endpoint-h8-gate-proof` (21/21),
+`grailkey-operator-panel-capture-wiring` (18/18),
+`gk167-media-storage-routing` (13/13), `gk226-capture-outcome-price`
+(11/11), `list-ebay-outcome1-handler-smoke` (37/37),
+`inventory-authority-sold-consistency` (18/18),
+`asset-graph-operator-actions-live-proof` (7/7) — zero new failures
+anywhere.
+
+**§8/§9 — Old Man Logan #25 + scope.** No manufactured photos. After this
+dispatch's own deployment, Old Man Logan #25's `media` table state is
+unchanged from before (1 row, `capture_view: NULL`) — the new capability
+is deployed and inert until Jimmy explicitly adds Back/Spine/Pages through
+the new "PHYSICAL EVIDENCE" section in the real app. No pricing math, no
+comps, no decision-engine code, no inventory-authority code, no eBay
+listing code, no outcome reconciler code, and no Marketplace Adapter code
+touched anywhere in this dispatch (`git diff` scope confirmed: migration
+0029 + repository/service additions to `attachMedia`'s own signature +
+2 new lib files + 1 new API endpoint + App.jsx/GrailKeyOperatorPanel.jsx UI
+wiring + 3 new test files — nothing else).
+
+Commit `25282a2`, pushed to `origin/main`. Production deployment confirmed
+READY, exact SHA match, live on `comic-vault-rouge.vercel.app`. Migration
+0029 live-applied to both Development and Production (independently
+re-verified before/after in both).
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.
