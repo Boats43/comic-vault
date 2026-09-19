@@ -48,11 +48,38 @@
 //
 // MILESTONE_TEN_H8_PASS=true is a runtime unlock, never itself evidence
 // that H8 passed. It may only be set in Production after the real H8
-// proof is independently recorded (phone auth, Creepy #1 retrieved on
-// phone, desktop independently retrieves the same asset/media, matching
-// gkAssetId/mediaId/byte length) — see docs/adr/DATA-1D-CORRECTION-PASS.md,
-// H8. Setting this flag is not part of, and is not authorized by, this
-// dispatch.
+// proof is independently recorded (phone auth, the bootstrap-captured
+// asset retrieved on phone, desktop independently retrieves the same
+// asset/media, matching gkAssetId/mediaId/byte length) — see
+// docs/adr/DATA-1D-CORRECTION-PASS.md, H8. Setting this flag is not
+// part of, and is not authorized by, this dispatch.
+//
+// H8 BOOTSTRAP DEADLOCK RESOLUTION (2026-09-19): H8 as originally
+// formulated is circular — it requires a Production durable asset to
+// retrieve and compare, but Production durable capture stays blocked
+// until H8 passes. Direct read-only evidence this dispatch (root-cause
+// report accepted) found ZERO gk_asset/media/collection_item_link rows
+// in real Production — the "Creepy #1" asset this file's own comments
+// used to reference lives only in Development; it is legitimate
+// Development machinery/history evidence, never Production durable-asset
+// proof. MILESTONE_TEN_H8_BOOTSTRAP=true is the resolution: a SEPARATE,
+// narrower one-shot exception, never itself H8 proof (bootstrap
+// authorization != H8 proof, a required invariant) — it exists only to
+// let exactly ONE real Production capture happen so H8-B's own
+// independent phone/desktop retrieval-and-compare proof has something
+// real to retrieve. It is checked ONLY when MILESTONE_TEN_H8_PASS is not
+// already true, and is exhausted the instant Production holds ANY
+// gk_asset row — reusing the EXISTING asset-count read
+// (src/modules/assets/index.js's hasAnyPhysicalAsset(), no new
+// table/column/token) rather than inventing a second mechanism, per the
+// "reuse a safer existing one-shot mechanism if one exists" instruction.
+// A failure to determine that count (a DB error, an environment-identity
+// mismatch under the shared GK-179 guard, anything) fails CLOSED — never
+// silently treated as "zero assets, bootstrap still available." Once one
+// asset exists, bootstrap denies every further Production request with
+// PRODUCTION_CAPTURE_BOOTSTRAP_EXHAUSTED, unconditionally, even with the
+// env var still set to true, until MILESTONE_TEN_H8_PASS is separately
+// recorded true (the operator's job after H8-B's proof, not this file's).
 //
 // Photo transport: captureFromScan's photos[i].bytes must be a real
 // Buffer/Uint8Array (src/modules/assets/service.js's attachMedia asserts
@@ -64,6 +91,7 @@
 // transformation of the request happens here.
 
 import { verifyToken, InvalidTokenError } from '../src/modules/auth/index.js';
+import { hasAnyPhysicalAsset } from '../src/modules/assets/index.js';
 import { handleCaptureScan } from '../src/lib/captureScanHandler.js';
 
 function extractBearerToken(req) {
@@ -86,16 +114,39 @@ export default async function handler(req, res) {
   }
 
   // 2. H8 gate — only reachable once the caller is authenticated. Still
-  // before rate limiting and before any DB connection.
+  // before rate limiting and before any real DB write.
   const environment = process.env.GRAILKEY_CATALOG_ENVIRONMENT;
   const h8Pass = process.env.MILESTONE_TEN_H8_PASS === 'true';
   if (environment === 'production' && !h8Pass) {
-    return res.status(403).json({
-      error: 'PRODUCTION_CAPTURE_BLOCKED_H8_NOT_PROVEN',
-      detail:
-        'Milestone Ten (H8, independent phone/desktop durability proof) has not been recorded PASS. ' +
-        'Production physical-asset capture stays fail-closed until then.',
-    });
+    const h8Bootstrap = process.env.MILESTONE_TEN_H8_BOOTSTRAP === 'true';
+    if (!h8Bootstrap) {
+      return res.status(403).json({
+        error: 'PRODUCTION_CAPTURE_BLOCKED_H8_NOT_PROVEN',
+        detail:
+          'Milestone Ten (H8, independent phone/desktop durability proof) has not been recorded PASS. ' +
+          'Production physical-asset capture stays fail-closed until then.',
+      });
+    }
+    // Bootstrap is authorized but NOT itself proof — exhausted the
+    // instant one asset exists. Any failure to determine that (thrown
+    // error of any kind, including a GK-179 environment-identity
+    // mismatch) is treated identically to "bootstrap exhausted" — fail
+    // closed, never fail open.
+    let alreadyBootstrapped = true;
+    try {
+      alreadyBootstrapped = await hasAnyPhysicalAsset();
+    } catch (e) {
+      console.error('[capture-scan] bootstrap eligibility check failed — failing closed:', e?.message || e);
+    }
+    if (alreadyBootstrapped) {
+      return res.status(403).json({
+        error: 'PRODUCTION_CAPTURE_BOOTSTRAP_EXHAUSTED',
+        detail:
+          'The one-shot H8 bootstrap capture has already been used (or its eligibility could not be verified). ' +
+          'Production capture stays fail-closed until MILESTONE_TEN_H8_PASS is recorded true.',
+      });
+    }
+    // Falls through: exactly one bootstrap capture permitted.
   }
 
   // 3. Photo transport decode, then delegate to the reused, unmodified

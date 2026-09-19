@@ -6,6 +6,8 @@ Proof levels: **P1** architecture/design only · **P2** implementation exists, n
 
 HEAD at this publication: `6b800f4`.
 
+**CORRECTION (2026-09-19, GK-215 — see `docs/TICKET-REGISTRY.md`):** every row on this board citing Creepy #1 (`gkAssetId 01a02d23-1acb-72e8-aae3-8f851308e9cf`) or the physical-asset kernel (`gk_asset`/`media`/`collection_item_link`/`ownership_event`/`outcome_event`/`operator_action_event`/etc.) as **P3 (production, live-verified)** is corrected to **P2 (implementation exists, real-DB-proven in Development, NOT production-verified)**. Direct read-only audit of real Production found `gk_asset`/`media`/`collection_item_link` and every other physical-asset-kernel table hold **zero rows** there (`operator_action_event`/`outcome_event`/`outcome_economics_component` don't exist as Production tables at all); the same rows are real and live in Development (Creepy #1 present, `created_at: 2026-08-23`, matching GK-166's own dated history). This board's own individual rows (§ below) are NOT rewritten per the standing "do not rewrite historical rows" rule — read every "production"/P3 claim below involving Creepy #1 or the asset kernel through this correction until each row is individually re-stamped. The real eBay LIST/DELIST (ItemID `366665728633`) as a real Production→eBay API call is NOT disputed by this correction — only what durable-asset linkage it validated against is now an open question (GK-215).
+
 ---
 
 ## 1. Runtime (comic-pricing pipeline)

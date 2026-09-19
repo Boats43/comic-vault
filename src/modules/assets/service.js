@@ -176,6 +176,24 @@ export async function getPhysicalAsset({ principalId, gkAssetId } = {}) {
   }
 }
 
+// H8 BOOTSTRAP — see repository.js's anyAssetExists for the full
+// rationale. No principalId parameter at all, deliberately: this is a
+// whole-environment fact, not an authorization-scoped read. Still goes
+// through the same acquireConnection() (and therefore the same GK-179
+// environment-identity guard) every other operation in this module
+// uses — a mismatched/unverifiable environment fails this closed
+// (throws) exactly like it would any other real operation here, never
+// silently reports "no assets exist" for an environment it couldn't
+// actually verify.
+export async function hasAnyPhysicalAsset() {
+  const client = await acquireConnection();
+  try {
+    return await repo.anyAssetExists(client);
+  } finally {
+    client.release();
+  }
+}
+
 // DATA-1D, T3 — list every asset the authenticated principal owns
 // (cross-device retrieval needs a "what's mine" entry point, not just
 // "fetch this one gkAssetId I already somehow know"). A thin,

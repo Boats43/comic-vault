@@ -97,6 +97,18 @@ export async function getAssetById(client, assetId) {
   return res.rows[0] || null;
 }
 
+// H8 BOOTSTRAP (Milestone Ten, 2026-09-19) — deliberately NOT
+// principal-scoped, unlike every other read in this file: "has ANY
+// physical asset ever been minted in this environment" is a whole-
+// environment fact api/capture-scan.js's one-shot bootstrap gate needs,
+// not a per-caller one. Used only by that gate — see its own header for
+// why reusing this existing count rather than inventing a new counter/
+// table/flag is the smaller, safer mechanism.
+export async function anyAssetExists(client) {
+  const res = await client.query('SELECT EXISTS(SELECT 1 FROM data1_dev.gk_asset) AS exists');
+  return res.rows[0].exists;
+}
+
 // DATA-1D, T2 — the authorization chain's one real query: who currently
 // owns this asset. current_owner is the materialized, rebuild-on-write
 // projection of ownership_event (0004) — never an independent write

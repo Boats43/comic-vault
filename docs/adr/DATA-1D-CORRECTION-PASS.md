@@ -402,18 +402,42 @@ directly, no bypass cookie needed.
 
 Session security, credential hygiene, and the auth mechanism itself are
 now proven end-to-end against real code, a real database, and — as of
-this smoke test — real production traffic, including the two new
-hardening mechanisms this pass added (session epoch, secret-strength
-floor) and the real Creepy #1 capture (GK-166). What remains genuinely
-unproven is the same thing the original DATA-1D dispatch already
-disclosed: a literal second physical device.
+this smoke test — real traffic against `comic-vault-rouge.vercel.app`,
+including the two new hardening mechanisms this pass added (session
+epoch, secret-strength floor). **CORRECTION (2026-09-19, GK-215 — see
+`docs/TICKET-REGISTRY.md`): a direct read-only audit of real Production,
+run this date, found `gk_asset`/`media`/`collection_item_link` hold ZERO
+rows there — the asset-fetch/asset-media rows in the table above, and
+the "real Creepy #1 capture (GK-166)" they were attributed to, describe
+real, genuine work, but the underlying durable data they retrieved lives
+in Development, not Production, as of today.** Unresolved, disclosed,
+not investigated further this pass: whether Production's own database
+connection was repointed to a different branch at some point after this
+2026-08-23 smoke test (the same failure class GK-179's guard exists to
+catch), or whether the original request somehow reached a non-Production
+target despite the Production hostname — either way, the table above is
+left exactly as recorded (a dated historical record of what was checked
+that day), not rewritten. What remains genuinely unproven, unchanged: a
+literal second physical device — and, as of this correction, a
+Production durable asset for it to check against in the first place.
 
-### The exact phone procedure — Jimmy's next step
+### The exact phone procedure — SUPERSEDED (2026-09-19, GK-215)
 
-The real asset this checks against already exists in Production — this
-is not a hypothetical: **Creepy #1, Warren Publishing, 1964**,
-`gkAssetId 01a02d23-1acb-72e8-aae3-8f851308e9cf`,
-`mediaId 01a02d23-2809-7024-9312-d45bb5003014`.
+**Do not run the procedure below.** It instructs the operator to check
+`gkAssetId 01a02d23-1acb-72e8-aae3-8f851308e9cf` against Production —
+that asset does not exist in Production (confirmed, GK-215's own direct
+audit); running this exact procedure was already attempted for real and
+failed exactly this way. The original single-stage Milestone Ten/H8 was
+also found to be circular (it requires a Production durable asset to
+check against, while Production durable capture stays blocked until H8
+passes) and has been replaced with a two-stage H8-A/H8-B sequence — see
+`docs/TICKET-REGISTRY.md`, GK-215, for the full current procedure
+(independently-proven bootstrap preconditions → one-shot
+`MILESTONE_TEN_H8_BOOTSTRAP=true` → exactly one real Production capture
+→ this same phone+desktop retrieval-and-compare shape, but against that
+NEW real Production asset → `MILESTONE_TEN_H8_PASS=true`). The steps
+below are preserved verbatim as the historical record of what was
+originally specified, not deleted, not silently altered:
 
 1. **From the phone**, independently: `POST
    https://comic-vault-rouge.vercel.app/api/auth-login` with `{
