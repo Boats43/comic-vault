@@ -26,6 +26,7 @@ import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch } from "./lib/grailkeySession.js";
 import { fetchServerCollection } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
+import { appendPhysicalMediaEvidence, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
 import { computeFeeAmount, computeNetProfit, computeMaxBuy, evaluateAgainstMaxBuy } from "./lib/maxBuyCalculator.js";
 import { pushBuyerDecision, pushBuyerAcquisition } from "./lib/buyerDecisionSync.js";
@@ -4533,7 +4534,7 @@ function CollectionDetail({
         )}
       </div>
 
-      <GrailKeyOperatorPanel collectionItemId={item.id} item={item} photos={photos} />
+      <GrailKeyOperatorPanel collectionItemId={item.id} item={item} photos={photos} onAddPhoto={onAddPhoto} />
 
       {/* 1. PHOTO STRIP */}
       <div
@@ -10899,6 +10900,13 @@ export default function App() {
       }
       const localItems = await getAllComics();
       await retryPendingCollectionItems(localItems);
+      // GK-227 — same authenticated-reconnect trigger, retries using each
+      // pending entry's OWN preserved original bytes (never re-derived
+      // from item.images, which may have changed since).
+      await retryPendingPhysicalMediaAppends(localItems, (itemId, stillPending) => {
+        setCatalogue((prev) => prev.map((x) => (x.id === itemId ? { ...x, _pendingEvidenceAppends: stillPending } : x)));
+        putComic({ ...localItems.find((x) => x.id === itemId), _pendingEvidenceAppends: stillPending }).catch(() => {});
+      });
       const items = await getAllComics();
       setCatalogue(items.map(normalizeItem));
       // GRAILKEY DURABLE BUYER DECISION LEDGER V1 — same authenticated-
@@ -13576,7 +13584,16 @@ export default function App() {
   // Append a new photo to an existing comic and re-run /api/grade with
   // ALL photos so the identification benefits from multi-angle coverage.
   // Updates the stored entry with fresh grade fields + new images array.
-  const addPhotoToComic = useCallback(async (item, file) => {
+  const addPhotoToComic = useCallback(async (item, file, evidenceOptions) => {
+    // GK-227 — POST-CAPTURE PHYSICAL MEDIA APPEND. `evidenceOptions`
+    // ({gkAssetId, captureView}) is supplied ONLY by
+    // GrailKeyOperatorPanel.jsx's own explicit "Add Evidence Photo"
+    // control (rendered only when this item is linked to a real
+    // gkAssetId, one explicit role at a time, never inferred). Every
+    // OTHER caller of this function (the ordinary catalogue photo strip)
+    // omits it — that path is completely unaffected, byte-for-byte, by
+    // this dispatch.
+    const { gkAssetId: evidenceGkAssetId, captureView: evidenceCaptureView } = evidenceOptions || {};
     const existingPhotos = getComicPhotos(item);
     if (existingPhotos.length >= 4) {
       throw new Error("Maximum 4 photos reached");
@@ -13670,6 +13687,35 @@ export default function App() {
       logStaleScanResponse('add-photo', { scanId: addPhotoOwnership.scanId }, addPhotoOwnership, activeScanRef.current, 'scanid-mismatch', SCAN_OWNERSHIP_MODE.ENFORCE);
       throw new Error('Add photo superseded by a newer operation — not applied.');
     }
+
+    // GK-227 — physical-evidence append, additive to (not a replacement
+    // for) the catalogue write below. Uses `newThumb` — the SAME bytes
+    // just added to `images` above, never a URL, never remoteImages,
+    // never a value re-derived later. Attempted BEFORE the catalogue
+    // write so a failure's `_pendingEvidenceAppends` marker is part of
+    // the SAME local persist, not a second one.
+    if (evidenceGkAssetId && evidenceCaptureView) {
+      const idempotencyKey = getOrCreateEvidenceIdempotencyKey(item.id, evidenceCaptureView);
+      const evidenceResult = await appendPhysicalMediaEvidence({
+        gkAssetId: evidenceGkAssetId,
+        dataUrl: newThumb,
+        captureView: evidenceCaptureView,
+        idempotencyKey,
+      });
+      if (evidenceResult?.mediaId) {
+        retireEvidenceIdempotencyKey(item.id, evidenceCaptureView);
+      } else {
+        // Best-effort failed — preserve the exact bytes for retry
+        // (never reconstructed from a URL later), mark pending
+        // explicitly. Never claims success the caller didn't earn.
+        const priorPending = Array.isArray(item._pendingEvidenceAppends) ? item._pendingEvidenceAppends : [];
+        updated._pendingEvidenceAppends = [
+          ...priorPending.filter((p) => p.captureView !== evidenceCaptureView),
+          { gkAssetId: evidenceGkAssetId, captureView: evidenceCaptureView, dataUrl: newThumb, idempotencyKey },
+        ];
+      }
+    }
+
     try {
       await putComic(updated);
     } catch {

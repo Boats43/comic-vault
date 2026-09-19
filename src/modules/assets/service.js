@@ -431,12 +431,27 @@ export async function attachMediaMetadata({ principalId, gkAssetId, mediaFields,
 // not merely trusted from the earlier preflight). A DB transaction is
 // never held open across the remote storage I/O.
 // ─────────────────────────────────────────────────────────────────────
-export async function attachMedia({ principalId, gkAssetId, bytes, contentType, captureRole, idempotencyKey, correlationId, occurredAt } = {}) {
+// GK-227 — `captureView` (FRONT/BACK/SPINE/PAGES/DETAIL, migration 0029)
+// is a NEW, OPTIONAL, orthogonal axis from `captureRole`. `captureRole`
+// answers WHY this media exists (capture-photo/grading-photo/document —
+// unchanged, 0004's own vocabulary); `captureView` answers WHICH SIDE of
+// the physical object it depicts, when the caller knows and supplies it.
+// Every existing caller (src/modules/capture/service.js's captureFromScan,
+// the only one that existed before this dispatch) omits it — those calls
+// are byte-for-byte unaffected, capture_view stays NULL exactly as it
+// does for every pre-existing media row. It participates in the request
+// fingerprint so two attachMedia calls under the SAME idempotencyKey with
+// the SAME bytes but a DIFFERENT declared view are correctly treated as a
+// genuine semantic conflict, not a replay.
+export async function attachMedia({ principalId, gkAssetId, bytes, contentType, captureRole, captureView, idempotencyKey, correlationId, occurredAt } = {}) {
   requireFields(
     { principalId, gkAssetId, bytes, contentType, captureRole, idempotencyKey },
     ['principalId', 'gkAssetId', 'bytes', 'contentType', 'captureRole', 'idempotencyKey']
   );
   requireEnum(captureRole, ['capture-photo', 'grading-photo', 'document'], 'captureRole');
+  if (captureView != null) {
+    requireEnum(captureView, ['FRONT', 'BACK', 'SPINE', 'PAGES', 'DETAIL'], 'captureView');
+  }
   if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
     throw new ValidationFailedError('bytes must be a non-empty Buffer/Uint8Array');
   }
@@ -447,8 +462,17 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
   // computation from the same real bytes — defense in depth, never a
   // caller-declared value trusted for storage.
   const sha256 = createHash('sha256').update(bytes).digest('hex');
-  // GK-163 — semantic payload: which asset, what role, what content.
-  const requestFingerprint = computeRequestFingerprint({ gkAssetId, captureRole, sha256 });
+  // GK-163 — semantic payload: which asset, what role, what content, and
+  // now (GK-227) which physical view, when supplied. `captureView ??
+  // undefined` (not `?? null`) is deliberate: JSON.stringify drops an
+  // undefined-valued key entirely, so an omitted captureView (every
+  // pre-GK-227 attachMedia call, including src/modules/capture's own
+  // capture-time loop) produces the BYTE-IDENTICAL fingerprint it always
+  // has — a client retrying an in-flight pre-deploy idempotencyKey after
+  // this ships must still resolve as the same legitimate replay, not a
+  // spurious conflict. A real captureView value changes the fingerprint
+  // as intended.
+  const requestFingerprint = computeRequestFingerprint({ gkAssetId, captureRole, sha256, captureView: captureView ?? undefined });
 
   // D5 — non-transactional preflight, strictly BEFORE any storage I/O.
   const preflight = await acquireConnection();
@@ -503,17 +527,18 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
         // fact from recorded_at. Caller-supplied only; omitted -> NULL,
         // never "now".
         occurredAt,
+        captureView: captureView ?? null,
       });
       const outcome = stored.created ? 'created' : 'existing-blob-new-row';
       await repo.writeDomainEvent(client, {
         eventType: 'media.attached', actorPrincipalId: principalId, actorKind: 'user',
         subjectType: 'gk_asset', subjectId: gkAssetId,
-        payload: { mediaId, captureRole, sha256, objectUri: stored.objectUri, outcome },
+        payload: { mediaId, captureRole, captureView: captureView ?? null, sha256, objectUri: stored.objectUri, outcome },
         correlationId: correlationId || await newCorrelationId(client),
         occurredAt,
       });
 
-      const publicResult = { mediaId, objectUri: stored.objectUri, sha256, outcome };
+      const publicResult = { mediaId, objectUri: stored.objectUri, sha256, outcome, captureView: captureView ?? null };
       await claimIdempotencyKey(client, {
         operation, idempotencyKey, principalId, result: publicResult, requestFingerprint,
       });

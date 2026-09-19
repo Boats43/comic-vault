@@ -188,12 +188,12 @@ export async function getLiveIdentityAssignment(client, assetId) {
   return res.rows[0] || null;
 }
 
-export async function insertMedia(client, { assetId, mediaType, contentHash, objectUri, contentType, recordedByPrincipalId, occurredAt }) {
+export async function insertMedia(client, { assetId, mediaType, contentHash, objectUri, contentType, recordedByPrincipalId, occurredAt, captureView }) {
   const id = await uuidv7(client);
   await client.query(
-    `INSERT INTO data1_dev.media (id, asset_id, media_type, content_hash, object_uri, content_type, recorded_by_principal_id, occurred_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [id, assetId, mediaType, contentHash, objectUri ?? null, contentType ?? null, recordedByPrincipalId, occurredAt ?? null]
+    `INSERT INTO data1_dev.media (id, asset_id, media_type, content_hash, object_uri, content_type, recorded_by_principal_id, occurred_at, capture_view)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [id, assetId, mediaType, contentHash, objectUri ?? null, contentType ?? null, recordedByPrincipalId, occurredAt ?? null, captureView ?? null]
   );
   return id;
 }

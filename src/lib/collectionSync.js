@@ -24,6 +24,17 @@
 // Excludes `_syncStatus` (collectionPersistence.js) — a local
 // cache/UI-status marker, never a real collection-item attribute; it
 // must never round-trip into the server's own attributes JSONB.
+//
+// Excludes `_pendingEvidenceAppends` (GK-227,
+// src/lib/physicalMediaAppend.js) for the same reason `images` itself
+// gets special top-level handling rather than living in `attributes`:
+// it holds raw base64 photo bytes (queued physical-asset evidence not
+// yet durably appended to the kernel media table) — sending it as an
+// ordinary attribute would write raw photo bytes straight into the
+// collection_item JSONB column, exactly what 0026's own design forbids
+// for `images`. This field is local-only retry scratch state; the
+// durable fact it targets (a media row) is written via
+// /api/asset-media-append, never via /api/collection.
 
 import { authFetch } from "./grailkeySession.js";
 
@@ -43,7 +54,7 @@ export async function fetchServerCollection() {
 // over time, but a network blip must never lose a scan taken in hand).
 export async function pushCollectionItem(entry) {
   try {
-    const { images, _syncStatus, ...attributes } = entry || {};
+    const { images, _syncStatus, _pendingEvidenceAppends, ...attributes } = entry || {};
     const res = await authFetch("/api/collection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -30,7 +30,7 @@
 // reach /api/capture-scan; there is no other code path in the frontend
 // that calls it.
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { authFetch, isAuthenticated, getPrincipalScope } from "../lib/grailkeySession.js";
 import {
   getPendingIdempotencyKey,
@@ -42,6 +42,8 @@ import {
 // GK-226 — see src/lib/captureOutcomeMapping.js for the full root-cause
 // narrative (Old Man Logan #25's durable $0.00 valuation_event).
 import { buildCaptureOutcomePrice } from "../lib/captureOutcomeMapping.js";
+// GK-227 — post-capture physical media append.
+import { REQUIRED_CAPTURE_VIEWS, ALL_CAPTURE_VIEWS, computeCaptureViewChecklist } from "../lib/physicalMediaChecklist.js";
 
 const ACTIONS = ["LIST", "HOLD", "PASS"];
 const REQUEST_TIMEOUT_MS = 15000;
@@ -99,7 +101,7 @@ function formatPendingAge(createdAt) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-export default function GrailKeyOperatorPanel({ collectionItemId, item, photos }) {
+export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, onAddPhoto }) {
   const [state, setState] = useState({ status: "loading" }); // loading | none | found | error
   const [submitting, setSubmitting] = useState(null); // which actionCode is in flight
   const [lastResult, setLastResult] = useState(null); // { actionCode, operatorActionEventId }
@@ -122,6 +124,14 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos }
   // db/data0/0004_data1_foundation.sql + 0009's own content_type
   // addition), so this is the only honest source for it.
   const [h8Proof, setH8Proof] = useState("idle");
+  // GK-227 — 'idle' | uploading role string | { role, error }. Which
+  // explicit role a pending file-picker selection targets, and any
+  // per-attempt error. Never a generic "photo added" success state here
+  // — success is read from the real refreshed `graph.media` checklist
+  // below (load() re-fetches it), never claimed independently.
+  const [evidenceAppendState, setEvidenceAppendState] = useState("idle");
+  const [pendingRole, setPendingRole] = useState(null);
+  const evidenceFileInputRef = useRef(null);
 
   const load = useCallback(async () => {
     if (!collectionItemId || !isAuthenticated()) {
@@ -374,6 +384,37 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos }
     }
   }
 
+  // GK-227 — explicit role must be chosen BEFORE the file picker opens;
+  // never inferred from filename or which slot this happens to be.
+  function requestEvidencePhoto(role) {
+    if (evidenceAppendState !== "idle" || !onAddPhoto) return;
+    setPendingRole(role);
+    evidenceFileInputRef.current?.click();
+  }
+
+  async function handleEvidenceFileChange(e) {
+    const file = e.target.files?.[0];
+    if (evidenceFileInputRef.current) evidenceFileInputRef.current.value = "";
+    const role = pendingRole;
+    setPendingRole(null);
+    if (!file || !role || !onAddPhoto || !gkAssetId) return;
+    setEvidenceAppendState(role);
+    try {
+      // Reuses the SAME addPhotoToComic pipeline the ordinary photo strip
+      // uses (local persist + catalogue sync) — this call additionally
+      // supplies {gkAssetId, captureView}, which is what makes it ALSO
+      // attempt a durable kernel-media append with this exact role and
+      // these exact fresh bytes. Local/catalogue success happens either
+      // way; kernel-evidence success is verified afterward by reloading
+      // the real graph below, never assumed from this call alone.
+      await onAddPhoto(item, file, { gkAssetId, captureView: role });
+      await load();
+      setEvidenceAppendState("idle");
+    } catch (err) {
+      setEvidenceAppendState({ role, error: err?.message || "Failed to add photo" });
+    }
+  }
+
   return (
     <div style={panelStyle}>
       <div style={{ color: "#d4af37", fontSize: 12, fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }}>
@@ -454,6 +495,66 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos }
           </div>
         )}
       </div>
+
+      {/* GK-227 — PHYSICAL EVIDENCE. Derived ONLY from real durable
+          media rows (graph.media) + their capture_view — never from raw
+          photo count, never from collection remoteImages, never from
+          Vision/model prose. */}
+      {gkAssetId && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(212,175,55,0.15)" }}>
+          <div style={{ color: "#d4af37", fontWeight: 700, fontSize: 12, marginBottom: 6, letterSpacing: 0.5 }}>
+            PHYSICAL EVIDENCE
+          </div>
+          {(() => {
+            const checklist = computeCaptureViewChecklist(graph.media);
+            const localPending = Array.isArray(item?._pendingEvidenceAppends) ? item._pendingEvidenceAppends : [];
+            return ALL_CAPTURE_VIEWS.map((role) => {
+              const present = checklist[role];
+              const isPending = !present && localPending.some((p) => p.captureView === role);
+              const uploading = evidenceAppendState === role;
+              const errored = evidenceAppendState?.role === role ? evidenceAppendState.error : null;
+              return (
+                <div key={role} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0", fontSize: 12 }}>
+                  <span style={{ color: present ? "#7cc47c" : "#888" }}>
+                    {present ? "✓" : "—"} {role}{role === "DETAIL" ? " (optional)" : ""}
+                  </span>
+                  {!present && (
+                    <button
+                      onClick={() => requestEvidencePhoto(role)}
+                      disabled={evidenceAppendState !== "idle" || !onAddPhoto}
+                      style={{
+                        background: "transparent", border: "1px solid rgba(212,175,55,0.3)", borderRadius: 4,
+                        color: "#d4af37", fontSize: 11, padding: "3px 8px",
+                        cursor: evidenceAppendState !== "idle" ? "not-allowed" : "pointer",
+                        opacity: evidenceAppendState !== "idle" && !uploading ? 0.5 : 1,
+                      }}
+                    >
+                      {uploading ? "Adding…" : isPending ? "Retry" : "+ Add"}
+                    </button>
+                  )}
+                  {!present && isPending && !uploading && (
+                    <span style={{ color: "#c9a227", fontSize: 10, marginLeft: 6 }}>local photo saved — kernel evidence sync pending, will retry automatically</span>
+                  )}
+                  {errored && <span style={{ color: "#e05656", fontSize: 10, marginLeft: 6 }}>{errored}</span>}
+                </div>
+              );
+            });
+          })()}
+          <input
+            ref={evidenceFileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: "none" }}
+            onChange={handleEvidenceFileChange}
+          />
+          {!REQUIRED_CAPTURE_VIEWS.every((v) => computeCaptureViewChecklist(graph.media)[v]) && (
+            <div style={{ color: "#666", fontSize: 10, marginTop: 6 }}>
+              A complete evidence packet requires FRONT, BACK, SPINE, and PAGES as durable kernel media rows. DETAIL is optional, supplementary evidence.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
