@@ -29,6 +29,33 @@ import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collec
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
 import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
+import { useClerk } from "@clerk/react";
+
+// Same gate src/main.jsx uses to decide whether <ClerkProvider> is mounted
+// at all, and src/components/GrailKeyLoginGate.jsx uses to decide whether
+// to render Clerk sign-in — kept consistent so a Clerk hook is only ever
+// invoked when a live ClerkProvider ancestor actually exists.
+const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+
+// LOGOUT FIX — Clerk keeps its own persistent, cookie-backed session
+// independent of the GrailKey bearer token. Without this, clicking
+// "Log out" only clears the GrailKey token (clearSession()); the login
+// gate remounts, ClerkAuthPanel sees the still-live Clerk session, and
+// silently re-authenticates the operator right back in — logout never
+// sticks for an operator who signed in (or still has a live browser
+// session) via Clerk. This bridge exposes Clerk's own signOut() to the
+// header's logout handler, mounted only when CLERK_ENABLED (i.e. only
+// ever inside a live ClerkProvider). Never renders anything itself.
+function ClerkSignOutBridge({ signOutRef }) {
+  const { signOut } = useClerk();
+  useEffect(() => {
+    signOutRef.current = signOut;
+    return () => {
+      signOutRef.current = null;
+    };
+  }, [signOut, signOutRef]);
+  return null;
+}
 
 // A3 ACCESS GATE: Client-side key helper
 // ACCESS GATE — T1 invite key management (A3 + LAUNCH BLOCKER FIX)
@@ -10455,6 +10482,12 @@ export default function App() {
   // gate above. Reuses the existing DATA-1D backend auth contract exactly;
   // no new auth mechanism, no signup, no tenancy.
   const [grailkeyAuthed, setGrailkeyAuthed] = useState(() => isAuthenticated());
+  // Populated by <ClerkSignOutBridge> (only mounted when CLERK_ENABLED) so
+  // the logout handler below can also end the separate Clerk session — see
+  // that component's own comment for why this is required for logout to
+  // actually stick.
+  const clerkSignOutRef = useRef(null);
+  const [loggingOut, setLoggingOut] = useState(false);
   const fileRef = useRef(null);
   const buyerFileRef = useRef(null);
   const bulkRef = useRef(null);
@@ -13457,12 +13490,42 @@ export default function App() {
     setInstallDismissed(true);
   };
 
+  // LOGOUT FIX (GRAILKEY) — clearSession() removes exactly gk_session_token
+  // and gk_session_expires_at (src/lib/grailkeySession.js), same as before.
+  // Never touches IndexedDB or catalogue/collection data. When Clerk is
+  // configured, its own session must end FIRST (awaited) so the
+  // GrailKeyLoginGate that mounts next doesn't get silently bypassed by
+  // ClerkAuthPanel's live-session auto-link effect — see
+  // ClerkSignOutBridge's comment above. A Clerk failure never blocks the
+  // GrailKey-side logout (finally block always runs).
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      if (CLERK_ENABLED && clerkSignOutRef.current) {
+        await clerkSignOutRef.current();
+      }
+    } catch {
+      // Clerk sign-out failing must not prevent the GrailKey logout below.
+    } finally {
+      clearSession();
+      setGrailkeyAuthed(false);
+      setLoggingOut(false);
+    }
+  };
+
   if (!grailkeyAuthed) {
-    return <GrailKeyLoginGate onAuthenticated={() => setGrailkeyAuthed(true)} />;
+    return (
+      <>
+        {CLERK_ENABLED && <ClerkSignOutBridge signOutRef={clerkSignOutRef} />}
+        <GrailKeyLoginGate onAuthenticated={() => setGrailkeyAuthed(true)} />
+      </>
+    );
   }
 
   return (
     <div className="app">
+      {CLERK_ENABLED && <ClerkSignOutBridge signOutRef={clerkSignOutRef} />}
       <header className="header">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
@@ -13470,10 +13533,15 @@ export default function App() {
             <div style={{ fontSize: 11, color: "#999", marginTop: 2, fontWeight: 400 }}>Know what it's worth. Get paid.</div>
           </div>
           <button
-            onClick={() => { clearSession(); setGrailkeyAuthed(false); }}
-            style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, color: "#999", fontSize: 11, padding: "4px 10px", cursor: "pointer" }}
+            onClick={handleLogout}
+            disabled={loggingOut}
+            style={{
+              background: "transparent", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6,
+              color: "#999", fontSize: 11, padding: "4px 10px",
+              cursor: loggingOut ? "default" : "pointer", opacity: loggingOut ? 0.6 : 1,
+            }}
           >
-            Log out
+            {loggingOut ? "Logging out…" : "Log out"}
           </button>
         </div>
       </header>
