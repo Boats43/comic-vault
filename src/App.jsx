@@ -27,6 +27,7 @@ import { isAuthenticated, clearSession, getSession, authFetch } from "./lib/grai
 import { fetchServerCollection } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
+import { computeFeeAmount, computeNetProfit, computeMaxBuy, evaluateAgainstMaxBuy } from "./lib/maxBuyCalculator.js";
 import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
 import { useClerk } from "@clerk/react";
@@ -2411,9 +2412,26 @@ const SESSIONS_KEY = "cv_buyer_sessions";
 const getSessions = () => { try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]"); } catch { return []; } };
 const saveSession = (entry) => {
   const sessions = getSessions();
-  sessions.push({ ...entry, ts: Date.now() });
+  // Preserve a caller-supplied ts (used as a stable lookup key by
+  // recordActualPurchasePrice) instead of always minting a new one.
+  sessions.push({ ...entry, ts: entry.ts || Date.now() });
   if (sessions.length > 100) sessions.splice(0, sessions.length - 100);
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+};
+// Records what the operator actually paid, after the fact, without ever
+// overwriting the original recommendation (maxBuy/netProfit/decision/etc.
+// stay exactly as computed at decision time).
+const recordActualPurchasePrice = (ts, actualPrice) => {
+  const sessions = getSessions();
+  const idx = sessions.findIndex((s) => s.ts === ts);
+  if (idx === -1) return false;
+  sessions[idx] = {
+    ...sessions[idx],
+    actualPurchasePrice: actualPrice,
+    actualPurchaseRecordedAt: Date.now(),
+  };
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  return true;
 };
 const getSessionSummary = () => {
   const sessions = getSessions().slice(-20);
@@ -2484,9 +2502,13 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, o
   const [budget, setBudget] = useState(() => localStorage.getItem("cv_buyer_budget") || "");
   const [seeded, setSeeded] = useState(false);
   const [logged, setLogged] = useState(false);
+  const [loggedTs, setLoggedTs] = useState(null);
+  const [loggedDecision, setLoggedDecision] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState(loadBuyerSettings);
+  const [actualPriceInput, setActualPriceInput] = useState("");
+  const [actualPriceSaved, setActualPriceSaved] = useState(false);
 
   useEffect(() => {
     if (detectedPrice && !seeded) {
@@ -2516,11 +2538,23 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, o
   const supplies = parseFloat(settings.supplies) || 0;
   const labor = parseFloat(settings.labor) || 0;
   const minProfit = parseFloat(settings.minProfit) || 0;
+  // MAX BUY reuses "Min profit $" as its required-profit target rather than
+  // inventing a second, parallel target-profit/margin concept — the
+  // calculator has never modeled profit as a margin/ROI, only a flat $.
+  const targetProfit = minProfit;
 
-  const whatnotFeeAmt = hasMV ? marketValue * (feePct / 100) : 0;
+  const whatnotFeeAmt = computeFeeAmount(marketValue, feePct);
   const netProfit = hasMV && hasBid
-    ? marketValue - whatnotFeeAmt - supplies - labor - bidNum
+    ? computeNetProfit({ marketValue, feePct, supplies, labor, price: bidNum })
     : null;
+
+  const maxBuyResult = hasMV
+    ? computeMaxBuy({ marketValue, feePct, supplies, labor, targetProfit })
+    : { maxBuy: null, valid: false, achievable: false };
+  const maxBuy = maxBuyResult.valid ? maxBuyResult.maxBuy : null;
+  const maxBuyEval = hasBid && maxBuy != null
+    ? evaluateAgainstMaxBuy({ maxBuy, price: bidNum })
+    : { decision: null, delta: null };
 
   const overBudget = hasBid && hasBudget && bidNum > budgetNum;
 
@@ -2534,17 +2568,36 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, o
 
   const logDecision = (decision) => {
     if (logged) return;
+    const ts = Date.now();
     const entry = {
+      ts,
       title: resultTitle || "Unknown",
+      grade: resultGrade || null,
       marketValue: marketValue || 0,
       bidPrice: bidNum || 0,
       budget: budgetNum || 0,
       netProfit: netProfit != null ? Math.round(netProfit * 100) / 100 : 0,
+      // Economics inputs snapshotted at decision time, plus the recommendation
+      // itself — recordActualPurchasePrice() only ever adds fields to this
+      // same entry later, never overwrites any of these.
+      feePct,
+      supplies,
+      labor,
+      targetProfit,
+      maxBuy: maxBuy != null ? Math.round(maxBuy * 100) / 100 : null,
       decision,
     };
     saveSession(entry);
     setLogged(true);
+    setLoggedTs(ts);
+    setLoggedDecision(decision);
     if (onLogSession) onLogSession(entry);
+  };
+
+  const saveActualPurchasePrice = () => {
+    const parsed = parseFloat(actualPriceInput);
+    if (!loggedTs || isNaN(parsed) || parsed < 0) return;
+    if (recordActualPurchasePrice(loggedTs, parsed)) setActualPriceSaved(true);
   };
 
   const updateSetting = (k, v) => setSettings((s) => ({ ...s, [k]: v }));
@@ -2640,6 +2693,31 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, o
         </div>
       )}
 
+      {/* MAX BUY — highest acquisition price that still clears the target profit */}
+      {hasMV && maxBuy != null && (
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "baseline",
+          padding: "8px 10px", borderRadius: 8, marginBottom: 8,
+          background: "rgba(212,175,55,0.08)", border: "1px solid rgba(212,175,55,0.25)",
+        }}>
+          <span style={{ fontSize: 12, color: "#d4af37", fontWeight: 700 }}>MAX BUY</span>
+          {maxBuyResult.achievable ? (
+            <span style={{ fontSize: 20, fontWeight: 800, color: "#d4af37" }}>${Math.round(maxBuy)}</span>
+          ) : (
+            <span style={{ fontSize: 12, color: "#e05656", fontWeight: 700 }}>
+              $0 — target profit unreachable at any price
+            </span>
+          )}
+        </div>
+      )}
+      {hasMV && hasBid && maxBuy != null && maxBuyEval.decision && (
+        <div style={{ textAlign: "center", fontSize: 12, color: maxBuyEval.decision === "BUY" ? "#16a34a" : "#e05656", marginBottom: 8 }}>
+          {maxBuyEval.decision === "BUY"
+            ? `$${Math.abs(Math.round(maxBuyEval.delta))} below MAX BUY`
+            : `$${Math.abs(Math.round(maxBuyEval.delta))} above MAX BUY`}
+        </div>
+      )}
+
       {/* BUY / PASS */}
       {hasMV && hasBid && (
         <button
@@ -2652,6 +2730,35 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, o
             color: logged ? "#666" : "#fff", marginTop: 6,
           }}
         >{logged ? "LOGGED" : (shouldBuy ? "BUY" : "PASS")}</button>
+      )}
+
+      {/* Actual purchase price — recorded after the fact, never overwrites the recommendation */}
+      {logged && loggedDecision === "BUY" && (
+        <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)" }}>
+          {actualPriceSaved ? (
+            <div style={{ fontSize: 12, color: "#16a34a" }}>✓ Actual purchase price recorded</div>
+          ) : (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>Actually paid</span>
+              <div className="calc-input-wrap" style={{ flex: 1 }}>
+                <span className="calc-dollar">$</span>
+                <input
+                  type="number" inputMode="decimal" placeholder="if different"
+                  value={actualPriceInput} onChange={(e) => setActualPriceInput(e.target.value)}
+                  className="calc-input"
+                />
+              </div>
+              <button
+                onClick={saveActualPurchasePrice}
+                disabled={!actualPriceInput}
+                style={{
+                  padding: "6px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 700,
+                  background: "rgba(212,175,55,0.2)", color: "#d4af37", cursor: actualPriceInput ? "pointer" : "default",
+                }}
+              >Save</button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* See details */}
@@ -2685,6 +2792,15 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, o
                 <span style={{ color: "#ddd" }}>Net profit</span>
                 <span style={{ color: verdictColor }}>${netProfit.toFixed(2)}</span>
               </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0 0", borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 4 }}>
+                <span>Target profit</span><span>${targetProfit.toFixed(2)}</span>
+              </div>
+              {maxBuy != null && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontWeight: 700 }}>
+                  <span style={{ color: "#d4af37" }}>MAX BUY</span>
+                  <span style={{ color: "#d4af37" }}>${Math.max(0, maxBuy).toFixed(2)}</span>
+                </div>
+              )}
             </div>
           )}
         </>
