@@ -30,6 +30,7 @@ export {
   getOutcomeEventsForListing,
   getLatestValuation,
   hasActiveListingForChannel,
+  hasAuthoritativeSoldOutcome,
   wasOutcomeIdempotencyKeyClaimed,
   linkCollectionItem,
   resolveCollectionItemLink,

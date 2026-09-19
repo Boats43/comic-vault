@@ -1179,6 +1179,26 @@ export async function recordEconomicsComponent({
   }
 }
 
+// hasAuthoritativeSoldOutcome -- read-only. GRAILKEY INVENTORY AUTHORITY
+// V1 SOLD CONSISTENCY CLOSEOUT. The durable, immutable source of truth
+// for "has this physical asset ever really sold" -- outcome_event's own
+// SOLD row, never the mutable inventory_current_state projection. This
+// is what the LIST preflight now consults FIRST and INDEPENDENTLY of
+// inventory_current_state, so a stale/failed inventory-projection write
+// can never make a truly SOLD asset appear listable again.
+export async function hasAuthoritativeSoldOutcome({ principalId, gkAssetId } = {}) {
+  requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    const soldRow = await repo.findAuthoritativeSoldOutcome(client, gkAssetId);
+    return { sold: soldRow !== null, soldOutcomeEventId: soldRow?.id ?? null, soldAt: soldRow?.occurred_at ?? null };
+  } finally {
+    client.release();
+  }
+}
+
 // wasOutcomeIdempotencyKeyClaimed -- read-only, no principal scoping
 // needed (the caller already possesses the exact key it is asking
 // about; this reveals no information beyond "has this specific key

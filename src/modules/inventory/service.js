@@ -21,6 +21,15 @@ import * as repo from './repository.js';
 import { acquireConnection } from './db.js';
 import { checkIdempotencyReplay, claimIdempotencyKey, computeRequestFingerprint } from './idempotency.js';
 import { NotFoundError, ValidationFailedError, AuthorizationFailedError, ConflictError } from './errors.js';
+// SOLD CONSISTENCY CLOSEOUT — the durable outcome_event ledger lives in
+// the assets module; this is a normal public-surface cross-module read
+// (the same composition pattern src/modules/assets/service.js already
+// uses for media), never a boundary violation. Every function below
+// that could make an asset appear AVAILABLE/RESERVED checks this FIRST,
+// independent of this module's own (mutable) inventory_current_state —
+// a stale/failed projection must never let a truly SOLD asset become
+// reservable or listable again.
+import { hasAuthoritativeSoldOutcome } from '../assets/index.js';
 
 function requireFields(obj, fields) {
   for (const f of fields) {
@@ -46,6 +55,19 @@ async function assertPrincipalOwnsAsset(client, principalId, gkAssetId) {
 
 const newCorrelationId = () => crypto.randomUUID();
 
+// SOLD CONSISTENCY CLOSEOUT — shared fail-closed guard. Consults the
+// durable outcome_event ledger directly (never this module's own
+// inventory_current_state), so a stale/failed projection can never let
+// a truly SOLD asset be enrolled, reserved, or released back to
+// AVAILABLE. Called from every function below that could otherwise make
+// an asset appear available for sale.
+async function assertNoAuthoritativeSoldOutcome(principalId, gkAssetId) {
+  const { sold, soldOutcomeEventId, soldAt } = await hasAuthoritativeSoldOutcome({ principalId, gkAssetId });
+  if (sold) {
+    throw new ConflictError(`gk_asset ${gkAssetId} has a durable SOLD outcome_event (${soldOutcomeEventId}, occurred_at ${soldAt}) — permanently ineligible, regardless of Inventory Authority projection state`);
+  }
+}
+
 // enrollAsset — UNMANAGED -> AVAILABLE. "GrailKey is now authorized to
 // control sale availability for this physical asset." Never inferred
 // from a scan, ownership, gkAssetId existing, Collection presence, or
@@ -65,6 +87,7 @@ export async function enrollAsset({ principalId, gkAssetId, idempotencyKey, occu
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      await assertNoAuthoritativeSoldOutcome(principalId, gkAssetId);
 
       const transitionEventId = await repo.insertTransitionEvent(client, {
         gkAssetId, priorState: 'UNMANAGED', nextState: 'AVAILABLE', reason: 'operator-enrollment',
@@ -108,6 +131,7 @@ export async function reserveAsset({ principalId, gkAssetId, channel, externalRe
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      await assertNoAuthoritativeSoldOutcome(principalId, gkAssetId);
 
       const transitionEventId = await repo.insertTransitionEvent(client, {
         gkAssetId, priorState: 'AVAILABLE', nextState: 'RESERVED', reason,
@@ -149,6 +173,7 @@ export async function releaseReservation({ principalId, gkAssetId, reason = 'ope
       if (replay) { await client.query('COMMIT'); return replay; }
 
       await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      await assertNoAuthoritativeSoldOutcome(principalId, gkAssetId);
 
       const transitionEventId = await repo.insertTransitionEvent(client, {
         gkAssetId, priorState: 'RESERVED', nextState: 'AVAILABLE', reason,

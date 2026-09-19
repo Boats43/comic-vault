@@ -4,10 +4,41 @@
 // own validateOutcomeAttachment. Does not rebuild or replace eBay LIST —
 // this is purely an additional precondition check.
 //
-// TWO independent facts, both required:
-//   1. Inventory Authority state is AVAILABLE (src/modules/inventory —
+// SOLD CONSISTENCY CLOSEOUT (2026-09-20) — the ORIGINAL V1 preflight
+// consulted ONLY inventory_current_state (a mutable projection). Traced
+// failure path, confirmed by reading the actual code, not inferred: if
+// a real SOLD outcome_event write succeeds but the reconciler's own
+// markSold() projection write fails afterward for any reason (best-
+// effort, never blocks the outcome ledger — see
+// src/lib/ebayOutcomeReconciler.js), inventory_current_state is left
+// stale (still AVAILABLE/RESERVED) while outcome_event durably says
+// SOLD. The old preflight would then WRONGLY permit a new LIST: (1)
+// assertListable() only reads the stale projection, sees AVAILABLE,
+// passes; (2) hasActiveListingForChannel() groups by external_listing_id
+// — a NEW listing attempt uses a fresh id, so the OLD (now-terminal,
+// SOLD) listing episode is invisible to that check. A physically sold,
+// one-of-one asset could become listable again. Confirmed split-brain,
+// not hypothetical.
+//
+// FIX (smallest correct one, per explicit instruction — no transactional
+// coupling, no new retry subsystem, no second inventory authority): the
+// preflight now ALSO independently consults the durable, immutable
+// outcome_event ledger directly (hasAuthoritativeSoldOutcome) — never
+// the mutable projection — and fails closed unconditionally if a real
+// SOLD outcome exists, REGARDLESS of what inventory_current_state says.
+// outcome_event is the durable historical fact; inventory_current_state
+// is a derived projection; a projection failure must never make a SOLD
+// asset sellable again. This check runs FIRST, before the projection
+// read, and is channel-agnostic (a physically sold asset is never
+// listable on any channel, not just the one it sold through).
+//
+// THREE independent facts, ALL required:
+//   1. No authoritative SOLD outcome_event exists for this asset, on
+//      ANY channel (the fail-closed invariant — checked first,
+//      independent of the mutable projection below).
+//   2. Inventory Authority state is AVAILABLE (src/modules/inventory —
 //      UNMANAGED/RESERVED/SOLD/missing/ambiguous all reject).
-//   2. No existing active listing already exists for this asset on this
+//   3. No existing active listing already exists for this asset on this
 //      channel (src/modules/assets — AVAILABLE does not by itself mean
 //      "safe to create unlimited duplicate projections").
 //
@@ -17,7 +48,7 @@
 // mutates it.
 
 import { assertListable, ConflictError as InventoryConflictError, NotFoundError as InventoryNotFoundError, AuthorizationFailedError as InventoryAuthorizationFailedError } from '../modules/inventory/index.js';
-import { hasActiveListingForChannel, wasOutcomeIdempotencyKeyClaimed } from '../modules/assets/index.js';
+import { hasActiveListingForChannel, hasAuthoritativeSoldOutcome, wasOutcomeIdempotencyKeyClaimed } from '../modules/assets/index.js';
 
 export class ListingPreflightFailedError extends Error {
   constructor(code, message) {
@@ -43,6 +74,18 @@ export class ListingPreflightFailedError extends Error {
  * still fully subject to the duplicate check.
  */
 export async function assertListingAuthorized({ principalId, gkAssetId, channel, outcomeIdempotencyKey }) {
+  // Fail-closed invariant, checked FIRST and independent of the mutable
+  // inventory_current_state projection below: once GrailKey has durable
+  // authoritative SOLD evidence for a physical asset, no new marketplace
+  // LIST may succeed, regardless of a temporary projection failure.
+  const soldCheck = await hasAuthoritativeSoldOutcome({ principalId, gkAssetId });
+  if (soldCheck.sold) {
+    throw new ListingPreflightFailedError(
+      'AUTHORITATIVE_SOLD_EXISTS',
+      `gk_asset ${gkAssetId} has a durable SOLD outcome_event (${soldCheck.soldOutcomeEventId}, occurred_at ${soldCheck.soldAt}) — permanently not listable, regardless of Inventory Authority projection state`
+    );
+  }
+
   try {
     await assertListable({ principalId, gkAssetId });
   } catch (e) {

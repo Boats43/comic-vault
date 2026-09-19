@@ -63,9 +63,12 @@ global.fetch = async (url) => {
   return { ok: false, status: 404, statusText: 'unmocked URL', json: async () => ({ errors: [{ message: `unmocked URL: ${u}` }] }) };
 };
 
-const createdOutcomeEventIds = [];
 let createdValuationEventId = null;
 
+// Cleanup deletes by TEST_ASSET_ID directly (see the finally block below)
+// rather than tracking individual ids — a dedicated test-only asset, and
+// reconcileEbayOutcome() itself writes SOLD/component rows this function
+// never sees the ids of, so per-id tracking previously under-cleaned.
 async function createTransientListedRow(externalListingId, askAmount = 100) {
   const result = await assets.recordOutcomeEvent({
     principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID,
@@ -73,7 +76,6 @@ async function createTransientListedRow(externalListingId, askAmount = 100) {
     askAmount, askCurrency: 'USD',
     idempotencyKey: `reconciler-test-listed-${crypto.randomUUID()}`,
   });
-  createdOutcomeEventIds.push(result.outcomeEventId);
   return result.outcomeEventId;
 }
 
@@ -360,19 +362,35 @@ try {
   }
 
 } finally {
-  // Cleanup: delete every transient component + outcome_event this test
-  // created, and the one transient valuation_event. Creepy's real rows
-  // are never touched (none were created against it, proven above).
+  // Cleanup: delete EVERY outcome_event row (and their components) for
+  // TEST_ASSET_ID — a dedicated test-only asset, safe to fully clear —
+  // not just the originally-tracked LISTED-row ids. FIX (found live,
+  // 2026-09-20, Inventory Authority SOLD Consistency Closeout): the
+  // original version of this cleanup only ever deleted the LISTED rows
+  // this test explicitly created via createTransientListedRow() — it
+  // never tracked the SEPARATE SOLD outcome_event rows
+  // reconcileEbayOutcome() itself writes on top of them, so every SOLD
+  // row from every scenario below was silently leaking into real
+  // Development on every run. Confirmed and cleaned up as a real,
+  // disclosed incident (16 stray rows found and removed) before writing
+  // this fix — deleting by TEST_ASSET_ID directly closes the gap
+  // structurally rather than requiring every future scenario to
+  // remember to track every row type it might produce. Creepy's real
+  // rows are never touched (a different asset id, never written to,
+  // proven above).
   const client = await assertAdminDbTarget({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, label: 'reconciler-test-cleanup' });
   try {
-    for (const id of createdOutcomeEventIds) {
-      await client.query('DELETE FROM data1_dev.outcome_economics_component WHERE outcome_event_id = $1', [id]).catch(() => {});
-      await client.query('DELETE FROM data1_dev.outcome_event WHERE id = $1', [id]).catch(() => {});
+    const staleIds = (await client.query('SELECT id FROM data1_dev.outcome_event WHERE gk_asset_id = $1', [TEST_ASSET_ID])).rows.map((r) => r.id);
+    if (staleIds.length > 0) {
+      await client.query('DELETE FROM data1_dev.outcome_economics_component WHERE outcome_event_id = ANY($1)', [staleIds]);
     }
+    await client.query('DELETE FROM data1_dev.outcome_event WHERE gk_asset_id = $1', [TEST_ASSET_ID]);
+    await client.query('DELETE FROM data1_dev.inventory_current_state WHERE gk_asset_id = $1', [TEST_ASSET_ID]);
+    await client.query('DELETE FROM data1_dev.inventory_transition_event WHERE gk_asset_id = $1', [TEST_ASSET_ID]);
     if (createdValuationEventId) {
       await client.query('DELETE FROM data1_dev.valuation_event WHERE id = $1', [createdValuationEventId]).catch(() => {});
     }
-    console.log(`\n  cleaned up ${createdOutcomeEventIds.length} transient outcome_event row(s) (+ their components) and 1 transient valuation_event row`);
+    console.log(`\n  cleaned up ${staleIds.length} outcome_event row(s) (+ their components) for TEST_ASSET_ID, any leftover inventory rows, and 1 transient valuation_event row`);
   } finally {
     await client.end();
   }

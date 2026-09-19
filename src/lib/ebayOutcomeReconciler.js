@@ -148,8 +148,19 @@ async function scoreOutcomePrediction({ principalId, gkAssetId, listedRow, soldO
  * by construction (same order id -> same idempotencyKey), so calling it
  * again on every enrichment poll is always safe and self-healing if an
  * earlier attempt failed.
+ *
+ * SOLD CONSISTENCY CLOSEOUT: a failure here (this function returning
+ * applied:false) is NOT a data-loss risk — src/lib/inventoryListingPreflight.js
+ * independently consults the durable outcome_event SOLD record directly
+ * (never this function's own success/failure), so a stale
+ * inventory_current_state projection can never make a truly SOLD asset
+ * listable again. This function's only job is to keep the PROJECTION
+ * eventually consistent; it is exported so a repeated reconciler call
+ * (or a dedicated repair invocation, proven in
+ * tests/inventory-authority-sold-consistency.test.js) can retry it
+ * idempotently until it applies.
  */
-async function attemptInventoryMarkSold({ principalId, gkAssetId, channel, orderId }) {
+export async function attemptInventoryMarkSold({ principalId, gkAssetId, channel, orderId }) {
   try {
     const result = await markInventorySold({
       principalId, gkAssetId, reason: 'authoritative-sale', channel, externalReference: orderId,

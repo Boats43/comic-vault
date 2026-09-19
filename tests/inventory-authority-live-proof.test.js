@@ -165,14 +165,21 @@ try {
   // 9-13. Authoritative sale -> SOLD, terminal, and repeated-reconciliation idempotency
   // -------------------------------------------------------------------
   console.log('\n-- Authoritative sale -> SOLD, terminal --\n');
-  const soldKey = `inventory-authority-order-XYZ-SOLD`; // mirrors the reconciler's own real derivation shape
-  const sold1 = await inventory.markSold({ principalId, gkAssetId: ASSET_A, channel: 'ebay', externalReference: 'order-XYZ', idempotencyKey: soldKey });
+  // A real orderId, unique per test run — a hardcoded key here would
+  // collide with idempotency_key rows LEFT BY A PRIOR RUN (that table is
+  // never cleaned up per-run, by design, matching every other module's
+  // idempotency law) and silently replay stale, since-deleted data
+  // instead of executing fresh — found and fixed live while writing this
+  // test (a real test bug, not a production code bug).
+  const soldOrderId = `order-${crypto.randomUUID()}`;
+  const soldKey = `inventory-authority-${soldOrderId}-SOLD`; // mirrors the reconciler's own real derivation shape
+  const sold1 = await inventory.markSold({ principalId, gkAssetId: ASSET_A, channel: 'ebay', externalReference: soldOrderId, idempotencyKey: soldKey });
   assertTrue(sold1.state === 'SOLD', 'markSold transitions the real AVAILABLE asset to SOLD');
 
   // "Repeated reconciliation creates no duplicate transitions" — the
   // SAME idempotencyKey a real reconciler poll would reuse (derived from
   // the same real order id) replays instead of duplicating.
-  const sold2 = await inventory.markSold({ principalId, gkAssetId: ASSET_A, channel: 'ebay', externalReference: 'order-XYZ', idempotencyKey: soldKey });
+  const sold2 = await inventory.markSold({ principalId, gkAssetId: ASSET_A, channel: 'ebay', externalReference: soldOrderId, idempotencyKey: soldKey });
   assertTrue(sold1.transitionEventId === sold2.transitionEventId, 'repeated reconciliation (same order, same derived idempotencyKey) replays the SAME transition, never a duplicate');
   const soldHistory = await inventory.getInventoryState({ principalId, gkAssetId: ASSET_A });
   const soldTransitions = soldHistory.history.filter((h) => h.next_state === 'SOLD');

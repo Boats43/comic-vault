@@ -390,6 +390,21 @@ export async function wasOutcomeIdempotencyKeyClaimed(client, idempotencyKey) {
   return r.rows.length > 0;
 }
 
+// GRAILKEY INVENTORY AUTHORITY V1 — SOLD CONSISTENCY CLOSEOUT. Channel-
+// agnostic: once physically sold, an asset is never listable on ANY
+// channel, not just the one it sold through. Queries the durable,
+// immutable outcome_event ledger directly — never the mutable
+// inventory_current_state projection, which is exactly the fact this
+// check exists to be independent of (a stale/failed projection write
+// must never make a truly SOLD asset appear listable again).
+export async function findAuthoritativeSoldOutcome(client, gkAssetId) {
+  const r = await client.query(
+    `SELECT * FROM data1_dev.outcome_event WHERE gk_asset_id = $1 AND outcome_type = 'SOLD' ORDER BY occurred_at LIMIT 1`,
+    [gkAssetId]
+  );
+  return r.rows[0] || null;
+}
+
 // GRAILKEY INVENTORY AUTHORITY V1 — duplicate-list defense. Groups this
 // asset's outcome_event rows for one channel by external_listing_id;
 // a group is "active" when it has a LISTED row and no terminal row
