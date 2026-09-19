@@ -28,6 +28,7 @@ import { fetchServerCollection } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
 import { computeFeeAmount, computeNetProfit, computeMaxBuy, evaluateAgainstMaxBuy } from "./lib/maxBuyCalculator.js";
+import { pushBuyerDecision, pushBuyerAcquisition } from "./lib/buyerDecisionSync.js";
 import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
 import { useClerk } from "@clerk/react";
@@ -2433,6 +2434,82 @@ const recordActualPurchasePrice = (ts, actualPrice) => {
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
   return true;
 };
+// GRAILKEY DURABLE BUYER DECISION LEDGER V1 — a client-minted correlation
+// id grouping decisions made within one open Buyer Mode browser tab
+// (sessionStorage: cleared on tab close, never sent anywhere as auth).
+const getBuyerSessionId = () => {
+  try {
+    let id = sessionStorage.getItem("cv_buyer_session_id");
+    if (!id) {
+      id = crypto.randomUUID();
+      sessionStorage.setItem("cv_buyer_session_id", id);
+    }
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
+};
+
+const updateBuyerSessionSyncFields = (ts, patch) => {
+  const sessions = getSessions();
+  const idx = sessions.findIndex((s) => s.ts === ts);
+  if (idx === -1) return;
+  sessions[idx] = { ...sessions[idx], ...patch };
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+};
+
+// Local-first doctrine (same as Collection's persistCollectionItem): the
+// local write in saveSession() ALWAYS already happened before this is
+// ever called — a network failure here never erases the operator's
+// decision. Local success is never represented as durable-server success
+// when it is not: on any failure this simply leaves _syncStatus:'pending'
+// exactly as saveSession() set it, for retryPendingBuyerDecisions() to
+// pick up later. Not authenticated -> stays pending, no request attempted.
+const syncBuyerDecisionEntry = async (entry) => {
+  if (!isAuthenticated()) return;
+  const payload = { ...entry };
+  delete payload.ts;
+  delete payload._syncStatus;
+  delete payload._durableId;
+  delete payload._acquisitionSyncStatus;
+  delete payload._acquisitionIdempotencyKey;
+  delete payload.actualPurchasePrice;
+  delete payload.actualPurchaseRecordedAt;
+  const result = await pushBuyerDecision(payload);
+  if (result?.buyerDecisionEventId) {
+    updateBuyerSessionSyncFields(entry.ts, { _syncStatus: "synced", _durableId: result.buyerDecisionEventId });
+  }
+};
+
+// Same local-first doctrine for the later actual-purchase-price fact.
+// Requires the parent decision's own _durableId — if the decision itself
+// hasn't synced yet (e.g. recorded while offline), this simply no-ops
+// and retryPendingBuyerDecisions() picks it up once the decision has.
+const syncBuyerAcquisitionEntry = async (entry) => {
+  if (!isAuthenticated() || !entry._durableId || entry.actualPurchasePrice == null) return;
+  const result = await pushBuyerAcquisition({
+    buyerDecisionEventId: entry._durableId,
+    actualPurchasePriceAmount: entry.actualPurchasePrice,
+    idempotencyKey: entry._acquisitionIdempotencyKey || `buyer-acquisition-${entry.ts}`,
+  });
+  if (result?.buyerAcquisitionEventId) {
+    updateBuyerSessionSyncFields(entry.ts, { _acquisitionSyncStatus: "synced" });
+  }
+};
+
+// Retried on every authenticated reconnect (mirrors retryPendingCollectionItems's
+// own trigger point exactly) — never on a timer, never blocking the UI.
+const retryPendingBuyerDecisions = async () => {
+  const pendingDecisions = getSessions().filter((s) => s._syncStatus === "pending");
+  for (const entry of pendingDecisions) {
+    await syncBuyerDecisionEntry(entry);
+  }
+  const pendingAcquisitions = getSessions().filter((s) => s._acquisitionSyncStatus === "pending" && s._durableId);
+  for (const entry of pendingAcquisitions) {
+    await syncBuyerAcquisitionEntry(entry);
+  }
+};
+
 const getSessionSummary = () => {
   const sessions = getSessions().slice(-20);
   if (sessions.length === 0) return null;
@@ -2497,7 +2574,7 @@ const loadBuyerSettings = () => {
   }
 };
 
-function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, onLogSession }) {
+function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, onLogSession, scanResult }) {
   const [bid, setBid] = useState("");
   const [budget, setBudget] = useState(() => localStorage.getItem("cv_buyer_budget") || "");
   const [seeded, setSeeded] = useState(false);
@@ -2569,6 +2646,35 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, o
   const logDecision = (decision) => {
     if (logged) return;
     const ts = Date.now();
+    const roundedMaxBuy = maxBuy != null ? Math.round(maxBuy * 100) / 100 : null;
+    const roundedNetProfit = netProfit != null ? Math.round(netProfit * 100) / 100 : null;
+
+    // Valuation provenance — sourced only from fields the pricing system
+    // already exposes on scanResult (contract.actionAuthority.marketStanding
+    // is the server-computed axis, GK-212's own Hulk #273 finding is why
+    // this reads the authoritative computed value rather than re-deriving
+    // it from a display token). verifiedCompCount has no real source
+    // anywhere in this pricing system yet — always null, never fabricated.
+    const provenance = scanResult ? {
+      pricingSource: scanResult.pricingSource || null,
+      priceBandsSource: scanResult.priceBands?.source || null,
+      marketStanding: scanResult.contract?.actionAuthority?.marketStanding || null,
+      soldCompCount: typeof scanResult.soldComps?.length === "number" ? scanResult.soldComps.length : null,
+      activeCompCount: typeof scanResult.comps?.count === "number" ? scanResult.comps.count : null,
+      totalCompCount: typeof scanResult.rawComps?.count === "number" ? scanResult.rawComps.count : null,
+      verifiedCompCount: null,
+      matchConfidenceTier: scanResult.matchConfidence?.tier || null,
+      matchConfidenceScore: typeof scanResult.matchConfidence?.score === "number" ? scanResult.matchConfidence.score : null,
+    } : {};
+    const identity = {
+      observedTitle: scanResult?.title || resultTitle || null,
+      observedIssue: scanResult?.issue || null,
+      observedPublisher: scanResult?.publisher || null,
+      observedYear: scanResult?.year || null,
+      observedVariant: scanResult?.variant || null,
+      observedGrade: scanResult?.grade || resultGrade || null,
+    };
+
     const entry = {
       ts,
       title: resultTitle || "Unknown",
@@ -2576,7 +2682,7 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, o
       marketValue: marketValue || 0,
       bidPrice: bidNum || 0,
       budget: budgetNum || 0,
-      netProfit: netProfit != null ? Math.round(netProfit * 100) / 100 : 0,
+      netProfit: roundedNetProfit ?? 0,
       // Economics inputs snapshotted at decision time, plus the recommendation
       // itself — recordActualPurchasePrice() only ever adds fields to this
       // same entry later, never overwrites any of these.
@@ -2584,20 +2690,59 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, o
       supplies,
       labor,
       targetProfit,
-      maxBuy: maxBuy != null ? Math.round(maxBuy * 100) / 100 : null,
+      maxBuy: roundedMaxBuy,
       decision,
+      // GRAILKEY DURABLE BUYER DECISION LEDGER V1 — the exact payload
+      // shape /api/buyer-decision expects, sent as-is on both the
+      // initial attempt (below) and any later retry
+      // (retryPendingBuyerDecisions) — one payload shape, never two.
+      sessionId: getBuyerSessionId(),
+      ...identity,
+      marketValueAmount: marketValue || 0,
+      marketValueCurrency: "USD",
+      contemplatedPriceAmount: bidNum || 0,
+      suppliesAmount: supplies,
+      laborAmount: labor,
+      targetProfitAmount: targetProfit,
+      maxBuyAmount: roundedMaxBuy,
+      netProfitAmount: roundedNetProfit,
+      ...provenance,
+      idempotencyKey: `buyer-decision-${crypto.randomUUID()}`,
+      _syncStatus: "pending",
+      _durableId: null,
     };
+    // Local record ALWAYS succeeds first, independent of network — a
+    // BUY or PASS taken in hand is never at risk because the server
+    // happens to be unreachable.
     saveSession(entry);
     setLogged(true);
     setLoggedTs(ts);
     setLoggedDecision(decision);
     if (onLogSession) onLogSession(entry);
+
+    // Durable server append — best-effort. Success re-tags the local
+    // record _syncStatus:'synced'; failure leaves it 'pending', exactly
+    // as saveSession() already set it, for retryPendingBuyerDecisions()
+    // on the next authenticated reconnect. Local success above is never
+    // represented as durable-server success when it isn't.
+    syncBuyerDecisionEntry(entry);
   };
 
   const saveActualPurchasePrice = () => {
     const parsed = parseFloat(actualPriceInput);
     if (!loggedTs || isNaN(parsed) || parsed < 0) return;
-    if (recordActualPurchasePrice(loggedTs, parsed)) setActualPriceSaved(true);
+    if (!recordActualPurchasePrice(loggedTs, parsed)) return;
+    setActualPriceSaved(true);
+    // A separate, later, independent fact — never rewrites the decision
+    // row, never rewrites MAX BUY, never rewrites valuation provenance
+    // (buyer_acquisition_event has no column that could even express any
+    // of those, by construction — see db/data0/0027's own structural
+    // proof). Syncs only if the parent decision already has a durable id;
+    // otherwise retryPendingBuyerDecisions() picks it up once it does.
+    const acquisitionIdempotencyKey = `buyer-acquisition-${crypto.randomUUID()}`;
+    updateBuyerSessionSyncFields(loggedTs, { _acquisitionSyncStatus: "pending", _acquisitionIdempotencyKey: acquisitionIdempotencyKey });
+    const fresh = getSessions().find((s) => s.ts === loggedTs);
+    if (fresh) syncBuyerAcquisitionEntry(fresh);
   };
 
   const updateSetting = (k, v) => setSettings((s) => ({ ...s, [k]: v }));
@@ -10756,6 +10901,9 @@ export default function App() {
       await retryPendingCollectionItems(localItems);
       const items = await getAllComics();
       setCatalogue(items.map(normalizeItem));
+      // GRAILKEY DURABLE BUYER DECISION LEDGER V1 — same authenticated-
+      // reconnect trigger, same "never block, best-effort" contract.
+      await retryPendingBuyerDecisions();
     })();
   }, [grailkeyAuthed]);
 
@@ -14269,7 +14417,7 @@ export default function App() {
               >
                 <ResultCard result={result} enriching={enriching} />
               </CardErrorBoundary>
-              <BidCalculator marketValue={marketValue} detectedPrice={result?.detectedPrice} resultTitle={result?.title} resultGrade={result?.grade} />
+              <BidCalculator marketValue={marketValue} detectedPrice={result?.detectedPrice} resultTitle={result?.title} resultGrade={result?.grade} scanResult={result} />
               <button className="reset-btn" onClick={reset}>Scan another</button>
             </>
           )}

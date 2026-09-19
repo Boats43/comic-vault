@@ -1,142 +1,170 @@
 -- =====================================================================
--- 0027 -- Buyer Decision Ledger (DESIGN DRAFT, NOT APPLIED)
+-- 0027 -- Buyer Decision Ledger (FINALIZED, real canonical migration)
 -- =====================================================================
--- GRAILKEY — BUYER DECISION DURABILITY + AUTOMATIC OUTCOME INGESTION,
--- item 2. DESIGN-ONLY ARTIFACT: not applied to data1_dev or any database
--- as part of this dispatch. No application-layer writer exists yet
--- (App.jsx's BidCalculator still writes only to localStorage,
--- SESSIONS_KEY='cv_buyer_sessions' — see this dispatch's own storage
--- trace, docs/TICKET-REGISTRY.md). This file names the smallest addition
--- that would make Buyer Mode decisions durable and cross-device, and
--- explains why none of the four existing asset-scoped event tables can
--- be reused as-is.
+-- GRAILKEY — DURABLE BUYER DECISION LEDGER V1. Supersedes the prior
+-- 0027 design-draft text (banked in git history at commit 0356ba3) with
+-- the finalized schema this dispatch's own instruction requires. Applied
+-- fresh to Development first (proof), then Production, per this
+-- dispatch's own migration discipline -- see the apply scripts and
+-- verification report cited in docs/TICKET-REGISTRY.md.
 --
--- WHY NO EXISTING TABLE FITS (checked against the real, live schema, not
--- assumed): acquisition_event, valuation_event, decision_event (0004) and
--- outcome_event (0023) are ALL declared `asset_id UUID NOT NULL
--- REFERENCES gk_asset(id)` / `gk_asset_id UUID NOT NULL REFERENCES
--- gk_asset(id)`. Every one of them requires a real, already-minted
--- physical asset to attach to. Buyer Mode decisions are evaluations of
--- something the operator does NOT yet own -- by definition, no gk_asset
--- exists at the moment "BUY" or "PASS" is logged. domain_event (0004)
--- has no such FK and is schema-permissive, but it is documented and used
--- throughout this schema as a derivative ENVELOPE that mirrors other
--- primary event tables' writes (Ruling 21's "envelope linkage") -- it is
--- not itself a primary store for a new record class. Treating it as one
--- here would be exactly the kind of silent doctrine stretch this
--- project's standing rules warn against. This is therefore a genuine,
--- disclosed schema gap, not a wiring gap.
+-- WHY NO EXISTING TABLE FITS (restated from the prior draft, still true):
+-- acquisition_event, valuation_event, decision_event (0004) and
+-- outcome_event (0023) are ALL `asset_id`/`gk_asset_id NOT NULL
+-- REFERENCES gk_asset(id)`. Buyer Mode decisions are evaluations of
+-- something the operator does NOT yet own -- no gk_asset exists at
+-- BUY/PASS time. domain_event has no such FK but is a documented
+-- derivative envelope over primary events, not a primary store for a new
+-- record class. This is a genuine, disclosed schema gap.
+--
+-- BUY AND PASS ARE EQUALLY DURABLE (this dispatch's own explicit
+-- instruction): decision has exactly two values, BUY and PASS, and
+-- nothing in this schema treats one as more first-class than the other
+-- -- both are ordinary rows in the same append-only table. A PASS is a
+-- real economic observation (e.g. "MAX BUY $44, seller asked $60,
+-- passed") and is preserved with the identical fidelity as a BUY,
+-- including full valuation provenance.
 --
 -- APPEND-ONLY LAW (binding, same as every other table in this
 -- directory): "history appends; current state derives" (0006's own
--- binding law, restated here because it directly shapes this design). A
--- recommendation and a later-recorded actual purchase price are TWO
--- separate facts that arrive at different times -- they are therefore
--- TWO separate immutable rows in TWO tables, never one row that gets a
--- column filled in later. This mirrors ownership_event/current_owner and
--- deliberately does NOT mirror this dispatch's own browser-local
--- shortcut (src/App.jsx's recordActualPurchasePrice(), which does merge
--- a field onto an existing localStorage session entry) -- that shortcut
--- is acceptable for ephemeral, single-device, non-durable browser
--- storage; it is NOT the correct pattern for a durable kernel table, and
--- this design does not carry it over.
+-- binding law). A recommendation (buyer_decision_event) and a
+-- later-recorded actual acquisition (buyer_acquisition_event) are two
+-- facts that arrive at different times -- they are therefore two
+-- separate immutable rows in two tables, never one row mutated in place.
+-- This deliberately does NOT mirror src/App.jsx's own browser-local
+-- shortcut (recordActualPurchasePrice(), which merges a field onto an
+-- existing localStorage entry) -- that shortcut remains acceptable for
+-- ephemeral, single-device, non-durable browser storage; it is not
+-- carried into this durable kernel table. No UPDATE statement against
+-- either table is part of this design; no application code in this
+-- dispatch issues one.
 --
--- SCOPE: schema only. No writer, no API endpoint, no App.jsx wiring to
--- this table exists in this dispatch. Bringing Buyer Mode's real
--- localStorage sessions durable (cross-device, queryable, feeding future
--- economic learning) is a separate, later, explicitly-gated pass -- named
--- here, not built here, matching the same discipline GK-203 itself used
--- when it deferred Finances-API fee ingestion out of its own scope.
+-- VALUATION PROVENANCE (this dispatch's own explicit instruction --
+-- "do not store only the final number, persist enough evidence to later
+-- judge the quality of the recommendation"). Every provenance column
+-- below is sourced from a field the pricing system ALREADY exposes on
+-- the scan result object (out.pricingSource, out.priceBands.source,
+-- out.rawComps.count, out.soldComps.length, out.comps.count,
+-- out.matchConfidence.tier/.score, and src/lib/actionAuthority.js's
+-- deriveMarketStanding(out) -- EXACT_CURRENT / EXACT_STALE /
+-- SIMILAR_ONLY, the exact axis GK-212's Hulk #273 finding showed can
+-- diverge from a card's displayed comp count). verified_comp_count is
+-- included in the schema because the instruction requires the *column*
+-- to exist for future use, but the pricing system does not currently
+-- compute or expose any such figure anywhere (confirmed by grep across
+-- api/enrich.js, api/comps.js, responseContract.js -- no field named
+-- anything resembling "verified comp count" exists) -- every writer in
+-- this dispatch passes NULL for it, disclosed rather than invented. All
+-- provenance columns are nullable for the same reason: a given scan may
+-- not have reached pricing at all (e.g. ID_REQUIRED), and this table
+-- must still accept the decision without fabricating evidence that was
+-- never computed.
 -- =====================================================================
 
 SET search_path TO data1_dev;
 
 -- ---------------------------------------------------------------------
--- buyer_decision_event -- one immutable row per BUY/PASS evaluation.
--- Pre-asset by definition: gk_asset_id is nullable and NOT required --
--- most rows will never acquire one. IF the evaluated item is later
--- actually captured as a real physical asset, a future (not this
--- dispatch's) process may populate gk_asset_id on a NEW row's own write
--- path is not applicable here since this row is immutable once written;
--- linking a buyer decision to a later-minted asset, if ever needed, is a
--- named open item, not solved by mutating this row.
+-- buyer_decision_event -- one immutable row per committed BUY or PASS
+-- evaluation. Pre-asset by definition: gk_asset_id is nullable and not
+-- required -- most rows will never acquire one. session_id is a client-
+-- minted correlation UUID grouping decisions made within one Buyer Mode
+-- browsing session; it is NOT a foreign key to any session/auth table
+-- (no such table exists), purely a grouping value.
 -- ---------------------------------------------------------------------
 CREATE TABLE buyer_decision_event (
   id                             UUID PRIMARY KEY,          -- uuidv7(), minted explicitly (ADR-ID-001)
   principal_id                   UUID NOT NULL REFERENCES gk_principal(id),  -- who evaluated
+  session_id                     UUID NOT NULL,              -- client-minted correlation id, groups decisions in one Buyer Mode session
   gk_asset_id                    UUID REFERENCES gk_asset(id),  -- nullable: pre-asset by definition, see header
 
-  observed_title                 TEXT,           -- nullable: identification may be partial/unresolved at buy time
-  observed_grade                 TEXT,
+  -- Observed identity snapshot -- whatever the pipeline had resolved at
+  -- decision time, all nullable (identity may be partial/unresolved).
+  observed_title                 TEXT,
+  observed_issue                 TEXT,
+  observed_publisher             TEXT,
+  observed_year                  TEXT,
+  observed_variant                TEXT,
+  observed_grade                  TEXT,
 
-  market_value_amount            NUMERIC(12,2) NOT NULL,
-  market_value_currency          TEXT NOT NULL DEFAULT 'USD',
+  market_value_amount             NUMERIC(12,2) NOT NULL,
+  market_value_currency            TEXT NOT NULL DEFAULT 'USD',
 
-  -- Economics inputs, snapshotted at decision time (mirrors
-  -- src/lib/maxBuyCalculator.js's own inputs exactly -- this table is a
-  -- durable projection of that same, already-shipped math, never a
-  -- second/parallel model).
-  fee_pct                        NUMERIC(7,3) NOT NULL,
-  supplies_amount                NUMERIC(12,2) NOT NULL,
-  labor_amount                   NUMERIC(12,2) NOT NULL,
-  target_profit_amount           NUMERIC(12,2) NOT NULL,
+  contemplated_price_amount        NUMERIC(12,2) NOT NULL,  -- seller ask / contemplated acquisition price at decision time
+
+  -- Economics inputs, snapshotted at decision time -- mirrors
+  -- src/lib/maxBuyCalculator.js's own inputs exactly, a durable
+  -- projection of that already-shipped math, never a second model.
+  fee_pct                          NUMERIC(7,3) NOT NULL,
+  supplies_amount                  NUMERIC(12,2) NOT NULL,
+  labor_amount                     NUMERIC(12,2) NOT NULL,
+  target_profit_amount             NUMERIC(12,2) NOT NULL,
 
   -- max_buy_amount is nullable: computeMaxBuy() can be valid but
   -- unachievable (negative) -- the true, possibly-negative value is
-  -- preserved here exactly as the calculator computed it, never clamped.
-  max_buy_amount                 NUMERIC(12,2),
+  -- preserved exactly as computed, never clamped to zero here.
+  max_buy_amount                   NUMERIC(12,2),
+  net_profit_amount                 NUMERIC(12,2),           -- computeNetProfit() at decision time
 
-  contemplated_price_amount      NUMERIC(12,2) NOT NULL,  -- the bid/ask evaluated against
-  net_profit_amount              NUMERIC(12,2),           -- computeNetProfit() at decision time
+  decision                          TEXT NOT NULL CHECK (decision IN ('BUY', 'PASS')),
 
-  decision                       TEXT NOT NULL CHECK (decision IN ('BUY', 'PASS')),
+  -- Valuation provenance -- see header. All nullable; UNKNOWN is stored
+  -- as SQL NULL, never as a fabricated value.
+  pricing_source                    TEXT,        -- out.pricingSource, raw token (src/lib/sourceLabels.js's own domain)
+  price_bands_source                TEXT,        -- out.priceBands.source, raw token
+  market_standing                   TEXT CHECK (market_standing IS NULL OR market_standing IN ('EXACT_CURRENT', 'EXACT_STALE', 'SIMILAR_ONLY')),
+  sold_comp_count                   INT,         -- out.soldComps.length
+  active_comp_count                 INT,         -- out.comps.count
+  total_comp_count                  INT,         -- out.rawComps.count (the pool actually behind the price)
+  verified_comp_count               INT,         -- NEVER populated in this dispatch -- no such figure exists yet, see header
+  match_confidence_tier             TEXT,        -- out.matchConfidence.tier, raw value, no re-derivation
+  match_confidence_score            NUMERIC(6,2),-- out.matchConfidence.score
 
-  occurred_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  recorded_by_principal_id       UUID NOT NULL REFERENCES gk_principal(id),
+  occurred_at                       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  recorded_by_principal_id          UUID NOT NULL REFERENCES gk_principal(id),
 
-  -- First-party idempotency (same class-wide law as every Asset Service
-  -- writer, GK-163) -- a future writer would need this to make a
-  -- repeated client-side sync safe; named here rather than added later,
-  -- since the whole point of this table is durability, and durability
-  -- without idempotency reintroduces exactly the duplicate-write risk
-  -- this project has repeatedly had to close elsewhere.
-  idempotency_namespace          TEXT NOT NULL,      -- e.g. 'buyer-mode-sync'
-  idempotency_key                TEXT NOT NULL
+  -- First-party idempotency (class-wide law, GK-163) -- mobile/network
+  -- retries of the same commit must never create a second row.
+  idempotency_namespace             TEXT NOT NULL,      -- 'buyer-decision-sync'
+  idempotency_key                   TEXT NOT NULL
 );
 CREATE UNIQUE INDEX ON buyer_decision_event (idempotency_namespace, idempotency_key);
 CREATE INDEX ON buyer_decision_event (principal_id, occurred_at);
+CREATE INDEX ON buyer_decision_event (session_id);
 CREATE INDEX ON buyer_decision_event (gk_asset_id) WHERE gk_asset_id IS NOT NULL;
 
 -- ---------------------------------------------------------------------
 -- buyer_acquisition_event -- one immutable row per actual-purchase-price
--- fact, recorded independently and possibly much later than the
--- decision it corresponds to. NEVER a column added to
--- buyer_decision_event -- see the append-only law in this file's header.
--- A buyer_decision_event may have zero, one acquisition row (the normal
--- case: BUY, then the operator later records what they actually paid)
--- -- more than one would represent a correction, itself just another
--- appended row, never an edit of a prior one.
+-- fact, recorded independently and possibly later than the decision it
+-- corresponds to. NEVER a column update on buyer_decision_event -- see
+-- the append-only law in this file's header. gk_asset_id here is the
+-- OPTIONAL later link if/when the purchased item becomes a real durable
+-- physical asset (capture is a separate, unrelated process -- this
+-- column is populated only if a future, out-of-scope-for-this-dispatch
+-- process chooses to set it; nothing in this dispatch writes it).
 -- ---------------------------------------------------------------------
 CREATE TABLE buyer_acquisition_event (
   id                             UUID PRIMARY KEY,
   buyer_decision_event_id        UUID NOT NULL REFERENCES buyer_decision_event(id),
   actual_purchase_price_amount   NUMERIC(12,2) NOT NULL,
   actual_purchase_currency       TEXT NOT NULL DEFAULT 'USD',
-  occurred_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the purchase itself happened, if known; defaults to recording time otherwise
+  gk_asset_id                    UUID REFERENCES gk_asset(id),  -- nullable, optional, see above
+  occurred_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
   recorded_by_principal_id       UUID NOT NULL REFERENCES gk_principal(id),
 
-  idempotency_namespace          TEXT NOT NULL,
+  idempotency_namespace          TEXT NOT NULL,      -- 'buyer-acquisition-sync'
   idempotency_key                TEXT NOT NULL
 );
 CREATE UNIQUE INDEX ON buyer_acquisition_event (idempotency_namespace, idempotency_key);
 CREATE INDEX ON buyer_acquisition_event (buyer_decision_event_id, occurred_at);
 
 -- Open items, named not solved here:
---   * No FK/mechanism links a buyer_decision_event to the gk_asset later
---     minted from it, beyond the nullable gk_asset_id column above,
---     which nothing populates automatically -- a future capture-time
---     lookup (e.g. by observed_title + occurred_at proximity) is a named
---     idea, not a design.
---   * No server API endpoint, no client sync/writer, no App.jsx wiring.
---     Buyer Mode's real decisions remain localStorage-only until a later,
---     explicitly-gated pass builds and authorizes that sync.
+--   * No mechanism auto-populates gk_asset_id on either table -- both
+--     stay NULL unless/until a future process explicitly links them.
+--   * verified_comp_count has no real writer anywhere -- named for
+--     future use, always NULL today.
+--   * No trigger enforces "at most one buyer_acquisition_event per
+--     buyer_decision_event" -- more than one would represent an
+--     operator correction and is legal (itself just another appended
+--     row, never an edit of a prior one); the API layer's own
+--     idempotency law prevents an accidental duplicate of the SAME
+--     fact, not a legitimate second, different fact.
