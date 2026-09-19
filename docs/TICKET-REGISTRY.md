@@ -293,6 +293,156 @@ structurally separate from doctrine.
   vouching for something it doesn't measure). **Promote to doctrine only if
   books 16–50 produce an independent second instance.**
 
+## GK-226 — Certification #1 prep closeout: photo-persistence trace + $0.00 valuation root-cause and fix
+
+**Context.** Ahead of "GRAILKEY — PRODUCTION ECONOMIC LOOP CERTIFICATION #1"
+(target asset: Old Man Logan #25, gkAssetId
+`01a0bb24-c806-7a63-aa86-ce26fe8eed83`), that dispatch's own preflight
+(§2) surfaced two open questions the certification could not proceed past:
+a single-photo packet where Jimmy believed he had added Back/Spine/Pages
+photos, and a durable `valuation_event.value_amount` of `0.00` against a
+real current Market price of `$15.28`. This ticket is the dedicated
+investigation-and-fix dispatch for both.
+
+**1. Photo-persistence trace.**
+
+Traced the full path: add-photo UI (`src/App.jsx`'s `addPhotoToComic`) →
+local IndexedDB (`putComic`, always succeeds, unconditional) →
+`persistCollectionItem` (`src/lib/collectionPersistence.js`, local-first,
+best-effort server push, never silently swallows — failure leaves
+`_syncStatus:'pending'` for retry, success re-tags `'synced'`) →
+`pushCollectionItem` (`src/lib/collectionSync.js`, sends the FULL
+`images` array, not just the new photo) → `api/collection.js` (uploads
+each `data:` URL through the media module's raw content-addressed `put()`
+primitive, writes the resulting URIs into
+`collection_item.attributes.remoteImages`) → durable `collection_item`
+row.
+
+**Two independent findings, neither a live reproducible code bug:**
+
+- **Architectural gap:** `api/collection.js`'s `mediaPut()` call is the
+  SAME underlying primitive (`src/modules/media/index.js`'s `put()`) used
+  everywhere, but it is a pure content-addressed blob-store write — it
+  never inserts a `data1_dev.media` row. The physical-asset kernel's
+  `media` table (the one GK-207/LIST-preflight photo-completeness
+  reasoning would need to inspect) is written ONLY by
+  `src/modules/assets/service.js`'s `attachMedia()`, called exclusively
+  from `src/modules/capture/service.js`'s `captureFromScan` — i.e., only
+  at the ONE original capture moment (GK-218's "Capture as Owned Physical
+  Asset" button). There is currently no code path to append MORE
+  physical-asset kernel media after that single capture. Ordinary
+  "Add Photo" only ever feeds the catalogue layer
+  (`collection_item.attributes.remoteImages`), never the kernel. This is
+  a real, disclosed capability gap — not something patched in this
+  investigation-scoped dispatch — and it means even a successful catalogue
+  sync of Back/Spine/Pages photos would NOT become durable physical-asset
+  evidence under the current architecture. Decision on whether to (a)
+  treat collection-layer photos as sufficient certification evidence, or
+  (b) build a kernel-media-append capability, is Jimmy's, not made here.
+
+- **No evidence any extra photo ever reached Production for this or any
+  item.** Direct census of all 17 `collection_item` rows belonging to this
+  principal (`95b42d2e-a1d8-47de-904e-798122731b08`) in real Production:
+  every row's `photo_count` (via `jsonb_array_length(remoteImages)`) is 0
+  or 1, none higher; Old Man Logan #25's own row shows `updated_at`
+  (`2026-09-19T19:28:45.843Z`) essentially unchanged from `created_at`
+  (`2026-09-19T19:28:40.711Z`, ~5s apart) — no later session ever wrote to
+  it again. Cross-checked against real Vercel runtime error logs
+  (`get_runtime_errors`, 7-day window): the ONE real `/api/collection`
+  media-upload error on record (`Vercel Blob: Cannot use public access on
+  a private store`) occurred at `2026-09-19T02:38:53Z` — before both the
+  documented fix (api/collection.js's own header comment) and before this
+  asset's capture (`19:29:04Z`) — and zero `/api/collection` or media-write
+  errors appear anywhere after that. If Jimmy did add Back/Spine/Pages
+  photos in the UI, the most likely explanation given this evidence is
+  that the push never reached the network at all (e.g., an auth-token
+  condition causing `authFetch` to return null client-side before any
+  request, which produces no server-side trace) and the record is sitting
+  locally with `_syncStatus:'pending'`, not yet retried since (retry only
+  fires on a fresh authenticated mount/reconnect, per
+  `collectionPersistence.js`'s own documented contract) — or the photos
+  were never completed to that point in this authenticated session.
+  **Not fabricated either way — this is a real gap in what can be proven
+  from server-side evidence alone; Jimmy's own local device state is the
+  only way to resolve it (reload the app to trigger a retry, or re-add the
+  photos and watch for a visible error).**
+
+**2. $0.00 valuation root cause — CONFIRMED, code bug, FIXED (`7bfa40b`).**
+
+`GrailKeyOperatorPanel.jsx`'s `captureAsOwnedAsset()` built the capture
+payload with:
+```js
+price: item.price != null ? `$${Number(item.price).toFixed(2)}` : null
+```
+`item.price` is a dollar-formatted STRING throughout this codebase
+(`api/enrich.js`'s `fmtUsd()`, e.g. `"$15.28"` — confirmed live in
+`collection_item.attributes.price` for this exact asset). `Number("$15.28")`
+evaluates to `NaN` (the `Number()` constructor does not strip currency
+symbols); `NaN.toFixed(2)` is the string `"NaN"`; the resulting
+`outcome.price` sent to `/api/capture-scan` was the string `"$NaN"`. This
+is non-empty, so `src/modules/capture/mapping.js`'s `hasValuation()`
+(`!!(scanPayload.outcome && scanPayload.outcome.price)`, a bare
+truthiness check) let it through — a `valuation_event` WAS created, not
+skipped — but `mapValuation()`'s parse
+(`Number(String(price).replace(/[^0-9.]/g, ''))`) strips every non-digit
+character, including the letters "N" and "a" right along with the "$",
+leaving an empty string, and `Number('')` is `0`. This is the exact,
+reproduced, end-to-end cause of Old Man Logan #25's durable
+`valuation_event.value_amount = 0.00` row (recorded
+`2026-09-19T19:29:09.406Z`) despite a real, contemporaneous
+`collection_item.attributes.price` of `$15.28`.
+
+**Fix:** extracted the price-mapping into a new pure helper,
+`src/lib/captureOutcomeMapping.js`'s `buildCaptureOutcomePrice(item)`,
+which reuses the EXISTING `parsePriceNumber` helper
+(`src/lib/responseContract.js`) already used elsewhere in this app for
+this exact `"$X.XX"` string shape. `GrailKeyOperatorPanel.jsx` now calls
+this helper instead of the raw `Number()` conversion.
+
+**Test-hygiene finding along the way:** the existing
+`tests/grailkey-operator-panel-capture-wiring.test.js` had unknowingly
+masked this exact bug — its own `buildRequestBody()` test helper
+duplicated the broken inline formula rather than importing the real
+component logic, AND used an unrealistic raw-number price fixture
+(`42.5`) instead of the real dollar-string shape (`Number(42.5)` is a
+valid number, so the bug never manifested in that fixture). Fixed: the
+test now imports the real `buildCaptureOutcomePrice` and uses realistic
+`"$X.XX"`-string fixtures throughout, plus a new assertion that the real
+minted asset's durable `value_amount` is non-zero.
+
+**Proof:** new `tests/gk226-capture-outcome-price.test.js` (11/11, pure
+function, no DB) reproduces the exact `"$NaN"` → `0` chain step-by-step
+and proves the fix, including edge cases (null price, missing price,
+genuinely-zero price preserved as `$0.00` rather than conflated with
+null). `tests/grailkey-operator-panel-capture-wiring.test.js` re-run
+clean against real Development (18/18, was 16/16) — including the new
+non-zero `value_amount` assertion (`42.50`, not `0.00`) on a real minted
+asset. Full regression (`capture-module-boundary.test.js`,
+`capture-scan-endpoint-h8-gate-proof.test.js`) re-run clean, unaffected.
+`npm run build` clean (ESM-mode check + `vite build`). Committed
+(`7bfa40b`) and pushed; Production deployment
+`dpl_5N39hCY2dagkQ53YAtx4F5RB94P7` confirmed READY, exact SHA match, live
+on `comic-vault-rouge.vercel.app`.
+
+**Not done this pass — explicitly disclosed, not silently skipped:**
+appending a corrected CURRENT valuation_event for Old Man Logan #25 itself
+(using the existing `recordValuation` mechanism, preserving the historical
+`$0.00` row untouched, per the dispatch's own §2 instruction) was prepared
+— exact payload dry-run reviewed
+(`gkAssetId 01a0bb24-c806-7a63-aa86-ce26fe8eed83`, `valueAmount: 15.28`,
+`method: 'engine-computed'`, `gradeAssumption: 'NM 9.2'`,
+`buildSha: 'GK-226-manual-valuation-correction-2026-09-20'`,
+`idempotencyKey: 'gk226-oml25-valuation-correction-2026-09-20'`) — but
+execution was blocked by the harness's own auto-mode classifier
+("Modify Shared Resources", a real Production DB write). This mirrors the
+same classifier behavior previously seen blocking the 0015/0016 live-apply
+(D5B dispatch, resolved that time by manual execution). Requires either an
+explicit Bash permission grant or manual execution by Jimmy to complete.
+No pricing math, grading, inventory, or eBay code touched. Old Man Logan
+#25 remains UNMANAGED, zero inventory transitions, zero operator actions,
+zero outcomes — untouched by this dispatch beyond the historical valuation
+row's root-cause (not yet corrected).
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.
