@@ -11,6 +11,24 @@
 // mutated by this panel. Clicking LIST/HOLD/PASS only ever creates a new
 // operator_action_event via the existing /api/operator-action endpoint —
 // this dispatch does not call eBay or write any marketplace/outcome row.
+//
+// GRAILKEY — FINAL CAPTURE-PATH WIRING (2026-09-19). Before this pass, the
+// entire Scan/grade/save pipeline (gradeBlob/addToCatalogue/
+// persistCollectionItem, src/App.jsx) never called /api/capture-scan at
+// all — confirmed by grep, zero references anywhere in the frontend.
+// Every catalogue item, regardless of how it was scanned, was structurally
+// incapable of minting a durable gkAssetId. This is the ONLY place that
+// changes: when NO durable asset is linked yet (state.status === 'none',
+// below), this panel renders one explicit, clearly-labeled button —
+// "Capture as Owned Physical Asset" — instead of returning null. Tapping
+// it is the ENTIRE mint/don't-mint decision point in this codebase: never
+// inferred from image source, camera vs. upload, file origin, screenshot
+// metadata, presence/absence of photos, whether the original scan
+// succeeded, or any default-open branch. The scan/grade/save pipeline
+// itself is completely untouched — a reference/quick-lookup scan that is
+// never brought to THIS panel and THIS button can structurally never
+// reach /api/capture-scan; there is no other code path in the frontend
+// that calls it.
 
 import { useEffect, useState, useCallback } from "react";
 import { authFetch, isAuthenticated, getPrincipalScope } from "../lib/grailkeySession.js";
@@ -25,6 +43,50 @@ import {
 const ACTIONS = ["LIST", "HOLD", "PASS"];
 const REQUEST_TIMEOUT_MS = 15000;
 
+// Capture idempotency: same lifecycle rule as operatorActionIdempotency.js
+// (persist BEFORE the request, retire only on a definitive response,
+// retain on anything ambiguous so a retry safely replays instead of
+// double-minting) — a small, dedicated, per-collectionItemId key holder
+// rather than reusing that module's own key shape, which is keyed by
+// {gkAssetId, decisionEventId, actionCode} and doesn't fit "before any
+// gkAssetId exists yet."
+const CAPTURE_KEY_PREFIX = "grailkey_capture_pending_v1:";
+
+function getOrCreateCaptureIdempotencyKey(collectionItemId) {
+  const storageKey = CAPTURE_KEY_PREFIX + collectionItemId;
+  try {
+    const existing = localStorage.getItem(storageKey);
+    if (existing) return existing;
+    const fresh = (crypto.randomUUID ? crypto.randomUUID() : `${collectionItemId}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    localStorage.setItem(storageKey, fresh);
+    return fresh;
+  } catch {
+    // localStorage unavailable — fall back to a one-shot key; retry-safety
+    // is best-effort in that case, never a reason to block the action.
+    return (crypto.randomUUID ? crypto.randomUUID() : `${collectionItemId}-${Date.now()}`);
+  }
+}
+
+function retireCaptureIdempotencyKey(collectionItemId) {
+  try {
+    localStorage.removeItem(CAPTURE_KEY_PREFIX + collectionItemId);
+  } catch {
+    // no-op
+  }
+}
+
+// Strips a data: URL down to pure base64 — api/capture-scan.js decodes
+// photos[i].bytes with Buffer.from(bytes, 'base64'), which requires the
+// bare payload, not the data: URL wrapper.
+function stripDataUrlPrefix(dataUrl) {
+  const idx = dataUrl.indexOf(",");
+  return idx === -1 ? dataUrl : dataUrl.slice(idx + 1);
+}
+function contentTypeFromDataUrl(dataUrl) {
+  const m = dataUrl.match(/^data:([^;,]+)/);
+  return m ? m[1] : "image/jpeg";
+}
+
 function formatPendingAge(createdAt) {
   const mins = Math.round(pendingAgeMs(createdAt) / 60000);
   if (mins < 1) return "moments ago";
@@ -34,12 +96,17 @@ function formatPendingAge(createdAt) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-export default function GrailKeyOperatorPanel({ collectionItemId }) {
+export default function GrailKeyOperatorPanel({ collectionItemId, item, photos }) {
   const [state, setState] = useState({ status: "loading" }); // loading | none | found | error
   const [submitting, setSubmitting] = useState(null); // which actionCode is in flight
   const [lastResult, setLastResult] = useState(null); // { actionCode, operatorActionEventId }
   const [actionError, setActionError] = useState(null);
   const [ambiguousNotice, setAmbiguousNotice] = useState(null);
+  // Mint/don't-mint — see this file's own header. 'idle' | 'capturing' |
+  // { error } | { ambiguous: true }. A successful capture doesn't set its
+  // own "success" state — it just re-runs load() (below), which finds the
+  // newly-linked asset and transitions this whole panel to status:'found'.
+  const [captureState, setCaptureState] = useState("idle");
   // H8 (Milestone Ten operator proof) — on-demand only, never fetched
   // automatically: 'idle' | 'loading' | { gkAssetId, mediaId, byteLength }
   // | { error }. Reuses the SAME two existing read-only, authenticated
@@ -74,7 +141,112 @@ export default function GrailKeyOperatorPanel({ collectionItemId }) {
 
   useEffect(() => { load(); }, [load]);
 
-  if (state.status === "loading" || state.status === "none") return null;
+  // Mint/don't-mint — the ENTIRE decision point. See this file's own
+  // header. Requires: a real collectionItemId, a real authenticated
+  // session, and a real LOCAL photo on THIS device (item.images/item.image
+  // — never a synced remoteImages proxy path from another device, which
+  // is display evidence, not this device's own capture). scanPayload is
+  // built from already-computed, already-displayed catalogue fields —
+  // this reads existing grading/pricing output, it never recomputes or
+  // changes any of it.
+  async function captureAsOwnedAsset() {
+    if (captureState === "capturing" || !collectionItemId || !item) return;
+    const localPhoto = (item.images && item.images[0]) || item.image || null;
+    if (!localPhoto || typeof localPhoto !== "string" || !localPhoto.startsWith("data:")) {
+      setCaptureState({ error: "No local photo on this device for this item — capture requires this device's own photo, not a synced reference image." });
+      return;
+    }
+    setCaptureState("capturing");
+    const idempotencyKey = getOrCreateCaptureIdempotencyKey(collectionItemId);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS * 4); // photo upload, allow more time
+    try {
+      const scanPayload = {
+        correlationId: idempotencyKey,
+        collectionItemId,
+        book: {
+          title: item.title || null,
+          issue: item.issue || null,
+          year: item.year || null,
+        },
+        outcome: {
+          decisionAction: item.decision?.action || null,
+          pricingSource: item.pricingSource || null,
+          price: item.price != null ? `$${Number(item.price).toFixed(2)}` : null,
+          gradeMultiplier: item.gradeMultiplier ?? null,
+        },
+      };
+      const res = await authFetch("/api/capture-scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scanPayload,
+          photos: [{ bytes: stripDataUrlPrefix(localPhoto), contentType: contentTypeFromDataUrl(localPhoto), captureRole: "capture-photo" }],
+          idempotencyKey,
+        }),
+        signal: controller.signal,
+      });
+      if (!res) {
+        setCaptureState({ error: "Not signed in." });
+        return;
+      }
+      if (!isDefinitiveResponseStatus(res.status)) {
+        setCaptureState({ ambiguous: true });
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Definitive failure (e.g. the H8 gate's own 403, or a real
+        // validation error) — safe to retire the key, a fresh retry
+        // should mint fresh rather than replay a request that was
+        // itself rejected.
+        retireCaptureIdempotencyKey(collectionItemId);
+        setCaptureState({ error: body.detail || body.error || `Request failed (${res.status})` });
+        return;
+      }
+      retireCaptureIdempotencyKey(collectionItemId);
+      setCaptureState("idle");
+      await load(); // re-fetch — now finds the newly-linked asset, transitions to status:'found'
+    } catch {
+      setCaptureState({ ambiguous: true });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  if (state.status === "loading") return null;
+  if (state.status === "none") {
+    if (!collectionItemId || !item) return null;
+    return (
+      <div style={panelStyle}>
+        <div style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>
+          No durable GrailKey physical-asset record exists for this catalogue item.
+        </div>
+        <button
+          onClick={captureAsOwnedAsset}
+          disabled={captureState === "capturing"}
+          style={{
+            width: "100%", padding: "10px 0", borderRadius: 6,
+            border: "1px solid rgba(212,175,55,0.4)",
+            background: "transparent", color: "#d4af37", fontWeight: 700, fontSize: 13,
+            cursor: captureState === "capturing" ? "not-allowed" : "pointer",
+            opacity: captureState === "capturing" ? 0.6 : 1,
+          }}
+        >
+          {captureState === "capturing" ? "Capturing…" : "Capture as Owned Physical Asset"}
+        </button>
+        <div style={{ color: "#666", fontSize: 10, marginTop: 6 }}>
+          Mints a permanent GrailKey physical-asset record from this device's own photo. Never use this for a quick lookup or reference-only scan.
+        </div>
+        {captureState !== "idle" && captureState !== "capturing" && captureState.ambiguous && (
+          <div style={{ color: "#c9a227", fontSize: 12, marginTop: 6 }}>Could not confirm the result — outcome unknown. Tap again to safely retry; it will not create a duplicate.</div>
+        )}
+        {captureState !== "idle" && captureState !== "capturing" && captureState.error && (
+          <div style={{ color: "#e05656", fontSize: 12, marginTop: 6 }}>{captureState.error}</div>
+        )}
+      </div>
+    );
+  }
   if (state.status === "error") {
     return (
       <div style={panelStyle}>

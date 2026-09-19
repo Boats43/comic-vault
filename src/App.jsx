@@ -4272,7 +4272,7 @@ function CollectionDetail({
         )}
       </div>
 
-      <GrailKeyOperatorPanel collectionItemId={item.id} />
+      <GrailKeyOperatorPanel collectionItemId={item.id} item={item} photos={photos} />
 
       {/* 1. PHOTO STRIP */}
       <div
