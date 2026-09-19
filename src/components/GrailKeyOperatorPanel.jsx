@@ -40,6 +40,18 @@ export default function GrailKeyOperatorPanel({ collectionItemId }) {
   const [lastResult, setLastResult] = useState(null); // { actionCode, operatorActionEventId }
   const [actionError, setActionError] = useState(null);
   const [ambiguousNotice, setAmbiguousNotice] = useState(null);
+  // H8 (Milestone Ten operator proof) — on-demand only, never fetched
+  // automatically: 'idle' | 'loading' | { gkAssetId, mediaId, byteLength }
+  // | { error }. Reuses the SAME two existing read-only, authenticated
+  // endpoints this panel already calls (GET /api/assets and GET
+  // /api/asset-media) — no new backend surface, no write, no asset
+  // mutation. byteLength is the real length of the bytes actually
+  // retrieved through /api/asset-media (which itself streams
+  // media.getBytes()'s real result) — never a stored/hardcoded number;
+  // the media table has no byte-count column at all (confirmed against
+  // db/data0/0004_data1_foundation.sql + 0009's own content_type
+  // addition), so this is the only honest source for it.
+  const [h8Proof, setH8Proof] = useState("idle");
 
   const load = useCallback(async () => {
     if (!collectionItemId || !isAuthenticated()) {
@@ -159,6 +171,34 @@ export default function GrailKeyOperatorPanel({ collectionItemId }) {
     }
   }
 
+  // H8 — fetch the real byte length by actually retrieving the media
+  // bytes through the existing authenticated proxy (the same one the
+  // photo strip elsewhere in the app already loads from), rather than
+  // trusting any header alone.
+  async function loadH8Proof() {
+    const media0 = graph.media?.[0];
+    if (!gkAssetId || !media0?.id || !media0?.object_uri) {
+      setH8Proof({ error: "No durable media record linked to this asset." });
+      return;
+    }
+    setH8Proof("loading");
+    try {
+      const res = await authFetch(media0.object_uri);
+      if (!res) {
+        setH8Proof({ error: "Not signed in." });
+        return;
+      }
+      if (!res.ok) {
+        setH8Proof({ error: `Media fetch failed (HTTP ${res.status})` });
+        return;
+      }
+      const bytes = await res.arrayBuffer();
+      setH8Proof({ gkAssetId, mediaId: media0.id, byteLength: bytes.byteLength });
+    } catch (e) {
+      setH8Proof({ error: e?.message || "Fetch failed" });
+    }
+  }
+
   return (
     <div style={panelStyle}>
       <div style={{ color: "#d4af37", fontSize: 12, fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }}>
@@ -210,6 +250,35 @@ export default function GrailKeyOperatorPanel({ collectionItemId }) {
       ) : (
         <div style={{ color: "#888", fontSize: 12 }}>No durable recommendation exists yet for this asset.</div>
       )}
+
+      {/* H8 — Milestone Ten operator proof values. Read-only, on-demand. */}
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(212,175,55,0.15)" }}>
+        {h8Proof === "idle" && (
+          <button
+            onClick={loadH8Proof}
+            style={{
+              background: "transparent", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6,
+              color: "#999", fontSize: 11, padding: "6px 10px", cursor: "pointer",
+            }}
+          >
+            Show H8 proof values
+          </button>
+        )}
+        {h8Proof === "loading" && (
+          <div style={{ color: "#888", fontSize: 12 }}>Fetching real server record…</div>
+        )}
+        {h8Proof !== "idle" && h8Proof !== "loading" && h8Proof.error && (
+          <div style={{ color: "#e05656", fontSize: 12 }}>{h8Proof.error}</div>
+        )}
+        {h8Proof !== "idle" && h8Proof !== "loading" && !h8Proof.error && (
+          <div style={{ fontSize: 12 }}>
+            <div style={{ color: "#d4af37", fontWeight: 700, marginBottom: 6, letterSpacing: 0.5 }}>H8 PROOF VALUES</div>
+            <div style={{ marginBottom: 3 }}><span style={{ color: "#888" }}>gkAssetId: </span><span style={{ color: "#eee", wordBreak: "break-all" }}>{h8Proof.gkAssetId}</span></div>
+            <div style={{ marginBottom: 3 }}><span style={{ color: "#888" }}>mediaId: </span><span style={{ color: "#eee", wordBreak: "break-all" }}>{h8Proof.mediaId}</span></div>
+            <div><span style={{ color: "#888" }}>byteLength: </span><span style={{ color: "#eee" }}>{h8Proof.byteLength}</span></div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
