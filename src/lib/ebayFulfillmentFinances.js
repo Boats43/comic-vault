@@ -7,12 +7,23 @@
 // Browse API. Never makes a write call to eBay. Never touches
 // api/list-ebay.js's Trading API listing path.
 //
-// SOLD determination is NOT this module's job — scripts/observe-outcome1-
-// listing.mjs already owns that (real Trading API GetItem, QuantitySold>0)
-// and this module never re-derives or second-guesses it. This module only
-// ever runs AFTER a real SOLD outcome_event already exists, to attach the
-// real financial facts (fees/shipping/refund/credit/order linkage) that
-// the Trading API's GetItem call never had access to.
+// GRAILKEY AUTOMATIC EBAY OUTCOME RECONCILER V1 (2026-09-20) —
+// evaluateOrderSaleEvidence(), below, is now the AUTHORITATIVE SOLD
+// evidence rule, used by src/lib/ebayOutcomeReconciler.js. A listing
+// disappearing, ending, or becoming unavailable (Trading API GetItem's
+// own signal) is explicitly insufficient evidence of a real sale — SOLD
+// requires a real Fulfillment order with a confirmed, non-cancelled
+// payment state. This supersedes, in evidentiary strength, the older
+// scripts/observe-outcome1-listing.mjs SOLD branch (GetItem
+// QuantitySold>0 on a Completed listing) — that script is UNCHANGED by
+// this dispatch (out of scope to modify) and its own SOLD branch remains
+// live, but any new SOLD outcome should be produced by the reconciler's
+// stronger order-based evidence going forward; this is a disclosed,
+// known duplication of authority, not silently resolved. Both writers
+// share the SAME "already has a SOLD row" idempotent short-circuit
+// (checked by the reconciler before ever writing), so the two scripts
+// cannot race into two SOLD rows for the same listing regardless of
+// which one runs first.
 //
 // FABRICATION DISCIPLINE (binding for every function below): a field eBay's
 // response does not contain is simply absent from the return value — never
@@ -147,4 +158,40 @@ export function normalizeTransactionToComponents(txn) {
     occurredAt: txn.transactionDate ? new Date(txn.transactionDate) : null,
     idempotencyKey: `outcome1-finances-${txn.transactionId}-${c.subKey}`,
   }));
+}
+
+// Payment states that confirm a real, executed transaction actually
+// happened — including a since-refunded one (a refund is itself
+// evidence a sale occurred; it is a LATER, separate economic fact, never
+// evidence the sale itself didn't happen). PENDING/FAILED, or any future/
+// unrecognized value, are deliberately NOT in this set — ambiguous or
+// no-payment states never confirm a sale.
+const CONFIRMED_SALE_PAYMENT_STATUSES = new Set(['PAID', 'PARTIALLY_REFUNDED', 'FULLY_REFUNDED']);
+
+/**
+ * evaluateOrderSaleEvidence — pure, no I/O. The single authoritative
+ * gate between "a Fulfillment order object exists" and "this GrailKey
+ * listing may be marked SOLD." Real eBay Sell Fulfillment API Order
+ * resource fields only (order.cancelStatus.cancelState,
+ * order.orderPaymentStatus) — never inferred from lineItem/listing state.
+ *
+ * @returns {{ verdict: 'NO_ORDER'|'CANCELLED'|'AMBIGUOUS'|'CONFIRMED_SALE', reason: string }}
+ */
+export function evaluateOrderSaleEvidence(order) {
+  if (!order || !order.orderId) {
+    return { verdict: 'NO_ORDER', reason: 'no real Fulfillment order object supplied' };
+  }
+  const cancelState = order.cancelStatus?.cancelState;
+  if (cancelState === 'CANCEL_REQUESTED' || cancelState === 'CANCEL_CLOSED') {
+    return { verdict: 'CANCELLED', reason: `order.cancelStatus.cancelState=${cancelState}` };
+  }
+  const paymentStatus = order.orderPaymentStatus;
+  if (!paymentStatus) {
+    return { verdict: 'AMBIGUOUS', reason: 'order.orderPaymentStatus missing from the real API response — never treated as a sale' };
+  }
+  if (!CONFIRMED_SALE_PAYMENT_STATUSES.has(paymentStatus)) {
+    // PENDING, FAILED, or any value this evaluator does not recognize.
+    return { verdict: 'AMBIGUOUS', reason: `order.orderPaymentStatus="${paymentStatus}" does not confirm a legitimate sale` };
+  }
+  return { verdict: 'CONFIRMED_SALE', reason: `orderPaymentStatus=${paymentStatus}, cancelState=${cancelState || 'NONE_REQUESTED'}` };
 }

@@ -27,6 +27,8 @@ export {
   validateOutcomeAttachment,
   recordEconomicsComponent,
   getOutcomeEconomics,
+  getOutcomeEventsForListing,
+  getLatestValuation,
   linkCollectionItem,
   resolveCollectionItemLink,
   getLiveIdentityAssignment,

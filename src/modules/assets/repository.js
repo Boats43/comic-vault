@@ -365,6 +365,31 @@ export async function insertEconomicsComponent(client, {
   return id;
 }
 
+// GrailKey Automatic eBay Outcome Reconciler V1 — the most recent
+// valuation_event for an asset (predictedValue for PredictionError
+// scoring). Read-only; never used to gate or replace any write path.
+export async function getLatestValuationEvent(client, assetId) {
+  const r = await client.query(
+    `SELECT * FROM data1_dev.valuation_event WHERE asset_id = $1 ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+    [assetId]
+  );
+  return r.rows[0] || null;
+}
+
+// GrailKey Automatic eBay Outcome Reconciler V1 — the read a
+// principal-authenticated HTTP handler needs (list every outcome_event
+// row for one listing, ownership-scoped) that no existing function
+// provided; the prior manual scripts queried outcome_event with their
+// own raw admin-tool SQL instead, which is not appropriate inside a live
+// authenticated request handler.
+export async function listOutcomeEventsByExternalListingId(client, { gkAssetId, externalListingId }) {
+  const r = await client.query(
+    `SELECT * FROM data1_dev.outcome_event WHERE gk_asset_id = $1 AND external_listing_id = $2 ORDER BY occurred_at`,
+    [gkAssetId, externalListingId]
+  );
+  return r.rows;
+}
+
 export async function listEconomicsComponents(client, outcomeEventId) {
   const r = await client.query(
     `SELECT * FROM data1_dev.outcome_economics_component WHERE outcome_event_id = $1 ORDER BY occurred_at, id`,

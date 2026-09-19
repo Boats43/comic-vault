@@ -179,8 +179,14 @@ const occurredAt = action === 'SOLD' ? (real.endTime ? new Date(real.endTime) : 
   : action === 'DELISTED' || action === 'EXPIRED_UNSOLD' ? (real.endTime ? new Date(real.endTime) : now)
   : now; // ACTIVE_AT_CUTOFF — the observation instant itself IS the censoring timestamp
 
+// outcome_event.days_to_sale is an INT column — must be rounded, never a
+// raw float division result (Postgres rejects a non-integer value
+// outright, "invalid input syntax for type integer"). Found live via the
+// Automatic eBay Outcome Reconciler V1's own proof pass, 2026-09-20 —
+// this exact unrounded shape existed here too, never previously
+// exercised against a real SOLD write.
 const daysToSale = action === 'SOLD'
-  ? (occurredAt.getTime() - new Date(listedRow.occurred_at).getTime()) / (24 * 60 * 60 * 1000)
+  ? Math.round((occurredAt.getTime() - new Date(listedRow.occurred_at).getTime()) / (24 * 60 * 60 * 1000))
   : null;
 
 // Idempotency key: stable for the SAME real-world state observed on the

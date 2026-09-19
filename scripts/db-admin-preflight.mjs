@@ -156,6 +156,44 @@ export async function assertAdminDbTarget({
   }
 }
 
+/**
+ * assertScratchSchemaTarget — GRAILKEY environment-hygiene correction
+ * (2026-09-20). Every D4/D5-series scratch-schema migration-contract
+ * test built its OWN ad hoc "assertScratchTarget" (dedicated backend PID
+ * pin + SAFETY ABORT if current_schema() resolves to data1_dev) —
+ * duplicated ~20 times, and NONE of those copies ever independently
+ * confirmed current_database() itself. That gap was real: with
+ * GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED resolving to an unrelated
+ * "bookforge" database (found, then fixed, 2026-09-20 — third
+ * independent discovery of this exact class of mismatch), every one of
+ * those ~20 tests would have silently created/dropped real scratch
+ * schemas inside bookforge instead of the intended Neon project, with
+ * no check anywhere in their own logic that would have caught it (a
+ * freshly-created scratch schema resolves current_schema() correctly
+ * REGARDLESS of which physical database it was created in).
+ *
+ * This function is the fail-closed replacement: verifies current
+ * database() up front (this file's own established DATABASE_MISMATCH
+ * check), pins one backend PID for the whole caller session, and
+ * refuses if the live connection ever points at data1_dev directly
+ * (scratch-schema tests must never run against the real schema). New
+ * scratch-schema test files should call THIS instead of writing a new
+ * ad hoc copy. The existing ~20 pre-2026-09-20 test files still carry
+ * their own duplicated version — NOT migrated to this by this pass
+ * (a mechanical, low-risk, but real refactor across many files, left as
+ * an explicit follow-up rather than silently expanded into this dispatch).
+ *
+ * Usage:
+ *   const { client, sessionPid } = await assertScratchSchemaTarget({ connectionString, label });
+ *   // ... CREATE SCHEMA <name>, SET search_path TO <name>, real DDL/proof ...
+ *   // caller owns client, must client.end() when done.
+ */
+export async function assertScratchSchemaTarget({ connectionString, label = 'scratch-schema operation', expectedDatabase } = {}) {
+  const client = await assertAdminDbTarget({ connectionString, label, expectedDatabase });
+  const { rows: [{ pid: sessionPid }] } = await client.query('SELECT pg_backend_pid() AS pid');
+  return { client, sessionPid };
+}
+
 // --- CLI entrypoint ---
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const args = process.argv.slice(2);

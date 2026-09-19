@@ -1179,6 +1179,41 @@ export async function recordEconomicsComponent({
   }
 }
 
+// getLatestValuation -- read-only. GrailKey Automatic eBay Outcome
+// Reconciler V1's own PredictionError input: the most recent
+// valuation_event.value_amount for an asset, ownership-checked. Returns
+// null (not an error) when the asset has no valuation_event yet.
+export async function getLatestValuation({ principalId, gkAssetId } = {}) {
+  requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    const row = await repo.getLatestValuationEvent(client, gkAssetId);
+    return row ? { valueAmount: Number(row.value_amount), occurredAt: row.occurred_at, method: row.method } : null;
+  } finally {
+    client.release();
+  }
+}
+
+// getOutcomeEventsForListing -- read-only, no transaction. GrailKey
+// Automatic eBay Outcome Reconciler V1's own read: every outcome_event
+// row (LISTED/SOLD/DELISTED/EXPIRED_UNSOLD/ACTIVE_AT_CUTOFF) recorded so
+// far for one asset's one listing, ownership-checked exactly like every
+// other read here. Never mutates anything.
+export async function getOutcomeEventsForListing({ principalId, gkAssetId, externalListingId } = {}) {
+  requireFields({ principalId, gkAssetId, externalListingId }, ['principalId', 'gkAssetId', 'externalListingId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    const events = await repo.listOutcomeEventsByExternalListingId(client, { gkAssetId, externalListingId });
+    return { events };
+  } finally {
+    client.release();
+  }
+}
+
 // getOutcomeEconomics -- read-only, no transaction. Returns every
 // persisted component plus the derived realized net (never a stored
 // field) for one outcome_event. Ownership-checked the same way every

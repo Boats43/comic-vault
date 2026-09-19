@@ -1,12 +1,15 @@
 // tests/buyer-decision-ledger-migration-contract.test.js
 //
 // GRAILKEY — DURABLE BUYER DECISION LEDGER V1. Real, isolated
-// scratch-schema proof of db/data0/0027_buyer_decision_ledger.sql,
-// mirroring the established D5B/D5C/D5D scratch-schema discipline
-// exactly (dedicated unpooled backend PID pinned for the whole script,
-// hard SAFETY ABORT if current_schema() ever resolves to data1_dev,
-// scratch schema dropped in a finally block). data1_dev is never
-// touched by this test.
+// scratch-schema proof of db/data0/0027_buyer_decision_ledger.sql, via
+// scripts/db-admin-preflight.mjs's assertScratchSchemaTarget() — the
+// environment-hygiene-corrected (2026-09-20) successor to the D5B/D5C/D5D
+// series' own ad hoc, independently-duplicated "assertScratchTarget"
+// (dedicated backend PID pin + SAFETY ABORT on data1_dev), now ALSO
+// independently verifying current_database() up front, closing the gap
+// that let GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED's real-then-fixed
+// "bookforge" misconfiguration go undetected by every one of those prior
+// copies. data1_dev is never touched by this test.
 //
 // Proves: 0027 applies cleanly on top of minimal gk_principal/gk_asset
 // stubs; PK/FK/CHECK/NOT NULL/unique-index constraints all enforce as
@@ -20,8 +23,7 @@
 // Invoke: node tests/buyer-decision-ledger-migration-contract.test.js
 
 import { readFileSync } from 'node:fs';
-import { Client } from 'pg';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
@@ -33,6 +35,8 @@ for (const line of envRaw.split(/\r?\n/)) {
   const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
   if (m) process.env[m[1]] = m[2].replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
 }
+
+const { assertScratchSchemaTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -55,20 +59,17 @@ const assertSucceeds = async (fn, label) => {
 
 console.log('\n=== Buyer Decision Ledger (0027) — migration contract (real, isolated scratch-schema proof) ===\n');
 
-// NOTE: this local .env.development.local's own
-// GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED resolves to an unrelated
-// database ("bookforge", no data1_dev schema at all) — the exact,
-// documented GK-202 hazard scripts/db-admin-preflight.mjs exists to
-// catch (confirmed directly this pass: current_database() = 'bookforge',
-// data1_dev absent from pg_namespace there). The POOLED
-// GRAILKEY_CATALOG_DATABASE_URL correctly resolves to the real
-// Development database (neondb, data1_dev present) and — verified
-// directly — a single pg.Client held open for this whole script keeps
-// one stable backend PID throughout, which is all this script's own PID
-// pin actually requires. Using it here, not the broken UNPOOLED sibling.
-const client = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
-await client.connect();
-const { rows: [{ pid: sessionPid }] } = await client.query('SELECT pg_backend_pid() AS pid');
+// GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED was independently found and
+// fixed this same pass (was resolving to an unrelated "bookforge"
+// database, corrected to the real Neon project's direct-connect
+// endpoint — see docs/TICKET-REGISTRY.md, environment-hygiene entry).
+// assertScratchSchemaTarget() re-verifies current_database() itself
+// before returning a client, so this is now fail-closed regardless of
+// whether that env value ever drifts again.
+const { client, sessionPid } = await assertScratchSchemaTarget({
+  connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED,
+  label: 'buyer-decision-ledger-migration-contract',
+});
 console.log('  dedicated unpooled backend PID for this entire script:', sessionPid);
 
 async function assertScratchTarget(expectedSchema, label) {

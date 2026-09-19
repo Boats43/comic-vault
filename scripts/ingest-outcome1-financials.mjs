@@ -39,6 +39,23 @@
  * only — end-to-end proof against a real sale is still open, pending a
  * real SOLD outcome.
  *
+ * GRAILKEY AUTOMATIC EBAY OUTCOME RECONCILER V1 (2026-09-20) —
+ * superseded in AUTHORITY, kept FUNCTIONAL: scripts/reconcile-ebay-
+ * outcome.mjs now owns SOLD determination via real Fulfillment-order
+ * evidence (stronger than this script's own prerequisite, a GetItem-
+ * QuantitySold-based SOLD row from observe-outcome1-listing.mjs) and
+ * shares its transaction-ingestion loop with this script via
+ * src/lib/ebayOutcomeReconciler.js's ingestFinancialTransactionsForOutcome
+ * — ONE ingestion implementation, not two. This script remains useful
+ * standalone for manually attaching financials to an outcome already
+ * marked SOLD through the legacy GetItem path. Also fixed this pass: a
+ * real bug where the PredictionError call below read
+ * `economics.realizedGross` (undefined — getOutcomeEconomics returns
+ * `gross`, never `realizedGross`) and so ALWAYS scored CENSORED/unscored
+ * regardless of real data; now reads the correct field and gates on
+ * `hasAnyComponent`, matching src/lib/ebayOutcomeReconciler.js's own
+ * classifyEconomicsCompleteness()/scoreOutcomePrediction() logic exactly.
+ *
  * Usage: node scripts/ingest-outcome1-financials.mjs <ExternalListingId>
  */
 
@@ -61,8 +78,9 @@ for (const v of ['GRAILKEY_CATALOG_DATABASE_URL', 'GRAILKEY_CATALOG_ENVIRONMENT'
 const { assertAdminDbTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
 const { recordEconomicsComponent, getOutcomeEconomics } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
 const { refreshUserAccessToken } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'ebayUserOAuth.js')).href);
-const { findOrderByLegacyItemId, getFinancialTransactionsForOrder, normalizeTransactionToComponents } =
-  await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'ebayFulfillmentFinances.js')).href);
+const { findOrderByLegacyItemId } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'ebayFulfillmentFinances.js')).href);
+const { ingestFinancialTransactionsForOutcome, classifyEconomicsCompleteness } =
+  await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'ebayOutcomeReconciler.js')).href);
 const { scorePrediction } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'predictionErrorScoring.js')).href);
 
 const itemId = process.argv[2];
@@ -150,66 +168,45 @@ const orderRefResult = await recordEconomicsComponent({
 });
 console.log(`order_reference recorded/replayed: ${orderRefResult.componentId}`);
 
-// 6. Real Finances transactions for this real order.
-let transactions = [];
-try {
-  transactions = await getFinancialTransactionsForOrder({ accessToken, orderId: order.orderId });
-} catch (e) {
-  console.error(`\nFinances transaction lookup failed: ${e.message}`);
+// 6. Real Finances transactions for this real order — shared ingestion
+//    loop (src/lib/ebayOutcomeReconciler.js), the SAME one
+//    scripts/reconcile-ebay-outcome.mjs uses, so there is exactly one
+//    transaction-ingestion implementation in this repo, not two.
+const ingestResult = await ingestFinancialTransactionsForOutcome({
+  principalId: soldRow.recorded_by_principal_id, outcomeEventId: soldRow.id, orderId: order.orderId, accessToken,
+});
+if (ingestResult.error) {
+  console.error(`\nFinances transaction lookup failed: ${ingestResult.error}`);
   await client.end();
   process.exit(1);
 }
-if (transactions.length === 0) {
-  console.log(`\nOrder found but zero Finances transactions returned yet (fees/payout can post days after a sale). No fee/shipping/refund/credit components written this run. Safe to re-run later.`);
-  await client.end();
-  process.exit(0);
+console.log(`\n${ingestResult.transactionsSeen} real Finances transaction(s) seen; ${ingestResult.written} component write(s) attempted (idempotent — reruns will not duplicate); ${ingestResult.skippedGross} gross candidate(s) skipped as already-recorded.`);
+if (ingestResult.transactionsSeen === 0) {
+  console.log('Order found but zero Finances transactions returned yet (fees/payout can post days after a sale). Safe to re-run later.');
 }
-
-const alreadyHasGross = existingComponents.some((c) => c.component_type === 'gross');
-let written = 0;
-for (const txn of transactions) {
-  const candidates = normalizeTransactionToComponents(txn);
-  for (const c of candidates) {
-    if (c.componentType === 'gross' && alreadyHasGross) {
-      // Trading-API-sourced gross already exists (observe-outcome1-listing.mjs).
-      // Deliberate, disclosed skip — not a fabrication, not a silent overwrite —
-      // rather than letting two independently-sourced gross facts coexist.
-      console.log(`  skipping duplicate gross from txn ${txn.transactionId} — Trading-API-sourced gross already recorded for this outcome_event`);
-      continue;
-    }
-    const result = await recordEconomicsComponent({
-      principalId: soldRow.recorded_by_principal_id,
-      outcomeEventId: soldRow.id,
-      componentType: c.componentType,
-      amount: c.amount,
-      currency: c.currency,
-      source: 'api-sourced',
-      sourceReference: c.sourceReference,
-      externalOrderId: c.externalOrderId,
-      idempotencyKey: c.idempotencyKey,
-      occurredAt: c.occurredAt || undefined,
-    });
-    written += 1;
-    console.log(`  ${c.componentType} $${c.amount} recorded/replayed (${result.componentId}) — ${c.sourceReference}`);
-  }
-}
-console.log(`\n${written} economics component write(s) attempted this run (idempotent — a rerun over the same transactions will not duplicate).`);
 
 // 7. Prediction error — reuses the existing pure scorer exactly, computed
 //    and logged only; no new persistence, matching predictionErrorScoring.js's
-//    own no-I/O contract.
+//    own no-I/O contract. Gated on real hasAnyComponent evidence — fixed
+//    this pass, see file header ("Also fixed this pass").
 if (listedRow) {
   const predicted = (await client.query(
     `SELECT value_amount FROM data1_dev.valuation_event WHERE asset_id = $1 ORDER BY occurred_at DESC LIMIT 1`,
     [soldRow.gk_asset_id]
   )).rows[0];
   const economics = await getOutcomeEconomics({ principalId: soldRow.recorded_by_principal_id, outcomeEventId: soldRow.id });
-  if (predicted?.value_amount != null && listedRow.ask_amount != null) {
+  const economicsStatus = classifyEconomicsCompleteness(economics);
+  if (economicsStatus === 'PENDING') {
+    console.log('\nPrediction error not computed — sale confirmed but no realized-gross economics component recorded yet (ECONOMICS_PENDING, distinct from CENSORED).');
+  } else if (predicted?.value_amount != null && listedRow.ask_amount != null) {
     const scored = scorePrediction({
       predictedValue: parseFloat(predicted.value_amount),
       askAmount: parseFloat(listedRow.ask_amount),
-      realizedGross: economics.realizedGross ?? null,
-      realizedNet: economics.realizedNet ?? null,
+      realizedGross: economics.gross,
+      // Only a real, both-gross-and-fees-known 'KNOWN' economics state
+      // may report a net — otherwise a still-missing fee would silently
+      // COALESCE to $0 inside economics.realizedNet, a fabrication.
+      realizedNet: economicsStatus === 'KNOWN' ? economics.realizedNet : null,
       listedAt: listedRow.occurred_at,
       realizedAt: soldRow.occurred_at,
       isCensored: false,
