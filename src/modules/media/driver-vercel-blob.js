@@ -52,7 +52,17 @@ function requireToken() {
   }
 }
 
-export async function put({ bytes, contentType, sha256 }) {
+// `access` defaults to 'private' (C1's original "never public by
+// default" invariant, unchanged for every existing evidence-grade
+// caller — src/modules/assets/service.js's attachMedia never passes
+// this, so it stays exactly as before). A caller may explicitly opt
+// into 'public' for content that is disclosed, non-evidentiary, and
+// low-sensitivity — the one instance of this today is
+// api/collection.js's collection-display-image storage (see that
+// file's own comment): a collection thumbnail is catalogue display
+// data, never physical-asset evidence, and is stored under an
+// unguessable content-addressed key either way.
+export async function put({ bytes, contentType, sha256, access = 'private' }) {
   requireToken();
   const { put: blobPut } = await loadSdk();
 
@@ -66,7 +76,7 @@ export async function put({ bytes, contentType, sha256 }) {
 
   try {
     const result = await blobPut(key, bytes, {
-      access: 'private', // C1 — never public by default
+      access,
       contentType,
       addRandomSuffix: false, // the key IS the content address; a random suffix would break that
       // allowOverwrite intentionally omitted (defaults false) — this is

@@ -951,16 +951,26 @@ const makeThumbnail = (dataUrl, maxDim = 1000, quality = 0.85) =>
     img.src = dataUrl;
   });
 
-// Return an array of photo data URLs for a comic, supporting both the
-// legacy single `image` field and the new `images` array. Used by
-// CollectionList, CollectionDetail, and the list-to-eBay flow so either
-// storage shape works.
+// Return an array of photo URLs/data-URLs for a comic, supporting the
+// legacy single `image` field, the `images` array (local base64 —
+// vision/re-identify/eBay-listing consumers all expect this exact
+// shape, unchanged), and, only when NEITHER local form exists,
+// `remoteImages` (synced Blob URLs from a device that never scanned
+// this item locally — see api/collection.js/collectionSync.js's own
+// comments). Lowest priority deliberately: a device that scanned this
+// item itself always uses its own local bytes; `remoteImages` only ever
+// fills the gap on a device that received the item purely via sync.
+// `<img src>` renders a plain https:// URL exactly like a data: URL, so
+// no rendering code elsewhere needs to change.
 const getComicPhotos = (comic) => {
   if (!comic) return [];
   if (Array.isArray(comic.images) && comic.images.length > 0) {
     return comic.images.filter(Boolean);
   }
   if (comic.image) return [comic.image];
+  if (Array.isArray(comic.remoteImages) && comic.remoteImages.length > 0) {
+    return comic.remoteImages.filter(Boolean);
+  }
   return [];
 };
 
@@ -10593,8 +10603,28 @@ export default function App() {
     (async () => {
       const serverItems = await fetchServerCollection();
       if (serverItems && serverItems.length > 0) {
+        // GRAILKEY — COLLECTION IMAGE SYNC (2026-09-19). putComic() is a
+        // full IndexedDB store.put(), never a partial merge (src/db.js) —
+        // writing only `item.attributes` here would silently erase this
+        // device's own local `images` (raw base64, used by
+        // reIdentifyBook/grading/eBay-listing — none of which server
+        // attributes carry, by design, see collectionSync.js) on every
+        // login, even on the device that originally scanned the photo.
+        // Preserve a pre-existing local `images` value explicitly; every
+        // other field stays server-authoritative exactly as before. A
+        // device with no prior local record for this id (id not in the
+        // map) gets no `images` key at all — correct, since it never had
+        // the raw bytes — and getComicPhotos() falls back to the synced
+        // `attributes.remoteImages` for display.
+        const existingById = new Map((await getAllComics()).map((c) => [c.id, c]));
         for (const item of serverItems) {
-          await putComic({ id: item.id, ...item.attributes, _syncStatus: "synced" });
+          const existingImages = existingById.get(item.id)?.images;
+          await putComic({
+            id: item.id,
+            ...item.attributes,
+            ...(existingImages ? { images: existingImages } : {}),
+            _syncStatus: "synced",
+          });
         }
       }
       const localItems = await getAllComics();

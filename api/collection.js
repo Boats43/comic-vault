@@ -28,12 +28,56 @@ import {
   updateCollectionItem, deleteCollectionItem,
   ValidationFailedError, AuthorizationFailedError, NotFoundError,
 } from '../src/modules/collection/index.js';
+import { put as mediaPut } from '../src/modules/media/index.js';
 import { checkRateLimit } from './rate-limit.js';
 
 function extractBearerToken(req) {
   const header = req.headers?.authorization || req.headers?.Authorization;
   if (!header || !header.startsWith('Bearer ')) return null;
   return header.slice('Bearer '.length).trim();
+}
+
+// GRAILKEY — COLLECTION IMAGE SYNC (2026-09-19). collection_item.attributes
+// is an opaque JSON bag for every OTHER field (title/issue/publisher/...),
+// but a raw base64 photo has no business sitting in that JSONB column
+// (large, and Postgres is not a blob store) — see 0026's own header. This
+// endpoint is the one place that isn't opaque about `images`: a data: URL
+// in the request body's top-level `images` array is uploaded through the
+// media module's raw content-addressed blob primitive
+// (src/modules/media/index.js's put(), access:'public' — a disclosed,
+// deliberate exception to the evidence-grade private default, see that
+// driver's own comment) and only the resulting URL is written into
+// attributes.remoteImages. This is NOT the physical-asset evidence path:
+// no gk_asset, no gkAssetId, no gk_media row, no call into
+// src/modules/assets/ or src/modules/capture/ — a collection display
+// thumbnail stays exactly what it is, never silently becoming durable
+// physical-condition evidence. An entry already shaped like a URL (not a
+// data: URL) is passed through unchanged — a replay of an already-synced
+// item must not re-upload.
+const DATA_URL_RE = /^data:([^;,]+);base64,(.+)$/;
+
+async function resolveRemoteImages(images) {
+  if (!Array.isArray(images) || images.length === 0) return undefined;
+  const resolved = [];
+  for (const entry of images) {
+    if (typeof entry !== 'string') continue;
+    const m = entry.match(DATA_URL_RE);
+    if (!m) {
+      resolved.push(entry); // already a URL from a prior sync — pass through
+      continue;
+    }
+    const [, contentType, b64] = m;
+    const bytes = Buffer.from(b64, 'base64');
+    const { objectUri } = await mediaPut({ bytes, contentType, access: 'public' });
+    resolved.push(objectUri);
+  }
+  return resolved;
+}
+
+async function withResolvedImages(attributes, images) {
+  const remoteImages = await resolveRemoteImages(images);
+  if (remoteImages === undefined) return attributes;
+  return { ...(attributes || {}), remoteImages };
 }
 
 export default async function handler(req, res) {
@@ -71,15 +115,17 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { id: bodyId, assetCategory, attributes } = req.body || {};
-      const created = await createCollectionItem({ principalId, id: bodyId, assetCategory, attributes });
+      const { id: bodyId, assetCategory, attributes, images } = req.body || {};
+      const resolvedAttributes = await withResolvedImages(attributes, images);
+      const created = await createCollectionItem({ principalId, id: bodyId, assetCategory, attributes: resolvedAttributes });
       return res.status(200).json(created);
     }
 
     if (req.method === 'PUT' || req.method === 'PATCH') {
       if (!id) return res.status(400).json({ error: 'id query parameter is required' });
-      const { assetCategory, attributes } = req.body || {};
-      const updated = await updateCollectionItem({ principalId, id, assetCategory, attributes });
+      const { assetCategory, attributes, images } = req.body || {};
+      const resolvedAttributes = await withResolvedImages(attributes, images);
+      const updated = await updateCollectionItem({ principalId, id, assetCategory, attributes: resolvedAttributes });
       return res.status(200).json(updated);
     }
 
