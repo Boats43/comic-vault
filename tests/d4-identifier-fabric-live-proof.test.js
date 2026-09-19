@@ -18,7 +18,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { Client } from 'pg';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -169,8 +168,16 @@ const obsForImmutability = await assets.recordRawObservation({
   source: D4_PROVENANCE_MARKER, idempotencyKey: uid('obs-immut'),
 });
 
-const dbClient = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED, ssl: { rejectUnauthorized: false } });
-await dbClient.connect();
+// This client deliberately targets REAL data1_dev (an immutability
+// proof against an already-created real row) — assertAdminDbTarget()
+// (not the scratch variant) is the correct fit: verifies
+// current_database()/data1_dev-schema/environment-identity without
+// refusing a live data1_dev target, which this test intentionally is.
+const { assertAdminDbTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const dbClient = await assertAdminDbTarget({
+  connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED,
+  label: 'd4-identifier-fabric-live-proof',
+});
 await dbClient.query('SET search_path TO data1_dev');
 
 await assertRejected(

@@ -172,6 +172,17 @@ console.log('\n=== api/list-ebay.js -- Outcome #1 real handler smoke invocation 
 const client = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
 await client.connect();
 
+// GRAILKEY INVENTORY AUTHORITY V1 (2026-09-20) — api/list-ebay.js's
+// single-item path now requires Inventory Authority state AVAILABLE
+// before any eBay call. Creepy is UNMANAGED in real Development (never
+// enrolled) — enroll it for real here so the scenarios below still
+// exercise what they were written to exercise (linkage/outcome-writing),
+// then restore Creepy to UNMANAGED in cleanup, exactly as found.
+const { enrollAsset, closePool: closeInventoryPool } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'inventory', 'index.js')).href);
+const inventoryEnrollKey = `list-ebay-smoke-inventory-enroll-${crypto.randomUUID()}`;
+await enrollAsset({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, idempotencyKey: inventoryEnrollKey });
+console.log('  (test setup) Creepy enrolled in Inventory Authority: UNMANAGED -> AVAILABLE, real write, restored in cleanup\n');
+
 console.log('-- real success: valid token + gkAssetId + decisionEventId + LIST operatorActionEventId --\n');
 {
   fetchCalls.length = 0;
@@ -356,6 +367,13 @@ console.log('\n-- idempotent replay: the SAME idempotencyKey twice returns the S
 
   await cleanup(client, idempotencyKey);
 }
+
+// Restore Creepy to UNMANAGED, exactly as found before this test ran.
+await client.query('DELETE FROM data1_dev.inventory_current_state WHERE gk_asset_id = $1', [CREEPY_ASSET_ID]);
+await client.query('DELETE FROM data1_dev.inventory_transition_event WHERE gk_asset_id = $1', [CREEPY_ASSET_ID]);
+await client.query(`DELETE FROM data1_dev.idempotency_key WHERE operation = 'enrollAsset' AND idempotency_key = $1`, [inventoryEnrollKey]);
+console.log('  (test cleanup) Creepy restored to UNMANAGED in Inventory Authority');
+await closeInventoryPool();
 
 await client.end();
 

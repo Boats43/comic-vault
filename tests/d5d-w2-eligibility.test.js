@@ -19,7 +19,6 @@
 // Invoke: node tests/d5d-w2-eligibility.test.js
 
 import { readFileSync } from 'node:fs';
-import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -45,8 +44,14 @@ const assertTrue = (cond, label) => {
 console.log('\n=== D5D W2 -- asset-source route proof (real data1_dev, read-only) ===\n');
 
 // Pre-flight row-count snapshot (proves zero writes, before AND after).
-const censusClient = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED, ssl: { rejectUnauthorized: false } });
-await censusClient.connect();
+// Deliberately targets real data1_dev — assertAdminDbTarget() verifies
+// current_database()/schema/environment-identity without refusing that
+// live, read-only target.
+const { assertAdminDbTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const censusClient = await assertAdminDbTarget({
+  connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED,
+  label: 'd5d-w2-eligibility',
+});
 const countsBefore = await censusClient.query(`
   SELECT
     (SELECT count(*)::int FROM data1_dev.collection_item_link) AS cil,

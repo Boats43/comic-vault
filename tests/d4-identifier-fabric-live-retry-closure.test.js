@@ -58,8 +58,12 @@ console.log('\n=== D4 Phase B, B7a closure -- deterministic 3-cycle deadlock (re
 let uidCounter = 0;
 const uid = (label) => `d4-b7a-close-${label}-${Date.now()}-${uidCounter++}`;
 
-const setup = new Client(connOpts);
-await setup.connect();
+// Deliberately targets real data1_dev — assertAdminDbTarget() verifies
+// current_database()/schema/environment-identity without refusing that
+// live target. Other raw connections below reuse the SAME already-
+// verified connOpts.
+const { assertAdminDbTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const setup = await assertAdminDbTarget({ connectionString: connOpts.connectionString, label: 'd4-identifier-fabric-live-retry-closure' });
 await setup.query('SET search_path TO data1_dev');
 
 // GK-178 workaround: db.js's own pooled connection (Neon PgBouncer) can

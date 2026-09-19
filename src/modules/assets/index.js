@@ -29,6 +29,8 @@ export {
   getOutcomeEconomics,
   getOutcomeEventsForListing,
   getLatestValuation,
+  hasActiveListingForChannel,
+  wasOutcomeIdempotencyKeyClaimed,
   linkCollectionItem,
   resolveCollectionItemLink,
   getLiveIdentityAssignment,

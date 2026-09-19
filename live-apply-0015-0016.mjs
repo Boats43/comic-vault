@@ -14,9 +14,10 @@
 // STATUS.md already tracks "applied" status this same way), captured
 // independently before/after each stage.
 
-import { Client } from 'pg';
 import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
 
 const envRaw = readFileSync('.env.development.local', 'utf8');
 for (const line of envRaw.split(/\r?\n/)) {
@@ -30,11 +31,15 @@ console.log('=== D5B LIVE MIGRATION -- 0015 (D1 repair) then 0016 (D5B Valuation
 console.log('git HEAD SHA:', gitSha);
 console.log('working tree status (should show nothing for this script once committed):', JSON.stringify(treeStatus));
 
-const client = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED, ssl: { rejectUnauthorized: false } });
-await client.connect();
-
-const targetCheck = await client.query(`SELECT current_database() AS db`);
-console.log('database:', targetCheck.rows[0].db);
+// HISTORICAL SCRIPT — 0015/0016 are already live in data1_dev; kept as a
+// record, not intended to be re-run. Environment-hygiene closeout
+// (2026-09-20): upgraded its original log-only current_database() check
+// to the real fail-closed gate; not executed as part of this upgrade.
+const { assertAdminDbTarget } = await import(pathToFileURL(path.join(process.cwd(), 'scripts', 'db-admin-preflight.mjs')).href);
+const client = await assertAdminDbTarget({
+  connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED,
+  label: 'live-apply-0015-0016 (historical)',
+});
 const sessionPid = (await client.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
 console.log('pg_backend_pid() (this session, stable throughout):', sessionPid);
 

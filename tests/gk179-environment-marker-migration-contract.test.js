@@ -31,9 +31,8 @@
 //           any D2/D3 hash/dedup/domain-event/outbox/evidence-lineage
 //           source file -- infrastructure, not domain (state brief §3)
 
-import { Client } from 'pg';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -74,9 +73,8 @@ if (!connectionString) {
   process.exit(2);
 }
 
-const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
-await client.connect();
-const { rows: [{ pid: sessionPid }] } = await client.query('SELECT pg_backend_pid() AS pid');
+const { assertScratchSchemaTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const { client, sessionPid } = await assertScratchSchemaTarget({ connectionString, label: 'gk179-environment-marker-migration-contract' });
 console.log('  dedicated backend PID for this entire script:', sessionPid);
 
 async function assertScratchTarget(expectedSchema, label) {

@@ -17,7 +17,6 @@
 // Invoke: node tests/d5d-valuation-writer.test.js
 
 import { readFileSync } from 'node:fs';
-import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -54,9 +53,11 @@ const assertRejected = async (fn, label, expectedFragment) => {
 
 console.log('\n=== D5D -- isolated valuation writer proof (real, isolated scratch schema) ===\n');
 
-const setupClient = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED, ssl: { rejectUnauthorized: false } });
-await setupClient.connect();
-const { rows: [{ pid: sessionPid }] } = await setupClient.query('SELECT pg_backend_pid() AS pid');
+const { assertScratchSchemaTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const { client: setupClient, sessionPid } = await assertScratchSchemaTarget({
+  connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED,
+  label: 'd5d-valuation-writer',
+});
 console.log('  setup client backend PID:', sessionPid);
 
 async function assertScratchTarget(client, expectedSchema, label) {

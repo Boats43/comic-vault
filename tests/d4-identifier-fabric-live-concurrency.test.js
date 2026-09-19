@@ -52,8 +52,13 @@ console.log('\n=== D4 Phase B, B9 + B7a -- live concurrency (real data1_dev) ===
 let uidCounter = 0;
 const uid = (label) => `d4-b9-${label}-${Date.now()}-${uidCounter++}`;
 
-const setup = new Client(connOpts);
-await setup.connect();
+// Deliberately targets real data1_dev — assertAdminDbTarget() verifies
+// current_database()/schema/environment-identity without refusing that
+// live target (unlike the scratch-schema variant). c1/c2 below reuse
+// the SAME already-verified connOpts for their own raw concurrent
+// connections.
+const { assertAdminDbTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const setup = await assertAdminDbTarget({ connectionString: connOpts.connectionString, label: 'd4-identifier-fabric-live-concurrency' });
 await setup.query('SET search_path TO data1_dev');
 const iso = await setup.query('SHOW transaction_isolation');
 console.log('  Session transaction_isolation:', iso.rows[0].transaction_isolation);

@@ -16,8 +16,7 @@
 // Invoke: node tests/beta1a-0022-migration-contract.test.js
 
 import { readFileSync } from 'node:fs';
-import { Client } from 'pg';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
@@ -66,10 +65,23 @@ console.log('\n=== BETA-1A -- 0022 Clerk identity-mapping migration contract (re
 // this script's pattern of many discrete client.query() calls sharing one
 // SET search_path. Using it here instead of _UNPOOLED until the routing
 // hazard itself is fixed.
-const client = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
-await client.connect();
-const { rows: [{ pid: sessionPid }] } = await client.query('SELECT pg_backend_pid() AS pid');
-console.log('  dedicated unpooled backend PID for this entire script:', sessionPid);
+//
+// ENVIRONMENT-HYGIENE CLOSEOUT (2026-09-20): this file's own 2026-09-11
+// finding was this repo's SECOND independent discovery of the exact same
+// "bookforge" mismatch (GK-202 was the first, never escalated to a root-
+// cause fix; a third discovery, the Buyer Decision Ledger dispatch, is
+// what finally fixed the underlying env value and added
+// assertScratchSchemaTarget()). GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED
+// itself is now fixed too, but this file keeps using the pooled var it
+// already independently verified — migrated to the canonical helper for
+// the same current_database()/schema/environment-identity guarantee,
+// not because the pooled choice was wrong.
+const { assertScratchSchemaTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const { client, sessionPid } = await assertScratchSchemaTarget({
+  connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL,
+  label: 'beta1a-0022-migration-contract',
+});
+console.log('  dedicated backend PID for this entire script:', sessionPid);
 
 async function assertScratchTarget(expectedSchema, label) {
   const r = await client.query('SELECT current_schema() AS s, pg_backend_pid() AS pid');

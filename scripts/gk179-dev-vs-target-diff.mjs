@@ -28,6 +28,8 @@
 //   node --env-file=.env.development.local scripts/gk179-dev-vs-target-diff.mjs preview post-gk194
 
 import { Client } from 'pg';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
 
 const TARGET_ENV_VARS = {
   production: 'GK179_PRODUCTION_DATABASE_URL',
@@ -45,6 +47,20 @@ const devConnStr = process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED;
 const targetConnStr = process.env[TARGET_ENV_VARS[target]];
 if (!devConnStr) { console.log('BLOCKED — VARIABLE NOT SET (GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED)'); process.exit(2); }
 if (!targetConnStr) { console.log(`BLOCKED — VARIABLE NOT SET (${TARGET_ENV_VARS[target]})`); process.exit(2); }
+
+// Environment-hygiene closeout (2026-09-20): this script previously only
+// checked that GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED was SET, never that
+// it resolved to the right database — exactly the class of gap that let
+// it silently resolve to an unrelated "bookforge" database elsewhere.
+// Fail-closed check on the dev side specifically (the side using that
+// variable); the target side's own connection string is explicitly named
+// per --target argument and is a genuinely different real environment on
+// purpose, not validated against "neondb" here.
+{
+  const { assertAdminDbTarget } = await import(pathToFileURL(path.join(process.cwd(), 'scripts', 'db-admin-preflight.mjs')).href);
+  const preflightClient = await assertAdminDbTarget({ connectionString: devConnStr, label: 'gk179-dev-vs-target-diff (dev side)' });
+  await preflightClient.end();
+}
 
 // The closed, exhaustive GK-194 whitelist. No other function delta passes.
 const GK194_WHITELIST = new Set(['asset_identifier_assertion_guard()', 'asset_identity_assignment_guard()']);

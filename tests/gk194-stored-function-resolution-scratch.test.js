@@ -17,9 +17,8 @@
 //
 // Invoke: node --env-file=.env.development.local tests/gk194-stored-function-resolution-scratch.test.js
 
-import { Client } from 'pg';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,9 +37,8 @@ console.log('\n=== GK-194 -- 0019 stored function schema resolution (real, isola
 const connectionString = process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED;
 if (!connectionString) { console.log('BLOCKED — VARIABLE NOT SET (GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED)'); process.exit(2); }
 
-const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
-await client.connect();
-const { rows: [{ pid: sessionPid }] } = await client.query('SELECT pg_backend_pid() AS pid');
+const { assertScratchSchemaTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const { client, sessionPid } = await assertScratchSchemaTarget({ connectionString, label: 'gk194-stored-function-resolution-scratch' });
 console.log('  dedicated backend PID for this entire script:', sessionPid);
 
 async function assertScratchTarget(expectedSchema, label) {

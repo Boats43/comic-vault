@@ -13,7 +13,7 @@
 
 import { readFileSync } from 'node:fs';
 import { Client } from 'pg';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,8 +41,8 @@ const assertSucceeds = async (fn, label) => {
 
 console.log('\n=== D4 Phase A -- Identifier Fabric concurrency proof (real 0013 trigger, two real connections) ===\n');
 
-const setup = new Client(connOpts);
-await setup.connect();
+const { assertScratchSchemaTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const { client: setup } = await assertScratchSchemaTarget({ connectionString: connOpts.connectionString, label: 'd4-identifier-fabric-concurrency' });
 
 const isoRow = await setup.query('SHOW transaction_isolation');
 console.log('  Session default transaction_isolation:', isoRow.rows[0].transaction_isolation);

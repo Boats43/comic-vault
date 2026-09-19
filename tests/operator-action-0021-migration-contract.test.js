@@ -13,8 +13,7 @@
 // Invoke: node tests/operator-action-0021-migration-contract.test.js
 
 import { readFileSync } from 'node:fs';
-import { Client } from 'pg';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -43,8 +42,11 @@ const assertRejected = async (fn, label, expectedCode) => {
 
 console.log('\n=== OperatorAction -- 0021 migration contract proof (real, isolated scratch schema) ===\n');
 
-const client = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED, ssl: { rejectUnauthorized: false } });
-await client.connect();
+const { assertScratchSchemaTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const { client } = await assertScratchSchemaTarget({
+  connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED,
+  label: 'operator-action-0021-migration-contract',
+});
 
 async function assertScratchTarget(label) {
   const r = await client.query('SELECT current_schema() AS s');

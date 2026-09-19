@@ -48,7 +48,6 @@
 // Invoke: node tests/d5b-0015-migration-contract.test.js
 
 import { readFileSync } from 'node:fs';
-import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -93,10 +92,12 @@ console.log('\n=== D5B 0015 -- ValuationQuestion + Applicability migration contr
 // DDL-mutating statement -- identical mechanism to the D5A test's own
 // assertScratchTarget, reused by pattern, re-implemented here because
 // each script must carry its own live guard).
-const client = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED, ssl: { rejectUnauthorized: false } });
-await client.connect();
-const { rows: [{ pid: sessionPid }] } = await client.query('SELECT pg_backend_pid() AS pid');
-console.log('  dedicated unpooled backend PID for this entire script:', sessionPid);
+const { assertScratchSchemaTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const { client, sessionPid } = await assertScratchSchemaTarget({
+  connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED,
+  label: 'd5b-0015-migration-contract',
+});
+console.log('  dedicated backend PID for this entire script:', sessionPid);
 
 async function assertScratchTarget(expectedSchema, label) {
   const r = await client.query('SELECT current_schema() AS s, pg_backend_pid() AS pid');

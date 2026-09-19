@@ -1179,6 +1179,42 @@ export async function recordEconomicsComponent({
   }
 }
 
+// wasOutcomeIdempotencyKeyClaimed -- read-only, no principal scoping
+// needed (the caller already possesses the exact key it is asking
+// about; this reveals no information beyond "has this specific key
+// already been used"). GRAILKEY INVENTORY AUTHORITY V1's own duplicate-
+// list preflight uses this to recognize a legitimate idempotent replay
+// and skip the active-listing check for it, rather than incorrectly
+// rejecting a retry of the SAME request as if it were a new listing
+// attempt.
+export async function wasOutcomeIdempotencyKeyClaimed(idempotencyKey) {
+  const client = await acquireConnection();
+  try {
+    return await repo.wasOutcomeIdempotencyKeyClaimed(client, idempotencyKey);
+  } finally {
+    client.release();
+  }
+}
+
+// hasActiveListingForChannel -- read-only. GRAILKEY INVENTORY AUTHORITY
+// V1's own duplicate-list defense: true when this asset already has an
+// active (LISTED, no terminal event yet) listing on this channel.
+// AVAILABLE inventory state does NOT by itself mean "safe to create
+// unlimited duplicate projections" -- this is the second, independent
+// check the LIST preflight also runs.
+export async function hasActiveListingForChannel({ principalId, gkAssetId, channel } = {}) {
+  requireFields({ principalId, gkAssetId, channel }, ['principalId', 'gkAssetId', 'channel']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    const active = await repo.listActiveListingsForChannel(client, { gkAssetId, channel });
+    return { active: active.length > 0, activeListingIds: active };
+  } finally {
+    client.release();
+  }
+}
+
 // getLatestValuation -- read-only. GrailKey Automatic eBay Outcome
 // Reconciler V1's own PredictionError input: the most recent
 // valuation_event.value_amount for an asset, ownership-checked. Returns

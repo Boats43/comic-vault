@@ -47,8 +47,12 @@ const assertTrue = (cond, label) => {
 console.log('\n=== D4 Phase B, B7a FINAL deterministic closure (real PostgreSQL lock cycle) ===\n');
 console.log('  Asset:', ASSET_ID, '  A(source)=', A, '  B(target)=', B);
 
-const observer = new Client(connOpts);
-await observer.connect();
+// Deliberately targets real data1_dev — assertAdminDbTarget() verifies
+// current_database()/schema/environment-identity without refusing that
+// live target. Helper connection H below reuses the SAME already-
+// verified connOpts.
+const { assertAdminDbTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const observer = await assertAdminDbTarget({ connectionString: connOpts.connectionString, label: 'd4-identifier-fabric-live-retry-deterministic' });
 await observer.query('SET search_path TO data1_dev');
 
 // Pre-flight: confirm A and B are actually live right now, and reachable.

@@ -24,7 +24,6 @@
 // Invoke: node tests/d5c-market-population-migration-contract.test.js
 
 import { readFileSync } from 'node:fs';
-import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -64,10 +63,12 @@ const assertSucceeds = async (fn, label) => {
 
 console.log('\n=== D5C -- MarketPopulation migration contract (real, isolated scratch-schema proof) ===\n');
 
-const client = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED, ssl: { rejectUnauthorized: false } });
-await client.connect();
-const { rows: [{ pid: sessionPid }] } = await client.query('SELECT pg_backend_pid() AS pid');
-console.log('  dedicated unpooled backend PID for this entire script:', sessionPid);
+const { assertScratchSchemaTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+const { client, sessionPid } = await assertScratchSchemaTarget({
+  connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED,
+  label: 'd5c-market-population-migration-contract',
+});
+console.log('  dedicated backend PID for this entire script:', sessionPid);
 
 async function assertScratchTarget(expectedSchema, label) {
   const r = await client.query('SELECT current_schema() AS s, pg_backend_pid() AS pid');

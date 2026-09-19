@@ -376,6 +376,49 @@ export async function getLatestValuationEvent(client, assetId) {
   return r.rows[0] || null;
 }
 
+// GRAILKEY INVENTORY AUTHORITY V1 — lets the duplicate-list preflight
+// distinguish "a genuinely new listing attempt while one is already
+// active" (reject) from "this exact request, replayed" (let the normal
+// GK-163 idempotency mechanism inside recordOutcomeEvent handle it,
+// exactly as before this dispatch).
+export async function wasOutcomeIdempotencyKeyClaimed(client, idempotencyKey) {
+  if (!idempotencyKey) return false;
+  const r = await client.query(
+    `SELECT 1 FROM data1_dev.idempotency_key WHERE operation = 'recordOutcomeEvent' AND idempotency_key = $1`,
+    [idempotencyKey]
+  );
+  return r.rows.length > 0;
+}
+
+// GRAILKEY INVENTORY AUTHORITY V1 — duplicate-list defense. Groups this
+// asset's outcome_event rows for one channel by external_listing_id;
+// a group is "active" when it has a LISTED row and no terminal row
+// (SOLD/DELISTED/EXPIRED_UNSOLD) after it — ACTIVE_AT_CUTOFF is
+// deliberately NOT terminal (it only observes continued activity).
+export async function listActiveListingsForChannel(client, { gkAssetId, channel }) {
+  const r = await client.query(
+    `SELECT external_listing_id, outcome_type, occurred_at
+     FROM data1_dev.outcome_event
+     WHERE gk_asset_id = $1 AND channel = $2 AND external_listing_id IS NOT NULL
+     ORDER BY external_listing_id, occurred_at`,
+    [gkAssetId, channel]
+  );
+  const TERMINAL = new Set(['SOLD', 'DELISTED', 'EXPIRED_UNSOLD']);
+  const byListing = new Map();
+  for (const row of r.rows) {
+    const list = byListing.get(row.external_listing_id) || [];
+    list.push(row);
+    byListing.set(row.external_listing_id, list);
+  }
+  const active = [];
+  for (const [externalListingId, rows] of byListing) {
+    const hasListed = rows.some((row) => row.outcome_type === 'LISTED');
+    const hasTerminal = rows.some((row) => TERMINAL.has(row.outcome_type));
+    if (hasListed && !hasTerminal) active.push(externalListingId);
+  }
+  return active;
+}
+
 // GrailKey Automatic eBay Outcome Reconciler V1 — the read a
 // principal-authenticated HTTP handler needs (list every outcome_event
 // row for one listing, ownership-scoped) that no existing function

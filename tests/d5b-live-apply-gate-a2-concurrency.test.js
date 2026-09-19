@@ -34,7 +34,7 @@
 
 import { readFileSync } from 'node:fs';
 import { Client } from 'pg';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
@@ -57,9 +57,13 @@ const assertTrue = (cond, label) => {
 console.log('\n=== D5B live-apply gate, A2 -- concurrency/deadlock analysis (asset_identity_assignment_guard) ===\n');
 
 const connOpts = { connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL_UNPOOLED, ssl: { rejectUnauthorized: false } };
-const setup = new Client(connOpts);
-await setup.connect();
-const { rows: [{ pid: sessionPid }] } = await setup.query('SELECT pg_backend_pid() AS pid');
+const { assertScratchSchemaTarget } = await import(pathToFileURL(path.join(repoRoot, 'scripts', 'db-admin-preflight.mjs')).href);
+// Verifies current_database()/schema/environment-identity ONCE, via the
+// setup connection — c1/c2 below reuse the SAME already-verified
+// connOpts for their own raw connections (deliberately real concurrent
+// connections to the SAME confirmed-correct database; re-running the
+// full preflight per connection would be redundant, not safer).
+const { client: setup, sessionPid } = await assertScratchSchemaTarget({ connectionString: connOpts.connectionString, label: 'd5b-live-apply-gate-a2-concurrency' });
 console.log('  setup client backend PID:', sessionPid);
 
 async function assertScratchTarget(client, expectedSchema, label) {

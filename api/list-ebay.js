@@ -38,6 +38,7 @@ import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
 import { recordOutcomeEvent, validateOutcomeAttachment, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
+import { assertListingAuthorized, ListingPreflightFailedError } from "../src/lib/inventoryListingPreflight.js";
 
 const EBAY_ENDPOINT = "https://api.ebay.com/ws/api.dll";
 const COMPAT_LEVEL = "1193";
@@ -780,6 +781,26 @@ export default async function handler(req, res) {
 
     // Bundle branch: combined lot listing for multiple comics.
     if (item.bundle === true) {
+      // GRAILKEY INVENTORY AUTHORITY V1 (item 7) — the bundle path has
+      // zero GrailKey linkage of any kind (no gkAssetId/decisionEventId/
+      // operatorActionEventId per item), so it cannot independently
+      // prove GK-207 linkage, Inventory Authority state, or duplicate-
+      // listing safety for each physical asset without a real redesign
+      // of the bundle feature — explicitly out of this dispatch's scope
+      // ("do not redesign bundle listing"). Per this dispatch's own
+      // explicit instruction, the smallest safe response when that
+      // proof cannot be built cleanly is to disable Production bundle
+      // writes entirely, fail-closed, until a future dispatch builds
+      // real per-item linkage. Development is unaffected (no durable
+      // Production asset has ever been part of a bundle listing; this
+      // closes GK-216's own previously-disclosed bundle bypass).
+      if (process.env.GRAILKEY_CATALOG_ENVIRONMENT === 'production') {
+        res.status(503).json({
+          error: 'BUNDLE_LISTING_DISABLED_PRODUCTION',
+          message: 'Bundle listing is disabled in Production until it can independently prove GK-207 linkage, Inventory Authority state, and duplicate-listing safety for every item (GK-216\'s disclosed gap).',
+        });
+        return;
+      }
       const items = Array.isArray(item.items) ? item.items : [];
       if (items.length < 2) {
         res.status(400).json({ error: "Bundle requires at least 2 items" });
@@ -908,6 +929,26 @@ export default async function handler(req, res) {
         error: 'GRAILKEY_LINKAGE_INVALID',
         message: e?.message || 'GrailKey linkage validation failed.',
       });
+      return;
+    }
+
+    // GRAILKEY INVENTORY AUTHORITY V1 — fail-closed preflight, additive
+    // to GK-207's own linkage gate above, never a replacement for it.
+    // Requires Inventory Authority state AVAILABLE (UNMANAGED, RESERVED,
+    // SOLD, missing, or ambiguous all reject) AND no existing active
+    // listing for this asset on this channel — both checked BEFORE any
+    // eBay network call. This gate does not reserve anything; it only
+    // reads state. Reservation (AVAILABLE -> RESERVED) is a separate,
+    // manual/API-driven operation in V1 (src/modules/inventory).
+    try {
+      await assertListingAuthorized({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId, channel: 'ebay', outcomeIdempotencyKey: item.outcomeIdempotencyKey || null });
+    } catch (e) {
+      console.error("[ebay] pre-flight Inventory Authority check FAILED — aborting before any eBay call:", e?.message || e);
+      if (e instanceof ListingPreflightFailedError) {
+        res.status(409).json({ error: e.code, message: e.message });
+        return;
+      }
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Inventory Authority check failed unexpectedly.' });
       return;
     }
 

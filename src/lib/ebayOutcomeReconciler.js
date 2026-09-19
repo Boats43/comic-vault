@@ -41,6 +41,7 @@
 import { findOrderByLegacyItemId, getFinancialTransactionsForOrder, normalizeTransactionToComponents, evaluateOrderSaleEvidence } from './ebayFulfillmentFinances.js';
 import { recordOutcomeEvent, recordEconomicsComponent, getOutcomeEconomics, getOutcomeEventsForListing, getLatestValuation } from '../modules/assets/index.js';
 import { scorePrediction } from './predictionErrorScoring.js';
+import { markSold as markInventorySold, ConflictError as InventoryConflictError } from '../modules/inventory/index.js';
 
 export const DEFAULT_LOOKBACK_DAYS = 180;
 const TERMINAL_UNSOLD_TYPES = new Set(['DELISTED', 'EXPIRED_UNSOLD']);
@@ -138,6 +139,34 @@ async function scoreOutcomePrediction({ principalId, gkAssetId, listedRow, soldO
 }
 
 /**
+ * attemptInventoryMarkSold — GRAILKEY INVENTORY AUTHORITY V1 wiring.
+ * Best-effort, NEVER throws and NEVER blocks the outcome ledger itself
+ * — outcome_event is the authoritative marketplace-execution record
+ * regardless of whether the asset was ever enrolled in Inventory
+ * Authority (an UNMANAGED asset can still have real outcome history;
+ * the two systems are related, not one gated by the other). Idempotent
+ * by construction (same order id -> same idempotencyKey), so calling it
+ * again on every enrichment poll is always safe and self-healing if an
+ * earlier attempt failed.
+ */
+async function attemptInventoryMarkSold({ principalId, gkAssetId, channel, orderId }) {
+  try {
+    const result = await markInventorySold({
+      principalId, gkAssetId, reason: 'authoritative-sale', channel, externalReference: orderId,
+      idempotencyKey: `inventory-authority-${orderId}-SOLD`,
+    });
+    return { attempted: true, applied: true, state: result.state };
+  } catch (e) {
+    if (e instanceof InventoryConflictError) {
+      // Not enrolled (UNMANAGED) or already SOLD via some other path —
+      // a real, expected, non-fatal outcome, not a bug in the ledger.
+      return { attempted: true, applied: false, reason: e.message };
+    }
+    return { attempted: true, applied: false, reason: `unexpected error: ${e.message}` };
+  }
+}
+
+/**
  * reconcileEbayOutcome — the single entry point. Never determines SOLD
  * from listing status; always from real Fulfillment order evidence.
  * Idempotent: safe to call repeatedly for the same externalListingId at
@@ -165,7 +194,8 @@ export async function reconcileEbayOutcome({ principalId, gkAssetId, externalLis
     const economics = await getOutcomeEconomics({ principalId, outcomeEventId: soldRow.id });
     const economicsStatus = classifyEconomicsCompleteness(economics);
     const predictionError = await scoreOutcomePrediction({ principalId, gkAssetId, listedRow, soldOccurredAt: soldRow.occurred_at, economics, economicsStatus });
-    return { status: 'ALREADY_SOLD_ENRICHED', outcomeEventId: soldRow.id, orderId, ...ingestResult, economicsStatus, economics, predictionError };
+    const inventory = await attemptInventoryMarkSold({ principalId, gkAssetId, channel: soldRow.channel, orderId });
+    return { status: 'ALREADY_SOLD_ENRICHED', outcomeEventId: soldRow.id, orderId, ...ingestResult, economicsStatus, economics, predictionError, inventory };
   }
 
   const terminalUnsold = events.find((e) => TERMINAL_UNSOLD_TYPES.has(e.outcome_type));
@@ -226,9 +256,10 @@ export async function reconcileEbayOutcome({ principalId, gkAssetId, externalLis
   const economics = await getOutcomeEconomics({ principalId, outcomeEventId: soldResult.outcomeEventId });
   const economicsStatus = classifyEconomicsCompleteness(economics);
   const predictionError = await scoreOutcomePrediction({ principalId, gkAssetId, listedRow, soldOccurredAt: occurredAt, economics, economicsStatus });
+  const inventory = await attemptInventoryMarkSold({ principalId, gkAssetId, channel: listedRow.channel, orderId: order.orderId });
 
   return {
     status: 'SOLD_CONFIRMED', outcomeEventId: soldResult.outcomeEventId, orderId: order.orderId,
-    ...ingestResult, economicsStatus, economics, predictionError,
+    ...ingestResult, economicsStatus, economics, predictionError, inventory,
   };
 }
