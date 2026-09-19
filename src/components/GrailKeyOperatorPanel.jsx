@@ -39,6 +39,9 @@ import {
   isDefinitiveResponseStatus,
   pendingAgeMs,
 } from "../lib/operatorActionIdempotency.js";
+// GK-226 — see src/lib/captureOutcomeMapping.js for the full root-cause
+// narrative (Old Man Logan #25's durable $0.00 valuation_event).
+import { buildCaptureOutcomePrice } from "../lib/captureOutcomeMapping.js";
 
 const ACTIONS = ["LIST", "HOLD", "PASS"];
 const REQUEST_TIMEOUT_MS = 15000;
@@ -172,7 +175,7 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos }
         outcome: {
           decisionAction: item.decision?.action || null,
           pricingSource: item.pricingSource || null,
-          price: item.price != null ? `$${Number(item.price).toFixed(2)}` : null,
+          price: buildCaptureOutcomePrice(item),
           gradeMultiplier: item.gradeMultiplier ?? null,
         },
       };

@@ -51,6 +51,14 @@ delete process.env.MILESTONE_TEN_H8_BOOTSTRAP;
 
 const captureScanRoute = (await import(pathToFileURL(path.join(repoRoot, 'api', 'capture-scan.js')).href)).default;
 const { getPhysicalAsset, closePool } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+// GK-226 — the REAL helper, not a hand-rolled reimplementation. Before
+// this fix, this test's own buildRequestBody() duplicated the buggy
+// `Number(item.price).toFixed(2)` inline expression AND used a raw
+// numeric price fixture (42.5) — masking the real bug, which only
+// manifests when item.price is the dollar-formatted STRING it actually
+// is in production ("$15.28"). Importing the real function closes that
+// gap: this test now exercises the exact code the button runs.
+const { buildCaptureOutcomePrice } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'captureOutcomeMapping.js')).href);
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -101,7 +109,9 @@ function contentTypeFromDataUrl(dataUrl) {
   return m ? m[1] : 'image/jpeg';
 }
 function buildRequestBody(item, collectionItemId, idempotencyKey) {
-  // Byte-for-byte the same construction captureAsOwnedAsset() performs.
+  // Byte-for-byte the same construction captureAsOwnedAsset() performs —
+  // including calling the REAL buildCaptureOutcomePrice(), not a
+  // reimplementation (GK-226).
   const localPhoto = (item.images && item.images[0]) || item.image || null;
   const scanPayload = {
     correlationId: idempotencyKey,
@@ -110,7 +120,7 @@ function buildRequestBody(item, collectionItemId, idempotencyKey) {
     outcome: {
       decisionAction: item.decision?.action || null,
       pricingSource: item.pricingSource || null,
-      price: item.price != null ? `$${Number(item.price).toFixed(2)}` : null,
+      price: buildCaptureOutcomePrice(item),
       gradeMultiplier: item.gradeMultiplier ?? null,
     },
   };
@@ -137,7 +147,10 @@ try {
     images: [LOCAL_PHOTO],
     decision: { action: 'LIST_LOW' },
     pricingSource: 'ebay-active',
-    price: 42.5,
+    // GK-226 — real production shape: a dollar-formatted STRING
+    // (api/enrich.js's fmtUsd()), never a raw number. A raw-number
+    // fixture here would have masked the Number("$X")->NaN->0 bug.
+    price: '$42.50',
     gradeMultiplier: 1.1,
   };
   const idempotencyKey1 = randomUUID();
@@ -165,6 +178,11 @@ try {
   const graph = await getPhysicalAsset({ principalId: JIMMY, gkAssetId });
   assertTrue(graph.media.length === 1 && graph.media[0].media_type === 'capture-photo', 'real media row attached, correct captureRole, confirmed via independent getPhysicalAsset read');
 
+  console.log('\n-- GK-226: real dollar-formatted price string survives to a NON-ZERO durable valuation, not 0.00 --\n');
+  const valRow = await client.query('SELECT value_amount FROM valuation_event WHERE asset_id = $1 ORDER BY occurred_at DESC LIMIT 1', [gkAssetId]);
+  assertTrue(valRow.rowCount === 1, 'a valuation_event row was written for this asset');
+  assertTrue(Number(valRow.rows[0]?.value_amount) === 42.5, `durable value_amount is the real $42.50, not 0.00 (got ${valRow.rows[0]?.value_amount})`);
+
   console.log('\n-- IDEMPOTENCY: repeated submit (same key) cannot double-mint --\n');
   const beforeReplay = await countAssets();
   const req2 = { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: reqBody }; // exact same body, same key
@@ -187,7 +205,7 @@ try {
   // directly from outcome.price, so recordValuation's own fingerprint
   // (keyed `${idempotencyKey}:valuation`) genuinely differs and correctly
   // throws IdempotencyConflictError, proving the real conflict path.
-  const conflictBody = buildRequestBody({ ...item, price: 999.99 }, COLLECTION_ITEM_ID, idempotencyKey1);
+  const conflictBody = buildRequestBody({ ...item, price: '$999.99' }, COLLECTION_ITEM_ID, idempotencyKey1);
   const beforeConflict = await countAssets();
   const req3 = { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: conflictBody };
   const res3 = mockRes();
