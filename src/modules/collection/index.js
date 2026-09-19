@@ -10,6 +10,7 @@ export {
   createCollectionItem,
   updateCollectionItem,
   deleteCollectionItem,
+  getRemoteImageUri,
 } from './service.js';
 
 export {

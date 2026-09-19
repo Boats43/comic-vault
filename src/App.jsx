@@ -955,21 +955,30 @@ const makeThumbnail = (dataUrl, maxDim = 1000, quality = 0.85) =>
 // legacy single `image` field, the `images` array (local base64 —
 // vision/re-identify/eBay-listing consumers all expect this exact
 // shape, unchanged), and, only when NEITHER local form exists,
-// `remoteImages` (synced Blob URLs from a device that never scanned
-// this item locally — see api/collection.js/collectionSync.js's own
-// comments). Lowest priority deliberately: a device that scanned this
-// item itself always uses its own local bytes; `remoteImages` only ever
-// fills the gap on a device that received the item purely via sync.
-// `<img src>` renders a plain https:// URL exactly like a data: URL, so
-// no rendering code elsewhere needs to change.
+// a synced display image (a device that never scanned this item
+// locally). Lowest priority deliberately: a device that scanned this
+// item itself always uses its own local bytes; the synced fallback only
+// ever fills the gap on a device that received the item purely via sync.
+//
+// PRODUCTION-RETEST CORRECTION (2026-09-19): `comic.remoteImages` holds
+// the real Vercel Blob object URIs, but those are PRIVATE (the real
+// Production store is provisioned private-only — see
+// api/collection.js's own header) — a plain <img src> pointed straight
+// at one would 401/403. This never reads `comic.remoteImages`' string
+// CONTENTS at all; it only reads its LENGTH, and builds a same-origin
+// proxy path per index (`/api/collection-image?id=...&index=n`) that
+// api/collection-image.js resolves server-side against the item's real
+// stored remoteImages[index] independently. A plain <img src> can load
+// a same-origin path with no auth header needed, so no other rendering
+// code changes.
 const getComicPhotos = (comic) => {
   if (!comic) return [];
   if (Array.isArray(comic.images) && comic.images.length > 0) {
     return comic.images.filter(Boolean);
   }
   if (comic.image) return [comic.image];
-  if (Array.isArray(comic.remoteImages) && comic.remoteImages.length > 0) {
-    return comic.remoteImages.filter(Boolean);
+  if (Array.isArray(comic.remoteImages) && comic.remoteImages.length > 0 && comic.id) {
+    return comic.remoteImages.map((_, i) => `/api/collection-image?id=${encodeURIComponent(comic.id)}&index=${i}`);
   }
   return [];
 };

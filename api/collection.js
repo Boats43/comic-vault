@@ -37,18 +37,36 @@ function extractBearerToken(req) {
   return header.slice('Bearer '.length).trim();
 }
 
-// GRAILKEY — COLLECTION IMAGE SYNC (2026-09-19). collection_item.attributes
-// is an opaque JSON bag for every OTHER field (title/issue/publisher/...),
-// but a raw base64 photo has no business sitting in that JSONB column
-// (large, and Postgres is not a blob store) — see 0026's own header. This
-// endpoint is the one place that isn't opaque about `images`: a data: URL
-// in the request body's top-level `images` array is uploaded through the
-// media module's raw content-addressed blob primitive
-// (src/modules/media/index.js's put(), access:'public' — a disclosed,
-// deliberate exception to the evidence-grade private default, see that
-// driver's own comment) and only the resulting URL is written into
-// attributes.remoteImages. This is NOT the physical-asset evidence path:
-// no gk_asset, no gkAssetId, no gk_media row, no call into
+// GRAILKEY — COLLECTION IMAGE SYNC (2026-09-19, production-retest fix).
+// collection_item.attributes is an opaque JSON bag for every OTHER field
+// (title/issue/publisher/...), but a raw base64 photo has no business
+// sitting in that JSONB column (large, and Postgres is not a blob store)
+// — see 0026's own header. This endpoint is the one place that isn't
+// opaque about `images`: a data: URL in the request body's top-level
+// `images` array is uploaded through the media module's raw
+// content-addressed blob primitive (src/modules/media/index.js's put()).
+//
+// CORRECTION (2026-09-19): the first version of this code requested
+// access:'public'. Real Production evidence (Vercel runtime logs, a live
+// reproduced 500) proved that throws — the real comic-vault-media-primary
+// store (GK-166) was provisioned PRIVATE-ONLY; there is no per-object
+// public override, and every real write that included an image was
+// failing outright (500, "Internal error"), attributes and all. The
+// store's own configuration is left exactly as it already is — access is
+// no longer requested at all here (media.put()'s default, 'private',
+// applies).
+//
+// attributes.remoteImages still holds the real (private) objectUri
+// strings — server-side ground truth only, never sent directly to a
+// browser <img src>. The client (src/App.jsx's getComicPhotos()) never
+// reads these values; it derives a same-origin proxy path
+// (`/api/collection-image?id=<item id>&index=<n>`) purely from the
+// item's own id and the array's length/position. That new endpoint
+// (api/collection-image.js) independently re-reads this exact
+// attributes.remoteImages[index] value server-side and streams the
+// bytes — see its own header for why it doesn't need Bearer auth to
+// stay safe. This is still NOT the physical-asset evidence path: no
+// gk_asset, no gkAssetId, no gk_media row, no call into
 // src/modules/assets/ or src/modules/capture/ — a collection display
 // thumbnail stays exactly what it is, never silently becoming durable
 // physical-condition evidence. An entry already shaped like a URL (not a
@@ -68,7 +86,7 @@ async function resolveRemoteImages(images) {
     }
     const [, contentType, b64] = m;
     const bytes = Buffer.from(b64, 'base64');
-    const { objectUri } = await mediaPut({ bytes, contentType, access: 'public' });
+    const { objectUri } = await mediaPut({ bytes, contentType }); // default access:'private', matches the real store
     resolved.push(objectUri);
   }
   return resolved;

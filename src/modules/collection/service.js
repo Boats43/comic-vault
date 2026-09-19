@@ -102,3 +102,16 @@ export async function deleteCollectionItem({ principalId, id } = {}) {
     client.release();
   }
 }
+
+// GRAILKEY — COLLECTION IMAGE SYNC (2026-09-19). See
+// repository.js's getRemoteImageUri for the deliberate no-principal-scope
+// rationale. Used only by api/collection-image.js.
+export async function getRemoteImageUri({ id, index = 0 } = {}) {
+  requireFields({ id }, ['id']);
+  const client = await acquireConnection();
+  try {
+    return await repo.getRemoteImageUri(client, id, index);
+  } finally {
+    client.release();
+  }
+}

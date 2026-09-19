@@ -88,3 +88,24 @@ export async function deleteItem(client, principalId, id) {
   );
   return res.rowCount > 0;
 }
+
+// GRAILKEY — COLLECTION IMAGE SYNC (2026-09-19). Deliberately NOT
+// principal-scoped, unlike every other lookup in this file — used only
+// by api/collection-image.js's display-image proxy, which authenticates
+// by "server-side registration in a real collection_item row" rather
+// than by caller identity (see that endpoint's own header for the full
+// rationale: an id is a client-generated `cv_<timestamp>_<random>`
+// value, not a secret, and this is the same "unguessable key, no
+// further access control" trust model 'public' Blob access would have
+// given directly, now routed through this proxy because the real
+// Production Blob store turned out to be private-only). Returns ONLY
+// the one string at attributes.remoteImages[index] — nothing else about
+// the item, and never the raw `attributes` object.
+export async function getRemoteImageUri(client, id, index) {
+  const res = await client.query(
+    `SELECT attributes->'remoteImages' AS remote_images FROM data1_dev.collection_item WHERE id = $1 LIMIT 1`,
+    [id]
+  );
+  const arr = res.rows[0]?.remote_images;
+  return Array.isArray(arr) && typeof arr[index] === 'string' ? arr[index] : null;
+}
