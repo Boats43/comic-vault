@@ -1091,6 +1091,85 @@ plus a real fake-indexeddb proof banking a production-shaped New Mutants
 for its own count. **STATUS: SHIPPED**, pending Jimmy's phone retest (see
 dispatch response for exact steps).
 
+## GK-237 — Active-side diagnostic evidence (activePoolSuspect/activeCompDiagnostics) false-negative + retention gap (FIXED)
+
+CORPUS EVIDENCE RETENTION dispatch (2026-09-20), evidence-retention only —
+no pricing behavior changed. Two independently real, confirmed defects on
+the active-side diagnostic fields, both fixed:
+
+1. **False-negative on `activePoolSuspect`/`activePoolSuspectReason`.**
+`activePoolSuspect` is computed ONLY inside `computePriceBands`' Tier 2
+branch (`src/lib/priceBands.js` ~line 837) — Tier 1/2.5/3/4 result objects
+never set this key at all. `api/enrich.js` previously did
+`priceBandsRaw.activePoolSuspect || false`, and `src/lib/fixtureShape.js`
+previously did `activePoolSuspect ?? false` — both silently converted
+"never evaluated for this book's pricing tier" into an affirmative
+"checked, pool is clean." Confirmed via the real NM #98 Production fixture
+itself: that book priced via `tier3_active_discounted` (Tier 3), where the
+check never runs, yet the exported fixture showed `activePoolSuspect:
+false` as though the engine had checked and found nothing wrong. Fixed at
+both layers to a null-preserving trichotomy: observed `true` → `true`,
+observed `false` → `false` (Tier 2 ran, pool was clean), unavailable →
+`null` + an explicit disclosed reason naming the actual pricing tier used.
+2. **Merge-site retention gap.** Even when `api/enrich.js` DID compute a
+real `activePoolSuspect`/`activePoolSuspectReason`, neither field was ever
+merged onto the persisted catalogue record at any of App.jsx's 5
+scan-result merge sites (the same 5 that already merge `pipelineAudit`) —
+so a real Tier-2 `true` was silently dropped before ever reaching
+`CollectionDetail`'s `item` prop, i.e. before any Collection-tab bank
+attempt could see it. Fixed via new `mergeActivePoolSuspect(enrich, prior)`
+(`src/lib/dataQualityGuard.js`), same presence-aware/Stale-Authority-
+Inheritance pattern as `mergePipelineAudit` — key absent on `enrich`
+(e.g. a refused-to-price response) preserves the prior scan's value; key
+present (even an honest `null`) is trusted verbatim and overwrites a stale
+prior value. Applied at all 5 sites.
+
+**`activeCompDiagnostics`: confirmed, not built.** Direct inspection of
+`api/comps.js` (grepped for `soldCompDiagnostics`/`activeCompDiagnostics`/
+`activeDiagnostics`/`activeRejected`/`rejectedSamples`/`rejected++`/
+`rejectionReasons`) found zero matches — no active-side rejection-reason
+breakdown object exists upstream anywhere in this codebase, unlike the
+sold side's `verifySoldComps` `reasons` counters. Per this dispatch's own
+explicit instruction, nothing was synthesized; `activeCompDiagnostics`
+continues to serialize as `null` + its pre-existing disclosed reason
+(`fixtureShape.js`'s own text, unchanged) — this remains the same
+pre-existing gap PRICE-LANE-2's T3 trace already found, still open,
+already correctly disclosed rather than fabricated.
+
+**`rawComps.prices` (individual active listings, title/price/url/date/
+condition): confirmed already surviving the full chain correctly**, not
+regressed by this dispatch — single construction site in `api/enrich.js`
+(`out.rawComps = ...`), merged verbatim at every merge site via
+`enrich.rawComps || cur.rawComps || null`. No second/duplicate
+`activeComps` representation was added anywhere.
+
+New test: `tests/gk237-active-diagnostics-retention.test.js` (39/39) —
+static proof of both fixes plus the confirmed absence of an upstream
+`activeCompDiagnostics` object; real `mergeActivePoolSuspect` proof of all
+four presence/absence cases (observed true, observed false, present-null
+overwriting a stale prior true, key-absent preserving a prior value); real
+`buildFixture` proof of the true/false/null trichotomy plus a no-reason
+fallback case; `rawComps.prices` byte-for-byte preservation proof; a
+no-pricing-output-changes proof (tier/branch/gradeMultiplier/price/
+decision.action all pass through unchanged); and a real fake-indexeddb
+round trip banking all three diagnostic states as distinct fixtures and
+reading each back unchanged (the null case never comes back as a
+fabricated `false`). Full regression re-run clean: build clean, GK-231
+36/36, production-fixture-bank-replay 78/78, GK-236 20/20, GK-234 43/43.
+**STATUS: SHIPPED.**
+
+**Banked finding, not fixed this dispatch (per explicit instruction):**
+Tier 3 active pricing is grade-blind. Real Production NM #98 proof:
+asserted grade VG 4.0, zero verified sold comps, priced via
+`tier3_active_discounted`, active average $424.227..., Market $360.59,
+displayed/reference `gradeMultiplier` = 0.55 — but Tier 3's actual price
+calculation (`activeAvg × 0.85`) never applies that multiplier at all; the
+display value is reference-only (D2 convention, `src/lib/priceBands.js`).
+The display/math divergence (GK-233) and Tier 3's active-pool grade
+blindness (GK-232) are related symptoms of the same underlying gap, banked
+together for the upcoming design work — not implemented here, no pricing
+math touched.
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.

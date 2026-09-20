@@ -346,3 +346,29 @@ export function mergePipelineAudit(enrich, prior) {
   }
   return incoming;
 }
+
+// GK-237 (2026-09-20) — CORPUS EVIDENCE RETENTION dispatch. Presence-aware,
+// same Stale Authority Inheritance guard as mergePipelineAudit above:
+// api/enrich.js sets activePoolSuspect (true/false/null, see its own
+// GK-237 comment) whenever priceBandsRaw exists at all — key ABSENT on
+// `enrich` means this response never ran pricing (e.g. a refused-to-price
+// path), so the prior scan's own value is preserved rather than wiped;
+// key PRESENT (even when its value is the honest `null` for "not
+// evaluated on this pricing tier") is trusted verbatim — a null must
+// overwrite a stale prior `true`/`false` from a DIFFERENT tier's earlier
+// scan, never be treated as "no new data." This is the merge-site half of
+// the false-negative fix: without it, a real Tier-2 `true` computed by
+// enrich.js would still never reach the persisted catalogue record (the
+// field was never merged onto it by any site before this dispatch).
+export function mergeActivePoolSuspect(enrich, prior) {
+  if (!hasKey(enrich, 'activePoolSuspect')) {
+    return {
+      activePoolSuspect: prior?.activePoolSuspect ?? null,
+      activePoolSuspectReason: prior?.activePoolSuspectReason ?? null,
+    };
+  }
+  return {
+    activePoolSuspect: enrich.activePoolSuspect,
+    activePoolSuspectReason: enrich.activePoolSuspectReason ?? null,
+  };
+}

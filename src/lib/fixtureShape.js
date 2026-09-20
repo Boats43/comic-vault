@@ -132,6 +132,23 @@ export function buildFixture(fields, meta = {}) {
     cgcPenaltyFlagsSource || 'condition evidence not captured for this scan (browser bank action always has it; a Node-CLI-reconstructed fixture only has it when grade-response.json was also supplied)'
   );
 
+  // GK-237 (2026-09-20) — trichotomy, not disclose(): unlike every other
+  // field above, activePoolSuspect's reason is meaningful in TWO of its
+  // three states, not just when null. `true` carries the real "why it's
+  // suspect" text (computePriceBands' own contamination-detection
+  // message); `false` legitimately has no reason (the check ran and found
+  // nothing); `null`/`undefined` means the check was never evaluated for
+  // this book's pricing tier (only Tier 2 runs it) and gets its own
+  // explicit unavailability reason. Previously this field used `?? false`,
+  // which silently converted "never evaluated" into an affirmative "pool
+  // is clean" on every non-Tier-2 book — exactly the false-negative this
+  // fixes. `false` is intentionally excluded from the `== null` check
+  // (`!= null` is false only for null/undefined, never for `false`).
+  const activePoolSuspectValue = activePoolSuspect === true ? true : (activePoolSuspect === false ? false : null);
+  const activePoolSuspectFinalReason = activePoolSuspectValue === null
+    ? (activePoolSuspectReason || 'active-pool-suspect check was not evaluated for this book (computed only inside computePriceBands\' Tier 2 branch — Tier 1/2.5/3/4 pricing paths never run it)')
+    : (activePoolSuspectValue === true ? (activePoolSuspectReason || null) : null);
+
   return {
     fixtureSchemaVersion: FIXTURE_SCHEMA_VERSION,
     source: meta.source || 'production-phone-scan',
@@ -168,8 +185,8 @@ export function buildFixture(fields, meta = {}) {
       rawCompsReason: rawCompsEvidence.reason,
       activeCompDiagnostics: activeDiagEvidence.value,
       activeCompDiagnosticsReason: activeDiagEvidence.reason,
-      activePoolSuspect: activePoolSuspect ?? false,
-      activePoolSuspectReason: activePoolSuspectReason ?? null,
+      activePoolSuspect: activePoolSuspectValue,
+      activePoolSuspectReason: activePoolSuspectFinalReason,
       priceLadder: ladderEvidence.value,
       priceLadderReason: ladderEvidence.reason,
     },

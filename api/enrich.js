@@ -7832,8 +7832,23 @@ export default async function handler(req, res) {
       // SAME values computed inside computePriceBands (src/lib/
       // priceBands.js Tier 2), surfaced verbatim. activePoolSuspectWarning
       // above is unchanged for existing UI consumers.
-      out.activePoolSuspect = priceBandsRaw.activePoolSuspect || false;
-      out.activePoolSuspectReason = priceBandsRaw.activePoolSuspectReason || null;
+      //
+      // GK-237 (2026-09-20) — presence-aware, corrects a false-negative:
+      // activePoolSuspect is computed ONLY inside computePriceBands' Tier 2
+      // branch (src/lib/priceBands.js ~line 837) — Tier 1/2.5/3/4 result
+      // objects never set this key at all, so `priceBandsRaw.activePoolSuspect`
+      // is `undefined` on every non-Tier-2 book (e.g. every Tier 3
+      // active-only book). The prior `|| false` coerced "never evaluated
+      // for this tier" into an affirmative "checked, pool is clean" —
+      // fabricating a negative the engine never actually determined.
+      // Corrected: key absent -> null (not evaluated for this pricing
+      // tier, with an explicit reason), key present -> trust the real
+      // boolean exactly, true or false.
+      const activePoolSuspectComputed = Object.prototype.hasOwnProperty.call(priceBandsRaw, 'activePoolSuspect');
+      out.activePoolSuspect = activePoolSuspectComputed ? priceBandsRaw.activePoolSuspect : null;
+      out.activePoolSuspectReason = activePoolSuspectComputed
+        ? (priceBandsRaw.activePoolSuspectReason || null)
+        : `not evaluated — active-pool-suspect check only runs inside Tier 2 pricing (this book priced via ${priceBandsRaw.source || 'a different tier'})`;
     }
 
     // Ship #21e: Surface blendedAvg for price derivation trace UI

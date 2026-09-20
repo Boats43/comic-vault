@@ -20,7 +20,7 @@ import { getAssetConfirmationBadge } from "./lib/assetConfirmationBadge.js";
 import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLabels.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
-import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, applyFirstModelPrediction } from "./lib/dataQualityGuard.js";
+import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction } from "./lib/dataQualityGuard.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -11544,6 +11544,9 @@ export default function App() {
                 hypotheticalReferenceEstimate: enrich.hypotheticalReferenceEstimate ?? cur.hypotheticalReferenceEstimate ?? null,
                 identityProvisionalFields: enrich.identityProvisionalFields ?? cur.identityProvisionalFields ?? null,
                 identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? cur.identityProvisionalYearDetail ?? null,
+                // GK-237 — active-pool-suspect diagnostics, same
+                // presence-aware parity as pipelineAudit above.
+                ...mergeActivePoolSuspect(enrich, cur),
               };
               // GrailKey Collection Sync Closeout — auto-refresh changes
               // persisted collection state (price/identity), routed
@@ -12153,6 +12156,9 @@ export default function App() {
                   hypotheticalReferenceEstimate: enrich.hypotheticalReferenceEstimate ?? cur.hypotheticalReferenceEstimate ?? null,
                   identityProvisionalFields: enrich.identityProvisionalFields ?? cur.identityProvisionalFields ?? null,
                   identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? cur.identityProvisionalYearDetail ?? null,
+                  // GK-237 — active-pool-suspect diagnostics, same
+                  // presence-aware parity as pipelineAudit above.
+                  ...mergeActivePoolSuspect(enrich, cur),
                 };
                 console.log('[persist] savedId:', savedId,
                   'price:', updated.price,
@@ -12298,6 +12304,9 @@ export default function App() {
                   hypotheticalReferenceEstimate: enrich.hypotheticalReferenceEstimate ?? s.hypotheticalReferenceEstimate ?? null,
                   identityProvisionalFields: enrich.identityProvisionalFields ?? s.identityProvisionalFields ?? null,
                   identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? s.identityProvisionalYearDetail ?? null,
+                  // GK-237 — active-pool-suspect diagnostics, same
+                  // presence-aware parity as pipelineAudit above.
+                  ...mergeActivePoolSuspect(enrich, s),
                 };
               });
               // SPEED-2a: Load deferred metadata asynchronously
@@ -12692,6 +12701,9 @@ export default function App() {
                 hypotheticalReferenceEstimate: enrich.hypotheticalReferenceEstimate ?? cur.hypotheticalReferenceEstimate ?? null,
                 identityProvisionalFields: enrich.identityProvisionalFields ?? cur.identityProvisionalFields ?? null,
                 identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? cur.identityProvisionalYearDetail ?? null,
+                // GK-237 — active-pool-suspect diagnostics, same
+                // presence-aware parity as pipelineAudit above.
+                ...mergeActivePoolSuspect(enrich, cur),
               };
               console.log('[persist-bulk] savedId:', savedId,
                 'price:', updated.price,
@@ -13458,6 +13470,9 @@ export default function App() {
       hypotheticalReferenceEstimate: enrich.hypotheticalReferenceEstimate ?? item.hypotheticalReferenceEstimate ?? null,
       identityProvisionalFields: enrich.identityProvisionalFields ?? item.identityProvisionalFields ?? null,
       identityProvisionalYearDetail: enrich.identityProvisionalYearDetail ?? item.identityProvisionalYearDetail ?? null,
+      // GK-237 — active-pool-suspect diagnostics, same presence-aware
+      // parity as pipelineAudit above.
+      ...mergeActivePoolSuspect(enrich, item),
     };
 
     // Ship #20a.6.22 — Apply autofix engine
