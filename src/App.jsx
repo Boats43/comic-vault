@@ -1533,6 +1533,135 @@ export class CardErrorBoundary extends Component {
   }
 }
 
+// GK-236 (2026-09-20) — Bank Regression Fixture reachability fix. Extracted
+// from ResultCard so the SAME implementation (same buildFixture() shape,
+// same putFixture() call, same idle/banking/banked/error UI) can be reused
+// on a persisted Collection item, not only the transient post-scan
+// ResultCard. `item` is either the live in-memory `result` object
+// (ResultCard, mid-scan) or a persisted catalogue record (CollectionDetail)
+// — both shapes carry the same field names by construction (App.jsx's own
+// scan->catalogue merge threads pipelineAudit/rawComps/priceLadder/
+// soldCompDiagnostics/contract/decision/etc. onto the catalogue record
+// verbatim, see the merge sites feeding `pipelineAudit: mergePipelineAudit(...)`).
+// No second banking implementation exists anywhere in this file.
+function BankFixtureButton({ item, enriching }) {
+  // PRODUCTION FIXTURE BANK dispatch (2026-09-20) — 'idle' | 'banking' |
+  // 'banked' | 'error'. Purely local UI feedback; the fixture itself lives
+  // in IndexedDB (src/db.js putFixture), never React state.
+  const [fixtureBankStatus, setFixtureBankStatus] = useState('idle');
+  // GK-231 hardening (2026-09-20) — B5: the actionable reason behind an
+  // 'error' state (e.g. src/db.js's own bounded blocked-upgrade message),
+  // surfaced instead of a bare "something went wrong."
+  const [fixtureBankError, setFixtureBankError] = useState(null);
+
+  // PRODUCTION FIXTURE BANK dispatch (2026-09-20) — "normal Production
+  // scan -> explicit Bank Regression Fixture -> sanitized fixture" in one
+  // action, no DevTools, no manual JSON paste, no duplicate marketplace
+  // requests. Every field below already lives on `item` (either the live
+  // in-memory scan result, or the SAME data once persisted to the
+  // catalogue record), so this makes zero network calls of its own. Hard
+  // non-mutation requirement: this function reads `item` and writes
+  // ONLY to the local fixtureBank IndexedDB store (src/db.js) — it never
+  // touches gkAssetId/collection_item/valuation/decision/outcome/
+  // marketplace state, and calls no /api/* endpoint.
+  const handleBankFixture = async () => {
+    const traceId = item.pipelineAudit?.traceId;
+    if (!traceId) {
+      setFixtureBankError('This scan has no traceId (pipelineAudit missing) — nothing to bank. Rescan and try again.');
+      setFixtureBankStatus('error');
+      return;
+    }
+    setFixtureBankError(null);
+    setFixtureBankStatus('banking');
+    try {
+      const fixture = buildFixture(
+        {
+          title: item.title,
+          issue: item.issue,
+          publisher: item.publisher,
+          year: item.year,
+          grade: item.grade,
+          gradeConfidence: item.confidence,
+          isGraded: item.isGraded,
+          numericGrade: item.numericGrade,
+          defectPenalty: item.defectPenalty,
+          cgcPenaltyFlags: item.cgcPenaltyFlags,
+          restoration: item.restoration,
+          soldComps: item.soldComps,
+          soldCompDiagnostics: item.soldCompDiagnostics,
+          rawComps: item.rawComps,
+          priceLadder: item.priceLadder,
+          activePoolSuspect: item.activePoolSuspect,
+          activePoolSuspectReason: item.activePoolSuspectReason,
+          priceBands: item.priceBands,
+          priceDerivationTrace: item.priceDerivationTrace,
+          pricingSource: item.pricingSource,
+          gradeMultiplier: item.gradeMultiplier,
+          price: item.price,
+          priceLow: item.priceLow,
+          priceHigh: item.priceHigh,
+          decision: item.decision,
+          contract: item.contract,
+          traceId,
+        },
+        {
+          source: 'production-phone-scan',
+          capturedAt: new Date().toISOString(),
+          buildSha: item.pipelineAudit?.buildSha ?? null,
+        }
+      );
+      // GK-231 hardening — B3/B5: putFixture now resolves ONLY after a
+      // real transaction.oncomplete, so 'banked' here is a genuine commit
+      // guarantee, never a "the write request fired" guess.
+      await putFixture(fixture);
+      setFixtureBankStatus('banked');
+    } catch (err) {
+      // B1: src/db.js's openDb() now rejects (with an actionable message)
+      // on a blocked version-upgrade instead of hanging forever — this is
+      // exactly the class of error that previously left the button stuck
+      // on "Banking…" indefinitely with no feedback at all.
+      console.error('[fixture-bank] failed:', err);
+      setFixtureBankError(err?.message || 'Unknown fixture-bank error');
+      setFixtureBankStatus('error');
+    }
+  };
+
+  if (enriching || !item?.pipelineAudit?.traceId) return null;
+
+  return (
+    <div style={{ marginTop: 4, marginBottom: 4 }}>
+      <button
+        type="button"
+        onClick={handleBankFixture}
+        disabled={fixtureBankStatus === 'banking'}
+        style={{
+          fontSize: 11,
+          padding: "3px 8px",
+          borderRadius: 6,
+          border: "1px solid #555",
+          background: fixtureBankStatus === 'banked' ? "#1a4d2e" : "#2a2a2a",
+          color: "#aaa",
+          cursor: fixtureBankStatus === 'banking' ? "wait" : "pointer",
+        }}
+        title={fixtureBankStatus === 'error' && fixtureBankError ? fixtureBankError : "Bank this scan's evidence as a sanitized regression fixture (local only, diagnostic — creates no owned asset)"}
+      >
+        {fixtureBankStatus === 'banking' && "🗄️ Banking…"}
+        {fixtureBankStatus === 'banked' && "✅ Fixture Banked"}
+        {fixtureBankStatus === 'error' && "⚠️ Bank Failed — Retry"}
+        {fixtureBankStatus === 'idle' && "🗄️ Bank Regression Fixture"}
+      </button>
+      {/* GK-231 hardening — B5: the actionable reason stays visible
+          on the card, not just in a hover title (mobile has no
+          hover). */}
+      {fixtureBankStatus === 'error' && fixtureBankError && (
+        <div style={{ fontSize: 10, color: '#e05656', marginTop: 2, maxWidth: 280 }}>
+          {fixtureBankError}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ResultCard({ result, enriching }) {
   // Ship #20a.6.1 — collapsible drawer for soldCompDiagnostics rejected
   // samples. Toggled by clicking the V/R chip. Per-card state — different
@@ -1554,14 +1683,6 @@ function ResultCard({ result, enriching }) {
   // Price History / Full Comp Pool. Defaults OPEN (Q109 dispatch); the
   // four sub-sections above keep their own independent expand state.
   const [evidenceExpanded, setEvidenceExpanded] = useState(true);
-  // PRODUCTION FIXTURE BANK dispatch (2026-09-20) — 'idle' | 'banking' |
-  // 'banked' | 'error'. Purely local UI feedback; the fixture itself lives
-  // in IndexedDB (src/db.js putFixture), never React state.
-  const [fixtureBankStatus, setFixtureBankStatus] = useState('idle');
-  // GK-231 hardening (2026-09-20) — B5: the actionable reason behind an
-  // 'error' state (e.g. src/db.js's own bounded blocked-upgrade message),
-  // surfaced instead of a bare "something went wrong."
-  const [fixtureBankError, setFixtureBankError] = useState(null);
 
   const comps = result.comps;
   const hasComps =
@@ -1612,79 +1733,6 @@ function ResultCard({ result, enriching }) {
     issueRendersAsNumber &&
     !result.title?.includes(`#${result.issue}`);
 
-  // PRODUCTION FIXTURE BANK dispatch (2026-09-20) — "normal Production
-  // scan -> explicit Bank Regression Fixture -> sanitized fixture" in one
-  // action, no DevTools, no manual JSON paste, no duplicate marketplace
-  // requests. Every field below already lives on `result` (the SAME
-  // in-memory object this card renders from — the live client merge of
-  // /api/grade + /api/enrich responses per App.jsx's own setResult
-  // pipeline), so this makes zero network calls of its own. Hard
-  // non-mutation requirement: this function reads `result` and writes
-  // ONLY to the local fixtureBank IndexedDB store (src/db.js) — it never
-  // touches gkAssetId/collection_item/valuation/decision/outcome/
-  // marketplace state, and calls no /api/* endpoint.
-  const handleBankFixture = async () => {
-    const traceId = result.pipelineAudit?.traceId;
-    if (!traceId) {
-      setFixtureBankError('This scan has no traceId (pipelineAudit missing) — nothing to bank. Rescan and try again.');
-      setFixtureBankStatus('error');
-      return;
-    }
-    setFixtureBankError(null);
-    setFixtureBankStatus('banking');
-    try {
-      const fixture = buildFixture(
-        {
-          title: result.title,
-          issue: result.issue,
-          publisher: result.publisher,
-          year: result.year,
-          grade: result.grade,
-          gradeConfidence: result.confidence,
-          isGraded: result.isGraded,
-          numericGrade: result.numericGrade,
-          defectPenalty: result.defectPenalty,
-          cgcPenaltyFlags: result.cgcPenaltyFlags,
-          restoration: result.restoration,
-          soldComps: result.soldComps,
-          soldCompDiagnostics: result.soldCompDiagnostics,
-          rawComps: result.rawComps,
-          priceLadder: result.priceLadder,
-          activePoolSuspect: result.activePoolSuspect,
-          activePoolSuspectReason: result.activePoolSuspectReason,
-          priceBands: result.priceBands,
-          priceDerivationTrace: result.priceDerivationTrace,
-          pricingSource: result.pricingSource,
-          gradeMultiplier: result.gradeMultiplier,
-          price: result.price,
-          priceLow: result.priceLow,
-          priceHigh: result.priceHigh,
-          decision: result.decision,
-          contract: result.contract,
-          traceId,
-        },
-        {
-          source: 'production-phone-scan',
-          capturedAt: new Date().toISOString(),
-          buildSha: result.pipelineAudit?.buildSha ?? null,
-        }
-      );
-      // GK-231 hardening — B3/B5: putFixture now resolves ONLY after a
-      // real transaction.oncomplete, so 'banked' here is a genuine commit
-      // guarantee, never a "the write request fired" guess.
-      await putFixture(fixture);
-      setFixtureBankStatus('banked');
-    } catch (err) {
-      // B1: src/db.js's openDb() now rejects (with an actionable message)
-      // on a blocked version-upgrade instead of hanging forever — this is
-      // exactly the class of error that previously left the button stuck
-      // on "Banking…" indefinitely with no feedback at all.
-      console.error('[fixture-bank] failed:', err);
-      setFixtureBankError(err?.message || 'Unknown fixture-bank error');
-      setFixtureBankStatus('error');
-    }
-  };
-
   return (
     <div className="result-card">
       {result.image && (
@@ -1712,39 +1760,9 @@ function ResultCard({ result, enriching }) {
           diagnostic-only. Reads `result` (already in memory, zero network
           calls), writes only to the local fixtureBank IndexedDB store —
           never mints a gkAssetId, never touches Collection/valuation/
-          decision/Buyer/inventory/marketplace state. */}
-      {!enriching && result.pipelineAudit?.traceId && (
-        <div style={{ marginTop: 4, marginBottom: 4 }}>
-          <button
-            type="button"
-            onClick={handleBankFixture}
-            disabled={fixtureBankStatus === 'banking'}
-            style={{
-              fontSize: 11,
-              padding: "3px 8px",
-              borderRadius: 6,
-              border: "1px solid #555",
-              background: fixtureBankStatus === 'banked' ? "#1a4d2e" : "#2a2a2a",
-              color: "#aaa",
-              cursor: fixtureBankStatus === 'banking' ? "wait" : "pointer",
-            }}
-            title={fixtureBankStatus === 'error' && fixtureBankError ? fixtureBankError : "Bank this scan's evidence as a sanitized regression fixture (local only, diagnostic — creates no owned asset)"}
-          >
-            {fixtureBankStatus === 'banking' && "🗄️ Banking…"}
-            {fixtureBankStatus === 'banked' && "✅ Fixture Banked"}
-            {fixtureBankStatus === 'error' && "⚠️ Bank Failed — Retry"}
-            {fixtureBankStatus === 'idle' && "🗄️ Bank Regression Fixture"}
-          </button>
-          {/* GK-231 hardening — B5: the actionable reason stays visible
-              on the card, not just in a hover title (mobile has no
-              hover). */}
-          {fixtureBankStatus === 'error' && fixtureBankError && (
-            <div style={{ fontSize: 10, color: '#e05656', marginTop: 2, maxWidth: 280 }}>
-              {fixtureBankError}
-            </div>
-          )}
-        </div>
-      )}
+          decision/Buyer/inventory/marketplace state. GK-236 — same shared
+          implementation also reachable from CollectionDetail. */}
+      <BankFixtureButton item={result} enriching={enriching} />
       {/* GrailKey Directive P, Task 3 — variant is title-adjacent, not buried
           below grade/key-box. Same authoritative value (result.variant) the
           card always read; only its position changed, plus the custody fix
@@ -4998,6 +5016,17 @@ function CollectionDetail({
         {item.year}
         {item.grade && ` · ${gradeBadgeText}`}
       </div>
+      {/* GK-236 (2026-09-20) — Bank Regression Fixture reachability fix.
+          The button previously existed only on the transient post-scan
+          ResultCard, never here — a real Production phone scan followed by
+          the ordinary "open it from Collection" workflow never saw it. This
+          reuses the SAME buildFixture()/putFixture() implementation
+          (BankFixtureButton, defined above ResultCard) against the
+          persisted catalogue record, which already carries traceId/
+          rawComps/priceLadder/soldCompDiagnostics/contract/decision (App.jsx's
+          own scan->catalogue merge threads these onto `item` verbatim). No
+          Collection mutation, no network call, no asset mint. */}
+      <BankFixtureButton item={item} />
       {/* GrailKey Directive P, Task 3 — variant title-adjacent, same
           authoritative value the card always read (item.variant), just
           moved up from ~1400 lines further down the card into the header

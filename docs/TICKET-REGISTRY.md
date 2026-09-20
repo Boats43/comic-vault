@@ -1047,6 +1047,50 @@ an unverified local credential must be treated as provisional with
 respect to Production. Banked only; no implementation work opened.
 **STATUS: OPEN, informational.**
 
+## GK-236 — Bank Regression Fixture not reachable from the real Production result path (FIXED)
+
+Real phone evidence: a fresh New Mutants #98 scan/result completed
+successfully, the item was confirmed present in Collection, but "Bank
+Regression Fixture" was not rendered anywhere on the screen inspected.
+Root cause (T1/T2 trace): the button existed ONLY on `ResultCard` (the
+transient screen shown immediately after a scan, on the "scan"/"buyer"
+tabs) — it was never added to `CollectionDetail` (the screen rendered at
+`tab === "collection" && selectedItem`, i.e. the screen reached by
+opening a book from Collection, the normal way an operator reviews a
+saved scan). This is a render-path/reachability defect, not a repeat of
+GK-231's IndexedDB persistence defect — not re-investigated here.
+
+T2 (data-survival check, done before building): confirmed the persisted
+catalogue record backing `CollectionDetail`'s `item` prop already carries
+everything `buildFixture()` needs — `pipelineAudit` (traceId), `rawComps`,
+`priceLadder`, `soldCompDiagnostics`, `contract`, `decision` are all
+threaded onto it at the scan->catalogue merge site. Only
+`activePoolSuspect`/`activePoolSuspectReason`/`activeCompDiagnostics`
+never survive onto a catalogue record (not merged at any of the 8
+documented merge sites) — non-blocking, `fixtureShape.js`'s own
+`disclose()` convention already renders these as an honest `false`/`null`
+rather than a fabricated value.
+
+Fix: extracted the banking implementation (state + `handleBankFixture` +
+render) out of `ResultCard` into a new shared `BankFixtureButton({ item,
+enriching })` component — the SAME `buildFixture()`/`putFixture()` call,
+same idle/banking/banked/error UI, no second implementation. `ResultCard`
+now renders `<BankFixtureButton item={result} enriching={enriching} />`;
+`CollectionDetail` now also renders `<BankFixtureButton item={item} />`
+(previously absent). No Collection mutation, no network call, no asset
+mint, no pricing change.
+
+New test: `tests/gk236-bank-fixture-reachability.test.js` (20/20) — static
+source-proof that exactly one `BankFixtureButton`/`handleBankFixture`/
+`putFixture` call site exists, that `CollectionDetail` is genuinely the
+component mounted at the real Collection-tab/selectedItem render site,
+and that the button's only render gate is `enriching`/missing-`traceId`;
+plus a real fake-indexeddb proof banking a production-shaped New Mutants
+#98 record (the `CollectionDetail`-`item` shape) and reading back exactly
+1 fixture via the same `getAllFixtures()` call `exportFixtureCorpus` uses
+for its own count. **STATUS: SHIPPED**, pending Jimmy's phone retest (see
+dispatch response for exact steps).
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.
