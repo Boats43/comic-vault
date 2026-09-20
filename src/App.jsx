@@ -11,6 +11,7 @@ import {
   putAnalysis,
   putFixture,
   getAllFixtures,
+  getFixtureBankDiagnostics,
 } from "./db.js";
 import { buildFixture } from "./lib/fixtureShape.js";
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
@@ -1557,6 +1558,10 @@ function ResultCard({ result, enriching }) {
   // 'banked' | 'error'. Purely local UI feedback; the fixture itself lives
   // in IndexedDB (src/db.js putFixture), never React state.
   const [fixtureBankStatus, setFixtureBankStatus] = useState('idle');
+  // GK-231 hardening (2026-09-20) — B5: the actionable reason behind an
+  // 'error' state (e.g. src/db.js's own bounded blocked-upgrade message),
+  // surfaced instead of a bare "something went wrong."
+  const [fixtureBankError, setFixtureBankError] = useState(null);
 
   const comps = result.comps;
   const hasComps =
@@ -1621,9 +1626,11 @@ function ResultCard({ result, enriching }) {
   const handleBankFixture = async () => {
     const traceId = result.pipelineAudit?.traceId;
     if (!traceId) {
+      setFixtureBankError('This scan has no traceId (pipelineAudit missing) — nothing to bank. Rescan and try again.');
       setFixtureBankStatus('error');
       return;
     }
+    setFixtureBankError(null);
     setFixtureBankStatus('banking');
     try {
       const fixture = buildFixture(
@@ -1662,10 +1669,18 @@ function ResultCard({ result, enriching }) {
           buildSha: result.pipelineAudit?.buildSha ?? null,
         }
       );
+      // GK-231 hardening — B3/B5: putFixture now resolves ONLY after a
+      // real transaction.oncomplete, so 'banked' here is a genuine commit
+      // guarantee, never a "the write request fired" guess.
       await putFixture(fixture);
       setFixtureBankStatus('banked');
     } catch (err) {
+      // B1: src/db.js's openDb() now rejects (with an actionable message)
+      // on a blocked version-upgrade instead of hanging forever — this is
+      // exactly the class of error that previously left the button stuck
+      // on "Banking…" indefinitely with no feedback at all.
       console.error('[fixture-bank] failed:', err);
+      setFixtureBankError(err?.message || 'Unknown fixture-bank error');
       setFixtureBankStatus('error');
     }
   };
@@ -1713,13 +1728,21 @@ function ResultCard({ result, enriching }) {
               color: "#aaa",
               cursor: fixtureBankStatus === 'banking' ? "wait" : "pointer",
             }}
-            title="Bank this scan's evidence as a sanitized regression fixture (local only, diagnostic — creates no owned asset)"
+            title={fixtureBankStatus === 'error' && fixtureBankError ? fixtureBankError : "Bank this scan's evidence as a sanitized regression fixture (local only, diagnostic — creates no owned asset)"}
           >
             {fixtureBankStatus === 'banking' && "🗄️ Banking…"}
             {fixtureBankStatus === 'banked' && "✅ Fixture Banked"}
             {fixtureBankStatus === 'error' && "⚠️ Bank Failed — Retry"}
             {fixtureBankStatus === 'idle' && "🗄️ Bank Regression Fixture"}
           </button>
+          {/* GK-231 hardening — B5: the actionable reason stays visible
+              on the card, not just in a hover title (mobile has no
+              hover). */}
+          {fixtureBankStatus === 'error' && fixtureBankError && (
+            <div style={{ fontSize: 10, color: '#e05656', marginTop: 2, maxWidth: 280 }}>
+              {fixtureBankError}
+            </div>
+          )}
         </div>
       )}
       {/* GrailKey Directive P, Task 3 — variant is title-adjacent, not buried
@@ -3419,6 +3442,22 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
   // single array, download as one file. No server round-trip, no new
   // persistence subsystem — reuses this exact same Blob/createObjectURL/
   // anchor-click pattern exportJSON/backupToDrive already use above.
+  //
+  // GK-231 hardening (2026-09-20) — B4: getAllFixtures() no longer
+  // swallows errors into a bare [], so a genuine storage failure now
+  // THROWS here instead of silently exporting an empty file — the exact
+  // "valid [] with no signal of what actually happened" shape of the
+  // original incident. This function itself no longer catches; the
+  // caller (the toolbar button below) is responsible for distinguishing
+  // "resolved, length 0" (No fixtures banked yet) from "rejected"
+  // (Fixture storage error: <reason>).
+  //
+  // A3 self-reporting diagnostics: the fixture ARRAY itself is exported
+  // completely unchanged (existing merge-fixture.mjs/replay-test tooling
+  // stays valid with zero changes) — origin/DB name/version/store names/
+  // record count/build SHA go into a SEPARATE small sidecar file,
+  // triggered by this same one operator action, never mixed into the
+  // fixture schema itself.
   const exportFixtureCorpus = async () => {
     const fixtures = await getAllFixtures();
     const blob = new Blob([JSON.stringify(fixtures, null, 2)], { type: "application/json" });
@@ -3429,6 +3468,31 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
     a.download = `comic-vault-fixture-corpus-${date}.json`;
     a.click();
     URL.revokeObjectURL(url);
+
+    const dbDiag = await getFixtureBankDiagnostics();
+    const mostRecentBuildSha = fixtures.length > 0 ? (fixtures[fixtures.length - 1]?.buildSha ?? null) : null;
+    const diagnostics = {
+      origin: window.location.origin,
+      dbName: dbDiag.dbName,
+      dbVersionOpened: dbDiag.dbVersionOpened,
+      objectStoreNames: dbDiag.objectStoreNames,
+      fixtureRecordCount: dbDiag.fixtureRecordCount,
+      // Not build-time-injected to the client bundle (CV_BUILD_ID is a
+      // server/API-only env var, deliberately not exposed to the
+      // browser) — sourced from the most recently banked fixture's own
+      // buildSha instead, disclosed explicitly when none exists yet.
+      buildShaSource: fixtures.length > 0 ? 'most-recently-banked-fixture.buildSha' : 'unavailable — no fixtures banked yet',
+      buildSha: mostRecentBuildSha,
+      exportedAt: new Date().toISOString(),
+    };
+    const diagBlob = new Blob([JSON.stringify(diagnostics, null, 2)], { type: "application/json" });
+    const diagUrl = URL.createObjectURL(diagBlob);
+    const diagA = document.createElement("a");
+    diagA.href = diagUrl;
+    diagA.download = `comic-vault-fixture-diagnostics-${date}.json`;
+    diagA.click();
+    URL.revokeObjectURL(diagUrl);
+
     return fixtures.length;
   };
 
@@ -3807,8 +3871,18 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
             <button
               style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
               onClick={async () => {
-                const n = await exportFixtureCorpus();
-                window.alert(n > 0 ? `Exported ${n} banked fixture(s).` : "No fixtures banked yet — use \"Bank Regression Fixture\" on a scan result first.");
+                // GK-231 hardening — B4: a genuine storage failure now
+                // throws (see exportFixtureCorpus above) instead of
+                // silently producing an empty file — distinguished here
+                // from the equally-valid "resolved, just genuinely
+                // empty" case.
+                try {
+                  const n = await exportFixtureCorpus();
+                  window.alert(n > 0 ? `Exported ${n} banked fixture(s) + diagnostics.` : "No fixtures banked yet — use \"Bank Regression Fixture\" on a scan result first.");
+                } catch (err) {
+                  console.error('[fixture-export] failed:', err);
+                  window.alert(`Fixture storage error: ${err?.message || 'unknown error'}`);
+                }
               }}
               title="Export every locally-banked regression fixture as one JSON file (diagnostic evidence, never touches your catalogue)"
             >Export Fixtures</button>

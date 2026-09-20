@@ -18,6 +18,24 @@ const LEGACY_KEY = "cv_catalogue";
 
 let dbPromise = null;
 
+// GK-231 hardening (2026-09-20) — B1/B2. A version-upgrade open() blocks
+// (fires NEITHER onupgradeneeded NOR onsuccess NOR onerror — just sits)
+// for as long as any OTHER connection to this database, opened at a
+// LOWER version, stays alive — reproduced for real in
+// tests/gk231-fixture-bank-indexeddb.test.js. Previously this left
+// openDb()'s promise pending forever with zero signal, which is capable
+// of stranding the Bank Regression Fixture button on "Banking…"
+// indefinitely. B1: onblocked now rejects with a bounded, actionable
+// error instead of hanging, and resets `dbPromise` so a retry gets a
+// genuinely fresh attempt rather than replaying a poisoned promise. B2:
+// every successfully opened connection releases itself the instant a
+// NEWER tab wants to upgrade (onversionchange -> close()) — this lets a
+// tab running the FIXED code get out of a future tab's way; it cannot
+// force-close a tab still running OLD pre-fix code (that tab never
+// attached this handler), which is exactly why B1's bounded failure path
+// is still required as the fallback.
+const BLOCKED_MESSAGE = 'GrailKey storage upgrade is blocked by another open GrailKey tab/session. Close other GrailKey tabs and retry.';
+
 const openDb = () => {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
@@ -39,8 +57,16 @@ const openDb = () => {
         fixtureStore.createIndex("capturedAt", "capturedAt", { unique: false });
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => { db.close(); };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
+    req.onblocked = () => {
+      dbPromise = null;
+      reject(new Error(BLOCKED_MESSAGE));
+    };
   });
   return dbPromise;
 };
@@ -152,22 +178,51 @@ export const migrateComicVineRemoval = async () => {
 
 // --- Fixture bank (diagnostic regression evidence, never a catalogue/asset store) ---
 
-export const putFixture = async (fixture) => {
-  if (!fixture?.traceId) throw new Error("putFixture: fixture.traceId is required (idempotency key)");
-  const store = await txStore(FIXTURE_BANK_STORE, "readwrite");
-  await wrap(store.put(fixture));
-  return fixture;
+// GK-231 hardening — B3. Resolves ONLY on transaction.oncomplete (a real,
+// durable commit), never on the individual put-request's own onsuccess
+// (which fires before the surrounding transaction is guaranteed
+// committed — the exact "UI claims Banked before the transaction
+// completes" gap this dispatch called out). Rejects on the request's own
+// error, the transaction's error, or an abort — whichever actually
+// happens is the one propagated, never silently coerced into "success."
+export const putFixture = (fixture) => {
+  if (!fixture?.traceId) return Promise.reject(new Error("putFixture: fixture.traceId is required (idempotency key)"));
+  return openDb().then((db) => new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (err) => { if (!settled) { settled = true; reject(err); } };
+    const transaction = db.transaction(FIXTURE_BANK_STORE, "readwrite");
+    const store = transaction.objectStore(FIXTURE_BANK_STORE);
+    const putReq = store.put(fixture);
+    putReq.onerror = () => fail(putReq.error);
+    transaction.onerror = () => fail(transaction.error);
+    transaction.onabort = () => fail(transaction.error || new Error("putFixture: transaction aborted"));
+    transaction.oncomplete = () => { if (!settled) { settled = true; resolve(fixture); } };
+  }));
 };
 
-export const getAllFixtures = async () => {
-  try {
-    const store = await txStore(FIXTURE_BANK_STORE, "readonly");
-    const items = await wrap(store.getAll());
-    return (items || []).sort((a, b) => (a.capturedAt || "").localeCompare(b.capturedAt || ""));
-  } catch {
-    return [];
-  }
-};
+// GK-231 hardening — B4. A genuinely empty store and a genuine
+// open/read/transaction failure must never be indistinguishable. This no
+// longer swallows any error into a bare `[]` — every failure propagates
+// as a real rejection; callers (App.jsx's exportFixtureCorpus) are
+// responsible for telling "No fixtures banked yet" (resolved, length 0)
+// apart from "Fixture storage error: <reason>" (rejected).
+export const getAllFixtures = () =>
+  openDb().then((db) => new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (err) => { if (!settled) { settled = true; reject(err); } };
+    const transaction = db.transaction(FIXTURE_BANK_STORE, "readonly");
+    const store = transaction.objectStore(FIXTURE_BANK_STORE);
+    const req = store.getAll();
+    req.onerror = () => fail(req.error);
+    transaction.onerror = () => fail(transaction.error);
+    transaction.onabort = () => fail(transaction.error || new Error("getAllFixtures: transaction aborted"));
+    req.onsuccess = () => {
+      if (settled) return;
+      settled = true;
+      const items = req.result || [];
+      resolve(items.sort((a, b) => (a.capturedAt || "").localeCompare(b.capturedAt || "")));
+    };
+  }));
 
 export const deleteFixture = async (traceId) => {
   const store = await txStore(FIXTURE_BANK_STORE, "readwrite");
@@ -178,6 +233,21 @@ export const clearFixtureBank = async () => {
   const store = await txStore(FIXTURE_BANK_STORE, "readwrite");
   await wrap(store.clear());
 };
+
+// GK-231 — A3 self-reporting diagnostics. Deliberately reads facts ABOUT
+// the connection/store (never mutates the fixture schema itself — the
+// dispatch's own explicit constraint). window.location.origin and
+// buildSha are added by the caller (App.jsx, where `window` and the most
+// recent scan result actually live) — kept out of this module so db.js
+// stays runnable in a plain Node/IndexedDB-polyfill test environment
+// with no DOM.
+export const getFixtureBankDiagnostics = () =>
+  openDb().then(async (db) => ({
+    dbName: DB_NAME,
+    dbVersionOpened: db.version,
+    objectStoreNames: Array.from(db.objectStoreNames),
+    fixtureRecordCount: (await getAllFixtures()).length,
+  }));
 
 // One-shot migration: if a legacy `cv_catalogue` array exists in localStorage,
 // copy its entries into IndexedDB then drop the key. Safe to call on every load.

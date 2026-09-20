@@ -909,6 +909,72 @@ instructions.
 **STATUS: SHIPPED-PENDING** (pending Jimmy's Gate 1 capture/replay sanity
 check on the real deployed build).
 
+**PRODUCTION SMOKE FAILURE (2026-09-20):** a real export from
+`https://app.grailkey.com` produced a valid JSON file containing exactly
+`[]`. Production fixture-bank smoke failed; confirmed IndexedDB
+lifecycle hardening gaps found (B1-B5 below, shipped); incident root
+cause was under discrimination between origin split, keyPath/traceId
+failure, and bank-time blocked upgrade — resolved to the classification
+below, not asserted as a single confirmed cause without live evidence.
+
+**Root-cause classification matrix:**
+- **Candidate 1 — origin split** (`app.grailkey.com` vs
+  `comic-vault-rouge.vercel.app`, both real Vercel aliases of the exact
+  same deployment, confirmed via the Vercel API): **CONSISTENT WITH
+  EVIDENCE.** IndexedDB is unconditionally origin-scoped by the web
+  platform spec — this is not implementation-dependent, it needs no code
+  trace to confirm. Banking on one origin and exporting from the other
+  would deterministically, silently, and WITHOUT ANY ERROR produce
+  exactly the observed symptom (a valid, successfully-read, empty JSON
+  file) — no other candidate explains the export half of the incident as
+  cleanly. Not CONFIRMED because which origin(s) Jimmy actually used at
+  bank-time is not independently known.
+- **Candidate 2 — missing/invalid traceId**: **DISPROVEN** (near-certain).
+  Source-traced directly: `pipelineAudit` (the sole source of `traceId`,
+  a real `randomUUID()`) is set on both response shapes that can ever
+  render a card with a Bank button (`out`/`refusedOut`); every response
+  shape lacking it never produces a renderable card client-side at all
+  (App.jsx's own `if (!enrich) return`/`r.ok` gate). `buildFixture` and
+  `putFixture` both fail closed, visibly, on a missing traceId — never a
+  silent write. Proven end-to-end, real path, in
+  `tests/gk231-fixture-bank-indexeddb.test.js`'s A2 section.
+- **Candidate 3 — blocked DB upgrade**: **CONSISTENT WITH EVIDENCE.** A
+  blocked upgrade AT EXPORT TIME cannot explain a resolved, valid `[]`
+  (blocked means pending, not resolved-empty) — but a blocked upgrade AT
+  BANK TIME (pre-fix: `openDb()` had no `onblocked` handler, hung
+  indefinitely, zero error, zero timeout — reproduced live, not just
+  read from the spec) fully explains the complete observed chain: the
+  write silently never lands, and a later export correctly, honestly
+  reports `[]`. Not CONFIRMED because Jimmy's own account of the bank
+  button's exact behavior at the time (stuck on "Banking…"? a Retry
+  error he didn't mention? apparent success?) is not independently known.
+
+**Hardening shipped regardless of root-cause discrimination status** (B1-B5,
+explicitly pre-authorized): `src/db.js`'s `openDb()` now has a bounded
+`onblocked` failure path (rejects with an actionable message instead of
+hanging forever) and every successful connection now self-closes on
+`onversionchange` (lets a fixed-code tab get out of a future tab's way —
+cannot force-close a still-open OLD pre-fix tab, which is why the bounded
+`onblocked` path remains required as the fallback). `putFixture` now
+resolves only on real `transaction.oncomplete` (never the bare
+put-request's `onsuccess`). `getAllFixtures` no longer swallows any error
+into a bare `[]` — a genuine storage failure now rejects, distinguishable
+from a genuinely-empty, successfully-read store. The Bank button surfaces
+the actionable error text on-card (not just a hover title — mobile has no
+hover) and remains retryable. A3: `exportFixtureCorpus` now also
+downloads a small diagnostics sidecar (origin, DB name/version, object
+store names, fixture record count, best-effort build SHA) in the same
+one operator action — the fixture array itself is exported completely
+unchanged, so existing merge-fixture.mjs/replay tooling needed zero
+changes. `tests/gk231-fixture-bank-indexeddb.test.js` extended to 36/36,
+covering every B6-required failure class against the real, hardened
+`src/db.js` exports (not a reproduction of raw platform mechanics).
+
+**STATUS: HARDENING SHIPPED-PENDING** (pending Jimmy's one-book
+Production smoke test, `https://app.grailkey.com` only, per this
+dispatch's B7 instructions — see `docs/TICKET-REGISTRY.md` GK-231 commit
+history / the dispatch response for the exact procedure).
+
 ## GK-232 — Active ask path lacks sufficient grade awareness (defect scope banked, build deferred)
 
 Banked per this dispatch's explicit instruction, not built. Two related
