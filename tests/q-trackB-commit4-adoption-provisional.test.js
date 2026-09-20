@@ -842,15 +842,21 @@ await runFetchCompsIntegration();
 // ══════════════════════════════════════════════════════════════════════════════
 console.log('\nItem 3: execute the real verifySoldComps production path\n');
 {
+  // GK-228 (2026-09-20): none of these titles carried a title-legible grade
+  // token — harmless under the old keep-by-default behavior, but GK-228 now
+  // requires independently established grade evidence to admit a sold comp.
+  // "NM 9.4" added to each (matching baseCtx's own assessedGrade below) —
+  // the issue-authority/adoption text these fixtures exist to test is
+  // otherwise untouched.
   const SOLD_ROWS = [
-    { title: 'Test Family Comics #12 (2001) Test Publisher', price: 40, endTime: '2026-06-01' },
-    { title: 'Test Family Comics #12 2001 raw copy', price: 45, endTime: '2026-06-05' },
-    { title: 'Test Family Comics #12 near mint 2001', price: 50, endTime: '2026-06-10' },
+    { title: 'Test Family Comics #12 (2001) Test Publisher NM 9.4', price: 40, endTime: '2026-06-01' },
+    { title: 'Test Family Comics #12 2001 raw copy NM 9.4', price: 45, endTime: '2026-06-05' },
+    { title: 'Test Family Comics #12 near mint 2001 NM 9.4', price: 50, endTime: '2026-06-10' },
   ];
   const MISMATCHED_SOLD_ROWS = [
-    { title: 'Test Family Comics #9 (2001) Test Publisher', price: 10, endTime: '2026-06-01' },
-    { title: 'Test Family Comics #9 2001 raw copy', price: 12, endTime: '2026-06-05' },
-    { title: 'Test Family Comics #9 near mint 2001', price: 14, endTime: '2026-06-10' },
+    { title: 'Test Family Comics #9 (2001) Test Publisher NM 9.4', price: 10, endTime: '2026-06-01' },
+    { title: 'Test Family Comics #9 2001 raw copy NM 9.4', price: 12, endTime: '2026-06-05' },
+    { title: 'Test Family Comics #9 near mint 2001 NM 9.4', price: 14, endTime: '2026-06-10' },
   ];
   const baseCtx = {
     title: 'Test Family Comics', issue: '12', variant: null, publisher: 'Test Publisher',

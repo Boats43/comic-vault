@@ -1062,10 +1062,18 @@ export const parseListingGrade = (title) => {
     ['gd-', 1.8], ['gd', 2.0], ['fr/gd', 1.5],
     ['fr', 1.0], ['pr', 0.5]
   ];
+  // GK-228 (2026-09-20): only '/' was escaped here, so the five '+'-suffixed
+  // abbreviations (nm+, vf+, fn+, vg+, gd+) built a regex where '+' meant
+  // "one or more of the preceding char", not a literal plus — "NM+"/"VF+"
+  // never matched at all. Harmless while an unparsed title fell through to
+  // keep-by-default; now that soldVerification.js rejects an unparsed title
+  // as ungradedTitle, a genuinely graded "NM+"/"VF+" comp would be wrongly
+  // treated as having no grade evidence. Escape every regex metacharacter,
+  // not just '/'.
   for (const [abbr, val] of gradeMap) {
     const re = new RegExp(
       '(?:^|[\\s#(])' +
-      abbr.replace('/', '\\/') +
+      abbr.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') +
       '(?:[\\s)$]|\\d)', 'i');
     if (re.test(t)) return val;
   }

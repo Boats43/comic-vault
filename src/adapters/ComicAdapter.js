@@ -36,12 +36,21 @@ export function detectKeyValue(keyIssue) {
  * Verify story content from ComicVine metadata.
  * Replaces inline comicVine.description check in decisionEngine.js.
  *
+ * GK-229 (2026-09-20): absent/too-thin description is UNKNOWN, not
+ * suspicious — ComicVine genuinely has no synopsis for many issues
+ * (especially older back-issues), and that absence is not evidence of a
+ * content/identity problem. Only a description that IS present and
+ * contains a suspicious marker (reprint/collection/translation text) is a
+ * real signal. Callers must not treat `null` as "verified=false"; it is a
+ * third, neutral state.
+ *
  * @param {Object|null} comicVine - ComicVine API response
- * @returns {boolean} True if story verified (not ad/pinup/metadata artifact)
+ * @returns {boolean|null} true = verified, false = genuinely suspicious
+ *   content, null = unknown/thin metadata (never itself a warning trigger)
  */
 export function verifyStory(comicVine) {
   if (!comicVine?.description || comicVine.description.length <= 50) {
-    return false;
+    return null;
   }
 
   const storyLower = comicVine.description.toLowerCase();

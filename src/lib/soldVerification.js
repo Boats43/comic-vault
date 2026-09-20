@@ -263,6 +263,7 @@ export const verifySoldComps = (rawRows, ctx) => {
     format: 0,
     yearMismatch: 0,
     gradeMismatch: 0,
+    ungradedTitle: 0,
     stale: 0,
     outlier: 0,
   };
@@ -832,9 +833,11 @@ export const verifySoldComps = (rawRows, ctx) => {
             return false;
           }
           // Q47-QUAL: qualitative low-grade phrases ("reading copy", "low
-          // grade", "coverless", etc.) — positive evidence only. No match
-          // falls through to the price-ladder check below, then the
-          // unchanged keep-by-default.
+          // grade", "coverless", etc.) — positive evidence only. A
+          // conflicting phrase (outside ±1.5) is rejected below; an
+          // agreeing phrase is independently-established (if coarse) grade
+          // evidence and is admitted, same standing as a numeric title-grade
+          // match.
           const qualCeiling = getQualitativeGradeCeiling(titleStr);
           if (qualCeiling != null && Math.abs(numericTarget - qualCeiling) > 1.5) {
             console.log('[sold-reject] qualitative grade phrase |', titleStr.slice(0, 60),
@@ -843,8 +846,27 @@ export const verifySoldComps = (rawRows, ctx) => {
             pushSample(r, 'gradeMismatch');
             return false;
           }
-          // no parseable grade, no conflicting phrase — falls through to the
-          // price-ladder check below, then keep-by-default.
+          // GK-228 (2026-09-20): a sold comp whose title carries NO grade
+          // evidence at all — no numeric grade token, no Fair/Poor label, no
+          // qualitative ceiling phrase — has no independently established
+          // grade. Admitting it at face value into a grade-specific average
+          // silently produces a raw-market price under a grade-specific
+          // label (New Mutants #98 evidence: 22 mostly ungraded-title solds
+          // priced within 0.9% of PriceCharting's "generic raw" ladder row
+          // while displayed under a VG 4.0 label). The ladder can normalize
+          // ladder[target]/ladder[known] when a comp's OWN grade is known;
+          // an ungraded comp has no source grade to normalize from, and
+          // inferring one from its price would be circular. Unknown grade
+          // must remain unknown: reject rather than admit at face value. An
+          // in-tolerance qualitative phrase (just above) is NOT this case.
+          if (qualCeiling == null) {
+            console.log('[sold-reject] ungraded title |', titleStr.slice(0, 60), '— no grade token, no qualitative phrase');
+            reasons.ungradedTitle++;
+            pushSample(r, 'ungradedTitle');
+            return false;
+          }
+          // qualCeiling in-tolerance — falls through to the price-ladder
+          // check below, then admitted.
         } else {
           const diff = Math.abs(listingGrade - numericTarget);
           if (diff > 1.5) {

@@ -568,8 +568,21 @@ export function computeDecision(item, context = {}) {
   }
 
   // Warning: Content verification
-  // contentVerified flag computed by ComicAdapter.verifyStory()
-  if (item.contentVerified === false) {
+  // contentVerified flag computed by ComicAdapter.verifyStory(): true =
+  // verified, false = genuinely suspicious content (reprint/collection/
+  // translation markers found IN a real description), null = unknown/thin
+  // metadata — never itself a warning trigger (GK-229).
+  //
+  // GK-229 (2026-09-20): storySuppressedReason (identity/match-quality
+  // suppression) is a different axis from content verification and must
+  // not force LIST_LOW on an otherwise CONFIRMED/EXACT_CURRENT asset —
+  // routed to the (pre-existing, previously dead) informational
+  // 'story-suppressed' signal instead. content-unverified now fires only
+  // for a real, present, suspicious description.
+  if (item.storySuppressedReason) {
+    decision.warnings.push('story-suppressed');
+    decision.evidence.storySuppressed = item.storySuppressedReason;
+  } else if (item.contentVerified === false) {
     decision.warnings.push('content-unverified');
     decision.evidence.contentUnverified = 'Story metadata suspicious or suppressed';
   }
@@ -1146,11 +1159,14 @@ export function describeWarning(slug, item) {
       ? `UK weekly/pence variant ("${item.variant}") — no eBay comps found, manual research required`
       : 'UK weekly/pence variant — no eBay comps found, manual research required';
   }
-  if (slug === 'content-unverified') {
+  if (slug === 'story-suppressed') {
     return STORY_SUPPRESSED_MESSAGES[item.storySuppressedReason]
       || (item.storySuppressedReason?.startsWith('convergence-rejected')
-        ? `story metadata rejected — axes disagreed (${item.storySuppressedReason.replace('convergence-rejected:', '')})`
-        : 'story metadata suspicious or suppressed');
+        ? `story metadata unavailable — axes disagreed (${item.storySuppressedReason.replace('convergence-rejected:', '')})`
+        : 'story metadata unavailable for this match — informational only');
+  }
+  if (slug === 'content-unverified') {
+    return 'story metadata contains suspicious markers (reprint/collection/translation text)';
   }
   if (slug === 'internal-inconsistency') {
     const messages = item.visionConsistency?.flags?.map((f) => f.message) || [];

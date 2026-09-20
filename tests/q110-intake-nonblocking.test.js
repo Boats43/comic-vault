@@ -250,8 +250,18 @@ const zeroVerifiedMsg = describeWarning('zero-verified-comps', {
 assertTrue(/variant mismatch/i.test(zeroVerifiedMsg), `zero-verified-comps names the dominant cause: "${zeroVerifiedMsg}"`);
 assertTrue(zeroVerifiedMsg !== 'zero-verified-comps', 'not the raw slug');
 
-const contentUnverifiedMsg = describeWarning('content-unverified', { storySuppressedReason: 'publisher-mismatch' });
-assertTrue(/publisher/i.test(contentUnverifiedMsg), `content-unverified names the specific mismatch: "${contentUnverifiedMsg}"`);
+// GK-229 (2026-09-20): storySuppressedReason (identity/match-quality
+// suppression) and content-unverified (real, present, suspicious
+// description text) are now mutually exclusive, separately-routed signals
+// — decisionEngine.js pushes 'story-suppressed' for the former,
+// 'content-unverified' only for the latter. The specific-mismatch-naming
+// behavior this test checks now belongs to 'story-suppressed'.
+const storySuppressedMsg = describeWarning('story-suppressed', { storySuppressedReason: 'publisher-mismatch' });
+assertTrue(/publisher/i.test(storySuppressedMsg), `story-suppressed names the specific mismatch: "${storySuppressedMsg}"`);
+assertTrue(storySuppressedMsg !== 'story-suppressed', 'not the raw slug');
+
+const contentUnverifiedMsg = describeWarning('content-unverified', {});
+assertTrue(/suspicious/i.test(contentUnverifiedMsg), `content-unverified names the real-content-suspicion case: "${contentUnverifiedMsg}"`);
 assertTrue(contentUnverifiedMsg !== 'content-unverified', 'not the raw slug');
 
 const thinPoolMsg = describeWarning('thin-pool-anchor', { rawComps: { count: 2 } });
@@ -281,7 +291,7 @@ const allWarningSlugs = [
   'vision-low-confidence', 'ai-verify-rejected-all', 'identity-from-consensus',
   'refused-to-price', 'verification-failed-claude', 'verification-failed-no-data',
   'verification-failed-visual-fallback', 'web-search-pricing', 'uk-weekly-no-comps',
-  'verification-failed-reprint-thin', 'content-unverified', 'sold-active-mismatch-extreme',
+  'verification-failed-reprint-thin', 'content-unverified', 'story-suppressed', 'sold-active-mismatch-extreme',
   'era-risk-vintage-thin', 'reprint-polybag-detected', 'filter-bypass-detected',
   'claude-check-high-severity', 'floor-contamination-suspect', 'all-sold-comps-stale',
   'bundle-candidate', 'cold-market-velocity', 'zero-velocity', 'hot-market-velocity',

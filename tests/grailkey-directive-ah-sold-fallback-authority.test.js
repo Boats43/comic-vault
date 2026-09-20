@@ -110,9 +110,18 @@ const applyEnrichGlue = (out, priceBandsRaw, activeVariantApplicability) => {
 // ═══════════════════════════════════════════════════════════════════════
 console.log('Fixture 1: Sabrina production shape — PRE-AH READY, POST-AH REVIEW\n');
 {
+  // compHygiene.js (2026-09-20): fixed a pre-existing regex-escaping bug
+  // where the unescaped '+' quantifier in the 'nm+' grade-abbreviation
+  // pattern accidentally matched plain "NM" text too, misreading it as
+  // 9.6 instead of its own correct 9.4 — these two rows' `grade` field
+  // (PriceCharting's own grade tab, independent of title text) is
+  // corrected from '9.8' to '9.4' to stay internally consistent with what
+  // the title (a real production string) actually says; that
+  // inconsistency was only ever passing gradeTabMismatch's ±0.3 check by
+  // coincidence of the parsing bug, not by design.
   const soldRows = [
-    { price: 24.99, title: 'Sabrina Annual Spectacular #1 2024 NM Archie', daysAgo: 5, grade: '9.8', year: '2024' },
-    { price: 21.50, title: 'Sabrina Annual Spectacular #1 2024 NM Archie', daysAgo: 12, grade: '9.8', year: '2024' },
+    { price: 24.99, title: 'Sabrina Annual Spectacular #1 2024 NM Archie', daysAgo: 5, grade: '9.4', year: '2024' },
+    { price: 21.50, title: 'Sabrina Annual Spectacular #1 2024 NM Archie', daysAgo: 12, grade: '9.4', year: '2024' },
   ];
   // Real confirmedVariant text differs slightly from production's literal
   // "Dan Parent NYCC variant" (adds "Foil" so src/lib/soldVerification.js's

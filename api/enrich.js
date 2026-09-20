@@ -11638,12 +11638,17 @@ export default async function handler(req, res) {
     }
 
     // 3b. contentVerified: universal flag computed by ComicAdapter.verifyStory
-    // False when story suppressed OR story metadata suspicious
-    if (out.storySuppressedReason) {
-      out.contentVerified = false;
-    } else {
-      out.contentVerified = verifyStory(out.comicVine);
-    }
+    // GK-229 (2026-09-20): storySuppressedReason (identity/match-quality
+    // suppression — borderline title/publisher match, foreign edition,
+    // era-gate year drift) is a DIFFERENT axis from story-CONTENT
+    // verification. Previously this unconditionally forced
+    // contentVerified=false, which meant a book whose ComicVine MATCH was
+    // merely borderline (common — nameScore<75/publisherScore=0/
+    // overlapRatio<0.6 is a wide net) got flagged "content suspicious" even
+    // when no content was ever evaluated. contentVerified stays null
+    // (unknown, not suspicious) for the suppressed case — decisionEngine.js
+    // routes storySuppressedReason to its own informational warning.
+    out.contentVerified = out.storySuppressedReason ? null : verifyStory(out.comicVine);
 
     // 3c. hasKeyValue: universal flag computed by ComicAdapter.detectKeyValue
     out.hasKeyValue = detectKeyValue(req.body.keyIssue);

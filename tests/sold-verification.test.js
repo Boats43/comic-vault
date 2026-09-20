@@ -115,10 +115,10 @@ console.log('\ndetectSeriesMarkers extension (annual / special / king-size / gia
 console.log('\nCase 1 — Thor #4 2020 2nd print rejects 1st-print/unmarked rows:');
 {
   const rows = [
-    { price: 22, title: 'Thor #4 2020 2nd Print', daysAgo: 30, grade: '9.4' },
+    { price: 22, title: 'Thor #4 2020 2nd Print CGC 9.4', daysAgo: 30, grade: '9.4' },
     { price: 12, title: 'Thor #4 2020', daysAgo: 30, grade: '9.4' },               // unmarked → reject
     { price: 14, title: 'Thor #4 2020 1st Print', daysAgo: 30, grade: '9.4' },     // 1st print → reject
-    { price: 25, title: 'Thor #4 2020 2nd Print Variant', daysAgo: 60, grade: '9.4' },
+    { price: 25, title: 'Thor #4 2020 2nd Print Variant CGC 9.4', daysAgo: 60, grade: '9.4' },
   ];
   const r = verifySoldComps(rows, {
     title: 'Thor', issue: '4', variant: '2nd Print', bookYear: 2020, userGradeKey: '9.4',
@@ -131,10 +131,10 @@ console.log('\nCase 1 — Thor #4 2020 2nd print rejects 1st-print/unmarked rows
 console.log('\nCase 2 — Rogue & Gambit #1 Jeehyung Lee virgin rejects other-artist variants:');
 {
   const rows = [
-    { price: 80, title: 'Rogue Gambit #1 Jeehyung Lee virgin variant', daysAgo: 10, grade: '9.8' },
-    { price: 25, title: 'Rogue Gambit #1 Alex Ross variant', daysAgo: 20, grade: '9.8' },
-    { price: 30, title: 'Rogue Gambit #1 Kaare Andrews variant', daysAgo: 25, grade: '9.8' },
-    { price: 75, title: 'Rogue Gambit #1 Jeehyung Lee', daysAgo: 40, grade: '9.8' },
+    { price: 80, title: 'Rogue Gambit #1 Jeehyung Lee virgin variant CGC 9.8', daysAgo: 10, grade: '9.8' },
+    { price: 25, title: 'Rogue Gambit #1 Alex Ross variant CGC 9.8', daysAgo: 20, grade: '9.8' },
+    { price: 30, title: 'Rogue Gambit #1 Kaare Andrews variant CGC 9.8', daysAgo: 25, grade: '9.8' },
+    { price: 75, title: 'Rogue Gambit #1 Jeehyung Lee CGC 9.8', daysAgo: 40, grade: '9.8' },
   ];
   const r = verifySoldComps(rows, {
     title: 'Rogue Gambit', issue: '1', variant: 'Jeehyung Lee virgin', bookYear: 2023, userGradeKey: '9.8',
@@ -205,8 +205,8 @@ console.log('\nCase 5 — Comics Interview #58 rejects Marvel Age #58:');
 console.log('\nCase 6 — Batman & Outsiders Annual #1 rejects Annual #2:');
 {
   const rows = [
-    { price: 12, title: 'Batman and the Outsiders Annual #1', daysAgo: 60, grade: '9.4' },
-    { price: 8, title: 'Batman and the Outsiders Annual #2', daysAgo: 90, grade: '9.4' },
+    { price: 12, title: 'Batman and the Outsiders Annual #1 CGC 9.4', daysAgo: 60, grade: '9.4' },
+    { price: 8, title: 'Batman and the Outsiders Annual #2 CGC 9.4', daysAgo: 90, grade: '9.4' },
   ];
   const r = verifySoldComps(rows, {
     title: 'Batman and the Outsiders Annual', issue: '1', variant: null, bookYear: 1984, userGradeKey: '9.4',
@@ -218,8 +218,8 @@ console.log('\nCase 6 — Batman & Outsiders Annual #1 rejects Annual #2:');
 // Bonus: regular #1 vs Annual #1 (one-sided format-asymmetry)
 {
   const rows = [
-    { price: 5, title: 'Batman and the Outsiders #1', daysAgo: 30, grade: '9.4' },
-    { price: 12, title: 'Batman and the Outsiders Annual #1', daysAgo: 60, grade: '9.4' },
+    { price: 5, title: 'Batman and the Outsiders #1 CGC 9.4', daysAgo: 30, grade: '9.4' },
+    { price: 12, title: 'Batman and the Outsiders Annual #1 CGC 9.4', daysAgo: 60, grade: '9.4' },
   ];
   // Our book is regular #1 (no Annual marker). Sold row "Annual #1" carries
   // annual-1 marker we lack → reject.
@@ -234,10 +234,10 @@ console.log('\nCase 6 — Batman & Outsiders Annual #1 rejects Annual #2:');
 console.log('\nCase 7 — Avengers #36 modern stale rows (>540d) rejected:');
 {
   const rows = [
-    { price: 8, title: 'Avengers #36 2020', daysAgo: 30, grade: '9.4' },
-    { price: 25, title: 'Avengers #36 2020', daysAgo: 600, grade: '9.4' },         // stale
-    { price: 30, title: 'Avengers #36 2020', daysAgo: 800, grade: '9.4' },         // stale
-    { price: 9, title: 'Avengers #36 2020 NM', daysAgo: 90, grade: '9.4' },
+    { price: 8, title: 'Avengers #36 2020 CGC 9.4', daysAgo: 30, grade: '9.4' },
+    { price: 25, title: 'Avengers #36 2020 CGC 9.4', daysAgo: 600, grade: '9.4' },         // stale
+    { price: 30, title: 'Avengers #36 2020 CGC 9.4', daysAgo: 800, grade: '9.4' },         // stale
+    { price: 9, title: 'Avengers #36 2020 NM condition', daysAgo: 90, grade: '9.4' },
   ];
   const r = verifySoldComps(rows, {
     title: 'Avengers', issue: '36', variant: null, bookYear: 2020, userGradeKey: '9.4',
@@ -345,7 +345,7 @@ console.log('\nCase 9 — Signed / SS / autographed rows rejected:');
 console.log('\nCase 10 — Lots / bundles / sets rejected:');
 {
   const rows = [
-    { price: 50, title: 'Walking Dead #1', daysAgo: 30, grade: '9.4' },
+    { price: 50, title: 'Walking Dead #1 CGC 9.4', daysAgo: 30, grade: '9.4' },
     { price: 200, title: 'Walking Dead #1-10 lot', daysAgo: 60, grade: '9.4' },
     { price: 300, title: 'Walking Dead #1 bundle of 5', daysAgo: 90, grade: '9.4' },
     { price: 150, title: 'Walking Dead complete set #1-3', daysAgo: 90, grade: '9.4' },
@@ -381,7 +381,7 @@ console.log('\nCase 10 — Lots / bundles / sets rejected:');
 console.log('\nVariant contamination — our book NOT a variant rejects variant rows:');
 {
   const rows = [
-    { price: 10, title: 'Test Comic #1', daysAgo: 30, grade: '9.4' },
+    { price: 10, title: 'Test Comic #1 CGC 9.4', daysAgo: 30, grade: '9.4' },
     { price: 50, title: 'Test Comic #1 virgin variant', daysAgo: 30, grade: '9.4' },
     { price: 80, title: 'Test Comic #1 1:50 incentive', daysAgo: 30, grade: '9.4' },
     { price: 40, title: 'Test Comic #1 foil variant', daysAgo: 30, grade: '9.4' },
@@ -396,27 +396,33 @@ console.log('\nVariant contamination — our book NOT a variant rejects variant 
 // ─── Grade tab vs listing-title consistency ────────────────────────
 console.log('\nGrade tab vs listing-title consistency:');
 {
+  // GK-228 (2026-09-20): the third row was originally "unparseable from
+  // title → keep" — the exact face-value-admission behavior this fix
+  // reverses (New Mutants #98 class: ungraded-title solds silently pricing
+  // as generic raw market under a grade-specific label). It is now REJECTED
+  // with reason 'ungradedTitle' instead of admitted.
   const rows = [
     { price: 50, title: 'Hulk #181 CGC 9.4', daysAgo: 30, grade: '9.4' },           // match
     { price: 200, title: 'Hulk #181 CGC 9.8', daysAgo: 30, grade: '9.4' },          // mismatch
-    { price: 100, title: 'Hulk #181 ungraded', daysAgo: 30, grade: '9.4' },         // unparseable from title → keep
+    { price: 100, title: 'Hulk #181 ungraded', daysAgo: 30, grade: '9.4' },         // unparseable from title → GK-228 reject
   ];
   const r = verifySoldComps(rows, {
     title: 'Hulk', issue: '181', variant: null, bookYear: 1974, userGradeKey: '9.4',
   });
-  assertEq(r.verified.length, 2, '2 rows kept (matching + unparseable); 1 mismatch rejected');
+  assertEq(r.verified.length, 1, '1 row kept (matching); mismatch + unparseable both rejected');
   assertEq(r.diagnostics.reasons.gradeMismatch, 1, 'gradeMismatch counter = 1');
+  assertEq(r.diagnostics.reasons.ungradedTitle, 1, 'ungradedTitle counter = 1 (GK-228)');
 }
 
 // ─── Outlier filter ────────────────────────────────────────────────
 console.log('\nPrice outlier filter (3× / 0.25× median):');
 {
   const rows = [
-    { price: 10, title: 'Comic #1', daysAgo: 30, grade: '9.4' },
-    { price: 11, title: 'Comic #1 NM', daysAgo: 30, grade: '9.4' },
-    { price: 12, title: 'Comic #1 2024', daysAgo: 30, grade: '9.4' },
-    { price: 100, title: 'Comic #1 outlier', daysAgo: 30, grade: '9.4' },           // 10× median
-    { price: 1, title: 'Comic #1 ultra-low', daysAgo: 30, grade: '9.4' },           // <0.25×
+    { price: 10, title: 'Comic #1 CGC 9.4', daysAgo: 30, grade: '9.4' },
+    { price: 11, title: 'Comic #1 NM condition', daysAgo: 30, grade: '9.4' },
+    { price: 12, title: 'Comic #1 2024 CGC 9.4', daysAgo: 30, grade: '9.4' },
+    { price: 100, title: 'Comic #1 outlier CGC 9.4', daysAgo: 30, grade: '9.4' },           // 10× median
+    { price: 1, title: 'Comic #1 ultra-low CGC 9.4', daysAgo: 30, grade: '9.4' },           // <0.25×
   ];
   const r = verifySoldComps(rows, {
     title: 'Comic', issue: '1', variant: null, bookYear: 2024, userGradeKey: '9.4',
@@ -448,7 +454,7 @@ console.log('\nDiagnostics shape:');
   const expectedKeys = [
     'titleMismatch', 'issueMismatch', 'annualMismatch', 'printingMismatch',
     'variantMismatch', 'slabMismatch', 'signed', 'lot', 'gradeMismatch',
-    'stale', 'outlier',
+    'ungradedTitle', 'stale', 'outlier',
   ];
   for (const k of expectedKeys) {
     assertTrue(k in r.diagnostics.reasons, `reasons.${k} present`);
@@ -498,7 +504,7 @@ console.log('\nRecency band tagging:');
 console.log('\nHalf-issue / ashcan / promo rejection:');
 {
   const rows = [
-    { price: 12, title: 'Fathom #1 1998', daysAgo: 30, grade: '9.4' },
+    { price: 12, title: 'Fathom #1 1998 CGC 9.4', daysAgo: 30, grade: '9.4' },
     { price: 35, title: 'Fathom #1/2 Wizard', daysAgo: 30, grade: '9.4' },
     { price: 25, title: 'Fathom #1 ashcan', daysAgo: 30, grade: '9.4' },
     { price: 30, title: 'Fathom #1 promo', daysAgo: 30, grade: '9.4' },
@@ -637,7 +643,7 @@ console.log('\nVariant token mismatch:');
 // Case 1: User has foil, comp has foil → KEPT
 {
   const rows = [
-    { price: 150, title: 'Amazing Spider-Man #1 foil Bryan Hitch variant', daysAgo: 10, grade: '9.8' },
+    { price: 150, title: 'Amazing Spider-Man #1 foil Bryan Hitch variant CGC 9.8', daysAgo: 10, grade: '9.8' },
   ];
   const r = verifySoldComps(rows, {
     title: 'Amazing Spider-Man', issue: '1', variant: 'foil', bookYear: 2022, userGradeKey: '9.8',

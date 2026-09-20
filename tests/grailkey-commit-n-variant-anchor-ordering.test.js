@@ -130,10 +130,16 @@ console.log('\nN-2: re-anchor scoring prefers the Brett Booth virgin over the ba
 // (confirmedVariant="brett booth" via N1) lets them survive.
 console.log('\nN-3: Brett Booth virgin sold comps SURVIVE once confirmedVariant is correctly populated:');
 {
+  // GK-228 (2026-09-20): rows 2/3 carried no title-legible grade token, and
+  // row 1's trailing "NM" (no character after it) doesn't match
+  // parseListingGrade's trailing-boundary regex either — harmless under the
+  // old keep-by-default behavior, but GK-228 now requires independently
+  // established grade evidence to admit a sold comp. CGC 9.6 added to all
+  // three; the variant/cover-descriptor text under test is untouched.
   const soldRows = [
-    { price: 65, title: 'Spawn #351 Cover C Brett Booth Virgin Variant NM', daysAgo: 10, grade: '9.6' },
-    { price: 21, title: 'Spawn #351 Brett Booth Virgin Cover C', daysAgo: 15, grade: '9.6' },
-    { price: 45, title: 'Spawn #351 Brett Booth Virgin Cameo of Lyra', daysAgo: 20, grade: '9.6' },
+    { price: 65, title: 'Spawn #351 Cover C Brett Booth Virgin Variant NM CGC 9.6', daysAgo: 10, grade: '9.6' },
+    { price: 21, title: 'Spawn #351 Brett Booth Virgin Cover C CGC 9.6', daysAgo: 15, grade: '9.6' },
+    { price: 45, title: 'Spawn #351 Brett Booth Virgin Cameo of Lyra CGC 9.6', daysAgo: 20, grade: '9.6' },
   ];
 
   // OLD behavior: confirmedVariant stayed null (Defect 1+2, uncorrected).

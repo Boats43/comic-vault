@@ -119,9 +119,20 @@ console.log('\nD-2b: classifyEvidenceRow WRONG_VARIANT no longer cross-axis-reje
 // ─── D-2c: END-TO-END recovery on real production titles ───────────────
 console.log('\nD-2c: full pipeline recovers Spawn #351 end-to-end on VERBATIM production titles:');
 {
+  // GK-228 (2026-09-20): the verbatim production titles for rows 1 and 2
+  // never carried a title-legible grade token at all — under the old
+  // keep-by-default behavior that didn't matter, but GK-228 now requires
+  // independently-established grade evidence to admit a sold comp. An
+  // on-target CGC 9.6 token is added to each (the artist/cover-variant text
+  // these rows exist to test is otherwise untouched, verbatim). Row 3
+  // already carried its own, pre-existing, unrelated title/grade-tab
+  // inconsistency (title says "NM-" = 9.2 via parseListingGrade, but its
+  // structured `grade` field says 9.6) that filter 11 (gradeTabMismatch)
+  // was already rejecting before GK-228 ever existed — that remains this
+  // test's one intended gradeMismatch rejection.
   const rows = [
-    { price: 45, title: 'SPAWN #351 CVR C BRETT BOOTH VIRGIN 1st CAMEO OF LYRA HTF SCARCE 2024', daysAgo: 20, grade: '9.6' },
-    { price: 50, title: 'Spawn #351 Cover C Brett Booth Virgin Variant 2024', daysAgo: 35, grade: '9.6' },
+    { price: 45, title: 'SPAWN #351 CVR C BRETT BOOTH VIRGIN 1st CAMEO OF LYRA HTF SCARCE 2024 CGC 9.6', daysAgo: 20, grade: '9.6' },
+    { price: 50, title: 'Spawn #351 Cover C Brett Booth Virgin Variant 2024 CGC 9.6', daysAgo: 35, grade: '9.6' },
     { price: 48, title: 'SPAWN #351 BRETT BOOTH VIRGIN VARIANT C IMAGE COMICS NM- FIRST PRINT', daysAgo: 40, grade: '9.6' },
     { price: 47, title: 'SPAWN #351 CVR C NM BRETT BOOTH VIRGIN CAMEO OF LYRA HTF SCARCE (2024)', daysAgo: 55, grade: '9.6' },
   ];
@@ -152,14 +163,14 @@ console.log('\nD-2c: full pipeline recovers Spawn #351 end-to-end on VERBATIM pr
 console.log('\nD-4: genuine same-axis mismatch still rejects (Filter 8, mixed pool):');
 {
   const rows = [
-    { price: 40, title: 'Test Comic #1 virgin cover', daysAgo: 20, grade: '9.4' },
-    { price: 42, title: 'Test Comic #1 foil cover', daysAgo: 25, grade: '9.4' },
+    { price: 40, title: 'Test Comic #1 virgin cover CGC 9.4', daysAgo: 20, grade: '9.4' },
+    { price: 42, title: 'Test Comic #1 foil cover CGC 9.4', daysAgo: 25, grade: '9.4' },
   ];
   const r = verifySoldComps(rows, {
     title: 'Test Comic', issue: '1', variant: 'virgin cover', bookYear: 2024, userGradeKey: '9.4',
   });
   assertEq(r.verified.length, 1, 'only the matching virgin-cover row survives; foil-cover row rejected');
-  assertEq(r.verified[0]?.title, 'Test Comic #1 virgin cover', 'the surviving row is the correct one');
+  assertEq(r.verified[0]?.title, 'Test Comic #1 virgin cover CGC 9.4', 'the surviving row is the correct one');
   assertTrue(r.diagnostics.reasons.variantMismatch >= 1, 'variantMismatch counted for the foil row');
 }
 
@@ -167,8 +178,8 @@ console.log('\nD-4: genuine same-axis mismatch still rejects (Filter 8, mixed po
 console.log('\nControl: plain book, no variant either side — unaffected:');
 {
   const rows = [
-    { price: 40, title: 'Test Comic #1', daysAgo: 20, grade: '9.4' },
-    { price: 45, title: 'Test Comic #1 near mint', daysAgo: 35, grade: '9.4' },
+    { price: 40, title: 'Test Comic #1 CGC 9.4', daysAgo: 20, grade: '9.4' },
+    { price: 45, title: 'Test Comic #1 near mint CGC 9.4', daysAgo: 35, grade: '9.4' },
   ];
   const r = verifySoldComps(rows, {
     title: 'Test Comic', issue: '1', variant: null, bookYear: 2024, userGradeKey: '9.4',
@@ -181,7 +192,7 @@ console.log('\nControl: plain book, no variant either side — unaffected:');
 console.log('\nControl: recognized-artist comp matching the standard cover survives (no false positive):');
 {
   const rows = [
-    { price: 300, title: 'X-Men #1 Jim Lee cover 1991', daysAgo: 20, grade: '9.8' },
+    { price: 300, title: 'X-Men #1 Jim Lee cover 1991 CGC 9.8', daysAgo: 20, grade: '9.8' },
   ];
   const r = verifySoldComps(rows, {
     title: 'X-Men', issue: '1', variant: null, bookYear: 1991, userGradeKey: '9.8',
