@@ -9,7 +9,10 @@ import {
   getAllSnapshots,
   getAnalysis,
   putAnalysis,
+  putFixture,
+  getAllFixtures,
 } from "./db.js";
+import { buildFixture } from "./lib/fixtureShape.js";
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 import { isPcAnchorExact, pcEditionCaveat } from "./lib/pcAnchorAuthority.js";
 import { getAssetConfirmationBadge } from "./lib/assetConfirmationBadge.js";
@@ -1550,6 +1553,10 @@ function ResultCard({ result, enriching }) {
   // Price History / Full Comp Pool. Defaults OPEN (Q109 dispatch); the
   // four sub-sections above keep their own independent expand state.
   const [evidenceExpanded, setEvidenceExpanded] = useState(true);
+  // PRODUCTION FIXTURE BANK dispatch (2026-09-20) — 'idle' | 'banking' |
+  // 'banked' | 'error'. Purely local UI feedback; the fixture itself lives
+  // in IndexedDB (src/db.js putFixture), never React state.
+  const [fixtureBankStatus, setFixtureBankStatus] = useState('idle');
 
   const comps = result.comps;
   const hasComps =
@@ -1600,6 +1607,69 @@ function ResultCard({ result, enriching }) {
     issueRendersAsNumber &&
     !result.title?.includes(`#${result.issue}`);
 
+  // PRODUCTION FIXTURE BANK dispatch (2026-09-20) — "normal Production
+  // scan -> explicit Bank Regression Fixture -> sanitized fixture" in one
+  // action, no DevTools, no manual JSON paste, no duplicate marketplace
+  // requests. Every field below already lives on `result` (the SAME
+  // in-memory object this card renders from — the live client merge of
+  // /api/grade + /api/enrich responses per App.jsx's own setResult
+  // pipeline), so this makes zero network calls of its own. Hard
+  // non-mutation requirement: this function reads `result` and writes
+  // ONLY to the local fixtureBank IndexedDB store (src/db.js) — it never
+  // touches gkAssetId/collection_item/valuation/decision/outcome/
+  // marketplace state, and calls no /api/* endpoint.
+  const handleBankFixture = async () => {
+    const traceId = result.pipelineAudit?.traceId;
+    if (!traceId) {
+      setFixtureBankStatus('error');
+      return;
+    }
+    setFixtureBankStatus('banking');
+    try {
+      const fixture = buildFixture(
+        {
+          title: result.title,
+          issue: result.issue,
+          publisher: result.publisher,
+          year: result.year,
+          grade: result.grade,
+          gradeConfidence: result.confidence,
+          isGraded: result.isGraded,
+          numericGrade: result.numericGrade,
+          defectPenalty: result.defectPenalty,
+          cgcPenaltyFlags: result.cgcPenaltyFlags,
+          restoration: result.restoration,
+          soldComps: result.soldComps,
+          soldCompDiagnostics: result.soldCompDiagnostics,
+          rawComps: result.rawComps,
+          priceLadder: result.priceLadder,
+          activePoolSuspect: result.activePoolSuspect,
+          activePoolSuspectReason: result.activePoolSuspectReason,
+          priceBands: result.priceBands,
+          priceDerivationTrace: result.priceDerivationTrace,
+          pricingSource: result.pricingSource,
+          gradeMultiplier: result.gradeMultiplier,
+          price: result.price,
+          priceLow: result.priceLow,
+          priceHigh: result.priceHigh,
+          decision: result.decision,
+          contract: result.contract,
+          traceId,
+        },
+        {
+          source: 'production-phone-scan',
+          capturedAt: new Date().toISOString(),
+          buildSha: result.pipelineAudit?.buildSha ?? null,
+        }
+      );
+      await putFixture(fixture);
+      setFixtureBankStatus('banked');
+    } catch (err) {
+      console.error('[fixture-bank] failed:', err);
+      setFixtureBankStatus('error');
+    }
+  };
+
   return (
     <div className="result-card">
       {result.image && (
@@ -1623,6 +1693,35 @@ function ResultCard({ result, enriching }) {
         {result.publisher && result.year && /^\d{4}$/.test(String(result.year).trim()) ? " · " : ""}
         {/^\d{4}$/.test(String(result.year || "").trim()) ? result.year : ""}
       </div>
+      {/* PRODUCTION FIXTURE BANK dispatch (2026-09-20) — one-action,
+          diagnostic-only. Reads `result` (already in memory, zero network
+          calls), writes only to the local fixtureBank IndexedDB store —
+          never mints a gkAssetId, never touches Collection/valuation/
+          decision/Buyer/inventory/marketplace state. */}
+      {!enriching && result.pipelineAudit?.traceId && (
+        <div style={{ marginTop: 4, marginBottom: 4 }}>
+          <button
+            type="button"
+            onClick={handleBankFixture}
+            disabled={fixtureBankStatus === 'banking'}
+            style={{
+              fontSize: 11,
+              padding: "3px 8px",
+              borderRadius: 6,
+              border: "1px solid #555",
+              background: fixtureBankStatus === 'banked' ? "#1a4d2e" : "#2a2a2a",
+              color: "#aaa",
+              cursor: fixtureBankStatus === 'banking' ? "wait" : "pointer",
+            }}
+            title="Bank this scan's evidence as a sanitized regression fixture (local only, diagnostic — creates no owned asset)"
+          >
+            {fixtureBankStatus === 'banking' && "🗄️ Banking…"}
+            {fixtureBankStatus === 'banked' && "✅ Fixture Banked"}
+            {fixtureBankStatus === 'error' && "⚠️ Bank Failed — Retry"}
+            {fixtureBankStatus === 'idle' && "🗄️ Bank Regression Fixture"}
+          </button>
+        </div>
+      )}
       {/* GrailKey Directive P, Task 3 — variant is title-adjacent, not buried
           below grade/key-box. Same authoritative value (result.variant) the
           card always read; only its position changed, plus the custody fix
@@ -3313,6 +3412,26 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
     URL.revokeObjectURL(url);
   };
 
+  // PRODUCTION FIXTURE BANK dispatch (2026-09-20) — "the operator should
+  // be able to bank all scans and hand the corpus to the regression
+  // harness without individually moving JSON files." One action: read
+  // every fixture banked locally in IndexedDB (src/db.js), bundle into a
+  // single array, download as one file. No server round-trip, no new
+  // persistence subsystem — reuses this exact same Blob/createObjectURL/
+  // anchor-click pattern exportJSON/backupToDrive already use above.
+  const exportFixtureCorpus = async () => {
+    const fixtures = await getAllFixtures();
+    const blob = new Blob([JSON.stringify(fixtures, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `comic-vault-fixture-corpus-${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return fixtures.length;
+  };
+
   const backupToDrive = () => {
     const data = items.map(({ images, ...rest }) => rest);
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -3683,6 +3802,16 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
               style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
               onClick={exportCSV}
             >CSV</button>
+            {/* PRODUCTION FIXTURE BANK dispatch (2026-09-20) — one-action
+                export of every fixture banked so far into a single file. */}
+            <button
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
+              onClick={async () => {
+                const n = await exportFixtureCorpus();
+                window.alert(n > 0 ? `Exported ${n} banked fixture(s).` : "No fixtures banked yet — use \"Bank Regression Fixture\" on a scan result first.");
+              }}
+              title="Export every locally-banked regression fixture as one JSON file (diagnostic evidence, never touches your catalogue)"
+            >Export Fixtures</button>
             <button
               style={{ fontSize: 12, padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#aaa", cursor: "pointer" }}
               onClick={() => importRef.current?.click()}

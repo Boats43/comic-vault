@@ -3,10 +3,17 @@
 // so we can return items newest-first without sorting the whole array.
 
 const DB_NAME = "comic-vault";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = "comics";
 const SNAPSHOTS_STORE = "valueSnapshots";
 const ANALYSIS_STORE = "analysisCache";
+// PRODUCTION FIXTURE BANK dispatch (2026-09-20) — diagnostic evidence
+// only, never a catalogue/asset store. Keyed by traceId (the same
+// pipelineAudit.traceId every /api/enrich response already carries) so
+// re-banking the identical scan is a plain overwrite (`put`), never a
+// duplicate — the dispatch's own idempotency requirement, satisfied by
+// the store's own key, no extra bookkeeping needed.
+const FIXTURE_BANK_STORE = "fixtureBank";
 const LEGACY_KEY = "cv_catalogue";
 
 let dbPromise = null;
@@ -26,6 +33,10 @@ const openDb = () => {
       }
       if (!db.objectStoreNames.contains(ANALYSIS_STORE)) {
         db.createObjectStore(ANALYSIS_STORE, { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains(FIXTURE_BANK_STORE)) {
+        const fixtureStore = db.createObjectStore(FIXTURE_BANK_STORE, { keyPath: "traceId" });
+        fixtureStore.createIndex("capturedAt", "capturedAt", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -137,6 +148,35 @@ export const migrateComicVineRemoval = async () => {
   } catch {
     return 0;
   }
+};
+
+// --- Fixture bank (diagnostic regression evidence, never a catalogue/asset store) ---
+
+export const putFixture = async (fixture) => {
+  if (!fixture?.traceId) throw new Error("putFixture: fixture.traceId is required (idempotency key)");
+  const store = await txStore(FIXTURE_BANK_STORE, "readwrite");
+  await wrap(store.put(fixture));
+  return fixture;
+};
+
+export const getAllFixtures = async () => {
+  try {
+    const store = await txStore(FIXTURE_BANK_STORE, "readonly");
+    const items = await wrap(store.getAll());
+    return (items || []).sort((a, b) => (a.capturedAt || "").localeCompare(b.capturedAt || ""));
+  } catch {
+    return [];
+  }
+};
+
+export const deleteFixture = async (traceId) => {
+  const store = await txStore(FIXTURE_BANK_STORE, "readwrite");
+  await wrap(store.delete(traceId));
+};
+
+export const clearFixtureBank = async () => {
+  const store = await txStore(FIXTURE_BANK_STORE, "readwrite");
+  await wrap(store.clear());
 };
 
 // One-shot migration: if a legacy `cv_catalogue` array exists in localStorage,

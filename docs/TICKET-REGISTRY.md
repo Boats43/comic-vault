@@ -799,6 +799,143 @@ condition→grade path further without building a fix).** No numeric
 grade-cap rule invented per the original dispatch's explicit
 instruction not to.
 
+**PRICE-LANE-2 closure note (2026-09-20):** the previously-suspected Quick
+and Stretch pricing defects are **DISPROVEN, CLOSED, no ticket opened.**
+Traced directly from `src/lib/priceBands.js`: Tier 1 sold Quick = raw
+`soldLow` (no multiplier at all — not `activeFloor × hidden constant`,
+not 0.85/0.70/0.538 against the wrong denominator); Tier 2 sold-only
+Quick = same, raw `soldLow`; Tier 3 active-only Quick = `activeLow ×
+0.85` (the one real 0.85 constant, correctly active-side-scoped, not a
+defect). Stretch = `Market × 1.15` confirmed to reconcile all four
+observed cases, no change proposed. Neither required a fix.
+
+## GK-231 — Production Fixture Bank V1
+
+**Context.** PRICE-LANE-1/2 both needed real Production-shaped evidence
+(the four known-answer books plus a stratified 18-book corpus) to close
+out — but the existing fixture-capture tooling
+(`scripts/ingest-fixture-response.mjs` + `capture-active-cache-entry.mjs`
++ `merge-fixture.mjs`) required Jimmy to manually copy 2-3 raw network
+payloads per book through DevTools and run CLI commands per book — not a
+workable path for a real 22-scan corpus on a phone.
+
+**Traced first, per the dispatch's own requirement:** the existing
+Node-CLI pipeline already satisfied 10 of 12 required capture fields.
+Confirmed gaps: condition evidence (`cgcPenaltyFlags`/`defectPenalty`)
+never reaches `/api/enrich` in either direction for `cgcPenaltyFlags`
+(zero references anywhere in `api/enrich.js`, confirmed by grep) — it
+lives only on `/api/grade.js`'s own response, merged directly into
+client-side state; `defectPenalty` alone does reach `/api/enrich`'s own
+request body but was never surfaced into the derived fixture.
+`activePoolSuspect`/`activePoolSuspectReason` are computed inside
+`computePriceBands` (Tier 2) but were never exposed on the `/api/enrich`
+response at all (only a derived, true-only `activePoolSuspectWarning`
+string existed). The complete 14-row PriceCharting ladder (`out.priceLadder`)
+and the active floor/avg/high (`out.rawComps.{lowest,average,highest}`)
+were ALREADY fully exposed — no gap there.
+
+**Built:**
+1. **`api/enrich.js`** — additive-only, computation untouched, per this
+   dispatch's own explicit authorization: `out.activePoolSuspect`
+   (boolean, always set) and `out.activePoolSuspectReason` now surfaced
+   alongside the pre-existing, unchanged `out.activePoolSuspectWarning`.
+2. **`src/lib/fixtureShape.js`** (new) — the single canonical fixture
+   shape + sanitization implementation, isomorphic (no Node-only APIs),
+   shared by the browser bank action and the three quarantined CLI
+   scripts. Every required field (identity/corpus metadata, condition
+   evidence, pricing evidence including the full ladder and rejection
+   breakdown by reason, pricing result including exact sub-tier branch)
+   is present-with-real-value or explicitly-null-with-a-disclosed-reason
+   — never silently omitted. Production-shaped values (e.g. `"$32.00"`)
+   preserved verbatim, never coerced to bare numbers.
+3. **`src/db.js`** — new `fixtureBank` IndexedDB object store
+   (`DB_VERSION` 2→3, additive, existing `comics`/`valueSnapshots`/
+   `analysisCache` stores untouched), keyed by `traceId` — the same
+   `pipelineAudit.traceId` every response already carries — so re-banking
+   an identical scan snapshot is a plain `put()` overwrite, never a
+   duplicate (idempotency by construction, not extra bookkeeping).
+4. **`src/App.jsx`** — "🗄️ Bank Regression Fixture" button on the scan
+   result card (`ResultCard`): reads the already-in-memory `result`
+   object (zero new network calls), builds a fixture via the shared
+   `buildFixture`, writes it via `putFixture`. "Export Fixtures" button
+   on the Catalogue toolbar: reads every banked fixture, bundles into one
+   JSON file, triggers one browser download (same
+   Blob/createObjectURL/anchor-click pattern the pre-existing
+   `exportJSON`/`backupToDrive` already use) — no new persistence
+   subsystem, reuses the app's own existing IndexedDB + download pattern.
+5. **Two quarantined scripts edited locally, never staged** (standing
+   quarantine, CLAUDE.md — explicit dispatch build authorization covers
+   editing, not the quarantine itself): `ingest-fixture-response.mjs` and
+   `merge-fixture.mjs` refactored to import `buildFixture`/
+   `sanitizeForFixture` from the shared module instead of carrying their
+   own copies — there is no second sanitizer and no second fixture
+   schema anywhere in this repo.
+
+**Storage/export mechanism, explained:** local IndexedDB (already the
+app's own catalogue storage layer, `src/db.js`) plus a one-action
+"Export Fixtures" download — chosen over GrailKey's durable Postgres/Blob
+stores because a fixture is explicitly required to be non-durable/
+non-asset evidence (Section 7's hard non-mutation requirement), and
+because it requires zero new server infrastructure, satisfying "do not
+build a substantial new persistence subsystem." Jimmy AirDrops/transfers
+the one exported JSON file to hand the corpus to the regression harness.
+
+**Non-mutation (hard requirement) — proven, not asserted:** static proof
+(`tests/production-fixture-bank-replay.test.js`) confirms `handleBankFixture`/
+`exportFixtureCorpus` reference no marketplace/asset/valuation/decision/
+outcome endpoint or function, make zero `fetch()` calls of their own, and
+write only via `putFixture` (the diagnostic store).
+
+**Deterministic replay — proven, not asserted:** the same test feeds a
+fixture's own frozen `soldComps` back through the real
+`computePriceBands` and confirms it reproduces the frozen tier/branch/
+Quick/Market/Stretch, without any network call. 78/78 assertions,
+covering Section 3's full required-field list, Section 2's
+production-shaped-value preservation, Section 7's non-mutation, and
+Section 8's replay + idempotency.
+
+**Verification limitation, disclosed:** no browser-automation tool was
+available in this session. `npm run build` is clean, all three new/edited
+modules were confirmed to transform successfully through a real running
+Vite dev server (HTTP 200, correct import wiring visible in the
+transformed output), and the Node-side capture→merge pipeline was
+smoke-tested end-to-end for real (custody check passed, sanitization
+confirmed stripping images, condition evidence populated correctly). The
+actual button click / IndexedDB write in a live phone browser was not
+interactively exercised — Jimmy's own Gate 1 (the four known books,
+first) is the real verification of that, per this dispatch's own
+instructions.
+
+**STATUS: SHIPPED-PENDING** (pending Jimmy's Gate 1 capture/replay sanity
+check on the real deployed build).
+
+## GK-232 — Active ask path lacks sufficient grade awareness (defect scope banked, build deferred)
+
+Banked per this dispatch's explicit instruction, not built. Two related
+findings under one defect scope: (1) `api/comps.js` Filter 3 (±1.5 grade
+proximity, ~line 1954) still admits an ungraded-title active listing at
+face value when at least one grade-matching row exists in the pool — the
+active-side sibling of GK-228, unfixed; (2) Tier 3's `activeAvg × 0.85`
+pricing (`src/lib/priceBands.js`) is itself grade-blind by the same
+mechanism. Per the operator's own framing (asks aren't realizations,
+sellers omit grades far more often on active listings than sold ones,
+ask spreads are legitimately wide), GK-228's reject-on-ungraded rule must
+NOT be mechanically copied onto this path — needs its own, separately-
+scoped design. **STATUS: OPEN, deferred.**
+
+## GK-233 — Grade-multiplier display/math divergence (honesty defect, banked, build deferred)
+
+Banked per this dispatch's explicit instruction, not built. The UI can
+display "Grade adj: ×X" on a pricing tier where that multiplier is
+reference-only and was never actually used to compute the displayed
+recommendation (Tier 1/Tier 2 sold-dominant branches treat
+`gradeMultiplier` as reference-only by design — `src/lib/priceBands.js`'s
+own "D2" comment: "sold/active averages control this tier entirely").
+Showing a multiplier value next to a price it didn't produce is a real
+provenance/honesty defect, distinct from any pricing-math defect. Not
+investigated for exact call sites or fixed this pass. **STATUS: OPEN,
+deferred.**
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.

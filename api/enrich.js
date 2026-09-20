@@ -7824,6 +7824,16 @@ export default async function handler(req, res) {
       if (priceBandsRaw.activePoolSuspect) {
         out.activePoolSuspectWarning = priceBandsRaw.activePoolSuspectReason;
       }
+      // PRODUCTION FIXTURE BANK dispatch (2026-09-20) — explicit,
+      // authorized expose-only addition: the fixture-bank/regression path
+      // needs the raw boolean + reason (not just the UI warning string,
+      // which is only ever set when true). Computation untouched —
+      // priceBandsRaw.activePoolSuspect/activePoolSuspectReason are the
+      // SAME values computed inside computePriceBands (src/lib/
+      // priceBands.js Tier 2), surfaced verbatim. activePoolSuspectWarning
+      // above is unchanged for existing UI consumers.
+      out.activePoolSuspect = priceBandsRaw.activePoolSuspect || false;
+      out.activePoolSuspectReason = priceBandsRaw.activePoolSuspectReason || null;
     }
 
     // Ship #21e: Surface blendedAvg for price derivation trace UI
