@@ -1002,6 +1002,51 @@ provenance/honesty defect, distinct from any pricing-math defect. Not
 investigated for exact call sites or fixed this pass. **STATUS: OPEN,
 deferred.**
 
+## GK-234 — Collection delete resurrection (storage-transaction-defect class + missing server delete call, FIXED)
+
+Two independently real, confirmed defects, both now fixed:
+
+1. **Storage layer:** multiple `src/db.js` mutations historically reported
+success at IndexedDB request `onsuccess` rather than durable transaction
+`oncomplete`. The shared mutation helper now enforces transaction-complete
+success and transaction abort/error failure. This is the same defect
+class as GK-231's storage-transaction hardening (shared root mechanism,
+now fixed uniformly across `putComic`, `deleteComic`, `putSnapshot`,
+`putAnalysis`, `deleteFixture`, `clearFixtureBank`, `putFixture`). **This
+is confirmed as a real defect across the storage layer, but it is NOT
+stated to have conclusively caused GK-231's phone `[]` incident** — the
+origin-split candidate explanation for that specific observation remains
+separate and unresolved (see GK-231).
+2. **Sync layer:** `deleteFromCatalogue` (`src/App.jsx`) never called the
+server DELETE endpoint for server-backed items — it only removed the
+local IndexedDB row. Since login/reload rehydration
+(`fetchServerCollection`) is unconditionally additive, any server-backed
+item deleted locally was silently resurrected on the next authenticated
+reload. Fixed via new `deleteServerCollectionItem()`
+(`src/lib/collectionSync.js`), called before the local delete for any
+item where `_syncStatus !== undefined`; a failed server delete blocks the
+local delete and surfaces the real error rather than silently diverging
+client/server state. A 404 (already gone server-side) is treated as
+success.
+
+New test: `tests/gk234-collection-delete-resurrection.test.js` (43/43),
+including a FINAL PRE-COMMIT GATE proving rehydrated server items are
+deterministically tagged `_syncStatus: 'synced'` and are never
+misclassified as local-only by the delete path's ownership check.
+**STATUS: SHIPPED**, pending Jimmy's phone Validation A (see dispatch
+response for exact steps).
+
+## GK-235 — Production DB target identity verification (banked, not investigated further)
+
+`GRAILKEY_CATALOG_DATABASE_URL` exists as separate Development / Preview
+/ Production Vercel entries, but their underlying targets have not been
+safely verified as identical or distinct (checked via env-metadata only,
+per standing secret-hygiene instruction — credentials were not
+decrypted). Consequence: DB-backed investigative reads performed through
+an unverified local credential must be treated as provisional with
+respect to Production. Banked only; no implementation work opened.
+**STATUS: OPEN, informational.**
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.

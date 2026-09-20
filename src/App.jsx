@@ -28,7 +28,7 @@ import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNER
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch } from "./lib/grailkeySession.js";
-import { fetchServerCollection } from "./lib/collectionSync.js";
+import { fetchServerCollection, deleteServerCollectionItem } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
 import { appendPhysicalMediaEvidence, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
@@ -3396,11 +3396,30 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
   };
   const selectAll = () => setSelected(new Set(items.map((i) => i.id)));
   const cancelSelect = () => { setSelectMode(false); setSelected(new Set()); };
-  const deleteSelected = () => {
-    if (!confirm(`Delete ${selected.size} comic${selected.size === 1 ? "" : "s"}? This cannot be undone.`)) return;
-    for (const id of selected) onDelete(id);
+  // GK-234 — B4: partial failure must be honest. Previously this fired
+  // every onDelete(id) unawaited and unconditionally cleared selection —
+  // a server-delete failure (or, before this dispatch, an uncommitted
+  // local delete) would silently be reported as "all deleted" regardless
+  // of what actually happened. Now awaits each deletion in turn (each
+  // one already enforces its own server-then-local ordering) and reports
+  // the true count, naming exactly which items failed and why.
+  const deleteSelected = async () => {
+    const ids = [...selected];
+    if (!confirm(`Delete ${ids.length} comic${ids.length === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    const results = [];
+    for (const id of ids) {
+      results.push(await onDelete(id, { silent: true }));
+    }
     setSelected(new Set());
     setSelectMode(false);
+    const succeeded = results.filter((r) => r?.ok).length;
+    const failed = results.filter((r) => r && r.ok === false && !r.cancelled);
+    if (failed.length > 0) {
+      alert(
+        `Deleted ${succeeded} of ${ids.length}. ${failed.length} failed — Retry.\n\n` +
+        failed.map((f) => `• ${items.find((i) => i.id === f.id)?.title || f.id}: ${f.error || "unknown error"}`).join("\n")
+      );
+    }
   };
 
   const exportJSON = () => {
@@ -12766,11 +12785,28 @@ export default function App() {
     setPendingDuplicate(null);
   };
 
-  const deleteFromCatalogue = useCallback(async (id) => {
+  // GK-234 (2026-09-20) — COLLECTION DELETE RESURRECTION fix. Root cause
+  // traced: this function previously only ever called the LOCAL
+  // deleteComic() — it never told the server, and App.jsx's own
+  // login/reload rehydration effect is unconditionally additive (by
+  // design, to protect legacy local-only records), so any server-backed
+  // row this never deleted server-side would resurrect on the very next
+  // authenticated reload. Required ordering now: server DELETE confirmed
+  // -> local IndexedDB delete committed -> React state removal.
+  // Destructive writes are not best-effort — a failed server delete
+  // leaves the item fully visible, with an actionable error and a Retry
+  // path (just re-invoking this same function), never a silent
+  // local-only removal that the next login would undo anyway.
+  //
+  // `silent` (used by deleteSelected's multi-item loop below) suppresses
+  // this function's own alert() on failure so a multi-select delete
+  // reports one honest, aggregate summary instead of N popups.
+  const deleteFromCatalogue = useCallback(async (id, { silent = false } = {}) => {
     const item = catalogue.find((x) => x.id === id);
+    if (!item) return { id, ok: true, skipped: true };
 
     // If listed on eBay with a known ItemID, offer to delist first.
-    if (item && item.status === "listed" && item.ebayItemId) {
+    if (item.status === "listed" && item.ebayItemId) {
       const choice = prompt(
         `"${item.title}" is listed on eBay.\n\n` +
         `Type 1 to Remove from eBay + Collection\n` +
@@ -12791,7 +12827,7 @@ export default function App() {
               `Remove manually at ebay.com/myebay.\n\n` +
               `Still remove from collection?`
             );
-            if (!proceed) return;
+            if (!proceed) return { id, ok: false, cancelled: true };
           }
         } catch {
           const proceed = confirm(
@@ -12799,16 +12835,41 @@ export default function App() {
             `Remove manually at ebay.com/myebay.\n\n` +
             `Still remove from collection?`
           );
-          if (!proceed) return;
+          if (!proceed) return { id, ok: false, cancelled: true };
         }
       } else if (choice !== "2") {
-        return; // cancelled
+        return { id, ok: false, cancelled: true };
       }
     }
 
+    // GK-234 — B3: a record with NO `_syncStatus` at all has never been
+    // pushed to the server (this repo's own established convention —
+    // see collectionSync.js/collectionPersistence.js's own comments) —
+    // reliably local-only, so a local delete alone is the correct,
+    // sufficient action; there is nothing server-side to remove and no
+    // reason to require network/auth for a purely local record.
+    // `'synced'` or `'pending'` both mean the server MAY have this row
+    // (pending is the ambiguous case — a prior push attempt's outcome
+    // isn't certain) — the safe minimal behavior for both is to attempt
+    // the server delete; deleteServerCollectionItem treats a 404 (never
+    // actually landed, or already gone) as success either way.
+    const isServerBacked = item._syncStatus !== undefined;
+    if (isServerBacked) {
+      try {
+        await deleteServerCollectionItem(id);
+      } catch (err) {
+        const message = err?.message || "Server delete failed — item was NOT removed.";
+        if (!silent) alert(`Could not delete "${item.title}":\n${message}\n\nThe item has not been removed. Try again.`);
+        return { id, ok: false, error: message };
+      }
+    }
+
+    // GK-234 — A4/B1: deleteComic() now resolves only after a real,
+    // durable IndexedDB commit (never before) — see src/db.js.
     await deleteComic(id);
     setCatalogue((prev) => prev.filter((x) => x.id !== id));
     setSelectedItem((cur) => (cur && cur.id === id ? null : cur));
+    return { id, ok: true };
   }, [catalogue]);
 
   const listOnEbay = useCallback(async (item) => {

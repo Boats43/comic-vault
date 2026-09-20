@@ -71,6 +71,37 @@ const openDb = () => {
   return dbPromise;
 };
 
+// GK-234 hardening (2026-09-20) — A2/A4/B1. Every mutating IndexedDB
+// operation in this file previously resolved on the individual request's
+// own `onsuccess` (via the old generic `wrap()` helper below, still used
+// for READS only), never on `transaction.oncomplete` — the exact defect
+// class GK-231 already found and fixed for putFixture, confirmed by this
+// dispatch to be shared, mechanically, by every write/delete/clear helper
+// in this file (deleteComic, putComic, putSnapshot, putAnalysis,
+// deleteFixture, clearFixtureBank). A request's `onsuccess` firing does
+// NOT guarantee the surrounding transaction has durably committed —
+// `transaction.oncomplete` is the real commit signal. `runMutation` is
+// the one shared, mechanical fix applied uniformly to all of them (per
+// this dispatch's own "mechanical/common" authorization) rather than
+// six independent, potentially-drifting copies of the same fix.
+//
+// `run(store)` must return the IDBRequest it wants observed (e.g.
+// `store.delete(id)`) — its own onerror is wired in addition to the
+// transaction's, so a request-level failure is never silently masked by
+// a transaction that technically "completes" around it.
+const runMutation = (storeName, run) =>
+  openDb().then((db) => new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (err) => { if (!settled) { settled = true; reject(err); } };
+    const transaction = db.transaction(storeName, "readwrite");
+    const store = transaction.objectStore(storeName);
+    const request = run(store);
+    if (request) request.onerror = () => fail(request.error);
+    transaction.onerror = () => fail(transaction.error);
+    transaction.onabort = () => fail(transaction.error || new Error(`${storeName} mutation transaction aborted`));
+    transaction.oncomplete = () => { if (!settled) { settled = true; resolve(request?.result); } };
+  }));
+
 const tx = async (mode) => {
   const db = await openDb();
   const transaction = db.transaction(STORE, mode);
@@ -95,16 +126,15 @@ export const getAllComics = async () => {
   }
 };
 
-export const putComic = async (entry) => {
-  const store = await tx("readwrite");
-  await wrap(store.put(entry));
-  return entry;
-};
+// GK-234 — B1: resolves only on transaction.oncomplete (see runMutation).
+export const putComic = (entry) => runMutation(STORE, (store) => store.put(entry)).then(() => entry);
 
-export const deleteComic = async (id) => {
-  const store = await tx("readwrite");
-  await wrap(store.delete(id));
-};
+// GK-234 — A4/B1: THE fix this dispatch's own repro depends on. A caller
+// awaiting deleteComic() now has a real durability guarantee — the row is
+// gone from durable storage, not merely "a delete request was queued,"
+// before this promise resolves and before any caller updates UI/React
+// state as if the deletion succeeded.
+export const deleteComic = (id) => runMutation(STORE, (store) => store.delete(id)).then(() => undefined);
 
 // --- Value snapshots (for the trend chart) ---
 
@@ -114,10 +144,8 @@ const txStore = async (storeName, mode) => {
   return transaction.objectStore(storeName);
 };
 
-export const putSnapshot = async (snapshot) => {
-  const store = await txStore(SNAPSHOTS_STORE, "readwrite");
-  await wrap(store.put(snapshot));
-};
+// GK-234 — B1: same mechanical fix.
+export const putSnapshot = (snapshot) => runMutation(SNAPSHOTS_STORE, (store) => store.put(snapshot)).then(() => undefined);
 
 export const getAllSnapshots = async () => {
   try {
@@ -140,10 +168,8 @@ export const getAnalysis = async () => {
   }
 };
 
-export const putAnalysis = async (data) => {
-  const store = await txStore(ANALYSIS_STORE, "readwrite");
-  await wrap(store.put({ key: "latest", ...data }));
-};
+// GK-234 — B1: same mechanical fix.
+export const putAnalysis = (data) => runMutation(ANALYSIS_STORE, (store) => store.put({ key: "latest", ...data })).then(() => undefined);
 
 // Dispatch 42 Task 1 — ComicVine kill, IndexedDB migration. Strips the
 // `comicVine` object from every stored catalogue record so a disabled
@@ -185,19 +211,11 @@ export const migrateComicVineRemoval = async () => {
 // completes" gap this dispatch called out). Rejects on the request's own
 // error, the transaction's error, or an abort — whichever actually
 // happens is the one propagated, never silently coerced into "success."
+// GK-234 — now expressed via the same shared runMutation() every other
+// mutator uses, rather than its own bespoke copy of the identical logic.
 export const putFixture = (fixture) => {
   if (!fixture?.traceId) return Promise.reject(new Error("putFixture: fixture.traceId is required (idempotency key)"));
-  return openDb().then((db) => new Promise((resolve, reject) => {
-    let settled = false;
-    const fail = (err) => { if (!settled) { settled = true; reject(err); } };
-    const transaction = db.transaction(FIXTURE_BANK_STORE, "readwrite");
-    const store = transaction.objectStore(FIXTURE_BANK_STORE);
-    const putReq = store.put(fixture);
-    putReq.onerror = () => fail(putReq.error);
-    transaction.onerror = () => fail(transaction.error);
-    transaction.onabort = () => fail(transaction.error || new Error("putFixture: transaction aborted"));
-    transaction.oncomplete = () => { if (!settled) { settled = true; resolve(fixture); } };
-  }));
+  return runMutation(FIXTURE_BANK_STORE, (store) => store.put(fixture)).then(() => fixture);
 };
 
 // GK-231 hardening — B4. A genuinely empty store and a genuine
@@ -224,15 +242,10 @@ export const getAllFixtures = () =>
     };
   }));
 
-export const deleteFixture = async (traceId) => {
-  const store = await txStore(FIXTURE_BANK_STORE, "readwrite");
-  await wrap(store.delete(traceId));
-};
+// GK-234 — B1: same mechanical fix.
+export const deleteFixture = (traceId) => runMutation(FIXTURE_BANK_STORE, (store) => store.delete(traceId)).then(() => undefined);
 
-export const clearFixtureBank = async () => {
-  const store = await txStore(FIXTURE_BANK_STORE, "readwrite");
-  await wrap(store.clear());
-};
+export const clearFixtureBank = () => runMutation(FIXTURE_BANK_STORE, (store) => store.clear()).then(() => undefined);
 
 // GK-231 — A3 self-reporting diagnostics. Deliberately reads facts ABOUT
 // the connection/store (never mutates the fixture schema itself — the

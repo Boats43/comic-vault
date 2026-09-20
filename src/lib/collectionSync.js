@@ -49,6 +49,34 @@ export async function fetchServerCollection() {
   }
 }
 
+// GK-234 (2026-09-20) — COLLECTION DELETE RESURRECTION fix. Unlike
+// pushCollectionItem (best-effort, fire-and-forget-safe by design —
+// losing a create/update sync attempt just means the record stays
+// pending and gets retried), a DELETE is destructive and irreversible on
+// the server, and this repo's own login-rehydration path is
+// unconditionally additive (App.jsx, GrailKey Clean Account/Collection
+// Cutover comment) — it will silently resurrect ANY row the server still
+// has on the very next authenticated reload, including a plain page
+// refresh. This function therefore does NOT swallow failures into null;
+// callers MUST distinguish success from failure and must never remove a
+// synced item locally on a failed server call. A 404 (already gone, or
+// never existed server-side) is treated as SUCCESS — the end state the
+// caller wants (no server row) already holds.
+export async function deleteServerCollectionItem(id) {
+  const res = await authFetch(`/api/collection?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res) {
+    throw new Error("Could not reach the server (no session or network unavailable) — item was NOT deleted server-side.");
+  }
+  if (res.status === 404) {
+    return { id, deleted: true, alreadyGone: true };
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Server delete failed (HTTP ${res.status})`);
+  }
+  return await res.json().catch(() => ({ id, deleted: true }));
+}
+
 // Best-effort, fire-and-forget-safe: callers must NEVER let this block
 // or fail the local save it accompanies (server becomes authoritative
 // over time, but a network blip must never lose a scan taken in hand).
