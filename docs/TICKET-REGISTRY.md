@@ -700,6 +700,105 @@ READY, exact SHA match, live on `comic-vault-rouge.vercel.app`. Migration
 0029 live-applied to both Development and Production (independently
 re-verified before/after in both).
 
+## GK-228 — Ungraded sold-comp admission (registry entry, formalizing PRICE-LANE-1's own working label)
+
+**Numbering note:** PRICE-LANE-1's own dispatch text referenced GK-163
+for this defect — that number is already CLOSED for an unrelated matter
+(class-wide idempotency fingerprint). Flagged before any code changed;
+GK-228/229/230 used instead (next free numbers at dispatch time), now
+formalized here per PRICE-LANE-2's registry-preflight requirement.
+
+`src/lib/soldVerification.js`'s grade-proximity filter admitted a sold
+comp at face value whenever its title carried no grade token, no
+Fair/Poor label, and no qualitative-ceiling phrase — the ladder can
+normalize `ladder[target]/ladder[known]` when a comp's own grade is
+known, but an ungraded comp has none to normalize from, so admission
+silently produced a raw-market price under a grade-specific label (New
+Mutants #98: 22 mostly ungraded-title solds priced within 0.9% of
+PriceCharting's "generic raw" ladder row while displayed as VG 4.0).
+**FIXED (commit `7baddb4`):** rejected instead, reason `ungradedTitle`
+(new counter in `soldVerification.js`'s `reasons` object, surfaces
+through the pre-existing generic `Object.entries(reasons)` rendering
+path in both `api/enrich.js`'s log line and `App.jsx`'s
+`humanizeSoldReason` — no friendly label added to `SOLD_REASON_LABELS`
+yet, disclosed follow-up). Chose REJECT over NORMALIZE per the
+dispatch's own A/B rule: no deterministic grade-normalization mechanism
+exists anywhere in this repo.
+
+**Necessary corequisite fix, same commit:** `compHygiene.js`'s
+`parseListingGrade` grade-abbreviation regex only escaped `/`, so the
+five `+`-suffixed abbreviations (`nm+/vf+/fn+/vg+/gd+`) built a regex
+where `+` meant "one or more," never matching literal "NM+"/"VF+" at
+all — and, more subtly, the buggy `nm+` pattern could accidentally
+match bare "NM" text too (since `m+` is satisfied by a single "m"),
+misreading a plain "NM" grade as 9.6 instead of its own correct 9.4.
+Both harmless while an unparsed/misparsed title fell through to
+keep-by-default; GK-228 would have wrongly rejected real "NM+"-titled
+comps and wrongly admitted/miscategorized bare-"NM" comps without this
+fix. All grade-abbreviation regex metacharacters now escaped.
+
+**STATUS: SHIPPED, dollar-value validation OPEN.** Composition-
+correction mechanism proven (unit + real-handler-shaped fixtures,
+`tests/price-lane-1-gk228-gk229-regression.test.js`,
+`tests/sold-verification.test.js` + 4 other pre-existing suites updated
+as disclosed, expected consequences — zero net regression verified via
+stash-diff baseline comparison, not just re-run). Real Production dollar
+values for ASM #91/ASM #10 NOT independently verified — PRICE-LANE-1's
+own fixtures for those two used synthetic (schema-correct, not
+live-captured) comp data, disclosed at the time. Awaiting PRICE-LANE-2
+Step 1 (fixture-capture tooling) + Step 2 (Jimmy's real 20-scan corpus,
+including these 4 books) before this can close.
+
+## GK-229 — Story-metadata dead dependency (registry entry, formalizing PRICE-LANE-1's own working label)
+
+Same numbering note as GK-228 (dispatch referenced GK-162, already
+CLOSED for an unrelated matter).
+
+**Root cause, sharper than PRICE-LANE-1's own TRACE-phase framing:**
+`out.contentVerified` was not merely "often false" — it was
+**unconditionally false on 100% of scans**. `lookupComicVine` (the sole
+producer of `out.comicVine`) is gated by `COMICVINE_ENABLED = false`
+(`api/enrich.js:587`, set by commit `9ca0b9a` "Dispatch 42: ComicVine
+safe-kill," 2026-08-09 — six+ weeks before this dispatch), independent
+of `COMICVINE_API_KEY`. `out.comicVine` is `null` on every fresh scan;
+`verifyStory(null)` always returned `false` under the old code. **Side
+finding, not fixed here:** CLAUDE.md's own structural-fact stamp still
+lists ComicVine as one of three "live" external sources — stale since
+2026-08-09.
+
+**FIXED (commit `7baddb4`):** `ComicAdapter.verifyStory` now returns a
+tri-state (`true`/`false`/`null`) — `null` (unknown/thin metadata) is
+never itself a warning trigger. `storySuppressedReason` (identity/
+match-quality suppression — a different axis from content verification)
+now routes to the previously-dead informational `'story-suppressed'`
+warning instead of forcing `content-unverified`; `content-unverified`
+fires only for a real, present, suspicious description (Q72's original
+LIST_LOW-tier design, unchanged for that genuine case). Real-handler
+smoke proof (GK-138 protocol): `tests/gk229-content-unverified-handler-
+smoke.test.js`, 14/14, against the real (ComicVine-disabled) production
+wiring.
+
+**STATUS: SHIPPED.**
+
+## GK-230 — Condition docks computed then discarded (registry entry, TRACE only, not built)
+
+Same numbering note as above (dispatch referenced GK-164, already
+CLOSED for an unrelated matter — DATA-1D credential incident).
+
+TRACE-confirmed genuine grading-rule gap, not a wiring bug:
+`api/grade.js`'s Vision JSON_SHAPE asks for `grade` and
+`cgcPenaltyFlags`/`defectPenalty` as independent sibling fields with no
+cross-reference instruction; `assessedGrade` (the bare model string)
+feeds pricing directly; `cgcPenaltyFlags`/`defectPenalty` never appear
+again anywhere in `api/enrich.js` or `src/lib/pricingEngine.js` (zero
+matches, full-file grep) — only consumer is a display-only advisory list
+in `App.jsx`. `defectPenalty` IS a real, already-emitted 0.5-0.9
+multiplier with no consumer. **STATUS: OPEN, deferred to a future,
+separately-scoped dispatch (PRICE-LANE-2's own T1 traces the
+condition→grade path further without building a fix).** No numeric
+grade-cap rule invented per the original dispatch's explicit
+instruction not to.
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.
