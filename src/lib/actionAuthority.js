@@ -14,9 +14,19 @@
 // Two independently-derived standings feed one verdict:
 //   identityStanding — CONFIRMED | CONFLICTED | UNRESOLVED
 //   marketStanding   — EXACT_CURRENT | EXACT_STALE | SIMILAR_ONLY |
-//                       FALLBACK_ONLY | NONE
+//                       FALLBACK_ONLY | NO_SOLD_EVIDENCE | NONE
 //   actionAuthority  — { state, identityStanding, marketStanding, reasonCodes }
 //     state: READY | REVIEW | LOCKED
+//
+// GK-238 (2026-09-21, Authority Truthfulness Hotfix) — NO_SOLD_EVIDENCE
+// added. Production evidence found marketStanding claiming EXACT_CURRENT
+// purely from the pricingSource STRING, with zero regard for whether any
+// usable SOLD evidence actually backed it: ASM #11 (zero sold candidates
+// ever found, Tier 3 active-ask-only pricing), New Mutants #98 (30 raw
+// sold candidates, all rejected by verification), Detective Comics #424
+// (1 verified sold comp, 203 days old — decisionEngine.js's own
+// 'sold-comps-stale' warning already flagged this and this function simply
+// never read it). See deriveMarketStanding below for the fix.
 //
 // Pure functions only, operating on `out` (the server enrich response
 // shape, same object responseContract.js already consumes) — importable
@@ -64,6 +74,56 @@ export function deriveMarketStanding(out) {
   if (SIMILAR_ONLY_SOURCES.has(source)) return 'SIMILAR_ONLY';
   if (STALE_SOURCES.has(source)) return 'EXACT_STALE';
   if (EXACT_CURRENT_SOURCES.has(source)) {
+    // GK-238 (2026-09-21, Authority Truthfulness Hotfix) — the invariant:
+    // EXACT_CURRENT requires usable verified SOLD evidence, not merely a
+    // nonzero verified count and not merely a pricingSource string that
+    // NAMES a sold/current tier. Reads out.soldCompDiagnostics (already
+    // computed by soldVerification.js and custodied onto `out` unchanged —
+    // never re-derived here, same "read the custodied signal" discipline
+    // AB/AP/AR/AT/AV below already established).
+    //
+    // Gated on the signal being EXPLICITLY present with real numeric
+    // fields — same "absence never fabricates a worse state" precedent as
+    // AB's variantApplicability-undefined case below. A real enrich `out`
+    // ALWAYS carries this (soldVerification.js's verifySoldComps always
+    // returns rawCount/verifiedCount/newestDaysAgo, even on its
+    // zero-raw-rows early return), except the isolated isPolybagPricing
+    // branch (api/enrich.js), which deliberately sets a diagnostics object
+    // with no rawCount field at all — that case is intentionally left
+    // untouched by this check, not silently caught by it. This also means
+    // an `out` shape predating this field (an old cached response, or
+    // api/list-ebay.js's synthetic re-derivation when the client never
+    // sent soldCompDiagnostics) reaches EXACT_CURRENT exactly as it did
+    // before this fix — never over-fires on missing data.
+    const soldDx = out?.soldCompDiagnostics;
+    const rawSoldCount = soldDx?.rawCount;
+    const verifiedSoldCount = soldDx?.verifiedCount;
+    const hasRawSoldCount = typeof rawSoldCount === 'number';
+    const hasVerifiedSoldCount = typeof verifiedSoldCount === 'number';
+    if (hasRawSoldCount && rawSoldCount === 0) {
+      // Case A (ASM #11) — no sold candidates were ever found. Whatever
+      // this price is (active-ask-derived, most commonly), it is not
+      // current SOLD market evidence.
+      return 'NO_SOLD_EVIDENCE';
+    }
+    if (hasRawSoldCount && rawSoldCount > 0 && hasVerifiedSoldCount && verifiedSoldCount === 0) {
+      // Case B (New Mutants #98) — candidates were found, none survived
+      // verification. decisionEngine.js's own 'zero-verified-comps'
+      // warning already, correctly, downgrades decision.action for this
+      // shape — this fixes the SEPARATE marketStanding/authority axis,
+      // which never read that decision at all.
+      return 'NO_SOLD_EVIDENCE';
+    }
+    // Case C (Detective Comics #424) — usable verified sold evidence
+    // exists but is stale. Reuses decisionEngine.js's own recency
+    // threshold VERBATIM (see that file's 'sold-comps-stale' warning,
+    // `mostRecentDays > 180`) rather than inventing a new freshness rule —
+    // both must be kept in sync if either changes.
+    const newestDaysAgo = soldDx?.newestDaysAgo;
+    if (hasVerifiedSoldCount && verifiedSoldCount > 0 &&
+        typeof newestDaysAgo === 'number' && newestDaysAgo > 180) {
+      return 'EXACT_STALE';
+    }
     // GrailKey Directive AB (GK-101) — evidence applicability custody.
     // pricingSource alone says the pool is CURRENT; it says nothing about
     // whether the pool is evidence for the confirmed EDITION. When a
@@ -235,6 +295,7 @@ const LOCK_CODE_TO_REASON = {
   'market-standing-title-contested': 'TITLE_CONTESTED', // GrailKey Directive AV (GK-133)
   'market-standing-issue-contested': 'ISSUE_CONTESTED', // GK-152 (2026-08-22)
   'market-standing-edition-review-ceiling': 'EDITION_REVIEW_CEILING', // GK-168 (2026-08-24)
+  'market-standing-no-sold-evidence': 'NO_SOLD_EVIDENCE', // GK-238 (2026-09-21)
 };
 
 const lockToReasonCode = (lock) => {

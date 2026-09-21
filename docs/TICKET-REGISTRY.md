@@ -1170,6 +1170,232 @@ blindness (GK-232) are related symptoms of the same underlying gap, banked
 together for the upcoming design work — not implemented here, no pricing
 math touched.
 
+## GK-238 — Authority Truthfulness Hotfix: marketStanding/actionAuthority ignored actual sold-evidence quality (FIXED-PENDING REVIEW)
+
+DISPATCH: AUTHORITY TRUTHFULNESS HOTFIX — EXPANDED LAUNCH BLOCKER
+(2026-09-21). Scope: market standing + decision warnings + listing
+authority only — no pricing formulas/tiers/bands/comp filters touched, no
+greenlight required (Layer A trust hardening).
+
+**Three real production authority failures, one root cause.** `deriveMarketStanding`
+(`src/lib/actionAuthority.js`) derived `EXACT_CURRENT` purely from the
+`pricingSource` STRING (a coarse tier label), with zero regard for whether
+any usable SOLD evidence actually backed it:
+- **Case A — ASM #11:** `rawCount=0, verifiedCount=0, warnings=[]` →
+  `marketStanding=EXACT_CURRENT`, `ACTION AUTHORITY=READY`, live "List on
+  eBay" button. Root cause: Tier 3 (`tier3_active_discounted` →
+  `active_ask_derived`) fires legitimately on an active-only pool with
+  literally zero sold candidates ever found; `active_ask_derived` sits in
+  `EXACT_CURRENT_SOURCES` by design (dozens of pre-existing tests across
+  Directives Z/AB/AD/AP/AR/AS/AT/AV/Q-trackB use it as their standard
+  "would otherwise be EXACT_CURRENT" baseline fixture) and nothing ever
+  checked the underlying sold-comp count.
+- **Case B — New Mutants #98:** `rawCount=30, verifiedCount=0` →
+  `decisionEngine.js`'s pre-existing `zero-verified-comps` warning already
+  correctly downgrades `decision.action` to RESEARCH, but the SEPARATE
+  `marketStanding`/`actionAuthority` axis (Directive Z's own
+  confidence-vs-authority split) never read that decision at all and
+  stayed `EXACT_CURRENT`.
+- **Case C — Detective Comics #424:** `verifiedCount=1`, newest verified
+  sold comp 203 days old. `decisionEngine.js`'s pre-existing
+  `sold-comps-stale` warning (`mostRecentDays > 180`) ALREADY fires and
+  displays correctly — the bug was that `deriveMarketStanding` never read
+  this signal either; its only staleness check (`STALE_SOURCES` /
+  `verified_sold_stale`) requires `priceBands.js`'s own Tier 2.5 bulk
+  threshold (≥5 sold comps, ALL >90d) and structurally cannot fire on a
+  single stale comp.
+
+**Root cause named:** `EXACT_CURRENT` requires usable verified SOLD
+evidence, not merely a nonzero verified count and not merely a
+`pricingSource` string that NAMES a sold/current tier.
+
+**Fix (additive, presence-gated on explicit numeric signals — absence
+never fabricates a worse state, same precedent as GK-101/AB's
+`variantApplicability`-undefined case):**
+1. `src/lib/soldVerification.js` — `verifySoldComps`'s returned
+   `diagnostics` gains `newestDaysAgo` (all 4 return sites), computed from
+   the SAME `daysAgo` field and the SAME `> 180` threshold
+   `decisionEngine.js`'s pre-existing `sold-comps-stale` warning already
+   uses — not a new freshness rule, the existing one made readable to a
+   second consumer.
+2. `src/lib/actionAuthority.js` — `deriveMarketStanding` now reads
+   `out.soldCompDiagnostics.{rawCount,verifiedCount,newestDaysAgo}` before
+   granting `EXACT_CURRENT`: `rawCount===0` or
+   (`rawCount>0 && verifiedCount===0`) floors to new value
+   `NO_SOLD_EVIDENCE`; `verifiedCount>0 && newestDaysAgo>180` floors to the
+   existing `EXACT_STALE`. Gated on the fields being explicit numbers —
+   an `out` shape that never set `soldCompDiagnostics` (every
+   pre-existing bare test fixture, and the polybag pricing branch's own
+   `{kept,rejected,reasons}`-only diagnostics shape) is completely
+   unaffected.
+3. `src/lib/responseContract.js` — `deriveLocks` gains one new,
+   `preStandingLockCount`-gated soft lock (`market-standing-no-sold-evidence`)
+   for the new standing, same additive pattern as the pre-existing
+   `market-standing-fallback-only`/`-none` locks.
+4. `src/lib/decisionEngine.js` — new `no-sold-candidates` warning
+   (`rawSoldCount===0`, presence-gated on `soldCompDiagnostics` being
+   explicitly set), mutually exclusive with and sibling to the pre-existing
+   `zero-verified-comps` (`rawSoldCount>0 && verifiedCount===0`); added to
+   `criticalWarnings` (forces RESEARCH, never LIST_NOW with zero
+   evidence-quality signal).
+5. `api/list-ebay.js` + `src/App.jsx` — `soldCompDiagnostics`
+   (`{rawCount,verifiedCount,newestDaysAgo}`, stripped subset, same
+   convention as the existing `rawComps:{count}` line) threaded into the
+   client's list-ebay request body and the server's independent
+   `syntheticOut` re-derivation, so the ACTUAL mutation-authorization gate
+   (not just card display) also enforces this — a book with zero sold
+   evidence server-side re-derives to REVIEW and gets a real 403
+   `ACTION_AUTHORITY_NOT_READY`, same as GK-207's own gate.
+
+**Price immutability, proven:** this hotfix changes authority state only.
+Zero pricing math touched — `computePriceBands`/`priceBandsRaw`/tier
+selection/grade multipliers/floor guards untouched, confirmed by `git diff`
+scope (5 lib files + list-ebay.js + App.jsx, zero touches to
+`api/comps.js`, `src/lib/priceBands.js`, `src/lib/pricingEngine.js`).
+
+**B2 — why ASM #11 had `rawCount=0`, investigated, not broadened:**
+`api/enrich.js` calls `fetchPricechartingSales(...).catch(() => null)` —
+ANY failure (network error, PriceCharting WAF block, timeout, parse
+error) is silently converted to `null`, structurally indistinguishable at
+that point from PriceCharting genuinely returning zero sold listings for
+the book. `rawSoldRows` then falls to `[]` (the dormant eBay legacy
+`fetchSold` path is disabled via `SOLD_INSIGHTS_DISABLED`), and Q91's
+sold-retention rescue only engages when a prior CACHED raw pool of ≥5 rows
+exists on the request (`req.body.soldCompsRawCached`) — absent on a first
+scan. **Confirmed, real, code-level mechanism; NOT independently confirmed
+which branch ASM #11's specific historical scan actually hit** (no
+retained server log for that exact request) — reported as a disclosed,
+pre-existing latent risk, not fixed this pass per the dispatch's own
+explicit instruction not to broaden scope without a confirmed silent
+failure.
+
+**Tests:** `tests/gk238-authority-truthfulness-hotfix.test.js` (new,
+48/48) — all 4 documented fixtures (Cases A/B/C + Hulk #180 regression
+guard), absence-safety regression, `decisionEngine.js` warning emission,
+full `assembleContract`/`finalizeResponse` card-level proof incl. price
+immutability, and a MIRRORED `api/list-ebay.js` server-side
+re-derivation proof (same convention as
+`grailkey-directive-z-transaction-authority.test.js` Part 4). Full
+regression: 83 files touching `actionAuthority.js`/`decisionEngine.js`/
+`responseContract.js`/`soldVerification.js` re-run — 4 real, correctly-
+diagnosed-and-fixed pre-existing-test-fixture regressions found and
+corrected (`grailkey-directive-z-transaction-authority.test.js`,
+`gk159-commit4-terminal-floor-handler-smoke.test.js`,
+`gk168-edition-facet.test.js`, `grailkey-directive-ab-evidence-applicability.test.js`
+— each had a real production-shaped fixture whose `pricingSource` claimed
+a sold-evidence tier while its own `soldCompDiagnostics` said otherwise;
+each fixture updated to be internally consistent, with state/listable/
+other-reason-codes confirmed unaffected in every case) plus one genuinely
+stale pre-existing assertion in `tests/decision-engine.test.js` (Test 37
+was literally asserting Case A's own bug — `rawCount=0` → silent
+`LIST_NOW` — as expected behavior; updated to assert the corrected
+`RESEARCH`/`no-sold-candidates` outcome). 6 remaining test-file failures
+in the 83-file batch (`decision-engine.test.js`'s other 6 failures,
+`grailkey-commit-e/g.test.js`, `list-ebay-photo-handoff.test.js`,
+`priceBands.test.js`, `sold-verification.test.js`) confirmed byte-for-byte
+identical to the pre-existing baseline via `git stash` A/B comparison —
+none caused by this hotfix. `npm run build` clean (ESM parse check + vite
+build).
+
+**Known, disclosed, out of scope (per dispatch's own instruction):** Hulk
+#180's separate `SIMILAR_ONLY` inversion (GK-232a-class) — untouched.
+GK-230/232/233 — untouched. Detective #424's UI-copy "32 verified comps"
+vs. the actual derivation (32 active listings, 1 verified sold comp) —
+terminology/display-honesty debt, banked, not fixed this pass (matches an
+existing, not-yet-ticketed class — flagged here for a future dispatch to
+assign its own number if not already covered). Bundle listings
+(`api/list-ebay.js`'s `item.bundle===true` branch) do not read
+`soldCompDiagnostics` at all — this hotfix does not close GK-216's own
+disclosed bundle-listing linkage gap.
+
+**Real-fixture-replay evidence (2026-09-21).** New Mutants #98's real
+exported Production fixture — `comic-vault-fixture-corpus-2026-09-20
+(1111.json` (PC-side, traceId `01902734-7675-4cf9-a4b5-e8ae7cdcedb5`,
+`knownAnswerFixture: true`) — was replayed through the real
+`deriveMarketStanding` → `assembleContract` → `finalizeResponse` chain,
+verbatim real data (rawCount=30, verifiedCount=0, price=$360.59,
+pricingSource=`active_ask_derived`, tier 3): **PASS** —
+`marketStanding` moved `EXACT_CURRENT` (the value literally captured in
+the export, pre-fix) → `NO_SOLD_EVIDENCE`; `state` REVIEW, not READY;
+`decision.warnings` still carries the pre-existing `zero-verified-comps`;
+`price` unchanged at exactly $360.59.
+
+ASM #11 (traceId `23ee02a9-b066-4d36-9fe6-6e859dc115e5`) and Hulk #180
+(traceId `bca3dae7-ef1c-49d7-8fe9-d309797afb19`) **real Production
+fixtures exist** — `comic-vault-fixture-corpus-2026-09-21 (1).json`,
+exported 2026-09-21T00:49:36Z, build `2773794`, 3 records, on Jimmy's
+phone — but were not transferred to this machine before this commit.
+Per explicit operator ruling, this commit proceeds on: the real NM #98
+replay above, PLUS the deterministic Case-A/Case-D fixtures already
+covering ASM #11's zero-sold-candidate shape and Hulk #180's
+strong-evidence no-regression shape (`tests/gk238-authority-truthfulness-hotfix.test.js`
+Fixtures 1 and 4 — both synthetic-but-structurally-matched, not the real
+phone-side exports). The real phone-side replay of these two specific
+fixtures is deferred to normal Production phone acceptance, below —
+**not itself the launch-blocker gate**, per this ruling.
+
+**STATUS: SHIPPED** — committed and deployed per explicit operator
+authorization (GK-238 approval dispatch + commit-with-available-evidence
+ruling, both 2026-09-21). Production phone acceptance (A/B/C below)
+remains the final real-world confirmation step, deferred to normal
+post-deploy use.
+
+**Verification label (GK-238 approval dispatch, item 3):** the
+`api/list-ebay.js` mutation-gate proof (Part 5 of
+`tests/gk238-authority-truthfulness-hotfix.test.js`, and the pre-existing
+Part 4 of `grailkey-directive-z-transaction-authority.test.js`) is
+**MIRRORED-WIRING-UNVERIFIED** — it exercises the real
+`deriveLocks`/`deriveActionAuthority` functions against a hand-constructed
+`syntheticOut` shaped to match `api/list-ebay.js`'s own construction, not
+the real HTTP handler (no live eBay credential set exists in this test
+environment). This is NOT real-handler Production proof. Current Beta
+acceptance relies on the real phone/listing attempt after deployment (see
+Production Phone Acceptance C below).
+
+## GK-239 — Sold-fetch failure state indistinguishable from genuine zero (BANKED, not built)
+
+Banked per GK-238's own approval dispatch, item 4A — registry ID
+assigned, no implementation. `api/enrich.js` calls
+`fetchPricechartingSales(...).catch(() => null)` — any transport/WAF/
+timeout/parse failure is silently converted to `null`, structurally
+indistinguishable at that point from PriceCharting genuinely returning
+zero sold listings for the book. Confirmed as GK-238's own B2 answer for
+why ASM #11 had `rawCount=0` (mechanism confirmed real; which branch that
+specific historical scan hit was NOT independently confirmed — no
+retained log for that exact request). **Future state must distinguish**
+`SOLD_FETCH_FAILED` (a real infrastructure failure, should not silently
+demote to the same evidence-quality signal as a genuine empty market —
+arguably should retry, warn distinctly, or fall back to a cached prior
+pool more aggressively than Q91's current ≥5-row threshold) from
+`NO_SOLD_CANDIDATES` (a genuine zero, correctly demoted by GK-238).
+**STATUS: OPEN, deferred** — no threshold, no retry policy, no new field
+designed or built this pass.
+
+## GK-240 — eBay mutation trust boundary: authority derived from client-supplied syntheticOut (BANKED, not built)
+
+Banked per GK-238's own approval dispatch, item 4B — registry ID
+assigned, no implementation. `api/list-ebay.js` independently re-derives
+`deriveActionAuthority` server-side (Directive Z, GK-95/96), but the raw
+evidence fields it re-derives FROM (`pricingSource`, `rawComps`,
+`soldCompDiagnostics`, `variantApplicability`, etc., including GK-238's
+own new `soldCompDiagnostics` threading) are themselves **client-supplied**
+in the request body — never independently re-fetched or re-verified
+against a server-trusted durable source. **For the current single-operator
+Beta this is accepted as a documented limitation** (matches the file's
+own pre-existing "Known, documented limitation" disclosure for
+`identityProvisional`/`listingHardLockReason`) — the server does NOT
+independently reconstruct or independently verify market evidence; it
+only proves a forged `actionAuthority`/`decision.action` verdict has zero
+effect (the ONE thing Directive Z actually closed), not that the
+underlying evidence fields themselves are trustworthy against a malicious
+or buggy client. **Before multi-operator/productized use, listing
+authority must derive from server-trusted durable evidence** (e.g. the
+GrailKey asset-graph's own `market_observation`/`valuation_event` rows,
+once GK-180's writer gap closes) **rather than forgeable client-supplied
+market diagnostics.** **STATUS: OPEN, deferred** — no server-trusted
+evidence source designed or built this pass; single-operator Beta risk
+accepted as-is per this dispatch's explicit ruling.
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.

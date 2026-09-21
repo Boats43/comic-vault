@@ -324,7 +324,15 @@ async function main() {
     const marketStanding = deriveMarketStanding(body);
     const authority = deriveActionAuthority(body, locks, body.decision);
     console.log(`  marketStanding=${marketStanding} authority.state=${authority.state} reasonCodes=${JSON.stringify(authority.reasonCodes)}`);
-    assertEq(marketStanding, 'SIMILAR_ONLY', 'Control 1: REVIEW ceiling — marketStanding floors to SIMILAR_ONLY, not EXACT_CURRENT (C7)');
+    // GK-238 (2026-09-21, Authority Truthfulness Hotfix) — this fixture's
+    // pool carries zero sold comps (active-only), so
+    // deriveMarketStanding's new NO_SOLD_EVIDENCE check now wins over the
+    // EDITION_REVIEW_CEILING facet floor's own SIMILAR_ONLY (both are
+    // real, independently-true facts about this fixture — NO_SOLD_EVIDENCE
+    // is checked first as the more fundamental reason). REVIEW ceiling
+    // itself (authority.state !== READY, EDITION_REVIEW_CEILING still
+    // present in reasonCodes below) is completely unaffected.
+    assertEq(marketStanding, 'NO_SOLD_EVIDENCE', 'Control 1: REVIEW ceiling — marketStanding floors to NO_SOLD_EVIDENCE (zero sold comps in this fixture), not EXACT_CURRENT (C7)');
     assertTrue(authority.state !== 'READY', 'Control 1: REVIEW ceiling — authority.state is not READY');
     assertTrue(authority.reasonCodes.includes('EDITION_REVIEW_CEILING'), 'Control 1: the specific EDITION_REVIEW_CEILING reason code is present');
   }

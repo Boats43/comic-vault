@@ -999,6 +999,20 @@ export default async function handler(req, res) {
       // placeholder array reproduces that check exactly without needing
       // the full sold-comp payload over the wire.
       soldComps: new Array(typeof item.soldComps === 'number' ? item.soldComps : 0).fill({}),
+      // GK-238 (2026-09-21, Authority Truthfulness Hotfix) — same raw-
+      // evidence-field trust boundary as every other line here. Only the
+      // three scalar fields deriveMarketStanding actually reads (never the
+      // full reasons/rejectedSamples payload) — matches the existing
+      // rawComps stripped-to-{count} convention just above. Absent on the
+      // client (older cached item, or a field this endpoint's caller never
+      // set) means deriveMarketStanding's presence-gated checks are simply
+      // not evaluated, identical to its enrich-time behavior before this
+      // fix — never a fabricated demotion from missing data.
+      soldCompDiagnostics: item.soldCompDiagnostics ? {
+        rawCount: typeof item.soldCompDiagnostics.rawCount === 'number' ? item.soldCompDiagnostics.rawCount : null,
+        verifiedCount: typeof item.soldCompDiagnostics.verifiedCount === 'number' ? item.soldCompDiagnostics.verifiedCount : null,
+        newestDaysAgo: typeof item.soldCompDiagnostics.newestDaysAgo === 'number' ? item.soldCompDiagnostics.newestDaysAgo : null,
+      } : null,
       identityConfident: item.identityConfident,
       refusedToPrice: item.refusedToPrice === true,
       manualReviewRequired: item.manualReviewRequired === true,

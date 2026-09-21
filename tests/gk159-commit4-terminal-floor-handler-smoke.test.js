@@ -12,8 +12,18 @@
 // src/lib/issueAuthority.js) would have unconditionally nulled that price
 // and forced ID_REQUIRED the instant issueAuthority.status went
 // 'conflicted' — after this fix, the card commits the real price, floored
-// to marketStanding=SIMILAR_ONLY / actionAuthority.state=REVIEW, never
-// EXACT_CURRENT/READY, listing still not listable.
+// to actionAuthority.state=REVIEW, never EXACT_CURRENT/READY, listing
+// still not listable.
+//
+// GK-238 (2026-09-21, Authority Truthfulness Hotfix) — this fixture's mock
+// never seeds any sold comps at all (Tier 3 fires on the active pool
+// alone, rawCount=0) — deriveMarketStanding now correctly floors that to
+// NO_SOLD_EVIDENCE (the more fundamental reason this book can't reach
+// EXACT_CURRENT) rather than SIMILAR_ONLY (which this shape also still
+// independently earns via the issue-contested facet floor — ISSUE_CONTESTED
+// remains present in reasonCodes below, just no longer the value marketStanding
+// itself resolves to, since NO_SOLD_EVIDENCE is checked first). state/listable
+// are unaffected — this changes only which specific label wins.
 //
 // Invoke: node tests/gk159-commit4-terminal-floor-handler-smoke.test.js
 
@@ -176,7 +186,7 @@ async function main() {
   const contract = capturedBody?.contract;
   assertTrue(!!contract, 'response carries an assembled contract block');
   if (contract) {
-    assertEq(contract.actionAuthority?.marketStanding, 'SIMILAR_ONLY', 'contract.actionAuthority.marketStanding === SIMILAR_ONLY');
+    assertEq(contract.actionAuthority?.marketStanding, 'NO_SOLD_EVIDENCE', 'contract.actionAuthority.marketStanding === NO_SOLD_EVIDENCE (GK-238: zero sold comps in this fixture wins over the issue-contested SIMILAR_ONLY floor)');
     assertEq(contract.actionAuthority?.state, 'REVIEW', 'contract.actionAuthority.state === REVIEW (never LOCKED/ID_REQUIRED/READY)');
     assertTrue(Array.isArray(contract.actionAuthority?.reasonCodes) && contract.actionAuthority.reasonCodes.includes('ISSUE_CONTESTED'), `contract.actionAuthority.reasonCodes includes ISSUE_CONTESTED (actual: ${JSON.stringify(contract.actionAuthority?.reasonCodes)})`);
     assertEq(contract.listable, false, 'contract.listable === false (listing stays gated, never READY)');

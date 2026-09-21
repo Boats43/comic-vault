@@ -1007,8 +1007,18 @@ test('Has verified sold comps - no confidence cap', () => {
   assertNotIncludes(decision.warnings, 'zero-verified-comps', 'Should NOT have zero-verified-comps warning');
 });
 
-// TEST 37: No sold comp data - no zero-verified warning (v1-C edge case)
-test('No sold comp data - no zero-verified warning', () => {
+// TEST 37: No sold comp data - zero-verified-comps still does not fire,
+// but this exact shape (rawCount=0) is GK-238's own Case A (ASM #11
+// production evidence) — updated 2026-09-21, Authority Truthfulness
+// Hotfix. This fixture's rawCount=0/verifiedCount=0/warnings=[]/LIST_NOW
+// shape was the literal documented defect (a book with zero sold
+// candidates ever found sailing through to LIST_NOW with no warning at
+// all) — decisionEngine.js now emits the new, distinct 'no-sold-candidates'
+// warning for this shape (rawSoldCount===0, mutually exclusive with
+// zero-verified-comps which requires rawSoldCount>0) and escalates to
+// RESEARCH via criticalWarnings. See tests/gk238-authority-truthfulness-hotfix.test.js
+// for the full fixture set (Cases A/B/C + Hulk #180 regression guard).
+test('No sold comp data - no-sold-candidates warning (not zero-verified-comps)', () => {
   const item = {
     title: "Test Comic",
     issue: "1",
@@ -1032,10 +1042,11 @@ test('No sold comp data - no zero-verified warning', () => {
 
   const decision = computeDecision(item);
 
-  assertEqual(decision.action, 'LIST_NOW', 'Should be LIST_NOW');
-  assertEqual(decision.confidence, 'high', 'Confidence should be high');
+  assertEqual(decision.action, 'RESEARCH', 'GK-238: zero sold candidates now escalates to RESEARCH, never LIST_NOW with no evidence-quality signal at all');
+  assertIncludes(decision.warnings, 'no-sold-candidates',
+    'GK-238: should carry the new no-sold-candidates warning (distinct evidence state from zero-verified-comps)');
   assertNotIncludes(decision.warnings, 'zero-verified-comps',
-    'Should NOT have zero-verified-comps warning when no sold comps exist');
+    'Should NOT have zero-verified-comps warning when no sold comps were ever found at all (that warning means "found and rejected", a different state)');
 });
 
 // TEST 38: Floor enforcement - recommended below floor (v0-F)

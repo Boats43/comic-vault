@@ -110,6 +110,20 @@ const recencyBandFor = (daysAgo) => {
   return 'stale';
 };
 
+// GK-238 (2026-09-21, Authority Truthfulness Hotfix) — the single place
+// diagnostics.newestDaysAgo is computed, from whichever verified-row array
+// a given return branch is actually shipping (main chain or variant
+// fallback). Same `?? 999` defensive default decisionEngine.js's own
+// pre-existing 'sold-comps-stale' warning already uses on this exact field
+// (Math.min(...item.soldComps.map(s => s.daysAgo || 999))) — not a new
+// convention. null (not 999/Infinity) when there are zero verified rows to
+// measure, so a downstream consumer can distinguish "no verified sold
+// evidence at all" from "verified evidence that happens to be very old".
+const computeNewestDaysAgo = (verifiedRows) =>
+  Array.isArray(verifiedRows) && verifiedRows.length > 0
+    ? Math.min(...verifiedRows.map((r) => r?.daysAgo ?? 999))
+    : null;
+
 // ─────────────────────────── filter helpers ───────────────────────────
 
 // Hard reject when row title contains a format marker (annual / special /
@@ -300,6 +314,7 @@ export const verifySoldComps = (rawRows, ctx) => {
         rejectedCount: 0,
         reasons,
         rejectedSamples,
+        newestDaysAgo: null, // GK-238 — no verified rows to measure recency from
       },
     };
   }
@@ -1191,6 +1206,7 @@ export const verifySoldComps = (rawRows, ctx) => {
           rejectedCount: rawCount,
           reasons: fallbackReasons,
           rejectedSamples: fallbackRejectedSamples,
+          newestDaysAgo: null, // GK-238 — zero verified rows in this branch
         },
         variantAdjusted: true,
         variantFallbackIncoherent: true,
@@ -1215,6 +1231,7 @@ export const verifySoldComps = (rawRows, ctx) => {
           rawCount,
           verifiedCount: gatedFallbackPool.length,
           rejectedCount: rawCount - gatedFallbackPool.length,
+          newestDaysAgo: computeNewestDaysAgo(gatedFallbackPool), // GK-238
           // Q113 dispatch (2026-07-18, Batman #608 class) — this pass's OWN
           // tally, not the abandoned first pass's. sum(fallbackReasons) now
           // reconciles with rejectedCount by construction. Was: reused
@@ -1268,6 +1285,7 @@ export const verifySoldComps = (rawRows, ctx) => {
       rejectedCount: rawCount - working.length,
       reasons,
       rejectedSamples,
+      newestDaysAgo: computeNewestDaysAgo(working), // GK-238
     },
     evidence: evidencePopulations,
   };

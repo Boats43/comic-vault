@@ -437,7 +437,22 @@ export function computeDecision(item, context = {}) {
   const rawSoldCount = item.soldCompDiagnostics?.rawCount || 0;
   const activeCount = item.rawComps?.count || 0;
 
-  if (verifiedSoldCount === 0 && rawSoldCount > 0) {
+  // GK-238 (2026-09-21, Authority Truthfulness Hotfix) — 'zero-verified-comps'
+  // above requires rawSoldCount > 0 by design (it means "candidates were
+  // found and rejected"), so it structurally can never fire for a book
+  // where no sold candidates were EVER found at all (ASM #11 production
+  // case: rawCount=0, verifiedCount=0, warnings=[] — a genuinely distinct,
+  // previously-silent evidence state). Presence-gated on
+  // item.soldCompDiagnostics.rawCount being an explicit number — same
+  // "absence never fabricates a worse state" precedent as every other
+  // gate in this file that reads a possibly-absent upstream signal — so a
+  // fixture/caller that never sets soldCompDiagnostics at all is
+  // completely unaffected by this addition.
+  const hasRawSoldCountSignal = typeof item.soldCompDiagnostics?.rawCount === 'number';
+  if (hasRawSoldCountSignal && rawSoldCount === 0) {
+    decision.warnings.push('no-sold-candidates');
+    decision.evidence.noSoldCandidates = { activeCount };
+  } else if (verifiedSoldCount === 0 && rawSoldCount > 0) {
     decision.warnings.push('zero-verified-comps');
     decision.evidence.zeroVerifiedComps = {
       rawSoldCount,
@@ -747,6 +762,7 @@ export function computeDecision(item, context = {}) {
     'era-risk-vintage-thin',           // Price evidence: thin Golden Age pool
     'active-avg-far-below',            // Price evidence: recommended far above asks
     'zero-verified-comps',             // Price evidence: no verified sold data
+    'no-sold-candidates',              // GK-238: zero sold candidates ever found (distinct from zero-verified-comps)
     'ai-verify-rejected-all',          // Price evidence: 100% comp rejection
     'verification-failed-claude',      // Price evidence: Claude gate rejected
     'verification-failed-no-data',     // Price evidence: zero comp data
@@ -1120,6 +1136,12 @@ export function describeWarning(slug, item) {
       }
     }
     return 'sold comps exist but none verified';
+  }
+  if (slug === 'no-sold-candidates') {
+    const activeCount = item.rawComps?.count;
+    return typeof activeCount === 'number'
+      ? `no sold comps found — priced from ${activeCount} active listing${activeCount === 1 ? '' : 's'} only, not realized sales`
+      : 'no sold comps found — price reflects active listing asks only, not realized sales';
   }
   if (slug === 'ebay-source-unavailable') {
     return `eBay data unavailable this scan (${item.ebaySourceReason || 'unknown reason'}) — not verified as a zero-market book`;

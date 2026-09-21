@@ -13016,6 +13016,17 @@ export default function App() {
         matchConfidence: item.matchConfidence || null,
         rawComps: item.rawComps ? { count: item.rawComps.count ?? 0 } : null,
         soldComps: Array.isArray(item.soldComps) ? item.soldComps.length : 0,
+        // GK-238 (2026-09-21, Authority Truthfulness Hotfix) — same
+        // raw-evidence-field convention as rawComps just above (stripped to
+        // only the fields the server's deriveMarketStanding actually reads,
+        // never the full reasons/rejectedSamples payload). Was previously
+        // never sent at all — the server-side re-derivation had nothing to
+        // gate on for this signal until now.
+        soldCompDiagnostics: item.soldCompDiagnostics ? {
+          rawCount: item.soldCompDiagnostics.rawCount ?? null,
+          verifiedCount: item.soldCompDiagnostics.verifiedCount ?? null,
+          newestDaysAgo: item.soldCompDiagnostics.newestDaysAgo ?? null,
+        } : null,
         // GrailKey Directive AH (GK-111) — found while tracing the server
         // boundary for this dispatch's own new signal: variantApplicability
         // (GK-101/Directive AB) was NEVER included in this request body at

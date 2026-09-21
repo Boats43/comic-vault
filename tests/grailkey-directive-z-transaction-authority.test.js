@@ -212,10 +212,27 @@ const rank = { READY: 2, REVIEW: 1, LOCKED: 0 };
 {
   // 4. improve exact applicable evidence -- authority MAY RISE.
   const before = buildSabrinaOut(); // FALLBACK_ONLY, LOCKED
-  const improved = { ...buildSabrinaOut(), pricingSource: 'verified_sold_recency', rawComps: { count: 8, average: 80, lowest: 60, highest: 100 } };
+  // GK-238 (2026-09-21, Authority Truthfulness Hotfix) — "improved" must
+  // also improve soldCompDiagnostics, not just the pricingSource label.
+  // buildSabrinaOut()'s own soldCompDiagnostics (rawCount:30,
+  // verifiedCount:0) genuinely means "zero usable sold evidence" -- a
+  // pricingSource of 'verified_sold_recency' can never be genuinely
+  // selected by priceBands.js's own Tier 1 without >=5 fresh verified sold
+  // comps behind it in the first place, so a fixture claiming that source
+  // while its diagnostics still say verifiedCount:0 was never a realistic
+  // "improved" shape -- it's the exact dishonest-label mismatch this
+  // dispatch's own fix now correctly catches (and did, before this test
+  // fixture was corrected: it read NO_SOLD_EVIDENCE/REVIEW, not
+  // EXACT_CURRENT/READY, until this line below was added).
+  const improved = {
+    ...buildSabrinaOut(),
+    pricingSource: 'verified_sold_recency',
+    rawComps: { count: 8, average: 80, lowest: 60, highest: 100 },
+    soldCompDiagnostics: { rawCount: 8, verifiedCount: 5, activeCount: 8, newestDaysAgo: 10 },
+  };
   const beforeAuth = assembleContract(before).actionAuthority;
   const improvedAuth = assembleContract(improved).actionAuthority;
-  assertTrue(rank[improvedAuth.state] > rank[beforeAuth.state], 'MONOTONICITY 4: improving pricingSource to verified_sold_recency (real exact-current evidence) RAISES authority (LOCKED -> READY) -- a demonstrated recovery path exists');
+  assertTrue(rank[improvedAuth.state] > rank[beforeAuth.state], 'MONOTONICITY 4: improving pricingSource to verified_sold_recency (real exact-current evidence, now with consistent soldCompDiagnostics) RAISES authority (LOCKED -> READY) -- a demonstrated recovery path exists');
   assertEq(improvedAuth.state, 'READY', 'improved evidence reaches READY, not merely REVIEW');
 }
 

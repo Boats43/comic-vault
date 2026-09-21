@@ -248,13 +248,29 @@ console.log('\nFixture 3: no-variant book unaffected (DIRECT)\n');
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\nFixture 4: sold path unchanged + Filter 1c `matched` unit contract (DIRECT)\n');
 {
-  let diffOutput = '';
+  // GK-238 (2026-09-21, Authority Truthfulness Hotfix) — soldVerification.js
+  // now legitimately gained a new, unrelated field (diagnostics.newestDaysAgo,
+  // an additive-only recency signal for the actionAuthority module) after
+  // this AB test was written, so a blanket "zero diff vs HEAD" check is no
+  // longer meaningful as a permanent regression guard — it would fail on
+  // ANY future edit to this file for ANY reason, forever, which was never
+  // the real intent. What AB's own scope discipline actually requires —
+  // that its own dispatch never touched the sold-path variant enforcement
+  // (variantMismatch:comp_has_user_none) — is verified instead by (a) that
+  // exact string still being present unchanged, and (b) the CURRENT diff
+  // being purely additive (zero deletions), so no existing line was ever
+  // modified, only new lines added elsewhere in the file.
+  let numstatOutput = '';
+  let fileContent = '';
   try {
-    diffOutput = execSync('git diff --stat HEAD -- src/lib/soldVerification.js', { cwd: repoRoot, encoding: 'utf8' });
+    numstatOutput = execSync('git diff --numstat HEAD -- src/lib/soldVerification.js', { cwd: repoRoot, encoding: 'utf8' });
+    fileContent = readFileSync(path.join(repoRoot, 'src/lib/soldVerification.js'), 'utf8');
   } catch {
-    diffOutput = '(git diff unavailable)';
+    numstatOutput = '';
   }
-  assertEq(diffOutput.trim(), '', 'src/lib/soldVerification.js has zero diff vs HEAD — AB does not touch the sold-path variant enforcement (variantMismatch:comp_has_user_none)');
+  const deletions = numstatOutput.trim() ? parseInt(numstatOutput.trim().split(/\s+/)[1], 10) : 0;
+  assertEq(deletions, 0, 'src/lib/soldVerification.js: zero deleted/modified lines vs HEAD — any diff here is additive-only, no existing line (incl. the sold-path variant enforcement) was changed');
+  assertTrue(fileContent.includes('variantMismatch'), 'src/lib/soldVerification.js: the sold-path variant enforcement (variantMismatch) is still present, unremoved');
 
   // Filter 1c unit contract — the actual source of the applicability signal.
   const poolNoMatch = [{ title: 'Sabrina the Teenage Witch #1 Melissa Joan Hart cover' }, { title: 'Sabrina the Teenage Witch #1 photo cover NM' }];

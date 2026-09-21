@@ -252,6 +252,27 @@ export function deriveLocks(out) {
     });
   }
 
+  // GK-238 (2026-09-21, Authority Truthfulness Hotfix) — deriveMarketStanding
+  // floors EXACT_CURRENT to NO_SOLD_EVIDENCE when out.soldCompDiagnostics
+  // explicitly reports zero raw sold candidates, or candidates with zero
+  // surviving verification (the actual gating power — READY requires
+  // marketStanding === 'EXACT_CURRENT', so this alone routes the book
+  // through deriveActionAuthority's existing REVIEW fallthrough). Same
+  // additive, independent-of-the-other-standing-locks pattern as
+  // market-standing-fallback-only/none above — this adds only the specific,
+  // explicable reason code.
+  if (preStandingLockCount === 0 && marketStanding === 'NO_SOLD_EVIDENCE') {
+    const rawSoldCount = out?.soldCompDiagnostics?.rawCount;
+    locks.push({
+      code: 'market-standing-no-sold-evidence',
+      reason: (typeof rawSoldCount === 'number' && rawSoldCount === 0)
+        ? 'No sold comps were found — price reflects active listing asks only, not realized sales'
+        : 'Sold comps were found but none passed verification — price does not reflect a verified realized sale',
+      hard: false,
+      class: 'insufficiency',
+    });
+  }
+
   // GrailKey Directive AB (GK-101) — evidence applicability custody.
   // deriveMarketStanding already floors EXACT_CURRENT to SIMILAR_ONLY when
   // out.variantApplicability === 'UNVERIFIED' (the actual gating power —
