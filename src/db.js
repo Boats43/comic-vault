@@ -3,7 +3,7 @@
 // so we can return items newest-first without sorting the whole array.
 
 const DB_NAME = "comic-vault";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE = "comics";
 const SNAPSHOTS_STORE = "valueSnapshots";
 const ANALYSIS_STORE = "analysisCache";
@@ -14,6 +14,19 @@ const ANALYSIS_STORE = "analysisCache";
 // duplicate — the dispatch's own idempotency requirement, satisfied by
 // the store's own key, no extra bookkeeping needed.
 const FIXTURE_BANK_STORE = "fixtureBank";
+// GK-246 (U4, Generic Asset Mode, 2026-09-22) — durable local recovery
+// state for an in-progress generic physical capture (photo + operator
+// fields + the one stable capture/collection_item id), keyed by that
+// same id. Additive-only, DB_VERSION 3->4. Exists so a reload/crash
+// mid-capture can resume with the EXACT SAME photo bytes and the EXACT
+// SAME capture key (A1's own "no re-encoded retry" requirement) rather
+// than re-reading the file picker (which could hand back different
+// bytes on a second read) or generating a new key (which would mint a
+// second physical asset). Never a catalogue store — a synced/complete
+// draft is removed once the real collection_item exists server-side;
+// the durable truth after that point is the server (gk_asset/media/
+// collection_item), never this store.
+const GENERIC_CAPTURE_DRAFTS_STORE = "genericCaptureDrafts";
 const LEGACY_KEY = "cv_catalogue";
 
 let dbPromise = null;
@@ -55,6 +68,9 @@ const openDb = () => {
       if (!db.objectStoreNames.contains(FIXTURE_BANK_STORE)) {
         const fixtureStore = db.createObjectStore(FIXTURE_BANK_STORE, { keyPath: "traceId" });
         fixtureStore.createIndex("capturedAt", "capturedAt", { unique: false });
+      }
+      if (!db.objectStoreNames.contains(GENERIC_CAPTURE_DRAFTS_STORE)) {
+        db.createObjectStore(GENERIC_CAPTURE_DRAFTS_STORE, { keyPath: "id" });
       }
     };
     req.onsuccess = () => {
@@ -261,6 +277,36 @@ export const getFixtureBankDiagnostics = () =>
     objectStoreNames: Array.from(db.objectStoreNames),
     fixtureRecordCount: (await getAllFixtures()).length,
   }));
+
+// --- Generic capture drafts (U4, Generic Asset Mode — recovery state only) ---
+
+// GK-246 — same runMutation discipline as every other mutator in this
+// file: resolves only on real transaction.oncomplete.
+export const putGenericCaptureDraft = (draft) => {
+  if (!draft?.id) return Promise.reject(new Error("putGenericCaptureDraft: draft.id is required (the stable capture/collection_item id)"));
+  return runMutation(GENERIC_CAPTURE_DRAFTS_STORE, (store) => store.put(draft)).then(() => draft);
+};
+
+export const getGenericCaptureDraft = (id) =>
+  openDb().then((db) => new Promise((resolve, reject) => {
+    const transaction = db.transaction(GENERIC_CAPTURE_DRAFTS_STORE, "readonly");
+    const store = transaction.objectStore(GENERIC_CAPTURE_DRAFTS_STORE);
+    const req = store.get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  }));
+
+export const getAllGenericCaptureDrafts = () =>
+  openDb().then((db) => new Promise((resolve, reject) => {
+    const transaction = db.transaction(GENERIC_CAPTURE_DRAFTS_STORE, "readonly");
+    const store = transaction.objectStore(GENERIC_CAPTURE_DRAFTS_STORE);
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  }));
+
+export const deleteGenericCaptureDraft = (id) =>
+  runMutation(GENERIC_CAPTURE_DRAFTS_STORE, (store) => store.delete(id)).then(() => undefined);
 
 // One-shot migration: if a legacy `cv_catalogue` array exists in localStorage,
 // copy its entries into IndexedDB then drop the key. Safe to call on every load.

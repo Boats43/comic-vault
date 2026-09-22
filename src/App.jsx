@@ -36,6 +36,7 @@ import { computeFeeAmount, computeNetProfit, computeMaxBuy, evaluateAgainstMaxBu
 import { pushBuyerDecision, pushBuyerAcquisition } from "./lib/buyerDecisionSync.js";
 import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
+import GenericAssetCapture from "./components/GenericAssetCapture.jsx";
 import { useClerk } from "@clerk/react";
 
 // Same gate src/main.jsx uses to decide whether <ClerkProvider> is mounted
@@ -4727,6 +4728,72 @@ function CollectionDetail({
     }
   };
 
+  // U4 (Generic Asset Mode, A3) — every hook above has already run
+  // unconditionally, so this early return is a plain conditional render,
+  // not a hook-order violation. A generic-category item never went
+  // through /api/grade or /api/enrich, so it carries none of the
+  // comic-specific fields (grade/price/comps/decision/...) the rest of
+  // this component below assumes — rendering it through that path would
+  // either crash on absent nested fields or display fabricated-looking
+  // zeros/blanks for data that was never computed. This branch shows
+  // ONLY what is truthfully known: the operator-supplied name, the
+  // category, the photo, and acquisition cost if the operator entered
+  // one — plus explicit "unavailable"/"unknown" labels rather than
+  // silently omitting fields a comic card would show.
+  if (item?.assetCategory === "generic") {
+    const genericPhotos = getComicPhotos(item);
+    return (
+      <div className="detail-view" style={{ padding: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "#d4af37", fontSize: 15, cursor: "pointer" }}>← Back</button>
+          {totalItems > 1 && (
+            <div style={{ color: "#888", fontSize: 12 }}>{currentIndex + 1} / {totalItems}</div>
+          )}
+        </div>
+        {genericPhotos[0] ? (
+          <img src={genericPhotos[0]} alt="" style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 10, background: "rgba(255,255,255,0.03)" }} />
+        ) : (
+          <div style={{ width: "100%", height: 220, background: "rgba(255,255,255,0.04)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48 }}>📦</div>
+        )}
+        <div style={{ marginTop: 14 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color: "#0a0a0a", background: "#d4af37", padding: "2px 8px", borderRadius: 4 }}>GENERIC ASSET</span>
+        </div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 8 }}>{item.title || "Untitled asset"}</div>
+        {item.description ? (
+          <div style={{ color: "#bbb", fontSize: 13, marginTop: 6 }}>{item.description}</div>
+        ) : null}
+        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
+          <div><span style={{ color: "#888" }}>Identity: </span><span style={{ color: "#eee" }}>operator supplied</span></div>
+          <div><span style={{ color: "#888" }}>Condition: </span><span style={{ color: "#eee" }}>unknown</span></div>
+          <div><span style={{ color: "#888" }}>Automated valuation: </span><span style={{ color: "#eee" }}>unavailable</span></div>
+          <div>
+            <span style={{ color: "#888" }}>Acquisition cost: </span>
+            <span style={{ color: "#eee" }}>{item.purchasePrice != null ? `$${Number(item.purchasePrice).toFixed(2)}` : "—"}</span>
+          </div>
+          {item.gkAssetId && (
+            <div><span style={{ color: "#888" }}>GrailKey asset id: </span><span style={{ color: "#666", fontSize: 11, wordBreak: "break-all" }}>{item.gkAssetId}</span></div>
+          )}
+        </div>
+        {onDelete && (
+          <button
+            onClick={() => {
+              if (confirm(`Delete "${item.title || "this asset"}"?`)) {
+                onDelete(item.id);
+                onBack();
+              }
+            }}
+            style={{ marginTop: 20, width: "100%", padding: "10px 0", borderRadius: 6, border: "1px solid rgba(224,86,86,0.4)", background: "transparent", color: "#e05656", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+          >
+            Delete
+          </button>
+        )}
+        <div style={{ color: "#666", fontSize: 10, marginTop: 10 }}>
+          Generic assets do not support automated pricing, grading, or eBay listing — this is a durable ownership record only.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="detail-view"
@@ -9273,6 +9340,11 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   const [updateAllRunning, setUpdateAllRunning] = useState(false);
   const [updateAllProgress, setUpdateAllProgress] = useState({ current: 0, total: 0 });
   const [tradePileModal, setTradePileModal] = useState(null); // { step: 1|2, wants: string[], notes: string }
+  // U4 (Generic Asset Mode) — the entire mint/don't-mint decision point
+  // for a non-comic physical asset. See GenericAssetCapture.jsx's own
+  // header for why this is a wholly separate component from the comic
+  // scan/grade/enrich pipeline.
+  const [showGenericCapture, setShowGenericCapture] = useState(false);
 
   const selectionMode = selectionType !== null;
 
@@ -9319,6 +9391,11 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   const getListableBooks = (aiTagsSnapshot) =>
     catalogue.filter(
       (c) =>
+        // U4/A4 — a generic asset has no automated pricing/identity and
+        // must never be swept into a bulk eBay listing pass, even though
+        // getDisplayPrice(c) already resolves to 0 for it today (explicit
+        // here as defense-in-depth, not relying only on that side effect).
+        c.assetCategory !== 'generic' &&
         c.status !== "listed" &&
         getDisplayPrice(c) > 0 &&
         c.identityConfident !== false &&
@@ -10044,6 +10121,23 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
           >
             {selectionMode && selectionType === 'trade' ? "✕ Cancel Trade" : "🔁 Create Trade Pile"}
           </button>
+          <button
+            onClick={() => setShowGenericCapture(true)}
+            disabled={selectionMode}
+            style={{
+              padding: "6px 12px",
+              background: "rgba(212,175,55,0.15)",
+              border: "1px solid rgba(212,175,55,0.35)",
+              borderRadius: 20,
+              color: "#d4af37",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: selectionMode ? "not-allowed" : "pointer",
+              opacity: selectionMode ? 0.5 : 1,
+            }}
+          >
+            📦 Capture Generic Asset
+          </button>
           {(() => {
             const listableBooks = getListableBooks(aiTags);
             if (listableBooks.length === 0) return null;
@@ -10226,13 +10320,15 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
               {thumbSrc ? (
                 <img src={thumbSrc} alt="" loading="lazy" style={{ width: "100%", height: 160, objectFit: "cover" }} />
               ) : (
-                <div style={{ width: "100%", height: 160, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>📘</div>
+                <div style={{ width: "100%", height: 160, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>{item.assetCategory === "generic" ? "📦" : "📘"}</div>
               )}
               <div style={{ padding: "8px 10px" }}>
                 <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 2 }}>
                   {item.title || "Unknown"}
                 </div>
-                {(() => {
+                {item.assetCategory === "generic" ? (
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#0a0a0a", background: "#d4af37", display: "inline-block", padding: "1px 6px", borderRadius: 4, marginBottom: 4 }}>GENERIC</div>
+                ) : (() => {
                   const gt = item.isGraded === true && item.numericGrade != null
                     ? `CGC ${item.numericGrade}`
                     : (item.grade || null);
@@ -10662,6 +10758,14 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
           </div>
         );
       })()}
+      {showGenericCapture && (
+        <GenericAssetCapture
+          onClose={() => setShowGenericCapture(false)}
+          onCaptured={(entry) => {
+            setCatalogue((prev) => [normalizeItem(entry), ...prev]);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -11143,6 +11247,14 @@ export default function App() {
           const existingImages = existingById.get(item.id)?.images;
           await putComic({
             id: item.id,
+            // U4 fix — item.assetCategory is a TOP-LEVEL collection_item
+            // field (api/collection.js, src/modules/collection/), never
+            // nested inside attributes. Before this fix it was silently
+            // dropped on every hydrate, so a generic asset synced to a
+            // second device landed with no assetCategory at all and would
+            // have rendered through the ordinary comic path there —
+            // exactly the cross-device round-trip U4.6 requires to work.
+            assetCategory: item.assetCategory || "comic",
             ...item.attributes,
             ...(existingImages ? { images: existingImages } : {}),
             _syncStatus: "synced",
@@ -11199,8 +11311,17 @@ export default function App() {
       }
       return cached;
     };
+    // U4/A2 — a generic asset was never priced/enriched by design (no
+    // /api/grade, no /api/enrich, no ComicAdapter anywhere in its capture
+    // path) — it will ALWAYS look like "missing pricingSource/comps" to
+    // this filter, which exists specifically to auto-heal genuinely
+    // incomplete COMIC scans. Without this guard, every generic asset
+    // older than 24h would be silently resubmitted to /api/enrich on a
+    // loop, which is exactly what U4/A2 forbids.
+    const isGenericAsset = (c) => c.assetCategory === 'generic';
     const missingSource = catalogue.filter(
       (c) =>
+        !isGenericAsset(c) &&
         !isRecentlyImported(c) &&
         !isUnverifiedMegaKey(c) &&
         !isQ87Cached(c) &&
@@ -11214,6 +11335,7 @@ export default function App() {
     // Find duplicate groups with inconsistent prices.
     const groups = {};
     catalogue.forEach((c) => {
+      if (isGenericAsset(c)) return; // U4/A2 — never grouped/auto-refreshed
       const key = [c.title?.toLowerCase(), c.issue, c.year].join("|");
       if (!groups[key]) groups[key] = [];
       groups[key].push(c);
@@ -12914,6 +13036,15 @@ export default function App() {
   }, [catalogue]);
 
   const listOnEbay = useCallback(async (item) => {
+    // U4/A4 (Generic Asset Mode) — a generic asset has no adapter, no
+    // automated pricing, and no marketplace-listing shape; this function
+    // must never even attempt the eBay call for one. api/list-ebay.js
+    // enforces the same rule server-side (defense in depth, below) —
+    // this client-side check only means an operator never sees a live
+    // listing attempt fired for an item that was never going to succeed.
+    if (item.assetCategory === 'generic') {
+      throw new Error('Generic assets do not support eBay listing.');
+    }
     // GK-208 PHOTO HANDOFF FIX — root cause: this request body sent only
     // a single `image` field (coverPhoto). api/list-ebay.js's own image-
     // upload logic (T2-1) uses that fallback ONLY when
@@ -12993,6 +13124,10 @@ export default function App() {
       body: JSON.stringify({
         q41Override: item.q41Override || null,
         ...(grailkeyLinkage || {}),
+        // U4/A4 — raw signal only, same convention as pricingSource/
+        // matchConfidence below: the server independently re-derives its
+        // own rejection from this field, never trusts a client verdict.
+        assetCategory: item.assetCategory || null,
         title: item.title,
         publisher: item.publisher,
         year: item.year,

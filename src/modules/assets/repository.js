@@ -510,6 +510,43 @@ export async function getCollectionItemLink(client, { collectionItemId }) {
   return res.rows[0] || null;
 }
 
+// U4.4 / Ruling 46 — Case A: a gk_asset this principal owns with zero
+// collection_item_link rows pointing at it. Real anti-join over the
+// indexed current_owner/collection_item_link FKs, scoped to one
+// principal — never a full-table scan. Read-only.
+export async function listPhysicalOrphans(client, { principalId }) {
+  const res = await client.query(
+    `SELECT ga.id AS gk_asset_id, ga.asset_class, ga.created_at
+     FROM data1_dev.gk_asset ga
+     JOIN data1_dev.current_owner co ON co.asset_id = ga.id
+     LEFT JOIN data1_dev.collection_item_link cil ON cil.gk_asset_id = ga.id
+     WHERE co.owner_principal_id = $1 AND cil.gk_asset_id IS NULL
+     ORDER BY ga.created_at`,
+    [principalId]
+  );
+  return res.rows;
+}
+
+// U4.4 / Ruling 46 — Case B: a collection_item_link row this principal
+// created whose collection_item_id has no matching collection_item row
+// for this principal. Read-only; recovery (re-creating the collection_item
+// row using this SAME collection_item_id) is a separate, explicit write
+// composed one layer up (src/lib/assetRecoveryHandler.js), never here —
+// this file only ever queries data1_dev.collection_item, it never writes
+// to it (that table belongs to src/modules/collection/).
+export async function listMissingProjections(client, { principalId }) {
+  const res = await client.query(
+    `SELECT cil.collection_item_id, cil.gk_asset_id
+     FROM data1_dev.collection_item_link cil
+     LEFT JOIN data1_dev.collection_item ci
+       ON ci.id = cil.collection_item_id AND ci.principal_id = $1
+     WHERE cil.linked_by_principal_id = $1 AND ci.id IS NULL
+     ORDER BY cil.collection_item_id`,
+    [principalId]
+  );
+  return res.rows;
+}
+
 // Ruling 21's ratified envelope — event_id, event_type, occurred_at,
 // actor, subject, payload, correlation_id, schema_version. No
 // causation_id: that field is not part of the ratified envelope or the

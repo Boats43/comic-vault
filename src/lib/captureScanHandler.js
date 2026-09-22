@@ -55,10 +55,10 @@ export async function handleCaptureScan(req, res) {
     return res.status(500).json({ error: 'Internal error' });
   }
 
-  const { scanPayload, photos, idempotencyKey } = req.body || {};
+  const { scanPayload, photos, idempotencyKey, assetClass } = req.body || {};
 
   try {
-    const result = await captureFromScan({ principalId, scanPayload, photos, idempotencyKey });
+    const result = await captureFromScan({ principalId, scanPayload, photos, idempotencyKey, assetClass });
     return res.status(200).json(result);
   } catch (e) {
     if (e instanceof ValidationFailedError) {

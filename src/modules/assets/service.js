@@ -212,6 +212,32 @@ export async function listMyAssets({ principalId } = {}) {
   }
 }
 
+// U4.4 / Ruling 46, Case A — read-only, principal-scoped anti-join. See
+// repository.js's own comment for the exact query shape and why it is
+// bounded (never a full-table scan).
+export async function listPhysicalOrphans({ principalId } = {}) {
+  requireFields({ principalId }, ['principalId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    return await repo.listPhysicalOrphans(client, { principalId });
+  } finally {
+    client.release();
+  }
+}
+
+// U4.4 / Ruling 46, Case B — read-only, principal-scoped anti-join.
+export async function listMissingProjections({ principalId } = {}) {
+  requireFields({ principalId }, ['principalId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    return await repo.listMissingProjections(client, { principalId });
+  } finally {
+    client.release();
+  }
+}
+
 // DATA-1D, T3 — fetch one media row's real object_uri, authorization-
 // checked against the media's OWNING asset (not the media row's own
 // recorded_by_principal_id, which is provenance, not authorization).

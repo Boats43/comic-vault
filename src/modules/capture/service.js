@@ -33,8 +33,21 @@ function requireFields(obj, fields) {
   }
 }
 
-export async function captureFromScan({ principalId, scanPayload, photos = [], idempotencyKey } = {}) {
+// U4.2 — the only two durable asset classes this orchestrator will ever
+// mint. Deliberately NOT free-text: exposing arbitrary asset_class values
+// here would let a caller invent categories with no adapter, no render
+// path, and no A2 background-path exclusion behind them.
+const ALLOWED_ASSET_CLASSES = ['comic', 'generic'];
+
+export async function captureFromScan({
+  principalId, scanPayload, photos = [], idempotencyKey, assetClass = 'comic',
+} = {}) {
   requireFields({ principalId, scanPayload, idempotencyKey }, ['principalId', 'scanPayload', 'idempotencyKey']);
+  if (!ALLOWED_ASSET_CLASSES.includes(assetClass)) {
+    throw new ValidationFailedError(
+      `assetClass must be one of ${ALLOWED_ASSET_CLASSES.join('|')}, got: ${assetClass}`
+    );
+  }
   if (!scanPayload.correlationId && !scanPayload.scanlogKey) {
     throw new ValidationFailedError(
       'scanPayload must carry a correlationId or scanlogKey — the capture-basis identity (Task 1a)'
@@ -93,13 +106,35 @@ export async function captureFromScan({ principalId, scanPayload, photos = [], i
   } else {
     const captureBasis = mapping.buildCaptureBasis(principalId, scanPayload);
     const mint = await createPhysicalAsset({
-      principalId, captureBasis, assetClass: 'comic',
+      principalId, captureBasis, assetClass,
       source: 'capture-integration',
       correlationId: scanPayload.correlationId,
       idempotencyKey: `${idempotencyKey}:mint`,
     });
     gkAssetId = mint.assetId;
     mintOutcome = mint.outcome;
+  }
+
+  // 1c — media mapping. Real bytes (or an honestly-labeled substitute,
+  // per C6) in, real stored objects + media rows out — via the Asset
+  // Service's own attachMedia (DATA-1C), unmodified here.
+  //
+  // U3-ratify (Ruling 45) — media is attached BEFORE the collection_item
+  // link is created: gk_asset -> media -> collection_item_link ->
+  // collection_item. Media only ever depends on gkAssetId (already
+  // resolved above), never on the link, so this reorder changes nothing
+  // about what data is available at this point — it only changes the
+  // order two independent, already-idempotent writes happen in.
+  const media = [];
+  for (let i = 0; i < photos.length; i++) {
+    const photo = photos[i];
+    const attach = await attachMedia({
+      principalId, gkAssetId, bytes: photo.bytes, contentType: photo.contentType,
+      captureRole: photo.captureRole || 'capture-photo',
+      idempotencyKey: `${idempotencyKey}:media:${i}`,
+      correlationId: scanPayload.correlationId,
+    });
+    media.push(attach);
   }
 
   // Link the CALLER'S collectionItemId to gkAssetId whenever it doesn't
@@ -127,21 +162,6 @@ export async function captureFromScan({ principalId, scanPayload, photos = [], i
     idempotencyKey: `${idempotencyKey}:identity`,
     correlationId: scanPayload.correlationId,
   });
-
-  // 1c — media mapping. Real bytes (or an honestly-labeled substitute,
-  // per C6) in, real stored objects + media rows out — via the Asset
-  // Service's own attachMedia (DATA-1C), unmodified here.
-  const media = [];
-  for (let i = 0; i < photos.length; i++) {
-    const photo = photos[i];
-    const attach = await attachMedia({
-      principalId, gkAssetId, bytes: photo.bytes, contentType: photo.contentType,
-      captureRole: photo.captureRole || 'capture-photo',
-      idempotencyKey: `${idempotencyKey}:media:${i}`,
-      correlationId: scanPayload.correlationId,
-    });
-    media.push(attach);
-  }
 
   // 1d — economics mapping. Each sub-mapping is conditional on the real
   // scanPayload actually carrying the relevant field — never fabricated

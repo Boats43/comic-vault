@@ -806,6 +806,17 @@ export default async function handler(req, res) {
         res.status(400).json({ error: "Bundle requires at least 2 items" });
         return;
       }
+      // U4/A4 — same fail-closed rule as the single-item path above,
+      // applied per-member: a generic asset must never reach a real
+      // eBay call through the bundle path either (Development-only,
+      // Production bundle writes are already disabled above).
+      if (items.some((it) => it?.assetCategory === 'generic')) {
+        res.status(400).json({
+          error: 'GENERIC_ASSET_NOT_LISTABLE',
+          message: 'Generic assets do not support eBay listing (bundle contains a generic asset).',
+        });
+        return;
+      }
       const bundleImages = items
         .map((it) => (Array.isArray(it.images) && it.images[0]) || it.image || null)
         .filter(Boolean)
@@ -856,6 +867,19 @@ export default async function handler(req, res) {
         listingUrl: `https://www.ebay.com/itm/${itemId}`,
         pictureCount: pictureUrls.length,
         ack: ack || "Success",
+      });
+      return;
+    }
+
+    // U4/A4 (Generic Asset Mode) — a generic asset has no adapter, no
+    // automated pricing, and no marketplace-listing shape. Fail closed
+    // server-side regardless of what the client UI does or doesn't show
+    // — the authoritative gate this dispatch requires, independent of
+    // the client-side check in src/App.jsx's listOnEbay.
+    if (item.assetCategory === 'generic') {
+      res.status(400).json({
+        error: 'GENERIC_ASSET_NOT_LISTABLE',
+        message: 'Generic assets do not support eBay listing.',
       });
       return;
     }

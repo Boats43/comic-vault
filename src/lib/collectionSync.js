@@ -82,13 +82,18 @@ export async function deleteServerCollectionItem(id) {
 // over time, but a network blip must never lose a scan taken in hand).
 export async function pushCollectionItem(entry) {
   try {
-    const { images, _syncStatus, _pendingEvidenceAppends, ...attributes } = entry || {};
+    // U4 — assetCategory is read from the entry itself (defaulting to
+    // 'comic', unchanged for every pre-existing caller that never sets
+    // this field) rather than hardcoded, so a generic-asset catalogue
+    // record syncs with its real category instead of being silently
+    // relabeled 'comic' on every push.
+    const { images, _syncStatus, _pendingEvidenceAppends, assetCategory, ...attributes } = entry || {};
     const res = await authFetch("/api/collection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: entry.id,
-        assetCategory: "comic",
+        assetCategory: assetCategory || "comic",
         attributes,
         images: Array.isArray(images) && images.length > 0 ? images : undefined,
       }),

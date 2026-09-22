@@ -34,6 +34,8 @@ export {
   wasOutcomeIdempotencyKeyClaimed,
   linkCollectionItem,
   resolveCollectionItemLink,
+  listPhysicalOrphans,
+  listMissingProjections,
   getLiveIdentityAssignment,
   recordIdentifierDefinition,
   recordRawObservation,
