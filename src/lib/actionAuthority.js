@@ -41,6 +41,36 @@
 // header above) — conflating them was the original architectural mistake
 // this dispatch exists to undo, not repeat under a new name.
 
+// GK-241 (2026-09-21) — the single source of truth for every literal
+// string deriveMarketStanding (below) can return. Exhaustively
+// re-verified against every `return` statement in that function at the
+// time this was added: 3 return sites for 'NONE' (no source, /^refused/,
+// unrecognized-source fallback), 1 for 'FALLBACK_ONLY', 7 for
+// 'SIMILAR_ONLY' (SIMILAR_ONLY_SOURCES match, variant UNVERIFIED/
+// UNRESOLVED/CONTESTED, year CONTESTED, title CONTESTED, issue
+// conflicted, non-original printingClass), 2 for 'EXACT_STALE'
+// (STALE_SOURCES match, Case C staleness), 2 for 'NO_SOLD_EVIDENCE'
+// (Case A, Case B), 1 for 'EXACT_CURRENT' (final fallthrough) — matches
+// this file's own header comment exactly. Any consumer that needs to
+// validate/whitelist a marketStanding value (e.g. src/modules/buyer/
+// service.js) MUST import this constant rather than maintain its own
+// copy — GK-241 was exactly this drift: a second, hand-maintained list
+// (Buyer Decision sync) silently fell behind this function's own real
+// output set three times (FALLBACK_ONLY, NONE, and GK-238's
+// NO_SOLD_EVIDENCE), rejecting real Production decisions for those
+// standings. If a future change adds/removes a value deriveMarketStanding
+// can return, this constant must be updated in the SAME commit — every
+// import site then fails closed on drift by construction (an unrecognized
+// value is still rejected, per the requireEnum contract), not silently.
+export const MARKET_STANDING_VALUES = [
+  'EXACT_CURRENT',
+  'EXACT_STALE',
+  'SIMILAR_ONLY',
+  'FALLBACK_ONLY',
+  'NO_SOLD_EVIDENCE',
+  'NONE',
+];
+
 // Mirrors responseContract.js's PRICED_SOURCES/ESTIMATED_SOURCES
 // vocabulary (not reinvented — same source list, re-partitioned along the
 // evidence-currency axis those sets don't themselves express).

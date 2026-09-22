@@ -20,6 +20,19 @@ import * as repo from './repository.js';
 import { acquireConnection } from './db.js';
 import { checkIdempotencyReplay, claimIdempotencyKey, computeRequestFingerprint } from './idempotency.js';
 import { NotFoundError, ValidationFailedError, AuthorizationFailedError } from './errors.js';
+// GK-241 hotfix (2026-09-21) — the single source of truth for every
+// marketStanding value deriveMarketStanding can actually emit. This
+// module previously maintained its own separate, hand-copied whitelist
+// (['EXACT_CURRENT', 'EXACT_STALE', 'SIMILAR_ONLY']) that silently
+// drifted from the real function three times over (missing FALLBACK_ONLY
+// and NONE from before this fix, then GK-238's NO_SOLD_EVIDENCE) —
+// rejecting real Production Buyer Decisions for those standings with a
+// genuine HTTP 400. Importing the constant directly, rather than
+// re-copying its values, makes that drift class structurally impossible
+// going forward: any future addition/removal in actionAuthority.js's own
+// return statements updates this validation automatically, in the same
+// commit, by construction.
+import { MARKET_STANDING_VALUES } from '../../lib/actionAuthority.js';
 
 function requireFields(obj, fields) {
   for (const f of fields) {
@@ -69,7 +82,7 @@ export async function appendBuyerDecision({
   requireNumber(suppliesAmount, 'suppliesAmount');
   requireNumber(laborAmount, 'laborAmount');
   requireNumber(targetProfitAmount, 'targetProfitAmount');
-  if (marketStanding != null) requireEnum(marketStanding, ['EXACT_CURRENT', 'EXACT_STALE', 'SIMILAR_ONLY'], 'marketStanding');
+  if (marketStanding != null) requireEnum(marketStanding, MARKET_STANDING_VALUES, 'marketStanding');
 
   const client = await acquireConnection();
   try {
