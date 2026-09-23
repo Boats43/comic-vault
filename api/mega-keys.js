@@ -278,9 +278,19 @@ export const MEGA_KEYS_FLOOR = {
     year: 1960,
     yearTolerance: 2,
     verified: true,
+    // Commit C wording (2026-09-23) — honest evidence precision, per
+    // docs/TICKET-REGISTRY.md: this is NOT a fully verified current
+    // floor. Anchored to one 2021 Heritage 9.4 reference at
+    // approximately $342K; remaining grade buckets are extrapolated;
+    // reverification due. `verified: true` reflects historical Heritage
+    // sourcing, not current market re-verification (P3 display gate
+    // already reflects this — see megaKeyFloorVerificationDue/
+    // megaKeyFloorLastVerified, both still set below).
     source:
-      "Heritage Auctions archive; HA 2021 9.4 ref: $342K. F2 filter pairs " +
-      "with this entry to reject 1992 DC Classics Library reprint comps.",
+      "Anchored to one 2021 Heritage 9.4 sale reference at approximately " +
+      "$342K; remaining grade buckets extrapolated; reverification due. " +
+      "F2 filter pairs with this entry to reject 1992 DC Classics Library " +
+      "reprint comps.",
     lastVerified: null,
     verificationDue: true,
     verificationNote: VERIFY_NOTE,
@@ -321,9 +331,12 @@ export const MEGA_KEYS_FLOOR = {
     publisher: "marvel",
     year: 1961,
     verified: true,
+    // Commit C wording (2026-09-23) — honest evidence precision, same
+    // reasoning as "brave and the bold|28" above.
     source:
-      "Heritage Auctions; 9.2 ref: $715K HA 2022. Scaled conservatively " +
-      "from public CGC census.",
+      "Anchored to one 2022 Heritage 9.2 sale reference at approximately " +
+      "$715K; remaining grade buckets scaled conservatively from that " +
+      "anchor and public CGC census data; reverification due.",
     lastVerified: null,
     verificationDue: true,
     verificationNote: VERIFY_NOTE,
@@ -372,9 +385,13 @@ export const MEGA_KEYS_FLOOR = {
     publisher: "marvel",
     year: 1963,
     verified: true,
+    // Commit C wording (2026-09-23) — honest evidence precision, same
+    // reasoning as "brave and the bold|28" above.
     source:
-      "Heritage Auctions; 9.2 ref: $375K HA 2021. 1st Iron Man. SEPARATE " +
-      "from Iron Man #1 (1968 solo series — NOT a mega-key, not in map).",
+      "Anchored to one 2021 Heritage 9.2 sale reference at approximately " +
+      "$375K; remaining grade buckets extrapolated; reverification due. " +
+      "1st Iron Man — SEPARATE from Iron Man #1 (1968 solo series, NOT a " +
+      "mega-key, not in this map).",
     lastVerified: null,
     verificationDue: true,
     verificationNote: VERIFY_NOTE,
@@ -391,7 +408,15 @@ export const MEGA_KEYS_FLOOR = {
     publisher: "marvel",
     year: 1962,
     verified: true,
-    source: "Heritage Auctions archive; 1st Thor.",
+    // Commit C wording (2026-09-23) — honest evidence precision. Unlike
+    // the other 3 Heritage-anchored entries, this one's original source
+    // text never recorded a specific sale reference (dollar figure/date)
+    // — disclosed here rather than fabricating one to match their
+    // wording pattern; reverification (which should also recover a real
+    // reference) is due.
+    source: "Anchored to Heritage Auctions archive data — no specific " +
+      "sale reference recorded in this entry's source metadata; " +
+      "remaining grade buckets extrapolated; reverification due. 1st Thor.",
     lastVerified: null,
     verificationDue: true,
     verificationNote: VERIFY_NOTE,
@@ -419,41 +444,18 @@ export const MEGA_KEYS_FLOOR = {
       9.4: 700_000, 9.6: 1_500_000,
     },
   },
-  "x men|1": {
-    type: "MEGA",
-    publisher: "marvel",
-    year: 1963,
-    verified: false,
-    source: "training_estimate_60pct",
-    lastVerified: null,
-    verificationDue: true,
-    verificationNote: VERIFY_NOTE,
-    volatilityNote:
-      "1st X-Men team (1963). SEPARATE from Giant-Size X-Men #1 (1975) " +
-      "and from later X-Men #1 relaunches (1991 Jim Lee, 2019 HoX, 2024 " +
-      "Krakoa). Publisher+year gating prevents relaunch false-positives.",
-    grades: {
-      0.5: 2_000, 1.0: 3_000, 2.0: 6_000, 4.0: 15_000,
-      6.0: 35_000, 8.0: 125_000, 9.0: 300_000, 9.2: 500_000,
-      9.4: 900_000, 9.6: 1_400_000,
-    },
-  },
-  "strange tales|110": {
-    type: "MEGA",
-    publisher: "marvel",
-    year: 1963,
-    verified: false,
-    source: "training_estimate_60pct",
-    lastVerified: null,
-    verificationDue: true,
-    verificationNote: VERIFY_NOTE,
-    volatilityNote: "1st Doctor Strange. MCU cycles volatile.",
-    grades: {
-      0.5: 150, 1.0: 250, 2.0: 600, 4.0: 1_500,
-      6.0: 4_000, 8.0: 12_000, 9.0: 25_000, 9.2: 40_000,
-      9.4: 75_000, 9.6: 175_000, 9.8: 450_000,
-    },
-  },
+  // Commit C dedupe (Pricing Trust dispatch, 2026-09-23) — "x men|1" and
+  // "strange tales|110" were each defined twice (JS object-literal
+  // last-write-wins had silently made THIS block's definitions dead code
+  // — see docs/TICKET-REGISTRY.md). Retained the later (Block 2,
+  // commit cb90ae6c) definitions below as the sole, behavior-preserving
+  // survivors: neither Block-1 nor Block-2 definitions were more
+  // authoritative (both training_estimate_60pct, identical verification
+  // state), so this dedupe deliberately keeps whichever was already live
+  // rather than fabricating a tie-break. The new divergence-disclosure
+  // check (api/enrich.js) now protects against either one being
+  // materially wrong relative to live evidence, regardless of which
+  // survived.
   "tales to astonish|35": {
     type: "MEGA",
     publisher: "marvel",
@@ -472,24 +474,10 @@ export const MEGA_KEYS_FLOOR = {
       9.4: 120_000, 9.6: 250_000,
     },
   },
-  "avengers|1": {
-    type: "MEGA",
-    publisher: "marvel",
-    year: 1963,
-    verified: false,
-    source: "training_estimate_60pct",
-    lastVerified: null,
-    verificationDue: true,
-    verificationNote: VERIFY_NOTE,
-    volatilityNote:
-      "1st Avengers team (1963). MCU cycles. SEPARATE from later Avengers " +
-      "#1 relaunches — publisher+year gating prevents false positives.",
-    grades: {
-      0.5: 600, 1.0: 900, 2.0: 2_000, 4.0: 5_000,
-      6.0: 15_000, 8.0: 50_000, 9.0: 100_000, 9.2: 150_000,
-      9.4: 275_000, 9.6: 500_000,
-    },
-  },
+  // Commit C dedupe (Pricing Trust dispatch, 2026-09-23) — "avengers|1"
+  // was defined twice; retained the later (Block 2, commit cb90ae6c)
+  // definition below as the sole survivor, same reasoning as the
+  // "x men|1"/"strange tales|110" dedupe above.
   "avengers|4": {
     type: "MEGA",
     publisher: "marvel",
@@ -613,22 +601,11 @@ export const MEGA_KEYS_FLOOR = {
 
   // ─── Ship #22d TIER-0 EXPANSION ──────────────────────────────────────
   // 21 additional mega-keys (29→50 total) for convergence-lock identity validation
-  "fantastic four|1": {
-    type: "MEGA",
-    publisher: "marvel",
-    year: 1961,
-    verified: false,
-    source: "training_estimate_60pct",
-    lastVerified: null,
-    verificationDue: true,
-    verificationNote: VERIFY_NOTE,
-    volatilityNote: "1st Fantastic Four. MCU integration pending.",
-    grades: {
-      0.5: 2_000, 1.0: 3_500, 2.0: 7_000, 4.0: 15_000,
-      6.0: 35_000, 8.0: 80_000, 9.0: 150_000, 9.2: 250_000,
-      9.4: 500_000, 9.6: 1_000_000, 9.8: 2_500_000,
-    },
-  },
+  // Commit C dedupe (Pricing Trust dispatch, 2026-09-23) — "fantastic
+  // four|1" was defined twice; the Heritage-anchored definition earlier
+  // in this file (verified:true) is retained as the sole survivor —
+  // this unverified training-estimate duplicate is removed, not the
+  // better-evidenced one. See that entry's own updated source text.
   "amazing spider man|1": {
     type: "MEGA",
     publisher: "marvel",
@@ -677,38 +654,14 @@ export const MEGA_KEYS_FLOOR = {
       9.4: 550_000, 9.6: 1_100_000, 9.8: 2_800_000,
     },
   },
-  "journey into mystery|83": {
-    type: "MEGA",
-    publisher: "marvel",
-    year: 1962,
-    verified: false,
-    source: "training_estimate_60pct",
-    lastVerified: null,
-    verificationDue: true,
-    verificationNote: VERIFY_NOTE,
-    volatilityNote: "1st Thor. MCU cycles.",
-    grades: {
-      0.5: 1_200, 1.0: 2_000, 2.0: 4_000, 4.0: 9_000,
-      6.0: 20_000, 8.0: 45_000, 9.0: 80_000, 9.2: 130_000,
-      9.4: 250_000, 9.6: 500_000, 9.8: 1_200_000,
-    },
-  },
-  "tales of suspense|39": {
-    type: "MEGA",
-    publisher: "marvel",
-    year: 1963,
-    verified: false,
-    source: "training_estimate_60pct",
-    lastVerified: null,
-    verificationDue: true,
-    verificationNote: VERIFY_NOTE,
-    volatilityNote: "1st Iron Man. MCU peak impact.",
-    grades: {
-      0.5: 1_500, 1.0: 2_500, 2.0: 5_000, 4.0: 12_000,
-      6.0: 25_000, 8.0: 55_000, 9.0: 100_000, 9.2: 170_000,
-      9.4: 350_000, 9.6: 700_000, 9.8: 1_800_000,
-    },
-  },
+  // Commit C dedupe (Pricing Trust dispatch, 2026-09-23) — "journey into
+  // mystery|83" was defined twice; the Heritage-anchored definition
+  // earlier in this file (verified:true) is retained as the sole
+  // survivor. See that entry's own updated source text.
+  // Commit C dedupe (Pricing Trust dispatch, 2026-09-23) — "tales of
+  // suspense|39" was defined twice; the Heritage-anchored definition
+  // earlier in this file (verified:true) is retained as the sole
+  // survivor. See that entry's own updated source text.
   "tales to astonish|27": {
     type: "MEGA",
     publisher: "marvel",
@@ -741,22 +694,10 @@ export const MEGA_KEYS_FLOOR = {
       9.4: 200_000, 9.6: 400_000, 9.8: 1_000_000,
     },
   },
-  "brave and the bold|28": {
-    type: "MEGA",
-    publisher: "dc",
-    year: 1960,
-    verified: false,
-    source: "training_estimate_60pct",
-    lastVerified: null,
-    verificationDue: true,
-    verificationNote: VERIFY_NOTE,
-    volatilityNote: "1st Justice League.",
-    grades: {
-      0.5: 1_500, 1.0: 2_500, 2.0: 5_000, 4.0: 12_000,
-      6.0: 25_000, 8.0: 55_000, 9.0: 100_000, 9.2: 170_000,
-      9.4: 350_000, 9.6: 700_000,
-    },
-  },
+  // Commit C dedupe (Pricing Trust dispatch, 2026-09-23) — "brave and
+  // the bold|28" was defined twice; the Heritage-anchored definition
+  // earlier in this file (verified:true) is retained as the sole
+  // survivor. See that entry's own updated source text.
   "green lantern|76": {
     type: "MEGA",
     publisher: "dc",
@@ -1200,6 +1141,29 @@ export const isMegaKeyIdentityCorroborated = ({ identitySource, yearAuthority, v
   ) return false;
   return true;
 };
+
+// Commit C (Pricing Trust dispatch, 2026-09-23) — the SAME current-
+// verification predicate P3 (src/App.jsx's isMegaKeyFloorCurrentlyVerified)
+// already established for display truthfulness, reused server-side to
+// decide whether a mega-key floor is exempt from the divergence-disclosure
+// check below. Historical sourcing (`verified: true`, meaning "this
+// number came from a Heritage/GoCollect archive") is NOT the same thing
+// as current verification. As of this dispatch, real registry state:
+// 43/43 live entries have verificationDue:true, 0/43 have a non-null
+// lastVerified — so this predicate is satisfied by ZERO entries today,
+// intentionally (see docs/TICKET-REGISTRY.md). That is not a bug in this
+// function; it means every mega-key floor application today is subject
+// to the divergence check, including the 4 entries whose bucket VALUES
+// are Heritage-anchored — none of them has ever been re-verified against
+// CURRENT market evidence either. The only way this predicate starts
+// returning true for a real entry is a separate, future data-verification
+// operation that records a genuine lastVerified date — never fabricated
+// here.
+export const isMegaKeyEntryCurrentlyVerified = (entry) =>
+  !!entry &&
+  entry.verified === true &&
+  entry.verificationDue !== true &&
+  entry.lastVerified != null;
 
 // Return the floor value + priceHigh + exceedsMap flag for a
 // title+issue+publisher+year+grade combination.

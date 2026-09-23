@@ -1250,6 +1250,51 @@ const isMegaKeyFloorCurrentlyVerified = (item) =>
   item?.megaKeyFloorVerificationDue !== true &&
   item?.megaKeyFloorLastVerified != null;
 
+// Commit C (Pricing Trust dispatch, 2026-09-23) — "PRICE NOT ESTABLISHED."
+// megaKeyFloorDivergent means an unverified mega-key floor and the card's
+// own live market evidence disagree by more than the divergence
+// threshold (api/enrich.js) — neither number has earned "recommended
+// price" authority (per the ASM #1 production case: pre-floor evidence
+// $6,661.46 vs a $300,000 unverified floor, a ~45x gap). Three distinct
+// states going forward, never overloaded onto one number: PRICE
+// ESTABLISHED (evidence supports a recommendation) / REFERENCE FLOOR
+// (historical data exists but lacks current authority) / PRICE NOT
+// ESTABLISHED (credible signals materially disagree — refuse to invent
+// certainty). This component renders the third state. Reused verbatim
+// across every price-display render site rather than duplicated —
+// keeps the "header == stats bar == Recommended row == List button all
+// agree" invariant those other sites already document.
+const MegaKeyDivergenceBanner = ({ item }) => {
+  if (item?.megaKeyFloorDivergent !== true) return null;
+  const evidence = item.megaKeyFloorEvidenceValue;
+  const mapValue = item.megaKeyFloorMapValue;
+  const ratio = item.megaKeyFloorDivergenceRatio;
+  const fmt = (n) => (typeof n === 'number' ? `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
+  return (
+    <div style={{
+      marginTop: 12,
+      padding: "10px 12px",
+      borderRadius: 8,
+      border: "1px solid rgba(239,68,68,0.5)",
+      background: "rgba(239,68,68,0.08)",
+      color: "#ef4444",
+      fontSize: 13,
+    }}>
+      <div style={{ fontWeight: 700 }}>⚠ PRICE NOT ESTABLISHED</div>
+      <div style={{ marginTop: 6, fontWeight: 400, color: "#eee" }}>
+        Market evidence: <strong>{fmt(evidence)}</strong>
+      </div>
+      <div style={{ fontWeight: 400, color: "#eee" }}>
+        Reference floor: <strong>{fmt(mapValue)}</strong>
+      </div>
+      <div style={{ marginTop: 4, fontWeight: 400, opacity: 0.9 }}>
+        {typeof ratio === 'number' ? `${ratio.toFixed(1)}× divergence` : 'Large divergence'} — no price recommended.
+        The static floor is not currently verified and materially disagrees with observed market evidence.
+      </div>
+    </div>
+  );
+};
+
 // Ship #26 v0-D.1 — Reprint key-label safety helper
 // When reprint/polybag detected, prepend "Reprint of" to key issue label.
 // Prevents misleading users that a modern reprint is an original first appearance.
@@ -1720,6 +1765,12 @@ function ResultCard({ result, enriching }) {
         ? formatCurrency(assertContractPrice(result, 'ResultCard.header', result.contract.price))
         : "—")
     : (displayPrice > 0 ? formatCurrency(displayPrice) : result.price || "—");
+  // Commit C — a divergent mega-key floor means neither the pre-floor
+  // evidence number nor the map's static floor has earned "recommended
+  // price" authority. Every recommendedLabel render site in this
+  // component must agree (same invariant the header/stats-bar/List
+  // button already document) — gate them all on this one flag.
+  const isMegaKeyDivergent = result.megaKeyFloorDivergent === true;
   // Contract banner: REFUSED / LOCKED / INCOMPLETE render locks[0].reason
   // verbatim (Amendment B — wires XMEN1 contamination copy onto the card).
   const contractBanner =
@@ -1854,7 +1905,11 @@ function ResultCard({ result, enriching }) {
         </div>
       )}
 
-      {!identityGated && contractBanner && (
+      {/* Commit C — the divergence case gets its own dedicated, more
+          informative banner (MegaKeyDivergenceBanner, below) instead of
+          the generic locked-reason banner, to avoid showing the same
+          lock explanation twice in two different shapes. */}
+      {!identityGated && !isMegaKeyDivergent && contractBanner && (
         <div
           style={{
             marginTop: 12,
@@ -1878,7 +1933,9 @@ function ResultCard({ result, enriching }) {
         </div>
       )}
 
-      {!identityGated && recommendedLabel && (
+      {!identityGated && isMegaKeyDivergent && <MegaKeyDivergenceBanner item={result} />}
+
+      {!identityGated && !isMegaKeyDivergent && recommendedLabel && (
         <>
           <div className="muted small" style={{ marginTop: 12 }}>
             Recommended list price
@@ -2067,8 +2124,8 @@ function ResultCard({ result, enriching }) {
           >
             <span className="muted small">Recommended</span>
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontWeight: 700, color: "#d4af37" }}>
-                {recommendedLabel}
+              <span style={{ fontWeight: 700, color: isMegaKeyDivergent ? "#ef4444" : "#d4af37" }}>
+                {isMegaKeyDivergent ? "⚠ Not established" : recommendedLabel}
               </span>
               {(() => {
                 // Ship #24a-3 (Amendment A): inline chip recomputation
@@ -4573,6 +4630,9 @@ function CollectionDetail({
         ? formatCurrency(assertContractPrice(item, 'CollectionDetail.recommended', item.contract.price))
         : "—")
     : (displayPrice > 0 ? formatCurrency(displayPrice) : "—");
+  // Commit C — same "PRICE NOT ESTABLISHED" gate as ResultCard; every
+  // recommendedLabel render site in this component must agree.
+  const isMegaKeyDivergent = item.megaKeyFloorDivergent === true;
 
   // Grade badge: CGC numeric if graded, raw grade if available, else RAW COPY.
   const gradeBadgeText =
@@ -6848,9 +6908,11 @@ function CollectionDetail({
       <div style={{ marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div>
-            <div className="muted small">Recommended list price</div>
+            <div className="muted small">{isMegaKeyDivergent ? "Price status" : "Recommended list price"}</div>
             {/* Ship #24 Wave 1 Commit 3 (Q122 class) — contract wins once present. */}
-            {isContractIdentityBlocked(item) ? (
+            {isMegaKeyDivergent ? (
+              <MegaKeyDivergenceBanner item={item} />
+            ) : isContractIdentityBlocked(item) ? (
               <>
                 <div style={{ fontSize: 22, fontWeight: 800, color: "#ef4444", lineHeight: 1.15 }}>
                   Identification Required
@@ -7515,7 +7577,9 @@ function CollectionDetail({
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
               <span className="muted small">Recommended</span>
-              <span style={{ fontWeight: 700, color: "#d4af37" }}>{recommendedLabel}</span>
+              <span style={{ fontWeight: 700, color: isMegaKeyDivergent ? "#ef4444" : "#d4af37" }}>
+                {isMegaKeyDivergent ? "⚠ Not established" : recommendedLabel}
+              </span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
               <span className="muted small">Floor</span>

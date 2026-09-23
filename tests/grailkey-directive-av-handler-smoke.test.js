@@ -224,14 +224,26 @@ async function main() {
   assertTrue(dellotto.capturedBody?.decision?.action !== 'LIST_NOW', "B2: safety holds — never a clean listable action");
 
   // ══════════════════════════════════════════════════════════════════════
-  // B3 — genuine corroborated mega-key negative control, real handler.
-  // A manual-identity ASM #1 (bypasses resolveIdentity/family-clustering
-  // entirely — identitySource='manual', independently authoritative) with
-  // an operator-supplied 1963 year and no variant claim at all must still
-  // floor at $300,000, full force. If this fails, C5 is violated.
+  // B3 — genuine corroborated mega-key, real handler. UPDATED for Commit C
+  // (Pricing Trust dispatch, 2026-09-23): this fixture's own original
+  // assertion ("STILL floors near/at $300,000, full force") tested
+  // pre-Commit-C behavior and is now SUPERSEDED, not broken — this is the
+  // real ASM #1 production case (pre-floor evidence ≈$6,661-8,881 vs a
+  // $300,000 unverified mega-key floor) that motivated the divergence-
+  // disclosure mechanism in the first place. What this fixture still
+  // correctly proves, unchanged: identity corroboration itself is genuine
+  // here (manual identity, independently authoritative) — the P2 identity
+  // gate does NOT stand the floor down (see the assertion below). What's
+  // NEW: the floor no longer silently overwrites price when it diverges
+  // from live evidence by more than the threshold, because ZERO of the
+  // 43 live mega-key entries satisfy the strict P3 current-verification
+  // predicate today (verified===true && verificationDue!==true &&
+  // lastVerified!=null) — historical Heritage/GoCollect sourcing is not
+  // current verification. Reporting the ACTUAL runtime numbers below, not
+  // forcing them.
   // ══════════════════════════════════════════════════════════════════════
   const genuine = await runScan({
-    label: 'B3 GENUINE MEGA-KEY — corroborated identity still floors, full force',
+    label: 'B3 GENUINE MEGA-KEY — divergence disclosure fires instead of silent floor (Commit C)',
     pool: [
       ["Amazing Spider-Man #1 CGC 9.4 1963 Marvel Silver Age", 250000],
       ["Amazing Spider-Man #1 1963 Marvel Origin Spider-Man", 275000],
@@ -245,11 +257,23 @@ async function main() {
     },
     pcProducts: [{ id: '2314818', 'product-name': 'Amazing Spider-Man #1 (1963)', 'loose-price': 403725 }],
   });
+  assertTrue(!genuine.capturedLogs.some((l) => l.startsWith('[mega-key-floor] STOOD DOWN')), 'B3: identity is genuinely corroborated — the P2 stand-down gate does NOT fire (unchanged)');
   if (genuine.capturedBody) {
-    const priceNum = parseFloat(String(genuine.capturedBody.price || '0').replace(/[$,]/g, ''));
-    assertTrue(priceNum >= 250000, `B3 SHIP-BLOCKING (C5 negative control): a genuinely corroborated 1963 ASM #1 STILL floors near/at $300,000 (actual: ${genuine.capturedBody.price})`);
+    const body = genuine.capturedBody;
+    const priceNum = parseFloat(String(body.price || '0').replace(/[$,]/g, ''));
+    console.log(`  B3 ACTUAL runtime result: price=$${priceNum.toFixed(2)} megaKeyFloorDivergent=${body.megaKeyFloorDivergent} evidence=${body.megaKeyFloorEvidenceValue} mapValue=${body.megaKeyFloorMapValue} ratio=${body.megaKeyFloorDivergenceRatio} listingHardLocked=${body.listingHardLocked} lockReason=${body.listingHardLockReason} decision=${body.decision?.action}`);
+    assertTrue(priceNum < 250000, `B3: price is NOT silently floored to grail-tier (~$300,000) any more (actual: ${body.price})`);
+    assertTrue(body.megaKeyFloorDivergent === true, 'B3 REQUIRED: out.megaKeyFloorDivergent === true');
+    assertTrue(typeof body.megaKeyFloorEvidenceValue === 'number' && body.megaKeyFloorEvidenceValue > 0, `B3 REQUIRED: evidence value retained (actual: ${body.megaKeyFloorEvidenceValue})`);
+    assertTrue(body.megaKeyFloorMapValue === 300000, `B3 REQUIRED: map/reference value retained as the real $300,000 9.4 bucket (actual: ${body.megaKeyFloorMapValue})`);
+    assertTrue(typeof body.megaKeyFloorDivergenceRatio === 'number' && body.megaKeyFloorDivergenceRatio > 2.0, `B3 REQUIRED: divergence ratio retained and >2x (actual: ${body.megaKeyFloorDivergenceRatio})`);
+    assertTrue(body.listingHardLocked === true, 'B3 REQUIRED: listingHardLocked === true');
+    assertTrue(body.listingHardLockReason === 'mega-key-floor-divergence', `B3 REQUIRED: listingHardLockReason === "mega-key-floor-divergence" (actual: ${body.listingHardLockReason})`);
+    assertTrue(body.decision?.action === 'RESEARCH', `B3 REQUIRED: decision.action === RESEARCH (actual: ${body.decision?.action})`);
+    assertTrue(body.contract?.listable === false, `B3 REQUIRED: contract.listable === false — no enabled List action (actual: ${body.contract?.listable})`);
+    assertTrue(body.contract?.state === 'LOCKED', `B3: contract.state === LOCKED (actual: ${body.contract?.state})`);
+    assertTrue(body.contract?.price === Math.round(body.megaKeyFloorEvidenceValue * 100) / 100, `B3: contract.price carries the pre-floor evidence value internally, not the floor (actual contract.price: ${body.contract?.price}, evidence: ${body.megaKeyFloorEvidenceValue})`);
   }
-  assertTrue(!genuine.capturedLogs.some((l) => l.startsWith('[mega-key-floor] STOOD DOWN')), 'B3: floor did NOT stand down for the genuine case');
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);
   if (failed > 0) {

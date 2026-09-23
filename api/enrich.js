@@ -106,6 +106,7 @@ import {
   normalizeTitle,
   isPublisherYearPlausible,
   isMegaKeyIdentityCorroborated,
+  isMegaKeyEntryCurrentlyVerified,
 } from "./mega-keys.js";
 import { extractCreatorsFromComps } from "../src/lib/premiumCreators.js";
 import { extractIssueFromEbayResults } from "../src/lib/identityAlignment.js";
@@ -10004,6 +10005,21 @@ export default async function handler(req, res) {
             const STRONG_EVIDENCE_RATIO = 0.75;
             const STRONG_EVIDENCE_MIN_COMPS = 15;
             const STRONG_EVIDENCE_MAX_DAYS = 7;
+            // Commit C (Pricing Trust dispatch, 2026-09-23) — "~2x" per
+            // the ruling: an unverified floor more than double the
+            // pre-floor evidence-derived price locks and discloses
+            // rather than silently applying. Deliberately the same
+            // ratio as isSuspectContaminated's own 50%-of-floor line
+            // above (2.0x == 50% algebraically) — this branch never
+            // fires when that one already would have (it's checked
+            // first, unchanged); this constant's real, distinct
+            // contribution is covering every pricing tier
+            // isSuspectContaminated/Q90 don't (they're gated on
+            // soldDerivedSource; this is gated on verification state
+            // instead, so it also protects active-derived/PC-estimate/
+            // fallback-priced books, which previously had zero
+            // divergence protection at all).
+            const MEGA_KEY_FLOOR_DIVERGENCE_THRESHOLD = 2.0;
             const soldCount = filteredSold?.length || 0;
             const freshestDaysAgo = (filteredSold || []).reduce((min, s) => {
               const d = s?.daysAgo;
@@ -10061,6 +10077,57 @@ export default async function handler(req, res) {
                 `basis=${soldBasis != null ? '$' + soldBasis.toFixed(2) : 'n/a'} ratio=${effectiveNearFloorRatio}`,
                 `(strongEvidence=${strongEvidence}, freshestDaysAgo=${Number.isFinite(freshestDaysAgo) ? freshestDaysAgo : 'n/a'})`,
                 `— floor band $${floorResult.floor}–$${floorResult.priceHigh} retained as reference`);
+            } else if (
+              !isMegaKeyEntryCurrentlyVerified(megaKeyEntry) &&
+              (currentPriceNum <= 0 || (floorResult.floor / currentPriceNum) > MEGA_KEY_FLOOR_DIVERGENCE_THRESHOLD)
+            ) {
+              // Commit C (Pricing Trust dispatch, 2026-09-23) — "PRICE NOT
+              // ESTABLISHED." Sibling to the isSuspectContaminated branch
+              // above (same shape: hard-lock, RESEARCH, disclose rather
+              // than silently price) — generalized to cover EVERY
+              // pricing tier, not just soldDerivedSource (which
+              // isSuspectContaminated/Q90 above are gated on). A book
+              // priced from active-derived/PC-estimate/fallback evidence
+              // previously had ZERO divergence protection at all; the
+              // floor simply overrode it unconditionally.
+              //
+              // Real production case this closes: ASM #1 (1963),
+              // manual-identity, pre-floor evidence-derived price
+              // $6,661.46, mega-key floor $300,000 — a ~45x gap. Neither
+              // number had earned "recommended price" authority once
+              // they disagreed by that much. Exemption predicate is the
+              // SAME strict P3 current-verification gate (verified===true
+              // && verificationDue!==true && lastVerified!=null) already
+              // shipped for display truthfulness — not bare
+              // megaKeyEntry.verified — because historical sourcing is
+              // not current verification. As of this dispatch, 0/43 live
+              // entries satisfy it, so every mega-key floor application
+              // is subject to this check today; that is intentional, not
+              // a bug (docs/TICKET-REGISTRY.md).
+              out.megaKeyFloorDivergent = true;
+              out.megaKeyFloorEvidenceValue = currentPriceNum > 0 ? currentPriceNum : null;
+              out.megaKeyFloorMapValue = floorResult.floor;
+              out.megaKeyFloorDivergenceRatio = currentPriceNum > 0
+                ? Math.round((floorResult.floor / currentPriceNum) * 100) / 100
+                : null;
+              out.megaKeyFloorDivergenceReason = currentPriceNum > 0
+                ? `Market evidence ($${currentPriceNum.toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:2})}) and the unverified reference floor ($${floorResult.floor.toLocaleString()}) diverge by ${(floorResult.floor / currentPriceNum).toFixed(1)}x — neither is established as the price. The static floor is not currently verified and materially disagrees with observed market evidence.`
+                : `No usable market evidence exists to compare against the unverified reference floor ($${floorResult.floor.toLocaleString()}) — price not established.`;
+              out.decision = {
+                action: 'RESEARCH',
+                confidence: 'LOW',
+                blockers: ['mega-key-floor-divergence'],
+                warnings: [],
+                reason: out.megaKeyFloorDivergenceReason,
+              };
+              out.listingHardLocked = true;
+              out.listingHardLockReason = 'mega-key-floor-divergence';
+              out.listingHardLockBanner = out.megaKeyFloorDivergenceReason;
+              console.log('[mega-key-floor] DIVERGENT:',
+                `${title} #${confirmedIssue} evidence=${currentPriceNum > 0 ? '$' + currentPriceNum.toFixed(2) : 'none'}`,
+                `floor=$${floorResult.floor.toLocaleString()}`,
+                `ratio=${currentPriceNum > 0 ? (floorResult.floor / currentPriceNum).toFixed(1) + 'x' : 'n/a'}`,
+                `→ RESEARCH + hard-locked, price NOT established (pre-floor value retained internally, not shown as a recommendation)`);
             } else if (currentPriceNum < floorResult.floor) {
               // Normal floor enforcement path
               out.preFloorPrice = out.price;
