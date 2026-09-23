@@ -10081,6 +10081,17 @@ export default async function handler(req, res) {
               out.priceHigh = fmtUsd(floorResult.priceHigh);
               out.megaKeyFloorApplied = true;
               out.megaKeyFloorVerified = megaKeyEntry.verified;
+              // P3 (Pricing Trust dispatch, 2026-09-23) — plumb the map
+              // entry's own currency signals through so the client can
+              // tell historical sourcing (`verified: true` on the map
+              // entry, meaning "this floor number came from Heritage
+              // Auctions archive data") apart from CURRENT verification.
+              // Every entry in MEGA_KEYS_FLOOR carries lastVerified:null —
+              // none has ever actually been re-verified against live
+              // evidence — so `megaKeyFloorVerified` alone was never a
+              // truthful "this is confirmed current" signal.
+              out.megaKeyFloorVerificationDue = megaKeyEntry.verificationDue === true;
+              out.megaKeyFloorLastVerified = megaKeyEntry.lastVerified ?? null;
               out.megaKeyFloorSource = megaKeyEntry.source;
               out.megaKeyFloorNote = megaKeyEntry.volatilityNote;
               out.priceNote = (out.priceNote || '') + ' · mega-key floor';

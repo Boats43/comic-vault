@@ -1237,6 +1237,19 @@ const showKeyIssue = (k) => {
     .some((x) => s.includes(x));
 };
 
+// P3 (Pricing Trust dispatch, 2026-09-23) — "VERIFIED FLOOR" truthfulness.
+// megaKeyFloorVerified alone means "this floor number's SOURCE is a
+// historical archive (Heritage/GoCollect)" — it says nothing about whether
+// that number has ever been checked against CURRENT evidence.
+// megaKeyFloorVerificationDue/megaKeyFloorLastVerified (api/mega-keys.js's
+// own map entry fields, plumbed through api/enrich.js) carry that currency
+// signal. Historical sourcing is not the same thing as current
+// verification — a card must not claim "VERIFIED" off sourcing alone.
+const isMegaKeyFloorCurrentlyVerified = (item) =>
+  item?.megaKeyFloorVerified === true &&
+  item?.megaKeyFloorVerificationDue !== true &&
+  item?.megaKeyFloorLastVerified != null;
+
 // Ship #26 v0-D.1 — Reprint key-label safety helper
 // When reprint/polybag detected, prepend "Reprint of" to key issue label.
 // Prevents misleading users that a modern reprint is an original first appearance.
@@ -4173,10 +4186,10 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
                   )}
                   {item.megaKeyFloorApplied && !item.manualReviewRequired && !item.gradeExceedsMap && (
                     <span
-                      className={`pill ${item.megaKeyFloorVerified ? 'pill-mega-verified' : 'pill-mega-estimated'}`}
+                      className={`pill ${isMegaKeyFloorCurrentlyVerified(item) ? 'pill-mega-verified' : 'pill-mega-estimated'}`}
                       title={item.megaKeyFloorNote || ""}
                     >
-                      🔑 {item.megaKeyFloorVerified ? "VERIFIED" : "ESTIMATED"}
+                      🔑 {isMegaKeyFloorCurrentlyVerified(item) ? "VERIFIED" : "ESTIMATED"}
                     </span>
                   )}
                   {item.status === "listed" && <span className="pill pill-listed">LISTED</span>}
@@ -7097,13 +7110,14 @@ function CollectionDetail({
               );
             }
             if (item.megaKeyFloorApplied) {
+              const trulyVerified = isMegaKeyFloorCurrentlyVerified(item);
               return (
                 <span
-                  className={`pill ${item.megaKeyFloorVerified ? "pill-mega-verified" : "pill-mega-estimated"}`}
+                  className={`pill ${trulyVerified ? "pill-mega-verified" : "pill-mega-estimated"}`}
                   title={item.megaKeyFloorNote || ""}
                   style={pillStyle}
                 >
-                  🔑 {item.megaKeyFloorVerified ? "VERIFIED FLOOR" : "ESTIMATED FLOOR"}
+                  🔑 {trulyVerified ? "VERIFIED FLOOR" : "ESTIMATED FLOOR"}
                 </span>
               );
             }
@@ -7239,25 +7253,27 @@ function CollectionDetail({
           </div>
         )}
 
-        {item.megaKeyFloorApplied && !item.manualReviewRequired && !item.gradeExceedsMap && (
+        {item.megaKeyFloorApplied && !item.manualReviewRequired && !item.gradeExceedsMap && (() => {
+          const trulyVerified = isMegaKeyFloorCurrentlyVerified(item);
+          return (
           <div style={{
             marginTop: 10,
             padding: "12px 14px",
-            border: `1px solid ${item.megaKeyFloorVerified ? "#2ea043" : "#d29922"}`,
+            border: `1px solid ${trulyVerified ? "#2ea043" : "#d29922"}`,
             borderRadius: 8,
-            background: item.megaKeyFloorVerified
+            background: trulyVerified
               ? "rgba(46,160,67,0.08)"
               : "rgba(210,153,34,0.08)",
-            color: item.megaKeyFloorVerified ? "#86efac" : "#fde68a",
+            color: trulyVerified ? "#86efac" : "#fde68a",
             fontSize: 13,
             lineHeight: 1.45,
           }}>
             <div style={{
               fontWeight: 700,
               marginBottom: 4,
-              color: item.megaKeyFloorVerified ? "#2ea043" : "#d29922"
+              color: trulyVerified ? "#2ea043" : "#d29922"
             }}>
-              🔑 Mega-key floor {item.megaKeyFloorVerified ? "enforced" : "applied (estimated)"}
+              🔑 Mega-key floor {trulyVerified ? "enforced" : "applied (estimated)"}
             </div>
             <div>Engine floor: <strong>{item.price}</strong></div>
             {item.preFloorPrice && (
@@ -7267,9 +7283,9 @@ function CollectionDetail({
               </div>
             )}
             <div style={{ marginTop: 6, fontSize: 12 }}>
-              {item.megaKeyFloorVerified
+              {trulyVerified
                 ? "Verified against Heritage/GoCollect sold archive."
-                : "⚠ Estimated floor — verify against Heritage/GoCollect before listing."}
+                : "⚠ Estimated floor — historically sourced, not re-verified against current market. Verify before listing."}
             </div>
             {item.megaKeyFloorNote && (
               <div style={{ marginTop: 6, fontSize: 11, opacity: 0.8, fontStyle: "italic" }}>
@@ -7277,7 +7293,8 @@ function CollectionDetail({
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         {/* Q90 — floor suppressed: sold-derived slab price stands, floor
             band shown as reference only (never re-anchors the price) */}
@@ -11602,6 +11619,8 @@ export default function App() {
                 megaKeyFloorBand: enrich.megaKeyFloorBand || null,
                 soldRetentionStale: enrich.soldRetentionStale === true,
                 megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
+                megaKeyFloorVerificationDue: enrich.megaKeyFloorVerificationDue === true,
+                megaKeyFloorLastVerified: enrich.megaKeyFloorLastVerified ?? null,
                 megaKeyFloorSource: enrich.megaKeyFloorSource || null,
                 megaKeyFloorNote: enrich.megaKeyFloorNote || null,
                 preFloorPrice: enrich.preFloorPrice || null,
@@ -12212,6 +12231,8 @@ export default function App() {
                   megaKeyFloorBand: enrich.megaKeyFloorBand || null,
                   soldRetentionStale: enrich.soldRetentionStale === true,
                   megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
+                  megaKeyFloorVerificationDue: enrich.megaKeyFloorVerificationDue === true,
+                  megaKeyFloorLastVerified: enrich.megaKeyFloorLastVerified ?? null,
                   megaKeyFloorSource: enrich.megaKeyFloorSource || null,
                   megaKeyFloorNote: enrich.megaKeyFloorNote || null,
                   preFloorPrice: enrich.preFloorPrice || null,
@@ -12365,6 +12386,8 @@ export default function App() {
                   megaKeyFloorBand: enrich.megaKeyFloorBand || null,
                   soldRetentionStale: enrich.soldRetentionStale === true,
                   megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
+                  megaKeyFloorVerificationDue: enrich.megaKeyFloorVerificationDue === true,
+                  megaKeyFloorLastVerified: enrich.megaKeyFloorLastVerified ?? null,
                   megaKeyFloorSource: enrich.megaKeyFloorSource || null,
                   megaKeyFloorNote: enrich.megaKeyFloorNote || null,
                   preFloorPrice: enrich.preFloorPrice || null,
@@ -12773,6 +12796,8 @@ export default function App() {
                 megaKeyFloorBand: enrich.megaKeyFloorBand || null,
                 soldRetentionStale: enrich.soldRetentionStale === true,
                 megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
+                megaKeyFloorVerificationDue: enrich.megaKeyFloorVerificationDue === true,
+                megaKeyFloorLastVerified: enrich.megaKeyFloorLastVerified ?? null,
                 megaKeyFloorSource: enrich.megaKeyFloorSource || null,
                 megaKeyFloorNote: enrich.megaKeyFloorNote || null,
                 preFloorPrice: enrich.preFloorPrice || null,
@@ -13559,6 +13584,8 @@ export default function App() {
       megaKeyFloorBand: enrich.megaKeyFloorBand || null,
       soldRetentionStale: enrich.soldRetentionStale === true,
       megaKeyFloorVerified: enrich.megaKeyFloorVerified === true,
+      megaKeyFloorVerificationDue: enrich.megaKeyFloorVerificationDue === true,
+      megaKeyFloorLastVerified: enrich.megaKeyFloorLastVerified ?? null,
       megaKeyFloorSource: enrich.megaKeyFloorSource || null,
       megaKeyFloorNote: enrich.megaKeyFloorNote || null,
       preFloorPrice: enrich.preFloorPrice || null,

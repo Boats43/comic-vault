@@ -1180,7 +1180,24 @@ export const isMegaKeyIdentityCorroborated = ({ identitySource, yearAuthority, v
     || (typeof isCorroboratedIdentitySourceFn === 'function' && isCorroboratedIdentitySourceFn(identitySource));
   if (!isCorroboratedTitle) return false;
   if (yearAuthority === 'CONTESTED') return false;
-  if (variantApplicability === 'CONTESTED') return false;
+  // P2 (Pricing Trust dispatch, 2026-09-23) — reconciled with
+  // deriveMarketStanding's (src/lib/actionAuthority.js) own three-way
+  // variantApplicability disqualification: UNVERIFIED (Filter 1c couldn't
+  // confirm any comp actually matches the confirmed variant), UNRESOLVED
+  // (edition specificity was evidenced but never confirmed — the GSX #1
+  // CGC 4.0 VARIANT_UNRESOLVED_EDITION case this fix closes), and CONTESTED
+  // (an independent source disagrees). All three already demote
+  // marketStanding to SIMILAR_ONLY there — this gate previously only
+  // checked CONTESTED, leaving UNRESOLVED/UNVERIFIED mega-key matches free
+  // to floor at full historical map price while the same card's own
+  // market standing had already been revoked to SIMILAR_ONLY/REVIEW. A
+  // floor must never claim more authority than the card's own evidence
+  // state permits.
+  if (
+    variantApplicability === 'CONTESTED' ||
+    variantApplicability === 'UNRESOLVED' ||
+    variantApplicability === 'UNVERIFIED'
+  ) return false;
   return true;
 };
 
