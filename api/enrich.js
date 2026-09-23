@@ -7875,6 +7875,22 @@ export default async function handler(req, res) {
     out.keyIssueSource = keyEnhanced.keySource || (existingKey ? 'claude' : null);
     out.autoDetectedKey = keyEnhanced.autoDetected;
     out.keyCharacters = keyEnhanced.keyCharacters;
+    // P1 (Pricing Trust dispatch, 2026-09-23) — ComicVine's own structured
+    // verdict, custodied regardless of which source actually won out.keyIssue
+    // above. Read by the key-multiplier trust boundary below to distinguish
+    // "no structured data available" (silence) from "ComicVine looked and
+    // disagrees" (a real Vision-vs-structured-source conflict).
+    out.keyIssueComicVineIsKey = keyEnhanced.comicVineIsKey === true;
+    // P1 — an operator can explicitly confirm a Vision/manual keyIssue
+    // claim on THIS SAME request only — never inferred, never carried
+    // forward from a prior scan. Deliberately a narrow, dedicated flag
+    // rather than routing through the identity manualAuthority contract
+    // (MANUAL_CORRECTION_ALLOWED_FIELDS, src/lib/manualCorrection.js):
+    // key-issue significance is not an identity facet, and that contract
+    // is reserved for title/issue/year/publisher/variant/printingClass.
+    if (existingKey && req.body?.keyIssueOperatorConfirmed === true) {
+      out.keyIssueSource = 'operator_confirmed';
+    }
 
     // Legacy logic preserved for backward compatibility (Vision/manual override priority)
     // Priority chain (highest first):
@@ -9705,9 +9721,21 @@ export default async function handler(req, res) {
       }
     }
 
-    // Key issue multiplier: tiered — major keys ×1.5, minor keys ×1.2.
-    // Only apply when PriceCharting is the pricing source — browse_api/ebay_avg
-    // already reflect market premium for the key.
+    // Key issue significance: DISPLAY METADATA ONLY. The Ship 1.6.1
+    // isMajorKey ×1.5 / isMinorKey ×1.2 price-changing multiplier is
+    // RETIRED here (P1, Pricing Trust dispatch, 2026-09-23) — the DATA-0
+    // GCD capability audit's Part 0 finding confirmed it as a structural
+    // double-count, independent of any corroboration gate: its only two
+    // reachable bases, pricingSource==='verified_sold' and isFromPC &&
+    // blendedAvg, are BOTH already-transacted sold evidence for this exact
+    // issue — a genuine key's premium is already embedded in those comps.
+    // The multiplier was also, by the same gating, structurally unreachable
+    // on every weaker tier (active-derived, PC-estimate-only, fallback),
+    // so it never actually performed the "rescue thin evidence" job its
+    // own inline history (Ship 1.6.1, Captain America #359) described —
+    // it was either double-counting or dead code, never a middle case. No
+    // prose substring may affect price, corroborated or not.
+    // out.keyIssue/out.keyIssueSource remain exactly as before (display).
     const keyStr = String(out.keyIssue || '').toLowerCase();
     const isMajorKey = keyStr.includes('1st appearance') ||
       keyStr.includes('first appearance') ||
@@ -9724,65 +9752,26 @@ export default async function handler(req, res) {
       keyStr.includes('iconic') ||
       keyStr.includes('classic')
     );
-    const keyMult = isMajorKey ? 1.5 : isMinorKey ? 1.2 : 1.0;
-    console.log('[key] keyIssue:', out.keyIssue, 'major:', isMajorKey, 'minor:', isMinorKey, 'mult:', keyMult, 'isFromPC:', isFromPC);
-    // Ship 1.6.1 — key multiplier must work across all pricing sources.
-    // Previous gate required isFromPC && blendedAvg, which silently
-    // no-op'd whenever priceBands fired (verified_sold/verified_active).
-    // Captain America #359 (1st Crossbones cameo, 23 sources) was
-    // priced at $6.70 with no multiplier instead of $7.50–$9 range.
-    // Ship 6 — Skip key multiplier when polybag pricing active.
-    if (keyMult > 1.0 && out.price && isPolybagPricing) {
-      console.log('[key] SKIPPED — polybag pricing active (no key premium for reprints)');
-    } else if (keyMult > 1.0 && out.price) {
-      const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
-      if (curPrice > 0) {
-        // Determine multiplier base: blendedAvg (PC source) or current price (price-bands)
-        let keyMultBase;
-        let keyMultBaseSource;
-        if (isFromPC && blendedAvg) {
-          keyMultBase = blendedAvg;
-          keyMultBaseSource = 'blendedAvg';
-        } else if (out.pricingSource === 'verified_sold') {
-          // GrailKey Dispatch 13 — 'verified_active' removed from this
-          // check (dead: never produced by the current tier engine, see
-          // VARIANT_MULT_ELIGIBLE_SOURCES above for the full rationale).
-          keyMultBase = curPrice;
-          keyMultBaseSource = 'priceBandsMarket';
-        }
-        if (keyMultBase) {
-          const newPrice = keyMultBase * keyMult;
-          const ratio = newPrice / curPrice;
-          // Sanity ceiling: only apply if multiplier would change price
-          // by less than 50% in either direction. Prevents thin-pool
-          // edge cases from blowing up.
-          if (ratio <= 1.5 && ratio >= 0.67) {
-            out.price = fmtUsd(newPrice);
-            out.priceLow = fmtUsd(newPrice * 0.75);
-            out.priceHigh = fmtUsd(newPrice * 1.25);
-            out.keyMultiplier = keyMult;
-            out.keyMultBaseSource = keyMultBaseSource;
-
-            // Ship #24 — preserve blend-sourced label when key mult applied to blendedAvg.
-            // Without this, blend-derived pricing shows as 'pc_estimate' even though the
-            // base came from verified sold+active comps (Street Fighter G.I. #1 case).
-            if (keyMultBaseSource === 'blendedAvg' && out.pricingSource === 'pc_estimate') {
-              out.pricingSource = 'verified_sold_active_blend';
-            }
-
-            console.log('[key]', isMajorKey ? 'major' : 'minor',
-              `×${keyMult} (base=${keyMultBaseSource}=${keyMultBase.toFixed(2)})`,
-              `${curPrice.toFixed(2)} → ${newPrice.toFixed(2)}`);
-          } else {
-            console.log('[key] SKIPPED — sanity ceiling',
-              `(ratio=${ratio.toFixed(2)}, ${curPrice.toFixed(2)} → ${newPrice.toFixed(2)})`);
-          }
-        } else {
-          console.log('[key] SKIPPED — no multiplier base available',
-            `(source=${out.pricingSource}, isFromPC=${isFromPC})`);
-        }
-      }
+    // isMajorKey/isMinorKey are kept ONLY to detect a genuine Vision-vs-
+    // ComicVine disagreement for the review escalation below — neither
+    // ever touches out.price/priceLow/priceHigh again. A Vision/manual
+    // claim ("claude" source) actively contradicted by ComicVine's OWN
+    // structured first-appearance data (present and explicitly
+    // disagreeing — out.keyIssueComicVineIsKey===false — not merely
+    // silent/unavailable) escalates via decisionEngine.js's
+    // 'key-issue-uncorroborated' criticalWarning (→ RESEARCH). Mere
+    // absence of ComicVine data is silence, not disagreement, and does
+    // not escalate.
+    const keyClaimsValue = isMajorKey || isMinorKey;
+    if (keyClaimsValue && out.keyIssueSource === 'claude' && comicVine != null && out.keyIssueComicVineIsKey === false) {
+      out.keyIssueDisagreement = true;
+      out.keyIssueUncorroborated = true;
+      out.keyIssueUncorroboratedReason =
+        `keyIssue ("${out.keyIssue}") claims major/minor key significance from Vision/manual entry, ` +
+        `but ComicVine's own structured first-appearance data does not corroborate it — flagged for review`;
+      console.log('[key] DISAGREEMENT — Vision/manual claim contradicted by ComicVine structured data. keyIssue:', out.keyIssue, 'source:', out.keyIssueSource);
     }
+    console.log('[key] keyIssue:', out.keyIssue, 'source:', out.keyIssueSource, 'major:', isMajorKey, 'minor:', isMinorKey, '(display-only — pricing multiplier retired P1 2026-09-23)');
 
     // Ship #13.1 — thin-comp-pool anchor (scope-corrected from Ship #13).
     // Universal safety cap: when rawComps.count < 3 (and > 0), cap engine

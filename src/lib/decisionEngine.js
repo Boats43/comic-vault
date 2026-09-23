@@ -461,6 +461,20 @@ export function computeDecision(item, context = {}) {
     };
   }
 
+  // Warning: keyIssue claims major/minor key significance and directly
+  // contradicts ComicVine's own structured first-appearance data (P1,
+  // Pricing Trust dispatch, 2026-09-23). Set only on a genuine disagreement
+  // (api/enrich.js's out.keyIssueDisagreement) — not on mere absence of
+  // corroboration, which already silently withholds the pricing multiplier
+  // without escalating to review.
+  if (item.keyIssueDisagreement === true) {
+    decision.warnings.push('key-issue-uncorroborated');
+    decision.evidence.keyIssueUncorroborated = {
+      keyIssue: item.keyIssue,
+      keyIssueSource: item.keyIssueSource,
+    };
+  }
+
   // Warning: eBay source unavailable (GrailKey Directive B, Task 2). Distinct
   // from zero-verified-comps above (that's about sold-comp AI-verification
   // rejecting everything; this is about the eBay active-listing search never
@@ -781,6 +795,7 @@ export function computeDecision(item, context = {}) {
     'issue-consensus-conflict',        // Q140 corrective dispatch: visual-pool issue disagreed with confirmedIssue, locked not overwritten
     'issue-fingerprint-violation',     // Q140 corrective dispatch: pre-pricing/pre-response mismatch — internal consistency failure
     'ebay-source-unavailable',         // GrailKey Directive B, Task 2: eBay search could not run (outage/config/thrown) — not verified as a genuine zero-market book
+    'key-issue-uncorroborated',        // P1, Pricing Trust dispatch: Vision/manual keyIssue claims major/minor key significance but ComicVine's own structured data disagrees
   ];
   // Removed: 'content-unverified' (not a price flag — stays LIST_LOW/BUNDLE)
 
@@ -1136,6 +1151,10 @@ export function describeWarning(slug, item) {
       }
     }
     return 'sold comps exist but none verified';
+  }
+  if (slug === 'key-issue-uncorroborated') {
+    return item.keyIssueUncorroboratedReason ||
+      `"${item.keyIssue || 'key issue'}" claims major/minor key significance but ComicVine's own data disagrees — pricing multiplier withheld pending review`;
   }
   if (slug === 'no-sold-candidates') {
     const activeCount = item.rawComps?.count;

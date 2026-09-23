@@ -82,6 +82,15 @@ export const enhanceKeyIssue = (existingKey, comicVine) => {
       keyIssue: existingKey,
       autoDetected: false,
       keyCharacters: autoKey.keyCharacters, // Still surface characters for display
+      // P1 (Pricing Trust dispatch, 2026-09-23) — always surfaced, even
+      // when existingKey wins, so a caller can tell whether ComicVine's
+      // OWN structured data independently corroborates or actively
+      // disagrees with a Vision/manual keyIssue claim. Previously
+      // discarded here — api/enrich.js's key-multiplier trust boundary
+      // needs it to distinguish "no structured data available" from "a
+      // structured source looked and found nothing," the latter being a
+      // real disagreement, not mere silence.
+      comicVineIsKey: autoKey.isKey,
     };
   }
 
@@ -92,6 +101,7 @@ export const enhanceKeyIssue = (existingKey, comicVine) => {
       autoDetected: true,
       keyCharacters: autoKey.keyCharacters,
       keySource: autoKey.keySource,
+      comicVineIsKey: true,
     };
   }
 
@@ -100,5 +110,6 @@ export const enhanceKeyIssue = (existingKey, comicVine) => {
     keyIssue: null,
     autoDetected: false,
     keyCharacters: [],
+    comicVineIsKey: false,
   };
 };
