@@ -1557,7 +1557,21 @@ Re-scoped from GK-147's L2 item (U5-MINIMAL dispatch trace, 2026-09-23; U5-MINIM
 
 **Full existing book/non-comic code census (Section F, U5-MINIMAL-B dispatch):** `docs/U6-PREFLIGHT-CENSUS.md` (new). Headline, not a substitute for reading the full census: `src/adapters/BookAdapter.js` and `src/adapters/adapterRegistry.js` are **not dormant** — `getAdapter()` is called unconditionally on every scan in `api/enrich.js` (2 real call sites) and dynamically in `api/comps.js`; `api/grade.js` has a live `BOOK_PROMPT` selected via `detectBookSignals()`; `api/enrich.js` has real server-side book-vs-comic asset-type derivation (`[assetType-derive]`, Session 4B) that runs on every scan regardless of any UI book-selection flow, because none exists. This materially corrects this same dispatch train's own U5-MINIMAL trace and GK-242/U1's "dormant 2026-06-06 skeleton" framing — full detail and the F8 census table are in the new doc, not repeated here.
 
+## GK-248 — Missing deterministic banked Production fixture-corpus runner (OPEN, proof-gap)
 
+Banked per the U5-MINIMAL-B dispatch's own push/deploy pass (2026-09-23), found while attempting to satisfy that dispatch's own regression requirement ("compare before/after: price, price source, decision state, blockers, listing hard-lock, listability, Mega Key floor/authority behavior" against "the established deterministic banked Production fixture corpus").
+
+**The gap:** no automated runner exists anywhere in this repository that can mechanically replay a banked Production fixture (title/issue/year/comps snapshot → expected price/decision/blocker output) and diff it against current code. GK-238's own entry references real exported Production fixtures (`comic-vault-fixture-corpus-2026-09-20/21 (...).json`) but these live externally — on Jimmy's phone, transferred ad hoc per-dispatch when needed — not as committed fixture files with a committed harness in `tests/`. Every "banked fixture" regression claim in this registry to date (GK-238 included) has been a manual, disclosed, per-dispatch replay against whatever fixture happened to be transferred at the time, not a repeatable, deterministic, CI-runnable check.
+
+**Consequence, disclosed rather than worked around:** the U5-MINIMAL-B dispatch's own L3 rename (GK-147 closure) could not produce the specific before/after fixture comparison table its own governing dispatch asked for. It substituted the strongest available proxy instead — a static source-contract test proving every production call site passes the renamed option's value unchanged — and disclosed the substitution rather than fabricating a replay.
+
+**Scope of the fix, not designed or built this pass:** (1) a committed, version-controlled fixture corpus (even a small representative subset of the real banked set, with any operator PII/credentials stripped) under `tests/fixtures/` or similar; (2) a deterministic runner that feeds each fixture through the real pricing/decision pipeline (mocking only the true external I/O boundary — PriceCharting/eBay/ComicVine HTTP calls — never the pricing math itself) and diffs price/priceLow/priceHigh/pricingSource/decision.action/decision.blockers/listingHardLocked/listable/megaKeyFloorApplied/megaKeyFloorDivergent against each fixture's recorded expected values; (3) a clear failure mode (unexplained movement = defect, matching this project's own standing regression discipline) runnable via `node tests/X.test.js` like every other suite in this repo.
+
+**STATUS: OPEN, banked, not built. No code, no fixture files, no harness — proof-gap only.**
+
+## Observations
+
+Non-ticket notes — record only, no GK-N assigned, no status tracked.
 
 - **Classics Illustrated #26, 2026-08-11 re-scan.** Taxonomy changed
   `ID_REQUIRED` → `RESEARCH` between two scans of the same book. Containment
