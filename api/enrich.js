@@ -6588,6 +6588,74 @@ export default async function handler(req, res) {
       } // end else (below-floor: unpromoted, early-return path)
     } // end if (identityRefused)
 
+    // GK-253 — durable category authority resolution. An owned asset's
+    // established, server-persisted category (collection_item.asset_category,
+    // db/data0/0026_collection_item.sql) must survive an ordinary market
+    // refresh/re-identify: neither this request's own fresh identification
+    // pass NOR a client-supplied `assetType` value may silently unlock the
+    // GK-250 allowlist immediately below once that authority is established.
+    // Read-only, best-effort, and NEVER fatal to the response: no
+    // collectionItemId, no bearer token, an invalid/expired token, a row
+    // that doesn't exist yet (the normal race on a brand-new scan's very
+    // first enrich call — addToCatalogue's server sync is fire-and-forget
+    // and may not have landed yet), or any DB error all mean "no durable
+    // authority resolvable this request" and fall through to the
+    // identification-pipeline-derived out.assetType exactly as before this
+    // dispatch (the correct behavior for a genuinely fresh, not-yet-owned
+    // capture — Permanent Ruling below applies to ESTABLISHED authority,
+    // not to a first-ever identification pass that has none yet).
+    //
+    // Only a RESOLVED, non-'comic' durable category ever overrides
+    // anything here — a resolved 'comic' (the default for every one of the
+    // 37 real, pre-existing Production rows verified read-only this
+    // dispatch) changes nothing, so ordinary comic behavior is byte-for-byte
+    // unchanged. Deliberately does NOT trust `assetCategory` from the
+    // request body at all — only the server's own read of the durable row.
+    //
+    // PERMANENT RULING (GK-253): marketplace evidence is replaceable;
+    // established category authority is not. Missing category data must
+    // never default to an economically authorized category such as
+    // 'comic' — this block only ever narrows (forces a non-comic category
+    // to stick), never widens, authorization.
+    let durableCategoryAuthority = null;
+    if (collectionItemId) {
+      try {
+        const authHeaderGK253 = req.headers?.authorization || req.headers?.Authorization;
+        const bearerTokenGK253 = authHeaderGK253 && authHeaderGK253.startsWith('Bearer ')
+          ? authHeaderGK253.slice(7).trim()
+          : null;
+        if (bearerTokenGK253) {
+          const authModGK253 = await import('../src/modules/auth/index.js');
+          const { principalId: principalIdGK253 } = authModGK253.verifyToken(bearerTokenGK253);
+          if (principalIdGK253) {
+            const collectionModGK253 = await import('../src/modules/collection/index.js');
+            const ownedItemGK253 = await collectionModGK253.getMyCollectionItem({
+              principalId: principalIdGK253,
+              id: collectionItemId,
+            });
+            if (ownedItemGK253?.assetCategory) {
+              durableCategoryAuthority = ownedItemGK253.assetCategory;
+            }
+          }
+        }
+      } catch (e) {
+        console.log(
+          `[category-authority] durable resolution unavailable ` +
+          `(${e?.constructor?.name || 'error'}: ${e?.message || e}) — ` +
+          `falling through to pipeline-derived assetType`
+        );
+      }
+    }
+    if (durableCategoryAuthority && durableCategoryAuthority !== 'comic' && out.assetType !== durableCategoryAuthority) {
+      console.log(
+        `[category-authority] durable authority overrides this request's derived assetType: ` +
+        `derived=${JSON.stringify(out.assetType)} durable=${JSON.stringify(durableCategoryAuthority)} ` +
+        `collectionItemId=${JSON.stringify(collectionItemId)}`
+      );
+      out.assetType = durableCategoryAuthority;
+      out.categoryAuthoritySource = 'durable-collection-item';
+    }
+
     // GK-250 (U6.0C) — economic authorization allowlist. Pre-push review of
     // GK-249's routing fix found that making assetType='book' reliably
     // reachable also made a pre-existing, never-gated economic path

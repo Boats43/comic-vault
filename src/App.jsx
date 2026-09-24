@@ -11953,6 +11953,20 @@ export default function App() {
       cgcLabel: data.cgcLabel || null,
       purchasePrice: data.purchasePrice != null ? parseFloat(data.purchasePrice) || null : null,
       timestamp: Date.now(),
+      // GK-253 — durable category authority. assetCategory is the field
+      // pushCollectionItem (src/lib/collectionSync.js) reads for the
+      // server-side collection_item.asset_category column (0026's own
+      // purpose-built, category-agnostic field) — omitting it here meant
+      // every accepted Book silently persisted as asset_category='comic'
+      // (the column's own DEFAULT), which is exactly the durable-authority
+      // gap that let a later Refresh Market Data / Re-identify call
+      // re-derive assetType='comic' server-side and bypass GK-250's
+      // economic allowlist. assetType itself is also persisted (was never
+      // set on this object at all before this fix) purely as the raw,
+      // non-authoritative signal — api/enrich.js's own durable-authority
+      // resolution reads assetCategory, never assetType, for authority.
+      assetType: data.assetType || 'comic',
+      assetCategory: data.assetType === 'book' ? 'book' : 'comic',
       assetTypeConfident: data.assetTypeConfident !== false,
       foreignEdition: data.foreignEdition === true,
       isReprint: data.isReprint === true,
@@ -13982,6 +13996,18 @@ export default function App() {
       priceLow: enrichData?.priceLow || null,
       priceHigh: enrichData?.priceHigh || null,
       comps: enrichData?.comps || null,
+      // GK-253 — this merge previously never touched contract/decision at
+      // all, so the `...item` spread above silently carried the OLD
+      // contract/decision forward regardless of what this re-identify
+      // pass's own /api/enrich response computed (price/comps above WERE
+      // already being overwritten unconditionally, so a stale-but-REFUSED
+      // old contract sitting next to a freshly-unlocked price was possible
+      // even before this fix). Matches the exact pattern every other
+      // catalogue-merge site in this file already uses for these two
+      // fields (scan→catalogue, refreshMarketData) — the new response's
+      // contract/decision is now what actually governs this card.
+      contract: enrichData?.contract ?? item.contract ?? null,
+      decision: enrichData?.decision || item.decision,
       reason: gradeData.reason || null,
       restoration: gradeData.restoration || null,
       defectPenalty: gradeData.defectPenalty || null,

@@ -565,7 +565,15 @@ export const IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE = [
   'grade', 'isGraded', 'numericGrade', 'confidence',
   'certNumber', 'cgcLabel', 'cgcVerified', 'labelType', 'labelNotes',
   'defectPenalty', 'cgcPenaltyFlags', 'restoration',
-  'assetType', 'assetTypeConfident', 'gradeLocked',
+  // GK-253 — assetCategory is the durable category-authority field
+  // (collection_item.asset_category); a text-only title/issue/year/
+  // publisher correction says nothing about which category this physical
+  // object belongs to and must never touch it. Preserved via the initial
+  // `{...oldItem}` spread even without this explicit re-assertion (nothing
+  // in the clear-list or an enrich response ever sets assetCategory), but
+  // listed here anyway for the same defensive, explicit reason assetType
+  // already is.
+  'assetType', 'assetTypeConfident', 'assetCategory', 'gradeLocked',
 ];
 
 // ─────────────────────────── the merge itself ───────────────────────────
