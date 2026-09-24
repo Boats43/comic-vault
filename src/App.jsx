@@ -8832,13 +8832,39 @@ export function CollectionDetail({
               const q41AckPriceValid =
                 item.q41Ack != null &&
                 Math.abs((item.q41Ack.price ?? -1) - q41EffectivePrice) < 0.011;
+              // GK-250 (U6.0C) — contract law, defense-in-depth: REFUSED
+              // must dominate every acknowledgment/override path, for every
+              // category, not just Book. CORRECTION during this same
+              // dispatch's own test-writing pass: this code is actually
+              // UNREACHABLE for contract.state==='REFUSED' today, because
+              // isContractIdentityBlocked(item) (App.jsx:894-897 —
+              // `item.contract.state === 'ID_REQUIRED' || 'REFUSED'`)
+              // already returns its own "Listing blocked — identification
+              // required" banner earlier in this same render tree,
+              // unconditionally, before this component ever reaches
+              // q41Unlocked/listLocked. So there is no live bypass for
+              // REFUSED specifically to close here — verified by direct
+              // SSR execution (tests/gk250-refused-q41-dominance.test.js),
+              // not assumed. This guard is kept anyway as an explicit,
+              // second, independent layer of the same invariant: if a
+              // future change ever alters isContractIdentityBlocked's
+              // condition or ordering, this still holds unconditionally on
+              // its own, rather than relying on exactly one gate to be the
+              // sole thing standing between REFUSED and an acknowledged
+              // listing action.
               const q41Unlocked =
+                item.contract?.state !== 'REFUSED' &&
                 q41AckPriceValid &&
                 (q41Locks.length === 0 ||
                   (q41Locks.every((l) => l.class === 'insufficiency') && item.priceOverridden));
 
+              // GK-250 (U6.0C) — same defense-in-depth invariant, applied to
+              // the "Acknowledge and Enable Listing" research panel's own
+              // offer condition (also unreachable for REFUSED today via
+              // isContractIdentityBlocked, same reasoning as above).
               const researchAckNeeded =
                 item.contract && !item.contract.listable &&
+                item.contract.state !== 'REFUSED' &&
                 q41Locks.length === 0 && !q41AckPriceValid;
 
               if (researchAckNeeded) {
@@ -8889,8 +8915,14 @@ export function CollectionDetail({
               // is true from the moment the button is clicked, one tick
               // earlier. Item-scoped already (this component remounts per
               // selected item, key={selectedItem?.id}).
+              // GK-250 (U6.0C) — redundant, explicit backstop alongside the
+              // q41Unlocked fix above: REFUSED unconditionally forces
+              // listLocked=true, independent of q41Unlocked's own
+              // computation. Two independent checks for the same
+              // invariant, deliberately — matches this codebase's own
+              // belt-and-suspenders convention for hard safety states.
               const listLocked = correctionSubmitting || (item.contract
-                ? (!item.contract.listable && !q41Unlocked)
+                ? (item.contract.state === 'REFUSED' || (!item.contract.listable && !q41Unlocked))
                 : (item.matchConfidence?.tier === 'LOW' &&
                    (item.soldComps?.length || 0) + (item.comps?.count || 0) < 3));
               const listLockedLabel = correctionSubmitting

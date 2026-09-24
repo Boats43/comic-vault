@@ -84,10 +84,14 @@ console.log('Part 1: fix statements present in the real source\n');
   assertTrue(!!refusedGuardMatch, 'refusedOut guard statement present verbatim in api/enrich.js');
 
   const outGuardMatches = [...enrichSrc.matchAll(/if \(out\.variantNote === undefined\) \{\s*out\.variantNote = confirmedVariant \|\| null;\s*\}/g)];
-  // Two occurrences expected: the Q135 universal fallback (pre-existing,
-  // ~line 10862, unchanged by this dispatch) and Directive R's new one at
-  // the Q32 merchandise-gate exit.
-  assertEq(outGuardMatches.length, 2, `exactly 2 occurrences of the out.variantNote guard (Q135's pre-existing one + Directive R's new one) — found ${outGuardMatches.length}`);
+  // Three occurrences expected as of GK-250 (U6.0C): the Q135 universal
+  // fallback (pre-existing, ~line 10862, unchanged), Directive R's original
+  // one at the Q32 merchandise-gate exit (now provably unreachable but
+  // deliberately left in place, see api/enrich.js's own GK-250 comment at
+  // that site), and a third, earlier one added by GK-250's new economic
+  // allowlist gate (assetType !== 'comic' early-return) — same guarded-
+  // assignment shape, reused rather than duplicated with different logic.
+  assertEq(outGuardMatches.length, 3, `exactly 3 occurrences of the out.variantNote guard (Q135's pre-existing one + Directive R's original one + GK-250's new economic-allowlist one) — found ${outGuardMatches.length}`);
 
   // Confirm ordering: both new guards sit BEFORE their respective returns.
   const refusedReturnIdx = enrichSrc.indexOf('return res.status(200).json(finalizeResponse(refusedOut));');
@@ -95,10 +99,14 @@ console.log('Part 1: fix statements present in the real source\n');
   assertTrue(refusedGuardIdx !== -1 && refusedGuardIdx < refusedReturnIdx, 'refusedOut guard sits before its return statement');
 
   const merchReturnIdx = enrichSrc.indexOf('return res.json(finalizeResponse(out)); // STOP — no pricing, return early');
-  // The Directive R guard immediately precedes this exact return; the Q135
-  // one (far later, normal completion path) does not.
+  // As of GK-250, TWO out.variantNote guards now sit before this exact
+  // return: Directive R's original one (immediately preceding it, still
+  // present but provably unreachable in practice) and GK-250's new,
+  // earlier economic-allowlist guard (which returns before execution can
+  // even reach the merchandise gate for assetType!=='comic'). The Q135
+  // one (far later, normal completion path) still does not.
   const guardsBeforeMerchReturn = outGuardMatches.filter((m) => enrichSrc.indexOf(m[0]) < merchReturnIdx);
-  assertEq(guardsBeforeMerchReturn.length, 1, 'exactly 1 out.variantNote guard sits before the Q32 merchandise-gate return (Directive R\'s new one, not Q135\'s later one)');
+  assertEq(guardsBeforeMerchReturn.length, 2, 'exactly 2 out.variantNote guards sit before the Q32 merchandise-gate return (GK-250\'s new earlier one + Directive R\'s original one; Q135\'s later one does not)');
 }
 
 // ═══════════════════════════════════════════════════════════════════════

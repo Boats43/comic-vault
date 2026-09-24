@@ -6588,6 +6588,94 @@ export default async function handler(req, res) {
       } // end else (below-floor: unpromoted, early-return path)
     } // end if (identityRefused)
 
+    // GK-250 (U6.0C) — economic authorization allowlist. Pre-push review of
+    // GK-249's routing fix found that making assetType='book' reliably
+    // reachable also made a pre-existing, never-gated economic path
+    // reachable: book -> real eBay comps (buildBookQuery, comps.js) ->
+    // generic browse_api pricing -> category-neutral decisionEngine ->
+    // potentially listable. The existing Q32 merchandise-only hard gate
+    // (further down this handler, ~line 8341 pre-this-commit) runs AFTER
+    // fetchComps already executes — too late to prevent the eBay call and,
+    // more importantly, structurally specific to one category rather than
+    // a general authorization boundary.
+    //
+    // This is the inverse of a category-specific denial list: ONLY
+    // assetType==='comic' is currently authorized to proceed into
+    // comps-for-valuation, automated pricing, or listing-eligibility
+    // derivation. Every other value -- 'book', 'merchandise', any future
+    // adapter's category, or a malformed/unexpected value -- refuses here,
+    // before fetchComps/lookupPriceCharting/any pricing math ever runs.
+    // Malformed values are NOT silently coerced to 'comic' -- only the
+    // exact string 'comic' passes.
+    //
+    // Positioned here deliberately: out.assetType is fully finalized by
+    // this point (last write ~line 3863, Q32 vote logic), identity fields
+    // (title/author/year/etc.) have already survived every upstream
+    // resolution step, and neither compsPromise/fetchComps (next
+    // statement below) nor any pricing/decision derivation has run yet.
+    if (out.assetType !== 'comic') {
+      console.log(
+        `[economic-allowlist] assetType=${JSON.stringify(out.assetType)} not authorized for automated economics — ` +
+        `refusing before comps fetch (fetchComps/pricingEngine/decisionEngine all skipped for this response)`
+      );
+      out.refusedToPrice = true;
+      out.pricingSource = 'refused-category-pricing-not-authorized';
+      // Identity survives this refusal: out.title is otherwise only ever
+      // set much later (~line 11700, out.title = confirmedTitle), which
+      // every OTHER early-exit path in this handler (identityRefused,
+      // the merchandise gate) also relies on the client's own req.body
+      // fallback for -- explicitly set here so this response is more
+      // complete than that pre-existing pattern requires, not less.
+      // out.author is already set earlier (Session 4B's book-author
+      // derivation, ~line 3982) and needs no extra write here.
+      out.title = confirmedTitle;
+      out.price = null;
+      out.priceLow = null;
+      out.priceHigh = null;
+      out.comps = null;
+      out.rawComps = null;
+      out.soldComps = [];
+      out.priceNote =
+        `Automated pricing is not yet authorized for asset type "${out.assetType}" — identity is captured, valuation is withheld.`;
+      out.confidenceLevel = 'LOW';
+      // Deliberately RESEARCH, never a LIST_* action — deriveActionAuthority
+      // (src/lib/actionAuthority.js) requires action.startsWith('LIST') as
+      // one of READY's own necessary conditions, so this alone already
+      // keeps contract.listable=false regardless of any other field here;
+      // the pricingSource above additionally keeps deriveLocks' 'refused'
+      // lock class 'integrity' (not in INSUFFICIENCY_REFUSAL_SLUGS,
+      // src/lib/responseContract.js), so no Q41 acknowledgment path
+      // reaches an acknowledgeable branch for this response at all.
+      out.decision = {
+        action: 'RESEARCH',
+        confidence: 'HIGH',
+        blockers: [],
+        warnings: ['category-pricing-not-authorized'],
+        nextStep: 'Automated pricing for this asset category is not yet built — identity is captured and safe to review manually.',
+      };
+      logTitleStripSummary();
+      out.pipelineAudit = buildPipelineAudit({
+        traceId: pipelineTraceId,
+        buildSha: buildId,
+        identityRevision: pipelineIdentityRevision,
+        familyIssueConsensus: identity?.familyIssueConsensus || null,
+        familyKey: confirmedTitle ?? null,
+        pricingIssue,
+        confirmedIssue,
+        outIssue: out.issue ?? null,
+        prePricingOk: pricingIssue === confirmedIssue,
+        preResponseOk: (out.issue ?? null) === (confirmedIssue ?? null),
+        decision: out.decision,
+      });
+      if (out.variantNote === undefined) {
+        out.variantNote = confirmedVariant || null;
+      }
+      if (out.variantApplicability === undefined) {
+        out.variantApplicability = null;
+      }
+      return res.status(200).json(finalizeResponse(out)); // STOP — no comps, no pricing, return early
+    }
+
     // Book-level comps cache — skip 5-9s eBay fetch on refresh.
     // Comps stored on book record with timestamp, 6-hour TTL.
     // Survives Vercel cold starts (in-memory cache does not).
@@ -8335,9 +8423,18 @@ export default async function handler(req, res) {
       }
     }
 
-    // Q32 — Merchandise hard gate (fraud risk). Runs BEFORE identity gate so
-    // assetType=merchandise blocks pricing pipeline entirely. Forces RESEARCH
-    // decision with clear blocker message.
+    // Q32 — Merchandise hard gate (fraud risk). NOTE (GK-250, U6.0C): this
+    // block is now provably unreachable in practice -- the economic
+    // allowlist gate added earlier in this handler (~line 6591, "GK-250
+    // (U6.0C) — economic authorization allowlist") already returns early
+    // for any assetType !== 'comic', including 'merchandise', long before
+    // execution reaches here. Left in place deliberately rather than
+    // deleted: existing tests assert its exact source-text position
+    // relative to nearby guards (tests/grailkey-directive-r-early-return-
+    // variant.test.js), and removing working, previously-tested code
+    // carries more risk than a confirmed-dead branch does. Runs BEFORE
+    // identity gate so assetType=merchandise blocks pricing pipeline
+    // entirely. Forces RESEARCH decision with clear blocker message.
     if (out.assetType === 'merchandise') {
       out.identityComplete = false;
       out.decision = {
