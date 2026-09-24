@@ -12049,18 +12049,47 @@ export default function App() {
 
         if (!res.ok) throw new Error(data.error || "Failed to grade");
 
-        // FIX 2: Non-comic rejection. GK-41 (2026-08-08): the three-null
-        // clause no longer fires when Vision itself affirms
-        // assetTypeConfident=true — a virgin/sketch/blank-cover variant
-        // legitimately prints none of publisher/year/issue, and Fix 3a's
-        // (correct) removal of year/issue fabrication means all three can
-        // now come back honestly null on a real book. Not also gated on
-        // data.title here: !data.title already forces rejection via the
-        // first clause above, so repeating it would be dead logic.
-        if (!data.title ||
+        // U6.0D (GK-252) — Book-success branch, checked BEFORE the comic
+        // rejection logic below. Predicate: data.assetType==='book' AND a
+        // usable, non-placeholder title. Deliberately does NOT require
+        // issue/publisher/year/assetTypeConfident -- BOOK_JSON_SHAPE
+        // (api/grade.js) has neither an issue nor an assetTypeConfident
+        // field at all, so requiring them would make book acceptance
+        // structurally impossible. Confirmed against two real Production
+        // scans (GK-249's phone acceptance trace, 2026-09-24): a real,
+        // correctly-identified BOOK_PROMPT response for "The Rationalists"
+        // was rejected by the OLD comic-only gate below both times, purely
+        // because neither cover photo showed a visible publisher or year.
+        const isUsableBookTitle = data.title &&
+          data.title.trim() &&
+          !data.title.toLowerCase().includes('not a comic') &&
+          !data.title.toLowerCase().includes('unknown');
+        if (data.assetType === 'book' && isUsableBookTitle) {
+          // Accepted -- falls through to the shared flow below exactly as
+          // a comic would (issueNum extraction, duplicate detection,
+          // setResult, addToCatalogue, enrich). issueNum resolves to null
+          // for a book (no "#N" pattern in a book title), which is already
+          // null-safe downstream -- proven via real handler + real render
+          // execution, not assumed (tests/gk251-book-real-pipeline-render-
+          // proof.test.js, 20/20).
+        } else if (
+          // FIX 2: Non-comic rejection. GK-41 (2026-08-08): the three-null
+          // clause no longer fires when Vision itself affirms
+          // assetTypeConfident=true — a virgin/sketch/blank-cover variant
+          // legitimately prints none of publisher/year/issue, and Fix 3a's
+          // (correct) removal of year/issue fabrication means all three can
+          // now come back honestly null on a real book. Not also gated on
+          // data.title here: !data.title already forces rejection via the
+          // first clause above, so repeating it would be dead logic.
+          // BYTE-IDENTICAL to before U6.0D -- unchanged condition, only
+          // moved from a bare `if` into this `else if` so the book branch
+          // above is checked first; a genuine comic (assetType!=='book')
+          // always reaches this exact check unchanged.
+          !data.title ||
             data.title.toLowerCase().includes('not a comic') ||
             data.title.toLowerCase().includes('unknown') ||
-            (!data.publisher && !data.year && !data.issue && data.assetTypeConfident !== true)) {
+            (!data.publisher && !data.year && !data.issue && data.assetTypeConfident !== true)
+        ) {
           setError("No comic detected. Try again.");
           setLoading(false);
           return;
