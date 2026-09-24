@@ -119,7 +119,16 @@ const parseResponse = (text) => {
 // Session 4B — Import book signal detection from shared classifier module.
 // Moved from local definition to avoid cross-module handler imports (api/enrich
 // importing api/grade pulls grade's handler into enrich's bundle).
-import { detectBookSignals } from '../src/lib/categoryClassifier.js';
+// GK-249 (U6.0B) — classifyTitle added alongside: a positive book-evidence
+// signal sourced from real eBay listing titles (already fetched by the
+// eBay-first identity lookup, zero new network calls), composed with the
+// existing detectBookSignals as an OR. Real-log-evidence trace (The
+// Rationalists, 2026-09-24) found detectBookSignals alone missed a real
+// book because STANDARD_PROMPT's own comic-framed schema gives Vision no
+// fields to volunteer bibliographic vocabulary in; classifyTitle over the
+// eBay pool's own listing titles correctly caught it (0/12 false positives
+// measured against real comic-pool titles from this same session's logs).
+import { detectBookSignals, classifyTitle } from '../src/lib/categoryClassifier.js';
 
 // Session 4B — Ensure assetType is set on every response path.
 // Single choke point: all res.status(200).json() calls pass through this.
@@ -395,7 +404,18 @@ const lookupEbayIdentity = async (imageBase64) => {
 
     if (!consensus) {
       console.log('[ebay-id] no consensus (low agreement)');
-      return null;
+      // GK-249 (U6.0B) — previously returned bare null here, discarding
+      // `items`/`parsedRows` one line before they would otherwise have
+      // been returned. That silently threw away real eBay evidence the
+      // caller could use as a positive book-classification signal even
+      // when no COMIC identity consensus was reachable (The Rationalists
+      // real-log trace, 2026-09-24). `consensus: null` preserves the
+      // exact caller behavior every existing `ebayResult.consensus &&
+      // ebayResult.consensus.confidence >= 0.3` check already relies on
+      // (short-circuits false identically whether ebayResult is null or
+      // an object with a null consensus) — this is additive, not a
+      // behavior change to the eBay-first comic-identity path.
+      return { consensus: null, rawItems: items, parsedRows };
     }
 
     console.log(`[ebay-id] consensus: ${consensus.title} #${consensus.issue} (${consensus.confidence} confidence)`);
@@ -784,19 +804,57 @@ export default async function handler(req, res) {
     mark('vision_start');
     const { parsed: initialScan } = await callModel("claude-sonnet-4-5-20250929", imageContent, STANDARD_PROMPT);
     mark('vision_complete');
-    const isBook = detectBookSignals(initialScan);
+    // GK-249 (U6.0B) — composed trigger: the original detectBookSignals
+    // check (book vocabulary inside STANDARD_PROMPT's own comic-framed
+    // title/reason text) OR'd with a positive signal from the real eBay
+    // image-search pool's own listing titles, classified by the existing
+    // categoryClassifier.js (already used for eBay-pool filtering
+    // elsewhere — not new machinery). Real-log trace found the eBay pool
+    // often carries usable evidence (e.g. "...Paperback...") even when no
+    // COMIC identity consensus was reachable from it. assetTypeConfident
+    // is deliberately NOT part of this trigger — it's a negative-only
+    // signal ("not confident this is a comic"), doesn't confirm BOOK
+    // specifically, and A1/A2's measurement (2026-09-24, this dispatch)
+    // was too thin (single 24h window, no difficult-case coverage) to
+    // justify it as more than a possible future last-resort fallback.
+    const ebayPoolBookSignal = Array.isArray(ebayResult?.rawItems) &&
+      ebayResult.rawItems.some((it) => classifyTitle(it?.title || it?.rawTitle || '') === 'BOOK');
+    const isBook = detectBookSignals(initialScan) || ebayPoolBookSignal;
 
     let userPrompt = STANDARD_PROMPT;
     let finalParsed = initialScan;
 
     if (isBook) {
-      console.log('[grade] Book signals detected — using BOOK_PROMPT');
+      console.log(`[grade] Book signals detected — using BOOK_PROMPT (detectBookSignals=${detectBookSignals(initialScan)}, ebayPoolBookSignal=${ebayPoolBookSignal})`);
       userPrompt = BOOK_PROMPT;
       if (body.voiceContext) {
         userPrompt += "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
       }
       const { parsed: bookScan } = await callModel("claude-sonnet-4-5-20250929", imageContent, userPrompt);
       finalParsed = bookScan;
+      // GK-249 (U6.0B) Section B2 — first-fire observability. No prior
+      // real BOOK_PROMPT output had been observed in Production as of
+      // this dispatch (confirmed: zero "[grade] Book signals detected"
+      // hits within the maximum searchable ~24h log retention window,
+      // 2026-09-24). Presence/value flags only — never image/base64,
+      // auth data, user identifiers, or unrelated raw request contents.
+      // Title logged by value (not sensitive); everything else by
+      // presence only, per the dispatch's own instruction.
+      const smallestAcceptancePredicateWouldPass = !!(
+        bookScan?.assetType === 'book' &&
+        bookScan?.title &&
+        String(bookScan.title).trim() &&
+        !String(bookScan.title).toLowerCase().includes('unknown')
+      );
+      console.log(
+        `[grade][book-first-fire] title=${JSON.stringify(bookScan?.title ?? null)} ` +
+        `authorPresent=${bookScan?.author != null} publisherPresent=${bookScan?.publisher != null} ` +
+        `yearPresent=${bookScan?.year != null} isbnPresent=${bookScan?.isbn != null} ` +
+        `editionPresent=${bookScan?.edition != null} formatPresent=${bookScan?.format != null} ` +
+        `assetType=${JSON.stringify(bookScan?.assetType ?? null)} ` +
+        `smallestAcceptancePredicateWouldPass=${smallestAcceptancePredicateWouldPass} ` +
+        `triggerSource=${detectBookSignals(initialScan) ? 'detectBookSignals' : 'ebayPoolBookSignal'}`
+      );
     } else {
       // Comic — use initial scan result
       if (body.voiceContext) {

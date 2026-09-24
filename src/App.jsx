@@ -1721,7 +1721,10 @@ function BankFixtureButton({ item, enriching }) {
   );
 }
 
-function ResultCard({ result, enriching }) {
+// GK-249 (U6.0B render-safety proof) — exported so tests/gk249-book-refused-render-safety.test.js
+// can render this component via react-dom/server without a browser. No
+// behavior change — this is a bare `export` keyword addition only.
+export function ResultCard({ result, enriching }) {
   // Ship #20a.6.1 — collapsible drawer for soldCompDiagnostics rejected
   // samples. Toggled by clicking the V/R chip. Per-card state — different
   // cards stay independently expanded.
@@ -4447,7 +4450,9 @@ function EditionVerifyPanel({ item, onManualCorrect, onDismiss }) {
   );
 }
 
-function CollectionDetail({
+// GK-249 (U6.0B render-safety proof) — exported for the same reason as
+// ResultCard above. No behavior change.
+export function CollectionDetail({
   item,
   onBack,
   onDelete,
