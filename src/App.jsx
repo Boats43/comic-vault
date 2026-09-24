@@ -11548,6 +11548,7 @@ export default function App() {
             // instead of re-running fuzzy q= search on every auto-refresh.
             pcProductId: item.pcProductId || null,
             collectionItemId: item.id, // GK-145 — auto-refresh targets an existing collection record
+            ownedRefresh: true, // GK-254 — same explicit flow marker as manual refreshMarketData; auto-refresh is the same "ordinary market refresh of an owned item" class
           }),
           signal: controller.signal,
         })
@@ -11568,6 +11569,22 @@ export default function App() {
           })
           .then((enrich) => {
             if (cancelled || !enrich) return;
+            // GK-254 Section C — same shape as the 401 handling just above:
+            // the server could not verify durable category authority for
+            // this owned item. Never merge this refused-shaped response,
+            // never let the queue keep firing unauthenticated requests for
+            // every other stale item (the exact 12x-401-style cascade the
+            // 401 branch above already guards against) — invalidate the
+            // stale session and drain.
+            if (enrich.ownedAssetAuthRequired === true) {
+              console.warn('[auto-refresh] owned-asset auth required — session missing/invalid/expired, forcing re-login');
+              clearSession();
+              setGrailkeyAuthed(false);
+              cancelled = true;
+              queue.length = 0;
+              setRefreshingPrices(0);
+              return;
+            }
             // Gate: when matchConfidence is LOW, auto-refresh must NOT
             // overwrite price/comps fields — comps are loose substitutes,
             // not exact matches. Non-price metadata (matchConfidence, year
@@ -13606,6 +13623,7 @@ export default function App() {
           // /api/enrich as out.scanId, same as gradeBlob's request.
           scanId: refreshOwnership.scanId,
           collectionItemId: item.id, // GK-145 — refresh always targets an existing collection record
+          ownedRefresh: true, // GK-254 — explicit flow marker: an ordinary market refresh of an already-owned item, no fresh identification evidence, durable category authority must be resolved server-side and must win outright
         }),
         signal: controller.signal,
       });
@@ -13634,6 +13652,20 @@ export default function App() {
     if (activeCardEnrichIdRef.current !== enrichId) {
       console.log(`[enrich] stale ignored post-parse id=${enrichId}`);
       return;
+    }
+    // GK-254 Section C — the server could not verify durable category
+    // authority for this owned item (session missing/expired/invalid, or
+    // the owned row couldn't be resolved for this principal). Never
+    // merge this refused-shaped response into the item (it says nothing
+    // real about this item's own state), never retry unauthenticated —
+    // invalidate the stale session via the same existing helpers
+    // handleLogout already uses, forcing a truthful re-authentication
+    // prompt instead of a silent, misleading price/category change.
+    if (enrich.ownedAssetAuthRequired === true) {
+      console.warn(`[refresh] owned-asset auth required id=${enrichId} — session missing/invalid/expired, forcing re-login`);
+      clearSession();
+      setGrailkeyAuthed(false);
+      throw new Error('Your session expired — please sign in again, then retry.');
     }
     if (enrich.yearCorrected && enrich.confirmedYear) {
       console.log('[refresh] year healed:', item.year, '→', enrich.confirmedYear);
@@ -13956,6 +13988,7 @@ export default function App() {
           images: [b64],
           scanId: reidentifyOwnership.scanId,
           collectionItemId: item.id, // GK-145 — re-identify always targets an existing collection record
+          ownedReidentify: true, // GK-254 — explicit flow marker: a genuine fresh identification pass against an already-owned item; a conflict with durable category authority must be held/refused, never silently resolved in either direction
         }),
       });
       if (!enrichRes.ok) {
@@ -13963,7 +13996,27 @@ export default function App() {
         throw new Error(errBody.error || "Failed to enrich book");
       }
       enrichData = await enrichRes.json();
+      // GK-254 Section C — the server could not verify durable category
+      // authority for this owned item. This is NOT an ordinary enrich
+      // failure: the "graceful degradation, fall back to Vision-only"
+      // path below is designed for a genuinely-failed/unreachable enrich
+      // call, and would otherwise silently persist a re-identification
+      // built from Vision data alone — exactly the "fall back to
+      // stateless category derivation" this dispatch forbids for an
+      // owned item. Thrown with a dedicated marker so the catch below
+      // aborts outright instead of degrading gracefully.
+      if (enrichData?.ownedAssetAuthRequired === true) {
+        const authErr = new Error('Your session expired — please sign in again, then retry.');
+        authErr.ownedAssetAuthRequired = true;
+        throw authErr;
+      }
     } catch (err) {
+      if (err?.ownedAssetAuthRequired === true) {
+        console.warn('[reIdentify] owned-asset auth required — session missing/invalid/expired, forcing re-login');
+        clearSession();
+        setGrailkeyAuthed(false);
+        throw err; // abort outright — do not fall back to Vision-only, do not persist anything
+      }
       // Graceful degradation: enrich failed but we have Vision data
       enrichFailed = true;
       enrichError = err.message;
@@ -14187,6 +14240,18 @@ export default function App() {
       throw new Error(errBody.error || `Correction failed: ${enrichRes.status}`);
     }
     const enrichData = await enrichRes.json();
+    // GK-254 Section C — the server could not verify durable category
+    // authority for this owned item. The pendingItem locked/no-price
+    // state above is already safe to leave as-is (never unlocked); abort
+    // here rather than calling buildCorrectedCatalogueItem with a
+    // refused-shaped response, and force a truthful re-authentication
+    // prompt instead of a silent, misleading "correction failed."
+    if (enrichData?.ownedAssetAuthRequired === true) {
+      console.warn('[correction] owned-asset auth required — session missing/invalid/expired, forcing re-login');
+      clearSession();
+      setGrailkeyAuthed(false);
+      throw new Error('Your session expired — please sign in again, then retry.');
+    }
 
     let applied = false;
     let finalUpdated = null;

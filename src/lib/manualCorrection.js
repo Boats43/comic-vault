@@ -754,6 +754,7 @@ export const buildManualCorrectionPayload = (item, correctedValues, correctedFie
   confidence: 'HIGH',
   ...(scanId ? { scanId } : {}),
   collectionItemId: item.id, // GK-145 (GrailKey Dispatch 2026-08-21) — correction always targets an existing collection record
+  ownedRefresh: true, // GK-254 — a manual correction is text-only (no fresh Vision/image-search pass), so it is the "ordinary refresh" class, not the re-identify class: durable category authority must be resolved server-side and win outright, same as refreshMarketData/auto-refresh
   title: correctedValues.title ?? item.title,
   issue: correctedValues.issue ?? item.issue,
   year: correctedValues.year ?? item.year,

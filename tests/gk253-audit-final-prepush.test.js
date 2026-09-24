@@ -1,39 +1,39 @@
 // tests/gk253-audit-final-prepush.test.js
 //
-// GK-253 FINAL PRE-PUSH UNIVERSAL AUTHORITY AUDIT (2026-09-24) — TEST ONLY,
-// per the governing audit's own explicit "DO NOT MODIFY APPLICATION CODE
-// DURING THIS AUDIT" instruction and its allowance for a test-only commit
-// when a real gap must be proven rather than asserted. This file proves two
-// real, distinct gaps in GK-253's own durable-category-authority mechanism
-// (api/enrich.js, the block introduced in commit 5b358e2) via genuine
-// execution against the real Development DB and the real, unmodified
-// api/enrich.js handler — not hand-constructed shapes.
+// GK-253 FINAL PRE-PUSH UNIVERSAL AUTHORITY AUDIT (2026-09-24) — originally
+// a TEST-ONLY commit (d6cedbd) proving two real, distinct gaps in GK-253's
+// original durable-category-authority mechanism via genuine execution,
+// per the governing audit's "DO NOT MODIFY APPLICATION CODE DURING THIS
+// AUDIT" instruction. Both gaps were FIXED by GK-254 (2026-09-24,
+// api/enrich.js) — this file is UPDATED, not rewritten, to prove the fix:
+// the narrative below documents what was originally found (kept verbatim
+// as the historical record), and every assertion now proves the CURRENT,
+// fixed behavior rather than the original bug.
 //
-// GAP 1 (Section 1 of the audit — auth plumbing): the durable-authority
-// resolution block requires a valid Bearer token to ever run at all. The
-// real client session token has a fixed 12h TTL with no refresh mechanism
-// (src/modules/auth/token.js:31, src/lib/grailkeySession.js's own header
-// comment) and the top-level `grailkeyAuthed` React state that gates the
-// whole app is only set once at mount / on explicit logout -- it does NOT
-// re-check on every request. A real owned Book, refreshed after the
-// session token has silently expired mid-session (a realistic 12h+ usage
-// window, not an adversarial contrivance), sends collectionItemId with NO
-// usable Authorization header -- the durable override silently never
-// attempts the DB read, and the request falls through to the exact
-// pre-GK-253 vulnerable behavior (pipeline-derived assetType defaults to
-// 'comic' for a bare title with no book signal).
+// GAP 1 (originally: Section 1 of the audit — auth plumbing). ORIGINAL
+// FINDING: the durable-authority resolution block required a valid Bearer
+// token to ever run at all. The real client session token has a fixed 12h
+// TTL with no refresh mechanism (src/modules/auth/token.js:31,
+// src/lib/grailkeySession.js's own header comment) and the top-level
+// `grailkeyAuthed` React state that gates the whole app is only set once
+// at mount / on explicit logout -- it does NOT re-check on every request.
+// A real owned Book, refreshed after the session token had silently
+// expired mid-session, sent collectionItemId with NO usable Authorization
+// header -- the durable override silently never attempted the DB read,
+// falling through to the pre-GK-253 vulnerable behavior. GK-254 FIX:
+// ownedRefresh/ownedReidentify requests with unresolvable auth now FAIL
+// CLOSED (ownedAssetAuthRequired:true, refusedToPrice:true), never fall
+// through.
 //
-// GAP 2 (Section 3 of the audit — asymmetric protection): GK-253's override
-// (api/enrich.js ~6649) only fires when the resolved durable category is
-// non-'comic'. It does nothing when the durable category IS 'comic' --
-// meaning a real, established Comic's own pre-existing, independent
-// book-vs-comic derivation (api/enrich.js:3828-3847, `ebaySaysBook`/
-// `titleSaysBook` from a genuine image-search pass, e.g. on a real
-// reIdentifyBook call which never sends skipImageSearch) can still flip
-// out.assetType to 'book' for one request, REFUSING a real Comic's
-// economics -- the "permanent law" requires this to be symmetric
-// (established authority in EITHER direction survives an ordinary
-// refresh), which the current code does not provide.
+// GAP 2 (originally: Section 3 of the audit — asymmetric protection).
+// ORIGINAL FINDING: GK-253's override only fired when the resolved
+// durable category was non-'comic' -- a real, established Comic's own
+// pre-existing, independent book-vs-comic derivation
+// (api/enrich.js:3828-3847) could still flip out.assetType to 'book' for
+// one request, REFUSING a real Comic's economics, with zero protection in
+// the other direction. GK-254 FIX: for ownedRefresh, durable authority is
+// now PINNED before that speculative derivation ever runs, in either
+// direction (durableAuthorityPinned guards both derivation sites).
 //
 // Same real-Development-DB / real-principal-and-token / real-handler
 // convention as tests/gk253-durable-category-authority.test.js.
@@ -153,31 +153,29 @@ try {
     const id = `${TAG}-gap1`;
     await makeCollectionItem(id, 'book', { title: 'The Rationalists', author: 'Test Author' });
 
-    // A real refreshMarketData-shaped request (skipImageSearch:true, no
-    // assetType, bare title, collectionItemId present) but with NO
-    // Authorization header at all -- exactly what getVaultHeaders() sends
-    // once the 12h session token has expired while grailkeyAuthed (React
-    // state) remains stuck true.
+    // The real refreshMarketData-shaped request, INCLUDING the ownedRefresh
+    // flag GK-254 introduced, but with NO Authorization header at all --
+    // exactly what getVaultHeaders() sends once the 12h session token has
+    // expired while grailkeyAuthed (React state) remains stuck true.
     const { body, logs } = await runOnce({
-      label: 'GAP1 durable book, expired/missing session token',
-      bearer: null, // <-- the gap: no Bearer token, even though this targets a REAL durable Book row
+      label: 'GAP1 (FIXED) durable book, expired/missing session token',
+      bearer: null, // no Bearer token, even though this targets a REAL durable Book row
       pool: [],
       requestBody: {
         title: 'The Rationalists', issue: null, grade: 'Very Good', confidence: 'high',
         isGraded: false, numericGrade: null, year: '2020', publisher: null,
-        skipImageSearch: true, collectionItemId: id,
+        skipImageSearch: true, collectionItemId: id, ownedRefresh: true,
       },
     });
 
-    assertFalse(!!logs.find((l) => l.startsWith('[category-authority] durable authority overrides')), 'CONFIRMED GAP: no durable override attempted -- no Bearer token means the server never even tries the DB read');
-    assertEq(body?.assetType, 'comic', 'CONFIRMED GAP: assetType falls through to the pipeline default (comic) for this real, durably-owned Book -- identical to the pre-GK-253 vulnerable behavior');
-    assertFalse(body?.refusedToPrice === true, 'CONFIRMED GAP: the economic allowlist does NOT refuse this request -- a real owned Book can reach comic-calibrated economics whenever its session has quietly expired');
+    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] FAIL CLOSED')), 'FIXED: fails closed and logs it, rather than silently falling through');
+    assertTrue(body?.ownedAssetAuthRequired === true, 'FIXED: ownedAssetAuthRequired stamped for the client to detect and force re-login');
+    assertTrue(body?.refusedToPrice === true, 'FIXED: refused outright -- a real owned Book can no longer reach comic-calibrated economics merely because its session quietly expired');
+    assertEq(body?.contract?.listable, false, 'FIXED: listable stays false');
   }
 
   // Control: the SAME durable book row, SAME request, but WITH a valid
-  // token -- proves the override DOES work when auth is present (isolates
-  // the gap to the auth precondition specifically, not the resolution
-  // logic itself).
+  // token -- proves the pin still works correctly when auth is present.
   {
     const id = `${TAG}-gap1-control`;
     await makeCollectionItem(id, 'book', { title: 'The Rationalists', author: 'Test Author' });
@@ -188,10 +186,10 @@ try {
       requestBody: {
         title: 'The Rationalists', issue: null, grade: 'Very Good', confidence: 'high',
         isGraded: false, numericGrade: null, year: '2020', publisher: null,
-        skipImageSearch: true, collectionItemId: id,
+        skipImageSearch: true, collectionItemId: id, ownedRefresh: true,
       },
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[category-authority] durable authority overrides')), 'control: override DOES fire with a valid token -- confirms Gap 1 is specifically the missing-auth precondition, not a defect in the resolution logic itself');
+    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] pinning')), 'control: the pin DOES fire with a valid token -- confirms Gap 1\'s fix is specifically about the auth precondition, not a defect in the resolution logic itself');
     assertEq(body?.assetType, 'book', 'control: stays book with a valid token');
     assertTrue(body?.refusedToPrice === true, 'control: correctly refused with a valid token');
   }
@@ -225,21 +223,21 @@ try {
         title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high',
         isGraded: false, numericGrade: null, year: '1988', publisher: 'Marvel',
         images: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='],
-        collectionItemId: id,
+        collectionItemId: id, ownedReidentify: true,
       },
     });
 
-    // NOTE (found during audit): the eBay-category vector (ebaySaysBook) is
-    // ALREADY blocked by a real, pre-existing, unrelated hard-reject filter
-    // -- `[visual-identity-filter]` rejects rows with
-    // reasons.MARKETPLACE_BOOK_CATEGORY BEFORE parsedVisualRows is even
-    // populated for the book-derivation check, so this specific vector
-    // does NOT reproduce the hypothesized flip. Left in as a negative
-    // control (see assertions below), and the title-signal vector
-    // (titleSaysBook) is tested separately next, since it is unrelated to
-    // marketplace evidence entirely.
+    // NOTE (found during audit, still true post-fix): the eBay-category
+    // vector (ebaySaysBook) is ALREADY blocked by a real, pre-existing,
+    // unrelated hard-reject filter -- `[visual-identity-filter]` rejects
+    // rows with reasons.MARKETPLACE_BOOK_CATEGORY BEFORE parsedVisualRows
+    // is even populated for the book-derivation check, so this specific
+    // vector never reproduced the hypothesized flip, before or after
+    // GK-254. Left in as a negative control; the title-signal vector
+    // (titleSaysBook, GAP2b below) is the one that genuinely needed the
+    // GK-254 fix.
     assertFalse(!!logs.find((l) => l.startsWith('[assetType-derive] book detected')), 'NEGATIVE CONTROL: the eBay-category book-derivation vector does NOT fire here -- a real, pre-existing, unrelated filter (visual-identity-filter, MARKETPLACE_BOOK_CATEGORY) already hard-rejects book-category marketplace rows before they reach this check');
-    assertEq(body?.assetType, 'comic', 'stays comic -- this specific vector is not a real gap (pre-existing filter already protects it)');
+    assertEq(body?.assetType, 'comic', 'stays comic -- this specific vector was never a real gap (pre-existing filter already protects it)');
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -265,13 +263,16 @@ try {
         issue: '300', grade: 'Very Fine', confidence: 'high',
         isGraded: false, numericGrade: null, year: '1988', publisher: 'Marvel',
         images: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='],
-        collectionItemId: id,
+        collectionItemId: id, ownedReidentify: true,
       },
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[assetType-derive] book detected')), 'the title-signal (titleSaysBook) vector genuinely fires -- 2+ BOOK_SIGNALS keywords in the title text alone ("edition", "hardcover")');
-    assertFalse(!!logs.find((l) => l.startsWith('[category-authority]') && l.includes('overrides')), 'CONFIRMED GAP 2: GK-253\'s override never fires for a durable "comic" value -- it does not protect established Comic authority');
-    assertEq(body?.assetType, 'book', 'CONFIRMED GAP 2: out.assetType flips to "book" for a REAL, established, durably-owned Comic, purely from THIS request\'s own title-text reading -- no marketplace evidence involved at all, so the pre-existing visual-identity-filter cannot protect against this vector');
-    assertTrue(body?.refusedToPrice === true, 'CONFIRMED GAP 2: a real owned Comic\'s normal economics are incorrectly REFUSED -- category authority changed asymmetrically, in violation of the permanent law\'s symmetric requirement');
+    assertTrue(!!logs.find((l) => l.startsWith('[assetType-derive] book detected')), 'the title-signal (titleSaysBook) vector still genuinely fires this request\'s own fresh derivation -- 2+ BOOK_SIGNALS keywords in the title text alone ("edition", "hardcover")');
+    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] RE-IDENTIFY CONFLICT')), 'FIXED: GK-254 detects the conflict between durable "comic" and this request\'s freshly-derived "book"');
+    assertEq(body?.assetType, 'comic', 'FIXED: durable "comic" authority is PRESERVED -- no longer silently flips to "book" from a title misread alone');
+    assertEq(body?.categoryConflict?.durable, 'comic', 'categoryConflict.durable records the preserved value');
+    assertEq(body?.categoryConflict?.freshlyDerived, 'book', 'categoryConflict.freshlyDerived records what this request actually derived, for operator review');
+    assertTrue(body?.refusedToPrice === true, 'held/refused pending review, per Section E -- normal Comic economics do not silently continue under an unresolved conflict either');
+    assertEq(body?.pricingSource, 'refused-category-reidentify-conflict', 'the dedicated conflict pricingSource');
   }
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);

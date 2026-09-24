@@ -6,22 +6,30 @@
 // to the one durable, server-side field purpose-built for it
 // (collection_item.asset_category, db/data0/0026_collection_item.sql —
 // defaults to 'comic' when nothing sets it), and /api/enrich never
-// resolved that field at all (collectionItemId was read but explicitly
-// documented as "MEASUREMENT-ONLY... drives no identity, pricing, or
-// decision logic"). An ordinary Refresh Market Data / Re-identify call on
-// a persisted Book therefore re-derived assetType='comic' server-side and
-// could bypass GK-250's economic allowlist, replacing the earlier REFUSED
-// contract with a real, unlocked one.
+// resolved that field at all. An ordinary Refresh Market Data / Re-identify
+// call on a persisted Book therefore re-derived assetType='comic'
+// server-side and could bypass GK-250's economic allowlist.
 //
-// This file proves the fix through REAL execution, not hand-constructed
-// shapes, per this repo's own standing rule: a real Development gk_principal
-// + real collection_item rows (created via the real collection module,
-// src/modules/collection/index.js), a real signed HMAC token (same
-// mintTestToken convention as tests/collection-endpoint-live-proof.test.js),
-// and the real api/enrich.js default export invoked directly (same
-// fetch-mocking convention as tests/gk250-book-enrich-handler-smoke.test.js).
-// Every row this file creates is cleaned up in a finally block; nothing
-// pre-existing is touched.
+// UPDATED by GK-254 (2026-09-24): GK-253's original mechanism (a bare
+// collectionItemId triggered durable-authority resolution) was superseded
+// after GK-253's own final pre-push audit (commit d6cedbd) proved two real
+// gaps — no auth-failure fail-closed behavior, and asymmetric protection
+// (only non-'comic' durable authority was ever protected). The real
+// mechanism now lives earlier in api/enrich.js and requires an explicit
+// `ownedRefresh`/`ownedReidentify` request-body flag (GK-254 Section A:
+// bare collectionItemId presence alone is NOT a safe trigger — bulk
+// import's and duplicate-confirm's fire-and-forget post-save enrich calls
+// have the exact same shape). This file is updated to match the real,
+// current request shapes and log-line prefixes
+// (`[owned-asset-authority]`, not the retired `[category-authority]`).
+// GK-254's own auth-fail-closed and symmetric-precedence tests live in
+// tests/gk254-owned-asset-fail-closed.test.js — this file keeps proving
+// GK-253's original scenarios (legacy comic unaffected, missing-row
+// fall-through, client-tampering) still hold under the new mechanism.
+//
+// Real Development gk_principal + real collection_item rows (via the real
+// collection module), a real signed HMAC token, and the real
+// api/enrich.js default export invoked directly. Every row is cleaned up.
 //
 // Invoke: node tests/gk253-durable-category-authority.test.js
 
@@ -97,11 +105,6 @@ async function makeCollectionItem(id, assetCategory, attributes) {
 
 async function runOnce({ label, requestBody, bearer, expectFetchComps = false, expectPriceCharting = false }) {
   console.log(`\n--- ${label} ---`);
-  // Pool titles mirror the REQUEST's own title/issue so real title-
-  // similarity/issue-match filtering in comps.js doesn't reject everything
-  // as a wrong-book mismatch -- keeps each case's pricing behavior
-  // attributable to the category-authority logic under test, not an
-  // incidental comp-pool/title mismatch.
   const reqTitle = requestBody.title || 'Test Item';
   const reqIssue = requestBody.issue || '';
   const POOL = [
@@ -153,23 +156,20 @@ try {
   {
     const id = `${TAG}-j1`;
     await makeCollectionItem(id, 'book', { title: 'The Rationalists', author: 'Test Author', issue: null });
-    // Refresh Market Data's real shape: skipImageSearch:true, no assetType
-    // field at all, no book signals in the bare title -- WITHOUT durable
-    // authority this would derive assetType='comic'.
     const { body, logs } = await runOnce({
       label: 'J1 refresh on persisted Book',
       bearer: TOKEN,
       requestBody: {
         title: 'The Rationalists', issue: null, grade: 'Very Good', confidence: 'high',
         isGraded: false, numericGrade: null, year: '2020', publisher: null,
-        skipImageSearch: true, collectionItemId: id,
+        skipImageSearch: true, collectionItemId: id, ownedRefresh: true,
       },
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[category-authority]') && l.includes('durable=\"book\"')), 'the [category-authority] override genuinely fired for this request');
+    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] pinning')), 'the durable-authority pin fired for this request');
     assertEq(body?.assetType, 'book', 'out.assetType forced to durable "book" despite no book signal in this request');
     assertEq(body?.categoryAuthoritySource, 'durable-collection-item', 'out.categoryAuthoritySource marks this as durable-authority-derived');
     assertTrue(body?.refusedToPrice === true, 'refusedToPrice === true');
-    assertEq(body?.contract?.state, 'REFUSED', 'contract.state === REFUSED, freshly assembled this request (J8)');
+    assertEq(body?.contract?.state, 'REFUSED', 'contract.state === REFUSED, freshly assembled this request');
     assertEq(body?.price, null, 'price stays null');
     assertEq(body?.contract?.listable, false, 'contract.listable === false');
     assertFalse(String(body?.decision?.action || '').startsWith('LIST'), 'decision.action does not start with LIST');
@@ -185,42 +185,34 @@ try {
       requestBody: {
         title: 'The Rationalists', issue: null, grade: 'Very Good', confidence: 'high',
         isGraded: false, numericGrade: null, year: '2020', publisher: null,
-        assetType: 'book', collectionItemId: id,
+        collectionItemId: id, ownedReidentify: true,
       },
     });
     assertEq(body?.assetType, 'book', 'stays book (pipeline and durable authority agree)');
     assertTrue(body?.refusedToPrice === true, 'refusedToPrice === true');
   }
 
-  // ═══ J3 — Persisted Book -> Re-identify with CONFLICTING Comic classification -> cannot unlock economics ═══
+  // ═══ J3 — Persisted Book -> Re-identify with CONFLICTING Comic classification -> held, not silently comic-priced ═══
   {
     const id = `${TAG}-j3`;
     await makeCollectionItem(id, 'book', { title: 'Some Confused Scan' });
     const { body, logs } = await runOnce({
       label: 'J3 re-identify conflicts (comic-shaped evidence)',
       bearer: TOKEN,
-      // A genuinely comic-shaped identification this time -- title+issue+
-      // publisher, no book signals -- what a fresh Vision call disagreeing
-      // with the established authority would look like.
       requestBody: {
         title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high',
         isGraded: false, numericGrade: null, year: '1988', publisher: 'Marvel',
-        collectionItemId: id,
+        collectionItemId: id, ownedReidentify: true,
       },
-      expectFetchComps: false, // still refused -- durable authority wins, no comic economics unlock
-      // PRE-EXISTING, NOT a GK-253 behavior: PriceCharting is queried during
-      // IDENTITY/year resolution whenever `issue` is present (CLAUDE.md:
-      // "PriceCharting skipped when issue=null"), before GK-250's allowlist
-      // gate and independent of category. This call's result never reaches
-      // out.price/out.comps for a refused category (both are explicitly
-      // nulled by the allowlist gate regardless) -- disclosed in the GK-253
-      // report's Section K rather than silently hidden by a wrong
-      // expectation here.
-      expectPriceCharting: true,
+      expectFetchComps: false,
+      expectPriceCharting: true, // pre-existing, unrelated identity/year PC call — see GK-253's own disclosed note
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[category-authority]')), 'durable override fired');
+    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] RE-IDENTIFY CONFLICT')), 'conflict detected and logged');
     assertEq(body?.assetType, 'book', 'durable "book" authority preserved despite this request\'s own comic-shaped identification');
-    assertTrue(body?.refusedToPrice === true, 'refusedToPrice === true -- conflict cannot unlock comic economics');
+    assertEq(body?.categoryConflict?.durable, 'book', 'categoryConflict.durable records the preserved value');
+    assertEq(body?.categoryConflict?.freshlyDerived, 'comic', 'categoryConflict.freshlyDerived records what this request actually derived');
+    assertTrue(body?.refusedToPrice === true, 'refusedToPrice === true -- conflict cannot unlock economics');
+    assertEq(body?.pricingSource, 'refused-category-reidentify-conflict', 'the dedicated conflict pricingSource, not the generic allowlist one');
     assertEq(body?.contract?.state, 'REFUSED', 'contract.state === REFUSED (hold/review, not silently comic-priced)');
   }
 
@@ -235,10 +227,10 @@ try {
         title: 'The Rationalists', issue: null, grade: 'Very Good', confidence: 'high',
         isGraded: false, numericGrade: null, year: '2020', publisher: null,
         assetType: 'comic', // <-- the tampering attempt
-        collectionItemId: id,
+        skipImageSearch: true, collectionItemId: id, ownedRefresh: true,
       },
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[category-authority]')), 'durable override fired against the client-supplied value');
+    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] pinning')), 'durable pin fired against the client-supplied value');
     assertEq(body?.assetType, 'book', 'server-resolved durable authority wins over the client-supplied assetType="comic"');
     assertTrue(body?.refusedToPrice === true, 'refusedToPrice === true -- client cannot self-authorize economics');
     assertEq(body?.contract?.listable, false, 'listable stays false');
@@ -249,22 +241,18 @@ try {
     const id = `${TAG}-j5`;
     await makeCollectionItem(id, 'comic', { title: 'Weird War Tales', issue: '64', author: null });
     const { body } = await runOnce({
-      label: 'J5 legacy comic row, ordinary comic request',
+      label: 'J5 legacy comic row, ordinary comic refresh',
       bearer: TOKEN,
       requestBody: {
         title: 'Weird War Tales', issue: '64', grade: 'Fine', confidence: 'high',
         isGraded: false, numericGrade: null, year: '1978', publisher: 'DC',
-        collectionItemId: id,
+        skipImageSearch: true, collectionItemId: id, ownedRefresh: true,
       },
-      expectFetchComps: true, // durable='comic' -> no override -> normal comic economics run
-      expectPriceCharting: true, // issue present -> PC identity/year-resolution call, unrelated to category
+      expectFetchComps: true,
+      expectPriceCharting: true,
     });
-    assertEq(body?.assetType, 'comic', 'stays comic -- durable "comic" authority never overrides anything');
-    assertTrue(body?.categoryAuthoritySource === undefined, 'no categoryAuthoritySource stamp -- this was never an override');
-    // Same disclosed, pre-existing GK-238 thin-fixture behavior as the
-    // final comic-regression case below -- the meaningful proof is that
-    // whatever refusal (if any) occurs is NOT the category allowlist and
-    // NOT a GK-253 override.
+    assertEq(body?.assetType, 'comic', 'stays comic -- durable "comic" authority pins to comic, same outcome as before');
+    assertEq(body?.categoryAuthoritySource, 'durable-collection-item', 'now DOES stamp categoryAuthoritySource (GK-254 pins symmetrically, unlike the old GK-253 non-comic-only override)');
     assertTrue(body?.pricingSource !== 'refused-category-pricing-not-authorized', 'refusal (if any) is not from the category allowlist');
   }
 
@@ -278,67 +266,46 @@ try {
       requestBody: {
         title: 'Unidentified Collectible', issue: null, grade: null, confidence: 'high',
         isGraded: false, numericGrade: null, year: null, publisher: null,
-        collectionItemId: id,
+        skipImageSearch: true, collectionItemId: id, ownedRefresh: true,
       },
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[category-authority]') && l.includes('durable=\"generic\"')), 'durable "generic" authority resolved and overrides');
+    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] pinning')), 'durable "generic" authority resolved and pinned');
     assertEq(body?.assetType, 'generic', 'assetType forced to durable "generic"');
     assertTrue(body?.refusedToPrice === true, 'refused -- generic never reaches comic economics');
   }
 
-  // ═══ J7 — No durable row at all (brand-new scan, race / never persisted) -> falls through safely, merchandise still refused ═══
+  // ═══ J7 — bare collectionItemId, NO ownedRefresh/ownedReidentify flag (bulk-import/duplicate-confirm shape) -> untouched ═══
   {
+    const id = `${TAG}-j7`;
+    await makeCollectionItem(id, 'book', { title: 'A Real Owned Book' });
     const { body, logs } = await runOnce({
-      label: 'J7 no durable row (fresh scan race) -- merchandise still refused by GK-250',
+      label: 'J7 bare collectionItemId, no flag -- fresh-save shape, must NOT trigger owned-asset logic',
       bearer: TOKEN,
       requestBody: {
-        title: 'Test Merchandise Item', assetType: 'merchandise', grade: null, confidence: 'high',
+        title: 'A Real Owned Book', issue: null, grade: 'Very Good', confidence: 'high',
         isGraded: false, numericGrade: null, publisher: null,
-        collectionItemId: `${TAG}-never-created`, // does not exist -> NotFoundError, caught, non-fatal
+        collectionItemId: id, // real durable row exists, but NEITHER flag is set
       },
+      expectFetchComps: true, // correctly proceeds as an ordinary comic request -- this IS the desired behavior for a fresh-save shape
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[category-authority] durable resolution unavailable')), 'missing row handled gracefully, logged, non-fatal');
-    assertEq(body?.assetType, 'merchandise', 'falls through to pipeline-derived value');
-    assertTrue(body?.refusedToPrice === true, 'GK-250s pre-existing allowlist still refuses merchandise on its own');
+    assertFalse(!!logs.find((l) => l.startsWith('[owned-asset-authority]')), 'GK-254 owned-asset logic never even attempted -- this is deliberately the bulk-import/duplicate-confirm/fresh-scan shape, per Section A');
+    assertEq(body?.assetType, 'comic', 'falls through entirely to pipeline-derived value (comic default), unaffected by the real durable "book" row');
   }
 
-  // ═══ No bearer token at all -- durable resolution never attempted, existing anonymous behavior unchanged ═══
+  // ═══ No bearer token, but ownedRefresh:true and a REAL durable row -- now FAILS CLOSED (GK-254), not silently ignored ═══
   {
     const { body, logs } = await runOnce({
-      label: 'anonymous request, collectionItemId present but no token -- no DB call attempted',
+      label: 'ownedRefresh:true, no token -- fails closed (superseded GK-253 behavior)',
       bearer: null,
       requestBody: {
-        title: 'The Rationalists', assetType: 'book', grade: null, confidence: 'high',
+        title: 'The Rationalists', grade: null, confidence: 'high',
         isGraded: false, numericGrade: null, publisher: null,
-        collectionItemId: `${TAG}-j1`, // a REAL row (from J1) -- must NOT be reachable without a token
+        skipImageSearch: true, collectionItemId: `${TAG}-j1`, ownedRefresh: true,
       },
     });
-    assertFalse(!!logs.find((l) => l.startsWith('[category-authority] durable authority overrides')), 'no override attempted without a valid bearer token, even though a real durable row exists under this id');
-    assertEq(body?.assetType, 'book', 'still book here only because the request itself already said so (pipeline-derived), not durable authority');
-  }
-
-  // ═══ Comic regression: ordinary comic, no collectionItemId at all (the overwhelming majority of traffic) ═══
-  {
-    const { body } = await runOnce({
-      label: 'ordinary comic scan, no collectionItemId',
-      bearer: null,
-      requestBody: {
-        title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high',
-        isGraded: false, numericGrade: null, year: '1988', publisher: 'Marvel',
-      },
-      expectFetchComps: true,
-      expectPriceCharting: true,
-    });
-    assertEq(body?.assetType, 'comic', 'ordinary comic scan totally unaffected');
-    // The full economic pipeline genuinely ran (fetchComps + PC executed,
-    // matchConfidence computed above) -- this thin 1-comp mocked fixture
-    // then correctly hits the real, PRE-EXISTING GK-238 "insufficient
-    // verified comps" guard (pricingSource='refused-tier-bypass-detected',
-    // warnings:['no-sold-candidates']), completely unrelated to category
-    // authority. The regression proof that matters here is that this is
-    // NOT GK-250's allowlist and NOT a GK-253 override.
-    assertTrue(body?.pricingSource !== 'refused-category-pricing-not-authorized', 'refusal (if any) is not from the category allowlist');
-    assertTrue(body?.categoryAuthoritySource === undefined, 'no GK-253 override touched this request at all');
+    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] FAIL CLOSED')), 'fails closed, logged');
+    assertTrue(body?.ownedAssetAuthRequired === true, 'ownedAssetAuthRequired stamped for the client to detect');
+    assertTrue(body?.refusedToPrice === true, 'refused, not merely reverted to pipeline-derived assetType');
   }
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);

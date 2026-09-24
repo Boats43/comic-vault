@@ -2316,7 +2316,9 @@ export default async function handler(req, res) {
       manualAuthority, // Track B Phase 0, Commit 3 — { correctedBy, correctedFields }, present only on a card-correction request
       priorIdentity,   // Track B Phase 0, Commit 3 — { title, issue, year, publisher, issueAuthority } snapshot of the card BEFORE correction, client-supplied (server has no other way to know the prior state)
       scanId,          // Slice 7 — client-minted per-scan ownership identifier (src/lib/scanOwnership.js), echoed back verbatim so App.jsx's gradeBlob can verify this response belongs to the scan that requested it. Absent on requests from older clients or non-gradeBlob call sites (e.g. refreshMarketData) — always optional.
-      collectionItemId, // GK-145 (GrailKey Dispatch 2026-08-21) — the IndexedDB collection record's own item.id, threaded through by App.jsx on collection-originated requests only (refreshMarketData, auto-refresh, reIdentifyBook, submitManualCorrection, bulk import, gradeBlob/duplicate-confirm post-save). Null on a free-standing scan not yet saved to the collection. MEASUREMENT-ONLY: read here solely to snapshot into the scanlog record below (src/lib/scanLog.js) — this value drives no identity, pricing, or decision logic in this handler and never will without a separate, explicit greenlight. Not proof of physical-copy identity — see scanLog.js's own JSDoc on this field.
+      collectionItemId, // GK-145 (GrailKey Dispatch 2026-08-21) — the IndexedDB collection record's own item.id, threaded through by App.jsx on collection-originated requests only (refreshMarketData, auto-refresh, reIdentifyBook, submitManualCorrection, bulk import, gradeBlob/duplicate-confirm post-save). Null on a free-standing scan not yet saved to the collection. Also snapshotted into the scanlog record below (src/lib/scanLog.js), NOT proof of physical-copy identity there — see scanLog.js's own JSDoc. GK-253/GK-254 (2026-09-24): now ALSO drives real identity/economic logic, but ONLY when paired with the explicit ownedRefresh/ownedReidentify flag below — never on its own (a bare collectionItemId with neither flag, e.g. a fresh gradeBlob/bulk-import/duplicate-confirm post-save call, is deliberately left exactly as measurement-only as before; see GK-254's own Section A trace for why those flows cannot be safely inferred from collectionItemId presence alone).
+      ownedRefresh,    // GK-254 — explicit flow marker. true ONLY for refreshMarketData/auto-refresh/submitManualCorrection (App.jsx): "this request targets an already-owned Collection item and carries no fresh identification evidence that should ever be allowed to silently change its established category." Absent/false everywhere else, including every first-time-save flow (gradeBlob's initial scan, bulk import, duplicate-confirm) — those must never be gated by owned-asset fail-closed logic, since they have no established durable authority yet to protect (GK-254 Section A).
+      ownedReidentify, // GK-254 — explicit flow marker. true ONLY for reIdentifyBook (App.jsx): "this request targets an already-owned Collection item AND carries a genuine fresh identification pass (real Vision + image search) whose result may legitimately conflict with established durable authority." Distinct from ownedRefresh: a conflict here must be held/refused, never silently resolved in either direction (GK-254 Section E).
     } = req.body || {};
 
     // Track B Phase 0, Commit 3 — Safeguards 1+2. prepareManualCorrectionRequest
@@ -2528,6 +2530,150 @@ export default async function handler(req, res) {
     // Defaults to 'comic' when not provided (backward compatibility).
     out.assetType = assetType || 'comic';
     console.log(`[enrich-entry] assetType from req.body: ${assetType}, out.assetType: ${out.assetType}`);
+
+    // ─────────────────────────────────────────────────────────────────
+    // GK-254 — owned-asset authority fail-closed + symmetric category
+    // precedence. Supersedes GK-253's original late-stage override (was
+    // positioned just before the GK-250 allowlist, ~line 6591 pre-this-
+    // dispatch) with two real, distinct fixes GK-253's own final
+    // pre-push audit (commit d6cedbd) found and proved through real
+    // execution, neither fixed at the time:
+    //
+    // GAP 1 (auth plumbing): the OLD override silently did nothing when
+    // no valid Bearer token was present -- collectionItemId still
+    // arrived, but the request fell through to ordinary pipeline
+    // derivation exactly as if no durable row existed at all. A real
+    // owned Book, refreshed after its session token's fixed 12h TTL had
+    // silently expired (no refresh mechanism, and the top-level
+    // `grailkeyAuthed` React state only updates at mount/explicit
+    // logout), could reach comic-calibrated economics. FIXED: for the
+    // specific flows that claim to target an already-owned item
+    // (ownedRefresh / ownedReidentify, explicit flags -- see the
+    // destructure comment above for exactly which real App.jsx callers
+    // set each, and why a bare collectionItemId with neither flag is
+    // deliberately left alone), missing/invalid/expired auth or an
+    // unverifiable owned row now FAILS CLOSED immediately, before any
+    // identity/comps/pricing work runs at all -- never falls back to
+    // stateless category derivation.
+    //
+    // GAP 2 (asymmetric protection): the OLD override only ever fired
+    // for a resolved NON-'comic' durable value -- a resolved 'comic'
+    // authority was never protected from this SAME request's own fresh,
+    // pre-existing (Session 4B, unrelated to GK-253/254) book/
+    // merchandise derivation further below (~line 3828/3853), proven
+    // reproducible via a real Vision title misread (e.g. a hardcover/
+    // omnibus reprint's own cover text) with zero marketplace evidence
+    // involved at all. FIXED: for ownedRefresh, resolved durable
+    // authority is PINNED here, immediately, in EITHER direction,
+    // before that speculative derivation ever runs (durableAuthorityPinned
+    // guards both sites below) -- marketplace/title evidence may still
+    // update PRICING on an ordinary refresh, it may never silently
+    // change CATEGORY again, in either direction. For ownedReidentify,
+    // authority is deliberately left UNPINNED here -- Section E requires
+    // a genuine fresh identification pass to complete first so a real
+    // conflict against durable authority can be detected and held, not
+    // silently avoided; see the conflict check positioned where the OLD
+    // GK-253 override used to sit, right before the GK-250 allowlist.
+    //
+    // Deliberately does NOT trust request-body assetType/assetCategory
+    // for authority at any point -- only this handler's own DB read.
+    // Every other flow (fresh gradeBlob scan, bulk import, duplicate-
+    // confirm, Watch Mode preview, barcode identify, manual text entry,
+    // warmup ping) sets neither flag and is completely unaffected --
+    // confirmed by direct trace of every real /api/enrich call site in
+    // App.jsx, not assumed (GK-254 Section A).
+    let durableCategoryAuthority = null;
+    let durableAuthorityPinned = false;
+    if ((ownedRefresh === true || ownedReidentify === true) && collectionItemId) {
+      let authFailedGK254 = false;
+      try {
+        const authHeaderGK254 = req.headers?.authorization || req.headers?.Authorization;
+        const bearerTokenGK254 = authHeaderGK254 && authHeaderGK254.startsWith('Bearer ')
+          ? authHeaderGK254.slice(7).trim()
+          : null;
+        if (!bearerTokenGK254) {
+          authFailedGK254 = true;
+        } else {
+          const authModGK254 = await import('../src/modules/auth/index.js');
+          let principalIdGK254 = null;
+          try {
+            ({ principalId: principalIdGK254 } = authModGK254.verifyToken(bearerTokenGK254));
+          } catch {
+            principalIdGK254 = null; // invalid/expired token — not a crash
+          }
+          if (!principalIdGK254) {
+            authFailedGK254 = true;
+          } else {
+            const collectionModGK254 = await import('../src/modules/collection/index.js');
+            try {
+              const ownedItemGK254 = await collectionModGK254.getMyCollectionItem({
+                principalId: principalIdGK254,
+                id: collectionItemId,
+              });
+              if (ownedItemGK254?.assetCategory) {
+                durableCategoryAuthority = ownedItemGK254.assetCategory;
+              } else {
+                authFailedGK254 = true; // resolved row, no category — treat as unresolved
+              }
+            } catch (e) {
+              // NotFoundError / AuthorizationFailedError / DB error — unlike
+              // GK-253's original fresh-scan race tolerance, an
+              // ownedRefresh/ownedReidentify request explicitly CLAIMS to
+              // already be owned; a row that can't be verified here is a
+              // genuine fail-closed case, not a benign first-save race.
+              authFailedGK254 = true;
+            }
+          }
+        }
+      } catch (e) {
+        authFailedGK254 = true;
+      }
+
+      if (authFailedGK254) {
+        console.log(
+          `[owned-asset-authority] FAIL CLOSED — collectionItemId=${JSON.stringify(collectionItemId)} ` +
+          `ownedRefresh=${ownedRefresh === true} ownedReidentify=${ownedReidentify === true}: ` +
+          `authentication missing/invalid/expired, or the owned row could not be verified for this principal`
+        );
+        out.ownedAssetAuthRequired = true;
+        out.refusedToPrice = true;
+        out.pricingSource = 'refused-owned-asset-auth-required';
+        out.title = title || null;
+        out.price = null;
+        out.priceLow = null;
+        out.priceHigh = null;
+        out.comps = null;
+        out.rawComps = null;
+        out.soldComps = [];
+        out.priceNote = 'Your session could not be verified for this owned item — please sign in again, then retry.';
+        out.confidenceLevel = 'LOW';
+        out.decision = {
+          action: 'RESEARCH',
+          confidence: 'HIGH',
+          blockers: [],
+          warnings: ['owned-asset-auth-required'],
+          nextStep: 'Sign in again, then retry — this item\'s established category could not be safely verified.',
+        };
+        if (out.variantNote === undefined) out.variantNote = null;
+        if (out.variantApplicability === undefined) out.variantApplicability = null;
+        return res.status(200).json(finalizeResponse(out)); // STOP — fail closed, no identity/comps/pricing work at all
+      }
+
+      if (ownedRefresh === true) {
+        if (out.assetType !== durableCategoryAuthority) {
+          console.log(
+            `[owned-asset-authority] pinning out.assetType to durable value BEFORE per-request derivation: ` +
+            `derived=${JSON.stringify(out.assetType)} durable=${JSON.stringify(durableCategoryAuthority)}`
+          );
+        }
+        out.assetType = durableCategoryAuthority;
+        out.categoryAuthoritySource = 'durable-collection-item';
+        durableAuthorityPinned = true;
+      }
+      // ownedReidentify: durableCategoryAuthority is resolved but
+      // deliberately left UNPINNED here — see the conflict check below.
+    }
+    // ─────────────────────────────────────────────────────────────────
 
     // Prefer explicit issue param, fall back to parsing from title.
     // Ship #20a.6.22 hotfix: treat "Unknown" as null (Vision failure case).
@@ -3825,7 +3971,13 @@ export default async function handler(req, res) {
     // Do not trust client handoff (grade→App→enrich drops assetType repeatedly).
     // Server derivation is source of truth. Client req.body.assetType is a hint
     // only — if it arrives as 'book', trust it; otherwise derive from data we have.
-    if (out.assetType !== 'book' && out.assetType !== 'comic' || out.assetType === 'comic') {
+    // GK-254 — skipped entirely once durable owned-asset authority has
+    // already pinned out.assetType (ownedRefresh only; see the block near
+    // this handler's top) — this speculative per-request re-derivation is
+    // exactly the mechanism GK-253's final audit proved could otherwise
+    // silently flip a durably-owned Comic to 'book' from a Vision title
+    // misread alone, with zero marketplace evidence involved.
+    if (!durableAuthorityPinned && (out.assetType !== 'book' && out.assetType !== 'comic' || out.assetType === 'comic')) {
       // Count eBay results categorized as books
       const bookCatRows = (parsedVisualRows || []).filter(r =>
         (r.categories || []).some(c =>
@@ -3850,7 +4002,11 @@ export default async function handler(req, res) {
     // Runs AFTER book detection so book-category hits take precedence.
     // Only fires when parsedVisualRows available (image-search path only).
     // Barcode/title-search paths skip this gate (no leafCategoryIds).
-    if (out.assetType === 'comic' && parsedVisualRows?.length > 0) {
+    // GK-254 — same durableAuthorityPinned guard as the book-derivation
+    // block above: a pinned durable 'comic' authority must not be
+    // silently flipped to 'merchandise' by this same speculative,
+    // per-request eBay-category vote either.
+    if (!durableAuthorityPinned && out.assetType === 'comic' && parsedVisualRows?.length > 0) {
       const categoryVotes = parsedVisualRows
         .map(r => inferAssetTypeFromCategories(r.leafCategoryIds))
         .filter(Boolean); // null when no category data on a row
@@ -6588,72 +6744,77 @@ export default async function handler(req, res) {
       } // end else (below-floor: unpromoted, early-return path)
     } // end if (identityRefused)
 
-    // GK-253 — durable category authority resolution. An owned asset's
-    // established, server-persisted category (collection_item.asset_category,
-    // db/data0/0026_collection_item.sql) must survive an ordinary market
-    // refresh/re-identify: neither this request's own fresh identification
-    // pass NOR a client-supplied `assetType` value may silently unlock the
-    // GK-250 allowlist immediately below once that authority is established.
-    // Read-only, best-effort, and NEVER fatal to the response: no
-    // collectionItemId, no bearer token, an invalid/expired token, a row
-    // that doesn't exist yet (the normal race on a brand-new scan's very
-    // first enrich call — addToCatalogue's server sync is fire-and-forget
-    // and may not have landed yet), or any DB error all mean "no durable
-    // authority resolvable this request" and fall through to the
-    // identification-pipeline-derived out.assetType exactly as before this
-    // dispatch (the correct behavior for a genuinely fresh, not-yet-owned
-    // capture — Permanent Ruling below applies to ESTABLISHED authority,
-    // not to a first-ever identification pass that has none yet).
+    // GK-254 — re-identify category-conflict check. Section E: re-
+    // identification is NOT ordinary market refresh — a genuine fresh
+    // identification pass (real Vision + image search) was deliberately
+    // allowed to run above, unpinned, so its result can be compared
+    // against durable authority HERE, once out.assetType is fully
+    // finalized (same point GK-250's own allowlist immediately below
+    // relies on). durableCategoryAuthority is non-null here only for a
+    // successfully-resolved ownedReidentify request (the fail-closed
+    // auth check already returned early otherwise, near this handler's
+    // top) that was deliberately left unpinned.
     //
-    // Only a RESOLVED, non-'comic' durable category ever overrides
-    // anything here — a resolved 'comic' (the default for every one of the
-    // 37 real, pre-existing Production rows verified read-only this
-    // dispatch) changes nothing, so ordinary comic behavior is byte-for-byte
-    // unchanged. Deliberately does NOT trust `assetCategory` from the
-    // request body at all — only the server's own read of the durable row.
-    //
-    // PERMANENT RULING (GK-253): marketplace evidence is replaceable;
-    // established category authority is not. Missing category data must
-    // never default to an economically authorized category such as
-    // 'comic' — this block only ever narrows (forces a non-comic category
-    // to stick), never widens, authorization.
-    let durableCategoryAuthority = null;
-    if (collectionItemId) {
-      try {
-        const authHeaderGK253 = req.headers?.authorization || req.headers?.Authorization;
-        const bearerTokenGK253 = authHeaderGK253 && authHeaderGK253.startsWith('Bearer ')
-          ? authHeaderGK253.slice(7).trim()
-          : null;
-        if (bearerTokenGK253) {
-          const authModGK253 = await import('../src/modules/auth/index.js');
-          const { principalId: principalIdGK253 } = authModGK253.verifyToken(bearerTokenGK253);
-          if (principalIdGK253) {
-            const collectionModGK253 = await import('../src/modules/collection/index.js');
-            const ownedItemGK253 = await collectionModGK253.getMyCollectionItem({
-              principalId: principalIdGK253,
-              id: collectionItemId,
-            });
-            if (ownedItemGK253?.assetCategory) {
-              durableCategoryAuthority = ownedItemGK253.assetCategory;
-            }
-          }
-        }
-      } catch (e) {
+    // Agreement -> continue normally (falls through to GK-250's
+    // allowlist below, which will pass a comic/refuse a non-comic
+    // exactly as it always has). Conflict -> preserve durable authority,
+    // hold/refuse — never silently adopt the fresh category, never
+    // silently keep running under it either.
+    if (ownedReidentify === true && durableCategoryAuthority && !durableAuthorityPinned) {
+      if (out.assetType !== durableCategoryAuthority) {
+        const freshlyDerivedAssetTypeGK254 = out.assetType;
         console.log(
-          `[category-authority] durable resolution unavailable ` +
-          `(${e?.constructor?.name || 'error'}: ${e?.message || e}) — ` +
-          `falling through to pipeline-derived assetType`
+          `[owned-asset-authority] RE-IDENTIFY CONFLICT — durable=${JSON.stringify(durableCategoryAuthority)} ` +
+          `freshlyDerived=${JSON.stringify(freshlyDerivedAssetTypeGK254)} collectionItemId=${JSON.stringify(collectionItemId)}: ` +
+          `preserving durable authority, holding economics pending explicit operator review`
         );
+        out.assetType = durableCategoryAuthority; // preserve established authority — never silently adopt the fresh read
+        out.categoryAuthoritySource = 'durable-collection-item';
+        out.categoryConflict = {
+          durable: durableCategoryAuthority,
+          freshlyDerived: freshlyDerivedAssetTypeGK254,
+        };
+        out.refusedToPrice = true;
+        out.pricingSource = 'refused-category-reidentify-conflict';
+        out.title = confirmedTitle;
+        out.price = null;
+        out.priceLow = null;
+        out.priceHigh = null;
+        out.comps = null;
+        out.rawComps = null;
+        out.soldComps = [];
+        out.priceNote =
+          `Re-identification suggests a different category ("${freshlyDerivedAssetTypeGK254}") than this item's ` +
+          `established one ("${durableCategoryAuthority}") — the established category is preserved and pricing is ` +
+          `held pending explicit review.`;
+        out.confidenceLevel = 'LOW';
+        out.decision = {
+          action: 'RESEARCH',
+          confidence: 'HIGH',
+          blockers: [],
+          warnings: ['category-reidentify-conflict'],
+          nextStep: 'Re-identification disagrees with this item\'s established category — review manually before pricing.',
+        };
+        logTitleStripSummary();
+        out.pipelineAudit = buildPipelineAudit({
+          traceId: pipelineTraceId,
+          buildSha: buildId,
+          identityRevision: pipelineIdentityRevision,
+          familyIssueConsensus: identity?.familyIssueConsensus || null,
+          familyKey: confirmedTitle ?? null,
+          pricingIssue,
+          confirmedIssue,
+          outIssue: out.issue ?? null,
+          prePricingOk: pricingIssue === confirmedIssue,
+          preResponseOk: (out.issue ?? null) === (confirmedIssue ?? null),
+          decision: out.decision,
+        });
+        if (out.variantNote === undefined) out.variantNote = confirmedVariant || null;
+        if (out.variantApplicability === undefined) out.variantApplicability = null;
+        return res.status(200).json(finalizeResponse(out)); // STOP — conflict held, no comps, no pricing
+      } else {
+        out.categoryAuthoritySource = 'durable-collection-item';
       }
-    }
-    if (durableCategoryAuthority && durableCategoryAuthority !== 'comic' && out.assetType !== durableCategoryAuthority) {
-      console.log(
-        `[category-authority] durable authority overrides this request's derived assetType: ` +
-        `derived=${JSON.stringify(out.assetType)} durable=${JSON.stringify(durableCategoryAuthority)} ` +
-        `collectionItemId=${JSON.stringify(collectionItemId)}`
-      );
-      out.assetType = durableCategoryAuthority;
-      out.categoryAuthoritySource = 'durable-collection-item';
     }
 
     // GK-250 (U6.0C) — economic authorization allowlist. Pre-push review of
