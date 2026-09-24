@@ -43,7 +43,11 @@ export const median = (arr) => {
  * or null when anchor is not warranted. Pure — no side effects.
  *
  * Skip conditions:
- *   isMegaKey        → floor map at api/mega-keys.js is authoritative
+ *   authorityFloorActive → an authoritative floor from elsewhere already
+ *                          governs this price (today's sole source: the
+ *                          Mega Key floor map, api/mega-keys.js — this
+ *                          option is domain-neutral, the caller decides
+ *                          what counts as an authoritative floor)
  *   compsExhausted   → no trusted comps to anchor against
  *   rawComps missing / count≤1 / count≥3 → no thin-pool situation
  *   highest missing / ≤0                  → no upper bound to cap against
@@ -61,14 +65,14 @@ export const median = (arr) => {
  * Conservative guard: suppress anchor when anchorCap < rawComps.lowest.
  */
 export const computeThinPoolAnchor = (currentPrice, rawComps, opts = {}) => {
-  const { isMegaKey, compsExhausted, tierPathActive } = opts;
+  const { authorityFloorActive, compsExhausted, tierPathActive } = opts;
   // GL-4 (EX-1): tier engine owns pricing when a tier fired — the anchor
   // caps against the ACTIVE pool and must never override sold-derived tier
   // output. Action #33: 2 merch actives ($13/$23.45) capped a 10-sold
   // tier-2.5 price $291.21 → $24.62. Same gate #20b-FIX2 gave the legacy
   // ask-floor.
   if (tierPathActive) return null;
-  if (isMegaKey || compsExhausted) return null;
+  if (authorityFloorActive || compsExhausted) return null;
   if (!rawComps || typeof rawComps.count !== 'number') return null;
   if (rawComps.count <= 1 || rawComps.count >= 3) return null;
   if (typeof rawComps.highest !== 'number' || rawComps.highest <= 0) return null;
@@ -180,9 +184,13 @@ export const computeSanityFallback = (pcNum, compsAvg, opts = {}) => {
  *     grade-aware pricing.
  *
  * Skip conditions (matches Ship #13.1 / Ship #14 helpers):
- *   isMegaKey       → mega-key floor is authoritative (one-way raise
- *                     downstream re-corrects anyway, but skip to avoid
- *                     pointless price thrash and observability noise)
+ *   authorityFloorActive → an authoritative floor from elsewhere already
+ *                     governs this price (today's sole source: the Mega
+ *                     Key floor map — its one-way raise downstream
+ *                     re-corrects anyway, but skip to avoid pointless
+ *                     price thrash and observability noise). Domain-
+ *                     neutral option name — the caller decides what
+ *                     counts as an authoritative floor.
  *   compsExhausted  → AI verify rejected 100% of comps; rawComps.lowest
  *                     is null and compsFromEbay.lowest is contaminated
  *   pop missing / pop.total === 0  → no signal
@@ -194,8 +202,8 @@ export const computeSanityFallback = (pcNum, compsAvg, opts = {}) => {
  * apply, or null when it should not. Pure — no side effects.
  */
 export const computeLowGradeFloor = (currentPrice, rawComps, pop, opts = {}) => {
-  const { isMegaKey, compsExhausted, pricingSource } = opts;
-  if (isMegaKey || compsExhausted) return null;
+  const { authorityFloorActive, compsExhausted, pricingSource } = opts;
+  if (authorityFloorActive || compsExhausted) return null;
   if (pricingSource !== 'browse_api') return null;
   if (!pop || !(Number(pop.total) > 0)) return null;
   if (pop.belowGrade !== 0) return null;

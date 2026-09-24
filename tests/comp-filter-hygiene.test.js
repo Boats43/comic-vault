@@ -444,10 +444,10 @@ assertEq(
   computeThinPoolAnchor(
     50000,
     { count: 1, highest: 100 },
-    { isMegaKey: true }
+    { authorityFloorActive: true }
   ),
   null,
-  'mega-key skip (Action #1 thin pool, floor map authoritative)'
+  'authorityFloorActive skip (Action #1 thin pool, mega-key floor map authoritative)'
 );
 
 // compsExhausted skip — no trusted comps to anchor against.

@@ -123,8 +123,8 @@ assertNull(
 console.log('\nSkip flags:');
 
 assertNull(
-  computeLowGradeFloor(30, compsCheap, popBottom, { ...browsePricing, isMegaKey: true }),
-  'isMegaKey → null'
+  computeLowGradeFloor(30, compsCheap, popBottom, { ...browsePricing, authorityFloorActive: true }),
+  'authorityFloorActive → null'
 );
 assertNull(
   computeLowGradeFloor(30, compsCheap, popBottom, { ...browsePricing, compsExhausted: true }),

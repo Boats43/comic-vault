@@ -134,8 +134,12 @@ export function computeDecision(item, context = {}) {
   if (!item.title || item.title.trim() === '') {
     decision.blockers.push('missing-title');
   }
-  // Blocker: Identity incomplete (comic-specific: issue + publisher required)
-  // identityComplete flag computed by ComicAdapter
+  // Blocker: Identity incomplete. `identityComplete` is a precomputed
+  // identity-completeness primitive supplied to the decision engine —
+  // its own category-specific computation is NOT adapter-owned today
+  // (GK-147 L1, re-scoped, see docs/TICKET-REGISTRY.md GK-246). This
+  // engine only ever reads the boolean; it does not itself know or care
+  // what "complete" means for any given category.
   if (item.identityComplete === false && !isProvisionalWithRealComps) {
     decision.blockers.push('identity-incomplete');
   }

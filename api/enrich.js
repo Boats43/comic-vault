@@ -9786,7 +9786,7 @@ export default async function handler(req, res) {
     {
       const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
       const anchorResult = computeThinPoolAnchor(curPrice, rawComps, {
-        isMegaKey: isMegaKeyForFloor,
+        authorityFloorActive: isMegaKeyForFloor,
         compsExhausted,
         // GL-4 (EX-1): tier engine owns pricing — anchor never overrides
         // sold-derived tier output with active-pool math (#20b-FIX2 parity).
@@ -9824,7 +9824,7 @@ export default async function handler(req, res) {
     {
       const curPrice = parseFloat(String(out.price || '0').replace(/[$,]/g, ''));
       const lgResult = computeLowGradeFloor(curPrice, rawComps, pcPop, {
-        isMegaKey: isMegaKeyForFloor,
+        authorityFloorActive: isMegaKeyForFloor,
         compsExhausted,
         pricingSource: out.pricingSource,
       });
