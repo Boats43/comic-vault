@@ -6587,6 +6587,27 @@ export default async function handler(req, res) {
           : `[phase2] SKIPPED — identity refused, promotion blocked by cross-population guard (${identityRefusedTopFamily?.count ?? 0} member(s), otherwise above the >=3 floor)`
       );
 
+      // GK-255 — economic authority must cover every price-producing path,
+      // not just the main pipeline GK-250 already gates. This identity-
+      // refused fallback (commit a080ad3, 2026-07-18 — predates GK-249→254
+      // by two months) returns BEFORE GK-250's own `out.assetType !== 'comic'`
+      // allowlist check (~line 6845) ever runs, so a category GK-250 already
+      // decided is unauthorized for ANY automated price could still get one
+      // here, through a different door (confirmed live: The Rationalists,
+      // 2026-09-25, assetType='book', $45/$39-69 rendered from this exact
+      // branch). Reuses GK-250's own condition verbatim — no new
+      // authorization concept, no change to which categories are
+      // authorized, no change to Comic behavior (the authorized branch
+      // below is byte-identical to what this file already did before this
+      // dispatch).
+      const economicsAuthorizedGK255 = out.assetType === 'comic';
+      if (!economicsAuthorizedGK255) {
+        console.log(
+          `[economic-allowlist] (identity-refused path) assetType=${JSON.stringify(out.assetType)} not authorized for automated economics — ` +
+          `refusing the identity-refused visual-pool fallback too, before it reaches the client (GK-255)`
+        );
+      }
+
       // FIX 1: Include backfilled year/publisher in refused response
       // (backfillFromComps ran at line 1990, may have set confirmedYear/confirmedPublisher)
       const refusedOut = {
@@ -6657,7 +6678,7 @@ export default async function handler(req, res) {
           ? `Visual identification uncertain — ${familyCandidate.reason} — verify before listing`
           : 'Visual identification uncertain — verify before listing',
         confidenceLevel: 'LOW',
-        ...(fallbackPrice != null
+        ...(economicsAuthorizedGK255 && fallbackPrice != null
           ? {
               price: fmtUsd(fallbackPrice),
               priceLow: fmtUsd(fallbackLow),
@@ -6675,7 +6696,8 @@ export default async function handler(req, res) {
               visualPoolSize: fallbackPoolSize,
               visualPoolIsolatedToFamily: fallbackIsolatedToFamily,
             }
-          : {
+          : economicsAuthorizedGK255
+          ? {
               // Genuinely nothing to fall back to (thin visual pool too) —
               // this is the "truly zero data" case the ruling still reserves
               // for an honest no-price state, not a refusal wall.
@@ -6685,6 +6707,32 @@ export default async function handler(req, res) {
               priceBands: null,
               pricingSource: null,
               priceNote: 'No comp or visual-similarity data available for this identification.',
+            }
+          : {
+              // GK-255 — category not authorized for automated economics
+              // (same test GK-250 applies, reused verbatim). Identity is
+              // ALSO unresolved on this exit — that's why this branch ran
+              // at all — and both truths are preserved, not collapsed into
+              // one: listingHardLocked/listingHardLockReason/
+              // listingHardLockBanner (set above, untouched by this block)
+              // keep the identity-conflict reason as its own lock; the
+              // refusedToPrice below adds a SECOND, independent lock for
+              // the category refusal. deriveLocks() (src/lib/
+              // responseContract.js) pushes both into locks[] — one is
+              // never sacrificed for the other. contract.state resolves to
+              // REFUSED (refusedToPrice wins the state-precedence ladder
+              // over a bare hard lock), which nulls price/bands everywhere
+              // per the Customer-Grade Standard — the identity-conflict
+              // fact itself still survives in locks[]/
+              // familyCandidateDiagnostic/refusalReason regardless of which
+              // single state label rendered as contract.state.
+              price: null,
+              priceLow: null,
+              priceHigh: null,
+              priceBands: null,
+              pricingSource: 'refused-category-pricing-not-authorized',
+              priceNote: `Automated pricing is not yet authorized for asset type "${out.assetType}" — identity is also unresolved (${familyCandidate?.reason || 'visual pool disagrees with the scanned identification'}) — neither can be confirmed from this scan.`,
+              refusedToPrice: true,
             }),
       };
       // A6 dispatch — pipelineAudit on the refused exit. This branch never
