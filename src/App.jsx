@@ -21,6 +21,7 @@ import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLab
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
+import { setOperatorGrade, clearOperatorGrade, setOperatorGradingFormat, clearOperatorGradingFormat, resolveGoverningGrade, resolveGoverningGradingFormat, validateOperatorGrade } from "./lib/gradeAuthority.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -4461,6 +4462,9 @@ export function CollectionDetail({
   onReIdentify,
   onManualCorrect,
   onSetGradedOverride,
+  onClearGradedOverride,
+  onSetOperatorGrade,
+  onClearOperatorGrade,
   onAbortEnrich,
   onAddPhoto,
   onUpdateField,
@@ -4477,6 +4481,10 @@ export function CollectionDetail({
   const [reIdentifyError, setReIdentifyError] = useState(null);
   const [gradedOverridePending, setGradedOverridePending] = useState(false);
   const [gradedOverrideError, setGradedOverrideError] = useState(null);
+  // GK-213B (Operator Authority) — operator raw-grade correction input.
+  const [operatorGradeInput, setOperatorGradeInput] = useState("");
+  const [operatorGradePending, setOperatorGradePending] = useState(false);
+  const [operatorGradeError, setOperatorGradeError] = useState(null);
   const [addingPhoto, setAddingPhoto] = useState(false);
   const [addPhotoError, setAddPhotoError] = useState(null);
   const [syncing, setSyncing] = useState(false);
@@ -4748,7 +4756,11 @@ export function CollectionDetail({
 
   const handleToggleGraded = async () => {
     if (!onSetGradedOverride) return;
-    const newValue = !item.isGraded;
+    // GK-213B — toggle the GOVERNING format (certified fact > operator
+    // override > model guess), not the raw model isGraded, so a second tap
+    // after an override is already active flips the actually-displayed
+    // state rather than bouncing back to whatever the model originally said.
+    const newValue = !resolveGoverningGradingFormat(item).isGraded;
     const label = newValue ? "graded" : "raw";
     const confirmed = window.confirm(
       `Mark this book as ${label}? This corrects the grading classification and recalculates pricing accordingly.`
@@ -4762,6 +4774,53 @@ export function CollectionDetail({
       setGradedOverrideError(err.message || "Failed to update grading status");
     } finally {
       setGradedOverridePending(false);
+    }
+  };
+
+  // GK-213B — governing-format/grade resolution for THIS card's render,
+  // same pure functions api/enrich.js's own pricing already used to
+  // compute this response server-side (src/lib/gradeAuthority.js) —
+  // display-only here, never re-decides anything.
+  const governingFormat = resolveGoverningGradingFormat(item);
+  const governingGradeInfo = resolveGoverningGrade(item);
+
+  const handleClearGradedOverride = async () => {
+    if (!onClearGradedOverride) return;
+    setGradedOverridePending(true);
+    setGradedOverrideError(null);
+    try {
+      await onClearGradedOverride(item);
+    } catch (err) {
+      setGradedOverrideError(err.message || "Failed to clear grading override");
+    } finally {
+      setGradedOverridePending(false);
+    }
+  };
+
+  const handleSetOperatorGrade = async () => {
+    if (!onSetOperatorGrade) return;
+    setOperatorGradePending(true);
+    setOperatorGradeError(null);
+    try {
+      await onSetOperatorGrade(item, operatorGradeInput);
+      setOperatorGradeInput("");
+    } catch (err) {
+      setOperatorGradeError(err.message || "Failed to set operator grade");
+    } finally {
+      setOperatorGradePending(false);
+    }
+  };
+
+  const handleClearOperatorGrade = async () => {
+    if (!onClearOperatorGrade) return;
+    setOperatorGradePending(true);
+    setOperatorGradeError(null);
+    try {
+      await onClearOperatorGrade(item);
+    } catch (err) {
+      setOperatorGradeError(err.message || "Failed to clear operator grade");
+    } finally {
+      setOperatorGradePending(false);
     }
   };
 
@@ -8020,7 +8079,10 @@ export function CollectionDetail({
           </>
         )}
 
-        {/* Q109 Ruling 3 — manual isGraded correction toggle */}
+        {/* Q109 Ruling 3 — manual isGraded correction toggle. GK-213B:
+            toggles the governing format only (operatorIsGraded/
+            gradingFormatAuthority) — item.isGraded itself, the model's own
+            read, is never mutated by this control. */}
         {onSetGradedOverride && (
           <>
             <button
@@ -8046,18 +8108,94 @@ export function CollectionDetail({
                   />
                   Updating…
                 </>
-              ) : item.isGraded ? (
+              ) : governingFormat.isGraded ? (
                 "📗 Mark as Raw"
               ) : (
                 "🏷️ Mark as Graded"
               )}
             </button>
+            {governingFormat.source === 'operator' && onClearGradedOverride && (
+              <button
+                className="btn-secondary"
+                onClick={handleClearGradedOverride}
+                disabled={gradedOverridePending || refreshing || reIdentifying}
+                style={{ marginTop: 6, width: "100%", fontSize: 12, opacity: 0.85 }}
+              >
+                ↺ Clear format correction (AI read: {item.isGraded ? "Graded" : "Raw"})
+              </button>
+            )}
             {gradedOverrideError && (
               <div className="error-text small" style={{ marginTop: 6 }}>
                 {gradedOverrideError}
               </div>
             )}
           </>
+        )}
+
+        {/* GK-213B — operator raw-grade authority. "Estimated Grade"
+            terminology per this build's own requirement — never presented
+            as certified. Hidden entirely when the governing format is
+            certified/graded (Section C: operator raw-grade override is
+            not available and never consumed by pricing on that path). */}
+        {!governingFormat.isGraded && (onSetOperatorGrade || item.modelPredictedGrade || item.operatorGrade) && (
+          <div style={{ marginTop: 10, padding: 10, border: "1px solid rgba(212,175,55,0.25)", borderRadius: 6, background: "rgba(255,255,255,0.03)" }}>
+            <div className="muted small" style={{ marginBottom: 4 }}>Estimated Grade</div>
+            {item.modelPredictedGrade && (
+              <div className="small" style={{ marginBottom: 2 }}>
+                Original AI estimate: <strong>{item.modelPredictedGrade}</strong>
+              </div>
+            )}
+            {item.grade && (
+              <div className="small" style={{ marginBottom: 2 }}>
+                Current AI estimate: <strong>{item.grade}</strong>
+              </div>
+            )}
+            <div className="small" style={{ marginBottom: 6 }}>
+              Pricing uses: <strong>{governingGradeInfo.grade || "—"}</strong>{" "}
+              <span className="muted" style={{ fontSize: 11 }}>
+                ({governingGradeInfo.source === 'operator' ? "your estimate" : "AI estimate"})
+              </span>
+            </div>
+            {onSetOperatorGrade && (
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  type="text"
+                  placeholder='e.g. "VG 4.0" or "FN"'
+                  value={operatorGradeInput}
+                  onChange={(e) => setOperatorGradeInput(e.target.value)}
+                  disabled={operatorGradePending}
+                  style={{
+                    flex: 1, padding: "6px 8px", background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(212,175,55,0.25)", borderRadius: 4,
+                    color: "#f4f4f4", fontSize: 13,
+                  }}
+                />
+                <button
+                  className="btn-secondary"
+                  onClick={handleSetOperatorGrade}
+                  disabled={operatorGradePending || !operatorGradeInput.trim()}
+                  style={{ fontSize: 12 }}
+                >
+                  {operatorGradePending ? "…" : "Set"}
+                </button>
+                {item.gradeAuthority === 'OPERATOR_CONFIRMED' && onClearOperatorGrade && (
+                  <button
+                    className="btn-secondary"
+                    onClick={handleClearOperatorGrade}
+                    disabled={operatorGradePending}
+                    style={{ fontSize: 12 }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+            {operatorGradeError && (
+              <div className="error-text small" style={{ marginTop: 6 }}>
+                {operatorGradeError}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -11549,6 +11687,15 @@ export default function App() {
             pcProductId: item.pcProductId || null,
             collectionItemId: item.id, // GK-145 — auto-refresh targets an existing collection record
             ownedRefresh: true, // GK-254 — same explicit flow marker as manual refreshMarketData; auto-refresh is the same "ordinary market refresh of an owned item" class
+            // GK-213B — same rationale as manual refreshMarketData: a
+            // background auto-refresh must respect an active operator
+            // grade/format override too, or pricing would silently revert
+            // to the model grade every ~60s until the next manual refresh.
+            gradeAuthority: item.gradeAuthority || null,
+            operatorGrade: item.operatorGrade || null,
+            operatorGradeNumeric: item.operatorGradeNumeric ?? null,
+            operatorIsGraded: item.operatorIsGraded ?? null,
+            gradingFormatAuthority: item.gradingFormatAuthority || null,
           }),
           signal: controller.signal,
         })
@@ -13624,6 +13771,16 @@ export default function App() {
           scanId: refreshOwnership.scanId,
           collectionItemId: item.id, // GK-145 — refresh always targets an existing collection record
           ownedRefresh: true, // GK-254 — explicit flow marker: an ordinary market refresh of an already-owned item, no fresh identification evidence, durable category authority must be resolved server-side and must win outright
+          // GK-213B (Operator Authority) — grading-authority fields, same
+          // client-persists/re-sends-every-call pattern as grade/isGraded/
+          // numericGrade themselves. api/enrich.js's resolveGoverning*
+          // (src/lib/gradeAuthority.js) reads these to select the input to
+          // the existing, unmodified multiplier formulas.
+          gradeAuthority: item.gradeAuthority || null,
+          operatorGrade: item.operatorGrade || null,
+          operatorGradeNumeric: item.operatorGradeNumeric ?? null,
+          operatorIsGraded: item.operatorIsGraded ?? null,
+          gradingFormatAuthority: item.gradingFormatAuthority || null,
         }),
         signal: controller.signal,
       });
@@ -13681,6 +13838,14 @@ export default function App() {
       // cleared when identity becomes confident.
       q87CheckedRevision: idGatedRM ? (item.identityRevision || 0) : null,
       title: enrich.title || item.title,
+      // GK-213B — provenance display fields only, never consulted for any
+      // authority decision client-side (governing selection itself already
+      // happened server-side, in api/enrich.js, before this response was sent).
+      governingGrade: enrich.governingGrade ?? item.governingGrade ?? null,
+      governingGradeNumeric: enrich.governingGradeNumeric ?? item.governingGradeNumeric ?? null,
+      governingGradeSource: enrich.governingGradeSource ?? item.governingGradeSource ?? null,
+      governingIsGraded: enrich.governingIsGraded ?? item.governingIsGraded ?? null,
+      governingGradingFormatSource: enrich.governingGradingFormatSource ?? item.governingGradingFormatSource ?? null,
       comps: enrich.comps ?? item.comps,
       price: newPriceRM,
       priceLow: idGatedRM ? null : (enrich.priceLow ?? item.priceLow),
@@ -13900,15 +14065,53 @@ export default function App() {
   // override, then reuses refreshMarketData's exact recalculation path so
   // price/comps recompute against the corrected flag instead of just
   // flipping a display label.
+  //
+  // GK-213B (Operator Authority, K1) — this used to mutate `item.isGraded`
+  // directly (plus null certNumber/labelType/labelNotes as a side effect),
+  // the exact "do not overwrite the model-produced isGraded value" defect
+  // this build's own governing law forbids: the model's own read is real
+  // provenance, and a misread today doesn't retroactively make the model's
+  // OWN historical output something else. Now layers a SEPARATE
+  // operatorIsGraded/gradingFormatAuthority fact instead
+  // (src/lib/gradeAuthority.js) — item.isGraded itself is left completely
+  // alone, untouched by this function, exactly like modelPredictedGrade*
+  // is untouched by an ordinary grade refresh. Also no longer nulls the
+  // slab fields — per this build's own ruling, a misread CERTIFIED LABEL
+  // is a separate, explicit correction, outside this control's scope; an
+  // operator declaring the FORMAT raw doesn't retroactively claim the
+  // label itself was never real data.
   const setGradedOverride = useCallback(async (item, newIsGraded) => {
-    const patched = {
-      ...item,
-      isGraded: newIsGraded,
-      isGradedManualOverride: true,
-      // A book manually marked raw was never actually slabbed — its
-      // slab-only fields no longer apply.
-      ...(newIsGraded === false ? { certNumber: null, labelType: null, labelNotes: null } : {}),
-    };
+    const patched = { ...item, ...setOperatorGradingFormat(newIsGraded) };
+    await refreshMarketData(patched);
+  }, [refreshMarketData]);
+
+  // GK-213B — clears the operator format override; governing format
+  // returns to whatever the certified-fact/model tiers resolve to
+  // (resolveGoverningGradingFormat, src/lib/gradeAuthority.js). Does not
+  // touch item.isGraded, certNumber, labelType, or labelNotes.
+  const clearGradedOverride = useCallback(async (item) => {
+    const patched = { ...item, ...clearOperatorGradingFormat() };
+    await refreshMarketData(patched);
+  }, [refreshMarketData]);
+
+  // GK-213B — operator raw-grade SET/CHANGE. Validates against the real
+  // accepted raw-grade vocabulary (gradeAuthority.js's own list, matching
+  // what api/enrich.js's RAW_MULTIPLIERS tables actually recognize) before
+  // persisting anything — a malformed grade never reaches gradeAuthority
+  // at all. Never touches `grade`/`numericGrade` (the current automated
+  // estimate) or modelPredictedGrade* (the write-once baseline) — only
+  // operatorGrade/operatorGradeNumeric/operatorGradeSetAt/gradeAuthority.
+  const setItemOperatorGrade = useCallback(async (item, rawInput) => {
+    const result = setOperatorGrade(rawInput);
+    if (!result.ok) throw new Error(result.error);
+    const patched = { ...item, ...result.patch };
+    await refreshMarketData(patched);
+  }, [refreshMarketData]);
+
+  // GK-213B — CLEAR. Governing grade immediately returns to the current
+  // automated `grade` (never mutated by this function either way).
+  const clearItemOperatorGrade = useCallback(async (item) => {
+    const patched = { ...item, ...clearOperatorGrade() };
     await refreshMarketData(patched);
   }, [refreshMarketData]);
 
@@ -15238,6 +15441,9 @@ export default function App() {
             onReIdentify={reIdentifyBook}
             onManualCorrect={submitManualCorrection}
             onSetGradedOverride={setGradedOverride}
+            onClearGradedOverride={clearGradedOverride}
+            onSetOperatorGrade={setItemOperatorGrade}
+            onClearOperatorGrade={clearItemOperatorGrade}
             onAbortEnrich={() => {
               if (cardEnrichAbortRef.current) {
                 console.log("[enrich] card unmount/change — aborting in-flight");

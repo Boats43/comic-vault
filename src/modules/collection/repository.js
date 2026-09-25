@@ -9,6 +9,41 @@ export async function assertPrincipalExists(client, principalId) {
   return res.rowCount > 0;
 }
 
+// GK-213B (Operator Authority, K3) — attributes is otherwise a deliberate
+// FULL REPLACE (see updateItem's own comment below) — correct for every
+// ordinary field (title, images, comps, etc.), but wrong for the small set
+// of authority/provenance keys GK-213A/B place inside this same JSONB blob:
+// an ordinary client write that legitimately omits these keys (any caller
+// that doesn't know about them at all — "Add Photo," a stale client
+// version, a future caller) must never be read as "delete the established
+// authority." Presence-aware, same law as every client-side merge in
+// src/lib/dataQualityGuard.js: a key ABSENT from the incoming attributes
+// preserves whatever the existing row already had; a key PRESENT (even an
+// explicit null, e.g. an intentional CLEAR) overwrites it. Every other key
+// in `attributes` is untouched by this — still a genuine full replace.
+// Enforced here, server-side, at the one real persistence boundary, rather
+// than requiring every present and future client caller to remember to
+// resend every authority field forever.
+const PROTECTED_AUTHORITY_KEYS = [
+  'identityAuthority',
+  'modelPredictedGrade', 'modelPredictedGradeReason', 'modelPredictedGradeConfidence', 'modelPredictedAt',
+  'operatorGrade', 'operatorGradeNumeric', 'operatorGradeSetAt', 'gradeAuthority',
+  'operatorIsGraded', 'gradingFormatAuthority',
+];
+
+// `existingAttrsExpr` is a trusted SQL fragment (the current row's own
+// `attributes` column reference — either the bare column name in an UPDATE,
+// or `collection_item.attributes` inside an ON CONFLICT DO UPDATE, where the
+// bare table name resolves to the pre-existing row). `incomingParam` is
+// likewise a trusted SQL fragment (a bind parameter or EXCLUDED.attributes),
+// never caller-supplied text — PROTECTED_AUTHORITY_KEYS is a fixed literal
+// list, not user input, so building the key list into the query text here
+// carries no injection risk.
+function protectedAttributesMergeSql(existingAttrsExpr, incomingParam) {
+  const pairs = PROTECTED_AUTHORITY_KEYS.map((k) => `'${k}', ${existingAttrsExpr}->'${k}'`).join(', ');
+  return `(jsonb_strip_nulls(jsonb_build_object(${pairs})) || COALESCE(${incomingParam}::jsonb, '{}'::jsonb))`;
+}
+
 function toRow(dbRow) {
   return {
     id: dbRow.id,
@@ -56,7 +91,7 @@ export async function upsertItem(client, { id, principalId, assetCategory, attri
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (principal_id, id) DO UPDATE
        SET asset_category = EXCLUDED.asset_category,
-           attributes = EXCLUDED.attributes,
+           attributes = ${protectedAttributesMergeSql('collection_item.attributes', 'EXCLUDED.attributes')},
            updated_at = now()
      RETURNING id, asset_category, attributes, created_at, updated_at`,
     [id, principalId, assetCategory, JSON.stringify(attributes)]
@@ -64,15 +99,18 @@ export async function upsertItem(client, { id, principalId, assetCategory, attri
   return toRow(res.rows[0]);
 }
 
-// Full replace of `attributes` — mirrors the existing client-side
-// IndexedDB putComic() semantics exactly (a whole-object store.put(),
-// never a partial merge), so behavior stays identical whether a write
-// lands locally or on the server.
+// Full replace of `attributes` for every ordinary field — mirrors the
+// existing client-side IndexedDB putComic() semantics exactly (a
+// whole-object store.put(), never a partial merge), so behavior stays
+// identical whether a write lands locally or on the server. GK-213B (K3)
+// carves out one narrow, explicit exception: PROTECTED_AUTHORITY_KEYS
+// survive an incoming write that omits them (see that constant's own
+// comment) — everything else in `attributes` remains a true full replace.
 export async function updateItem(client, { id, principalId, assetCategory, attributes }) {
   const res = await client.query(
     `UPDATE data1_dev.collection_item
         SET asset_category = COALESCE($3, asset_category),
-            attributes = $4,
+            attributes = ${protectedAttributesMergeSql('attributes', '$4')},
             updated_at = now()
       WHERE principal_id = $1 AND id = $2
       RETURNING id, asset_category, attributes, created_at, updated_at`,

@@ -109,6 +109,11 @@ import {
   isMegaKeyEntryCurrentlyVerified,
 } from "./mega-keys.js";
 import { extractCreatorsFromComps } from "../src/lib/premiumCreators.js";
+// GK-213B (Operator Authority) — resolves which grading FORMAT and which
+// grade VALUE govern pricing, per the hierarchy that module's own header
+// documents. Selects an input for the existing, unmodified multiplier
+// formulas below — never a second pricing path.
+import { resolveGoverningGradingFormat, resolveGoverningGrade } from "../src/lib/gradeAuthority.js";
 import { extractIssueFromEbayResults } from "../src/lib/identityAlignment.js";
 // Ship #20a.6.4 — refuse-to-price gate. Sanitizes Vision identity fields
 // and refuses to produce a price when title/issue/year/publisher can't
@@ -2319,6 +2324,23 @@ export default async function handler(req, res) {
       collectionItemId, // GK-145 (GrailKey Dispatch 2026-08-21) — the IndexedDB collection record's own item.id, threaded through by App.jsx on collection-originated requests only (refreshMarketData, auto-refresh, reIdentifyBook, submitManualCorrection, bulk import, gradeBlob/duplicate-confirm post-save). Null on a free-standing scan not yet saved to the collection. Also snapshotted into the scanlog record below (src/lib/scanLog.js), NOT proof of physical-copy identity there — see scanLog.js's own JSDoc. GK-253/GK-254 (2026-09-24): now ALSO drives real identity/economic logic, but ONLY when paired with the explicit ownedRefresh/ownedReidentify flag below — never on its own (a bare collectionItemId with neither flag, e.g. a fresh gradeBlob/bulk-import/duplicate-confirm post-save call, is deliberately left exactly as measurement-only as before; see GK-254's own Section A trace for why those flows cannot be safely inferred from collectionItemId presence alone).
       ownedRefresh,    // GK-254 — explicit flow marker. true ONLY for refreshMarketData/auto-refresh/submitManualCorrection (App.jsx): "this request targets an already-owned Collection item and carries no fresh identification evidence that should ever be allowed to silently change its established category." Absent/false everywhere else, including every first-time-save flow (gradeBlob's initial scan, bulk import, duplicate-confirm) — those must never be gated by owned-asset fail-closed logic, since they have no established durable authority yet to protect (GK-254 Section A).
       ownedReidentify, // GK-254 — explicit flow marker. true ONLY for reIdentifyBook (App.jsx): "this request targets an already-owned Collection item AND carries a genuine fresh identification pass (real Vision + image search) whose result may legitimately conflict with established durable authority." Distinct from ownedRefresh: a conflict here must be held/refused, never silently resolved in either direction (GK-254 Section E).
+      // GK-213B (Operator Authority) — grading-authority fields, threaded
+      // through by App.jsx exactly like identityAuthority (GK-213A): the
+      // client persists these in collection_item.attributes and re-sends
+      // them on every enrich call, same pattern as grade/isGraded/
+      // numericGrade themselves. Server-side authority (never trusted from
+      // the request for anything else) is deliberately NOT required here —
+      // unlike identityAuthority, gradeAuthority/gradingFormatAuthority
+      // carry no durable-category-style economic gate; resolveGoverning*
+      // (src/lib/gradeAuthority.js) only ever SELECTS which already-
+      // client-persisted value feeds the existing, unmodified multiplier
+      // formulas — it authorizes no new capability the client didn't
+      // already have via plain `grade`/`isGraded`.
+      gradeAuthority,
+      operatorGrade,
+      operatorGradeNumeric,
+      operatorIsGraded,
+      gradingFormatAuthority,
     } = req.body || {};
 
     // Track B Phase 0, Commit 3 — Safeguards 1+2. prepareManualCorrectionRequest
@@ -8011,7 +8033,22 @@ export default async function handler(req, res) {
     let gradeMultiplier = 1;
     let gradeLabel = '';
 
-    if (isGraded === true && numericGrade != null) {
+    // GK-213B (Operator Authority) — resolve the governing grading format
+    // and, when raw, the governing grade VALUE before selecting a
+    // multiplier table. Section C: when the governing format is certified
+    // (isGraded), operator raw-grade authority is never even consulted —
+    // resolveGoverningGrade is not called at all in that branch, so an
+    // operatorGrade cannot affect certified pricing even in principle, not
+    // merely by convention. RAW_MULTIPLIERS/CGC_MULTIPLIERS/
+    // getGradeMultiplier/getRawGradeMultiplier themselves are byte-identical
+    // to before this dispatch — only which grade/format feeds them changed.
+    const governingFormat = resolveGoverningGradingFormat({
+      cgcVerified: out.cgcVerified, gradingFormatAuthority, operatorIsGraded, isGraded,
+    });
+    out.governingGradingFormatSource = governingFormat.source;
+    out.governingIsGraded = governingFormat.isGraded;
+
+    if (governingFormat.isGraded === true && numericGrade != null) {
       const gradeInfo = getGradeMultiplier(numericGrade, eraYear);
       if (gradeInfo) {
         gradeMultiplier = gradeInfo.multiplier;
@@ -8024,10 +8061,16 @@ export default async function handler(req, res) {
           out.gradeMultiplierInterpolatedFrom = gradeInfo.grade;
         }
       }
-    } else if (grade) {
-      const rawInfo = getRawGradeMultiplier(grade, eraYear);
-      gradeMultiplier = rawInfo.multiplier;
-      gradeLabel = rawInfo.label;
+    } else if (governingFormat.isGraded !== true) {
+      const governingGrade = resolveGoverningGrade({ gradeAuthority, operatorGrade, operatorGradeNumeric, grade, numericGrade });
+      out.governingGrade = governingGrade.grade;
+      out.governingGradeNumeric = governingGrade.numericGrade;
+      out.governingGradeSource = governingGrade.source;
+      if (governingGrade.grade) {
+        const rawInfo = getRawGradeMultiplier(governingGrade.grade, eraYear);
+        gradeMultiplier = rawInfo.multiplier;
+        gradeLabel = rawInfo.label;
+      }
     }
 
     const pcBase = priceCharting?.price || null;
