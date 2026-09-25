@@ -21,7 +21,7 @@ import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLab
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
-import { setOperatorGrade, clearOperatorGrade, setOperatorGradingFormat, clearOperatorGradingFormat, resolveGoverningGrade, resolveGoverningGradingFormat, validateOperatorGrade } from "./lib/gradeAuthority.js";
+import { setOperatorGrade, clearOperatorGrade, setOperatorGradingFormat, clearOperatorGradingFormat, resolveGoverningGrade, resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -11687,15 +11687,15 @@ export default function App() {
             pcProductId: item.pcProductId || null,
             collectionItemId: item.id, // GK-145 — auto-refresh targets an existing collection record
             ownedRefresh: true, // GK-254 — same explicit flow marker as manual refreshMarketData; auto-refresh is the same "ordinary market refresh of an owned item" class
-            // GK-213B — same rationale as manual refreshMarketData: a
+            // GK-213B/C — same rationale as manual refreshMarketData: a
             // background auto-refresh must respect an active operator
             // grade/format override too, or pricing would silently revert
             // to the model grade every ~60s until the next manual refresh.
-            gradeAuthority: item.gradeAuthority || null,
-            operatorGrade: item.operatorGrade || null,
-            operatorGradeNumeric: item.operatorGradeNumeric ?? null,
-            operatorIsGraded: item.operatorIsGraded ?? null,
-            gradingFormatAuthority: item.gradingFormatAuthority || null,
+            // Own-property-only (never synthesized null) — see
+            // pickGradingAuthorityFields's own doc comment: a genuinely
+            // unhydrated item must send nothing here so the server's own
+            // durable-row fallback (GK-213C) can fire instead.
+            ...pickGradingAuthorityFields(item),
           }),
           signal: controller.signal,
         })
@@ -13771,16 +13771,12 @@ export default function App() {
           scanId: refreshOwnership.scanId,
           collectionItemId: item.id, // GK-145 — refresh always targets an existing collection record
           ownedRefresh: true, // GK-254 — explicit flow marker: an ordinary market refresh of an already-owned item, no fresh identification evidence, durable category authority must be resolved server-side and must win outright
-          // GK-213B (Operator Authority) — grading-authority fields, same
-          // client-persists/re-sends-every-call pattern as grade/isGraded/
-          // numericGrade themselves. api/enrich.js's resolveGoverning*
-          // (src/lib/gradeAuthority.js) reads these to select the input to
-          // the existing, unmodified multiplier formulas.
-          gradeAuthority: item.gradeAuthority || null,
-          operatorGrade: item.operatorGrade || null,
-          operatorGradeNumeric: item.operatorGradeNumeric ?? null,
-          operatorIsGraded: item.operatorIsGraded ?? null,
-          gradingFormatAuthority: item.gradingFormatAuthority || null,
+          // GK-213B/C (Operator Authority) — grading-authority fields.
+          // Own-property-only (never synthesized null) — a genuinely
+          // unhydrated item must send nothing here so the server's own
+          // durable-row fallback (GK-213C, api/enrich.js) can fire instead
+          // of a synthesized null masquerading as an explicit CLEAR.
+          ...pickGradingAuthorityFields(item),
         }),
         signal: controller.signal,
       });

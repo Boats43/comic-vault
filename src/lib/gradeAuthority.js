@@ -170,6 +170,44 @@ export function clearOperatorGradingFormat() {
  * @param {object} item - { cgcVerified, gradingFormatAuthority, operatorIsGraded, isGraded }
  * @returns {{ isGraded: boolean, source: 'certified'|'operator'|'model' }}
  */
+// GK-213C — the five grading-authority field names, shared by both the
+// client request-body builder below and the server's own resolution
+// (api/enrich.js reads the same five names from req.body/durable
+// attributes.). One list, not two independently-typed copies.
+export const GRADING_AUTHORITY_FIELDS = [
+  'gradeAuthority', 'operatorGrade', 'operatorGradeNumeric', 'operatorIsGraded', 'gradingFormatAuthority',
+];
+
+/**
+ * GK-213C — own-property-only projection of the five grading-authority
+ * fields, for building an /api/enrich request body. A field the item
+ * genuinely never had (unhydrated/stale/legacy record) is OMITTED from
+ * the returned object entirely — never synthesized as null — so the
+ * server's own presence-aware durable fallback (api/enrich.js) can tell
+ * "this caller asserts nothing about this field, consult the durable
+ * owned row" apart from "this caller explicitly cleared it" (an own
+ * property genuinely present with value null, e.g. straight from
+ * clearOperatorGrade()/clearOperatorGradingFormat()). Spread directly
+ * into a fetch body: `...pickGradingAuthorityFields(item)`. A plain
+ * `field: item.field || null` / `?? null` pattern would defeat this —
+ * every field becomes an own-property on every request, so the durable
+ * fallback could never fire and a genuinely-unhydrated item would be
+ * indistinguishable from an intentional CLEAR.
+ *
+ * @param {object} item
+ * @returns {object} only the keys `item` actually has, values untouched
+ */
+export function pickGradingAuthorityFields(item) {
+  const out = {};
+  if (!item) return out;
+  for (const field of GRADING_AUTHORITY_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(item, field)) {
+      out[field] = item[field];
+    }
+  }
+  return out;
+}
+
 export function resolveGoverningGradingFormat(item) {
   if (item?.cgcVerified === true) {
     return { isGraded: true, source: 'certified' };

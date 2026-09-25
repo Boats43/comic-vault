@@ -2606,6 +2606,15 @@ export default async function handler(req, res) {
     // App.jsx, not assumed (GK-254 Section A).
     let durableCategoryAuthority = null;
     let durableAuthorityPinned = false;
+    // GK-213C — the same durable owned-item row this block already reads
+    // for category authority also carries grading authority (attributes.
+    // gradeAuthority/operatorGrade/operatorGradeNumeric/operatorIsGraded/
+    // gradingFormatAuthority) — resolved below, once, right after
+    // ownedItemGK254 resolves successfully. null means "no durable row
+    // was resolved this request" (every non-owned flow: initial scan,
+    // bulk import, duplicate-confirm, etc.) — those fall through to
+    // request-body-only resolution, byte-identical to before this dispatch.
+    let durableGradingAttributesGK213C = null;
     if ((ownedRefresh === true || ownedReidentify === true) && collectionItemId) {
       let authFailedGK254 = false;
       try {
@@ -2634,6 +2643,9 @@ export default async function handler(req, res) {
               });
               if (ownedItemGK254?.assetCategory) {
                 durableCategoryAuthority = ownedItemGK254.assetCategory;
+                // GK-213C — same successful-resolution branch, same row,
+                // no second DB read.
+                durableGradingAttributesGK213C = ownedItemGK254.attributes || {};
               } else {
                 authFailedGK254 = true; // resolved row, no category — treat as unresolved
               }
@@ -2696,6 +2708,54 @@ export default async function handler(req, res) {
       // deliberately left UNPINNED here — see the conflict check below.
     }
     // ─────────────────────────────────────────────────────────────────
+
+    // GK-213C — durable owned grading-authority fallback. Closes a real
+    // gap the GK-213 final closure audit found: reIdentifyBook and
+    // submitManualCorrection are legitimate existing-owned-item economic
+    // recomputation paths (ownedReidentify/ownedRefresh respectively) that
+    // never threaded gradeAuthority/operatorGrade/operatorGradeNumeric/
+    // operatorIsGraded/gradingFormatAuthority into their request bodies —
+    // so a response from either could silently price from the fresh/model
+    // grade despite an established durable operator override. Reuses the
+    // SAME durable row GK-254 already resolved above (durableGradingAttributesGK213C,
+    // null for every non-owned flow) rather than adding more per-caller
+    // client threading.
+    //
+    // Precedence, per field, independently: an explicit request-body value
+    // (own-property, INCLUDING an explicit null — e.g. a just-issued CLEAR
+    // whose result hasn't been persisted back to the collection row yet)
+    // always governs THIS response; a field genuinely ABSENT from the
+    // request body falls back to the durable row; absent from both leaves
+    // it unresolved (existing resolver semantics — no operator authority
+    // at all, identical to pre-GK-213C behavior). Deliberately own-property
+    // presence, never `||`/`??` — either would collapse "caller didn't
+    // assert anything about this field" and "caller explicitly cleared it"
+    // into the same value, destroying exactly the distinction K3/K6 depend
+    // on. Request-present intentionally still outranks durable (not the
+    // reverse): SET/CHANGE/CLEAR construct a patched client item and call
+    // refreshMarketData BEFORE that item is necessarily persisted back, so
+    // the in-flight request is the only place this session's own most
+    // recent operator action is visible yet.
+    const reqBodyGK213C = req.body || {};
+    const hasOwnGK213C = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+    const resolveGradingAuthorityFieldGK213C = (field) =>
+      hasOwnGK213C(reqBodyGK213C, field)
+        ? reqBodyGK213C[field]
+        : (durableGradingAttributesGK213C && hasOwnGK213C(durableGradingAttributesGK213C, field)
+            ? durableGradingAttributesGK213C[field]
+            : undefined);
+    const effectiveGradeAuthority = resolveGradingAuthorityFieldGK213C('gradeAuthority');
+    const effectiveOperatorGrade = resolveGradingAuthorityFieldGK213C('operatorGrade');
+    const effectiveOperatorGradeNumeric = resolveGradingAuthorityFieldGK213C('operatorGradeNumeric');
+    const effectiveOperatorIsGraded = resolveGradingAuthorityFieldGK213C('operatorIsGraded');
+    const effectiveGradingFormatAuthority = resolveGradingAuthorityFieldGK213C('gradingFormatAuthority');
+    if (durableGradingAttributesGK213C && (effectiveGradeAuthority !== gradeAuthority || effectiveGradingFormatAuthority !== gradingFormatAuthority)) {
+      console.log(
+        `[owned-grading-authority] durable fallback applied — request gradeAuthority=${JSON.stringify(gradeAuthority)} ` +
+        `effective=${JSON.stringify(effectiveGradeAuthority)}, request gradingFormatAuthority=${JSON.stringify(gradingFormatAuthority)} ` +
+        `effective=${JSON.stringify(effectiveGradingFormatAuthority)}`
+      );
+    }
 
     // Prefer explicit issue param, fall back to parsing from title.
     // Ship #20a.6.22 hotfix: treat "Unknown" as null (Vision failure case).
@@ -8042,8 +8102,11 @@ export default async function handler(req, res) {
     // merely by convention. RAW_MULTIPLIERS/CGC_MULTIPLIERS/
     // getGradeMultiplier/getRawGradeMultiplier themselves are byte-identical
     // to before this dispatch — only which grade/format feeds them changed.
+    // GK-213C — resolved (request-present, else durable owned row, else
+    // unset) values, not the bare request-body destructure — see the
+    // resolution block above.
     const governingFormat = resolveGoverningGradingFormat({
-      cgcVerified: out.cgcVerified, gradingFormatAuthority, operatorIsGraded, isGraded,
+      cgcVerified: out.cgcVerified, gradingFormatAuthority: effectiveGradingFormatAuthority, operatorIsGraded: effectiveOperatorIsGraded, isGraded,
     });
     out.governingGradingFormatSource = governingFormat.source;
     out.governingIsGraded = governingFormat.isGraded;
@@ -8062,7 +8125,7 @@ export default async function handler(req, res) {
         }
       }
     } else if (governingFormat.isGraded !== true) {
-      const governingGrade = resolveGoverningGrade({ gradeAuthority, operatorGrade, operatorGradeNumeric, grade, numericGrade });
+      const governingGrade = resolveGoverningGrade({ gradeAuthority: effectiveGradeAuthority, operatorGrade: effectiveOperatorGrade, operatorGradeNumeric: effectiveOperatorGradeNumeric, grade, numericGrade });
       out.governingGrade = governingGrade.grade;
       out.governingGradeNumeric = governingGrade.numericGrade;
       out.governingGradeSource = governingGrade.source;
