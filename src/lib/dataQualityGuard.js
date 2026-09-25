@@ -200,13 +200,64 @@ export function applyFirstModelPrediction(current, source) {
  */
 export function applyProvisionalIdentity(enrich, prior) {
   if (!enrich?.identityProvisional) return {};
+  // GK-213A (Operator Authority) — this was the exact overwrite defect: a
+  // provisional pool-family adoption could clobber even an OPERATOR_CONFIRMED
+  // field, because this function never consulted identityAuthority at all —
+  // unlike mergeConfirmedIdentity (which DOES), and this function's own
+  // output wins the key collision at every call site (spread after it).
+  // Same lock semantics as mergeConfirmedIdentity's own `pick()`: a locked
+  // field keeps the prior stored value regardless of what this provisional
+  // response says, honest-null semantics included.
+  const authority = mergeIdentityAuthority(enrich, prior);
+  const lock = (field, value) => (authority[field] === 'OPERATOR_CONFIRMED' ? prior?.[field] : value);
   return {
-    title: enrich.title ?? enrich.confirmedTitle ?? prior?.title,
-    issue: hasKey(enrich, 'issue') ? enrich.issue : (prior?.issue ?? null),
-    year: enrich.year ?? null,
-    publisher: enrich.publisher ?? null,
-    variant: enrich.variantNote ?? null,
+    title: lock('title', enrich.title ?? enrich.confirmedTitle ?? prior?.title),
+    issue: lock('issue', hasKey(enrich, 'issue') ? enrich.issue : (prior?.issue ?? null)),
+    year: lock('year', enrich.year ?? null),
+    publisher: lock('publisher', enrich.publisher ?? null),
+    variant: lock('variant', enrich.variantNote ?? null),
   };
+}
+
+/**
+ * GK-213A (Operator Authority) — for a flow that deliberately runs fresh
+ * identification against an already-owned item (reIdentifyBook), silently
+ * preserving an operator-confirmed field is not enough on its own: the
+ * disagreement itself is real information the operator should see, not a
+ * fact this app is entitled to discard. Pure diagnostic — never used to
+ * decide what gets merged (mergeConfirmedIdentity/applyProvisionalIdentity
+ * already own that), only to report what got held back and why.
+ *
+ * Skips a field with no fresh signal at all (key absent, or an honest fresh
+ * null) — that's "no new evidence," not a conflict — and skips a field where
+ * the fresh value agrees with the locked one (case/whitespace-insensitive)
+ * — that's corroboration, not conflict.
+ *
+ * @param {object} enrich - the fresh identification result (enrich-shaped:
+ *   title/issue/year/publisher/variantNote/identityAuthority)
+ * @param {object} prior - the existing stored record
+ * @returns {Array<{field, operatorConfirmedValue, freshValue}>|null}
+ */
+export function detectIdentityConflict(enrich, prior) {
+  const authority = mergeIdentityAuthority(enrich, prior);
+  const FIELDS = [
+    ['title', 'title'],
+    ['issue', 'issue'],
+    ['year', 'year'],
+    ['publisher', 'publisher'],
+    ['variant', 'variantNote'],
+  ];
+  const conflicts = [];
+  for (const [field, enrichField] of FIELDS) {
+    if (authority[field] !== 'OPERATOR_CONFIRMED') continue;
+    if (!hasKey(enrich, enrichField)) continue;
+    const freshValue = enrich[enrichField];
+    if (freshValue == null) continue;
+    const priorValue = prior?.[field] ?? null;
+    if (String(freshValue).trim().toLowerCase() === String(priorValue ?? '').trim().toLowerCase()) continue;
+    conflicts.push({ field, operatorConfirmedValue: priorValue, freshValue });
+  }
+  return conflicts.length > 0 ? conflicts : null;
 }
 
 /**

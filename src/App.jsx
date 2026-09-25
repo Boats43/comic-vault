@@ -20,7 +20,7 @@ import { getAssetConfirmationBadge } from "./lib/assetConfirmationBadge.js";
 import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLabels.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
-import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction } from "./lib/dataQualityGuard.js";
+import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -14024,17 +14024,47 @@ export default function App() {
     }
 
     // Step 3: Update catalogue with new identity + enriched data (or Vision-only if enrich failed)
-    const updated = {
-      ...item,
+    // GK-213A (Operator Authority) — reIdentifyBook used to write title/
+    // issue/year/publisher/variant unconditionally, the one merge site with
+    // NO authority check at all (worse than the other 6, which at least
+    // routed through mergeConfirmedIdentity for a non-provisional response).
+    // A deliberate re-identification IS allowed to update identity — that's
+    // this feature's whole point — but not silently past an operator's own
+    // explicit correction. Shaped as an enrich-like object so the same
+    // shared authority helpers every other merge site uses apply here too,
+    // rather than a bespoke eighth special case. `identityAuthority` is
+    // deliberately NOT threaded from `enrichData` here (re-identify never
+    // sets it — only a manual correction does), so `mergeIdentityAuthority`
+    // resolves purely from `item.identityAuthority`, exactly as intended.
+    const reIdentifyFreshIdentity = {
       title: gradeData.title,
       issue: issueNum,
+      year: enrichData?.confirmedYear || gradeData.year,
+      publisher: gradeData.publisher,
+      variantNote: gradeData.variant || null,
+    };
+    const identityAuthorityConflict = detectIdentityConflict(reIdentifyFreshIdentity, item);
+    const protectedIdentity = {
+      ...mergeConfirmedIdentity(reIdentifyFreshIdentity, item),
+      ...applyProvisionalIdentity(reIdentifyFreshIdentity, item),
+    };
+    const updated = {
+      ...item,
+      title: protectedIdentity.title,
+      issue: protectedIdentity.issue,
       grade: gradeData.grade,
       isGraded: gradeData.isGraded,
       numericGrade: gradeData.numericGrade,
-      year: enrichData?.confirmedYear || gradeData.year,
-      publisher: gradeData.publisher,
+      year: protectedIdentity.year,
+      publisher: protectedIdentity.publisher,
       confidence: gradeData.confidence,
-      variant: gradeData.variant || null,
+      variant: protectedIdentity.variant,
+      identityAuthority: protectedIdentity.identityAuthority,
+      // GK-213A — held-back disagreement, surfaced rather than silently
+      // discarded (never used to decide the merge above — purely a review
+      // signal). null when re-identification agreed with every locked
+      // field, or when nothing is locked at all.
+      identityAuthorityConflict: identityAuthorityConflict || null,
       keyIssue: enrichData?.keyIssue || gradeData.keyIssue || null,
       // Q109-E — explicit, NOT the `...item` spread's implicit carry-
       // forward: re-identification may have corrected title/issue/year to
@@ -15080,7 +15110,17 @@ export default function App() {
                                   // 2026-07-18 — fold in identity/asset-type gate (was previously
                                   // absent on this duplicate-confirm path).
                                   const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
-                                  const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null };
+                                  const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                                  // GK-213A (Operator Authority) — site-parity: this was the one
+                                  // "fresh save" merge site with no title/issue/year/publisher key
+                                  // at all (silently frozen on the addToCatalogue-time value,
+                                  // unlike its sibling initial-scan/bulk-import sites) AND no
+                                  // identityAuthority protection. Spread last, same collision order
+                                  // as every other site, so a provisional response's honest-null
+                                  // semantics still win over the individual keys above when both apply.
+                                  ...mergeConfirmedIdentity(enrich, cur),
+                                  ...applyProvisionalIdentity(enrich, cur),
+                                  };
                                   // GrailKey Collection Sync Closeout —
                                   // duplicate-confirm's own post-enrich
                                   // update, routed through the shared helper.
