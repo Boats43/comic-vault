@@ -219,6 +219,13 @@ export const buildScanLogRecord = ({
         pricingSource: outcome.pricingSource ?? null,
         price: outcome.price ?? null,
         gradeMultiplier: outcome.gradeMultiplier ?? null,
+        // GK-258 — additive, optional, default-null (this file's own
+        // established convention above, no version bump). Distinguishes a
+        // legitimate resolved multiplier from an unresolved/fallback one
+        // that happens to share the same numeric value (e.g. resolved ×1
+        // vs. the unresolved-default ×1; resolved ×0.75 vs. the generic
+        // fallback ×0.75) — docs/TICKET-REGISTRY.md, GK-258.
+        gradeResolutionStatus: outcome.gradeResolutionStatus ?? null,
       }
     : null,
 });

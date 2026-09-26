@@ -91,7 +91,15 @@ console.log('\n=== Structural proofs ===');
   const contaminationIdx = src.indexOf('if (isSuspectContaminated)');
   const q90Idx = src.indexOf('} else if (soldMatchedFloorGuard)');
   const divergenceIdx = src.indexOf('!isMegaKeyEntryCurrentlyVerified(megaKeyEntry)');
-  const normalFloorIdx = src.indexOf('} else if (currentPriceNum < floorResult.floor) {');
+  // GK-258 added a `!out.refusedToPrice` guard to this exact branch
+  // (docs/TICKET-REGISTRY.md, GK-258 — a refused Tier-4 item's out.price
+  // reads as 0 via parseFloat, which would otherwise always satisfy
+  // `currentPriceNum < floorResult.floor` and silently restore a full
+  // mega-key floor price on an already-refused item). The branch's
+  // position in the if/else-if chain — still the final fallback, still
+  // after the divergence branch — is unchanged; only its own guard
+  // condition grew.
+  const normalFloorIdx = src.indexOf('} else if (!out.refusedToPrice && currentPriceNum < floorResult.floor) {');
   assertTrue(contaminationIdx > 0 && q90Idx > contaminationIdx, 'isSuspectContaminated is checked before soldMatchedFloorGuard (unchanged)');
   assertTrue(divergenceIdx > q90Idx, 'the new divergence branch is checked AFTER both isSuspectContaminated and soldMatchedFloorGuard — never preempts them');
   assertTrue(normalFloorIdx > divergenceIdx, 'normal floor enforcement remains the final fallback, checked after the divergence branch');

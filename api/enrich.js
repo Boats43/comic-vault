@@ -1391,8 +1391,16 @@ export const getGradeMultiplier = (grade, year = null) => {
 // Step 1: extract numeric → find nearest CGC_MULTIPLIERS entry.
 // Step 2: extract text abbreviation → look up RAW_MULTIPLIERS.
 // Step 3: default 0.75.
+//
+// GK-258 — `resolved` distinguishes a real Step-1/Step-2 mapping from the
+// generic Step-3 default. The multiplier VALUE alone is never proof of
+// resolution: a legitimate vintage grade 5.0 and an unrecognized free-text
+// grade both produce exactly 0.75 (docs/TICKET-REGISTRY.md, GK-258 —
+// "the ×0.75 collision"). Callers that need to know whether a grade is
+// usable for load-bearing pricing (vs. a generic fallback) must check
+// `resolved`, never the multiplier itself.
 export const getRawGradeMultiplier = (gradeStr, year = null) => {
-  if (!gradeStr) return { multiplier: 0.75, label: "RAW", era: getEra(year) };
+  if (!gradeStr) return { multiplier: 0.75, label: "RAW", era: getEra(year), resolved: false };
   const s = String(gradeStr).trim();
   const era = getEra(year);
 
@@ -1402,7 +1410,7 @@ export const getRawGradeMultiplier = (gradeStr, year = null) => {
     const g = parseFloat(numMatch[1]);
     if (!isNaN(g) && g >= 0.5 && g <= 10) {
       const info = getGradeMultiplier(g, year);
-      if (info) return { multiplier: info.multiplier, label: s, era };
+      if (info) return { multiplier: info.multiplier, label: s, era, resolved: true };
     }
   }
 
@@ -1412,12 +1420,12 @@ export const getRawGradeMultiplier = (gradeStr, year = null) => {
     const abbrev = textMatch[1].toUpperCase().replace(/\s+/g, "");
     const table = RAW_MULTIPLIERS[era];
     if (table[abbrev] != null) {
-      return { multiplier: table[abbrev], label: s, era };
+      return { multiplier: table[abbrev], label: s, era, resolved: true };
     }
   }
 
-  // Step 3: default
-  return { multiplier: 0.75, label: s || "RAW", era };
+  // Step 3: default — NOT a real mapping, see GK-258 header note above.
+  return { multiplier: 0.75, label: s || "RAW", era, resolved: false };
 };
 
 // Ship #12a — FR-D7 multi-key attribution extraction from comp titles.
@@ -8093,6 +8101,19 @@ export default async function handler(req, res) {
     let gradeMultiplier = 1;
     let gradeLabel = '';
 
+    // GK-258 — governing safety law: a load-bearing price may use a grade
+    // multiplier only when the grade-to-multiplier mapping was
+    // AFFIRMATIVELY RESOLVED. Neither the outer default (×1, this variable's
+    // own initializer above) nor getRawGradeMultiplier's own generic Step-3
+    // fallback (×0.75) may substitute for resolved economic authority —
+    // both numbers also arise from real, legitimate resolutions (vintage
+    // grade 7.0/RAW "NM" = ×1; vintage grade 5.0/RAW "VF" = ×0.75), so the
+    // multiplier's numeric VALUE is never proof of resolution. This status
+    // is the provenance record a Tier-4 refusal decision is built on below
+    // — see docs/TICKET-REGISTRY.md, GK-258.
+    let gradeResolutionStatus = 'unresolved-grade-missing';
+    let gradeResolutionUsableForPricing = false;
+
     // GK-213B (Operator Authority) — resolve the governing grading format
     // and, when raw, the governing grade VALUE before selecting a
     // multiplier table. Section C: when the governing format is certified
@@ -8111,20 +8132,41 @@ export default async function handler(req, res) {
     out.governingGradingFormatSource = governingFormat.source;
     out.governingIsGraded = governingFormat.isGraded;
 
-    if (governingFormat.isGraded === true && numericGrade != null) {
-      const gradeInfo = getGradeMultiplier(numericGrade, eraYear);
-      if (gradeInfo) {
-        gradeMultiplier = gradeInfo.multiplier;
-        gradeLabel = `CGC ${numericGrade}`;
-        // Q109-G — transparency: the multiplier table has no exact entry
-        // for this grade, so the price reflects the nearest table grade's
-        // multiplier instead. Surfaced on the card rather than left silent.
-        if (gradeInfo.gradeFallback) {
-          out.gradeMultiplierInterpolated = true;
-          out.gradeMultiplierInterpolatedFrom = gradeInfo.grade;
+    if (governingFormat.isGraded === true) {
+      if (numericGrade == null) {
+        // Live-reachable shape (GK-258): Vision/operator asserts "graded"
+        // but no numeric grade was ever parsed off the label. Reserve the
+        // certified-specific status for an actual cgcVerified===true fact
+        // (currently unreachable in Production — CGC cert lookup is
+        // WAF-dormant, docs/OPEN-BLOCKERS.md) — do not conflate the two.
+        gradeResolutionStatus = governingFormat.source === 'certified'
+          ? 'unresolved-certified-numeric-missing'
+          : 'unresolved-graded-numeric-missing';
+      } else {
+        const gradeInfo = getGradeMultiplier(numericGrade, eraYear);
+        if (gradeInfo) {
+          gradeMultiplier = gradeInfo.multiplier;
+          gradeLabel = `CGC ${numericGrade}`;
+          gradeResolutionStatus = governingFormat.source === 'certified'
+            ? 'resolved-certified'
+            : (governingFormat.source === 'operator' ? 'resolved-operator' : 'resolved-model');
+          gradeResolutionUsableForPricing = true;
+          // Q109-G — transparency: the multiplier table has no exact entry
+          // for this grade, so the price reflects the nearest table grade's
+          // multiplier instead. Surfaced on the card rather than left silent.
+          // Nearest-neighbor interpolation is still a real resolution, not
+          // a fallback — gradeResolutionUsableForPricing stays true.
+          if (gradeInfo.gradeFallback) {
+            out.gradeMultiplierInterpolated = true;
+            out.gradeMultiplierInterpolatedFrom = gradeInfo.grade;
+          }
+        } else {
+          // Only reachable when Number(numericGrade) is NaN — a malformed
+          // numeric value that passed the `!= null` guard above.
+          gradeResolutionStatus = 'unresolved-grade-malformed';
         }
       }
-    } else if (governingFormat.isGraded !== true) {
+    } else {
       const governingGrade = resolveGoverningGrade({ gradeAuthority: effectiveGradeAuthority, operatorGrade: effectiveOperatorGrade, operatorGradeNumeric: effectiveOperatorGradeNumeric, grade, numericGrade });
       out.governingGrade = governingGrade.grade;
       out.governingGradeNumeric = governingGrade.numericGrade;
@@ -8133,8 +8175,24 @@ export default async function handler(req, res) {
         const rawInfo = getRawGradeMultiplier(governingGrade.grade, eraYear);
         gradeMultiplier = rawInfo.multiplier;
         gradeLabel = rawInfo.label;
+        if (rawInfo.resolved) {
+          gradeResolutionStatus = governingGrade.source === 'operator' ? 'resolved-operator' : 'resolved-model';
+          gradeResolutionUsableForPricing = true;
+        } else {
+          // getRawGradeMultiplier fell through to its generic Step-3
+          // default (×0.75) — most commonly unvalidated model free-text
+          // grade output (operator input is validated and always resolves,
+          // GK-258 Section 2). Same number as a legitimate vintage grade
+          // 5.0, never usable as load-bearing evidence — see the ×0.75
+          // collision note on getRawGradeMultiplier itself.
+          gradeResolutionStatus = 'fallback-raw-default';
+        }
       }
+      // else: governingGrade.grade itself is falsy — status stays at its
+      // 'unresolved-grade-missing' initializer above.
     }
+    out.gradeResolutionStatus = gradeResolutionStatus;
+    out.gradeResolutionUsableForPricing = gradeResolutionUsableForPricing;
 
     const pcBase = priceCharting?.price || null;
     // Ship #20b: Pass soldVerifyResult for tier-based pricing (live recency bands)
@@ -8191,7 +8249,69 @@ export default async function handler(req, res) {
         `quick=$${priceBandsRaw.quick} market=$${priceBandsRaw.market} stretch=$${priceBandsRaw.stretch} ` +
         `count=${priceBandsRaw.count}` +
         (priceBandsRaw.recencyDays != null ? ` recency=${priceBandsRaw.recencyDays}d` : '') +
-        ` gradeMult=${gradeMultiplier}`
+        ` gradeMult=${gradeMultiplier} gradeResolutionStatus=${gradeResolutionStatus}`
+      );
+    }
+
+    // GK-258 — Tier 4 (pc_estimate) is the ONLY comp-pricing tier where
+    // gradeMultiplier is real, load-bearing arithmetic (api/enrich.js's own
+    // reference-only note further below; src/lib/priceBands.js multiplies
+    // pcBase×gradeMultiplier only inside its Tier-4 branch). Every other
+    // tier treats gradeMultiplier as a diagnostic value that never moves
+    // the price, so this check is deliberately scoped to tier===4 only —
+    // per the governing safety law above, do not extend this to
+    // comp-derived tiers merely because their diagnostic multiplier is
+    // also unresolved (docs/TICKET-REGISTRY.md, GK-258, Section 5/9).
+    // Gated on !out.refusedToPrice so this never overwrites an earlier,
+    // more fundamental refusal (e.g. identity/category) that already
+    // locked pricing before this point.
+    if (!out.refusedToPrice && priceBandsRaw?.tier === 4 && !gradeResolutionUsableForPricing) {
+      out.refusedToPrice = true;
+      out.listingHardLocked = true;
+      out.listingHardLockReason = 'grade-authority-unresolved';
+      // GK-258 — status-aware operator guidance. src/lib/responseContract.js's
+      // deriveLocks() pushes the 'refused' lock (reason: out.priceNote)
+      // BEFORE the listingHardLocked lock (reason: out.listingHardLockBanner)
+      // whenever both are set — and per that file's own header comment,
+      // "locks[0].reason renders verbatim as the card banner." Since GK-258
+      // always sets refusedToPrice too, the 'refused' lock is locks[0], so
+      // out.priceNote — not out.listingHardLockBanner alone — is what the
+      // operator actually sees first. Both are set to the same text here,
+      // matching the existing convention (e.g. the polybag refusal sites
+      // set both fields identically) so the guidance is correct regardless
+      // of which lock a future UI change surfaces first.
+      const gradeGuidance = (() => {
+        switch (gradeResolutionStatus) {
+          case 'unresolved-graded-numeric-missing':
+            // Section 3.A — the Estimated Grade input is hidden while
+            // governing format reads as graded (App.jsx's `!governingFormat.
+            // isGraded` gate). The proven live recovery (Case A) requires
+            // Mark as Raw FIRST, or the grade field the operator is told to
+            // "set" isn't visible yet.
+            return 'This book is marked as graded, but no grade number could be read from it — mark it as raw, then set the grade, to enable pricing.';
+          case 'unresolved-certified-numeric-missing':
+            // Section 3.C — a genuinely certified fact must not be offered
+            // a "Mark as Raw" override that would silently defeat it, and no
+            // certified-grade correction UI exists yet (GK-258 Section
+            // 11/16, banked as a CGC-activation prerequisite). Neutral
+            // review language only — never promise a recovery that doesn't exist.
+            return 'This book\'s certified grade could not be read — under review, pricing is unavailable until the certified grade is confirmed.';
+          case 'unresolved-grade-missing':
+            return 'No grade is set for this book — set the grade to enable pricing.';
+          case 'unresolved-grade-malformed':
+            return 'The grade value could not be understood — correct the grade to enable pricing.';
+          case 'fallback-raw-default':
+            return 'The grade text could not be matched to a known grade — correct the grade to enable pricing.';
+          default:
+            return 'Grade required for this pricing method could not be determined — set the grade to enable pricing.';
+        }
+      })();
+      out.priceNote = gradeGuidance;
+      out.listingHardLockBanner = gradeGuidance;
+      console.log(
+        `[grade-authority-refusal] tier=4 gradeResolutionStatus=${gradeResolutionStatus} ` +
+        `governingIsGraded=${governingFormat.isGraded} governingGradingFormatSource=${governingFormat.source} ` +
+        `governingGrade=${out.governingGrade ?? null} numericGrade=${numericGrade ?? null} — refusing to price`
       );
     }
 
@@ -8586,7 +8706,17 @@ export default async function handler(req, res) {
               ? priceBandsRaw.market
               : 0;
 
-          if (realPoolPrice > 0 && pcAnchor && pcAnchor / realPoolPrice > 10) {
+          // GK-258 — both divergence branches below gated on
+          // !out.refusedToPrice. A price already refused as economically
+          // unauthorized (e.g. GK-258's own Tier-4 grade-authority refusal)
+          // must not be reused as trusted evidence for a SEPARATE downstream
+          // divergence verdict, and a downstream setter here must not
+          // overwrite an already-recorded refusal reason. The raw
+          // priceBandsRaw.market/realPoolPrice values remain visible above
+          // in [price-trace]'s existing reference-only diagnostic logging —
+          // only their use as economic/divergence EVIDENCE is gated here.
+          // docs/TICKET-REGISTRY.md, GK-258.
+          if (!out.refusedToPrice && realPoolPrice > 0 && pcAnchor && pcAnchor / realPoolPrice > 10) {
             out.price = null;
             out.priceLow = null;
             out.priceHigh = null;
@@ -8614,7 +8744,7 @@ export default async function handler(req, res) {
               `${pcAnchor ? '$' + pcAnchor.toFixed(2) : 'n/a'} — INV-3 does not fire ` +
               `(image-pool ${(reprintRatio * 100).toFixed(0)}% facsimile signal stays informational)`
             );
-          } else if (pcAnchor && askAvg > 0 && pcAnchor / askAvg > 10) {
+          } else if (!out.refusedToPrice && pcAnchor && askAvg > 0 && pcAnchor / askAvg > 10) {
             // No real pool price at all — original image-pool fallback.
             out.price = null;
             out.priceLow = null;
@@ -9491,7 +9621,17 @@ export default async function handler(req, res) {
     // true inside the >=3-member promotion floor, Q133 Slice 2) — adding it
     // here is not a new eligibility class, it's completing the one Q133
     // Slice 2 already established.
-    if ((idCheckFinal.confident || publisherOnlyMissing || visionLowButCorroborated || out.identityProvisional) && !isPolybagPricing) {
+    // GK-258 — `!out.refusedToPrice` added to this gate. Before this fix,
+    // this block assigned out.price/priceLow/priceHigh from priceBandsRaw
+    // unconditionally on identity-confidence grounds alone, with no check
+    // on any refusal already recorded upstream — a refusal that doesn't
+    // itself null out.price at its own site (this codebase's established
+    // per-site contract, e.g. the polybag/impaired-label refusal blocks)
+    // could still have its price silently reinstated here. Mirrors the
+    // sibling `!out.refusedToPrice` guard already on the priceBands-object
+    // copy above (~line 8246) — this is the same idiom applied to the gate
+    // that actually sets out.price itself. docs/TICKET-REGISTRY.md, GK-258.
+    if ((idCheckFinal.confident || publisherOnlyMissing || visionLowButCorroborated || out.identityProvisional) && !isPolybagPricing && !out.refusedToPrice) {
     // P0-A — Kill browse_api legacy paths. All pricing routes through tier engine.
     // When priceBandsRaw truthy (tier 1-4 with data), use it. When null (tier-4
     // no-data: no PC, <2 verified comps), refuse-to-price instead of falling through
@@ -10608,8 +10748,19 @@ export default async function handler(req, res) {
                 `floor=$${floorResult.floor.toLocaleString()}`,
                 `ratio=${currentPriceNum > 0 ? (floorResult.floor / currentPriceNum).toFixed(1) + 'x' : 'n/a'}`,
                 `→ RESEARCH + hard-locked, price NOT established (pre-floor value retained internally, not shown as a recommendation)`);
-            } else if (currentPriceNum < floorResult.floor) {
-              // Normal floor enforcement path
+            } else if (!out.refusedToPrice && currentPriceNum < floorResult.floor) {
+              // Normal floor enforcement path.
+              // GK-258 — `!out.refusedToPrice` guard added. Without it, a
+              // refused item (out.price already null) computes
+              // currentPriceNum=0 just above (parseFloat of "0"), which is
+              // always < floorResult.floor — this branch would otherwise
+              // silently restore a full mega-key floor price (thousands of
+              // dollars) on an item GK-258 already refused as economically
+              // unauthorized. Narrowest possible fix: only this branch
+              // writes out.price/priceLow/priceHigh in the whole mega-key
+              // block (Phase 0A trace, docs/TICKET-REGISTRY.md GK-258) — the
+              // other branches (contamination/divergence/suppression) never
+              // touch these fields, so they're left untouched here.
               out.preFloorPrice = out.price;
               out.preFloorSource = out.pricingSource || 'fallback';
               out.price = fmtUsd(floorResult.floor);
@@ -10815,7 +10966,9 @@ export default async function handler(req, res) {
       'finalPrice:', out.price,
       'source:', out.pricingSource,
       'thinPoolAnchored:', out.thinPoolAnchored === true,
-      'lowGradeFloorApplied:', out.lowGradeFloorApplied === true
+      'lowGradeFloorApplied:', out.lowGradeFloorApplied === true,
+      'gradeResolutionStatus:', out.gradeResolutionStatus,
+      'gradeResolutionUsableForPricing:', out.gradeResolutionUsableForPricing
     );
     if (out.priceDerivationTrace) {
       const t = out.priceDerivationTrace;
@@ -13039,6 +13192,7 @@ export default async function handler(req, res) {
           pricingSource: out.pricingSource ?? null,
           price: out.price ?? null,
           gradeMultiplier: out.gradeMultiplier ?? null,
+          gradeResolutionStatus: out.gradeResolutionStatus ?? null,
         },
       });
       // GK-145/GK-146 — diagnostic line, same convention as [decision]/

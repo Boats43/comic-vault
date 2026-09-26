@@ -13842,6 +13842,14 @@ export default function App() {
       governingGradeSource: enrich.governingGradeSource ?? item.governingGradeSource ?? null,
       governingIsGraded: enrich.governingIsGraded ?? item.governingIsGraded ?? null,
       governingGradingFormatSource: enrich.governingGradingFormatSource ?? item.governingGradingFormatSource ?? null,
+      // GK-258 — same provenance-display-only status as the governing*
+      // fields immediately above (never consulted for any authority
+      // decision client-side). gradeResolutionUsableForPricing is
+      // deliberately NOT carried here — it's a pure derivation of this
+      // same status string (usable iff status starts with "resolved-"),
+      // so persisting both would be a duplicate, driftable source of
+      // truth for one fact.
+      gradeResolutionStatus: enrich.gradeResolutionStatus ?? item.gradeResolutionStatus ?? null,
       comps: enrich.comps ?? item.comps,
       price: newPriceRM,
       priceLow: idGatedRM ? null : (enrich.priceLow ?? item.priceLow),
