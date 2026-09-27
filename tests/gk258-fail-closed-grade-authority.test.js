@@ -40,12 +40,9 @@ delete process.env.UPSTASH_REDIS_REST_TOKEN;
 import {
   validateOperatorGrade,
   setOperatorGrade,
-  clearOperatorGrade,
   setOperatorGradingFormat,
-  clearOperatorGradingFormat,
   resolveGoverningGradingFormat,
   resolveGoverningGrade,
-  pickGradingAuthorityFields,
 } from '../src/lib/gradeAuthority.js';
 import { computePriceBands } from '../src/lib/priceBands.js';
 
@@ -622,15 +619,21 @@ console.log('\nSection 4: Case A live recovery — real two-request round trip t
   const gradeSetResult = setOperatorGrade('VG 4.0');
   assertTrue(gradeSetResult.ok, 'operator grade "VG 4.0" is accepted by the real validator');
 
-  const recoveredItem = { ...refused, ...formatPatch, ...gradeSetResult.patch };
-  // Request 2 — real second /api/enrich call carrying the real recovered
-  // grading-authority fields (pickGradingAuthorityFields, own-property-only
-  // projection — GK-213C's own contract, exercised here for real).
+  // GK-260 (Server-Owned Write Authority) — request 2 now sends the
+  // validated ACTION INTENT (exactly what App.jsx's setGradedOverride ->
+  // refreshMarketData and setItemOperatorGrade -> refreshMarketData send
+  // post-GK-260), not a client-computed gradeAuthority/operatorGrade patch.
+  // The server re-validates and mints the same result independently —
+  // formatPatch/gradeSetResult above remain useful as a proof that the
+  // client-side helper functions themselves still produce the correct
+  // patch shape (unchanged by GK-260), but the wire request no longer
+  // asserts that patch directly.
   const { body: recovered } = await runTier4Case({
     label: 'CaseA-req2-recovered',
     gradeFields: {
       grade: null, isGraded: true, numericGrade: null, // model's own fields, deliberately unchanged
-      ...pickGradingAuthorityFields(recoveredItem),
+      gradingFormatAction: 'SET_RAW',
+      operatorGradeAction: 'SET', operatorGradeValue: 'VG 4.0',
     },
   });
   assertEq(recovered?.governingGradingFormatSource, 'operator', 'Case A req2: governing format source is operator (RAW) after Mark as Raw');

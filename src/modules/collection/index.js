@@ -11,6 +11,7 @@ export {
   updateCollectionItem,
   deleteCollectionItem,
   getRemoteImageUri,
+  applyGradingAuthorityPatch, // GK-260 — internal callers only (api/enrich.js); never wired to a public HTTP route
 } from './service.js';
 
 export {

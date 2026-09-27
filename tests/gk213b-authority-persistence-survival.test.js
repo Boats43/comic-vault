@@ -10,6 +10,25 @@
 // those keys (any caller that doesn't know about them at all) must never
 // be read as "delete the established authority."
 //
+// GK-260 CLOSURE PASS UPDATE (same repository.js file, different keys):
+// the six grade/grading-format authority keys (operatorGrade/
+// operatorGradeNumeric/operatorGradeSetAt/gradeAuthority/operatorIsGraded/
+// gradingFormatAuthority) got a STRONGER guarantee than "survives
+// omission" — GK-260 found that an ordinary /api/collection write could
+// previously plant a FORGED value for these six directly (this file's own
+// original assertions, ironically, encoded that forgeable behavior as
+// "correct" — they asserted a raw attributes.operatorGrade sent through
+// this exact endpoint would persist and survive). These six are now FULLY
+// IMMUNE to this ordinary write path in both directions (can't be set,
+// changed, or cleared here at all) — the only legitimate way to change
+// them is applyGradingAuthorityPatch (src/modules/collection/service.js),
+// called exclusively by api/enrich.js after a validated operator action
+// (see tests/gk260-server-owned-grade-authority.test.js, scenarios 14-19).
+// This file's assertions for those six keys are updated accordingly; the
+// remaining four keys (identityAuthority, modelPredictedGrade*) keep their
+// original omission-survives/explicit-null-clears behavior, unchanged and
+// re-proven here as a regression check that GK-260 did not disturb them.
+//
 // Real Development DB, real /api/collection.js handler, real HMAC tokens
 // — same convention as tests/collection-endpoint-live-proof.test.js. Uses
 // its own throwaway principal, never touches Jimmy's real rows, cleans up
@@ -96,14 +115,21 @@ try {
     gradingFormatAuthority: 'OPERATOR_CONFIRMED',
   };
 
-  console.log('-- 1. create with full authority/provenance state --\n');
+  console.log('-- 1. create with a payload claiming full authority/provenance state --\n');
   {
     const req = { method: 'POST', headers: { authorization: `Bearer ${token}` }, query: {}, body: { id: ITEM_ID, assetCategory: 'comic', attributes: fullAuthorityAttributes } };
     const res = mockRes();
     await collectionRoute(req, res);
     assertTrue(res.statusCode === 200, `create -> 200 (got ${res.statusCode})`);
-    assertEq(res.body?.attributes?.operatorGrade, 'VF 7.5', 'operatorGrade persisted on create');
-    assertEq(res.body?.attributes?.gradeAuthority, 'OPERATOR_CONFIRMED', 'gradeAuthority persisted on create');
+    assertEq(res.body?.attributes?.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'identityAuthority persisted on create (unchanged, out of GK-260 scope)');
+    assertEq(res.body?.attributes?.modelPredictedGrade, 'GD 2.0', 'modelPredictedGrade persisted on create (unchanged, out of GK-260 scope)');
+    // GK-260: the ordinary create path can never plant these six, even at
+    // create time — this is the exact "forged insertion on a new row" gap
+    // GK-260's closure pass found and fixed (repository.js's
+    // stripFullyProtectedGradingKeysSql, applied to upsertItem's INSERT
+    // VALUES, not just its ON CONFLICT branch).
+    assertTrue(!('operatorGrade' in (res.body?.attributes || {})), 'CRITICAL (GK-260): operatorGrade is NOT persisted on create via the ordinary path, even though the payload claimed it');
+    assertTrue(!('gradeAuthority' in (res.body?.attributes || {})), 'CRITICAL (GK-260): gradeAuthority is NOT persisted on create via the ordinary path');
   }
 
   console.log('\n-- 2. THE REQUIRED TEST: ordinary update that OMITS every authority/provenance key --\n');
@@ -127,18 +153,15 @@ try {
 
     assertEq(attrs.price, '$45.00', 'ordinary field (price) DID update — full-replace semantics intact for non-authority fields');
     assertEq(attrs.someUnrelatedField, 'x', 'a genuinely new ordinary field is also accepted normally');
-    assertTrue(!('modelPredictedGrade' in attrs) === false, 'modelPredictedGrade key still present at all');
-    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'SURVIVED: identityAuthority (K3 required result)');
-    assertEq(attrs.modelPredictedGrade, 'GD 2.0', 'SURVIVED: modelPredictedGrade');
-    assertEq(attrs.modelPredictedGradeReason, 'Initial AI read', 'SURVIVED: modelPredictedGradeReason');
-    assertEq(attrs.modelPredictedGradeConfidence, 'high', 'SURVIVED: modelPredictedGradeConfidence');
-    assertEq(attrs.modelPredictedAt, 1700000000000, 'SURVIVED: modelPredictedAt');
-    assertEq(attrs.operatorGrade, 'VF 7.5', 'SURVIVED: operatorGrade');
-    assertEq(attrs.operatorGradeNumeric, 7.5, 'SURVIVED: operatorGradeNumeric');
-    assertEq(attrs.operatorGradeSetAt, 1700000001000, 'SURVIVED: operatorGradeSetAt');
-    assertEq(attrs.gradeAuthority, 'OPERATOR_CONFIRMED', 'SURVIVED: gradeAuthority');
-    assertEq(attrs.operatorIsGraded, false, 'SURVIVED: operatorIsGraded (explicit false, not dropped)');
-    assertEq(attrs.gradingFormatAuthority, 'OPERATOR_CONFIRMED', 'SURVIVED: gradingFormatAuthority');
+    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'SURVIVED: identityAuthority (K3 required result, unchanged by GK-260)');
+    assertEq(attrs.modelPredictedGrade, 'GD 2.0', 'SURVIVED: modelPredictedGrade (unchanged by GK-260)');
+    assertEq(attrs.modelPredictedGradeReason, 'Initial AI read', 'SURVIVED: modelPredictedGradeReason (unchanged by GK-260)');
+    assertEq(attrs.modelPredictedGradeConfidence, 'high', 'SURVIVED: modelPredictedGradeConfidence (unchanged by GK-260)');
+    assertEq(attrs.modelPredictedAt, 1700000000000, 'SURVIVED: modelPredictedAt (unchanged by GK-260)');
+    // GK-260: never persisted in the first place (test 1) — still absent.
+    assertTrue(!('operatorGrade' in attrs), 'GK-260: operatorGrade remains absent (was never persisted via the ordinary path)');
+    assertTrue(!('gradeAuthority' in attrs), 'GK-260: gradeAuthority remains absent');
+    assertTrue(!('gradingFormatAuthority' in attrs), 'GK-260: gradingFormatAuthority remains absent');
   }
 
   console.log('\n-- 3. explicit CLEAR still works — presence with null value overwrites, not just omission-preserves --\n');
@@ -151,15 +174,19 @@ try {
 
     const reloaded = await client.query('SELECT attributes FROM collection_item WHERE principal_id = $1 AND id = $2', [PRINCIPAL, ITEM_ID]);
     const attrs = reloaded.rows[0].attributes;
-    assertTrue(attrs.gradeAuthority == null, 'explicit clear DOES null gradeAuthority (presence with null wins over the old non-null value)');
-    assertTrue(attrs.operatorGrade == null, 'explicit clear DOES null operatorGrade');
+    // GK-260: these were never established via the ordinary path (test 1),
+    // so an explicit-null send through it is a harmless no-op — still
+    // absent, not a real "clear" (there is nothing to clear here; the real
+    // clear-of-an-established-value proof lives in
+    // tests/gk260-server-owned-grade-authority.test.js scenario 16, via a
+    // row seeded with REAL authority through the legitimate internal path).
+    assertTrue(!('gradeAuthority' in attrs), 'GK-260: gradeAuthority still absent (explicit null through the ordinary path is a no-op, never establishes or persists anything)');
+    assertTrue(!('operatorGrade' in attrs), 'GK-260: operatorGrade still absent');
     // Fields NOT mentioned in this clear payload (identityAuthority,
-    // gradingFormatAuthority, modelPredictedGrade*) must still survive —
-    // proving the protection is per-key, not "any authority write disables
-    // protection for the whole write."
-    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'identityAuthority STILL survives (not mentioned in this clear payload)');
-    assertEq(attrs.gradingFormatAuthority, 'OPERATOR_CONFIRMED', 'gradingFormatAuthority STILL survives (not mentioned in this clear payload)');
-    assertEq(attrs.modelPredictedGrade, 'GD 2.0', 'modelPredictedGrade STILL survives (not mentioned in this clear payload)');
+    // modelPredictedGrade*) must still survive — proving the (unchanged)
+    // per-key protection for those four keys still holds.
+    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'identityAuthority STILL survives (not mentioned in this clear payload, unchanged by GK-260)');
+    assertEq(attrs.modelPredictedGrade, 'GD 2.0', 'modelPredictedGrade STILL survives (not mentioned in this clear payload, unchanged by GK-260)');
   }
 
   console.log('\n-- 4. same survival property on the upsertItem (POST-to-existing-id) path --\n');
@@ -182,8 +209,11 @@ try {
     const reloaded = await client.query('SELECT attributes FROM collection_item WHERE principal_id = $1 AND id = $2', [PRINCIPAL, ITEM_ID2]);
     const attrs = reloaded.rows[0].attributes;
     assertEq(attrs.condition, 'Fine', 'upsert path: new ordinary field accepted');
-    assertEq(attrs.operatorGrade, 'VF 7.5', 'upsert path: SURVIVED operatorGrade through ON CONFLICT DO UPDATE');
-    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'upsert path: SURVIVED identityAuthority through ON CONFLICT DO UPDATE');
+    // GK-260: operatorGrade was never persisted by the initial create
+    // (fullAuthorityAttributes claims it, but the ordinary path never
+    // writes it — same as test 1) — still absent through ON CONFLICT too.
+    assertTrue(!('operatorGrade' in attrs), 'GK-260: operatorGrade absent through ON CONFLICT DO UPDATE (never persisted in the first place)');
+    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'upsert path: SURVIVED identityAuthority through ON CONFLICT DO UPDATE (unchanged by GK-260)');
   }
 
   console.log('\n-- 5. no-authority-ever item is completely unaffected (no null-key pollution) --\n');

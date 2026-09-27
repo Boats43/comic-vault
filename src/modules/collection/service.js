@@ -90,6 +90,34 @@ export async function updateCollectionItem({ principalId, id, assetCategory, att
   }
 }
 
+// GK-260 (Server-Owned Write Authority) — the ONLY way to durably set,
+// change, or clear operatorGrade/operatorGradeNumeric/operatorGradeSetAt/
+// gradeAuthority/operatorIsGraded/gradingFormatAuthority. Called
+// exclusively from api/enrich.js, and only after a validated
+// setOperatorGrade/clearOperatorGrade/setOperatorGradingFormat/
+// clearOperatorGradingFormat result — `patch` must be that function's own
+// output, never raw request-body fields. `principalId` comes from
+// api/enrich.js's own verified Bearer-token resolution (the same
+// GK-254 auth check that already gates the durable-row read this patch
+// follows), never from the request body. repo.applyGradingAuthorityPatch
+// independently filters `patch` to the six protected keys as defense in
+// depth.
+export async function applyGradingAuthorityPatch({ principalId, id, patch } = {}) {
+  requireFields({ principalId, id }, ['principalId', 'id']);
+  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+    throw new ValidationFailedError('patch must be a JSON object');
+  }
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const updated = await repo.applyGradingAuthorityPatch(client, { id, principalId, patch });
+    if (!updated) throw new NotFoundError(`collection item ${id} does not exist`);
+    return updated;
+  } finally {
+    client.release();
+  }
+}
+
 export async function deleteCollectionItem({ principalId, id } = {}) {
   requireFields({ principalId, id }, ['principalId', 'id']);
   const client = await acquireConnection();

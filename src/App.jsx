@@ -21,7 +21,7 @@ import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLab
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
-import { setOperatorGrade, clearOperatorGrade, setOperatorGradingFormat, clearOperatorGradingFormat, resolveGoverningGrade, resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
+import { resolveGoverningGrade, resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -13680,7 +13680,14 @@ export default function App() {
   // activeCardEnrichIdRef — if mismatched, the user moved on (swiped cards,
   // closed detail, started another refresh) and this response is discarded
   // before it can overwrite the catalogue with stale data for a prior item.
-  const refreshMarketData = useCallback(async (item) => {
+  // GK-260 (Server-Owned Write Authority) — optional `gradingAction` describes
+  // WHAT the operator did ({ operatorGradeAction, operatorGradeValue } and/or
+  // { gradingFormatAction }); the server validates and mints the resulting
+  // gradeAuthority/operatorGrade/gradingFormatAuthority itself. This function
+  // never asserts those fields as already-authoritative on the client's
+  // behalf. Omitted entirely on every ordinary refresh (auto-refresh, manual
+  // refresh button) — unchanged behavior there.
+  const refreshMarketData = useCallback(async (item, gradingAction = null) => {
     // Q87: ID_REQUIRED enrich cache. A blocked book re-enriches only after
     // a user identity edit bumps identityRevision — same fields, same
     // refusal, so the call is pure waste until something changes.
@@ -13771,12 +13778,18 @@ export default function App() {
           scanId: refreshOwnership.scanId,
           collectionItemId: item.id, // GK-145 — refresh always targets an existing collection record
           ownedRefresh: true, // GK-254 — explicit flow marker: an ordinary market refresh of an already-owned item, no fresh identification evidence, durable category authority must be resolved server-side and must win outright
-          // GK-213B/C (Operator Authority) — grading-authority fields.
-          // Own-property-only (never synthesized null) — a genuinely
-          // unhydrated item must send nothing here so the server's own
-          // durable-row fallback (GK-213C, api/enrich.js) can fire instead
-          // of a synthesized null masquerading as an explicit CLEAR.
+          // GK-260 (Server-Owned Write Authority) — as of GK-260 the server
+          // no longer trusts these raw fields to establish authority (kept
+          // here only for backward-compatible shape / diagnostics; the
+          // server logs and ignores them). Authority now comes from the
+          // durable row plus, when present, the validated action below.
           ...pickGradingAuthorityFields(item),
+          // GK-260 — the validated action, if this call is a Set/Change/
+          // Clear grade or grading-format request rather than an ordinary
+          // refresh. Undefined fields are dropped by JSON.stringify.
+          operatorGradeAction: gradingAction?.operatorGradeAction,
+          operatorGradeValue: gradingAction?.operatorGradeValue,
+          gradingFormatAction: gradingAction?.gradingFormatAction,
         }),
         signal: controller.signal,
       });
@@ -13850,6 +13863,24 @@ export default function App() {
       // so persisting both would be a duplicate, driftable source of
       // truth for one fact.
       gradeResolutionStatus: enrich.gradeResolutionStatus ?? item.gradeResolutionStatus ?? null,
+      // GK-260 (Server-Owned Write Authority) — the raw operator-authority
+      // fields themselves, now server-minted (never client-computed —
+      // setItemOperatorGrade/clearItemOperatorGrade/setGradedOverride/
+      // clearGradedOverride send an action, not a pre-built patch). Presence
+      // (hasOwnProperty), never `??` alone: enrich explicitly resolving a
+      // field to null (a real CLEAR, or "no operator authority applies")
+      // must overwrite a stale prior item value — `??` would treat that
+      // null as "no new data" and wrongly resurrect the old value. A key
+      // genuinely ABSENT from enrich (an early-return response that never
+      // reached grade resolution at all, e.g. ownedAssetAuthRequired —
+      // though that path is never merged in the first place, see above)
+      // preserves whatever the item already had.
+      gradeAuthority: Object.prototype.hasOwnProperty.call(enrich, 'gradeAuthority') ? enrich.gradeAuthority : item.gradeAuthority,
+      operatorGrade: Object.prototype.hasOwnProperty.call(enrich, 'operatorGrade') ? enrich.operatorGrade : item.operatorGrade,
+      operatorGradeNumeric: Object.prototype.hasOwnProperty.call(enrich, 'operatorGradeNumeric') ? enrich.operatorGradeNumeric : item.operatorGradeNumeric,
+      operatorGradeSetAt: Object.prototype.hasOwnProperty.call(enrich, 'operatorGradeSetAt') ? enrich.operatorGradeSetAt : item.operatorGradeSetAt,
+      operatorIsGraded: Object.prototype.hasOwnProperty.call(enrich, 'operatorIsGraded') ? enrich.operatorIsGraded : item.operatorIsGraded,
+      gradingFormatAuthority: Object.prototype.hasOwnProperty.call(enrich, 'gradingFormatAuthority') ? enrich.gradingFormatAuthority : item.gradingFormatAuthority,
       comps: enrich.comps ?? item.comps,
       price: newPriceRM,
       priceLow: idGatedRM ? null : (enrich.priceLow ?? item.priceLow),
@@ -14084,39 +14115,44 @@ export default function App() {
   // is a separate, explicit correction, outside this control's scope; an
   // operator declaring the FORMAT raw doesn't retroactively claim the
   // label itself was never real data.
+  // GK-260 (Server-Owned Write Authority) — sends an action INTENT
+  // (gradingFormatAction) rather than a client-computed
+  // operatorIsGraded/gradingFormatAuthority patch. The server validates and
+  // mints the resulting authority (api/enrich.js); this function no longer
+  // asserts it. The item itself is passed through unmodified — the merge
+  // site (refreshMarketData's own response handling) adopts whatever the
+  // server actually minted.
   const setGradedOverride = useCallback(async (item, newIsGraded) => {
-    const patched = { ...item, ...setOperatorGradingFormat(newIsGraded) };
-    await refreshMarketData(patched);
+    await refreshMarketData(item, { gradingFormatAction: newIsGraded ? 'SET_GRADED' : 'SET_RAW' });
   }, [refreshMarketData]);
 
-  // GK-213B — clears the operator format override; governing format
-  // returns to whatever the certified-fact/model tiers resolve to
-  // (resolveGoverningGradingFormat, src/lib/gradeAuthority.js). Does not
-  // touch item.isGraded, certNumber, labelType, or labelNotes.
+  // GK-260 — clears the operator format override via a validated CLEAR
+  // action; governing format returns to whatever the certified-fact/model
+  // tiers resolve to (resolveGoverningGradingFormat, src/lib/gradeAuthority.js).
+  // Does not touch item.isGraded, certNumber, labelType, or labelNotes.
   const clearGradedOverride = useCallback(async (item) => {
-    const patched = { ...item, ...clearOperatorGradingFormat() };
-    await refreshMarketData(patched);
+    await refreshMarketData(item, { gradingFormatAction: 'CLEAR' });
   }, [refreshMarketData]);
 
-  // GK-213B — operator raw-grade SET/CHANGE. Validates against the real
+  // GK-260 — operator raw-grade SET/CHANGE. Validates against the real
   // accepted raw-grade vocabulary (gradeAuthority.js's own list, matching
-  // what api/enrich.js's RAW_MULTIPLIERS tables actually recognize) before
-  // persisting anything — a malformed grade never reaches gradeAuthority
-  // at all. Never touches `grade`/`numericGrade` (the current automated
-  // estimate) or modelPredictedGrade* (the write-once baseline) — only
-  // operatorGrade/operatorGradeNumeric/operatorGradeSetAt/gradeAuthority.
+  // what api/enrich.js's RAW_MULTIPLIERS tables actually recognize) BEFORE
+  // sending anything, for fast UI error feedback — the server independently
+  // re-validates and is the only one that actually mints
+  // operatorGrade/operatorGradeNumeric/operatorGradeSetAt/gradeAuthority (a
+  // client-side pre-validated value is a UX nicety, never trusted as the
+  // authoritative one). Never touches `grade`/`numericGrade` (the current
+  // automated estimate) or modelPredictedGrade* (the write-once baseline).
   const setItemOperatorGrade = useCallback(async (item, rawInput) => {
-    const result = setOperatorGrade(rawInput);
-    if (!result.ok) throw new Error(result.error);
-    const patched = { ...item, ...result.patch };
-    await refreshMarketData(patched);
+    const result = validateOperatorGrade(rawInput);
+    if (!result.valid) throw new Error(result.error);
+    await refreshMarketData(item, { operatorGradeAction: 'SET', operatorGradeValue: rawInput });
   }, [refreshMarketData]);
 
-  // GK-213B — CLEAR. Governing grade immediately returns to the current
+  // GK-260 — CLEAR. Governing grade immediately returns to the current
   // automated `grade` (never mutated by this function either way).
   const clearItemOperatorGrade = useCallback(async (item) => {
-    const patched = { ...item, ...clearOperatorGrade() };
-    await refreshMarketData(patched);
+    await refreshMarketData(item, { operatorGradeAction: 'CLEAR' });
   }, [refreshMarketData]);
 
   // Ship #20a.6.19 — Re-identify book (re-grade + re-enrich with stored image).

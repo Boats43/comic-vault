@@ -169,7 +169,15 @@ try {
     assertEq(body?.governingIsGraded, false, 'durable format override remains governing through a manual identity correction');
   }
 
-  console.log('\n-- 5. explicit SET must be distinguishable from fallback --\n');
+  // GK-260 (Server-Owned Write Authority) — tests 5-8 and 13 below were
+  // rewritten from raw request-present gradeAuthority/operatorGrade trust
+  // (the exact launch blocker GK-260 closes) to the validated
+  // operatorGradeAction/gradingFormatAction protocol. Same real handler,
+  // same real durable rows, same expected outcomes — proving the fix
+  // preserves every legitimate SET/CHANGE/CLEAR capability while a raw,
+  // un-actioned authority claim (proven in the new GK-260 test file) no
+  // longer establishes anything.
+  console.log('\n-- 5. validated SET must be distinguishable from fallback --\n');
   {
     const id = await createOwnedItem('explicit-set', {}); // durable row has NO operator grade authority at all
     const { body, threw } = await callEnrich({
@@ -177,13 +185,14 @@ try {
       grade: 'GD 2.0', isGraded: false, numericGrade: null, confidence: 'high',
       skipImageSearch: true,
       collectionItemId: id, ownedRefresh: true,
-      gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: 'VG 4.0', operatorGradeNumeric: 4.0, // explicit, request-present
+      operatorGradeAction: 'SET', operatorGradeValue: 'VG 4.0', // validated action, no durable row to fall back to
     });
     assertTrue(threw === null, 'no exception');
-    assertEq(body?.governingGrade, 'VG 4.0', 'request-present value governs this response (legitimate SET, no durable row to fall back to)');
+    assertEq(body?.governingGrade, 'VG 4.0', 'a validated SET action governs this response (legitimate SET, no durable row to fall back to)');
+    assertEq(body?.gradeAuthority, 'OPERATOR_CONFIRMED', 'server minted gradeAuthority in the response');
   }
 
-  console.log('\n-- 6. explicit CHANGE --\n');
+  console.log('\n-- 6. validated CHANGE --\n');
   {
     const id = await createOwnedItem('explicit-change', { gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: 'VG 4.0', operatorGradeNumeric: 4.0 });
     const { body, threw } = await callEnrich({
@@ -191,13 +200,13 @@ try {
       grade: 'GD 2.0', isGraded: false, numericGrade: null, confidence: 'high',
       skipImageSearch: true,
       collectionItemId: id, ownedRefresh: true,
-      gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: 'NM 9.0', operatorGradeNumeric: 9.0, // new value, request-present
+      operatorGradeAction: 'SET', operatorGradeValue: 'NM 9.0', // validated action, new value
     });
     assertTrue(threw === null, 'no exception');
-    assertEq(body?.governingGrade, 'NM 9.0', 'request-present NEW value governs this response, not the durable OLD value');
+    assertEq(body?.governingGrade, 'NM 9.0', 'the validated CHANGE action governs this response, not the durable OLD value');
   }
 
-  console.log('\n-- 7. explicit CLEAR --\n');
+  console.log('\n-- 7. validated CLEAR --\n');
   {
     const id = await createOwnedItem('explicit-clear', { gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: 'VF 8.0', operatorGradeNumeric: 8.0 });
     const { body, threw } = await callEnrich({
@@ -205,14 +214,15 @@ try {
       grade: 'FN 6.0', isGraded: false, numericGrade: null, confidence: 'high',
       skipImageSearch: true,
       collectionItemId: id, ownedRefresh: true,
-      gradeAuthority: null, operatorGrade: null, operatorGradeNumeric: null, // explicit CLEAR, own-properties present with null
+      operatorGradeAction: 'CLEAR',
     });
     assertTrue(threw === null, 'no exception');
-    assertEq(body?.governingGrade, 'FN 6.0', 'the durable VF 8.0 is NOT resurrected — governing grade returns to the current automated grade (explicit null means CLEAR, not "unknown, consult durable")');
+    assertEq(body?.governingGrade, 'FN 6.0', 'the durable VF 8.0 is NOT resurrected — governing grade returns to the current automated grade (a validated CLEAR action, not "unknown, consult durable")');
     assertEq(body?.governingGradeSource, 'model', 'source correctly attributed to model');
+    assertEq(body?.gradeAuthority, null, 'server minted gradeAuthority=null on the response');
   }
 
-  console.log('\n-- 8. format CLEAR --\n');
+  console.log('\n-- 8. validated format CLEAR --\n');
   {
     const id = await createOwnedItem('format-clear', { gradingFormatAuthority: 'OPERATOR_CONFIRMED', operatorIsGraded: false });
     const { body, threw } = await callEnrich({
@@ -220,7 +230,7 @@ try {
       grade: 'FN 6.0', isGraded: false, numericGrade: null, confidence: 'high',
       skipImageSearch: true,
       collectionItemId: id, ownedRefresh: true,
-      gradingFormatAuthority: null, operatorIsGraded: null,
+      gradingFormatAction: 'CLEAR',
     });
     assertTrue(threw === null, 'no exception');
     assertEq(body?.governingGradingFormatSource, 'model', 'the durable RAW override is NOT resurrected — resolver falls back to model tier');
@@ -321,18 +331,21 @@ try {
     const unhydratedProjected = pickGradingAuthorityFields({ id: 'x', title: 'Test Comic' });
     assertTrue(!('gradeAuthority' in unhydratedProjected) && ('gradeAuthority' in projected), 'TEST 11 vs TEST 13: identical helper, observably different request bodies — ABSENT vs PRESENT-WITH-NULL, proven side by side');
 
-    // Real end-to-end: the durable value must NOT be resurrected.
+    // Real end-to-end (GK-260): a raw `...projected` (own-property-null)
+    // spread is no longer trusted to establish or clear anything — a
+    // validated operatorGradeAction/gradingFormatAction CLEAR is required.
+    // The durable value must still NOT be resurrected.
     const id = await createOwnedItem('clear-vs-unhydrated', { gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: 'VF 8.0', operatorGradeNumeric: 8.0, gradingFormatAuthority: 'OPERATOR_CONFIRMED', operatorIsGraded: false });
     const requestBody = {
       title: 'Test Comic', year: '1990', publisher: 'Marvel', assetType: 'comic',
       grade: 'FN 6.0', isGraded: false, numericGrade: null, confidence: 'high',
       skipImageSearch: true,
       collectionItemId: id, ownedRefresh: true,
-      ...projected,
+      operatorGradeAction: 'CLEAR', gradingFormatAction: 'CLEAR',
     };
     const { body, threw } = await callEnrich(requestBody);
     assertTrue(threw === null, 'no exception');
-    assertEq(body?.governingGrade, 'FN 6.0', 'request-present null outranks the durable VF 8.0 — durable value is NOT resurrected, governing grade returns to current automated grade');
+    assertEq(body?.governingGrade, 'FN 6.0', 'a validated CLEAR action outranks the durable VF 8.0 — durable value is NOT resurrected, governing grade returns to current automated grade');
   }
 } finally {
   if (createdIds.length) await client.query('DELETE FROM collection_item WHERE principal_id = $1 AND id = ANY($2::text[])', [PRINCIPAL, createdIds]);

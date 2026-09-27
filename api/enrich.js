@@ -113,7 +113,13 @@ import { extractCreatorsFromComps } from "../src/lib/premiumCreators.js";
 // grade VALUE govern pricing, per the hierarchy that module's own header
 // documents. Selects an input for the existing, unmodified multiplier
 // formulas below — never a second pricing path.
-import { resolveGoverningGradingFormat, resolveGoverningGrade } from "../src/lib/gradeAuthority.js";
+// GK-260 (Server-Owned Write Authority) — setOperatorGrade/clearOperatorGrade/
+// setOperatorGradingFormat/clearOperatorGradingFormat are the SAME validated
+// mint functions src/App.jsx already uses client-side; this handler now
+// calls them itself, server-side, so a validated operator ACTION — never a
+// raw client-asserted authority field — is the only way gradeAuthority/
+// gradingFormatAuthority can become 'OPERATOR_CONFIRMED' for a request.
+import { resolveGoverningGradingFormat, resolveGoverningGrade, setOperatorGrade, clearOperatorGrade, setOperatorGradingFormat, clearOperatorGradingFormat } from "../src/lib/gradeAuthority.js";
 import { extractIssueFromEbayResults } from "../src/lib/identityAlignment.js";
 // Ship #20a.6.4 — refuse-to-price gate. Sanitizes Vision identity fields
 // and refuses to produce a price when title/issue/year/publisher can't
@@ -2332,23 +2338,27 @@ export default async function handler(req, res) {
       collectionItemId, // GK-145 (GrailKey Dispatch 2026-08-21) — the IndexedDB collection record's own item.id, threaded through by App.jsx on collection-originated requests only (refreshMarketData, auto-refresh, reIdentifyBook, submitManualCorrection, bulk import, gradeBlob/duplicate-confirm post-save). Null on a free-standing scan not yet saved to the collection. Also snapshotted into the scanlog record below (src/lib/scanLog.js), NOT proof of physical-copy identity there — see scanLog.js's own JSDoc. GK-253/GK-254 (2026-09-24): now ALSO drives real identity/economic logic, but ONLY when paired with the explicit ownedRefresh/ownedReidentify flag below — never on its own (a bare collectionItemId with neither flag, e.g. a fresh gradeBlob/bulk-import/duplicate-confirm post-save call, is deliberately left exactly as measurement-only as before; see GK-254's own Section A trace for why those flows cannot be safely inferred from collectionItemId presence alone).
       ownedRefresh,    // GK-254 — explicit flow marker. true ONLY for refreshMarketData/auto-refresh/submitManualCorrection (App.jsx): "this request targets an already-owned Collection item and carries no fresh identification evidence that should ever be allowed to silently change its established category." Absent/false everywhere else, including every first-time-save flow (gradeBlob's initial scan, bulk import, duplicate-confirm) — those must never be gated by owned-asset fail-closed logic, since they have no established durable authority yet to protect (GK-254 Section A).
       ownedReidentify, // GK-254 — explicit flow marker. true ONLY for reIdentifyBook (App.jsx): "this request targets an already-owned Collection item AND carries a genuine fresh identification pass (real Vision + image search) whose result may legitimately conflict with established durable authority." Distinct from ownedRefresh: a conflict here must be held/refused, never silently resolved in either direction (GK-254 Section E).
-      // GK-213B (Operator Authority) — grading-authority fields, threaded
-      // through by App.jsx exactly like identityAuthority (GK-213A): the
-      // client persists these in collection_item.attributes and re-sends
-      // them on every enrich call, same pattern as grade/isGraded/
-      // numericGrade themselves. Server-side authority (never trusted from
-      // the request for anything else) is deliberately NOT required here —
-      // unlike identityAuthority, gradeAuthority/gradingFormatAuthority
-      // carry no durable-category-style economic gate; resolveGoverning*
-      // (src/lib/gradeAuthority.js) only ever SELECTS which already-
-      // client-persisted value feeds the existing, unmodified multiplier
-      // formulas — it authorizes no new capability the client didn't
-      // already have via plain `grade`/`isGraded`.
+      // GK-260 (Server-Owned Write Authority) — these five raw fields are
+      // deliberately destructured but NEVER trusted to establish authority
+      // (see the GK-213C resolution block below, which now reads the
+      // durable row ONLY). A pre-GK-260 build trusted them verbatim from
+      // the request body — that was the exact launch blocker this dispatch
+      // closes: a forged gradeAuthority:'OPERATOR_CONFIRMED' claimed human
+      // confirmation the server never validated. Kept here only so a
+      // caller that still sends them (a stale client, or a forged request)
+      // can be logged/diagnosed rather than silently ignored with no trace.
       gradeAuthority,
       operatorGrade,
       operatorGradeNumeric,
       operatorIsGraded,
       gradingFormatAuthority,
+      // GK-260 — the ONLY way authority may be established or changed for
+      // THIS request. Client describes WHAT the operator did; the server
+      // validates via the same setOperatorGrade/setOperatorGradingFormat
+      // functions the legitimate UI already calls, and mints the result.
+      operatorGradeAction,   // 'SET' | 'CLEAR'
+      operatorGradeValue,    // raw grade string, required when action is 'SET'
+      gradingFormatAction,   // 'SET_RAW' | 'SET_GRADED' | 'CLEAR'
     } = req.body || {};
 
     // Track B Phase 0, Commit 3 — Safeguards 1+2. prepareManualCorrectionRequest
@@ -2623,6 +2633,14 @@ export default async function handler(req, res) {
     // bulk import, duplicate-confirm, etc.) — those fall through to
     // request-body-only resolution, byte-identical to before this dispatch.
     let durableGradingAttributesGK213C = null;
+    // GK-260 — hoisted out of the block below (which resolves them inside
+    // nested try/else scopes) so the validated-action write-back further
+    // down can reuse the SAME verified principal/module reference, rather
+    // than re-deriving or re-verifying anything. Both stay null for every
+    // non-owned flow, or when authentication/ownership verification fails
+    // — the write-back below is gated on both being non-null.
+    let principalIdGK260 = null;
+    let collectionModGK260 = null;
     if ((ownedRefresh === true || ownedReidentify === true) && collectionItemId) {
       let authFailedGK254 = false;
       try {
@@ -2654,6 +2672,13 @@ export default async function handler(req, res) {
                 // GK-213C — same successful-resolution branch, same row,
                 // no second DB read.
                 durableGradingAttributesGK213C = ownedItemGK254.attributes || {};
+                // GK-260 — this is the one place a principalId has been
+                // cryptographically verified (real Bearer token) AND
+                // confirmed to own this exact collectionItemId (the
+                // getMyCollectionItem call above throws otherwise). Safe to
+                // hoist for the validated-action write-back below.
+                principalIdGK260 = principalIdGK254;
+                collectionModGK260 = collectionModGK254;
               } else {
                 authFailedGK254 = true; // resolved row, no category — treat as unresolved
               }
@@ -2729,40 +2754,132 @@ export default async function handler(req, res) {
     // null for every non-owned flow) rather than adding more per-caller
     // client threading.
     //
-    // Precedence, per field, independently: an explicit request-body value
-    // (own-property, INCLUDING an explicit null — e.g. a just-issued CLEAR
-    // whose result hasn't been persisted back to the collection row yet)
-    // always governs THIS response; a field genuinely ABSENT from the
-    // request body falls back to the durable row; absent from both leaves
-    // it unresolved (existing resolver semantics — no operator authority
-    // at all, identical to pre-GK-213C behavior). Deliberately own-property
-    // presence, never `||`/`??` — either would collapse "caller didn't
-    // assert anything about this field" and "caller explicitly cleared it"
-    // into the same value, destroying exactly the distinction K3/K6 depend
-    // on. Request-present intentionally still outranks durable (not the
-    // reverse): SET/CHANGE/CLEAR construct a patched client item and call
-    // refreshMarketData BEFORE that item is necessarily persisted back, so
-    // the in-flight request is the only place this session's own most
-    // recent operator action is visible yet.
-    const reqBodyGK213C = req.body || {};
+    // GK-260 (Server-Owned Write Authority) correction: this resolver is
+    // now DURABLE-ONLY — the request body is no longer consulted here at
+    // all. Pre-GK-260, an explicit request-body value outranked the durable
+    // row unconditionally, with no check that the request-body value ever
+    // came from a validated action — a forged gradeAuthority:'OPERATOR_
+    // CONFIRMED' in an ordinary request body was indistinguishable from a
+    // real one. The "in-flight action not yet durably persisted" case this
+    // used to serve is now handled correctly below, by validating and
+    // minting the action server-side for THIS request (see
+    // operatorGradeAction/gradingFormatAction handling immediately after),
+    // rather than by trusting whatever authority label the client attached
+    // to its own claim.
     const hasOwnGK213C = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
     const resolveGradingAuthorityFieldGK213C = (field) =>
-      hasOwnGK213C(reqBodyGK213C, field)
-        ? reqBodyGK213C[field]
-        : (durableGradingAttributesGK213C && hasOwnGK213C(durableGradingAttributesGK213C, field)
-            ? durableGradingAttributesGK213C[field]
-            : undefined);
-    const effectiveGradeAuthority = resolveGradingAuthorityFieldGK213C('gradeAuthority');
-    const effectiveOperatorGrade = resolveGradingAuthorityFieldGK213C('operatorGrade');
-    const effectiveOperatorGradeNumeric = resolveGradingAuthorityFieldGK213C('operatorGradeNumeric');
-    const effectiveOperatorIsGraded = resolveGradingAuthorityFieldGK213C('operatorIsGraded');
-    const effectiveGradingFormatAuthority = resolveGradingAuthorityFieldGK213C('gradingFormatAuthority');
-    if (durableGradingAttributesGK213C && (effectiveGradeAuthority !== gradeAuthority || effectiveGradingFormatAuthority !== gradingFormatAuthority)) {
+      durableGradingAttributesGK213C && hasOwnGK213C(durableGradingAttributesGK213C, field)
+        ? durableGradingAttributesGK213C[field]
+        : undefined;
+    let effectiveGradeAuthority = resolveGradingAuthorityFieldGK213C('gradeAuthority');
+    let effectiveOperatorGrade = resolveGradingAuthorityFieldGK213C('operatorGrade');
+    let effectiveOperatorGradeNumeric = resolveGradingAuthorityFieldGK213C('operatorGradeNumeric');
+    let effectiveOperatorGradeSetAt = resolveGradingAuthorityFieldGK213C('operatorGradeSetAt');
+    let effectiveOperatorIsGraded = resolveGradingAuthorityFieldGK213C('operatorIsGraded');
+    let effectiveGradingFormatAuthority = resolveGradingAuthorityFieldGK213C('gradingFormatAuthority');
+    if (durableGradingAttributesGK213C && (effectiveGradeAuthority !== undefined || effectiveGradingFormatAuthority !== undefined)) {
       console.log(
-        `[owned-grading-authority] durable fallback applied — request gradeAuthority=${JSON.stringify(gradeAuthority)} ` +
-        `effective=${JSON.stringify(effectiveGradeAuthority)}, request gradingFormatAuthority=${JSON.stringify(gradingFormatAuthority)} ` +
-        `effective=${JSON.stringify(effectiveGradingFormatAuthority)}`
+        `[owned-grading-authority] durable fallback applied — gradeAuthority=${JSON.stringify(effectiveGradeAuthority)} ` +
+        `gradingFormatAuthority=${JSON.stringify(effectiveGradingFormatAuthority)}`
       );
+    }
+    if (gradeAuthority !== undefined || operatorGrade !== undefined || gradingFormatAuthority !== undefined || operatorIsGraded !== undefined) {
+      console.log(
+        `[owned-grading-authority] IGNORED raw client-asserted authority fields (GK-260) — ` +
+        `request gradeAuthority=${JSON.stringify(gradeAuthority)} operatorGrade=${JSON.stringify(operatorGrade)} ` +
+        `gradingFormatAuthority=${JSON.stringify(gradingFormatAuthority)} operatorIsGraded=${JSON.stringify(operatorIsGraded)} — ` +
+        `only a validated operatorGradeAction/gradingFormatAction, or the durable row, may establish authority`
+      );
+    }
+
+    // GK-260 — SERVER-OWNED WRITE AUTHORITY. The client may describe WHAT
+    // the operator did (operatorGradeAction/gradingFormatAction); it may
+    // never assert THAT the resulting state is authoritative. The server
+    // validates the action via the SAME setOperatorGrade/clearOperatorGrade/
+    // setOperatorGradingFormat/clearOperatorGradingFormat functions the
+    // legitimate App.jsx UI already calls (src/lib/gradeAuthority.js,
+    // GK-213B) and mints the result — this is the only way effective*
+    // above can be established or changed within this request, on top of
+    // whatever the durable row already held. operatorGradeSetAt is minted
+    // from the SERVER clock (Date.now() below), never accepted from the
+    // client.
+    if (operatorGradeAction === 'SET') {
+      const result = setOperatorGrade(operatorGradeValue);
+      if (!result.ok) {
+        return res.status(400).json({ error: result.error });
+      }
+      effectiveGradeAuthority = result.patch.gradeAuthority;
+      effectiveOperatorGrade = result.patch.operatorGrade;
+      effectiveOperatorGradeNumeric = result.patch.operatorGradeNumeric;
+      effectiveOperatorGradeSetAt = result.patch.operatorGradeSetAt;
+      console.log(`[owned-grading-authority] operatorGradeAction=SET minted grade=${JSON.stringify(effectiveOperatorGrade)}`);
+    } else if (operatorGradeAction === 'CLEAR') {
+      const patch = clearOperatorGrade();
+      effectiveGradeAuthority = patch.gradeAuthority;
+      effectiveOperatorGrade = patch.operatorGrade;
+      effectiveOperatorGradeNumeric = patch.operatorGradeNumeric;
+      effectiveOperatorGradeSetAt = patch.operatorGradeSetAt;
+      console.log('[owned-grading-authority] operatorGradeAction=CLEAR');
+    } else if (operatorGradeAction != null) {
+      return res.status(400).json({ error: `Unrecognized operatorGradeAction "${operatorGradeAction}"` });
+    }
+
+    if (gradingFormatAction === 'SET_RAW' || gradingFormatAction === 'SET_GRADED') {
+      const patch = setOperatorGradingFormat(gradingFormatAction === 'SET_GRADED');
+      effectiveOperatorIsGraded = patch.operatorIsGraded;
+      effectiveGradingFormatAuthority = patch.gradingFormatAuthority;
+      console.log(`[owned-grading-authority] gradingFormatAction=${gradingFormatAction} minted isGraded=${effectiveOperatorIsGraded}`);
+    } else if (gradingFormatAction === 'CLEAR') {
+      const patch = clearOperatorGradingFormat();
+      effectiveOperatorIsGraded = patch.operatorIsGraded;
+      effectiveGradingFormatAuthority = patch.gradingFormatAuthority;
+      console.log('[owned-grading-authority] gradingFormatAction=CLEAR');
+    } else if (gradingFormatAction != null) {
+      return res.status(400).json({ error: `Unrecognized gradingFormatAction "${gradingFormatAction}"` });
+    }
+
+    // GK-260 — DURABLE WRITE-BACK. A validated action just minted new
+    // grading authority for THIS response, but that alone is only
+    // transient (the next request, on any device, would only see it if
+    // something durably persists it). Persisting it via the ordinary
+    // /api/collection write is no longer possible — as of this dispatch,
+    // FULLY_PROTECTED_GRADING_KEYS are immune to that path by design, on
+    // purpose, so a forged client PUT can never plant fake authority there
+    // either. This targeted, server-side patch (never fed by raw
+    // request-body fields — only by the SAME `result.patch`/`patch`
+    // objects setOperatorGrade/clearOperatorGrade/setOperatorGradingFormat/
+    // clearOperatorGradingFormat just produced) is now the ONLY way these
+    // six fields ever change in the database. Gated on principalIdGK260/
+    // collectionModGK260 being non-null — i.e. this request already passed
+    // GK-254's real Bearer-token + ownership verification above; an
+    // unauthenticated or non-owned action is intentionally transient-only
+    // (see the governance note on this exact question banked in
+    // docs/TICKET-REGISTRY.md, GK-260).
+    if ((operatorGradeAction != null || gradingFormatAction != null) && principalIdGK260 && collectionModGK260) {
+      try {
+        await collectionModGK260.applyGradingAuthorityPatch({
+          principalId: principalIdGK260,
+          id: collectionItemId,
+          patch: {
+            gradeAuthority: effectiveGradeAuthority ?? null,
+            operatorGrade: effectiveOperatorGrade ?? null,
+            operatorGradeNumeric: effectiveOperatorGradeNumeric ?? null,
+            operatorGradeSetAt: effectiveOperatorGradeSetAt ?? null,
+            operatorIsGraded: effectiveOperatorIsGraded ?? null,
+            gradingFormatAuthority: effectiveGradingFormatAuthority ?? null,
+          },
+        });
+        console.log(`[owned-grading-authority] durably persisted validated action for collectionItemId=${JSON.stringify(collectionItemId)}`);
+      } catch (e) {
+        // Durable persistence failed (transient DB error, row deleted
+        // mid-request, etc.) — THIS response still reflects the correctly
+        // validated/minted authority (pricing below is unaffected), but the
+        // change may not survive to the next request. Disclosed, not
+        // silently swallowed, never a 500 — the operator's immediate result
+        // is still correct and real.
+        out.gradingAuthorityPersistFailed = true;
+        console.log(`[owned-grading-authority] DURABLE WRITE-BACK FAILED (non-fatal, transient-only this response): ${e?.message || e}`);
+      }
     }
 
     // Prefer explicit issue param, fall back to parsing from title.
@@ -8123,14 +8240,25 @@ export default async function handler(req, res) {
     // merely by convention. RAW_MULTIPLIERS/CGC_MULTIPLIERS/
     // getGradeMultiplier/getRawGradeMultiplier themselves are byte-identical
     // to before this dispatch — only which grade/format feeds them changed.
-    // GK-213C — resolved (request-present, else durable owned row, else
-    // unset) values, not the bare request-body destructure — see the
-    // resolution block above.
+    // GK-260 — resolved (durable owned row, then a validated this-request
+    // action, else unset) values, never the bare request-body destructure —
+    // see the resolution block above.
     const governingFormat = resolveGoverningGradingFormat({
       cgcVerified: out.cgcVerified, gradingFormatAuthority: effectiveGradingFormatAuthority, operatorIsGraded: effectiveOperatorIsGraded, isGraded,
     });
     out.governingGradingFormatSource = governingFormat.source;
     out.governingIsGraded = governingFormat.isGraded;
+    // GK-260 — echo the resolved (never client-asserted) authority fields
+    // back on every response so the client can adopt the SERVER's own
+    // resolution, instead of ever needing to compute or assert these
+    // itself. Always set (string or null) whenever this point in the
+    // pipeline is reached, so App.jsx's merge can trust them directly.
+    out.gradeAuthority = effectiveGradeAuthority ?? null;
+    out.operatorGrade = effectiveOperatorGrade ?? null;
+    out.operatorGradeNumeric = effectiveOperatorGradeNumeric ?? null;
+    out.operatorGradeSetAt = effectiveOperatorGradeSetAt ?? null;
+    out.operatorIsGraded = effectiveOperatorIsGraded ?? null;
+    out.gradingFormatAuthority = effectiveGradingFormatAuthority ?? null;
 
     if (governingFormat.isGraded === true) {
       if (numericGrade == null) {

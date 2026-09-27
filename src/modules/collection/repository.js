@@ -31,17 +31,63 @@ const PROTECTED_AUTHORITY_KEYS = [
   'operatorIsGraded', 'gradingFormatAuthority',
 ];
 
+// GK-260 (Server-Owned Write Authority) — of the ten keys above, these six
+// specifically get a STRONGER guarantee than the rest: an ordinary
+// /api/collection write can never mint, overwrite, downgrade, OR clear
+// them, whether the incoming attributes blob omits them, includes a forged
+// value, or includes an explicit null. The EXISTING row's value always
+// wins, unconditionally. This closes a real gap the omission-only
+// protection below left open: a client could previously plant
+// gradeAuthority:'OPERATOR_CONFIRMED' directly through this endpoint,
+// which api/enrich.js's durable-row fallback (GK-213C) would then trust
+// unconditionally on a later request — a forged-insertion path GK-260's
+// own request-body fix never covered.
+//
+// The remaining four keys (identityAuthority/modelPredictedGrade*) keep
+// their existing omission-only protection, unchanged — broadening their
+// treatment is out of this dispatch's contained scope.
+//
+// The ONLY legitimate way to set/change/clear these six fields is now
+// applyGradingAuthorityPatch below, called exclusively by api/enrich.js
+// after a validated setOperatorGrade/clearOperatorGrade/
+// setOperatorGradingFormat/clearOperatorGradingFormat call — never through
+// this ordinary write path, regardless of what the caller sends here.
+const FULLY_PROTECTED_GRADING_KEYS = [
+  'operatorGrade', 'operatorGradeNumeric', 'operatorGradeSetAt', 'gradeAuthority',
+  'operatorIsGraded', 'gradingFormatAuthority',
+];
+
+// GK-260 — for a genuine INSERT (no pre-existing row to fall back to at
+// all, e.g. a brand-new collection_item), there is nothing legitimate for
+// these six keys to inherit — they simply must never be settable via the
+// ordinary create path either. Used directly in upsertItem's VALUES list
+// (not just its ON CONFLICT branch, which alone left a real gap: a genuine
+// first-insert bypassed protectedAttributesMergeSql entirely, since that
+// function is only referenced inside the ON CONFLICT DO UPDATE clause).
+function stripFullyProtectedGradingKeysSql(incomingParam) {
+  const gradingKeysArray = `ARRAY[${FULLY_PROTECTED_GRADING_KEYS.map((k) => `'${k}'`).join(', ')}]::text[]`;
+  return `(COALESCE(${incomingParam}::jsonb, '{}'::jsonb) - ${gradingKeysArray})`;
+}
+
 // `existingAttrsExpr` is a trusted SQL fragment (the current row's own
 // `attributes` column reference — either the bare column name in an UPDATE,
 // or `collection_item.attributes` inside an ON CONFLICT DO UPDATE, where the
 // bare table name resolves to the pre-existing row). `incomingParam` is
 // likewise a trusted SQL fragment (a bind parameter or EXCLUDED.attributes),
-// never caller-supplied text — PROTECTED_AUTHORITY_KEYS is a fixed literal
-// list, not user input, so building the key list into the query text here
-// carries no injection risk.
+// never caller-supplied text — PROTECTED_AUTHORITY_KEYS/
+// FULLY_PROTECTED_GRADING_KEYS are fixed literal lists, not user input, so
+// building the key lists into the query text here carries no injection risk.
 function protectedAttributesMergeSql(existingAttrsExpr, incomingParam) {
   const pairs = PROTECTED_AUTHORITY_KEYS.map((k) => `'${k}', ${existingAttrsExpr}->'${k}'`).join(', ');
-  return `(jsonb_strip_nulls(jsonb_build_object(${pairs})) || COALESCE(${incomingParam}::jsonb, '{}'::jsonb))`;
+  const gradingKeysArray = `ARRAY[${FULLY_PROTECTED_GRADING_KEYS.map((k) => `'${k}'`).join(', ')}]::text[]`;
+  const gradingPairsFromExisting = FULLY_PROTECTED_GRADING_KEYS.map((k) => `'${k}', ${existingAttrsExpr}->'${k}'`).join(', ');
+  return `(
+    (
+      (jsonb_strip_nulls(jsonb_build_object(${pairs})) || COALESCE(${incomingParam}::jsonb, '{}'::jsonb))
+      - ${gradingKeysArray}
+    )
+    || jsonb_strip_nulls(jsonb_build_object(${gradingPairsFromExisting}))
+  )`;
 }
 
 function toRow(dbRow) {
@@ -88,7 +134,7 @@ export async function getByPrincipalAndId(client, principalId, id) {
 export async function upsertItem(client, { id, principalId, assetCategory, attributes }) {
   const res = await client.query(
     `INSERT INTO data1_dev.collection_item (id, principal_id, asset_category, attributes)
-     VALUES ($1, $2, $3, $4)
+     VALUES ($1, $2, $3, ${stripFullyProtectedGradingKeysSql('$4')})
      ON CONFLICT (principal_id, id) DO UPDATE
        SET asset_category = EXCLUDED.asset_category,
            attributes = ${protectedAttributesMergeSql('collection_item.attributes', 'EXCLUDED.attributes')},
@@ -115,6 +161,35 @@ export async function updateItem(client, { id, principalId, assetCategory, attri
       WHERE principal_id = $1 AND id = $2
       RETURNING id, asset_category, attributes, created_at, updated_at`,
     [principalId, id, assetCategory ?? null, JSON.stringify(attributes)]
+  );
+  return res.rowCount > 0 ? toRow(res.rows[0]) : null;
+}
+
+// GK-260 — the ONLY write path that may set/change/clear the six
+// FULLY_PROTECTED_GRADING_KEYS. NOT a full replace, NOT the ordinary
+// client-facing write (api/collection.js never calls this) — a targeted
+// jsonb patch merge that touches only the caller-supplied keys, leaving
+// every other attribute (title, images, price, comps, identityAuthority,
+// modelPredictedGrade*, etc.) completely untouched, so there is no
+// possible staleness/full-replace race with a concurrent ordinary write.
+// `patch` is filtered to FULLY_PROTECTED_GRADING_KEYS ONLY — defense in
+// depth against a future caller accidentally passing an unrelated field —
+// the caller (src/modules/collection/service.js) is expected to have
+// already built `patch` from a validated setOperatorGrade/
+// clearOperatorGrade/setOperatorGradingFormat/clearOperatorGradingFormat
+// result, never from raw client input directly.
+export async function applyGradingAuthorityPatch(client, { id, principalId, patch }) {
+  const safePatch = {};
+  for (const key of FULLY_PROTECTED_GRADING_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(patch || {}, key)) safePatch[key] = patch[key];
+  }
+  const res = await client.query(
+    `UPDATE data1_dev.collection_item
+        SET attributes = COALESCE(attributes, '{}'::jsonb) || $3::jsonb,
+            updated_at = now()
+      WHERE principal_id = $1 AND id = $2
+      RETURNING id, asset_category, attributes, created_at, updated_at`,
+    [principalId, id, JSON.stringify(safePatch)]
   );
   return res.rowCount > 0 ? toRow(res.rows[0]) : null;
 }
