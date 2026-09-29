@@ -1897,6 +1897,22 @@ Preserving the disclosed hybrid delist status exactly, not overstating either br
 
 **STATUS: GK-264 — IMPLEMENTED / LOCAL PASS / HELD BEFORE PUSH.** Not pushed, not deployed. No Production migration needed or applied (no schema change this pass — GK-263's schema is unmodified). Two hard Production-certification prerequisites remain open, both disclosed above: `GRAILKEY_OAUTH_STATE_SECRET`/`GRAILKEY_MARKETPLACE_CREDENTIAL_KEY` must both be present and valid in Production, and the operator must confirm the eBay Developer Portal Accept URL for the Production RuName points at this app's frontend root. Next phase (PRINCIPAL-SCOPED SELLER EXECUTION — wiring `list-ebay.js`/`delist-ebay.js`/Fulfillment/Finances/the reconciler onto this per-principal credential, no global seller-token fallback) is a new, separately-authorized ticket, not started.
 
+### GK-264 activation-preflight annotation — durable provider-identity law, corrected (not amended, no history rewrite)
+
+**GK-264's own hardening pass discovered and CORRECTED a GK-263 ownership edge case**, in code (`src/modules/marketplace/service.js`, commit `e5cb34d`), not by rewriting any prior commit: a principal could previously attempt to rebind the same provider slot (their own `marketplace_connection` row for a given provider) to a **different** durable provider identity — connected or after disconnecting — because the pre-existing cross-principal collision check explicitly excludes the calling principal from its own comparison. GK-264 now enforces, at the service layer:
+
+- provider identity is durable — once bound to a principal+provider row, it does not change for the life of that row
+- disconnect changes connection **state**, never ownership **identity**
+- reconnect to the SAME provider identity is allowed (the existing row is reused in place)
+- reconnect/rebind to a DIFFERENT provider identity is refused (`ProviderIdentityConflictError`), never silently allowed, for the SAME principal exactly as for a different one
+- no state transition anywhere in this module may silently reassign or mutate a durable identity binding
+
+**Structural law, recorded explicitly:**
+
+> **STATE TRANSITION ≠ IDENTITY TRANSFER.** A transition such as CONNECTED → DISCONNECTED → CONNECTED may change connection state and credential material, but it may never silently rewrite the durable external identity already bound to that principal/provider relationship.
+
+**Durable encryption-root rule.** `GRAILKEY_MARKETPLACE_CREDENTIAL_KEY` is the durable encryption root for every stored marketplace refresh credential (AES-256-GCM, `src/modules/marketplace/crypto.js`). Once the first real marketplace credential is ever written: loss of this key makes existing encrypted refresh credentials permanently unrecoverable; replacing/rotating the key without a re-encryption pass makes existing credentials unreadable (fails closed — `decryptCredential` cannot recover plaintext under the wrong key by construction, proven adversarially in `tests/gk263-marketplace-connection.test.js` Part G3); affected sellers would need to re-authorize through OAuth from scratch. **This is NOT loss of marketplace ownership/history** — the durable `marketplace_connection` rows and their identity bindings (`provider_user_id`, the permanence law above) remain completely intact; only the encrypted credential *material* becomes unrecoverable. No key-rotation/re-encryption mechanism exists yet — banked, explicitly not required before the pilot.
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.
