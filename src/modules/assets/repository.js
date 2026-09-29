@@ -448,6 +448,21 @@ export async function listOutcomeEventsByExternalListingId(client, { gkAssetId, 
   return r.rows;
 }
 
+// GK-262 — api/delist-ebay.js's reverse lookup: which gk_asset_id (if
+// any) a marketplace ItemID durably belongs to, with NO gkAssetId known
+// yet by the caller. Read-only. outcome_event_listing_type_uidx (0023)
+// already guarantees at most one LISTED row per (external_listing_id,
+// outcome_type) pair, so this can never return more than one candidate.
+export async function getAssetIdByExternalListingId(client, { externalListingId, channel }) {
+  const r = await client.query(
+    `SELECT gk_asset_id FROM data1_dev.outcome_event
+     WHERE external_listing_id = $1 AND channel = $2 AND outcome_type = 'LISTED'
+     LIMIT 1`,
+    [externalListingId, channel]
+  );
+  return r.rows[0]?.gk_asset_id ?? null;
+}
+
 export async function listEconomicsComponents(client, outcomeEventId) {
   const r = await client.query(
     `SELECT * FROM data1_dev.outcome_economics_component WHERE outcome_event_id = $1 ORDER BY occurred_at, id`,

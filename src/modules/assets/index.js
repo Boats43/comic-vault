@@ -28,6 +28,7 @@ export {
   recordEconomicsComponent,
   getOutcomeEconomics,
   getOutcomeEventsForListing,
+  resolveOwnedAssetForListing,
   getLatestValuation,
   hasActiveListingForChannel,
   hasAuthoritativeSoldOutcome,

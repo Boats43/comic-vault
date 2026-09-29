@@ -1321,6 +1321,37 @@ export async function getOutcomeEventsForListing({ principalId, gkAssetId, exter
   }
 }
 
+// resolveOwnedAssetForListing -- GK-262, api/delist-ebay.js's own
+// ownership-bind read. Reverse of the normal principalId->gkAssetId
+// direction: starts from a bare marketplace ItemID (no gkAssetId known
+// yet), finds the durable gk_asset_id (if any) via the SAME
+// outcome_event ledger attemptListedOutcome already writes to at LIST
+// time, then applies the SAME ownership check every other asset-scoped
+// read/write in this module already applies. Never mutates anything.
+//
+// found:false means NO durable outcome_event LISTED row exists for this
+// externalListingId -- real for any listing made before this linkage
+// existed, through the Production-disabled bundle path, or through a
+// durable-write decline at LIST time (attemptListedOutcome's own
+// disclosed failure mode). Callers MUST NOT treat found:false as
+// "authorized" -- it means "this endpoint cannot assert ownership for
+// this ItemID," not "ownership was checked and passed."
+export async function resolveOwnedAssetForListing({ principalId, externalListingId, channel = 'ebay' } = {}) {
+  requireFields({ principalId, externalListingId }, ['principalId', 'externalListingId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const gkAssetId = await repo.getAssetIdByExternalListingId(client, { externalListingId, channel });
+    if (!gkAssetId) {
+      return { found: false, gkAssetId: null };
+    }
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    return { found: true, gkAssetId };
+  } finally {
+    client.release();
+  }
+}
+
 // getOutcomeEconomics -- read-only, no transaction. Returns every
 // persisted component plus the derived realized net (never a stored
 // field) for one outcome_event. Ownership-checked the same way every

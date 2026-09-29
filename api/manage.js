@@ -1,10 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { checkAccessGate } from "../src/lib/accessGate.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  // GK-262 -- this endpoint made unauthenticated Anthropic calls before
+  // this gate existed. Rejects before any Anthropic call, never after.
+  const gateError = checkAccessGate(req);
+  if (gateError) {
+    res.status(gateError.status).json({ error: gateError.error });
     return;
   }
 
