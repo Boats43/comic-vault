@@ -1807,7 +1807,10 @@ Real phone acceptance test on "The Rationalists" (Production `dca47d5`, two atte
 
 **Files changed:** `api/delist-ebay.js`, `api/chat.js`, `api/manage.js`, `src/modules/assets/repository.js`, `src/modules/assets/service.js`, `src/modules/assets/index.js`, `tests/gk262-public-surface-blockers.test.js` (new).
 
-**STATUS: GK-262 — IMPLEMENTED / LOCAL PASS / COMMITTED / HELD BEFORE PUSH.** Code, tests, and regression are all real and passing (commit `95bceb3`) — this is NOT yet CLOSED. Do not mark CLOSED until a real Production deployment plus a real Production smoke pass (the three unauthenticated-rejection checks below) are independently confirmed; this line is updated again, in its own truthful commit, only once that proof exists.
+**STATUS: GK-262 — CLOSED / PRODUCTION PASS.** Commits `95bceb3` (implementation) + `cba625e` (registry correction) pushed to `origin/main` and deployed to real Production (`dpl_AVRTrxrP3QvkgP35AGbBCqH7ivcP`, commit `cba625e`, aliased live to `comic-vault-rouge.vercel.app`/`app.grailkey.com`). Real, passive, unauthenticated Production smoke (no Authorization header, no destructive/spend-incurring action taken):
+- `POST /api/delist-ebay` → 401 `{"error":"Missing, invalid, or expired token"}`, sub-second response, rejected before any `EndItem` call (confirmed both by response shape and by source order — `verifyToken` runs and returns before any `fetch` in the handler).
+- `POST /api/chat` → 401 `{"error":"Access denied. Contact the vault administrator for an access code."}`, rejected before any Anthropic call.
+- `POST /api/manage` → 401, identical gate rejection, rejected before any Anthropic call.
 
 Preserving the disclosed hybrid delist status exactly, not overstating either branch:
 - **Listings with a durable `outcome_event` LISTED linkage:** FULL PRINCIPAL OWNERSHIP BIND.
