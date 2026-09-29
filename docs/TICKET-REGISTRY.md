@@ -1805,7 +1805,14 @@ Real phone acceptance test on "The Rationalists" (Production `dca47d5`, two atte
 
 **Explicitly NOT done this pass, per bounded scope:** per-user eBay OAuth / `marketplace_connection` schema; the `EBAY_USER_REFRESH_TOKEN`/`EBAY_OAUTH_REFRESH_TOKEN` env-name mismatch (banked, checked only after a real sale, not touched here); eBay Marketplace Account Deletion compliance; session-lifecycle (12h fixed TTL, no refresh) work; GK-259 (governing-grade merge-site completion); any pricing-math/grade-authority/Universal-architecture change; quarantine/scratch.
 
-**Files changed:** `api/delist-ebay.js`, `api/chat.js`, `api/manage.js`, `src/modules/assets/repository.js`, `src/modules/assets/service.js`, `src/modules/assets/index.js`, `tests/gk262-public-surface-blockers.test.js` (new). **STATUS: CLOSED, held locally — NOT committed, NOT pushed, NOT deployed** (commit created in the same dispatch, per instruction, but push/deploy requires separate authorization).
+**Files changed:** `api/delist-ebay.js`, `api/chat.js`, `api/manage.js`, `src/modules/assets/repository.js`, `src/modules/assets/service.js`, `src/modules/assets/index.js`, `tests/gk262-public-surface-blockers.test.js` (new).
+
+**STATUS: GK-262 — IMPLEMENTED / LOCAL PASS / COMMITTED / HELD BEFORE PUSH.** Code, tests, and regression are all real and passing (commit `95bceb3`) — this is NOT yet CLOSED. Do not mark CLOSED until a real Production deployment plus a real Production smoke pass (the three unauthenticated-rejection checks below) are independently confirmed; this line is updated again, in its own truthful commit, only once that proof exists.
+
+Preserving the disclosed hybrid delist status exactly, not overstating either branch:
+- **Listings with a durable `outcome_event` LISTED linkage:** FULL PRINCIPAL OWNERSHIP BIND.
+- **Historical/unlinked listings:** AUTHENTICATED STOPGAP ONLY.
+- ASM #10, when listed through the current gkAssetId-mandatory `list-ebay.js` path, is expected to create the durable LISTED outcome linkage at LIST time and therefore receive the full ownership bind if it is ever delisted through this endpoint.
 
 ## Observations
 
