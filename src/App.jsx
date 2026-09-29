@@ -11327,10 +11327,124 @@ function WatchMode({ onStop }) {
   );
 }
 
+// EbayConnectionWidget — GK-264. The smallest connection UI: fetches
+// current status via GET /api/ebay-connection (metadata only, never
+// credential material) and drives Connect/Reconnect/Disconnect through
+// POST /api/ebay-connect and POST /api/ebay-disconnect. No token
+// material is ever displayed or held here — the in-memory code/state
+// pair from eBay's redirect is captured and consumed entirely inside
+// App() below, never passed into this component.
+function EbayConnectionWidget({ pendingMessage, pendingIsError, refreshSignal }) {
+  const [status, setStatus] = useState(null); // null (loading) | 'NOT_CONNECTED' | 'CONNECTED' | 'RECONNECT_REQUIRED' | 'DISCONNECTED'
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const res = await authFetch("/api/ebay-connection");
+      if (!res || !res.ok) { setStatus(null); return; }
+      const data = await res.json();
+      setStatus(data.status || "NOT_CONNECTED");
+    } catch {
+      setStatus(null);
+    }
+  }, []);
+
+  useEffect(() => { loadStatus(); }, [loadStatus, refreshSignal]);
+
+  const handleConnect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await authFetch("/api/ebay-connect", { method: "POST" });
+      const data = res ? await res.json().catch(() => ({})) : {};
+      if (res && res.ok && data.authorizationUrl) {
+        window.location.assign(data.authorizationUrl);
+      } else {
+        setError(data.error || "Could not start eBay connection.");
+        setBusy(false);
+      }
+    } catch {
+      setError("Could not start eBay connection.");
+      setBusy(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await authFetch("/api/ebay-disconnect", { method: "POST" });
+    } catch {
+      /* best-effort — the status refetch below reflects real server state either way */
+    }
+    await loadStatus();
+    setBusy(false);
+  };
+
+  const boxStyle = {
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 10,
+    padding: "14px 16px",
+    marginBottom: 16,
+    fontSize: 14,
+  };
+  const btnStyle = {
+    background: "linear-gradient(135deg, #d4af37, #b8941f)",
+    color: "#0a0a0a",
+    border: "none",
+    borderRadius: 8,
+    padding: "8px 14px",
+    fontWeight: 600,
+    cursor: busy ? "wait" : "pointer",
+    marginTop: 8,
+    marginRight: 8,
+  };
+  const secondaryBtnStyle = { ...btnStyle, background: "rgba(255,255,255,0.1)", color: "#eee" };
+
+  return (
+    <div style={boxStyle}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>Marketplaces</div>
+      {pendingMessage && (
+        <div style={{ color: pendingIsError ? "#dc2626" : "#d4af37", marginBottom: 8 }}>{pendingMessage}</div>
+      )}
+      {error && <div style={{ color: "#dc2626", marginBottom: 8 }}>{error}</div>}
+      {status === null && !pendingMessage && <div style={{ color: "#888" }}>Loading eBay connection…</div>}
+      {(status === "NOT_CONNECTED" || status === "DISCONNECTED") && (
+        <div>
+          <div style={{ color: "#888" }}>eBay — not connected</div>
+          <button style={btnStyle} disabled={busy} onClick={handleConnect}>Connect eBay</button>
+        </div>
+      )}
+      {status === "CONNECTED" && (
+        <div>
+          <div style={{ color: "#16a34a" }}>eBay connected</div>
+          <button style={secondaryBtnStyle} disabled={busy} onClick={handleConnect}>Reconnect</button>
+          <button style={secondaryBtnStyle} disabled={busy} onClick={handleDisconnect}>Disconnect</button>
+        </div>
+      )}
+      {status === "RECONNECT_REQUIRED" && (
+        <div>
+          <div style={{ color: "#d4af37" }}>eBay authorization expired</div>
+          <button style={btnStyle} disabled={busy} onClick={handleConnect}>Reconnect eBay</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const isShareTarget = typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("share-target") === "1";
   const [tab, setTab] = useState(isShareTarget ? "buyer" : "scan"); // 'scan' | 'buyer' | 'collection'
+  // GK-264 — eBay OAuth Connect. code/state captured in-memory ONLY
+  // (never localStorage/sessionStorage/IndexedDB) by the mount-time
+  // effect below, consumed at most once by the callback-completion
+  // effect once a GrailKey session is available.
+  const ebayOAuthCallbackRef = useRef(null);
+  const [ebayConnectMessage, setEbayConnectMessage] = useState(null); // { text, isError } | null
+  const [ebayConnectionRefreshSignal, setEbayConnectionRefreshSignal] = useState(0);
   const [loading, setLoading] = useState(isShareTarget);
   const [step, setStep] = useState(0);
   const [result, setResult] = useState(null);
@@ -13231,6 +13345,54 @@ export default function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [selectedItem]);
+
+  // GK-264 — eBay OAuth Connect, step 1 of 2: capture code/state from
+  // the URL the instant the app mounts, then strip them from browser
+  // history IMMEDIATELY (governing law — never let them linger in
+  // history/back-button/reload). Captured value lives only in this
+  // ref, never persisted anywhere.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
+    if (code && state) {
+      ebayOAuthCallbackRef.current = { code, state };
+      window.history.replaceState({}, "", "/");
+      setEbayConnectMessage({ text: "Connecting to eBay...", isError: false });
+    }
+  }, []);
+
+  // GK-264 — eBay OAuth Connect, step 2 of 2: complete the callback once
+  // a GrailKey session is available (the authenticated POST requires
+  // one) — consumes the captured code/state at most once, never retried
+  // automatically.
+  useEffect(() => {
+    if (!grailkeyAuthed) return;
+    const pending = ebayOAuthCallbackRef.current;
+    if (!pending) return;
+    ebayOAuthCallbackRef.current = null;
+    (async () => {
+      try {
+        const res = await authFetch("/api/ebay-callback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: pending.code, state: pending.state }),
+        });
+        const data = res ? await res.json().catch(() => ({})) : {};
+        if (res && res.ok) {
+          setEbayConnectMessage({ text: "eBay connected!", isError: false });
+        } else {
+          setEbayConnectMessage({ text: data.error || "eBay connection failed — please try again.", isError: true });
+        }
+      } catch {
+        setEbayConnectMessage({ text: "eBay connection failed — please try again.", isError: true });
+      } finally {
+        setTab("manage");
+        setEbayConnectionRefreshSignal((n) => n + 1);
+      }
+    })();
+  }, [grailkeyAuthed]);
 
   // Web Share Target handoff — grade in Buyer tab without saving.
   // Strip ?share-target=1 immediately so reloads don't re-trigger the flow.
@@ -15528,6 +15690,12 @@ export default function App() {
       )}
 
       {tab === "manage" && (
+        <>
+        <EbayConnectionWidget
+          pendingMessage={ebayConnectMessage?.text || null}
+          pendingIsError={!!ebayConnectMessage?.isError}
+          refreshSignal={ebayConnectionRefreshSignal}
+        />
         <ManagePage
           catalogue={catalogue}
           totalValue={totalValue}
@@ -15546,6 +15714,7 @@ export default function App() {
           setTradePiles={setTradePiles}
           setCatalogue={setCatalogue}
         />
+        </>
       )}
 
       {/* A1 LEGAL: Launch footer — pricing disclaimer + eBay attribution */}

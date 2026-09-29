@@ -93,20 +93,36 @@ assertTrue(
 // No HTTP handler (api/) imports this module at all in Phase 1 — the
 // governing dispatch's own "NO HTTP SURFACE YET" requirement, checked
 // mechanically rather than just by review.
+// GK-264 Phase 2 wires exactly four authenticated endpoints to this
+// module's public surface (index.js only, never repository.js/db.js/
+// crypto.js directly — the same private-module check above already
+// covers that). Every OTHER api/ file — critically list-ebay.js,
+// delist-ebay.js, and ebay-outcome-reconciler.js, whose seller-credential
+// behavior this dispatch is explicitly forbidden from touching — must
+// import NOTHING from this module. Checked mechanically, not just by
+// review.
+const EXPECTED_MARKETPLACE_API_IMPORTERS = new Set([
+  'ebay-connect.js', 'ebay-callback.js', 'ebay-connection.js', 'ebay-disconnect.js',
+]);
 const apiFiles = walk(path.join(repoRoot, 'api'));
-let apiImportsMarketplace = null;
+const unexpectedApiImporters = [];
+const actualApiImporters = new Set();
 for (const file of apiFiles) {
   const text = readFileSync(file, 'utf8');
   if (/from\s+['"][^'"]*modules\/marketplace/.test(text)) {
-    apiImportsMarketplace = file;
-    break;
+    const base = path.basename(file);
+    actualApiImporters.add(base);
+    if (!EXPECTED_MARKETPLACE_API_IMPORTERS.has(base)) unexpectedApiImporters.push(file);
   }
 }
 assertTrue(
-  apiImportsMarketplace === null,
-  'no file under api/ imports src/modules/marketplace/ (Phase 1 has no HTTP surface)' +
-  (apiImportsMarketplace ? ` (VIOLATION: ${path.relative(repoRoot, apiImportsMarketplace)})` : '')
+  unexpectedApiImporters.length === 0,
+  'no api/ file OUTSIDE the four authorized eBay-connect endpoints imports src/modules/marketplace/ (list-ebay.js/delist-ebay.js/ebay-outcome-reconciler.js seller-credential behavior stays untouched)' +
+  (unexpectedApiImporters.length ? ` (VIOLATION: ${unexpectedApiImporters.map((f) => path.relative(repoRoot, f)).join(', ')})` : '')
 );
+for (const expected of EXPECTED_MARKETPLACE_API_IMPORTERS) {
+  assertTrue(actualApiImporters.has(expected), `api/${expected} imports src/modules/marketplace/ (expected wiring present)`);
+}
 
 const indexSrc = readFileSync(path.join(MODULE_DIR, 'index.js'), 'utf8');
 const REQUIRED_EXPORTS = [

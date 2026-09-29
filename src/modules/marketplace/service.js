@@ -107,8 +107,26 @@ export async function upsertMarketplaceConnection({
         );
       }
 
-      const encryptedRefreshCredential = encryptCredential(refreshCredential);
       const existing = await repo.getConnectionByPrincipalProvider(client, { principalId, provider });
+
+      // GK-264 invariant review, Section 12 — the SAME-principal half of
+      // the permanent provider identity law: a principal's own row is
+      // permanently bound to whichever provider account it first
+      // connected, connected or not. This principal reconnecting the
+      // SAME providerUserId (any status, including DISCONNECTED) is the
+      // only case that may update the existing row; a DIFFERENT
+      // providerUserId is refused outright — no account-transfer
+      // semantic exists in Phase 1/2, for the same principal any more
+      // than for a different one. Checked BEFORE encryption (no wasted
+      // work, no possibility of encrypting a credential this call will
+      // ultimately refuse to store).
+      if (existing && existing.provider_user_id !== providerUserId) {
+        throw new ProviderIdentityConflictError(
+          `principalId ${principalId} already has a different ${provider} account bound (existing identity is permanent, connected or not) — refusing to replace it`
+        );
+      }
+
+      const encryptedRefreshCredential = encryptCredential(refreshCredential);
       const resolvedConnectedAt = connectedAt ?? new Date();
 
       if (existing) {

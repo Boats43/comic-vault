@@ -46,6 +46,46 @@ export const REQUIRED_SCOPES = Object.freeze([
   'https://api.ebay.com/oauth/api_scope/sell.finances',
 ]);
 
+// CONNECT_SCOPES — GK-264, the ONE server-owned scope union for the
+// interactive eBay Connect flow. Adds the base Trading-API-via-OAuth
+// scope (confirmed against current eBay documentation: Trading API
+// calls authorized via X-EBAY-API-IAF-TOKEN require
+// "https://api.ebay.com/oauth/api_scope") to REQUIRED_SCOPES's existing
+// Fulfillment/Finances pair — this is what src/lib/ebayIdentityProof.js's
+// GetUser-via-IAF call needs. The SAME constant governs (1) authorization
+// URL construction (api/ebay-connect.js), (2) marketplace_connection.
+// granted_scopes at storage time (api/ebay-callback.js) — Phase 2 never
+// reads scope from the browser or claims the token response supplies it
+// (eBay's authorization_code response contract does not echo the
+// granted scope back; the persisted value is always the exact scope set
+// this server requested, never anything client-asserted). (3) future
+// per-connection refresh requests are Phase 3's concern — refreshUserAccessToken
+// below is untouched, unused by Phase 2, and keeps its own REQUIRED_SCOPES
+// default; Phase 3 should pass CONNECT_SCOPES explicitly once it starts
+// refreshing a per-principal connection's own access token.
+export const CONNECT_SCOPES = Object.freeze([
+  'https://api.ebay.com/oauth/api_scope',
+  ...REQUIRED_SCOPES,
+]);
+
+// attemptRemoteRevocationBestEffort — GK-264, DISCLOSED GAP, NOT A REAL
+// CALL. eBay's currently documented OAuth token-revocation endpoint
+// could not be independently verified from this session (the official
+// docs page returned HTTP 403 to an automated fetch, and web search
+// results were inconclusive on the exact path/contract). Rather than
+// guess an endpoint and risk either a silent no-op or an unintended
+// real call, this is an honest, disclosed stub: it never contacts eBay,
+// never throws, and never logs the token. It exists so callers (the
+// collision path in api/ebay-callback.js, and api/ebay-disconnect.js)
+// have one shared call site to upgrade once the real endpoint is
+// confirmed — the fail-closed guarantee those callers provide (nothing
+// is ever persisted/returned/left usable) does NOT depend on this
+// function doing anything real.
+export async function attemptRemoteRevocationBestEffort(_refreshToken) {
+  console.warn('[ebayUserOAuth] remote token revocation not attempted this pass (disclosed gap — see attemptRemoteRevocationBestEffort\'s own header). Local fail-closed behavior is unaffected.');
+  return { attempted: false, reason: 'NOT_IMPLEMENTED_DISCLOSED_GAP' };
+}
+
 function requireEnv(name) {
   const v = process.env[name];
   if (!v) {
