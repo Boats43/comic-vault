@@ -224,6 +224,61 @@ console.log('\n=== GK-263 PART H: secret hygiene ===\n');
   assertTrue(!allLogText.includes(TEST_KEY), 'H3: the encryption key itself never appears in any emitted log line');
 }
 
+console.log('\n=== GK-263 PART I: provider-identity invariants across disconnect ===\n');
+{
+  // A fresh, dedicated provider_user_id — never reused by any earlier
+  // part of this file — so no other scenario's state can leak in.
+  const PROVIDER_USER_ID = 'gk263-ebay-user-INVARIANT-X';
+
+  const connA = await upsertMarketplaceConnection({
+    principalId: JIMMY, provider: 'EBAY', providerUserId: PROVIDER_USER_ID,
+    refreshCredential: 'fake-refresh-credential-INVARIANT-1',
+  });
+  assertTrue(connA.connectionStatus === 'CONNECTED', 'I-setup: Principal A connects X');
+  const rowIdAfterConnect = connA.id;
+
+  const discA = await disconnectMarketplaceConnection({ principalId: JIMMY, provider: 'EBAY' });
+  assertTrue(discA.connectionStatus === 'DISCONNECTED', 'I-setup: Principal A disconnects');
+
+  // SCENARIO 1 — cross-principal reuse after disconnect. REQUIRED: fail
+  // closed. A disconnect must not silently release provider identity X
+  // for a DIFFERENT GrailKey principal to claim.
+  let scenario1Threw = null;
+  try {
+    await upsertMarketplaceConnection({
+      principalId: PRINCIPAL_B, provider: 'EBAY', providerUserId: PROVIDER_USER_ID,
+      refreshCredential: 'fake-refresh-credential-INVARIANT-STOLEN',
+    });
+  } catch (e) { scenario1Threw = e; }
+  assertTrue(scenario1Threw instanceof ProviderIdentityConflictError, 'SCENARIO 1: Principal B connecting a DISCONNECTED-but-previously-claimed provider identity X is refused with a specific conflict error');
+
+  const bRowAfterScenario1 = await getRawRow(PRINCIPAL_B);
+  assertTrue(bRowAfterScenario1 === null, 'SCENARIO 1: no row was created for Principal B as a side effect of the rejected attempt');
+
+  const aRowAfterScenario1 = await getRawRow(JIMMY);
+  assertTrue(aRowAfterScenario1.connection_status === 'DISCONNECTED' && aRowAfterScenario1.provider_user_id === PROVIDER_USER_ID, "SCENARIO 1: Principal A's own (disconnected) row is completely unchanged by the rejected attempt");
+
+  // SCENARIO 2 — same-principal reconnect after disconnect. REQUIRED:
+  // succeeds, reuses/reactivates the SAME durable row (never a second
+  // row) — disconnect must not permanently lock a principal out of
+  // their own account.
+  const reconnA = await upsertMarketplaceConnection({
+    principalId: JIMMY, provider: 'EBAY', providerUserId: PROVIDER_USER_ID,
+    refreshCredential: 'fake-refresh-credential-INVARIANT-2',
+  });
+  assertTrue(reconnA.connectionStatus === 'CONNECTED', "SCENARIO 2: Principal A successfully reconnects their OWN previously-disconnected provider identity X");
+  assertTrue(reconnA.id === rowIdAfterConnect, 'SCENARIO 2: reconnect reuses/reactivates the SAME durable row (same id), never creates a second row');
+
+  const rowCountForA = await dbClient.query(
+    `SELECT COUNT(*)::int AS n FROM data1_dev.marketplace_connection WHERE principal_id = $1 AND provider = 'EBAY'`,
+    [JIMMY]
+  );
+  assertTrue(rowCountForA.rows[0].n === 1, 'SCENARIO 2 durable-row check: exactly one marketplace_connection row exists for Principal A + EBAY, not two');
+
+  const resolvedAfterReconnect = await resolveMarketplaceRefreshCredential({ principalId: JIMMY, provider: 'EBAY' });
+  assertTrue(resolvedAfterReconnect.refreshCredential === 'fake-refresh-credential-INVARIANT-2', 'SCENARIO 2: the reconnected credential resolves correctly');
+}
+
 // ── Cleanup — real transient rows only, nothing pre-existing touched. ──
 await dbClient.query(`DELETE FROM data1_dev.marketplace_connection WHERE principal_id IN ($1, $2)`, [JIMMY, PRINCIPAL_B]);
 await dbClient.query(`DELETE FROM data1_dev.gk_principal WHERE id = $1`, [PRINCIPAL_B]);

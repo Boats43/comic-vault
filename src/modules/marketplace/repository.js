@@ -28,16 +28,21 @@ export async function getConnectionByPrincipalProvider(client, { principalId, pr
   return r.rows[0] || null;
 }
 
-// getActiveConnectionByProviderIdentity — the provider-identity collision
-// check (governing dispatch, Section 6). excludePrincipalId is always
-// the CALLER's own principalId — this only ever looks for a DIFFERENT
-// principal already holding this exact provider account, scoped to
-// non-terminal states so a genuine disconnect frees the identity later.
-export async function getActiveConnectionByProviderIdentity(client, { provider, providerUserId, excludePrincipalId }) {
+// getConnectionByProviderIdentity — the provider-identity collision check
+// (governing dispatch, Section 6, corrected by the GK-263 invariant
+// review). excludePrincipalId is always the CALLER's own principalId —
+// this only ever looks for a DIFFERENT principal already holding a row
+// for this exact provider account. Deliberately NOT scoped to
+// CONNECTED/RECONNECT_REQUIRED only: a provider identity must remain
+// bound to the GrailKey principal that first connected it EVEN AFTER
+// that principal disconnects — Phase 1 has no account-transfer or
+// release semantic, so a DISCONNECTED row still counts as "already
+// claimed" for this check. Governing law: a marketplace provider
+// identity may not silently migrate between GrailKey principals.
+export async function getConnectionByProviderIdentity(client, { provider, providerUserId, excludePrincipalId }) {
   const r = await client.query(
     `SELECT * FROM data1_dev.marketplace_connection
      WHERE provider = $1 AND provider_user_id = $2
-       AND connection_status IN ('CONNECTED', 'RECONNECT_REQUIRED')
        AND principal_id <> $3
      LIMIT 1`,
     [provider, providerUserId, excludePrincipalId]

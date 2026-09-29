@@ -92,16 +92,18 @@ export async function upsertMarketplaceConnection({
     await assertPrincipalActive(client, principalId);
     await client.query('BEGIN');
     try {
-      // Section 6 — provider-identity collision. Fail closed, no
-      // overwrite, no reassignment: if a DIFFERENT principal already
-      // holds an active connection for this exact provider account,
-      // this request is refused outright.
-      const collision = await repo.getActiveConnectionByProviderIdentity(client, {
+      // Section 6 — provider-identity collision, corrected by the GK-263
+      // invariant review: fail closed, no overwrite, no reassignment, if
+      // a DIFFERENT principal's row (in ANY status, including
+      // DISCONNECTED) already claims this exact provider account. A
+      // disconnect does not release a provider identity for a different
+      // principal to claim — Phase 1 has no account-transfer semantic.
+      const collision = await repo.getConnectionByProviderIdentity(client, {
         provider, providerUserId, excludePrincipalId: principalId,
       });
       if (collision) {
         throw new ProviderIdentityConflictError(
-          `${provider} account ${providerUserId} is already actively connected to a different GrailKey principal — refusing to move or overwrite ownership`
+          `${provider} account ${providerUserId} is already connected to a different GrailKey principal — refusing to move or overwrite ownership`
         );
       }
 
