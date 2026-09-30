@@ -1913,6 +1913,24 @@ Preserving the disclosed hybrid delist status exactly, not overstating either br
 
 **Durable encryption-root rule.** `GRAILKEY_MARKETPLACE_CREDENTIAL_KEY` is the durable encryption root for every stored marketplace refresh credential (AES-256-GCM, `src/modules/marketplace/crypto.js`). Once the first real marketplace credential is ever written: loss of this key makes existing encrypted refresh credentials permanently unrecoverable; replacing/rotating the key without a re-encryption pass makes existing credentials unreadable (fails closed — `decryptCredential` cannot recover plaintext under the wrong key by construction, proven adversarially in `tests/gk263-marketplace-connection.test.js` Part G3); affected sellers would need to re-authorize through OAuth from scratch. **This is NOT loss of marketplace ownership/history** — the durable `marketplace_connection` rows and their identity bindings (`provider_user_id`, the permanence law above) remain completely intact; only the encrypted credential *material* becomes unrecoverable. No key-rotation/re-encryption mechanism exists yet — banked, explicitly not required before the pilot.
 
+### GK-264 deployment update (2026-09-30) — pushed and deployed, real OAuth certification still gated
+
+**STATUS: GK-264 — DEPLOYED / AWAITING REAL OAUTH CERTIFICATION.** Superseded (not rewritten) the prior "IMPLEMENTED / LOCAL PASS / HELD BEFORE PUSH" line above. Operator confirmed both Production environment preconditions are now satisfied: `GRAILKEY_MARKETPLACE_CREDENTIAL_KEY` and `GRAILKEY_OAUTH_STATE_SECRET` are both PRESENT in Production (confirmed this pass by environment metadata only — key name/target/visibility/creation-time checked via the Vercel project-env API; no value was ever read, decrypted, or logged), and the Production eBay RuName's Accept/Decline URLs were operator-confirmed to be `https://app.grailkey.com/` (the frontend root), matching this ticket's frontend-landing callback architecture.
+
+Pushed `644d157 → e5cb34d → 767f254` to `origin/main` (fast-forward, no rebase/amend/squash). Vercel Production deployment `dpl_2Nk2GS3eAz7WvHDjjveokGGEaG2D` (commit `767f254`) reached `READY` and is aliased to `app.grailkey.com`. Post-deploy smoke (no real OAuth attempted):
+
+- `https://app.grailkey.com/` → HTTP 200.
+- `GET /api/ebay-connection` and `POST /api/ebay-connect`, both unauthenticated → HTTP 401 `Missing, invalid, or expired token` (endpoints deployed, auth gate active, zero eBay call reachable without a valid session).
+- Production `data1_dev.marketplace_connection` row count independently re-queried read-only (fail-closed environment-identity check passed) both immediately before the push and again after the deploy: **0** both times. No Production credential exists.
+- No real eBay authorization-code exchange was initiated or attempted this pass.
+- `git diff 644d157..767f254 -- api/list-ebay.js api/delist-ebay.js api/ebay-outcome-reconciler.js` independently re-run: empty. Seller-execution behavior on all three files is unchanged by this deploy.
+
+Not independently exercised this pass (disclosed, not claimed): the authenticated Manage/account-area Connect/Reconnect/Disconnect widget and its not-connected rendering state were confirmed only by source-diff (the `EbayConnectionWidget`/mount-effect changes in `src/App.jsx` are present in the deployed commit) and by the endpoint-level auth-gate smoke above — not by an actual authenticated browser session, since doing so was out of this pass's scope (no real OAuth yet) and no operator session token was available to this session.
+
+**Secure-backup gate: OPERATOR SECURE BACKUP CONFIRMATION PENDING.** Does not block this deployment (already complete). It DOES block writing the first real Production marketplace credential — real OAuth certification must not begin until the operator confirms a recoverable copy of `GRAILKEY_MARKETPLACE_CREDENTIAL_KEY` exists outside Vercel, in an operator-controlled secure secret store.
+
+**Remaining closure gate, unchanged in substance:** real end-to-end OAuth certification (Jimmy's GrailKey principal → Connect eBay → eBay consent → `https://app.grailkey.com/` → authenticated callback → `GetUser`/EIASToken → encrypted `marketplace_connection` row actually written) has not been attempted. GK-264 remains open until that run is independently verified.
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.
