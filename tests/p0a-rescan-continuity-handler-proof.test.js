@@ -42,6 +42,10 @@ if (!process.env.GRAILKEY_SESSION_SECRET) {
 const { handleCaptureScan } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'captureScanHandler.js')).href);
 const { resolveCollectionItemLink, getPhysicalAsset, closePool } =
   await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+// GK-266 — every collectionItemId that will receive a NEW
+// collection_item_link (fresh mint or continuity alias alike) now
+// requires a durably-synced collection_item first.
+const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -102,6 +106,7 @@ try {
   console.log('\n-- real handler call #1: fresh scan (OLD collectionItemId), through the real req/res boundary --\n');
   const OLD_ID = `${TAG}-classic-old`;
   createdCollectionItemIds.push(OLD_ID);
+  await createCollectionItem({ principalId: JIMMY, id: OLD_ID, assetCategory: 'comic', attributes: { title: 'P0-A Handler Test Comic' } });
   {
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
@@ -119,6 +124,7 @@ try {
   console.log('\n-- real handler call #2: rescan asserting priorCollectionItemId, through the real req/res boundary --\n');
   const NEW_ID = `${TAG}-classic-new`;
   createdCollectionItemIds.push(NEW_ID);
+  await createCollectionItem({ principalId: JIMMY, id: NEW_ID, assetCategory: 'comic', attributes: { title: 'P0-A Handler Test Comic' } });
   {
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
@@ -162,6 +168,7 @@ try {
     // proves the chain survives a SECOND hop, not just one.
     const NEW_ID_2 = `${TAG}-classic-new-2`;
     createdCollectionItemIds.push(NEW_ID_2);
+    await createCollectionItem({ principalId: JIMMY, id: NEW_ID_2, assetCategory: 'comic', attributes: { title: 'P0-A Handler Test Comic' } });
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
       body: { scanPayload: { collectionItemId: NEW_ID_2, priorCollectionItemId: NEW_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap3` },
@@ -217,6 +224,7 @@ try {
   }
   if (createdCollectionItemIds.length > 0) {
     await client.query(`DELETE FROM collection_item_link WHERE collection_item_id = ANY($1::text[])`, [createdCollectionItemIds]);
+    await client.query(`DELETE FROM collection_item WHERE id = ANY($1::text[])`, [createdCollectionItemIds]);
   }
   if (idempotencyKeysUsed.length > 0) {
     await client.query(`DELETE FROM idempotency_key WHERE idempotency_key = ANY($1::text[])`, [idempotencyKeysUsed]);

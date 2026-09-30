@@ -55,9 +55,9 @@ delete process.env.MILESTONE_TEN_H8_BOOTSTRAP;
 const captureScanRoute = (await import(pathToFileURL(path.join(repoRoot, 'api', 'capture-scan.js')).href)).default;
 const assetRecoveryRoute = (await import(pathToFileURL(path.join(repoRoot, 'api', 'asset-recovery.js')).href)).default;
 const collectionRoute = (await import(pathToFileURL(path.join(repoRoot, 'api', 'collection.js')).href)).default;
-const { getPhysicalAsset, closePool } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+const { getPhysicalAsset, closePool, createPhysicalAsset, assignIdentity } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
 const { captureFromScan, ValidationFailedError } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'capture', 'index.js')).href);
-const { closePool: closeCollectionPool } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
+const { closePool: closeCollectionPool, createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -118,6 +118,13 @@ try {
 
   console.log('\n-- generic capture: mint + media + link, no comic identity, no fabricated valuation --\n');
   const collectionItemId1 = `${TAG}-item1`;
+  // GK-266 — captureFromScan now requires the referenced collection_item
+  // to durably exist first. A placeholder sync here mirrors the real
+  // flow (the catalogue entry is created/synced, then physically
+  // captured); the later /api/collection POST below (name/description)
+  // becomes an ordinary idempotent update of the same row, not a
+  // first-ever create — unaffected in substance.
+  await createCollectionItem({ principalId: JIMMY, id: collectionItemId1, assetCategory: 'generic', attributes: {} });
   const idempotencyKey1 = randomUUID();
   const reqBody1 = {
     scanPayload: { correlationId: idempotencyKey1, collectionItemId: collectionItemId1, book: null },
@@ -158,6 +165,8 @@ try {
 
   console.log('\n-- optional acquisition cost survives as a real acquisition_event --\n');
   const collectionItemId2 = `${TAG}-item2-acq`;
+  createdCollectionItemIds.push(collectionItemId2);
+  await createCollectionItem({ principalId: JIMMY, id: collectionItemId2, assetCategory: 'generic', attributes: {} });
   const idempotencyKey2 = randomUUID();
   const reqBody2 = {
     scanPayload: {
@@ -240,23 +249,33 @@ try {
   assertTrue(!orphanFalselyInMissingProjections, 'the orphan (no link at all) is NOT misclassified as a missing-projection case (no link exists to be missing a projection)');
 
   console.log('\n-- Case B: a real link with no collection_item row is a missing projection, recoverable server-side --\n');
+  // GK-266 — captureFromScan/linkCollectionItem now REFUSE to create this
+  // exact state (that is the whole point of GK-266's prevention half).
+  // Case B therefore now only arises from historical/pre-fix data (the 4
+  // real Production rows GK-266 Stage 1 found) — reconstructed here via
+  // direct fixture SQL, exactly like tests/gk266-collection-continuity.test.js's
+  // own buildDanglingFixture, never via the now-hardened capture route.
   const missingProjCollectionItemId = `${TAG}-item3-missingproj`;
-  const missingProjKey = randomUUID();
-  const missingProjReq = {
-    method: 'POST', headers: { authorization: `Bearer ${token}` },
-    body: {
-      scanPayload: { correlationId: missingProjKey, collectionItemId: missingProjCollectionItemId, book: null },
-      photos: [{ bytes: ONE_PX_PNG_B64, contentType: 'image/png', captureRole: 'capture-photo' }],
-      idempotencyKey: missingProjKey, assetClass: 'generic',
-    },
-  };
-  const missingProjRes = mockRes();
-  await captureScanRoute(missingProjReq, missingProjRes);
-  const missingProjAssetId = missingProjRes.body?.gkAssetId;
+  // captureBasis must be genuinely unique per run — mintAsset's own
+  // content-addressed dedup (basisNamespace/basisKey) would otherwise
+  // resolve a static literal to a stale pre-existing entity from an
+  // earlier run.
+  const missingProjMint = await createPhysicalAsset({
+    principalId: JIMMY, captureBasis: { test: true, label: 'u4-missing-proj', nonce: TAG }, assetClass: 'generic',
+    source: 'test-fixture', idempotencyKey: `${TAG}:missingproj:mint`,
+  });
+  const missingProjAssetId = missingProjMint.assetId;
   createdAssetIds.push(missingProjAssetId);
+  // Every real captureFromScan call also runs assignIdentity
+  // unconditionally (Ruling 10) — matched here for fixture realism.
+  await assignIdentity({ principalId: JIMMY, gkAssetId: missingProjAssetId, evidence: { authority: 'NONE', source: 'unresolved' }, idempotencyKey: `${TAG}:missingproj:identity` });
+  await client.query(
+    `INSERT INTO collection_item_link (collection_item_id, gk_asset_id, linked_by_principal_id) VALUES ($1, $2, $3)`,
+    [missingProjCollectionItemId, missingProjAssetId, JIMMY]
+  );
   // Deliberately never call /api/collection for this id — this IS the
-  // "capture reached the link step but never reached the projection
-  // step" scenario Case B exists for.
+  // "a dangling link already exists, never synced" scenario Case B
+  // exists for.
   const preRecoveryRow = await client.query('SELECT COUNT(*)::int AS n FROM collection_item WHERE id = $1', [missingProjCollectionItemId]);
   assertTrue(preRecoveryRow.rows[0].n === 0, 'confirmed: no collection_item row exists yet for this id');
 

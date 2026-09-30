@@ -51,6 +51,12 @@ delete process.env.MILESTONE_TEN_H8_BOOTSTRAP;
 
 const captureScanRoute = (await import(pathToFileURL(path.join(repoRoot, 'api', 'capture-scan.js')).href)).default;
 const { getPhysicalAsset, closePool } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+// GK-266 — the button only ever appears on an already-viewed catalogue
+// item, so in the real flow a collection_item row already exists for it.
+// captureFromScan now requires that durably, closing the exact continuity
+// gap this file's own scenario should have caught (4 real Production rows
+// found this shape before this fix).
+const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
 // GK-226 — the REAL helper, not a hand-rolled reimplementation. Before
 // this fix, this test's own buildRequestBody() duplicated the buggy
 // `Number(item.price).toFixed(2)` inline expression AND used a raw
@@ -136,6 +142,8 @@ const LOCAL_PHOTO = `data:image/png;base64,${ONE_PX_PNG_B64}`;
 
 const COLLECTION_ITEM_ID = `${TAG}-item`;
 const createdAssetIds = [];
+
+await createCollectionItem({ principalId: JIMMY, id: COLLECTION_ITEM_ID, assetCategory: 'comic', attributes: { title: 'Final Capture Proof Comic', issue: '1', year: '2019' } });
 
 try {
   console.log('-- OWNED PHYSICAL path: the exact request the button builds, sent to the real handler --\n');
@@ -247,6 +255,7 @@ try {
       await client.query(`DELETE FROM ownership_event WHERE asset_id = $1`, [assetId]);
     }
     await client.query(`DELETE FROM idempotency_key WHERE idempotency_key LIKE $1`, [`%${TAG}%`]);
+    await client.query(`DELETE FROM collection_item WHERE id = $1`, [COLLECTION_ITEM_ID]);
   } catch (cleanupErr) {
     console.log('  CLEANUP ERROR (manual cleanup may be required):', cleanupErr.message, { createdAssetIds });
   }

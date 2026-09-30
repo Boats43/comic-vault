@@ -640,8 +640,71 @@ export async function transferOwnership({ principalId, gkAssetId, toPrincipalId,
 // item (see db/data0/0007_capture_integration_linkage.sql), not
 // defaulted to either "overwrite" or "reject silently."
 // ─────────────────────────────────────────────────────────────────────
+//
+// GK-266 — CONTINUITY HARDENING. Before this dispatch, linkCollectionItem
+// proved gkAsset existence/ownership but NEVER proved the referenced
+// collection_item itself existed, or belonged to the same principal —
+// collectionItemId was a bare, unvalidated string trusted end to end.
+// This is the exact seam that let GK-218's physical-asset capture create
+// gk_asset/media/collection_item_link rows while the referenced
+// collection_item never existed (4 real Production rows found this
+// shape, GK-266's own Stage-1 trace). assertCollectionItemLinkable below
+// closes it, reusing the collection module's own PUBLIC
+// getMyCollectionItem (never a second, drifting ownership-check
+// implementation) — its own indistinguishable-from-not-found convention
+// (a wrong-principal row also throws NotFoundError) already satisfies
+// "fail closed on nonexistent AND on cross-principal, without leaking
+// another principal's identity," so no new distinguishing helper was
+// needed.
+//
+// Governing invariant: NO DURABLE collection_item_link MAY REFER TO A
+// NONEXISTENT collection_item. A client-supplied collectionItemId is a
+// locator only — never proof of existence, ownership, or authority.
+//
+// RESIDUAL FAILURE WINDOW (disclosed, not eliminated): this check and
+// the INSERT below run against the SAME assets-module connection/
+// transaction for the write itself, but the EXISTENCE check runs via a
+// separate connection pool (src/modules/collection/db.js) — true
+// cross-module transactional atomicity would require unifying the two
+// modules' pools, a broader redesign explicitly out of this ticket's
+// scope. If a concurrent deleteCollectionItem for this exact id commits
+// after this check passes but before the INSERT below commits, durable
+// state becomes a dangling collection_item_link again — an extremely
+// narrow, concurrent-delete-only race (not observed, requires a specific
+// adversarial timing). The next normal collection sync (Class A: same
+// caller-preserved id) repairs it again immediately, with zero further
+// action, since the link's own collection_item_id never changes.
+async function assertCollectionItemDurablyOwned(principalId, collectionItemId) {
+  const collectionMod = await import('../collection/index.js');
+  try {
+    await collectionMod.getMyCollectionItem({ principalId, id: collectionItemId });
+  } catch (e) {
+    if (e instanceof collectionMod.NotFoundError) {
+      throw new ValidationFailedError(
+        `collectionItemId "${collectionItemId}" does not resolve to a durable collection_item owned by this principal — sync the catalogue item (POST /api/collection) before linking a physical asset to it`
+      );
+    }
+    throw e;
+  }
+}
+
+// GK-266 — the same check, exported for a caller (src/modules/capture/
+// service.js) that wants to validate BEFORE minting a new physical
+// asset, rather than discovering a bad reference only after gkAsset/
+// media already exist. Never mutates anything; throws
+// ValidationFailedError on a nonexistent or cross-principal reference.
+export async function assertCollectionItemLinkable({ principalId, collectionItemId } = {}) {
+  requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
+  await assertCollectionItemDurablyOwned(principalId, collectionItemId);
+}
+
 export async function linkCollectionItem({ principalId, collectionItemId, gkAssetId, idempotencyKey, correlationId } = {}) {
   requireFields({ principalId, collectionItemId, gkAssetId }, ['principalId', 'collectionItemId', 'gkAssetId']);
+  // GK-266 — SERVER-SIDE DEFENSE, unconditional, regardless of caller
+  // ordering. Runs before any connection is even acquired for the write
+  // below, matching this file's own "validate before touching the DB"
+  // step-1 convention.
+  await assertCollectionItemDurablyOwned(principalId, collectionItemId);
 
   const client = await acquireConnection();
   try {

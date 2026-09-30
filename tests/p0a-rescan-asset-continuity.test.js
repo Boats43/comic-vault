@@ -53,6 +53,10 @@ const {
 } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')));
 const { captureFromScan, ValidationFailedError } =
   await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'capture', 'index.js')));
+// GK-266 — captureFromScan now requires the referenced collection_item to
+// durably exist first for any collectionItemId about to receive a NEW link.
+const { createCollectionItem } =
+  await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')));
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -109,6 +113,7 @@ try {
   // --- Setup: mint asset A via captureFromScan, collectionItemId = OLD ---
   const OLD_ID = `${TAG}-classic-old`;
   createdCollectionItemIds.push(OLD_ID);
+  await createCollectionItem({ principalId: JIMMY_PRINCIPAL_ID, id: OLD_ID, assetCategory: 'comic', attributes: { title: 'P0-A Continuity Test' } });
   const cap1 = await captureFromScan({
     principalId: JIMMY_PRINCIPAL_ID,
     scanPayload: { collectionItemId: OLD_ID, correlationId: crypto.randomUUID() },
@@ -134,6 +139,7 @@ try {
   // real new physical book — it mints a SECOND, disconnected gkAssetId.
   const DRIFTED_ID = `${TAG}-classic-drifted`;
   createdCollectionItemIds.push(DRIFTED_ID);
+  await createCollectionItem({ principalId: JIMMY_PRINCIPAL_ID, id: DRIFTED_ID, assetCategory: 'comic', attributes: { title: 'P0-A Continuity Test (drifted)' } });
   const capDrift = await captureFromScan({
     principalId: JIMMY_PRINCIPAL_ID,
     scanPayload: { collectionItemId: DRIFTED_ID, correlationId: crypto.randomUUID() },
@@ -150,6 +156,7 @@ try {
   // A genuine rescan asserts continuity via priorCollectionItemId.
   const NEW_ID = `${TAG}-classic-new`;
   createdCollectionItemIds.push(NEW_ID);
+  await createCollectionItem({ principalId: JIMMY_PRINCIPAL_ID, id: NEW_ID, assetCategory: 'comic', attributes: { title: 'P0-A Continuity Test' } });
   const capFixed = await captureFromScan({
     principalId: JIMMY_PRINCIPAL_ID,
     scanPayload: { collectionItemId: NEW_ID, priorCollectionItemId: OLD_ID, correlationId: crypto.randomUUID() },
@@ -230,6 +237,7 @@ try {
   }
   if (createdCollectionItemIds.length > 0) {
     await client.query(`DELETE FROM collection_item_link WHERE collection_item_id = ANY($1::text[])`, [createdCollectionItemIds]);
+    await client.query(`DELETE FROM collection_item WHERE id = ANY($1::text[])`, [createdCollectionItemIds]);
   }
   if (idempotencyKeysUsed.length > 0) {
     await client.query(`DELETE FROM idempotency_key WHERE idempotency_key = ANY($1::text[])`, [idempotencyKeysUsed]);

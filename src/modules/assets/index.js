@@ -34,6 +34,7 @@ export {
   hasAuthoritativeSoldOutcome,
   wasOutcomeIdempotencyKeyClaimed,
   linkCollectionItem,
+  assertCollectionItemLinkable,
   resolveCollectionItemLink,
   listPhysicalOrphans,
   listMissingProjections,

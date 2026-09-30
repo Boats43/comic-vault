@@ -44,6 +44,12 @@ delete process.env.MILESTONE_TEN_H8_PASS;
 const captureScanRoute = (await import(pathToFileURL(path.join(repoRoot, 'api', 'capture-scan.js')).href)).default;
 const { getPhysicalAsset, closePool } =
   await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+// GK-266 — captureFromScan now requires the referenced collection_item to
+// durably exist (and belong to the calling principal) before it will
+// mint/link a fresh physical asset for a given collectionItemId. Every
+// scenario below that expects a NEW link to succeed must sync one first.
+const { createCollectionItem } =
+  await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -158,6 +164,7 @@ try {
   console.log('\n-- Development (non-Production) request with a real operator-captured photo -> 200, asset + media created --\n');
   const CID = `${TAG}-classic`;
   createdCollectionItemIds.push(CID);
+  await createCollectionItem({ principalId: JIMMY, id: CID, assetCategory: 'comic', attributes: { title: 'Brave and the Bold', issue: '141', year: '1978' } });
   let mintedAssetId;
   {
     const photoBytes = Buffer.from('fake-jpeg-bytes-for-test-only', 'utf8');
@@ -186,6 +193,8 @@ try {
 
   console.log('\n-- unauthenticated media role cannot masquerade as operator physical evidence (invalid captureRole -> 400) --\n');
   {
+    createdCollectionItemIds.push(`${TAG}-refcontam`);
+    await createCollectionItem({ principalId: JIMMY, id: `${TAG}-refcontam`, assetCategory: 'comic', attributes: { title: 'Refcontam Test' } });
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
       body: {
@@ -195,7 +204,6 @@ try {
       },
     };
     idempotencyKeysUsed.push(`${TAG}:refcontam:mint`, `${TAG}:refcontam:link`, `${TAG}:refcontam:identity`);
-    createdCollectionItemIds.push(`${TAG}-refcontam`);
     const res = mockRes();
     await captureScanRoute(req, res);
     assertTrue(res.statusCode === 400, `'reference-image' captureRole rejected by the enum guard, never silently persisted as physical evidence (got ${res.statusCode})`);
@@ -234,7 +242,10 @@ try {
   {
     const CORR = randomUUID();
     const CID2 = `${TAG}-conflict`;
-    createdCollectionItemIds.push(CID2);
+    const CID2b = `${TAG}-conflict-2`;
+    createdCollectionItemIds.push(CID2, CID2b);
+    await createCollectionItem({ principalId: JIMMY, id: CID2, assetCategory: 'comic', attributes: { title: 'Original Title', issue: '1', year: '2000' } });
+    await createCollectionItem({ principalId: JIMMY, id: CID2b, assetCategory: 'comic', attributes: { title: 'Different Title', issue: '2', year: '1999' } });
     const before = await countAssets();
 
     const req1 = {
@@ -275,6 +286,9 @@ try {
   }
   if (createdCollectionItemIds.length > 0) {
     await client.query(`DELETE FROM collection_item_link WHERE collection_item_id = ANY($1::text[])`, [createdCollectionItemIds]);
+    // GK-266 — also clean up the collection_item rows this file now syncs
+    // as a precondition for captureFromScan's continuity check.
+    await client.query(`DELETE FROM collection_item WHERE id = ANY($1::text[])`, [createdCollectionItemIds]);
   }
   if (idempotencyKeysUsed.length > 0) {
     await client.query(`DELETE FROM idempotency_key WHERE idempotency_key = ANY($1::text[])`, [idempotencyKeysUsed]);

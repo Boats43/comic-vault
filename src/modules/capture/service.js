@@ -20,7 +20,7 @@
 
 import {
   createPhysicalAsset, assignIdentity, attachMedia, recordValuation,
-  recordDecision, recordAcquisition, linkCollectionItem, resolveCollectionItemLink,
+  recordDecision, recordAcquisition, linkCollectionItem, assertCollectionItemLinkable, resolveCollectionItemLink,
   ValidationFailedError,
 } from '../assets/index.js';
 import * as mapping from './mapping.js';
@@ -83,6 +83,20 @@ export async function captureFromScan({
   const existingLink = scanPayload.collectionItemId
     ? await resolveCollectionItemLink({ principalId, collectionItemId: scanPayload.collectionItemId })
     : null;
+
+  // GK-266 — CONTINUITY HARDENING. A collectionItemId with no existing
+  // link is about to drive a fresh gkAsset mint + media attach + link
+  // creation below. Prove the referenced collection_item durably exists
+  // and belongs to this principal FIRST — a bad/stale/nonexistent
+  // reference must produce ZERO new physical state (no gkAsset, no
+  // media, no link), not merely fail at the link-creation step after
+  // resources are already spent. This is an optimization on top of
+  // linkCollectionItem's own unconditional server-side check, below —
+  // that check remains the authoritative defense (defense in depth,
+  // never relying on this call site alone).
+  if (scanPayload.collectionItemId && !existingLink) {
+    await assertCollectionItemLinkable({ principalId, collectionItemId: scanPayload.collectionItemId });
+  }
 
   let continuityLink = null;
   if (!existingLink && scanPayload.priorCollectionItemId) {
