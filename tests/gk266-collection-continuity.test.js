@@ -377,6 +377,45 @@ try {
     assertTrue(link === null, 'I: no collection_item_link row was created');
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // M — POST-LINK DELETE INVARIANT (found during pre-push review):
+  // GK-266's prevention half stops a NEW dangling link from ever being
+  // created, but a collection_item already referenced by a real
+  // collection_item_link could still be deleted through the ordinary
+  // authenticated DELETE /api/collection path, orphaning that link
+  // AFTER THE FACT — unbounded in time, not merely the disclosed
+  // check-then-insert race. api/collection.js now refuses (409) to
+  // delete a linked collection_item; an unlinked item is unaffected
+  // (already covered by tests/collection-endpoint-live-proof.test.js).
+  // ════════════════════════════════════════════════════════════════
+  console.log('\n-- M: DELETE /api/collection refuses to orphan a real physical-asset link --\n');
+  {
+    const collectionHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'collection.js')).href)).default;
+    const collectionItemId = `${TAG}-delete-guard`;
+    createdCollectionIds.push(collectionItemId);
+    await createCollectionItem({ principalId: PRINCIPAL_A, id: collectionItemId, assetCategory: 'comic', attributes: { title: 'about to be linked' } });
+    const mint = await createPhysicalAsset({ principalId: PRINCIPAL_A, captureBasis: { test: true, label: 'delete-guard', tag: TAG }, assetClass: 'comic', source: 'test-fixture', idempotencyKey: `${TAG}-delete-guard-mint` });
+    await linkCollectionItem({ principalId: PRINCIPAL_A, collectionItemId, gkAssetId: mint.assetId, idempotencyKey: `${TAG}-delete-guard-link` });
+
+    const token = mintTestToken(PRINCIPAL_A);
+    function mockRes() {
+      const res = { statusCode: null, body: null, headers: {} };
+      res.setHeader = (k, v) => { res.headers[k] = v; };
+      res.status = (c) => { res.statusCode = c; return res; };
+      res.json = (b) => { res.body = b; return res; };
+      return res;
+    }
+    const req = { method: 'DELETE', headers: { authorization: `Bearer ${token}` }, query: { id: collectionItemId } };
+    const res = mockRes();
+    await collectionHandler(req, res);
+    assertTrue(res.statusCode === 409, `M: DELETE on a linked collection_item is refused (409) (got ${res.statusCode})`);
+    assertTrue(res.body?.error === 'COLLECTION_ITEM_LINKED_TO_PHYSICAL_ASSET', 'M: error code names the reason');
+    const stillThere = await collectionItemRow(collectionItemId);
+    assertTrue(stillThere !== null, 'M: the collection_item row still exists — delete did not proceed');
+    const stillLinked = await linkRow(collectionItemId);
+    assertTrue(stillLinked?.gk_asset_id === mint.assetId, 'M: the collection_item_link is untouched — no dangling link created');
+  }
+
 } finally {
   for (const id of createdCollectionIds) {
     await dbClient.query(`DELETE FROM collection_item_link WHERE collection_item_id = $1`, [id]).catch(() => {});

@@ -17,10 +17,23 @@
 // this endpoint and the collection module are concerned — comic-shaped
 // today, any future format's shape tomorrow, no schema enforced here.
 //
-// This endpoint creates NO physical asset, NO gkAssetId, and never calls
-// src/modules/assets/ or src/modules/capture/ — collection_item !=
-// gkAssetId, unchanged. Does not touch /api/capture-scan, grading,
+// This endpoint creates NO physical asset, NO gkAssetId, and never
+// WRITES to src/modules/assets/ or src/modules/capture/ — collection_item
+// != gkAssetId, unchanged. Does not touch /api/capture-scan, grading,
 // pricing, or eBay in any way.
+//
+// GK-266 follow-up (2026-09-30) — ONE narrow, READ-ONLY exception to the
+// "never calls assets/" rule above, on the DELETE path only. GK-266's own
+// prevention fix stops a NEW collection_item_link from ever being created
+// against a nonexistent collection_item, but a *later* delete of an
+// already-linked collection_item through this ordinary path was found to
+// still orphan that link (a real, Production-reachable gap, not merely
+// the disclosed check-then-insert race — this is unbounded in time,
+// exercisable by any authenticated principal on their own already-synced
+// item at any point after linking). Composed here, one layer up from
+// both modules — the same pattern src/lib/assetRecoveryHandler.js
+// already uses to read across collection_item_link and collection_item
+// without either module writing to the other's tables.
 
 import { verifyToken, InvalidTokenError } from '../src/modules/auth/index.js';
 import {
@@ -28,6 +41,7 @@ import {
   updateCollectionItem, deleteCollectionItem,
   ValidationFailedError, AuthorizationFailedError, NotFoundError,
 } from '../src/modules/collection/index.js';
+import { resolveCollectionItemLink } from '../src/modules/assets/index.js';
 import { put as mediaPut } from '../src/modules/media/index.js';
 import { checkRateLimit } from './rate-limit.js';
 
@@ -149,6 +163,22 @@ export default async function handler(req, res) {
 
     if (req.method === 'DELETE') {
       if (!id) return res.status(400).json({ error: 'id query parameter is required' });
+      // GK-266 follow-up — governing invariant: NO NORMAL PRODUCTION
+      // APPLICATION OPERATION MAY CREATE A DANGLING collection_item_link.
+      // A collection_item referenced by a real physical-asset link is
+      // permanently linked in v1 (0007's own header: "no relink mechanism
+      // in v1") — there is no established, safe unlink transaction to
+      // run first, so this fails closed unconditionally rather than
+      // inventing cascading-delete semantics. Read-only check, principal-
+      // scoped (resolveCollectionItemLink never leaks a cross-principal
+      // link's existence — see that function's own contract).
+      const link = await resolveCollectionItemLink({ principalId, collectionItemId: id });
+      if (link) {
+        return res.status(409).json({
+          error: 'COLLECTION_ITEM_LINKED_TO_PHYSICAL_ASSET',
+          message: 'This catalogue item is linked to a real physical asset and cannot be deleted.',
+        });
+      }
       const result = await deleteCollectionItem({ principalId, id });
       return res.status(200).json(result);
     }
