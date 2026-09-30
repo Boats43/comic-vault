@@ -497,12 +497,23 @@ try {
     // column) is the durable proof for the refresh token specifically.
   }
 
-  console.log('\n=== GK-264 PART: boundary — untouched seller-execution files ===\n');
+  console.log('\n=== GK-264 PART: boundary — untouched seller-execution files (bounded to GK-264\'s own commit range) ===\n');
   {
-    const beforeSha = '644d157ab73754b47bf6d03d56fdd024406f3a74'; // HEAD at the start of this dispatch
+    // GK-265 PHASE 3 (a later, separate, explicitly authorized dispatch)
+    // DOES intentionally convert these 3 files to principal-scoped
+    // credentials -- an open-ended `beforeSha..HEAD` diff would now
+    // always be non-empty and this check would misreport a real,
+    // authorized later change as a GK-264 boundary violation. Bounded
+    // instead to GK-264's OWN commit range (644d157 = HEAD immediately
+    // before GK-264 began; 767f254 = GK-264's own last commit, before
+    // GK-265 started) -- this preserves the original, still-true
+    // historical proof ("GK-264 itself never touched seller execution")
+    // without being invalidated by legitimate later work.
+    const beforeSha = '644d157ab73754b47bf6d03d56fdd024406f3a74'; // HEAD at the start of GK-264
+    const afterSha = '767f25448996fb16f5d343a24d538235896a8e9b'; // GK-264's own last commit, before GK-265 began
     const { execSync } = await import('node:child_process');
-    const diff = execSync(`git diff ${beforeSha} -- api/list-ebay.js api/delist-ebay.js api/ebay-outcome-reconciler.js`, { cwd: repoRoot }).toString();
-    assertTrue(diff.trim() === '', 'BOUNDARY: zero diff on list-ebay.js/delist-ebay.js/ebay-outcome-reconciler.js since before this dispatch began');
+    const diff = execSync(`git diff ${beforeSha} ${afterSha} -- api/list-ebay.js api/delist-ebay.js api/ebay-outcome-reconciler.js`, { cwd: repoRoot }).toString();
+    assertTrue(diff.trim() === '', 'BOUNDARY: zero diff on list-ebay.js/delist-ebay.js/ebay-outcome-reconciler.js within GK-264\'s own commit range (644d157..767f254) -- GK-265 is a separate, later, authorized dispatch that does convert these files');
   }
 } finally {
   // ── Cleanup — real transient rows only. ──

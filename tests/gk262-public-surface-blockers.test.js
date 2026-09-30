@@ -43,11 +43,16 @@ if (!process.env.GRAILKEY_SESSION_SECRET) {
   process.env.GRAILKEY_SESSION_SECRET = randomBytes(32).toString('base64url');
 }
 process.env.ACCESS_CODE = process.env.ACCESS_CODE || 'gk262-test-vault-code';
-process.env.EBAY_AUTH_TOKEN = process.env.EBAY_AUTH_TOKEN || 'test-ebay-token';
 process.env.EBAY_APP_ID = process.env.EBAY_APP_ID || 'test-app';
 process.env.EBAY_DEV_ID = process.env.EBAY_DEV_ID || 'test-dev';
 process.env.EBAY_CERT_ID = process.env.EBAY_CERT_ID || 'test-cert';
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-anthropic-key-unused';
+// GK-265 PHASE 3 — api/delist-ebay.js now resolves a real per-principal
+// eBay User access token instead of a global EBAY_AUTH_TOKEN.
+if (!process.env.GRAILKEY_MARKETPLACE_CREDENTIAL_KEY) {
+  process.env.GRAILKEY_MARKETPLACE_CREDENTIAL_KEY = randomBytes(32).toString('base64url');
+}
+const JIMMY_EBAY_REFRESH_CREDENTIAL = `fake-refresh-jimmy-gk262-${Date.now()}`;
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -92,6 +97,11 @@ function anthropicResponse(bodyObj) {
 }
 
 global.fetch = async (url, opts) => {
+  const urlStr0 = String(url);
+  if (urlStr0.includes('identity/v1/oauth2/token')) {
+    fetchCalls.push('refresh-exchange');
+    return { ok: true, status: 200, json: async () => ({ access_token: `access-for-jimmy-gk262-${Date.now()}`, expires_in: 7200 }) };
+  }
   const callName = opts?.headers?.['X-EBAY-API-CALL-NAME'];
   if (callName) {
     fetchCalls.push(callName);
@@ -122,6 +132,11 @@ const CREEPY_LIST_OPERATOR_ACTION_EVENT_ID = '01a097a1-6e78-71c9-9309-1ed9344c40
 
 const dbClient = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
 await dbClient.connect();
+
+// GK-265 PHASE 3 — a real, transient EBAY marketplace_connection for
+// JIMMY, deleted in cleanup.
+const { upsertMarketplaceConnection } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'marketplace', 'index.js')).href);
+await upsertMarketplaceConnection({ principalId: JIMMY, provider: 'EBAY', providerUserId: 'jimmy-test-ebay-identity', refreshCredential: JIMMY_EBAY_REFRESH_CREDENTIAL, grantedScopes: [] });
 
 // ════════════════════════════════════════════════════════════════════
 // PART 1 — /api/delist-ebay
@@ -198,20 +213,20 @@ try {
     assertTrue(fetchCalls.length === 0, 'D3: no EndItem call made for the cross-principal attempt');
   }
 
-  // D4 — authenticated request for an ebayItemId with NO durable
-  // linkage proceeds as the disclosed AUTHENTICATED STOPGAP
-  // (ownershipBound:false) — the real, current shape of every
-  // historical listing (0 outcome_event rows in Production today per
-  // GK-215/216) — proving the existing real UI caller keeps working.
+  // D4 — GK-265 PHASE 3 SUPERSEDES THIS CASE: the GK-262 "AUTHENTICATED
+  // STOPGAP" for an ebayItemId with no durable linkage is REMOVED once
+  // seller execution is principal-scoped — there is no way to know
+  // WHOSE eBay connection should service the call without durable
+  // ownership. An authenticated request for an unlinked ebayItemId now
+  // fails closed, full stop.
   {
     const req = { method: 'POST', headers: { authorization: `Bearer ${issueToken({ principalId: JIMMY }).token}` }, body: { ebayItemId: `gk262-unlinked-${Date.now()}` } };
     const res = mockRes();
     fetchCalls.length = 0;
     endItemBehavior = 'success';
     await delistHandler(req, res);
-    assertTrue(res.statusCode === 200 && res.body?.success === true, 'D4: authenticated delist with NO durable linkage still succeeds (stopgap)');
-    assertTrue(res.body?.ownershipBound === false, 'D4: response discloses ownershipBound:false for an unlinked listing');
-    assertTrue(fetchCalls.includes('EndItem'), 'D4: EndItem was actually called for the stopgap path');
+    assertTrue(res.statusCode === 404, 'D4 (GK-265): authenticated delist with NO durable linkage now FAILS CLOSED (404) — stopgap removed');
+    assertTrue(!fetchCalls.includes('EndItem'), 'D4 (GK-265): no EndItem call made for an unlinked listing');
   }
 
   // D5 — a real EndItem failure from eBay is still surfaced correctly;
@@ -232,7 +247,8 @@ try {
   if (secondPrincipalId) {
     await dbClient.query(`DELETE FROM data1_dev.gk_principal WHERE id = $1`, [secondPrincipalId]);
   }
-  console.log('  (test cleanup) transient outcome_event row, idempotency_key row, and principal-B row all deleted\n');
+  await dbClient.query(`DELETE FROM data1_dev.marketplace_connection WHERE principal_id = $1 AND provider = 'EBAY'`, [JIMMY]);
+  console.log('  (test cleanup) transient outcome_event row, idempotency_key row, principal-B row, and JIMMY\'s marketplace_connection all deleted\n');
 }
 
 // ════════════════════════════════════════════════════════════════════

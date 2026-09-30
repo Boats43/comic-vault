@@ -19,7 +19,13 @@
 
 import { verifyToken, InvalidTokenError } from '../src/modules/auth/index.js';
 import { reconcileEbayOutcome, DEFAULT_LOOKBACK_DAYS } from '../src/lib/ebayOutcomeReconciler.js';
-import { refreshUserAccessToken } from '../src/lib/ebayUserOAuth.js';
+import {
+  resolveEbayUserAccessToken,
+  EbayConnectionRequiredError,
+  EbayReconnectRequiredError,
+  EbayTemporaryFailureError,
+  EbayTokenResolutionInternalError,
+} from '../src/lib/ebayPrincipalToken.js';
 import { ValidationFailedError, NotFoundError, AuthorizationFailedError } from '../src/modules/assets/index.js';
 import { checkRateLimit } from './rate-limit.js';
 
@@ -58,14 +64,29 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'gkAssetId and externalListingId are both required' });
   }
 
+  // GK-265 PHASE 3 — principal-scoped token resolution. principalId here
+  // is the SAME value getOutcomeEventsForListing (inside
+  // reconcileEbayOutcome, below) independently checks asset ownership
+  // against — this endpoint's own caller-authenticated principal is
+  // never trusted as authority beyond "whose eBay connection to use."
+  // NO global EBAY_USER_REFRESH_TOKEN fallback exists on this path.
   let accessToken;
   try {
-    const refreshToken = process.env.EBAY_USER_REFRESH_TOKEN;
-    if (!refreshToken) {
-      return res.status(503).json({ error: 'EBAY_USER_REFRESH_TOKEN is not configured — eBay User OAuth consent has not been completed in this environment (see GK-214).' });
-    }
-    ({ accessToken } = await refreshUserAccessToken(refreshToken));
+    ({ accessToken } = await resolveEbayUserAccessToken({ principalId }));
   } catch (e) {
+    if (e instanceof EbayConnectionRequiredError) {
+      return res.status(503).json({ error: 'EBAY_CONNECTION_REQUIRED', message: 'No eBay connection exists for this principal — Connect eBay before reconciling.' });
+    }
+    if (e instanceof EbayReconnectRequiredError) {
+      return res.status(503).json({ error: 'EBAY_RECONNECT_REQUIRED', message: 'This principal\'s eBay connection requires reconnection.' });
+    }
+    if (e instanceof EbayTemporaryFailureError) {
+      return res.status(502).json({ error: 'EBAY_TEMPORARY_FAILURE', message: 'eBay was temporarily unavailable — try again shortly.' });
+    }
+    if (e instanceof EbayTokenResolutionInternalError) {
+      console.error('[ebay-outcome-reconciler] internal token-resolution fault:', e?.message || e);
+      return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Could not resolve an eBay access token due to a server-side fault.' });
+    }
     console.error('[ebay-outcome-reconciler] could not obtain eBay User access token:', e?.message || e);
     return res.status(502).json({ error: 'Could not obtain a real eBay User access token' });
   }

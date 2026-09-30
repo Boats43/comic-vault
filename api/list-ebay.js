@@ -3,11 +3,21 @@
 // Creates a real eBay fixed-price listing via the Trading API (AddFixedPriceItem).
 // Also handles status sync: { checkStatus: true, ebayItemId } calls GetItem to detect sold/ended.
 //
-// Requires these env vars on Vercel:
-//   EBAY_APP_ID     — your Trading API App ID (client id)
-//   EBAY_CERT_ID    — your Trading API Cert ID (client secret)
-//   EBAY_DEV_ID     — your Trading API Dev ID
-//   EBAY_AUTH_TOKEN — user auth token ("Auth'n'Auth" / eBayAuthToken) for the seller account
+// Requires these env vars on Vercel (application identity only — see
+// GK-265 PHASE 3 note below for the per-principal seller credential):
+//   EBAY_APP_ID  — your Trading API App ID (client id)
+//   EBAY_CERT_ID — your Trading API Cert ID (client secret)
+//   EBAY_DEV_ID  — your Trading API Dev ID
+//
+// GK-265 PHASE 3 — principal-scoped seller execution. The legacy global
+// EBAY_AUTH_TOKEN ("Auth'n'Auth" eBayAuthToken) is GONE from this file.
+// Every Trading API call now authenticates the SELLER via
+// X-EBAY-API-IAF-TOKEN, a short-lived OAuth User access token resolved
+// per request from the authenticated GrailKey principal's OWN GK-263/
+// GK-264 eBay connection (src/lib/ebayPrincipalToken.js). There is no
+// global seller-token fallback: a principal with no usable connection
+// gets a safe, typed failure, never a call made on someone else's
+// behalf.
 //
 // Notes:
 //  - Category 63 = Comics (US site).
@@ -36,9 +46,22 @@ import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
 // endpoint has no mandatory GrailKey auth today, and this dispatch does
 // not add one).
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
-import { recordOutcomeEvent, validateOutcomeAttachment, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
+import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
 import { assertListingAuthorized, ListingPreflightFailedError } from "../src/lib/inventoryListingPreflight.js";
+// GK-265 PHASE 3 -- principal-scoped eBay seller execution. Every real
+// Trading API call in this file (GetItem, UploadSiteHostedPictures,
+// GetUser, AddFixedPriceItem, EndItem via delist-ebay.js) now uses the
+// AUTHENTICATED PRINCIPAL's own eBay User access token
+// (X-EBAY-API-IAF-TOKEN), resolved fresh per request. NO global
+// EBAY_AUTH_TOKEN fallback exists anywhere below this line.
+import {
+  resolveEbayUserAccessToken,
+  EbayConnectionRequiredError,
+  EbayReconnectRequiredError,
+  EbayTemporaryFailureError,
+  EbayTokenResolutionInternalError,
+} from "../src/lib/ebayPrincipalToken.js";
 
 const EBAY_ENDPOINT = "https://api.ebay.com/ws/api.dll";
 const COMPAT_LEVEL = "1193";
@@ -202,7 +225,7 @@ const buildBundleDescription = (items) => {
   return lines.join("\n");
 };
 
-const buildBundleXml = (items, authToken, pictureUrls) => {
+const buildBundleXml = (items, pictureUrls) => {
   const title = buildBundleTitle(items);
   const description = buildBundleDescription(items);
   const sum = items.reduce((acc, it) => {
@@ -219,9 +242,6 @@ const buildBundleXml = (items, authToken, pictureUrls) => {
     : "";
   return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${xmlEscape(authToken)}</eBayAuthToken>
-  </RequesterCredentials>
   <ErrorLanguage>en_US</ErrorLanguage>
   <WarningLevel>High</WarningLevel>
   <Item>
@@ -392,16 +412,16 @@ const decodeDataUrl = (dataUrl) => {
 };
 
 // Upload a base64 image to eBay's picture service via UploadSiteHostedPictures.
-// Returns the hosted FullURL or throws.
-const uploadSiteHostedPicture = async (base64Image, authToken, headers) => {
+// Returns the hosted FullURL or throws. `headers` must already carry
+// X-EBAY-API-IAF-TOKEN (the principal's own eBay User access token) --
+// this function no longer embeds a RequesterCredentials/eBayAuthToken
+// block in the XML body (GK-265 Phase 3).
+const uploadSiteHostedPicture = async (base64Image, headers) => {
   const { bytes, mimeType } = decodeDataUrl(base64Image);
   if (!bytes || bytes.length === 0) throw new Error("Empty image payload");
 
   const uploadXml = `<?xml version="1.0" encoding="utf-8"?>
 <UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${xmlEscape(authToken)}</eBayAuthToken>
-  </RequesterCredentials>
   <PictureName>comic-vault-${Date.now()}</PictureName>
   <PictureSet>Supersize</PictureSet>
   <ExtensionInDays>30</ExtensionInDays>
@@ -459,7 +479,7 @@ const uploadSiteHostedPicture = async (base64Image, authToken, headers) => {
   return fullUrl;
 };
 
-const buildXml = (item, authToken, pictureUrls) => {
+const buildXml = (item, pictureUrls) => {
   const title = buildTitle(item);
   const description = buildDescription(item);
   const price = parsePriceNumber(item.price) ?? parsePriceNumber(item.priceHigh) ?? parsePriceNumber(item.priceLow);
@@ -538,9 +558,6 @@ ${character ? `      <NameValueList>
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${xmlEscape(authToken)}</eBayAuthToken>
-  </RequesterCredentials>
   <ErrorLanguage>en_US</ErrorLanguage>
   <WarningLevel>High</WarningLevel>
   <Item>
@@ -587,14 +604,13 @@ ${itemSpecifics}    <BestOfferDetails>
 </AddFixedPriceItemRequest>`;
 };
 
-// Check listing status via GetItem API.
+// Check listing status via GetItem API. `headers` must already carry
+// X-EBAY-API-IAF-TOKEN — no eBayAuthToken is embedded in the XML body
+// (GK-265 Phase 3).
 // Returns { status: "sold"|"ended"|"active", soldPrice?, soldAt?, buyerFeedback? }
-const checkListingStatus = async (ebayItemId, authToken, headers) => {
+const checkListingStatus = async (ebayItemId, headers) => {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${xmlEscape(authToken)}</eBayAuthToken>
-  </RequesterCredentials>
   <ItemID>${xmlEscape(ebayItemId)}</ItemID>
   <DetailLevel>ReturnAll</DetailLevel>
 </GetItemRequest>`;
@@ -669,12 +685,9 @@ const checkListingStatus = async (ebayItemId, authToken, headers) => {
 // <eBayAuthToken> element). Read-only by construction — GetUser creates,
 // modifies, or deletes nothing on eBay's side; a failure here throws
 // and the caller aborts BEFORE ever reaching AddFixedPriceItem.
-const verifySellerAccount = async (authToken, headers) => {
+const verifySellerAccount = async (headers) => {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${xmlEscape(authToken)}</eBayAuthToken>
-  </RequesterCredentials>
 </GetUserRequest>`;
 
   const res = await fetch(EBAY_ENDPOINT, {
@@ -714,17 +727,47 @@ const extractBearerToken = (req) => {
   return header.slice("Bearer ".length).trim();
 };
 
+// GK-265 PHASE 3 — maps a resolveEbayUserAccessToken() failure to the
+// correct safe HTTP response. Every branch writes a response; callers
+// must `return` immediately after calling this.
+const respondEbayTokenError = (res, e, context) => {
+  if (e instanceof EbayConnectionRequiredError) {
+    res.status(503).json({ error: "EBAY_CONNECTION_REQUIRED", message: `No eBay connection exists for this principal — Connect eBay before ${context}.` });
+    return;
+  }
+  if (e instanceof EbayReconnectRequiredError) {
+    res.status(503).json({ error: "EBAY_RECONNECT_REQUIRED", message: "This principal's eBay connection requires reconnection." });
+    return;
+  }
+  if (e instanceof EbayTemporaryFailureError) {
+    res.status(502).json({ error: "EBAY_TEMPORARY_FAILURE", message: "eBay was temporarily unavailable — try again shortly." });
+    return;
+  }
+  if (e instanceof EbayTokenResolutionInternalError) {
+    console.error("[ebay] internal token-resolution fault:", e?.message || e);
+    res.status(500).json({ error: "INTERNAL_ERROR", message: "Could not resolve an eBay access token due to a server-side fault." });
+    return;
+  }
+  console.error("[ebay] unexpected token-resolution error:", e?.message || e);
+  res.status(500).json({ error: "Internal error" });
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
     return;
   }
 
-  const { EBAY_APP_ID, EBAY_CERT_ID, EBAY_DEV_ID, EBAY_AUTH_TOKEN } = process.env;
-  if (!EBAY_APP_ID || !EBAY_CERT_ID || !EBAY_DEV_ID || !EBAY_AUTH_TOKEN) {
+  // GK-265 PHASE 3 — EBAY_AUTH_TOKEN (the legacy global Auth'n'Auth
+  // seller credential) is NO LONGER read anywhere in this file. App/Dev/
+  // Cert IDs remain required — they identify the APPLICATION on every
+  // Trading API call, orthogonal to the per-principal SELLER identity
+  // now carried by X-EBAY-API-IAF-TOKEN (resolved per request, below).
+  const { EBAY_APP_ID, EBAY_CERT_ID, EBAY_DEV_ID } = process.env;
+  if (!EBAY_APP_ID || !EBAY_CERT_ID || !EBAY_DEV_ID) {
     res.status(500).json({
       error:
-        "Missing eBay credentials. Set EBAY_APP_ID, EBAY_CERT_ID, EBAY_DEV_ID, EBAY_AUTH_TOKEN in Vercel env.",
+        "Missing eBay application credentials. Set EBAY_APP_ID, EBAY_CERT_ID, EBAY_DEV_ID in Vercel env.",
     });
     return;
   }
@@ -765,17 +808,50 @@ export default async function handler(req, res) {
     }
 
     // Status check branch: { checkStatus: true, ebayItemId }
+    // GK-265 PHASE 3 — GetItem now runs with the OWNING principal's own
+    // eBay User access token, never a global one. Requires a verified
+    // GrailKey session AND durable GrailKey linkage for this ebayItemId
+    // (same resolveOwnedAssetForListing api/delist-ebay.js uses) —
+    // fails closed otherwise, exactly like the other seller-user paths
+    // in this file.
     if (item.checkStatus === true) {
       if (!item.ebayItemId) {
         res.status(400).json({ error: "ebayItemId required for status check" });
         return;
       }
+      if (!grailkeyPrincipalId) {
+        res.status(401).json({ error: 'GRAILKEY_AUTH_REQUIRED', message: 'A valid GrailKey session is required to check listing status.' });
+        return;
+      }
+      let statusGkAssetId;
+      try {
+        const resolved = await resolveOwnedAssetForListing({ principalId: grailkeyPrincipalId, externalListingId: String(item.ebayItemId), channel: 'ebay' });
+        if (!resolved.found) {
+          res.status(404).json({ error: 'EBAY_LISTING_NOT_LINKED', message: 'No durable GrailKey linkage exists for this listing.' });
+          return;
+        }
+        statusGkAssetId = resolved.gkAssetId;
+      } catch (e) {
+        if (e instanceof AssetAuthorizationFailedError) {
+          res.status(403).json({ error: 'Not authorized to check this listing' });
+          return;
+        }
+        console.error('[ebay] unexpected ownership-resolution error (checkStatus):', e?.message || e);
+        res.status(500).json({ error: 'Internal error' });
+        return;
+      }
+      let statusAccessToken;
+      try {
+        ({ accessToken: statusAccessToken } = await resolveEbayUserAccessToken({ principalId: grailkeyPrincipalId }));
+      } catch (e) {
+        respondEbayTokenError(res, e, 'checking listing status');
+        return;
+      }
       const statusResult = await checkListingStatus(
         item.ebayItemId,
-        EBAY_AUTH_TOKEN,
-        ebayHeaders
+        { ...ebayHeaders, "X-EBAY-API-IAF-TOKEN": statusAccessToken }
       );
-      res.status(200).json(statusResult);
+      res.status(200).json({ ...statusResult, gkAssetId: statusGkAssetId });
       return;
     }
 
@@ -817,6 +893,26 @@ export default async function handler(req, res) {
         });
         return;
       }
+      // GK-265 PHASE 3 — no global seller token exists any more, so the
+      // bundle path (like every other seller-user call in this file) now
+      // REQUIRES a verified GrailKey principal and uses that principal's
+      // own eBay User access token. This does NOT close the pre-existing,
+      // disclosed per-item-linkage gap (GK-216) — it only removes the
+      // global-credential fallback. Bundle listing remains Production-
+      // disabled above regardless.
+      if (!grailkeyPrincipalId) {
+        res.status(401).json({ error: 'GRAILKEY_AUTH_REQUIRED', message: 'A valid GrailKey session is required to create a bundle listing.' });
+        return;
+      }
+      let bundleAccessToken;
+      try {
+        ({ accessToken: bundleAccessToken } = await resolveEbayUserAccessToken({ principalId: grailkeyPrincipalId }));
+      } catch (e) {
+        respondEbayTokenError(res, e, 'creating a bundle listing');
+        return;
+      }
+      const bundleHeaders = { ...ebayHeaders, "X-EBAY-API-IAF-TOKEN": bundleAccessToken };
+
       const bundleImages = items
         .map((it) => (Array.isArray(it.images) && it.images[0]) || it.image || null)
         .filter(Boolean)
@@ -824,7 +920,7 @@ export default async function handler(req, res) {
       const pictureUrls = [];
       for (const img of bundleImages) {
         try {
-          const url = await uploadSiteHostedPicture(img, EBAY_AUTH_TOKEN, ebayHeaders);
+          const url = await uploadSiteHostedPicture(img, bundleHeaders);
           if (url) pictureUrls.push(url);
         } catch (imgErr) {
           console.error("[ebay] bundle picture upload failed:", imgErr.message);
@@ -832,14 +928,14 @@ export default async function handler(req, res) {
       }
       // EBAY PUBLISH SAFETY — read-only account/token validity check,
       // immediately before the real AddFixedPriceItem call below.
-      await verifySellerAccount(EBAY_AUTH_TOKEN, ebayHeaders);
+      await verifySellerAccount(bundleHeaders);
 
-      const xml = buildBundleXml(items, EBAY_AUTH_TOKEN, pictureUrls);
+      const xml = buildBundleXml(items, pictureUrls);
       console.log("[ebay] AddFixedPriceItem (bundle) request XML:\n" + redactToken(xml));
       const ebayRes = await fetch(EBAY_ENDPOINT, {
         method: "POST",
         headers: {
-          ...ebayHeaders,
+          ...bundleHeaders,
           "Content-Type": "text/xml",
           "X-EBAY-API-CALL-NAME": "AddFixedPriceItem",
         },
@@ -946,8 +1042,20 @@ export default async function handler(req, res) {
       });
     } catch (e) {
       console.error("[ebay] pre-flight GrailKey linkage validation FAILED — aborting before any eBay call:", e?.message || e);
+      // GK-265 PHASE 3 — validateOutcomeAttachment's own
+      // assertPrincipalOwnsAsset throws AssetAuthorizationFailedError
+      // for a cross-principal gkAssetId (the exact "A session + B
+      // asset" case this dispatch's own governing authority law
+      // requires rejecting before any eBay call). Previously
+      // unclassified here, it fell into the generic 500 branch — still
+      // rejected before any eBay call, but mislabeled as a server
+      // fault rather than an authorization failure. Found while proving
+      // Section 13's cross-principal LIST matrix; fixed, not left as a
+      // disclosed gap, since it's directly load-bearing for this same
+      // dispatch's authority law.
       const status = (e instanceof NotFoundError) ? 404
         : (e instanceof ValidationFailedError) ? 422
+        : (e instanceof AssetAuthorizationFailedError) ? 403
         : 500;
       res.status(status).json({
         error: 'GRAILKEY_LINKAGE_INVALID',
@@ -1079,10 +1187,32 @@ export default async function handler(req, res) {
       ? (item.images || []).filter(Boolean).slice(0, 12)
       : [(item.images?.[0] || item.image || null)].filter(Boolean);
 
+    // GK-265 PHASE 3 — the authenticated, ownership-verified principal's
+    // own eBay User access token (src/lib/ebayPrincipalToken.js).
+    // grailkeyPrincipalId is guaranteed non-null and already verified to
+    // own item.gkAssetId by the linkage/Inventory Authority gates above
+    // — this is never any other seller's credential, and there is no
+    // global EBAY_AUTH_TOKEN fallback if resolution fails. Only resolved
+    // when there's actually at least one image to upload — a zero-photo
+    // request is about to be rejected by the GK-208 gate below
+    // regardless, so this avoids a real, wasted OAuth refresh call on a
+    // request that was never going to reach eBay either way.
+    let singleHeaders = ebayHeaders;
+    if (imagesToUpload.length > 0) {
+      let singleAccessToken;
+      try {
+        ({ accessToken: singleAccessToken } = await resolveEbayUserAccessToken({ principalId: grailkeyPrincipalId }));
+      } catch (e) {
+        respondEbayTokenError(res, e, 'publishing this listing');
+        return;
+      }
+      singleHeaders = { ...ebayHeaders, "X-EBAY-API-IAF-TOKEN": singleAccessToken };
+    }
+
     const pictureUrls = [];
     for (const img of imagesToUpload) {
       try {
-        const url = await uploadSiteHostedPicture(img, EBAY_AUTH_TOKEN, ebayHeaders);
+        const url = await uploadSiteHostedPicture(img, singleHeaders);
         if (url) pictureUrls.push(url);
       } catch (imgErr) {
         // Don't hard-fail the whole listing on image upload issues — log and continue without.
@@ -1114,16 +1244,16 @@ export default async function handler(req, res) {
     // (and this handler's outer catch turns it into a 500) if the token
     // is invalid or the account cannot be confirmed — the real listing
     // call below never runs in that case.
-    await verifySellerAccount(EBAY_AUTH_TOKEN, ebayHeaders);
+    await verifySellerAccount(singleHeaders);
 
     // Step 2: create the listing, including the hosted picture URLs.
-    const xml = buildXml(item, EBAY_AUTH_TOKEN, pictureUrls);
+    const xml = buildXml(item, pictureUrls);
     console.log("[ebay] AddFixedPriceItem request XML:\n" + redactToken(xml));
 
     const ebayRes = await fetch(EBAY_ENDPOINT, {
       method: "POST",
       headers: {
-        ...ebayHeaders,
+        ...singleHeaders,
         "Content-Type": "text/xml",
         "X-EBAY-API-CALL-NAME": "AddFixedPriceItem",
       },

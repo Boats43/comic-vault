@@ -38,6 +38,12 @@ process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development';
 if (!process.env.GRAILKEY_SESSION_SECRET) {
   process.env.GRAILKEY_SESSION_SECRET = randomBytes(32).toString('base64url');
 }
+// GK-265 PHASE 3 — api/list-ebay.js now resolves a real per-principal
+// eBay User access token instead of a global EBAY_AUTH_TOKEN.
+if (!process.env.GRAILKEY_MARKETPLACE_CREDENTIAL_KEY) {
+  process.env.GRAILKEY_MARKETPLACE_CREDENTIAL_KEY = randomBytes(32).toString('base64url');
+}
+const JIMMY_EBAY_REFRESH_CREDENTIAL = `fake-refresh-jimmy-photo-${Date.now()}`;
 
 // A real, standard, non-sensitive 1x1 transparent PNG data URL — the
 // smallest valid input decodeDataUrl() accepts. Never a real photo,
@@ -53,6 +59,11 @@ const FAKE_ITEM_ID = `test-photo-item-${Date.now()}`;
 const FAKE_HOSTED_URL = 'https://i.ebayimg.example/hosted/fake-picture-1.jpg';
 
 global.fetch = async (url, opts) => {
+  const urlStr = String(url);
+  if (urlStr.includes('identity/v1/oauth2/token')) {
+    fetchCalls.push('refresh-exchange');
+    return { ok: true, status: 200, json: async () => ({ access_token: `access-for-jimmy-photo-${Date.now()}`, expires_in: 7200 }) };
+  }
   const callName = opts?.headers?.['X-EBAY-API-CALL-NAME'] || '(unknown)';
   fetchCalls.push(callName);
   if (callName === 'GetUser') {
@@ -165,6 +176,23 @@ async function cleanupOutcome(client, idempotencyKey) {
 const dbClient = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
 await dbClient.connect();
 
+// GK-265 PHASE 3 — a real, transient EBAY marketplace_connection for
+// JIMMY, deleted in cleanup.
+const { upsertMarketplaceConnection } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'marketplace', 'index.js')).href);
+await upsertMarketplaceConnection({ principalId: JIMMY, provider: 'EBAY', providerUserId: 'jimmy-test-ebay-identity', refreshCredential: JIMMY_EBAY_REFRESH_CREDENTIAL, grantedScopes: [] });
+
+// Pre-existing gap found while making the above change, unrelated to
+// credentials: this file never enrolled Creepy in Inventory Authority
+// (GRAILKEY INVENTORY AUTHORITY V1, 2026-09-20), so every scenario here
+// was failing closed at the 409 INVENTORY_NOT_AVAILABLE preflight
+// before ever reaching the photo logic under test — the same real gap
+// tests/list-ebay-outcome1-handler-smoke.test.js's own header already
+// documents and works around. Mirrored here, restored in cleanup.
+const { enrollAsset, closePool: closeInventoryPool } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'inventory', 'index.js')).href);
+const inventoryEnrollKey = `list-ebay-photo-handoff-inventory-enroll-${crypto.randomUUID()}`;
+await enrollAsset({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, idempotencyKey: inventoryEnrollKey });
+console.log('  (test setup) Creepy enrolled in Inventory Authority: UNMANAGED -> AVAILABLE, real write, restored in cleanup\n');
+
 console.log('\n=== api/list-ebay.js -- GK-208 photo handoff, real handler proof ===\n');
 
 console.log('-- REGRESSION PROOF (the exact real bug): images array present, matchConfidence NOT LOW (the common case) -> uploads, AddFixedPriceItem receives a real PictureURL --\n');
@@ -251,6 +279,14 @@ console.log('\n-- ZERO-PHOTO PRECALL GATE: an images array is present but every 
   uploadBehavior = 'success';
 }
 
+// Restore Creepy to UNMANAGED, exactly as found before this test ran.
+await dbClient.query('DELETE FROM data1_dev.inventory_current_state WHERE gk_asset_id = $1', [CREEPY_ASSET_ID]);
+await dbClient.query('DELETE FROM data1_dev.inventory_transition_event WHERE gk_asset_id = $1', [CREEPY_ASSET_ID]);
+await dbClient.query(`DELETE FROM data1_dev.idempotency_key WHERE operation = 'enrollAsset' AND idempotency_key = $1`, [inventoryEnrollKey]);
+console.log('  (test cleanup) Creepy restored to UNMANAGED in Inventory Authority');
+await closeInventoryPool();
+
+await dbClient.query(`DELETE FROM data1_dev.marketplace_connection WHERE principal_id = $1 AND provider = 'EBAY'`, [JIMMY]);
 await dbClient.end();
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

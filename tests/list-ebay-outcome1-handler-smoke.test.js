@@ -41,6 +41,14 @@ process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development';
 if (!process.env.GRAILKEY_SESSION_SECRET) {
   process.env.GRAILKEY_SESSION_SECRET = randomBytes(32).toString('base64url');
 }
+// GK-265 PHASE 3 — api/list-ebay.js now resolves a real per-principal
+// eBay User access token (src/lib/ebayPrincipalToken.js) instead of a
+// global EBAY_AUTH_TOKEN. A real (fake-content) encrypted
+// marketplace_connection row for JIMMY is required below.
+if (!process.env.GRAILKEY_MARKETPLACE_CREDENTIAL_KEY) {
+  process.env.GRAILKEY_MARKETPLACE_CREDENTIAL_KEY = randomBytes(32).toString('base64url');
+}
+const JIMMY_EBAY_REFRESH_CREDENTIAL = `fake-refresh-jimmy-${Date.now()}`;
 
 // ── Mock fetch — intercepts by X-EBAY-API-CALL-NAME, never reaches the
 // real network. Recorded call log lets tests assert call ORDER (the
@@ -60,6 +68,11 @@ const TINY_PNG_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 global.fetch = async (url, opts) => {
+  const urlStr = String(url);
+  if (urlStr.includes('identity/v1/oauth2/token')) {
+    fetchCalls.push('refresh-exchange');
+    return { ok: true, status: 200, json: async () => ({ access_token: `access-for-jimmy-${Date.now()}`, expires_in: 7200 }) };
+  }
   const callName = opts?.headers?.['X-EBAY-API-CALL-NAME'] || '(unknown)';
   fetchCalls.push(callName);
   if (callName === 'GetUser') {
@@ -182,6 +195,12 @@ const { enrollAsset, closePool: closeInventoryPool } = await import(pathToFileUR
 const inventoryEnrollKey = `list-ebay-smoke-inventory-enroll-${crypto.randomUUID()}`;
 await enrollAsset({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, idempotencyKey: inventoryEnrollKey });
 console.log('  (test setup) Creepy enrolled in Inventory Authority: UNMANAGED -> AVAILABLE, real write, restored in cleanup\n');
+
+// GK-265 PHASE 3 — a real, transient EBAY marketplace_connection for
+// JIMMY (real encryptCredential envelope), deleted in cleanup.
+const { upsertMarketplaceConnection } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'marketplace', 'index.js')).href);
+await upsertMarketplaceConnection({ principalId: JIMMY, provider: 'EBAY', providerUserId: 'jimmy-test-ebay-identity', refreshCredential: JIMMY_EBAY_REFRESH_CREDENTIAL, grantedScopes: [] });
+console.log('  (test setup) real transient EBAY marketplace_connection written for JIMMY, deleted in cleanup\n');
 
 console.log('-- real success: valid token + gkAssetId + decisionEventId + LIST operatorActionEventId --\n');
 {
@@ -374,6 +393,9 @@ await client.query('DELETE FROM data1_dev.inventory_transition_event WHERE gk_as
 await client.query(`DELETE FROM data1_dev.idempotency_key WHERE operation = 'enrollAsset' AND idempotency_key = $1`, [inventoryEnrollKey]);
 console.log('  (test cleanup) Creepy restored to UNMANAGED in Inventory Authority');
 await closeInventoryPool();
+
+await client.query(`DELETE FROM data1_dev.marketplace_connection WHERE principal_id = $1 AND provider = 'EBAY'`, [JIMMY]);
+console.log('  (test cleanup) JIMMY\'s transient EBAY marketplace_connection deleted');
 
 await client.end();
 
