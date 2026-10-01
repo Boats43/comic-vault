@@ -41,7 +41,7 @@ import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
 import GenericAssetCapture from "./components/GenericAssetCapture.jsx";
 import { useClerk } from "@clerk/react";
 import { deriveMarketCopy, NEUTRAL_MARKET_FOOTER } from "./lib/marketEvidence.js";
-import { getDisplayPrice, getAuthorityPrice, getAdvisoryContractPrice, isIdentityDisplayGated, describeActiveEvidenceProvenance } from "./lib/displayAuthority.js";
+import { getDisplayPrice, getAuthorityPrice, getAdvisoryContractPrice, isIdentityDisplayGated, describeActiveEvidenceProvenance, isIdentityAuthorityInsufficient, getDisplayConditionEvidence, POLYBAG_FLAG_OBSERVATION_TEXT } from "./lib/displayAuthority.js";
 
 // Same gate src/main.jsx uses to decide whether <ClerkProvider> is mounted
 // at all, and src/components/GrailKeyLoginGate.jsx uses to decide whether
@@ -2111,7 +2111,7 @@ export function ResultCard({ result, enriching }) {
               fontSize: 14,
             }}
           >
-            <span className="muted small">Floor</span>
+            <span className="muted small">{identityGated ? "Lowest active ask (reference)" : "Floor"}</span>
             <span style={{ fontWeight: 600, color: "#e05656" }}>
               {fmtPrice(comps.lowestNum)}
             </span>
@@ -2125,7 +2125,9 @@ export function ResultCard({ result, enriching }) {
             className="muted small"
             style={{ marginTop: 8, fontStyle: "italic" }}
           >
-            {result.pricingSource === "pricecharting"
+            {identityGated
+              ? describeActiveEvidenceProvenance(result)
+              : result.pricingSource === "pricecharting"
               ? "Source: PriceCharting market data"
               : "Source: Browse API — active listings"}
             {Array.isArray(result.soldComps) && result.soldComps.length > 0 && " + eBay sold"}
@@ -2559,7 +2561,7 @@ export function ResultCard({ result, enriching }) {
         </div>
       )}
 
-      {result.reason && <div className="reason muted small">{result.reason}</div>}
+      {result.reason && getDisplayConditionEvidence(result).reason && <div className="reason muted small">{getDisplayConditionEvidence(result).reason}</div>}
     </div>
   );
 }
@@ -4606,9 +4608,14 @@ export function CollectionDetail({
   // render only — preserves item.reason in storage so first-print scans
   // are unaffected and we can revert later. Pattern matches case-insensitive.
   const KEY_LANGUAGE_RE = /\b(?:1st|first)\s+(?:app|appearance|jla|justice|issue)|\bmajor\s+(?:silver|bronze|golden|copper)\s+age\s+key|\bkey\s+issue|\borigin\s+of\b|\bdebut\s+of\b/i;
+  // GK-272D — condition prose/flags are re-guarded at display time against
+  // the item's FINAL year and known image evidence (the grade-time guard
+  // runs before enrich resolves the year, and saved items persist pre-guard
+  // prose).
+  const conditionEvidence = getDisplayConditionEvidence(item);
   const conditionBullets = item.polybagDetected
-    ? parseConditionReport(item.reason).filter((b) => !KEY_LANGUAGE_RE.test(b.text || ''))
-    : parseConditionReport(item.reason);
+    ? parseConditionReport(conditionEvidence.reason).filter((b) => !KEY_LANGUAGE_RE.test(b.text || ''))
+    : parseConditionReport(conditionEvidence.reason);
   const confidenceText = formatConfidence(item.confidence);
   const scannedText = item.timestamp
     ? new Date(item.timestamp).toLocaleString()
@@ -5051,6 +5058,12 @@ export function CollectionDetail({
         // show a green "VERIFIED" next to a contract-driven "ID REQUIRED"
         // pill elsewhere on the same card.
         const lowConfidence = isContractIdentityBlocked(item);
+        // GK-272D — claudeCheck.verified only means the comp cross-check
+        // found no critical conflicts; it is NOT identity authority. A badge
+        // that reads as "verified" must stand down for CONFLICTED /
+        // UNRESOLVED identity (LOCKED + IDENTITY_UNRESOLVED), which
+        // isContractIdentityBlocked deliberately does not cover.
+        const identityInsufficient = !lowConfidence && isIdentityAuthorityInsufficient(item);
 
         const badge = lowConfidence ? {
           icon: '❓',
@@ -5058,6 +5071,12 @@ export function CollectionDetail({
           color: '#888',
           bg: 'rgba(136,136,136,0.1)',
           border: 'rgba(136,136,136,0.3)'
+        } : identityInsufficient ? {
+          icon: '⚠️',
+          label: 'IDENTIFICATION REQUIRED',
+          color: '#fbbf24',
+          bg: 'rgba(251,191,36,0.1)',
+          border: 'rgba(251,191,36,0.3)'
         } : hasFlags ? {
           icon: '⚠️',
           label: 'NEEDS REVIEW',
@@ -5066,7 +5085,7 @@ export function CollectionDetail({
           border: 'rgba(251,191,36,0.3)'
         } : verified ? {
           icon: '✅',
-          label: 'VERIFIED',
+          label: 'CHECKS PASSED',
           color: '#22c55e',
           bg: 'rgba(34,197,94,0.1)',
           border: 'rgba(34,197,94,0.3)'
@@ -5095,7 +5114,7 @@ export function CollectionDetail({
           }}>
             <span>{badge.icon}</span>
             <span>{badge.label}</span>
-            {hasFlags && <span style={{ fontSize: 9 }}>({check.flags.length})</span>}
+            {hasFlags && !identityInsufficient && <span style={{ fontSize: 9 }}>({check.flags.length})</span>}
           </div>
         );
       })()}
@@ -6636,7 +6655,7 @@ export function CollectionDetail({
       )}
 
       {/* 4. AI CONDITION REPORT */}
-      {(conditionBullets.length > 0 || confidenceText || scannedText || item.cgcPenaltyFlags) && (
+      {(conditionBullets.length > 0 || confidenceText || scannedText || conditionEvidence.cgcPenaltyFlags) && (
         <div
           style={{
             marginTop: 14,
@@ -6696,8 +6715,8 @@ export function CollectionDetail({
               ))}
             </ul>
           )}
-          {item.cgcPenaltyFlags && (() => {
-            const f = item.cgcPenaltyFlags;
+          {conditionEvidence.cgcPenaltyFlags && (() => {
+            const f = conditionEvidence.cgcPenaltyFlags;
             const advisoryStyle = (color) => ({
               padding: "4px 0",
               fontSize: 14,
@@ -6749,7 +6768,7 @@ export function CollectionDetail({
               lis.push(
                 <li key="polybag" style={advisoryStyle(info)}>
                   <span style={{ flexShrink: 0 }}>✨</span>
-                  <span>Polybag indents — pressing recommended</span>
+                  <span>{POLYBAG_FLAG_OBSERVATION_TEXT}</span>
                 </li>
               );
             }
@@ -6782,12 +6801,12 @@ export function CollectionDetail({
           {(confidenceText || scannedText) && (() => {
             const hasAnyAdvisory =
               conditionBullets.length > 0 ||
-              (item.cgcPenaltyFlags && (
-                item.cgcPenaltyFlags.pedigreeStamp?.detected ||
-                item.cgcPenaltyFlags.storeStamp?.detected ||
-                item.cgcPenaltyFlags.staplePopping?.detected ||
-                item.cgcPenaltyFlags.polybagIndents?.detected ||
-                item.cgcPenaltyFlags.cornerChips?.detected
+              (conditionEvidence.cgcPenaltyFlags && (
+                conditionEvidence.cgcPenaltyFlags.pedigreeStamp?.detected ||
+                conditionEvidence.cgcPenaltyFlags.storeStamp?.detected ||
+                conditionEvidence.cgcPenaltyFlags.staplePopping?.detected ||
+                conditionEvidence.cgcPenaltyFlags.polybagIndents?.detected ||
+                conditionEvidence.cgcPenaltyFlags.cornerChips?.detected
               ));
             return (
               <div

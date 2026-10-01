@@ -104,3 +104,7 @@ Prior entry, retained for history: 201 PASS / 19 FAIL / 4 TIMEOUT / 224 total â€
 ## Roster delta (2026-10-01, GK-272C derived-economics authority)
 
 +1 file: `tests/gk272c-derived-economics-authority.test.js` (39/39). `tests/gk271-grade-handler-smoke.test.js` extended in place (24/24 -> 26/26). Roster count 274 -> 275. Historical-roster status changes: NOT FRESHLY MEASURED.
+
+## Roster delta (2026-10-01, GK-272D live-surface certification)
+
++1 file: `tests/gk272d-live-surfaces.test.js` (27/27, real component render; pre-fix files fail 12/27). Roster count 275 -> 276. Historical-roster status changes: NOT FRESHLY MEASURED.

@@ -69,8 +69,12 @@ export const guardConditionClaims = ({ reason, imageCount = 0, views = null, und
   const y = parseInt(year, 10);
   const polybagImpossible = Number.isFinite(y) && y > 0 && y < POLYBAG_EARLIEST_YEAR;
 
+  // Line structure (bullets/newlines) is preserved: sentences are guarded
+  // per line and a line that loses every sentence is dropped.
+  const keptLines = [];
+  for (const rawLine of String(reason || '').split('\n')) {
   const kept = [];
-  for (const sentence of splitSentences(reason)) {
+  for (const sentence of splitSentences(rawLine)) {
     if (polybagImpossible && POLYBAG_RE.test(sentence)) {
       withheld.push({ claim: sentence, reason: `era-implausible: polybag indentation in a ${y} book` });
       continue;
@@ -108,6 +112,8 @@ export const guardConditionClaims = ({ reason, imageCount = 0, views = null, und
     }
     kept.push(sentence);
   }
+  if (kept.length > 0) keptLines.push(kept.join(' '));
+  }
 
   let flags = cgcPenaltyFlags;
   let flagsChanged = false;
@@ -129,7 +135,7 @@ export const guardConditionClaims = ({ reason, imageCount = 0, views = null, und
   }
 
   return {
-    reason: kept.join(' '),
+    reason: keptLines.join('\n'),
     cgcPenaltyFlags: flags,
     flagsChanged,
     withheld,

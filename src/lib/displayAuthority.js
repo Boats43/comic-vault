@@ -5,6 +5,8 @@
 
 // True when the fresh ResultCard suppresses its Recommended price
 // (identityConfident === false). Missing field = not gated (legacy items).
+import { guardConditionClaims } from './conditionEvidenceGuard.js';
+
 export const isIdentityDisplayGated = (item) => item?.identityConfident === false;
 
 // Explicit raw access for diagnostics/assertions that genuinely need the
@@ -127,3 +129,48 @@ export const describeActiveEvidenceProvenance = (item) => {
   }
   return null;
 };
+
+// ───────────────────────── GK-272D ─────────────────────────
+
+// Identity AUTHORITY insufficient for an identity-confirming badge. Distinct
+// from App.jsx's isContractIdentityBlocked on purpose: that predicate means
+// "listing blocked — identification required" (ID_REQUIRED/REFUSED only) and
+// a test pins that LOCKED is a different state. A badge that CLAIMS identity
+// is confirmed must also stand down for CONFLICTED/UNRESOLVED standing and
+// the display gate.
+export const isIdentityAuthorityInsufficient = (item) => {
+  if (!item) return false;
+  if (isIdentityDisplayGated(item)) return true;
+  const st = item.contract?.state;
+  if (st === 'ID_REQUIRED' || st === 'REFUSED') return true;
+  const standing = item.contract?.actionAuthority?.identityStanding;
+  return standing === 'CONFLICTED' || standing === 'UNRESOLVED' || standing === 'REFUSED';
+};
+
+// Display-time condition evidence. The grade-time guard runs before enrich
+// resolves the final year (the eBay-first path often has none), and saved
+// items persist pre-guard prose, so every condition surface re-applies the
+// SAME guard against the item's final year and what is actually known about
+// its images. Idempotent with the grade-time pass. Declared views are not
+// persisted on the item, so grounding falls back to image count (never
+// inferring view identity from it).
+export const getDisplayConditionEvidence = (item) => {
+  const imageCount = Array.isArray(item?.images) ? item.images.length : (item?.image ? 1 : 0);
+  const g = guardConditionClaims({
+    reason: typeof item?.reason === 'string' ? item.reason : '',
+    imageCount: Math.max(imageCount, 1),
+    year: item?.year ?? null,
+    cgcPenaltyFlags: item?.cgcPenaltyFlags ?? null,
+  });
+  return {
+    reason: typeof item?.reason === 'string' && g.changed ? g.reason : item?.reason,
+    cgcPenaltyFlags: g.cgcPenaltyFlags,
+    withheld: g.withheld,
+  };
+};
+
+// "Polybag indents — pressing recommended" asserted provenance (polybagging),
+// storage method and a pressing recommendation. Visible surface deformation
+// is not polybag provenance; with no evidence contract that supports the
+// conclusion, only the observation may be shown.
+export const POLYBAG_FLAG_OBSERVATION_TEXT = 'Cover indentation visible (model-observed)';
