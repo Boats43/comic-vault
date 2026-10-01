@@ -41,6 +41,7 @@ import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
 import GenericAssetCapture from "./components/GenericAssetCapture.jsx";
 import { useClerk } from "@clerk/react";
 import { deriveMarketCopy, NEUTRAL_MARKET_FOOTER } from "./lib/marketEvidence.js";
+import { getDisplayPrice, getAuthorityPrice, getAdvisoryContractPrice, isIdentityDisplayGated } from "./lib/displayAuthority.js";
 
 // Same gate src/main.jsx uses to decide whether <ClerkProvider> is mounted
 // at all, and src/components/GrailKeyLoginGate.jsx uses to decide whether
@@ -272,47 +273,6 @@ const POP_GRADE_INDEX = [
   1, 2, 3, 4, 5, 6, 7, 8, 9.0, 9.2, 9.4, 9.6, 9.8, 10,
 ];
 
-const getDisplayPrice = (item) => {
-  if (!item) return 0;
-
-  // Ship #24a-3 — single writer. When the canonical contract block exists,
-  // it IS the price: header, stats bar, Recommended row, and List button all
-  // resolve here. Legacy chain below survives ONLY for pre-Ship-24 catalogue
-  // entries that have no contract yet (auto-refresh back-fills them).
-  // Q41 manual override still wins — the user's number outranks the engine's.
-  if (item.contract && !item.priceOverridden) {
-    return item.contract.price ?? 0;
-  }
-
-  // Ship #20a.6.4 — refuse-to-price gate. When identity is uncertain,
-  // suppress both Vision's stored price AND the cached comps fallback.
-  // The displayed value is the listing-decision number; gated books
-  // must not produce one. Default-true on missing field protects
-  // existing catalog entries (no field → not gated).
-  if (item.identityConfident === false) return 0;
-
-  // Q41: When priceOverridden flag is set, use item.price (manual edit).
-  // Otherwise prefer priceBands.market (market-band price from decision engine).
-  if (item.priceOverridden) {
-    const p = parseFloat(String(item.price || "0").replace(/[$,]/g, ""));
-    return p > 0 ? p : 0;
-  }
-
-  // Prefer priceBands.market (decision engine's market recommendation)
-  if (item.priceBands?.market) {
-    const marketPrice = parseFloat(String(item.priceBands.market).replace(/[$,]/g, ""));
-    if (marketPrice > 0) return marketPrice;
-  }
-
-  // Fallback to item.price (legacy books without priceBands)
-  const p = parseFloat(String(item.price || "0").replace(/[$,]/g, ""));
-  if (p > 0) return p;
-
-  // Final fallback: comps average + 15%
-  if (item.comps?.averageNum)
-    return Math.round(item.comps.averageNum * 1.15);
-  return 0;
-};
 
 // Fix A — Phase 1: Format currency to exactly 2 decimal places.
 // Prevents float artifacts like $13.796000000000001 from rendering.
@@ -789,46 +749,6 @@ const getChannelMetrics = (catalogue) => {
   return metrics;
 };
 
-// v0-E: Decision Engine price authority helper
-// Returns the authoritative price for listPrice initialization.
-// Precedence: blocked → 0, decision.price when decision permits listing → system price fallback
-// Fix v0-H: When floor enforcement creates extreme mismatch with recommended price,
-// use the recommended price (from verified sold comps) instead of floor.
-const getAuthorityPrice = (item) => {
-  if (!item) return 0;
-
-  // Ship #24a-3 (Amendment A): the contract is the single price authority —
-  // listPrice and the List button read the same number as every other
-  // surface. The v0-H soldAvg override is DELETED as a writer; sold/active
-  // arbitration now happens server-side inside contract assembly.
-  if (item.contract) {
-    return item.contract.price ?? 0;
-  }
-
-  // Legacy chain — pre-Ship-24 catalogue entries only (no contract yet).
-
-  // Q68-C: Refuse-state coherence - return 0 for refused identity
-  if (item.identityConfident === false) return 0;
-
-  // Blocked decisions: use system price (may be 0)
-  const isBlocked =
-    item.decision?.action === 'DO_NOT_LIST' ||
-    item.decision?.action === 'ID_REQUIRED' ||
-    (item.decision?.blockers?.length || 0) > 0;
-
-  if (isBlocked) {
-    return getDisplayPrice(item);
-  }
-
-  // Non-blocked decisions with decision.price: use it
-  // Includes LIST_NOW, LIST_LOW, RESEARCH, GRADE_CANDIDATE
-  if (item.decision?.price != null && item.decision.price > 0) {
-    return item.decision.price;
-  }
-
-  // Fallback to system price
-  return getDisplayPrice(item);
-};
 
 // Ship #24 Amendment C — client-side drift alarm (dev mode only).
 // Every rendered price surface must show contract.price; a divergence here
@@ -837,7 +757,10 @@ const CONTRACT_DEV_MODE =
   typeof import.meta !== 'undefined' && !!import.meta.env?.DEV;
 const assertContractPrice = (item, surface, rendered) => {
   if (!CONTRACT_DEV_MODE || !item?.contract || item.priceOverridden) return rendered;
-  const cp = item.contract.price ?? 0;
+  // GK-272B — a gated item intentionally renders no price while the
+  // contract keeps its advisory price; that is not drift.
+  if (isIdentityDisplayGated(item)) return rendered;
+  const cp = getAdvisoryContractPrice(item) ?? 0;
   const rv =
     typeof rendered === 'number'
       ? rendered
@@ -4651,7 +4574,12 @@ export function CollectionDetail({
   const displayPrice = getDisplayPrice(item);
   // Ship #24a-3 — contract price renders "—" honestly when null (REFUSED),
   // never a $0.00 string (ruling 3).
-  const recommendedLabel = item.contract
+  // GK-272B — an identity-gated item keeps its advisory contract.price
+  // internally but this saved-item surface must not present it as the
+  // recommended value (the fresh ResultCard already suppresses it).
+  const recommendedLabel = isIdentityDisplayGated(item)
+    ? "—"
+    : item.contract
     ? (item.contract.price != null
         ? formatCurrency(assertContractPrice(item, 'CollectionDetail.recommended', item.contract.price))
         : "—")
@@ -5402,7 +5330,7 @@ export function CollectionDetail({
                 contract price. The decision.price/displayPrice divergence
                 (four-sources coherence bug, B3 P3-A) is dead for contract
                 items: header == Recommended row == stats bar == List button. */}
-            {(item.contract ? item.contract.price != null : (item.decision?.price != null || displayPrice > 0)) && (
+            {!isIdentityDisplayGated(item) && (item.contract ? item.contract.price != null : (item.decision?.price != null || displayPrice > 0)) && (
               <div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: colors.text, marginBottom: 4 }}>
                   {item.contract

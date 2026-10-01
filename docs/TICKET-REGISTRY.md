@@ -2105,6 +2105,18 @@ New `api/ebay-account-deletion.js` — GET challenge-response verification (SHA-
 
 **Fix:** the detail assignment and log line now run only when a year adoption actually happened (`familyYearConsensus?.mode === 'adopted'`); the `identityProvisionalFields` normalization is unchanged. **Test:** `tests/gk272-classic-comics-refused-conflict-smoke.test.js` 8/8 — real handler, the 19 real pool titles from the production log; the pre-fix file reproduces the exact 500 (5/8 fail), the fixed file returns 200 with a contract. Related identity/provisional suites and the GK-271/AU/152 handler smokes re-run clean. Not investigated: the fixed run prices $59.76 from `active_ask_derived` under a provisional refused-conflict identity — inspect that card on the live rescan against the Customer-Grade Standard; no pricing code touched.
 
+## GK-272B — display authority: contract price existence != user-facing price authority (2026-10-01), PENDING LIVE RESCAN
+
+**Not a pricing-engine defect.** `contract.price` may stay populated as advisory context under `identityConfident=false` / `actionAuthority LOCKED` / `decision RESEARCH` / `IDENTITY_UNRESOLVED` (Q110/Q133/XMEN1 retention law, unchanged). Traced control flow for the Classic Comics replay ($59.76 `active_ask_derived`): decision engine treats a provisional pool identity as advisory -> RESEARCH, not ID_REQUIRED -> `deriveState` skips ID_REQUIRED/REFUSED, hard lock gives LOCKED -> "LOCKED keeps price visible".
+
+**The defect:** `getDisplayPrice()` returned `item.contract.price` BEFORE reaching its own `identityConfident === false` guard, so for any item carrying a contract that guard was unreachable. Three more surfaces read `contract.price` directly and bypassed the helper altogether: `getAuthorityPrice` (pre-fills CollectionDetail's editable list price), CollectionDetail's `recommendedLabel` (the "Recommended" rows), and the DecisionPanel hero price. The fresh ResultCard already suppressed Recommended via `identityGated`.
+
+**Fix (display only):** new `src/lib/displayAuthority.js` (functions moved out of `App.jsx`, importable by tests): `isIdentityDisplayGated` (same predicate as ResultCard's `identityGated`), `getDisplayPrice` and `getAuthorityPrice` now gate FIRST (return 0 = the helper's existing no-display signal; callers test `> 0` or sum; not a $0 valuation, no substitution of AI/active-ask/fallback), `getAdvisoryContractPrice` for explicit raw access. CollectionDetail `recommendedLabel` -> "—" and DecisionPanel hero hidden when gated. `assertContractPrice` no longer flags intentional suppression as drift. Operator-override (Q41) behavior unchanged: confident + override still shows the operator number; override on a gated identity was already 0.
+
+**Callers audited:** 34 `getDisplayPrice` call sites (collection tile price, sort/filter by value, portfolio/liquid-value totals + daily snapshot, readiness checklist, listing/packet/bundle prices, ROI, grading-upside calc, trade piles, Whatnot starting bid) — all class A (actionable/valuation); none needs the raw advisory number. Class B (explicit raw): only `assertContractPrice`. Direct readers fixed: `getAuthorityPrice`, CollectionDetail `recommendedLabel`, DecisionPanel hero. Left alone: ResultCard header/`recommendedLabel` (already gated by `identityGated`), "Engine floor: item.price" in the manual-review block (mega-key diagnostic).
+
+**Tests:** `tests/gk272b-display-authority.test.js` 29/29 (the 8 required scenarios + direct-reader sites); `gk272-classic-comics-refused-conflict-smoke` 9/9 now also asserts the server contract price/LOCKED/RESEARCH are untouched.
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.

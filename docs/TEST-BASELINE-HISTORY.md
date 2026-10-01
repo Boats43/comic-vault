@@ -96,3 +96,7 @@ Prior entry, retained for history: 201 PASS / 19 FAIL / 4 TIMEOUT / 224 total â€
 ## Roster delta (2026-10-01, GK-272 Classic Comics refused-conflict 500)
 
 +1 file: `tests/gk272-classic-comics-refused-conflict-smoke.test.js` (8/8, real handler, real production pool titles; pre-fix file fails 5/8). Roster count 272 -> 273. Historical-roster status changes: NOT FRESHLY MEASURED.
+
+## Roster delta (2026-10-01, GK-272B display authority)
+
++1 file: `tests/gk272b-display-authority.test.js` (29/29). `tests/gk272-classic-comics-refused-conflict-smoke.test.js` extended in place (8/8 -> 9/9). Roster count 273 -> 274. Historical-roster status changes: NOT FRESHLY MEASURED.

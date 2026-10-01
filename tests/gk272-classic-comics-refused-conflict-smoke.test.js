@@ -103,6 +103,7 @@ ok(!logs.some((l) => l.includes("reading 'year'")), "the null 'year' dereference
 ok(!logs.some((l) => l.includes('[enrich-error]')), 'no [enrich-error] logged');
 ok(body && body.identityConfident !== undefined || body?.title != null, 'a response body was produced');
 ok(body?.contract != null, 'the response contract was assembled');
+ok(body?.contract?.price > 0 && body?.contract?.actionAuthority?.state === 'LOCKED' && body?.decision?.action === 'RESEARCH', 'pricing/contract untouched: advisory contract.price still populated under LOCKED + RESEARCH (display authority is a client concern, GK-272B)');
 ok(body?.country == null && body?.editionStanding !== 'CONFIRMED_BY_RECONCILER', 'country/edition not asserted from the pool alone');
 origLog(`  response: price=${body?.price} pricingSource=${body?.pricingSource} editionStanding=${body?.editionStanding} identityProvisionalFields=${JSON.stringify(body?.identityProvisionalFields)}`);
 
