@@ -184,6 +184,7 @@ import { writeConfirmed } from "../src/lib/identityWriteLog.js";
 import { computeAnthropicCallCostUsd } from "../src/lib/anthropicPricing.js";
 // BETA-1A.1 — shared legacy access gate, factored out of this file (see src/lib/accessGate.js)
 import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
+import { isUnconfirmedCountryClaim, deriveEditionStanding } from "../src/lib/editionAuthority.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -10219,7 +10220,26 @@ export default async function handler(req, res) {
     // resolve to null (comps/sold-verify cleaned up) while this block still
     // applied a spurious multiplier from the same contaminated string
     // (the real "[variant] exclusive limited signed x 1.15" case).
-    const variant = safeReqVariant ? String(safeReqVariant).trim() : null;
+    const variantRawForMult = safeReqVariant ? String(safeReqVariant).trim() : null;
+    // GK-271 (Edition authority) — a COUNTRY claim ("Canadian edition")
+    // carried only by Vision's raw variant string is an uncorroborated
+    // model read, not edition truth. The reconciler (above) CLEARS
+    // confirmedVariant when no independent evidence supports it, yet this
+    // block reads the raw req.body variant — so a Vision-only "Canadian"
+    // claim could still reach the 'canadian' x1.8 multiplier even after
+    // the reconciler cleared it. Withheld here unless confirmedVariant
+    // itself carries the country claim. Conservative direction: the
+    // multiplier simply does not fire; no table value is touched.
+    const countryClaimUnconfirmed = isUnconfirmedCountryClaim(variantRawForMult, confirmedVariant);
+    const variant = countryClaimUnconfirmed ? null : variantRawForMult;
+    if (countryClaimUnconfirmed) {
+      out.countryClaimWithheld = true;
+      out.editionStanding = 'UNRESOLVED';
+      console.log(
+        `[edition-authority] country claim "${variantRawForMult}" is Vision-only (confirmedVariant=${JSON.stringify(confirmedVariant ?? null)}) — ` +
+        `edition UNRESOLVED, variant multiplier withheld`
+      );
+    }
 
     // Newsstand multiplier eligibility (GrailKey Dispatch 14, 2026-08-07)
     // — deliberately broader than the rest of the variant-multiplier
@@ -12927,6 +12947,21 @@ export default async function handler(req, res) {
     if (req.body.foreignEdition === true) {
       out.foreignEdition = true;
       console.log('[q27] foreign edition detected — pc_estimate blocked');
+    }
+    // GK-271 — Vision-only foreignEdition / "Canadian" text is a claim, not
+    // edition truth. Country stays UNRESOLVED (null) unless the reconciled
+    // confirmedVariant itself carries it. (foreignEdition above keeps its
+    // existing, conservative pc_estimate-blocking effect — unchanged.)
+    {
+      const es = deriveEditionStanding({
+        rawVariant: safeReqVariant,
+        confirmedVariant,
+        foreignEditionFlag: req.body.foreignEdition === true,
+      });
+      if (es.editionStanding !== 'NOT_CLAIMED') {
+        out.editionStanding = es.editionStanding;
+        out.country = es.country;
+      }
     }
 
     // 3d. identityComplete: adapter-aware flag

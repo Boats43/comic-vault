@@ -40,6 +40,7 @@ import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
 import GenericAssetCapture from "./components/GenericAssetCapture.jsx";
 import { useClerk } from "@clerk/react";
+import { deriveMarketCopy, NEUTRAL_MARKET_FOOTER } from "./lib/marketEvidence.js";
 
 // Same gate src/main.jsx uses to decide whether <ClerkProvider> is mounted
 // at all, and src/components/GrailKeyLoginGate.jsx uses to decide whether
@@ -1756,6 +1757,9 @@ export function ResultCard({ result, enriching }) {
     (result.priceLadder && Object.keys(result.priceLadder).length > 0) ||
     (((result.priceChart?.used?.length || 0) + (result.priceChart?.graded?.length || 0)) >= 2) ||
     (Array.isArray(result.rawComps?.prices) && result.rawComps.prices.length > 0);
+  // GK-271 — market copy follows the evidence inventory + marketStanding,
+  // never a hardcoded "eBay sales" assumption.
+  const marketCopy = deriveMarketCopy(result);
   const displayPrice = getDisplayPrice(result);
   // Ship #24a-3 — contract items render contract.price ONLY. The legacy
   // `result.price` string fallback is dead for them: a REFUSED card must
@@ -2000,21 +2004,34 @@ export function ResultCard({ result, enriching }) {
           }}
         >
           <div style={{ fontWeight: 700, marginBottom: 4 }}>
-            ⚠ No recent eBay sales found for this book
+            ⚠ {marketCopy.headline}
           </div>
-          <div className="small" style={{ marginBottom: 4 }}>
-            Price estimated from AI market knowledge
-          </div>
+          {marketCopy.detail && (
+            <div className="small" style={{ marginBottom: 4 }}>
+              {marketCopy.detail}
+            </div>
+          )}
           <div className="small" style={{ marginBottom: 8 }}>
-            Verify on eBay before listing
+            Verify sold prices before listing
           </div>
           {(result.priceLow || result.priceHigh) && (
             <div style={{ fontWeight: 600 }}>
-              AI range: {result.priceLow}
+              {marketCopy.aiRangeLabel || "AI context (unverified)"}: {result.priceLow}
               {result.priceLow && result.priceHigh ? " – " : ""}
               {result.priceHigh}
             </div>
           )}
+        </div>
+      )}
+
+      {hasComps && marketCopy.state !== "EXACT_CURRENT" && (
+        <div
+          className="small"
+          style={{ marginTop: 14, color: "#f59e0b", fontWeight: 600 }}
+          data-testid="market-evidence-headline"
+        >
+          {marketCopy.headline}
+          {marketCopy.detail ? ` ${marketCopy.detail}` : ""}
         </div>
       )}
 
@@ -16016,7 +16033,7 @@ export default function App() {
         color: "#888",
         textAlign: "center",
       }}>
-        Prices are estimates derived from recent eBay sales data — not appraisals or financial advice.
+        {tab === "scan" && result ? deriveMarketCopy(result).footer : NEUTRAL_MARKET_FOOTER}
         <br />
         eBay and the eBay logo are trademarks of eBay Inc.
       </div>

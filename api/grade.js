@@ -10,6 +10,7 @@ import { getOAuthToken } from "./comps.js";
 import { checkRateLimit } from "./rate-limit.js";
 import { computeAnthropicCallCostUsd, getEstimatedStaticPrefixTokens, classifyCacheEligibility } from "../src/lib/anthropicPricing.js";
 import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
+import { guardConditionClaims } from "../src/lib/conditionEvidenceGuard.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -141,6 +142,32 @@ const ensureAssetType = (responseObj, initialScan = null) => {
     responseObj.assetType = isBook ? 'book' : 'comic';
   }
   return responseObj;
+};
+
+// GK-271 — view-grounded condition claims + era plausibility. Runs AFTER
+// detectEditionWarning (which must keep reading Vision's raw prose so a
+// reprint/facsimile safety signal is never lost to this guard). Only
+// withholds unsupported claims; never raises a grade or price. The
+// withheld claims are recorded on the result, not silently dropped.
+const applyConditionGuard = (result, imageCount) => {
+  if (!result || typeof result !== 'object' || typeof result.reason !== 'string') return result;
+  try {
+    const g = guardConditionClaims({
+      reason: result.reason,
+      imageCount,
+      year: result.year ?? null,
+      cgcPenaltyFlags: result.cgcPenaltyFlags ?? null,
+    });
+    if (g.changed) {
+      result.reason = g.reason;
+      if (g.flagsChanged) result.cgcPenaltyFlags = g.cgcPenaltyFlags;
+      result.conditionClaimsWithheld = g.withheld;
+      console.log(`[condition-guard] withheld ${g.withheld.length} unsupported claim(s) (imageCount=${imageCount}, year=${result.year ?? 'null'})`);
+    }
+  } catch (err) {
+    console.error('[condition-guard] skipped:', err?.message || err);
+  }
+  return result;
 };
 
 // Slice 7 — echo the client-minted scanId (if present) on every response
@@ -788,6 +815,7 @@ export default async function handler(req, res) {
 
       enrichPedigree(result);
       result.editionWarning = detectEditionWarning(result.reason);
+      applyConditionGuard(result, Array.isArray(images) ? images.length : (image ? 1 : 0));
       applyNewsstandFallback(result);
       if (noImage) result.noImage = true;
 
@@ -868,6 +896,7 @@ export default async function handler(req, res) {
     if (noImage) finalParsed.noImage = true;
     enrichPedigree(finalParsed);
     finalParsed.editionWarning = detectEditionWarning(finalParsed.reason);
+    applyConditionGuard(finalParsed, Array.isArray(images) ? images.length : (image ? 1 : 0));
     applyNewsstandFallback(finalParsed);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
