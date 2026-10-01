@@ -92,3 +92,7 @@ Prior entry, retained for history: 201 PASS / 19 FAIL / 4 TIMEOUT / 224 total â€
 ## Roster delta (2026-10-01, GK-271b evidence contract closeout)
 
 +1 file: `tests/gk271b-evidence-contract.test.js` (23/23). `tests/gk271-enrich-handler-smoke.test.js` extended in place (13/13 -> 25/25), `tests/gk271-grade-handler-smoke.test.js` extended in place (13/13 -> 24/24). Roster count 271 -> 272. Historical-roster status changes: NOT FRESHLY MEASURED.
+
+## Roster delta (2026-10-01, GK-272 Classic Comics refused-conflict 500)
+
++1 file: `tests/gk272-classic-comics-refused-conflict-smoke.test.js` (8/8, real handler, real production pool titles; pre-fix file fails 5/8). Roster count 272 -> 273. Historical-roster status changes: NOT FRESHLY MEASURED.

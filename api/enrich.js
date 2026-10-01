@@ -3652,11 +3652,23 @@ export default async function handler(req, res) {
           // output. Card could show "year is provisional" but never what
           // year, or on what evidence. Mirrors the log line's own data
           // exactly — no new computation, just also assigning it to out.
-          out.identityProvisionalYearDetail = buildIdentityProvisionalYearDetail(identity.familyYearConsensus);
-          console.log(
-            `[commit4.1] identityProvisionalFields += 'year' (family-scoped adoption): ` +
-            `year=${identity.familyYearConsensus.year} support=${identity.familyYearConsensus.support}/${identity.familyYearConsensus.uniqueRows}`
-          );
+          // GK-272 (Classic Comics #13 live 500, 2026-10-01 19:56) — the
+          // block's own entry test (`nextProvisionalFields !==
+          // out.identityProvisionalFields`) is ALSO true when
+          // appendYearToProvisionalFields merely normalized a missing
+          // identityProvisionalFields into a fresh `[]` and appended
+          // nothing, which happens on the refused-conflict provisional path
+          // where familyYearConsensus is null. The detail/log below
+          // dereferenced that null (`TypeError: Cannot read properties of
+          // null (reading 'year')`, HTTP 500). They only describe a real
+          // year adoption, so they run only when one actually happened.
+          if (familyYearConsensus?.mode === 'adopted') {
+            out.identityProvisionalYearDetail = buildIdentityProvisionalYearDetail(identity.familyYearConsensus);
+            console.log(
+              `[commit4.1] identityProvisionalFields += 'year' (family-scoped adoption): ` +
+              `year=${identity.familyYearConsensus.year} support=${identity.familyYearConsensus.support}/${identity.familyYearConsensus.uniqueRows}`
+            );
+          }
         }
 
         // Track B Phase 0, Commit 4.1 — visualReferenceEvidence, built

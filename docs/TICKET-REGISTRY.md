@@ -2099,6 +2099,12 @@ New `api/ebay-account-deletion.js` — GET challenge-response verification (SHA-
 
 **Research:** `docs/MARKET-SOURCE-ACCESS-RESEARCH.md` second pass, primary-source only; the first pass's snippet-derived claims (ComicConnect/WorthPoint prohibition, Heritage reuse limit, GoCollect Pro API, PriceCharting `/api/sales`) are NOT re-confirmed and were retracted. Confirmed: PriceCharting's API has no sales-history endpoint and its terms limit use to internal; GoCollect API is Enterprise-only, sale-level data unconfirmed. No provider integration started.
 
+## GK-272 — Classic Comics #13 live HTTP 500 on the refused-conflict provisional path (2026-10-01), FIXED, PENDING LIVE RESCAN
+
+**Found while certifying GK-271b:** Production runtime logs show the real Classic Comics #13 rescan attempt at 2026-10-01 19:56:33 UTC (build `2823dcc`, i.e. BEFORE GK-271/271b) returned **HTTP 500** from `/api/enrich`: `TypeError: Cannot read properties of null (reading 'year')` at `enrich.js:3656`. Cause: the Commit-4.1 year-provisional block's entry test (`nextProvisionalFields !== out.identityProvisionalFields`) is also true when `appendYearToProvisionalFields` merely normalizes a missing array into a fresh `[]` with nothing appended; on the refused-conflict provisional path `familyYearConsensus` is null, and the block's log/detail line dereferenced it. Pre-existing, unrelated to GK-271. The `/api/grade` half of that scan succeeded (eBay consensus classic comics #13, 0.53). **No scan has hit the GK-271b deployment (`dpl_C7SXEqC5LHM6mBz8oBZ7XjWmRFBv`, READY, sha `265c0a5`, alias `app.grailkey.com`) yet** — the live rescan certification is still outstanding.
+
+**Fix:** the detail assignment and log line now run only when a year adoption actually happened (`familyYearConsensus?.mode === 'adopted'`); the `identityProvisionalFields` normalization is unchanged. **Test:** `tests/gk272-classic-comics-refused-conflict-smoke.test.js` 8/8 — real handler, the 19 real pool titles from the production log; the pre-fix file reproduces the exact 500 (5/8 fail), the fixed file returns 200 with a contract. Related identity/provisional suites and the GK-271/AU/152 handler smokes re-run clean. Not investigated: the fixed run prices $59.76 from `active_ask_derived` under a provisional refused-conflict identity — inspect that card on the live rescan against the Customer-Grade Standard; no pricing code touched.
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.
