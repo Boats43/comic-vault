@@ -733,6 +733,29 @@ export async function linkCollectionItem({ principalId, collectionItemId, gkAsse
         return result;
       }
 
+      // GK-270, Case A — the asset-side half of the same invariant the
+      // check above already enforces from the collectionItemId side.
+      // PHYSICAL IDENTITY != CATALOGUE SIMILARITY: this gkAssetId's
+      // canonical projection, once established, is fixed — a caller
+      // presenting a DIFFERENT, not-yet-linked collectionItemId for an
+      // asset that already has one is never allowed to mint a second,
+      // competing projection. Resolved, not rejected (per the governing
+      // dispatch's own "resolve and use the canonical collection_item_id"
+      // wording) — the caller gets back the TRUE canonical id, never the
+      // one it asked to link.
+      const existingByAsset = await repo.getCollectionItemLinkByAssetId(client, { gkAssetId });
+      if (existingByAsset && existingByAsset.collection_item_id !== collectionItemId) {
+        const result = {
+          collectionItemId: existingByAsset.collection_item_id,
+          gkAssetId,
+          outcome: 'resolved-canonical-existing',
+          requestedCollectionItemId: collectionItemId,
+        };
+        await claimIdempotencyKey(client, { operation, idempotencyKey, principalId, result, requestFingerprint });
+        await client.query('COMMIT');
+        return result;
+      }
+
       await repo.insertCollectionItemLink(client, { collectionItemId, gkAssetId, principalId });
       await repo.writeDomainEvent(client, {
         eventType: 'collection-item.linked', actorPrincipalId: principalId, actorKind: 'user',

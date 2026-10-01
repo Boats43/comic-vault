@@ -525,6 +525,22 @@ export async function getCollectionItemLink(client, { collectionItemId }) {
   return res.rows[0] || null;
 }
 
+// GK-270 — the REVERSE lookup getCollectionItemLink deliberately doesn't
+// offer: given a gkAssetId, find whichever collection_item_id (if any) is
+// ALREADY its canonical projection. This is Case A's own server-
+// enforceable half of "PHYSICAL IDENTITY != CATALOGUE SIMILARITY" —
+// title/issue/year similarity never establishes physical identity, but
+// once a REAL gkAssetId is already in hand, this table's own
+// (collection_item_id PK, one row per asset in practice) relationship IS
+// authoritative and must never be silently duplicated.
+export async function getCollectionItemLinkByAssetId(client, { gkAssetId }) {
+  const res = await client.query(
+    `SELECT collection_item_id, gk_asset_id FROM data1_dev.collection_item_link WHERE gk_asset_id = $1 LIMIT 1`,
+    [gkAssetId]
+  );
+  return res.rows[0] || null;
+}
+
 // U4.4 / Ruling 46 — Case A: a gk_asset this principal owns with zero
 // collection_item_link rows pointing at it. Real anti-join over the
 // indexed current_owner/collection_item_link FKs, scoped to one

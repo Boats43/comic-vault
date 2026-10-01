@@ -35,6 +35,7 @@ import { appendPhysicalMediaEvidence, getOrCreateEvidenceIdempotencyKey, retireE
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
 import { computeFeeAmount, computeNetProfit, computeMaxBuy, evaluateAgainstMaxBuy } from "./lib/maxBuyCalculator.js";
 import { pushBuyerDecision, pushBuyerAcquisition } from "./lib/buyerDecisionSync.js";
+import { titlesLikelySameBook } from "./lib/duplicateCopyDetection.js";
 import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
 import GenericAssetCapture from "./components/GenericAssetCapture.jsx";
@@ -12394,14 +12395,46 @@ export default function App() {
         console.log('[grade] title:', data.title, 'issue:', issueNum);
 
         // Duplicate detection: skip auto-save if already in collection.
-        const isDuplicate = save && catalogue.some(c =>
-          c.title?.toLowerCase() === data.title?.toLowerCase() &&
+        // GK-270 — PHYSICAL IDENTITY != CATALOGUE SIMILARITY. Widened from
+        // exact title equality (which silently missed the real Old Man
+        // Logan defect: "old man logan mike deodato" vs "old man logan
+        // deodato", same issue/year, two independent Vision reads of the
+        // same physical book) to fuzzy token-overlap. This still only ever
+        // produces a SIMILARITY signal — it never by itself decides same
+        // physical asset; see the async physical-link check below and the
+        // SAME COPY / ANOTHER COPY gate in the warning UI.
+        const matchedExisting = save ? catalogue.find(c =>
+          titlesLikelySameBook(c.title, data.title) &&
           c.issue === issueNum &&
           c.year === data.year
-        );
+        ) : null;
+        const isDuplicate = !!matchedExisting;
         if (isDuplicate) {
-          setDuplicateWarning({ title: data.title, issue: issueNum, year: data.year });
-          setPendingDuplicate({ data: { ...data, issue: issueNum }, b64 });
+          setDuplicateWarning({ title: data.title, issue: issueNum, year: data.year, existingId: matchedExisting.id, linkStatus: 'checking' });
+          setPendingDuplicate({ data: { ...data, issue: issueNum }, b64, existingId: matchedExisting.id });
+          // GK-270, Case C — fire-and-forget: does the MATCHED existing
+          // catalogue row already carry durable physical-asset identity?
+          // If so, this is no longer a cosmetic "two catalogue rows"
+          // question — it's a real physical-identity decision the
+          // operator must make explicitly (no default, no silent merge,
+          // no silent second row). Reuses the exact resolution
+          // GrailKeyOperatorPanel.jsx already performs for the same
+          // purpose — no new endpoint, no new logic.
+          (async () => {
+            try {
+              const res = await authFetch(`/api/assets?collectionItemId=${encodeURIComponent(matchedExisting.id)}`);
+              const linked = !!(res && res.ok && (await res.json().catch(() => null))?.asset);
+              setDuplicateWarning((prev) =>
+                prev && prev.existingId === matchedExisting.id
+                  ? { ...prev, linkStatus: linked ? 'linked' : 'unlinked' }
+                  : prev
+              );
+            } catch {
+              setDuplicateWarning((prev) =>
+                prev && prev.existingId === matchedExisting.id ? { ...prev, linkStatus: 'unlinked' } : prev
+              );
+            }
+          })();
         } else {
           setDuplicateWarning(null);
           setPendingDuplicate(null);
@@ -13060,9 +13093,15 @@ export default function App() {
           return;
         }
 
-        // Duplicate detection (mirrors gradeBlob :3859-3863)
+        // Duplicate detection (mirrors gradeBlob's own check, widened to
+        // fuzzy title matching GK-270 — a bulk import is a background/
+        // batch operation with no practical per-file operator prompt, so
+        // this stays a safe silent-skip (never a new row, matching Case
+        // B's own "may legitimately receive a new collection_item" only
+        // for genuinely distinct titles), just no longer defeated by a
+        // one-word OCR/Vision difference between two scans of one book).
         const isDuplicate = catalogue.some(c =>
-          c.title?.toLowerCase() === titleLower &&
+          titlesLikelySameBook(c.title, data.title) &&
           c.issue === bulkIssue &&
           c.year === data.year
         );
@@ -15488,7 +15527,230 @@ export default function App() {
           )}
           {result && !loading && !bulkProgress && (
             <>
-              {duplicateWarning && pendingDuplicate && (
+              {duplicateWarning && pendingDuplicate && duplicateWarning.linkStatus === 'linked' && (
+                // GK-270, Case C — PHYSICAL IDENTITY != CATALOGUE SIMILARITY.
+                // The matched existing row already carries durable
+                // gkAssetId linkage: this is no longer a cosmetic "two
+                // catalogue rows" question, it's a real physical-identity
+                // decision. No default, no timeout-to-create, no silent
+                // merge, no silent new row — the operator must explicitly
+                // choose. The real Old Man Logan defect this prevents: a
+                // second Vision read of the SAME physical book ("old man
+                // logan deodato" vs the canonical "old man logan mike
+                // deodato") silently minting an unlinked duplicate that
+                // later routes List/operator actions to the wrong row.
+                <div style={{ background: "#ff990022", border: "1px solid #ff9900", borderRadius: 6, padding: "8px 12px", marginBottom: 8, color: "#ffaa33", fontSize: 13 }}>
+                  <div style={{ marginBottom: 8 }}>
+                    ⚠️ This may already be a physical copy you own. Is this the SAME copy, or ANOTHER copy?
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      style={{ flex: 1, background: "#ff9900", color: "#000", border: "none", borderRadius: 4, padding: "6px 10px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+                      onClick={async () => {
+                        const { data, b64, existingId } = pendingDuplicate;
+                        setPendingDuplicate(null);
+                        setDuplicateWarning(null);
+                        // GK-270 — Same Copy: resolve to the EXISTING
+                        // canonical collection_item/gkAsset. Never calls
+                        // addToCatalogue (never mints a new row/id).
+                        // Reuses the existing ownedRefresh mechanism
+                        // (GK-254) exactly as "Refresh Market Data" on the
+                        // existing item already would, just supplying this
+                        // fresh scan's own data/photo as the refresh input.
+                        const sameCopyOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'scan', itemId: existingId };
+                        activeScanRef.current = sameCopyOwnership;
+                        try {
+                          const res = await fetch("/api/enrich", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json", ...getVaultHeaders() },
+                            body: JSON.stringify({
+                              title: data.title, issue: data.issue, grade: data.grade,
+                              isGraded: data.isGraded, numericGrade: data.numericGrade,
+                              year: data.year, publisher: data.publisher,
+                              confidence: data.confidence, defectPenalty: data.defectPenalty || null,
+                              certNumber: data.certNumber || null, labelType: data.labelType || null, labelNotes: data.labelNotes || null, variant: data.variant || null,
+                              keyIssue: data.keyIssue || null, images: [b64],
+                              assetTypeConfident: data.assetTypeConfident,
+                              foreignEdition: data.foreignEdition,
+                              isReprint: data.isReprint,
+                              editionType: data.editionType,
+                              scanId: sameCopyOwnership.scanId,
+                              skipImageSearch: true,
+                              collectionItemId: existingId,
+                              ownedRefresh: true,
+                            }),
+                          });
+                          const enrich = res.ok ? await res.json() : null;
+                          if (!enrich) return;
+                          applyScanOwnershipGuard(
+                            'same-copy-confirm',
+                            enrich,
+                            sameCopyOwnership,
+                            activeScanRef.current,
+                            wasSupersededByCorrection(sameCopyOwnership, activeScanRef.current)
+                              ? SCAN_OWNERSHIP_MODE.ENFORCE
+                              : CURRENT_SCAN_OWNERSHIP_MODE,
+                            () => {
+                              setCatalogue((prev) => {
+                                const cur = prev.find((x) => x.id === existingId);
+                                if (!cur) return prev;
+                                const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
+                                const updated = {
+                                  ...cur,
+                                  assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true,
+                                  contract: enrich.contract ?? cur.contract ?? null,
+                                  decision: enrich.decision || cur.decision || null,
+                                  comps: enrich.comps || cur.comps,
+                                  price: idGatedDup ? null : (enrich.price || cur.price),
+                                  priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow),
+                                  priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh),
+                                  identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true),
+                                  identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null,
+                                  identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null,
+                                  keyIssue: enrich.keyIssue || cur.keyIssue,
+                                  soldComps: enrich.soldComps || cur.soldComps || [],
+                                  imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
+                                  salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
+                                  priceLadder: enrich.priceLadder || cur.priceLadder || null,
+                                  pcAnchorTrust: enrich.pcAnchorTrust ?? null,
+                                  pcAnchorYear: enrich.pcAnchorYear ?? null,
+                                  salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
+                                  velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
+                                  rawComps: enrich.rawComps || cur.rawComps || null,
+                                  priceChart: enrich.priceChart || cur.priceChart || null,
+                                  confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
+                                  pricingSource: enrich.pricingSource || null,
+                                  priceNote: enrich.priceNote || null,
+                                  gradeMultiplier: enrich.gradeMultiplier || null,
+                                  defectPenalty: enrich.defectPenalty || cur.defectPenalty || null,
+                                  comicVine: enrich.comicVine || null,
+                                  certNumber: enrich.certNumber || cur.certNumber || null,
+                                  labelType: enrich.labelType || cur.labelType || null,
+                                  labelNotes: enrich.labelNotes || cur.labelNotes || null,
+                                  cgcVerified: enrich.cgcVerified || cur.cgcVerified || false,
+                                  cgcLabel: enrich.cgcLabel || cur.cgcLabel || null,
+                                  governingGrade: enrich.governingGrade ?? cur.governingGrade ?? null,
+                                  governingGradeNumeric: enrich.governingGradeNumeric ?? cur.governingGradeNumeric ?? null,
+                                  governingGradeSource: enrich.governingGradeSource ?? cur.governingGradeSource ?? null,
+                                  governingIsGraded: enrich.governingIsGraded ?? cur.governingIsGraded ?? null,
+                                  governingGradingFormatSource: enrich.governingGradingFormatSource ?? cur.governingGradingFormatSource ?? null,
+                                  gradeResolutionStatus: enrich.gradeResolutionStatus ?? cur.gradeResolutionStatus ?? null,
+                                  variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant,
+                                  variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                                  ...mergeConfirmedIdentity(enrich, cur),
+                                  ...applyProvisionalIdentity(enrich, cur),
+                                  // GK-270 — durable, explicit record of the
+                                  // operator's own physical-identity
+                                  // decision, so it can be explained later
+                                  // (governing dispatch's own "operator
+                                  // choice must be durable enough to
+                                  // explain the resulting identity decision
+                                  // later" requirement). Persisted via the
+                                  // same collection_item.attributes sync
+                                  // every other field on this object already
+                                  // uses — no new table, no migration.
+                                  sameCopyConfirmations: [
+                                    ...(Array.isArray(cur.sameCopyConfirmations) ? cur.sameCopyConfirmations : []),
+                                    { at: Date.now(), fromTitle: data.title, fromIssue: data.issue || null, fromYear: data.year || null },
+                                  ],
+                                };
+                                persistCollectionItem(updated).catch(() => {});
+                                return prev.map((x) => x.id === existingId ? updated : x);
+                              });
+                            }
+                          );
+                        } catch {
+                          // best-effort — the existing item's own next
+                          // Refresh Market Data retries this exact work
+                        }
+                      }}
+                    >Same Copy</button>
+                    <button
+                      style={{ flex: 1, background: "transparent", color: "#ffaa33", border: "1px solid #ff9900", borderRadius: 4, padding: "6px 10px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+                      onClick={async () => {
+                      const { data, b64 } = pendingDuplicate;
+                      const savedId = await addToCatalogue(data, b64);
+                      setPendingDuplicate(null);
+                      setDuplicateWarning(null);
+                      if (savedId) {
+                        // GrailKey Directive V, Task 2 (GK-88, ownership
+                        // perimeter) — same shape as gradeBlob's own
+                        // fire-and-forget enrich: itemId known only once
+                        // savedId resolves, same shared activeScanRef.
+                        const dupOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'scan', itemId: savedId };
+                        activeScanRef.current = dupOwnership;
+                        // Fire enrichment for the newly saved copy
+                        fetch("/api/enrich", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json", ...getVaultHeaders() },
+                          body: JSON.stringify({
+                            title: data.title, issue: data.issue, grade: data.grade,
+                            isGraded: data.isGraded, numericGrade: data.numericGrade,
+                            year: data.year, publisher: data.publisher,
+                            confidence: data.confidence, defectPenalty: data.defectPenalty || null,
+                            certNumber: data.certNumber || null, labelType: data.labelType || null, labelNotes: data.labelNotes || null, variant: data.variant || null,
+                            keyIssue: data.keyIssue || null, images: [b64],
+                            assetTypeConfident: data.assetTypeConfident,
+                            foreignEdition: data.foreignEdition,
+                            isReprint: data.isReprint,
+                            editionType: data.editionType,
+                            scanId: dupOwnership.scanId,
+                            collectionItemId: savedId, // GK-145 — item already saved above via addToCatalogue
+                          }),
+                        })
+                          .then((r) => r.ok ? r.json() : null)
+                          .then((enrich) => {
+                            if (!enrich) return;
+                            applyScanOwnershipGuard(
+                              'duplicate-confirm',
+                              enrich,
+                              dupOwnership,
+                              activeScanRef.current,
+                              wasSupersededByCorrection(dupOwnership, activeScanRef.current)
+                                ? SCAN_OWNERSHIP_MODE.ENFORCE
+                                : CURRENT_SCAN_OWNERSHIP_MODE,
+                              () => {
+                                setCatalogue((prev) => {
+                                  const cur = prev.find((x) => x.id === savedId);
+                                  if (!cur) return prev;
+                                  // 2026-07-18 — fold in identity/asset-type gate (was previously
+                                  // absent on this duplicate-confirm path).
+                                  const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
+                                  const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GK-259 — governing-grade provenance-display fields, same pattern as refreshMarketData */ governingGrade: enrich.governingGrade ?? cur.governingGrade ?? null, governingGradeNumeric: enrich.governingGradeNumeric ?? cur.governingGradeNumeric ?? null, governingGradeSource: enrich.governingGradeSource ?? cur.governingGradeSource ?? null, governingIsGraded: enrich.governingIsGraded ?? cur.governingIsGraded ?? null, governingGradingFormatSource: enrich.governingGradingFormatSource ?? cur.governingGradingFormatSource ?? null, gradeResolutionStatus: enrich.gradeResolutionStatus ?? cur.gradeResolutionStatus ?? null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                                  // GK-213A (Operator Authority) — site-parity: this was the one
+                                  // "fresh save" merge site with no title/issue/year/publisher key
+                                  // at all (silently frozen on the addToCatalogue-time value,
+                                  // unlike its sibling initial-scan/bulk-import sites) AND no
+                                  // identityAuthority protection. Spread last, same collision order
+                                  // as every other site, so a provisional response's honest-null
+                                  // semantics still win over the individual keys above when both apply.
+                                  ...mergeConfirmedIdentity(enrich, cur),
+                                  ...applyProvisionalIdentity(enrich, cur),
+                                  };
+                                  // GrailKey Collection Sync Closeout —
+                                  // duplicate-confirm's own post-enrich
+                                  // update, routed through the shared helper.
+                                  persistCollectionItem(updated).catch(() => {});
+                                  return prev.map((x) => x.id === savedId ? updated : x);
+                                });
+                              }
+                            );
+                          })
+                          .catch(() => {});
+                      }
+                    }}
+                  >Another Copy</button>
+                  </div>
+                </div>
+              )}
+              {duplicateWarning && pendingDuplicate && duplicateWarning.linkStatus !== 'linked' && (
+                // GK-270 — unchanged original behavior when the matched row
+                // carries no durable physical-asset link (Case B territory:
+                // an ordinary catalogue-level duplicate with no physical
+                // identity at stake), or while the link check is still
+                // resolving. Saving proceeds exactly as it always has —
+                // the heavier Case C gate above only ever applies when
+                // real physical identity is actually on the line.
                 <div style={{ background: "#ff990022", border: "1px solid #ff9900", borderRadius: 6, padding: "8px 12px", marginBottom: 8, color: "#ffaa33", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span>⚠️ Already in collection. Tap Save to add another copy.</span>
                   <button
