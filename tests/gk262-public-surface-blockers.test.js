@@ -268,27 +268,27 @@ const chatHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'chat
   assertTrue(!fetchCalls.includes('anthropic-messages-create'), 'C1: no Anthropic call made for an unauthenticated request');
 }
 
-// C2 — valid gated request (matching vault key) reaches the normal
-// handler path; the mocked Anthropic call is reached and its parsed
-// response is returned.
+// C2 — GK-269 (2026-09-30): an x-vault-key header, even matching the old
+// ACCESS_CODE value exactly, no longer grants anything. The shared-secret
+// path is fully retired, not merely one of two accepted credentials.
 {
   const req = { method: 'POST', headers: { 'x-vault-key': process.env.ACCESS_CODE }, body: { message: 'what should I sell?', collection: [] } };
   const res = mockRes();
   fetchCalls.length = 0;
   await chatHandler(req, res);
-  assertTrue(res.statusCode === 200 && res.body?.response === anthropicChatReply.response, 'C2: a validly gated chat request reaches the normal handler path and returns the (mocked) Claude response');
-  assertTrue(fetchCalls.includes('anthropic-messages-create'), 'C2: Anthropic was actually called for the valid gated request');
+  assertTrue(res.statusCode === 401, 'C2: an x-vault-key header alone no longer passes the gate (401) — the shared secret is retired');
+  assertTrue(!fetchCalls.includes('anthropic-messages-create'), 'C2: no Anthropic call made for a vault-key-only request');
 }
 
-// C3 — a valid GrailKey Bearer session also passes the gate (the
-// alternate credential accessGate.js already supports).
+// C3 — a valid GrailKey Bearer session is now the ONLY way to pass.
 {
   const { token } = issueToken({ principalId: JIMMY });
   const req = { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: { message: 'hi', collection: [] } };
   const res = mockRes();
   fetchCalls.length = 0;
   await chatHandler(req, res);
-  assertTrue(res.statusCode === 200, 'C3: a valid GrailKey session Bearer token also passes the gate');
+  assertTrue(res.statusCode === 200, 'C3: a valid GrailKey session Bearer token passes the gate');
+  assertTrue(fetchCalls.includes('anthropic-messages-create'), 'C3: Anthropic was actually called for the valid authenticated request');
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -308,14 +308,26 @@ const manageHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'ma
   assertTrue(!fetchCalls.includes('anthropic-messages-create'), 'M1: no Anthropic call made for an unauthenticated request');
 }
 
-// M2 — valid gated request reaches the normal handler path.
+// M2 — GK-269 (2026-09-30): an x-vault-key header no longer grants
+// anything on this endpoint either.
 {
   const req = { method: 'POST', headers: { 'x-vault-key': process.env.ACCESS_CODE }, body: { comics: [{ id: '1', title: 'Test Comic', price: '$10' }] } };
   const res = mockRes();
   fetchCalls.length = 0;
   await manageHandler(req, res);
-  assertTrue(res.statusCode === 200 && res.body?.marketSummary === anthropicManageReply.marketSummary, 'M2: a validly gated manage request reaches the normal handler path and returns the (mocked) Claude analysis');
-  assertTrue(fetchCalls.includes('anthropic-messages-create'), 'M2: Anthropic was actually called for the valid gated request');
+  assertTrue(res.statusCode === 401, 'M2: an x-vault-key header alone no longer passes the gate (401) — the shared secret is retired');
+  assertTrue(!fetchCalls.includes('anthropic-messages-create'), 'M2: no Anthropic call made for a vault-key-only request');
+}
+
+// M3 — a valid GrailKey Bearer session is now the ONLY way to pass.
+{
+  const { token } = issueToken({ principalId: JIMMY });
+  const req = { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: { comics: [{ id: '1', title: 'Test Comic', price: '$10' }] } };
+  const res = mockRes();
+  fetchCalls.length = 0;
+  await manageHandler(req, res);
+  assertTrue(res.statusCode === 200 && res.body?.marketSummary === anthropicManageReply.marketSummary, 'M3: a validly authenticated manage request reaches the normal handler path and returns the (mocked) Claude analysis');
+  assertTrue(fetchCalls.includes('anthropic-messages-create'), 'M3: Anthropic was actually called for the valid authenticated request');
 }
 
 // ════════════════════════════════════════════════════════════════════

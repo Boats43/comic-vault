@@ -23,7 +23,16 @@
 
 import { buildScanLogRecord } from '../src/lib/scanLog.js';
 
-delete process.env.ACCESS_CODE;
+delete process.env.ACCESS_CODE; // GK-269: now a no-op -- the gate never reads this env var anymore, left in place as a harmless historical marker
+// GK-269 (2026-09-30, FINAL AUTH CLOSURE) -- api/enrich.js now requires a
+// verified GrailKey session unconditionally (src/lib/accessGate.js's
+// requireAuthenticatedPrincipal). This file's real-handler calls need a
+// real, valid session to reach the pricing/identity logic under test.
+if (!process.env.GRAILKEY_SESSION_SECRET) {
+  process.env.GRAILKEY_SESSION_SECRET = (await import('node:crypto')).randomBytes(32).toString('base64url');
+}
+const { issueToken: __gk269IssueToken } = await import('../src/modules/auth/token.js');
+const __gk269TestToken = __gk269IssueToken({ principalId: 'gk269-test-principal' }).token;
 delete process.env.KV_REST_API_URL;
 delete process.env.KV_REST_API_TOKEN;
 delete process.env.UPSTASH_REDIS_REST_URL;
@@ -165,7 +174,7 @@ async function main() {
   const COLLECTION_ITEM_ID = 'cv_1699999999999_gk145tst';
 
   const req = {
-    method: 'POST', headers: {},
+    method: 'POST', headers: { authorization: `Bearer ${__gk269TestToken}` },
     body: {
       title: 'Venom Separation Anxiety', issue: '1', grade: 'NM 9.4', confidence: 'high',
       isGraded: false, numericGrade: null, year: '2024', publisher: 'Marvel Comics',

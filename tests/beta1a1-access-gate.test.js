@@ -1,30 +1,39 @@
 // tests/beta1a1-access-gate.test.js
 //
-// BETA-1A.1 — proves the legacy shared-secret access gate
-// (src/lib/accessGate.js, used by api/enrich.js, api/comps.js,
-// api/grade.js) now accepts a genuinely verified GrailKey session as an
-// ALTERNATE credential alongside the pre-existing ACCESS_CODE/x-vault-key
-// path, without weakening it: an unauthenticated caller still fails
-// closed, and a forged/garbage Authorization header cannot bypass
-// anything (it falls through to the exact same vault-key check that
-// already existed). Also proves (GK-268 AUTH LAUNCH, 2026-09-30, updated
-// from this file's original BETA-1A.1 proof) that the client-side vault-
-// key modal has been removed from App.jsx's real source entirely — not
-// merely suppressed for an authenticated session — and that the
-// pre-existing passphrase login path (api/auth-login.js) is unmodified
-// and still functioning server-side even though it's no longer reachable
-// from the login UI.
+// GK-269 (2026-09-30, FINAL AUTH CLOSURE) — this file originally proved
+// BETA-1A.1's "verified session as an ALTERNATE credential alongside
+// ACCESS_CODE/x-vault-key" design. That design is now retired entirely:
+// src/lib/accessGate.js's checkAccessGate (vault-key-or-session) no longer
+// exists — it was replaced by requireAuthenticatedPrincipal, which
+// accepts ONLY a verified GrailKey session. There is no longer any
+// ACCESS_CODE/x-vault-key path at all, for any caller, under any
+// condition. This rewrite proves the NEW contract (and that the OLD one
+// is genuinely gone, not merely bypassed), rather than patching
+// assertions that described a design this dispatch retires on purpose.
+//
+// Also still proves: the client-side vault-key modal remains removed from
+// App.jsx's real source, and that api/auth-login.js (the single-operator
+// passphrase HTTP endpoint) has been completely removed from this repo —
+// not merely disabled — per this dispatch's explicit "prefer complete
+// removal" instruction. The underlying login() function in
+// src/modules/auth/service.js is untouched and still real (no public HTTP
+// entry point reaches it anymore).
 //
 // Invoke: node tests/beta1a1-access-gate.test.js
 
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.join(__dirname, '..');
 
 process.env.GRAILKEY_SESSION_SECRET = process.env.GRAILKEY_SESSION_SECRET || randomBytes(32).toString('base64url');
 process.env.GRAILKEY_SESSION_EPOCH = process.env.GRAILKEY_SESSION_EPOCH || 'test-epoch-1';
-process.env.ACCESS_CODE = 'test-vault-code-xyz';
 
-const { checkAccessGate } = await import('../src/lib/accessGate.js');
+const { requireAuthenticatedPrincipal } = await import('../src/lib/accessGate.js');
 const { issueToken } = await import('../src/modules/auth/token.js');
 
 let passed = 0, failed = 0;
@@ -41,105 +50,130 @@ function req({ vaultKey, bearer } = {}) {
   return { headers };
 }
 
-console.log('--- src/lib/accessGate.js: checkAccessGate ---');
+console.log('--- src/lib/accessGate.js: requireAuthenticatedPrincipal (new contract) ---');
 
-// 1. Authenticated principal → access-code gate NOT shown (passes with
-// zero vault key, a real, freshly-issued, genuinely-verifiable token).
+// 1. A real, valid, freshly-issued session passes — the ONLY way to pass.
 {
   const { token } = issueToken({ principalId: 'principal-real-user' });
-  const result = checkAccessGate(req({ bearer: token }));
-  assertTrue(result === null, 'a valid authenticated GrailKey session passes the gate with NO vault key at all');
+  const result = requireAuthenticatedPrincipal(req({ bearer: token }));
+  assertTrue(result.ok === true, 'a valid authenticated GrailKey session passes the gate');
+  assertTrue(result.principalId === 'principal-real-user', 'the gate returns the exact verified principalId, for rate-limiting/scoping downstream');
 }
 
-// 2. Signed-out user → cannot reach application (no token, no vault key).
+// 2. Completely signed-out — rejected.
 {
-  const result = checkAccessGate(req({}));
-  assertTrue(result !== null && result.status === 401, 'a completely signed-out request (no Bearer, no vault key) is rejected 401');
-}
-{
-  const result = checkAccessGate(req({ vaultKey: 'totally-wrong-code' }));
-  assertTrue(result !== null && result.status === 401, 'a wrong vault key with no Bearer token is still rejected 401');
+  const result = requireAuthenticatedPrincipal(req({}));
+  assertTrue(result.ok === false && result.status === 401, 'a completely signed-out request (no Bearer header at all) is rejected 401');
 }
 
-// 3. Forged client auth state cannot bypass server authorization.
+// 3. THE REGRESSION PROOF — a vault-key header alone, even one that would
+// have matched the old ACCESS_CODE exactly, grants NOTHING anymore. This
+// is the entire point of GK-269: zero Production-reachable authorization
+// based on a shared secret.
 {
-  const result = checkAccessGate(req({ bearer: 'not-a-real-token.garbage-signature' }));
-  assertTrue(result !== null && result.status === 401, 'a garbage/forged Bearer token is rejected — falls through to the vault-key check, which also fails with none supplied');
+  const result = requireAuthenticatedPrincipal(req({ vaultKey: 'any-value-whatsoever-including-a-real-former-access-code' }));
+  assertTrue(result.ok === false && result.status === 401, 'an x-vault-key header, by itself, grants no access whatsoever — the shared-secret path no longer exists');
 }
 {
-  // A tampered-but-real-shaped token (valid structure, wrong signature).
+  // Vault key AND a garbage bearer together — still rejected. Proves there
+  // is no code path left that reads x-vault-key at all, combined or not.
+  const result = requireAuthenticatedPrincipal(req({ vaultKey: 'any-value', bearer: 'garbage.garbage' }));
+  assertTrue(result.ok === false && result.status === 401, 'a vault key combined with a garbage bearer token is still rejected — no fallback to the retired shared secret');
+}
+
+// 4. Forged/garbage/tampered tokens cannot bypass anything.
+{
+  const result = requireAuthenticatedPrincipal(req({ bearer: 'not-a-real-token.garbage-signature' }));
+  assertTrue(result.ok === false && result.status === 401, 'a garbage/forged Bearer token is rejected');
+}
+{
   const { token } = issueToken({ principalId: 'principal-attacker-claim' });
   const [payloadB64, sig] = token.split('.');
   const tampered = `${payloadB64}.${sig.slice(0, -2)}xx`;
-  const result = checkAccessGate(req({ bearer: tampered }));
-  assertTrue(result !== null && result.status === 401, 'a tampered-signature token is rejected — cannot forge a principal claim into a passing gate');
-}
-{
-  // Forged token PLUS a wrong vault key together — still rejected, proving
-  // the two checks are independent, neither weakens the other.
-  const result = checkAccessGate(req({ bearer: 'garbage.garbage', vaultKey: 'wrong' }));
-  assertTrue(result !== null && result.status === 401, 'a forged token combined with a wrong vault key is still rejected');
+  const result = requireAuthenticatedPrincipal(req({ bearer: tampered }));
+  assertTrue(result.ok === false && result.status === 401, 'a tampered-signature token is rejected — cannot forge a principal claim into a passing gate');
 }
 
-// 4. The pre-existing shared-secret path is fully preserved, unweakened —
-// still works standalone with no GrailKey session at all (e.g. an
-// external script or admin tool with no principal).
+// 5. ACCESS_CODE env var is no longer read AT ALL — present, absent, or
+// anything in between makes zero difference to the gate's behavior.
 {
-  const result = checkAccessGate(req({ vaultKey: 'test-vault-code-xyz' }));
-  assertTrue(result === null, 'the original x-vault-key === ACCESS_CODE path still passes on its own, unmodified, no Bearer token involved');
-}
-
-// 5. Gate fully disabled when ACCESS_CODE is unset — unchanged prior behavior.
-{
+  process.env.ACCESS_CODE = 'leftover-env-value-should-be-irrelevant';
+  const withEnvSet = requireAuthenticatedPrincipal(req({}));
   delete process.env.ACCESS_CODE;
-  const result = checkAccessGate(req({}));
-  assertTrue(result === null, 'gate is a no-op when ACCESS_CODE is unset, exactly as before this change');
-  process.env.ACCESS_CODE = 'test-vault-code-xyz';
+  const withEnvUnset = requireAuthenticatedPrincipal(req({}));
+  assertTrue(withEnvSet.status === 401 && withEnvUnset.status === 401, 'ACCESS_CODE being set or unset makes zero difference — the gate never reads it anymore (both reject identically)');
 }
 
-console.log('\n--- GK-268 AUTH LAUNCH: the legacy vault-key modal is fully removed from App.jsx (source-text proof) ---');
+console.log('\n--- the vault-key modal is fully removed from App.jsx (source-text proof) ---');
 {
-  // Supersedes the prior "mount-time modal predicate" section, which
-  // tested a hand-mirrored formula rather than App.jsx's real source. By
-  // GK-268 AUTH LAUNCH (2026-09-30) that formula, and the modal it
-  // described, no longer exist in the product at all — explicit product
-  // ruling: Google-via-Clerk sign-in (ClerkAuthPanel/GrailKeyLoginGate) is
-  // the sole front door. Proving against the real file text, not a
-  // formula that could silently drift from it.
-  const appSrc = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const appSrc = readFileSync(path.join(repoRoot, 'src', 'App.jsx'), 'utf8');
   const liveCode = appSrc.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   assertTrue(!/vault_key/.test(liveCode), 'no live code in App.jsx reads/writes localStorage vault_key anymore (comments excluded)');
   assertTrue(!/showAccessModal/.test(liveCode), 'no live code in App.jsx references showAccessModal/the access-code modal anymore (comments excluded)');
-  assertTrue(!liveCode.includes('🔑 Access code'), 'the "🔑 Access code" button is removed from the product UI (comments excluded — the removal itself is documented in a comment)');
+  assertTrue(!liveCode.includes('🔑 Access code'), 'the "🔑 Access code" button is removed from the product UI (comments excluded)');
   assertTrue(/if \(!grailkeyAuthed\) return/.test(appSrc), 'the GrailKey session gate (grailkeyAuthed) remains the sole front-door gate');
 }
 
-console.log('\n--- existing passphrase login path (unmodified file) ---');
+console.log('\n--- GK-269: api/auth-login.js is completely removed, not merely disabled ---');
 {
-  const loginMod = await import('../api/auth-login.js');
-  const loginHandler = loginMod.default;
-  const cap = { status: null, body: null };
-  const res = { status: (c) => ({ json: (d) => { cap.status = c; cap.body = d; } }), setHeader: () => {} };
-  await loginHandler({ method: 'POST', headers: {}, body: {} }, res);
-  assertTrue(cap.status === 400, 'api/auth-login.js (untouched by BETA-1A.1) still functions correctly — rejects a request with no passphrase');
+  const filePath = path.join(repoRoot, 'api', 'auth-login.js');
+  assertTrue(!existsSync(filePath), 'api/auth-login.js no longer exists on disk — complete removal, not a disabled stub (per this dispatch’s explicit "prefer complete removal" instruction)');
+  let importFailed = false;
+  try {
+    await import('../api/auth-login.js');
+  } catch {
+    importFailed = true;
+  }
+  assertTrue(importFailed, 'attempting to import the retired endpoint fails — there is no module left to mint a session from');
+
+  // The underlying passphrase-verification function itself is untouched —
+  // this dispatch retired the PUBLIC HTTP entry point, not the real
+  // credential-checking logic a future admin tool could still reuse.
+  const { login } = await import('../src/modules/auth/index.js');
+  assertTrue(typeof login === 'function', 'src/modules/auth/service.js’s own login() function is untouched and still real (no public HTTP route reaches it anymore)');
 }
 
 console.log('\n--- api/enrich.js real-handler smoke (Handler-Wiring Verification, GK-138 spirit) ---');
 {
-  // enrich.js's inline checkAccessGate was moved to an import this pass —
-  // a real invocation of the actual handler proves the wiring itself
-  // (not just the extracted function in isolation) still works, exactly
-  // the class of bug library-only tests cannot catch.
   const enrichMod = await import('../api/enrich.js');
   const enrichHandler = enrichMod.default;
-  const cap = { status: null, body: null };
-  const res = { status: (c) => ({ json: (d) => { cap.status = c; cap.body = d; return { statusCode: c, body: d }; } }), setHeader: () => {} };
-  let threw = null;
-  try {
-    await enrichHandler({ method: 'POST', headers: {}, body: {} }, res);
-  } catch (e) { threw = e; }
-  assertTrue(threw === null, `no exception escaped api/enrich.js's real handler (threw: ${threw ? threw.message : 'none'})`);
-  assertTrue(cap.status === 401, `the real enrich.js handler's gate wiring rejects a signed-out, no-vault-key request with 401 (actual: ${cap.status})`);
+  function mockRes() {
+    const cap = { status: null, body: null, headers: {} };
+    const res = {
+      status: (c) => ({ json: (d) => { cap.status = c; cap.body = d; return { statusCode: c, body: d }; } }),
+      setHeader: (k, v) => { cap.headers[k] = v; },
+    };
+    return { res, cap };
+  }
+
+  // 7a — signed-out: real handler, real rejection.
+  {
+    const { res, cap } = mockRes();
+    let threw = null;
+    try {
+      await enrichHandler({ method: 'POST', headers: {}, body: {} }, res);
+    } catch (e) { threw = e; }
+    assertTrue(threw === null, `no exception escaped api/enrich.js's real handler (threw: ${threw ? threw.message : 'none'})`);
+    assertTrue(cap.status === 401, `the real enrich.js handler's gate wiring rejects a signed-out request with 401 (actual: ${cap.status})`);
+  }
+
+  // 7b — a vault-key header alone against the REAL deployed handler: still
+  // 401. The exact end-to-end regression proof for the production code
+  // path, not just the extracted accessGate.js function in isolation.
+  {
+    const { res, cap } = mockRes();
+    await enrichHandler({ method: 'POST', headers: { 'x-vault-key': 'any-value' }, body: {} }, res);
+    assertTrue(cap.status === 401, `the real enrich.js handler rejects an x-vault-key-only request with 401 (actual: ${cap.status}) — the shared secret grants nothing against the real deployed wiring`);
+  }
+
+  // 7c — a genuinely valid session reaches past the gate (warmup=true short-
+  // circuits before any real pricing work, keeping this a pure wiring proof).
+  {
+    const { token } = issueToken({ principalId: 'principal-real-user-enrich-smoke' });
+    const { res, cap } = mockRes();
+    await enrichHandler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body: { warmup: true } }, res);
+    assertTrue(cap.status === 200 && cap.body?.warmed === true, `a genuinely valid session reaches past the real gate wiring (actual status: ${cap.status}, body: ${JSON.stringify(cap.body)})`);
+  }
 }
 
 console.log(`\n=== ${passed} passed, ${failed} failed ===`);

@@ -66,13 +66,13 @@ function ClerkSignOutBridge({ signOutRef }) {
   return null;
 }
 
-// GK-268 AUTH LAUNCH — the legacy shared "vault_key"/access-code gate is
-// retired from the product entirely (no UI ever reads/writes it anymore).
-// This helper now attaches only the real, per-principal GrailKey session
-// Bearer token (src/lib/accessGate.js's server-side ACCESS_CODE/x-vault-key
-// fallback is untouched and still exists for non-product admin/test
-// tooling, but the client never sends it). Name kept as-is to avoid
-// touching all 26 call sites across this file.
+// GK-268/GK-269 AUTH LAUNCH — the legacy shared "vault_key"/access-code
+// gate is retired entirely, client AND server (src/lib/accessGate.js's
+// ACCESS_CODE/x-vault-key fallback no longer exists at all — GK-269,
+// 2026-09-30). This helper now attaches only the real, per-principal
+// GrailKey session Bearer token, which every protected endpoint requires
+// unconditionally. Name kept as-is to avoid touching all 26 call sites
+// across this file.
 const getVaultHeaders = () => {
   const session = getSession();
   return {

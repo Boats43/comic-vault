@@ -172,23 +172,28 @@ console.log('\n--- api/auth-clerk.js: real handler smoke ---');
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Section 4 — existing GrailKey auth path remains functional, exercised
-// through the SAME unmodified production files (api/auth-login.js,
-// api/assets.js) this dispatch never edited.
+// Section 4 — GK-269 (2026-09-30) update: api/auth-login.js (the
+// single-operator passphrase endpoint) is now COMPLETELY REMOVED from
+// this repo, not merely left unmodified — a separate, later, explicitly
+// authorized dispatch (FINAL AUTH CLOSURE) retired it entirely once
+// Google-via-Clerk became the sole front door. This section now proves
+// the removal itself, plus that api/assets.js (genuinely unmodified by
+// either dispatch) still rejects a signed-out request identically.
 // ─────────────────────────────────────────────────────────────────────
-console.log('\n--- existing GrailKey passphrase/session path (unmodified files) ---');
+console.log('\n--- GK-269: the passphrase endpoint is gone; the real session-gated surface is unaffected ---');
 {
-  const loginMod = await import('../api/auth-login.js');
-  const loginHandler = loginMod.default;
+  let importFailed = false;
+  try {
+    await import('../api/auth-login.js');
+  } catch {
+    importFailed = true;
+  }
+  assertTrue(importFailed, 'api/auth-login.js no longer exists — removed by GK-269 FINAL AUTH CLOSURE, after this file’s own original BETA-1A pass');
+
   function mockRes() {
     const cap = { status: null, body: null };
     const res = { status: (c) => ({ json: (d) => { cap.status = c; cap.body = d; } }), setHeader: () => {} };
     return { res, cap };
-  }
-  {
-    const { res, cap } = mockRes();
-    await loginHandler({ method: 'POST', headers: {}, body: {} }, res);
-    assertTrue(cap.status === 400, 'api/auth-login.js (untouched by this dispatch) still rejects a request with no passphrase — passphrase login path is unaffected by the Clerk adapter');
   }
 
   const assetsMod = await import('../api/assets.js');

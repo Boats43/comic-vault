@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { checkAccessGate } from "../src/lib/accessGate.js";
+import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
+import { checkRateLimit } from "./rate-limit.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -11,9 +12,20 @@ export default async function handler(req, res) {
 
   // GK-262 -- this endpoint made unauthenticated Anthropic calls before
   // this gate existed. Rejects before any Anthropic call, never after.
-  const gateError = checkAccessGate(req);
-  if (gateError) {
-    res.status(gateError.status).json({ error: gateError.error });
+  // GK-269 -- verified GrailKey session required, no shared secret.
+  const auth = requireAuthenticatedPrincipal(req);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  // GK-269 -- principal-scoped AI cost ceiling (previously missing on this
+  // endpoint entirely).
+  const rateCheck = checkRateLimit(req, { principalId: auth.principalId });
+  res.setHeader('x-ratelimit-remaining', String(rateCheck.remaining));
+  if (!rateCheck.allowed) {
+    res.setHeader('retry-after', String(rateCheck.reset));
+    res.status(429).json({ error: rateCheck.error, retryAfter: rateCheck.reset });
     return;
   }
 

@@ -64,7 +64,16 @@ import { fetchComps } from '../api/comps.js';
 import { deriveMarketStanding } from '../src/lib/actionAuthority.js';
 import { deriveLocks, assembleContract } from '../src/lib/responseContract.js';
 
-delete process.env.ACCESS_CODE;
+delete process.env.ACCESS_CODE; // GK-269: now a no-op -- the gate never reads this env var anymore, left in place as a harmless historical marker
+// GK-269 (2026-09-30, FINAL AUTH CLOSURE) -- api/enrich.js now requires a
+// verified GrailKey session unconditionally (src/lib/accessGate.js's
+// requireAuthenticatedPrincipal). This file's real-handler calls need a
+// real, valid session to reach the pricing/identity logic under test.
+if (!process.env.GRAILKEY_SESSION_SECRET) {
+  process.env.GRAILKEY_SESSION_SECRET = (await import('node:crypto')).randomBytes(32).toString('base64url');
+}
+const { issueToken: __gk269IssueToken } = await import('../src/modules/auth/token.js');
+const __gk269TestToken = __gk269IssueToken({ principalId: 'gk269-test-principal' }).token;
 delete process.env.KV_REST_API_URL;
 delete process.env.KV_REST_API_TOKEN;
 delete process.env.UPSTASH_REDIS_REST_URL;
@@ -146,7 +155,7 @@ async function part1Gk157HandlerControl() {
   const handlerModule = await import('../api/enrich.js');
   const handler = handlerModule.default;
   const req = {
-    method: 'POST', headers: {},
+    method: 'POST', headers: { authorization: `Bearer ${__gk269TestToken}` },
     body: {
       title: 'g i joe', issue: '5', grade: 'unknown', confidence: 'low',
       isGraded: false, numericGrade: null, year: null, publisher: null,
@@ -217,7 +226,7 @@ async function part2Gk158HandlerControl() {
   const handlerModule = await import('../api/enrich.js');
   const handler = handlerModule.default;
   const req = {
-    method: 'POST', headers: {},
+    method: 'POST', headers: { authorization: `Bearer ${__gk269TestToken}` },
     body: {
       title: 'Dark Nights: Death Metal', issue: '1', grade: 'NM 9.4', confidence: 'high',
       isGraded: false, numericGrade: null, year: null, publisher: null,

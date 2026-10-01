@@ -106,7 +106,7 @@ async function readAssetCategory(id) {
   return res.rows[0]?.asset_category ?? null;
 }
 
-async function runOnce({ label, requestBody, bearer, pool = [], expectFetchComps = false, expectPriceCharting = null }) {
+async function runOnce({ label, requestBody, bearer, pool = [], expectFetchComps = false, expectPriceCharting = null, expectStatus = 200 }) {
   console.log(`\n--- ${label} ---`);
   const fetchLog = [];
   global.fetch = async (url) => {
@@ -136,13 +136,13 @@ async function runOnce({ label, requestBody, bearer, pool = [], expectFetchComps
   console.log = originalConsoleLog;
 
   assertTrue(threw === null, `no exception escaped the handler (${threw ? threw.stack : ''})`);
-  assertTrue(capturedStatus === 200, `HTTP 200 (actual: ${capturedStatus})`);
+  assertTrue(capturedStatus === expectStatus, `HTTP ${expectStatus} (actual: ${capturedStatus})`);
 
   const compsSearchCalls = fetchLog.filter((u) => u.includes('item_summary/search') && !u.includes('search_by_image'));
   if (expectFetchComps) assertTrue(compsSearchCalls.length > 0, `fetchComps DID execute, as expected (count=${compsSearchCalls.length})`);
-  else assertTrue(compsSearchCalls.length === 0, `fetchComps did NOT execute (H — no economic output created)`);
+  else assertTrue(compsSearchCalls.length === 0, `fetchComps did NOT execute (H — no economic output created, or GK-269's blanket auth gate rejected the request before any handler body logic ran)`);
 
-  return { body: capturedBody, logs: capturedLogs, fetchLog };
+  return { body: capturedBody, logs: capturedLogs, fetchLog, status: capturedStatus };
 }
 
 try {
@@ -164,77 +164,92 @@ try {
     assertEq(body?.contract?.state, 'REFUSED', 'contract.state REFUSED');
   }
 
-  // F2 — Persisted owned Book + Refresh + missing auth -> fail closed, no stateless derivation, no comps/pricing/decision
+  // F2 — GK-269 (2026-09-30, FINAL AUTH CLOSURE) superseding note: a
+  // blanket "verified GrailKey session required" gate now sits in front
+  // of EVERY api/enrich.js request, before body parsing even begins (see
+  // src/lib/accessGate.js's requireAuthenticatedPrincipal). A request with
+  // no bearer at all is now rejected with a flat 401 at that gate — it
+  // never reaches GK-254's own nuanced ownedAssetAuthRequired logic below
+  // (that logic's distinct value is now for an AUTHENTICATED-but-wrong-
+  // owner request, not a completely anonymous one; see gk268's own
+  // tenant-isolation proof for that case). This is a strictly STRONGER,
+  // EARLIER rejection than before, not a weakened one — updated to assert
+  // the new reality rather than keep testing a path that can no longer be
+  // reached.
   {
     const id = `${TAG}-f2`;
     await makeCollectionItem(id, 'book', { title: 'The Rationalists' });
-    const { body, logs } = await runOnce({
-      label: 'F2 owned Book, MISSING auth, ordinary refresh -> fail closed',
+    const { status } = await runOnce({
+      label: 'F2 owned Book, MISSING auth, ordinary refresh -> blanket gate rejects first (401)',
       bearer: null,
       requestBody: { title: 'The Rationalists', grade: 'Very Good', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
+      expectStatus: 401,
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] FAIL CLOSED')), 'fails closed');
-    assertTrue(body?.ownedAssetAuthRequired === true, 'ownedAssetAuthRequired stamped');
-    assertTrue(body?.refusedToPrice === true, 'refused');
-    assertEq(body?.price, null, 'no price');
-    assertEq(body?.comps, null, 'no comps');
-    assertFalse(String(body?.decision?.action || '').startsWith('LIST'), 'no LIST decision');
-    assertEq(body?.contract?.listable, false, 'not listable');
+    assertEq(status, 401, 'rejected before any handler body logic (including GK-254’s own) ever runs');
   }
 
-  // F2b — same, but EXPIRED (not merely absent) token -- distinct failure mode
+  // F2b — same, but EXPIRED (not merely absent) token -- the blanket gate's
+  // own verifyToken() call rejects an expired token identically to a
+  // missing one (same undifferentiated 401 shape by design).
   {
     const id = `${TAG}-f2b`;
     await makeCollectionItem(id, 'book', { title: 'The Rationalists' });
-    const { body, logs } = await runOnce({
-      label: 'F2b owned Book, EXPIRED auth, ordinary refresh -> fail closed',
+    const { status } = await runOnce({
+      label: 'F2b owned Book, EXPIRED auth, ordinary refresh -> blanket gate rejects first (401)',
       bearer: EXPIRED_TOKEN,
       requestBody: { title: 'The Rationalists', grade: 'Very Good', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
+      expectStatus: 401,
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] FAIL CLOSED')), 'fails closed on a genuinely expired (not merely absent) token');
-    assertTrue(body?.ownedAssetAuthRequired === true, 'ownedAssetAuthRequired stamped');
+    assertEq(status, 401, 'a genuinely expired token is rejected at the blanket gate, same as a missing one');
   }
 
-  // F3 — Persisted owned COMIC + Refresh + missing auth -> ALSO fails closed (does not reinterpret category, does not silently fall through to normal comic economics either)
+  // F3 — Persisted owned COMIC + Refresh + missing auth -> ALSO rejected at the blanket gate.
   {
     const id = `${TAG}-f3`;
     await makeCollectionItem(id, 'comic', { title: 'Amazing Spider-Man', issue: '300' });
-    const { body, logs, fetchLog } = await runOnce({
-      label: 'F3 owned Comic, MISSING auth, ordinary refresh -> fails closed too',
+    const { status, fetchLog } = await runOnce({
+      label: 'F3 owned Comic, MISSING auth, ordinary refresh -> blanket gate rejects first (401)',
       bearer: null,
       requestBody: { title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
+      expectStatus: 401,
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] FAIL CLOSED')), 'fails closed for a COMIC too -- server cannot verify authority without auth, regardless of what the category would have turned out to be');
-    assertTrue(body?.ownedAssetAuthRequired === true, 'ownedAssetAuthRequired stamped');
+    assertEq(status, 401, 'rejected for a COMIC too -- the blanket gate runs before category is ever considered');
     const compsSearchCalls = fetchLog.filter((u) => u.includes('item_summary/search') && !u.includes('search_by_image'));
     assertEq(compsSearchCalls.length, 0, 'no comps fetch attempted even though the underlying item is a real Comic');
   }
 
-  // F4 — Re-identify Book + missing auth -> fails closed before durable authority can be bypassed
+  // F4 — Re-identify Book + missing auth -> rejected at the blanket gate, before any conflict logic.
   {
     const id = `${TAG}-f4`;
     await makeCollectionItem(id, 'book', { title: 'The Rationalists' });
-    const { body, logs } = await runOnce({
-      label: 'F4 owned Book, MISSING auth, re-identify -> fails closed before any conflict logic runs',
+    const { status, logs } = await runOnce({
+      label: 'F4 owned Book, MISSING auth, re-identify -> blanket gate rejects first (401)',
       bearer: null,
       requestBody: { title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, publisher: 'Marvel', collectionItemId: id, ownedReidentify: true },
+      expectStatus: 401,
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] FAIL CLOSED')), 'fails closed');
-    assertFalse(!!logs.find((l) => l.startsWith('[owned-asset-authority] RE-IDENTIFY CONFLICT')), 'the conflict-check never runs -- auth failure is checked first, unconditionally');
-    assertTrue(body?.ownedAssetAuthRequired === true, 'ownedAssetAuthRequired stamped');
+    assertEq(status, 401, 'rejected before any body logic runs');
+    assertFalse(!!logs.find((l) => l.startsWith('[owned-asset-authority] RE-IDENTIFY CONFLICT')), 'the conflict-check never runs -- the blanket auth gate is checked first, unconditionally, before GK-254’s own logic even starts');
   }
 
-  // F5 — Fresh normal Scan + missing auth -> UNCHANGED (Section A's explicit scope decision: neither flag is ever set by a real fresh-scan call site, so this new logic must never even attempt to apply)
+  // F5 — Fresh normal Scan WITH a valid session -> GK-254's logic still
+  // never even attempts to apply (Section A's explicit scope decision:
+  // neither flag is ever set by a real fresh-scan call site). Previously
+  // this proved an UNAUTHENTICATED fresh scan was unaffected by GK-254;
+  // GK-269's blanket gate now requires authentication for every scan,
+  // period -- the interesting invariant this case still proves is that an
+  // ordinary AUTHENTICATED scan with neither flag set is unaffected by
+  // GK-254's owned-asset logic specifically.
   {
     const { body, logs } = await runOnce({
-      label: 'F5 fresh normal Scan, missing auth -> completely unaffected (Section A scope)',
-      bearer: null,
+      label: 'F5 fresh normal Scan, valid session, no owned flags -> GK-254 logic completely unaffected (Section A scope)',
+      bearer: TOKEN,
       requestBody: { title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, year: '1988', publisher: 'Marvel' }, // no collectionItemId, no ownedRefresh/ownedReidentify -- the real gradeBlob-without-a-saved-item shape
       expectFetchComps: true,
     });
     assertFalse(!!logs.find((l) => l.startsWith('[owned-asset-authority]')), 'GK-254 logic never even attempted for a fresh scan');
     assertFalse(body?.ownedAssetAuthRequired === true, 'ownedAssetAuthRequired never stamped');
-    assertEq(body?.assetType, 'comic', 'ordinary comic scan proceeds exactly as before this dispatch');
+    assertEq(body?.assetType, 'comic', 'ordinary comic scan proceeds exactly as before this dispatch (now simply authenticated, same as every real app user)');
   }
 
   // ═══════════════════════════════════════════════════════════════════

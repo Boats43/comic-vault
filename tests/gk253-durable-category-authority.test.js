@@ -103,7 +103,7 @@ async function makeCollectionItem(id, assetCategory, attributes) {
   await createCollectionItem({ principalId: PRINCIPAL, id, assetCategory, attributes });
 }
 
-async function runOnce({ label, requestBody, bearer, expectFetchComps = false, expectPriceCharting = false }) {
+async function runOnce({ label, requestBody, bearer, expectFetchComps = false, expectPriceCharting = false, expectStatus = 200 }) {
   console.log(`\n--- ${label} ---`);
   const reqTitle = requestBody.title || 'Test Item';
   const reqIssue = requestBody.issue || '';
@@ -139,7 +139,7 @@ async function runOnce({ label, requestBody, bearer, expectFetchComps = false, e
   console.log = originalConsoleLog;
 
   assertTrue(threw === null, `no exception escaped the handler (${threw ? threw.stack : ''})`);
-  assertTrue(capturedStatus === 200, `HTTP 200 (actual: ${capturedStatus})`);
+  assertTrue(capturedStatus === expectStatus, `HTTP ${expectStatus} (actual: ${capturedStatus})`);
 
   const compsSearchCalls = fetchLog.filter((u) => u.includes('item_summary/search') && !u.includes('search_by_image'));
   const pcCalls = fetchLog.filter((u) => u.includes('pricecharting.com'));
@@ -148,7 +148,7 @@ async function runOnce({ label, requestBody, bearer, expectFetchComps = false, e
   if (expectPriceCharting) assertTrue(pcCalls.length > 0, `PriceCharting DID execute, as expected (count=${pcCalls.length})`);
   else assertTrue(pcCalls.length === 0, 'PriceCharting did NOT execute');
 
-  return { body: capturedBody, logs: capturedLogs };
+  return { body: capturedBody, logs: capturedLogs, status: capturedStatus };
 }
 
 try {
@@ -292,20 +292,26 @@ try {
     assertEq(body?.assetType, 'comic', 'falls through entirely to pipeline-derived value (comic default), unaffected by the real durable "book" row');
   }
 
-  // ═══ No bearer token, but ownedRefresh:true and a REAL durable row -- now FAILS CLOSED (GK-254), not silently ignored ═══
+  // ═══ No bearer token, but ownedRefresh:true and a REAL durable row --
+  // GK-269 (2026-09-30, FINAL AUTH CLOSURE) superseding note: a blanket
+  // "verified GrailKey session required" gate now sits in front of EVERY
+  // api/enrich.js request, before body parsing even begins. A request
+  // with no bearer at all is now rejected with a flat 401 at that gate --
+  // it never reaches GK-254's own ownedAssetAuthRequired logic. Strictly
+  // STRONGER and EARLIER than the GK-253/254-era fix this case originally
+  // proved. ═══
   {
-    const { body, logs } = await runOnce({
-      label: 'ownedRefresh:true, no token -- fails closed (superseded GK-253 behavior)',
+    const { status } = await runOnce({
+      label: 'ownedRefresh:true, no token -- blanket gate rejects first (401, superseded GK-253/254 behavior)',
       bearer: null,
+      expectStatus: 401,
       requestBody: {
         title: 'The Rationalists', grade: null, confidence: 'high',
         isGraded: false, numericGrade: null, publisher: null,
         skipImageSearch: true, collectionItemId: `${TAG}-j1`, ownedRefresh: true,
       },
     });
-    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] FAIL CLOSED')), 'fails closed, logged');
-    assertTrue(body?.ownedAssetAuthRequired === true, 'ownedAssetAuthRequired stamped for the client to detect');
-    assertTrue(body?.refusedToPrice === true, 'refused, not merely reverted to pipeline-derived assetType');
+    assertEq(status, 401, 'rejected before any handler body logic (including GK-254’s own) ever runs');
   }
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);

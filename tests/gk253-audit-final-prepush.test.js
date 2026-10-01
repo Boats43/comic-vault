@@ -110,7 +110,7 @@ async function makeCollectionItem(id, assetCategory, attributes) {
   await createCollectionItem({ principalId: PRINCIPAL, id, assetCategory, attributes });
 }
 
-async function runOnce({ label, requestBody, bearer, pool }) {
+async function runOnce({ label, requestBody, bearer, pool, expectStatus = 200 }) {
   console.log(`\n--- ${label} ---`);
   const fetchLog = [];
   global.fetch = async (url) => {
@@ -140,9 +140,9 @@ async function runOnce({ label, requestBody, bearer, pool }) {
   console.log = originalConsoleLog;
 
   assertTrue(threw === null, `no exception escaped the handler (${threw ? threw.stack : ''})`);
-  assertTrue(capturedStatus === 200, `HTTP 200 (actual: ${capturedStatus})`);
+  assertTrue(capturedStatus === expectStatus, `HTTP ${expectStatus} (actual: ${capturedStatus})`);
 
-  return { body: capturedBody, logs: capturedLogs };
+  return { body: capturedBody, logs: capturedLogs, status: capturedStatus };
 }
 
 try {
@@ -157,10 +157,20 @@ try {
     // flag GK-254 introduced, but with NO Authorization header at all --
     // exactly what getVaultHeaders() sends once the 12h session token has
     // expired while grailkeyAuthed (React state) remains stuck true.
-    const { body, logs } = await runOnce({
-      label: 'GAP1 (FIXED) durable book, expired/missing session token',
+    // GK-269 (2026-09-30, FINAL AUTH CLOSURE) superseding note: a blanket
+    // "verified GrailKey session required" gate now sits in front of
+    // EVERY api/enrich.js request (src/lib/accessGate.js's
+    // requireAuthenticatedPrincipal), before body parsing even begins. A
+    // request with no bearer at all is now rejected with a flat 401 at
+    // that gate -- it never reaches GK-254's own ownedAssetAuthRequired
+    // logic. This is a strictly STRONGER, EARLIER rejection than Gap 1's
+    // original fix (which itself was already correct for its own era);
+    // updated to assert the new reality.
+    const { status } = await runOnce({
+      label: 'GAP1 (SUPERSEDED BY GK-269) durable book, missing session token -> blanket gate rejects first (401)',
       bearer: null, // no Bearer token, even though this targets a REAL durable Book row
       pool: [],
+      expectStatus: 401,
       requestBody: {
         title: 'The Rationalists', issue: null, grade: 'Very Good', confidence: 'high',
         isGraded: false, numericGrade: null, year: '2020', publisher: null,
@@ -168,10 +178,7 @@ try {
       },
     });
 
-    assertTrue(!!logs.find((l) => l.startsWith('[owned-asset-authority] FAIL CLOSED')), 'FIXED: fails closed and logs it, rather than silently falling through');
-    assertTrue(body?.ownedAssetAuthRequired === true, 'FIXED: ownedAssetAuthRequired stamped for the client to detect and force re-login');
-    assertTrue(body?.refusedToPrice === true, 'FIXED: refused outright -- a real owned Book can no longer reach comic-calibrated economics merely because its session quietly expired');
-    assertEq(body?.contract?.listable, false, 'FIXED: listable stays false');
+    assertEq(status, 401, 'rejected before any handler body logic (including GK-254’s own) ever runs');
   }
 
   // Control: the SAME durable book row, SAME request, but WITH a valid

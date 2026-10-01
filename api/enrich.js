@@ -183,7 +183,7 @@ import { resetTitleStripStats, logTitleStripSummary } from "../src/lib/titleStri
 import { writeConfirmed } from "../src/lib/identityWriteLog.js";
 import { computeAnthropicCallCostUsd } from "../src/lib/anthropicPricing.js";
 // BETA-1A.1 — shared legacy access gate, factored out of this file (see src/lib/accessGate.js)
-import { checkAccessGate } from "../src/lib/accessGate.js";
+import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -2270,14 +2270,14 @@ export default async function handler(req, res) {
   // concurrency caveat documented in that file.
   resetTitleStripStats();
 
-  // A3 ACCESS GATE: T1 invite mechanism
-  const gateError = checkAccessGate(req);
-  if (gateError) {
-    return res.status(gateError.status).json({ error: gateError.error });
+  // GK-269 ACCESS GATE: verified GrailKey session required, no shared secret.
+  const auth = requireAuthenticatedPrincipal(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
   }
 
-  // A4 RATE LIMIT: 30 scans / 10 min per key+IP
-  const rateCheck = checkRateLimit(req);
+  // A4 RATE LIMIT: 30 scans / 10 min per principal+IP
+  const rateCheck = checkRateLimit(req, { principalId: auth.principalId });
   res.setHeader('x-ratelimit-remaining', String(rateCheck.remaining));
   if (!rateCheck.allowed) {
     res.setHeader('retry-after', String(rateCheck.reset));
