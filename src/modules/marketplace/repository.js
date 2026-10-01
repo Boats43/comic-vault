@@ -50,6 +50,24 @@ export async function getConnectionByProviderIdentity(client, { provider, provid
   return r.rows[0] || null;
 }
 
+// getConnectionByProviderUserId — the REVERSE lookup
+// getConnectionByProviderIdentity deliberately doesn't offer (that one
+// always excludes a given principalId, for the connect-time collision
+// check). This one has no exclusion: given a verified provider-side
+// identity alone (e.g. an eBay Marketplace Account Deletion
+// notification's own eiasToken), find whichever GrailKey principal, if
+// any, currently owns it — regardless of connection_status, since a
+// deletion notification must still resolve a principal to disconnect
+// even if this module already marked the row RECONNECT_REQUIRED or
+// DISCONNECTED earlier.
+export async function getConnectionByProviderUserId(client, { provider, providerUserId }) {
+  const r = await client.query(
+    `SELECT * FROM data1_dev.marketplace_connection WHERE provider = $1 AND provider_user_id = $2 LIMIT 1`,
+    [provider, providerUserId]
+  );
+  return r.rows[0] || null;
+}
+
 export async function insertConnection(client, {
   id, principalId, provider, providerUserId, connectionStatus, grantedScopes,
   encryptedRefreshCredential, credentialKeyVersion, connectedAt,

@@ -93,16 +93,21 @@ assertTrue(
 // No HTTP handler (api/) imports this module at all in Phase 1 — the
 // governing dispatch's own "NO HTTP SURFACE YET" requirement, checked
 // mechanically rather than just by review.
-// GK-264 Phase 2 wires exactly four authenticated endpoints to this
+// GK-264 Phase 2 wired exactly four authenticated endpoints to this
 // module's public surface (index.js only, never repository.js/db.js/
 // crypto.js directly — the same private-module check above already
-// covers that). Every OTHER api/ file — critically list-ebay.js,
-// delist-ebay.js, and ebay-outcome-reconciler.js, whose seller-credential
-// behavior this dispatch is explicitly forbidden from touching — must
-// import NOTHING from this module. Checked mechanically, not just by
-// review.
+// covers that). GK-269 Lane B adds a fifth, deliberate, eBay-authenticated
+// (never GrailKey-session-authenticated) one: ebay-account-deletion.js,
+// which calls ONLY findPrincipalByProviderIdentity and
+// disconnectMarketplaceConnection — never resolveMarketplaceRefreshCredential,
+// never reads credential material. Every OTHER api/ file — critically
+// list-ebay.js, delist-ebay.js, and ebay-outcome-reconciler.js, whose
+// seller-credential behavior this dispatch is explicitly forbidden from
+// touching — must import NOTHING from this module. Checked mechanically,
+// not just by review.
 const EXPECTED_MARKETPLACE_API_IMPORTERS = new Set([
   'ebay-connect.js', 'ebay-callback.js', 'ebay-connection.js', 'ebay-disconnect.js',
+  'ebay-account-deletion.js',
 ]);
 const apiFiles = walk(path.join(repoRoot, 'api'));
 const unexpectedApiImporters = [];

@@ -6,7 +6,10 @@
 // tests/marketplace-module-boundary.test.js).
 //
 // GK-263 Phase 1 — storage + ownership + encryption primitives only.
-// No HTTP handler in this repo imports this module yet.
+// GK-269 Lane B — api/ebay-account-deletion.js is now the first HTTP
+// handler to import this module (findPrincipalByProviderIdentity +
+// disconnectMarketplaceConnection only; it never calls
+// resolveMarketplaceRefreshCredential or reads credential material).
 
 export {
   upsertMarketplaceConnection,
@@ -14,6 +17,7 @@ export {
   resolveMarketplaceRefreshCredential,
   markMarketplaceReconnectRequired,
   disconnectMarketplaceConnection,
+  findPrincipalByProviderIdentity,
 } from './service.js';
 
 export {

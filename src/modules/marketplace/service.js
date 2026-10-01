@@ -228,6 +228,28 @@ export async function markMarketplaceReconnectRequired({ principalId, provider, 
   }
 }
 
+// findPrincipalByProviderIdentity — GK-269 Lane B (eBay Marketplace
+// Account Deletion compliance). The ONE reverse-lookup this module
+// exposes: given a verified provider-side identity (eBay's own
+// eiasToken, which is what provider_user_id is populated from — see
+// api/ebay-callback.js), resolve the GrailKey principal that owns it, or
+// null if none does. Metadata-only (toMetadata boundary) — never returns
+// credential material. The caller (api/ebay-account-deletion.js) uses
+// the returned principalId only to call disconnectMarketplaceConnection;
+// this function itself performs no mutation.
+export async function findPrincipalByProviderIdentity({ provider, providerUserId } = {}) {
+  requireFields({ provider, providerUserId }, ['provider', 'providerUserId']);
+  requireProvider(provider);
+  const client = await acquireConnection();
+  try {
+    const row = await repo.getConnectionByProviderUserId(client, { provider, providerUserId });
+    if (!row) return null;
+    return { principalId: row.principal_id };
+  } finally {
+    client.release();
+  }
+}
+
 // disconnectMarketplaceConnection — makes the credential unusable by
 // GrailKey (status DISCONNECTED, ciphertext cleared). No eBay
 // revocation call — that belongs to a later, separately-authorized
