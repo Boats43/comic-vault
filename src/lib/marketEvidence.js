@@ -150,6 +150,12 @@ const num0 = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
 // Build the full evidence inventory for a scan result. Every count is
 // derived from a field the pipeline already produced.
+export const MARKET_EVIDENCE_VERSION = 1;
+
+// Rows kept in a payload are capped (the catalogue persists this object);
+// the inventory counts always reflect the FULL pools.
+const ROW_CAPS = Object.freeze({ notAdmittedSold: 20, activeAsks: 10 });
+
 export const buildMarketEvidence = (result) => {
   const res = result || {};
   const rows = [];
@@ -157,16 +163,27 @@ export const buildMarketEvidence = (result) => {
   // 1. Realized sales — admitted (verified pool) vs not admitted (raw pool).
   const admitted = Array.isArray(res.soldComps) ? res.soldComps : [];
   const admittedKeys = new Set(admitted.map(rowKey));
+  // Admitted rows passed the verification chain, but "exact" additionally
+  // needs the edition facet not to be disputed/unverified — the same
+  // custody signals deriveMarketStanding already floors on.
+  const editionDisputed = ['UNVERIFIED', 'UNRESOLVED', 'CONTESTED'].includes(res.variantApplicability);
   for (const s of admitted) {
-    rows.push(normalizePcSoldRow(s, { admitted: true, matchStanding: 'EXACT' }));
+    rows.push(normalizePcSoldRow(s, { admitted: true, matchStanding: editionDisputed ? 'SIMILAR' : 'EXACT' }));
   }
   const raw = Array.isArray(res.soldCompsRaw) ? res.soldCompsRaw : [];
+  // verifySoldComps keeps per-row reasons for a sample of rejected rows
+  // (diagnostics.rejectedSamples, {title, price, reason}). Use them when
+  // present; otherwise the reason stays honestly generic.
+  const samples = Array.isArray(res.soldCompDiagnostics?.rejectedSamples) ? res.soldCompDiagnostics.rejectedSamples : [];
+  const reasonByRow = new Map(samples.map((x) => [`${String(x?.title || '').slice(0, 60)}|${numOrNull(x?.price)}`, x?.reason]));
+  const DIFFERENT_EDITION_REASONS = new Set(['printingMismatch', 'variantMismatch']);
   for (const s of raw) {
     if (admittedKeys.has(rowKey(s))) continue;
+    const reason = s?.rejectReason || s?.rejectionReason || reasonByRow.get(`${String(s?.title || '').slice(0, 60)}|${numOrNull(s?.price)}`) || 'not-admitted-by-verification-chain';
     rows.push(normalizePcSoldRow(s, {
       admitted: false,
-      rejectionReason: s?.rejectReason || s?.rejectionReason || 'not-admitted-by-verification-chain',
-      matchStanding: 'UNKNOWN',
+      rejectionReason: reason,
+      matchStanding: DIFFERENT_EDITION_REASONS.has(reason) ? 'SIMILAR' : 'UNKNOWN',
     }));
   }
 
@@ -176,7 +193,11 @@ export const buildMarketEvidence = (result) => {
   const recent = Array.isArray(res.comps?.recentSales) ? res.comps.recentSales : [];
   const rawPool = Array.isArray(res.rawComps?.prices) ? res.rawComps.prices.filter((p) => p && typeof p === 'object') : [];
   const askSource = rawPool.length > 0 ? rawPool : (/finding/i.test(compsSource) ? [] : recent);
-  for (const a of askSource) rows.push(normalizeActiveAsk(a));
+  // The container name ("recentSales") says nothing about semantics: every
+  // row from either container is an ACTIVE_ASK by construction, even when a
+  // legacy field carries a date.
+  const askRows = askSource.map(normalizeActiveAsk);
+  rows.push(...askRows.slice(0, ROW_CAPS.activeAsks));
 
   // 3. Structured historical: PC ladder.
   const ladder = res.priceLadder && typeof res.priceLadder === 'object' ? res.priceLadder : {};
@@ -198,19 +219,50 @@ export const buildMarketEvidence = (result) => {
 
   const count = (cls, pred = () => true) => rows.filter((r) => r.evidenceClass === cls && pred(r)).length;
   const inventory = {
-    exactRealized: count(EVIDENCE_CLASS.REALIZED_SALE, (r) => r.admissionStanding === 'ADMITTED'),
+    exactRealized: count(EVIDENCE_CLASS.REALIZED_SALE, (r) => r.admissionStanding === 'ADMITTED' && r.matchStanding === 'EXACT'),
+    admittedSimilarRealized: count(EVIDENCE_CLASS.REALIZED_SALE, (r) => r.admissionStanding === 'ADMITTED' && r.matchStanding === 'SIMILAR'),
     notAdmittedRealized: count(EVIDENCE_CLASS.REALIZED_SALE, (r) => r.admissionStanding === 'REJECTED'),
     similarEditionRealized: similarEditionCount,
     rawSoldCandidates: rawCount,
     verifiedSold: verifiedCount,
     newestSoldDaysAgo: typeof dx.newestDaysAgo === 'number' ? dx.newestDaysAgo : null,
-    activeAsks: count(EVIDENCE_CLASS.ACTIVE_ASK),
+    activeAsks: askRows.length,
     structuredReferences: count(EVIDENCE_CLASS.STRUCTURED_HISTORICAL),
     hasReference: count(EVIDENCE_CLASS.REFERENCE) > 0,
     hasAiContext,
     heritageThroughPriceCharting: rows.filter((r) => r.provider === 'HERITAGE' && r.sourceThrough === 'PRICECHARTING').length,
   };
-  return { rows, inventory };
+  // Cap persisted rows (inventory above already reflects the full pools).
+  let notAdmittedSeen = 0;
+  const cappedRows = rows.filter((r) => {
+    if (r.evidenceClass === EVIDENCE_CLASS.REALIZED_SALE && r.admissionStanding === 'REJECTED') {
+      notAdmittedSeen += 1;
+      return notAdmittedSeen <= ROW_CAPS.notAdmittedSold;
+    }
+    return true;
+  });
+  return { version: MARKET_EVIDENCE_VERSION, rows: cappedRows, inventory };
+};
+
+// Structural invariants any evidence payload must satisfy, wherever it was
+// built. Returns a list of violations (empty = clean).
+export const evidenceIntegrityViolations = (rows) => {
+  const bad = [];
+  (Array.isArray(rows) ? rows : []).forEach((r, i) => {
+    if (r?.evidenceClass === EVIDENCE_CLASS.REALIZED_SALE && (r.saleDate == null || r.price == null)) bad.push({ i, why: 'REALIZED_SALE requires saleDate and price' });
+    if (r?.evidenceClass === EVIDENCE_CLASS.ACTIVE_ASK && r.saleDate != null) bad.push({ i, why: 'ACTIVE_ASK must not carry a saleDate' });
+    if (r?.evidenceClass === EVIDENCE_CLASS.STRUCTURED_HISTORICAL && r.saleDate != null) bad.push({ i, why: 'STRUCTURED_HISTORICAL is not a sale' });
+    if (r?.provider === 'HERITAGE' && r.sourceThrough == null) bad.push({ i, why: 'HERITAGE row without sourceThrough would read as a direct integration' });
+  });
+  return bad;
+};
+
+// The server payload is authoritative. A legacy result without it (an old
+// catalogue item, a cached response) falls back to local derivation.
+export const getMarketEvidence = (result) => {
+  const me = result?.normalizedEvidence;
+  if (me && me.version === MARKET_EVIDENCE_VERSION && Array.isArray(me.rows) && me.inventory) return me;
+  return buildMarketEvidence(result);
 };
 
 const LINES = Object.freeze({
@@ -229,13 +281,13 @@ const LINES = Object.freeze({
 // the inventory only ever makes the copy MORE conservative, never grants
 // exactness the pipeline did not.
 export const deriveMarketCopy = (result) => {
-  const { inventory: inv } = buildMarketEvidence(result);
+  const { inventory: inv } = getMarketEvidence(result);
   const standing = result?.contract?.actionAuthority?.marketStanding || result?.marketStanding || null;
 
   let state;
   if (standing === 'EXACT_CURRENT' && inv.exactRealized > 0) state = 'EXACT_CURRENT';
   else if (standing === 'EXACT_STALE' && inv.exactRealized > 0) state = 'EXACT_STALE';
-  else if (inv.similarEditionRealized > 0 || standing === 'SIMILAR_ONLY') state = 'SIMILAR_ONLY';
+  else if (inv.similarEditionRealized > 0 || inv.admittedSimilarRealized > 0 || standing === 'SIMILAR_ONLY') state = 'SIMILAR_ONLY';
   else if (inv.activeAsks > 0) state = 'ACTIVE_ONLY';
   else if (inv.structuredReferences > 0) state = 'STRUCTURED_ONLY';
   else if (inv.hasAiContext) state = 'AI_ONLY';

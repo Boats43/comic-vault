@@ -88,3 +88,7 @@ Prior entry, retained for history: 201 PASS / 19 FAIL / 4 TIMEOUT / 224 total â€
 ## Roster delta (2026-10-01, GK-271 market evidence foundation)
 
 +3 files: `tests/gk271-market-evidence-foundation.test.js` (45/45), `tests/gk271-enrich-handler-smoke.test.js` (13/13), `tests/gk271-grade-handler-smoke.test.js` (13/13). Roster count 268 -> 271 (note: 386 test files exist on disk; the stamped roster counts the sweep roster, not every file). Historical-roster status changes: NOT FRESHLY MEASURED. Non-DB regression subset: 40 files fail identically on HEAD and on this tree.
+
+## Roster delta (2026-10-01, GK-271b evidence contract closeout)
+
++1 file: `tests/gk271b-evidence-contract.test.js` (23/23). `tests/gk271-enrich-handler-smoke.test.js` extended in place (13/13 -> 25/25), `tests/gk271-grade-handler-smoke.test.js` extended in place (13/13 -> 24/24). Roster count 271 -> 272. Historical-roster status changes: NOT FRESHLY MEASURED.

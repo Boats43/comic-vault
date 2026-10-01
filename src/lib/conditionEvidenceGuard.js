@@ -31,7 +31,7 @@ const splitSentences = (text) =>
  * @param {number|string|null} [p.year] publication year if known
  * @param {object|null} [p.cgcPenaltyFlags]
  */
-export const guardConditionClaims = ({ reason, imageCount = 0, views = null, year = null, cgcPenaltyFlags = null } = {}) => {
+export const guardConditionClaims = ({ reason, imageCount = 0, views = null, undeclaredImageCount = 0, year = null, cgcPenaltyFlags = null } = {}) => {
   const withheld = [];
   const knownViews = Array.isArray(views) && views.length > 0
     ? new Set(views.map((v) => String(v).toUpperCase()))
@@ -42,6 +42,10 @@ export const guardConditionClaims = ({ reason, imageCount = 0, views = null, yea
   // images cannot be disproven, so their claims are left standing.
   const hasView = (name) => (knownViews ? knownViews.has(name) : false);
   const frontOnly = !knownViews && imageCount <= 1;
+  // Images whose role was never declared could show anything, so a claim
+  // not matched by a declared view cannot be disproven — it stands. Only a
+  // fully-declared set (or a lone undeclared image) makes grounding knowable.
+  const fullyDeclared = !!knownViews && undeclaredImageCount === 0;
 
   const y = parseInt(year, 10);
   const polybagImpossible = Number.isFinite(y) && y > 0 && y < POLYBAG_EARLIEST_YEAR;
@@ -60,7 +64,7 @@ export const guardConditionClaims = ({ reason, imageCount = 0, views = null, yea
         (!needsBack || hasView('BACK')) &&
         (!needsSpine || hasView('SPINE')) &&
         (!needsPages || hasView('PAGES'));
-      const groundingKnowable = frontOnly || !!knownViews;
+      const groundingKnowable = frontOnly || fullyDeclared;
       if (!grounded && groundingKnowable) {
         withheld.push({
           claim: sentence,
@@ -80,6 +84,17 @@ export const guardConditionClaims = ({ reason, imageCount = 0, views = null, yea
     flags = { ...flags, polybagIndents: { ...flags.polybagIndents, detected: false, rejectedByEraGate: true } };
     flagsChanged = true;
     withheld.push({ claim: 'cgcPenaltyFlags.polybagIndents', reason: `era-implausible: polybag indentation in a ${y} book` });
+  }
+
+  // Structured penalty flag that needs a SPINE view: staple popping is only
+  // observable on the spine/staple line. Same grounding rule as the prose.
+  if (flags?.staplePopping?.detected === true && !hasView('SPINE') && (frontOnly || fullyDeclared)) {
+    flags = { ...flags, staplePopping: { ...flags.staplePopping, detected: false, severity: null, rejectedByViewGate: true } };
+    flagsChanged = true;
+    withheld.push({
+      claim: 'cgcPenaltyFlags.staplePopping',
+      reason: frontOnly ? 'not-visible-from-supplied-evidence: single front image' : 'not-grounded: no declared SPINE view',
+    });
   }
 
   return {

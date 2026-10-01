@@ -11956,6 +11956,7 @@ export default function App() {
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
                 soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
+                normalizedEvidence: enrich.normalizedEvidence || cur.normalizedEvidence || null,
                 // P0-B — Persist tier-based pricing metadata
                 priceBands: enrich.priceBands || cur.priceBands || {},
                 demandSignals: enrich.demandSignals || cur.demandSignals || {},
@@ -12667,6 +12668,7 @@ export default function App() {
                   soldComps: enrich.soldComps || cur.soldComps || [],
                   soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
                   soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
+                  normalizedEvidence: enrich.normalizedEvidence || cur.normalizedEvidence || null,
                   imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null,
                   salesByGrade: enrich.salesByGrade || cur.salesByGrade || null,
                   priceLadder: enrich.priceLadder || cur.priceLadder || null,
@@ -12824,6 +12826,7 @@ export default function App() {
                   soldComps: enrich.soldComps || s.soldComps || [],
                   soldCompsRaw: enrich.soldCompsRaw || s.soldCompsRaw || [],
                   soldCompDiagnostics: enrich.soldCompDiagnostics || s.soldCompDiagnostics || null,
+                  normalizedEvidence: enrich.normalizedEvidence || s.normalizedEvidence || null,
                   imageSearchResults: enrich.imageSearchResults || s.imageSearchResults || null,
                   salesByGrade: enrich.salesByGrade || s.salesByGrade || null,
                   priceLadder: enrich.priceLadder || s.priceLadder || null,
@@ -13240,6 +13243,7 @@ export default function App() {
                 soldComps: enrich.soldComps || cur.soldComps || [],
                 soldCompsRaw: enrich.soldCompsRaw || cur.soldCompsRaw || [],
                 soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
+                normalizedEvidence: enrich.normalizedEvidence || cur.normalizedEvidence || null,
                 // P0-B — Persist tier-based pricing metadata
                 priceBands: enrich.priceBands || cur.priceBands || {},
                 demandSignals: enrich.demandSignals || cur.demandSignals || {},
@@ -14147,6 +14151,7 @@ export default function App() {
       soldComps: enrich.soldComps || item.soldComps || [],
       soldCompsRaw: enrich.soldCompsRaw || item.soldCompsRaw || [],
       soldCompDiagnostics: enrich.soldCompDiagnostics || item.soldCompDiagnostics || null,
+      normalizedEvidence: enrich.normalizedEvidence || item.normalizedEvidence || null,
       // Q109-E — persist the resolved PriceCharting product id so the NEXT
       // refresh can anchor to it via id= instead of re-running q= search.
       pcProductId: enrich.pcProductId || item.pcProductId || null,
@@ -14853,6 +14858,12 @@ export default function App() {
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
         images: nextPhotos,
+        // GK-271 — declared capture views, parallel to `images`. Only the
+        // operator-supplied role for the photo just added is known; every
+        // other entry is null (never inferred from order/count).
+        ...(evidenceCaptureView
+          ? { imageViews: nextPhotos.map((_, i) => (i === nextPhotos.length - 1 ? evidenceCaptureView : null)) }
+          : {}),
         existingGrade: {
           grade: item.grade,
           isGraded: item.isGraded,

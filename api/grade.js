@@ -149,20 +149,46 @@ const ensureAssetType = (responseObj, initialScan = null) => {
 // reprint/facsimile safety signal is never lost to this guard). Only
 // withholds unsupported claims; never raises a grade or price. The
 // withheld claims are recorded on the result, not silently dropped.
-const applyConditionGuard = (result, imageCount) => {
-  if (!result || typeof result !== 'object' || typeof result.reason !== 'string') return result;
+const VALID_IMAGE_VIEWS = new Set(['FRONT', 'BACK', 'SPINE', 'PAGES', 'DETAIL']);
+
+// GK-271 — declared capture views. The client MAY send `imageViews`, an
+// array parallel to `images` holding a role per image (null where the role
+// is not actually known). Image COUNT or ORDER is never read as a view
+// identity. Anything malformed is ignored, never guessed.
+const parseImageViews = (imageViews, imageCount) => {
+  if (!Array.isArray(imageViews) || imageViews.length !== imageCount) return { views: null, undeclared: imageCount };
+  const roles = imageViews.map((v) => {
+    const r = typeof v === 'string' ? v.toUpperCase() : null;
+    return r && VALID_IMAGE_VIEWS.has(r) ? r : null;
+  });
+  const declared = roles.filter(Boolean);
+  return { views: declared.length > 0 ? declared : null, undeclared: roles.length - declared.length };
+};
+
+const applyConditionGuard = (result, imageCount, imageViews = null) => {
+  if (!result || typeof result !== 'object') return result;
+  if (typeof result.reason !== 'string' && !result.cgcPenaltyFlags) return result;
   try {
+    const { views, undeclared } = parseImageViews(imageViews, imageCount);
     const g = guardConditionClaims({
-      reason: result.reason,
+      reason: typeof result.reason === 'string' ? result.reason : '',
       imageCount,
+      views,
+      undeclaredImageCount: undeclared,
       year: result.year ?? null,
       cgcPenaltyFlags: result.cgcPenaltyFlags ?? null,
     });
     if (g.changed) {
-      result.reason = g.reason;
+      if (typeof result.reason === 'string') result.reason = g.reason;
       if (g.flagsChanged) result.cgcPenaltyFlags = g.cgcPenaltyFlags;
       result.conditionClaimsWithheld = g.withheld;
-      console.log(`[condition-guard] withheld ${g.withheld.length} unsupported claim(s) (imageCount=${imageCount}, year=${result.year ?? 'null'})`);
+      // Law: an ungrounded defect may not become grade authority. The
+      // numeric grade is the model's own holistic call and cannot be
+      // re-derived here (no grading redesign), but it must not be
+      // presented with more confidence than its evidence supports.
+      result.gradeEvidenceStanding = 'UNSUPPORTED_CLAIMS_WITHHELD';
+      if (result.confidence === 'high') result.confidence = 'medium';
+      console.log(`[condition-guard] withheld ${g.withheld.length} unsupported claim(s) (imageCount=${imageCount}, declaredViews=${views ? views.join('/') : 'none'}, year=${result.year ?? 'null'})`);
     }
   } catch (err) {
     console.error('[condition-guard] skipped:', err?.message || err);
@@ -747,6 +773,7 @@ export default async function handler(req, res) {
     // Watch mode: self-correcting multi-pass pipeline
     if (body.source === "watch") {
       const { result, passes, timings } = await watchPipeline(imageContent, body.voiceContext);
+      applyConditionGuard(result, Array.isArray(images) ? images.length : (image ? 1 : 0), body.imageViews);
       if (noImage) result.noImage = true;
       res.setHeader("x-watch-passes", String(passes));
       res.setHeader("x-watch-timing", JSON.stringify(timings));
@@ -815,7 +842,7 @@ export default async function handler(req, res) {
 
       enrichPedigree(result);
       result.editionWarning = detectEditionWarning(result.reason);
-      applyConditionGuard(result, Array.isArray(images) ? images.length : (image ? 1 : 0));
+      applyConditionGuard(result, Array.isArray(images) ? images.length : (image ? 1 : 0), body.imageViews);
       applyNewsstandFallback(result);
       if (noImage) result.noImage = true;
 
@@ -896,7 +923,7 @@ export default async function handler(req, res) {
     if (noImage) finalParsed.noImage = true;
     enrichPedigree(finalParsed);
     finalParsed.editionWarning = detectEditionWarning(finalParsed.reason);
-    applyConditionGuard(finalParsed, Array.isArray(images) ? images.length : (image ? 1 : 0));
+    applyConditionGuard(finalParsed, Array.isArray(images) ? images.length : (image ? 1 : 0), body.imageViews);
     applyNewsstandFallback(finalParsed);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 

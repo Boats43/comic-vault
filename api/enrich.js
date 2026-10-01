@@ -185,6 +185,7 @@ import { computeAnthropicCallCostUsd } from "../src/lib/anthropicPricing.js";
 // BETA-1A.1 — shared legacy access gate, factored out of this file (see src/lib/accessGate.js)
 import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
 import { isUnconfirmedCountryClaim, deriveEditionStanding } from "../src/lib/editionAuthority.js";
+import { buildMarketEvidence, evidenceIntegrityViolations } from "../src/lib/marketEvidence.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -13543,6 +13544,20 @@ export default async function handler(req, res) {
     // Return full enrichment including display-only fields (story, creators, pop, goCollect).
     // Previously these were stripped and fetched via separate /api/metadata call (SPEED-2a).
     // Eliminates duplicate CV/PC/GoCollect API calls and second HTTP round-trip.
+    // GK-271 — server-normalized market evidence. Provider results are
+    // classified HERE (evidenceClass/provider/sourceThrough/admission), so
+    // the browser never infers source semantics from legacy field names
+    // (e.g. comps.recentSales, which holds eBay Browse ACTIVE asks). Pure
+    // read of fields already on `out`; never feeds pricing/admission.
+    try {
+      out.normalizedEvidence = buildMarketEvidence(out);
+      const evViolations = evidenceIntegrityViolations(out.normalizedEvidence.rows);
+      if (evViolations.length > 0) {
+        console.log(`[market-evidence] integrity violations: ${JSON.stringify(evViolations.slice(0, 5))}`);
+      }
+    } catch (evErr) {
+      console.error('[market-evidence] skipped (non-fatal):', evErr?.message || evErr);
+    }
     mark('response_sent');
     // GRAILKEY PERF-1 (2026-08-18) — measurement-only, completes the
     // phase report started above (final_response → response_sent span).

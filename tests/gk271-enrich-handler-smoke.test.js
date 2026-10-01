@@ -40,6 +40,17 @@ const ebayItem = (title, price, i) => ({
   itemLocation: { country: 'US' }, listingMarketplaceId: 'EBAY_US',
 });
 const ITEMS = POOL.map(([t, p], i) => ebayItem(t, p, i));
+
+const PC_HTML = `<html><body>
+<select id="completed-auctions-condition"><option value="completed-auctions-cib">Ungraded (2)</option><option value="completed-auctions-grade-seventeen">1.0 (0)</option></select>
+<div class="completed-auctions-cib"><table class="hoverable-rows sortable"><tbody>
+<tr id="ebay-123456789012"><td class="date">2026-08-02</td><td class="title"><a class="js-ebay-completed-sale" href="https://www.ebay.com/itm/123456789012">Classic Comics #13 Dr Jekyll Mr Hyde Gilberton</a> [eBay]</td><td class="numeric"><span class="js-price">$141.00</span></td></tr>
+<tr><td class="date">2026-05-01</td><td class="title"><a class="js-ha-completed-sale" href="https://comics.ha.com/itm/77">Classic Comics #13 Dr Jekyll Mr Hyde HRN 20</a> [HeritageAuctions]</td><td class="numeric"><span class="js-price">$900.00</span></td></tr>
+</tbody></table></div>
+<div class="completed-auctions-grade-seventeen"><p>No sales data</p></div>
+<div id="full-prices"><table><tr><td>Ungraded</td><td class="price js-price">$150.00</td></tr><tr><td>1.0</td><td class="price js-price">$210.00</td></tr></table></div>
+</body></html>`;
+let PC_PAGE = false;
 let EMPTY_EBAY = false;
 const jsonResponse = (body, status = 200) => ({ ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
 const originalFetch = global.fetch;
@@ -51,6 +62,7 @@ global.fetch = async (url) => {
   if (u.includes('pricecharting.com/api/products')) {
     return jsonResponse({ products: [{ id: '999001', 'product-name': 'Classic Comics #13 (1943)', 'loose-price': 15000 }] });
   }
+  if (u.includes('pricecharting.com/game/') && PC_PAGE) return { ok: true, status: 200, text: async () => PC_HTML, json: async () => ({}) };
   if (u.includes('pricecharting.com')) return jsonResponse({ error: 'not found' }, 404);
   if (u.includes('api.anthropic.com')) return jsonResponse({ content: [{ type: 'text', text: '{}' }] });
   return jsonResponse({});
@@ -117,6 +129,35 @@ const cMult = c.logs.filter((l) => /^\[variant\]/.test(l) && /canadian/i.test(l)
 origLog(`  [variant] canadian lines: ${JSON.stringify(cMult)}`);
 ok(cMult.length === 0, 'no Canadian multiplier line in the PC-estimate lane');
 ok(c.body?.editionStanding === 'UNRESOLVED', 'edition UNRESOLVED in the PC-estimate lane');
+
+origLog('\n— server-normalized evidence payload (real handler + real PC extractor) —');
+PC_PAGE = true;
+const d = await run('Whitman variant', false);
+PC_PAGE = false;
+ok(d.threw === null && d.status === 200, 'PC-HTML scenario runs through the real handler');
+const ne = d.body?.normalizedEvidence;
+ok(ne && ne.version === 1 && Array.isArray(ne.rows) && ne.inventory, 'response carries normalizedEvidence {version, rows, inventory}');
+const rows = ne?.rows || [];
+const CLASSES = new Set(['REALIZED_SALE', 'STRUCTURED_HISTORICAL', 'ACTIVE_ASK', 'AUCTION_STATE', 'REFERENCE', 'AI_CONTEXT']);
+ok(rows.length > 0 && rows.every((r) => CLASSES.has(r.evidenceClass)), `every server row carries a valid evidenceClass (${rows.length} rows)`);
+const asks = rows.filter((r) => r.evidenceClass === 'ACTIVE_ASK');
+ok(asks.length > 0 && asks.every((r) => r.saleDate === null), 'eBay Browse pool rows are ACTIVE_ASK with no sale date');
+ok(!rows.some((r) => r.evidenceClass === 'REALIZED_SALE' && r.admissionStanding === 'NOT_APPLICABLE'), 'no ask/guide row is classed REALIZED_SALE');
+const her = rows.find((r) => r.provider === 'HERITAGE');
+origLog(`  Heritage row: ${JSON.stringify(her)}`);
+ok(!!her && her.sourceThrough === 'PRICECHARTING' && her.evidenceClass === 'REALIZED_SALE', 'Heritage-through-PriceCharting: provider=HERITAGE, sourceThrough=PRICECHARTING, REALIZED_SALE');
+ok(her?.hrn === '20', 'HRN 20 parsed from the Heritage row title (row fact only)');
+const ebaySold = rows.find((r) => r.provider === 'EBAY' && r.evidenceClass === 'REALIZED_SALE');
+ok(!!ebaySold && ebaySold.sourceThrough === 'PRICECHARTING' && ebaySold.providerRecordId === '123456789012', 'eBay sold row keeps provider EBAY, sourceThrough PRICECHARTING, providerRecordId');
+const lad = rows.filter((r) => r.evidenceClass === 'STRUCTURED_HISTORICAL');
+ok(lad.length >= 1 && lad.every((r) => r.provider === 'PRICECHARTING' && r.saleDate === null), 'PC ladder rows are STRUCTURED_HISTORICAL, never REALIZED_SALE');
+const rt = JSON.parse(JSON.stringify(ne));
+const { getMarketEvidence, evidenceIntegrityViolations } = await import('../src/lib/marketEvidence.js');
+ok(getMarketEvidence({ normalizedEvidence: rt }) === rt, 'client prefers the server payload (no re-derivation) after a JSON round trip');
+ok(rt.rows.find((r) => r.provider === 'HERITAGE')?.sourceThrough === 'PRICECHARTING', 'provider/sourceThrough survive server→client serialization');
+ok(evidenceIntegrityViolations(rows).length === 0, 'server payload passes the evidence-integrity invariants');
+origLog(`  inventory: ${JSON.stringify(ne?.inventory)}`);
+origLog(`  soldCompDiagnostics: ${JSON.stringify(d.body?.soldCompDiagnostics)}`);
 
 global.fetch = originalFetch;
 origLog(`\n=== ${passed} passed, ${failed} failed ===\n`);
