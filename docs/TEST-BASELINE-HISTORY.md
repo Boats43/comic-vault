@@ -100,3 +100,7 @@ Prior entry, retained for history: 201 PASS / 19 FAIL / 4 TIMEOUT / 224 total â€
 ## Roster delta (2026-10-01, GK-272B display authority)
 
 +1 file: `tests/gk272b-display-authority.test.js` (29/29). `tests/gk272-classic-comics-refused-conflict-smoke.test.js` extended in place (8/8 -> 9/9). Roster count 273 -> 274. Historical-roster status changes: NOT FRESHLY MEASURED.
+
+## Roster delta (2026-10-01, GK-272C derived-economics authority)
+
++1 file: `tests/gk272c-derived-economics-authority.test.js` (39/39). `tests/gk271-grade-handler-smoke.test.js` extended in place (24/24 -> 26/26). Roster count 274 -> 275. Historical-roster status changes: NOT FRESHLY MEASURED.

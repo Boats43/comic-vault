@@ -114,6 +114,13 @@ const watch = await run([PNG], '10.0.0.8', { source: 'watch' });
 ok(watch.threw === null && watch.status === 200, 'watch-mode path runs through the real handler with the guard wired (' + watch.status + ')');
 ok(!/staple/i.test(watch.body?.reason || '') || watch.body?.reason == null, 'watch mode: unsupported staple claim withheld');
 
+origLog(NL + '— GK-272C: live Classic Comics prose through the real handler —');
+visionNow = { ...VISION_JSON, year: '1953', reason: 'Heavy wear consistent with a 1940s-era Golden Age copy. General brittleness indicative of age and storage. Corner chipping on all four corners. Heavy creasing on the front cover.', cgcPenaltyFlags: null };
+const live = await run([PNG], '10.0.0.9');
+ok(live.status === 200 && !/brittl|storage|1940s|golden age/i.test(live.body?.reason || ''), 'real handler: brittleness / storage / era-identity prose withheld from a front-only scan');
+ok(/corner chipping/i.test(live.body?.reason || '') && /creasing/i.test(live.body?.reason || ''), 'real handler: visible front-cover observations survive');
+visionNow = VISION_JSON;
+
 global.fetch = originalFetch;
 origLog(`\n=== ${passed} passed, ${failed} failed ===\n`);
 process.exit(failed ? 1 : 0);

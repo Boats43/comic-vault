@@ -112,3 +112,18 @@ export const getAuthorityPrice = (item) => {
   // Fallback to system price
   return getDisplayPrice(item);
 };
+
+// GK-272C — provenance for the RAW active-ask evidence shown beside a gated
+// identity. Derived from what the evidence itself says it is (comps.source),
+// never from item.pricingSource (which the identity-gated refresh merge
+// deliberately does not overwrite, and which is therefore absent/stale —
+// the "Source: unknown" next to "Based on 1 active eBay listing" defect).
+// Returns null when provenance cannot be established: the caller must then
+// suppress the line, never label it "unknown" beside known evidence.
+export const describeActiveEvidenceProvenance = (item) => {
+  const src = item?.comps?.source;
+  if (src === 'browse_api') {
+    return 'Source: eBay Browse API — active listings (asking prices, reference only — not sales)';
+  }
+  return null;
+};

@@ -41,7 +41,7 @@ import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
 import GenericAssetCapture from "./components/GenericAssetCapture.jsx";
 import { useClerk } from "@clerk/react";
 import { deriveMarketCopy, NEUTRAL_MARKET_FOOTER } from "./lib/marketEvidence.js";
-import { getDisplayPrice, getAuthorityPrice, getAdvisoryContractPrice, isIdentityDisplayGated } from "./lib/displayAuthority.js";
+import { getDisplayPrice, getAuthorityPrice, getAdvisoryContractPrice, isIdentityDisplayGated, describeActiveEvidenceProvenance } from "./lib/displayAuthority.js";
 
 // Same gate src/main.jsx uses to decide whether <ClerkProvider> is mounted
 // at all, and src/components/GrailKeyLoginGate.jsx uses to decide whether
@@ -1687,7 +1687,11 @@ export function ResultCard({ result, enriching }) {
   // Ship #24a-3 — contract items render contract.price ONLY. The legacy
   // `result.price` string fallback is dead for them: a REFUSED card must
   // show "—", never a stale writer's price (ruling 3).
-  const recommendedLabel = result.contract
+  // GK-272C — never present an advisory price as the recommended value on a
+  // gated identity (also covers the Recommended row inside the comps panel).
+  const recommendedLabel = isIdentityDisplayGated(result)
+    ? "—"
+    : result.contract
     ? (result.contract.price != null
         ? formatCurrency(assertContractPrice(result, 'ResultCard.header', result.contract.price))
         : "—")
@@ -4120,8 +4124,8 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
                   <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
                     {soldLow ? `Last sold${soldIsPcRef ? ' (ref)' : ''} $${Math.round(soldLow)}` : ''}
                     {soldLow && askLow ? ' · ' : ''}
-                    {askLow ? `Asking $${Math.round(askLow)}` : ''}
-                    {askHigh && askHigh !== askLow ? `–$${Math.round(askHigh)}` : ''}
+                    {askLow ? `Active ask $${Math.round(askLow)}` : ''}
+                    {askHigh && Math.round(askHigh) !== Math.round(askLow) ? `–$${Math.round(askHigh)}` : ''}
                   </div>
                 );
               })()}
@@ -4577,7 +4581,8 @@ export function CollectionDetail({
   // GK-272B — an identity-gated item keeps its advisory contract.price
   // internally but this saved-item surface must not present it as the
   // recommended value (the fresh ResultCard already suppresses it).
-  const recommendedLabel = isIdentityDisplayGated(item)
+  const identityGatedItem = isIdentityDisplayGated(item);
+  const recommendedLabel = identityGatedItem
     ? "—"
     : item.contract
     ? (item.contract.price != null
@@ -6169,7 +6174,7 @@ export function CollectionDetail({
         assertContractField(item, 'StatsBar', 'activeAsking', activeAvgNum);
         const activeLow = activeLoNum ? '$' + Math.round(activeLoNum) : null;
         const activeHigh = activeHiNum ? '$' + Math.round(activeHiNum) : null;
-        const activeRange = activeLow && activeHigh ? activeLow + '\u2013' + activeHigh : (activeAvgNum ? '$' + Math.round(activeAvgNum) : null);
+        const activeRange = activeLow && activeHigh && activeLow === activeHigh ? activeLow : activeLow && activeHigh ? activeLow + '\u2013' + activeHigh : (activeAvgNum ? '$' + Math.round(activeAvgNum) : null);
         const dp = assertContractPrice(item, 'StatsBar', getDisplayPrice(item));
         return (
           <div style={{ fontSize: 12, color: '#888', marginTop: 4, marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -6193,7 +6198,7 @@ export function CollectionDetail({
                 {dp > 0 && <span>${dp.toLocaleString('en-US')}</span>}
                 {/* GrailKey Directive G, Task 2 — annotate PC-anchored sold data, never hide (I13). */}
                 {lastSoldLabel && <span>· Last sold{pcEditionCaveat(item) ? ' (ref)' : ''} {lastSoldLabel}</span>}
-                {activeRange && <span>· Asking {activeRange}</span>}
+                {activeRange && <span>· Active ask {activeRange}</span>}
               </>
             )}
           </div>
@@ -7235,7 +7240,9 @@ export function CollectionDetail({
               ? `✓ Verified${mcScore != null ? ` ${mcScore}` : ""}`
               : level === "MEDIUM"
                 ? (mcScore != null ? `Match quality: ${mcScore}/100` : "Similar match")
-                : `⚠ Estimate${mcScore != null ? ` ${mcScore}` : ""}`;
+                : isIdentityDisplayGated(item)
+                  ? "⚠ Identity unresolved"
+                  : `⚠ Low match${mcScore != null ? ` ${mcScore}/100` : ""}`;
             return (
               <span style={{ ...pillStyle, background: bg, color: fg }}>
                 {label}
@@ -7418,7 +7425,7 @@ export function CollectionDetail({
             }}
           >
             {/* Ship #21e: PRICE DERIVATION trace */}
-            {item.price && (
+            {!identityGatedItem && item.price && (
               <div style={{ marginBottom: 10 }}>
                 <div
                   onClick={() => setDerivationExpanded(!derivationExpanded)}
@@ -7587,7 +7594,7 @@ export function CollectionDetail({
               </span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 14 }}>
-              <span className="muted small">Floor</span>
+              <span className="muted small">{identityGatedItem ? "Lowest active ask (reference)" : "Floor"}</span>
               <span style={{ fontWeight: 600, color: "#e05656" }}>{fmtPrice(item.comps?.lowestNum)}</span>
             </div>
             {item.comps?.highestNum != null && (
@@ -7600,12 +7607,12 @@ export function CollectionDetail({
                 )}
               </div>
             )}
-            {item.gradeMultiplier != null && (
+            {!identityGatedItem && item.gradeMultiplier != null && (
               <div className="muted small" style={{ marginTop: 4, fontSize: 12 }}>
                 Grade adj: ×{item.gradeMultiplier}{item.priceNote && /estimate|CGC/i.test(item.priceNote) ? ` (${item.priceNote})` : ""}
               </div>
             )}
-            {item.variantMultiplier != null && (
+            {!identityGatedItem && item.variantMultiplier != null && (
               <div style={{ color: "#aaa", fontSize: 11, marginTop: 4 }}>
                 Variant adj: ×{item.variantMultiplier}
                 {item.variantMultiplierEstimated && (
@@ -7624,8 +7631,9 @@ export function CollectionDetail({
                   eBay-outage signal (decisionEngine.js's
                   ebay-source-unavailable warning, unrelated to this label)
                   and must never collide with an ordinary labeling gap. */}
-              {getPricingSourceLabel(item.pricingSource)}
-              {Array.isArray(item.soldComps) && item.soldComps.length > 0 && " + eBay sold"}
+              {identityGatedItem
+                ? describeActiveEvidenceProvenance(item)
+                : (<>{getPricingSourceLabel(item.pricingSource)}{Array.isArray(item.soldComps) && item.soldComps.length > 0 && " + eBay sold"}</>)}
             </div>
             <div className="muted small" style={{ fontSize: 11 }}>
               {/* Q114 dispatch (2026-07-18, Batman #608 class) — "in last 30
@@ -8236,7 +8244,7 @@ export function CollectionDetail({
                 is a raw pre-contract field that can survive a refusal
                 (e.g. the reprint/facsimile edition-gate) and was leaking a
                 fully populated ladder alongside the CANNOT PRICE banner. */}
-            {item.priceBands && item.contract?.state !== 'REFUSED' && (
+            {item.priceBands && item.contract?.state !== 'REFUSED' && !identityGatedItem && (
               <div style={{
                 background: "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.1)",
@@ -8419,7 +8427,7 @@ export function CollectionDetail({
             })()}
 
             {/* Ship #21 — Decision Path UI */}
-            {item.claudeCheck && item.claudeCheck.recommendation && (
+            {!identityGatedItem && item.claudeCheck && item.claudeCheck.recommendation && (
               <div style={{
                 marginBottom: 12,
                 padding: "12px",

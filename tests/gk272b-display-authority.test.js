@@ -66,7 +66,7 @@ ok(!/^const getDisplayPrice = /m.test(app) && /from "\.\/lib\/displayAuthority\.
 console.log('\n— direct contract.price readers (bypassed getDisplayPrice) are under the same law —');
 ok(getAuthorityPrice(g) === 0, 'getAuthorityPrice: gated item does not pre-fill the editable list price with the advisory price');
 ok(getAuthorityPrice(confident()) === 59.76, 'getAuthorityPrice: confident item still pre-fills');
-ok(/const recommendedLabel = isIdentityDisplayGated\(item\)\s*\?\s*"—"/.test(app), 'static: CollectionDetail recommendedLabel is "—" for a gated item');
+ok(/const recommendedLabel = identityGatedItem\s*\?\s*"—"/.test(app), 'static: CollectionDetail recommendedLabel is "—" for a gated item');
 ok(/\{!isIdentityDisplayGated\(item\) && \(item\.contract \? item\.contract\.price != null/.test(app), 'static: DecisionPanel hero price is gated');
 ok(/getAuthorityPrice/.test(app) && !/^const getAuthorityPrice = /m.test(app), 'static: App.jsx uses the single extracted getAuthorityPrice');
 const detailRecommended = (item) => (isIdentityDisplayGated(item) ? '—' : item.contract ? (item.contract.price != null ? `$${item.contract.price}` : '—') : '—');
