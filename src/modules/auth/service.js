@@ -42,31 +42,54 @@ export async function login({ passphrase } = {}) {
   }
 }
 
-// BETA-1A — loginWithExternalIdentity({ provider, externalSubject }) ->
+// BETA-1A, extended by GK-268 AUTH LAUNCH (2026-09-30) —
+// loginWithExternalIdentity({ provider, externalSubject, displayName }) ->
 // { token, expiresAt, principalId }
 //
 // The Clerk adapter's ONLY entry point into this module. `externalSubject`
 // must already be a VERIFIED value (api/auth-clerk.js derives it from
-// @clerk/backend's own authenticateRequest() — a request-supplied subject
-// never reaches this function). Issues the SAME HMAC session token
-// login() does — everything downstream of a successful call here
-// (assets.js, asset-media.js, operator-action.js) is unchanged, because
-// the resulting token is indistinguishable from one the passphrase path
-// issued. An unrecognized subject is NotProvisionedError, identical in
-// shape/status to an unrecognized passphrase — never a silent fallback
-// to any other principal.
-export async function loginWithExternalIdentity({ provider, externalSubject } = {}) {
+// @clerk/backend's own verifyToken() — a request-supplied subject never
+// reaches this function). Issues the SAME HMAC session token login() does
+// — everything downstream of a successful call here (assets.js,
+// asset-media.js, operator-action.js) is unchanged, because the resulting
+// token is indistinguishable from one the passphrase path issued.
+//
+// GK-268 retired the prior invite-only boundary (0022's own migration
+// header: "do NOT provision public users yet" / NotProvisionedError on
+// any unmapped subject) by explicit product ruling: a verified external
+// identity with no existing mapping now gets a brand-new 'user'-kind
+// principal, auto-created atomically with its identity mapping
+// (repo.createPrincipalWithExternalIdentity) — never a silent fallback to
+// any OTHER existing principal, and never a client-chosen principalId.
+// `displayName` is optional, caller-supplied verified profile metadata
+// (e.g. the Clerk user's own email) used only for a brand-new principal's
+// initial display_name — ignored entirely when the subject already
+// resolves to an existing principal.
+export async function loginWithExternalIdentity({ provider, externalSubject, displayName } = {}) {
   if (!provider || !externalSubject || typeof externalSubject !== 'string') {
     throw new InvalidCredentialError('provider and externalSubject are required');
   }
   const client = await acquireConnection();
   try {
-    const principal = await repo.getPrincipalByExternalIdentity(client, { provider, externalSubject });
+    let principal = await repo.getPrincipalByExternalIdentity(client, { provider, externalSubject });
     if (!principal) {
-      throw new NotProvisionedError(
-        `no principal mapped for external identity provider=${provider} — ` +
-        'run the local seed script to map this subject before attempting login'
-      );
+      try {
+        principal = await repo.createPrincipalWithExternalIdentity(client, {
+          displayName: displayName || 'GrailKey User',
+          provider,
+          externalSubject,
+        });
+      } catch (e) {
+        // Unique-violation race (23505): two concurrent first-logins for
+        // the same brand-new subject both missed the SELECT above. Recover
+        // the winner's already-committed row rather than erroring — same
+        // "recover the winner's result on the loser's unique-violation"
+        // precedent as GK-193's idempotency-claim race.
+        if (e?.code === '23505') {
+          principal = await repo.getPrincipalByExternalIdentity(client, { provider, externalSubject });
+        }
+        if (!principal) throw e;
+      }
     }
     const { token, expiresAt } = issueToken({ principalId: principal.id });
     return { token, expiresAt, principalId: principal.id };

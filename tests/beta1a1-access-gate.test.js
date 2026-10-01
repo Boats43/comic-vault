@@ -7,14 +7,18 @@
 // path, without weakening it: an unauthenticated caller still fails
 // closed, and a forged/garbage Authorization header cannot bypass
 // anything (it falls through to the exact same vault-key check that
-// already existed). Also proves the client-side mount-time modal
-// predicate (App.jsx) no longer forces the prompt open for an
-// authenticated session, and that the pre-existing passphrase login path
-// (api/auth-login.js) is unmodified and still functioning.
+// already existed). Also proves (GK-268 AUTH LAUNCH, 2026-09-30, updated
+// from this file's original BETA-1A.1 proof) that the client-side vault-
+// key modal has been removed from App.jsx's real source entirely — not
+// merely suppressed for an authenticated session — and that the
+// pre-existing passphrase login path (api/auth-login.js) is unmodified
+// and still functioning server-side even though it's no longer reachable
+// from the login UI.
 //
 // Invoke: node tests/beta1a1-access-gate.test.js
 
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 process.env.GRAILKEY_SESSION_SECRET = process.env.GRAILKEY_SESSION_SECRET || randomBytes(32).toString('base64url');
 process.env.GRAILKEY_SESSION_EPOCH = process.env.GRAILKEY_SESSION_EPOCH || 'test-epoch-1';
@@ -93,39 +97,21 @@ console.log('--- src/lib/accessGate.js: checkAccessGate ---');
   process.env.ACCESS_CODE = 'test-vault-code-xyz';
 }
 
-console.log('\n--- App.jsx mount-time modal predicate (client-side, logic-level proof) ---');
+console.log('\n--- GK-268 AUTH LAUNCH: the legacy vault-key modal is fully removed from App.jsx (source-text proof) ---');
 {
-  function makeLocalStorageShim() {
-    const store = new Map();
-    return {
-      getItem: (k) => (store.has(k) ? store.get(k) : null),
-      setItem: (k, v) => store.set(k, String(v)),
-      removeItem: (k) => store.delete(k),
-      clear: () => store.clear(),
-    };
-  }
-  globalThis.localStorage = makeLocalStorageShim();
-  const { setSession, clearSession, isAuthenticated } = await import('../src/lib/grailkeySession.js');
-
-  // The exact predicate now used in App.jsx: `if (!key && !isAuthenticated()) setShowAccessModal(true)`
-  function wouldShowModal() {
-    const key = localStorage.getItem('vault_key');
-    return !key && !isAuthenticated();
-  }
-
-  clearSession();
-  localStorage.removeItem('vault_key');
-  assertTrue(wouldShowModal() === true, 'signed-out, no vault key -> modal WOULD show (fail closed for a genuinely unauthenticated browser)');
-
-  setSession('a-real-grailkey-session-token', Date.now() + 60_000);
-  assertTrue(wouldShowModal() === false, 'authenticated GrailKey session (Clerk OR passphrase — grailkeySession.js does not distinguish), no vault key -> modal does NOT show');
-
-  clearSession();
-  localStorage.setItem('vault_key', 'some-legacy-code');
-  assertTrue(wouldShowModal() === false, 'legacy vault key alone (no GrailKey session) still suppresses the modal — unrelated administrative path unchanged');
-
-  localStorage.removeItem('vault_key');
-  clearSession();
+  // Supersedes the prior "mount-time modal predicate" section, which
+  // tested a hand-mirrored formula rather than App.jsx's real source. By
+  // GK-268 AUTH LAUNCH (2026-09-30) that formula, and the modal it
+  // described, no longer exist in the product at all — explicit product
+  // ruling: Google-via-Clerk sign-in (ClerkAuthPanel/GrailKeyLoginGate) is
+  // the sole front door. Proving against the real file text, not a
+  // formula that could silently drift from it.
+  const appSrc = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const liveCode = appSrc.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assertTrue(!/vault_key/.test(liveCode), 'no live code in App.jsx reads/writes localStorage vault_key anymore (comments excluded)');
+  assertTrue(!/showAccessModal/.test(liveCode), 'no live code in App.jsx references showAccessModal/the access-code modal anymore (comments excluded)');
+  assertTrue(!liveCode.includes('🔑 Access code'), 'the "🔑 Access code" button is removed from the product UI (comments excluded — the removal itself is documented in a comment)');
+  assertTrue(/if \(!grailkeyAuthed\) return/.test(appSrc), 'the GrailKey session gate (grailkeyAuthed) remains the sole front-door gate');
 }
 
 console.log('\n--- existing passphrase login path (unmodified file) ---');

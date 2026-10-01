@@ -1,25 +1,31 @@
 // POST /api/auth-clerk
 //
-// BETA-1A — Clerk identity adapter. Accepts a Clerk SESSION token
-// (obtained client-side via Clerk's own useAuth().getToken() — never a
-// principal/user ID typed in directly) and verifies it server-side
-// against Clerk's own keys (@clerk/backend's verifyToken, CLERK_SECRET_KEY
-// never sent to or readable by the client). The verified `sub` claim
-// (Clerk's own user ID, a standard JWT claim) is the ONLY value carried
-// forward out of the token — never anything else it contains, never
-// anything from the request body.
+// BETA-1A, extended by GK-268 AUTH LAUNCH (2026-09-30) — Clerk identity
+// adapter, now GrailKey's sole public login surface. Accepts a Clerk
+// SESSION token (obtained client-side via Clerk's own useAuth().getToken()
+// — never a principal/user ID typed in directly) and verifies it
+// server-side against Clerk's own keys (@clerk/backend's verifyToken,
+// CLERK_SECRET_KEY never sent to or readable by the client). The verified
+// `sub` claim (Clerk's own user ID, a standard JWT claim, stable across
+// however the end user authenticated into Clerk — Google included) is the
+// ONLY identity value carried forward out of the token — never anything
+// else it contains, never anything from the request body.
 //
-// That verified subject is resolved to a GrailKey principal via
-// loginWithExternalIdentity() (src/modules/auth/service.js) against
+// That verified subject resolves-or-creates exactly one GrailKey principal
+// via loginWithExternalIdentity() (src/modules/auth/service.js) against
 // principal_external_identity (db/data0/0022_beta1a_clerk_identity_mapping.sql,
-// PROPOSED — not yet applied to data1_dev, so this endpoint 500s with a
-// clear DB error until that migration is live AND a mapping row exists;
-// it does not silently authenticate anyone in the meantime). An
-// unrecognized-but-verified subject fails closed exactly like a wrong
-// passphrase does in api/auth-login.js — NotProvisionedError, same 401,
-// same message, no hint that Clerk verification itself succeeded. This
-// endpoint can NEVER authenticate as the operator principal for a
-// subject with no explicit mapping row; there is no fallback path.
+// live in both environments). GK-268 retired the prior invite-only
+// boundary: a verified subject with no existing mapping now gets a
+// brand-new principal auto-created, atomically, rather than a
+// NotProvisionedError — see service.js's own header for the full
+// before/after. A genuinely UNVERIFIABLE token (bad signature, expired,
+// malformed) still fails closed with the same undifferentiated 401 a
+// wrong passphrase gets.
+//
+// Best-effort, non-fatal profile fetch (Clerk's own management API, same
+// CLERK_SECRET_KEY) supplies a human-readable displayName for a BRAND NEW
+// principal only — loginWithExternalIdentity ignores it entirely once a
+// principal already exists. A failed profile fetch never blocks login.
 //
 // On success this issues the SAME session token issueToken() already
 // produces for the passphrase path — the resulting Authorization: Bearer
@@ -28,7 +34,7 @@
 // operator-action.js) needs zero changes to accept a Clerk-originated
 // session. Same rate limiter as auth-login.js.
 
-import { verifyToken as verifyClerkToken } from '@clerk/backend';
+import { verifyToken as verifyClerkToken, createClerkClient } from '@clerk/backend';
 import { loginWithExternalIdentity, InvalidCredentialError, InvalidTokenError, NotProvisionedError } from '../src/modules/auth/index.js';
 import { checkRateLimit } from './rate-limit.js';
 
@@ -69,8 +75,22 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
+  // Best-effort profile fetch for a brand-new principal's display name
+  // only. Never printed/logged beyond this; never blocks login on failure.
+  let displayName = null;
   try {
-    const { token, expiresAt } = await loginWithExternalIdentity({ provider: 'clerk', externalSubject: clerkSubject });
+    const clerkClient = createClerkClient({ secretKey });
+    const clerkUser = await clerkClient.users.getUser(clerkSubject);
+    displayName =
+      clerkUser?.primaryEmailAddress?.emailAddress ||
+      [clerkUser?.firstName, clerkUser?.lastName].filter(Boolean).join(' ') ||
+      null;
+  } catch (e) {
+    console.warn('[auth-clerk] profile fetch failed (non-fatal, login proceeds):', e?.message || e);
+  }
+
+  try {
+    const { token, expiresAt } = await loginWithExternalIdentity({ provider: 'clerk', externalSubject: clerkSubject, displayName });
     return res.status(200).json({ token, expiresAt });
   } catch (e) {
     if (e instanceof InvalidCredentialError || e instanceof NotProvisionedError || e instanceof InvalidTokenError) {

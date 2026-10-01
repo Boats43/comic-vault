@@ -41,11 +41,23 @@ console.log('--- api/assets.js: collectionItemId wiring ---');
 
 console.log('--- src/components/GrailKeyLoginGate.jsx ---');
 {
+  // GK-268 AUTH LAUNCH (2026-09-30) — the passphrase form (POST
+  // api/auth-login, direct setSession() call) is retired from this
+  // component entirely; it now delegates its ENTIRE onAuthenticated()
+  // path to ClerkAuthPanel (Google-via-Clerk, the sole front door). The
+  // session-helper/no-logging invariants this section exists to prove
+  // still hold — just one layer down, in ClerkAuthPanel.jsx, which this
+  // component unconditionally renders.
   const src = read('src/components/GrailKeyLoginGate.jsx');
-  assertTrue(/api\/auth-login/.test(src), 'posts to the existing auth-login endpoint, no new auth mechanism');
-  assertTrue(!/console\.(log|error|warn)\([^)]*passphrase/i.test(src), 'never logs the passphrase');
-  assertTrue(!/console\.(log|error|warn)\([^)]*token/i.test(src), 'never logs the token');
-  assertTrue(/setSession\(/.test(src), 'stores the returned session via the shared session helper, not ad hoc localStorage calls');
+  const liveSrc = src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assertTrue(!/api\/auth-login/.test(liveSrc), 'no longer posts to the retired passphrase auth-login endpoint — Google-via-Clerk is the sole front door (comments excluded — the retirement itself is documented in one)');
+  assertTrue(/<ClerkAuthPanel/.test(src), 'delegates its entire sign-in UI to ClerkAuthPanel');
+  assertTrue(!/console\.(log|error|warn)\([^)]*passphrase/i.test(src), 'never logs a passphrase (none exists in this file anymore)');
+  assertTrue(!/console\.(log|error|warn)\([^)]*token/i.test(src), 'never logs a token');
+
+  const clerkSrc = read('src/components/ClerkAuthPanel.jsx');
+  assertTrue(/setSession\(/.test(clerkSrc), 'ClerkAuthPanel stores the returned session via the shared session helper, not ad hoc localStorage calls');
+  assertTrue(!/console\.(log|error|warn)\([^)]*clerkToken/i.test(clerkSrc), 'ClerkAuthPanel never logs the Clerk token');
 }
 
 console.log('--- src/components/GrailKeyOperatorPanel.jsx ---');

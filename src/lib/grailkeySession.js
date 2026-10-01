@@ -36,12 +36,31 @@ export function setSession(token, expiresAt) {
   }
 }
 
+// GK-268 AUTH LAUNCH (2026-09-30) — every call site that already detects a
+// stale/invalid/expired session (there were ~6 scattered across App.jsx,
+// each independently calling clearSession() then separately flipping its
+// own local "authed" state) now gets that second step for free: a
+// 'grailkey:session-expired' event fires on every clearSession() call, so
+// App.jsx needs exactly ONE listener (mounted once, near grailkeyAuthed's
+// own useState) instead of a parallel setGrailkeyAuthed(false) at each
+// call site. Dispatched AFTER the localStorage removal succeeds/no-ops, so
+// a listener reading getSession()/isAuthenticated() during the event
+// always sees the already-cleared state. No-op in a non-browser context
+// (no `window`), matching this file's existing defensive try/catch style.
 export function clearSession() {
   try {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(EXPIRES_KEY);
   } catch {
     // no-op
+  }
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('grailkey:session-expired'));
+    }
+  } catch {
+    // no-op — a dispatch failure must never prevent the session from
+    // being considered cleared.
   }
 }
 
@@ -84,9 +103,20 @@ export function getPrincipalScope() {
 // throws, never calls fetch) when there is no valid session, so callers can
 // treat "not logged in" and "logged out mid-request" identically without a
 // try/catch at every call site.
+//
+// GK-268 AUTH LAUNCH — a 401 response means the server rejected this exact
+// token (missing/invalid/expired/revoked epoch) regardless of what
+// getSession()'s own local expiry check believed a moment ago. Clearing
+// the session here (which fires 'grailkey:session-expired', see
+// clearSession() above) means every authFetch call site gets "exits stale
+// authenticated state" for free, with zero per-call-site code. The
+// response is still returned (never swallowed) so an existing caller's
+// own error handling/messaging is unaffected.
 export async function authFetch(url, options = {}) {
   const session = getSession();
   if (!session) return null;
   const headers = { ...(options.headers || {}), Authorization: `Bearer ${session.token}` };
-  return fetch(url, { ...options, headers });
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) clearSession();
+  return res;
 }

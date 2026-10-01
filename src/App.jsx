@@ -66,23 +66,18 @@ function ClerkSignOutBridge({ signOutRef }) {
   return null;
 }
 
-// A3 ACCESS GATE: Client-side key helper
-// ACCESS GATE — T1 invite key management (A3 + LAUNCH BLOCKER FIX)
-// BETA-1A.1 — also attaches the real GrailKey session Bearer token when
-// one exists (src/lib/accessGate.js now accepts either credential
-// server-side). This is purely additive: a caller with no GrailKey
-// session still relies on the vault key exactly as before.
+// GK-268 AUTH LAUNCH — the legacy shared "vault_key"/access-code gate is
+// retired from the product entirely (no UI ever reads/writes it anymore).
+// This helper now attaches only the real, per-principal GrailKey session
+// Bearer token (src/lib/accessGate.js's server-side ACCESS_CODE/x-vault-key
+// fallback is untouched and still exists for non-product admin/test
+// tooling, but the client never sends it). Name kept as-is to avoid
+// touching all 26 call sites across this file.
 const getVaultHeaders = () => {
-  const key = localStorage.getItem('vault_key');
   const session = getSession();
   return {
-    ...(key ? { 'x-vault-key': key } : {}),
     ...(session ? { Authorization: `Bearer ${session.token}` } : {}),
   };
-};
-
-const clearVaultKey = () => {
-  localStorage.removeItem('vault_key');
 };
 
 // STRUCTURAL FIX: Normalize all items before render to prevent "cannot read property of undefined" crashes
@@ -11482,12 +11477,23 @@ export default function App() {
   const [duplicateWarning, setDuplicateWarning] = useState(null);
   const [pendingDuplicate, setPendingDuplicate] = useState(null);
   const [tradePiles, setTradePiles] = useState(() => getTradePiles());
-  const [showAccessModal, setShowAccessModal] = useState(false);
-  const [accessCodeInput, setAccessCodeInput] = useState('');
-  // GrailKey operator auth (Outcome #1) — distinct from the legacy vault-key
-  // gate above. Reuses the existing DATA-1D backend auth contract exactly;
-  // no new auth mechanism, no signup, no tenancy.
+  // GK-268 AUTH LAUNCH — the legacy shared vault-key/access-code gate
+  // (showAccessModal/accessCodeInput state + its modal) is retired
+  // entirely; GrailKey session auth (below) is now the sole front door.
+  // GrailKey operator auth (Outcome #1) — reuses the existing DATA-1D
+  // backend auth contract exactly.
   const [grailkeyAuthed, setGrailkeyAuthed] = useState(() => isAuthenticated());
+  // GK-268 AUTH LAUNCH — the single centralized stale-session listener.
+  // grailkeySession.js's clearSession() (called by authFetch on any 401,
+  // and by every pre-existing scattered 401/ownedAssetAuthRequired handler
+  // in this file) fires this event — one listener here replaces what used
+  // to be a parallel setGrailkeyAuthed(false) hand-written at each call
+  // site. Covers every current and future authFetch-based call for free.
+  useEffect(() => {
+    const onSessionExpired = () => setGrailkeyAuthed(false);
+    window.addEventListener('grailkey:session-expired', onSessionExpired);
+    return () => window.removeEventListener('grailkey:session-expired', onSessionExpired);
+  }, []);
   // Populated by <ClerkSignOutBridge> (only mounted when CLERK_ENABLED) so
   // the logout handler below can also end the separate Clerk session — see
   // that component's own comment for why this is required for logout to
@@ -11530,29 +11536,13 @@ export default function App() {
     saveTradePiles(tradePiles);
   }, [tradePiles]);
 
-  // ACCESS GATE — Check for vault key on mount.
-  // BETA-1A.1: this component only ever renders once grailkeyAuthed is
-  // true (see the `if (!grailkeyAuthed) return <GrailKeyLoginGate/>` gate
-  // above) — a valid authenticated GrailKey session already exists on
-  // every render that reaches here, and src/lib/accessGate.js now accepts
-  // that session as an alternate credential server-side. The legacy
-  // shared-code prompt is therefore only ever needed for a caller with
-  // NEITHER a stored vault key NOR a GrailKey session, which cannot occur
-  // on this render path — so it no longer pops up automatically for an
-  // authenticated user. The modal itself, and its manual "access code"
-  // button (unrelated administrative entry point), are unchanged.
-  useEffect(() => {
-    const key = localStorage.getItem('vault_key');
-    if (!key && !isAuthenticated()) {
-      setShowAccessModal(true);
-    }
-  }, []);
-
   // Load catalogue, snapshots, and cached analysis from IndexedDB on mount.
   useEffect(() => {
-    // Warm up grade + enrich endpoints silently (skip if no key yet)
-    const key = localStorage.getItem('vault_key');
-    if (!key) return;
+    // Warm up grade + enrich endpoints silently — GK-268 AUTH LAUNCH: this
+    // component only ever renders once grailkeyAuthed is true (see the
+    // `if (!grailkeyAuthed) return <GrailKeyLoginGate/>` gate above), so a
+    // valid session always exists on every render that reaches here.
+    if (!isAuthenticated()) return;
 
     fetch('/api/grade', {
       method: 'POST',
@@ -11728,10 +11718,10 @@ export default function App() {
 
     const stale = [...missingSource, ...dupStale];
     if (stale.length === 0) return;
-    // Q92-B: never launch the queue without a vault key — every request
-    // would bounce off the access gate as a 401 burst (the warmup effect
-    // already guards this way; the access modal is what the user needs).
-    if (!localStorage.getItem('vault_key')) return;
+    // Q92-B: never launch the queue without a valid session — every
+    // request would bounce off the access gate as a 401 burst (the
+    // warmup effect above guards this way too).
+    if (!isAuthenticated()) return;
     let cancelled = false;
     setRefreshingPrices(stale.length);
     const queue = stale.slice();
@@ -11814,13 +11804,15 @@ export default function App() {
           signal: controller.signal,
         })
           .then((r) => {
-            // Handle 401 unauthorized
+            // Handle 401 unauthorized — session missing/invalid/expired.
+            // GK-268 AUTH LAUNCH: force a real re-login (same pattern as
+            // the ownedAssetAuthRequired handling just below), not the
+            // retired vault-key modal.
             if (r.status === 401) {
-              clearVaultKey();
-              setShowAccessModal(true);
-              // Q92-B: stop the queue. getVaultHeaders() is empty after
-              // clearVaultKey(), so every remaining launch would fire
-              // keyless and 401 — the 12x-401 cascade. Drain instead.
+              clearSession();
+              setGrailkeyAuthed(false);
+              // Q92-B: stop the queue. Every remaining launch would fire
+              // sessionless and 401 — the 12x-401 cascade. Drain instead.
               cancelled = true;
               queue.length = 0;
               setRefreshingPrices(0);
@@ -12332,11 +12324,11 @@ export default function App() {
         });
         const data = await res.json();
 
-        // Handle 401 unauthorized (wrong/missing access code)
+        // Handle 401 unauthorized — session missing/invalid/expired.
         if (res.status === 401) {
-          clearVaultKey();
-          setShowAccessModal(true);
-          throw new Error("Access denied. Please enter your access code.");
+          clearSession();
+          setGrailkeyAuthed(false);
+          throw new Error("Your session expired — please sign in again.");
         }
 
         if (!res.ok) throw new Error(data.error || "Failed to grade");
@@ -12485,10 +12477,10 @@ export default function App() {
           body: JSON.stringify(enrichBody),
         })
           .then((r) => {
-            // Handle 401 unauthorized
+            // Handle 401 unauthorized — session missing/invalid/expired.
             if (r.status === 401) {
-              clearVaultKey();
-              setShowAccessModal(true);
+              clearSession();
+              setGrailkeyAuthed(false);
               return null;
             }
             return r.ok ? r.json() : null;
@@ -13963,10 +13955,10 @@ export default function App() {
       throw err;
     }
     if (!res.ok) {
-      // Handle 401 unauthorized
+      // Handle 401 unauthorized — session missing/invalid/expired.
       if (res.status === 401) {
-        clearVaultKey();
-        setShowAccessModal(true);
+        clearSession();
+        setGrailkeyAuthed(false);
         return;
       }
       const errBody = await res.json().catch(() => ({}));
@@ -15071,21 +15063,10 @@ export default function App() {
 
           {!loading && !result && !error && !bulkProgress && bulkDone == null && (
             <>
-              {/* Scanner ready indicator + access code button */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 20px 8px" }}>
-                <button
-                  onClick={() => setShowAccessModal(true)}
-                  style={{
-                    fontSize: 11,
-                    color: "#666",
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: "4px 8px",
-                  }}
-                >
-                  🔑 Access code
-                </button>
+              {/* Scanner ready indicator — GK-268 AUTH LAUNCH: the legacy
+                  "🔑 Access code" button is retired, no shared operator
+                  key exists for a real user to enter anymore. */}
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "0 20px 8px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <div style={{
                     width: 6, height: 6, borderRadius: "50%", background: "#16a34a",
@@ -15824,98 +15805,11 @@ export default function App() {
         </div>
       )}
 
-      {/* ACCESS GATE MODAL — T1 invite key entry (LAUNCH BLOCKER FIX) */}
-      {showAccessModal && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.95)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 10000,
-            padding: 20,
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              // Prevent dismissing by clicking outside if no key stored
-              if (localStorage.getItem('vault_key')) {
-                setShowAccessModal(false);
-              }
-            }
-          }}
-        >
-          <div
-            style={{
-              background: "#1a1a1a",
-              borderRadius: 12,
-              padding: 32,
-              maxWidth: 400,
-              width: "100%",
-              border: "1px solid #333",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 8, color: "#d4af37" }}>
-              🔐 Access Required
-            </div>
-            <div style={{ fontSize: 14, color: "#999", marginBottom: 24 }}>
-              Enter your GrailKey access code to continue
-            </div>
-            <input
-              type="password"
-              value={accessCodeInput}
-              onChange={(e) => setAccessCodeInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && accessCodeInput.trim()) {
-                  localStorage.setItem('vault_key', accessCodeInput.trim());
-                  setShowAccessModal(false);
-                  setAccessCodeInput('');
-                }
-              }}
-              placeholder="Access code"
-              autoFocus
-              style={{
-                width: "100%",
-                padding: "12px 16px",
-                fontSize: 16,
-                background: "#2a2a2a",
-                border: "1px solid #444",
-                borderRadius: 8,
-                color: "#fff",
-                marginBottom: 16,
-              }}
-            />
-            <button
-              onClick={() => {
-                if (accessCodeInput.trim()) {
-                  localStorage.setItem('vault_key', accessCodeInput.trim());
-                  setShowAccessModal(false);
-                  setAccessCodeInput('');
-                }
-              }}
-              disabled={!accessCodeInput.trim()}
-              style={{
-                width: "100%",
-                padding: "12px 16px",
-                fontSize: 16,
-                fontWeight: 700,
-                background: accessCodeInput.trim() ? "#d4af37" : "#444",
-                color: accessCodeInput.trim() ? "#000" : "#666",
-                border: "none",
-                borderRadius: 8,
-                cursor: accessCodeInput.trim() ? "pointer" : "not-allowed",
-              }}
-            >
-              Continue
-            </button>
-          </div>
-        </div>
-      )}
+      {/* GK-268 AUTH LAUNCH — the legacy shared "vault_key"/access-code
+          modal is retired entirely (no shared operator secret exists for
+          a real user to enter anymore). GrailKey session auth, gated at
+          the top of this component (`if (!grailkeyAuthed) return
+          <GrailKeyLoginGate/>`), is now the sole front door. */}
     </div>
   );
 }

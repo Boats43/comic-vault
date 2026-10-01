@@ -84,7 +84,13 @@ console.log('\n--- service.js: loginWithExternalIdentity fail-closed guard (stat
   const fnMatch = src.match(/export async function loginWithExternalIdentity\([^)]*\)[^{]*\{([\s\S]*?)\n\}/);
   assertTrue(!!fnMatch, 'loginWithExternalIdentity is exported and its body is present');
   const body = fnMatch ? fnMatch[1] : '';
-  assertTrue(/if \(!principal\)/.test(body) && /NotProvisionedError/.test(body), 'an unmapped principal throws NotProvisionedError — same fail-closed shape as login()');
+  // GK-268 AUTH LAUNCH (2026-09-30) — superseded assertion: an unmapped
+  // subject used to throw NotProvisionedError (invite-only boundary,
+  // 0022's own migration header). Explicit product ruling retired that
+  // boundary — an unmapped, VERIFIED subject now gets a brand-new
+  // principal auto-created, atomically, rather than rejected. See
+  // service.js's own updated header for the full before/after.
+  assertTrue(/if \(!principal\)/.test(body) && /createPrincipalWithExternalIdentity/.test(body), 'an unmapped (but verified) subject reaches createPrincipalWithExternalIdentity — self-service provisioning, not a rejection');
   assertTrue(!/getOperatorPrincipal/.test(body), 'loginWithExternalIdentity never calls getOperatorPrincipal — no fallback to "the one operator" for an unrecognized subject');
   assertTrue(/getPrincipalByExternalIdentity/.test(body), 'resolution goes exclusively through getPrincipalByExternalIdentity');
   const sigMatch = src.match(/export async function loginWithExternalIdentity\(\{([^}]*)\}/);

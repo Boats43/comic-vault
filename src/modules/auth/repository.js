@@ -76,3 +76,43 @@ export async function upsertExternalIdentity(client, { id, principalId, provider
     [id, principalId, provider, externalSubject]
   );
 }
+
+// GK-268 AUTH LAUNCH (2026-09-30) — self-service principal creation. A
+// verified external identity (today: Clerk, carrying Google/etc. behind
+// it) with no existing principal_external_identity mapping gets a brand
+// new, 'user'-kind gk_principal (kind='operator' is reserved for the
+// single pre-existing operator era — see 0004's own CHECK constraint),
+// atomically with its identity mapping, in one transaction. IDs are
+// minted explicitly via uuidv7() before use (ADR-ID-001 — never a column
+// default), same convention src/modules/assets/service.js already uses.
+//
+// Race safety: two concurrent first-logins for the same new subject can
+// both miss a prior SELECT and both reach here — the loser's INSERT
+// violates principal_external_identity's own UNIQUE(provider,
+// external_subject) constraint (23505). The caller (service.js) catches
+// that and re-reads the winner's row via getPrincipalByExternalIdentity —
+// this function itself just rolls back cleanly and rethrows, same shape
+// GK-193's idempotency-claim race precedent established elsewhere.
+export async function createPrincipalWithExternalIdentity(client, { displayName, provider, externalSubject }) {
+  await client.query('BEGIN');
+  try {
+    const principalIdRes = await client.query('SELECT uuidv7() AS id');
+    const principalId = principalIdRes.rows[0].id;
+    await client.query(
+      `INSERT INTO data1_dev.gk_principal (id, display_name, kind) VALUES ($1, $2, 'user')`,
+      [principalId, displayName]
+    );
+    const identityIdRes = await client.query('SELECT uuidv7() AS id');
+    const identityId = identityIdRes.rows[0].id;
+    await client.query(
+      `INSERT INTO data1_dev.principal_external_identity (id, principal_id, provider, external_subject)
+       VALUES ($1, $2, $3, $4)`,
+      [identityId, principalId, provider, externalSubject]
+    );
+    await client.query('COMMIT');
+    return { id: principalId, display_name: displayName };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  }
+}
