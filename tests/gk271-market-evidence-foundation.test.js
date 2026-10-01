@@ -7,6 +7,7 @@ import {
 } from '../src/lib/marketEvidence.js';
 import { isUnconfirmedCountryClaim, deriveEditionStanding } from '../src/lib/editionAuthority.js';
 import { guardConditionClaims } from '../src/lib/conditionEvidenceGuard.js';
+import { evidenceIntegrityViolations, getMarketEvidence } from '../src/lib/marketEvidence.js';
 
 let passed = 0, failed = 0;
 const ok = (c, l) => { if (c) { passed++; console.log(`  ✓ ${l}`); } else { failed++; console.log(`  ✗ ${l}`); } };
@@ -83,7 +84,7 @@ ok(!/staple/i.test(g1.reason), 'front-only: staple/spine claim withheld');
 ok(!/polybag|back covers/i.test(g1.reason), 'pre-1980 book: polybag claim withheld');
 ok(/corner chipping/i.test(g1.reason) && /heavy wear/i.test(g1.reason), 'front-visible claims (corners, wear) are kept');
 ok(g1.cgcPenaltyFlags.polybagIndents.detected === false && g1.cgcPenaltyFlags.polybagIndents.rejectedByEraGate === true, 'polybag flag rejected by era gate');
-ok(g1.cgcPenaltyFlags.staplePopping.detected === true, 'unrelated penalty flags are not touched here (disclosed)');
+ok(g1.cgcPenaltyFlags.staplePopping.detected === false && g1.cgcPenaltyFlags.staplePopping.rejectedByViewGate === true, 'front-only: staplePopping flag rejected by the view gate (needs SPINE)');
 ok(g1.withheld.length >= 2 && g1.withheld.every((w) => w.claim && w.reason), 'withheld claims are recorded with reasons, not silently dropped');
 const g2 = guardConditionClaims({ reason: 'Back cover shows a crease. Spine has stress lines.', imageCount: 2, year: 1985 });
 ok(g2.changed === false, 'multiple undeclared images: claims stand (cannot be disproven)');
