@@ -11,7 +11,7 @@
 // Invoke: node tests/gk269-ebay-account-deletion.test.js
 
 import { readFileSync } from 'node:fs';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createSign, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -30,6 +30,83 @@ if (!process.env.GRAILKEY_MARKETPLACE_CREDENTIAL_KEY) {
 }
 process.env.EBAY_ACCOUNT_DELETION_VERIFICATION_TOKEN = process.env.EBAY_ACCOUNT_DELETION_VERIFICATION_TOKEN || `test-verification-token-${randomBytes(16).toString('hex')}`;
 process.env.EBAY_ACCOUNT_DELETION_ENDPOINT_URL = process.env.EBAY_ACCOUNT_DELETION_ENDPOINT_URL || 'https://app.grailkey.com/api/ebay-account-deletion';
+process.env.EBAY_APP_ID = process.env.EBAY_APP_ID || 'test-app-id';
+process.env.EBAY_CERT_ID = process.env.EBAY_CERT_ID || 'test-cert-id';
+
+// ─────────────────────────────────────────────────────────────────────
+// Real EC keypair + real eBay-shaped signature fixture. Mirrors eBay's
+// own official event-notification-nodejs-sdk exactly (fetched and read
+// directly from github.com/eBay/event-notification-nodejs-sdk this
+// session): digest name 'ssl3-sha1' (verified accepted by this Node's
+// OpenSSL build -- createVerify('ssl3-sha1') does not throw), message =
+// JSON.stringify(body), public key returned by eBay's own API glues the
+// PEM BEGIN/END markers onto the base64 body with no newline (formatKey
+// reinserts it) -- so the TEST's own mocked "eBay API" response
+// deliberately strips the real PEM's newlines the same way, to prove the
+// handler's own reformatting step is what makes verification succeed,
+// not an accidentally-already-valid PEM.
+// ─────────────────────────────────────────────────────────────────────
+const { publicKey: testPublicKeyObj, privateKey: testPrivateKeyObj } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const testPublicKeyPem = testPublicKeyObj.export({ type: 'spki', format: 'pem' });
+// Strip the newline eBay's real API apparently omits, so the handler's
+// own formatEbayPublicKeyPem() is the thing proven to restore it.
+const testPublicKeyRawNoNewlines = testPublicKeyPem
+  .replace('-----BEGIN PUBLIC KEY-----\n', '-----BEGIN PUBLIC KEY-----')
+  .replace('\n-----END PUBLIC KEY-----\n', '-----END PUBLIC KEY-----')
+  .replace(/\n/g, '');
+const TEST_KID = 'test-key-1';
+
+function signNotificationBody(body) {
+  const signer = createSign('ssl3-sha1');
+  signer.update(JSON.stringify(body));
+  const signature = signer.sign(testPrivateKeyObj, 'base64');
+  return Buffer.from(JSON.stringify({ kid: TEST_KID, signature })).toString('base64');
+}
+
+// Real end-to-end self-check at module load: if this fails, the fixture
+// itself (curve/digest/PEM-reconstruction choice) is wrong, independent
+// of anything in the handler.
+{
+  const { createVerify } = await import('node:crypto');
+  const probeBody = { probe: true };
+  const probeHeader = signNotificationBody(probeBody);
+  const decoded = JSON.parse(Buffer.from(probeHeader, 'base64').toString('ascii'));
+  const reformatted = testPublicKeyRawNoNewlines
+    .replace('-----BEGIN PUBLIC KEY-----', '-----BEGIN PUBLIC KEY-----\n')
+    .replace('-----END PUBLIC KEY-----', '\n-----END PUBLIC KEY-----');
+  const verifier = createVerify('ssl3-sha1');
+  verifier.update(JSON.stringify(probeBody));
+  const selfCheckOk = verifier.verify(reformatted, decoded.signature, 'base64');
+  if (!selfCheckOk) {
+    throw new Error('FIXTURE SELF-CHECK FAILED: the test’s own sign/verify round-trip (prime256v1 + ssl3-sha1) does not pass -- the curve or digest choice needs adjustment before any handler test can be trusted.');
+  }
+  console.log('[fixture self-check] prime256v1 + ssl3-sha1 real sign/verify round-trip: PASS');
+}
+
+// Dispatches global.fetch by URL: eBay's OAuth token endpoint (consumed
+// by api/comps.js's own getOAuthToken, reused by the handler) and eBay's
+// public-key endpoint (returns the test public key, PEM-markers glued
+// with no newline, exactly like the real API apparently does).
+function installEbayFetchMock() {
+  global.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('/identity/v1/oauth2/token')) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ access_token: 'fake-app-token', expires_in: 7200, token_type: 'Application Access Token' }),
+      };
+    }
+    if (u.includes('/commerce/notification/v1/public_key/')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ key: testPublicKeyRawNoNewlines, algorithm: 'ECDSA', digest: 'SHA1' }),
+      };
+    }
+    throw new Error(`unexpected fetch in test: ${u}`);
+  };
+}
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -100,10 +177,40 @@ try {
     process.env.EBAY_ACCOUNT_DELETION_ENDPOINT_URL = saved;
   }
 
+  installEbayFetchMock();
+
   // ─────────────────────────────────────────────────────────────────
-  // POST — real matching connection gets disconnected
+  // POST — missing / malformed signature rejected BEFORE any DB access
   // ─────────────────────────────────────────────────────────────────
-  console.log('\n--- POST: matching eiasToken disconnects the real connection ---');
+  console.log('\n--- POST: missing signature header rejected ---');
+  {
+    const { res, cap } = mockRes();
+    const notification = { metadata: {}, notification: { data: { eiasToken: `${TAG}-no-sig` } } };
+    await handler({ method: 'POST', headers: {}, body: notification }, res);
+    assertEq(cap.status, 400, 'a POST with no x-ebay-signature header at all is rejected (400) before any database access');
+  }
+
+  console.log('\n--- POST: malformed signature header rejected ---');
+  {
+    const { res, cap } = mockRes();
+    const notification = { metadata: {}, notification: { data: { eiasToken: `${TAG}-bad-sig` } } };
+    await handler({ method: 'POST', headers: { 'x-ebay-signature': 'not-valid-base64-json!!!' }, body: notification }, res);
+    assertEq(cap.status, 400, 'a structurally malformed x-ebay-signature header (not valid base64/JSON) is rejected (400) before any database access');
+  }
+  {
+    // Valid base64/JSON shape, but not a real signature -> rejected as a
+    // verification failure (401), distinct from "malformed" (400).
+    const { res, cap } = mockRes();
+    const notification = { metadata: {}, notification: { data: { eiasToken: `${TAG}-fake-sig` } } };
+    const fakeHeader = Buffer.from(JSON.stringify({ kid: TEST_KID, signature: Buffer.from('not-a-real-signature').toString('base64') })).toString('base64');
+    await handler({ method: 'POST', headers: { 'x-ebay-signature': fakeHeader }, body: notification }, res);
+    assertEq(cap.status, 401, 'a well-formed but cryptographically invalid signature is rejected (401) -- distinct status from a structurally malformed header');
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // POST — real matching connection gets disconnected (validly signed)
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- POST: matching eiasToken disconnects the real connection (validly signed) ---');
   const PRINCIPAL_B = randomUUID();
   createdPrincipalIds.push(PRINCIPAL_B);
   await client.query(`INSERT INTO gk_principal (id, display_name, kind) VALUES ($1, $2, 'user')`, [PRINCIPAL_B, `${TAG}-principal-b`]);
@@ -115,17 +222,32 @@ try {
     refreshCredential: `fake-refresh-${TAG}-b`,
   });
 
+  const notificationB = { metadata: { topic: 'MARKETPLACE_ACCOUNT_DELETION', schemaVersion: '1.0' }, notification: { notificationId: randomUUID(), data: { username: 'fake_username', userId: 'fake_user_id', eiasToken: EIAS_TOKEN_B } } };
+  const sigHeaderB = signNotificationBody(notificationB);
+
   {
     const before = await getMarketplaceConnection({ principalId: PRINCIPAL_B, provider: 'EBAY' });
     assertEq(before?.connectionStatus, 'CONNECTED', 'sanity: principal B’s connection starts CONNECTED');
 
     const { res, cap } = mockRes();
-    const notification = { metadata: { topic: 'MARKETPLACE_ACCOUNT_DELETION', schemaVersion: '1.0' }, notification: { notificationId: randomUUID(), data: { username: 'fake_username', userId: 'fake_user_id', eiasToken: EIAS_TOKEN_B } } };
-    await handler({ method: 'POST', body: notification }, res);
-    assertEq(cap.status, 200, 'POST with a matching eiasToken returns 200');
+    await handler({ method: 'POST', headers: { 'x-ebay-signature': sigHeaderB }, body: notificationB }, res);
+    assertEq(cap.status, 200, 'a validly signed POST with a matching eiasToken returns 200 -- real end-to-end signature verification (real EC keypair, real sign, real verify against the handler’s own formatEbayPublicKeyPem reconstruction) actually passed');
 
     const after = await getMarketplaceConnection({ principalId: PRINCIPAL_B, provider: 'EBAY' });
     assertEq(after?.connectionStatus, 'DISCONNECTED', 'the matching connection is now DISCONNECTED (independently re-read, not accepted from the handler response alone)');
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // POST — payload mutation invalidates the (otherwise valid) signature
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- POST: payload mutation invalidates verification ---');
+  {
+    const mutatedBody = { ...notificationB, notification: { ...notificationB.notification, data: { ...notificationB.notification.data, eiasToken: `${TAG}-attacker-substituted-eias` } } };
+    const { res, cap } = mockRes();
+    // Reuse sigHeaderB (signed over the ORIGINAL notificationB), but send
+    // the mutated body -- the signature no longer matches.
+    await handler({ method: 'POST', headers: { 'x-ebay-signature': sigHeaderB }, body: mutatedBody }, res);
+    assertEq(cap.status, 401, 'a signature valid for one payload does not validate a different (mutated) payload -- rejected (401), no disconnect attempted');
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -134,30 +256,32 @@ try {
   console.log('\n--- POST: duplicate notification for the same (now-disconnected) eiasToken is idempotent ---');
   {
     const { res, cap } = mockRes();
-    const notification = { metadata: { topic: 'MARKETPLACE_ACCOUNT_DELETION' }, notification: { notificationId: randomUUID(), data: { eiasToken: EIAS_TOKEN_B } } };
-    await handler({ method: 'POST', body: notification }, res);
-    assertEq(cap.status, 200, 'a second notification for the same, already-disconnected eiasToken still returns 200 (idempotent, not an error)');
+    await handler({ method: 'POST', headers: { 'x-ebay-signature': sigHeaderB }, body: notificationB }, res);
+    assertEq(cap.status, 200, 'a second, validly-signed notification for the same, already-disconnected eiasToken still returns 200 (idempotent, not an error)');
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // POST — unknown eiasToken (no matching connection at all)
+  // POST — unknown eiasToken (no matching connection at all), validly signed
   // ─────────────────────────────────────────────────────────────────
-  console.log('\n--- POST: unknown eiasToken (never connected) ---');
+  console.log('\n--- POST: unknown eiasToken (never connected), validly signed ---');
   {
-    const { res, cap } = mockRes();
     const notification = { metadata: { topic: 'MARKETPLACE_ACCOUNT_DELETION' }, notification: { notificationId: randomUUID(), data: { eiasToken: `${TAG}-never-existed` } } };
-    await handler({ method: 'POST', body: notification }, res);
-    assertEq(cap.status, 200, 'an eiasToken matching no connection still returns 200, never an error');
+    const sigHeader = signNotificationBody(notification);
+    const { res, cap } = mockRes();
+    await handler({ method: 'POST', headers: { 'x-ebay-signature': sigHeader }, body: notification }, res);
+    assertEq(cap.status, 200, 'a validly-signed notification whose eiasToken matches no connection still returns 200, never an error, and never a database write');
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // POST — missing eiasToken in payload (malformed/partial notification)
+  // POST — missing eiasToken in payload (malformed/partial notification), validly signed
   // ─────────────────────────────────────────────────────────────────
-  console.log('\n--- POST: malformed notification body (no eiasToken) ---');
+  console.log('\n--- POST: malformed notification body (no eiasToken), validly signed ---');
   {
+    const body = { metadata: {}, notification: { data: {} } };
+    const sigHeader = signNotificationBody(body);
     const { res, cap } = mockRes();
-    await handler({ method: 'POST', body: { metadata: {}, notification: { data: {} } } }, res);
-    assertEq(cap.status, 200, 'a notification body with no eiasToken at all still returns 200 (nothing to disconnect, not an error)');
+    await handler({ method: 'POST', headers: { 'x-ebay-signature': sigHeader }, body }, res);
+    assertEq(cap.status, 200, 'a validly-signed notification body with no eiasToken at all still returns 200 (nothing to disconnect, not an error)');
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -179,6 +303,23 @@ try {
     const liveSrc = src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
     assertTrue(!/requireAuthenticatedPrincipal/.test(liveSrc), 'this endpoint does NOT require a GrailKey session in live code (eBay itself calls it directly, never carries a Bearer token) — comments excluded, the deliberate non-use is documented in one');
     assertTrue(!/gk_asset|collection_item|outcome_event|operator_action_event/.test(liveSrc), 'the handler source never references any physical-asset/collection/outcome table (comments excluded) — scope is strictly the marketplace_connection row');
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // No credential disclosure: the signature value, public key material,
+  // and app token are never passed to console.log/console.error.
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- scope: signature verification never logs secret/key material ---');
+  {
+    const src = readFileSync(path.join(repoRoot, 'api', 'ebay-account-deletion.js'), 'utf8');
+    const liveSrc = src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    // Every console.log/console.error call site, checked individually --
+    // none may interpolate decoded.signature, rawKey, accessToken, or the
+    // raw x-ebay-signature header value itself.
+    const logCalls = liveSrc.match(/console\.(log|error)\([^;]*\)/g) || [];
+    assertTrue(logCalls.length > 0, 'sanity: the source actually contains console.log/console.error calls to check');
+    const leaksSecret = logCalls.some((call) => /decoded\.signature|rawKey|accessToken|headerValue|EBAY_CERT_ID/.test(call));
+    assertTrue(!leaksSecret, 'no console.log/console.error call site interpolates the signature value, the raw public key, the app access token, the raw signature header, or EBAY_CERT_ID');
   }
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);
