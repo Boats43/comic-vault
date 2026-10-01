@@ -11921,6 +11921,16 @@ export default function App() {
                 originalYear: enrich.originalYear || cur.originalYear || null,
                 originalKeyIssue: enrich.originalKeyIssue || cur.originalKeyIssue || null,
                 title: enrich.title || cur.title,
+                // GK-259 — governing-grade provenance-display fields, same
+                // presence-aware pattern and field set refreshMarketData
+                // already uses (App.jsx, ~line 14007) — never consulted for
+                // any authority decision client-side.
+                governingGrade: enrich.governingGrade ?? cur.governingGrade ?? null,
+                governingGradeNumeric: enrich.governingGradeNumeric ?? cur.governingGradeNumeric ?? null,
+                governingGradeSource: enrich.governingGradeSource ?? cur.governingGradeSource ?? null,
+                governingIsGraded: enrich.governingIsGraded ?? cur.governingIsGraded ?? null,
+                governingGradingFormatSource: enrich.governingGradingFormatSource ?? cur.governingGradingFormatSource ?? null,
+                gradeResolutionStatus: enrich.gradeResolutionStatus ?? cur.gradeResolutionStatus ?? null,
                 keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
                 keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
                 creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
@@ -12670,6 +12680,14 @@ export default function App() {
                   // Ship #17 observability
                   lowGradeFloorApplied: enrich.lowGradeFloorApplied === true,
                   lowGradeFloorAnchor: enrich.lowGradeFloorAnchor || null,
+                  // GK-259 — governing-grade provenance-display fields,
+                  // same pattern as refreshMarketData (App.jsx, ~line 14007).
+                  governingGrade: enrich.governingGrade ?? cur.governingGrade ?? null,
+                  governingGradeNumeric: enrich.governingGradeNumeric ?? cur.governingGradeNumeric ?? null,
+                  governingGradeSource: enrich.governingGradeSource ?? cur.governingGradeSource ?? null,
+                  governingIsGraded: enrich.governingIsGraded ?? cur.governingIsGraded ?? null,
+                  governingGradingFormatSource: enrich.governingGradingFormatSource ?? cur.governingGradingFormatSource ?? null,
+                  gradeResolutionStatus: enrich.gradeResolutionStatus ?? cur.gradeResolutionStatus ?? null,
                   // Ship #18 — preserve Vision-set penalty flags
                   cgcPenaltyFlags: enrich.cgcPenaltyFlags || cur.cgcPenaltyFlags || null,
                   // Ship #19 — preserve Vision-set editionWarning + ack state
@@ -12787,6 +12805,14 @@ export default function App() {
                   certNumber: enrich.certNumber || s.certNumber || null, labelType: enrich.labelType || s.labelType || null, labelNotes: enrich.labelNotes || s.labelNotes || null,
                   cgcVerified: enrich.cgcVerified || s.cgcVerified || false,
                   cgcLabel: enrich.cgcLabel || s.cgcLabel || null,
+                  // GK-259 — governing-grade provenance-display fields,
+                  // same pattern as refreshMarketData (App.jsx, ~line 14007).
+                  governingGrade: enrich.governingGrade ?? s.governingGrade ?? null,
+                  governingGradeNumeric: enrich.governingGradeNumeric ?? s.governingGradeNumeric ?? null,
+                  governingGradeSource: enrich.governingGradeSource ?? s.governingGradeSource ?? null,
+                  governingIsGraded: enrich.governingIsGraded ?? s.governingIsGraded ?? null,
+                  governingGradingFormatSource: enrich.governingGradingFormatSource ?? s.governingGradingFormatSource ?? null,
+                  gradeResolutionStatus: enrich.gradeResolutionStatus ?? s.gradeResolutionStatus ?? null,
                   goCollect: enrich.goCollect || s.goCollect || null,
                   variantMultiplier: enrich.variantMultiplier || s.variantMultiplier || null,
                   variantMultiplierEstimated: enrich.variantMultiplierEstimated === true || s.variantMultiplierEstimated === true,
@@ -13141,6 +13167,16 @@ export default function App() {
                 originalYear: enrich.originalYear || cur.originalYear || null,
                 originalKeyIssue: enrich.originalKeyIssue || cur.originalKeyIssue || null,
                 title: enrich.title || cur.title,
+                // GK-259 — governing-grade provenance-display fields, same
+                // presence-aware pattern and field set refreshMarketData
+                // already uses (App.jsx, ~line 14007) — never consulted for
+                // any authority decision client-side.
+                governingGrade: enrich.governingGrade ?? cur.governingGrade ?? null,
+                governingGradeNumeric: enrich.governingGradeNumeric ?? cur.governingGradeNumeric ?? null,
+                governingGradeSource: enrich.governingGradeSource ?? cur.governingGradeSource ?? null,
+                governingIsGraded: enrich.governingIsGraded ?? cur.governingIsGraded ?? null,
+                governingGradingFormatSource: enrich.governingGradingFormatSource ?? cur.governingGradingFormatSource ?? null,
+                gradeResolutionStatus: enrich.gradeResolutionStatus ?? cur.gradeResolutionStatus ?? null,
                 keyFromComps: enrich.keyFromComps || cur.keyFromComps || [],
                 keyFromCompsSingleton: enrich.keyFromCompsSingleton || cur.keyFromCompsSingleton || [],
                 creatorFromComps: enrich.creatorFromComps || cur.creatorFromComps || [],
@@ -14506,6 +14542,16 @@ export default function App() {
       labelNotes: gradeData.labelNotes || null,
       cgcVerified: gradeData.cgcVerified || false,
       cgcLabel: gradeData.cgcLabel || null,
+      // GK-259 — governing-grade provenance-display fields, same
+      // presence-aware pattern and field set refreshMarketData already
+      // uses (App.jsx, ~line 14007) — never consulted for any authority
+      // decision client-side.
+      governingGrade: enrichData?.governingGrade ?? item.governingGrade ?? null,
+      governingGradeNumeric: enrichData?.governingGradeNumeric ?? item.governingGradeNumeric ?? null,
+      governingGradeSource: enrichData?.governingGradeSource ?? item.governingGradeSource ?? null,
+      governingIsGraded: enrichData?.governingIsGraded ?? item.governingIsGraded ?? null,
+      governingGradingFormatSource: enrichData?.governingGradingFormatSource ?? item.governingGradingFormatSource ?? null,
+      gradeResolutionStatus: enrichData?.gradeResolutionStatus ?? item.gradeResolutionStatus ?? null,
       // 2026-07-18 — re-identification runs a fresh Vision call, so refresh
       // both gates from the new result rather than carrying forward the
       // pre-re-identify values via the `...item` spread above.
@@ -15496,7 +15542,7 @@ export default function App() {
                                   // 2026-07-18 — fold in identity/asset-type gate (was previously
                                   // absent on this duplicate-confirm path).
                                   const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
-                                  const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                                  const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GK-259 — governing-grade provenance-display fields, same pattern as refreshMarketData */ governingGrade: enrich.governingGrade ?? cur.governingGrade ?? null, governingGradeNumeric: enrich.governingGradeNumeric ?? cur.governingGradeNumeric ?? null, governingGradeSource: enrich.governingGradeSource ?? cur.governingGradeSource ?? null, governingIsGraded: enrich.governingIsGraded ?? cur.governingIsGraded ?? null, governingGradingFormatSource: enrich.governingGradingFormatSource ?? cur.governingGradingFormatSource ?? null, gradeResolutionStatus: enrich.gradeResolutionStatus ?? cur.gradeResolutionStatus ?? null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                                   // GK-213A (Operator Authority) — site-parity: this was the one
                                   // "fresh save" merge site with no title/issue/year/publisher key
                                   // at all (silently frozen on the addToCatalogue-time value,
