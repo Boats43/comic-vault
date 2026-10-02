@@ -120,6 +120,26 @@ export const kvZAdd = async (key, score, member) => {
 };
 
 /**
+ * GK-261 — atomic get-and-delete (Redis GETDEL). The single-use claim
+ * primitive for server-owned grade receipts (src/lib/gradeReceipt.js):
+ * of N concurrent callers exactly one receives the value. Returns null on
+ * miss, error, or when KV is unavailable (callers must treat null as
+ * "no receipt," never as "trust the client").
+ */
+export const kvGetDel = async (key) => {
+  const client = await getKV();
+  if (!client) return null;
+
+  try {
+    const value = await client.getdel(key);
+    return value ?? null;
+  } catch (err) {
+    console.warn('[kv-cache] GETDEL failed:', key, err.message);
+    return null;
+  }
+};
+
+/**
  * Delete value from KV cache.
  * Used for cache invalidation (rarely needed).
  */

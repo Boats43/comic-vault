@@ -115,14 +115,35 @@ try {
     gradingFormatAuthority: 'OPERATOR_CONFIRMED',
   };
 
+  // GK-261 — identityAuthority / modelPredictedGrade* are now FULLY server-owned: an
+  // ordinary client create can no longer persist them (previously "unchanged, out of
+  // GK-260 scope"). This suite's SURVIVAL assertions therefore seed those values the
+  // only way a pre-GK-261 historical row could hold them — directly in the DB — and
+  // prove ordinary writes preserve them byte-for-byte (historical claims preserved,
+  // neither promoted nor erased). Forge/clear/overwrite closure is
+  // tests/gk261-server-owned-model-authority.test.js.
+  const seedLegacyServerOwned = async (id) => {
+    await client.query(
+      `UPDATE collection_item SET attributes = attributes || $3::jsonb WHERE principal_id = $1 AND id = $2`,
+      [PRINCIPAL, id, JSON.stringify({
+        identityAuthority: fullAuthorityAttributes.identityAuthority,
+        modelPredictedGrade: fullAuthorityAttributes.modelPredictedGrade,
+        modelPredictedGradeReason: fullAuthorityAttributes.modelPredictedGradeReason,
+        modelPredictedGradeConfidence: fullAuthorityAttributes.modelPredictedGradeConfidence,
+        modelPredictedAt: fullAuthorityAttributes.modelPredictedAt,
+      })]
+    );
+  };
+
   console.log('-- 1. create with a payload claiming full authority/provenance state --\n');
   {
     const req = { method: 'POST', headers: { authorization: `Bearer ${token}` }, query: {}, body: { id: ITEM_ID, assetCategory: 'comic', attributes: fullAuthorityAttributes } };
     const res = mockRes();
     await collectionRoute(req, res);
     assertTrue(res.statusCode === 200, `create -> 200 (got ${res.statusCode})`);
-    assertEq(res.body?.attributes?.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'identityAuthority persisted on create (unchanged, out of GK-260 scope)');
-    assertEq(res.body?.attributes?.modelPredictedGrade, 'GD 2.0', 'modelPredictedGrade persisted on create (unchanged, out of GK-260 scope)');
+    assertTrue(!('identityAuthority' in (res.body?.attributes || {})), 'CRITICAL (GK-261): identityAuthority is NOT persisted on create via the ordinary path');
+    assertTrue(!('modelPredictedGrade' in (res.body?.attributes || {})), 'CRITICAL (GK-261): modelPredictedGrade is NOT persisted on create via the ordinary path');
+    await seedLegacyServerOwned(ITEM_ID);
     // GK-260: the ordinary create path can never plant these six, even at
     // create time — this is the exact "forged insertion on a new row" gap
     // GK-260's closure pass found and fixed (repository.js's
@@ -153,11 +174,11 @@ try {
 
     assertEq(attrs.price, '$45.00', 'ordinary field (price) DID update — full-replace semantics intact for non-authority fields');
     assertEq(attrs.someUnrelatedField, 'x', 'a genuinely new ordinary field is also accepted normally');
-    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'SURVIVED: identityAuthority (K3 required result, unchanged by GK-260)');
-    assertEq(attrs.modelPredictedGrade, 'GD 2.0', 'SURVIVED: modelPredictedGrade (unchanged by GK-260)');
-    assertEq(attrs.modelPredictedGradeReason, 'Initial AI read', 'SURVIVED: modelPredictedGradeReason (unchanged by GK-260)');
-    assertEq(attrs.modelPredictedGradeConfidence, 'high', 'SURVIVED: modelPredictedGradeConfidence (unchanged by GK-260)');
-    assertEq(attrs.modelPredictedAt, 1700000000000, 'SURVIVED: modelPredictedAt (unchanged by GK-260)');
+    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'SURVIVED: identityAuthority (K3 required result; historical value preserved)');
+    assertEq(attrs.modelPredictedGrade, 'GD 2.0', 'SURVIVED: modelPredictedGrade (historical value preserved; GK-261 full immunity)');
+    assertEq(attrs.modelPredictedGradeReason, 'Initial AI read', 'SURVIVED: modelPredictedGradeReason (historical value preserved; GK-261 full immunity)');
+    assertEq(attrs.modelPredictedGradeConfidence, 'high', 'SURVIVED: modelPredictedGradeConfidence (historical value preserved; GK-261 full immunity)');
+    assertEq(attrs.modelPredictedAt, 1700000000000, 'SURVIVED: modelPredictedAt (historical value preserved; GK-261 full immunity)');
     // GK-260: never persisted in the first place (test 1) — still absent.
     assertTrue(!('operatorGrade' in attrs), 'GK-260: operatorGrade remains absent (was never persisted via the ordinary path)');
     assertTrue(!('gradeAuthority' in attrs), 'GK-260: gradeAuthority remains absent');
@@ -185,8 +206,8 @@ try {
     // Fields NOT mentioned in this clear payload (identityAuthority,
     // modelPredictedGrade*) must still survive — proving the (unchanged)
     // per-key protection for those four keys still holds.
-    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'identityAuthority STILL survives (not mentioned in this clear payload, unchanged by GK-260)');
-    assertEq(attrs.modelPredictedGrade, 'GD 2.0', 'modelPredictedGrade STILL survives (not mentioned in this clear payload, unchanged by GK-260)');
+    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'identityAuthority STILL survives (not mentioned in this clear payload, historical value preserved)');
+    assertEq(attrs.modelPredictedGrade, 'GD 2.0', 'modelPredictedGrade STILL survives (not mentioned in this clear payload, historical value preserved)');
   }
 
   console.log('\n-- 4. same survival property on the upsertItem (POST-to-existing-id) path --\n');
@@ -198,6 +219,7 @@ try {
     let res = mockRes();
     await collectionRoute(req, res);
     assertTrue(res.statusCode === 200, `item2 create -> 200 (got ${res.statusCode})`);
+    await seedLegacyServerOwned(ITEM_ID2);
 
     // Re-POST to the SAME id (upsertItem's ON CONFLICT DO UPDATE path) with
     // an ordinary payload that omits every authority key.
@@ -213,7 +235,7 @@ try {
     // (fullAuthorityAttributes claims it, but the ordinary path never
     // writes it — same as test 1) — still absent through ON CONFLICT too.
     assertTrue(!('operatorGrade' in attrs), 'GK-260: operatorGrade absent through ON CONFLICT DO UPDATE (never persisted in the first place)');
-    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'upsert path: SURVIVED identityAuthority through ON CONFLICT DO UPDATE (unchanged by GK-260)');
+    assertEq(attrs.identityAuthority, { title: 'OPERATOR_CONFIRMED' }, 'upsert path: SURVIVED identityAuthority through ON CONFLICT DO UPDATE (historical value preserved; GK-261 full immunity)');
   }
 
   console.log('\n-- 5. no-authority-ever item is completely unaffected (no null-key pollution) --\n');

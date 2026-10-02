@@ -27,6 +27,7 @@ export async function assertPrincipalExists(client, principalId) {
 const PROTECTED_AUTHORITY_KEYS = [
   'identityAuthority',
   'modelPredictedGrade', 'modelPredictedGradeReason', 'modelPredictedGradeConfidence', 'modelPredictedAt',
+  'modelPredictedGradeAt', 'modelPredictedProvenance',
   'operatorGrade', 'operatorGradeNumeric', 'operatorGradeSetAt', 'gradeAuthority',
   'operatorIsGraded', 'gradingFormatAuthority',
 ];
@@ -43,9 +44,7 @@ const PROTECTED_AUTHORITY_KEYS = [
 // unconditionally on a later request — a forged-insertion path GK-260's
 // own request-body fix never covered.
 //
-// The remaining four keys (identityAuthority/modelPredictedGrade*) keep
-// their existing omission-only protection, unchanged — broadening their
-// treatment is out of this dispatch's contained scope.
+// (GK-261 below extends the same full immunity to the remaining keys.)
 //
 // The ONLY legitimate way to set/change/clear these six fields is now
 // applyGradingAuthorityPatch below, called exclusively by api/enrich.js
@@ -64,8 +63,25 @@ const FULLY_PROTECTED_GRADING_KEYS = [
 // (not just its ON CONFLICT branch, which alone left a real gap: a genuine
 // first-insert bypassed protectedAttributesMergeSql entirely, since that
 // function is only referenced inside the ON CONFLICT DO UPDATE clause).
+// GK-261 (Server-Owned Model / Grade Authority) — the model-prediction
+// baseline and identity authority get the SAME full immunity. The existing
+// row's value always wins on UPDATE/ON CONFLICT; the keys are stripped from
+// the INSERT VALUES list; an explicit null cannot clear them. They change
+// ONLY through claimModelBaselinePatch (a server-claimed grade receipt,
+// write-once) and applyIdentityAuthorityPatch (a validated manual
+// correction, api/enrich.js). modelPredictedGradeAt is the dispatch's name
+// for modelPredictedAt; both are protected so neither spelling can be forged.
+// Historical rows keep whatever they already hold (existing wins) — they are
+// preserved, not promoted and not rewritten.
+const FULLY_PROTECTED_BASELINE_KEYS = [
+  'identityAuthority',
+  'modelPredictedGrade', 'modelPredictedGradeReason', 'modelPredictedGradeConfidence', 'modelPredictedAt',
+  'modelPredictedGradeAt', 'modelPredictedProvenance',
+];
+const ALL_FULLY_PROTECTED_KEYS = [...FULLY_PROTECTED_GRADING_KEYS, ...FULLY_PROTECTED_BASELINE_KEYS];
+
 function stripFullyProtectedGradingKeysSql(incomingParam) {
-  const gradingKeysArray = `ARRAY[${FULLY_PROTECTED_GRADING_KEYS.map((k) => `'${k}'`).join(', ')}]::text[]`;
+  const gradingKeysArray = `ARRAY[${ALL_FULLY_PROTECTED_KEYS.map((k) => `'${k}'`).join(', ')}]::text[]`;
   return `(COALESCE(${incomingParam}::jsonb, '{}'::jsonb) - ${gradingKeysArray})`;
 }
 
@@ -78,15 +94,20 @@ function stripFullyProtectedGradingKeysSql(incomingParam) {
 // FULLY_PROTECTED_GRADING_KEYS are fixed literal lists, not user input, so
 // building the key lists into the query text here carries no injection risk.
 function protectedAttributesMergeSql(existingAttrsExpr, incomingParam) {
-  const pairs = PROTECTED_AUTHORITY_KEYS.map((k) => `'${k}', ${existingAttrsExpr}->'${k}'`).join(', ');
-  const gradingKeysArray = `ARRAY[${FULLY_PROTECTED_GRADING_KEYS.map((k) => `'${k}'`).join(', ')}]::text[]`;
-  const gradingPairsFromExisting = FULLY_PROTECTED_GRADING_KEYS.map((k) => `'${k}', ${existingAttrsExpr}->'${k}'`).join(', ');
+  // GK-261: every key in PROTECTED_AUTHORITY_KEYS is now fully protected
+  // (ALL_FULLY_PROTECTED_KEYS is a superset). Result = incoming minus every
+  // protected key, plus the EXISTING row's protected entries copied exactly
+  // (jsonb_each key-subset, NOT jsonb_strip_nulls, which is recursive and
+  // would silently drop nested null keys inside a protected value such as
+  // modelPredictedProvenance — "unknown stays null" must survive byte-for-byte).
+  const keysArray = `ARRAY[${ALL_FULLY_PROTECTED_KEYS.map((k) => `'${k}'`).join(', ')}]::text[]`;
   return `(
-    (
-      (jsonb_strip_nulls(jsonb_build_object(${pairs})) || COALESCE(${incomingParam}::jsonb, '{}'::jsonb))
-      - ${gradingKeysArray}
+    (COALESCE(${incomingParam}::jsonb, '{}'::jsonb) - ${keysArray})
+    || (
+      SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+        FROM jsonb_each(COALESCE(${existingAttrsExpr}, '{}'::jsonb)) AS e
+       WHERE e.key = ANY(${keysArray})
     )
-    || jsonb_strip_nulls(jsonb_build_object(${gradingPairsFromExisting}))
   )`;
 }
 
@@ -190,6 +211,49 @@ export async function applyGradingAuthorityPatch(client, { id, principalId, patc
       WHERE principal_id = $1 AND id = $2
       RETURNING id, asset_category, attributes, created_at, updated_at`,
     [principalId, id, JSON.stringify(safePatch)]
+  );
+  return res.rowCount > 0 ? toRow(res.rows[0]) : null;
+}
+
+// GK-261 — write-once model baseline from a server-claimed grade receipt.
+// `baseline` must be claimGradeReceipt's own output (src/lib/gradeReceipt.js),
+// never request-body fields. Filtered to the model-baseline keys as defense in
+// depth, and the UPDATE is predicated on NO existing modelPredictedGrade, so a
+// replay, a second receipt, or a legacy client-written baseline can never be
+// overwritten. Returns { written, item } — written:false with a non-null item
+// means the baseline already existed (idempotent no-op); item:null means no row.
+const BASELINE_PATCH_KEYS = [
+  'modelPredictedGrade', 'modelPredictedGradeReason', 'modelPredictedGradeConfidence', 'modelPredictedAt', 'modelPredictedProvenance',
+];
+export async function claimModelBaselinePatch(client, { id, principalId, baseline }) {
+  const safe = {};
+  for (const key of BASELINE_PATCH_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(baseline || {}, key)) safe[key] = baseline[key];
+  }
+  const res = await client.query(
+    `UPDATE data1_dev.collection_item
+        SET attributes = COALESCE(attributes, '{}'::jsonb) || $3::jsonb,
+            updated_at = now()
+      WHERE principal_id = $1 AND id = $2
+        AND (attributes->>'modelPredictedGrade') IS NULL
+      RETURNING id, asset_category, attributes, created_at, updated_at`,
+    [principalId, id, JSON.stringify(safe)]
+  );
+  if (res.rowCount > 0) return { written: true, item: toRow(res.rows[0]) };
+  return { written: false, item: await getByPrincipalAndId(client, principalId, id) };
+}
+
+// GK-261 — the ONLY write path for identityAuthority. `identityAuthority` is
+// the facet->'OPERATOR_CONFIRMED' map api/enrich.js minted from a validated
+// manual-correction request, already merged with the durable row's prior map.
+export async function applyIdentityAuthorityPatch(client, { id, principalId, identityAuthority }) {
+  const res = await client.query(
+    `UPDATE data1_dev.collection_item
+        SET attributes = COALESCE(attributes, '{}'::jsonb) || jsonb_build_object('identityAuthority', $3::jsonb),
+            updated_at = now()
+      WHERE principal_id = $1 AND id = $2
+      RETURNING id, asset_category, attributes, created_at, updated_at`,
+    [principalId, id, JSON.stringify(identityAuthority || {})]
   );
   return res.rowCount > 0 ? toRow(res.rows[0]) : null;
 }

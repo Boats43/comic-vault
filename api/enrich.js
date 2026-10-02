@@ -12938,6 +12938,29 @@ export default async function handler(req, res) {
       out.identityAuthority = Object.fromEntries(
         lockableAcceptedFields.map((f) => [f, 'OPERATOR_CONFIRMED'])
       );
+      // GK-261 — identityAuthority is server-owned: an ordinary
+      // /api/collection write can no longer set it. This validated manual
+      // correction (manualCorrectionRequest.valid, on a verified, owned
+      // item: principalIdGK260/collectionModGK260 are non-null only after
+      // GK-254's real Bearer-token + ownership resolution) is the ONLY
+      // thing that durably establishes it, merged onto the durable row's
+      // own prior map (never the client's copy). Non-owned/unauthenticated
+      // corrections stay transient-only in this response, exactly like
+      // GK-260's grading authority.
+      if (principalIdGK260 && collectionModGK260 && collectionItemId && Object.keys(out.identityAuthority).length > 0) {
+        try {
+          const priorDurable = (durableGradingAttributesGK213C && typeof durableGradingAttributesGK213C.identityAuthority === 'object' && durableGradingAttributesGK213C.identityAuthority) || {};
+          await collectionModGK260.applyIdentityAuthorityPatch({
+            principalId: principalIdGK260,
+            id: collectionItemId,
+            identityAuthority: { ...priorDurable, ...out.identityAuthority },
+          });
+          console.log('[owned-identity-authority] durably persisted validated manual correction authority');
+        } catch (e) {
+          out.identityAuthorityPersistFailed = true;
+          console.log('[owned-identity-authority] DURABLE WRITE-BACK FAILED (non-fatal, transient-only this response): ' + (e?.message || e));
+        }
+      }
     }
 
     // Q135 dispatch — out.variantNote (the field the client actually

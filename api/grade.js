@@ -130,6 +130,26 @@ const parseResponse = (text) => {
 // eBay pool's own listing titles correctly caught it (0/12 false positives
 // measured against real comic-pool titles from this same session's logs).
 import { detectBookSignals, classifyTitle } from '../src/lib/categoryClassifier.js';
+import { issueGradeReceipt } from '../src/lib/gradeReceipt.js';
+
+// GK-261 — record what the model ACTUALLY returned under an opaque,
+// principal-bound, short-TTL receipt and hand the client only the handle.
+// `model` is the model id the call site really used (null = not known,
+// recorded as UNKNOWN — never inferred). Never throws; no receipt on any
+// failure, and a missing receipt just means no trusted baseline later.
+const attachGradeReceipt = async (result, principalId, model) => {
+  try {
+    const receiptId = await issueGradeReceipt({
+      principalId,
+      result,
+      provider: model ? 'anthropic' : null,
+      model: model || null,
+      buildSha: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null,
+    });
+    if (receiptId) result.gradeReceiptId = receiptId;
+  } catch { /* receipt is best-effort; absence == UNKNOWN */ }
+  return result;
+};
 
 // Session 4B — Ensure assetType is set on every response path.
 // Single choke point: all res.status(200).json() calls pass through this.
@@ -775,6 +795,7 @@ export default async function handler(req, res) {
       const { result, passes, timings } = await watchPipeline(imageContent, body.voiceContext);
       applyConditionGuard(result, Array.isArray(images) ? images.length : (image ? 1 : 0), body.imageViews);
       if (noImage) result.noImage = true;
+      await attachGradeReceipt(result, auth.principalId, null);
       res.setHeader("x-watch-passes", String(passes));
       res.setHeader("x-watch-timing", JSON.stringify(timings));
       res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
@@ -847,6 +868,7 @@ export default async function handler(req, res) {
       if (noImage) result.noImage = true;
 
       console.log('[grade] eBay-first path succeeded');
+      await attachGradeReceipt(result, auth.principalId, "claude-haiku-4-5-20251001");
       mark('response_sent');
       res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
       return;
@@ -927,6 +949,7 @@ export default async function handler(req, res) {
     applyNewsstandFallback(finalParsed);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
+    await attachGradeReceipt(finalParsed, auth.principalId, "claude-sonnet-4-5-20250929");
     mark('response_sent');
     res.status(200).json(echoScanId(ensureAssetType(finalParsed, initialScan), body.scanId));
   } catch (err) {

@@ -87,7 +87,10 @@ export async function pushCollectionItem(entry) {
     // this field) rather than hardcoded, so a generic-asset catalogue
     // record syncs with its real category instead of being silently
     // relabeled 'comic' on every push.
-    const { images, _syncStatus, _pendingEvidenceAppends, assetCategory, ...attributes } = entry || {};
+    // GK-261 — _gradeReceiptId is the OPAQUE handle /api/grade returned; it is sent as its
+    // own top-level field (never inside attributes) and the server derives the model
+    // baseline from its own receipt record. No model/grade authority value is ever sent.
+    const { images, _syncStatus, _pendingEvidenceAppends, _gradeReceiptId, assetCategory, ...attributes } = entry || {};
     const res = await authFetch("/api/collection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -96,6 +99,7 @@ export async function pushCollectionItem(entry) {
         assetCategory: assetCategory || "comic",
         attributes,
         images: Array.isArray(images) && images.length > 0 ? images : undefined,
+        gradeReceiptId: typeof _gradeReceiptId === "string" ? _gradeReceiptId : undefined,
       }),
     });
     if (!res || !res.ok) return null;

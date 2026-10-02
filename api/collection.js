@@ -38,12 +38,13 @@
 import { verifyToken, InvalidTokenError } from '../src/modules/auth/index.js';
 import {
   listMyCollection, getMyCollectionItem, createCollectionItem,
-  updateCollectionItem, deleteCollectionItem,
+  updateCollectionItem, deleteCollectionItem, claimModelBaseline,
   ValidationFailedError, AuthorizationFailedError, NotFoundError,
 } from '../src/modules/collection/index.js';
 import { resolveCollectionItemLink } from '../src/modules/assets/index.js';
 import { put as mediaPut } from '../src/modules/media/index.js';
 import { checkRateLimit } from './rate-limit.js';
+import { claimGradeReceipt, restoreGradeReceipt } from '../src/lib/gradeReceipt.js';
 
 function extractBearerToken(req) {
   const header = req.headers?.authorization || req.headers?.Authorization;
@@ -112,6 +113,31 @@ async function withResolvedImages(attributes, images) {
   return { ...(attributes || {}), remoteImages };
 }
 
+// GK-261 — server-owned model baseline. The client presents ONLY an opaque
+// receipt id (minted by /api/grade for this same principal); the baseline
+// values come exclusively from the server's own receipt record. Any
+// modelPredicted*/identityAuthority material in the request's attributes
+// has already been made inert by the repository's full-immunity set. A
+// missing/expired/foreign/replayed receipt changes nothing — the ordinary
+// save still succeeds and no trusted baseline is minted (UNKNOWN).
+async function claimReceiptIfPresent(principalId, itemId, gradeReceiptId, saved) {
+  if (gradeReceiptId === undefined || gradeReceiptId === null) return saved;
+  const claim = await claimGradeReceipt({ principalId, receiptId: gradeReceiptId });
+  if (!claim.ok) {
+    console.log(`[grade-receipt] not claimed: ${claim.reason}`);
+    return saved;
+  }
+  try {
+    const out = await claimModelBaseline({ principalId, id: itemId, baseline: claim.baseline });
+    console.log(`[grade-receipt] claimed written=${out.written}`);
+    return out.item || saved;
+  } catch (e) {
+    await restoreGradeReceipt({ receiptId: gradeReceiptId, record: claim.record });
+    console.log(`[grade-receipt] durable write failed, receipt restored: ${e?.message || e}`);
+    return saved;
+  }
+}
+
 export default async function handler(req, res) {
   // 1. Auth — first, before rate limiting or anything else.
   const token = extractBearerToken(req);
@@ -147,18 +173,18 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { id: bodyId, assetCategory, attributes, images } = req.body || {};
+      const { id: bodyId, assetCategory, attributes, images, gradeReceiptId } = req.body || {};
       const resolvedAttributes = await withResolvedImages(attributes, images);
       const created = await createCollectionItem({ principalId, id: bodyId, assetCategory, attributes: resolvedAttributes });
-      return res.status(200).json(created);
+      return res.status(200).json(await claimReceiptIfPresent(principalId, bodyId, gradeReceiptId, created));
     }
 
     if (req.method === 'PUT' || req.method === 'PATCH') {
       if (!id) return res.status(400).json({ error: 'id query parameter is required' });
-      const { assetCategory, attributes, images } = req.body || {};
+      const { assetCategory, attributes, images, gradeReceiptId } = req.body || {};
       const resolvedAttributes = await withResolvedImages(attributes, images);
       const updated = await updateCollectionItem({ principalId, id, assetCategory, attributes: resolvedAttributes });
-      return res.status(200).json(updated);
+      return res.status(200).json(await claimReceiptIfPresent(principalId, id, gradeReceiptId, updated));
     }
 
     if (req.method === 'DELETE') {

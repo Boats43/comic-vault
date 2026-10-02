@@ -118,6 +118,42 @@ export async function applyGradingAuthorityPatch({ principalId, id, patch } = {}
   }
 }
 
+// GK-261 — write-once model baseline from a SERVER-CLAIMED grade receipt.
+// `baseline` must be claimGradeReceipt's output; api/collection.js is the only caller.
+export async function claimModelBaseline({ principalId, id, baseline } = {}) {
+  requireFields({ principalId, id }, ['principalId', 'id']);
+  if (typeof baseline !== 'object' || baseline === null || Array.isArray(baseline)) {
+    throw new ValidationFailedError('baseline must be a JSON object');
+  }
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const out = await repo.claimModelBaselinePatch(client, { id, principalId, baseline });
+    if (!out.item) throw new NotFoundError(`collection item ${id} does not exist`);
+    return out;
+  } finally {
+    client.release();
+  }
+}
+
+// GK-261 — the ONLY durable write path for identityAuthority; api/enrich.js only,
+// after a validated manual-correction request on a verified, owned item.
+export async function applyIdentityAuthorityPatch({ principalId, id, identityAuthority } = {}) {
+  requireFields({ principalId, id }, ['principalId', 'id']);
+  if (typeof identityAuthority !== 'object' || identityAuthority === null || Array.isArray(identityAuthority)) {
+    throw new ValidationFailedError('identityAuthority must be a JSON object');
+  }
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const updated = await repo.applyIdentityAuthorityPatch(client, { id, principalId, identityAuthority });
+    if (!updated) throw new NotFoundError(`collection item ${id} does not exist`);
+    return updated;
+  } finally {
+    client.release();
+  }
+}
+
 export async function deleteCollectionItem({ principalId, id } = {}) {
   requireFields({ principalId, id }, ['principalId', 'id']);
   const client = await acquireConnection();

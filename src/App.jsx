@@ -12235,6 +12235,10 @@ export default function App() {
       // applyFirstModelPrediction. `current` is null: this is a brand-new
       // item, so the first grade it's ever saved with IS the baseline.
       ...applyFirstModelPrediction(null, data),
+      // GK-261 — opaque handle for the SERVER's own record of this model result. Local-only
+      // (collectionSync.js lifts it out of attributes); the server, not this client, mints
+      // the durable baseline from it. Absent => the server mints nothing (UNKNOWN).
+      _gradeReceiptId: typeof data.gradeReceiptId === "string" ? data.gradeReceiptId : undefined,
     };
     try {
       await putComic(entry);
