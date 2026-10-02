@@ -120,29 +120,31 @@ try {
   // resolution is genuinely id-ordered and not accidentally still
   // agreeing with insertion order by coincidence.
   const tiedInstant = new Date('2030-01-01T00:00:00.000Z');
-  await client.query(
-    `UPDATE decision_event SET recorded_at = $1 WHERE id = $2`,
-    [tiedInstant, d3.decisionEventId]
-  );
-  const d4 = await recordDecision({ principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, recommendation: 'GRADE_CANDIDATE', valuationEventId: v3.valuationEventId, idempotencyKey: `${TEST_TAG}:dec4` });
-  idempotencyKeysUsed.push(`${TEST_TAG}:dec4`);
-  await client.query(
-    `UPDATE decision_event SET recorded_at = $1 WHERE id = $2`,
-    [tiedInstant, d4.decisionEventId]
-  );
+  // GK-276: decision_event is DB-immutable (0034) -- the tie can no longer be
+  // forged by UPDATE. INSERT is still allowed, so the tie is constructed by
+  // inserting two rows that genuinely share one explicit recorded_at instant
+  // (a real tie, not a simulated one). These rows are retained, never deleted.
+  const { randomUUID } = await import('node:crypto');
+  const dTieA = { decisionEventId: randomUUID() };
+  const dTieB = { decisionEventId: randomUUID() };
+  for (const [row, rec] of [[dTieA, 'LIST_NOW'], [dTieB, 'GRADE_CANDIDATE']]) {
+    await client.query(
+      `INSERT INTO decision_event (id, asset_id, recommendation, valuation_event_id, recorded_at) VALUES ($1, $2, $3, $4, $5)`,
+      [row.decisionEventId, createdAssetId, rec, v3.valuationEventId, tiedInstant]
+    );
+  }
 
   const tieCheck = await client.query(
     `SELECT id, recorded_at FROM decision_event WHERE id = ANY($1::uuid[])`,
-    [[d3.decisionEventId, d4.decisionEventId]]
+    [[dTieA.decisionEventId, dTieB.decisionEventId]]
   );
   const tieRows = tieCheck.rows;
   assertTrue(
     tieRows.length === 2 && tieRows[0].recorded_at.getTime() === tieRows[1].recorded_at.getTime(),
     'Round 2 setup: d3 and d4 genuinely share the exact same recorded_at instant (a real tie, not simulated)'
   );
-  const expectedTieWinner = [d3.decisionEventId, d4.decisionEventId].sort().pop(); // lexicographically-largest id wins ORDER BY ... , id
-  assertTrue(expectedTieWinner === d4.decisionEventId, 'Round 2 setup sanity: d4 is the lexicographically-larger id of the tied pair (expected — later uuidv7 mint)');
-
+  const expectedTieWinner = [dTieA.decisionEventId, dTieB.decisionEventId].sort().pop(); // lexicographically-largest id wins ORDER BY ... , id
+  
   graph = await getPhysicalAsset({ principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId });
   assertTrue(graph.currentDecisionId === expectedTieWinner, `Round 2: with recorded_at tied, currentDecisionId resolves via the id tie-break deterministically (got ${graph.currentDecisionId})`);
 
@@ -163,13 +165,10 @@ try {
   if (createdAssetId) {
     await client.query(`DELETE FROM outbox WHERE domain_event_id IN (SELECT event_id FROM domain_event WHERE (subject->>'entity_id')::uuid = $1)`, [createdAssetId]);
     await client.query(`DELETE FROM domain_event WHERE (subject->>'entity_id')::uuid = $1`, [createdAssetId]);
-    await client.query(`DELETE FROM decision_event WHERE asset_id = $1`, [createdAssetId]);
-    await client.query(`DELETE FROM valuation_event WHERE asset_id = $1`, [createdAssetId]);
+    // GK-276: valuation_event/decision_event are DB-immutable (0034) -- test rows are retained (same precedent as asset_identity_assignment), never deleted.
     await client.query(`DELETE FROM current_owner WHERE asset_id = $1`, [createdAssetId]);
     await client.query(`DELETE FROM ownership_event WHERE asset_id = $1`, [createdAssetId]);
-    await client.query(`DELETE FROM mint_event WHERE entity_id = $1`, [createdAssetId]);
-    await client.query(`DELETE FROM gk_asset WHERE id = $1`, [createdAssetId]);
-    await client.query(`DELETE FROM entity_mint_basis WHERE entity_id = $1`, [createdAssetId]);
+    // GK-276: gk_asset (and its mint_event/entity_mint_basis) is pinned by the retained, immutable valuation/decision rows -- retained.
   }
   if (idempotencyKeysUsed.length > 0) {
     await client.query(`DELETE FROM idempotency_key WHERE idempotency_key = ANY($1::text[])`, [idempotencyKeysUsed]);
@@ -177,8 +176,10 @@ try {
 
   const after = await countAll();
   console.log('  post-cleanup table counts:', JSON.stringify(after));
-  const restored = Object.keys(before).every((k) => before[k] === after[k]);
-  assertTrue(restored, 'cleanup: EVERY table count restored to exact pre-test baseline — zero permanent residue');
+  // GK-276: valuation_event/decision_event are DB-immutable (0034) and now RETAINED, never deleted -- their counts may only grow.
+  const RETAINED = ['gk_asset', 'mint_event', 'entity_mint_basis', 'valuation_event', 'decision_event'];
+  const restored = Object.keys(before).every((k) => RETAINED.includes(k) ? after[k] >= before[k] : before[k] === after[k]);
+  assertTrue(restored, 'cleanup: every mutable table restored to baseline; immutable economic rows (and the asset they pin) retained');
 
   await client.end();
   await closePool();

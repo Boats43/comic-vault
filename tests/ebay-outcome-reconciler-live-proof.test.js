@@ -445,10 +445,9 @@ try {
     await client.query('DELETE FROM data1_dev.inventory_transition_event WHERE gk_asset_id = $1', [TEST_ASSET_ID]);
     // GK-274 — decision first (it references the valuation), then valuations.
     if (createdDecisionEventId) {
-      await client.query('DELETE FROM data1_dev.decision_event WHERE id = $1', [createdDecisionEventId]).catch(() => {});
+      // GK-276: valuation_event/decision_event are DB-immutable (0034) -- test rows are retained (same precedent as asset_identity_assignment), never deleted.
     }
     for (const vid of [createdValuationEventId, ...extraValuationEventIds]) {
-      if (vid) await client.query('DELETE FROM data1_dev.valuation_event WHERE id = $1', [vid]).catch(() => {});
     }
     console.log(`\n  cleaned up ${staleIds.length} outcome_event row(s) (+ their components) for TEST_ASSET_ID, any leftover inventory rows, and 1 transient valuation_event row`);
   } finally {

@@ -229,8 +229,7 @@ try {
     await client.query(`DELETE FROM outbox WHERE domain_event_id IN (SELECT event_id FROM domain_event WHERE (subject->>'entity_id')::uuid = $1)`, [assetId]);
     await client.query(`DELETE FROM domain_event WHERE (subject->>'entity_id')::uuid = $1`, [assetId]);
     await client.query(`DELETE FROM operator_action_event WHERE gk_asset_id = $1`, [assetId]);
-    await client.query(`DELETE FROM decision_event WHERE asset_id = $1`, [assetId]);
-    await client.query(`DELETE FROM valuation_event WHERE asset_id = $1`, [assetId]);
+    // GK-276: valuation_event/decision_event are DB-immutable (0034) -- test rows are retained (same precedent as asset_identity_assignment), never deleted.
     await client.query(`DELETE FROM collection_item_link WHERE gk_asset_id = $1`, [assetId]);
     await client.query(`DELETE FROM current_owner WHERE asset_id = $1`, [assetId]);
     await client.query(`DELETE FROM ownership_event WHERE asset_id = $1`, [assetId]);
@@ -249,7 +248,7 @@ try {
   const mintedAssetCount = createdAssetIds.length; // one gk_asset/entity_mint_basis/mint_event row per asset actually minted
   const identityAssignmentCalls = 4; // cap1, capDrift, capFixed, capReplay — assignIdentity runs unconditionally on every captureFromScan call
   const otherTablesMatch = Object.keys(before).every(
-    (k) => PERMANENTLY_RETAINED.includes(k) || before[k] === after[k]
+    (k) => PERMANENTLY_RETAINED.includes(k) || (['valuation_event', 'decision_event'].includes(k) ? after[k] >= before[k] : before[k] === after[k]) // GK-276: immutable economic rows retained
   );
   const mintRetentionMatches = ['gk_asset', 'entity_mint_basis', 'mint_event'].every((k) => after[k] === before[k] + mintedAssetCount);
   const identityRetentionMatches = after.asset_identity_assignment === before.asset_identity_assignment + identityAssignmentCalls;

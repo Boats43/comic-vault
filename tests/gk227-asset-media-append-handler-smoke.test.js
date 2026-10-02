@@ -233,8 +233,7 @@ try {
     for (const assetId of createdAssetIds) {
       await client.query(`DELETE FROM outbox WHERE domain_event_id IN (SELECT event_id FROM domain_event WHERE (subject->>'entity_id')::uuid = $1)`, [assetId]);
       await client.query(`DELETE FROM domain_event WHERE (subject->>'entity_id')::uuid = $1`, [assetId]);
-      await client.query(`DELETE FROM decision_event WHERE asset_id = $1`, [assetId]);
-      await client.query(`DELETE FROM valuation_event WHERE asset_id = $1`, [assetId]);
+      // GK-276: valuation_event/decision_event are DB-immutable (0034) -- test rows are retained (same precedent as asset_identity_assignment), never deleted.
       await client.query(`DELETE FROM media WHERE asset_id = $1`, [assetId]);
       await client.query(`DELETE FROM collection_item_link WHERE gk_asset_id = $1`, [assetId]);
       await client.query(`DELETE FROM current_owner WHERE asset_id = $1`, [assetId]);

@@ -105,7 +105,7 @@ try {
   assertTrue(afterConflict === before + 2, 'the rejected conflicting call created NO row (only the first key2 call + the key1 call exist)');
 } finally {
   if (createdValuationEventIds.length > 0) {
-    await client.query(`DELETE FROM valuation_event WHERE id = ANY($1::uuid[])`, [createdValuationEventIds]);
+    // GK-276: valuation_event/decision_event are DB-immutable (0034) -- test rows are retained (same precedent as asset_identity_assignment), never deleted.
   }
   await client.query(`DELETE FROM idempotency_key WHERE operation = 'recordValuation' AND idempotency_key LIKE $1`, [`${TEST_TAG}:%`]);
   const after = await countAll();

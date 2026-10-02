@@ -210,7 +210,7 @@ try {
   // --- J: pre-existing historical valuation rows remain NULL. ---
   const histNullCheck = await client.query(
     `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE comp_snapshot_id IS NULL)::int AS null_count
-     FROM valuation_event WHERE id != ALL($1::uuid[])`,
+     FROM valuation_event WHERE id != ALL($1::uuid[]) AND build_sha NOT IN ('test-sha-b', 'test-sha-e') /* GK-276: this test's own retained (immutable) rows from prior runs */`,
     [[val1.valuationEventId, val2.valuationEventId]]
   );
   assertTrue(
@@ -226,7 +226,7 @@ try {
     await client.query(`DELETE FROM idempotency_key WHERE idempotency_key = ANY($1::text[])`, [idempotencyKeysUsed]);
     await client.query(`DELETE FROM outbox WHERE domain_event_id IN (SELECT event_id FROM domain_event WHERE (subject->>'entity_id')::uuid = $1)`, [assetId]);
     await client.query(`DELETE FROM domain_event WHERE (subject->>'entity_id')::uuid = $1`, [assetId]);
-    await client.query(`DELETE FROM valuation_event WHERE asset_id = $1`, [assetId]);
+    // GK-276: valuation_event/decision_event are DB-immutable (0034) -- test rows are retained (same precedent as asset_identity_assignment), never deleted.
     await client.query(`DELETE FROM current_owner WHERE asset_id = $1`, [assetId]);
     await client.query(`DELETE FROM ownership_event WHERE asset_id = $1`, [assetId]);
     await client.query(`DELETE FROM mint_event WHERE entity_id = $1`, [assetId]);
@@ -257,7 +257,9 @@ try {
   console.log('  pre-test table counts:     ', JSON.stringify(before));
 
   // Tables that MUST return to baseline (nothing structurally pins them).
-  for (const tbl of ['valuation_event', 'ownership_event', 'current_owner', 'mint_event', 'domain_event', 'outbox', 'idempotency_key']) {
+    // GK-276: valuation_event is DB-immutable (0034) -- retained, may only grow.
+  assertTrue(after.valuation_event >= before.valuation_event, `K: valuation_event retained (immutable) -- ${before.valuation_event} before, ${after.valuation_event} after`);
+  for (const tbl of ['ownership_event', 'current_owner', 'mint_event', 'domain_event', 'outbox', 'idempotency_key']) {
     assertTrue(after[tbl] === before[tbl], `K: ${tbl} count returned to exact baseline (${before[tbl]} before, ${after[tbl]} after) — fully cleaned`);
   }
   // Tables with an honest, reported, structurally-forced delta — never

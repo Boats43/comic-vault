@@ -186,8 +186,7 @@ try {
   if (createdAssetId) {
     await client.query(`DELETE FROM outbox WHERE domain_event_id IN (SELECT event_id FROM domain_event WHERE (subject->>'entity_id')::uuid = $1)`, [createdAssetId]);
     await client.query(`DELETE FROM domain_event WHERE (subject->>'entity_id')::uuid = $1`, [createdAssetId]);
-    await client.query(`DELETE FROM decision_event WHERE asset_id = $1`, [createdAssetId]);
-    await client.query(`DELETE FROM valuation_event WHERE asset_id = $1`, [createdAssetId]);
+    // GK-276: valuation_event/decision_event are DB-immutable (0034) -- test rows are retained (same precedent as asset_identity_assignment), never deleted.
     await client.query(`DELETE FROM acquisition_event WHERE asset_id = $1`, [createdAssetId]);
     await client.query(`DELETE FROM current_owner WHERE asset_id = $1`, [createdAssetId]);
     await client.query(`DELETE FROM ownership_event WHERE asset_id = $1`, [createdAssetId]);
@@ -204,8 +203,10 @@ try {
   // row's FK), and asset_identity_assignment itself (immutable, 0015).
   // Every other table must still return to the exact pre-test baseline.
   const PERMANENTLY_RETAINED = ['gk_asset', 'entity_mint_basis', 'mint_event', 'asset_identity_assignment'];
+  // GK-276: valuation_event/decision_event are DB-immutable (0034) and now RETAINED, never deleted -- their counts may only grow.
+  const ECONOMIC_RETAINED = ['valuation_event', 'decision_event'];
   const otherTablesMatch = Object.keys(before).every(
-    (k) => PERMANENTLY_RETAINED.includes(k) || before[k] === after[k]
+    (k) => PERMANENTLY_RETAINED.includes(k) || (ECONOMIC_RETAINED.includes(k) ? after[k] >= before[k] : before[k] === after[k])
   );
   const retainedTablesGrewByOne = PERMANENTLY_RETAINED.every((k) => after[k] === before[k] + 1);
   assertTrue(
