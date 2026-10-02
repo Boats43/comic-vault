@@ -112,3 +112,7 @@ Prior entry, retained for history: 201 PASS / 19 FAIL / 4 TIMEOUT / 224 total â€
 ## Roster delta (2026-10-01, GK-272E condition history inference)
 
 +1 file: `tests/gk272e-condition-history-inference.test.js` (29/29). Roster count 276 -> 277. Historical-roster status changes: NOT FRESHLY MEASURED.
+
+## Roster delta (2026-10-02, GK-273 Research the Market)
+
++1 file: `tests/gk273-research-market.test.js` (84/84). Roster count 277 -> 278. Historical-roster status changes: NOT FRESHLY MEASURED.

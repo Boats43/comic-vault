@@ -38,6 +38,7 @@ import { pushBuyerDecision, pushBuyerAcquisition } from "./lib/buyerDecisionSync
 import { titlesLikelySameBook } from "./lib/duplicateCopyDetection.js";
 import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
+import ResearchMarketPanel from "./components/ResearchMarketPanel.jsx";
 import GenericAssetCapture from "./components/GenericAssetCapture.jsx";
 import { useClerk } from "@clerk/react";
 import { deriveMarketCopy, NEUTRAL_MARKET_FOOTER } from "./lib/marketEvidence.js";
@@ -4932,6 +4933,9 @@ export function CollectionDetail({
       </div>
 
       <GrailKeyOperatorPanel collectionItemId={item.id} item={item} photos={photos} onAddPhoto={onAddPhoto} />
+
+      {/* GK-273 — Research the Market: operator-run escalation, shown only when the structured market result is insufficient. Read-only beside price authority. */}
+      <ResearchMarketPanel item={item} />
 
       {/* 1. PHOTO STRIP */}
       <div

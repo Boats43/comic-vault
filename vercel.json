@@ -6,6 +6,7 @@
   ],
   "functions": {
     "api/grade.js": { "maxDuration": 60 },
-    "api/enrich.js": { "maxDuration": 120 }
+    "api/enrich.js": { "maxDuration": 120 },
+    "api/research-market.js": { "maxDuration": 90 }
   }
 }
