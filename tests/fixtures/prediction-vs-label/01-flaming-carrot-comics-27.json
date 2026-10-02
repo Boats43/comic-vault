@@ -1,0 +1,31 @@
+{
+  "fixtureKind": "PREDICTION_VS_OPERATOR_LABEL",
+  "fixtureSchemaVersion": 1,
+  "sourceType": "REAL_PRODUCTION_RECORD",
+  "assetIdentity": {
+    "title": "Flaming Carrot Comics",
+    "issue": "27",
+    "year": "1991",
+    "publisher": "Dark Horse"
+  },
+  "modelPrediction": {
+    "kind": "FIRST_MODEL_GRADE",
+    "grade": "VF 8.0",
+    "recordedAt": "2026-09-26T03:44:44.639Z",
+    "provider": "UNKNOWN",
+    "model": "UNKNOWN",
+    "modelVersion": "UNKNOWN",
+    "promptVersion": "UNKNOWN",
+    "note": "collection_item.attributes.modelPredictedGrade (write-once at first save). Provider/model/version were never persisted and are NOT inferred."
+  },
+  "operatorLabel": {
+    "kind": "OPERATOR_ENTERED_GRADE",
+    "grade": "9.0",
+    "numeric": 9,
+    "setAt": "2026-09-26T03:45:06.647Z",
+    "note": "collection_item.attributes.operatorGrade. A label, not ground truth. Single slot: any earlier operator grade for this item was overwritten and is not recoverable."
+  },
+  "currentAutomatedGrade": "VF 8.0",
+  "adjudication": null,
+  "labelDiffersFromPrediction": true
+}

@@ -1,0 +1,291 @@
+{
+  "fixtureSchemaVersion": 1,
+  "source": "production-phone-scan",
+  "capturedAt": "2026-09-20T23:40:52.123Z",
+  "buildSha": "5b34136",
+  "operatorNote": null,
+  "traceId": "01902734-7675-4cf9-a4b5-e8ae7cdcedb5",
+  "identity": {
+    "title": "the new mutants",
+    "issue": "98",
+    "publisher": "Marvel",
+    "year": "1991",
+    "eraBucket": "1990_PLUS",
+    "knownAnswerFixture": true
+  },
+  "conditionEvidence": {
+    "grade": "VG 4.0",
+    "gradeConfidence": "high",
+    "isGraded": false,
+    "numericGrade": null,
+    "defectPenalty": 0.7,
+    "defectPenaltySource": "unspecified",
+    "cgcPenaltyFlags": {
+      "storeStamp": {
+        "detected": false,
+        "pedigreeName": null
+      },
+      "cornerChips": {
+        "count": 2,
+        "detected": true
+      },
+      "pedigreeStamp": {
+        "era": null,
+        "detected": false,
+        "canonical": null,
+        "recognized": false,
+        "pedigreeName": null
+      },
+      "staplePopping": {
+        "detected": false,
+        "severity": null
+      },
+      "polybagIndents": {
+        "detected": true
+      }
+    },
+    "cgcPenaltyFlagsSource": null,
+    "restoration": null
+  },
+  "pricingEvidence": {
+    "soldComps": [],
+    "soldCompsReason": null,
+    "soldCompDiagnostics": {
+      "reasons": {
+        "lot": 1,
+        "stale": 0,
+        "format": 0,
+        "signed": 0,
+        "outlier": 0,
+        "slabMismatch": 1,
+        "yearMismatch": 0,
+        "gradeMismatch": 6,
+        "issueMismatch": 0,
+        "titleMismatch": 0,
+        "ungradedTitle": 22,
+        "annualMismatch": 0,
+        "variantMismatch": 0,
+        "printingMismatch": 0
+      },
+      "rawCount": 30,
+      "rejectedCount": 30,
+      "verifiedCount": 0,
+      "rejectedSamples": [
+        {
+          "price": 265,
+          "title": "The New Mutants #98 (Marvel) Liefeld 1st Appearance Of Deadpool Copycat & Gideon 1991",
+          "reason": "cross-series"
+        },
+        {
+          "price": 425,
+          "title": "New Mutants #98 PSA 9.6 Incredible Looking Book! 1st App of Deadpool Not CGC 1991",
+          "reason": "slabMismatch"
+        },
+        {
+          "price": 338.1,
+          "title": "NEW MUTANTS #98 VF/NM 1ST DEADPOOL",
+          "reason": "gradeMismatch"
+        }
+      ]
+    },
+    "rawComps": {
+      "recentSales": [],
+      "prices": [
+        {
+          "url": "https://www.ebay.com/itm/336803989351?_skw=the+new+mutants+%2398+1991&hash=item4e6b150767:g:VpIAAeSwMyBqsAxA",
+          "date": null,
+          "price": 327.75,
+          "title": "The New Mutants #98 (Marvel, Feb 1991) ☆ Authentic ☆",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/157831457917?_skw=the+new+mutants+%2398+1991&hash=item24bf7cec7d:g:~1MAAeSwkC9nw8Bh&amdata=enc%3AAQALAAAA8ACCtXRWQnOEpyOqnQQ8KGbwc7mikT1v1vaLT351ojOOx0p%2BLTCx9yKSQgU6BscpHh3KXBC2%2FtvttofIhD01akO4blIg7WHrhtiyO%2Bm3khU%2FI37EjQInXplait9hRQpAQl1W8U%2Baznr3GoCKpwRfZjTkcf--CmxUTkmvNN6fMFUqGFiqF85MSAigU6f7IofTNqhodl6Ge9daqVva7jenUa5j3ohtw%2BMTn7vPjX3Xv24CuNLq7nW20SVSNbExbVvvcuJRparLGyaCRwsWQllPQuHqhL7KOJ%2F6vpIYa52sde5i0wiWvzelP06NIIlqXDKmSA%3D%3D",
+          "date": null,
+          "price": 425,
+          "title": "The New Mutants #98 (Marvel Comics February 1991) 1ST DEADPOOL!!!!",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/377441118600?_skw=the+new+mutants+%2398+1991&hash=item57e13e6988:g:Z0UAAeSw2npqihgx",
+          "date": null,
+          "price": 400,
+          "title": "The New Mutants #98 (Marvel Comics February 1991)",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/298619611687?_skw=the+new+mutants+%2398+1991&hash=item45871daa27:g:hysAAeSw0Hxqj5MP",
+          "date": null,
+          "price": 330,
+          "title": "The New Mutants #98 (Marvel Comics February 1991)",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/377451710741?_skw=the+new+mutants+%2398+1991&hash=item57e1e00915:g:ILsAAeSwMk1qkHMp&amdata=enc%3AAQALAAAA8ACCtXRWQnOEpyOqnQQ8KGbvNJl76g81m6sOE4i8XjuB5avuXBPZiOuiASnKXZlhONnBdGx4l89xVzzG9NUlGbk188Avx0sZEJnqvw7plVTgsV5U%2FWxBs%2Fllhfo8%2B%2BwmZF%2BUB8tJruxHGH0oMuCKxEjelXMn0%2FSa09rx53zIdX41MlGz%2FDWESKrXG0fif2NoRUYgXi8yZ3pH0vcbMhvRgMlNyBhPNelNOA5PrpHE3Mxag62zuCusaL%2FGkdXRf1AmCMRqFH79IkvONIdm6eUqUurfqxVOeWzv33kcgS6N0tDosw6Z6F%2Fu2jpO2CUMqpd6mA%3D%3D",
+          "date": null,
+          "price": 340,
+          "title": "The New Mutants #98 Comic Book First Deadpool Appearance",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/336789511037?_skw=the+new+mutants+%2398+1991&hash=item4e6a381b7d:g:PjwAAeSwiHtqpAGM",
+          "date": null,
+          "price": 349.99,
+          "title": "New Mutants #98 - 1st App Deadpool Marvel 1991 Comics",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/336338189652?_skw=the+new+mutants+%2398+1991&hash=item4e4f517d54:g:pAMAAeSwKyFpOemO&amdata=enc%3AAQALAAAA8ACCtXRWQnOEpyOqnQQ8KGYBmzj0aTCDaT2lfy7XHp1xB3IlbekGI6DmXxmTJHv3JGMc%2BGYWC%2BLNAMtRBDkXYLi9R3gl%2FwZRArnaHfc%2Fb4bJFqGLuF%2FwZJEh713iORyVILMdYISxGcG4swnU8D59J3QsX3dtnWJ%2BrdZNR%2ByMM8MfZgcCxOBMfa%2FS9t1UtrFrUD4kH6JTPP7sI8v%2BXTwLoUEZ4HC4bZCHWNN8w4rJJPP9Qa3YWr59Qkwk3hEG7iVYyg%2FRpIg5W68%2BfsAQUjOOuIYY3T6rmTQhcSaFidY%2BVi9CVSb5rAJBEwg6nFc23alq9w%3D%3D",
+          "date": null,
+          "price": 799,
+          "title": "The New Mutants #98 Comic Book (First Appearance Of Deadpool)",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/398402343938?_skw=the+new+mutants+%2398+1991&hash=item5cc2a15402:g:Fw8AAeSwzEtqqzou",
+          "date": null,
+          "price": 399.99,
+          "title": "Marvel Comics The New Mutants #98 (1991) Deadpool Domino Rob Liefeld",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/166329846239?_skw=the+new+mutants+%2398+1991&hash=item26ba0809df:g:FUMAAOSwt5FlApRV",
+          "date": null,
+          "price": 375,
+          "title": "The New Mutants #98 (Marvel, February 1991)",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/157642085964?_skw=the+new+mutants+%2398+1991&hash=item24b433564c:g:8jAAAeSwy7FpeThi",
+          "date": null,
+          "price": 444.88,
+          "title": "The New Mutants #98  (Marvel Comics February 1991)",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/178160757233?_skw=the+new+mutants+%2398+1991&hash=item297b3569f1:g:pz8AAeSwEJpqErcQ",
+          "date": null,
+          "price": 399.99,
+          "title": "The New Mutants #98 (First Deadpool)",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/318852838789?_skw=the+new+mutants+%2398+1991&hash=item4a3d1c3585:g:~~oAAeSwgXRqoqZf",
+          "date": null,
+          "price": 500,
+          "title": "Marvel Comics The New Mutants #98 1st Deadpool Appearance",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/384992601509?_skw=the+new+mutants+%2398+1991&hash=item59a358e5a5:g:PgoAAOSwkq1ixiMk",
+          "date": null,
+          "price": 500,
+          "title": "The New Mutants #98 (Feb 1991, Marvel)",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/188227385156?_skw=the+new+mutants+%2398+1991&hash=item2bd339f744:g:I~4AAeSwC~Rpyw3x",
+          "date": null,
+          "price": 499.99,
+          "title": "The New Mutants #98 (Marvel Comics February 1991) 1st Deadpool Key Issue",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/177821501909?_skw=the+new+mutants+%2398+1991&hash=item2966fcc9d5:g:yeEAAeSwDCxpfLgs",
+          "date": null,
+          "price": 340,
+          "title": "The New Mutants #98 First Printing (Marvel Comics 1991) Deadpool Domino Gideon",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/336535019804?_skw=the+new+mutants+%2398+1991&hash=item4e5b0ce11c:g:ZUIAAeSwzGVp32FX",
+          "date": null,
+          "price": 328.18,
+          "title": "The New Mutants # 98 1st Deadpool Appearance Marvel 1991 New (Other)",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/325598253617?_skw=the+new+mutants+%2398+1991&hash=item4bcf2b1231:g:glYAAOSwiKVkKGZP",
+          "date": null,
+          "price": 350,
+          "title": "The New Mutants #98 Deadpool Marvel Comics 1991",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/396585431844?_skw=the+new+mutants+%2398+1991&hash=item5c56557324:g:GAwAAOSwk8FoHSUg",
+          "date": null,
+          "price": 450,
+          "title": "The New Mutants #98 (Marvel Comics February 1991)",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/116236564274?_skw=the+new+mutants+%2398+1991&hash=item1b103d3732:g:e8cAAOSwKCdmg1C7",
+          "date": null,
+          "price": 350,
+          "title": "The New Mutants #98 (Marvel Comics February 1991) 1st Deadpool",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/198549457331?_skw=the+new+mutants+%2398+1991&hash=item2e3a7849b3:g:u4YAAeSwz-Bqcz2L",
+          "date": null,
+          "price": 599,
+          "title": "The New Mutants #98 (Marvel Comics February 1991) 1st Appearance Deadpool Key",
+          "condition": null
+        },
+        {
+          "url": "https://www.ebay.com/itm/307048552234?_skw=the+new+mutants+%2398+1991&hash=item477d85172a:g:9eQAAeSwBq5qJxGk",
+          "date": null,
+          "price": 400,
+          "title": "The New Mutants #98 1st app. Deadpool, 1st app. Gideon, 1st app. Domino NM",
+          "condition": null
+        }
+      ],
+      "count": 21,
+      "lowest": 327.75,
+      "average": 424.2271428571429,
+      "highest": 799,
+      "evidenceObservedAt": "2026-09-20T22:48:39.667Z"
+    },
+    "rawCompsReason": null,
+    "activeCompDiagnostics": null,
+    "activeCompDiagnosticsReason": "api/comps.js does not currently expose an active-side rejection-reason breakdown on the /api/enrich response (pre-existing gap, confirmed during PRICE-LANE-2 T3 trace — not fixed by this dispatch)",
+    "activePoolSuspect": null,
+    "activePoolSuspectReason": "active-pool-suspect check was not evaluated for this book (computed only inside computePriceBands' Tier 2 branch — Tier 1/2.5/3/4 pricing paths never run it)",
+    "priceLadder": {
+      "2.0": 104,
+      "3.0": 130.01,
+      "4.0": 136.48,
+      "5.0": 205.21,
+      "6.0": 218.66,
+      "7.0": 219.93,
+      "8.0": 309.99,
+      "9.0": 303,
+      "9.2": 345,
+      "9.4": 362.25,
+      "9.6": 479.48,
+      "9.8": 1014.43,
+      "raw": 253,
+      "10.0": 1319
+    },
+    "priceLadderReason": null
+  },
+  "pricingResult": {
+    "tier": 3,
+    "branch": "tier3_active_discounted",
+    "pricingSource": "active_ask_derived",
+    "quick": "$278.59",
+    "market": "$360.59",
+    "stretch": "$414.68",
+    "gradeMultiplier": 0.55,
+    "price": "$360.59",
+    "priceLow": "$278.59",
+    "priceHigh": "$414.68",
+    "priceDerivationTrace": null,
+    "decisionAction": "RESEARCH",
+    "decisionPrice": 360.59,
+    "decisionWarnings": [
+      "zero-verified-comps"
+    ],
+    "marketStanding": "EXACT_CURRENT",
+    "contractState": "ESTIMATED"
+  }
+}

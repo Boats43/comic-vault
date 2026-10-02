@@ -1569,6 +1569,8 @@ Banked per the U5-MINIMAL-B dispatch's own push/deploy pass (2026-09-23), found 
 
 **STATUS: OPEN, banked, not built. No code, no fixture files, no harness — proof-gap only.**
 
+**PROGRESS 2026-10-02 (real-fixture preservation, runner still NOT built):** 5 real captured fixtures (Creepy #1, Wonder Woman #31, Brave and the Bold #141, The X-Men #1, The New Mutants #98 — Production Fixture Bank export, builds `2773794`/`5b34136`) are now committed under `tests/fixtures/real-captures/` with a validated manifest (typed `REAL_CAPTURE`, sha256, record counts, secret/PII scan PASS; the empty GK-236 export and a duplicate-traceId New Mutants re-export excluded with reasons) plus 3 real Production prediction-vs-operator-label records under `tests/fixtures/prediction-vs-label/` (first model grade vs operator-entered grade; provider/model/version recorded as UNKNOWN; labels, not truth; no principal/item IDs). `tests/gk248-real-fixture-integrity.test.js` 68/68. These fixtures hold frozen engine OUTPUT only — no adjudicated expected answer — so the deterministic replay runner described above still cannot assert correctness and remains unbuilt. ASM #11 and Hulk #180 (phone) are not yet captured here.
+
 ## GK-249 — U6.0B Book routing trigger + first-fire observability + REFUSED-render-safety proof (IMPLEMENTED, not deployed)
 
 U6.0B binding amendment dispatch (2026-09-24), following the real-phone Production acceptance test on "The Rationalists" (canonical U6 acceptance case, banked in the U6.0 dispatch: normal Scan tab → "No comic detected", never reached `/api/enrich`).

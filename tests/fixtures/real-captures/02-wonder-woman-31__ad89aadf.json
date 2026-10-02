@@ -1,0 +1,179 @@
+{
+  "fixtureSchemaVersion": 1,
+  "source": "production-phone-scan",
+  "capturedAt": "2026-09-20T23:40:31.542Z",
+  "buildSha": "2773794",
+  "operatorNote": null,
+  "traceId": "ad89aadf-56eb-4d33-b50d-a89fbf1032fb",
+  "identity": {
+    "title": "wonder woman",
+    "issue": "31",
+    "publisher": "DC Comics",
+    "year": "1948",
+    "eraBucket": "PRE_1970",
+    "knownAnswerFixture": false
+  },
+  "conditionEvidence": {
+    "grade": "VG 4.0",
+    "gradeConfidence": "high",
+    "isGraded": false,
+    "numericGrade": null,
+    "defectPenalty": null,
+    "defectPenaltySource": "not present on this scan",
+    "cgcPenaltyFlags": {
+      "storeStamp": {
+        "detected": false,
+        "pedigreeName": null
+      },
+      "staplePopping": {
+        "detected": false,
+        "severity": null
+      },
+      "polybagIndents": {
+        "detected": false
+      },
+      "cornerChips": {
+        "detected": false,
+        "count": null
+      },
+      "pedigreeStamp": {
+        "detected": false,
+        "pedigreeName": null,
+        "recognized": false,
+        "canonical": null,
+        "era": null
+      }
+    },
+    "cgcPenaltyFlagsSource": null,
+    "restoration": null
+  },
+  "pricingEvidence": {
+    "soldComps": [
+      {
+        "price": 199.99,
+        "date": "2026-02-05",
+        "daysAgo": 227,
+        "grade": "raw",
+        "title": "Wonder Woman DC Comic #31 1948 Golden Age VG- The Shrinking Formula! 1948",
+        "url": "https://www.ebay.com/itm/376932959603?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+        "marketplace": "ebay",
+        "source": "pricecharting-history",
+        "__evIdx": 5,
+        "recencyBand": "aging",
+        "variantVerified": true
+      },
+      {
+        "price": 349.99,
+        "date": "2024-02-02",
+        "daysAgo": 961,
+        "grade": "raw",
+        "title": "WONDER WOMAN #31 1948 Golden Age DC Comics FN- 5.5 1948",
+        "url": "https://www.ebay.com/itm/145565584038?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+        "marketplace": "ebay",
+        "source": "pricecharting-history",
+        "__evIdx": 13,
+        "recencyBand": "stale",
+        "variantVerified": true
+      },
+      {
+        "price": 320,
+        "date": "2022-02-02",
+        "daysAgo": 1691,
+        "grade": "raw",
+        "title": "Wonder Woman #31 VG- 3.5 1948 1948 #31",
+        "url": "https://www.ebay.com/itm/363710800527?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+        "marketplace": "ebay",
+        "source": "pricecharting-history",
+        "__evIdx": 29,
+        "recencyBand": "stale",
+        "variantVerified": true
+      }
+    ],
+    "soldCompsReason": null,
+    "soldCompDiagnostics": {
+      "rawCount": 30,
+      "verifiedCount": 3,
+      "rejectedCount": 27,
+      "reasons": {
+        "titleMismatch": 0,
+        "issueMismatch": 2,
+        "annualMismatch": 1,
+        "printingMismatch": 0,
+        "variantMismatch": 0,
+        "slabMismatch": 0,
+        "signed": 0,
+        "lot": 0,
+        "format": 0,
+        "yearMismatch": 0,
+        "gradeMismatch": 9,
+        "ungradedTitle": 15,
+        "stale": 0,
+        "outlier": 0
+      },
+      "rejectedSamples": [
+        {
+          "title": "Wonder Woman 31 (3.0 GD/VG)",
+          "price": 127.5,
+          "reason": "issueMismatch"
+        },
+        {
+          "title": "Wonder Woman Vol. 1, #31 , 1948, Golden Age VG+ ( The Shrinking Formula) 1948",
+          "price": 375,
+          "reason": "issueMismatch"
+        },
+        {
+          "title": "Wonder Woman #31 FN+ Harry G. Peter Cover 1948 Pre-Code Golden Age High Grade 1948",
+          "price": 560,
+          "reason": "annualMismatch:pre-code"
+        }
+      ]
+    },
+    "rawComps": {
+      "average": null,
+      "lowest": null,
+      "highest": null,
+      "count": 0,
+      "prices": [],
+      "evidenceObservedAt": null
+    },
+    "rawCompsReason": null,
+    "activeCompDiagnostics": null,
+    "activeCompDiagnosticsReason": "api/comps.js does not currently expose an active-side rejection-reason breakdown on the /api/enrich response (pre-existing gap, confirmed during PRICE-LANE-2 T3 trace — not fixed by this dispatch)",
+    "activePoolSuspect": null,
+    "activePoolSuspectReason": "not evaluated — active-pool-suspect check only runs inside Tier 2 pricing (this book priced via tier4_pc_estimate)",
+    "priceLadder": {
+      "raw": 256.78,
+      "2.0": 249,
+      "3.0": 310.78,
+      "4.0": 336.66,
+      "5.0": 350,
+      "6.0": 443.24,
+      "7.0": 587.5,
+      "8.0": 1098,
+      "9.2": 14547.41,
+      "9.8": 125452.83,
+      "10.0": 163089
+    },
+    "priceLadderReason": null
+  },
+  "pricingResult": {
+    "tier": 4,
+    "branch": "tier4_pc_estimate",
+    "pricingSource": "pc_estimate",
+    "quick": "$133.53",
+    "market": "$166.91",
+    "stretch": "$200.29",
+    "gradeMultiplier": 0.65,
+    "price": "$166.91",
+    "priceLow": "$133.53",
+    "priceHigh": "$200.29",
+    "priceDerivationTrace": null,
+    "decisionAction": "LIST_LOW",
+    "decisionPrice": 166.91,
+    "decisionWarnings": [
+      "sold-comps-stale"
+    ],
+    "marketStanding": "FALLBACK_ONLY",
+    "contractState": "ESTIMATED"
+  }
+}

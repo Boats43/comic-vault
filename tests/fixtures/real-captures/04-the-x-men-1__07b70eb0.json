@@ -1,0 +1,178 @@
+{
+  "fixtureSchemaVersion": 1,
+  "source": "production-phone-scan",
+  "capturedAt": "2026-09-20T23:40:45.140Z",
+  "buildSha": "2773794",
+  "operatorNote": null,
+  "traceId": "07b70eb0-bd94-426f-8140-1466e29bf4a0",
+  "identity": {
+    "title": "The X-Men",
+    "issue": "1",
+    "publisher": "Marvel",
+    "year": "1963",
+    "eraBucket": "PRE_1970",
+    "knownAnswerFixture": false
+  },
+  "conditionEvidence": {
+    "grade": "GD 2.0",
+    "gradeConfidence": "high",
+    "isGraded": false,
+    "numericGrade": null,
+    "defectPenalty": 0.7,
+    "defectPenaltySource": "unspecified",
+    "cgcPenaltyFlags": {
+      "storeStamp": {
+        "detected": false,
+        "pedigreeName": null
+      },
+      "staplePopping": {
+        "detected": true,
+        "severity": "severe"
+      },
+      "polybagIndents": {
+        "detected": false
+      },
+      "cornerChips": {
+        "detected": true,
+        "count": 2
+      },
+      "pedigreeStamp": {
+        "detected": false,
+        "pedigreeName": null,
+        "recognized": false,
+        "canonical": null,
+        "era": null
+      }
+    },
+    "cgcPenaltyFlagsSource": null,
+    "restoration": null
+  },
+  "pricingEvidence": {
+    "soldComps": [
+      {
+        "price": 2100,
+        "date": "2026-09-02",
+        "daysAgo": 18,
+        "grade": "raw",
+        "title": "X-Men #1 (1963) Marvel Comics 12¢ Silver Age Key Stan Lee Kirby Cover Detached 1963",
+        "url": "https://www.ebay.com/itm/377466260645?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+        "marketplace": "ebay",
+        "source": "pricecharting-history",
+        "__evIdx": 0,
+        "recencyBand": "fresh",
+        "variantVerified": true
+      }
+    ],
+    "soldCompsReason": null,
+    "soldCompDiagnostics": {
+      "rawCount": 30,
+      "verifiedCount": 1,
+      "rejectedCount": 29,
+      "reasons": {
+        "titleMismatch": 5,
+        "issueMismatch": 0,
+        "annualMismatch": 2,
+        "printingMismatch": 0,
+        "variantMismatch": 0,
+        "slabMismatch": 2,
+        "signed": 0,
+        "lot": 1,
+        "format": 1,
+        "yearMismatch": 0,
+        "gradeMismatch": 1,
+        "ungradedTitle": 16,
+        "stale": 0,
+        "outlier": 0
+      },
+      "rejectedSamples": [
+        {
+          "title": "X-Men #1 (Marvel Comics, 1963) Origin & First Appearance Of The X-Men & Magneto 1963",
+          "price": 9198,
+          "reason": "cross-series"
+        },
+        {
+          "title": "Marvel Comics Library: X-Men Vol 1 1963–1966 Taschen XXL HC 2023 #1",
+          "price": 159.99,
+          "reason": "format:tpb"
+        },
+        {
+          "title": "X-Men 1 1st X-Men 1st Professor X 1st Magneto #1",
+          "price": 1999.99,
+          "reason": "annualMismatch:roman-x"
+        }
+      ]
+    },
+    "rawComps": {
+      "average": 11288.206666666665,
+      "lowest": 4364.62,
+      "highest": 20000,
+      "count": 3,
+      "prices": [
+        {
+          "price": 9500,
+          "title": "The X-Men #1 (Marvel Comics September 1963)",
+          "url": "https://www.ebay.com/itm/188829691329?_skw=X-Men+%231+1963+Marvel&hash=item2bf7206dc1:g:XvcAAeSwUjRqicHG",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 4364.62,
+          "title": "X-Men #1 (1963) 1st appearance of the X-Men Magneto Silver Age Key Marvel GD/VG",
+          "url": "https://www.ebay.com/itm/318387916161?_skw=X-Men+%231+1963+Marvel&hash=item4a21660d81:g:1OYAAeSw6mBqG9ee",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 20000,
+          "title": "The X-Men #1 (Marvel Comics September 1963)",
+          "url": "https://www.ebay.com/itm/176716452766?_skw=X-Men+%231+1963+Marvel&hash=item29251f139e:g:fF8AAOSwnqhnTlER",
+          "date": null,
+          "condition": null
+        }
+      ],
+      "evidenceObservedAt": "2026-09-20T23:39:58.798Z"
+    },
+    "rawCompsReason": null,
+    "activeCompDiagnostics": null,
+    "activeCompDiagnosticsReason": "api/comps.js does not currently expose an active-side rejection-reason breakdown on the /api/enrich response (pre-existing gap, confirmed during PRICE-LANE-2 T3 trace — not fixed by this dispatch)",
+    "activePoolSuspect": false,
+    "activePoolSuspectReason": null,
+    "priceLadder": {
+      "raw": 3385.57,
+      "2.0": 5175,
+      "3.0": 5656,
+      "4.0": 8235,
+      "5.0": 10579.71,
+      "6.0": 15045.5,
+      "7.0": 23180,
+      "8.0": 38130,
+      "9.0": 88450,
+      "9.2": 137364.54,
+      "9.4": 68710,
+      "9.6": 56.01,
+      "9.8": 487405.09,
+      "10.0": 633627
+    },
+    "priceLadderReason": null
+  },
+  "pricingResult": {
+    "tier": 2,
+    "branch": "tier2_blend_70_30",
+    "pricingSource": "sold_active_blend_30",
+    "quick": "$2,100.00",
+    "market": "$4,856.46",
+    "stretch": "$5,584.93",
+    "gradeMultiplier": 0.45,
+    "price": "$4,856.46",
+    "priceLow": "$2,100.00",
+    "priceHigh": "$5,584.93",
+    "priceDerivationTrace": null,
+    "decisionAction": "RESEARCH",
+    "decisionPrice": 4856.46,
+    "decisionWarnings": [
+      "contract-violation-decision-capped"
+    ],
+    "marketStanding": "SIMILAR_ONLY",
+    "contractState": "INCOMPLETE"
+  }
+}

@@ -1,0 +1,246 @@
+{
+  "fixtureSchemaVersion": 1,
+  "source": "production-phone-scan",
+  "capturedAt": "2026-09-20T23:40:24.627Z",
+  "buildSha": "2773794",
+  "operatorNote": null,
+  "traceId": "07765037-2c56-45d0-a623-c40d15ffffc7",
+  "identity": {
+    "title": "Creepy",
+    "issue": "1",
+    "publisher": "Warren Publishing",
+    "year": "1964",
+    "eraBucket": "PRE_1970",
+    "knownAnswerFixture": false
+  },
+  "conditionEvidence": {
+    "grade": "GD 2.0",
+    "gradeConfidence": "high",
+    "isGraded": false,
+    "numericGrade": null,
+    "defectPenalty": 0.7,
+    "defectPenaltySource": "unspecified",
+    "cgcPenaltyFlags": {
+      "storeStamp": {
+        "detected": false,
+        "pedigreeName": null
+      },
+      "staplePopping": {
+        "detected": false,
+        "severity": null
+      },
+      "polybagIndents": {
+        "detected": false
+      },
+      "cornerChips": {
+        "detected": true,
+        "count": 4
+      },
+      "pedigreeStamp": {
+        "detected": false,
+        "pedigreeName": null,
+        "recognized": false,
+        "canonical": null,
+        "era": null
+      }
+    },
+    "cgcPenaltyFlagsSource": null,
+    "restoration": null
+  },
+  "pricingEvidence": {
+    "soldComps": [
+      {
+        "price": 63,
+        "date": "2026-05-31",
+        "daysAgo": 112,
+        "grade": "raw",
+        "title": "Creepy #1 VG- 3.5 1964 1st app. Uncle Creepy 1964",
+        "url": "https://www.ebay.com/itm/366389659056?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+        "marketplace": "ebay",
+        "source": "pricecharting-history",
+        "__evIdx": 22,
+        "recencyBand": "aging",
+        "variantVerified": true
+      }
+    ],
+    "soldCompsReason": null,
+    "soldCompDiagnostics": {
+      "rawCount": 30,
+      "verifiedCount": 1,
+      "rejectedCount": 29,
+      "reasons": {
+        "titleMismatch": 0,
+        "issueMismatch": 0,
+        "annualMismatch": 0,
+        "printingMismatch": 0,
+        "variantMismatch": 1,
+        "slabMismatch": 0,
+        "signed": 0,
+        "lot": 0,
+        "format": 0,
+        "yearMismatch": 0,
+        "gradeMismatch": 7,
+        "ungradedTitle": 21,
+        "stale": 0,
+        "outlier": 0
+      },
+      "rejectedSamples": [
+        {
+          "title": "Creepy #1 1964 FN/VF(7.0) Warren Publishing Frazetta Art Jack Davis Cover B/W 1964",
+          "price": 55.65,
+          "reason": "variantMismatch:comp_has_user_none"
+        },
+        {
+          "title": "Warren - CREEPY (1964-85) #1 - Grade 4.0 - Comic Book",
+          "price": 48,
+          "reason": "gradeMismatch"
+        },
+        {
+          "title": "Vintage: Creepy #1 Magazine Key Issue 1st Appearance Uncle Creepy (1964) 1964",
+          "price": 74.95,
+          "reason": "ungradedTitle"
+        }
+      ]
+    },
+    "rawComps": {
+      "average": 142.07461538461538,
+      "lowest": 75,
+      "highest": 275,
+      "count": 13,
+      "prices": [
+        {
+          "price": 75,
+          "title": "Creepy #1 Magazine Key Issue 1st Appearance Uncle Creepy (1964)",
+          "url": "https://www.ebay.com/itm/188944376125?_skw=creepy+%231+1964+Warren+Publishing&hash=item2bfdf6613d:g:N00AAeSwtMVqrE59",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 145.79,
+          "title": "1964 Warren Publishing Creepy #1 Frank Frazetta Uncle Creepy! Free Shipping!",
+          "url": "https://www.ebay.com/itm/197623240943?_skw=creepy+%231+1964+Warren+Publishing&hash=item2e034358ef:g:G9kAAeSwHllon5SC",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 75,
+          "title": "CREEPY #1 Warren 1964 1st appearance of Uncle Creepy",
+          "url": "https://www.ebay.com/itm/306751980155?_skw=creepy+%231+1964+Warren+Publishing&hash=item476bd7c27b:g:gMsAAeSwWS5oofZd",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 95,
+          "title": "Creepy #1 - WARREN PUBLISHING, 1964",
+          "url": "https://www.ebay.com/itm/315127123546?_skw=creepy+%231+1964+Warren+Publishing&hash=item495f0a4e5a:g:gOwAAOSwvcVluDB2",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 153.65,
+          "title": "Creepy Magazine #1 (Warren Publishing) First issue 1964",
+          "url": "https://www.ebay.com/itm/398143220652?_skw=creepy+%231+1964+Warren+Publishing&hash=item5cb32f6bac:g:B0MAAeSw3nlqSqOC",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 96,
+          "title": "Creepy #1 GD/VG 3.0 1964 1st app. Uncle Creepy",
+          "url": "https://www.ebay.com/itm/318800126965?_skw=creepy+%231+1964+Warren+Publishing&hash=item4a39f7e3f5:g:nrYAAeSw3B1qlCh-",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 76.54,
+          "title": "Creepy #1 (1964 Magazine)",
+          "url": "https://www.ebay.com/itm/197759134148?_skw=creepy+%231+1964+Warren+Publishing&hash=item2e0b5ce9c4:g:V6oAAeSwHM1o43-4",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 200,
+          "title": "Creepy Magazine #1 Warren 1964 Frazetta Jack Davis Joe Orlando Al Williamson",
+          "url": "https://www.ebay.com/itm/237049257082?_skw=creepy+%231+1964+Warren+Publishing&hash=item37313c9c7a:g:pVgAAeSw2G9qmv7w",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 180,
+          "title": "CREEPY #1, VF, Frank Frazetta, Jack Davis, Warren, Voodoo Magazine, 1964",
+          "url": "https://www.ebay.com/itm/168561224114?_skw=creepy+%231+1964+Warren+Publishing&hash=item273f0829b2:g:i90AAeSwf4JqY7cR",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 149.99,
+          "title": "CREEPY #1 [1964 FN+] WARREN MAGAZINE    JACK DAVIS ART!",
+          "url": "https://www.ebay.com/itm/315744430262?_skw=creepy+%231+1964+Warren+Publishing&hash=item4983d5a8b6:g:qx0AAOSwkf5knHja",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 125,
+          "title": "CREEPY #1 (Warren 1964) - 1st appearance of Uncle Creepy Ungraded",
+          "url": "https://www.ebay.com/itm/187662522438?_skw=creepy+%231+1964+Warren+Publishing&hash=item2bb18ed846:g:MEYAAeSw1GJo8Wht",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 200,
+          "title": "CREEPY #1 FIRST APPEARANCE OF UNCLE CREEPY LAST FRAZETTA STRIP WARREN 1964",
+          "url": "https://www.ebay.com/itm/235596915192?_skw=creepy+%231+1964+Warren+Publishing&hash=item36daaba1f8:g:I5IAAOSw-x5mYc5A",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 275,
+          "title": "Creepy #1 Warren Comics 1964",
+          "url": "https://www.ebay.com/itm/175237449369?_skw=creepy+%231+1964+Warren+Publishing&hash=item28ccf74699:g:RagAAOSw7vhiITJq",
+          "date": null,
+          "condition": null
+        }
+      ],
+      "evidenceObservedAt": "2026-09-20T23:40:03.889Z"
+    },
+    "rawCompsReason": null,
+    "activeCompDiagnostics": null,
+    "activeCompDiagnosticsReason": "api/comps.js does not currently expose an active-side rejection-reason breakdown on the /api/enrich response (pre-existing gap, confirmed during PRICE-LANE-2 T3 trace — not fixed by this dispatch)",
+    "activePoolSuspect": null,
+    "activePoolSuspectReason": "not evaluated — active-pool-suspect check only runs inside Tier 2 pricing (this book priced via tier3_active_discounted)",
+    "priceLadder": {
+      "raw": 60.34,
+      "2.0": 52,
+      "3.0": 64.74,
+      "4.0": 69,
+      "5.0": 76,
+      "6.0": 82.56,
+      "7.0": 143.76,
+      "8.0": 197.78,
+      "9.0": 267.5,
+      "9.2": 499.99,
+      "9.4": 793,
+      "9.6": 2520,
+      "9.8": 4984.54,
+      "10.0": 6480
+    },
+    "priceLadderReason": null
+  },
+  "pricingResult": {
+    "tier": 3,
+    "branch": "tier3_active_discounted",
+    "pricingSource": "active_ask_derived",
+    "quick": "$63.75",
+    "market": "$120.76",
+    "stretch": "$138.88",
+    "gradeMultiplier": 0.45,
+    "price": "$120.76",
+    "priceLow": "$63.75",
+    "priceHigh": "$138.88",
+    "priceDerivationTrace": null,
+    "decisionAction": "LIST_NOW",
+    "decisionPrice": 120.76,
+    "decisionWarnings": [],
+    "marketStanding": "SIMILAR_ONLY",
+    "contractState": "ESTIMATED"
+  }
+}

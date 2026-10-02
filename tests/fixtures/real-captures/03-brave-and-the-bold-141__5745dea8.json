@@ -1,0 +1,311 @@
+{
+  "fixtureSchemaVersion": 1,
+  "source": "production-phone-scan",
+  "capturedAt": "2026-09-20T23:40:39.522Z",
+  "buildSha": "2773794",
+  "operatorNote": null,
+  "traceId": "5745dea8-6be2-49f4-964c-9501d6f634bb",
+  "identity": {
+    "title": "brave and the bold",
+    "issue": "141",
+    "publisher": "DC",
+    "year": "1978",
+    "eraBucket": "1970_1989",
+    "knownAnswerFixture": false
+  },
+  "conditionEvidence": {
+    "grade": "GD 2.0",
+    "gradeConfidence": "high",
+    "isGraded": false,
+    "numericGrade": null,
+    "defectPenalty": 0.7,
+    "defectPenaltySource": "unspecified",
+    "cgcPenaltyFlags": {
+      "storeStamp": {
+        "detected": true,
+        "pedigreeName": null
+      },
+      "staplePopping": {
+        "detected": true,
+        "severity": "severe"
+      },
+      "polybagIndents": {
+        "detected": false
+      },
+      "cornerChips": {
+        "detected": true,
+        "count": 2
+      },
+      "pedigreeStamp": {
+        "detected": false,
+        "pedigreeName": null,
+        "recognized": false,
+        "canonical": null,
+        "era": null
+      }
+    },
+    "cgcPenaltyFlagsSource": null,
+    "restoration": null
+  },
+  "pricingEvidence": {
+    "soldComps": [
+      {
+        "price": 5,
+        "date": "2026-01-13",
+        "daysAgo": 250,
+        "grade": "raw",
+        "title": "Brave And The Bold #141 (1978) Batman Joker Cover VG- 3.5 1978",
+        "url": "https://www.ebay.com/itm/356844993459?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+        "marketplace": "ebay",
+        "source": "pricecharting-history",
+        "__evIdx": 29,
+        "recencyBand": "aging",
+        "variantVerified": true
+      }
+    ],
+    "soldCompsReason": null,
+    "soldCompDiagnostics": {
+      "rawCount": 30,
+      "verifiedCount": 1,
+      "rejectedCount": 29,
+      "reasons": {
+        "titleMismatch": 0,
+        "issueMismatch": 0,
+        "annualMismatch": 1,
+        "printingMismatch": 0,
+        "variantMismatch": 0,
+        "slabMismatch": 0,
+        "signed": 0,
+        "lot": 2,
+        "format": 0,
+        "yearMismatch": 0,
+        "gradeMismatch": 14,
+        "ungradedTitle": 12,
+        "stale": 0,
+        "outlier": 0
+      },
+      "rejectedSamples": [
+        {
+          "title": "Brave and the Bold #141 Vol. 1 1978 DC Comics Higher Grade Comic Book RY1-11 1978",
+          "price": 9.99,
+          "reason": "lot"
+        },
+        {
+          "title": "The Brave and the Bold #141 (DC Comics May-June 1978) VF+ condition 1978",
+          "price": 6.5,
+          "reason": "cross-series"
+        },
+        {
+          "title": "Brave and the Bold #141 Vol. 1 1978 DC Comics Newsstand X222-173 1978",
+          "price": 23.99,
+          "reason": "annualMismatch:vol-1"
+        }
+      ]
+    },
+    "rawComps": {
+      "average": 15.603636363636365,
+      "lowest": 3.99,
+      "highest": 30,
+      "count": 22,
+      "prices": [
+        {
+          "price": 3.99,
+          "title": "THE BRAVE AND THE BOLD #141  LOWER GRADE  1978  COMBINE SHIPPING   BX95 I25",
+          "url": "https://www.ebay.com/itm/388173186933?_skw=brave+and+the+bold+%23141+1978&hash=item5a60ecc775:g:jv4AAOSw9Upn6a81",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 12.75,
+          "title": "THE BRAVE AND THE BOLD #141 COMIC BOOK (DC, 1978) BRONZE AGE -",
+          "url": "https://www.ebay.com/itm/168447914546?_skw=brave+and+the+bold+%23141+1978&hash=item2738473232:g:jWQAAeSwUHNqKbmN",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 8.99,
+          "title": "Brave and the Bold #141 Black Canary  (1978)",
+          "url": "https://www.ebay.com/itm/226270918222?_skw=brave+and+the+bold+%23141+1978&hash=item34aecc364e:g:GZ4AAOSwkKlmquI7",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 12.99,
+          "title": "DC Comics BATMAN The Brave and the Bold #141 May-June 1978 in good condition 🌹",
+          "url": "https://www.ebay.com/itm/376575414513?_skw=brave+and+the+bold+%23141+1978&hash=item57ada4d0f1:g:HrcAAeSwe1Jo1Wfq",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 15,
+          "title": "The Brave and the Bold #141 (DC Comics May-June 1978)",
+          "url": "https://www.ebay.com/itm/187476573022?_skw=brave+and+the+bold+%23141+1978&hash=item2ba6797b5e:g:lvAAAeSwoX9ol3fv",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 19.99,
+          "title": "BRAVE and the BOLD #141, VF, Batman, Joker, Canary, 1978, more in store",
+          "url": "https://www.ebay.com/itm/405031742053?_skw=brave+and+the+bold+%23141+1978&hash=item5e4dc5ea65:g:YQ8AAOSwWnpmaN04",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 12.99,
+          "title": "Brave And The Bold #141 Black Canary Joker! DC Comics 1978",
+          "url": "https://www.ebay.com/itm/226767666746?_skw=brave+and+the+bold+%23141+1978&hash=item34cc67fe3a:g:xRwAAeSwpuZoJJ9U",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 5,
+          "title": "1978 Brave and the Bold Batman & Black Canary DC Comic Book #141 - Joker!!!",
+          "url": "https://www.ebay.com/itm/295925698862?_skw=brave+and+the+bold+%23141+1978&hash=item44e68bd12e:g:Ad4AAOSwDD1k~dOF",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 13.95,
+          "title": "THE BRAVE AND THE BOLD COMIC  #141  JUNE 1978  SMOOTH COPY  \"JOKER\"   VERY FINE",
+          "url": "https://www.ebay.com/itm/273789495369?_skw=brave+and+the+bold+%23141+1978&hash=item3fbf202849:g:GgEAAOSwXeJXfgxc",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 13.2,
+          "title": "1978 DC Brave and the Bold Batman #141 Comic Book /D960",
+          "url": "https://www.ebay.com/itm/188598655015?_skw=brave+and+the+bold+%23141+1978&hash=item2be95b1827:g:CnUAAeSwJrVqSQ4c",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 29.99,
+          "title": "Brave and the Bold #141, DC Comics, 1978. VF-.",
+          "url": "https://www.ebay.com/itm/317751458923?_skw=brave+and+the+bold+%23141+1978&hash=item49fb767c6b:g:SnMAAeSw~eppYpul",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 12.99,
+          "title": "THE BRAVE AND THE BOLD #141 a 1978 DC comic with BATMAN & BLACK CANARY Aparo",
+          "url": "https://www.ebay.com/itm/326424758266?_skw=brave+and+the+bold+%23141+1978&hash=item4c006e87fa:g:S0gAAOSw6ednnNn6",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 18,
+          "title": "The Brave and the Bold #141 (DC Comics May-June 1978)",
+          "url": "https://www.ebay.com/itm/196957787231?_skw=brave+and+the+bold+%23141+1978&hash=item2ddb99545f:g:BL0AAOSwNpdnjWsw",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 14.99,
+          "title": "BRAVE and the BOLD #141, FN/VF, Joker, Black Canary, 1978, Batman",
+          "url": "https://www.ebay.com/itm/405031734329?_skw=brave+and+the+bold+%23141+1978&hash=item5e4dc5cc39:g:DUAAAOSwe-dmaNxK",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 16.02,
+          "title": "Brave and the Bold #141 - DC Comics - 1978",
+          "url": "https://www.ebay.com/itm/357592894789?_skw=brave+and+the+bold+%23141+1978&hash=item5342328d45:g:9MgAAeSwQZZov9Ma&amdata=enc%3AAQALAAABAACCtXRWQnOEpyOqnQQ8KGao%2BuidIqItw4H4ema6oLSNT0EVBWDK%2Bgya%2FJ2YM0oo3USv2%2FZTpkJgc66vwq%2BdWJzBMJzzI0No0ZVxysZBi%2FQaGJVbgjp0K1SigiiIRNYgo4N9%2FUxnKfeOSIeJdKiSYbuzVgYFP3ThaRfWzmMwTl%2Bdkwp7%2FmXnkgxPbUTh2SIVlrpd%2Bf3sfYg7vy1evQ5SkRgS6pDP9QP4Kw6%2BWtN8Vi4ggQusXzQPJqAVQ1guF1CUIusXSXW2dmAw%2Fan44T96EN%2BmYumR52hrPPLIQI0Zv8cnN6hkFEpvqGhyznx7XYA2hMEBLxy7OhDRBumBGMDVcZM%3D",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 22,
+          "title": "Brave and the Bold  #141 DC 1978 \" Pay - or Die ! \" Batman/Black Canary & Joker",
+          "url": "https://www.ebay.com/itm/358373893119?_skw=brave+and+the+bold+%23141+1978&hash=item5370bfa3ff:g:bsEAAeSw-YFpxAKh",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 13,
+          "title": "Brave and the Bold # 141    FINE   June 1978   Batman/Black Canary vs Catwoman",
+          "url": "https://www.ebay.com/itm/307171057170?_skw=brave+and+the+bold+%23141+1978&hash=item4784d25e12:g:UlMAAeSwRS5qocUp",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 23.4,
+          "title": "Brave and the Bold #141 (1978) Joker Alfred DC VF",
+          "url": "https://www.ebay.com/itm/117195369839?_skw=brave+and+the+bold+%23141+1978&hash=item1b49636d6f:g:HGMAAeSwcM9qBh~h",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 20,
+          "title": "Brave and the Bold  #141 DC 1978 \" Pay - or Die ! \" Batman/Black Canary & Joker",
+          "url": "https://www.ebay.com/itm/257424694914?_skw=brave+and+the+bold+%23141+1978&hash=item3befb51e82:g:baQAAeSwLeFpxAMs",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 16,
+          "title": "Brave and the Bold  #141 DC 1978 \" Pay - or Die ! \" Batman/Black Canary & Joker",
+          "url": "https://www.ebay.com/itm/252262060608?_skw=brave+and+the+bold+%23141+1978&hash=item3abbfd9240:g:Hd8AAOSwqYBWokI3",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 30,
+          "title": "The Brave and the Bold #141 (Jun 1978, DC)",
+          "url": "https://www.ebay.com/itm/134710780535?_skw=brave+and+the+bold+%23141+1978&hash=item1f5d636277:g:liYAAOSwAy5k8RvE",
+          "date": null,
+          "condition": null
+        },
+        {
+          "price": 8.04,
+          "title": "Vintage The Brave and the Bold #141 DC Comics June 1978 by Bob Haney Comic Book",
+          "url": "https://www.ebay.com/itm/398351847203?_skw=brave+and+the+bold+%23141+1978&hash=item5cbf9ecf23:g:bvcAAeSw2DJqlz~~",
+          "date": null,
+          "condition": null
+        }
+      ],
+      "evidenceObservedAt": "2026-09-20T23:39:59.186Z"
+    },
+    "rawCompsReason": null,
+    "activeCompDiagnostics": null,
+    "activeCompDiagnosticsReason": "api/comps.js does not currently expose an active-side rejection-reason breakdown on the /api/enrich response (pre-existing gap, confirmed during PRICE-LANE-2 T3 trace — not fixed by this dispatch)",
+    "activePoolSuspect": null,
+    "activePoolSuspectReason": "not evaluated — active-pool-suspect check only runs inside Tier 2 pricing (this book priced via tier3_active_discounted)",
+    "priceLadder": {
+      "raw": 7.8,
+      "2.0": 8,
+      "3.0": 10,
+      "4.0": 12,
+      "6.0": 20.35,
+      "7.0": 50,
+      "8.0": 77.5,
+      "9.0": 38,
+      "9.2": 101,
+      "9.4": 42,
+      "9.6": 79.99,
+      "9.8": 160,
+      "10.0": 208
+    },
+    "priceLadderReason": null
+  },
+  "pricingResult": {
+    "tier": 3,
+    "branch": "tier3_active_discounted",
+    "pricingSource": "active_ask_derived",
+    "quick": "$3.39",
+    "market": "$13.26",
+    "stretch": "$15.25",
+    "gradeMultiplier": 0.45,
+    "price": "$13.26",
+    "priceLow": "$3.39",
+    "priceHigh": "$15.25",
+    "priceDerivationTrace": null,
+    "decisionAction": "LIST_LOW",
+    "decisionPrice": 13.26,
+    "decisionWarnings": [
+      "active-floor-far-below",
+      "sold-comps-stale"
+    ],
+    "marketStanding": "EXACT_CURRENT",
+    "contractState": "ESTIMATED"
+  }
+}

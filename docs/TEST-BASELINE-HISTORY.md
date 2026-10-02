@@ -120,3 +120,7 @@ Prior entry, retained for history: 201 PASS / 19 FAIL / 4 TIMEOUT / 224 total â€
 ## Roster delta (2026-10-02, GK-274 PredictionError historical anchor)
 
 +1 file: `tests/gk274-prediction-anchor-unit.test.js` (30/30). `tests/ebay-outcome-reconciler-live-proof.test.js` extended in place (live, real Development; 53/53). Roster count 278 -> 279. Historical-roster status changes: NOT FRESHLY MEASURED.
+
+## Roster delta (2026-10-02, GK-248 real-fixture preservation)
+
++1 file: `tests/gk248-real-fixture-integrity.test.js` (68/68; validates the committed real fixtures, no DB). Roster count 279 -> 280. Historical-roster status changes: NOT FRESHLY MEASURED.

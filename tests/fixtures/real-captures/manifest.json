@@ -1,0 +1,165 @@
+{
+  "manifestVersion": 1,
+  "purpose": "Real captured scan fixtures, preserved because real captures are scarce and perishable. Frozen engine OUTPUT at capture time only: no operator label, no adjudicated answer, no ground truth. Do not use as a holdout until labelled/adjudicated.",
+  "source": "comic-vault-fixture-corpus-2026-09-20 (1111.json — Production Fixture Bank export, GK-231)",
+  "fixtures": [
+    {
+      "file": "01-creepy-1__07765037.json",
+      "sourceType": "REAL_CAPTURE",
+      "capturedVia": "production-phone-scan",
+      "parseable": true,
+      "assetIdentity": {
+        "title": "Creepy",
+        "issue": "1",
+        "publisher": "Warren Publishing",
+        "year": "1964"
+      },
+      "traceId": "07765037-2c56-45d0-a623-c40d15ffffc7",
+      "capturedAt": "2026-09-20T23:40:24.627Z",
+      "buildSha": "2773794",
+      "topLevelFieldCount": 10,
+      "recordCounts": {
+        "soldComps": 1,
+        "rawCompsPrices": 13,
+        "priceLadderGrades": 14,
+        "pricingResultFields": 16
+      },
+      "sha256": "c041b866ebd85a5963e7202247eee99e0edf2d3b148e5947c32d5ed54e42a047",
+      "labels": {
+        "operatorLabel": null,
+        "adjudication": null
+      },
+      "secretsPiiScan": "PASS (no principal/token/credential/email/seller/image keys or values)"
+    },
+    {
+      "file": "02-wonder-woman-31__ad89aadf.json",
+      "sourceType": "REAL_CAPTURE",
+      "capturedVia": "production-phone-scan",
+      "parseable": true,
+      "assetIdentity": {
+        "title": "wonder woman",
+        "issue": "31",
+        "publisher": "DC Comics",
+        "year": "1948"
+      },
+      "traceId": "ad89aadf-56eb-4d33-b50d-a89fbf1032fb",
+      "capturedAt": "2026-09-20T23:40:31.542Z",
+      "buildSha": "2773794",
+      "topLevelFieldCount": 10,
+      "recordCounts": {
+        "soldComps": 3,
+        "rawCompsPrices": 0,
+        "priceLadderGrades": 11,
+        "pricingResultFields": 16
+      },
+      "sha256": "065119bfd1cf32f2d2a4ba6f50042898c4037ee4e35e4a9c1dc809a71cddf7c4",
+      "labels": {
+        "operatorLabel": null,
+        "adjudication": null
+      },
+      "secretsPiiScan": "PASS (no principal/token/credential/email/seller/image keys or values)"
+    },
+    {
+      "file": "03-brave-and-the-bold-141__5745dea8.json",
+      "sourceType": "REAL_CAPTURE",
+      "capturedVia": "production-phone-scan",
+      "parseable": true,
+      "assetIdentity": {
+        "title": "brave and the bold",
+        "issue": "141",
+        "publisher": "DC",
+        "year": "1978"
+      },
+      "traceId": "5745dea8-6be2-49f4-964c-9501d6f634bb",
+      "capturedAt": "2026-09-20T23:40:39.522Z",
+      "buildSha": "2773794",
+      "topLevelFieldCount": 10,
+      "recordCounts": {
+        "soldComps": 1,
+        "rawCompsPrices": 22,
+        "priceLadderGrades": 13,
+        "pricingResultFields": 16
+      },
+      "sha256": "894b10c2526b9a225d072282893620f034553723fa08db83eac9b4e4fee33f7c",
+      "labels": {
+        "operatorLabel": null,
+        "adjudication": null
+      },
+      "secretsPiiScan": "PASS (no principal/token/credential/email/seller/image keys or values)"
+    },
+    {
+      "file": "04-the-x-men-1__07b70eb0.json",
+      "sourceType": "REAL_CAPTURE",
+      "capturedVia": "production-phone-scan",
+      "parseable": true,
+      "assetIdentity": {
+        "title": "The X-Men",
+        "issue": "1",
+        "publisher": "Marvel",
+        "year": "1963"
+      },
+      "traceId": "07b70eb0-bd94-426f-8140-1466e29bf4a0",
+      "capturedAt": "2026-09-20T23:40:45.140Z",
+      "buildSha": "2773794",
+      "topLevelFieldCount": 10,
+      "recordCounts": {
+        "soldComps": 1,
+        "rawCompsPrices": 3,
+        "priceLadderGrades": 14,
+        "pricingResultFields": 16
+      },
+      "sha256": "87c625f5a41ca248ecef351a29dbdb071b4776091f9511814e9843bc39f1c9ae",
+      "labels": {
+        "operatorLabel": null,
+        "adjudication": null
+      },
+      "secretsPiiScan": "PASS (no principal/token/credential/email/seller/image keys or values)"
+    },
+    {
+      "file": "05-the-new-mutants-98__01902734.json",
+      "sourceType": "REAL_CAPTURE",
+      "capturedVia": "production-phone-scan",
+      "parseable": true,
+      "assetIdentity": {
+        "title": "the new mutants",
+        "issue": "98",
+        "publisher": "Marvel",
+        "year": "1991"
+      },
+      "traceId": "01902734-7675-4cf9-a4b5-e8ae7cdcedb5",
+      "capturedAt": "2026-09-20T23:40:52.123Z",
+      "buildSha": "5b34136",
+      "topLevelFieldCount": 10,
+      "recordCounts": {
+        "soldComps": 0,
+        "rawCompsPrices": 21,
+        "priceLadderGrades": 14,
+        "pricingResultFields": 16
+      },
+      "sha256": "0eeac481bcf56b5c3a2689d7051a3358f947ef497a2d3c5982eec9b1973b01f4",
+      "labels": {
+        "operatorLabel": null,
+        "adjudication": null
+      },
+      "secretsPiiScan": "PASS (no principal/token/credential/email/seller/image keys or values)"
+    }
+  ],
+  "excluded": [
+    {
+      "file": "comic-vault-fixture-corpus-2026-09-20 (1).json",
+      "reason": "EMPTY export (0 fixtures, 2 bytes) — the known GK-236 empty export"
+    },
+    {
+      "file": "comic-vault-fixture-corpus-2026-09-20.json",
+      "reason": "DUPLICATE: its single fixture (The New Mutants #98) has the same traceId as fixture 05 (re-exported later with a newer build); the later, corpus-resident capture is kept"
+    },
+    {
+      "file": "comic-vault-fixture-diagnostics-2026-09-20*.json",
+      "reason": "diagnostics (354 bytes), not fixtures"
+    }
+  ],
+  "notOnThisMachine": [
+    "ASM #11 (phone, 2026-09-21)",
+    "Hulk #180 (phone, 2026-09-21)"
+  ]
+}
