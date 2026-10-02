@@ -195,7 +195,7 @@ export async function applyIdentityAuthorityPatch({ principalId, id, identityAut
       fields: correction?.fields, afterValues: correction?.afterValues, mergedAuthority: identityAuthority,
     }),
     apply: async (client, mutation) => {
-      const updated = await repo.applyIdentityAuthorityPatch(client, { id, principalId, identityAuthority: mutation.identityAuthority });
+      const updated = await repo.applyIdentityAuthorityPatch(client, { id, principalId, identityAuthority: mutation.identityAuthority, values: mutation.values });
       if (!updated) throw new NotFoundError(`collection item ${id} does not exist`);
       return updated;
     },

@@ -4,6 +4,16 @@
 
 Originally recorded 2026-10-02 (dispatch "OUTCOME SPINE FIRST") as design-only; this file records the laws the schema obeys, plus the verified evidence behind the shape.
 
+## GK-278B additions (2026-10-02) -- binding
+
+**Reaffirmation (explicit V1 decision).** Operator reaffirmation of an unchanged value is not captured in Learning Spine V1. operator_correction_event records changes, not confirmations. A future CONFIRM event may be added only if outcome data demonstrates that reaffirmation is useful enough to justify a separate semantic event. (before == after is a different semantic event from CORRECTION; operator_correction_event must not be silently overloaded. Re-setting an identical grade therefore performs no mutation, writes no event, and does not refresh operatorGradeSetAt -- deliberate, not accidental.)
+
+**Identity corrections are transactionally true.** For the corrected facets of a validated manual correction, the server writes the identity VALUES, the identityAuthority map and the operator_correction_event in ONE transaction: validated value == durable value == event.after. While a facet is OPERATOR_CONFIRMED, an ordinary /api/collection write cannot overwrite, null or omit its value; only a new validated correction can change it. Unconfirmed facets remain ordinary client state. (`printingClass` carries authority only; it has no persisted identity value.)
+
+**Organic corpus vs raw history.** The event tables are raw, immutable history and contain everything, including certification/test activity. Any provider bake-off, calibration set, PredictionError evaluation or aggregate meant to represent organic activity MUST read the projection views `organic_model_prediction_event` / `organic_operator_correction_event`, which exclude exactly the events registered in the append-only `learning_corpus_exclusion` table (0036). Exclusion is by explicit registered event id only -- never inferred from dates, titles, principals or behavior. **The Development database is NOT a clean organic corpus (permanent test/certification residue); raw Development event counts are never model-quality evidence.**
+
+**Future certification-artifact policy (the one method).** Every certification or test run that creates learning events against a database that will later feed any corpus must, immediately afterwards, run `node scripts/register-corpus-exclusion.mjs <env> --ticket <GK-N> --reason-code CERTIFICATION_ARTIFACT --reason "..." --date <YYYY-MM-DD> --item <collection_item_id> [--apply]` (dry run by default; `--item` resolves the item's correction events and the prediction events of the inferences they reference; `--result-id` / `--event table:uuid` also available). The events stay in history unmodified; the registry row is the permanent record.
+
 ## Master laws
 - **GRAILKEY LEARNS FROM HISTORY WITHOUT REWRITING HISTORY.**
 - MODEL PREDICTION ≠ OPERATOR LABEL ≠ ADJUDICATED AUTHORITY ≠ REALIZED OUTCOME. All four are preserved independently.

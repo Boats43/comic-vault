@@ -46,13 +46,17 @@ export function planGradingCorrections(attrs, patch) {
   return { noop: events.length === 0, events, mutation };
 }
 
+// The identity facets whose VALUES are persisted attributes (and are therefore written by the
+// server inside the correction transaction). 'printingClass' etc. carry authority only.
+export const IDENTITY_VALUE_FIELDS = ['title', 'issue', 'year', 'publisher', 'variant'];
+
 /**
  * Plan an IDENTITY correction. `fields` = the accepted corrected facets, `afterValues` = the
  * server-validated corrected values for them, `mergedAuthority` = prior durable map merged with
  * the newly minted OPERATOR_CONFIRMED entries.
  */
 export function planIdentityCorrection(attrs, { fields, afterValues, mergedAuthority }) {
-  const f = Array.isArray(fields) ? fields : [];
+  const f = (Array.isArray(fields) ? fields : []).filter((k) => IDENTITY_VALUE_FIELDS.includes(k));
   const beforeValue = pick(attrs, f);
   const afterValue = Object.fromEntries(f.map((k) => [k, norm(afterValues?.[k])]));
   const authorityBefore = (attrs?.identityAuthority && typeof attrs.identityAuthority === 'object') ? attrs.identityAuthority : {};
@@ -61,6 +65,8 @@ export function planIdentityCorrection(attrs, { fields, afterValues, mergedAutho
   return {
     noop: false,
     events: [{ surface: 'IDENTITY', action: 'CORRECT', beforeValue, afterValue, authorityBefore, authorityAfter }],
-    mutation: { identityAuthority: authorityAfter },
+    // GK-278B: the corrected VALUES are part of the same mutation, so durable value ==
+    // event.after == the validated value, in one transaction.
+    mutation: { identityAuthority: authorityAfter, values: afterValue },
   };
 }

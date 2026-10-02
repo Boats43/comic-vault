@@ -79,6 +79,8 @@ const FULLY_PROTECTED_BASELINE_KEYS = [
   'modelPredictedGradeAt', 'modelPredictedProvenance',
 ];
 const ALL_FULLY_PROTECTED_KEYS = [...FULLY_PROTECTED_GRADING_KEYS, ...FULLY_PROTECTED_BASELINE_KEYS];
+// GK-278B -- identity VALUE keys protected conditionally (only while their facet is OPERATOR_CONFIRMED).
+const IDENTITY_LOCKABLE_VALUE_KEYS = ['title', 'issue', 'year', 'publisher', 'variant'];
 
 function stripFullyProtectedGradingKeysSql(incomingParam) {
   const gradingKeysArray = `ARRAY[${ALL_FULLY_PROTECTED_KEYS.map((k) => `'${k}'`).join(', ')}]::text[]`;
@@ -101,12 +103,22 @@ function protectedAttributesMergeSql(existingAttrsExpr, incomingParam) {
   // would silently drop nested null keys inside a protected value such as
   // modelPredictedProvenance — "unknown stays null" must survive byte-for-byte).
   const keysArray = `ARRAY[${ALL_FULLY_PROTECTED_KEYS.map((k) => `'${k}'`).join(', ')}]::text[]`;
+  // GK-278B: an identity facet that is OPERATOR_CONFIRMED in the existing row keeps its existing VALUE
+  // too (survives overwrite, explicit null and omission). Only a new validated manual correction
+  // (applyIdentityAuthorityPatch) can change it. Facets without that authority stay ordinary client state.
+  const identityValueKeys = `ARRAY[${IDENTITY_LOCKABLE_VALUE_KEYS.map((k) => `'${k}'`).join(', ')}]::text[]`;
   return `(
     (COALESCE(${incomingParam}::jsonb, '{}'::jsonb) - ${keysArray})
     || (
       SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
         FROM jsonb_each(COALESCE(${existingAttrsExpr}, '{}'::jsonb)) AS e
        WHERE e.key = ANY(${keysArray})
+    )
+    || (
+      SELECT COALESCE(jsonb_object_agg(f.key, ${existingAttrsExpr}->f.key), '{}'::jsonb)
+        FROM unnest(${identityValueKeys}) AS f(key)
+       WHERE ${existingAttrsExpr}->'identityAuthority'->>f.key = 'OPERATOR_CONFIRMED'
+         AND (${existingAttrsExpr}) ? f.key
     )
   )`;
 }
@@ -246,14 +258,22 @@ export async function claimModelBaselinePatch(client, { id, principalId, baselin
 // GK-261 — the ONLY write path for identityAuthority. `identityAuthority` is
 // the facet->'OPERATOR_CONFIRMED' map api/enrich.js minted from a validated
 // manual-correction request, already merged with the durable row's prior map.
-export async function applyIdentityAuthorityPatch(client, { id, principalId, identityAuthority }) {
+// GK-278B: `values` = the corrected identity VALUES (title/issue/year/publisher/variant only, filtered
+// here as defense in depth), written in the same statement -- and therefore the same transaction -- as
+// the authority map, so the durable value cannot diverge from the validated correction.
+const IDENTITY_VALUE_KEYS = ['title', 'issue', 'year', 'publisher', 'variant'];
+export async function applyIdentityAuthorityPatch(client, { id, principalId, identityAuthority, values }) {
+  const safeValues = {};
+  for (const k of IDENTITY_VALUE_KEYS) {
+    if (values && Object.prototype.hasOwnProperty.call(values, k)) safeValues[k] = values[k];
+  }
   const res = await client.query(
     `UPDATE data1_dev.collection_item
-        SET attributes = COALESCE(attributes, '{}'::jsonb) || jsonb_build_object('identityAuthority', $3::jsonb),
+        SET attributes = COALESCE(attributes, '{}'::jsonb) || jsonb_build_object('identityAuthority', $3::jsonb) || $4::jsonb,
             updated_at = now()
       WHERE principal_id = $1 AND id = $2
       RETURNING id, asset_category, attributes, created_at, updated_at`,
-    [principalId, id, JSON.stringify(identityAuthority || {})]
+    [principalId, id, JSON.stringify(identityAuthority || {}), JSON.stringify(safeValues)]
   );
   return res.rowCount > 0 ? toRow(res.rows[0]) : null;
 }
