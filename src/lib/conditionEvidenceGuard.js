@@ -36,6 +36,40 @@ export const STORAGE_HISTORY_RE =
 export const BRITTLE_PAPER_RE =
   /\bbrittl(?:e|eness)\b|\bpaper (?:quality|stock|tone|flexib\w*)\b|\bflexib(?:le|ility)\b|\bacid(?:ic|ity)?\b|\bcrumbl\w*\b/i;
 
+// GK-272E — VISIBLE WEAR != HANDLING HISTORY. A photograph shows a physical
+// state; it does not show how long it took, what caused it, who owned the
+// book, or how it was kept. Prose may describe the state ("extensive color
+// loss and edge wear") but not infer duration, cause, ownership, storage or
+// handling history from it ("...consistent with decades of handling").
+//
+// Two shapes are handled:
+//  1. A trailing causal/inferential CLAUSE ("<observation> consistent with
+//     decades of handling.") — only the clause is removed; the visible
+//     observation before it is kept.
+//  2. A sentence that is itself a history claim ("Decades of handling are
+//     evident.", "Improper storage.") — withheld whole.
+const HISTORY_TOKEN =
+  "decades?|years?|centur(?:y|ies)|long[- ]term|ageing|aging|age|handling|handled|storage|stored|ownership|owners?|passage of time|use|used|improper|neglect|abuse|(?:19|20)\\d0'?s|(?:golden|silver|bronze|copper|modern)[- ]age|era";
+const HISTORY_CLAUSE_RE = new RegExp(
+  "\\s*,?\\s*\\b(?:consistent with|indicative of|suggest(?:s|ing|ive of)|typical of|characteristic of|reflect(?:s|ing)|resulting from|result of|caused by|due to|from|after|over|through)\\b[^.!?]*?\\b(?:" + HISTORY_TOKEN + ")\\b[^.!?]*",
+  "i"
+);
+const HISTORY_SENTENCE_RE = new RegExp(
+  "\\b(?:decades?|years?|centur(?:y|ies))\\s+of\\s+(?:\\w+\\s+){0,2}(?:handling|use|storage|wear|abuse|neglect)\\b|\\b(?:long[- ]term|improper|poor|years of)\\s+storage\\b|\\bheavy handling\\b|\\bhandling over (?:the )?(?:years|decades|time)\\b|\\bover (?:the )?(?:years|decades)\\b|\\bpassage of time\\b|\\bwell[- ]handled\\b|\\bmuch[- ]handled\\b",
+  "i"
+);
+
+export const trimInferredHistory = (sentence) => {
+  const m = String(sentence || '').match(HISTORY_CLAUSE_RE);
+  if (!m) return { text: sentence, removed: null };
+  const kept = sentence.slice(0, m.index).replace(/[\s,;:-]+$/, '');
+  const removed = sentence.slice(m.index).replace(/^[\s,]+/, '').replace(/[.!?\s]+$/, '');
+  if (!kept) return { text: '', removed: sentence };
+  return { text: /[.!?]$/.test(kept) ? kept : kept + '.', removed };
+};
+
+const HISTORY_REASON = 'not-observable: storage history, duration, cause or handling history cannot be established from photographs';
+
 const POLYBAG_RE = /\bpoly\s?bag(?:ged)?\b|\bbag(?:ged)?\s+indent/i;
 
 // Split into sentences conservatively; keep delimiters out.
@@ -73,46 +107,61 @@ export const guardConditionClaims = ({ reason, imageCount = 0, views = null, und
   // per line and a line that loses every sentence is dropped.
   const keptLines = [];
   for (const rawLine of String(reason || '').split('\n')) {
-  const kept = [];
-  for (const sentence of splitSentences(rawLine)) {
-    if (polybagImpossible && POLYBAG_RE.test(sentence)) {
-      withheld.push({ claim: sentence, reason: `era-implausible: polybag indentation in a ${y} book` });
-      continue;
-    }
-    if (ERA_IDENTITY_RE.test(sentence)) {
-      withheld.push({ claim: sentence, reason: 'identity-claim: era/decade is an identity assertion, not a condition observation' });
-      continue;
-    }
-    if (STORAGE_HISTORY_RE.test(sentence)) {
-      withheld.push({ claim: sentence, reason: 'not-observable: storage history cannot be established from photographs' });
-      continue;
-    }
-    if (BRITTLE_PAPER_RE.test(sentence) && !hasView('PAGES')) {
-      withheld.push({ claim: sentence, reason: 'not-visible-from-supplied-evidence: paper condition needs a declared PAGES view' });
-      continue;
-    }
-    if (UNSUPPORTED_WITH_FRONT_ONLY_RE.test(sentence)) {
-      const needsBack = /\b(?:back|rear)\b/i.test(sentence);
-      const needsSpine = /\b(?:spine|staples?|stapl)/i.test(sentence);
-      const needsPages = /\b(?:interior|pages?|centerfold|inside)\b/i.test(sentence);
-      const grounded =
-        (!needsBack || hasView('BACK')) &&
-        (!needsSpine || hasView('SPINE')) &&
-        (!needsPages || hasView('PAGES'));
-      const groundingKnowable = frontOnly || fullyDeclared;
-      if (!grounded && groundingKnowable) {
+    const kept = [];
+    for (const original of splitSentences(rawLine)) {
+      let sentence = original;
+      // GK-272E — strip an inferential history/cause/era clause first so the
+      // visible observation in front of it survives.
+      const trimmed = trimInferredHistory(sentence);
+      if (trimmed.removed) {
+        const isEra = ERA_IDENTITY_RE.test(trimmed.removed);
         withheld.push({
-          claim: sentence,
-          reason: frontOnly
-            ? 'not-visible-from-supplied-evidence: single front image'
-            : 'not-grounded: no declared capture_view supports this claim',
+          claim: trimmed.removed,
+          reason: isEra
+            ? 'identity-claim: era/decade is an identity assertion, not a condition observation'
+            : HISTORY_REASON,
         });
+        sentence = trimmed.text;
+        if (!sentence) continue;
+      }
+      if (polybagImpossible && POLYBAG_RE.test(sentence)) {
+        withheld.push({ claim: sentence, reason: `era-implausible: polybag indentation in a ${y} book` });
         continue;
       }
+      if (ERA_IDENTITY_RE.test(sentence)) {
+        withheld.push({ claim: sentence, reason: 'identity-claim: era/decade is an identity assertion, not a condition observation' });
+        continue;
+      }
+      if (HISTORY_SENTENCE_RE.test(sentence) || STORAGE_HISTORY_RE.test(sentence)) {
+        withheld.push({ claim: sentence, reason: HISTORY_REASON });
+        continue;
+      }
+      if (BRITTLE_PAPER_RE.test(sentence) && !hasView('PAGES')) {
+        withheld.push({ claim: sentence, reason: 'not-visible-from-supplied-evidence: paper condition needs a declared PAGES view' });
+        continue;
+      }
+      if (UNSUPPORTED_WITH_FRONT_ONLY_RE.test(sentence)) {
+        const needsBack = /\b(?:back|rear)\b/i.test(sentence);
+        const needsSpine = /\b(?:spine|staples?|stapl)/i.test(sentence);
+        const needsPages = /\b(?:interior|pages?|centerfold|inside)\b/i.test(sentence);
+        const grounded =
+          (!needsBack || hasView('BACK')) &&
+          (!needsSpine || hasView('SPINE')) &&
+          (!needsPages || hasView('PAGES'));
+        const groundingKnowable = frontOnly || fullyDeclared;
+        if (!grounded && groundingKnowable) {
+          withheld.push({
+            claim: sentence,
+            reason: frontOnly
+              ? 'not-visible-from-supplied-evidence: single front image'
+              : 'not-grounded: no declared capture_view supports this claim',
+          });
+          continue;
+        }
+      }
+      kept.push(sentence);
     }
-    kept.push(sentence);
-  }
-  if (kept.length > 0) keptLines.push(kept.join(' '));
+    if (kept.length > 0) keptLines.push(kept.join(' '));
   }
 
   let flags = cgcPenaltyFlags;

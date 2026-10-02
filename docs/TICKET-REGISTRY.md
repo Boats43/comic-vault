@@ -2143,6 +2143,18 @@ New `api/ebay-account-deletion.js` — GET challenge-response verification (SHA-
 
 **Tests:** `tests/gk272d-live-surfaces.test.js` 27/27 — REAL render (Vite SSR + react-dom/server) of the fresh ResultCard and saved CollectionDetail from the live state; against the pre-fix files it fails 12/27 (VERIFIED badge, Floor, polybag, brittleness/era all reproduced). GK-271/271b/272/272B/272C suites and the grade/enrich handler smokes still green. No pricing math, contract, decision engine or authority-state change.
 
+## GK-272E — visible wear != handling history (2026-10-01), PENDING LIVE VERIFICATION
+
+**Live finding:** the fresh ResultCard passed identity/economic authority; one condition sentence remained: "Cover exhibits extensive color loss and edge wear consistent with decades of handling." Color loss and edge wear are visible; "decades of handling" is inferred duration/cause/handling history.
+
+**Root cause:** the condition-evidence guard (GK-271/272C/272D) withholds back/spine/page claims, era/decade identity, storage history and brittleness, but had no rule for an inferential/causal CLAUSE hanging off a legitimate observation ("... consistent with decades of handling"). The only history rules matched the words `storage`/`stored`/`indicative of age`, so "decades of handling" (and "years of handling", "heavy handling over time", "long-term storage" phrasing without those exact tokens) passed untouched. Withholding whole sentences for these would also have thrown away the true observation.
+
+**Guard change (`conditionEvidenceGuard.js`):** `trimInferredHistory` removes a trailing connector clause ("consistent with / indicative of / suggesting / typical of / resulting from / caused by / due to / from / after / over / through ...") when the clause contains a duration/cause/ownership/storage/handling/age/era token, keeping the observation before it ("Cover exhibits extensive color loss and edge wear."). A sentence that is itself a history claim ("Decades of handling are evident.", "Improper storage.", "heavy handling over time", "well-handled copy") is withheld whole. Removed clauses are recorded in `conditionClaimsWithheld` with a handling-history reason (era clauses keep their identity-claim reason). Grade, identity, pricing, market evidence and penalty flags are untouched. Plain observations pass through unchanged (including lines like "Visible stain after cleaning." and "creasing over the front cover").
+
+**Both surfaces use the same guard:** FRESH ResultCard (`getDisplayConditionEvidence(result)`) and SAVED CollectionDetail (`conditionEvidence`) — verified by a real render of both. **Disclosed gap, not changed (outside the two named surfaces, and a production route):** `api/list-ebay.js` (listing description, bundle note) and `src/lib/marketplacePackets.js` still build outbound buyer-facing text from the raw `item.reason`; a handling-history clause could still reach a live listing. Recommend its own ticket.
+
+**Tests:** `tests/gk272e-condition-history-inference.test.js` 29/29 (live sentence, duration/cause/ownership/storage/handling variants, observation pass-through, bullet structure, no grade/price/identity output, real render of both surfaces). The pre-fix guard returns the live sentence unchanged. GK-271/271b/272/272B/272C/272D suites re-run green.
+
 ## Observations
 
 Non-ticket notes — record only, no GK-N assigned, no status tracked.

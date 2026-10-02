@@ -108,3 +108,7 @@ Prior entry, retained for history: 201 PASS / 19 FAIL / 4 TIMEOUT / 224 total â€
 ## Roster delta (2026-10-01, GK-272D live-surface certification)
 
 +1 file: `tests/gk272d-live-surfaces.test.js` (27/27, real component render; pre-fix files fail 12/27). Roster count 275 -> 276. Historical-roster status changes: NOT FRESHLY MEASURED.
+
+## Roster delta (2026-10-01, GK-272E condition history inference)
+
++1 file: `tests/gk272e-condition-history-inference.test.js` (29/29). Roster count 276 -> 277. Historical-roster status changes: NOT FRESHLY MEASURED.
