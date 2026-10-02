@@ -1830,6 +1830,12 @@ GK-278 Production certification (2026-10-02, commit `6e9595e`, deployment `dpl_D
 | model_prediction_event (CONDITION) | 01a0fdbf-ce48-7866-909c-9807b651be85 |
 | model_prediction_event (IDENTITY) | 01a0fdbf-cec5-72ec-afae-7aef915e727c |
 | operator_correction_event (GRADE) | 01a0fdbf-db31-7072-a0d8-79aa21b8595a |
+**Fifth artifact, from this dispatch's own Production smoke (GK-278B, build `3f9669b`, deployment `dpl_4GQSz4QdtvaFFuLvy6BnqsTak5Tj`):** a transient Production item `gk278b-smoke-1790964996488` (deleted) proved the identity transaction live (98 -> 99 durable, ordinary save of 97 / null cannot overwrite, history hashes unchanged) and created one more permanent event, registered immediately with the same reason (PRODUCTION CERTIFICATION ARTIFACT — NOT ORGANIC USER DATA):
+| event type | event ID |
+|---|---|
+| operator_correction_event (IDENTITY) | 01a0fdd5-60d8-71d5-84f8-5c897bd72353 |
+Disclosed discrepancy: its true DB creation time is 2026-10-02T18:16:54Z but the registry row was entered with certification_date 2026-10-03 (taken from a timezone-shifted script print — the same GK-191-class serialization artifact that made earlier script UTC prints appear 7h ahead). The exclusion registry is append-only, so the row is not amended; `operator_correction_event.created_at` is the authoritative time. Organic projections in Production: 0 predictions, 0 corrections.
+
 **Mechanism / policy:** `db/data0/0036_learning_corpus_exclusion.sql` (append-only registry + `organic_model_prediction_event` / `organic_operator_correction_event` views); `scripts/register-corpus-exclusion.mjs`; policy text in `docs/LEARNING-SPINE-LAWS.md` ("GK-278B additions"). Proof (`tests/gk278c-corpus-exclusion-and-truncate.test.js` 23/23): raw history keeps all four, organic projection has none, an unregistered organic event stays in the projection, the registry rejects UPDATE/DELETE, reason_code is a closed vocabulary. Production before/after: raw prediction hash `f7d7ce21…` and correction hash `83591632…` byte-identical; organic counts 3->0 and 1->0. **Development is NOT a clean organic corpus.**
 
 **TRUNCATE protection — verified directly (scratch schemas):** (A) prediction table with NO foreign key referencing it: `TRUNCATE` refused by the append-only TRIGGER; (B) with a correction row present: plain `TRUNCATE` is refused by the incidental FK, `TRUNCATE … CASCADE` is refused by the TRIGGER (no row lost in either table); (C) `TRUNCATE operator_correction_event` (and CASCADE) refused by its trigger. Not FK-conditional; no defect.
