@@ -30,6 +30,7 @@ export {
   getOutcomeEventsForListing,
   resolveOwnedAssetForListing,
   getLatestValuation,
+  recordEconomicDecision,
   getHistoricalValuationForDecision,
   hasActiveListingForChannel,
   hasAuthoritativeSoldOutcome,

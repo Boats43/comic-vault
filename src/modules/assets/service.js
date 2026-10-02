@@ -1039,6 +1039,83 @@ export async function recordDecision({ principalId, gkAssetId, recommendation, r
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// recordEconomicDecision -- GK-276. The ONE governed server-derived
+// economic writer: a valuation_event AND the decision_event that
+// references it commit in a SINGLE transaction (both or neither -- no
+// orphan valuation, no repair job). Provenance is hard-coded
+// SERVER_DERIVED: this function exists only for the server's own
+// economic engine and takes no provenance parameter, so no caller can
+// label a row otherwise. Idempotency is keyed by the caller-computed
+// SERVER-DERIVED semantic fingerprint (never a client key): the same
+// economic decision replays (zero new rows); a materially different one
+// appends one new pair.
+// ─────────────────────────────────────────────────────────────────────
+export async function recordEconomicDecision({
+  principalId, gkAssetId, valueAmount, valueCurrency = 'USD', method = 'engine-computed',
+  marketPopulationId, gradeAssumption, buildSha, recommendation, reasonCodes = [],
+  semanticFingerprint, correlationId, occurredAt,
+} = {}) {
+  requireFields(
+    { principalId, gkAssetId, valueAmount, method, buildSha, recommendation, semanticFingerprint },
+    ['principalId', 'gkAssetId', 'valueAmount', 'method', 'buildSha', 'recommendation', 'semanticFingerprint']
+  );
+  requireEnum(method, ['engine-computed', 'operator-override', 'gocollect', 'other'], 'method');
+  if (typeof semanticFingerprint !== 'string' || !semanticFingerprint.startsWith('econ-v1:')) {
+    throw new ValidationFailedError('semanticFingerprint must be the server-derived econ-v1 fingerprint');
+  }
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const operation = 'recordEconomicDecision';
+      const requestFingerprint = computeRequestFingerprint({
+        gkAssetId, valueAmount, valueCurrency, method, gradeAssumption: gradeAssumption ?? null,
+        marketPopulationId: marketPopulationId ?? null, recommendation, reasonCodes, buildSha,
+      });
+      const replay = await checkIdempotencyReplay(client, { operation, idempotencyKey: semanticFingerprint, requestFingerprint });
+      if (replay) { await client.query('COMMIT'); return { ...replay, replayed: true }; }
+
+      await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      // correlation ids are uuids: a non-uuid trace string never reaches the domain-event insert.
+      const cid = (typeof correlationId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(correlationId)) ? correlationId : await newCorrelationId(client);
+
+      const valuationEventId = await repo.insertValuationEvent(client, {
+        assetId: gkAssetId, valueAmount, valueCurrency, method, marketPopulationId, gradeAssumption, buildSha,
+        provenance: 'SERVER_DERIVED', recordedByPrincipalId: principalId, occurredAt,
+      });
+      await repo.writeDomainEvent(client, {
+        eventType: 'valuation.computed', actorPrincipalId: principalId, actorKind: 'system',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { valuationEventId, valueAmount, valueCurrency, method, buildSha, provenance: 'SERVER_DERIVED', compSnapshotId: null, marketPopulationId: marketPopulationId ?? null },
+        correlationId: cid, occurredAt,
+      });
+      const decisionEventId = await repo.insertDecisionEvent(client, {
+        assetId: gkAssetId, recommendation, reasonCodes, valuationEventId, occurredAt,
+      });
+      await repo.writeDomainEvent(client, {
+        eventType: 'decision.computed', actorPrincipalId: principalId, actorKind: 'system',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { decisionEventId, recommendation, reasonCodes },
+        correlationId: cid, occurredAt,
+      });
+
+      const result = { valuationEventId, decisionEventId };
+      await claimIdempotencyKey(client, { operation, idempotencyKey: semanticFingerprint, principalId, result, requestFingerprint });
+      await client.query('COMMIT');
+      return { ...result, replayed: false };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // recordOperatorAction — OperatorAction (0021, GK-199 dispatch 2).
 // The FOURTH distinct truth: what the authenticated human actually
 // chose, in response to a specific existing GrailKey recommendation

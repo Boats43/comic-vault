@@ -174,7 +174,7 @@ import { detectBookSignals } from "../src/lib/categoryClassifier.js";
 import { kvGet, kvSet, kvZAdd, KV_TTL, PC_FILTER_VERSION, CV_FILTER_VERSION } from "./kv-cache.js";
 import { captureEvidenceObservedAt, stampEvidenceObservedAt } from "../src/lib/evidenceObservedAt.js";
 import { attemptChain1, buildChain1ObservationsFromRawComps } from "../src/lib/d5dRuntimeBridge.js";
-import { attemptOutcome1 } from "../src/lib/outcome1RuntimeBridge.js";
+import { attemptOutcome1, attemptOutcome1Production } from "../src/lib/outcome1RuntimeBridge.js";
 import { buildScanLogRecord, buildScanLogKey, SCAN_LOG_INDEX_KEY } from "../src/lib/scanLog.js";
 import { checkRateLimit } from "./rate-limit.js";
 import { randomUUID } from "node:crypto";
@@ -13527,11 +13527,13 @@ export default async function handler(req, res) {
               priceString: out.price,
               decision: out.decision,
               gradeAssumption: numericGrade ?? null,
+              evidenceKey: `${out.pricingSource ?? 'none'}|${out.matchConfidence?.tier ?? 'none'}`,
               buildSha: buildId,
-              idempotencyKey: req.body?.d5dIdempotencyKey || null,
               correlationId: pipelineTraceId || null,
-              recordValuation: assetsMod.recordValuation,
-              recordDecision: assetsMod.recordDecision,
+              // GK-276: ONE atomic valuation+decision write, SERVER_DERIVED,
+              // idempotency key derived server-side from the semantic
+              // fingerprint. The client d5dIdempotencyKey is no longer read.
+              recordEconomicDecision: assetsMod.recordEconomicDecision,
             });
             const outcome1ElapsedMs = Date.now() - outcome1Start;
             console.log(
@@ -13550,6 +13552,61 @@ export default async function handler(req, res) {
       }
     } catch (d5dErr) {
       console.error('[d5d-chain1] wiring error (non-fatal, pricing response unaffected):', d5dErr.message);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // GK-276 — GK-180 PRODUCTION CONTROLLED CANARY (Outcome #1).
+    // Independent of D5D. Writes a durable, SERVER_DERIVED valuation +
+    // decision pair (ONE atomic transaction) only when ALL hold:
+    //   - GRAILKEY_CATALOG_ENVIRONMENT === 'production'
+    //   - the request EXPLICITLY asks (recordDurableDecision === true) --
+    //     a refresh alone never writes
+    //   - an owned-item flow (ownedRefresh) whose principal was verified
+    //     from the Bearer token AND confirmed to own collectionItemId
+    //   - the item resolves, via collection_item_link, to a physical
+    //     gkAssetId that is in OUTCOME1_PRODUCTION_ASSET_ALLOWLIST
+    //     (absent/empty allowlist = no Production writes; no wildcard)
+    //   - the request identity matches the durable owned item
+    //   - real build identity (never 'unknown')
+    // All economic values come from THIS request's own pipeline result
+    // (out.price / out.decision); the client contributes none. Failure here
+    // never changes the pricing response (own try/catch).
+    // ─────────────────────────────────────────────────────────────────
+    try {
+      const assetsModGK276 = process.env.GRAILKEY_CATALOG_ENVIRONMENT === 'production' && req.body?.recordDurableDecision === true
+        ? await import('../src/modules/assets/index.js')
+        : null;
+      const o1Result = await attemptOutcome1Production({
+        environment: process.env.GRAILKEY_CATALOG_ENVIRONMENT || null,
+        recordDurableDecision: req.body?.recordDurableDecision,
+        allowlistRaw: process.env.OUTCOME1_PRODUCTION_ASSET_ALLOWLIST,
+        ownedRefresh,
+        principalId: principalIdGK260,
+        collectionItemId,
+        durableAttributes: durableGradingAttributesGK213C,
+        requestIdentity: { title: req.body?.title, issue: req.body?.issue },
+        priceString: out.price,
+        decision: out.decision,
+        gradeAssumption: numericGrade ?? null,
+        evidenceKey: `${out.pricingSource ?? 'none'}|${out.matchConfidence?.tier ?? 'none'}`,
+        buildSha: buildId,
+        correlationId: pipelineTraceId || null,
+        resolveCollectionItemLink: assetsModGK276?.resolveCollectionItemLink,
+        recordEconomicDecision: assetsModGK276?.recordEconomicDecision,
+      });
+      if (!o1Result.skipped) {
+        console.log(`[outcome1-prod-canary] attempted=${o1Result.attempted} declineReason=${o1Result.declineReason || 'n/a'} replayed=${o1Result.replayed === true}`);
+        out.outcome1Result = {
+          attempted: o1Result.attempted,
+          declineReason: o1Result.declineReason || null,
+          replayed: o1Result.replayed === true,
+          valuationEventId: o1Result.result?.valuationEventId,
+          decisionEventId: o1Result.result?.decisionEventId,
+          error: o1Result.error || undefined,
+        };
+      }
+    } catch (o1ProdErr) {
+      console.error('[outcome1-prod-canary] wiring error (non-fatal, pricing response unaffected):', o1ProdErr.message);
     }
 
     // FIX 1 PHASE 2 — api/metadata.js merged into enrich.
