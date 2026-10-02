@@ -1053,8 +1053,14 @@ export async function recordDecision({ principalId, gkAssetId, recommendation, r
 export async function recordEconomicDecision({
   principalId, gkAssetId, valueAmount, valueCurrency = 'USD', method = 'engine-computed',
   marketPopulationId, gradeAssumption, buildSha, recommendation, reasonCodes = [],
-  semanticFingerprint, correlationId, occurredAt,
+  semanticFingerprint, correlationId, occurredAt, authoritySnapshot,
 } = {}) {
+  // GK-278: authoritySnapshot is a SERVER-constructed decision-time authority record (see
+  // src/lib/decisionAuthoritySnapshot.js). It is NOT part of the idempotency fingerprint -- a
+  // replay of the same economic decision stays a replay -- and it is validated as a plain object.
+  if (authoritySnapshot != null && (typeof authoritySnapshot !== 'object' || Array.isArray(authoritySnapshot))) {
+    throw new ValidationFailedError('authoritySnapshot must be an object when supplied');
+  }
   requireFields(
     { principalId, gkAssetId, valueAmount, method, buildSha, recommendation, semanticFingerprint },
     ['principalId', 'gkAssetId', 'valueAmount', 'method', 'buildSha', 'recommendation', 'semanticFingerprint']
@@ -1093,7 +1099,7 @@ export async function recordEconomicDecision({
         correlationId: cid, occurredAt,
       });
       const decisionEventId = await repo.insertDecisionEvent(client, {
-        assetId: gkAssetId, recommendation, reasonCodes, valuationEventId, occurredAt,
+        assetId: gkAssetId, recommendation, reasonCodes, valuationEventId, occurredAt, authoritySnapshot: authoritySnapshot ?? null,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'decision.computed', actorPrincipalId: principalId, actorKind: 'system',

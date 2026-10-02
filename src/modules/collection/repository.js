@@ -258,6 +258,16 @@ export async function applyIdentityAuthorityPatch(client, { id, principalId, ide
   return res.rowCount > 0 ? toRow(res.rows[0]) : null;
 }
 
+// GK-278 -- row lock for the correction transaction: the before-state read, the
+// mutation, and the correction-event insert all happen under this lock.
+export async function lockItemAttributes(client, { id, principalId }) {
+  const res = await client.query(
+    `SELECT attributes FROM data1_dev.collection_item WHERE principal_id = $1 AND id = $2 FOR UPDATE`,
+    [principalId, id]
+  );
+  return res.rowCount > 0 ? (res.rows[0].attributes || {}) : null;
+}
+
 export async function deleteItem(client, principalId, id) {
   const res = await client.query(
     `DELETE FROM data1_dev.collection_item WHERE principal_id = $1 AND id = $2`,

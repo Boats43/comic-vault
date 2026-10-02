@@ -131,20 +131,70 @@ const parseResponse = (text) => {
 // measured against real comic-pool titles from this same session's logs).
 import { detectBookSignals, classifyTitle } from '../src/lib/categoryClassifier.js';
 import { issueGradeReceipt } from '../src/lib/gradeReceipt.js';
+import { recordModelPrediction, sha256Hex } from '../src/modules/learning/index.js';
+import { randomUUID } from 'node:crypto';
 
 // GK-261 — record what the model ACTUALLY returned under an opaque,
 // principal-bound, short-TTL receipt and hand the client only the handle.
 // `model` is the model id the call site really used (null = not known,
 // recorded as UNKNOWN — never inferred). Never throws; no receipt on any
 // failure, and a missing receipt just means no trusted baseline later.
-const attachGradeReceipt = async (result, principalId, model) => {
+//
+// GK-278: the SAME server-observed result is also written, append-only, as
+// model_prediction_event rows (GRADE always; CONDITION when the model returned
+// condition evidence; IDENTITY only when the MODEL produced the identity, not when it
+// came from the eBay image-search consensus). Written here from the server's own response
+// object only; no client field is read. A failure to write never blocks the scan.
+const attachGradeReceipt = async (result, principalId, ctx = {}) => {
+  const { model = null, meta = null, inputHash = null, identityFromModel = false } = ctx;
+  const buildSha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null;
+  const resultId = randomUUID();
+  const provenance = {
+    provider: (meta?.requestedModel || model) ? 'anthropic' : null,
+    model: meta?.requestedModel || model || null,
+    modelVersion: meta?.model || null,
+    promptVersion: meta?.promptVersion || null,
+    buildSha,
+  };
+  let predictionEventId = null;
+  try {
+    if (result && typeof result.grade === 'string' && result.grade.trim()) {
+      const base = { principalId, resultId, ...provenance, inputHash, usage: meta?.usage || null };
+      const g = await recordModelPrediction({
+        ...base, surface: 'GRADE',
+        prediction: {
+          grade: result.grade, numericGrade: result.numericGrade ?? null, isGraded: result.isGraded ?? null,
+          confidence: result.confidence ?? null, reason: typeof result.reason === 'string' ? result.reason : null,
+        },
+      });
+      predictionEventId = g.eventId;
+      if (result.cgcPenaltyFlags || result.defectPenalty || result.restoration || result.conditionClaimsWithheld) {
+        await recordModelPrediction({
+          ...base, surface: 'CONDITION',
+          prediction: {
+            cgcPenaltyFlags: result.cgcPenaltyFlags ?? null, defectPenalty: result.defectPenalty ?? null,
+            restoration: result.restoration ?? null, conditionClaimsWithheld: result.conditionClaimsWithheld ?? null,
+            gradeEvidenceStanding: result.gradeEvidenceStanding ?? null,
+          },
+        });
+      }
+      if (identityFromModel) {
+        await recordModelPrediction({
+          ...base, surface: 'IDENTITY',
+          prediction: {
+            title: result.title ?? null, issue: result.issue ?? null, year: result.year ?? null,
+            publisher: result.publisher ?? null, variant: result.variant ?? null,
+            assetType: result.assetType ?? null, assetTypeConfident: result.assetTypeConfident ?? null,
+          },
+        });
+      }
+    }
+  } catch (e) {
+    console.log('[learning] model_prediction_event write failed (non-fatal): ' + (e?.message || e));
+  }
   try {
     const receiptId = await issueGradeReceipt({
-      principalId,
-      result,
-      provider: model ? 'anthropic' : null,
-      model: model || null,
-      buildSha: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null,
+      principalId, result, ...provenance, resultId, predictionEventId,
     });
     if (receiptId) result.gradeReceiptId = receiptId;
   } catch { /* receipt is best-effort; absence == UNKNOWN */ }
@@ -636,7 +686,18 @@ const callModel = async (model, imageContent, promptText) => {
     console.log(`[cost-audit] logging-failed model=${model} err=${err?.message ?? 'unknown'}`);
   }
 
-  return { parsed, ms };
+  const meta = {
+    requestedModel: model,
+    model: typeof message.model === 'string' ? message.model : null,
+    usage: message.usage ? {
+      input_tokens: message.usage.input_tokens ?? null,
+      output_tokens: message.usage.output_tokens ?? null,
+      cache_creation_input_tokens: message.usage.cache_creation_input_tokens ?? null,
+      cache_read_input_tokens: message.usage.cache_read_input_tokens ?? null,
+    } : null,
+    promptVersion: 'sha256:' + sha256Hex(String(promptText)).slice(0, 16),
+  };
+  return { parsed, ms, meta };
 };
 
 // Self-correcting watch pipeline: Haiku fast → Haiku self-correct → Opus escalation.
@@ -777,6 +838,10 @@ export default async function handler(req, res) {
       }
     }
     const noImage = !image;
+    // GK-278 -- durable input reference for prediction events: a hash of the first image as
+    // received, never the bytes.
+    const inputRef = Array.isArray(images) ? images[0] : image;
+    const inputHash = typeof inputRef === 'string' && inputRef ? 'sha256:' + sha256Hex(inputRef) : null;
 
     // Build image content with resize — fail-fast on invalid input
     let imageContent;
@@ -795,7 +860,7 @@ export default async function handler(req, res) {
       const { result, passes, timings } = await watchPipeline(imageContent, body.voiceContext);
       applyConditionGuard(result, Array.isArray(images) ? images.length : (image ? 1 : 0), body.imageViews);
       if (noImage) result.noImage = true;
-      await attachGradeReceipt(result, auth.principalId, null);
+      await attachGradeReceipt(result, auth.principalId, { model: null, inputHash });
       res.setHeader("x-watch-passes", String(passes));
       res.setHeader("x-watch-timing", JSON.stringify(timings));
       res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
@@ -815,7 +880,7 @@ export default async function handler(req, res) {
 
       mark('vision_start');
       const gradePrompt = buildGradeOnlyPrompt(ebayResult.consensus);
-      const { parsed: gradeResult } = await callModel("claude-haiku-4-5-20251001", imageContent, gradePrompt);
+      const { parsed: gradeResult, meta: gradeMeta } = await callModel("claude-haiku-4-5-20251001", imageContent, gradePrompt);
       mark('vision_complete');
 
       // Merge eBay identity + Sonnet grade
@@ -868,7 +933,7 @@ export default async function handler(req, res) {
       if (noImage) result.noImage = true;
 
       console.log('[grade] eBay-first path succeeded');
-      await attachGradeReceipt(result, auth.principalId, "claude-haiku-4-5-20251001");
+      await attachGradeReceipt(result, auth.principalId, { model: "claude-haiku-4-5-20251001", meta: gradeMeta, inputHash, identityFromModel: false });
       mark('response_sent');
       res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
       return;
@@ -879,7 +944,8 @@ export default async function handler(req, res) {
 
     // Session 4B — Initial scan to detect asset type
     mark('vision_start');
-    const { parsed: initialScan } = await callModel("claude-sonnet-4-5-20250929", imageContent, STANDARD_PROMPT);
+    const { parsed: initialScan, meta: initialMeta } = await callModel("claude-sonnet-4-5-20250929", imageContent, STANDARD_PROMPT);
+    let finalMeta = initialMeta;
     mark('vision_complete');
     // GK-249 (U6.0B) — composed trigger: the original detectBookSignals
     // check (book vocabulary inside STANDARD_PROMPT's own comic-framed
@@ -907,8 +973,9 @@ export default async function handler(req, res) {
       if (body.voiceContext) {
         userPrompt += "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
       }
-      const { parsed: bookScan } = await callModel("claude-sonnet-4-5-20250929", imageContent, userPrompt);
+      const { parsed: bookScan, meta: bookMeta } = await callModel("claude-sonnet-4-5-20250929", imageContent, userPrompt);
       finalParsed = bookScan;
+      finalMeta = bookMeta;
       // GK-249 (U6.0B) Section B2 — first-fire observability. No prior
       // real BOOK_PROMPT output had been observed in Production as of
       // this dispatch (confirmed: zero "[grade] Book signals detected"
@@ -937,8 +1004,9 @@ export default async function handler(req, res) {
       if (body.voiceContext) {
         // Re-scan with voice context
         userPrompt = STANDARD_PROMPT + "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
-        const { parsed: contextScan } = await callModel("claude-sonnet-4-5-20250929", imageContent, userPrompt);
+        const { parsed: contextScan, meta: contextMeta } = await callModel("claude-sonnet-4-5-20250929", imageContent, userPrompt);
         finalParsed = contextScan;
+        finalMeta = contextMeta;
       }
     }
 
@@ -949,7 +1017,7 @@ export default async function handler(req, res) {
     applyNewsstandFallback(finalParsed);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
-    await attachGradeReceipt(finalParsed, auth.principalId, "claude-sonnet-4-5-20250929");
+    await attachGradeReceipt(finalParsed, auth.principalId, { model: "claude-sonnet-4-5-20250929", meta: finalMeta, inputHash, identityFromModel: true });
     mark('response_sent');
     res.status(200).json(echoScanId(ensureAssetType(finalParsed, initialScan), body.scanId));
   } catch (err) {

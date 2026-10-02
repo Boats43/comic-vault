@@ -257,12 +257,15 @@ export async function insertValuationEvent(client, { assetId, valueAmount, value
   return id;
 }
 
-export async function insertDecisionEvent(client, { assetId, recommendation, reasonCodes, valuationEventId, occurredAt }) {
+export async function insertDecisionEvent(client, { assetId, recommendation, reasonCodes, valuationEventId, occurredAt, authoritySnapshot }) {
   const id = await uuidv7(client);
+  // GK-278 -- authority_snapshot (0035) is server-constructed (src/lib/decisionAuthoritySnapshot.js)
+  // and only recordEconomicDecision ever passes it; NULL for every other writer / historical row.
   await client.query(
-    `INSERT INTO data1_dev.decision_event (id, asset_id, recommendation, reason_codes, valuation_event_id, occurred_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [id, assetId, recommendation, JSON.stringify(reasonCodes ?? []), valuationEventId ?? null, occurredAt ?? null]
+    `INSERT INTO data1_dev.decision_event (id, asset_id, recommendation, reason_codes, valuation_event_id, occurred_at, authority_snapshot)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    [id, assetId, recommendation, JSON.stringify(reasonCodes ?? []), valuationEventId ?? null, occurredAt ?? null,
+     authoritySnapshot ? JSON.stringify(authoritySnapshot) : null]
   );
   return id;
 }

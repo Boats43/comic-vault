@@ -43,7 +43,7 @@ const str = (v) => (typeof v === 'string' && v.trim() ? v : null);
  * null when nothing trustworthy can be recorded (no principal, no grade,
  * store unavailable). Never throws.
  */
-export async function issueGradeReceipt({ principalId, result, provider = null, model = null, modelVersion = null, promptVersion = null, buildSha = null, now = Date.now() } = {}) {
+export async function issueGradeReceipt({ principalId, result, provider = null, model = null, modelVersion = null, promptVersion = null, buildSha = null, resultId = null, predictionEventId = null, now = Date.now() } = {}) {
   try {
     if (!principalId || !result || !str(result.grade)) return null;
     const receiptId = `gr_${randomBytes(24).toString('base64url')}`;
@@ -51,7 +51,8 @@ export async function issueGradeReceipt({ principalId, result, provider = null, 
       v: 1,
       principalId,
       issuedAt: now,
-      resultId: randomUUID(),
+      resultId: str(resultId) || randomUUID(),
+      predictionEventId: str(predictionEventId), // GK-278: the durable model_prediction_event this receipt corresponds to
       grade: result.grade,
       reason: typeof result.reason === 'string' ? result.reason : null,
       confidence: str(result.confidence),
@@ -111,6 +112,7 @@ export async function claimGradeReceipt({ principalId, receiptId, now = Date.now
           promptVersion: rec.promptVersion,
           buildSha: rec.buildSha,
           resultId: rec.resultId,
+          predictionEventId: rec.predictionEventId ?? null,
           receiptIssuedAt: rec.issuedAt,
           claimedAt: now,
         },

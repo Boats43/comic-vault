@@ -1,6 +1,8 @@
-# Learning Spine — binding design laws (DESIGN ONLY, schema UNAUTHORIZED)
+# Learning Spine — binding design laws
 
-Recorded 2026-10-02 (dispatch "OUTCOME SPINE FIRST"). Nothing here is built. No migration, no table, no column exists for any item below. The schema remains **unauthorized**; this file records the laws any future schema must obey, plus the verified evidence behind the shape.
+**STATUS UPDATE (2026-10-02, GK-278): the MINIMUM spine below is now BUILT** — migration `0035_learning_spine.sql` (`model_prediction_event`, `operator_correction_event`, `decision_event.authority_snapshot`), `src/modules/learning/`, writers wired in `api/grade.js`, `src/modules/collection` (transactional) and `src/lib/outcome1RuntimeBridge.js`. Items D-J that were design-only remain as written (outcome anchor = GK-274; Research durability, holdout and the rest are NOT built). Full detail: `docs/TICKET-REGISTRY.md`, GK-278.
+
+Originally recorded 2026-10-02 (dispatch "OUTCOME SPINE FIRST") as design-only; this file records the laws the schema obeys, plus the verified evidence behind the shape.
 
 ## Master laws
 - **GRAILKEY LEARNS FROM HISTORY WITHOUT REWRITING HISTORY.**

@@ -19,6 +19,8 @@
 import { acquireConnection } from './db.js';
 import * as repo from './repository.js';
 import { ValidationFailedError, AuthorizationFailedError, NotFoundError } from './errors.js';
+import { appendOperatorCorrectionEventTx } from '../learning/index.js';
+import { planGradingCorrections, planIdentityCorrection } from '../../lib/operatorCorrectionPlan.js';
 
 function requireFields(obj, fields) {
   for (const f of fields) {
@@ -102,20 +104,64 @@ export async function updateCollectionItem({ principalId, id, assetCategory, att
 // follows), never from the request body. repo.applyGradingAuthorityPatch
 // independently filters `patch` to the six protected keys as defense in
 // depth.
-export async function applyGradingAuthorityPatch({ principalId, id, patch } = {}) {
+//
+// GK-278: the mutation and the operator_correction_event(s) that record it commit in ONE
+// transaction under a row lock -- both or neither. A patch that changes nothing logically
+// performs neither (no mutation without an event, no event without a mutation).
+// `correction` carries only server-resolved context: { gkAssetId, source, reason, buildSha }.
+async function runCorrectionTx({ principalId, id, plan, correction, apply }) {
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const attrs = await repo.lockItemAttributes(client, { id, principalId });
+      if (!attrs) throw new NotFoundError(`collection item ${id} does not exist`);
+      const p = plan(attrs);
+      if (p.noop) {
+        await client.query('COMMIT');
+        const current = await repo.getByPrincipalAndId(client, principalId, id);
+        return { ...current, correctionEventIds: [], correctionNoop: true };
+      }
+      const updated = await apply(client, p.mutation);
+      const relatedPredictionEventId = attrs?.modelPredictedProvenance?.predictionEventId ?? null;
+      const eventIds = [];
+      for (const ev of p.events) {
+        const eid = await appendOperatorCorrectionEventTx(client, {
+          principalId, collectionItemId: id, gkAssetId: correction?.gkAssetId ?? null,
+          surface: ev.surface, action: ev.action,
+          beforeValue: ev.beforeValue, afterValue: ev.afterValue,
+          authorityBefore: ev.authorityBefore, authorityAfter: ev.authorityAfter,
+          relatedPredictionEventId, source: correction?.source ?? null, reason: correction?.reason ?? null,
+          buildSha: correction?.buildSha ?? null,
+        });
+        if (eid) eventIds.push(eid);
+      }
+      await client.query('COMMIT');
+      return { ...updated, correctionEventIds: eventIds, correctionNoop: false };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+export async function applyGradingAuthorityPatch({ principalId, id, patch, correction } = {}) {
   requireFields({ principalId, id }, ['principalId', 'id']);
   if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
     throw new ValidationFailedError('patch must be a JSON object');
   }
-  const client = await acquireConnection();
-  try {
-    await assertPrincipalActive(client, principalId);
-    const updated = await repo.applyGradingAuthorityPatch(client, { id, principalId, patch });
-    if (!updated) throw new NotFoundError(`collection item ${id} does not exist`);
-    return updated;
-  } finally {
-    client.release();
-  }
+  return runCorrectionTx({
+    principalId, id, correction,
+    plan: (attrs) => planGradingCorrections(attrs, patch),
+    apply: async (client, mutation) => {
+      const updated = await repo.applyGradingAuthorityPatch(client, { id, principalId, patch: mutation });
+      if (!updated) throw new NotFoundError(`collection item ${id} does not exist`);
+      return updated;
+    },
+  });
 }
 
 // GK-261 — write-once model baseline from a SERVER-CLAIMED grade receipt.
@@ -138,20 +184,22 @@ export async function claimModelBaseline({ principalId, id, baseline } = {}) {
 
 // GK-261 — the ONLY durable write path for identityAuthority; api/enrich.js only,
 // after a validated manual-correction request on a verified, owned item.
-export async function applyIdentityAuthorityPatch({ principalId, id, identityAuthority } = {}) {
+export async function applyIdentityAuthorityPatch({ principalId, id, identityAuthority, correction } = {}) {
   requireFields({ principalId, id }, ['principalId', 'id']);
   if (typeof identityAuthority !== 'object' || identityAuthority === null || Array.isArray(identityAuthority)) {
     throw new ValidationFailedError('identityAuthority must be a JSON object');
   }
-  const client = await acquireConnection();
-  try {
-    await assertPrincipalActive(client, principalId);
-    const updated = await repo.applyIdentityAuthorityPatch(client, { id, principalId, identityAuthority });
-    if (!updated) throw new NotFoundError(`collection item ${id} does not exist`);
-    return updated;
-  } finally {
-    client.release();
-  }
+  return runCorrectionTx({
+    principalId, id, correction,
+    plan: (attrs) => planIdentityCorrection(attrs, {
+      fields: correction?.fields, afterValues: correction?.afterValues, mergedAuthority: identityAuthority,
+    }),
+    apply: async (client, mutation) => {
+      const updated = await repo.applyIdentityAuthorityPatch(client, { id, principalId, identityAuthority: mutation.identityAuthority });
+      if (!updated) throw new NotFoundError(`collection item ${id} does not exist`);
+      return updated;
+    },
+  });
 }
 
 export async function deleteCollectionItem({ principalId, id } = {}) {

@@ -168,8 +168,8 @@ try {
     assertEq(a?.modelPredictedProvenance?.standing, 'SERVER_RECEIPT', 'provenance standing is SERVER_RECEIPT');
     assertEq(a?.modelPredictedProvenance?.provider, 'anthropic', 'CRITICAL (6): provider is the server-known value, forged provider ignored');
     assertEq(a?.modelPredictedProvenance?.model, 'claude-sonnet-4-5-20250929', 'CRITICAL (6): model is the server-known model, forged model ignored');
-    assertEq(a?.modelPredictedProvenance?.modelVersion, null, 'unknown stays UNKNOWN: modelVersion null, not invented');
-    assertEq(a?.modelPredictedProvenance?.promptVersion, null, 'unknown stays UNKNOWN: promptVersion null, not invented');
+    assertEq(a?.modelPredictedProvenance?.modelVersion, 'claude-sonnet-4-5-20250929', 'GK-278: modelVersion is now the real version echoed by the API call (was unknown at GK-261 time)');
+    assertTrue(/^sha256:[0-9a-f]{16}$/.test(a?.modelPredictedProvenance?.promptVersion || ''), 'GK-278: promptVersion is now a real hash of the prompt text actually sent');
     assertTrue(!('identityAuthority' in a), 'forged identityAuthority alongside a valid receipt still not minted');
     assertTrue(!('modelPredictedGradeAt' in a), 'forged modelPredictedGradeAt alias not minted');
     assertTrue(r.body?.attributes?.modelPredictedGrade === 'VG 4.0', 'save response reflects the server-minted baseline');
@@ -311,7 +311,9 @@ try {
   }
 } finally {
   if (createdIds.length) await client.query('DELETE FROM collection_item WHERE id = ANY($1::text[])', [createdIds]);
-  await client.query('DELETE FROM gk_principal WHERE id = ANY($1::uuid[])', [[PA, PB]]);
+  // GK-278: /api/grade now writes append-only model_prediction_event rows for these principals, so the
+  // throwaway principals can no longer be deleted (FK). They are retained by design.
+  try { await client.query('DELETE FROM gk_principal WHERE id = ANY($1::uuid[])', [[PA, PB]]); } catch { /* retained: referenced by append-only prediction events */ }
   await client.end();
   console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);
   if (failed > 0) { console.log('FAILURES:'); failures.forEach((f) => console.log(f)); process.exit(1); }

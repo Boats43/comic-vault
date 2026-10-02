@@ -2253,6 +2253,20 @@ export {
 // this file's own module namespace.
 export { buildActiveCompCacheKey, buildComicVineCacheKey, buildPriceChartingCacheKey, parseCacheKeyIssueSegment, buildFilterContextFingerprint } from "../src/lib/cacheKeys.js";
 
+// GK-278 -- resolve the canonical physical-asset link for an owned collection item, so
+// an operator_correction_event can carry the gkAssetId when one is established (null when
+// not linked -- Research/Correction history never mints an asset). Principal-scoped; a failure
+// resolves to null and never blocks the correction itself.
+async function resolveGkAssetIdForCorrection(principalId, collectionItemId) {
+  try {
+    const assetsMod = await import('../src/modules/assets/index.js');
+    const link = await assetsMod.resolveCollectionItemLink({ principalId, collectionItemId });
+    return link?.gkAssetId || null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   // A6 BUILD-ID: Inject commit hash header (Vercel auto-injects VERCEL_GIT_COMMIT_SHA)
   const buildId = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || 'unknown';
@@ -2862,6 +2876,13 @@ export default async function handler(req, res) {
         await collectionModGK260.applyGradingAuthorityPatch({
           principalId: principalIdGK260,
           id: collectionItemId,
+          // GK-278 -- server-resolved context for the operator_correction_event written in
+          // the SAME transaction as this mutation. Nothing here comes from the request body.
+          correction: {
+            gkAssetId: await resolveGkAssetIdForCorrection(principalIdGK260, collectionItemId),
+            source: 'enrich-owned-action',
+            buildSha: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null,
+          },
           patch: {
             gradeAuthority: effectiveGradeAuthority ?? null,
             operatorGrade: effectiveOperatorGrade ?? null,
@@ -12954,6 +12975,15 @@ export default async function handler(req, res) {
             principalId: principalIdGK260,
             id: collectionItemId,
             identityAuthority: { ...priorDurable, ...out.identityAuthority },
+            // GK-278 -- the corrected facets and their validated values (the operator's label);
+            // 'before' is read from the durable row under the transaction lock, never from the client.
+            correction: {
+              gkAssetId: await resolveGkAssetIdForCorrection(principalIdGK260, collectionItemId),
+              source: 'enrich-manual-correction',
+              buildSha: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null,
+              fields: lockableAcceptedFields,
+              afterValues: Object.fromEntries(lockableAcceptedFields.map((f) => [f, manualCorrectionRequest.workingIdentity?.[f] ?? null])),
+            },
           });
           console.log('[owned-identity-authority] durably persisted validated manual correction authority');
         } catch (e) {
@@ -13557,6 +13587,8 @@ export default async function handler(req, res) {
               // idempotency key derived server-side from the semantic
               // fingerprint. The client d5dIdempotencyKey is no longer read.
               recordEconomicDecision: assetsMod.recordEconomicDecision,
+              // GK-278 -- decision-time authority snapshot, built from the server's own pipeline state.
+              authoritySnapshotSource: { out, durable: durableGradingAttributesGK213C, durableCategoryAuthority },
             });
             const outcome1ElapsedMs = Date.now() - outcome1Start;
             console.log(
@@ -13616,6 +13648,8 @@ export default async function handler(req, res) {
         correlationId: pipelineTraceId || null,
         resolveCollectionItemLink: assetsModGK276?.resolveCollectionItemLink,
         recordEconomicDecision: assetsModGK276?.recordEconomicDecision,
+        // GK-278 -- decision-time authority snapshot from the server's own state, never the request body.
+        authoritySnapshotSource: { out, durable: durableGradingAttributesGK213C, durableCategoryAuthority },
       });
       if (!o1Result.skipped) {
         console.log(`[outcome1-prod-canary] attempted=${o1Result.attempted} declineReason=${o1Result.declineReason || 'n/a'} replayed=${o1Result.replayed === true}`);

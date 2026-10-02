@@ -23,6 +23,7 @@
 // separate dispatch).
 
 import crypto from 'node:crypto';
+import { buildDecisionAuthoritySnapshot } from './decisionAuthoritySnapshot.js';
 
 export const OUTCOME1_DECLINE_REASONS = Object.freeze({
   DISABLED: 'outcome1-disabled',
@@ -146,6 +147,7 @@ export async function attemptOutcome1({
   buildSha, // the SAME resolvable build identity already in api/enrich.js's own x-cv-build header (VERCEL_GIT_COMMIT_SHA / CV_BUILD_ID)
   correlationId,
   recordEconomicDecision, // injected: src/modules/assets/index.js's recordEconomicDecision
+  authoritySnapshotSource, // GK-278: { out, durable, durableCategoryAuthority } -- the SERVER's own pipeline state; never request-body material
 } = {}) {
   if (environment === 'development') {
     if (!enabled) return { attempted: false, declineReason: OUTCOME1_DECLINE_REASONS.DISABLED };
@@ -197,6 +199,12 @@ export async function attemptOutcome1({
       semanticFingerprint,
       correlationId,
       occurredAt,
+      authoritySnapshot: authoritySnapshotSource
+        ? buildDecisionAuthoritySnapshot(authoritySnapshotSource.out, authoritySnapshotSource.durable, {
+          buildSha, gradeAssumption, reasonCodes, decisionAction: decision.action,
+          durableCategoryAuthority: authoritySnapshotSource.durableCategoryAuthority,
+        })
+        : null,
     });
     return { attempted: true, semanticFingerprint, result: { valuationEventId: r.valuationEventId, decisionEventId: r.decisionEventId }, replayed: r.replayed === true };
   } catch (e) {
@@ -222,7 +230,7 @@ export async function attemptOutcome1Production({
   durableAttributes, // the durable owned collection_item attributes
   requestIdentity, // { title, issue } as sent in the request
   priceString, decision, gradeAssumption, evidenceKey, buildSha, correlationId,
-  resolveCollectionItemLink, recordEconomicDecision,
+  resolveCollectionItemLink, recordEconomicDecision, authoritySnapshotSource,
 } = {}) {
   if (environment !== 'production' || recordDurableDecision !== true) {
     return { skipped: true }; // not a Production explicit-intent request: nothing to do, nothing to report
@@ -247,6 +255,6 @@ export async function attemptOutcome1Production({
     gkAssetId: link?.gkAssetId || null,
     marketPopulationId: null, // D5D chain is not part of this canary; legal NULL
     priceString, decision, gradeAssumption, evidenceKey, buildSha, correlationId,
-    recordEconomicDecision,
+    recordEconomicDecision, authoritySnapshotSource,
   });
 }
