@@ -23,7 +23,7 @@ const makeLedger = () => {
       const v = d.valuationId ? valuations.find((x) => x.id === d.valuationId && x.assetId === d.assetId) : null;
       return {
         decisionEventId: d.id, recommendation: 'LIST_NOW', valuationEventId: d.valuationId ?? null,
-        valuation: v ? { valuationEventId: v.id, valueAmount: v.value, method: 'engine-computed', gradeAssumption: '4.0', buildSha: v.buildSha, occurredAt: v.occurredAt, recordedAt: v.occurredAt } : null,
+        valuation: v ? { valuationEventId: v.id, valueAmount: v.value, method: 'engine-computed', gradeAssumption: '4.0', provenance: 'SERVER_DERIVED', buildSha: v.buildSha, occurredAt: v.occurredAt, recordedAt: v.occurredAt } : null,
       };
     },
     // The OLD (defective) behaviour, kept only as the control.
@@ -113,8 +113,8 @@ console.log('\n— economics / ask behaviour around the anchor —');
 }
 
 console.log('\n— pure anchor resolution —');
-ok(resolveHistoricalAnchor({ decisionEventId: 'D', anchor: { valuationEventId: 'V', valuation: { valuationEventId: 'V', valueAmount: 10, buildSha: 'x' } } }).ok === true, 'a complete chain resolves');
-ok(resolveHistoricalAnchor({ decisionEventId: 'D', anchor: { valuationEventId: 'V', valuation: { valuationEventId: 'V', valueAmount: 0, buildSha: 'x' } } }).ok === true, 'a genuine $0 valuation is a real recorded value, not a "missing" one (never substituted, never refused for being zero)');
+ok(resolveHistoricalAnchor({ decisionEventId: 'D', anchor: { valuationEventId: 'V', valuation: { valuationEventId: 'V', valueAmount: 10, provenance: 'SERVER_DERIVED', buildSha: 'x' } } }).ok === true, 'a complete chain resolves');
+ok(resolveHistoricalAnchor({ decisionEventId: 'D', anchor: { valuationEventId: 'V', valuation: { valuationEventId: 'V', valueAmount: 0, provenance: 'SERVER_DERIVED', buildSha: 'x' } } }).ok === true, 'a genuine $0 valuation is a real recorded value, not a "missing" one (never substituted, never refused for being zero)');
 
 console.log('\n— static: no latest-valuation path remains in the scorer; same-asset, ownership-checked, read-only —');
 const rec = read('../src/lib/ebayOutcomeReconciler.js').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');

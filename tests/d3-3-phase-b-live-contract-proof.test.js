@@ -120,7 +120,7 @@ try {
   assertTrue(isDeepStrictEqual(s1Read.rows[0].payload, payloadS1), 'A: S1 reads back with the exact original payload (deep-equal, real function)');
 
   // --- B: Link V1 -> S1, read back, prove durable resolution. ---
-  const val1 = await recordValuation({
+  const val1 = await recordValuation({ provenance: 'SERVER_DERIVED',
     principalId: JIMMY_PRINCIPAL_ID, gkAssetId: assetId, valueAmount: 875, method: 'engine-computed',
     buildSha: 'test-sha-b', idempotencyKey: `${TEST_TAG}:val1`, compSnapshotId: s1Id,
   });
@@ -135,7 +135,7 @@ try {
   // --- C: referential integrity -- a nonexistent snapshot UUID is rejected. ---
   let danglingThrew = false;
   try {
-    await recordValuation({
+    await recordValuation({ provenance: 'SERVER_DERIVED',
       principalId: JIMMY_PRINCIPAL_ID, gkAssetId: assetId, valueAmount: 1, method: 'operator-override',
       buildSha: 'test-sha-c', idempotencyKey: `${TEST_TAG}:val-dangling`, compSnapshotId: crypto.randomUUID(),
     });
@@ -166,7 +166,7 @@ try {
   s2Id = snapResult2.compSnapshotId;
   assertTrue(s2Id !== s1Id, 'E: repricing produced a genuinely new, distinct snapshot (S2 != S1)');
 
-  const val2 = await recordValuation({
+  const val2 = await recordValuation({ provenance: 'SERVER_DERIVED',
     principalId: JIMMY_PRINCIPAL_ID, gkAssetId: assetId, valueAmount: 1200, method: 'engine-computed',
     buildSha: 'test-sha-e', idempotencyKey: `${TEST_TAG}:val2`, compSnapshotId: s2Id,
   });

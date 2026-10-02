@@ -111,7 +111,7 @@ try {
   }
 
   // D: NULL occurredAt succeeds and remains NULL (recordValuation, omitted).
-  const val = await recordValuation({
+  const val = await recordValuation({ provenance: 'SERVER_DERIVED',
     principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, valueAmount: 10, method: 'engine-computed',
     buildSha: 'test-sha', idempotencyKey: `${TEST_TAG}:val`,
     // occurredAt omitted on purpose

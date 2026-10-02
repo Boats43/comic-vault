@@ -195,7 +195,7 @@ if (listedRow) {
   // valuation_event_id). Any break in the chain => no score (REFUSED).
   const predicted = listedRow.decision_event_id
     ? (await client.query(
-        `SELECT v.value_amount
+        `SELECT v.value_amount, v.provenance
            FROM data1_dev.decision_event d
            JOIN data1_dev.valuation_event v ON v.id = d.valuation_event_id AND v.asset_id = d.asset_id
           WHERE d.id = $1 AND d.asset_id = $2`,
@@ -206,6 +206,10 @@ if (listedRow) {
   const economicsStatus = classifyEconomicsCompleteness(economics);
   if (economicsStatus === 'PENDING') {
     console.log('\nPrediction error not computed — sale confirmed but no realized-gross economics component recorded yet (ECONOMICS_PENDING, distinct from CENSORED).');
+  } else if (predicted && predicted.provenance !== 'SERVER_DERIVED') {
+    // GK-276 — PRECISE POINTER + UNTRUSTED PROVENANCE = REFUSED (operator overrides are not engine accuracy either).
+    console.log(`
+Prediction error REFUSED (GK-276) — the anchored valuation's provenance is ${predicted.provenance ?? 'unrecorded'}; only SERVER_DERIVED valuations are scored as engine predictions.`);
   } else if (predicted?.value_amount != null && listedRow.ask_amount != null) {
     const scored = scorePrediction({
       predictedValue: parseFloat(predicted.value_amount),

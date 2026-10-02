@@ -934,9 +934,14 @@ export async function recordCompSnapshot({ principalId, gkAssetId, source, paylo
 // ─────────────────────────────────────────────────────────────────────
 // recordValuation
 // ─────────────────────────────────────────────────────────────────────
-export async function recordValuation({ principalId, gkAssetId, valueAmount, valueCurrency = 'USD', method, compSnapshotRef, compSnapshotId, marketPopulationId, gradeAssumption, buildSha, idempotencyKey, correlationId, occurredAt } = {}) {
-  requireFields({ principalId, gkAssetId, valueAmount, method, buildSha }, ['principalId', 'gkAssetId', 'valueAmount', 'method', 'buildSha']);
+export async function recordValuation({ principalId, gkAssetId, valueAmount, valueCurrency = 'USD', method, compSnapshotRef, compSnapshotId, marketPopulationId, gradeAssumption, buildSha, provenance, idempotencyKey, correlationId, occurredAt } = {}) {
+  requireFields({ principalId, gkAssetId, valueAmount, method, buildSha, provenance }, ['principalId', 'gkAssetId', 'valueAmount', 'method', 'buildSha', 'provenance']);
   requireEnum(method, ['engine-computed', 'operator-override', 'gocollect', 'other'], 'method');
+  // GK-276 -- NEW rows may only be SERVER_DERIVED or OPERATOR_OVERRIDE.
+  // CLIENT_ASSERTED/LEGACY_UNKNOWN exist solely as the 0033 historical
+  // classification and can never be written by a live writer. This is a
+  // server-to-server parameter: no API surface forwards a request field here.
+  requireEnum(provenance, ['SERVER_DERIVED', 'OPERATOR_OVERRIDE'], 'provenance');
 
   const client = await acquireConnection();
   try {
@@ -962,13 +967,13 @@ export async function recordValuation({ principalId, gkAssetId, valueAmount, val
       // override valuation) legitimately omits both -> NULL, a
       // truthful legal state, not an error.
       const valuationEventId = await repo.insertValuationEvent(client, {
-        assetId: gkAssetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, marketPopulationId, gradeAssumption, buildSha,
+        assetId: gkAssetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, marketPopulationId, gradeAssumption, buildSha, provenance,
         recordedByPrincipalId: principalId, occurredAt,
       });
       await repo.writeDomainEvent(client, {
         eventType: 'valuation.computed', actorPrincipalId: principalId, actorKind: method === 'engine-computed' ? 'system' : 'user',
         subjectType: 'gk_asset', subjectId: gkAssetId,
-        payload: { valuationEventId, valueAmount, valueCurrency, method, buildSha, compSnapshotId: compSnapshotId ?? null, marketPopulationId: marketPopulationId ?? null },
+        payload: { valuationEventId, valueAmount, valueCurrency, method, buildSha, provenance, compSnapshotId: compSnapshotId ?? null, marketPopulationId: marketPopulationId ?? null },
         correlationId: correlationId || await newCorrelationId(client),
         occurredAt,
       });
@@ -1418,6 +1423,7 @@ export async function getHistoricalValuationForDecision({ principalId, gkAssetId
             method: row.method,
             gradeAssumption: row.grade_assumption,
             buildSha: row.build_sha,
+            provenance: row.provenance ?? null,
             marketPopulationId: row.market_population_id ?? null,
             occurredAt: row.valuation_occurred_at,
             recordedAt: row.valuation_recorded_at,

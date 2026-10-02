@@ -104,7 +104,7 @@ console.log('\n-- success: calls recordValuation then recordDecision with the ex
   assertEq(calls[0][0], 'recordValuation', 'recordValuation called first');
   assertEq(calls[0][1], {
     principalId: 'p-1', gkAssetId: 'asset-1', valueAmount: 61.41, valueCurrency: 'USD',
-    method: 'engine-computed', marketPopulationId: 'pop-1', gradeAssumption: 4.0, buildSha: 'abc1234',
+    method: 'engine-computed', provenance: 'SERVER_DERIVED', marketPopulationId: 'pop-1', gradeAssumption: 4.0, buildSha: 'abc1234',
     idempotencyKey: 'outcome1-test-key', correlationId: 'corr-1', occurredAt: new Date(1789000000000).toISOString(),
   }, 'recordValuation receives the exact real mapping (price parsed, populationId threaded, buildSha resolvable, occurredAt = decision.timestamp)');
   assertEq(calls[1][0], 'recordDecision', 'recordDecision called second, after valuation commits');

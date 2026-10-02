@@ -109,6 +109,7 @@ export async function attemptOutcome1({
       valueAmount,
       valueCurrency: 'USD',
       method: 'engine-computed',
+      provenance: 'SERVER_DERIVED', // GK-276: the server's own pipeline result, never a client value
       marketPopulationId: marketPopulationId ?? null,
       gradeAssumption: gradeAssumption ?? null,
       buildSha,

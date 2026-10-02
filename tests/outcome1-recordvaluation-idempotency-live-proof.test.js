@@ -68,12 +68,12 @@ const createdValuationEventIds = [];
 try {
   console.log('-- same idempotencyKey + same marketPopulationId -> replay, zero duplicate row --\n');
   const key1 = `${TEST_TAG}:same`;
-  const r1 = await recordValuation({
+  const r1 = await recordValuation({ provenance: 'SERVER_DERIVED',
     principalId: JIMMY_PRINCIPAL_ID, gkAssetId: CREEPY_ASSET_ID, valueAmount: 61.41, method: 'engine-computed',
     marketPopulationId: CHAIN1_POPULATION_ID, buildSha: TEST_TAG, idempotencyKey: key1,
   });
   createdValuationEventIds.push(r1.valuationEventId);
-  const r2 = await recordValuation({
+  const r2 = await recordValuation({ provenance: 'SERVER_DERIVED',
     principalId: JIMMY_PRINCIPAL_ID, gkAssetId: CREEPY_ASSET_ID, valueAmount: 61.41, method: 'engine-computed',
     marketPopulationId: CHAIN1_POPULATION_ID, buildSha: TEST_TAG, idempotencyKey: key1,
   });
@@ -83,14 +83,14 @@ try {
 
   console.log('\n-- same idempotencyKey + DIFFERENT marketPopulationId -> IdempotencyConflictError, never a silent replay --\n');
   const key2 = `${TEST_TAG}:conflict`;
-  const r3 = await recordValuation({
+  const r3 = await recordValuation({ provenance: 'SERVER_DERIVED',
     principalId: JIMMY_PRINCIPAL_ID, gkAssetId: CREEPY_ASSET_ID, valueAmount: 61.41, method: 'engine-computed',
     marketPopulationId: CHAIN1_POPULATION_ID, buildSha: TEST_TAG, idempotencyKey: key2,
   });
   createdValuationEventIds.push(r3.valuationEventId);
   let conflictThrown = false, isRightErrorClass = false;
   try {
-    await recordValuation({
+    await recordValuation({ provenance: 'SERVER_DERIVED',
       principalId: JIMMY_PRINCIPAL_ID, gkAssetId: CREEPY_ASSET_ID, valueAmount: 61.41, method: 'engine-computed',
       marketPopulationId: null, // DIFFERENT evidence basis, same key -- must conflict, not replay
       buildSha: TEST_TAG, idempotencyKey: key2,

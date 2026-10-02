@@ -125,7 +125,7 @@ try {
   assertTrue(cap1.linkOutcome === 'linked', 'setup: OLD collectionItemId linked to asset A');
 
   // Real history on asset A: valuation -> decision -> operator action.
-  const val = await recordValuation({ principalId: JIMMY_PRINCIPAL_ID, gkAssetId: cap1.gkAssetId, valueAmount: 42, method: 'engine-computed', buildSha: 'p0a-test', idempotencyKey: `${TAG}:val` });
+  const val = await recordValuation({ provenance: 'SERVER_DERIVED', principalId: JIMMY_PRINCIPAL_ID, gkAssetId: cap1.gkAssetId, valueAmount: 42, method: 'engine-computed', buildSha: 'p0a-test', idempotencyKey: `${TAG}:val` });
   idempotencyKeysUsed.push(`${TAG}:val`);
   const dec = await recordDecision({ principalId: JIMMY_PRINCIPAL_ID, gkAssetId: cap1.gkAssetId, recommendation: 'LIST_LOW', valuationEventId: val.valuationEventId, idempotencyKey: `${TAG}:dec` });
   idempotencyKeysUsed.push(`${TAG}:dec`);

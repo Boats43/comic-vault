@@ -245,12 +245,14 @@ export async function insertCompSnapshot(client, { assetId, source, payload, con
 // market_population.id) into D5's own structured evidence chain --
 // independent of, and coexisting with, compSnapshotId/compSnapshotRef
 // exactly as those two already coexist with each other.
-export async function insertValuationEvent(client, { assetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, marketPopulationId, gradeAssumption, buildSha, recordedByPrincipalId, occurredAt }) {
+export async function insertValuationEvent(client, { assetId, valueAmount, valueCurrency, method, compSnapshotRef, compSnapshotId, marketPopulationId, gradeAssumption, buildSha, provenance, recordedByPrincipalId, occurredAt }) {
   const id = await uuidv7(client);
+  // GK-276 -- provenance is server-controlled (0033): the service layer only
+  // ever passes SERVER_DERIVED or OPERATOR_OVERRIDE; never request-supplied.
   await client.query(
-    `INSERT INTO data1_dev.valuation_event (id, asset_id, value_amount, value_currency, method, comp_snapshot_ref, comp_snapshot_id, market_population_id, grade_assumption, build_sha, recorded_by_principal_id, occurred_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-    [id, assetId, valueAmount, valueCurrency, method, compSnapshotRef ?? null, compSnapshotId ?? null, marketPopulationId ?? null, gradeAssumption ?? null, buildSha, recordedByPrincipalId, occurredAt ?? null]
+    `INSERT INTO data1_dev.valuation_event (id, asset_id, value_amount, value_currency, method, comp_snapshot_ref, comp_snapshot_id, market_population_id, grade_assumption, build_sha, provenance, recorded_by_principal_id, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [id, assetId, valueAmount, valueCurrency, method, compSnapshotRef ?? null, compSnapshotId ?? null, marketPopulationId ?? null, gradeAssumption ?? null, buildSha, provenance, recordedByPrincipalId, occurredAt ?? null]
   );
   return id;
 }
@@ -378,7 +380,7 @@ export async function getDecisionWithValuation(client, assetId, decisionEventId)
   const r = await client.query(
     `SELECT d.id AS decision_id, d.recommendation, d.valuation_event_id,
             d.occurred_at AS decision_occurred_at, d.recorded_at AS decision_recorded_at,
-            v.id AS v_id, v.value_amount, v.value_currency, v.method, v.grade_assumption, v.build_sha,
+            v.id AS v_id, v.value_amount, v.value_currency, v.method, v.grade_assumption, v.build_sha, v.provenance,
             v.market_population_id, v.occurred_at AS valuation_occurred_at, v.recorded_at AS valuation_recorded_at
        FROM data1_dev.decision_event d
        LEFT JOIN data1_dev.valuation_event v ON v.id = d.valuation_event_id AND v.asset_id = d.asset_id

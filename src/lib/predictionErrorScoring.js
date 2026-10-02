@@ -103,7 +103,8 @@ export function scorePrediction({
 //
 // Bump when the scoring semantics change so a stored/compared score always
 // names the rule that produced it.
-export const SCORING_RULE_VERSION = 'pe-historical-anchor-v1';
+// v2 (GK-276): adds the valuation-PROVENANCE gate on top of v1's historical anchor.
+export const SCORING_RULE_VERSION = 'pe-historical-anchor-v2';
 
 export const REFUSAL_CODES = Object.freeze({
   DECISION_ANCHOR_MISSING: 'DECISION_ANCHOR_MISSING',       // the LISTED outcome row carries no decision_event_id
@@ -111,6 +112,8 @@ export const REFUSAL_CODES = Object.freeze({
   VALUATION_ANCHOR_MISSING: 'VALUATION_ANCHOR_MISSING',     // the decision carries no valuation_event_id
   VALUATION_ROW_MISSING: 'VALUATION_ROW_MISSING',           // the referenced valuation row does not exist for this asset
   VALUATION_VALUE_MISSING: 'VALUATION_VALUE_MISSING',       // the referenced valuation has no usable value
+  VALUATION_PROVENANCE_UNTRUSTED: 'VALUATION_PROVENANCE_UNTRUSTED', // CLIENT_ASSERTED / LEGACY_UNKNOWN / unrecorded provenance
+  VALUATION_OPERATOR_OVERRIDE_NOT_ENGINE: 'VALUATION_OPERATOR_OVERRIDE_NOT_ENGINE', // an operator judgment is not engine accuracy
 });
 
 const refuse = (code, reason, extra = {}) => ({
@@ -139,6 +142,16 @@ export function resolveHistoricalAnchor({ decisionEventId, anchor } = {}) {
   if (!anchor.valuation) {
     return { ok: false, refusal: refuse(REFUSAL_CODES.VALUATION_ROW_MISSING, 'the valuation_event the decision references does not exist for this asset', { decisionEventId, valuationEventId: anchor.valuationEventId }) };
   }
+  // GK-276 — PRECISE POINTER + UNTRUSTED PROVENANCE = REFUSED. Provenance
+  // outranks the legacy `method` string: method='engine-computed' with
+  // provenance CLIENT_ASSERTED is still CLIENT_ASSERTED. No fallback.
+  const prov = anchor.valuation.provenance ?? null;
+  if (prov === 'OPERATOR_OVERRIDE') {
+    return { ok: false, refusal: refuse(REFUSAL_CODES.VALUATION_OPERATOR_OVERRIDE_NOT_ENGINE, 'the anchored valuation is an operator override — it may be evaluated as operator judgment, never as engine/model accuracy', { decisionEventId, valuationEventId: anchor.valuationEventId, valuationProvenance: prov }) };
+  }
+  if (prov !== 'SERVER_DERIVED') {
+    return { ok: false, refusal: refuse(REFUSAL_CODES.VALUATION_PROVENANCE_UNTRUSTED, `the anchored valuation's provenance is ${prov ?? 'unrecorded'} — only SERVER_DERIVED valuations can be scored as engine predictions`, { decisionEventId, valuationEventId: anchor.valuationEventId, valuationProvenance: prov }) };
+  }
   const v = anchor.valuation.valueAmount;
   if (v == null || !Number.isFinite(v)) {
     return { ok: false, refusal: refuse(REFUSAL_CODES.VALUATION_VALUE_MISSING, 'the referenced valuation has no usable value_amount', { decisionEventId, valuationEventId: anchor.valuationEventId }) };
@@ -152,6 +165,7 @@ export function resolveHistoricalAnchor({ decisionEventId, anchor } = {}) {
       valuationEventId: anchor.valuation.valuationEventId,
       valuationBuildSha: anchor.valuation.buildSha ?? null,
       valuationMethod: anchor.valuation.method ?? null,
+      valuationProvenance: prov,
       valuationOccurredAt: anchor.valuation.occurredAt ?? null,
       valuationRecordedAt: anchor.valuation.recordedAt ?? null,
       gradeAssumption: anchor.valuation.gradeAssumption ?? null,

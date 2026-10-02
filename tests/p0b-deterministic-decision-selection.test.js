@@ -91,17 +91,17 @@ try {
   // timestamps (the common case — recorded_at alone already disambiguates
   // this). Proves currentValuationId/currentDecisionId track the
   // genuinely-latest row, not array length or insertion-call count.
-  const v1 = await recordValuation({ principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, valueAmount: 10, method: 'engine-computed', buildSha: 'p0b-test', idempotencyKey: `${TEST_TAG}:val1` });
+  const v1 = await recordValuation({ provenance: 'SERVER_DERIVED', principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, valueAmount: 10, method: 'engine-computed', buildSha: 'p0b-test', idempotencyKey: `${TEST_TAG}:val1` });
   idempotencyKeysUsed.push(`${TEST_TAG}:val1`);
   const d1 = await recordDecision({ principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, recommendation: 'RESEARCH', valuationEventId: v1.valuationEventId, idempotencyKey: `${TEST_TAG}:dec1` });
   idempotencyKeysUsed.push(`${TEST_TAG}:dec1`);
 
-  const v2 = await recordValuation({ principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, valueAmount: 20, method: 'engine-computed', buildSha: 'p0b-test', idempotencyKey: `${TEST_TAG}:val2` });
+  const v2 = await recordValuation({ provenance: 'SERVER_DERIVED', principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, valueAmount: 20, method: 'engine-computed', buildSha: 'p0b-test', idempotencyKey: `${TEST_TAG}:val2` });
   idempotencyKeysUsed.push(`${TEST_TAG}:val2`);
   const d2 = await recordDecision({ principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, recommendation: 'LIST_LOW', valuationEventId: v2.valuationEventId, idempotencyKey: `${TEST_TAG}:dec2` });
   idempotencyKeysUsed.push(`${TEST_TAG}:dec2`);
 
-  const v3 = await recordValuation({ principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, valueAmount: 30, method: 'engine-computed', buildSha: 'p0b-test', idempotencyKey: `${TEST_TAG}:val3` });
+  const v3 = await recordValuation({ provenance: 'SERVER_DERIVED', principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, valueAmount: 30, method: 'engine-computed', buildSha: 'p0b-test', idempotencyKey: `${TEST_TAG}:val3` });
   idempotencyKeysUsed.push(`${TEST_TAG}:val3`);
   const d3 = await recordDecision({ principalId: JIMMY_PRINCIPAL_ID, gkAssetId: createdAssetId, recommendation: 'LIST_NOW', valuationEventId: v3.valuationEventId, idempotencyKey: `${TEST_TAG}:dec3` });
   idempotencyKeysUsed.push(`${TEST_TAG}:dec3`);

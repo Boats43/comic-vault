@@ -156,7 +156,7 @@ try {
     // remains reachable afterward too, not just the bare mint/link facts.
     const { recordValuation, recordDecision, recordOperatorAction } =
       await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
-    const val = await recordValuation({ principalId: JIMMY, gkAssetId: originalGkAssetId, valueAmount: 77, method: 'engine-computed', buildSha: 'p0a-handler-test', idempotencyKey: `${TAG}:val` });
+    const val = await recordValuation({ provenance: 'SERVER_DERIVED', principalId: JIMMY, gkAssetId: originalGkAssetId, valueAmount: 77, method: 'engine-computed', buildSha: 'p0a-handler-test', idempotencyKey: `${TAG}:val` });
     idempotencyKeysUsed.push(`${TAG}:val`);
     const dec = await recordDecision({ principalId: JIMMY, gkAssetId: originalGkAssetId, recommendation: 'LIST_LOW', valuationEventId: val.valuationEventId, idempotencyKey: `${TAG}:dec` });
     idempotencyKeysUsed.push(`${TAG}:dec`);

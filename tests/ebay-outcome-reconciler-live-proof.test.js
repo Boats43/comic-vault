@@ -106,7 +106,7 @@ console.log('\n=== eBay Outcome Reconciler — real live proof (real Development
 try {
   // Real transient valuation_event for TEST_ASSET_ID — needed for the
   // SCORED predictionError path below.
-  const val = await assets.recordValuation({
+  const val = await assets.recordValuation({ provenance: 'SERVER_DERIVED',
     principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID,
     valueAmount: 61.41, method: 'engine-computed', buildSha: 'reconciler-test',
     idempotencyKey: `reconciler-test-valuation-${crypto.randomUUID()}`,
@@ -381,7 +381,7 @@ try {
   {
     // V2: a later, different valuation for the SAME asset (e.g. a refresh or
     // an operator correction). The OLD code scored against this one.
-    const v2 = await assets.recordValuation({
+    const v2 = await assets.recordValuation({ provenance: 'SERVER_DERIVED',
       principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID,
       valueAmount: 999.99, method: 'engine-computed', buildSha: 'reconciler-test-later-valuation',
       idempotencyKey: `reconciler-test-valuation-v2-${crypto.randomUUID()}`,
