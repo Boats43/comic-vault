@@ -7,7 +7,7 @@
 // src/lib/ebayFulfillmentFinances.js (order lookup, transaction
 // normalization, evaluateOrderSaleEvidence), src/modules/assets/index.js
 // (recordOutcomeEvent/recordEconomicsComponent/getOutcomeEconomics/
-// getOutcomeEventsForListing/getLatestValuation — the SAME writers
+// getOutcomeEventsForListing/getHistoricalValuationForDecision — the SAME writers
 // api/list-ebay.js's GK-207 gate and scripts/ingest-outcome1-
 // financials.mjs already use), src/lib/predictionErrorScoring.js
 // (scorePrediction, pure, no I/O).
@@ -39,8 +39,8 @@
 // makes any eBay WRITE call (GET only, throughout).
 
 import { findOrderByLegacyItemId, getFinancialTransactionsForOrder, normalizeTransactionToComponents, evaluateOrderSaleEvidence } from './ebayFulfillmentFinances.js';
-import { recordOutcomeEvent, recordEconomicsComponent, getOutcomeEconomics, getOutcomeEventsForListing, getLatestValuation } from '../modules/assets/index.js';
-import { scorePrediction } from './predictionErrorScoring.js';
+import { recordOutcomeEvent, recordEconomicsComponent, getOutcomeEconomics, getOutcomeEventsForListing, getHistoricalValuationForDecision } from '../modules/assets/index.js';
+import { scorePrediction, resolveHistoricalAnchor } from './predictionErrorScoring.js';
 import { markSold as markInventorySold, ConflictError as InventoryConflictError } from '../modules/inventory/index.js';
 
 export const DEFAULT_LOOKBACK_DAYS = 180;
@@ -97,37 +97,58 @@ export async function ingestFinancialTransactionsForOutcome({ principalId, outco
 }
 
 /**
- * scoreOutcomePrediction — PredictionError integration. Never called
- * unless real realized-gross evidence exists (economicsStatus !==
- * 'PENDING') — while economics are pending, this returns an explicit
- * non-score state distinct from CENSORED (which means "still listed,
- * right-censored" per predictionErrorScoring.js's own contract — a
- * confirmed-but-unsettled sale is a different fact and must not borrow
- * that label).
+ * scoreOutcomePrediction — PredictionError integration (a PROJECTION: nothing
+ * here is persisted).
+ *
+ * GK-274 — HISTORICAL DECISION SCORING MUST USE THE HISTORICAL VALUATION THE
+ * DECISION ACTUALLY USED. The prediction is resolved through
+ *   LISTED outcome_event.decision_event_id
+ *     -> decision_event.valuation_event_id
+ *       -> that exact valuation_event
+ * and NEVER via "the latest valuation for the asset" (which a later
+ * re-valuation or correction would silently change, rewriting the score of
+ * an earlier decision). A missing decision id, decision row, valuation id,
+ * valuation row, or value REFUSES — no fallback, no $0, no best-effort
+ * score. The result pins scoringRuleVersion, decisionEventId,
+ * valuationEventId and the valuation's build_sha.
+ *
+ * Economics: never scored unless real realized-gross evidence exists
+ * (economicsStatus !== 'PENDING') — while economics are pending this
+ * returns an explicit non-score state distinct from CENSORED (a
+ * confirmed-but-unsettled sale is not right-censored).
+ *
+ * `deps.getHistoricalValuationForDecision` is injectable so the anchor
+ * semantics are provable without a database.
  */
-async function scoreOutcomePrediction({ principalId, gkAssetId, listedRow, soldOccurredAt, economics, economicsStatus }) {
+export async function scoreOutcomePrediction({ principalId, gkAssetId, listedRow, soldOccurredAt, economics, economicsStatus }, deps = {}) {
+  const lookup = deps.getHistoricalValuationForDecision || getHistoricalValuationForDecision;
+  const decisionEventId = listedRow?.decision_event_id ?? null;
+  const anchor = decisionEventId ? await lookup({ principalId, gkAssetId, decisionEventId }) : null;
+  const resolved = resolveHistoricalAnchor({ decisionEventId, anchor });
+  if (!resolved.ok) return resolved.refusal;
+
   if (economicsStatus === 'PENDING') {
-    return { status: 'ECONOMICS_PENDING', reason: 'sale confirmed but no realized-gross economics component recorded yet — not eligible for scoring' };
+    return {
+      status: 'ECONOMICS_PENDING',
+      reason: 'sale confirmed but no realized-gross economics component recorded yet — not eligible for scoring',
+      predictedValue: resolved.predictedValue, ...resolved.pins,
+    };
   }
   const askAmount = listedRow.ask_amount != null ? Number(listedRow.ask_amount) : null;
   if (askAmount == null) {
-    return { status: 'NOT_ELIGIBLE', reason: 'LISTED row carries no ask_amount — scorePrediction requires it' };
+    return { status: 'NOT_ELIGIBLE', reason: 'LISTED row carries no ask_amount — scorePrediction requires it', ...resolved.pins };
   }
-  const valuation = await getLatestValuation({ principalId, gkAssetId });
-  if (!valuation) {
-    return { status: 'NOT_ELIGIBLE', reason: 'no valuation_event exists for this asset — original predicted value unknown' };
-  }
-  // economics.realizedNet is a SUM over whatever components exist, with
-  // any missing component type COALESCEd to 0 by getRealizedEconomics —
-  // a true net figure only once fees are ALSO known (economicsStatus
-  // 'KNOWN'), never when only gross is known ('PARTIAL') — otherwise a
-  // still-unknown fee would silently read as "$0 in fees," exactly the
-  // fabrication this dispatch's own instruction forbids. realizedGross
-  // itself is always trustworthy once economicsStatus is not 'PENDING' —
-  // a real gross component exists by construction.
+  // economics.realizedNet is a SUM over whatever components exist, with any
+  // missing component type COALESCEd to 0 by getRealizedEconomics — a true
+  // net figure only once fees are ALSO known (economicsStatus 'KNOWN'),
+  // never when only gross is known ('PARTIAL') — otherwise a still-unknown
+  // fee would silently read as "$0 in fees," exactly the fabrication this
+  // system forbids. realizedGross itself is always trustworthy once
+  // economicsStatus is not 'PENDING' — a real gross component exists by
+  // construction.
   const realizedNet = economicsStatus === 'KNOWN' ? economics.realizedNet : null;
   const scored = scorePrediction({
-    predictedValue: valuation.valueAmount,
+    predictedValue: resolved.predictedValue,
     askAmount,
     realizedGross: economics.gross,
     realizedNet,
@@ -135,7 +156,7 @@ async function scoreOutcomePrediction({ principalId, gkAssetId, listedRow, soldO
     realizedAt: soldOccurredAt,
     isCensored: false,
   });
-  return { status: scored.status, predictedValue: valuation.valueAmount, ...scored };
+  return { status: scored.status, predictedValue: resolved.predictedValue, ...scored, ...resolved.pins };
 }
 
 /**

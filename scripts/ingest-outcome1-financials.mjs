@@ -190,10 +190,18 @@ if (ingestResult.transactionsSeen === 0) {
 //    own no-I/O contract. Gated on real hasAnyComponent evidence — fixed
 //    this pass, see file header ("Also fixed this pass").
 if (listedRow) {
-  const predicted = (await client.query(
-    `SELECT value_amount FROM data1_dev.valuation_event WHERE asset_id = $1 ORDER BY occurred_at DESC LIMIT 1`,
-    [soldRow.gk_asset_id]
-  )).rows[0];
+  // GK-274 — HISTORICAL anchor, never the latest valuation: the valuation
+  // the LISTED row's own decision actually used (decision_event.
+  // valuation_event_id). Any break in the chain => no score (REFUSED).
+  const predicted = listedRow.decision_event_id
+    ? (await client.query(
+        `SELECT v.value_amount
+           FROM data1_dev.decision_event d
+           JOIN data1_dev.valuation_event v ON v.id = d.valuation_event_id AND v.asset_id = d.asset_id
+          WHERE d.id = $1 AND d.asset_id = $2`,
+        [listedRow.decision_event_id, soldRow.gk_asset_id]
+      )).rows[0]
+    : null;
   const economics = await getOutcomeEconomics({ principalId: soldRow.recorded_by_principal_id, outcomeEventId: soldRow.id });
   const economicsStatus = classifyEconomicsCompleteness(economics);
   if (economicsStatus === 'PENDING') {
@@ -213,7 +221,7 @@ if (listedRow) {
     });
     console.log(`\nPrediction error (${scored.status}): gross ${scored.grossSignedError != null ? `$${scored.grossSignedError.toFixed(2)} (${scored.grossPercentError.toFixed(1)}%)` : 'unscored'}, net ${scored.netSignedError != null ? `$${scored.netSignedError.toFixed(2)} (${scored.netPercentError.toFixed(1)}%)` : 'unscored (fees/shipping not yet fully known)'}`);
   } else {
-    console.log('\nPrediction error not computed — no valuation_event row found for this asset yet.');
+    console.log('\nPrediction error REFUSED (GK-274) — the LISTED row has no resolvable decision_event -> valuation_event anchor; no latest-valuation fallback.');
   }
 }
 

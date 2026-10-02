@@ -64,16 +64,19 @@ global.fetch = async (url) => {
 };
 
 let createdValuationEventId = null;
+let createdDecisionEventId = null; // GK-274 — the HISTORICAL decision every transient LISTED row anchors to
+const extraValuationEventIds = [];
 
 // Cleanup deletes by TEST_ASSET_ID directly (see the finally block below)
 // rather than tracking individual ids — a dedicated test-only asset, and
 // reconcileEbayOutcome() itself writes SOLD/component rows this function
 // never sees the ids of, so per-id tracking previously under-cleaned.
-async function createTransientListedRow(externalListingId, askAmount = 100) {
+async function createTransientListedRow(externalListingId, askAmount = 100, { withDecision = true } = {}) {
   const result = await assets.recordOutcomeEvent({
     principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID,
     outcomeType: 'LISTED', channel: 'ebay', externalListingId,
     askAmount, askCurrency: 'USD',
+    ...(withDecision ? { decisionEventId: createdDecisionEventId } : {}),
     idempotencyKey: `reconciler-test-listed-${crypto.randomUUID()}`,
   });
   return result.outcomeEventId;
@@ -109,6 +112,15 @@ try {
     idempotencyKey: `reconciler-test-valuation-${crypto.randomUUID()}`,
   });
   createdValuationEventId = val.valuationEventId;
+  // GK-274 — PredictionError resolves its prediction THROUGH the decision
+  // the LISTED row belongs to (decision_event.valuation_event_id), never
+  // "the latest valuation": record the historical decision D1 -> V1.
+  const dec = await assets.recordDecision({
+    principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID,
+    recommendation: 'LIST_NOW', reasonCodes: [], valuationEventId: createdValuationEventId,
+    idempotencyKey: `reconciler-test-decision-${crypto.randomUUID()}`,
+  });
+  createdDecisionEventId = dec.decisionEventId;
 
   // ===================================================================
   // 1. NO ORDER
@@ -361,6 +373,50 @@ try {
     assertTrue(!after.events.some((e) => e.outcome_type === 'SOLD'), 'Creepy still has NO SOLD row — never converted');
   }
 
+  // ===================================================================
+  // 12. GK-274 — HISTORICAL ANCHOR: a LATER valuation must not change the
+  //     score of an EARLIER decision; a missing anchor REFUSES.
+  // ===================================================================
+  console.log('\n-- Historical anchor (GK-274) --\n');
+  {
+    // V2: a later, different valuation for the SAME asset (e.g. a refresh or
+    // an operator correction). The OLD code scored against this one.
+    const v2 = await assets.recordValuation({
+      principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID,
+      valueAmount: 999.99, method: 'engine-computed', buildSha: 'reconciler-test-later-valuation',
+      idempotencyKey: `reconciler-test-valuation-v2-${crypto.randomUUID()}`,
+    });
+    extraValuationEventIds.push(v2.valuationEventId);
+
+    const itemId = `test-reconciler-anchor-${crypto.randomUUID()}`;
+    await createTransientListedRow(itemId, 75);
+    const orderId = `O-ANCHOR-${crypto.randomUUID()}`;
+    scenario = {
+      order: fixtureOrder({ orderId, itemId, paymentStatus: 'PAID', total: 75 }),
+      transactions: [saleTxn({ id: `T-ANCHOR-${crypto.randomUUID()}`, orderId, amount: 75, feeAmount: 9 })],
+    };
+    const r = await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId, accessToken: 'fake-token' });
+    assertTrue(r.predictionError?.status === 'SCORED', `scored against the decision's own valuation (got ${r.predictionError?.status})`);
+    assertTrue(r.predictionError?.predictedValue === 61.41, `predictedValue is V1 ($61.41), NOT the later V2 ($999.99) (got ${r.predictionError?.predictedValue})`);
+    assertTrue(r.predictionError?.valuationEventId === createdValuationEventId, 'the result pins the exact valuation_event id V1');
+    assertTrue(r.predictionError?.decisionEventId === createdDecisionEventId, 'the result pins the exact decision_event id D1');
+    assertTrue(r.predictionError?.valuationBuildSha === 'reconciler-test', 'the result pins the valuation build_sha');
+    assertTrue(typeof r.predictionError?.scoringRuleVersion === 'string' && r.predictionError.scoringRuleVersion.length > 0, 'the result carries scoring_rule_version');
+
+    // A LISTED row with NO decision anchor at all.
+    const itemId2 = `test-reconciler-noanchor-${crypto.randomUUID()}`;
+    await createTransientListedRow(itemId2, 75, { withDecision: false });
+    const orderId2 = `O-NOANCHOR-${crypto.randomUUID()}`;
+    scenario = {
+      order: fixtureOrder({ orderId: orderId2, itemId: itemId2, paymentStatus: 'PAID', total: 75 }),
+      transactions: [saleTxn({ id: `T-NOANCHOR-${crypto.randomUUID()}`, orderId: orderId2, amount: 75, feeAmount: 9 })],
+    };
+    const r2 = await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId2, accessToken: 'fake-token' });
+    assertTrue(r2.status === 'SOLD_CONFIRMED', 'the sale itself is still recorded (outcome facts are not blocked by a missing prediction anchor)');
+    assertTrue(r2.predictionError?.status === 'REFUSED' && r2.predictionError?.refusalCode === 'DECISION_ANCHOR_MISSING', `no decision anchor -> REFUSED, never the latest valuation (got ${r2.predictionError?.status}/${r2.predictionError?.refusalCode})`);
+    assertTrue(r2.predictionError?.predictedValue === undefined, 'a REFUSED result carries no predictedValue — no $0 and no fallback number');
+  }
+
 } finally {
   // Cleanup: delete EVERY outcome_event row (and their components) for
   // TEST_ASSET_ID — a dedicated test-only asset, safe to fully clear —
@@ -387,8 +443,12 @@ try {
     await client.query('DELETE FROM data1_dev.outcome_event WHERE gk_asset_id = $1', [TEST_ASSET_ID]);
     await client.query('DELETE FROM data1_dev.inventory_current_state WHERE gk_asset_id = $1', [TEST_ASSET_ID]);
     await client.query('DELETE FROM data1_dev.inventory_transition_event WHERE gk_asset_id = $1', [TEST_ASSET_ID]);
-    if (createdValuationEventId) {
-      await client.query('DELETE FROM data1_dev.valuation_event WHERE id = $1', [createdValuationEventId]).catch(() => {});
+    // GK-274 — decision first (it references the valuation), then valuations.
+    if (createdDecisionEventId) {
+      await client.query('DELETE FROM data1_dev.decision_event WHERE id = $1', [createdDecisionEventId]).catch(() => {});
+    }
+    for (const vid of [createdValuationEventId, ...extraValuationEventIds]) {
+      if (vid) await client.query('DELETE FROM data1_dev.valuation_event WHERE id = $1', [vid]).catch(() => {});
     }
     console.log(`\n  cleaned up ${staleIds.length} outcome_event row(s) (+ their components) for TEST_ASSET_ID, any leftover inventory rows, and 1 transient valuation_event row`);
   } finally {

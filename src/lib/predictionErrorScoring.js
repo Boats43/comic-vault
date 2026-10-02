@@ -18,6 +18,7 @@
 export const SCORE_STATUS = Object.freeze({
   SCORED: 'SCORED',
   CENSORED: 'CENSORED', // ACTIVE_AT_CUTOFF or otherwise not yet realized — no invented number
+  REFUSED: 'REFUSED', // GK-274 — the historical decision/valuation anchor is missing; no score is produced, no fallback
 });
 
 function signedAndPercentError(predicted, realized) {
@@ -84,5 +85,76 @@ export function scorePrediction({
     netPercentError: net.percentError,
     actualTimeToSaleDays,
     censoredReason: null,
+  };
+}
+
+// ───────────────────────── GK-274 — historical anchor ─────────────────────────
+//
+// HISTORICAL DECISION SCORING MUST USE THE HISTORICAL VALUATION THE DECISION
+// ACTUALLY USED. The score of an earlier decision must never change because
+// a LATER valuation was appended (a re-valuation, an operator correction, a
+// refresh). The anchor is:
+//   outcome_event.decision_event_id
+//     -> decision_event.valuation_event_id
+//       -> that exact valuation_event row.
+// Never the latest valuation, never current collection state, never a
+// "best available" valuation. Any break in the chain REFUSES — no fallback,
+// no $0 substitution, no best-effort number.
+//
+// Bump when the scoring semantics change so a stored/compared score always
+// names the rule that produced it.
+export const SCORING_RULE_VERSION = 'pe-historical-anchor-v1';
+
+export const REFUSAL_CODES = Object.freeze({
+  DECISION_ANCHOR_MISSING: 'DECISION_ANCHOR_MISSING',       // the LISTED outcome row carries no decision_event_id
+  DECISION_ROW_MISSING: 'DECISION_ROW_MISSING',             // decision_event_id points at no decision for this asset
+  VALUATION_ANCHOR_MISSING: 'VALUATION_ANCHOR_MISSING',     // the decision carries no valuation_event_id
+  VALUATION_ROW_MISSING: 'VALUATION_ROW_MISSING',           // the referenced valuation row does not exist for this asset
+  VALUATION_VALUE_MISSING: 'VALUATION_VALUE_MISSING',       // the referenced valuation has no usable value
+});
+
+const refuse = (code, reason, extra = {}) => ({
+  status: SCORE_STATUS.REFUSED,
+  refusalCode: code,
+  reason,
+  scoringRuleVersion: SCORING_RULE_VERSION,
+  ...extra,
+});
+
+/**
+ * Pure resolution of the historical anchor from what the decision lookup
+ * returned. `anchor` is getHistoricalValuationForDecision's result (or null).
+ * Returns {ok:true, predictedValue, ...pins} or {ok:false, refusal}.
+ */
+export function resolveHistoricalAnchor({ decisionEventId, anchor } = {}) {
+  if (!decisionEventId) {
+    return { ok: false, refusal: refuse(REFUSAL_CODES.DECISION_ANCHOR_MISSING, 'the LISTED outcome row has no decision_event_id — the historical decision this outcome belongs to is unknown') };
+  }
+  if (!anchor) {
+    return { ok: false, refusal: refuse(REFUSAL_CODES.DECISION_ROW_MISSING, 'decision_event_id does not resolve to a decision for this asset', { decisionEventId }) };
+  }
+  if (!anchor.valuationEventId) {
+    return { ok: false, refusal: refuse(REFUSAL_CODES.VALUATION_ANCHOR_MISSING, 'the decision carries no valuation_event_id — what it valued is unknown', { decisionEventId }) };
+  }
+  if (!anchor.valuation) {
+    return { ok: false, refusal: refuse(REFUSAL_CODES.VALUATION_ROW_MISSING, 'the valuation_event the decision references does not exist for this asset', { decisionEventId, valuationEventId: anchor.valuationEventId }) };
+  }
+  const v = anchor.valuation.valueAmount;
+  if (v == null || !Number.isFinite(v)) {
+    return { ok: false, refusal: refuse(REFUSAL_CODES.VALUATION_VALUE_MISSING, 'the referenced valuation has no usable value_amount', { decisionEventId, valuationEventId: anchor.valuationEventId }) };
+  }
+  return {
+    ok: true,
+    predictedValue: v,
+    pins: {
+      scoringRuleVersion: SCORING_RULE_VERSION,
+      decisionEventId,
+      valuationEventId: anchor.valuation.valuationEventId,
+      valuationBuildSha: anchor.valuation.buildSha ?? null,
+      valuationMethod: anchor.valuation.method ?? null,
+      valuationOccurredAt: anchor.valuation.occurredAt ?? null,
+      valuationRecordedAt: anchor.valuation.recordedAt ?? null,
+      gradeAssumption: anchor.valuation.gradeAssumption ?? null,
+    },
   };
 }

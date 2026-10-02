@@ -116,3 +116,7 @@ Prior entry, retained for history: 201 PASS / 19 FAIL / 4 TIMEOUT / 224 total â€
 ## Roster delta (2026-10-02, GK-273 Research the Market)
 
 +1 file: `tests/gk273-research-market.test.js` (84/84). Roster count 277 -> 278. Historical-roster status changes: NOT FRESHLY MEASURED.
+
+## Roster delta (2026-10-02, GK-274 PredictionError historical anchor)
+
++1 file: `tests/gk274-prediction-anchor-unit.test.js` (30/30). `tests/ebay-outcome-reconciler-live-proof.test.js` extended in place (live, real Development; 53/53). Roster count 278 -> 279. Historical-roster status changes: NOT FRESHLY MEASURED.

@@ -368,6 +368,26 @@ export async function insertEconomicsComponent(client, {
 // GrailKey Automatic eBay Outcome Reconciler V1 — the most recent
 // valuation_event for an asset (predictedValue for PredictionError
 // scoring). Read-only; never used to gate or replace any write path.
+// GK-274 — HISTORICAL DECISION ANCHOR. Resolves the valuation a SPECIFIC
+// decision actually used (decision_event.valuation_event_id), never "the
+// latest valuation for the asset". LEFT JOIN so a decision whose valuation
+// anchor is NULL or dangling is reported distinctly (decision found,
+// valuation not), instead of silently disappearing. Both rows must belong
+// to the same asset.
+export async function getDecisionWithValuation(client, assetId, decisionEventId) {
+  const r = await client.query(
+    `SELECT d.id AS decision_id, d.recommendation, d.valuation_event_id,
+            d.occurred_at AS decision_occurred_at, d.recorded_at AS decision_recorded_at,
+            v.id AS v_id, v.value_amount, v.value_currency, v.method, v.grade_assumption, v.build_sha,
+            v.market_population_id, v.occurred_at AS valuation_occurred_at, v.recorded_at AS valuation_recorded_at
+       FROM data1_dev.decision_event d
+       LEFT JOIN data1_dev.valuation_event v ON v.id = d.valuation_event_id AND v.asset_id = d.asset_id
+      WHERE d.id = $1 AND d.asset_id = $2`,
+    [decisionEventId, assetId]
+  );
+  return r.rows[0] || null;
+}
+
 export async function getLatestValuationEvent(client, assetId) {
   const r = await client.query(
     `SELECT * FROM data1_dev.valuation_event WHERE asset_id = $1 ORDER BY occurred_at DESC, id DESC LIMIT 1`,

@@ -1389,6 +1389,46 @@ export async function getLatestValuation({ principalId, gkAssetId } = {}) {
   }
 }
 
+// GK-274 — getHistoricalValuationForDecision: the valuation a SPECIFIC
+// decision_event actually referenced (decision_event.valuation_event_id),
+// ownership-checked like every other read here. Returns null when the
+// decision does not exist for this asset; otherwise {decision..., valuation}
+// where valuation is null if the decision carries no valuation anchor or
+// the referenced row is missing. NEVER falls back to the latest valuation:
+// HISTORICAL DECISION SCORING MUST USE THE HISTORICAL VALUATION THE
+// DECISION ACTUALLY USED. Read-only; no transaction.
+export async function getHistoricalValuationForDecision({ principalId, gkAssetId, decisionEventId } = {}) {
+  requireFields({ principalId, gkAssetId, decisionEventId }, ['principalId', 'gkAssetId', 'decisionEventId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    const row = await repo.getDecisionWithValuation(client, gkAssetId, decisionEventId);
+    if (!row) return null;
+    return {
+      decisionEventId: row.decision_id,
+      recommendation: row.recommendation,
+      valuationEventId: row.valuation_event_id ?? null,
+      decisionOccurredAt: row.decision_occurred_at,
+      valuation: row.v_id
+        ? {
+            valuationEventId: row.v_id,
+            valueAmount: row.value_amount != null ? Number(row.value_amount) : null,
+            valueCurrency: row.value_currency,
+            method: row.method,
+            gradeAssumption: row.grade_assumption,
+            buildSha: row.build_sha,
+            marketPopulationId: row.market_population_id ?? null,
+            occurredAt: row.valuation_occurred_at,
+            recordedAt: row.valuation_recorded_at,
+          }
+        : null,
+    };
+  } finally {
+    client.release();
+  }
+}
+
 // getOutcomeEventsForListing -- read-only, no transaction. GrailKey
 // Automatic eBay Outcome Reconciler V1's own read: every outcome_event
 // row (LISTED/SOLD/DELISTED/EXPIRED_UNSOLD/ACTIVE_AT_CUTOFF) recorded so
